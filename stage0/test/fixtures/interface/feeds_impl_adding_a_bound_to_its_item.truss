@@ -1,0 +1,13 @@
+trait Convert[Target] {
+  fn convert(self) -> Target
+}
+
+trait Feeds {
+  fn feed[Item: Convert[Int64]](self, item: Item) -> UInt64
+}
+
+type Reader()
+
+impl Feeds for Reader {
+  fn feed[Item: Convert[Int64] + Display](self, item: Item) -> UInt64 { todo }
+}

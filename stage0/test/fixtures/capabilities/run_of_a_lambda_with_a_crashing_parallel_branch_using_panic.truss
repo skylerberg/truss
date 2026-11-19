@@ -1,0 +1,10 @@
+fn f(values: Slice[Int64]) -> Int64
+  uses Panic
+{
+  run(fn() {
+    parallel {
+      let first = first_or_crash(values)
+    }
+    first
+  })
+}

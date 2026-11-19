@@ -1,0 +1,6 @@
+use standard::intrinsic
+
+fn key_of(count: intrinsic::Shared[Int64]) -> UInt64 {
+  let read: fn(intrinsic::Shared[Int64]) -> UInt64 = intrinsic::shared_key
+  read(count)
+}

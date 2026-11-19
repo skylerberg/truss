@@ -18,5 +18,3 @@ let parse_major (package : Path.package) =
   | Some (_, digits) when digits <> "" && String.for_all Char.Ascii.is_digit digits -> (
       match int_of_string_opt digits with Some major when major >= 1 -> major | _ -> 1)
   | _ -> 1
-
-let make_first_version name = (parse_major name, 0, 0)

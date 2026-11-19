@@ -1,0 +1,17 @@
+fn total(items: List[Int64] = [1, 2, 3]) -> Int64 {
+  var sum = 0
+  for item in items {
+    sum += item
+  }
+  sum
+}
+
+fn first(names: List[String] = ["a", "b"]) -> UInt64 {
+  names[0].length()
+}
+
+test "a read-only parameter's default with something to drop is dropped once" {
+  assert total() == 6
+  assert total([4]) == 4
+  assert first() == 1
+}

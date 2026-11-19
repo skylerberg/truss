@@ -52,10 +52,7 @@ let () =
 let () =
   let list_codes text =
     let packages = Support.setup [ ("app::main", text) ] in
-    (match Support.parse_errors packages (Support.parse_file "app::main") with
-    | [] -> ()
-    | errors -> Harness.fail "the test input does not parse: %s" (String.concat " " errors));
-    Support.list_codes (check packages (Support.parse_file "app::main"))
+    Support.list_codes (Support.run_check ~check packages "app::main")
   in
   let expect text expected =
     match list_codes text with

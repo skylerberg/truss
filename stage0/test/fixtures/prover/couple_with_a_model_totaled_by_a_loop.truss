@@ -7,7 +7,6 @@ impl Model for Couple {
     ensures result.length() == 2
     ensures identical(result[0], self.first)
     ensures identical(result[1], self.second)
-    cost time finite
   {
     Sequence.empty().append(self.first).append(self.second)
   }

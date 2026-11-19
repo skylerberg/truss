@@ -4,6 +4,7 @@
  (libraries
   file_system
   harness
+  lock_file
   process
   unix
   cli
@@ -14,7 +15,7 @@
   manifest
   registry
   project
-  compile
+  backend
   watcher))
 
 (rule

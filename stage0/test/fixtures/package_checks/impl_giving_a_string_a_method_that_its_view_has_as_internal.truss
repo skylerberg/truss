@@ -1,0 +1,9 @@
+trait Parted {
+  fn part(self) -> UInt64
+}
+
+impl Parted for String {
+  fn part(self) -> UInt64 {
+    0
+  }
+}

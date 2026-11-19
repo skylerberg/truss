@@ -13,6 +13,7 @@ include module type of struct
   include Parts
 end
 
+val find_local_name : Core.local -> string option
 val expand_formula : formula -> Graph.t
 val make_body_part : ?interface:Interface.Environment.interface -> Core.t -> body_part
 

@@ -1,0 +1,17 @@
+fn find[Key: Hash + Ordered](key: Key, counts: Map[Key, Int64]) -> Bool {
+  counts.contains(key)
+}
+
+fn f(
+  counts: mut Map[String, Int64],
+  names: Set[String],
+  listed: List[String],
+  tables: Map[List[UInt8], Int64],
+  word: StringSlice,
+  bytes: Slice[UInt8],
+) -> Bool {
+  mut counts.remove(word)
+  counts.get(word) is Some(_) && counts.contains(word) && counts[word] == 0 && names.contains(word)
+    && listed.contains(word) && tables.contains(bytes) && find(word, counts: counts)
+    && Map.contains(counts, key: word)
+}

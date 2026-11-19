@@ -1,0 +1,8 @@
+fn f(items: List[String]) {
+  var view = items[..]
+  match mut view[0] {
+    item => {
+      mut item.push("x")
+    }
+  }
+}

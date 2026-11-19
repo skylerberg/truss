@@ -1,0 +1,9 @@
+public type Kit(size: UInt64)
+
+internal fn Kit.part(self) -> UInt64 {
+  self.size
+}
+
+public fn Kit.measure(self) -> UInt64 {
+  self.part()
+}

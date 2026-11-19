@@ -13,12 +13,12 @@ let () =
          (uses Clock) (block x))");
   Harness.test "cost clauses" (fun () ->
       Parse_support.expect_definition Fixtures.Parser_rules.cost_clauses
-        "(fn f ((visit: (fn (Item) (cost time finite)))) (cost amortized time (O (* (call (. items \
+        "(fn f ((visit: (fn (Item) (cost time (O 1))))) (cost amortized time (O (* (call (. items \
          length)) (call time visit)))) (cost allocations (<= 1)) (cost (calls visit) (== 2)) (cost \
-         (calls FileRead.read) (== 3)) (cost (calls FileRead) (== 4)) (cost time finite) (block))");
+         (calls FileRead.read) (== 3)) (cost (calls FileRead) (== 4)) (block))");
   Harness.test "parsing continues after a misspelled cost word" (fun () ->
-      Parse_support.expect_error "fn f() cost time fnite {}" ~code:Cost_word ~at:"fnite"
-        ~fixed:"fn f() cost time finite {}";
+      Parse_support.expect_error "fn f() cost tme O(1) {}" ~code:Cost_word ~at:"tme"
+        ~fixed:"fn f() cost time O(1) {}";
       let _, diagnostics = Parse_support.parse "fn f() cost tme fnite {}" in
       if Parse_support.list_codes diagnostics <> [ "parser.cost_word"; "parser.cost_word" ] then
         Harness.fail "got [%s]" (String.concat "; " (Parse_support.list_codes diagnostics)));
@@ -28,9 +28,6 @@ let () =
   Harness.test "a misspelled cost word has a fix" (fun () ->
       Parse_support.expect_error "fn f() cost allocation == 0 {}" ~code:Cost_word ~at:"allocation"
         ~fixed:"fn f() cost allocations == 0 {}");
-  Harness.test "finite is only for time" (fun () ->
-      Parse_support.expect_error "fn f() cost allocations finite {}" ~code:Finite_not_time
-        ~at:"finite");
   Harness.test "cost potential belongs to a type" (fun () ->
       Parse_support.expect_error "fn f() cost potential x {}" ~code:Misplaced_potential
         ~at:"potential");
@@ -275,11 +272,9 @@ let () =
   Harness.test "a loop's cost clause" (fun () ->
       Parse_support.expect_statement "for row in rows\n  cost time O(visited.length())\n{}"
         "(for row rows (cost time (O (call (. visited length)))) (block))");
-  Harness.test "a loop's cost is not amortized or finite" (fun () ->
+  Harness.test "a loop's cost is not amortized" (fun () ->
       Parse_support.expect_body_error "while a\n  cost amortized time O(1)\n{}"
-        ~code:Loop_cost_bound ~at:"cost";
-      Parse_support.expect_body_error "while a\n  cost time finite\n{}" ~code:Loop_cost_bound
-        ~at:"cost");
+        ~code:Loop_cost_bound ~at:"cost");
   Harness.test "specifications allow forall" (fun () ->
       Parse_support.expect_definition
         "type S(items: List[Int64])\n  invariant forall i in items => i > 0"
@@ -571,8 +566,11 @@ let () =
         ~at:"{ it" ~fixed:"let x = statuses.map(fn(element) { element.code })");
   Harness.test "x as Int64" (fun () ->
       Parse_support.expect_body_error "let n = size as Int64" ~code:As_conversion ~at:"as"
-        ~fixed:"let n = Int64.from(size)"
-        ~alternatives:[ "let n = Int64.try_from(size)" ]);
+        ~fixed:"let n = Int64.from_integer(size)"
+        ~alternatives:[ "let n = Int64.try_from_integer(size)" ]);
+  Harness.test "x as Float64" (fun () ->
+      Parse_support.expect_body_error "let ratio = count as Float64" ~code:As_conversion ~at:"as"
+        ~fixed:"let ratio = count.to_float64()");
   Harness.test "loop" (fun () ->
       Parse_support.expect_body_error "loop {\n  todo\n}" ~code:Reserved_word ~at:"loop"
         ~fixed:"while true {\n  todo\n}");

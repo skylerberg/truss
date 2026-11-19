@@ -1,0 +1,5 @@
+fn double[Number: Add[Number, Output = Number]](value: Number) -> Number
+  requires value.add_is_defined(value)
+{
+  value + value
+}

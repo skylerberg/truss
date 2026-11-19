@@ -89,7 +89,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
       in
       State.register_statement state written (fun () ->
           let value = Operands.build mode (State.build_expression state value) in
-          let pattern = State.build_pattern state written_pattern in
+          let pattern = State.build_scrutinee_pattern state written_pattern in
           Let { pattern; value; else_ = Option.map (State.build_block state) else_ });
       (match (annotation, written_pattern.kind) with
       | None, Binding name -> Hashtbl.replace state.annotatable name.id ()
@@ -150,7 +150,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
       State.reject_in_formula state env (State.read_span state written.id) "A `for` loop";
       let mode, inner =
         match iterable.kind with
-        | Mode (mode, inner) when Option.is_none (State.find_call_with_mode_keyword state inner) ->
+        | Mode (mode, inner) when Option.is_none (State.find_keyword_operation state inner) ->
             State.note_mode_keyword state iterable mode inner;
             ((match mode with Mut -> Types.Mut | Own -> Types.Own), inner)
         | _ -> (Types.Read, iterable)
@@ -168,8 +168,8 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
                   (State.add_mismatch_diagnostic state Mismatch
                      (State.read_span state written_annotation.id)
                      ~sides:[ (element, annotated) ]
-                     (Printf.sprintf "The elements of this loop are `%s`, not `%s`."
-                        (State.show state element) (State.show state annotated)))
+                     (Printf.sprintf "Each element of this loop is %s, not %s."
+                        (State.describe state element) (State.describe state annotated)))
           | None -> (
               match written_pattern.kind with
               | Binding name -> Hashtbl.replace state.annotatable name.id ()
@@ -247,10 +247,10 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
       let trait = State.make_trait_reference ~arguments:[] (Well_known.make_path Index_assign) in
       match
         ( State.find_evidence state base_type trait,
-          Members.find_trait_method state.lookups trait.trait "assign" Mut )
+          Interface.Definition.find_trait_method state.lookups.interface trait.trait ~name:"assign"
+            ~receiver:Mut )
       with
-      | ( Some ((Interface.Impls.From_impl _ | From_bound | From_any) as evidence_source),
-          Some method_ ) ->
+      | Some ((Interface.Impls.From_impl _ | From_bound | From_any) as evidence_source), Some _ ->
           let index = State.make_trait_reference ~arguments:[] (Well_known.make_path Index) in
           let make_parameter name type_ : Types.parameter_info =
             { name; mode = Own; type_; has_default = false }
@@ -260,12 +260,14 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
             (Calls.check_argument state env key
                (make_parameter "key"
                   (State.resolve_associated_type state base_type index "Key"
-                     ~at:(State.read_span state key.id))));
+                     ~at:(State.read_span state key.id)))
+               ~has_generic_type:false);
           ignore
             (Calls.check_argument state env value
                (make_parameter "value"
                   (State.resolve_associated_type state base_type index "Output"
-                     ~at:(State.read_span state value.id))));
+                     ~at:(State.read_span state value.id)))
+               ~has_generic_type:false);
           let call : Syntax.expression = { kind = Expression_error; id = written.id } in
           State.record state call Types.unit;
           let make_argument (argument_expression : Syntax.expression) position mode :
@@ -282,13 +284,12 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
                       name = "assign";
                       receiver = Mut;
                       self_type = base_type;
-                      type_arguments = [];
+                      instantiation = Types.no_instantiation;
                       evidence = State.convert_evidence evidence_source;
                     };
                 arguments =
                   [ make_argument base 0 Mut; make_argument key 1 Own; make_argument value 2 Own ];
                 omitted_defaults = [];
-                uses = (Members.read_method_signature state.lookups trait.trait method_).uses;
                 callee_result = Types.unit;
               };
           Form.register_call state call;
@@ -311,12 +312,11 @@ and check_loop_clause state env (clause : Syntax.loop_clause) =
   | Invariant value -> Hooks.check state env value Types.bool
   | Loop_decreases measures ->
       List.iter (fun measure -> ignore (Hooks.check_expression state env measure)) measures
-  | Loop_cost { resource; bound; _ } -> (
-      State.check_resource state resource;
-      match bound with
+  | Loop_cost cost -> (
+      State.check_cost state cost;
+      match cost.bound with
       | Big_o value | At_most value | Exactly value ->
-          ignore (Hooks.check_expression state env value)
-      | Finite -> ())
+          ignore (Hooks.check_expression state env value))
 
 and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable : Syntax.expression)
     =
@@ -346,46 +346,47 @@ and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable :
       | Types.Error _ | Types.Hole -> (type_, mode)
       | _ -> (
           let cursor = State.make_trait_reference ~arguments:[] (Well_known.make_path Cursor) in
-          let by_position =
-            if mode = Types.Own then None
+          let by_position : (Tables.loop * Types.ty * Types.mode) Resolve.Names.lookup =
+            if mode = Types.Own then Absent
             else
               Name_lookup.find_elements_calls state (State.read_span state iterable.id) type_ mode
-          and consumed =
+          and consumed : (Tables.loop * Types.ty) Resolve.Names.lookup =
             if mode = Types.Own then
               Name_lookup.find_consuming_cursor state (State.read_span state iterable.id) type_
-            else None
+            else Absent
           in
           match (by_position, consumed, State.find_evidence state type_ cursor) with
-          | Some (loop, element, lends), _, _ ->
-              state.tables.loops.(written.id) <- Some loop;
+          | Visible (loop, element, lends), _, _ ->
+              State.record_loop state ~loop:written.id ~iterable loop;
               (element, lends)
-          | None, Some (loop, element), _ ->
-              state.tables.loops.(written.id) <- Some loop;
+          | _, Visible (loop, element), _ ->
+              State.record_loop state ~loop:written.id ~iterable loop;
               (element, Types.Own)
-          | None, None, Some _ ->
-              state.tables.loops.(written.id) <-
-                Some
-                  (Pulled
-                     {
-                       cursor = type_;
-                       cursor_call = None;
-                       remaining =
-                         Name_lookup.find_remaining_call state
-                           (State.read_span state iterable.id)
-                           type_;
-                     });
+          | _, _, Some _ ->
+              State.record_loop state ~loop:written.id ~iterable
+                (Pulled
+                   {
+                     cursor = type_;
+                     cursor_call = None;
+                     remaining =
+                       Name_lookup.find_remaining_call state
+                         (State.read_span state iterable.id)
+                         type_;
+                   });
               ( State.resolve_associated_type state type_ cursor "Element"
                   ~at:(State.read_span state iterable.id),
                 Types.Own )
-          | None, None, None ->
+          | Hidden hidden, _, None | _, Hidden hidden, None ->
+              (Members.make_hidden_error state (State.read_span state iterable.id) hidden, mode)
+          | Absent, Absent, None ->
               ( State.make_error_type state Not_indexable
                   (State.read_span state iterable.id)
                   (match mode with
                   | Types.Read ->
                       Printf.sprintf
-                        "A `for` loop cannot go over `%s`: it is not a `Cursor`, and it has no \
+                        "A `for` loop cannot go over %s: it is not a `Cursor`, and it has no \
                          `count` and `element` to visit it by position."
-                        (Types.show type_)
+                        (Types.describe type_)
                   | Mut ->
                       Printf.sprintf
                         "A `for` loop cannot mutate the elements of `%s`: it has no `element` that \

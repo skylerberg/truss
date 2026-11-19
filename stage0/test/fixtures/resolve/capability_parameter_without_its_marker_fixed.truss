@@ -1,0 +1,5 @@
+fn f(visit: (fn() uses generic Granted))
+  uses generic Granted
+{
+  visit()
+}

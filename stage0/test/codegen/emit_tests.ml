@@ -1,9 +1,6 @@
-let render_c_file env instances =
+let render_c_file env program =
   Emit_c.render_file env Development
-    (List.map
-       (fun (make_instance, linkage) ->
-         (Emit_c.make_fragment env (Code (make_instance env)), linkage))
-       instances)
+    (List.map (fun (program_fragment, linkage) -> (program_fragment env, linkage)) program)
 
 let () =
   Codegen_support.test "a function that returns a constant runs and exits with it" (fun () ->
@@ -19,7 +16,6 @@ let () =
             [
               Codegen_support.local ~name:"total" (Codegen_support.value Codegen_support.int32);
               Codegen_support.local ~name:"i" (Codegen_support.value Codegen_support.int32);
-              Codegen_support.local (Raw Bool);
             ]
             [
               Codegen_support.block
@@ -28,14 +24,13 @@ let () =
                   Assign (Codegen_support.at 1, Use (Codegen_support.constant_int32 1));
                 ]
                 (Goto 1);
-              Codegen_support.block
-                [
-                  Assign
-                    ( Codegen_support.at 2,
-                      Binary (Less_equal, Codegen_support.copy 1, Codegen_support.constant_int32 10)
-                    );
-                ]
-                (Switch { value = Codegen_support.copy 2; cases = [ (Z.one, 2) ]; default = 3 });
+              Codegen_support.block []
+                (Branch
+                   {
+                     test = (Less_equal, Codegen_support.copy 1, Codegen_support.constant_int32 10);
+                     yes = 2;
+                     no = 3;
+                   });
               Codegen_support.block
                 [
                   Assign
@@ -245,7 +240,7 @@ let () =
             ];
         ]);
   let bump =
-    Codegen_support.instance "bump"
+    Codegen_support.define_function "bump"
       (Codegen_support.function_ ~parameters:[ 0 ]
          [
            Codegen_support.local ~name:"count"
@@ -302,7 +297,7 @@ let () =
         ]
       in
       let lambda =
-        Codegen_support.function_ ~parameters:[ 0; 1 ]
+        Codegen_support.function_ ~parameters:[ 0; 1; 4 ]
           ~result:(Codegen_support.value Codegen_support.int32)
           ~environment
           [
@@ -310,6 +305,7 @@ let () =
             Codegen_support.local ~name:"argument" (Codegen_support.value Codegen_support.int32);
             Codegen_support.local (Pointer { target = Environment 0; writable = false });
             Codegen_support.local (Codegen_support.value Codegen_support.int32);
+            Codegen_support.local ~name:"capabilities" Convention.capabilities;
           ]
           [
             Codegen_support.block
@@ -356,7 +352,7 @@ let () =
                   Call
                     {
                       target = Indirect { value = Codegen_support.copy 2; signature };
-                      arguments = [ Codegen_support.constant_int32 1 ];
+                      arguments = [ Codegen_support.constant_int32 1; Constant Null ];
                       result = Returned (Codegen_support.at 3);
                     };
                 ]
@@ -372,7 +368,7 @@ let () =
             [
               Assign
                 ( Codegen_support.at 0,
-                  Binary (Equal, float64_constant Float.nan, float64_constant Float.nan) );
+                  Compare (Equal, float64_constant Float.nan, float64_constant Float.nan) );
             ];
         ]);
   Codegen_support.test "IEEE float equality does not" (fun () ->
@@ -383,7 +379,7 @@ let () =
             [
               Assign
                 ( Codegen_support.at 0,
-                  Binary (Ieee_equal, float64_constant Float.nan, float64_constant Float.nan) );
+                  Compare (Ieee_equal, float64_constant Float.nan, float64_constant Float.nan) );
             ];
         ]);
   Codegen_support.test "NaN is ordered after every number" (fun () ->
@@ -394,7 +390,7 @@ let () =
             [
               Assign
                 ( Codegen_support.at 0,
-                  Binary (Less, float64_constant Float.infinity, float64_constant Float.nan) );
+                  Compare (Less, float64_constant Float.infinity, float64_constant Float.nan) );
             ];
         ]);
   Codegen_support.test "negative zero equals zero" (fun () ->
@@ -404,7 +400,8 @@ let () =
             [ Codegen_support.local (Raw Bool) ]
             [
               Assign
-                (Codegen_support.at 0, Binary (Equal, float64_constant (-0.0), float64_constant 0.0));
+                ( Codegen_support.at 0,
+                  Compare (Equal, float64_constant (-0.0), float64_constant 0.0) );
             ];
         ]);
   Codegen_support.test "a shift amount is masked to the width of the value" (fun () ->
@@ -465,6 +462,7 @@ let () =
                        length = Constant (Integer (UInt64, Z.of_int 4));
                        site = { definition = Codegen_support.definition "entry"; offset = 4 };
                        reported = None;
+                       trace = None;
                      });
               ];
           ]
@@ -474,7 +472,7 @@ let () =
   Codegen_support.test "a copy of a callee is a static inline function, declared before its caller"
     (fun () ->
       let callee =
-        Codegen_support.instance "callee"
+        Codegen_support.define_function "callee"
           (Codegen_support.function_ ~parameters:[ 0 ]
              ~result:(Codegen_support.value Codegen_support.int32)
              [ Codegen_support.local (Codegen_support.value Codegen_support.int32) ]
@@ -512,7 +510,7 @@ let () =
             ] )
       in
       let holder =
-        Codegen_support.instance "holder"
+        Codegen_support.define_function "holder"
           (Codegen_support.function_
              [ Codegen_support.local (Codegen_support.value Codegen_support.pair) ]
              [
@@ -544,15 +542,15 @@ let () =
       in
       if not (String.includes ~affix:expected c_file) then
         Codegen_support.fail "no %S in:\n%s" expected c_file);
-  Codegen_support.test "emitting the same instances twice gives the same C" (fun () ->
-      let instances = [ (bump, Emit_c.External) ] in
+  Codegen_support.test "emitting the same program twice gives the same C" (fun () ->
+      let program = [ (bump, Emit_c.External) ] in
       Codegen_support.expect_string
-        ~expected:(render_c_file (Codegen_support.make_shape_env ()) instances)
-        (render_c_file (Codegen_support.make_shape_env ()) instances));
+        ~expected:(render_c_file (Codegen_support.make_shape_env ()) program)
+        (render_c_file (Codegen_support.make_shape_env ()) program));
   Codegen_support.test "the C has the blocks the entry reaches and the locals their code names"
     (fun () ->
       let entry =
-        Codegen_support.instance "entry"
+        Codegen_support.define_function "entry"
           (Codegen_support.function_
              ~result:(Codegen_support.value Codegen_support.int32)
              [
@@ -588,19 +586,24 @@ let () =
 
 let () =
   Codegen_support.test "a symbol names the path and the type arguments" (fun () ->
-      let key =
-        Instance.Code
+      let item =
+        Lowered.Item.Code
           {
             path = Method { owner = Well_known.make_path List; name = "each"; receiver = Read };
-            type_arguments = [ Type Codegen_support.int64 ];
+            instantiation =
+              { Ground.no_instantiation with type_arguments = [ Type Codegen_support.int64 ] };
           }
       in
-      Codegen_support.expect_string ~expected:"t_standard__list__List_each_Of_test__Int64_End_"
-        (Instance.make_symbol key));
+      Codegen_support.expect_string
+        ~expected:"t_standard__list__List_each_Of_standard__intrinsic__Int64_End_"
+        (Emit_c.make_symbol item));
   let render_function_symbol package modules =
-    Instance.make_symbol
-      (Instance.Code
-         { path = Top { module_ = { package; modules }; name = "length" }; type_arguments = [] })
+    Emit_c.make_symbol
+      (Lowered.Item.Code
+         {
+           path = Top { module_ = { package; modules }; name = "length" };
+           instantiation = Ground.no_instantiation;
+         })
   in
   Codegen_support.test "a symbol marks a package's owner apart from its modules" (fun () ->
       Codegen_support.expect_string ~expected:"t_acme_Owns_geometry__vector__length"
@@ -613,50 +616,50 @@ let () =
           "a package with an owner and a module of the same names have one symbol");
   Codegen_support.test "a long symbol keeps its start and ends with a hash" (fun () ->
       let make_long_symbol name =
-        Instance.make_symbol (Codegen_support.key (String.make 300 name))
+        Emit_c.make_symbol (Codegen_support.code_item (String.make 300 name))
       in
       let left = make_long_symbol 'a' and right = make_long_symbol 'b' in
       Codegen_support.expect_int ~expected:(180 + 6 + 32) (String.length left);
       if left = right then Codegen_support.fail "two long names give one symbol")
 
-let intrinsic_types : Compile.For_testing.Intrinsics.types =
+let intrinsic_types : Backend.For_testing.Intrinsics.types =
   { uint64 = Codegen_support.uint64; string_slice = Codegen_support.named "StringSlice" }
 
-let build_entry build_body : Codegen_support.instance =
+let build_entry build_body : Codegen_support.program_fragment =
  fun env ->
-  let builder = Emit_c.Builder.create env ~key:(Codegen_support.key "entry") in
-  Emit_c.Builder.start builder (Emit_c.Builder.allocate_block builder);
+  let builder = Emit_c.Ir_builder.create env ~item:(Codegen_support.code_item "entry") in
+  Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
   let result = build_body builder in
-  Emit_c.Builder.finish builder (Return (Some (Copy (Lowered.make_local_place result))));
-  Emit_c.Builder.build builder
+  Emit_c.Ir_builder.finish builder (Return (Some (Copy (Lowered.make_local_place result))));
+  Emit_c.Ir_builder.build builder
     { parameters = []; result = Some (Codegen_support.value Codegen_support.int32); returns = true }
 
 let operate builder ?destination ?(type_arguments = [ Codegen_support.int32 ]) ?value_arguments
     operation arguments =
-  Compile.For_testing.Intrinsics.lower ?value_arguments
+  Backend.For_testing.Intrinsics.lower ?value_arguments
     (Codegen_support.make_shape_env ())
     builder intrinsic_types operation ~type_arguments arguments ~destination
     ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
+    ~trace:None
 
 let () =
   Codegen_support.test
     "storage with room is pushed onto, and inserts, removes, swaps, and pops in place" (fun () ->
-      let storage_ty =
-        Ground.Named
-          { path = Intrinsic.make_builtin_path Storage; arguments = [ Type Codegen_support.int32 ] }
-      in
+      let storage_ty = Storage.make_storage_type Codegen_support.int32 in
       Codegen_support.expect_status 171
         [
           build_entry (fun builder ->
               let storage =
-                Emit_c.Builder.allocate_local builder ~name:"storage"
+                Emit_c.Ir_builder.allocate_local builder ~name:"storage"
                   (Codegen_support.value storage_ty)
               in
               let popped =
-                Emit_c.Builder.allocate_local builder (Codegen_support.value Codegen_support.int32)
+                Emit_c.Ir_builder.allocate_local builder
+                  (Codegen_support.value Codegen_support.int32)
               in
               let sum =
-                Emit_c.Builder.allocate_local builder (Codegen_support.value Codegen_support.int32)
+                Emit_c.Ir_builder.allocate_local builder
+                  (Codegen_support.value Codegen_support.int32)
               in
               ignore
                 (operate builder
@@ -719,17 +722,17 @@ let () =
                     Lowered.Binary (Multiply, Copy place, Codegen_support.constant_int32 weight)
                 | None -> failwith "storage_at lends nothing"
               in
-              Emit_c.Builder.emit builder
+              Emit_c.Ir_builder.emit builder
                 (Assign (Lowered.make_local_place sum, Use (Codegen_support.constant_int32 0)));
               List.iter
                 (fun (index, weight) ->
                   let term =
-                    Emit_c.Builder.allocate_local builder
+                    Emit_c.Ir_builder.allocate_local builder
                       (Codegen_support.value Codegen_support.int32)
                   in
-                  Emit_c.Builder.emit builder
+                  Emit_c.Ir_builder.emit builder
                     (Assign (Lowered.make_local_place term, make_element index weight));
-                  Emit_c.Builder.emit builder
+                  Emit_c.Ir_builder.emit builder
                     (Assign
                        ( Lowered.make_local_place sum,
                          Binary
@@ -738,35 +741,36 @@ let () =
                              Copy (Lowered.make_local_place term) ) )))
                 [ (0, 1); (1, 3); (2, 5); (3, 7) ];
               let length =
-                Emit_c.Builder.allocate_local builder
-                  (Codegen_support.value (Codegen_support.named "UInt64"))
+                Emit_c.Ir_builder.allocate_local builder
+                  (Codegen_support.value Codegen_support.uint64)
               in
               ignore
                 (operate builder ~destination:(Lowered.make_local_place length)
                    (Buffer Storage_length)
                    [ Place (Lowered.make_local_place storage) ]);
               let length32 =
-                Emit_c.Builder.allocate_local builder (Codegen_support.value Codegen_support.int32)
+                Emit_c.Ir_builder.allocate_local builder
+                  (Codegen_support.value Codegen_support.int32)
               in
-              Emit_c.Builder.emit builder
+              Emit_c.Ir_builder.emit builder
                 (Assign
                    ( Lowered.make_local_place length32,
                      Convert (Copy (Lowered.make_local_place length), Integer Int32) ));
-              Emit_c.Builder.emit builder
+              Emit_c.Ir_builder.emit builder
                 (Assign
                    ( Lowered.make_local_place length32,
                      Binary
                        ( Multiply,
                          Copy (Lowered.make_local_place length32),
                          Codegen_support.constant_int32 30 ) ));
-              Emit_c.Builder.emit builder
+              Emit_c.Ir_builder.emit builder
                 (Assign
                    ( Lowered.make_local_place sum,
                      Binary
                        ( Add,
                          Copy (Lowered.make_local_place sum),
                          Copy (Lowered.make_local_place length32) ) ));
-              Emit_c.Builder.emit builder
+              Emit_c.Ir_builder.emit builder
                 (Assign
                    ( Lowered.make_local_place sum,
                      Binary
@@ -776,33 +780,27 @@ let () =
               sum);
         ]);
   Codegen_support.test "an array's elements are moved into new storage, in order" (fun () ->
-      let storage_ty =
-        Ground.Named
-          { path = Intrinsic.make_builtin_path Storage; arguments = [ Type Codegen_support.int32 ] }
-      in
+      let storage_ty = Storage.make_storage_type Codegen_support.int32 in
       let array_ty =
-        Ground.Named
-          {
-            path = Intrinsic.make_builtin_path Array;
-            arguments = [ Type Codegen_support.int32; Value (Z.of_int 3) ];
-          }
+        Ground.make_builtin Array ~arguments:[ Type Codegen_support.int32; Value (Z.of_int 3) ]
       in
       Codegen_support.expect_status 165
         [
           build_entry (fun builder ->
               let array =
-                Emit_c.Builder.allocate_local builder ~name:"array" (Codegen_support.value array_ty)
+                Emit_c.Ir_builder.allocate_local builder ~name:"array"
+                  (Codegen_support.value array_ty)
               in
               List.iteri
                 (fun index count ->
-                  Emit_c.Builder.emit builder
+                  Emit_c.Ir_builder.emit builder
                     (Assign
                        ( Lowered.project (Lowered.make_local_place array)
                            (Index (Lowered.make_uint64_constant index)),
                          Use (Codegen_support.constant_int32 count) )))
                 [ 4; 5; 6 ];
               let storage =
-                Emit_c.Builder.allocate_local builder ~name:"storage"
+                Emit_c.Ir_builder.allocate_local builder ~name:"storage"
                   (Codegen_support.value storage_ty)
               in
               ignore
@@ -812,9 +810,11 @@ let () =
                    (Buffer Storage_from_array)
                    [ Value (Copy (Lowered.make_local_place array)) ]);
               let last =
-                Emit_c.Builder.allocate_local builder (Codegen_support.value Codegen_support.int32)
+                Emit_c.Ir_builder.allocate_local builder
+                  (Codegen_support.value Codegen_support.int32)
               and middle =
-                Emit_c.Builder.allocate_local builder (Codegen_support.value Codegen_support.int32)
+                Emit_c.Ir_builder.allocate_local builder
+                  (Codegen_support.value Codegen_support.int32)
               in
               ignore
                 (operate builder ~destination:(Lowered.make_local_place last) (Buffer Storage_pop)
@@ -823,42 +823,43 @@ let () =
                 (operate builder ~destination:(Lowered.make_local_place middle) (Buffer Storage_pop)
                    [ Place (Lowered.make_local_place storage) ]);
               let length =
-                Emit_c.Builder.allocate_local builder
-                  (Codegen_support.value (Codegen_support.named "UInt64"))
+                Emit_c.Ir_builder.allocate_local builder
+                  (Codegen_support.value Codegen_support.uint64)
               in
               ignore
                 (operate builder ~destination:(Lowered.make_local_place length)
                    (Buffer Storage_length)
                    [ Place (Lowered.make_local_place storage) ]);
               let status =
-                Emit_c.Builder.allocate_local builder (Codegen_support.value Codegen_support.int32)
+                Emit_c.Ir_builder.allocate_local builder
+                  (Codegen_support.value Codegen_support.int32)
               in
-              Emit_c.Builder.emit builder
+              Emit_c.Ir_builder.emit builder
                 (Assign
                    ( Lowered.make_local_place status,
                      Convert (Copy (Lowered.make_local_place length), Integer Int32) ));
-              Emit_c.Builder.emit builder
+              Emit_c.Ir_builder.emit builder
                 (Assign
                    ( Lowered.make_local_place status,
                      Binary
                        ( Multiply,
                          Copy (Lowered.make_local_place status),
                          Codegen_support.constant_int32 100 ) ));
-              Emit_c.Builder.emit builder
+              Emit_c.Ir_builder.emit builder
                 (Assign
                    ( Lowered.make_local_place last,
                      Binary
                        ( Multiply,
                          Copy (Lowered.make_local_place last),
                          Codegen_support.constant_int32 10 ) ));
-              Emit_c.Builder.emit builder
+              Emit_c.Ir_builder.emit builder
                 (Assign
                    ( Lowered.make_local_place status,
                      Binary
                        ( Add,
                          Copy (Lowered.make_local_place status),
                          Copy (Lowered.make_local_place last) ) ));
-              Emit_c.Builder.emit builder
+              Emit_c.Ir_builder.emit builder
                 (Assign
                    ( Lowered.make_local_place status,
                      Binary
@@ -869,47 +870,36 @@ let () =
         ]);
   Codegen_support.test "a view of an array has the array's elements" (fun () ->
       let array_ty =
-        Ground.Named
-          {
-            path = Intrinsic.make_builtin_path Array;
-            arguments = [ Type Codegen_support.int32; Value (Z.of_int 3) ];
-          }
+        Ground.make_builtin Array ~arguments:[ Type Codegen_support.int32; Value (Z.of_int 3) ]
       in
-      let view_ty =
-        Ground.Named
-          { path = Intrinsic.make_builtin_path View; arguments = [ Type Codegen_support.int32 ] }
-      in
-      let extra =
-        [
-          ( Ground.to_string view_ty,
-            Storage.make_view_shape ~uint64:(Codegen_support.named "UInt64") Codegen_support.int32
-          );
-        ]
-      in
+      let view_ty = Storage.make_view_type Codegen_support.int32 in
       let operate builder ?destination operation arguments =
-        Compile.For_testing.Intrinsics.lower
+        Backend.For_testing.Intrinsics.lower
           ~value_arguments:[ Z.of_int 3 ]
-          (Codegen_support.make_shape_env ~extra ())
+          (Codegen_support.make_shape_env ())
           builder intrinsic_types operation ~type_arguments:[ Codegen_support.int32 ] arguments
           ~destination
           ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
+          ~trace:None
       in
-      Codegen_support.expect_status ~extra 53
+      Codegen_support.expect_status 53
         [
           build_entry (fun builder ->
               let array =
-                Emit_c.Builder.allocate_local builder ~name:"array" (Codegen_support.value array_ty)
+                Emit_c.Ir_builder.allocate_local builder ~name:"array"
+                  (Codegen_support.value array_ty)
               in
               List.iteri
                 (fun index count ->
-                  Emit_c.Builder.emit builder
+                  Emit_c.Ir_builder.emit builder
                     (Assign
                        ( Lowered.project (Lowered.make_local_place array)
                            (Index (Lowered.make_uint64_constant index)),
                          Use (Codegen_support.constant_int32 count) )))
                 [ 4; 5; 6 ];
               let view =
-                Emit_c.Builder.allocate_local builder ~name:"view" (Codegen_support.value view_ty)
+                Emit_c.Ir_builder.allocate_local builder ~name:"view"
+                  (Codegen_support.value view_ty)
               in
               ignore
                 (operate builder ~destination:(Lowered.make_local_place view) (Buffer Array_view)
@@ -925,20 +915,21 @@ let () =
                 | None -> failwith "view_at lends nothing"
               in
               let length =
-                Emit_c.Builder.allocate_local builder
-                  (Codegen_support.value (Codegen_support.named "UInt64"))
+                Emit_c.Ir_builder.allocate_local builder
+                  (Codegen_support.value Codegen_support.uint64)
               in
               ignore
                 (operate builder ~destination:(Lowered.make_local_place length) (Buffer View_length)
                    [ Place (Lowered.make_local_place view) ]);
               let status =
-                Emit_c.Builder.allocate_local builder (Codegen_support.value Codegen_support.int32)
+                Emit_c.Ir_builder.allocate_local builder
+                  (Codegen_support.value Codegen_support.int32)
               in
-              Emit_c.Builder.emit builder
+              Emit_c.Ir_builder.emit builder
                 (Assign
                    ( Lowered.make_local_place status,
                      Convert (Copy (Lowered.make_local_place length), Integer Int32) ));
-              Emit_c.Builder.emit builder
+              Emit_c.Ir_builder.emit builder
                 (Assign
                    ( Lowered.make_local_place status,
                      Binary
@@ -946,13 +937,14 @@ let () =
                          Copy (Lowered.make_local_place status),
                          Codegen_support.constant_int32 50 ) ));
               let weighted =
-                Emit_c.Builder.allocate_local builder (Codegen_support.value Codegen_support.int32)
+                Emit_c.Ir_builder.allocate_local builder
+                  (Codegen_support.value Codegen_support.int32)
               in
-              Emit_c.Builder.emit builder
+              Emit_c.Ir_builder.emit builder
                 (Assign
                    ( Lowered.make_local_place weighted,
                      Binary (Subtract, Copy middle, Codegen_support.constant_int32 5) ));
-              Emit_c.Builder.emit builder
+              Emit_c.Ir_builder.emit builder
                 (Assign
                    ( Lowered.make_local_place status,
                      Binary
@@ -965,25 +957,22 @@ let () =
     "an array made of a storage has its elements, and the storage's buffer is freed" (fun () ->
       let storage_ty = Storage.make_storage_type Codegen_support.int32 in
       let array_ty =
-        Ground.Named
-          {
-            path = Intrinsic.make_builtin_path Array;
-            arguments = [ Type Codegen_support.int32; Value (Z.of_int 3) ];
-          }
+        Ground.make_builtin Array ~arguments:[ Type Codegen_support.int32; Value (Z.of_int 3) ]
       in
       let operate builder ?destination operation arguments =
-        Compile.For_testing.Intrinsics.lower ~checks:true
+        Backend.For_testing.Intrinsics.lower
           ~value_arguments:[ Z.of_int 3 ]
           (Codegen_support.make_shape_env ())
           builder intrinsic_types operation ~type_arguments:[ Codegen_support.int32 ] arguments
           ~destination
           ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
+          ~trace:None
       in
       let make_program_with pushed =
         [
           build_entry (fun builder ->
               let storage =
-                Emit_c.Builder.allocate_local builder (Codegen_support.value storage_ty)
+                Emit_c.Ir_builder.allocate_local builder (Codegen_support.value storage_ty)
               in
               ignore
                 (operate builder
@@ -1000,23 +989,25 @@ let () =
                        ]))
                 pushed;
               let array =
-                Emit_c.Builder.allocate_local builder ~name:"array" (Codegen_support.value array_ty)
+                Emit_c.Ir_builder.allocate_local builder ~name:"array"
+                  (Codegen_support.value array_ty)
               in
               ignore
                 (operate builder ~destination:(Lowered.make_local_place array)
                    (Buffer Array_from_storage)
                    [ Place (Lowered.make_local_place storage) ]);
               let status =
-                Emit_c.Builder.allocate_local builder (Codegen_support.value Codegen_support.int32)
+                Emit_c.Ir_builder.allocate_local builder
+                  (Codegen_support.value Codegen_support.int32)
               in
-              Emit_c.Builder.emit builder
+              Emit_c.Ir_builder.emit builder
                 (Assign
                    ( Lowered.make_local_place status,
                      Use
                        (Copy
                           (Lowered.project (Lowered.make_local_place array)
                              (Index (Lowered.make_uint64_constant 0)))) ));
-              Emit_c.Builder.emit builder
+              Emit_c.Ir_builder.emit builder
                 (Assign
                    ( Lowered.make_local_place status,
                      Binary
@@ -1038,48 +1029,37 @@ let () =
           [
             build_entry (fun builder ->
                 let status =
-                  Emit_c.Builder.allocate_local builder
+                  Emit_c.Ir_builder.allocate_local builder
                     (Codegen_support.value Codegen_support.int32)
                 in
-                Emit_c.Builder.emit builder
+                Emit_c.Ir_builder.emit builder
                   (Assign (Lowered.make_local_place status, Use (Codegen_support.constant_int32 0)));
                 List.iteri
                   (fun index (float, target, expected) ->
-                    let fits = Emit_c.Builder.allocate_local builder (Raw Bool) in
+                    let fits = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
                     ignore
                       (operate builder ~destination:(Lowered.make_local_place fits)
                          ~type_arguments:[ Codegen_support.float64; target ]
                          (Scalar Fits)
                          [ Value (Constant (Float64 (Int64.bits_of_float float))) ]);
-                    let right = Emit_c.Builder.allocate_local builder (Raw Bool) in
-                    Emit_c.Builder.emit builder
-                      (Assign
-                         ( Lowered.make_local_place right,
-                           Binary
-                             (Equal, Copy (Lowered.make_local_place fits), Constant (Bool expected))
-                         ));
-                    let bit =
-                      Emit_c.Builder.allocate_local builder
+                    let emit_int32 rvalue =
+                      Emit_c.Ir_builder.emit_temporary builder
                         (Codegen_support.value Codegen_support.int32)
+                        rvalue
                     in
-                    Emit_c.Builder.emit builder
-                      (Assign
-                         ( Lowered.make_local_place bit,
-                           Convert (Copy (Lowered.make_local_place right), Integer Int32) ));
-                    Emit_c.Builder.emit builder
-                      (Assign
-                         ( Lowered.make_local_place bit,
-                           Binary
-                             ( Shift_left,
-                               Copy (Lowered.make_local_place bit),
-                               Codegen_support.constant_int32 index ) ));
-                    Emit_c.Builder.emit builder
+                    let is_right =
+                      Emit_c.Ir_builder.emit_temporary builder (Raw Bool)
+                        (Compare
+                           (Equal, Copy (Lowered.make_local_place fits), Constant (Bool expected)))
+                    in
+                    let bit = emit_int32 (Convert (is_right, Integer Int32)) in
+                    let shifted =
+                      emit_int32 (Binary (Shift_left, bit, Codegen_support.constant_int32 index))
+                    in
+                    Emit_c.Ir_builder.emit builder
                       (Assign
                          ( Lowered.make_local_place status,
-                           Binary
-                             ( Bit_or,
-                               Copy (Lowered.make_local_place status),
-                               Copy (Lowered.make_local_place bit) ) )))
+                           Binary (Bit_or, Copy (Lowered.make_local_place status), shifted) )))
                   cases;
                 status);
           ]
@@ -1105,17 +1085,18 @@ let () =
   Codegen_support.test "a storage is shortened in place and keeps its room" (fun () ->
       let storage_ty = Storage.make_storage_type Codegen_support.uint8 in
       let operate_checked builder ?destination operation arguments =
-        Compile.For_testing.Intrinsics.lower ~checks:true
+        Backend.For_testing.Intrinsics.lower
           (Codegen_support.make_shape_env ())
           builder intrinsic_types operation ~type_arguments:[ Codegen_support.uint8 ] arguments
           ~destination
           ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
+          ~trace:None
       in
       let make_shortened ~to_ =
         [
           build_entry (fun builder ->
               let storage =
-                Emit_c.Builder.allocate_local builder (Codegen_support.value storage_ty)
+                Emit_c.Ir_builder.allocate_local builder (Codegen_support.value storage_ty)
               in
               ignore
                 (operate_checked builder
@@ -1138,16 +1119,17 @@ let () =
                      Value (Lowered.make_uint64_constant to_);
                    ]);
               let status =
-                Emit_c.Builder.allocate_local builder (Codegen_support.value Codegen_support.int32)
+                Emit_c.Ir_builder.allocate_local builder
+                  (Codegen_support.value Codegen_support.int32)
               in
               let read_part place =
                 let read =
-                  Emit_c.Builder.allocate_local builder
+                  Emit_c.Ir_builder.allocate_local builder
                     (Codegen_support.value Codegen_support.int32)
                 in
-                Emit_c.Builder.emit builder
+                Emit_c.Ir_builder.emit builder
                   (Assign (Lowered.make_local_place read, Convert (Copy place, Integer Int32)));
-                Emit_c.Builder.emit builder
+                Emit_c.Ir_builder.emit builder
                   (Assign
                      ( Lowered.make_local_place status,
                        Binary
@@ -1155,14 +1137,14 @@ let () =
                            Copy (Lowered.make_local_place status),
                            Copy (Lowered.make_local_place read) ) ))
               in
-              Emit_c.Builder.emit builder
+              Emit_c.Ir_builder.emit builder
                 (Assign (Lowered.make_local_place status, Use (Codegen_support.constant_int32 0)));
-              read_part (Lowered.project (Lowered.make_local_place storage) (Field "length"));
-              read_part (Lowered.project (Lowered.make_local_place storage) (Field "capacity"));
+              read_part (Storage.project_length (Lowered.make_local_place storage));
+              read_part (Storage.project_capacity (Lowered.make_local_place storage));
               read_part
-                (Lowered.project
-                   (Lowered.project (Lowered.make_local_place storage) (Field "buffer"))
-                   (Index (Lowered.make_uint64_constant (to_ - 1))));
+                (Storage.index_element
+                   (Lowered.make_local_place storage)
+                   (Lowered.make_uint64_constant (to_ - 1)));
               status);
         ]
       in
@@ -1174,33 +1156,24 @@ let () =
   Codegen_support.test
     "a checked build stops a storage or view operation whose precondition does not hold" (fun () ->
       let storage_ty = Storage.make_storage_type Codegen_support.uint8 in
-      let view_ty =
-        Ground.Named
-          { path = Intrinsic.make_builtin_path View; arguments = [ Type Codegen_support.uint8 ] }
-      in
-      let extra =
-        [
-          ( Ground.to_string view_ty,
-            Storage.make_view_shape ~uint64:(Codegen_support.named "UInt64") Codegen_support.uint8
-          );
-        ]
-      in
+      let view_ty = Storage.make_view_type Codegen_support.uint8 in
       let operate_checked builder ?destination operation arguments =
         ignore
-          (Compile.For_testing.Intrinsics.lower ~checks:true
-             (Codegen_support.make_shape_env ~extra ())
+          (Backend.For_testing.Intrinsics.lower
+             (Codegen_support.make_shape_env ())
              builder intrinsic_types operation ~type_arguments:[ Codegen_support.uint8 ] arguments
              ~destination
-             ~site:{ definition = Codegen_support.definition "entry"; offset = 0 })
+             ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
+             ~trace:None)
       in
       let byte : Lowered.operand = Constant (Integer (UInt8, Z.of_int 1)) in
       let expect_stop saying run_operation =
         let status, _, errors =
-          Codegen_support.run_program ~extra
+          Codegen_support.run_program
             [
               build_entry (fun builder ->
                   let storage =
-                    Emit_c.Builder.allocate_local builder (Codegen_support.value storage_ty)
+                    Emit_c.Ir_builder.allocate_local builder (Codegen_support.value storage_ty)
                   in
                   operate_checked builder
                     ~destination:(Lowered.make_local_place storage)
@@ -1212,7 +1185,7 @@ let () =
                         [ Place (Lowered.make_local_place storage); Value byte ])
                     [ 'a'; 'b'; 'c' ];
                   let view =
-                    Emit_c.Builder.allocate_local builder ~name:"view"
+                    Emit_c.Ir_builder.allocate_local builder ~name:"view"
                       (Codegen_support.value view_ty)
                   in
                   operate_checked builder ~destination:(Lowered.make_local_place view)
@@ -1220,10 +1193,10 @@ let () =
                     [ Place (Lowered.make_local_place storage) ];
                   run_operation builder ~storage ~view;
                   let status =
-                    Emit_c.Builder.allocate_local builder
+                    Emit_c.Ir_builder.allocate_local builder
                       (Codegen_support.value Codegen_support.int32)
                   in
-                  Emit_c.Builder.emit builder
+                  Emit_c.Ir_builder.emit builder
                     (Assign (Lowered.make_local_place status, Use (Codegen_support.constant_int32 0)));
                   status);
             ]
@@ -1259,7 +1232,7 @@ let () =
             [ Place (Lowered.make_local_place storage); Value (Lowered.make_uint64_constant 2) ]);
       expect_stop index (fun builder ~storage ~view:_ ->
           let removed =
-            Emit_c.Builder.allocate_local builder (Codegen_support.value Codegen_support.uint8)
+            Emit_c.Ir_builder.allocate_local builder (Codegen_support.value Codegen_support.uint8)
           in
           operate_checked builder
             ~destination:(Lowered.make_local_place removed)
@@ -1286,7 +1259,7 @@ let () =
               Value (Lowered.make_uint64_constant 0);
             ]);
       expect_stop slice (fun builder ~storage:_ ~view ->
-          let part = Emit_c.Builder.allocate_local builder (Codegen_support.value view_ty) in
+          let part = Emit_c.Ir_builder.allocate_local builder (Codegen_support.value view_ty) in
           operate_checked builder ~destination:(Lowered.make_local_place part) (Buffer View_slice)
             [
               Place (Lowered.make_local_place view);
@@ -1294,7 +1267,7 @@ let () =
               Value (Lowered.make_uint64_constant 4);
             ]);
       expect_stop slice (fun builder ~storage:_ ~view ->
-          let part = Emit_c.Builder.allocate_local builder (Codegen_support.value view_ty) in
+          let part = Emit_c.Ir_builder.allocate_local builder (Codegen_support.value view_ty) in
           operate_checked builder ~destination:(Lowered.make_local_place part) (Buffer View_slice)
             [
               Place (Lowered.make_local_place view);
@@ -1305,7 +1278,7 @@ let () =
           operate_checked builder (Buffer Storage_shorten)
             [ Place (Lowered.make_local_place storage); Value (Lowered.make_uint64_constant 0) ];
           let popped =
-            Emit_c.Builder.allocate_local builder (Codegen_support.value Codegen_support.uint8)
+            Emit_c.Ir_builder.allocate_local builder (Codegen_support.value Codegen_support.uint8)
           in
           operate_checked builder ~destination:(Lowered.make_local_place popped)
             (Buffer Storage_pop)
@@ -1314,12 +1287,8 @@ let () =
 let () =
   Codegen_support.test
     "a small read-only value is passed by value unless it holds an array's elements" (fun () ->
-      let make_array_type count : Ground.ty =
-        Named
-          {
-            path = Intrinsic.make_builtin_path Array;
-            arguments = [ Type Codegen_support.int32; Value (Z.of_int count) ];
-          }
+      let make_array_type count =
+        Ground.make_builtin Array ~arguments:[ Type Codegen_support.int32; Value (Z.of_int count) ]
       in
       let pair = Codegen_support.named "Pair" in
       let extra =

@@ -35,12 +35,14 @@ public fn Result[Value, Error].err(own self) -> Option[Error]
   }
 }
 
-public fn Result[Value, Error].map[Output, capability Granted](
+public fn Result[Value, Error].map[Output](
   own self,
-  transform: (fn(own Value) -> Output uses Granted cost time finite),
+  transform: (fn(own Value) -> Output uses generic Granted),
 ) -> Result[Output, Error]
-  uses Granted
+  uses generic Granted
   cost time O(time(transform))
+  cost allocations <= allocations(transform)
+  cost allocated_bytes <= allocated_bytes(transform)
 {
   match own self {
     Ok(value) => Ok(transform(own value))
@@ -48,12 +50,14 @@ public fn Result[Value, Error].map[Output, capability Granted](
   }
 }
 
-public fn Result[Value, Error].map_error[Other, capability Granted](
+public fn Result[Value, Error].map_error[Other](
   own self,
-  transform: (fn(own Error) -> Other uses Granted cost time finite),
+  transform: (fn(own Error) -> Other uses generic Granted),
 ) -> Result[Value, Other]
-  uses Granted
+  uses generic Granted
   cost time O(time(transform))
+  cost allocations <= allocations(transform)
+  cost allocated_bytes <= allocated_bytes(transform)
 {
   match own self {
     Ok(value) => Ok(own value)
@@ -61,12 +65,14 @@ public fn Result[Value, Error].map_error[Other, capability Granted](
   }
 }
 
-public fn Result[Value, Error].and_then[Output, capability Granted](
+public fn Result[Value, Error].and_then[Output](
   own self,
-  next: (fn(own Value) -> Result[Output, Error] uses Granted cost time finite),
+  next: (fn(own Value) -> Result[Output, Error] uses generic Granted),
 ) -> Result[Output, Error]
-  uses Granted
+  uses generic Granted
   cost time O(time(next))
+  cost allocations <= allocations(next)
+  cost allocated_bytes <= allocated_bytes(next)
 {
   match own self {
     Ok(value) => next(own value)
@@ -74,12 +80,14 @@ public fn Result[Value, Error].and_then[Output, capability Granted](
   }
 }
 
-public fn Result[Value, Error].or_else[Other, capability Granted](
+public fn Result[Value, Error].or_else[Other](
   own self,
-  recover: (fn(own Error) -> Result[Value, Other] uses Granted cost time finite),
+  recover: (fn(own Error) -> Result[Value, Other] uses generic Granted),
 ) -> Result[Value, Other]
-  uses Granted
+  uses generic Granted
   cost time O(time(recover))
+  cost allocations <= allocations(recover)
+  cost allocated_bytes <= allocated_bytes(recover)
 {
   match own self {
     Ok(value) => Ok(own value)
@@ -98,12 +106,14 @@ public fn Result[Value, Error].unwrap_or(own self, default: own Value) -> Value
   }
 }
 
-public fn Result[Value, Error].unwrap_or_else[capability Granted](
+public fn Result[Value, Error].unwrap_or_else(
   own self,
-  recover: (fn(own Error) -> Value uses Granted cost time finite),
+  recover: (fn(own Error) -> Value uses generic Granted),
 ) -> Value
-  uses Granted
+  uses generic Granted
   cost time O(time(recover))
+  cost allocations <= allocations(recover)
+  cost allocated_bytes <= allocated_bytes(recover)
 {
   match own self {
     Ok(value) => value
@@ -111,17 +121,10 @@ public fn Result[Value, Error].unwrap_or_else[capability Granted](
   }
 }
 
-public fn Result[Value, Error].unwrap(own self) -> Value
-  uses Panic
-{
-  match own self {
-    Ok(value) => value
-    Err(_) => Panic.crash("unwrap of Err")
-  }
-}
-
 public fn Result[Value, Error].expect(own self, message: StringSlice) -> Value
   uses Panic
+  ensures self is Ok(held) && identical(result, held)
+  cost time O(1)
 {
   match own self {
     Ok(value) => value

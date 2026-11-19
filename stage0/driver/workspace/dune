@@ -36,6 +36,7 @@
   project
   diagnostic
   file_system
+  lock_file
   standard_library
   database
   registry

@@ -1,6 +1,5 @@
 fn stamp() -> Bool
   uses Clock
-  cost time finite
 {
   todo
 }

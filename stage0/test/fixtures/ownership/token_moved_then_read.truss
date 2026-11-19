@@ -1,0 +1,8 @@
+public opaque type Token(code: Int64)
+
+fn keep(token: own Token) {}
+
+fn f(token: own Token) -> Int64 {
+  keep(own token)
+  token.code
+}

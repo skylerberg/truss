@@ -1,6 +1,7 @@
 type Box[Item](item: Item)
 
-fn smaller[Item: Ordered](first: Box[Item], second: Box[Item]) -> Bool {
+fn smaller[Item: Ordered](first: Box[Item], second: Box[Item]) -> Bool
+{
   first.item < second.item
 }
 

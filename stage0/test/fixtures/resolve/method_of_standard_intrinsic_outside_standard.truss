@@ -1,0 +1,3 @@
+fn standard::intrinsic::Int64.double(self) -> Int64 {
+  self
+}

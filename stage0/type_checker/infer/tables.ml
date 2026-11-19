@@ -1,19 +1,19 @@
 type local = Syntax.id
 
 type evidence =
-  | Impl of { impl : Path.t; arguments : Types.substitution }
+  | Impl of { impl : Path.t; substitution : Types.substitution }
   | Bound
   | Dynamic
   | Built_in
 
 type callee =
-  | Function of { path : Path.t; type_arguments : Types.argument list }
+  | Function of { path : Path.t; instantiation : Types.instantiation }
   | Trait_method of {
       trait : Types.trait_reference;
       name : string;
       receiver : Path.receiver;
       self_type : Types.ty;
-      type_arguments : Types.argument list;
+      instantiation : Types.instantiation;
       evidence : evidence;
     }
   | Capability_method of { capability : Path.t; name : string }
@@ -28,13 +28,12 @@ type call = {
   callee : callee;
   arguments : argument list;
   omitted_defaults : string list;
-  uses : Types.capability_set;
   callee_result : Types.ty;
 }
 
 type resolution =
   | Local_value of local
-  | Global of { path : Path.t; type_arguments : Types.argument list }
+  | Global of { path : Path.t; instantiation : Types.instantiation }
   | Field_access of { type_ : Types.ty; field : string }
   | Variant_value of { type_ : Types.ty; variant : string }
   | Type_name of Types.ty
@@ -104,7 +103,7 @@ let create size =
     lend_modes = Array.make size None;
   }
 
-let copy tables =
+let copy (tables : t) : t =
   {
     types = Array.copy tables.types;
     local_types = Array.copy tables.local_types;

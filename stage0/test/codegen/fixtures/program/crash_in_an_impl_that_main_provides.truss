@@ -1,0 +1,26 @@
+capability Counter {
+  fn next() -> Int64
+}
+
+type CrashingCounter(limit: Int64)
+
+impl Counter for CrashingCounter uses Panic {
+  fn next(self) -> Int64 {
+    Panic.crash("the counter has no next value")
+  }
+}
+
+fn count_once() -> Int64
+  uses Counter
+{
+  Counter.next()
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Panic
+{
+  let counted = provide CrashingCounter(limit: 0) {
+    count_once()
+  }
+  if counted == 0 { ExitCode.success } else { ExitCode.failure }
+}

@@ -88,6 +88,7 @@ public fn Slice[Element: Equal].contains(self, item: Element) -> Bool
 
   ensures result == (exists i in 0..self.length() => self.model()[i] == item)
   cost time O(self.length() * time(Element.equal))
+  cost allocations <= self.length() * allocations(Element.equal)
 {
   var index: UInt64 = 0
   while index < self.length()
@@ -112,6 +113,7 @@ public fn Slice[Element: Equal].index_of(self, item: Element) -> Option[UInt64]
     None => !self.contains(item)
   }
   cost time O(self.length() * time(Element.equal))
+  cost allocations <= self.length() * allocations(Element.equal)
 {
   var index: UInt64 = 0
   while index < self.length()
@@ -136,6 +138,7 @@ public fn Slice[Element: Equal].last_index_of(self, item: Element) -> Option[UIn
     None => !self.contains(item)
   }
   cost time O(self.length() * time(Element.equal))
+  cost allocations <= self.length() * allocations(Element.equal)
 {
   var index = self.length()
   while index > 0
@@ -152,7 +155,7 @@ public fn Slice[Element: Equal].last_index_of(self, item: Element) -> Option[UIn
   None
 }
 
-public fn Slice[Element].find_index(self, predicate: (fn(Element) -> Bool cost time finite)) -> Option[UInt64]
+public fn Slice[Element].find_index(self, predicate: fn(Element) -> Bool) -> Option[UInt64]
 
   ensures match result {
     Some(index) => index < self.length() && predicate(self.model()[index])
@@ -160,6 +163,7 @@ public fn Slice[Element].find_index(self, predicate: (fn(Element) -> Bool cost t
     None => forall i in 0..self.length() => !predicate(self.model()[i])
   }
   cost time O(self.length() * time(predicate))
+  cost allocations <= self.length() * allocations(predicate)
 {
   var index: UInt64 = 0
   while index < self.length()
@@ -181,6 +185,7 @@ public fn Slice[Element: Equal].starts_with(self, prefix: Slice[Element]) -> Boo
   ensures result == (prefix.length() <= self.length()
     && forall i in 0..prefix.length() => self.model()[i] == prefix.model()[i])
   cost time O(prefix.length() * time(Element.equal))
+  cost allocations <= prefix.length() * allocations(Element.equal)
 {
   if prefix.length() > self.length() {
     return false
@@ -205,6 +210,7 @@ public fn Slice[Element: Equal].ends_with(self, suffix: Slice[Element]) -> Bool
   ensures result == (suffix.length() <= self.length()
     && forall i in 0..suffix.length() => self.model()[self.length() - suffix.length() + i] == suffix.model()[i])
   cost time O(suffix.length() * time(Element.equal))
+  cost allocations <= suffix.length() * allocations(Element.equal)
 {
   if suffix.length() > self.length() {
     return false
@@ -339,7 +345,6 @@ public fn Slice[Element: Equal].find_slice(self, needle: Slice[Element]) -> Opti
 
 public fn Slice[Element: Ordered].is_sorted(self) -> Bool
   ensures result == (forall index in 1..self.length() => self[index - 1] <= self[index])
-  cost time finite
 {
   forall i in 1..self.length() => self[i - 1] <= self[i]
 }
@@ -348,7 +353,6 @@ internal theorem at_most_then_less[Element: Ordered](first: Element, second: Ele
   requires first <= second
   requires second < third
   ensures first < third
-  cost time finite
 {
 }
 
@@ -356,7 +360,6 @@ internal theorem less_then_at_most[Element: Ordered](first: Element, second: Ele
   requires first < second
   requires second <= third
   ensures first < third
-  cost time finite
 {
 }
 
@@ -364,35 +367,30 @@ internal theorem less_is_not_equal[Element: Ordered](first: Element, second: Ele
   requires first < second
   ensures !(first == second)
   ensures !(second == first)
-  cost time finite
 {
 }
 
 internal theorem greater_is_less_reversed[Element: Ordered](first: Element, second: Element)
   requires first.compare(second) == Ordering.Greater
   ensures second < first
-  cost time finite
 {
 }
 
 internal theorem equal_by_compare[Element: Ordered](first: Element, second: Element)
   requires first.compare(second) == Ordering.Equal
   ensures first == second
-  cost time finite
 {
 }
 
 internal theorem equal_is_at_most_reversed[Element: Ordered](first: Element, second: Element)
   requires first.compare(second) == Ordering.Equal
   ensures second <= first
-  cost time finite
 {
 }
 
 internal theorem at_most_is_not_less_reversed[Element: Ordered](first: Element, second: Element)
   requires first <= second
   ensures !(second < first)
-  cost time finite
 {
 }
 
@@ -402,7 +400,6 @@ theorem sorted_between[Element: Ordered](items: Slice[Element], first: UInt64, s
   requires second < items.length()
   ensures items[first] <= items[second]
   decreases second - first
-  cost time finite
 {
   if first < second {
     sorted_between(items, first: first, second: second - 1)
@@ -419,7 +416,6 @@ theorem sorted_below[Element: Ordered](items: Slice[Element], target: Element, l
   ensures forall i in 0..bound => items[i] < target
   ensures forall i in 0..items.length() => i < bound ==> !(items.model()[i] == target)
   decreases bound
-  cost time finite
 {
   if bound > 0 {
     sorted_below(items, target: target, last: last, bound: bound - 1)
@@ -438,7 +434,6 @@ theorem sorted_above[Element: Ordered](items: Slice[Element], target: Element, f
   ensures forall i in bound..items.length() => target < items[i]
   ensures forall i in bound..items.length() => !(items.model()[i] == target)
   decreases items.length() - bound
-  cost time finite
 {
   if bound < items.length() {
     sorted_above(items, target: target, first: first, bound: bound + 1)
@@ -453,7 +448,6 @@ theorem excluded_below[Element: Ordered](items: Slice[Element], target: Element,
   requires middle < items.length()
   requires items[middle] < target
   ensures forall position in 0..middle + 1 => !(items.model()[position] == target)
-  cost time finite
 {
   sorted_from_model(items, bound: items.length())
   sorted_below(items, target: target, last: middle, bound: middle + 1)
@@ -464,7 +458,6 @@ theorem excluded_above[Element: Ordered](items: Slice[Element], target: Element,
   requires middle < items.length()
   requires target < items[middle]
   ensures forall position in middle..items.length() => !(items.model()[position] == target)
-  cost time finite
 {
   sorted_from_model(items, bound: items.length())
   sorted_above(items, target: target, first: middle, bound: middle)
@@ -514,7 +507,7 @@ public fn Slice[Element: Ordered].binary_search(self, target: Element) -> Option
   None
 }
 
-public fn Slice[Element].partition_point(self, before: (fn(Element) -> Bool cost time finite)) -> UInt64
+public fn Slice[Element].partition_point(self, before: fn(Element) -> Bool) -> UInt64
   requires forall i in 0..self.length() => forall j in i..self.length() =>
     before(self.model()[j]) ==> before(self.model()[i])
   ensures result <= self.length()
@@ -596,7 +589,7 @@ public fn Slice[Element: Copyable].to_list(self) -> List[Element]
   List(storage: own copy)
 }
 
-public fn Slice[Element: Copyable].filter(self, keep: (fn(Element) -> Bool cost time finite)) -> List[Element]
+public fn Slice[Element: Copyable].filter(self, keep: fn(Element) -> Bool) -> List[Element]
   ensures result.length() <= self.length()
   ensures forall i in 0..result.length() => keep(result.model()[i])
   cost time O(self.length() * (time(keep) + time(Element.copy)))
@@ -642,26 +635,25 @@ public fn Slice[Element: Copyable].repeated(self, times: UInt64) -> List[Element
       }
       List(storage: own elements)
     }
-    None => intrinsic::crash("a list cannot hold that many elements".slice())
+    None => intrinsic::crash("a list cannot hold that many elements")
   }
 }
 
 public fn Slice[Element: Display].join(self, separator: StringSlice) -> String
-  cost time finite
 {
-  var output = TextBuilder.new()
+  var output = ""
   var index: UInt64 = 0
   while index < self.length()
     invariant index <= self.length()
     decreases self.length() - index
   {
     if index > 0 {
-      mut output.write(separator)
+      mut output.push(separator)
     }
     self[index].display(mut output)
     index += 1
   }
-  own output.finish()
+  output
 }
 
 public fn Slice[Element].enumerate(self) -> list::Enumerated[Element]
@@ -700,7 +692,6 @@ public fn Slice[Element].chunks(self, size: UInt64) -> list::Chunks[Element]
 
 public fn Slice[Element: Equal].split(self, separator: Element) -> List[Slice[Element]]
   ensures result.length() <= self.length() + 1
-  cost time finite
 {
   var parts: List[Slice[Element]] = []
   var start: UInt64 = 0
@@ -835,14 +826,15 @@ public fn Slice[Element: Copyable].copy_from(mut self, source: Slice[Element])
   }
 }
 
-public fn Slice[Element].update_each[capability Granted](
+public fn Slice[Element].update_each(
   mut self,
-  change: (fn(mut Element) uses Granted cost time finite),
+  change: (fn(mut Element) uses generic Granted),
 )
-  uses Granted
+  uses generic Granted
   ensures self.length() == old(self.length())
   cost calls(change) == self.length()
   cost time O(self.length() * time(change))
+  cost allocations <= self.length() * allocations(change)
 {
   for index in 0..self.length()
     invariant self.length() == old(self.length())
@@ -856,7 +848,6 @@ fn parent_holds[Element: Ordered](items: Sequence[Element], limit: Integer, pare
   requires 0 <= parent
   requires parent < limit / 2
   ensures result == (items[2 * parent + 1] <= items[parent] && (2 * parent + 2 >= limit || items[2 * parent + 2] <= items[parent]))
-  cost time finite
 {
   items[2 * parent + 1] <= items[parent] && (2 * parent + 2 >= limit || items[2 * parent + 2] <= items[parent])
 }
@@ -865,7 +856,6 @@ fn is_heap_from[Element: Ordered](items: Sequence[Element], limit: Integer, floo
   requires limit <= items.length()
   requires 0 <= floor
   ensures result == (forall parent in floor..limit / 2 => parent_holds(items, limit: limit, parent: parent))
-  cost time finite
 {
   forall parent in floor..limit / 2 => parent_holds(items, limit: limit, parent: parent)
 }
@@ -874,7 +864,6 @@ fn is_heap_except[Element: Ordered](items: Sequence[Element], limit: Integer, fl
   requires limit <= items.length()
   requires 0 <= floor
   ensures result == (forall parent in floor..limit / 2 => parent == hole || parent_holds(items, limit: limit, parent: parent))
-  cost time finite
 {
   forall parent in floor..limit / 2 => parent == hole || parent_holds(items, limit: limit, parent: parent)
 }
@@ -886,7 +875,6 @@ fn children_are_at_most[Element: Ordered](items: Sequence[Element], limit: Integ
   requires above < items.length()
   ensures result == (hole >= limit / 2
       || (items[2 * hole + 1] <= items[above] && (2 * hole + 2 >= limit || items[2 * hole + 2] <= items[above])))
-  cost time finite
 {
   hole >= limit / 2
     || (items[2 * hole + 1] <= items[above] && (2 * hole + 2 >= limit || items[2 * hole + 2] <= items[above]))
@@ -895,14 +883,12 @@ fn children_are_at_most[Element: Ordered](items: Sequence[Element], limit: Integ
 theorem less_is_at_most[Element: Ordered](first: Element, second: Element)
   requires first < second
   ensures first <= second
-  cost time finite
 {
 }
 
 theorem not_less_is_at_least[Element: Ordered](first: Element, second: Element)
   requires !(first < second)
   ensures second <= first
-  cost time finite
 {
 }
 
@@ -910,7 +896,6 @@ theorem at_most_chain[Element: Ordered](first: Element, second: Element, third: 
   requires first <= second
   requires second <= third
   ensures first <= third
-  cost time finite
 {
 }
 
@@ -939,7 +924,6 @@ theorem swap_keeps_heap_except[Element: Ordered](
   ensures forall parent in floor..limit =>
     parent >= bound || parent == child || parent_holds(after.model(), limit: limit, parent: parent)
   decreases bound
-  cost time finite
 {
   if bound > floor {
     swap_keeps_heap_except(
@@ -979,7 +963,6 @@ theorem swap_keeps_bound[Element: Ordered](
   requires forall i in 0..before.length() => i == first || i == second || identical(after.model()[i], before.model()[i])
   ensures forall i in 0..limit => i >= bound || after[i] <= after[top]
   decreases bound
-  cost time finite
 {
   if bound > 0 {
     swap_keeps_bound(
@@ -1136,7 +1119,6 @@ theorem heap_item_is_at_most_root[Element: Ordered](items: Slice[Element], limit
   requires index < limit
   ensures items[index] <= items[0]
   decreases index
-  cost time finite
 {
   if index > 0 {
     let parent = (index - 1) / 2
@@ -1154,7 +1136,6 @@ theorem heap_root_is_largest[Element: Ordered](items: Slice[Element], limit: UIn
   requires bound <= limit
   ensures forall i in 0..items.length() => i < bound ==> items[i] <= items[0]
   decreases bound
-  cost time finite
 {
   if bound > 0 {
     heap_root_is_largest(items, limit: limit, bound: bound - 1)
@@ -1190,7 +1171,6 @@ theorem moving_root_keeps_heap[Element: Ordered](before: Slice[Element], after: 
   requires forall i in 0..before.length() => i == 0 || i == limit - 1 || identical(after.model()[i], before.model()[i])
   ensures forall parent in 0..limit => parent >= bound || parent == 0 || parent_holds(after.model(), limit: limit - 1, parent: parent)
   decreases bound
-  cost time finite
 {
   if bound > 0 {
     moving_root_keeps_heap(before, after: after, limit: limit, bound: bound - 1)
@@ -1212,7 +1192,6 @@ theorem moved_root_is_largest[Element: Ordered](before: Slice[Element], after: S
   requires forall i in 0..before.length() => i == 0 || i == limit - 1 || identical(after.model()[i], before.model()[i])
   ensures forall i in 0..limit - 1 => i >= bound || after[i] <= after[limit - 1]
   decreases bound
-  cost time finite
 {
   if bound > 0 {
     moved_root_is_largest(before, after: after, limit: limit, bound: bound - 1)
@@ -1230,7 +1209,6 @@ theorem unchanged_tail_stays_sorted[Element: Ordered](before: Slice[Element], af
   requires forall i in from..before.length() => identical(after.model()[i], before.model()[i])
   ensures forall i in 1..after.length() => i > from && i < bound ==> after[i - 1] <= after[i]
   decreases bound - from
-  cost time finite
 {
   if bound > from {
     unchanged_tail_stays_sorted(before, after: after, from: from, bound: bound - 1)
@@ -1314,7 +1292,6 @@ theorem sorted_in_model[Element: Ordered](items: Slice[Element], bound: UInt64)
   requires bound <= items.length()
   ensures forall i in 1..items.length() => i < bound ==> items.model()[i - 1] <= items.model()[i]
   decreases bound
-  cost time finite
 {
   if bound > 1 {
     sorted_in_model(items, bound: bound - 1)
@@ -1326,7 +1303,6 @@ theorem sorted_in_model[Element: Ordered](items: Slice[Element], bound: UInt64)
 public theorem is_sorted_orders_model[Element: Ordered](items: Slice[Element])
   requires items.is_sorted()
   ensures forall i in 1..items.length() => items.model()[i - 1] <= items.model()[i]
-  cost time finite
 {
   sorted_in_model(items, bound: items.length())
 }
@@ -1336,7 +1312,6 @@ internal theorem sorted_from_model[Element: Ordered](items: Slice[Element], boun
   requires bound <= items.length()
   ensures forall i in 1..items.length() => i < bound ==> items[i - 1] <= items[i]
   decreases bound
-  cost time finite
 {
   if bound > 1 {
     sorted_from_model(items, bound: bound - 1)
@@ -1363,8 +1338,9 @@ fn sift_down_by[Element](
   position: UInt64,
   limit: UInt64,
   room: UInt64,
-  compare: (fn(Element, Element) -> Ordering cost time finite),
+  compare: (fn(Element, Element) -> Ordering uses generic Granted),
 )
+  uses generic Granted
   requires 1 <= position
   requires limit <= items.length()
   ensures items.length() == old(items.length())
@@ -1383,7 +1359,8 @@ fn sift_down_by[Element](
   }
 }
 
-fn build_heap_by[Element](items: mut Slice[Element], compare: (fn(Element, Element) -> Ordering cost time finite))
+fn build_heap_by[Element](items: mut Slice[Element], compare: (fn(Element, Element) -> Ordering uses generic Granted))
+  uses generic Granted
   ensures items.length() == old(items.length())
   cost time O(items.length() * log(items.length()) * time(compare))
 {
@@ -1400,7 +1377,8 @@ fn build_heap_by[Element](items: mut Slice[Element], compare: (fn(Element, Eleme
   }
 }
 
-fn drain_heap_by[Element](items: mut Slice[Element], compare: (fn(Element, Element) -> Ordering cost time finite))
+fn drain_heap_by[Element](items: mut Slice[Element], compare: (fn(Element, Element) -> Ordering uses generic Granted))
+  uses generic Granted
   ensures items.length() == old(items.length())
   cost time O(items.length() * log(items.length()) * time(compare))
 {
@@ -1418,7 +1396,8 @@ fn drain_heap_by[Element](items: mut Slice[Element], compare: (fn(Element, Eleme
   }
 }
 
-public fn Slice[Element].sort_by(mut self, compare: (fn(Element, Element) -> Ordering cost time finite))
+public fn Slice[Element].sort_by(mut self, compare: (fn(Element, Element) -> Ordering uses generic Granted))
+  uses generic Granted
   ensures self.length() == old(self.length())
   cost time O(self.length() * log(self.length()) * time(compare))
 {
@@ -1426,21 +1405,24 @@ public fn Slice[Element].sort_by(mut self, compare: (fn(Element, Element) -> Ord
   drain_heap_by(mut self, compare: compare)
 }
 
-public fn Slice[Element].sort_by_key[Key: Ordered](mut self, key: (fn(Element) -> Key cost time finite))
+public fn Slice[Element].sort_by_key[Key: Ordered](mut self, key: (fn(Element) -> Key uses generic Granted))
+  uses generic Granted
   ensures self.length() == old(self.length())
-  cost time finite
+  cost time O(self.length() * log(self.length()) * (time(key) + time(Key.compare)))
 {
   mut self.sort_by(fn(first, second) { key(first).compare(key(second)) })
 }
 
 internal fn Slice[Element].extreme_position(
   self,
-  compare: (fn(Element, Element) -> Ordering cost time finite),
+  compare: (fn(Element, Element) -> Ordering uses generic Granted),
   greatest: Bool,
 ) -> UInt64
+  uses generic Granted
   requires self.length() > 0
   ensures result < self.length()
   cost time O(self.length() * time(compare))
+  cost allocations <= self.length() * allocations(compare)
 {
   var best: UInt64 = 0
   var index: UInt64 = 1
@@ -1462,10 +1444,12 @@ internal fn Slice[Element].extreme_position(
 
 public fn Slice[Element].min_by(
   self,
-  compare: (fn(Element, Element) -> Ordering cost time finite),
+  compare: (fn(Element, Element) -> Ordering uses generic Granted),
 ) lends Option[Element]
+  uses generic Granted
   ensures (result is Some(_)) == (self.length() > 0)
   cost time O(self.length() * time(compare))
+  cost allocations <= self.length() * allocations(compare)
 {
   if self.length() > 0 {
     let position = self.extreme_position(compare, greatest: false)
@@ -1477,10 +1461,12 @@ public fn Slice[Element].min_by(
 
 public fn Slice[Element].max_by(
   self,
-  compare: (fn(Element, Element) -> Ordering cost time finite),
+  compare: (fn(Element, Element) -> Ordering uses generic Granted),
 ) lends Option[Element]
+  uses generic Granted
   ensures (result is Some(_)) == (self.length() > 0)
   cost time O(self.length() * time(compare))
+  cost allocations <= self.length() * allocations(compare)
 {
   if self.length() > 0 {
     let position = self.extreme_position(compare, greatest: true)
@@ -1494,6 +1480,7 @@ impl Equal for Slice[Element: Equal] {
   fn equal(self, other: Slice[Element]) -> Bool
     ensures result == (self.length() == other.length()
       && forall i in 0..self.length() => self.model()[i] == other.model()[i])
+    cost allocations <= self.length() * allocations(Element.equal)
   {
     if self.length() != other.length() {
       return false
@@ -1533,7 +1520,6 @@ public fn lexicographic[Element: Ordered](
       Ordering.Equal
     })
   decreases first.length() - from
-  cost time finite
 {
   if from < first.length() && from < second.length() {
     if first[from].compare(second[from]) == Ordering.Equal {
@@ -1559,7 +1545,6 @@ internal theorem lexicographic_agrees_with_equal[Element: Ordered](
   ensures (lexicographic(first, second: second, from: from) == Ordering.Equal)
     == (first.length() == second.length() && forall i in from..first.length() => first[i] == second[i])
   decreases first.length() - from
-  cost time finite
 {
   if from < first.length() && from < second.length() {
     lexicographic_agrees_with_equal(first, second: second, from: from + 1)
@@ -1576,7 +1561,6 @@ internal theorem lexicographic_is_antisymmetric[Element: Ordered](
   ensures (lexicographic(first, second: second, from: from) == Ordering.Less)
     == (lexicographic(first: second, second: first, from: from) == Ordering.Greater)
   decreases first.length() - from
-  cost time finite
 {
   if from < first.length() && from < second.length() {
     assert (first[from].compare(second[from]) == Ordering.Less)
@@ -1598,7 +1582,6 @@ internal theorem lexicographic_is_transitive[Element: Ordered](
   requires lexicographic(first: second, second: third, from: from) != Ordering.Greater
   ensures lexicographic(first, second: third, from: from) != Ordering.Greater
   decreases first.length() - from
-  cost time finite
 {
   if from < first.length() && from < second.length() && from < third.length() {
     assert first[from] <= second[from]
@@ -1616,6 +1599,7 @@ internal theorem lexicographic_is_transitive[Element: Ordered](
 impl Ordered for Slice[Element: Ordered] {
   fn compare(self, other: Slice[Element]) -> Ordering
     ensures result == lexicographic(self.model(), second: other.model(), from: 0)
+    cost allocations <= self.length() * allocations(Element.compare)
   {
     var index: UInt64 = 0
     while index < self.length() && index < other.length()
@@ -1624,6 +1608,7 @@ impl Ordered for Slice[Element: Ordered] {
       invariant lexicographic(self.model(), second: other.model(), from: 0)
         == lexicographic(self.model(), second: other.model(), from: index)
       decreases self.length() - index
+      cost allocations <= index * allocations(Element.compare)
     {
       let order = self[index].compare(other[index])
       if order != Ordering.Equal {
@@ -1649,6 +1634,7 @@ proof Ordered.transitive for Slice[Element: Ordered] {
 
 impl Hash for Slice[Element: Hash] {
   fn hash(self, hasher: mut Hasher)
+    cost allocations <= self.length() * allocations(Element.hash)
   {
     mut hasher.write(self.length())
     for index in 0..self.length() {
@@ -1658,15 +1644,15 @@ impl Hash for Slice[Element: Hash] {
 }
 
 impl Display for Slice[Element: Display] {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
-    mut output.write("[")
+    mut output.push("[")
     for index in 0..self.length() {
       if index > 0 {
-        mut output.write(", ")
+        mut output.push(", ")
       }
       self[index].display(mut output)
     }
-    mut output.write("]")
+    mut output.push("]")
   }
 }

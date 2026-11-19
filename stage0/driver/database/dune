@@ -4,7 +4,6 @@
   structural_key
   compiler_bug
   path
-  intrinsic
   source
   syntax
   types
@@ -13,7 +12,6 @@
   core
   manifest
   project
-  lexer
   parser
   resolve
   interface
@@ -23,8 +21,8 @@
   mir
   ownership
   package_checks
-  compile
-  instance
+  backend
+  lowered
   ground
   libc
   prover

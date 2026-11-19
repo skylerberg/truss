@@ -2,7 +2,11 @@ module Names = Names
 module Parts = Parts
 module Prelude = Prelude
 
-type specification_function = Walk.specification_function = Log | Power | Time | Calls
+type specification_function = Walk.specification_function =
+  | Log
+  | Power
+  | Call_cost of Metric.t
+  | Calls
 
 type target = Walk.target =
   | Binding

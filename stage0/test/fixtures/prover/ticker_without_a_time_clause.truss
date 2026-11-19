@@ -1,0 +1,10 @@
+trait Ticker {
+  fn tick(mut self) -> UInt64
+
+  fn tick_twice(mut self) -> UInt64
+    cost time O(time(Self.tick))
+  {
+    let _ = mut self.tick()
+    mut self.tick()
+  }
+}

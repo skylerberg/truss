@@ -1,0 +1,5 @@
+use standard::intrinsic
+
+fn f[Value](left: Value, right: Value) -> Value {
+  intrinsic::add(left, right)
+}

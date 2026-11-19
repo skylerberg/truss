@@ -1,0 +1,5 @@
+use app::shapes
+
+fn f() -> shapes::Shape {
+  shapes::Shape.hidden_maker()
+}

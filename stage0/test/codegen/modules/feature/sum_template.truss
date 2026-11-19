@@ -1,0 +1,31 @@
+type Sum(pieces: UInt64, total: Int64)
+
+type Count(value: Int64)
+
+impl From[Count] for Int64 {
+  fn from(value: own Count) -> Int64 {
+    value.value
+  }
+}
+
+impl FromTemplate for Sum {
+  type Part = Int64
+
+  fn from_template(template: Template[Int64]) -> Sum {
+    var total = 0
+    for part in template.parts {
+      total += part
+    }
+    Sum(pieces: template.literals.length(), total: total)
+  }
+}
+
+test "a tagged string gives its tag a template of its text and parts" {
+  let small = Count(value: 2)
+  let large: Int64 = 40
+  let sum = Sum"a ${small} b ${large} c"
+  assert sum.pieces == 3
+  assert sum.total == 42
+  let plain = Sum"none"
+  assert plain.pieces == 1 && plain.total == 0
+}

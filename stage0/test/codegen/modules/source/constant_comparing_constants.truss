@@ -1,0 +1,6 @@
+let small: Int64 = 3
+let is_small: Bool = small < 10 && !(small == 4)
+
+test "a constant that compares constants is folded" {
+  assert is_small
+}

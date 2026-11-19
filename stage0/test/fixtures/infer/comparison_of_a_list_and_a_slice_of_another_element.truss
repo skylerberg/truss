@@ -1,0 +1,3 @@
+fn f(items: List[Int64], part: Slice[String]) -> Bool {
+  items == part
+}

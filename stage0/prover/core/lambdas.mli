@@ -9,7 +9,7 @@ val make_parameter_symbols :
 val check_valid :
   State.context ->
   State.frame ->
-  State.location ->
+  Obligation.location ->
   Types.ty ->
   Logic.term ->
   deep:bool ->

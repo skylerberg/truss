@@ -7,6 +7,7 @@
   hashing_tests
   compiler_bug_tests
   process_tests
+  lock_file_tests
   cache_tests
   resolve_tests
   standard_library_tests
@@ -23,13 +24,14 @@
   documents_tests
   manifest_tests
   registry_tests
-  compatibility_tests
   prover_tests
   library_use_tests
   database_tests
   standard_package_loading_tests)
  (libraries
+  metric
   process
+  lock_file
   harness
   compiler_bug
   source
@@ -68,9 +70,9 @@
   infer
   syntax_walk
   manifest
-  registry
-  cli)
+  registry)
  (deps
+  served_length/served_length.exe
   (glob_files %{workspace_root}/*.md)
   (glob_files_rec %{workspace_root}/standard/*.md)
   (glob_files_rec %{workspace_root}/standard/*.truss)

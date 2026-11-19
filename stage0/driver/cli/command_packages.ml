@@ -52,24 +52,24 @@ let list_modules snapshot packages =
   List.sort_uniq compare
     (List.map (fun (file : Path.file) -> file.module_) (list_files snapshot packages))
 
-let project_dependencies snapshot packages =
+let list_project_dependencies snapshot packages =
   let project_packages = List.map snd (Workspace.list_packages snapshot) in
-  let seen = Package_table.create 8 in
+  let visited = Package_table.create 8 in
   let rec visit name =
     List.iter
       (fun dependency ->
-        if List.mem dependency project_packages && not (Package_table.mem seen dependency) then begin
-          Package_table.replace seen dependency ();
+        if List.mem dependency project_packages && not (Package_table.mem visited dependency) then begin
+          Package_table.replace visited dependency ();
           visit dependency
         end)
       (Workspace.list_dependency_names snapshot name)
   in
   List.iter visit packages;
   List.filter
-    (fun name -> Package_table.mem seen name && not (List.mem name packages))
+    (fun name -> Package_table.mem visited name && not (List.mem name packages))
     project_packages
 
-let list_program_packages snapshot packages = packages @ project_dependencies snapshot packages
+let list_program_packages snapshot packages = packages @ list_project_dependencies snapshot packages
 
 let list_manifest_problems snapshot database packages =
   List.concat_map
@@ -101,15 +101,11 @@ let select_files snapshot packages paths =
             wanted)
         (list_files snapshot packages)
 
-let read_source snapshot packages (file : Path.file) =
-  let source = Workspace.read_source snapshot file in
-  if List.mem file.module_.package packages then
-    Source.create ~path:(Shown_path.show_path (locate_file snapshot file)) (Source.text source)
-  else source
+let show_file snapshot packages (file : Path.file) =
+  if List.mem file.module_.package packages then Shown_path.show_path (locate_file snapshot file)
+  else Path.show_file file
 
-let show_workspace_path snapshot packages workspace_path =
-  match
-    List.find_opt (fun file -> Path.show_file file = workspace_path) (list_files snapshot packages)
-  with
-  | Some file -> Shown_path.show_path (locate_file snapshot file)
-  | None -> workspace_path
+let read_source snapshot database packages file =
+  Source.create
+    ~path:(show_file snapshot packages file)
+    (Source.text (Database.read_source database file))

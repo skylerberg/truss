@@ -148,7 +148,7 @@ internal fn join_paths(first: StringSlice, second: StringSlice) -> Path
     return Path(text: second.to_string())
   }
   if first.length() > UInt64.maximum / 4 || second.length() > UInt64.maximum / 4 {
-    intrinsic::crash("a path cannot hold that many bytes".slice())
+    intrinsic::crash("a path cannot hold that many bytes")
   }
   var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(first.length() + 1 + second.length())
   first.copy_onto(mut output)
@@ -169,11 +169,11 @@ public fn Path.is_absolute(self) -> Bool
 public fn Path.join(self, part: StringSlice) -> Path
   cost time O(self.text.length() + part.length())
 {
-  join_paths(self.text.slice(), second: part)
+  join_paths(self.text, second: part)
 }
 
 public fn Path.join_path(self, other: Path) -> Path
-  ensures identical(result, join_paths(self.text.slice(), second: other.text.slice()))
+  ensures identical(result, join_paths(self.text, second: other.text))
   cost time O(self.text.length() + other.text.length())
 {
   join_paths(self.text.slice(), second: other.text.slice())
@@ -267,7 +267,7 @@ public fn Path.with_extension(self, extension: StringSlice) -> Path
   }
   let stem = text.part(0, to: extension_start(text, name: name))
   if stem.length() > UInt64.maximum / 4 || extension.length() > UInt64.maximum / 4 {
-    intrinsic::crash("a path cannot hold that many bytes".slice())
+    intrinsic::crash("a path cannot hold that many bytes")
   }
   var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(stem.length() + 1 + extension.length())
   stem.copy_onto(mut output)
@@ -288,7 +288,7 @@ public fn Path.with_file_name(self, name: StringSlice) -> Path
   }
   let before = text.part(0, to: last.start)
   if before.length() > UInt64.maximum / 4 || name.length() > UInt64.maximum / 4 {
-    intrinsic::crash("a path cannot hold that many bytes".slice())
+    intrinsic::crash("a path cannot hold that many bytes")
   }
   var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(before.length() + name.length())
   before.copy_onto(mut output)
@@ -346,7 +346,7 @@ public fn Path.normalized(self) -> Path
   let text = self.text.slice()
   let absolute = self.is_absolute()
   if text.length() > UInt64.maximum / 4 {
-    intrinsic::crash("a path cannot hold that many bytes".slice())
+    intrinsic::crash("a path cannot hold that many bytes")
   }
   var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(text.length() + 1)
   if absolute {
@@ -470,6 +470,7 @@ public fn Path.relative_to(self, base: Path) -> Option[Path]
 impl Equal for Path {
   fn equal(self, other: Path) -> Bool
     ensures result == (self.text == other.text)
+    cost allocations == 0
   {
     self.text == other.text
   }
@@ -478,28 +479,31 @@ impl Equal for Path {
 impl Ordered for Path {
   fn compare(self, other: Path) -> Ordering
     ensures result == (self.text.compare(other.text))
+    cost allocations == 0
   {
     self.text.compare(other.text)
   }
 }
 
 impl Hash for Path {
-  fn hash(self, hasher: mut Hasher) {
+  fn hash(self, hasher: mut Hasher)
+    cost allocations == 0
+  {
     self.text.hash(mut hasher)
   }
 }
 
 impl Display for Path {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write(self.text.slice())
+  fn display(self, output: mut String) {
+    mut output.push(self.text)
   }
 }
 
 public type FileKind = File | Directory | SymbolicLink | Other
-  derives Equal, Hash
+  derives Equal, Hash, Ordered
 
 public opaque type Permissions(mode: UInt32)
-  derives Plain, Equal, Hash
+  derives Plain, Equal, Hash, Ordered
   invariant mode <= 0o7777
 
 public fn Permissions.from_mode(mode: UInt32) -> Permissions
@@ -576,7 +580,7 @@ internal fn FileReader.opened(simulated_handle: UInt64) -> FileReader {
 }
 
 public fn FileReader.read_line(mut self) -> Result[Option[String], SystemError]
-  uses Handles
+  uses Handles, RunForever
 {
   mut self.reader.read_line()
 }
@@ -714,12 +718,12 @@ public fn is_present(path: Path) -> Bool
   FileRead.metadata(path, follow_links: true).is_ok()
 }
 
-public fn write_with[Output, capability Granted](
+public fn write_with[Output](
   file: Path,
-  write: (fn(mut FileWriter) -> Result[Output, SystemError] uses Granted),
+  write: (fn(mut FileWriter) -> Result[Output, SystemError] uses generic Granted),
   mode: WriteMode = WriteMode.Replace,
 ) -> Result[Output, SystemError]
-  uses FileWrite, Handles, Granted
+  uses FileWrite, Handles, generic Granted
 {
   let opened = FileWrite.open(file, mode: mode)?
   var writer = FileWriter(file: own opened)
@@ -752,9 +756,9 @@ public fn write_atomically(file: Path, contents: Slice[UInt8]) -> Result[Unit, S
   }
   var temporary_name = name.to_string()
   mut temporary_name.push(".")
-  mut temporary_name.push(Random.next().format(radix: 16, minimum_digits: 16).slice())
+  mut temporary_name.push(Random.next().format(radix: 16, minimum_digits: 16))
   mut temporary_name.push(".tmp")
-  let temporary = file.with_file_name(temporary_name.slice())
+  let temporary = file.with_file_name(temporary_name)
   let written = write_new_file(temporary, contents: contents)
   let renamed = match written {
     Ok(_) => FileWrite.rename(temporary, to: file)
@@ -785,7 +789,7 @@ public fn append_text(file: Path, contents: StringSlice) -> Result[Unit, SystemE
 }
 
 public fn copy(from: Path, to: Path) -> Result[UInt64, SystemError]
-  uses FileRead, FileWrite, Handles
+  uses FileRead, FileWrite, Handles, RunForever
 {
   let permissions = FileRead.metadata(from, follow_links: true)?.permissions
   var source = FileRead.open(from)?
@@ -828,11 +832,11 @@ public fn create_directories(directory: Path) -> Result[Unit, SystemError]
 }
 
 public fn remove_all(path: Path) -> Result[Unit, SystemError]
-  uses FileRead, FileWrite
+  uses FileRead, FileWrite, RunForever
 {
   if FileRead.metadata(path, follow_links: false)?.is_directory() {
     for entry in FileRead.list(path)? {
-      remove_all(path.join(entry.name.slice()))?
+      remove_all(path.join(entry.name))?
     }
   }
   FileWrite.remove(path)
@@ -844,8 +848,8 @@ public fn create_temporary_directory(parent: Path, prefix: StringSlice) -> Resul
   var failure = SystemError.AlreadyExists
   for _ in 0..16 {
     var name = prefix.to_string()
-    mut name.push(Random.next().format(radix: 16, minimum_digits: 16).slice())
-    let directory = parent.join(name.slice())
+    mut name.push(Random.next().format(radix: 16, minimum_digits: 16))
+    let directory = parent.join(name)
     match FileWrite.create_directory(directory) {
       Ok(_) => return Ok(own directory)
       Err(AlreadyExists) => {}
@@ -862,13 +866,13 @@ public fn temporary_root() -> Path
   uses Environment
 {
   match Environment.variable("TMPDIR") {
-    Some(directory) => if directory.slice().trim().is_empty() { Path.new("/tmp") } else { Path.new(directory.slice()) }
+    Some(directory) => if directory.slice().trim().is_empty() { Path.new("/tmp") } else { Path.new(directory) }
     None => Path.new("/tmp")
   }
 }
 
-public fn with_temporary_directory[Output, capability Granted](work: (fn(Path) -> Output uses Granted)) -> Result[Output, SystemError]
-  uses FileRead, FileWrite, Random, Environment, Granted
+public fn with_temporary_directory[Output](work: (fn(Path) -> Output uses generic Granted)) -> Result[Output, SystemError]
+  uses FileRead, FileWrite, Random, Environment, generic Granted, RunForever
 {
   let directory = create_temporary_directory(temporary_root(), prefix: "truss-")?
   let output = work(directory)
@@ -876,8 +880,8 @@ public fn with_temporary_directory[Output, capability Granted](work: (fn(Path) -
   Ok(own output)
 }
 
-public fn with_temporary_file[Output, capability Granted](work: (fn(Path) -> Output uses Granted)) -> Result[Output, SystemError]
-  uses FileRead, FileWrite, Random, Environment, Granted
+public fn with_temporary_file[Output](work: (fn(Path) -> Output uses generic Granted)) -> Result[Output, SystemError]
+  uses FileRead, FileWrite, Random, Environment, generic Granted, RunForever
 {
   let directory = create_temporary_directory(temporary_root(), prefix: "truss-")?
   let file = directory.join("file")
@@ -899,7 +903,7 @@ public type WalkEntry(path: Path, kind: FileKind, depth: UInt64)
 let walk_depth_limit: UInt64 = 256
 
 public fn walk(root: Path, follow_links: Bool = false) -> Result[List[WalkEntry], SystemError]
-  uses FileRead
+  uses FileRead, RunForever
 {
   let kind = FileRead.metadata(root, follow_links: follow_links)?.kind
   var unvisited: List[WalkEntry] = [WalkEntry(path: root.copy(), kind: kind, depth: 0)]
@@ -912,7 +916,7 @@ public fn walk(root: Path, follow_links: Bool = false) -> Result[List[WalkEntry]
       var children = FileRead.list(entry.path)?
       mut children.reverse()
       for child in children {
-        let path = entry.path.join(child.name.slice())
+        let path = entry.path.join(child.name)
         let child_kind = if follow_links && child.kind == FileKind.SymbolicLink {
           FileRead.metadata(path, follow_links: true)?.kind
         } else {
@@ -927,33 +931,34 @@ public fn walk(root: Path, follow_links: Bool = false) -> Result[List[WalkEntry]
 }
 
 type CharacterRange(first: Character, last: Character)
+  derives Equal
 
 type GlobToken =
   | AnyCharacters
   | AnyCharacter
   | Literal(character: Character)
   | OneOf(ranges: List[CharacterRange], negated: Bool)
+  derives Equal
 
 type GlobComponent =
   | AnyDirectories
   | Name(tokens: List[GlobToken])
+  derives Equal
 
 type ParsedClass(token: GlobToken, end: UInt64)
 
 public opaque type Glob(components: List[GlobComponent], absolute: Bool)
-  derives Copyable
+  derives Copyable, Equal
 
 fn wildcard_matches(
   pattern_length: UInt64,
   text_length: UInt64,
-  is_wildcard: (fn(pattern_index: UInt64) -> Bool requires pattern_index < pattern_length cost time finite),
+  is_wildcard: (fn(pattern_index: UInt64) -> Bool requires pattern_index < pattern_length),
   matches_one: (
     fn(pattern_index: UInt64, text_index: UInt64) -> Bool
       requires pattern_index < pattern_length && text_index < text_length
-      cost time finite
   ),
 ) -> Bool
-  cost time finite
 {
   var text: UInt64 = 0
   var pattern: UInt64 = 0
@@ -996,7 +1001,6 @@ fn wildcard_matches(
 }
 
 fn GlobToken.matches(self, character: Character) -> Bool
-  cost time finite
 {
   match self {
     AnyCharacters => false
@@ -1015,7 +1019,6 @@ fn GlobToken.matches(self, character: Character) -> Bool
 }
 
 fn name_matches(tokens: Slice[GlobToken], name: StringSlice) -> Bool
-  cost time finite
 {
   var characters: List[Character] = []
   for character in name.characters() {
@@ -1032,7 +1035,6 @@ fn name_matches(tokens: Slice[GlobToken], name: StringSlice) -> Bool
 fn parse_class(pattern: StringSlice, from: UInt64) -> Result[ParsedClass, GlobError]
   requires from < pattern.length()
   ensures !(result is Ok(parsed) && (parsed.end <= from || parsed.end > pattern.length()))
-  cost time finite
 {
   var ranges: List[CharacterRange] = []
   var index = from + 1
@@ -1090,13 +1092,11 @@ impl FromTemplate for Glob {
 
 public fn is_valid_glob(literals: Slice[text::Literal]) -> Bool
   ensures result == (literals.length() == 1 && Glob.parse(literals[0].text()) is Ok(_))
-  cost time finite
 {
   literals.length() == 1 && Glob.parse(literals[0].text()) is Ok(_)
 }
 
 public fn Glob.parse(pattern: StringSlice) -> Result[Glob, GlobError]
-  cost time finite
 {
   var components: List[GlobComponent] = []
   var tokens: List[GlobToken] = []
@@ -1151,7 +1151,6 @@ public fn Glob.parse(pattern: StringSlice) -> Result[Glob, GlobError]
 }
 
 public fn Glob.matches(self, path: Path) -> Bool
-  cost time finite
 {
   if self.absolute != path.is_absolute() {
     return false
@@ -1167,14 +1166,14 @@ public fn Glob.matches(self, path: Path) -> Bool
     matches_one: fn(index, position) {
       match self.components[index] {
         AnyDirectories => false
-        Name(tokens) => name_matches(tokens.slice(), name: names[position].slice())
+        Name(tokens) => name_matches(tokens.slice(), name: names[position])
       }
     },
   )
 }
 
 public fn Glob.find(self, root: Path) -> Result[List[Path], SystemError]
-  uses FileRead
+  uses FileRead, RunForever
 {
   var paths: List[Path] = []
   for entry in walk(root)? {
@@ -1197,8 +1196,8 @@ public type GlobError(offset: UInt64)
   derives Equal
 
 impl Display for GlobError {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write("the glob is not valid at byte ")
+  fn display(self, output: mut String) {
+    mut output.push("the glob is not valid at byte ")
     self.offset.display(mut output)
   }
 }
@@ -1366,16 +1365,20 @@ public fn MemoryFiles.new() -> MemoryFiles {
   files
 }
 
-public fn MemoryFiles.with_text(own self, file: Path, contents: StringSlice) -> MemoryFiles {
+public fn MemoryFiles.with_text(own self, file: Path, contents: StringSlice) -> MemoryFiles
+  uses RunForever
+{
   own self.with_bytes(file, contents: contents.bytes())
 }
 
-public fn MemoryFiles.with_bytes(own self, file: Path, contents: Slice[UInt8]) -> MemoryFiles {
+public fn MemoryFiles.with_bytes(own self, file: Path, contents: Slice[UInt8]) -> MemoryFiles
+  uses RunForever
+{
   var changed = own self
   var directory = Path.new("/")
   var components = reversed_components(file)
   while mut components.pop() is Some(name) {
-    let path = directory.join(name.slice())
+    let path = directory.join(name)
     mut changed.remove_tree(path, keep_directory: !components.is_empty())
     if components.is_empty() {
       let inode = mut changed.add_inode(
@@ -1394,14 +1397,18 @@ public fn MemoryFiles.with_bytes(own self, file: Path, contents: Slice[UInt8]) -
   changed
 }
 
-public fn MemoryFiles.contents(self, file: Path) -> Option[List[UInt8]] {
+public fn MemoryFiles.contents(self, file: Path) -> Option[List[UInt8]]
+  uses RunForever
+{
   match self.read_bytes(file) {
     Ok(bytes) => Some(own bytes)
     Err(_) => None
   }
 }
 
-public fn MemoryFiles.text(self, file: Path) -> Option[String] {
+public fn MemoryFiles.text(self, file: Path) -> Option[String]
+  uses RunForever
+{
   match self.read_bytes(file) {
     Ok(bytes) => match String.from_utf8(own bytes) {
       Ok(text) => Some(own text)
@@ -1480,7 +1487,9 @@ internal fn MemoryFiles.kind_of(self, inode: UInt64) -> Option[FileKind] {
   }
 }
 
-internal fn MemoryFiles.locate(self, path: Path, follow_last: Bool) -> Result[Located, SystemError] {
+internal fn MemoryFiles.locate(self, path: Path, follow_last: Bool) -> Result[Located, SystemError]
+  uses RunForever
+{
   var unresolved = reversed_components(path)
   var current = Path.new("/")
   var followed: UInt64 = 0
@@ -1492,7 +1501,7 @@ internal fn MemoryFiles.locate(self, path: Path, follow_last: Bool) -> Result[Lo
       current = current.parent().unwrap_or(Path.new("/"))
       continue
     }
-    let candidate = current.join(name.slice())
+    let candidate = current.join(name)
     let inode = match self.names.get(candidate) {
       Some(number) => number
       None => {
@@ -1537,7 +1546,9 @@ internal fn MemoryFiles.locate(self, path: Path, follow_last: Bool) -> Result[Lo
   Ok(Located(path: own current, inode: inode))
 }
 
-internal fn MemoryFiles.existing(self, path: Path, follow_last: Bool) -> Result[UInt64, SystemError] {
+internal fn MemoryFiles.existing(self, path: Path, follow_last: Bool) -> Result[UInt64, SystemError]
+  uses RunForever
+{
   match self.locate(path, follow_last: follow_last)?.inode {
     Some(inode) => Ok(inode)
     None => Err(SystemError.NotFound)
@@ -1603,7 +1614,9 @@ internal fn MemoryFiles.remove_tree(mut self, path: Path, keep_directory: Bool) 
   }
 }
 
-internal fn MemoryFiles.read_bytes(self, file: Path) -> Result[List[UInt8], SystemError] {
+internal fn MemoryFiles.read_bytes(self, file: Path) -> Result[List[UInt8], SystemError]
+  uses RunForever
+{
   let inode = self.existing(file, follow_last: true)?
   match self.inodes.get(inode) {
     Some(entry) => match entry.kind {
@@ -1640,7 +1653,9 @@ internal fn MemoryFiles.replace_contents(mut self, inode: UInt64, contents: own 
   }
 }
 
-internal fn MemoryFiles.write_bytes(mut self, file: Path, contents: own List[UInt8]) -> Result[Unit, SystemError] {
+internal fn MemoryFiles.write_bytes(mut self, file: Path, contents: own List[UInt8]) -> Result[Unit, SystemError]
+  uses RunForever
+{
   let located = self.locate(file, follow_last: true)?
   match located.inode {
     Some(inode) => mut self.replace_contents(inode, contents: own contents)
@@ -1657,7 +1672,9 @@ internal fn MemoryFiles.change_inode(
   path: Path,
   permissions: Option[Permissions],
   modified: Option[Instant],
-) -> Result[Unit, SystemError] {
+) -> Result[Unit, SystemError]
+  uses RunForever
+{
   let inode = self.existing(path, follow_last: true)?
   match mut self.inodes.take(inode) {
     Some(entry) => {
@@ -1803,7 +1820,9 @@ internal fn MemoryFiles.resize(mut self, inode: UInt64, length: UInt64) -> Resul
   }
 }
 
-internal fn MemoryFiles.open_to_read(mut self, file: Path) -> Result[UInt64, SystemError] {
+internal fn MemoryFiles.open_to_read(mut self, file: Path) -> Result[UInt64, SystemError]
+  uses RunForever
+{
   let inode = self.existing(file, follow_last: true)?
   if self.kind_of(inode) == Some(FileKind.Directory) {
     return Err(SystemError.IsADirectory)
@@ -1814,7 +1833,9 @@ internal fn MemoryFiles.open_to_read(mut self, file: Path) -> Result[UInt64, Sys
   Ok(mut self.add_open_file(inode, readable: true, writable: false, appending: false))
 }
 
-internal fn MemoryFiles.open_to_write(mut self, file: Path, mode: WriteMode) -> Result[UInt64, SystemError] {
+internal fn MemoryFiles.open_to_write(mut self, file: Path, mode: WriteMode) -> Result[UInt64, SystemError]
+  uses RunForever
+{
   let located = self.locate(file, follow_last: true)?
   let inode = match located.inode {
     Some(existing) => {
@@ -1847,7 +1868,9 @@ internal fn MemoryFiles.open_to_write(mut self, file: Path, mode: WriteMode) -> 
   Ok(handle)
 }
 
-impl FileRead for MemoryFiles {
+impl FileRead for MemoryFiles
+  uses RunForever
+{
   fn read(self, file: Path) -> Result[List[UInt8], SystemError] {
     self.read_bytes(file)
   }
@@ -1907,7 +1930,9 @@ impl FileRead for MemoryFiles {
   }
 }
 
-impl FileWrite for MemoryFiles {
+impl FileWrite for MemoryFiles
+  uses RunForever
+{
   fn write(mut self, file: Path, contents: Slice[UInt8]) -> Result[Unit, SystemError] {
     mut self.write_bytes(file, contents: contents.to_list())
   }

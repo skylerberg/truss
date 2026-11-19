@@ -1,0 +1,13 @@
+fn thrice(visit: (fn(Int64) cost allocations <= 2))
+  cost allocations <= 3 * allocations(visit)
+{
+  visit(1)
+  visit(2)
+  visit(3)
+}
+
+fn f(visit: (fn(Int64) cost allocations <= 2))
+  cost allocations <= 6
+{
+  thrice(visit)
+}

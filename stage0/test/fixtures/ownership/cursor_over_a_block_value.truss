@@ -1,0 +1,11 @@
+fn f(flag: Bool) -> Option[Character] {
+  var each = (if flag {
+    var text = "a"
+    mut text.push("b")
+    text
+  } else {
+    var text = "c"
+    text
+  }).characters()
+  mut each.next()
+}

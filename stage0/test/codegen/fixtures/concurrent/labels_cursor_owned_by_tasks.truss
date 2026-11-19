@@ -31,7 +31,7 @@ impl Cursor for Counter {
 }
 
 fn label_lengths(counter: Counter, stop: Int64) -> UInt64
-  uses Tasks
+  uses Tasks, RunForever
 {
   concurrent for label in counter.labels() {
     if label == "label ${stop}" {
@@ -42,7 +42,7 @@ fn label_lengths(counter: Counter, stop: Int64) -> UInt64
 }
 
 fn sum_steps(counter: mut Counter) -> Int64
-  uses Tasks, Tally
+  uses Tasks, Tally, RunForever
 {
   concurrent for step in mut counter {
     Tally.add(step)
@@ -67,7 +67,7 @@ impl Tally for Sum {
   }
 }
 
-test "a computed value is dropped by its task or by the loop" {
+test "a computed value is dropped by its task or by the loop" uses RunForever {
   var tasks = InOrder(opened: 0, cancelled: [])
   provide mut tasks {
     assert label_lengths(Counter(count: 4), stop: 2) == 7
@@ -75,7 +75,7 @@ test "a computed value is dropped by its task or by the loop" {
   }
 }
 
-test "a plain value pulled from a cursor in a mut parameter is copied" {
+test "a plain value pulled from a cursor in a mut parameter is copied" uses RunForever {
   var tasks = InOrder(opened: 0, cancelled: [])
   var sum = Sum(total: 0)
   var counter = Counter(count: 4)

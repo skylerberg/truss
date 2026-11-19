@@ -1,4 +1,6 @@
-fn f() -> Int64 {
+fn f() -> Int64
+  uses RunForever
+{
   while true {
   }
   1

@@ -1,10 +1,10 @@
-fn apply[capability Granted](run: (fn() uses Granted))
-  uses Granted
+fn apply(run: (fn() uses generic Granted))
+  uses generic Granted
 {
   run()
 }
 
-fn later[capability Granted](run: (fn() uses Granted)) -> (fn() uses Granted) {
+fn later(run: (fn() uses generic Granted)) -> (fn() uses generic Granted) {
   run
 }
 

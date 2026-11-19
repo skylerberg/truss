@@ -1,18 +1,26 @@
-type build = Development | Release
 type linkage = External | Internal
 type failure = Echo | Todo
 
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Emit_c" format
 
 let render_site_symbol (site : Lowered.site) =
-  Printf.sprintf "t_Site_%s_%d" (Instance.mangle_path site.definition) site.offset
+  Printf.sprintf "t_Site_%s_%d" (Mangling.mangle_path site.definition) site.offset
 
-let site_struct =
+let shared_structs =
   "struct t_site {\n\
   \  const uint8_t *file;\n\
   \  uint64_t file_length;\n\
   \  uint32_t line;\n\
   \  uint32_t column;\n\
+   };\n\
+   struct t_trace {\n\
+  \  const struct t_site *site;\n\
+  \  const struct t_trace *caller;\n\
+   };\n\
+   struct t_capability {\n\
+  \  const uint8_t *name;\n\
+  \  uint64_t length;\n\
+  \  void *evidence;\n\
    };\n"
 
 let render_integer_type : Memory_layout.integer -> string = function
@@ -35,54 +43,8 @@ let is_signed : Memory_layout.integer -> bool = function
   | Int8 | Int16 | Int32 | Int64 -> true
   | UInt8 | UInt16 | UInt32 | UInt64 -> false
 
-let runtime_declarations =
-  String.concat ""
-    [
-      "typedef __INT8_TYPE__ int8_t;\n";
-      "typedef __INT16_TYPE__ int16_t;\n";
-      "typedef __INT32_TYPE__ int32_t;\n";
-      "typedef __INT64_TYPE__ int64_t;\n";
-      "typedef __UINT8_TYPE__ uint8_t;\n";
-      "typedef __UINT16_TYPE__ uint16_t;\n";
-      "typedef __UINT32_TYPE__ uint32_t;\n";
-      "typedef __UINT64_TYPE__ uint64_t;\n";
-      site_struct;
-      "_Noreturn void t_runtime_panic(const uint8_t *message, uint64_t length, const struct t_site \
-       *site);\n";
-      "_Noreturn void t_runtime_assertion_failed(const uint8_t *message, uint64_t length, const \
-       struct t_site *site);\n";
-      "_Noreturn void t_runtime_todo(const uint8_t *message, uint64_t length, const struct t_site \
-       *site);\n";
-      "void t_runtime_echo(const uint8_t *text, uint64_t length, const struct t_site *site);\n";
-      "_Noreturn void t_runtime_compiler_bug(void);\n";
-      "struct t_evidence {\n\
-      \  void *implementation;\n\
-      \  const void *const *table;\n\
-      \  const struct t_evidence *const *outer;\n\
-       };\n";
-      "void *t_runtime_allocate(uint64_t size, uint64_t alignment);\n";
-      "void *t_runtime_reallocate(void *pointer, uint64_t old_size, uint64_t size, uint64_t \
-       alignment);\n";
-      "void t_runtime_free(void *pointer);\n";
-      "struct t_branch {\n  void (*run)(void *environment);\n  void *environment;\n};\n";
-      "void t_runtime_parallel(const struct t_branch *branches, uint64_t count);\n";
-      "void t_runtime_parallel_range(void (*body)(void *environment, uint64_t first, uint64_t \
-       last), void *environment, uint64_t first, uint64_t last);\n";
-      "uint64_t t_runtime_coroutine_start(void (*code)(void *environment, uint64_t item), void \
-       *environment, uint64_t item);\n";
-      "uint8_t t_runtime_coroutine_resume(uint64_t coroutine);\n";
-      "void t_runtime_coroutine_suspend(void);\n";
-      "uint8_t t_runtime_tasks_spawn(uint64_t group, void (*code)(void *environment, uint64_t \
-       item), void *environment, uint64_t item);\n";
-      "void t_runtime_run_test(uint32_t index);\n";
-      "void t_runtime_report_tests_to(int32_t descriptor);\n";
-      "uint64_t t_runtime_live_blocks(void);\n";
-    ]
-
-let helpers =
-  [
-    ( "t_lend",
-      {|struct t_lend_deferred {
+let lend_structs =
+  {|struct t_lend_deferred {
   struct t_lend_deferred *next;
   void (*drop)(void *);
   void *target;
@@ -108,7 +70,59 @@ struct t_lend_mark {
   uint64_t used_after;
   uint8_t is_lent;
 };
-__attribute__((unused)) static inline void *t_lend_allocate(struct t_lend *lend, uint64_t size, uint64_t alignment) {
+|}
+
+let runtime_declarations =
+  String.concat ""
+    [
+      "typedef __INT8_TYPE__ int8_t;\n";
+      "typedef __INT16_TYPE__ int16_t;\n";
+      "typedef __INT32_TYPE__ int32_t;\n";
+      "typedef __INT64_TYPE__ int64_t;\n";
+      "typedef __UINT8_TYPE__ uint8_t;\n";
+      "typedef __UINT16_TYPE__ uint16_t;\n";
+      "typedef __UINT32_TYPE__ uint32_t;\n";
+      "typedef __UINT64_TYPE__ uint64_t;\n";
+      shared_structs;
+      "_Noreturn void t_runtime_panic(const uint8_t *message, uint64_t length, const struct t_site \
+       *site, const struct t_trace *trace);\n";
+      "_Noreturn void t_runtime_assertion_failed(const uint8_t *message, uint64_t length, const \
+       struct t_site *site);\n";
+      "_Noreturn void t_runtime_todo(const uint8_t *message, uint64_t length, const struct t_site \
+       *site);\n";
+      "void t_runtime_echo(const uint8_t *text, uint64_t length, const struct t_site *site);\n";
+      "_Noreturn void t_runtime_compiler_bug(void);\n";
+      "void *t_runtime_find_capability(const struct t_capability *capabilities, const uint8_t \
+       *name, uint64_t length);\n";
+      "struct t_evidence {\n\
+      \  void *implementation;\n\
+      \  const void *const *table;\n\
+      \  const struct t_evidence *const *outer;\n\
+       };\n";
+      "void *t_runtime_allocate(uint64_t size, uint64_t alignment);\n";
+      "void *t_runtime_reallocate(void *pointer, uint64_t old_size, uint64_t size, uint64_t \
+       alignment);\n";
+      "void t_runtime_free(void *pointer);\n";
+      "struct t_branch {\n  void (*run)(void *environment);\n  void *environment;\n};\n";
+      "void t_runtime_parallel(const struct t_branch *branches, uint64_t count);\n";
+      "void t_runtime_parallel_range(void (*body)(void *environment, uint64_t first, uint64_t \
+       last), void *environment, uint64_t first, uint64_t last);\n";
+      "uint64_t t_runtime_coroutine_start(void (*code)(void *environment, uint64_t item, void \
+       *capabilities), void *environment, uint64_t item);\n";
+      "uint8_t t_runtime_coroutine_resume(uint64_t coroutine);\n";
+      "void t_runtime_coroutine_suspend(void);\n";
+      "uint8_t t_runtime_tasks_spawn(uint64_t group, void (*code)(void *environment, uint64_t \
+       item, void *capabilities), void *environment, uint64_t item);\n";
+      "void t_runtime_run_test(uint32_t index);\n";
+      "void t_runtime_report_tests_to(int32_t descriptor);\n";
+      "uint64_t t_runtime_live_blocks(void);\n";
+      lend_structs;
+    ]
+
+let helpers =
+  [
+    ( "t_lend",
+      {|__attribute__((unused)) static inline void *t_lend_allocate(struct t_lend *lend, uint64_t size, uint64_t alignment) {
   uint64_t start = (lend->used + alignment - 1) & ~(alignment - 1);
   if (alignment <= 16 && start + size <= sizeof lend->storage) {
     lend->used = start + size;

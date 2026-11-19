@@ -1,0 +1,9 @@
+trait Feeds {
+  fn feed[Item: Cursor[Element = Int64]](self, item: Item) -> UInt64
+}
+
+type Reader()
+
+impl Feeds for Reader {
+  fn feed[Item: Cursor[Element = String]](self, item: Item) -> UInt64 { todo }
+}

@@ -97,8 +97,8 @@ grants none, so the package can only do pure computation.
 - **A missing grant is never added by a tool.** `truss check --fix` never
   widens a grant.
 - **Running a caller's callback does not count.** A function that runs a
-  callback with a `capability Granted` parameter uses no capability of its
-  own by doing so.
+  callback through a capability parameter, as in `uses generic Granted`,
+  uses no capability of its own by doing so.
 - Nothing in a package runs when it is fetched or built: there are no build
   scripts, and the code that runs while compiling is pure.
 
@@ -132,8 +132,7 @@ change that is not compatible is published under a new name, the old one
 with `_v2` after it, as in `acme::geometry_v2`. `acme::geometry` and
 `acme::geometry_v2` are two packages, and both can be in one build.
 
-The registry checks compatibility from the signatures. A release is
-compatible with the one before when:
+A release is compatible with the one before when:
 
 - every public definition is still there, at the same path
 - a function, method, or theorem has the same parameters and result, no
@@ -143,17 +142,23 @@ compatible with the one before when:
   an opaque type may change everything inside it
 - a trait or capability has the same methods, associated types, required
   traits, and laws, and gains at most methods that have bodies
-- every `impl` is still there
+- every `impl` is still there, and its associated capability sets gain no
+  capability: a call through a bound uses the capabilities in the `impl`'s
+  sets, so an `impl` that puts `RunForever` in its `Uses` breaks the
+  functions that call through the bound
 - a constant has the same type and value
 
 Bodies are not promised: a release may change a function's results within
 its contract, including a body that the prover reads as a definition and a
 parameter's default.
 
-The registry numbers each release. The first is `N.0.0`, where `N` is the
-number after `_v` in the package's name, or 1. After that, a release whose
-public signatures are unchanged gets the next patch number, and one that
-added to them gets the next minor number. There are no 0.x versions.
+The author gives each release its version, as in `truss publish 1.4.2`. Its
+first number is the number after `_v` in the package's name, or 1, so there
+are no 0.x versions. It is higher than the newest release's version. A
+release that adds to the public signatures takes the next minor number, and
+any other release takes the next patch number. The registry checks the first
+number and the order of versions. It does not check compatibility: the author
+promises it.
 
 ## The lock file
 

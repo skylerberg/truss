@@ -1,0 +1,9 @@
+fn head(values: Array[Int64, 4]) -> Slice[Int64] {
+  values[..2]
+}
+
+fn f(values: mut Array[Int64, 4]) -> UInt64 {
+  let first = head(values)
+  values[0] = 7
+  first.length()
+}

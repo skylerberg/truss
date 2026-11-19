@@ -11,6 +11,7 @@ type check =
   | Constant of Resolve.Names.key
   | Instantiations
   | Tests
+  | Unexported
   | Dependencies
 
 val list_checks : Resolve.Names.declaration list -> check list

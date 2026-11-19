@@ -1,0 +1,12 @@
+internal fn is_even(value: Int64) -> Bool
+  cost time O(1)
+{
+  value % 2 == 0
+}
+
+public fn even_below(value: Int64) -> Int64
+  requires value > -1000 && value < 1000
+  ensures is_even(result)
+{
+  value - value % 2
+}

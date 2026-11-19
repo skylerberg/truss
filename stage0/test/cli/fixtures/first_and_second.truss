@@ -1,7 +1,0 @@
-fn first() -> Int64 {
-  1
-}
-
-fn second() -> Int64 {
-  first() + 1
-}

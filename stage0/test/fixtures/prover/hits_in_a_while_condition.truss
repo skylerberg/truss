@@ -1,6 +1,5 @@
 capability Hits {
   fn hit()
-    cost time finite
 }
 
 type Counter(count: Int64)
@@ -11,7 +10,7 @@ impl Hits for Counter {
   }
 }
 
-fn f(count: UInt32, visit: (fn() -> Bool uses Hits cost time finite))
+fn f(count: UInt32, visit: (fn() -> Bool uses Hits))
   uses Hits
   cost calls(visit) <= 1
 {

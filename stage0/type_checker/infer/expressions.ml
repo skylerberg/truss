@@ -14,7 +14,7 @@ and check_lent_part state env (value : Syntax.expression) : Types.ty =
   | Some (Lends (mode, part)) ->
       let inner =
         match value.kind with
-        | Mode (mode, inner) when Option.is_none (State.find_call_with_mode_keyword state inner) ->
+        | Mode (mode, inner) when Option.is_none (State.find_keyword_operation state inner) ->
             State.note_mode_keyword state value mode inner;
             inner
         | _ -> value
@@ -22,7 +22,6 @@ and check_lent_part state env (value : Syntax.expression) : Types.ty =
       Hashtbl.replace state.yielded inner.id (match mode with Mut -> Mut | Read | Own -> Read);
       let actual = check_expression state env ~expected:part inner in
       if inner != value then State.alias_expression state value inner;
-      Modes.check_lent_value state env inner;
       if mode = Mut then Modes.mutate state env ~by:Passed_mut inner;
       Name_lookup.coerce state env inner ~actual ~expected:part;
       actual
@@ -110,13 +109,13 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
   | Prefix (operator, inner) -> Operators.check_prefix state env ?expected value operator inner
   | Mode (mode, inner) ->
       State.note_mode_keyword state value mode inner;
-      (match State.find_call_with_mode_keyword state inner with
+      (match State.find_keyword_operation state inner with
       | Some (call_id, _) ->
-          state.receiver_modes <-
-            (call_id, match mode with Mut -> Types.Mut | Own -> Types.Own) :: state.receiver_modes
+          state.keyword_modes <-
+            (call_id, match mode with Mut -> Types.Mut | Own -> Types.Own) :: state.keyword_modes
       | None -> ());
       let type_ = check_expression state env ?expected inner in
-      if mode = Mut && Option.is_none (State.find_call_with_mode_keyword state inner) then
+      if mode = Mut && Option.is_none (State.find_keyword_operation state inner) then
         Modes.mutate state env ~by:Passed_mut inner;
       State.alias_expression state value inner;
       type_
@@ -134,7 +133,7 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
           Matches
             {
               value = Operands.build mode (State.build_expression state tested);
-              pattern = State.build_pattern state written;
+              pattern = State.build_scrutinee_pattern state written;
             });
       Types.bool
   | Range { start; stop; inclusive; _ } ->
@@ -186,8 +185,7 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
                 | Binder_type (bound, _) ->
                     Over_type
                       {
-                        local = Named bound.id;
-                        name = bound.text;
+                        local = Declared { origin = bound.id; name = bound.text };
                         type_ = Form.read_local_type state bound.id;
                       }
                 | Binder_in
@@ -262,7 +260,7 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
   | Block body ->
       State.register_expression state value (fun () -> Block (State.build_block state body));
       Statements.check_block_value state env ?expected body
-  | Expression_error -> Types.Error (Diagnostic.make_recovered (State.read_span state value.id))
+  | Expression_error -> Types.Error Diagnostic.reported_elsewhere
 
 and check_member_value state env (value : Syntax.expression) (base : Syntax.expression)
     (member : Syntax.name) =
@@ -344,7 +342,7 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
       match base_type with
       | Types.Named { path; arguments = Types.Type element :: _ }
         when Well_known.is List path || Well_known.is Slice path
-             || Intrinsic.builtin_of_path path = Some Array ->
+             || Intrinsic.find_builtin path = Some Array ->
           Types.Named { path = Well_known.make_path Slice; arguments = [ Types.Type element ] }
       | Types.Named { path; _ } when Well_known.is String path || Well_known.is String_slice path ->
           State.make_error_type state Not_indexable (State.read_span state value.id)
@@ -352,7 +350,8 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
       | Types.Error _ | Types.Hole -> base_type
       | _ ->
           State.make_error_type state Not_indexable (State.read_span state value.id)
-            (Printf.sprintf "`%s` cannot be sliced." (State.show state base_type)))
+            (Printf.sprintf "%s cannot be sliced."
+               (String.capitalize_ascii (State.describe state base_type))))
   | [ Item key ] -> (
       if Types.is_well_known String base_type || Types.is_well_known String_slice base_type then begin
         State.make_error_type state Not_indexable (State.read_span state value.id)
@@ -375,7 +374,8 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
                 in
                 let key_type = resolve_associated "Key" and output = resolve_associated "Output" in
                 let actual = check_expression state env ~expected:key_type key in
-                Name_lookup.coerce state env ~argument:Read key ~actual ~expected:key_type;
+                Name_lookup.coerce state env ~argument:Read ~takes_view_as_owner:true key ~actual
+                  ~expected:key_type;
                 state.tables.calls.(value.id) <-
                   Some
                     {
@@ -386,7 +386,7 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
                             name = "at";
                             receiver = Read;
                             self_type = base_type;
-                            type_arguments = [];
+                            instantiation = Types.no_instantiation;
                             evidence = State.convert_evidence evidence;
                           };
                       arguments =
@@ -395,7 +395,6 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
                           { expression = key.id; core_argument_index = 1; mode = Read };
                         ];
                       omitted_defaults = [];
-                      uses = Types.no_capabilities;
                       callee_result = output;
                     };
                 Form.register_index state value;
@@ -403,7 +402,8 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
             | None ->
                 ignore (check_expression state env key);
                 State.make_error_type state Not_indexable (State.read_span state value.id)
-                  (Printf.sprintf "`%s` cannot be indexed." (State.show state base_type))))
+                  (Printf.sprintf "%s cannot be indexed."
+                     (String.capitalize_ascii (State.describe state base_type)))))
   | _ ->
       State.make_error_type state Not_indexable (State.read_span state value.id)
         "An index is one value."

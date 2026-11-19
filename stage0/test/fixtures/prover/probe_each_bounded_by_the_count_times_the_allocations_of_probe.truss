@@ -1,0 +1,9 @@
+fn f[Source: Probe](source: Source, count: UInt64) -> Bool
+  cost allocations <= (count + 1) * allocations(Source.probe)
+  cost allocated_bytes O((count + 1) * allocated_bytes(Source.probe))
+{
+  for _ in 0..count {
+    let _ = source.probe()
+  }
+  source.probe()
+}

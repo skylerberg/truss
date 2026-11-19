@@ -1,9 +1,37 @@
 let zero = Logic.Integer Z.zero
 
 type target = Through of Logic.term | Capability of Path.t | Capability_method of Path.t * string
-type resource = Time | Allocations | Allocated_bytes | Calls of target
+type resource = Metric of Metric.t | Calls of target
 type counting = Units | At_most | Exactly
 type counter = { resource : resource; counting : counting; amortized : bool }
+
+let least_amount = function
+  | Metric Time -> Logic.Integer Z.one
+  | Metric (Allocations | Allocated_bytes) | Calls _ -> zero
+
+let make_operand_counter (metric : Metric.t) =
+  {
+    resource = Metric metric;
+    counting = (match metric with Time -> Units | Allocations | Allocated_bytes -> At_most);
+    amortized = false;
+  }
+
+let list_stated_bounds (costs : Types.cost list) (metric : Metric.t) =
+  List.filter_map
+    (fun (cost : Types.cost) ->
+      if cost.resource = Types.Metric metric && not cost.amortized then Some cost.bound else None)
+    costs
+
+let find_stated_operand costs metric =
+  let counting = (make_operand_counter metric).counting in
+  List.find_map
+    (fun (bound : Types.cost_bound) ->
+      match (counting, bound) with
+      | Units, Order_of -> Some (Logic.Integer Z.one)
+      | At_most, (No_more_than (Some limit) | Exactly_cost (Some limit)) ->
+          Some (Logic.Integer limit)
+      | (Units | At_most | Exactly), (Order_of | No_more_than _ | Exactly_cost _) -> None)
+    (list_stated_bounds costs metric)
 
 let bound bound_function =
   Logic.Operation
@@ -198,6 +226,11 @@ let list_varying_parts varies term =
   in
   walk Grows term;
   !parts
+
+let grows_with ~varies term =
+  List.exists
+    (fun (_, polarity) -> polarity <> Shrinks)
+    (list_varying_parts varies (rewrite_choices_as_most term))
 
 let rec list_comparisons fact =
   match fact with

@@ -1,4 +1,5 @@
 val parse : Token.t array -> lexer_diagnostics:Diagnostic.t list -> Syntax.file * Diagnostic.t list
+val parse_source : Source.t -> Syntax.file * Diagnostic.t list
 
 module For_testing : sig
   type piece = Split.piece = { first : int; stop : int }

@@ -1,0 +1,17 @@
+fn row(seed: UInt64) -> List[UInt64]
+  cost time O(1)
+{
+  [seed]
+}
+
+fn f(count: UInt64) -> List[List[UInt64]]
+  cost time O(count)
+{
+  var rows: List[List[UInt64]] = []
+  for index in 0..count
+    cost time O(index)
+  {
+    mut rows.push(row(index))
+  }
+  rows
+}

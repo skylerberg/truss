@@ -1,0 +1,46 @@
+type Meters(length: Int64)
+
+impl Equal for Meters {
+  fn equal(self, other: Meters) -> Bool {
+    self.length == other.length
+  }
+}
+
+impl Hash for Meters {
+  fn hash(self, hasher: mut Hasher) {
+    self.length.hash(mut hasher)
+  }
+}
+
+type Span(start: Meters, stop: Meters)
+  derives Equal
+
+type Shape =
+  | Dot
+  | Line(length: Meters)
+  | Box(width: Meters, height: Meters)
+  derives Equal, Hash
+
+type Tree =
+  | Leaf
+  | indirect Node(left: Tree, value: Meters, right: Tree)
+  derives Equal
+
+type Forest(trees: List[Forest])
+  derives Equal
+
+type Pair[Item](first: Item, second: Meters)
+  derives Equal
+
+type Outer(span: Span)
+  derives Equal
+
+type Limits(size: Int64 = 3)
+  derives Default
+
+type Config(limits: Limits)
+  derives Default
+
+fn make() -> Config {
+  Config.default()
+}

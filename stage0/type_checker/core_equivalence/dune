@@ -1,3 +1,0 @@
-(library
- (name core_equivalence)
- (libraries structural_key path types core zarith))

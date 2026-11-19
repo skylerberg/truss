@@ -1,3 +1,0 @@
-fn sides(of: Int64) -> Int64 {
-  of
-}

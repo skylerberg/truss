@@ -28,11 +28,9 @@ public fn Ordering.then(self, next: Ordering) -> Ordering
 
 public trait Equal {
   fn equal(self, other: Self) -> Bool
-    cost time finite
 
   fn not_equal(self, other: Self) -> Bool
     ensures result == !self.equal(other)
-    cost time finite
   {
     !self.equal(other)
   }
@@ -57,12 +55,10 @@ public trait Equal {
 
 public trait Ordered: Equal {
   fn compare(self, other: Self) -> Ordering
-    cost time finite
 
   fn max(own self, other: own Self) -> Self
     ensures identical(result, self) || identical(result, other)
     ensures self <= result && other <= result
-    cost time finite
   {
     if self.compare(other) == Ordering.Less { other } else { self }
   }
@@ -70,7 +66,6 @@ public trait Ordered: Equal {
   fn min(own self, other: own Self) -> Self
     ensures identical(result, self) || identical(result, other)
     ensures result <= self && result <= other
-    cost time finite
   {
     if self.compare(other) == Ordering.Greater { other } else { self }
   }
@@ -81,7 +76,6 @@ public trait Ordered: Equal {
     ensures low <= self && self <= high ==> identical(result, self)
     ensures self < low ==> identical(result, low)
     ensures self > high ==> identical(result, high)
-    cost time finite
   {
     if self.compare(low) == Ordering.Less {
       low
@@ -117,25 +111,30 @@ public opaque type Hasher(state: UInt64)
 
 public fn Hasher.new() -> Hasher
   cost time O(1)
+  cost allocations == 0
 {
   Hasher(state: 14695981039346656037)
 }
 
 public fn Hasher.write(mut self, value: UInt64)
   cost time O(1)
+  cost allocations == 0
 {
   self.state = intrinsic::wrapping_multiply(intrinsic::bit_xor(self.state, right: value), right: 1099511628211)
 }
 
 public fn Hasher.write_bytes(mut self, bytes: Slice[UInt8])
   cost time O(bytes.length())
+  cost allocations == 0
 {
   for index in 0..bytes.length() {
     mut self.write(intrinsic::convert(bytes[index]))
   }
 }
 
-public fn Hasher.finish(self) -> UInt64 {
+public fn Hasher.finish(self) -> UInt64
+  cost allocations == 0
+{
   self.state
 }
 
@@ -144,8 +143,7 @@ public trait Default {
 }
 
 public trait Display {
-  fn display(self, output: mut TextBuilder)
-    cost time finite
+  fn display(self, output: mut String)
 }
 
 public trait From[Source] {
@@ -160,7 +158,6 @@ public trait TryFrom[Source] {
 public trait Copyable {
   fn copy(self) -> Self
     ensures identical(result, self)
-    cost time finite
 }
 
 public trait Plain: Copyable {}
@@ -171,7 +168,6 @@ public trait Add[Right] {
   type Output
 
   fn add_is_defined(self, right: Right) -> Bool
-    cost time finite
 
   fn add(self, right: Right) -> Self.Output
     requires self.add_is_defined(right)
@@ -181,7 +177,6 @@ public trait Subtract[Right] {
   type Output
 
   fn subtract_is_defined(self, right: Right) -> Bool
-    cost time finite
 
   fn subtract(self, right: Right) -> Self.Output
     requires self.subtract_is_defined(right)
@@ -191,7 +186,6 @@ public trait Multiply[Right] {
   type Output
 
   fn multiply_is_defined(self, right: Right) -> Bool
-    cost time finite
 
   fn multiply(self, right: Right) -> Self.Output
     requires self.multiply_is_defined(right)
@@ -201,7 +195,6 @@ public trait Divide[Right] {
   type Output
 
   fn divide_is_defined(self, right: Right) -> Bool
-    cost time finite
 
   fn divide(self, right: Right) -> Self.Output
     requires self.divide_is_defined(right)
@@ -211,7 +204,6 @@ public trait Remainder[Right] {
   type Output
 
   fn remainder_is_defined(self, right: Right) -> Bool
-    cost time finite
 
   fn remainder(self, right: Right) -> Self.Output
     requires self.remainder_is_defined(right)
@@ -221,7 +213,6 @@ public trait Negate {
   type Output
 
   fn negate_is_defined(self) -> Bool
-    cost time finite
 
   fn negate(self) -> Self.Output
     requires self.negate_is_defined()
@@ -231,7 +222,6 @@ public trait Model {
   type Value
 
   fn model(self) -> Self.Value
-    cost time finite
 }
 
 public trait Index {
@@ -239,7 +229,6 @@ public trait Index {
   type Output
 
   fn contains_key(self, key: Self.Key) -> Bool
-    cost time finite
 
   fn at(self, key: Self.Key) lends Self.Output
     requires self.contains_key(key)
@@ -252,7 +241,6 @@ public trait IndexMut: Index {
 
 public trait IndexAssign: Index {
   fn accepts_key(self, key: Self.Key) -> Bool
-    cost time finite
 
   fn assign(mut self, key: own Self.Key, value: own Self.Output)
     requires self.accepts_key(key)
@@ -262,18 +250,18 @@ public trait Iterable {
   type Element
 
   fn count(self) -> UInt64
-    cost time finite
 
   fn element(self, position: UInt64) lends Self.Element
     requires position < self.count()
-    cost time finite
 
   fn fold[Total](
     self,
     initial: own Total,
-    combine: (fn(own Total, Self.Element) -> Total cost time finite),
+    combine: (fn(own Total, Self.Element) -> Total uses generic Granted),
   ) -> Total
-    cost time finite
+    uses generic Granted
+    cost time O(time(Self.count) + self.count() * (time(Self.element) + time(combine)))
+    cost allocations <= allocations(Self.count) + self.count() * (allocations(Self.element) + allocations(combine))
   {
     var total = own initial
     for item in self {
@@ -282,50 +270,56 @@ public trait Iterable {
     total
   }
 
-  fn map[Output](self, transform: (fn(Self.Element) -> Output cost time finite)) -> List[Output]
-    cost time finite
+  fn map[Output](self, transform: (fn(Self.Element) -> Output uses generic Granted)) -> List[Output]
+    uses generic Granted
+    ensures result.length() == self.count()
+    cost time O(time(Self.count) + self.count() * (time(Self.element) + time(transform)))
   {
-    var results: List[Output] = []
-    for item in self {
-      mut results.push(transform(item))
+    var outputs: List[Output] = List.with_capacity(self.count())
+    for item in self
+      invariant outputs.length() == visited.length()
+    {
+      mut outputs.push(transform(item))
     }
-    results
+    outputs
   }
 
   fn filter_map[Output](
     self,
-    transform: (fn(Self.Element) -> Option[Output] cost time finite),
+    transform: (fn(Self.Element) -> Option[Output] uses generic Granted),
   ) -> List[Output]
-    cost time finite
+    uses generic Granted
+    cost time O(time(Self.count) + self.count() * (time(Self.element) + time(transform)))
   {
-    var results: List[Output] = []
+    var outputs: List[Output] = []
     for item in self {
       match transform(item) {
-        Some(output) => mut results.push(own output)
+        Some(output) => mut outputs.push(own output)
         None => {}
       }
     }
-    results
+    outputs
   }
 
   fn flat_map[Output](
     self,
-    transform: (fn(Self.Element) -> List[Output] cost time finite),
+    transform: (fn(Self.Element) -> List[Output] uses generic Granted),
   ) -> List[Output]
-    cost time finite
+    uses generic Granted
+    cost time O(time(Self.count) + self.count() * (time(Self.element) + time(transform)) + result.length())
   {
     var results: List[Output] = []
-    for item in self {
-      var outputs = transform(item)
-      for output in own outputs {
-        mut results.push(own output)
-      }
+    for item in self
+      cost time O(visited.length() * (time(Self.element) + time(transform)) + results.length())
+    {
+      mut results.append(transform(item))
     }
     results
   }
 
-  fn count_where(self, predicate: (fn(Self.Element) -> Bool cost time finite)) -> UInt64
-    cost time finite
+  fn count_where(self, predicate: (fn(Self.Element) -> Bool uses generic Granted)) -> UInt64
+    uses generic Granted
+    cost time O(time(Self.count) + self.count() * (time(Self.element) + time(predicate)))
   {
     var count: UInt64 = 0
     for item in self {
@@ -336,8 +330,10 @@ public trait Iterable {
     count
   }
 
-  fn find(self, predicate: (fn(Self.Element) -> Bool cost time finite)) lends Option[Self.Element]
-    cost time finite
+  fn find(self, predicate: (fn(Self.Element) -> Bool uses generic Granted)) lends Option[Self.Element]
+    uses generic Granted
+    cost time O(time(Self.count) + self.count() * (time(Self.element) + time(predicate)))
+    cost allocations <= allocations(Self.count) + self.count() * (allocations(Self.element) + allocations(predicate))
   {
     for item in self {
       if predicate(item) {
@@ -356,7 +352,7 @@ public trait Cursor {
     uses Self.Uses
 
   fn to_list(own self) -> List[Self.Element]
-    uses Self.Uses
+    uses Self.Uses, RunForever
   {
     var cursor = own self
     var items: List[Self.Element] = []
@@ -367,7 +363,7 @@ public trait Cursor {
   }
 
   fn count(own self) -> UInt64
-    uses Self.Uses
+    uses Self.Uses, RunForever
   {
     var cursor = own self
     var count: UInt64 = 0
@@ -378,7 +374,7 @@ public trait Cursor {
   }
 
   fn last(own self) -> Option[Self.Element]
-    uses Self.Uses
+    uses Self.Uses, RunForever
   {
     var cursor = own self
     var last: Option[Self.Element] = None
@@ -388,12 +384,12 @@ public trait Cursor {
     last
   }
 
-  fn fold[Total, capability Granted](
+  fn fold[Total](
     own self,
     initial: own Total,
-    combine: (fn(own Total, own Self.Element) -> Total uses Granted),
+    combine: (fn(own Total, own Self.Element) -> Total uses generic Granted),
   ) -> Total
-    uses Self.Uses, Granted
+    uses Self.Uses, generic Granted, RunForever
   {
     var cursor = own self
     var total = own initial
@@ -404,7 +400,7 @@ public trait Cursor {
   }
 
   fn find(mut self, predicate: fn(Self.Element) -> Bool) -> Option[Self.Element]
-    uses Self.Uses
+    uses Self.Uses, RunForever
   {
     while mut self.next() is Some(item) {
       if predicate(item) {
@@ -414,33 +410,46 @@ public trait Cursor {
     None
   }
 
-  fn skip(own self, count: UInt64) -> cursors::Skip[Self] {
+  fn skip(own self, count: UInt64) -> cursors::Skip[Self]
+    cost time O(1)
+  {
     cursors::Skip(source: own self, left: count)
   }
 
-  fn take(own self, count: UInt64) -> cursors::Take[Self] {
+  fn take(own self, count: UInt64) -> cursors::Take[Self]
+    cost time O(1)
+  {
     cursors::Take(source: own self, left: count)
   }
 
   fn step_by(own self, step: UInt64) -> cursors::StepBy[Self]
     requires step > 0
+    cost time O(1)
   {
     cursors::StepBy(source: own self, step: step, started: false)
   }
 
-  fn chain[Other: Cursor[Element = Self.Element]](own self, other: own Other) -> cursors::Chain[Self, Other] {
+  fn chain[Other: Cursor[Element = Self.Element]](own self, other: own Other) -> cursors::Chain[Self, Other]
+    cost time O(1)
+  {
     cursors::Chain(first: own self, second: own other, first_ended: false)
   }
 
-  fn zip[Other: Cursor](own self, other: own Other) -> cursors::Zip[Self, Other] {
+  fn zip[Other: Cursor](own self, other: own Other) -> cursors::Zip[Self, Other]
+    cost time O(1)
+  {
     cursors::Zip(first: own self, second: own other)
   }
 
-  fn enumerate(own self) -> cursors::Enumerate[Self] {
+  fn enumerate(own self) -> cursors::Enumerate[Self]
+    cost time O(1)
+  {
     cursors::Enumerate(source: own self, index: 0)
   }
 
-  fn peekable(own self) -> cursors::Peekable[Self] {
+  fn peekable(own self) -> cursors::Peekable[Self]
+    cost time O(1)
+  {
     cursors::Peekable(source: own self, peeked: None)
   }
 }
@@ -489,29 +498,38 @@ public trait Countable: Ordered + Plain {
 public type Range[Value](start: Value, stop: Value, inclusive: Bool)
 
 public type Indexed[Element](index: UInt64, element: Element)
+  derives Equal
 
 public type Pair[First, Second](first: First, second: Second)
+  derives Equal, Hash, Ordered
 
 public type ExitCode(code: UInt8)
+  derives Equal
 
 public let ExitCode.success: ExitCode = ExitCode(0)
 
 public let ExitCode.failure: ExitCode = ExitCode(1)
 
 impl Equal for Bool {
-  fn equal(self, other: Bool) -> Bool {
+  fn equal(self, other: Bool) -> Bool
+    cost allocations == 0
+  {
     intrinsic::equal(self, right: other)
   }
 }
 
 impl Hash for Bool {
-  fn hash(self, hasher: mut Hasher) {
+  fn hash(self, hasher: mut Hasher)
+    cost allocations == 0
+  {
     mut hasher.write(if self { 1 } else { 0 })
   }
 }
 
 impl Equal for Character {
-  fn equal(self, other: Character) -> Bool {
+  fn equal(self, other: Character) -> Bool
+    cost allocations == 0
+  {
     intrinsic::equal(self, right: other)
   }
 }
@@ -520,6 +538,7 @@ impl Ordered for Character {
   fn compare(self, other: Character) -> Ordering
     ensures (result == Ordering.Less) == (self.code() < other.code())
     ensures (result == Ordering.Equal) == (self.code() == other.code())
+    cost allocations == 0
   {
     if intrinsic::less(self, right: other) {
       Ordering.Less
@@ -532,13 +551,17 @@ impl Ordered for Character {
 }
 
 impl Hash for Character {
-  fn hash(self, hasher: mut Hasher) {
+  fn hash(self, hasher: mut Hasher)
+    cost allocations == 0
+  {
     mut hasher.write(intrinsic::convert(self))
   }
 }
 
 impl Equal for Unit {
-  fn equal(self, other: Unit) -> Bool {
+  fn equal(self, other: Unit) -> Bool
+    cost allocations == 0
+  {
     true
   }
 }
@@ -547,9 +570,9 @@ public type ConversionError()
   derives Equal
 
 impl Display for ConversionError {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
-    mut output.write("the value does not fit the type")
+    mut output.push("the value does not fit the type")
   }
 }
 
@@ -560,16 +583,16 @@ public type ParseIntegerError =
   derives Equal
 
 impl Display for ParseIntegerError {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
-      Empty => mut output.write("the text has no digits")
+      Empty => mut output.push("the text has no digits")
       InvalidDigit(offset) => {
-        mut output.write("the byte at offset ")
+        mut output.push("the byte at offset ")
         offset.display(mut output)
-        mut output.write(" is not a digit")
+        mut output.push(" is not a digit")
       }
-      OutOfRange => mut output.write("the number does not fit the type")
+      OutOfRange => mut output.push("the number does not fit the type")
     }
   }
 }
@@ -580,27 +603,27 @@ public type ParseFloatError =
   derives Equal
 
 impl Display for ParseFloatError {
-  fn display(self, output: mut TextBuilder)
+  fn display(self, output: mut String)
   {
     match self {
-      Empty => mut output.write("the text is empty")
+      Empty => mut output.push("the text is empty")
       InvalidCharacter(offset) => {
-        mut output.write("the byte at offset ")
+        mut output.push("the byte at offset ")
         offset.display(mut output)
-        mut output.write(" is not part of a number")
+        mut output.push(" is not part of a number")
       }
     }
   }
 }
 
 impl Display for Bool {
-  fn display(self, output: mut TextBuilder) {
-    if self { mut output.write("true") } else { mut output.write("false") }
+  fn display(self, output: mut String) {
+    if self { mut output.push("true") } else { mut output.push("false") }
   }
 }
 
 impl Display for Character {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write_character(self)
+  fn display(self, output: mut String) {
+    mut output.push_character(self)
   }
 }

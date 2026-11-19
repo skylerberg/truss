@@ -109,12 +109,6 @@ let resolve_parameter context (name : Syntax.name) =
       match Parameter_table.find_opt context.broken_parameters parameter with
       | Some report -> Error report
       | None -> Ok parameter)
-  | Some (Capability_parameter _) ->
-      Error
-        (record_diagnostic context.diagnostics Unknown_associated_type context.spans.(name.id)
-           (Printf.sprintf
-              "`%s` is a capability parameter, which has no associated types or capability sets."
-              name.text))
   | Some (Unknown report) -> Error report
   | _ -> raise_bug "`%s` is not resolved as a generic parameter" name.text
 
@@ -167,7 +161,7 @@ let rec elaborate_type context (written : Syntax.type_expression) : Types.ty =
       match elaborate_function_type context function_type with
       | Ok function_type -> Types.Function function_type
       | Error report -> Types.Error report)
-  | Type_error -> Types.Error (Diagnostic.make_recovered context.spans.(written.id))
+  | Type_error -> Types.Error Diagnostic.reported_elsewhere
 
 and elaborate_self context (span : Source.Definition_span.t) =
   match context.self_type with
@@ -270,10 +264,9 @@ and check_arity context (path : Syntax.path_type) shown expected :
       if argument_count <> List.length expected then
         Error
           (record_diagnostic context.diagnostics Arity context.spans.(path.id)
-             (Printf.sprintf "`%s` takes %d %s, and %d %s given." shown (List.length expected)
-                (if List.length expected = 1 then "argument" else "arguments")
-                argument_count
-                (if argument_count = 1 then "is" else "are")))
+             (Printf.sprintf "`%s` takes %s, and %s given." shown
+                (Diagnostic.show_count (List.length expected) "argument" "arguments")
+                (Diagnostic.show_count argument_count "is" "are")))
       else
         let errors =
           List.concat
@@ -293,7 +286,7 @@ and check_arity context (path : Syntax.path_type) shown expected :
                      report_argument_kind
                        (Printf.sprintf "`%s`'s parameter `%s` is a `UInt64` value, not a type."
                           shown name)
-                 | (Resolve.Names.Type_kind | Resolve.Names.Capability_kind), true ->
+                 | Resolve.Names.Type_kind, true ->
                      report_argument_kind
                        (Printf.sprintf "`%s`'s parameter `%s` is a type, not a value." shown name)
                  | _ -> [])
@@ -311,11 +304,8 @@ and elaborate_path_type context (path : Syntax.path_type) : Types.ty =
       match Parameter_table.find_opt context.broken_parameters parameter with
       | Some report -> Types.Error report
       | None -> Types.Parameter parameter)
-  | Some (Capability_parameter _) ->
-      report_error_type context Not_a_type context.spans.(path.id)
-        (Printf.sprintf "`%s` is a capability parameter, not a type." shown)
   | Some (Definition (Type, definition_path)) -> (
-      match Intrinsic.builtin_of_path definition_path with
+      match Intrinsic.find_builtin definition_path with
       | Some Never -> Types.Never
       | Some Integer -> Types.Integer
       | Some _ | None -> (
@@ -365,7 +355,7 @@ and elaborate_trait_reference ?(capability = false) context (path : Syntax.path_
       Error
         (record_diagnostic context.diagnostics Not_a_trait context.spans.(path.id)
            (Printf.sprintf "`%s` is not a trait." shown))
-  | Some (Type_parameter _ | Capability_parameter _) ->
+  | Some (Type_parameter _) ->
       Error
         (record_diagnostic context.diagnostics Not_a_trait context.spans.(path.id)
            (Printf.sprintf "`%s` is a generic parameter, not a trait." shown))
@@ -380,12 +370,12 @@ and elaborate_trait_bounds context paths =
 and elaborate_capability_path context (path : Syntax.path_type) : Types.capability list =
   let shown = show_path path.path in
   match find_target context path.path.last with
-  | Some (Capability_parameter parameter) -> [ Types.Capability_parameter parameter ]
   | Some (Type_parameter _) ->
       report_error_capability context Not_a_capability context.spans.(path.id)
         (Printf.sprintf
-           "`%s` is a type parameter. A capability parameter is declared `capability %s`." shown
-           shown)
+           "`%s` is a type parameter, not a capability. A capability parameter is written `generic \
+            %s` at each use."
+           shown shown)
   | Some (Definition (Capability, path_)) -> [ Types.Capability path_ ]
   | Some (Definition _) ->
       report_error_capability context Not_a_capability context.spans.(path.id)
@@ -406,9 +396,14 @@ and find_capability_projection context base traits (key : Syntax.name) =
 and elaborate_capability context (written : Syntax.capability_reference) : Types.capability list =
   match written.kind with
   | Capability_path path -> elaborate_capability_path context path
+  | Generic_capability name -> (
+      match find_target context name with
+      | Some (Capability_parameter parameter) -> [ Types.Capability_parameter parameter ]
+      | Some (Unknown report) -> [ Types.Capability_error report ]
+      | _ -> raise_bug "`generic %s` is not resolved as a capability parameter" name.text)
   | Self_capabilities key -> (
       match List.assoc_opt key.text context.self_capabilities with
-      | Some set -> (set :> Types.capability list)
+      | Some set -> Types.list_capabilities set
       | None -> (
           match (elaborate_self context context.spans.(written.id), context.self_trait) with
           | Error report, _ -> [ Types.Capability_error report ]
@@ -458,9 +453,24 @@ and elaborate_function_type context (written : Syntax.function_type) :
     match written.output with Some output -> elaborate_type context output | None -> Types.unit
   in
   let uses = elaborate_uses context written.clauses in
+  report_time_of_run_forever context ~uses written.clauses;
   match elaborate_costs context written.clauses with
-  | Ok costs -> Ok { inputs; output; uses; costs }
+  | Ok costs -> Ok { inputs; output; uses; costs = List.sort_uniq compare costs }
   | Error report -> Error report
+
+and report_time_of_run_forever context ~uses (clauses : Syntax.clause list) =
+  if not (Types.terminates uses) then
+    List.iter
+      (fun (clause : Syntax.clause) ->
+        match clause.kind with
+        | Cost { resource = Metric Time; _ } ->
+            ignore
+              (record_diagnostic context.diagnostics Unbounded_time context.spans.(clause.id)
+                 "A function that uses `RunForever` may run forever, so no `time` clause bounds \
+                  it. Remove the `time` clause, or remove `RunForever` and give each loop a \
+                  measure.")
+        | _ -> ())
+      clauses
 
 and elaborate_uses context clauses =
   elaborate_capabilities context
@@ -478,7 +488,10 @@ and elaborate_costs context clauses : (Types.cost list, Diagnostic.reported) Std
     match find_target context path.path.last with
     | Some (Definition (Capability, capability)) -> (
         match method_ with
-        | Some method_ when context.lookups.names.list_members capability method_.text = [] ->
+        | Some method_
+          when Option.is_none
+                 (context.lookups.names.find_key
+                    (Path.make_capability_method capability method_.text)) ->
             report_error Unknown_member context.spans.(method_.id)
               (Printf.sprintf "`%s` has no method `%s`." shown method_.text)
         | _ ->
@@ -500,9 +513,7 @@ and elaborate_costs context clauses : (Types.cost list, Diagnostic.reported) Std
         | Cost cost ->
             let resource : (Types.resource, Diagnostic.reported) Stdlib.result =
               match cost.resource with
-              | Time -> Ok Time
-              | Allocations -> Ok Allocations
-              | Allocated_bytes -> Ok Allocated_bytes
+              | Metric metric -> Ok (Metric metric)
               | Calls (Call_capability path) -> elaborate_counted path None
               | Calls (Call_method (path, method_)) -> elaborate_counted path (Some method_)
               | Calls (Call_parameter name) ->
@@ -516,17 +527,18 @@ and elaborate_costs context clauses : (Types.cost list, Diagnostic.reported) Std
             let evaluate_constant (value : Syntax.expression) =
               match value.kind with Integer value -> Some value | _ -> None
             in
-            let bound : Types.cost_bound =
+            let bound : Types.cost_bound option =
               match cost.bound with
-              | Finite -> Finite_cost
-              | Big_o _ -> Order_of
-              | At_most value -> No_more_than (evaluate_constant value)
-              | Exactly value -> Exactly_cost (evaluate_constant value)
+              | Big_o _ -> Some Order_of
+              | At_most value -> Some (No_more_than (evaluate_constant value))
+              | Exactly value -> Some (Exactly_cost (evaluate_constant value))
             in
-            Some
-              (Result.map
-                 (fun resource -> { Types.amortized = cost.amortized; resource; bound })
-                 resource)
+            Option.map
+              (fun bound ->
+                Result.map
+                  (fun resource -> { Types.amortized = cost.amortized; resource; bound })
+                  resource)
+              bound
         | _ -> None)
       clauses
   in
@@ -543,7 +555,6 @@ let elaborate_generics context owner (written : Syntax.generic_parameter list) :
         match generic.kind with
         | Type_parameter (name, bounds) -> Some (make_parameter name, `Type bounds)
         | Value_parameter (name, type_) -> Some (make_parameter name, `Value type_)
-        | Capability_parameter name -> Some (make_parameter name, `Capability)
         | Generic_error -> None)
       written
   in
@@ -555,17 +566,197 @@ let elaborate_generics context owner (written : Syntax.generic_parameter list) :
           Parameter_table.replace context.bounds parameter bounds;
           Option.iter (Parameter_table.replace context.broken_parameters parameter) broken;
           { Types.generic = parameter; kind = Type_generic bounds }
-      | `Value _ -> { Types.generic = parameter; kind = Value_generic }
-      | `Capability -> { Types.generic = parameter; kind = Capability_generic })
+      | `Value _ -> { Types.generic = parameter; kind = Value_generic })
     declared
 
-let mentions_specification_only_type type_ =
-  Option.is_some (Types.find_specification_only_type type_)
-
-let terminates (clauses : Syntax.clause list) =
-  List.exists
+let list_constant_costs (clauses : Syntax.clause list) : Types.cost list =
+  List.filter_map
     (fun (clause : Syntax.clause) ->
-      match clause.kind with Cost { resource = Time; _ } -> true | _ -> false)
+      match clause.kind with
+      | Cost { amortized; resource; bound } -> (
+          let resource : Types.resource option =
+            match resource with Metric metric -> Some (Metric metric) | Calls _ -> None
+          in
+          let bound : Types.cost_bound option =
+            match bound with
+            | Big_o { kind = Integer _; _ } -> Some Order_of
+            | At_most { kind = Integer limit; _ } -> Some (No_more_than (Some limit))
+            | Exactly { kind = Integer amount; _ } -> Some (Exactly_cost (Some amount))
+            | Big_o _ | At_most _ | Exactly _ -> None
+          in
+          match (resource, bound) with
+          | Some resource, Some bound -> Some { Types.amortized; resource; bound }
+          | _ -> None)
+      | _ -> None)
+    clauses
+
+type operand_callee =
+  | Function_parameter of Syntax.name
+  | Bound_method of { type_ : Syntax.expression; method_ : Syntax.name }
+  | Not_a_callee
+
+type cost_operand = {
+  written : Syntax.expression;
+  cost_function : Syntax.name;
+  metric : Metric.t;
+  callee : operand_callee;
+}
+
+let list_cost_operands context (bound : Syntax.expression) =
+  let operands = ref [] in
+  let rec visit (value : Syntax.expression) =
+    (match value.kind with
+    | Call ({ kind = Name { modules = []; last = cost_function }; _ }, arguments) -> (
+        match find_target context cost_function with
+        | Some (Specification_function (Call_cost metric)) ->
+            let callee =
+              match arguments with
+              | [ { value = { kind = Name { modules = []; last }; _ }; _ } ] ->
+                  Function_parameter last
+              | [ { value = { kind = Member (type_, method_); _ }; _ } ] ->
+                  Bound_method { type_; method_ }
+              | _ -> Not_a_callee
+            in
+            operands := { written = value; cost_function; metric; callee } :: !operands
+        | _ -> ())
+    | _ -> ());
+    Syntax_walk.visit_children visit value
+  in
+  visit bound;
+  List.rev !operands
+
+let find_trait_parts context trait =
+  match Option.bind (context.lookups.names.find_key trait) context.lookups.find_header with
+  | Some { container = Trait_parts { trait_generics; requires; associated_types; _ }; _ } ->
+      Some (trait_generics, requires, associated_types)
+  | Some { container = Capability_parts | Impl_parts _; _ } | None -> None
+
+let list_bound_closure context ~self (bound : Types.trait_reference) =
+  Properties.list_bound_closure_over
+    ~find_requirements:(fun trait ->
+      Option.map
+        (fun (trait_generics, requires, _) -> (trait_generics, requires))
+        (find_trait_parts context trait))
+    ~self bound
+
+let list_direct_bounds context (type_ : Types.ty) =
+  match type_ with
+  | Types.Parameter parameter -> list_bounds context parameter
+  | Types.Projection { base; trait; name } ->
+      List.concat_map
+        (fun (declaring : Types.trait_reference) ->
+          match find_trait_parts context declaring.trait with
+          | Some (trait_generics, _, associated_types) ->
+              let substitution =
+                Types.bind_argument
+                  (Types.make_self_parameter declaring.trait)
+                  (Types.Type base)
+                  (Types.make_substitution trait_generics declaring.trait_arguments)
+              in
+              List.concat_map
+                (fun (associated : Types.associated_type) ->
+                  if associated.associated_name = name then
+                    List.map (Types.substitute_trait substitution) associated.associated_bounds
+                  else [])
+                associated_types
+          | None -> [])
+        (list_bound_closure context ~self:base trait)
+  | _ -> []
+
+let rec find_bounded_type context (written : Syntax.expression) =
+  match written.kind with
+  | Self_type_value -> (
+      match context.self_type with
+      | Some (Types.Parameter _ as self) -> Some self
+      | Some _ | None -> None)
+  | Name { modules = []; last } -> (
+      match find_target context last with
+      | Some (Type_parameter parameter) -> Some (Types.Parameter parameter)
+      | Some _ | None -> None)
+  | Member (base, associated) ->
+      Option.bind (find_bounded_type context base) (fun base ->
+          let bounds = list_direct_bounds context base in
+          match
+            List.find_map
+              (fun (bound : Types.trait_reference) ->
+                List.assoc_opt associated.text bound.associated)
+              bounds
+          with
+          | Some ((Types.Parameter _ | Types.Projection _) as fixed) -> Some fixed
+          | Some _ -> None
+          | None ->
+              List.find_map
+                (fun (bound : Types.trait_reference) ->
+                  Option.map
+                    (fun _ -> Types.Projection { base; trait = bound; name = associated.text })
+                    (find_declaring_trait context bound.trait associated.text))
+                bounds)
+  | Parenthesized inner -> find_bounded_type context inner
+  | _ -> None
+
+type bound_method = {
+  self_type : Types.ty;
+  trait : Types.trait_reference;
+  name : string;
+  receiver : Path.receiver;
+}
+
+let list_bound_methods context (self_type : Types.ty) name =
+  List.fold_left
+    (fun methods (trait : Types.trait_reference) ->
+      List.fold_left
+        (fun methods (member : Resolve.Names.key) ->
+          match member.path with
+          | Method { receiver; _ }
+            when not
+                   (List.exists
+                      (fun (known : bound_method) ->
+                        Path.equal known.trait.trait trait.trait && known.receiver = receiver)
+                      methods) ->
+              methods @ [ { self_type; trait = { trait with associated = [] }; name; receiver } ]
+          | _ -> methods)
+        methods
+        (context.lookups.names.list_members trait.trait name))
+    []
+    (List.concat_map
+       (list_bound_closure context ~self:self_type)
+       (list_direct_bounds context self_type))
+
+let find_operand_method (overloads : bound_method list) =
+  match overloads with
+  | [ only ] -> Some only
+  | several -> (
+      match List.filter (fun (method_ : bound_method) -> method_.receiver = Read) several with
+      | [ read_only ] -> Some read_only
+      | _ -> None)
+
+let report_time_of_parameters_that_run_forever context ~(parameters : Types.parameter_info list)
+    (clauses : Syntax.clause list) =
+  let report_operand (operand : cost_operand) =
+    match (operand.metric, operand.callee) with
+    | Time, Function_parameter name -> (
+        match
+          List.find_opt
+            (fun (parameter : Types.parameter_info) -> parameter.name = name.text)
+            parameters
+        with
+        | Some { type_ = Function { uses; _ }; _ } when not (Types.terminates uses) ->
+            ignore
+              (record_diagnostic context.diagnostics Unbounded_time
+                 context.spans.(operand.written.id)
+                 (Printf.sprintf
+                    "`%s` may run forever, since its type uses `RunForever`, so `time(%s)` has no \
+                     value."
+                    name.text name.text))
+        | Some _ | None -> ())
+    | Time, (Bound_method _ | Not_a_callee) | (Allocations | Allocated_bytes), _ -> ()
+  in
+  List.iter
+    (fun (clause : Syntax.clause) ->
+      match clause.kind with
+      | Cost { resource = Metric Time; bound = Big_o value | At_most value | Exactly value; _ } ->
+          List.iter report_operand (list_cost_operands context value)
+      | _ -> ())
     clauses
 
 let elaborate_signature context ~owner ~head ~self_type (written : Syntax.signature) :
@@ -602,29 +793,28 @@ let elaborate_signature context ~owner ~head ~self_type (written : Syntax.signat
     | Some (Returns result) -> Types.Returns (elaborate_type context result)
     | Some (Lends (mode, result)) -> Types.Lends (elaborate_mode mode, elaborate_type context result)
   in
-  let terminates = terminates written.clauses in
-  let result_type = Types.extract_result_type output in
+  let uses = elaborate_uses context written.clauses in
+  report_time_of_run_forever context ~uses written.clauses;
+  report_time_of_parameters_that_run_forever context ~parameters written.clauses;
   {
     generics = generics_;
+    capability_parameters =
+      Array.fold_left
+        (fun listed -> function
+          | Some (Resolve.Capability_parameter (parameter : Types.parameter))
+            when Path.equal parameter.owner owner && not (List.mem parameter listed) ->
+              listed @ [ parameter ]
+          | _ -> listed)
+        [] context.resolved.names;
     receiver;
     parameters;
     output;
-    uses = elaborate_uses context written.clauses;
-    terminates;
+    uses;
+    costs = list_constant_costs written.clauses;
     specification_only =
-      Well_known.is Model owner
-      || mentions_specification_only_type result_type
-      || List.exists
-           (fun (parameter : Types.parameter_info) ->
-             mentions_specification_only_type parameter.type_)
-           parameters;
-    capture_free_parameters =
-      List.filter_map
-        (fun (parameter : Types.parameter_info) ->
-          match (parameter.mode, parameter.type_) with
-          | Own, Function _ -> Some parameter.name
-          | _ -> None)
-        parameters;
+      Well_known.is Model owner || Types.mentions_specification_only_type parameters output;
+    is_update_step = false;
+    capture_free_parameters = Types.list_capture_free_parameters parameters;
   }
 
 let elaborate_type_head context owner (head : Syntax.type_head) =
@@ -635,12 +825,12 @@ let elaborate_type_head context owner (head : Syntax.type_head) =
         match Resolve.Names.find_generics context.lookups.names type_path with
         | Some expected when List.length expected <> List.length generics ->
             report_error_type context Arity context.spans.(head.id)
-              (Printf.sprintf "`%s` takes %d generic %s, and this head names %d."
-                 (show_path head.path) (List.length expected)
-                 (if List.length expected = 1 then "parameter" else "parameters")
+              (Printf.sprintf "`%s` takes %s, and this head names %d." (show_path head.path)
+                 (Diagnostic.show_count (List.length expected) "generic parameter"
+                    "generic parameters")
                  (List.length generics))
         | _ -> (
-            match Intrinsic.builtin_of_path type_path with
+            match Intrinsic.find_builtin type_path with
             | Some Never -> Types.Never
             | Some Integer -> Types.Integer
             | _ ->
@@ -652,7 +842,7 @@ let elaborate_type_head context owner (head : Syntax.type_head) =
         report_error_type context Not_a_type context.spans.(head.id)
           (Printf.sprintf "`%s` is %s, not a type, so it has no methods, constants, or `impl`s."
              (show_path head.path)
-             (Resolve.Names.show_kind (Resolve.Names.kind_of_named kind))) )
+             (Resolve.Names.show_kind (Resolve.Names.convert_named kind))) )
   | Some (Unknown report) -> (generics, Types.Error report)
   | _ -> raise_bug "the type head `%s` is not resolved" (show_path head.path)
 
@@ -798,7 +988,7 @@ let elaborate_container (context : t) (path : Path.t) (definition : Syntax.defin
                       | _ -> false
                     in
                     if List.mem_assoc name.text sets then sets
-                    else if List.exists is_defined_by_this_impl (set :> Types.capability list) then
+                    else if Types.exists_capability is_defined_by_this_impl set then
                       ( name.text,
                         Types.make_capability_set
                           (report_error_capability context Unknown_associated_capability
@@ -931,39 +1121,12 @@ let elaborate_member (lookups : Lookups.t) ~path ~spans resolved (definition : S
   let context = create lookups resolved ~spans header.container_scope in
   match definition.kind with
   | Function { signature; _ } | Method_declaration signature ->
-      let impl_generics, impl_uses =
-        match header.container with
-        | Impl_parts { impl_generics; impl_uses; _ } -> (impl_generics, impl_uses)
-        | Trait_parts _ | Capability_parts -> ([], Types.no_capabilities)
-      in
-      let elaborated =
-        Types.add_impl_generics_and_uses ~impl_generics ~impl_uses
-          (elaborate_signature context ~owner:path ~head:[]
-             ~self_type:header.container_scope.self_type signature)
-      in
-      let inherits_termination =
-        match (path, header.container_scope.self_trait) with
-        | Method { name; receiver; _ }, Some (implements : Types.trait_reference) -> (
-            let implemented =
-              match Option.bind (lookups.names.find_key implements.trait) lookups.find_header with
-              | Some { container = Capability_parts; _ } ->
-                  Path.make_capability_method implements.trait name
-              | Some { container = Trait_parts _ | Impl_parts _; _ } | None ->
-                  Method { owner = implements.trait; name; receiver }
-            in
-            match Option.map lookups.names.read_definition (lookups.names.find_key implemented) with
-            | Some { kind = Function { signature = declared; _ } | Method_declaration declared; _ }
-              ->
-                terminates declared.clauses
-            | _ -> false)
-        | _ -> false
-      in
       make_elaborated_interface context
         (Function_interface
-           { elaborated with terminates = elaborated.terminates || inherits_termination })
-  | _ ->
-      make_elaborated_interface context
-        (Error_interface (Diagnostic.make_recovered spans.(definition.id)))
+           (elaborate_signature
+              { context with self_capabilities = [] }
+              ~owner:path ~head:[] ~self_type:header.container_scope.self_type signature))
+  | _ -> make_elaborated_interface context (Error_interface Diagnostic.reported_elsewhere)
 
 let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
   let resolved = lookups.read_resolved Interface key in
@@ -972,16 +1135,15 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
   let path = key.path in
   Compiler_bug.run_while_doing ~stage:"Interface" (Resolve.Names.show_key key) (fun () ->
       let context = create lookups resolved ~spans empty_scope in
-      let recover () =
-        make_elaborated_interface context
-          (Error_interface (Diagnostic.make_recovered spans.(definition.id)))
+      let make_error_interface () =
+        make_elaborated_interface context (Error_interface Diagnostic.reported_elsewhere)
       in
       match
-        ( Resolve.Names.find_recovery_report lookups.names key Header,
+        ( Resolve.Names.find_syntax_error lookups.names key Header,
           Option.map lookups.find_header (lookups.names.find_container key) )
       with
       | Some report, _ -> make_elaborated_interface context (Error_interface report)
-      | None, Some None -> recover ()
+      | None, Some None -> make_error_interface ()
       | None, Some (Some header) -> elaborate_member lookups ~path ~spans resolved definition header
       | None, None -> (
           match definition.kind with
@@ -989,7 +1151,7 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
               match lookups.find_header key with
               | Some header -> make_container_interface lookups key header
               | None -> raise_bug "`%s` has no header" (Resolve.Names.show_key key))
-          | Method_declaration _ | Definition_error _ -> recover ()
+          | Method_declaration _ | Definition_error _ -> make_error_interface ()
           | Function { signature; _ } ->
               let head, self_type =
                 match signature.name with
@@ -999,9 +1161,19 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
                     (generics, Some self)
               in
               let context = { context with self_type } in
+              let elaborated = elaborate_signature context ~owner:path ~head ~self_type signature in
+              let takes_mut_self =
+                match elaborated.receiver with
+                | Some (Mut, _) -> true
+                | Some ((Static | Read | Own), _) | None -> false
+              in
               make_elaborated_interface context
                 (Function_interface
-                   (elaborate_signature context ~owner:path ~head ~self_type signature))
+                   {
+                     elaborated with
+                     is_update_step =
+                       takes_mut_self && (lookups.names.read_declaration key).visibility = Private;
+                   })
           | Type_definition { generics; body; clauses; _ } ->
               let type_generics = elaborate_generics context path generics in
               let self =
@@ -1039,7 +1211,12 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
               in
               make_elaborated_interface context
                 (Type_interface
-                   { type_generics; shape; opaque = definition.visibility = Public_opaque; derives })
+                   {
+                     type_generics;
+                     shape;
+                     opaque = (lookups.names.read_declaration key).visibility = Public_opaque;
+                     derives;
+                   })
           | Constant { name; type_; _ } ->
               let context =
                 match name with
@@ -1052,17 +1229,28 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
                 (Constant_interface { constant_type = elaborate_type context type_ })
           | Test { uses; _ } ->
               make_elaborated_interface context
-                (Test_interface (elaborate_capabilities context uses))
+                (Test_interface
+                   {
+                     generics = [];
+                     capability_parameters = [];
+                     receiver = None;
+                     parameters = [];
+                     output = Returns Types.unit;
+                     uses = elaborate_capabilities context uses;
+                     costs = [];
+                     specification_only = false;
+                     is_update_step = false;
+                     capture_free_parameters = [];
+                   })
           | Theorem { name; generics; parameters; clauses; _ } ->
               let signature : Syntax.signature =
                 { name = Plain_name name; generics; parameters; result = None; clauses }
               in
+              let elaborated =
+                elaborate_signature context ~owner:path ~head:[] ~self_type:None signature
+              in
               make_elaborated_interface context
-                (Theorem_interface
-                   {
-                     (elaborate_signature context ~owner:path ~head:[] ~self_type:None signature) with
-                     specification_only = true;
-                   })
+                (Theorem_interface { elaborated with specification_only = true })
           | Law_proof { trait_; law; type_; _ } -> (
               let generics, for_type = elaborate_type_head context path type_ in
               match elaborate_trait_reference context trait_ with

@@ -1,0 +1,16 @@
+fn checked(value: Int64) -> Int64 {
+  if value < 0 {
+    todo
+  }
+  if value > 1000 {
+    unreachable
+  }
+  proof {
+    assert value >= 0
+  }
+  value
+}
+
+test "a todo and an unreachable on paths not taken, and a proof block" {
+  assert checked(4) == 4
+}

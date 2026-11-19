@@ -1,0 +1,21 @@
+fn f(value: Float64) -> Bool
+  ensures value == value
+{
+  proof {
+    assert value == value
+  }
+  for index in 0..3
+    invariant value <= value
+  {
+    let _ = index
+  }
+  true
+}
+
+trait Same: Equal {
+  fn same(self) -> Self
+
+  law same_is_equal(value: Self) {
+    value == value
+  }
+}

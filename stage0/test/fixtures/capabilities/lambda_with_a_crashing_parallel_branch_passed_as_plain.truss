@@ -1,0 +1,12 @@
+fn run_pure(action: fn() -> Int64) -> Int64 {
+  action()
+}
+
+fn f(values: Slice[Int64]) -> Int64 {
+  run_pure(fn() {
+    parallel {
+      let first = first_or_crash(values)
+    }
+    first
+  })
+}

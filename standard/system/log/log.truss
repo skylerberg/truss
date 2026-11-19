@@ -4,37 +4,38 @@ use standard::system::calls
 
 internal type SystemLog()
 
-impl Log for SystemLog {
+impl Log for SystemLog
+  uses RunForever
+{
   fn record(self, record: log::Record) {
-    var line = TextBuilder.new()
-    mut line.write("level=")
+    var line = ""
+    mut line.push("level=")
     match record.level {
-      Debug => mut line.write("debug")
-      Information => mut line.write("information")
-      Warning => mut line.write("warning")
-      Error => mut line.write("error")
+      Debug => mut line.push("debug")
+      Information => mut line.push("information")
+      Warning => mut line.push("warning")
+      Error => mut line.push("error")
     }
-    mut line.write(" message=")
-    quoted(mut line, text: record.message.slice())
+    mut line.push(" message=")
+    quoted(mut line, text: record.message)
     for field in record.fields {
-      mut line.write(" ")
-      mut line.write(field.name.slice())
-      mut line.write("=")
+      mut line.push(" ")
+      mut line.push(field.name)
+      mut line.push("=")
       match field.value {
-        String(value) => quoted(mut line, text: value.slice())
-        Integer(value) => mut line.write_signed(value)
-        Float(value) => mut line.write_float64(value)
-        Bool(value) => if value { mut line.write("true") } else { mut line.write("false") }
+        String(value) => quoted(mut line, text: value)
+        Integer(value) => mut line.push_signed(value)
+        Float(value) => mut line.push_float64(value)
+        Bool(value) => if value { mut line.push("true") } else { mut line.push("false") }
         Duration(value) => {
-          mut line.write_signed(value.total_nanoseconds())
-          mut line.write("ns")
+          mut line.push_signed(value.total_nanoseconds())
+          mut line.push("ns")
         }
-        Instant(value) => mut line.write_signed(value.unix_nanoseconds())
+        Instant(value) => mut line.push_signed(value.unix_nanoseconds())
       }
     }
-    mut line.write("\n")
-    let text = own line.finish()
-    let _ = calls::write_fully(2, bytes: text.slice().bytes)
+    mut line.push("\n")
+    let _ = calls::write_fully(2, bytes: line.slice().bytes)
   }
 
   fn enabled(self, level: log::Level) -> Bool {
@@ -42,20 +43,20 @@ impl Log for SystemLog {
   }
 }
 
-fn quoted(line: mut TextBuilder, text: StringSlice) {
-  mut line.write_byte(34)
+fn quoted(line: mut String, text: StringSlice) {
+  mut line.push_byte(34)
   let bytes = text.bytes
   for index in 0..intrinsic::view_length(bytes) {
     let byte = intrinsic::view_at(bytes, index: index)
     if byte == 34 || byte == 92 {
-      mut line.write_byte(92)
-      mut line.write_byte(byte)
+      mut line.push_byte(92)
+      mut line.push_byte(byte)
     } else if byte == 10 {
-      mut line.write_byte(92)
-      mut line.write_byte(110)
+      mut line.push_byte(92)
+      mut line.push_byte(110)
     } else {
-      mut line.write_byte(byte)
+      mut line.push_byte(byte)
     }
   }
-  mut line.write_byte(34)
+  mut line.push_byte(34)
 }

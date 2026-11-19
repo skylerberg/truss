@@ -1,0 +1,12 @@
+public type Version(major: Int64)
+  derives Equal, Ordered
+
+fn same[Item: Ordered](left: Item, right: Item) -> Bool
+{
+  left.compare(right) == Ordering.Equal
+}
+
+public fn same_versions(left: Version, right: Version) -> Bool
+{
+  same(left, right: right)
+}

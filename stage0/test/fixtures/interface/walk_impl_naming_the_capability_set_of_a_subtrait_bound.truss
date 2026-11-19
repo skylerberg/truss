@@ -1,0 +1,21 @@
+trait Walk {
+  capability Uses
+
+  fn each(self, visit: (fn(Int64) uses Self.Uses))
+    uses Self.Uses
+}
+
+trait Counted: Walk {
+  fn count(self) -> Int64
+}
+
+type Wrapper[Inner](inner: Inner)
+
+impl Walk for Wrapper[Inner: Counted] {
+  capability Uses = Inner.Uses
+
+  fn each(self, visit: (fn(Int64) uses Inner.Uses))
+    uses Inner.Uses
+  {
+  }
+}

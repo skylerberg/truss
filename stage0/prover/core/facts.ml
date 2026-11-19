@@ -1,7 +1,7 @@
 let make_variable ?(numbers = []) label = Logic.Symbol.Variable { label; numbers }
 
 type unsupported = {
-  location : State.location;
+  location : Obligation.location;
   construct : string;
   foreign_definition : string option;
 }
@@ -22,14 +22,36 @@ let run_in_source (context : State.context) (source : State.source) read =
     raise (Unsupported { unsupported with foreign_definition = Some source.name })
 
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Prover" format
-let list_method_instance ~self_type arguments = Types.Type self_type :: arguments
+let list_method_type_arguments ~self_type arguments = Types.Type self_type :: arguments
 
-let is_in_recursion_group (context : State.context) path =
-  List.exists (Path.equal path) (context.lookups.list_recursion_group context.current)
+let read_parameter_name (parameter : Mir.parameter) =
+  match Mir.find_local_name parameter.local with
+  | Some name -> name
+  | None -> raise_bug "a parameter that no definition names"
 
-let has_method_in_recursion_group (context : State.context) impl =
-  List.exists (is_in_recursion_group context)
-    (Mir.Call_edges.list_written_methods context.lookups.interface.names impl)
+let rec show_callee (path : Path.t) =
+  match path with
+  | Top { name; _ } -> name
+  | Method { owner = Impl { for_type; _ } | Derived { type_ = for_type; _ }; name; _ }
+  | Method { owner = for_type; name; _ }
+  | Member_constant { owner = for_type; name } ->
+      show_callee for_type ^ "." ^ name
+  | Impl _ | Derived _ | Test _ | Law_proof _ | Unresolved _ -> Path.show path
+
+let is_in_recursion_group (context : State.context) node =
+  let is_inherited_from declaration member =
+    match context.lookups.mir.find_form_origin member with
+    | Some (Inherited key, _) -> Path.equal key.path declaration
+    | Some ((Written _ | Derived _), _) | None -> false
+  in
+  List.exists (Path.equal node) (context.lookups.list_recursion_group context.node)
+  ||
+  match context.node with
+  | Method { owner; _ }
+    when Option.is_some (Interface.Definition.find_trait_interface context.lookups.interface owner)
+    ->
+      List.exists (is_inherited_from context.node) (context.lookups.list_recursion_group node)
+  | _ -> false
 
 let list_clauses (requires : Mir.requirement list) =
   List.map (fun (requirement : Mir.requirement) -> requirement.clause) requires
@@ -39,6 +61,11 @@ let declare (context : State.context) (declaration : Logic.declaration) =
   | Constant (name, _) | Function (name, _, _) ->
       if not (Tables.Symbol_table.mem context.declared name) then begin
         Tables.Symbol_table.replace context.declared name ();
+        context.declarations <- declaration :: context.declarations
+      end
+  | Definition { symbol; _ } ->
+      if not (Tables.Symbol_table.mem context.definitions symbol) then begin
+        Tables.Symbol_table.replace context.definitions symbol ();
         context.declarations <- declaration :: context.declarations
       end
   | Datatype _ -> invalid_arg "Translate.declare: a datatype is declared by its sort"
@@ -156,7 +183,7 @@ let assume context (frame : State.frame) term =
       else add_scoped_fact context frame guarded
 
 let locate (context : State.context) (source : State.source) origin =
-  if source.key = Some context.home then State.Node origin else Whole_definition
+  if source.key = Some context.home then Obligation.Node origin else Whole_definition
 
 let make_requires_fix (context : State.context) required =
   let names = context.lookups.interface.names in
@@ -169,7 +196,10 @@ let make_requires_fix (context : State.context) required =
   in
   let edit at before =
     Some
-      { State.at; replacement = (State.Text (before ^ "  requires ") :: required) @ [ Text "\n" ] }
+      {
+        Obligation.at;
+        replacement = (Obligation.Text (before ^ "  requires ") :: required) @ [ Text "\n" ];
+      }
   in
   let edit =
     match brace with
@@ -182,7 +212,10 @@ let make_requires_fix (context : State.context) required =
   match edit with
   | Some edit when not context.inherits_precondition ->
       [
-        { State.title = (State.Text "Add `requires " :: required) @ [ Text "`" ]; edits = [ edit ] };
+        {
+          Obligation.title = (Obligation.Text "Add `requires " :: required) @ [ Text "`" ];
+          edits = [ edit ];
+        };
       ]
   | Some _ | None -> []
 
@@ -194,7 +227,7 @@ let find_parameter_name (context : State.context) symbol =
 let collect_printed printed =
   if List.mem None printed then None else Some (List.filter_map Fun.id printed)
 
-let truss_of_value context term =
+let show_truss_value context term =
   let parenthesize level inner text = if inner < level then "(" ^ text ^ ")" else text in
   let rec show_arithmetic level = function
     | Logic.Operation ((("+" | "*") as operator), (_ :: _ :: _ as parts)) ->
@@ -218,8 +251,8 @@ let truss_of_value context term =
   in
   show_arithmetic 0 term
 
-let truss_of_goal context term =
-  let show_value = truss_of_value context in
+let show_truss_goal context term =
+  let show_value = show_truss_value context in
   let rec print = function
     | Logic.Operation ((("<" | "<=" | ">" | ">=" | "=") as operator), [ left; right ]) -> (
         match (show_value left, show_value right) with
@@ -251,14 +284,14 @@ let truss_of_goal context term =
     printed
   else None
 
-let add_requires context (frame : State.frame) (required : State.message) =
+let add_requires context (frame : State.frame) (required : Obligation.message) =
   match frame.condition with
   | Logic.Boolean true -> make_requires_fix context required
   | condition -> (
-      match truss_of_goal context condition with
+      match show_truss_goal context condition with
       | Some premise ->
           make_requires_fix context
-            ((State.Text ("(" ^ premise ^ ") ==> (") :: required) @ [ State.Text ")" ])
+            ((Obligation.Text ("(" ^ premise ^ ") ==> (") :: required) @ [ Obligation.Text ")" ])
       | None -> make_requires_fix context required)
 
 let rec make_closed_obligation ?template_clause context (frame : State.frame) code location message
@@ -282,7 +315,7 @@ let rec make_closed_obligation ?template_clause context (frame : State.frame) co
     | None -> None
 
 and make_obligation ?template_clause (context : State.context) (frame : State.frame) code location
-    message goal : State.obligation =
+    message goal : Obligation.t =
   let query =
     Logic.prune
       {
@@ -316,11 +349,10 @@ and make_obligation ?template_clause (context : State.context) (frame : State.fr
          | Some term when not (is_parameter term) -> [ (term, "result") ]
          | _ -> []));
     template_clause;
-    panic_clause = None;
   }
 
-let record_obligation ?template_clause ?cited ~fixes ~panic_clause context (frame : State.frame)
-    code location message goal =
+let oblige ?template_clause ?cited ?(fixes = []) context (frame : State.frame) code location message
+    goal =
   match
     make_closed_obligation ?template_clause context frame code location message
       (add_quantifier_facts
@@ -331,32 +363,108 @@ let record_obligation ?template_clause ?cited ~fixes ~panic_clause context (fram
       let fixes =
         match fixes with
         | [] when frame.source.key = Some context.home && frame.makes_obligations -> (
-            match truss_of_goal context goal with
+            match show_truss_goal context goal with
             | Some required -> add_requires context frame [ Text required ]
             | None -> [])
         | fixes -> fixes
       in
-      context.obligations <- { obligation with cited; fixes; panic_clause } :: context.obligations;
+      context.obligations <- { obligation with cited; fixes } :: context.obligations;
       assume context frame goal
   | None -> ()
 
-let oblige ?template_clause ?cited ?(fixes = []) context frame code location message goal =
-  record_obligation ?template_clause ?cited ~fixes ~panic_clause:None context frame code location
-    message goal
-
-let oblige_safe_operation ?cited ?(fixes = []) (context : State.context) (frame : State.frame) code
-    location message goal =
-  let record panic_clause =
-    record_obligation ?cited ~fixes ~panic_clause context frame code location message goal
+let reject_recursion_through_supplied_code (context : State.context) (frame : State.frame) location
+    (statement : Mir.statement) =
+  let reject text = oblige context frame Termination location [ Text text ] (Logic.Boolean false) in
+  let reject_supply (supplier : Mir.Call_edges.supplier) code =
+    let recursive = List.filter (is_in_recursion_group context) code in
+    (match supplier with
+    | Named_function path when List.exists (Path.equal path) recursive ->
+        reject
+          (Printf.sprintf
+             "Naming `%s` as a value reaches back here, and such a use passes no arguments the \
+              prover can compare, so the recursion cannot be shown to end: write it as a direct \
+              call on a part."
+             (Path.show path))
+    | Named_function _ | Call | Conversion_to_any | Provide -> ());
+    List.iter
+      (fun owner ->
+        let owner = Path.show owner in
+        reject
+          (match supplier with
+          | Call ->
+              Printf.sprintf
+                "This call uses `%s` where a bound needs it, and its methods reach back here. Such \
+                 a use passes no arguments the prover can compare, so the recursion cannot be \
+                 shown to end: write it as a direct call on a part."
+                owner
+          | Named_function path ->
+              Printf.sprintf
+                "Naming `%s` as a value uses `%s` where a bound needs it, and its methods reach \
+                 back here. Such a use passes no arguments the prover can compare, so the \
+                 recursion cannot be shown to end."
+                (Path.show path) owner
+          | Conversion_to_any ->
+              Printf.sprintf
+                "This conversion to `any` gives `%s`, whose methods call back here, so the prover \
+                 cannot show that the recursion ends."
+                owner
+          | Provide ->
+              Printf.sprintf
+                "This `provide` gives `%s`, whose methods call back here, so the prover cannot \
+                 show that the recursion ends."
+                owner))
+      (List.sort_uniq Path.compare
+         (List.filter_map
+            (fun (node : Path.t) -> match node with Method { owner; _ } -> Some owner | _ -> None)
+            recursive))
   in
-  match frame.panic with
-  | Declared when frame.source.key = Some context.home ->
-      if frame.makes_obligations then assume context frame goal
-  | Undeclared clause -> record (Some clause)
-  | Declared | Undeclarable -> record None
+  if context.terminates && frame.makes_obligations then
+    List.iter
+      (fun (edge : Mir.Call_edges.edge) ->
+        match edge with Calls _ -> () | Supplies { supplier; code } -> reject_supply supplier code)
+      (Mir.Call_edges.list_statement_edges context.lookups.interface frame.substitution statement)
+
+let find_recursive_callee (context : State.context) (frame : State.frame) location callee =
+  let resolution =
+    Mir.Call_edges.resolve_callee context.lookups.interface frame.substitution callee
+  in
+  let reject target origin =
+    oblige context frame Termination location
+      [
+        Text
+          (Printf.sprintf
+             "This call to `%s` reaches back here through code that its `impl` %s. No measure can \
+              be stated for that code, so the recursion cannot be shown to end."
+             (show_callee target) origin);
+      ]
+      (Logic.Boolean false);
+    None
+  in
+  let recursive_callee =
+    match resolution.target with
+    | Some target when frame.makes_obligations && is_in_recursion_group context target -> (
+        match context.lookups.mir.find_form_origin target with
+        | Some (Derived _, _) when context.terminates -> reject target "derives"
+        | Some (Inherited _, _) when context.terminates -> reject target "inherits from its trait"
+        | Some ((Written _ | Derived _ | Inherited _), _) | None -> Some target)
+    | Some _ | None -> None
+  in
+  (resolution, recursive_callee)
+
+let reject_uncompared_recursion (context : State.context) frame location recursive_callee ~describe
+    =
+  if context.terminates then
+    Option.iter
+      (fun callee ->
+        oblige context frame Termination location
+          [ Text (describe (show_callee callee)) ]
+          (Logic.Boolean false))
+      recursive_callee
 
 let quote (source : State.source) origin =
-  match source.key with Some key -> State.Quote (key, origin) | None -> Text "this expression"
+  match source.key with
+  | Some key -> Obligation.Quote (key, origin)
+  | None -> Text "this expression"
 
 let quote_span text (span : Source.Definition_span.t) =
   if span.stop = span.start then "this expression" else Source.Definition_span.quote text span
@@ -461,7 +569,7 @@ let rec declare_sort (context : State.context) (ty : Types.ty) : Logic.sort =
         Type_sort ty
       end
 
-let rec is_structural context ?(seen = []) (ty : Types.ty) =
+let rec is_equality_identity context ?(seen = []) (ty : Types.ty) =
   is_numeric ty || is_bool ty || Types.is_builtin Character ty || Types.equal ty Types.unit
   || List.exists (Types.equal ty) seen
   ||
@@ -471,7 +579,7 @@ let rec is_structural context ?(seen = []) (ty : Types.ty) =
       && List.for_all
            (fun (_, fields) ->
              List.for_all
-               (fun (_, field_type) -> is_structural context ~seen:(ty :: seen) field_type)
+               (fun (_, field_type) -> is_equality_identity context ~seen:(ty :: seen) field_type)
                fields)
            shape
   | _ -> false
@@ -518,13 +626,31 @@ let substitute_type (context : State.context) (frame : State.frame) ty =
 let find_local_type context frame local =
   Option.map (substitute_type context frame) (Locals.find_opt local frame.types)
 
+let is_potential = function
+  | Logic.Apply ((Logic.Symbol.Potential _ | Logic.Symbol.Slack _), _) -> true
+  | Logic.Apply (_, arguments) ->
+      List.exists
+        (function Logic.Symbol (Logic.Symbol.Potential_measure _) -> true | _ -> false)
+        arguments
+  | _ -> false
+
 let mentions_potential term =
-  let rec walk = function
-    | Logic.Apply ((Logic.Symbol.Potential _ | Logic.Symbol.Slack _), _) -> true
+  let rec walk term =
+    is_potential term
+    ||
+    match term with
     | Logic.Forall (_, _, body) | Logic.Exists (_, body) -> walk body
     | term -> List.exists walk (Logic.list_arguments term)
   in
   walk term
+
+let rec list_potentials term =
+  if is_potential term then [ term ]
+  else List.concat_map list_potentials (Logic.list_arguments term)
+
+let rec take_potential_as_zero term =
+  if is_potential term then Logic.Integer Z.zero
+  else Logic.map_arguments take_potential_as_zero term
 
 let restrict (frame : State.frame) condition =
   { frame with State.condition = Logic.( &&& ) frame.condition condition }
@@ -685,13 +811,14 @@ let merge context ?value_type ~condition
       Locals.fold
         (fun id joined renamed ->
           match Locals.find_opt id frame.locals with
-          | Some own when own != joined && own <> joined -> (own, joined) :: renamed
+          | Some incoming when incoming != joined && incoming <> joined ->
+              (incoming, joined) :: renamed
           | _ -> renamed)
         locals []
     in
     let renamed =
       match (frame.self, self) with
-      | Some own, Some joined when own <> joined -> (own, joined) :: renamed
+      | Some incoming, Some joined when incoming <> joined -> (incoming, joined) :: renamed
       | _ -> renamed
     in
     List.fold_left (fun amount (from, into) -> Logic.replace ~from ~into amount) amount renamed

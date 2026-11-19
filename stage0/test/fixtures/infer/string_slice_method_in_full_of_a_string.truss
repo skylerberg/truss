@@ -1,0 +1,7 @@
+fn f(name: String) -> String {
+  StringSlice.to_string(name)
+}
+
+fn g(name: String) -> String {
+  String.to_string(name)
+}

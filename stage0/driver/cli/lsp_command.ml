@@ -16,7 +16,7 @@ let encode_range encoding source (span : Source.span) =
   in
   Json.Object [ ("start", encode_point span.start); ("end", encode_point span.stop) ]
 
-let path_of_uri uri =
+let decode_file_uri uri =
   let prefix = "file://" in
   if not (String.starts_with ~prefix uri) then None
   else
@@ -65,9 +65,9 @@ let encode_diagnostic encoding ~uri source (diagnostic : Diagnostic.t) =
 let encode_state encoding source (state : Source.span Prover.state) =
   Json.Object
     [
-      ("range", encode_range encoding source state.span);
-      ("code", Json.String (Diagnostic.Code.name (Prover state.code)));
-      ("shows", Json.String state.shows);
+      ("range", encode_range encoding source state.site.span);
+      ("code", Json.String (Diagnostic.Code.name (Prover state.site.code)));
+      ("shows", Json.String state.site.shows);
       ("proven", Json.Bool (state.failure = None));
       ("trustsCompiledCode", Json.Bool state.trusts_compiled_code);
     ]
@@ -75,7 +75,7 @@ let encode_state encoding source (state : Source.span Prover.state) =
 let check ~root encoding (buffers : (string * string) list) =
   let buffers =
     List.filter_map
-      (fun (uri, text) -> Option.map (fun path -> (uri, path, text)) (path_of_uri uri))
+      (fun (uri, text) -> Option.map (fun path -> (uri, path, text)) (decode_file_uri uri))
       buffers
   in
   let snapshot, _ = Command_packages.load root in
@@ -99,7 +99,6 @@ let check ~root encoding (buffers : (string * string) list) =
       buffers
   in
   let database = Workspace.open_database trial in
-  Database.check database packages;
   let proofs =
     Proofs.check database trial packages (List.filter_map (fun (_, _, file) -> file) opened)
   in
@@ -224,7 +223,7 @@ let choose_client_encoding params =
 
 let extract_root params =
   match (Json.lookup_field "rootUri" params, Json.lookup_field "rootPath" params) with
-  | Json.String uri, _ when path_of_uri uri <> None -> Option.get (path_of_uri uri)
+  | Json.String uri, _ when decode_file_uri uri <> None -> Option.get (decode_file_uri uri)
   | _, Json.String path -> path
   | _ -> Sys.getcwd ()
 
@@ -285,7 +284,7 @@ let handle server message =
   | Json.String "exit" -> Stop (if server.shut_down then 0 else 1)
   | Json.String "textDocument/didOpen" -> (
       match (uri, Json.lookup_field "text" document) with
-      | Some uri, Json.String text when path_of_uri uri <> None ->
+      | Some uri, Json.String text when decode_file_uri uri <> None ->
           server.buffers <- (uri, text) :: List.remove_assoc uri server.buffers;
           Recheck
       | _ -> Continue)
@@ -351,18 +350,6 @@ let serve ~input ~output ~check =
               | Stop status -> status))
   in
   loop false
-
-let check_buffers = function
-  | root :: encoding :: rest ->
-      let rec pair_up = function uri :: text :: rest -> (uri, text) :: pair_up rest | _ -> [] in
-      let encoding = if encoding = "utf-8" then Utf_8 else Utf_16 in
-      Json.print (check ~root encoding (pair_up rest));
-      0
-  | _ -> 2
-
-let check_arguments ~root encoding buffers =
-  "__check-buffers" :: root :: show_encoding encoding
-  :: List.concat_map (fun (uri, text) -> [ uri; text ]) buffers
 
 module For_testing = struct
   let locate_position = locate_position

@@ -1,0 +1,29 @@
+fn each(items: List[Int64], visit: (fn(Int64) uses generic Granted))
+  uses generic Granted
+  cost allocations O(items.length() * allocations(visit))
+{
+  for item in items {
+    visit(item)
+  }
+}
+
+fn apply(value: Int64, change: (fn(Int64) -> Int64 uses generic Granted)) -> Int64
+  uses generic Granted
+  cost allocated_bytes O(allocated_bytes(change))
+{
+  change(value)
+}
+
+fn f(items: List[Int64])
+  cost allocations O(1)
+{
+  each(items, visit: fn(item) {
+    let _ = item
+  })
+}
+
+fn g(value: Int64) -> Int64
+  cost allocated_bytes O(1)
+{
+  apply(value, change: fn(inner) { inner })
+}

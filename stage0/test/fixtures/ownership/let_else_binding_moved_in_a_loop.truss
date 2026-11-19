@@ -1,4 +1,6 @@
-fn f(ready: Bool) {
+fn f(ready: Bool)
+  uses RunForever
+{
   while ready {
     let Some(text) = make() else {
       return

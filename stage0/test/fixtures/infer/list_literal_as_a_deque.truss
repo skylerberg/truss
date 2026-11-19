@@ -1,0 +1,6 @@
+use standard::collections
+
+fn f() {
+  let queue: collections::Deque[Int64] = [1, 2, 3]
+  let empty: collections::Deque[String] = []
+}

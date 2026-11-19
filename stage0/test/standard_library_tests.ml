@@ -95,10 +95,6 @@ let prove_files database files =
     solver
     (Database.list_proofs (Database.prove database files))
 
-let check database =
-  Database.check database [ Path.standard_package ];
-  database
-
 let is_always_read_kind : type a. a Database.Part.stored -> bool = function
   | Parsed _ | Resolved _ | Trait_header _ | Interface _ | Signature_check _ | Contract _
   | Checked_body _ | Body_mir _ | Contract_mir _ | Mir_call_edges _ ->
@@ -111,7 +107,6 @@ let is_always_read_kind : type a. a Database.Part.stored -> bool = function
 let is_always_read (Database.Part.Any part) = is_always_read_kind part
 
 let measure database ~is_measured =
-  let database = check database in
   let measured =
     List.map
       (fun (((module_ : Path.module_), files) as entry) ->
@@ -138,11 +133,11 @@ let measure database ~is_measured =
 
 let run_timed label work =
   let start = Unix.gettimeofday () in
-  let runs_before = Solver.count_queries_run solver in
+  let runs_before = Solver.For_testing.count_queries_run solver in
   let result = work () in
   Printf.printf "%6.1f s, %d queries solved: %s\n%!"
     (Unix.gettimeofday () -. start)
-    (Solver.count_queries_run solver - runs_before)
+    (Solver.For_testing.count_queries_run solver - runs_before)
     label;
   result
 
@@ -156,7 +151,7 @@ let () =
       measure (make_database ()) ~is_measured;
       exit 0)
     measured_modules;
-  let database = run_timed "type checking" (fun () -> check (make_database ())) in
+  let database = run_timed "type checking" make_database in
   Harness.test "every part whose kind is always read has a reader" (fun () ->
       List.iter
         (fun part ->

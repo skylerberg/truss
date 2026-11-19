@@ -1,5 +1,5 @@
-fn passes_on[capability Mine](action: (fn() -> Instant uses Mine)) -> Instant
-  uses Mine
+fn passes_on(action: (fn() -> Instant uses generic Mine)) -> Instant
+  uses generic Mine
 {
   each_time(action)
 }

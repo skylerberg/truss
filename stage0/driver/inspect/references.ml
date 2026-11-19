@@ -100,7 +100,7 @@ let list_uses ~(resolve_module : Syntax.path -> Path.module_) (items : Syntax.pa
              item.positions.spans.(path.last.id).stop) ))
     items
 
-let names_definition (definition : Path.t) target =
+let is_named_by (definition : Path.t) target =
   match (target, definition) with
   | Definition (Method { owner; name; _ }), Method { owner = other_owner; name = other_name; _ } ->
       Path.equal owner other_owner && name = other_name

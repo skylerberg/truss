@@ -1,5 +1,5 @@
 fn length() -> UInt64
-  uses Meter
+  uses Meter, RunForever
 {
   var cursor = readings(3)
   own cursor.count()

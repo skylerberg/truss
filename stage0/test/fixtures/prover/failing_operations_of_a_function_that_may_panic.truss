@@ -1,3 +1,5 @@
+use standard::collections
+
 fn sum(left: Int64, right: Int64) -> Int64
   uses Panic
 {
@@ -38,4 +40,36 @@ fn port(ports: Map[String, UInt16], name: String) -> UInt16
   uses Panic
 {
   ports[name]
+}
+
+fn mark(bits: mut collections::BitSet, index: UInt64)
+  uses Panic
+{
+  bits[index] = true
+}
+
+type Shelf(items: List[Int64])
+
+impl Index for Shelf {
+  type Key = UInt64
+  type Output = Int64
+
+  fn contains_key(self, key: UInt64) -> Bool
+    ensures result == (key < self.items.length())
+    cost time O(1)
+  {
+    key < self.items.length()
+  }
+
+  fn at(self, key: UInt64) lends Int64
+    cost time O(1)
+  {
+    self.items[key]
+  }
+}
+
+fn shelved(shelf: Shelf, index: UInt64) -> Int64
+  uses Panic
+{
+  shelf[index]
 }
