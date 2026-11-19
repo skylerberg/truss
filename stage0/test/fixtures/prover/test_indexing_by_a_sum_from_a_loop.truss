@@ -1,0 +1,9 @@
+test "a" uses Panic {
+  let counts: List[UInt64] = [1, 2, 3]
+  let numbers: List[Int64] = [4, 5, 6]
+  var total: UInt64 = 0
+  for count in counts {
+    total += count
+  }
+  assert numbers[total - 4] == 6
+}

@@ -1,5 +1,5 @@
 let apply_slice context (frame : State.frame) (site : Invocation.site) ~(base_type : Types.ty)
-    ~collection ~low ~high ~is_checked =
+    ~collection ~low ~high =
   let location = Facts.locate context frame.source site.origin in
   let element =
     match base_type with
@@ -19,8 +19,7 @@ let apply_slice context (frame : State.frame) (site : Invocation.site) ~(base_ty
         Facts.assume context frame (Operation ("<=", [ Logic.int 0; length ]));
         length
   in
-  (if is_checked then Facts.oblige_safe_operation context else Facts.oblige context)
-    frame Requires location
+  Facts.oblige context frame Requires location
     [ Text "`"; Facts.quote frame.source site.origin; Text "` may not be within the collection." ]
     Logic.(
       Operation ("<=", [ int 0; low ])
@@ -98,7 +97,7 @@ let slice_place context (site : Invocation.site) ~(owner : State.passed_place) ~
         let frame = { frame with makes_obligations = false } in
         let _, viewed, _, _ =
           apply_slice context frame site ~base_type:(owner_type frame)
-            ~collection:(owner.read frame) ~low ~high:(Some high) ~is_checked:false
+            ~collection:(owner.read frame) ~low ~high:(Some high)
         in
         viewed);
     write =
@@ -122,22 +121,18 @@ let declare_libc_number context frame (number : Libc.number) =
   let term = Logic.Symbol symbol in
   Facts.assume context frame
     (Facts.make_in_range
-       (Types.make_builtin (Intrinsic.builtin_of_libc (Libc.classify_number number)))
+       (Types.make_builtin (Intrinsic.convert_libc_scalar (Libc.classify_number number)))
        term);
   term
 
 let make_buffer_capacity context element term =
-  let ty =
-    Types.Named { path = Intrinsic.make_builtin_path Storage; arguments = [ Types.Type element ] }
-  in
+  let ty = Types.make_builtin Storage ~arguments:[ Type element ] in
   let symbol = Logic.Symbol.Capacity ty in
   Facts.declare context (Logic.Function (symbol, [ Facts.declare_sort context ty ], Logic.Int));
   Logic.Apply (symbol, [ term ])
 
 let make_buffer_model context (builtin : Intrinsic.builtin) element term =
-  let ty =
-    Types.Named { path = Intrinsic.make_builtin_path builtin; arguments = [ Types.Type element ] }
-  in
+  let ty = Types.make_builtin builtin ~arguments:[ Type element ] in
   let symbol = Logic.Symbol.Model ty in
   Facts.declare context
     (Logic.Function
@@ -184,7 +179,7 @@ let call_libc context frame ~(site : Invocation.site) (function_ : Libc.function
       ]
       condition
   in
-  let make_element_type scalar = Types.make_builtin (Intrinsic.builtin_of_libc scalar) in
+  let make_element_type scalar = Types.make_builtin (Intrinsic.convert_libc_scalar scalar) in
   let length element sequence = Models.make_sequence_length context element sequence in
   List.iteri
     (fun position (_, passes) ->
@@ -246,12 +241,12 @@ let measure_type element : Types.function_type =
     inputs = [ (Types.Read, element) ];
     output = Types.Integer;
     uses = Types.no_capabilities;
-    costs = [ { amortized = false; resource = Types.Time; bound = Finite_cost } ];
+    costs = [];
   }
 
 let make_sequence_sum context element term measure =
   let path = Path.Method { owner = Models.sequence_path; name = "sum"; receiver = Read } in
-  let symbol = Logic.Symbol.Function { callee = path; instance = [ Types.Type element ] } in
+  let symbol = Logic.Symbol.Function { callee = path; type_arguments = [ Types.Type element ] } in
   Facts.declare context
     (Logic.Function
        ( symbol,
@@ -797,9 +792,7 @@ let replace_element context frame element ~before ~after index part =
            ==> equal (at after (Symbol limit)) (at before (Symbol limit))) ))
 
 let update_storage context frame element storage index part =
-  let storage_type =
-    Types.Named { path = Intrinsic.make_builtin_path Storage; arguments = [ Types.Type element ] }
-  in
+  let storage_type = Types.make_builtin Storage ~arguments:[ Type element ] in
   let updated = Facts.arrive context frame "changed" storage_type in
   replace_element context frame element
     ~before:(make_buffer_model context Storage element storage)

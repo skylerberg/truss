@@ -1,0 +1,9 @@
+trait Depth {
+  fn depth(self) -> UInt64
+}
+
+impl Depth for Tree {
+  fn depth(self) -> UInt64 {
+    self.depth()
+  }
+}

@@ -2,18 +2,16 @@ let read_document name = File_system.read (Harness.make_workspace_path name)
 let make_source text = Source.create ~path:"test.truss" text
 
 let parse text =
-  let tokens, lexer_diagnostics = Lexer.lex (make_source text) in
-  let file, parser_diagnostics = Parser.parse tokens ~lexer_diagnostics in
-  let diagnostics = lexer_diagnostics @ parser_diagnostics in
+  let file, diagnostics = Parser.parse_source (make_source text) in
   if
     diagnostics = []
     && List.exists
          (fun (top_level : Syntax.top_level) ->
            List.exists
-             (fun (item : Syntax.definition Syntax.item) -> item.positions.recovered <> [])
+             (fun (item : Syntax.definition Syntax.item) -> item.positions.syntax_errors <> [])
              (top_level.definition :: top_level.methods))
          file.definitions
-  then Harness.fail "the parser recovered in %S with no error" text;
+  then Harness.fail "a syntax error in %S has no diagnostic" text;
   (file, diagnostics)
 
 let list_items (file : Syntax.file) =
@@ -71,7 +69,11 @@ let expect_error ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
       let expected = Support.locate_occurrence ~sub:at ~occurrence text in
       if diagnostic.span.start <> expected then
         Harness.fail "expected the error at %d (%S), got %d" expected at diagnostic.span.start;
-      let results = List.map (Diagnostic.apply_fix text) diagnostic.fixes in
+      let results =
+        List.map
+          (fun (fix : Source.span Diagnostic.fix) -> Diagnostic.apply_edits text fix.edits)
+          diagnostic.fixes
+      in
       match (fixed, results) with
       | None, [] -> ()
       | None, result :: _ -> Harness.fail "expected no fix, got one giving %S" result

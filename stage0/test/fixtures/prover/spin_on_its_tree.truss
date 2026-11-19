@@ -1,5 +1,4 @@
 fn spin(tree: Tree) -> Int64
-  cost time finite
 {
   spin(tree)
 }

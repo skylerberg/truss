@@ -9,7 +9,12 @@ val check_function_value_call :
   Types.ty
 
 val check_argument :
-  State.state -> State.env -> Syntax.expression -> Types.parameter_info -> Types.mode
+  State.state ->
+  State.env ->
+  Syntax.expression ->
+  Types.parameter_info ->
+  has_generic_type:bool ->
+  Types.mode
 
 val check_arguments :
   State.state ->
@@ -17,6 +22,7 @@ val check_arguments :
   ?constructor:string ->
   Syntax.expression ->
   Types.parameter_info list ->
+  declared:Types.parameter_info list ->
   Syntax.argument list ->
   has_receiver:bool ->
   (Tables.argument list * string list, Types.ty) result

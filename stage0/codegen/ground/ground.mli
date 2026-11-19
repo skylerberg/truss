@@ -6,11 +6,16 @@ type ty =
   | Any of { trait : Path.t; arguments : argument list; associated : (string * ty) list }
   | Never
 
-and argument = Type of ty | Value of Z.t | Capabilities of Path.t list
+and argument = Type of ty | Value of Z.t
 and function_type = { parameters : (mode * ty) list; result : ty; uses : Path.t list }
 
+type instantiation = {
+  type_arguments : argument list;
+  capability_arguments : (string * Path.t list) list;
+}
+
+val no_instantiation : instantiation
 val compare : ty -> ty -> int
-val make_builtin : Intrinsic.builtin -> ty
-val show_path_name : Path.t -> string
+val make_builtin : ?arguments:argument list -> Intrinsic.builtin -> ty
 val to_string : ty -> string
-val argument_to_string : argument -> string
+val show_argument : argument -> string

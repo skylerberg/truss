@@ -66,4 +66,37 @@ let () =
       expect_fine Fixtures.Usage.concurrent_branches_that_both_return);
   Harness.test "code after a block whose branch never finishes is unreachable" (fun () ->
       expect_one_diagnostic Fixtures.Usage.statement_after_concurrent_branches_that_return
-        "usage.unreachable_code")
+        "usage.unreachable_code");
+  Harness.test "a float compared with itself by != is an error with a fix that calls is_nan"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Usage.self_comparison_of_a_float "usage.self_comparison"
+        ~says:
+          "`value != value` compares a value with itself, so it is always false. `==` treats every \
+           NaN as equal to itself, so a test for NaN calls `value.is_nan()`."
+        ~fixed:Fixtures.Usage.self_comparison_of_a_float_fixed);
+  Harness.test "a float compared with itself by == is fixed to a negated is_nan" (fun () ->
+      expect_one_diagnostic Fixtures.Usage.self_equality_of_a_float "usage.self_comparison"
+        ~fixed:Fixtures.Usage.self_equality_of_a_float_fixed);
+  Harness.test "an integer compared with itself is always true, and has no fix" (fun () ->
+      expect_one_diagnostic "fn f(count: Int64) -> Bool {\n  count <= count\n}\n"
+        "usage.self_comparison"
+        ~says:"`count <= count` compares a value with itself, so it is always true.");
+  Harness.test "an element compared with itself through one index is an error" (fun () ->
+      expect_one_diagnostic
+        "fn f(items: List[Int64], index: UInt64) -> Bool\n\
+        \  requires index < items.length()\n\
+         {\n\
+        \  items[index] < items[index]\n\
+         }\n"
+        "usage.self_comparison" ~says:"always false");
+  Harness.test "a field compared with itself is an error" (fun () ->
+      expect_one_diagnostic
+        "type Point(x: Int64, y: Int64)\n\n\
+         fn Point.is_level(self) -> Bool {\n\
+        \  self.x == self.x\n\
+         }\n"
+        "usage.self_comparison" ~says:"`self.x == self.x`");
+  Harness.test "a specification may compare a value with itself" (fun () ->
+      expect_fine Fixtures.Usage.comparisons_in_specifications);
+  Harness.test "comparisons of different places and of calls are not reported" (fun () ->
+      expect_fine Fixtures.Usage.comparisons_of_different_places)

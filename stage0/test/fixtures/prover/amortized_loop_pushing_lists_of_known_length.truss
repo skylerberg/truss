@@ -1,0 +1,16 @@
+fn row(seed: UInt64) -> List[UInt64]
+  ensures result.length() == 1
+  cost time O(1)
+{
+  [seed]
+}
+
+fn f(rows: mut List[List[UInt64]], count: UInt64)
+  cost amortized time O(count)
+{
+  for index in 0..count
+    cost time O(index)
+  {
+    mut rows.push(row(index))
+  }
+}

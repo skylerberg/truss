@@ -204,16 +204,16 @@ let compute_root_words ~key ~mode input =
   in
   compute_chaining_value ~flags:root output
 
-let bytes_of_words words =
+let encode_words words =
   let digest = Bytes.create 32 in
   Array.iteri (fun place word -> Bytes.set_int32_le digest (place * 4) (Int32.of_int word)) words;
   Bytes.unsafe_to_string digest
 
-let hash input = bytes_of_words (compute_root_words ~key:initial ~mode:0 input)
+let hash input = encode_words (compute_root_words ~key:initial ~mode:0 input)
 
 let derive_key ~context =
   let key = compute_root_words ~key:initial ~mode:derive_key_context context in
-  fun material -> bytes_of_words (compute_root_words ~key ~mode:derive_key_material material)
+  fun material -> encode_words (compute_root_words ~key ~mode:derive_key_material material)
 
 let to_hex digest =
   String.concat ""

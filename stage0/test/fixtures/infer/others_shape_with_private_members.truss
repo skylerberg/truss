@@ -1,0 +1,37 @@
+public type Shape(sides: UInt64)
+
+fn Shape.secret(self) -> UInt64 {
+  self.sides
+}
+
+fn Shape.hidden_maker() -> Shape {
+  Shape(sides: 3)
+}
+
+let Shape.private_default: UInt64 = 3
+
+internal fn Shape.shared(self) -> UInt64 {
+  self.sides
+}
+
+public fn Shape.open(self) -> UInt64 {
+  self.secret() + self.shared() + Shape.private_default + Shape.hidden_maker().sides
+}
+
+fn Shape.count(self) -> UInt64 {
+  self.sides
+}
+
+fn Shape.element(self, position: UInt64) lends UInt64 {
+  self.sides
+}
+
+trait Measured {
+  fn measure(self) -> UInt64
+}
+
+impl Measured for Shape {
+  fn measure(self) -> UInt64 {
+    self.sides
+  }
+}

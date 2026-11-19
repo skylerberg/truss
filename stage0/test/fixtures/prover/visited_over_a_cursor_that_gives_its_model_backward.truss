@@ -1,0 +1,41 @@
+type FromTheBack(items: List[Int64])
+
+impl Model for FromTheBack {
+  type Value = Sequence[Int64]
+
+  fn model(self) -> Sequence[Int64]
+    ensures identical(result, self.items.model())
+  {
+    self.items.model()
+  }
+}
+
+fn FromTheBack.remaining(self) -> UInt64
+  ensures result == self.items.length()
+  cost time O(1)
+{
+  self.items.length()
+}
+
+impl Cursor for FromTheBack {
+  type Element = Int64
+
+  fn next(mut self) -> Option[Int64]
+    ensures (result is Some(_)) == (old(self.remaining()) > 0)
+    ensures (result is Some(_)) ==> self.remaining() + 1 == old(self.remaining())
+    ensures (result is None) ==> self.remaining() == old(self.remaining())
+    cost time O(1)
+  {
+    mut self.items.pop()
+  }
+}
+
+fn f(items: own List[Int64]) -> Int64 {
+  var last: Int64 = 0
+  for item in FromTheBack(items: own items)
+    invariant visited.length() >= 0
+  {
+    last = item
+  }
+  last
+}

@@ -4,7 +4,9 @@ use standard::intrinsic
 use standard::system::calls
 use standard::system::handles
 
-internal fn entries(directory: Path) -> Result[List[files::DirectoryEntry], SystemError] {
+internal fn entries(directory: Path) -> Result[List[files::DirectoryEntry], SystemError]
+  uses RunForever
+{
   let flags = intrinsic::libc_o_rdonly() | intrinsic::libc_o_directory()
   let handle = handles::with_file_error(calls::open_file(directory.text.slice().bytes, flags: flags))?
   let descriptor = intrinsic::handle_descriptor(handle)
@@ -23,7 +25,9 @@ fn entries_on_linux(
   descriptor: Int32,
   directory: intrinsic::View[UInt8],
   listed: mut List[files::DirectoryEntry],
-) -> Result[Unit, Int32] {
+) -> Result[Unit, Int32]
+  uses RunForever
+{
   let room: UInt64 = 32768
   let length_at = intrinsic::libc_dirent_length_offset()
   let kind_at = intrinsic::libc_dirent_kind_offset()
@@ -79,7 +83,9 @@ fn entries_on_linux(
   Ok(Unit)
 }
 
-fn entries_on_macos(descriptor: Int32, listed: mut List[files::DirectoryEntry]) -> Result[Unit, Int32] {
+fn entries_on_macos(descriptor: Int32, listed: mut List[files::DirectoryEntry]) -> Result[Unit, Int32]
+  uses RunForever
+{
   let attributes = intrinsic::libc_attr_cmn_returned_attrs()
     | intrinsic::libc_attr_cmn_name()
     | intrinsic::libc_attr_cmn_objtype()
@@ -165,7 +171,9 @@ fn add(listed: mut List[files::DirectoryEntry], name: own intrinsic::Storage[UIn
   }
 }
 
-fn kind_by_status(directory: intrinsic::View[UInt8], name: intrinsic::View[UInt8]) -> files::FileKind {
+fn kind_by_status(directory: intrinsic::View[UInt8], name: intrinsic::View[UInt8]) -> files::FileKind
+  uses RunForever
+{
   var path: intrinsic::Storage[UInt8] = calls::copy_of(directory)
   growth::push(mut path, value: 47)
   for index in 0..intrinsic::view_length(name) {

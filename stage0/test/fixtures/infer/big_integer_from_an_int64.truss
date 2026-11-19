@@ -1,0 +1,5 @@
+use standard::math
+
+fn f(count: Int64) -> math::BigInteger {
+  math::BigInteger.from(count)
+}

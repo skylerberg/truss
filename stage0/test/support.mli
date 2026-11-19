@@ -10,10 +10,16 @@ val with_dependencies :
 val read_source : Project.package list -> Path.file -> Source.t
 val parse_errors : Project.package list -> Path.file -> string list
 val make_database : Project.package list -> Database.t
-val make_names : Project.package list -> Path.package -> Resolve.Names.lookups
+val extend_standard_library : Project.package list -> Database.t
+val make_names : Project.package list -> Resolve.Names.lookups
 val list_declarations : Project.package list -> Path.module_ -> Resolve.Names.declaration list
-val list_diagnostics : Database.t -> Path.file -> Diagnostic.t list
 val list_codes : Diagnostic.t list -> string list
+
+val run_check :
+  check:(Project.package list -> Path.file -> Diagnostic.t list) ->
+  Project.package list ->
+  string ->
+  Diagnostic.t list
 
 type core_nodes = {
   expressions : Core.expression list;
@@ -35,6 +41,7 @@ val expect_one_diagnostic :
   ?fixed:string ->
   ?says:string ->
   ?at:string * int ->
+  ?notes:(string * (string * int)) list ->
   string ->
   string ->
   unit

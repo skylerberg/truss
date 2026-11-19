@@ -7,7 +7,7 @@ let expect_bug ~saying work =
         Codegen_support.fail "expected %S in %S" saying text
 
 let env = Codegen_support.make_shape_env ()
-let emit env make_instance = ignore (Emit_c.make_fragment env (Code (make_instance env)))
+let emit env program_fragment = ignore (program_fragment env)
 
 let make_caller arguments =
   Codegen_support.entry
@@ -61,7 +61,7 @@ let () =
             target =
               Direct
                 {
-                  function_ = Instance (Codegen_support.key "swapped");
+                  function_ = Item (Codegen_support.code_item "swapped");
                   signature =
                     { parameters = [ pointer true; pointer false ]; result = None; returns = true };
                 };
@@ -89,7 +89,7 @@ let () =
         {
           root =
             Static
-              { key = Constant (Codegen_support.definition "words"); ty = Codegen_support.text };
+              { item = Constant (Codegen_support.definition "words"); ty = Codegen_support.text };
           projections = [];
         }
       in
@@ -103,15 +103,17 @@ let () =
                    [ Assign (Codegen_support.at 0, Use (Move constant)) ]
                    (Return (Some (Codegen_support.constant_int32 0)));
                ])));
-  Codegen_support.test "an instance whose calls fit their targets passes" (fun () ->
+  Codegen_support.test "an item whose calls fit their targets passes" (fun () ->
       emit env (make_caller [ Codegen_support.constant_int32 1 ]))
 
 let () =
-  Codegen_support.test "a compiler bug says which instance was being lowered" (fun () ->
+  Codegen_support.test "a compiler bug says which item was being lowered" (fun () ->
       let not_code =
-        Instance.Code
-          { path = Top { module_ = Codegen_support.example; name = "Point" }; type_arguments = [] }
+        Lowered.Item.Code
+          {
+            path = Top { module_ = Codegen_support.example; name = "Point" };
+            instantiation = Ground.no_instantiation;
+          }
       in
-      let _, compile = Codegen_support.load ~roots:[ not_code ] "type Point(x: Int64)\n" in
       expect_bug ~saying:"while lowering example::Point" (fun () ->
-          ignore (Compile.For_testing.compile_fragment compile not_code)))
+          ignore (Codegen_support.load ~roots:[ not_code ] "type Point(x: Int64)\n")))

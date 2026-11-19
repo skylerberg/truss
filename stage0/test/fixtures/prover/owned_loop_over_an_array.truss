@@ -1,0 +1,13 @@
+fn f(items: own Array[Int64, 3]) -> List[Int64]
+  ensures result.length() == 3
+  ensures identical(result.model()[2], items.model()[2])
+{
+  var moved: List[Int64] = []
+  for item in own items
+    invariant moved.length() == visited.length()
+    invariant forall i in 0..visited.length() => identical(moved.model()[i], visited[i])
+  {
+    mut moved.push(item)
+  }
+  moved
+}

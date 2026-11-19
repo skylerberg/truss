@@ -6,6 +6,6 @@ type t = {
   find_header : Resolve.Names.key -> Environment.header option;
   read_elaborated_interface : Resolve.Names.key -> Environment.elaborated_interface;
   find_derived_interface : type_:Path.t -> trait:Path.t -> Types.impl_interface option;
-  find_type_facts : Path.t -> Environment.type_facts option;
+  read_type_facts : Path.t -> Environment.type_facts;
   find_grant : Path.package -> Path.package -> Environment.grant option;
 }

@@ -1,0 +1,45 @@
+fn each(items: List[Int64], visit: (fn(Int64) uses generic Granted))
+  uses generic Granted
+  cost allocations <= items.length() * allocations(visit)
+  cost allocated_bytes <= items.length() * allocated_bytes(visit)
+{
+  for item in items {
+    visit(item)
+  }
+}
+
+fn each_of_an_order(items: List[Int64], visit: (fn(Int64) uses generic Granted))
+  uses generic Granted
+  cost allocations O(items.length() * allocations(visit))
+  cost allocated_bytes O(items.length() * allocated_bytes(visit))
+{
+  for item in items
+    cost allocations O(visited.length() * allocations(visit))
+    cost allocated_bytes <= visited.length() * allocated_bytes(visit)
+  {
+    visit(item)
+  }
+}
+
+fn contains[Element: Equal](items: Slice[Element], item: Element) -> Bool
+  cost allocations <= items.length() * allocations(Element.equal)
+  cost allocated_bytes O(items.length() * allocated_bytes(Element.equal))
+{
+  for index in 0..items.length() {
+    if items[index] == item {
+      return true
+    }
+  }
+  false
+}
+
+trait Sized {
+  fn size(self) -> UInt64
+
+  fn doubled(self) -> UInt64
+    cost allocations <= 2 * allocations(Self.size)
+    cost allocated_bytes O(allocated_bytes(Self.size))
+  {
+    self.size().saturating_add(self.size())
+  }
+}

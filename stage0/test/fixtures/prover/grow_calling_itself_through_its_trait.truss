@@ -1,0 +1,11 @@
+trait Grow {
+  fn grow(self) -> Int64
+}
+
+type Seed(height: Int64)
+
+impl Grow for Seed {
+  fn grow(self) -> Int64 {
+    Grow.grow(self)
+  }
+}

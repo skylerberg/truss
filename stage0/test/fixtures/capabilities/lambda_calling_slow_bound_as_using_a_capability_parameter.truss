@@ -1,0 +1,11 @@
+fn slow() {
+}
+
+fn run(work: (fn() uses generic Mine))
+  uses generic Mine
+{
+  let again: (fn() uses generic Mine) = fn() {
+    slow()
+  }
+  again()
+}

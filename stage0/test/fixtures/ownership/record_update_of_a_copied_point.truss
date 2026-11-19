@@ -1,0 +1,5 @@
+type Point(x: Int64, y: Int64)
+
+fn moved(origin: Point) -> Point {
+  origin with (x: 5)
+}

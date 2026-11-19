@@ -61,7 +61,7 @@ let create system ~compute_shape =
   { system; compute_shape; layouts = Type_table.create 64; in_progress = Type_table.create 8 }
 
 let system env = env.system
-let shape env ty = env.compute_shape ty
+let compute_shape env ty = env.compute_shape ty
 
 let compute_integer_size = function
   | Int8 | UInt8 -> 1
@@ -318,7 +318,7 @@ let dispatch layout cases =
   | Zero_size | Niche_encoded _ | Scalar _ | Struct _ | Array _ ->
       Tests (List.map (fun (name, case) -> (compute_discriminant layout name, case)) cases)
 
-let integer_to_string = function
+let show_integer = function
   | Int8 -> "Int8"
   | Int16 -> "Int16"
   | Int32 -> "Int32"
@@ -328,8 +328,8 @@ let integer_to_string = function
   | UInt32 -> "UInt32"
   | UInt64 -> "UInt64"
 
-let scalar_to_string = function
-  | Integer integer -> integer_to_string integer
+let show_scalar = function
+  | Integer integer -> show_integer integer
   | Float32 -> "Float32"
   | Float64 -> "Float64"
   | Bool -> "Bool"
@@ -337,19 +337,19 @@ let scalar_to_string = function
   | Pointer _ -> "pointer"
   | Nullable_pointer _ -> "nullable pointer"
 
-let path_to_string = function
+let show_path = function
   | [] -> "."
   | path -> String.concat "." (List.map (function Field name -> name | Tag -> "tag") path)
 
-let niche_to_string niche =
-  Printf.sprintf "niche %s %s+%s" (path_to_string niche.path) (Z.to_string niche.start)
+let show_niche niche =
+  Printf.sprintf "niche %s %s+%s" (show_path niche.path) (Z.to_string niche.start)
     (Z.to_string niche.count)
 
 let rec to_string layout =
   let form =
     match layout.form with
     | Zero_size -> "zero"
-    | Scalar scalar -> scalar_to_string scalar
+    | Scalar scalar -> show_scalar scalar
     | Struct fields ->
         "struct("
         ^ String.concat " "
@@ -360,9 +360,9 @@ let rec to_string layout =
     | Array { element_layout; count; _ } ->
         Printf.sprintf "array(%d x %s)" count (to_string element_layout)
     | Tag_only { tag; variants } ->
-        Printf.sprintf "tag(%s: %s)" (integer_to_string tag) (String.concat " " variants)
+        Printf.sprintf "tag(%s: %s)" (show_integer tag) (String.concat " " variants)
     | Tagged { tag; payload_offset; variants } ->
-        Printf.sprintf "tagged(%s, payload@%d: %s)" (integer_to_string tag) payload_offset
+        Printf.sprintf "tagged(%s, payload@%d: %s)" (show_integer tag) payload_offset
           (String.concat " " (List.map (fun (variant : variant) -> variant.name) variants))
     | Niche_encoded { dataful; dataless = None } ->
         Printf.sprintf "niche-encoded(%s;  at nothing)" dataful.name
@@ -370,10 +370,10 @@ let rec to_string layout =
         Printf.sprintf "niche-encoded(%s; %s at %s)" dataful.name
           (String.concat " "
              (List.map (fun (name, value) -> name ^ "=" ^ Z.to_string value) niche_values))
-          (path_to_string niche.path)
+          (show_path niche.path)
   in
   Printf.sprintf "%d/%d %s%s" layout.size layout.alignment form
-    (match layout.niche with None -> "" | Some niche -> " " ^ niche_to_string niche)
+    (match layout.niche with None -> "" | Some niche -> " " ^ show_niche niche)
 
 let has_zero_size env ty = (of_type env ty).size = 0
 

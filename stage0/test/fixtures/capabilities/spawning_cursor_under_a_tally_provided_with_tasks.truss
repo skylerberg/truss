@@ -1,0 +1,21 @@
+fn pulled()
+  uses RunForever
+{
+  var tally = Tally(count: 0)
+  let scheduler = Scheduler(turn: 0)
+  var cursor = Spawning(left: 2)
+  provide mut tally, scheduler {
+    for value in cursor {
+      let _ = value
+    }
+  }
+}
+
+fn called() {
+  var tally = Tally(count: 0)
+  let scheduler = Scheduler(turn: 0)
+  var cursor = Spawning(left: 2)
+  provide mut tally, scheduler {
+    let _ = mut cursor.next()
+  }
+}

@@ -1,0 +1,6 @@
+fn f()
+  uses Console
+{
+  let held = chosen(shout, second: tick)
+  held()
+}

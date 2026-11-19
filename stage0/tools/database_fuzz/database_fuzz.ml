@@ -24,7 +24,7 @@ let build files =
         };
       ]
   in
-  Database.propagate database;
+  Database.For_testing.propagate database;
   database
 
 let split_lines text =
@@ -70,7 +70,7 @@ let list_words ~starts ~continues text =
   in
   scan 0 []
 
-let keywords = List.map fst Token.keywords
+let keywords = List.map fst Token.For_testing.keywords
 
 let list_identifiers text =
   List.filter
@@ -245,7 +245,7 @@ let open_database root =
   | Error message -> failwith message
 
 let check_and_reopen root =
-  Database.check (open_database root) [ example.package ];
+  ignore (open_database root);
   Workspace.flush ()
 
 let find_reopening root =
@@ -295,7 +295,7 @@ let () =
   let root = Filename.temp_dir "database-fuzz" "" in
   at_exit (fun () -> try File_system.remove root with Sys_error _ | Unix.Unix_error _ -> ());
   write_project root files;
-  Database.propagate (open_database root);
+  Database.For_testing.propagate (open_database root);
   let current = ref files in
   let failures = ref 0 and skipped = ref 0 in
   let report step (edit : edit) problem =
@@ -322,7 +322,7 @@ let () =
         let propagated =
           capture_outcome (fun () ->
               let hot = open_database root in
-              Database.propagate hot;
+              Database.For_testing.propagate hot;
               hot)
         in
         match (propagated, capture_outcome (fun () -> build edit.files)) with

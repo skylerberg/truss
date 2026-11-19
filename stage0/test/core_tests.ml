@@ -3,16 +3,11 @@ let find_core packages key =
     (fun (checked : Infer.checked) -> checked.form)
     (Database.read_checked_body (Support.make_database packages) key)
 
-type form = { core : Core.t; names : string Core_walk.For_testing.Local_table.t }
-
-let form_of (core : Core.t) =
-  { core; names = Core_walk.For_testing.collect_local_names core.definition }
-
-let list_expressions form =
+let list_expressions (form : Core.t) =
   let found = ref [] in
   Core_walk.walk_definition
     { Core_walk.ignore_all with expression = (fun node -> found := node :: !found) }
-    form.core.definition;
+    form.definition;
   List.rev !found
 
 let list_calls form =
@@ -20,35 +15,36 @@ let list_calls form =
     (fun (node : Core.expression) -> match node.kind with Call call -> Some call | _ -> None)
     (list_expressions form)
 
-let name form (local : Core.local) =
+let name (local : Core.local) =
   match local with
   | Self -> "self"
-  | Named _ | Synthetic _ ->
-      Option.value ~default:"" (Core_walk.For_testing.Local_table.find_opt form.names local)
+  | Declared { name; _ } | Trait_parameter { name; _ } -> name
+  | Synthetic index -> Printf.sprintf "synthetic %d" index
 
-let rec show_access_path form (place : Core.place) =
+let rec show_access_path (place : Core.place) =
   match place with
-  | Local { local; _ } -> name form local
-  | Field { base; field; _ } -> show_access_path form base ^ "." ^ field
+  | Local { local; _ } -> name local
+  | Field { base; field; _ } -> show_access_path base ^ "." ^ field
   | Constant { path; _ } -> Path.show path
-  | Lent call -> "lent " ^ show_expression form call
-  | Temporary value -> "temporary " ^ show_expression form value
+  | Lent call -> "lent " ^ show_expression call
+  | Temporary value -> "temporary " ^ show_expression value
 
-and show_expression form (node : Core.expression) =
+and show_expression (node : Core.expression) =
   let list describe items = String.concat ", " (List.map describe items) in
   match node.kind with
   | Integer number -> Z.to_string number
-  | Use place -> "use " ^ show_access_path form place
+  | Use place -> "use " ^ show_access_path place
   | Slice { base; callee; bounds } ->
-      Printf.sprintf "slice %s(%s)" (Core_lint.show_callee callee)
-        (list (show_argument form) (Passed { mode = Read; value = Place base } :: bounds))
+      Printf.sprintf "slice %s(%s)"
+        (Core_lint.show_target callee.target)
+        (list show_argument (Passed { mode = Read; value = Place base } :: bounds))
   | Operator { operation; arguments } ->
       Printf.sprintf "%s(%s)"
         (Intrinsic.show_operation (Scalar operation))
-        (list (show_expression form) arguments)
+        (list show_expression arguments)
   | Call { callee; arguments; _ } ->
       let dispatch =
-        match callee with
+        match callee.target with
         | Trait_method { self_type; evidence; _ } ->
             Printf.sprintf " for %s by %s" (Types.show self_type)
               (match evidence with
@@ -57,29 +53,28 @@ and show_expression form (node : Core.expression) =
               | Dynamic -> "any")
         | _ -> ""
       in
-      Printf.sprintf "%s%s(%s)" (Core_lint.show_callee callee) dispatch
-        (list (show_argument form) arguments)
+      Printf.sprintf "%s%s(%s)"
+        (Core_lint.show_target callee.target)
+        dispatch (list show_argument arguments)
   | _ -> "a value of the type " ^ Types.show node.type_
 
-and show_operand form (value : Core.operand) =
+and show_operand (value : Core.operand) =
   match value with
-  | Place place -> "place " ^ show_access_path form place
-  | Value value -> show_expression form value
+  | Place place -> "place " ^ show_access_path place
+  | Value value -> show_expression value
 
-and show_argument form (passed : Core.argument) =
+and show_argument (passed : Core.argument) =
   match passed with
-  | Passed { mode; value; _ } -> Types.show_mode mode ^ show_operand form value
+  | Passed { mode; value; _ } -> Types.show_mode mode ^ show_operand value
   | Default -> "default"
 
 let make_definition_form text (path : Path.t) =
   let packages = Support.setup [ ("app::main", text) ] in
   let file = Support.parse_file "app::main" in
   (match
-     List.map
-       (fun message -> Diagnostic.make ~code:(Types Mismatch) (Source.make_span 0 0) message)
-       (Support.parse_errors packages file)
-     @ Database.For_testing.list_diagnostics [ Resolve; Interface; Infer ]
-         (Support.make_database packages) file
+     Database.For_testing.list_diagnostics
+       [ Parse; Resolve; Interface; Infer ]
+       (Support.make_database packages) file
    with
   | [] -> ()
   | reported ->
@@ -89,18 +84,16 @@ let make_definition_form text (path : Path.t) =
   let definition =
     List.find_map
       (fun (declaration : Resolve.Names.declaration) ->
-        let key = Resolve.Names.make_key declaration in
+        let key = declaration.key in
         if Path.equal key.path path then
           Option.map (fun core -> (key, core)) (find_core packages key)
         else None)
-      ((Support.make_names packages file.module_.package).list_declarations_in file)
+      ((Support.make_names packages).list_declarations_in file)
   in
   match definition with
   | Some (key, core) ->
-      Core_lint.check
-        (Database.make_interface_lookups (Support.make_database packages) [ key.module_.package ])
-        key core;
-      form_of core
+      Core_lint.check (Database.make_interface_lookups (Support.make_database packages)) key core;
+      core
   | None -> failwith (Printf.sprintf "`%s` has no core form" (Path.show path))
 
 let expect_observed expected observed =
@@ -112,26 +105,26 @@ let expect ?(definition = Support.make_top_path "app::main" "g") test_name text 
   Harness.test test_name (fun () ->
       expect_observed expected (observe (make_definition_form text definition)))
 
-let read_contract form : Core.contract =
-  match form.core.definition with
+let read_contract (form : Core.t) : Core.contract =
+  match form.definition with
   | Function { contract; _ } -> contract
   | _ -> failwith "the definition is not a function"
 
-let list_final_expressions form =
+let list_final_expressions (form : Core.t) =
   let of_block (block : Core.block) =
     match (block.value, List.rev block.statements) with
-    | Some value, _ -> [ show_expression form value ]
-    | None, { kind = Evaluate value; _ } :: _ -> [ show_expression form value ]
+    | Some value, _ -> [ show_expression value ]
+    | None, { kind = Evaluate value; _ } :: _ -> [ show_expression value ]
     | None, _ -> []
   in
-  match form.core.definition with
+  match form.definition with
   | Function { body = Some body; _ } | Law_proof { body = Some body; _ } -> of_block body
   | _ -> []
 
 let list_capabilities (set : Types.capability_set) =
   List.map
     (function Types.Capability path -> Path.show path | _ -> "a capability that is not named")
-    (set :> Types.capability list)
+    (Types.list_capabilities set)
 
 let shape = Fixtures.Core.shape
 
@@ -142,7 +135,7 @@ let () =
       List.concat_map
         (fun (node : Core.expression) ->
           match node.kind with
-          | Match { scrutinees; _ } -> List.map (show_operand form) scrutinees
+          | Match { scrutinees; _ } -> List.map show_operand scrutinees
           | _ -> [])
         (list_expressions form))
     [ "place shape" ];
@@ -151,8 +144,8 @@ let () =
     (fun form ->
       List.filter_map
         (fun (call : Core.call) ->
-          if Core_lint.show_callee call.callee = "app::main::clear" then
-            Some (String.concat ", " (List.map (show_argument form) call.arguments))
+          if Core_lint.show_target call.callee.target = "app::main::clear" then
+            Some (String.concat ", " (List.map show_argument call.arguments))
           else None)
         (list_calls form))
     [ "mut slice standard::list::List.slice_from(place items, 0)" ]
@@ -171,7 +164,9 @@ let () =
                  fn take(count: Int64) -> Int64 {\n\
                 \  count\n\
                  }\n\n\
-                 fn g(items: List[Int64], config: Config) -> Int64 {\n\
+                 fn g(items: List[Int64], config: Config) -> Int64\n\
+                \  uses RunForever\n\
+                 {\n\
                 \  var hole = todo\n\
                 \  " ^ statement ^ "\n  config.port\n}\n" );
             ]))
@@ -208,14 +203,12 @@ let () =
   let list_granted form =
     List.concat_map
       (fun (call : Core.call) ->
-        match call.callee with
-        | Function { path; type_arguments }
+        match call.callee.target with
+        | Function { path; instantiation }
           when Path.equal path (Support.make_top_path "app::main" "apply") ->
             List.concat_map
-              (function
-                | Types.Capabilities set -> list_capabilities set
-                | other -> [ Types.show_argument other ])
-              type_arguments
+              (fun (_, argument) -> list_capabilities argument)
+              instantiation.capability_arguments
         | _ -> [])
       (list_calls form)
   in
@@ -227,62 +220,37 @@ let () =
     (apply ^ Fixtures.Core.named_function_passed_for_a_capability_generic)
     list_granted
     [ "standard::capabilities::Console" ];
-  Harness.test
-    "a call's `uses` and a lambda's type contain the inferred set, not the callee's parameter"
-    (fun () ->
-      let text = apply ^ Fixtures.Core.lambda_using_console_passed_to_apply in
-      let packages = Support.setup [ ("app::main", text) ] in
-      let actual = ref [] in
-      List.iter
-        (fun (declaration : Resolve.Names.declaration) ->
-          let key = Resolve.Names.make_key declaration in
-          if Path.equal key.path (Support.make_top_path "app::main" "g") then
-            match find_core packages key with
-            | Some form ->
-                Core_walk.walk_definition
-                  {
-                    Core_walk.ignore_all with
-                    expression =
-                      (fun (node : Core.expression) ->
-                        match node.kind with
-                        | Call { callee = Function { path; _ }; uses; _ }
-                          when Path.equal path (Support.make_top_path "app::main" "apply") ->
-                            actual :=
-                              ("needs " ^ Types.show_argument (Capabilities uses)) :: !actual
-                        | Lambda _ -> actual := Types.show node.type_ :: !actual
-                        | _ -> ());
-                  }
-                  form.definition
-            | None -> Harness.fail "no core form")
-        (Support.list_declarations packages (Support.parse_module "app::main"));
-      if List.sort compare !actual <> [ "(fn() uses Console)"; "needs {Console}" ] then
-        Harness.fail "found [%s]" (String.concat "; " !actual));
-  Harness.test "a capability parameter in a result type is inferred separately for each call"
-    (fun () ->
-      let text = Fixtures.Core.two_calls_of_later_with_different_capabilities in
-      let packages = Support.setup [ ("app::main", text) ] in
-      let actual = ref [] in
-      List.iter
-        (fun (declaration : Resolve.Names.declaration) ->
-          let key = Resolve.Names.make_key declaration in
-          if Path.equal key.path (Support.make_top_path "app::main" "g") then
-            match find_core packages key with
-            | Some form ->
-                Core_walk.walk_definition
-                  {
-                    Core_walk.ignore_all with
-                    pattern =
-                      (fun (node : Core.pattern) ->
-                        match node.kind with
-                        | Bind { name; _ } ->
-                            actual := (name ^ ": " ^ Types.show node.type_) :: !actual
-                        | _ -> ());
-                  }
-                  form.definition
-            | None -> Harness.fail "no core form")
-        (Support.list_declarations packages (Support.parse_module "app::main"));
-      if List.sort compare !actual <> [ "first: (fn() uses Console)"; "second: (fn() uses Clock)" ]
-      then Harness.fail "found [%s]" (String.concat "; " !actual))
+  expect "a call's `uses` and a lambda's type contain the inferred set, not the callee's parameter"
+    (apply ^ Fixtures.Core.lambda_using_console_passed_to_apply)
+    (fun form ->
+      List.sort compare
+        (List.filter_map
+           (fun (node : Core.expression) ->
+             match node.kind with
+             | Call { callee = { target = Function { path; _ }; uses }; _ }
+               when Path.equal path (Support.make_top_path "app::main" "apply") ->
+                 Some ("needs " ^ Types.show_capabilities uses)
+             | Lambda _ -> Some (Types.show node.type_)
+             | _ -> None)
+           (list_expressions form)))
+    [ "(fn() uses Console)"; "needs {Console}" ];
+  expect "a capability parameter in a result type is inferred separately for each call"
+    Fixtures.Core.two_calls_of_later_with_different_capabilities
+    (fun form ->
+      let bindings = ref [] in
+      Core_walk.walk_definition
+        {
+          Core_walk.ignore_all with
+          pattern =
+            (fun (node : Core.pattern) ->
+              match node.kind with
+              | Bind { local = Declared { name; _ }; _ } ->
+                  bindings := (name ^ ": " ^ Types.show node.type_) :: !bindings
+              | _ -> ());
+        }
+        form.definition;
+      List.sort compare !bindings)
+    [ "first: (fn() uses Console)"; "second: (fn() uses Clock)" ]
 
 let () =
   Harness.test "a node's origin gives its source span" (fun () ->
@@ -290,11 +258,11 @@ let () =
       let packages = Support.setup [ ("app::main", text) ] in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
-          let key = Resolve.Names.make_key declaration in
+          let key = declaration.key in
           match
             ( find_core packages key,
-              (Support.make_names packages key.module_.package).read_spans key,
-              (Support.make_names packages key.module_.package).read_text key )
+              (Support.make_names packages).read_spans key,
+              (Support.make_names packages).read_text key )
           with
           | Some form, spans, written ->
               let actual = ref [] in
@@ -326,9 +294,9 @@ let () =
               (match function_ with
               | Log -> "log"
               | Power -> "power"
-              | Time -> "time"
+              | Callback_cost metric -> Metric.show metric
               | Calls -> "calls")
-        | Call call -> Some ("call " ^ Core_lint.show_callee call.callee)
+        | Call call -> Some ("call " ^ Core_lint.show_target call.callee.target)
         | _ -> None)
       (list_expressions form)
   in
@@ -338,10 +306,8 @@ let () =
         (fun (cost : Core.cost) ->
           let resource =
             match cost.resource with
-            | Time -> "time"
-            | Allocations -> "allocations"
-            | Allocated_bytes -> "allocated bytes"
-            | Calls (Function_parameter local) -> "calls through " ^ name form local
+            | Metric metric -> Metric.show metric
+            | Calls (Function_parameter local) -> "calls through " ^ name local
             | Calls (Capability path) -> "calls of " ^ Path.show path
             | Calls (Capability_method (path, method_)) ->
                 "calls of " ^ Path.show path ^ "." ^ method_
@@ -349,7 +315,6 @@ let () =
           resource ^ " "
           ^
           match cost.bound with
-          | Finite -> "finite"
           | Order_of _ -> "of an order"
           | At_most _ -> "at most"
           | Exactly _ -> "exactly")
@@ -363,24 +328,32 @@ let () =
     Fixtures.Core.ensures_with_log_and_power list_applied [ "log"; "power" ];
   expect "a function of the file named `power` is called in a specification"
     Fixtures.Core.function_named_power list_applied [ "call app::main::power" ];
+  let list_method_costs form =
+    List.filter_map
+      (fun (node : Core.expression) ->
+        match node.kind with
+        | Method_cost { metric; method_ = Trait_method { self_type; evidence; _ } as method_ } ->
+            Some
+              (Printf.sprintf "%s(%s) for %s by %s" (Metric.show metric)
+                 (Core_lint.show_target method_) (Types.show self_type)
+                 (match evidence with Bound -> "a bound" | Impl _ -> "an impl" | Dynamic -> "any"))
+        | Method_cost { metric; method_ } ->
+            Some (Printf.sprintf "%s(%s)" (Metric.show metric) (Core_lint.show_target method_))
+        | _ -> None)
+      (list_expressions form)
+  in
   expect "the time of a method of a type parameter's bound names the trait method"
-    Fixtures.Core.cost_naming_time_of_a_bounds_method
-    (fun form ->
-      List.filter_map
-        (fun (node : Core.expression) ->
-          match node.kind with
-          | Method_time (Trait_method { self_type; evidence; _ } as callee) ->
-              Some
-                (Printf.sprintf "time(%s) for %s by %s" (Core_lint.show_callee callee)
-                   (Types.show self_type)
-                   (match evidence with
-                   | Bound -> "a bound"
-                   | Impl _ -> "an impl"
-                   | Dynamic -> "any"))
-          | Method_time callee -> Some ("time(" ^ Core_lint.show_callee callee ^ ")")
-          | _ -> None)
-        (list_expressions form))
+    Fixtures.Core.cost_naming_time_of_a_bounds_method list_method_costs
     [ "time(standard::core::Equal.equal) for Element by a bound" ];
+  expect "the allocations of a method of a bound name the trait method and the resource"
+    Fixtures.Core.cost_naming_allocations_of_a_callback_and_a_bounds_method list_method_costs
+    [
+      "allocations(standard::core::Equal.equal) for Element by a bound";
+      "allocated_bytes(standard::core::Equal.equal) for Element by a bound";
+    ];
+  expect "the allocations of a callback are a specification function of the resource"
+    Fixtures.Core.cost_naming_allocations_of_a_callback_and_a_bounds_method list_applied
+    [ "call standard::list::List.length"; "allocations"; "allocated_bytes" ];
   Harness.test "in a trait, `time(Self.method)` names the trait's own method" (fun () ->
       Support.expect_no_diagnostics
         ~check:(fun packages module_ ->
@@ -394,11 +367,11 @@ let () =
       let packages = Support.setup [ ("app::main", text) ] in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
-          let key = Resolve.Names.make_key declaration in
+          let key = declaration.key in
           match
             ( find_core packages key,
-              (Support.make_names packages key.module_.package).read_spans key,
-              (Support.make_names packages key.module_.package).read_text key )
+              (Support.make_names packages).read_spans key,
+              (Support.make_names packages).read_text key )
           with
           | ( Some { definition = Function { contract = { costs = [ cost ]; _ }; _ }; _ },
               spans,
@@ -420,8 +393,7 @@ let () =
           forms :=
             !forms
             + Core_lint.check_file
-                (Database.make_interface_lookups (Support.make_database packages)
-                   [ file.module_.package ])
+                (Database.make_interface_lookups (Support.make_database packages))
                 ~find_core:(find_core packages) file))
     Standard_library.files;
   Harness.test "the standard library has core forms" (fun () ->
@@ -449,9 +421,7 @@ let () =
     "every method of a derived impl in the standard library has a core form that satisfies the \
      invariants" (fun () ->
       let packages = Support.setup [] in
-      let interface =
-        Database.make_interface_lookups (Support.make_database packages) [ Path.standard_package ]
-      in
+      let interface = Database.make_interface_lookups (Support.make_database packages) in
       let derived =
         List.filter_map
           (fun (_, (impl : Path.t)) -> match impl with Derived _ -> Some impl | _ -> None)
@@ -503,13 +473,12 @@ let () =
   in
   let read_method_core name =
     let packages = Support.setup [ ("app::main", text) ] in
-    let both_package = Path.locate_package both in
     let parameter : Types.parameter = { owner = both; name = "Value" } in
     let list_bounds (actual : Types.parameter) = if actual = parameter then [ described ] else [] in
     let owner =
       match
         Interface.Impls.find_evidence
-          (Database.make_interface_lookups (Support.make_database packages) [ both_package ])
+          (Database.make_interface_lookups (Support.make_database packages))
           ~list_bounds
           (Types.make_named both [ Types.Parameter parameter ])
           described
@@ -522,11 +491,11 @@ let () =
         (Method { owner; name; receiver = Read })
     with
     | Some (form, substitution) ->
-        ( form_of form,
+        ( form,
           List.map
             (fun ((parameter : Types.parameter), argument) ->
               parameter.name ^ " = " ^ Types.show_argument argument)
-            substitution )
+            (Types.For_testing.list_arguments substitution) )
     | None -> failwith "no core form"
   in
   let list_observed name =
@@ -553,7 +522,10 @@ let () =
           Database.For_testing.read_core (Support.make_database packages)
             (Method { owner; name = "not_equal"; receiver = Read }) )
       with
-      | Some (_, []), Some (_, [ _ ]) -> ()
+      | Some (_, derived), Some (_, inherited)
+        when Types.For_testing.list_arguments derived = []
+             && List.length (Types.For_testing.list_arguments inherited) = 1 ->
+          ()
       | _ ->
           Harness.fail
             "expected the derived method with no substitution and the inherited method with one")
@@ -577,19 +549,109 @@ let () =
     (Fixtures.Core.pair_ordering
    ^ "proof Ordered.agrees_with_equal for Pair {\n  only_equal(first, second: second)\n}\n")
     (fun form ->
-      (match form.core.definition with
+      (match form.definition with
         | Law_proof { parameters; _ } ->
             List.map
               (fun (parameter : Core.parameter) ->
-                Printf.sprintf "%s: %s, %s" parameter.name (Types.show parameter.type_)
-                  (match parameter.local with
-                  | Synthetic index -> Printf.sprintf "synthetic local %d" index
-                  | Named _ | Self -> "not synthetic"))
+                match parameter.local with
+                | Trait_parameter { index; name } ->
+                    Printf.sprintf "%s: %s, trait parameter %d" name (Types.show parameter.type_)
+                      index
+                | Declared _ | Self | Synthetic _ -> "not a trait parameter")
               parameters
         | _ -> [ "not a law's proof" ])
       @ list_final_expressions form)
     [
-      "first: Pair, synthetic local 0";
-      "second: Pair, synthetic local 1";
+      "first: Pair, trait parameter 0";
+      "second: Pair, trait parameter 1";
       "app::main::only_equal(place first, place second)";
     ]
+
+let () =
+  let show_callee (callee : Core.callee) =
+    Printf.sprintf "%s uses [%s]"
+      (Core_lint.show_target callee.target)
+      (String.concat ", " (list_capabilities callee.uses))
+  in
+  let text = Fixtures.Core.slice_match_on_a_constant_and_loop_over_a_ticking_countdown in
+  expect
+    "a slice, a pattern that compares with a constant, and a loop over a cursor each hold their \
+     callee with the capability set that the callee gives"
+    text
+    (fun form ->
+      let held = ref [] in
+      Core_walk.walk_definition
+        {
+          Core_walk.ignore_all with
+          expression =
+            (fun node ->
+              match node.kind with
+              | Slice { callee; _ } -> held := ("a slice holds " ^ show_callee callee) :: !held
+              | _ -> ());
+          statement =
+            (fun node ->
+              match node.kind with
+              | For { iteration = Cursor { next; _ }; _ } ->
+                  held := ("a loop holds " ^ show_callee next) :: !held
+              | _ -> ());
+          pattern =
+            (fun node ->
+              match node.kind with
+              | Equal_to { equal; _ } -> held := ("a pattern holds " ^ show_callee equal) :: !held
+              | _ -> ());
+        }
+        form.definition;
+      List.rev !held)
+    [
+      "a loop holds standard::core::Cursor.next uses [app::main::Meter]";
+      "a slice holds standard::list::List.slice_from uses []";
+      "a pattern holds standard::core::Equal.equal uses []";
+    ];
+  expect "the walker hands every callee that a body invokes to its callee hook" text
+    (fun form ->
+      let invoked = ref [] in
+      Core_walk.walk_definition
+        {
+          Core_walk.ignore_all with
+          callee = (fun callee -> invoked := show_callee callee :: !invoked);
+        }
+        form.definition;
+      List.rev !invoked)
+    [
+      "standard::core::Cursor.next uses [app::main::Meter]";
+      "standard::list::List.slice_from uses []";
+      "standard::core::Equal.equal uses []";
+      "standard::list::Slice.length uses []";
+    ];
+  Harness.test "the callee of an intrinsic holds the capabilities that the intrinsic uses"
+    (fun () ->
+      let probe = Support.parse_file "standard::probe" in
+      let database =
+        Support.extend_standard_library
+          [
+            {
+              name = Path.standard_package;
+              dependencies = [];
+              files = [ (probe, Fixtures.Capabilities.shared_count_updated_using_tasks) ];
+            };
+          ]
+      in
+      let key : Resolve.Names.key =
+        {
+          module_ = probe.module_;
+          path = Top { module_ = probe.module_; name = "add" };
+          ordinal = 0;
+        }
+      in
+      match Database.read_checked_body database key with
+      | Some { form; _ } ->
+          Core_lint.check (Database.make_interface_lookups database) key form;
+          expect_observed
+            [ "intrinsic::shared_update uses [standard::capabilities::Tasks]" ]
+            (List.filter_map
+               (fun (call : Core.call) ->
+                 match call.callee.target with
+                 | Intrinsic _ -> Some (show_callee call.callee)
+                 | Function _ | Trait_method _ | Capability_method _ | Indirect _ -> None)
+               (list_calls form))
+      | None -> Harness.fail "`add` has no core form")

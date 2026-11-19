@@ -15,7 +15,7 @@ type t = {
   mutable cookies : int;
 }
 
-type changes = Changed of string list | Overflow | Removed
+type changes = Changed of string list | Rescan | Removed
 
 let synchronization_limit = 2.0
 
@@ -70,7 +70,10 @@ let drain watcher =
       relatives;
   (relatives, is_overflowed)
 
-let read_changes watcher =
+let list_relevant watcher relatives =
+  List.filter (fun relative -> relative = "" || not (is_skipped watcher relative)) relatives
+
+let synchronize watcher ~pending_paths ~is_overflowed =
   watcher.cookies <- watcher.cookies + 1;
   let cookie =
     Printf.sprintf "%s/sync-%d-%d" watcher.cookie_directory (Unix.getpid ()) watcher.cookies
@@ -78,31 +81,39 @@ let read_changes watcher =
   let cookie_path = Filename.concat watcher.root cookie in
   let rec wait ~deadline paths is_overflowed =
     let remaining = deadline -. Unix.gettimeofday () in
-    if remaining <= 0. then Overflow
+    if remaining <= 0. then Rescan
     else
       match Unix.select [ extract_descriptor watcher ] [] [] remaining with
       | exception Unix.Unix_error (EINTR, _, _) -> wait ~deadline paths is_overflowed
-      | [], _, _ -> Overflow
+      | [], _, _ -> Rescan
       | _ ->
-          let relatives, overflowed = drain watcher in
-          let is_overflowed = is_overflowed || overflowed in
-          let paths =
-            List.filter
-              (fun relative ->
-                not (String.starts_with ~prefix:(watcher.cookie_directory ^ "/") relative))
-              relatives
-            @ paths
-          in
+          let relatives, has_overflowed = drain watcher in
+          let is_overflowed = is_overflowed || has_overflowed in
+          let paths = list_relevant watcher relatives @ paths in
           if List.mem cookie relatives then
-            if is_overflowed then Overflow else Changed (List.sort_uniq compare paths)
+            if is_overflowed then Rescan else Changed (List.sort_uniq compare paths)
           else wait ~deadline paths is_overflowed
   in
   match Unix.openfile cookie_path [ O_WRONLY; O_CREAT; O_CLOEXEC ] 0o644 with
   | exception Unix.Unix_error (ENOENT, _, _) -> Removed
   | descriptor ->
       Unix.close descriptor;
-      let changes = wait ~deadline:(Unix.gettimeofday () +. synchronization_limit) [] false in
+      let changes =
+        wait ~deadline:(Unix.gettimeofday () +. synchronization_limit) pending_paths is_overflowed
+      in
       (try Sys.remove cookie_path with Sys_error _ -> ());
       changes
 
+let read_changes watcher = synchronize watcher ~pending_paths:[] ~is_overflowed:false
+
+let read_pending_changes watcher =
+  let relatives, is_overflowed = drain watcher in
+  match list_relevant watcher relatives with
+  | [] when not is_overflowed -> Changed []
+  | pending_paths -> synchronize watcher ~pending_paths ~is_overflowed
+
 let stop watcher = close watcher.handle
+
+module For_testing = struct
+  let is_delivered_before_synchronizing () = not (is_recursive ())
+end

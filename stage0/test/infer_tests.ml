@@ -13,11 +13,11 @@ let locate_expression text written occurrence =
   let actual =
     List.find_map
       (fun (declaration : Resolve.Names.declaration) ->
-        let key = Resolve.Names.make_key declaration in
+        let key = declaration.key in
         match
-          ( (Support.make_names packages key.module_.package).read_definition key,
-            (Support.make_names packages key.module_.package).read_spans key,
-            (Support.make_names packages key.module_.package).read_place key,
+          ( (Support.make_names packages).read_definition key,
+            (Support.make_names packages).read_spans key,
+            (Support.make_names packages).read_place key,
             Database.read_checked_body (Support.make_database packages) key )
         with
         | definition, spans, { base; _ }, Some result ->
@@ -40,7 +40,7 @@ let locate_expression text written occurrence =
             Syntax_walk.visit_definition visit definition;
             Option.map (fun value -> (value, result)) !best
         | _ -> None)
-      ((Support.make_names packages file.module_.package).list_declarations_in file)
+      ((Support.make_names packages).list_declarations_in file)
   in
   match actual with
   | Some actual -> actual
@@ -80,7 +80,15 @@ let is_view : Core.argument -> bool = function
       {
         value =
           Value
-            { kind = Call { callee = Function { path = Method { name = "slice"; _ }; _ }; _ }; _ };
+            {
+              kind =
+                Call
+                  {
+                    callee = { target = Function { path = Method { name = "slice"; _ }; _ }; _ };
+                    _;
+                  };
+              _;
+            };
         _;
       } ->
       true
@@ -115,9 +123,13 @@ let () =
           ]
       in
       let file = Support.parse_file "app::main" in
-      if List.length (Support.parse_errors packages file) <> 2 then
+      let database = Support.make_database packages in
+      if List.length (Database.For_testing.list_diagnostics [ Parse ] database file) <> 2 then
         Harness.fail "expected two syntax errors";
-      match Support.list_codes (check packages file) with
+      match
+        Support.list_codes
+          (Database.For_testing.list_diagnostics [ Resolve; Interface; Infer ] database file)
+      with
       | [ "types.mismatch" ] -> ()
       | reported -> Harness.fail "reported [%s]" (String.concat "; " reported));
   Harness.test "a literal takes the type of the other operand" (fun () ->
@@ -186,7 +198,7 @@ let () =
       expect_fine Fixtures.Infer.loop_annotating_a_destructured_element);
   Harness.test "a loop's annotation must be its element type" (fun () ->
       expect_one_diagnostic Fixtures.Infer.loop_over_uint16s_annotated_uint8 "types.mismatch"
-        ~says:"The elements of this loop are `UInt16`, not `UInt8`.");
+        ~says:"Each element of this loop is `UInt16`, not `UInt8`.");
   Harness.test
     "a loop variable given its default type by a method call has a fix that annotates the loop"
     (fun () ->
@@ -204,13 +216,38 @@ let () =
   Harness.test "comparing integer types that differ is an error with a fix that converts" (fun () ->
       expect_one_diagnostic Fixtures.Infer.comparison_of_uint64_and_uint32
         "types.mismatched_integers" ~fixed:Fixtures.Infer.comparison_of_uint64_and_uint32_fixed);
+  Harness.test "a comparison views a list, an array, or a string that meets its view" (fun () ->
+      expect_fine Fixtures.Infer.comparisons_of_owners_and_views);
+  Harness.test "a comparison of a list with a slice of another element type is a mismatch"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.comparison_of_a_list_and_a_slice_of_another_element
+        "types.mismatch");
+  Harness.test
+    "a read-only parameter whose type is a type parameter or an associated type takes a view of \
+     the list or the string it stands for" (fun () ->
+      expect_fine Fixtures.Infer.views_passed_as_owners_to_generic_parameters);
+  Harness.test "a parameter declared as a string takes no string slice" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.string_slice_passed_to_a_string_parameter
+        "types.mismatch");
+  Harness.test "an `own` parameter takes no view of its owning type" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.string_slice_passed_as_an_own_key "types.mismatch");
+  Harness.test "a slice is not passed as an array" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.slice_passed_as_an_array_key "types.mismatch");
+  Harness.test "a slice of bytes is not passed as a string" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.byte_slice_passed_as_a_string_key "types.mismatch");
+  Harness.test "a string slice is not the receiver of a string's method" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.string_slice_passed_as_a_string_receiver "types.mismatch");
   Harness.test "+ on strings is an error with a fix to interpolation" (fun () ->
       expect_one_diagnostic Fixtures.Infer.string_plus_a_string "types.string_addition"
         ~fixed:Fixtures.Infer.string_plus_a_string_fixed);
   Harness.test "an operator chooses the impl by both operands" (fun () ->
       let text = Fixtures.Infer.additions_of_meters_and_integers in
       match locate_core_call text "length + extra" 1 with
-      | { callee = Trait_method { evidence = Impl { impl; _ }; name = "add"; _ }; _ }, _ -> (
+      | ( {
+            callee = { target = Trait_method { evidence = Impl { impl; _ }; name = "add"; _ }; _ };
+            _;
+          },
+          _ ) -> (
           match impl with
           | Impl { trait = { arguments = [ Named { path = Top { name = "Int64"; _ }; _ } ]; _ }; _ }
             ->
@@ -222,7 +259,8 @@ let () =
       List.iter
         (fun written ->
           match locate_core_call text written 1 with
-          | { callee = Trait_method { name = "compare"; evidence = Bound; _ }; _ }, result ->
+          | ( { callee = { target = Trait_method { name = "compare"; evidence = Bound; _ }; _ }; _ },
+              result ) ->
               if Types.show result <> "Ordering" then
                 Harness.fail "`%s` calls a `compare` that gives `%s`" written (Types.show result)
           | _ -> Harness.fail "`%s` is another call" written)
@@ -308,11 +346,114 @@ let () =
       match locate_core_call text "greet(name)" 1 with
       | { arguments = [ argument ]; _ }, _ when is_view argument -> ()
       | _ -> Harness.fail "no conversion recorded");
+  Harness.test "an `Array` passed where a `Slice` is expected is viewed" (fun () ->
+      let text = Fixtures.Infer.sum_of_an_array_passed_as_a_slice in
+      match locate_core_call text "total(values)" 1 with
+      | { arguments = [ argument ]; _ }, _ when is_view argument -> ()
+      | _ -> Harness.fail "no conversion recorded");
+  Harness.test "an `Array` receiver finds a method of `Slice` and is viewed" (fun () ->
+      let text = Fixtures.Infer.contains_of_an_array in
+      match locate_core_call text "values.contains(1)" 1 with
+      | { arguments = [ receiver; _ ]; _ }, _ when is_view receiver -> ()
+      | _ -> Harness.fail "no conversion recorded");
+  Harness.test "an `Array` receiver passed `mut` to a method of `Slice` is sliced whole" (fun () ->
+      let text = Fixtures.Infer.sort_of_a_mut_array in
+      match locate_core_call text "values.sort()" 1 with
+      | { arguments = [ Passed { mode = Mut; value = Value { kind = Slice _; _ } } ]; _ }, _ -> ()
+      | _ -> Harness.fail "the receiver is not a slice of the whole array");
+  Harness.test
+    "a type argument of a view's method is counted after the view's parameters, not the array's"
+    (fun () -> expect_fine Fixtures.Infer.zip_of_an_array_with_a_type_argument);
   Harness.test "a capability's method views a String argument too" (fun () ->
       let text = Fixtures.Infer.print_line_of_a_string in
       match locate_core_call text "Console.print_line(name)" 1 with
       | { arguments = [ argument ]; _ }, _ when is_view argument -> ()
       | _ -> Harness.fail "no conversion recorded");
+  Harness.test "a `String` receiver finds a method of `StringSlice` and is viewed" (fun () ->
+      let text = Fixtures.Infer.to_string_of_a_string_and_of_a_literal in
+      match locate_core_call text "name.to_string()" 1 with
+      | { arguments = [ receiver ]; _ }, _ when is_view receiver -> ()
+      | _ -> Harness.fail "no conversion recorded");
+  Harness.test "a `List` receiver finds a method of `Slice` and is viewed" (fun () ->
+      let text = Fixtures.Infer.contains_of_a_list in
+      match locate_core_call text "items.contains(1)" 1 with
+      | { arguments = [ receiver; _ ]; _ }, _ when is_view receiver -> ()
+      | _ -> Harness.fail "no conversion recorded");
+  Harness.test "a `List` receiver passed `mut` to a method of `Slice` is sliced whole" (fun () ->
+      let text = Fixtures.Infer.sort_of_a_mut_list in
+      match locate_core_call text "items.sort()" 1 with
+      | ( {
+            arguments =
+              [
+                Passed
+                  {
+                    mode = Mut;
+                    value =
+                      Value
+                        {
+                          kind =
+                            Slice
+                              {
+                                callee =
+                                  {
+                                    target =
+                                      Function { path = Method { name = "slice_from"; _ }; _ };
+                                    _;
+                                  };
+                                _;
+                              };
+                          _;
+                        };
+                  };
+              ];
+            _;
+          },
+          _ ) ->
+          ()
+      | _ -> Harness.fail "the receiver is not a slice of the whole list");
+  Harness.test
+    "a `List` calling a method of `Slice` that takes `mut self` needs the mode keyword, with a fix \
+     that adds it" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.sort_of_a_list_without_mut "types.missing_mode"
+        ~fixed:Fixtures.Infer.sort_of_a_mut_list);
+  Harness.test "a string literal receiver finds a method of `StringSlice` and is viewed" (fun () ->
+      let text = Fixtures.Infer.to_string_of_a_string_and_of_a_literal in
+      match locate_core_call text "\"x\".to_string()" 1 with
+      | { arguments = [ receiver ]; _ }, _ when is_view receiver -> ()
+      | _ -> Harness.fail "no conversion recorded");
+  List.iter
+    (fun (type_name, written) ->
+      Harness.test
+        (Printf.sprintf
+           "a method of `StringSlice` written in full through `%s` views a `String` receiver"
+           type_name) (fun () ->
+          let text = Fixtures.Infer.string_slice_method_in_full_of_a_string in
+          match locate_core_call text written 1 with
+          | { arguments = [ receiver ]; _ }, _ when is_view receiver -> ()
+          | _ -> Harness.fail "no conversion recorded"))
+    [ ("StringSlice", "StringSlice.to_string(name)"); ("String", "String.to_string(name)") ];
+  Harness.test
+    "the receiver's mode chooses between a `String`'s own overload and its view's overload"
+    (fun () ->
+      let text = Fixtures.Infer.to_bytes_of_a_string_read_and_owned in
+      let find_owner occurrence =
+        match locate_core_call text "name.to_bytes()" occurrence with
+        | { callee = { target = Function { path = Method { owner; receiver; _ }; _ }; _ }; _ }, _ ->
+            (Well_known.of_path owner, receiver)
+        | _ -> failwith "the callee is not a method"
+      in
+      if find_owner 1 <> (Some String_slice, Read) then
+        Harness.fail "a read-only receiver does not call the view's overload";
+      if find_owner 2 <> (Some String, Own) then
+        Harness.fail "an `own` receiver does not call the `String`'s own overload");
+  Harness.test "a method of a view takes no `mut` receiver" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.to_string_of_a_string_passed_mut "types.wrong_receiver");
+  Harness.test "an unknown method of a `String` is reported for it and for its view" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.unknown_method_of_a_string "types.unknown_member"
+        ~says:"neither has its view `StringSlice`");
+  Harness.test "a method value names the view that defines the method" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.to_string_of_string_as_a_value "types.unknown_member"
+        ~says:"`StringSlice.to_string`");
   Harness.test "a string literal is a StringSlice where one is expected, and a String elsewhere"
     (fun () ->
       let text = Fixtures.Infer.string_literals_kept_and_printed in
@@ -349,6 +490,11 @@ let () =
         "types.unknown_member");
   Harness.test "own on a place of a hole's type is not redundant" (fun () ->
       expect_fine Fixtures.Infer.own_before_a_local_bound_to_todo);
+  Harness.test "a redundant own is reported once a later element of the statement solves the type"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.own_before_a_lambda_parameter_solved_later_as_an_integer
+        "types.redundant_mode"
+        ~fixed:Fixtures.Infer.own_before_a_lambda_parameter_solved_later_as_an_integer_fixed);
   Harness.test "a mut receiver chooses the method's mut overload" (fun () ->
       expect_fine Fixtures.Infer.mut_push_onto_a_var_list);
   Harness.test
@@ -356,6 +502,91 @@ let () =
     (fun () ->
       expect_one_diagnostic Fixtures.Infer.push_without_mut "types.missing_mode"
         ~fixed:Fixtures.Infer.push_without_mut_fixed)
+
+let () =
+  let shapes = Fixtures.Infer.others_shape_with_private_members in
+  let others = [ ("app::shapes", shapes) ] in
+  List.iter
+    (fun (use, fixture) ->
+      Harness.test (Printf.sprintf "another module's private %s is not visible" use) (fun () ->
+          expect_one_diagnostic ~others fixture "types.member_not_visible"
+            ~says:"private to its module"))
+    [
+      ("method, called with a dot,", Fixtures.Infer.call_of_another_modules_private_method);
+      ("method, called in full,", Fixtures.Infer.call_in_full_of_another_modules_private_method);
+      ("static method", Fixtures.Infer.call_of_another_modules_private_static_method);
+      ("member constant", Fixtures.Infer.read_of_another_modules_private_member_constant);
+      ("method, used as a value,", Fixtures.Infer.another_modules_private_method_as_a_value);
+      ( "member constant, in a pattern,",
+        Fixtures.Infer.pattern_of_another_modules_private_member_constant );
+    ];
+  Harness.test "an internal method and a public method of another module are visible" (fun () ->
+      expect_no_diagnostics
+        [
+          ("app::main", Fixtures.Infer.calls_of_another_modules_internal_and_public_methods);
+          ("app::shapes", shapes);
+        ]);
+  Harness.test "an internal method of another package is not visible" (fun () ->
+      expect_one_diagnostic
+        ~setup:(Support.setup ~dependencies:[ ("app", "tools") ])
+        ~others:[ ("tools::shapes", shapes) ]
+        Fixtures.Infer.call_of_another_packages_internal_method "types.member_not_visible"
+        ~says:"internal to its package");
+  Harness.test "a call with a dot does not find a method of another module's private trait"
+    (fun () ->
+      expect_one_diagnostic ~others Fixtures.Infer.call_of_a_method_of_another_modules_private_trait
+        "types.unknown_member");
+  List.iter
+    (fun (construct, fixture) ->
+      Harness.test
+        (Printf.sprintf
+           "%s over another module's private `count` and `element` names the hidden method"
+           construct) (fun () ->
+          expect_one_diagnostic ~others fixture "types.member_not_visible"
+            ~says:"`app::shapes::Shape.count` is private to its module"))
+    [
+      ("a loop", Fixtures.Infer.loop_over_a_type_with_a_private_loop_protocol);
+      ("a quantifier", Fixtures.Infer.quantifier_over_a_type_with_a_private_loop_protocol);
+    ];
+  Harness.test "reading another module's private method as a field does not reveal the method"
+    (fun () ->
+      expect_one_diagnostic ~others Fixtures.Infer.field_read_of_another_modules_private_method
+        "types.unknown_member" ~says:"has no field `secret`");
+  Harness.test
+    "a call with a dot reaches a trait's method where the type's own method of its name is hidden"
+    (fun () ->
+      let packages =
+        Support.setup
+          ~dependencies:[ ("app", "tools") ]
+          [
+            ( "app::main",
+              Fixtures.Infer.call_of_a_trait_method_named_like_another_packages_internal_method );
+            ("tools::kits", Fixtures.Infer.kit_with_an_internal_part);
+          ]
+      in
+      let list_callees module_ definition_name =
+        let file = Support.parse_file module_ in
+        (match check packages file with
+        | [] -> ()
+        | reported ->
+            Harness.fail "%s: %s" module_ (String.concat "; " (Support.list_codes reported)));
+        List.concat_map
+          (fun (declaration : Resolve.Names.declaration) ->
+            match declaration.key.path with
+            | (Top { name; _ } | Method { name; _ }) when name = definition_name ->
+                List.filter_map
+                  (fun (node : Core.expression) ->
+                    match node.kind with Call { callee; _ } -> Some callee.target | _ -> None)
+                  (Support.collect_core_nodes packages declaration.key).expressions
+            | _ -> [])
+          (Support.list_declarations packages file.module_)
+      in
+      (match list_callees "app::main" "f" with
+      | [ Trait_method { name = "part"; _ } ] -> ()
+      | _ -> Harness.fail "the call in `app` does not reach `Parted.part`");
+      match list_callees "tools::kits" "measure" with
+      | [ Function { path = Method { name = "part"; receiver = Read; _ }; _ } ] -> ()
+      | _ -> Harness.fail "the call in `tools` does not reach `Kit.part`")
 
 let () =
   Harness.test "a statement's value must be used, with a fix that discards it" (fun () ->
@@ -367,6 +598,9 @@ let () =
     (fun () ->
       expect_one_diagnostic Fixtures.Infer.cost_naming_time_of_an_undeclared_method
         "types.unknown_member");
+  Harness.test "the base of a record update cannot be passed `mut`" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.record_update_of_a_base_passed_mut "types.wrong_mode"
+        ~says:"so the base is passed `own`, not `mut`");
   Harness.test "a let cannot be assigned" (fun () ->
       expect_one_diagnostic Fixtures.Infer.assignment_to_a_let "types.not_assignable");
   List.iter
@@ -441,7 +675,7 @@ let () =
   Harness.test "a constant under a type is read by name" (fun () ->
       expect_type Fixtures.Infer.uint8_maximum "UInt8.maximum" "UInt8");
   Harness.test "a trait method through a type chooses the impl by the argument" (fun () ->
-      expect_fine Fixtures.Infer.int64_from_an_int32)
+      expect_fine Fixtures.Infer.big_integer_from_an_int64)
 
 let () =
   Harness.test "an unknown variant in a pattern is an error" (fun () ->
@@ -471,6 +705,10 @@ let () =
        expect_one_diagnostic
          (sessions ^ Fixtures.Infer.monitor_table_with_a_callback)
          "capabilities.callback_may_deadlock");
+   Harness.test
+     "a capability implemented by a monitor may take a callback that uses only `Panic` and \
+      `RunForever`, since no `provide` implements either" (fun () ->
+       expect_fine Fixtures.Infer.monitor_table_with_callbacks_that_use_only_built_in_capabilities);
    Harness.test "an implementation is not a monitor if the body of its `provide` cannot use `Tasks`"
      (fun () -> expect_fine (sessions ^ Fixtures.Infer.table_provided_without_tasks));
    let tally = Fixtures.Infer.tally in
@@ -555,14 +793,62 @@ let () =
   Harness.test "an array literal must have its type's length" (fun () ->
       expect_one_diagnostic Fixtures.Infer.array_literal_of_the_wrong_length "types.mismatch");
   Harness.test "a list literal is a set where a set is expected" (fun () ->
-      expect_fine Fixtures.Infer.list_literal_as_a_set)
+      expect_fine Fixtures.Infer.list_literal_as_a_set);
+  Harness.test "a list literal is a deque where a deque is expected" (fun () ->
+      expect_fine Fixtures.Infer.list_literal_as_a_deque);
+  Harness.test "a map literal is a sorted map where a sorted map is expected" (fun () ->
+      expect_fine Fixtures.Infer.map_literal_as_a_sorted_map);
+  Harness.test
+    "a loop over a generic trait's elements leaves the trait's arguments to inference, not its \
+     parameter" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.loop_over_the_elements_of_a_generic_trait
+        "types.cannot_infer"
+        ~says:
+          "This loop does not determine the arguments of `Bag`, whose methods give its elements."
+        ~at:("pair {", 1));
+  Harness.test "a list literal is a type that implements FromElements" (fun () ->
+      expect_fine Fixtures.Infer.list_literal_as_a_type_with_from_elements;
+      expect_type Fixtures.Infer.list_literal_as_a_type_with_from_elements "[1, 2, 3]"
+        "Stack[Int64]");
+  Harness.test "a map literal is a type that implements FromEntries" (fun () ->
+      expect_fine Fixtures.Infer.map_literal_as_a_type_with_from_entries);
+  Harness.test "a list literal is a type parameter that FromElements bounds" (fun () ->
+      expect_fine Fixtures.Infer.list_literal_as_a_bounded_type_parameter);
+  Harness.test "a literal's elements take the element type of the expected collection" (fun () ->
+      expect_type Fixtures.Infer.list_literal_of_set_literals "[1, 2]" "Set[Int64]");
+  Harness.test "a list literal needs the conditions of the collection's impl" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.list_literal_as_a_type_whose_impl_needs_more
+        "types.no_impl" ~says:"`Ranked[Point]` does not implement `FromElements`.");
+  Harness.test "a list literal is not a type that implements no literal trait" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.list_literal_as_a_heap "types.mismatch");
+  Harness.test "new on a type that takes a list literal names the literal" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.new_on_a_list "types.unknown_member"
+        ~says:"The literal `[]` is an empty `List[_]`." ~fixed:Fixtures.Infer.new_on_a_list_fixed);
+  Harness.test "new on a type that takes a map literal names the literal" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.new_on_a_sorted_map "types.unknown_member"
+        ~says:"The literal `[:]` is an empty" ~fixed:Fixtures.Infer.new_on_a_sorted_map_fixed);
+  Harness.test "new where nothing expects the collection names the literal and offers no fix"
+    (fun () ->
+      let text = Fixtures.Infer.new_on_a_list_with_type_arguments in
+      expect_one_diagnostic text "types.unknown_member"
+        ~says:"The literal `[]` is an empty `List[String]`.";
+      List.iter
+        (fun (diagnostic : Diagnostic.t) ->
+          if diagnostic.fixes <> [] then
+            Harness.fail "`[]` alone would not say which collection it is, and a fix is offered")
+        (check (Support.setup [ ("app::main", text) ]) (Support.parse_file "app::main")))
 
 let () =
   Harness.test "deriving Deserialize needs every invariant clause to run" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.deserialize_of_scores_with_a_quantified_invariant
+      expect_one_diagnostic Fixtures.Infer.deserialize_of_digits_with_an_invariant_over_a_type
+        "types.cannot_derive");
+  Harness.test "deriving Deserialize needs an invariant that names no `identical`" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.deserialize_of_rivals_with_an_invariant_naming_identical
         "types.cannot_derive");
   Harness.test "deriving Deserialize accepts an invariant that runs" (fun () ->
       expect_fine Fixtures.Infer.deserialize_of_bounds_with_an_invariant);
+  Harness.test "deriving Deserialize accepts an invariant that quantifies over a range" (fun () ->
+      expect_fine Fixtures.Infer.deserialize_of_scores_with_an_invariant_over_a_range);
   Harness.test "integer arithmetic in a specification is exact" (fun () ->
       expect_type Fixtures.Infer.ensures_of_a_sum "a + b" "Integer");
   Harness.test "comparisons in a specification may mix integer types" (fun () ->
@@ -589,8 +875,7 @@ let () =
       let find_type_check_result () =
         let packages = Support.setup [ ("app::main", text) ] in
         let key =
-          Resolve.Names.make_key
-            (List.hd (Support.list_declarations packages (Support.parse_module "app::main")))
+          (List.hd (Support.list_declarations packages (Support.parse_module "app::main"))).key
         in
         Database.read_checked_body (Support.make_database packages) key
       in
@@ -603,10 +888,7 @@ let () =
         (fun ((file : Path.file), _) ->
           List.iter
             (fun (declaration : Resolve.Names.declaration) ->
-              match
-                Database.read_checked_body (Support.make_database packages)
-                  (Resolve.Names.make_key declaration)
-              with
+              match Database.read_checked_body (Support.make_database packages) declaration.key with
               | Some { tables; _ } ->
                   List.iter
                     (Array.iter (function
@@ -614,11 +896,11 @@ let () =
                         when Types.exists
                                (function Variable _ | Literal _ -> true | _ -> false)
                                type_ ->
-                          Harness.fail "%s: an unsolved type" (Path.show declaration.path)
+                          Harness.fail "%s: an unsolved type" (Path.show declaration.key.path)
                       | _ -> ()))
                     [ tables.types; tables.local_types ]
               | None -> ())
-            ((Support.make_names packages file.module_.package).list_declarations_in file))
+            ((Support.make_names packages).list_declarations_in file))
         Standard_library.files)
 
 let point = "type Point(x: Int64)\n\n"
@@ -641,16 +923,14 @@ let () =
           {
             name = Path.standard_package;
             dependencies = [];
-            files =
-              Standard_library.files
-              @ List.map (fun (name, text) -> (Support.parse_file name, text)) files;
+            files = List.map (fun (name, text) -> (Support.parse_file name, text)) files;
           };
         ]
       in
       Support.expect_one_diagnostic ~setup:make_standard_packages ~file:"standard::probe"
         ~check:(fun packages ->
           Database.For_testing.list_diagnostics [ Resolve; Interface; Infer ]
-            (Database.create packages))
+            (Support.extend_standard_library packages))
         Fixtures.Infer.storage_lengthen_of_storages "types.unsatisfied_bound");
   Harness.test "a type written in a body that is not a type is an error" (fun () ->
       expect_one_diagnostic Fixtures.Infer.let_of_type_display "types.not_a_type");
@@ -740,6 +1020,50 @@ let () =
       with
       | [ (1, 5) ] -> ()
       | _ -> Harness.fail "the range pattern does not have the bounds 1 and 5");
+  Harness.test
+    "a `let` and a `match` arm copy a `Plain` value that they bind, and a loop variable, a lambda \
+     parameter, and a binding of another type do not" (fun () ->
+      let modes =
+        List.filter_map
+          (fun (node : Core.pattern) ->
+            match node.kind with
+            | Bind { local = Declared { name; _ }; mode; _ } -> Some (name, mode)
+            | _ -> None)
+          (Support.collect_first_core_nodes Fixtures.Infer.bindings_of_plain_and_other_values)
+            .patterns
+      in
+      List.iter
+        (fun (name, (expected : Types.mode)) ->
+          match List.assoc_opt name modes with
+          | Some mode when mode = expected -> ()
+          | Some _ -> Harness.fail "`%s` is bound in another mode" name
+          | None -> Harness.fail "`%s` is not bound" name)
+        [
+          ("copied", Own);
+          ("matched", Own);
+          ("viewed", Read);
+          ("each", Read);
+          ("given", Read);
+          ("count", Own);
+        ]);
+  Harness.test
+    "a compound assignment copies a `Plain` operand that its operator reads, and views an operand \
+     of another type" (fun () ->
+      let packages = Support.setup [ ("app::main", Fixtures.Infer.compound_assignment_operands) ] in
+      let assigning =
+        List.find
+          (fun (declaration : Resolve.Names.declaration) ->
+            Path.equal declaration.key.path (Support.make_top_path "app::main" "f"))
+          (Support.list_declarations packages (Support.parse_module "app::main"))
+      in
+      match
+        List.filter_map
+          (fun (node : Core.statement) ->
+            match node.kind with Compound_assign { operand; _ } -> Some operand | _ -> None)
+          (Support.collect_core_nodes packages assigning.key).statements
+      with
+      | [ Value _; Place _ ] -> ()
+      | _ -> Harness.fail "the operands are not a copy of `count` and a view of `title`");
   Harness.test "a range pattern on a type that is not an integer or Character is an error"
     (fun () -> expect_one_diagnostic Fixtures.Infer.bool_range_arm "types.mismatch");
   Harness.test "an integer range on a type that is not ordered is one error" (fun () ->
@@ -764,6 +1088,15 @@ let () =
       expect_one_diagnostic Fixtures.Infer.uint8_let_of_minus_one "types.negated_unsigned");
   Harness.test "explicit type arguments give exactly the function's own" (fun () ->
       expect_one_diagnostic Fixtures.Infer.pick_with_one_type_argument "types.arity");
+  Harness.test
+    "a written type argument gives the type parameter of a function that has a capability parameter"
+    (fun () ->
+      let text = Fixtures.Infer.make_with_a_type_argument_and_a_capability_parameter in
+      expect_fine text;
+      expect_type text "make[String](ignore)" "Option[String]");
+  Harness.test "a capability parameter takes no written type argument" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.make_with_a_type_argument_for_its_capability_parameter
+        "types.arity" ~says:"This takes 1 type argument, and 2 are given.");
   Harness.test "a type given too few arguments is one error, not a mismatch for each field"
     (fun () -> expect_one_diagnostic Fixtures.Infer.pair_built_with_one_type_argument "types.arity");
   Harness.test "an associated type that a supertrait fixes to Self is Self" (fun () ->
@@ -960,7 +1293,8 @@ let () =
   Harness.test "a pattern that does not fit its type still gives its bindings a type" (fun () ->
       expect_one_diagnostic Fixtures.Infer.some_pattern_on_an_integer "types.unknown_variant");
   Harness.test "a `todo` that nothing decides keeps the hole type in the tables" (fun () ->
-      expect_type Fixtures.Infer.let_of_todo "todo" "an undecided type")
+      let value, (result : Infer.checked) = locate_expression Fixtures.Infer.let_of_todo "todo" 1 in
+      if result.tables.types.(value.id) <> Some Types.Hole then Harness.fail "not the hole type")
 
 let shape = Fixtures.Infer.shape
 let source = Fixtures.Infer.source
@@ -1011,10 +1345,8 @@ let () =
     "the target of `calls` in a clause is a function parameter, a capability, or a capability's \
      method" (fun () ->
       let make_clause_source counted =
-        "type Point(x: Int64)\n\n\
-         fn f(count: Int64, visit: (fn() cost time finite))\n\
-        \  uses Clock\n\
-        \  cost calls(" ^ counted ^ ") <= 1\n{\n  todo\n}\n"
+        "type Point(x: Int64)\n\nfn f(count: Int64, visit: fn())\n  uses Clock\n  cost calls("
+        ^ counted ^ ") <= 1\n{\n  todo\n}\n"
       in
       expect_fine (make_clause_source "visit");
       expect_fine (make_clause_source "Clock");
@@ -1024,6 +1356,9 @@ let () =
       expect_one_diagnostic (make_clause_source "Clock.later") "types.unknown_member");
   Harness.test "a method with generic parameters is not object-safe" (fun () ->
       expect_one_diagnostic Fixtures.Infer.generic_visit_through_any "types.not_callable");
+  Harness.test "a method with a capability parameter cannot be called through any" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.visitor_with_a_capability_parameter_called_through_any
+        "types.not_callable");
   Harness.test "a method that takes or returns Self cannot be called through any" (fun () ->
       expect_one_diagnostic Fixtures.Infer.join_through_any "types.not_callable");
   Harness.test "a method whose result holds Self cannot be called through any" (fun () ->
@@ -1168,6 +1503,28 @@ let () =
       in
       expect_fine (make_implemented_source "public ");
       expect_fine (make_implemented_source "internal "));
+  Harness.test "an impl whose trait names a private type has clauses no other package reads"
+    (fun () ->
+      let make_converting_source visibility =
+        Fixtures.Infer.helper
+        ^ Printf.sprintf
+            "public trait Converts[Source] {\n\
+            \  fn convert(source: Source) -> Self\n\
+             }\n\n\
+             %stype Secret(value: Int64)\n\n\
+             public type Shown(value: Int64)\n\n\
+             impl Converts[Secret] for Shown {\n\
+            \  fn convert(source: Secret) -> Shown\n\
+            \    cost time O(1)\n\
+            \    requires small(source.value)\n\
+            \  {\n\
+            \    Shown(value: source.value)\n\
+            \  }\n\
+             }\n"
+            visibility
+      in
+      expect_fine (make_converting_source "");
+      expect_one_diagnostic (make_converting_source "public ") "types.private_in_public");
   Harness.test "a function's body can call a function that other packages cannot" (fun () ->
       expect_fine
         (make_helper_source "internal " ^ Fixtures.Infer.public_function_calling_a_private_one))
@@ -1175,3 +1532,130 @@ let () =
 let () =
   Harness.test "a bit-vector assertion names only integers and booleans" (fun () ->
       expect_one_diagnostic Fixtures.Infer.bit_vector_assertion_naming_a_list "types.not_bit_vector")
+
+let () =
+  let text = Fixtures.Infer.lambda_and_function_value_that_tick_through_a_bound in
+  Harness.test
+    "a lambda and a function value that tick through a bound have no time clause in their type"
+    (fun () ->
+      expect_fine text;
+      expect_type text "fn(source) { mut source.tick() }" "fn(mut Inner) -> UInt64";
+      expect_type text "advance" ~occurrence:2 "fn(mut Inner) -> UInt64");
+  Harness.test "the time of a method that no bound of the type declares is an error" (fun () ->
+      expect_one_diagnostic
+        "trait Ticker {\n\
+        \  fn tick(mut self) -> UInt64\n\
+         }\n\n\
+         fn f[Inner: Ticker](ticker: mut Inner) -> UInt64\n\
+        \  cost time O(time(Inner.tock))\n\
+         {\n\
+        \  mut ticker.tick()\n\
+         }\n"
+        "types.unknown_member"
+        ~says:"`Inner` has no method `tock`: no trait that bounds it declares one.");
+  Harness.test "the time of a method with two overloads that mutate or take `self` is ambiguous"
+    (fun () ->
+      expect_one_diagnostic
+        "trait Opened {\n\
+        \  fn open(mut self) -> UInt64\n\n\
+        \  fn open(own self) -> UInt64\n\
+         }\n\n\
+         fn f[Door: Opened](door: mut Door) -> UInt64\n\
+        \  cost time O(time(Door.open))\n\
+         {\n\
+        \  mut door.open()\n\
+         }\n"
+        "types.ambiguous_method" ~says:"`Door` has more than one method `open`")
+
+let () =
+  let make_each_source ?(loop_clause = "") clause =
+    Printf.sprintf
+      "fn each(items: List[Int64], count: UInt64, visit: (fn(Int64) uses generic Granted))\n\
+      \  uses generic Granted\n\
+      \  %s\n\
+       {\n\
+      \  for item in items%s {\n\
+      \    visit(item)\n\
+      \  }\n\
+       }\n"
+      clause loop_clause
+  in
+  let expect_rejected ?fixed ?loop_clause clause code ~says =
+    expect_one_diagnostic
+      ?fixed:(Option.map make_each_source fixed)
+      (make_each_source ?loop_clause clause)
+      code ~says
+  in
+  Harness.test "a bound names the allocations of a callee in `O(...)` and in `<=`" (fun () ->
+      expect_fine Fixtures.Infer.bounds_naming_the_allocations_of_a_callee);
+  Harness.test "an exact bound does not name the allocations of a callback" (fun () ->
+      expect_rejected "cost allocations == items.length() * allocations(visit)"
+        "types.upper_bound_in_exact_bound"
+        ~says:
+          "`allocations(visit)` is an upper bound on one call, and a call may spend less, so an \
+           exact amount that names it would be false for that call. State this bound with `<=` or \
+           `O(...)`.");
+  Harness.test "an exact bound does not name the allocated bytes of a callback" (fun () ->
+      expect_rejected "cost allocated_bytes == allocated_bytes(visit)"
+        "types.upper_bound_in_exact_bound"
+        ~says:"`allocated_bytes(visit)` is an upper bound on one call");
+  Harness.test "an exact bound does not name the time of a callback" (fun () ->
+      expect_rejected "cost time == time(visit)" "types.upper_bound_in_exact_bound"
+        ~says:"`time(visit)` is an upper bound on one call");
+  Harness.test "a loop's exact bound does not name the allocations of a callback" (fun () ->
+      expect_rejected "cost allocations <= items.length() * allocations(visit)"
+        ~loop_clause:"\n    cost allocations == visited.length() * allocations(visit)\n "
+        "types.upper_bound_in_exact_bound"
+        ~says:"`allocations(visit)` is an upper bound on one call");
+  Harness.test "an allocation bound does not name the time of a callback" (fun () ->
+      expect_rejected "cost allocations <= time(visit)" "types.cost_of_other_resource"
+        ~fixed:"cost allocations <= allocations(visit)"
+        ~says:
+          "`time(visit)` bounds the `time` of one call, not its `allocations`, which this clause \
+           bounds. Write `allocations(visit)`.");
+  Harness.test "a time bound does not name the allocations of a callback" (fun () ->
+      expect_rejected "cost time O(allocations(visit))" "types.cost_of_other_resource"
+        ~fixed:"cost time O(time(visit))"
+        ~says:"`allocations(visit)` bounds the `allocations` of one call, not its `time`");
+  Harness.test "an allocation bound does not name the allocated bytes of a callback" (fun () ->
+      expect_rejected "cost allocations <= allocated_bytes(visit)" "types.cost_of_other_resource"
+        ~fixed:"cost allocations <= allocations(visit)"
+        ~says:"`allocated_bytes(visit)` bounds the `allocated_bytes` of one call");
+  Harness.test "a bound on calls does not name the allocations of a callback" (fun () ->
+      expect_rejected "cost calls(visit) <= allocations(visit)" "types.cost_of_other_resource"
+        ~says:
+          "`allocations(visit)` bounds the `allocations` of one call, not the calls it makes, \
+           which this clause counts.");
+  Harness.test "the allocations of a parameter that is not a function are an error" (fun () ->
+      expect_rejected "cost allocations <= allocations(count)" "types.not_callable"
+        ~says:
+          "`allocations` takes a function parameter, as in `allocations(visit)`, or a method of a \
+           bound, as in `allocations(Element.equal)`, and `count` is a `UInt64`.");
+  Harness.test "the allocated bytes of a named function are an error" (fun () ->
+      expect_rejected "cost allocated_bytes <= allocated_bytes(each)" "types.not_callable"
+        ~says:"and `each` is neither.");
+  Harness.test "the allocations of an expression are an error" (fun () ->
+      expect_rejected "cost allocations <= allocations(count + 1)" "types.not_callable"
+        ~says:"and its operand is neither.");
+  Harness.test "the allocations of a method of a type that no bound names are an error" (fun () ->
+      expect_rejected "cost allocations <= allocations(Int64.equal)" "types.not_callable"
+        ~says:"and its operand is neither.");
+  Harness.test "the time of a parameter that is not a function is an error" (fun () ->
+      expect_rejected "cost time O(time(count))" "types.not_callable"
+        ~says:"`time` takes a function parameter, as in `time(visit)`");
+  Harness.test "the allocations of a method that no bound of the type declares are an error"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.cost_naming_allocations_of_an_undeclared_method
+        "types.unknown_member"
+        ~says:"`Element` has no method `compare`: no trait that bounds it declares one.");
+  Harness.test "the allocations of a method with two overloads that take `self` are ambiguous"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.cost_naming_allocations_of_an_overloaded_method
+        "types.ambiguous_method" ~says:"so `allocations` cannot tell which one is meant.")
+
+let () =
+  Harness.test "the body of an impl's method whose signature is not its trait's is not checked"
+    (fun () ->
+      expect_one_diagnostic
+        Fixtures.Infer.meters_fed_to_an_impl_bounding_its_item_by_another_trait_argument
+        "types.signature_mismatch" ~at:("feed", 2))

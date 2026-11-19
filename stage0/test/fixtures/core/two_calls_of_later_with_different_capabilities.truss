@@ -1,4 +1,4 @@
-fn later[capability Granted](run: (fn() uses Granted)) -> (fn() uses Granted) {
+fn later(run: (fn() uses generic Granted)) -> (fn() uses generic Granted) {
   run
 }
 

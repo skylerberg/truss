@@ -2,7 +2,11 @@ module Names = Names
 module Parts = Parts
 module Prelude = Prelude
 
-type specification_function = Walk.specification_function = Log | Power | Time | Calls
+type specification_function = Walk.specification_function =
+  | Log
+  | Power
+  | Call_cost of Metric.t
+  | Calls
 
 type target = Walk.target =
   | Binding
@@ -118,7 +122,7 @@ let resolve (lookups : Names.lookups) (key : Names.key) section =
                name)
       | _ -> ())
   | _ -> ());
-  if key.ordinal > 0 then begin
+  if key.ordinal > 0 && Path.is_resolved key.path then begin
     let span =
       match find_declared_name definition with
       | Some name -> spans.(name.id)
@@ -163,14 +167,16 @@ let resolve (lookups : Names.lookups) (key : Names.key) section =
 let list_file_diagnostics (lookups : Names.lookups) (path : Path.file) (file : Syntax.file) ~text
     ~(used : string list option) =
   let module_ = path.module_ in
-  let is_recovered (item : Syntax.definition Syntax.item) =
-    match item.value.kind with Definition_error _ -> true | _ -> item.positions.recovered <> []
+  let has_syntax_error (item : Syntax.definition Syntax.item) =
+    match item.value.kind with
+    | Definition_error _ -> true
+    | _ -> item.positions.syntax_errors <> []
   in
   let used =
     if
       List.exists
         (fun (top_level : Syntax.top_level) ->
-          is_recovered top_level.definition || List.exists is_recovered top_level.methods)
+          has_syntax_error top_level.definition || List.exists has_syntax_error top_level.methods)
         file.definitions
     then None
     else used
@@ -185,8 +191,8 @@ let list_file_diagnostics (lookups : Names.lookups) (path : Path.file) (file : S
          let span = Source.make_span item.base item.stop in
          let used_module = Names.resolve_used_module lookups ~from:module_ item.value in
          let last = Names.extract_last_name used_module in
-         if used_module = Intrinsic.module_ && module_.package <> Path.standard_package then
-           report Intrinsic_import span "Only the `standard` package can use `standard::intrinsic`."
+         if Names.is_restricted_module ~from:module_ used_module then
+           report Intrinsic_import span Names.restricted_module_message
          else if not (Names.is_visible_module lookups ~from:module_ used_module) then
            report Unknown_module span
              (Printf.sprintf "No module `%s` exists." (Path.show_module used_module))

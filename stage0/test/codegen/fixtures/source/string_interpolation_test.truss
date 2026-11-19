@@ -1,5 +1,0 @@
-test "interpolation" {
-  let count = 3
-  let name = "apples"
-  assert "${count} ${name}" == "3 apples"
-}

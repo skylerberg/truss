@@ -1,0 +1,7 @@
+fn halve(count: UInt32) -> UInt32 {
+  var halved = count
+  while halved != 0 {
+    halved = halved / 2
+  }
+  halved
+}

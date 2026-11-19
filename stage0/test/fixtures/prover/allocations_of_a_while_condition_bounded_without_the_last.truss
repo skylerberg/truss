@@ -1,0 +1,12 @@
+fn f()
+  cost allocations <= 2
+  uses RunForever
+{
+  var index: UInt32 = 0
+  while grows(index)
+    invariant index <= 2
+    cost allocations <= index
+  {
+    index = index + 1
+  }
+}

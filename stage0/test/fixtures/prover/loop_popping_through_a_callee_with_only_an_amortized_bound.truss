@@ -1,0 +1,17 @@
+fn take[Element](items: mut List[Element]) -> Option[Element]
+  cost amortized time O(1)
+{
+  mut items.pop()
+}
+
+fn f(count: UInt64)
+  cost time O(count)
+{
+  var items: List[String] = []
+  mut items.push("first")
+  for index in 0..count
+    cost time O(index)
+  {
+    let _ = take(mut items)
+  }
+}

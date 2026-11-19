@@ -11,7 +11,7 @@ type while_loop = {
 
 type iterable =
   | Over_range of { low : Logic.term; high : Logic.term; inclusive : bool }
-  | Over_cursor of { cursor : State.passed_place; cursor_type : Types.ty; next : Invocation.callee }
+  | Over_cursor of { cursor : State.passed_place; cursor_type : Types.ty; next : Invocation.t }
 
 type for_loop = {
   for_at : Core.origin;

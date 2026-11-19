@@ -1,0 +1,9 @@
+trait Step {
+  fn step(self) -> Int64 {
+    Hop().step()
+  }
+}
+
+type Hop()
+
+impl Step for Hop {}

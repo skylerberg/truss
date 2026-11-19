@@ -42,8 +42,10 @@ let find_defaults (definition : Core.definition) =
   | Test _ | Law_proof _ -> Some (Parameter_defaults [])
   | Trait _ | Constant _ | Empty -> None
 
-let make_parameter ({ local; name; mode; type_; default; _ } : Core.parameter) : parameter =
-  { local; name; mode; type_; has_default = default <> None }
+let find_local_name = Core_walk.find_local_name
+
+let make_parameter ({ local; mode; type_; default; _ } : Core.parameter) : parameter =
+  { local; mode; type_; has_default = default <> None }
 
 let find_contract (definition : Core.definition) =
   match definition with
@@ -68,7 +70,6 @@ let find_contract (definition : Core.definition) =
               (fun ({ origin; amortized; resource; bound } : Core.cost) ->
                 let bound : bound =
                   match bound with
-                  | Finite -> Finite
                   | Order_of amount -> Order_of (Builder.of_clause ~parameters amount)
                   | At_most amount -> At_most (Builder.of_clause ~parameters amount)
                   | Exactly amount -> Exactly (Builder.of_clause ~parameters amount)
@@ -94,7 +95,10 @@ let find_contract (definition : Core.definition) =
                     | None -> [])
                   parameters));
         }
-  | Type _ | Trait _ | Constant _ | Test _ | Law_proof _ | Empty -> None
+  | Test _ ->
+      Some
+        { parameters = []; requires = []; ensures = []; decreases = []; costs = []; callbacks = [] }
+  | Type _ | Trait _ | Constant _ | Law_proof _ | Empty -> None
 
 let list_laws (definition : Core.definition) =
   match definition with
@@ -124,7 +128,6 @@ let find_type_clauses ~find_type_interface path (definition : Core.definition) =
           let self : Core.parameter =
             {
               local = Self;
-              name = "self";
               mode = Read;
               type_ =
                 Types.Named

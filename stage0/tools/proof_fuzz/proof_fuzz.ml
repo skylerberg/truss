@@ -14,26 +14,24 @@ let build_example_database text =
 let solver =
   lazy (match Solver.find () with Ok solver -> solver | Error message -> failwith message)
 
-let compiler =
+let c_compiler =
   lazy
-    (match Toolchain.find () with Ok toolchain -> toolchain | Error message -> failwith message)
-
-let cache =
-  lazy (Build.make_cache (Filename.concat (Filename.get_temp_dir_name ()) "truss-proof-fuzz"))
-
-let settings : Build.settings = { build = Development; optimization = O1; extra = [] }
+    (match
+       C_compiler.find ~objects:(Filename.concat (Filename.get_temp_dir_name ()) "truss-proof-fuzz")
+     with
+    | Ok c_compiler -> c_compiler
+    | Error message -> failwith message)
 
 let load text =
   let database = build_example_database text in
-  Database.check database [ example_file.module_.package ];
-  if Database.list_file_diagnostics database example_file <> [] then None
-  else
-    Some
-      ( database,
-        lazy
-          (Compile.create ~evaluation_time_limit_ms:2000
-             (Database.make_lowering_requests database [ example.package ])
-             (Lazy.force compiler) (Lazy.force cache) settings) )
+  if Database.list_file_diagnostics database example_file <> [] then None else Some database
+
+let make_backend database =
+  Backend.create ~evaluation_time_limit_ms:2000
+    (match Database.find_lowered_lookups database [ example.package ] with
+    | Ok lookups -> lookups
+    | Error message -> failwith message)
+    (Lazy.force c_compiler) Development
 
 let find_integer (ty : Types.ty) =
   if Types.is_builtin Bool ty then Some (1, false) else Types.find_integer_bits ty
@@ -57,15 +55,15 @@ type candidate = {
 }
 
 let list_runnable database =
-  let mir = Database.For_testing.make_mir_lookups database example.package in
-  let interface = Database.make_interface_lookups database [ example.package ] in
+  let mir = Database.For_testing.make_mir_lookups database in
+  let interface = Database.make_interface_lookups database in
   let lookups = Database.make_proof_lookups database in
   List.filter_map
     (fun (declaration : Resolve.Names.declaration) ->
-      let key = Resolve.Names.make_key declaration in
+      let key = declaration.key in
       match
-        ( Interface.Definition.find_declared_signature interface declaration.path,
-          Mir.read_contract mir declaration.path )
+        ( Interface.Definition.find_declared_signature interface key.path,
+          Mir.read_contract mir key.path )
       with
       | ( Some ({ generics = []; receiver = None; uses; output = Returns output; _ } as signature),
           Some { form = { requires; _ }; _ } )
@@ -83,7 +81,7 @@ let list_runnable database =
             List.map
               (fun (requirement : Mir.requirement) ->
                 "("
-                ^ Prover.Facts.quote_span
+                ^ Source.Definition_span.quote
                     (lookups.interface.names.read_text key)
                     (Source.Definition_span.locate
                        (lookups.interface.names.read_spans key)
@@ -95,7 +93,7 @@ let list_runnable database =
           | ranges_written
             when List.length ranges_written = List.length ranges
                  && not (List.exists (fun admit -> String.includes ~affix:"==>" admit) admits) ->
-              Some { path = declaration.path; key; signature; admits; ranges = ranges_written }
+              Some { path = key.path; key; signature; admits; ranges = ranges_written }
           | _ -> None)
       | _ -> None)
     (lookups.interface.names.list_declarations example)
@@ -104,8 +102,8 @@ let is_proven (names : Resolve.Names.lookups) key states =
   let base = (names.read_place key).base and text = names.read_text key in
   List.for_all
     (fun (state : Source.span Prover.state) ->
-      state.span.stop <= base
-      || state.span.start >= base + String.length text
+      state.site.span.stop <= base
+      || state.site.span.start >= base + String.length text
       || state.failure = None)
     states
 
@@ -126,7 +124,7 @@ let runs = ref 0
 let run_mutant ~samples text =
   match load text with
   | None -> ()
-  | Some (database, _) -> (
+  | Some database -> (
       incr checked;
       let states =
         Prover.list_states
@@ -138,8 +136,7 @@ let run_mutant ~samples text =
       in
       let candidates =
         List.filter
-          (fun candidate ->
-            is_proven (Database.make_name_lookups database [ example.package ]) candidate.key states)
+          (fun candidate -> is_proven (Database.make_name_lookups database) candidate.key states)
           (list_runnable database)
       in
       let with_admitting =
@@ -152,13 +149,13 @@ let run_mutant ~samples text =
       in
       match load with_admitting with
       | None -> ()
-      | Some (running, compile) ->
+      | Some running ->
           List.iteri
             (fun index candidate ->
               incr functions;
               let call function_ arguments =
                 Database.For_testing.add_root running (Call_evaluation { function_; arguments });
-                Compile.For_testing.evaluate_call (Lazy.force compile) ~function_ ~arguments
+                Backend.For_testing.evaluate_call (make_backend running) ~function_ ~arguments
               in
               let is_admitted arguments =
                 candidate.admits = []
@@ -250,7 +247,7 @@ let () =
                   diagnostics
             in
             match load text with
-            | Some (database, _) ->
+            | Some database ->
                 let unproven =
                   Prover.list_diagnostics
                     (Prover.decide ~runs:[]
@@ -263,7 +260,6 @@ let () =
                 unproven = []
             | None ->
                 let database = build_example_database text in
-                Database.check database [ example_file.module_.package ];
                 print_diagnostics (Database.list_file_diagnostics database example_file);
                 false)
           (if Filename.check_suffix file ".md" then

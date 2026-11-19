@@ -1,0 +1,5 @@
+fn f(rows: List[Slice[Int64]]) {
+  parallel for row in rows {
+    let _ = first_or_crash(row)
+  }
+}

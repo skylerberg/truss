@@ -1,0 +1,23 @@
+capability Meter {
+  fn tick()
+  fn poll() -> Bool
+}
+
+fn step(index: UInt32) -> Bool
+  uses Meter
+  ensures result == (index < 2)
+  cost calls(Meter.tick) == 1
+{
+  Meter.tick()
+  index < 2
+}
+
+fn refuse() -> Bool
+  uses Meter
+  ensures !result
+  cost calls(Meter.tick) == 1
+{
+  Meter.tick()
+  false
+}
+

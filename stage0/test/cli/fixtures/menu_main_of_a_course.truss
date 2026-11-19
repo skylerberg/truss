@@ -1,3 +1,0 @@
-fn main(course: Int64) -> Int64 {
-  course
-}

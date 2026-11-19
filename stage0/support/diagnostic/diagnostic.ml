@@ -55,7 +55,6 @@ module Code = struct
     | Lends_own
     | Repeated_clause
     | Cost_word
-    | Finite_not_time
     | Loop_cost_bound
     | Function_type_names
     | Misplaced_requires
@@ -109,6 +108,7 @@ module Code = struct
     | Not_a_constant
     | Alternative_bindings
     | Not_a_generic_parameter
+    | Unconstrained_capability_parameter
     | Null
 
   type types =
@@ -129,6 +129,7 @@ module Code = struct
     | Unknown_member
     | Ambiguous_method
     | Private_field
+    | Member_not_visible
     | Not_callable
     | Not_a_value
     | No_impl
@@ -138,6 +139,9 @@ module Code = struct
     | Integer_for_float
     | Negated_unsigned
     | Unused_value
+    | Unbounded_time
+    | Upper_bound_in_exact_bound
+    | Cost_of_other_resource
     | Not_assignable
     | Wrong_try
     | Lambda_needs_type
@@ -153,7 +157,6 @@ module Code = struct
     | Not_a_type
     | Not_a_trait
     | Not_a_capability
-    | Misplaced_capability_parameter
     | Arity
     | Argument_kind
     | Unsatisfied_bound
@@ -174,14 +177,20 @@ module Code = struct
     | Extra_member
     | Signature_mismatch
     | Missing_required_impl
-    | Implements_panic
+    | Implements_built_in_capability
     | Impl_uses
     | Unknown_associated_type
     | Unknown_associated_capability
     | Associated_type_not_fixed
 
   type patterns = Not_covered | Unreachable_arm | Unreachable_alternative | Refutable
-  type usage = Unused_variable | Unreachable_code
+
+  type usage =
+    | Unused_variable
+    | Unused_function
+    | Unused_constant
+    | Unreachable_code
+    | Self_comparison
 
   type ownership =
     | Views_temporary
@@ -199,6 +208,7 @@ module Code = struct
     | Lends_other_parameter
     | Read_only_view
     | Lent_mut_in_variant
+    | Needs_lent_mut
     | Task_outlives_view
 
   type capabilities =
@@ -309,7 +319,6 @@ module Code = struct
     | Lends_own -> "lends_own"
     | Repeated_clause -> "repeated_clause"
     | Cost_word -> "cost_word"
-    | Finite_not_time -> "finite_not_time"
     | Loop_cost_bound -> "loop_cost_bound"
     | Function_type_names -> "function_type_names"
     | Misplaced_requires -> "misplaced_requires"
@@ -364,6 +373,7 @@ module Code = struct
     | Not_a_constant -> "not_a_constant"
     | Alternative_bindings -> "alternative_bindings"
     | Not_a_generic_parameter -> "not_a_generic_parameter"
+    | Unconstrained_capability_parameter -> "unconstrained_capability_parameter"
     | Null -> "null"
 
   let name_types_code code =
@@ -385,6 +395,7 @@ module Code = struct
     | Unknown_member -> "unknown_member"
     | Ambiguous_method -> "ambiguous_method"
     | Private_field -> "private_field"
+    | Member_not_visible -> "member_not_visible"
     | Not_callable -> "not_callable"
     | Not_a_value -> "not_a_value"
     | No_impl -> "no_impl"
@@ -394,6 +405,9 @@ module Code = struct
     | Integer_for_float -> "integer_for_float"
     | Negated_unsigned -> "negated_unsigned"
     | Unused_value -> "unused_value"
+    | Unbounded_time -> "unbounded_time"
+    | Upper_bound_in_exact_bound -> "upper_bound_in_exact_bound"
+    | Cost_of_other_resource -> "cost_of_other_resource"
     | Not_assignable -> "not_assignable"
     | Wrong_try -> "wrong_try"
     | Lambda_needs_type -> "lambda_needs_type"
@@ -409,7 +423,6 @@ module Code = struct
     | Not_a_type -> "not_a_type"
     | Not_a_trait -> "not_a_trait"
     | Not_a_capability -> "not_a_capability"
-    | Misplaced_capability_parameter -> "misplaced_capability_parameter"
     | Arity -> "arity"
     | Argument_kind -> "argument_kind"
     | Unsatisfied_bound -> "unsatisfied_bound"
@@ -430,7 +443,7 @@ module Code = struct
     | Extra_member -> "extra_member"
     | Signature_mismatch -> "signature_mismatch"
     | Missing_required_impl -> "missing_required_impl"
-    | Implements_panic -> "implements_panic"
+    | Implements_built_in_capability -> "implements_built_in_capability"
     | Impl_uses -> "impl_uses"
     | Unknown_associated_type -> "unknown_associated_type"
     | Unknown_associated_capability -> "unknown_associated_capability"
@@ -444,7 +457,12 @@ module Code = struct
     | Refutable -> "refutable"
 
   let name_usage_code code =
-    match code with Unused_variable -> "unused_variable" | Unreachable_code -> "unreachable_code"
+    match code with
+    | Unused_variable -> "unused_variable"
+    | Unused_function -> "unused_function"
+    | Unused_constant -> "unused_constant"
+    | Unreachable_code -> "unreachable_code"
+    | Self_comparison -> "self_comparison"
 
   let name_ownership_code code =
     match code with
@@ -463,6 +481,7 @@ module Code = struct
     | Lends_other_parameter -> "lends_other_parameter"
     | Read_only_view -> "read_only_view"
     | Lent_mut_in_variant -> "lent_mut_in_variant"
+    | Needs_lent_mut -> "needs_lent_mut"
     | Task_outlives_view -> "task_outlives_view"
 
   let name_capabilities_code code =
@@ -538,7 +557,7 @@ let make ?(notes = []) ?(fixes = []) ~code span message = { code; message; span;
 type reported = Reported
 
 let make_reported (_ : _ diagnostic) = Reported
-let make_recovered _ = Reported
+let reported_elsewhere = Reported
 let fix title edits = { title; edits }
 let replace span replacement = { span; replacement }
 let insert at replacement = { span = at; replacement }
@@ -555,10 +574,15 @@ let find_closest text candidates =
   | closest :: _ -> Some closest
   | [] -> None
 
+let list_spelling_fixes span ~written candidates =
+  match find_closest written candidates with
+  | Some candidate -> [ fix (Printf.sprintf "Write `%s`." candidate) [ replace span candidate ] ]
+  | None -> []
+
 let show_count count singular plural =
   Printf.sprintf "%d %s" count (if count = 1 then singular else plural)
 
-let map_spans convert diagnostic =
+let map_spans convert (diagnostic : _ diagnostic) : _ diagnostic =
   {
     diagnostic with
     span = convert diagnostic.span;
@@ -588,7 +612,7 @@ let apply_edits text (edits : Source.span edit list) =
   let position =
     List.fold_left
       (fun position (edit : Source.span edit) ->
-        if edit.span.start < position then invalid_arg "Diagnostic.apply_fix: overlapping edits";
+        if edit.span.start < position then invalid_arg "Diagnostic.apply_edits: overlapping edits";
         Buffer.add_substring buffer text position (edit.span.start - position);
         Buffer.add_string buffer edit.replacement;
         edit.span.stop)
@@ -596,8 +620,6 @@ let apply_edits text (edits : Source.span edit list) =
   in
   Buffer.add_substring buffer text position (String.length text - position);
   Buffer.contents buffer
-
-let apply_fix text (fix : Source.span fix) = apply_edits text fix.edits
 
 module Starts = Map.Make (Int)
 
@@ -714,8 +736,8 @@ let render source (diagnostic : t) =
     (show_location source diagnostic.span.start)
     (Code.name diagnostic.code) diagnostic.message;
   let start = diagnostic.span.start in
-  let line_start = Source.line_start source start in
-  let line_end = Source.line_end source start in
+  let line_start = Source.compute_line_start source start in
+  let line_end = Source.compute_line_end source start in
   let line = String.sub text line_start (line_end - line_start) in
   let _, start_column = Source.compute_position source start in
   let _, stop_column = Source.compute_position source (min diagnostic.span.stop line_end) in
@@ -812,9 +834,6 @@ let to_json_object source diagnostic =
     (encode_json_string diagnostic.message)
     (encode_json_span source diagnostic.span)
     (String.concat "," notes) (String.concat "," fixes)
-
-let to_json source diagnostics =
-  "[" ^ String.concat ",\n" (List.map (to_json_object source) diagnostics) ^ "]\n"
 
 module For_testing = struct
   let limit = limit

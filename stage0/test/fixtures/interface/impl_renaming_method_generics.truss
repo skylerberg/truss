@@ -1,8 +1,8 @@
 trait Filler {
   fn fill[count: UInt64](self) -> Array[Int64, count]
 
-  fn run[capability Used](self, action: (fn() uses Used))
-    uses Used
+  fn run(self, action: (fn() uses generic Used))
+    uses generic Used
 }
 
 type Thing()
@@ -10,8 +10,8 @@ type Thing()
 impl Filler for Thing {
   fn fill[size: UInt64](self) -> Array[Int64, size] { todo }
 
-  fn run[capability Given](self, action: (fn() uses Given))
-    uses Given
+  fn run(self, action: (fn() uses generic Used))
+    uses generic Used
   {
     todo
   }

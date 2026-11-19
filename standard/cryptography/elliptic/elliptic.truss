@@ -10,6 +10,7 @@ fn hex_limbs(text: StringSlice, count: UInt64) -> List[UInt64] {
   var index: UInt64 = 0
   while index < text.length() && text.length() - index >= 2
     invariant index <= text.length()
+    decreases text.length() - index
   {
     let high = text.byte(index).digit_value()
     let low = text.byte(index + 1).digit_value()

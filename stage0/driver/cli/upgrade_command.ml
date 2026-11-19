@@ -1,5 +1,11 @@
 module Path_table = Hashtbl.Make (Path)
 
+let read_version text =
+  match Registry.Version.parse text with
+  | Some version -> version
+  | None ->
+      Outcome.raise_cannot_run "`%s` is not a version, which is three numbers, such as 1.4.2." text
+
 let parse_wanted text =
   let written, version =
     match String.split_first ~sep:"@" text with
@@ -15,15 +21,7 @@ let parse_wanted text =
            `acme::geometry`."
           written
   in
-  ( name,
-    Option.map
-      (fun version ->
-        match Registry.Version.parse version with
-        | Some version -> version
-        | None ->
-            Outcome.raise_cannot_run "`%s` is not a version, which is three numbers, such as 1.4.2."
-              version)
-      version )
+  (name, Option.map read_version version)
 
 type change =
   | Entered of Registry.Lock.entry
@@ -107,32 +105,33 @@ type signature = {
 
 let list_signatures snapshot trial =
   let database = Workspace.open_database snapshot and upgraded = Workspace.open_database trial in
-  let own = List.map snd (Workspace.list_packages snapshot) in
-  let is_own path = List.mem (Path.locate_package path) own in
+  let project_packages = List.map snd (Workspace.list_packages snapshot) in
+  let is_in_project path = List.mem (Path.locate_package path) project_packages in
   let changed =
     List.filter
       (fun part ->
         Signatures.is_signature part
         &&
         match Database.Part.find_definition part with
-        | Some path -> not (is_own path)
+        | Some path -> not (is_in_project path)
         | None -> false)
       (Database.list_changes database upgraded)
   in
+  ignore
+    (Database.prove database
+       (List.concat_map (Workspace.list_package_files snapshot) project_packages));
   let dependents = Path_table.create 16 in
   List.iter
     (fun ({ dependent; dependency } : Database.read) ->
       match (Database.Part.find_definition dependent, Database.Part.find_definition dependency) with
-      | Some reader, Some path when is_own reader && List.mem dependency changed ->
+      | Some reader, Some path when is_in_project reader && List.mem dependency changed ->
           Path_table.replace dependents path
             (reader :: Option.value (Path_table.find_opt dependents path) ~default:[])
       | _ -> ())
     (Database.list_dependents database
        (List.sort_uniq Path.compare (List.filter_map Database.Part.find_definition changed)));
   let find_text database path =
-    Signatures.find_signature
-      (Database.make_name_lookups database [ Path.locate_package path ])
-      path
+    Signatures.find_signature (Database.make_name_lookups database) path
   in
   List.sort
     (fun left right -> Path.compare left.path right.path)
@@ -148,10 +147,9 @@ let list_signatures snapshot trial =
        dependents [])
 
 let list_new_errors snapshot trial =
-  let own = List.map snd (Workspace.list_packages snapshot) in
+  let project_packages = List.map snd (Workspace.list_packages snapshot) in
   let list_diagnostics (snapshot : Workspace.snapshot) =
     let database = Workspace.open_database snapshot in
-    Database.check database own;
     List.map Project.show_problem (Workspace.problems snapshot)
     @ List.concat_map
         (fun file ->
@@ -159,7 +157,7 @@ let list_new_errors snapshot trial =
             (fun (diagnostic : Diagnostic.t) ->
               Printf.sprintf "%s: %s" (Workspace.locate_file snapshot file) diagnostic.message)
             (Database.list_file_diagnostics database file))
-        (List.concat_map (Workspace.list_package_files snapshot) own)
+        (List.concat_map (Workspace.list_package_files snapshot) project_packages)
   in
   let now = list_diagnostics snapshot in
   List.filter (fun diagnostic -> not (List.mem diagnostic now)) (list_diagnostics trial)

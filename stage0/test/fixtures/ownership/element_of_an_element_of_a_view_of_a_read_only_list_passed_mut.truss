@@ -1,0 +1,4 @@
+fn f(items: List[List[String]]) {
+  var view = items[..]
+  mut view[0][0].push("x")
+}

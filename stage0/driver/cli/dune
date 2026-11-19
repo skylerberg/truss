@@ -16,20 +16,16 @@
   manifest
   registry
   libc
-  toolchain
+  c_compiler
   process
-  build
   emit_c
   unicode
-  compile
+  backend
   database
   solver
   prover
   workspace
   cache
   project
-  types
   infer
-  core
-  core_equivalence
   file_system))

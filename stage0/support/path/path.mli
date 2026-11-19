@@ -44,11 +44,13 @@ val standard_package : package
 val make_standard_module : string list -> module_
 val make_standard_path : string list -> string -> t
 val make_capability_method : t -> string -> t
+val is_entry_point : t -> bool
 val locate_package : t -> package
+val is_resolved : t -> bool
 val show : t -> string
+val show_name : t -> string
 val compare : t -> t -> int
 val equal : t -> t -> bool
 val hash : t -> int
 
 module Map : Map.S with type key = t
-module Set : Set.S with type elt = t

@@ -1087,7 +1087,7 @@ internal fn Blake3.end_chunk(mut self)
     }
   }
   if self.stack_length == 54 {
-    intrinsic::crash("BLAKE3 cannot hash that many bytes".slice())
+    intrinsic::crash("BLAKE3 cannot hash that many bytes")
   }
   let start = 8 * self.stack_length
   let count: UInt64 = 8
@@ -1590,7 +1590,6 @@ public fn pbkdf2_hmac_sha256(
 ) -> List[UInt8]
   requires iterations > 0
   ensures result.length() == length
-  cost time finite
 {
   let keyed = HmacSha256.new(password)
   var output: List[UInt8] = []
@@ -1633,7 +1632,7 @@ public fn pbkdf2_hmac_sha256(
       }
     }
     if block == UInt32.maximum {
-      intrinsic::crash("a derived key cannot be that long".slice())
+      intrinsic::crash("a derived key cannot be that long")
     }
     block += 1
   }
@@ -1641,6 +1640,7 @@ public fn pbkdf2_hmac_sha256(
 }
 
 public type PasswordCost(memory_kibibytes: UInt32 = 19456, iterations: UInt32 = 2, parallelism: UInt32 = 1)
+  derives Equal
 
 let blake2b_initial: Array[UInt64, 8] = [
   0x6a09e667f3bcc908, 0xbb67ae8584caa73b, 0x3c6ef372fe94f82b, 0xa54ff53a5f1d36f1, 0x510e527fade682d1,
@@ -1731,7 +1731,6 @@ internal fn blake2b_block(input: Slice[UInt8], from: UInt64) -> Array[UInt64, 16
 internal fn blake2b(input: Slice[UInt8], output_length: UInt64) -> List[UInt8]
   requires 1 <= output_length && output_length <= 64
   ensures result.length() == output_length
-  cost time finite
 {
   var state = blake2b_initial
   state[0] = state[0] ^ 0x01010000 ^ output_length
@@ -1760,7 +1759,6 @@ internal fn blake2b(input: Slice[UInt8], output_length: UInt64) -> List[UInt8]
 }
 
 internal fn push_little_endian_32(output: mut List[UInt8], value: UInt32)
-  cost time finite
 {
   let bytes: UInt64 = 4
   for index in 0..bytes {
@@ -1769,17 +1767,15 @@ internal fn push_little_endian_32(output: mut List[UInt8], value: UInt32)
 }
 
 internal fn push_length_32(output: mut List[UInt8], length: UInt64)
-  cost time finite
 {
   if !intrinsic::fits[UInt64, UInt32](length) {
-    intrinsic::crash("a password cannot hold that many bytes".slice())
+    intrinsic::crash("a password cannot hold that many bytes")
   }
   push_little_endian_32(mut output, value: intrinsic::convert(length))
 }
 
 internal fn argon2_long_hash(input: Slice[UInt8], length: UInt64) -> List[UInt8]
   requires 1 <= length && length <= UInt32.maximum
-  cost time finite
 {
   var prefixed: List[UInt8] = []
   push_length_32(mut prefixed, length: length)
@@ -1840,7 +1836,6 @@ internal fn argon2_block_from_bytes(bytes: Slice[UInt8]) -> Array[UInt64, 128]
 
 internal fn argon2_block_to_bytes(block: Array[UInt64, 128]) -> List[UInt8]
   ensures result.length() == 1024
-  cost time finite
 {
   var bytes: List[UInt8] = []
   let count: UInt64 = 1024
@@ -1994,7 +1989,6 @@ internal fn argon2_fill_segment(
   requires memory.length() > 0
   requires shape.lanes > 0 && shape.lane_length > 0
   ensures memory.length() == old(memory.length())
-  cost time finite
 {
   let block_count = memory.length()
   let independent = pass == 0 && slice < 2
@@ -2060,7 +2054,6 @@ public fn hash_password(
   requires password_cost.parallelism >= 1 && password_cost.parallelism <= 16777215
   requires password_cost.iterations >= 1
   requires password_cost.memory_kibibytes >= 8 * password_cost.parallelism
-  cost time finite
 {
   let tag = argon2id(password, salt: salt, password_cost: password_cost, length: 32)
   var hash: Array[UInt8, 32] = [
@@ -2086,7 +2079,6 @@ internal fn argon2id(
   requires password_cost.iterations >= 1
   requires password_cost.memory_kibibytes >= 8 * password_cost.parallelism
   requires length >= 4 && length <= 1024
-  cost time finite
 {
   let lanes: UInt64 = intrinsic::convert(password_cost.parallelism)
   let requested: UInt64 = intrinsic::convert(password_cost.memory_kibibytes)
@@ -2227,8 +2219,8 @@ public type AuthenticationError()
   derives Equal
 
 impl Display for AuthenticationError {
-  fn display(self, output: mut TextBuilder) {
-    mut output.write("the authentication tag does not match the data and key")
+  fn display(self, output: mut String) {
+    mut output.push("the authentication tag does not match the data and key")
   }
 }
 
@@ -3514,7 +3506,7 @@ public fn seal(
   cost time O(plaintext.length() + associated_data.length())
 {
   if plaintext.length() > UInt64.maximum - 16 {
-    intrinsic::crash("a list cannot hold that many bytes".slice())
+    intrinsic::crash("a list cannot hold that many bytes")
   }
   match cipher {
     ChaCha20Poly1305 => chacha20_poly1305_seal(
@@ -4102,7 +4094,7 @@ public opaque type SigningKey(seed: Array[UInt8, 32], verifying_key: Array[UInt8
   derives Copyable
 
 public opaque type VerifyingKey(bytes: Array[UInt8, 32])
-  derives Plain, Equal, Hash
+  derives Plain, Equal, Hash, Ordered
 
 public type Signature(bytes: Array[UInt8, 64])
   derives Equal
@@ -4197,7 +4189,7 @@ public fn VerifyingKey.verify(self, message: Slice[UInt8], signature: Signature)
 public opaque type AgreementKey(bytes: Array[UInt8, 32])
 
 public type AgreementPublicKey(bytes: Array[UInt8, 32])
-  derives Equal, Hash
+  derives Equal, Hash, Ordered
 
 public fn AgreementKey.generate() -> AgreementKey
   uses Random
@@ -4283,7 +4275,9 @@ fn scalar_of_digest(elliptic_curve: elliptic::Curve, digest: Slice[UInt8]) -> Li
   scalar
 }
 
-fn deterministic_nonce(curve: Curve, elliptic_curve: elliptic::Curve, private: Slice[UInt8], digest: Slice[UInt8]) -> List[UInt64] {
+fn deterministic_nonce(curve: Curve, elliptic_curve: elliptic::Curve, private: Slice[UInt8], digest: Slice[UInt8]) -> List[UInt64]
+  uses RunForever
+{
   let size = elliptic_curve.size()
   let hashed = modular::limbs_to_bytes(scalar_of_digest(elliptic_curve, digest: digest).slice(), length: size)
   let length = digest_for(curve, message: []).length()
@@ -4387,7 +4381,7 @@ public opaque type EcdsaSigningKey(curve: Curve, scalar: List[UInt8])
   derives Copyable
 
 fn random_scalar(curve: Curve) -> List[UInt8]
-  uses Random, Panic
+  uses Random, Panic, RunForever
 {
   let elliptic_curve = curve_of(curve)
   let size = elliptic_curve.size()
@@ -4409,7 +4403,7 @@ fn random_scalar(curve: Curve) -> List[UInt8]
 }
 
 public fn EcdsaSigningKey.generate(curve: Curve) -> EcdsaSigningKey
-  uses Random, Panic
+  uses Random, Panic, RunForever
 {
   EcdsaSigningKey(curve: curve, scalar: random_scalar(curve))
 }
@@ -4440,13 +4434,13 @@ public fn EcdsaSigningKey.verifying_key(self) -> EcdsaVerifyingKey
 }
 
 public fn EcdsaSigningKey.sign(self, message: Slice[UInt8]) -> List[UInt8]
-  uses Panic
+  uses Panic, RunForever
 {
   self.sign_digest(digest_for(self.curve, message: message).slice())
 }
 
 public fn EcdsaSigningKey.sign_digest(self, digest: Slice[UInt8]) -> List[UInt8]
-  uses Panic
+  uses Panic, RunForever
 {
   let elliptic_curve = curve_of(self.curve)
   let size = elliptic_curve.size()
@@ -4473,7 +4467,7 @@ public fn EcdsaSigningKey.sign_digest(self, digest: Slice[UInt8]) -> List[UInt8]
 public opaque type EcdhKey(curve: Curve, scalar: List[UInt8])
 
 public fn EcdhKey.generate(curve: Curve) -> EcdhKey
-  uses Random, Panic
+  uses Random, Panic, RunForever
 {
   EcdhKey(curve: curve, scalar: random_scalar(curve))
 }
@@ -4541,7 +4535,9 @@ fn digest_info(function: HashFunction) -> List[UInt8] {
   var bytes: List[UInt8] = []
   var index: UInt64 = 0
   let text = prefix.slice()
-  while index < text.length() && text.length() - index >= 2 {
+  while index < text.length() && text.length() - index >= 2
+    decreases text.length() - index
+  {
     let high = text.byte(index).digit_value()
     let low = text.byte(index + 1).digit_value()
     mut bytes.push(if high < 16 && low < 16 { high * 16 + low } else { 0 })
@@ -4553,7 +4549,9 @@ fn digest_info(function: HashFunction) -> List[UInt8] {
 fn mask_generation(function: HashFunction, seed: Slice[UInt8], length: UInt64) -> List[UInt8] {
   var mask: List[UInt8] = []
   var counter: UInt32 = 0
-  while mask.length() < length && counter < 65536 {
+  while mask.length() < length && counter < 65536
+    decreases 65536 - counter
+  {
     var input = seed.to_list()
     mut input.push(intrinsic::convert(counter >> 24))
     mut input.push(intrinsic::convert((counter >> 16) & 255))
@@ -4573,6 +4571,7 @@ fn trimmed(bytes: Slice[UInt8]) -> List[UInt8] {
   var start: UInt64 = 0
   while start < bytes.length() && bytes[start] == 0
     invariant start <= bytes.length()
+    decreases bytes.length() - start
   {
     start += 1
   }
@@ -4617,10 +4616,6 @@ fn public_operation(key: RsaPublicKey, signature: Slice[UInt8]) -> Option[List[U
   Some(modular::limbs_to_bytes(field.from_montgomery(raised.slice()).slice(), length: size))
 }
 
-fn constant_equal(first: Slice[UInt8], second: Slice[UInt8]) -> Bool {
-  first.length() == second.length() && constant_time_equal(first, second: second)
-}
-
 fn pkcs1_encoding(function: HashFunction, digest: Slice[UInt8], size: UInt64) -> Option[List[UInt8]] {
   var info = digest_info(function)
   mut info.append_slice(digest)
@@ -4639,7 +4634,7 @@ fn pkcs1_encoding(function: HashFunction, digest: Slice[UInt8], size: UInt64) ->
 public fn RsaPublicKey.verify_pkcs1(self, function: HashFunction, message: Slice[UInt8], signature: Slice[UInt8]) -> Bool {
   match public_operation(self, signature: signature) {
     Some(encoded) => match pkcs1_encoding(function, digest: function.digest(message).slice(), size: self.modulus.length()) {
-      Some(expected) => constant_equal(encoded.slice(), second: expected.slice())
+      Some(expected) => constant_time_equal(encoded.slice(), second: expected.slice())
       None => false
     }
     None => false
@@ -4708,7 +4703,7 @@ public fn RsaPublicKey.verify_pss(self, function: HashFunction, message: Slice[U
   }
   let salt = block[zeros + 1..]
   let expected = pss_hash(function, digest: function.digest(message).slice(), salt: salt)
-  constant_equal(expected.slice(), second: hashed)
+  constant_time_equal(expected.slice(), second: hashed)
 }
 
 public opaque type RsaPrivateKey(
@@ -4818,7 +4813,7 @@ public fn RsaPrivateKey.sign_pkcs1(self, function: HashFunction, message: Slice[
 }
 
 public fn RsaPrivateKey.sign_pss(self, function: HashFunction, message: Slice[UInt8]) -> List[UInt8]
-  uses Random, Panic
+  uses Random, Panic, RunForever
 {
   let bits = self.public_key.bits()
   let encoded_bits = bits.saturating_subtract(1)
@@ -4865,13 +4860,15 @@ public opaque type EncapsulationKey(bytes: List[UInt8])
 
 public type Encapsulation(ciphertext: List[UInt8], shared: SecretKey)
 
-public fn DecapsulationKey.from_seed(seed: Array[UInt8, 64]) -> DecapsulationKey {
+public fn DecapsulationKey.from_seed(seed: Array[UInt8, 64]) -> DecapsulationKey
+  uses RunForever
+{
   let pair = mlkem::generate(seed[0..32], rejection: seed[32..64])
   DecapsulationKey(bytes: own pair.decapsulation)
 }
 
 public fn DecapsulationKey.generate() -> DecapsulationKey
-  uses Random
+  uses Random, RunForever
 {
   let first = random_32_bytes()
   let second = random_32_bytes()
@@ -4899,7 +4896,9 @@ public fn DecapsulationKey.encapsulation_key(self) -> EncapsulationKey {
   EncapsulationKey(bytes: self.bytes[start..stop].to_list())
 }
 
-public fn DecapsulationKey.decapsulate(self, ciphertext: Slice[UInt8]) -> Option[SecretKey] {
+public fn DecapsulationKey.decapsulate(self, ciphertext: Slice[UInt8]) -> Option[SecretKey]
+  uses RunForever
+{
   if ciphertext.length() != mlkem::ciphertext_length {
     return None
   }
@@ -4918,13 +4917,15 @@ public fn EncapsulationKey.bytes(self) -> Slice[UInt8] {
   self.bytes.slice()
 }
 
-public fn EncapsulationKey.encapsulate_with(self, message: Array[UInt8, 32]) -> Encapsulation {
+public fn EncapsulationKey.encapsulate_with(self, message: Array[UInt8, 32]) -> Encapsulation
+  uses RunForever
+{
   let encapsulated = mlkem::encapsulate(self.bytes.slice(), message: message[..])
   Encapsulation(ciphertext: own encapsulated.ciphertext, shared: SecretKey(bytes: fill_32(encapsulated.shared.slice())))
 }
 
 public fn EncapsulationKey.encapsulate(self) -> Encapsulation
-  uses Random
+  uses Random, RunForever
 {
   self.encapsulate_with(random_32_bytes())
 }

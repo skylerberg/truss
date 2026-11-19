@@ -2,7 +2,7 @@ type segment = { number : int; size : int; digest : string }
 
 type t = {
   directory : string;
-  lock : Unix.file_descr;
+  lock : Lock_file.t;
   mutable header : string list option;
   mutable segments : segment list;
 }
@@ -16,7 +16,7 @@ let make_segments_directory t = Filename.concat t.directory "segments"
 let make_segment_path t number =
   Filename.concat (make_segments_directory t) (Printf.sprintf "%08d.segment" number)
 
-let digest text = Digest.BLAKE128.to_hex (Digest.BLAKE128.string text)
+let compute_digest text = Digest.BLAKE128.to_hex (Digest.BLAKE128.string text)
 
 let write_durably path text =
   let descriptor = Unix.openfile path [ O_WRONLY; O_CREAT; O_TRUNC; O_CLOEXEC ] 0o644 in
@@ -54,32 +54,24 @@ let open_ directory ~stop_holder =
   (try Unix.mkdir directory 0o755 with Unix.Unix_error (EEXIST, _, _) -> ());
   let ignored = Filename.concat directory ".gitignore" in
   if not (Sys.file_exists ignored) then File_system.write ignored "*\n";
+  let lock_path = Filename.concat directory "lock" in
   let lock =
-    Unix.openfile (Filename.concat directory "lock") [ O_RDWR; O_CREAT; O_CLOEXEC ] 0o644
+    match Lock_file.acquire_if_free lock_path with
+    | Some lock -> Some lock
+    | None when stop_holder () -> Some (Lock_file.acquire lock_path)
+    | None -> None
   in
-  let has_lock =
-    match Unix.lockf lock F_TLOCK 0 with
-    | () -> true
-    | exception Unix.Unix_error ((EAGAIN | EACCES), _, _) ->
-        stop_holder ()
-        && begin
-          Unix.lockf lock F_LOCK 0;
-          true
-        end
-  in
-  if not has_lock then begin
-    Unix.close lock;
-    Error `Open_elsewhere
-  end
-  else
-    let t = { directory; lock; header = None; segments = [] } in
-    (match parse_list (File_system.read (make_list_path t)) with
-    | Some (header, segments) ->
-        t.header <- Some header;
-        t.segments <- segments
-    | None -> ()
-    | exception Sys_error _ -> ());
-    Ok t
+  match lock with
+  | None -> Error `Open_elsewhere
+  | Some lock ->
+      let t = { directory; lock; header = None; segments = [] } in
+      (match parse_list (File_system.read (make_list_path t)) with
+      | Some (header, segments) ->
+          t.header <- Some header;
+          t.segments <- segments
+      | None -> ()
+      | exception Sys_error _ -> ());
+      Ok t
 
 let header t = t.header
 
@@ -113,7 +105,7 @@ let parse_records text =
 
 let read_segment t segment =
   match File_system.read (make_segment_path t segment.number) with
-  | text when String.length text = segment.size && digest text = segment.digest ->
+  | text when String.length text = segment.size && compute_digest text = segment.digest ->
       parse_records text
   | _ -> raise Damaged
   | exception Sys_error _ -> raise Damaged
@@ -168,7 +160,7 @@ let write_segment t entries =
   in
   (try Unix.mkdir (make_segments_directory t) 0o755 with Unix.Unix_error (EEXIST, _, _) -> ());
   write_durably (make_segment_path t number) text;
-  { number; size = String.length text; digest = digest text }
+  { number; size = String.length text; digest = compute_digest text }
 
 let make_list_text ~header segments =
   String.concat "\n"
@@ -222,7 +214,7 @@ let discard t =
   t.header <- None;
   t.segments <- []
 
-let close t = Unix.close t.lock
+let close t = Lock_file.release t.lock
 
 module For_testing = struct
   let interrupt_commit t ~header entries = ignore (prepare_commit t ~header entries)

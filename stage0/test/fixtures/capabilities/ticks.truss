@@ -8,8 +8,8 @@ fn still() -> Instant {
   todo
 }
 
-fn each_time[capability Granted](action: (fn() -> Instant uses Granted)) -> Instant
-  uses Granted
+fn each_time(action: (fn() -> Instant uses generic Granted)) -> Instant
+  uses generic Granted
 {
   action()
 }

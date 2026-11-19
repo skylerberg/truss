@@ -6,54 +6,48 @@ type ty =
   | Any of { trait : Path.t; arguments : argument list; associated : (string * ty) list }
   | Never
 
-and argument = Type of ty | Value of Z.t | Capabilities of Path.t list
+and argument = Type of ty | Value of Z.t
 and function_type = { parameters : (mode * ty) list; result : ty; uses : Path.t list }
 
-let compare = Stdlib.compare
-let make_builtin builtin = Named { path = Intrinsic.make_builtin_path builtin; arguments = [] }
+type instantiation = {
+  type_arguments : argument list;
+  capability_arguments : (string * Path.t list) list;
+}
 
-let rec show_path_name : Path.t -> string = function
-  | Top { name; _ } | Test { name; _ } -> name
-  | Impl { trait; for_type; _ } -> show_path_name trait.path ^ " for " ^ show_path_name for_type
-  | Law_proof { trait; law; for_type; _ } ->
-      show_path_name trait.path ^ "." ^ law ^ " for " ^ show_path_name for_type
-  | Unresolved { names; _ } -> String.concat "::" names
-  | Method { name; _ } | Member_constant { name; _ } -> name
-  | Derived { trait; _ } -> show_path_name trait
+let no_instantiation = { type_arguments = []; capability_arguments = [] }
+let compare = Stdlib.compare
+
+let make_builtin ?(arguments = []) builtin =
+  Named { path = Intrinsic.make_builtin_path builtin; arguments }
 
 let show_mode_prefix = function Read -> "" | Mut -> "mut " | Own -> "own "
 
 let rec to_string = function
-  | Named { path; arguments = [] } -> show_path_name path
-  | Named { path; arguments } -> show_path_name path ^ arguments_to_string arguments
+  | Named { path; arguments = [] } -> Path.show_name path
+  | Named { path; arguments } -> Path.show_name path ^ show_arguments arguments
   | Function function_type ->
       let parameters =
         List.map (fun (mode, ty) -> show_mode_prefix mode ^ to_string ty) function_type.parameters
       in
       let result =
         match function_type.result with
-        | Named { path; arguments = [] } when show_path_name path = "Unit" -> ""
+        | Named { path; arguments = [] } when Path.show_name path = "Unit" -> ""
         | ty -> " -> " ^ to_string ty
       in
       let text = "fn(" ^ String.concat ", " parameters ^ ")" ^ result in
       if function_type.uses = [] then text
       else
         "(" ^ text ^ " uses "
-        ^ String.concat ", " (List.map show_path_name function_type.uses)
+        ^ String.concat ", " (List.map Path.show_name function_type.uses)
         ^ ")"
   | Any { trait; arguments; associated } ->
       let items =
-        List.map argument_to_string arguments
+        List.map show_argument arguments
         @ List.map (fun (name, ty) -> name ^ " = " ^ to_string ty) associated
       in
-      "any " ^ show_path_name trait
+      "any " ^ Path.show_name trait
       ^ if items = [] then "" else "[" ^ String.concat ", " items ^ "]"
   | Never -> "Never"
 
-and argument_to_string = function
-  | Type ty -> to_string ty
-  | Value value -> Z.to_string value
-  | Capabilities set -> "{" ^ String.concat ", " (List.map show_path_name set) ^ "}"
-
-and arguments_to_string arguments =
-  "[" ^ String.concat ", " (List.map argument_to_string arguments) ^ "]"
+and show_argument = function Type ty -> to_string ty | Value value -> Z.to_string value
+and show_arguments arguments = "[" ^ String.concat ", " (List.map show_argument arguments) ^ "]"

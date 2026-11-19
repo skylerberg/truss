@@ -1,0 +1,13 @@
+fn keep(value: own String) -> UInt64 {
+  value.length()
+}
+
+test "a value moved in one iteration and given one in the next is not dropped twice" {
+  var text = "a${1}"
+  var total: UInt64 = 0
+  for index in 0..3 {
+    text = "x${index}"
+    total += keep(own text)
+  }
+  assert total == 6
+}

@@ -1,7 +1,8 @@
 (library
  (name prover)
- (modules_without_implementation state invocation lookups)
+ (modules_without_implementation obligation state invocation lookups)
  (libraries
+  metric
   structural_key
   source
   compiler_bug

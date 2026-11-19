@@ -1,10 +1,6 @@
 use standard::intrinsic
 use standard::time
 
-fn same_name(first: StringSlice, second: StringSlice) -> Bool {
-  first.to_ascii_lowercase() == second.to_ascii_lowercase()
-}
-
 let weekday_names: Array[String, 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 let month_names: Array[String, 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -13,7 +9,7 @@ fn push_two_digits(output: mut String, value: UInt8) {
   if value < 10 {
     mut output.push("0")
   }
-  mut output.push("${value}".slice())
+  value.display(mut output)
 }
 
 internal fn format(instant: Instant) -> String {
@@ -29,7 +25,7 @@ internal fn format(instant: Instant) -> String {
   let month: UInt64 = intrinsic::convert(date.month().number())
   mut output.push(if month >= 1 && month <= 12 { month_names[month - 1].slice() } else { "Jan".slice() })
   mut output.push(" ")
-  mut output.push("${date.year()}".slice())
+  date.year().display(mut output)
   mut output.push(" ")
   push_two_digits(mut output, value: clock.hour())
   mut output.push(":")
@@ -43,7 +39,7 @@ internal fn format(instant: Instant) -> String {
 fn month_number(name: StringSlice) -> Option[UInt8] {
   let count: UInt64 = 12
   for index in 0..count {
-    if same_name(month_names[index].slice(), second: name) {
+    if month_names[index].equal_ignoring_ascii_case(name) {
       return Some(intrinsic::convert(index + 1))
     }
   }
@@ -79,12 +75,12 @@ internal fn parse(text: StringSlice) -> Option[Instant] {
   var month: Option[UInt8] = None
   var year: Option[UInt32] = None
   var clock: Option[time::TimeOfDay] = None
-  if words.length() == 6 && words[5] == "GMT".slice() {
+  if words.length() == 6 && words[5] == "GMT" {
     day = number_of(words[1])
     month = month_number(words[2])
     year = number_of(words[3])
     clock = clock_of(words[4])
-  } else if words.length() == 4 && words[3] == "GMT".slice() {
+  } else if words.length() == 4 && words[3] == "GMT" {
     let parts: List[StringSlice] = words[1].split("-")
     if parts.length() == 3 {
       day = number_of(parts[0])

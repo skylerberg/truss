@@ -1,0 +1,4 @@
+fn apply(work: (fn() uses RunForever))
+  cost time O(time(work))
+{
+}

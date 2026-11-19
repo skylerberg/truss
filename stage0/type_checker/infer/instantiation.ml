@@ -78,9 +78,7 @@ let make_fresh_generic_arguments (state : State.state) (generics : Types.generic
     (fun (generic : Types.generic) ->
       match generic.kind with
       | Value_generic -> Types.Value (Unify.make_fresh_value state.unifier)
-      | Type_generic _ -> Types.Type (State.make_fresh_type state)
-      | Capability_generic ->
-          Types.Capabilities (Unify.make_fresh_capability_variable state.unifier))
+      | Type_generic _ -> Types.Type (State.make_fresh_type state))
     generics
 
 let make_fresh_arguments (state : State.state) (path : Path.t) =
@@ -134,7 +132,7 @@ let rec find_static state (value : Syntax.expression) : static_ option =
 
 and check_named_type state (value : Syntax.expression) path type_arguments =
   let make_type arguments =
-    match Intrinsic.builtin_of_path path with
+    match Intrinsic.find_builtin path with
     | Some Never -> Types.Never
     | Some Integer -> Types.Integer
     | _ -> Types.Named { path; arguments }
@@ -199,32 +197,39 @@ and check_type_argument state (value : Syntax.expression) : Types.argument =
                "A type argument is a type, or a `UInt64` value."))
 
 type instance = {
+  declared : Types.signature;
   signature : Types.signature;
   substitution : Types.substitution;
-  type_arguments : Types.argument list;
+  instantiation : Types.instantiation;
 }
 
-let instantiate (state : State.state) (span : Source.Definition_span.t) ?(extra = [])
-    (signature : Types.signature) =
+let instantiate (state : State.state) (span : Source.Definition_span.t)
+    ?(extra = Types.no_substitution) (signature : Types.signature) =
+  let instantiation : Types.instantiation =
+    {
+      type_arguments = make_fresh_generic_arguments state signature.generics;
+      capability_arguments =
+        List.map
+          (fun (parameter : Types.parameter) ->
+            (parameter.name, Unify.make_fresh_capability_variable state.unifier))
+          signature.capability_parameters;
+    }
+  in
   let substitution =
-    Types.make_substitution signature.generics
-      (make_fresh_generic_arguments state signature.generics)
-    @ extra
+    Types.combine_substitutions (Types.make_signature_substitution signature instantiation) extra
   in
   require_bounds state span signature.generics substitution;
   {
+    declared = signature;
     signature = Types.substitute_signature substitution signature;
     substitution;
-    type_arguments =
-      List.map
-        (fun (generic : Types.generic) -> List.assoc generic.generic substitution)
-        signature.generics;
+    instantiation;
   }
 
 let find_intrinsic_signature path =
-  Option.map Intrinsic_signatures.make_signature (Intrinsic.operation_of_path path)
+  Option.map Intrinsic_signatures.make_signature (Intrinsic.find_operation path)
 
 let find_function_signature (state : State.state) (path : Path.t) =
   match find_intrinsic_signature path with
   | Some signature -> Some signature
-  | None -> Interface.Definition.find_declared_signature state.lookups.interface path
+  | None -> Interface.Impls.read_signature state.lookups.interface path

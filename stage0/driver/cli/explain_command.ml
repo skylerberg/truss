@@ -22,14 +22,14 @@ let run ~position =
       let database = Workspace.open_database snapshot in
       let offset =
         Source.compute_offset Source.Scalar_values
-          (Workspace.read_source snapshot written)
+          (Database.read_source database written)
           ~line:(line - 1) ~column:(column - 1)
       in
-      let names = Database.make_name_lookups database packages in
+      let names = Database.make_name_lookups database in
       let symbol_at =
         List.find_map
           (fun (declaration : Resolve.Names.declaration) ->
-            let key = Resolve.Names.make_key declaration in
+            let key = declaration.key in
             let ({ base; _ } : Resolve.Names.place) = names.read_place key in
             let text = names.read_text key in
             if base <= offset && offset <= base + String.length text then

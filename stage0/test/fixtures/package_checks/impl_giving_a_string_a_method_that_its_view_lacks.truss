@@ -1,0 +1,9 @@
+trait Shouted {
+  fn shout(self) -> String
+}
+
+impl Shouted for String {
+  fn shout(self) -> String {
+    self.to_uppercase()
+  }
+}

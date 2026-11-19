@@ -55,21 +55,3 @@ let read_contract = read_from_contract_part (fun part -> part.contract)
 let read_defaults = read_from_contract_part (fun part -> part.defaults)
 let read_default_graphs = read_from_contract_part (fun part -> part.default_graphs)
 let read_type_clauses = read_from_contract_part (fun part -> part.type_clauses)
-
-let is_index_call (callee : _ Core.target) =
-  match callee with
-  | Trait_method { trait; evidence = Impl _; _ } ->
-      Well_known.is Index trait.trait || Well_known.is Index_mut trait.trait
-  | _ -> false
-
-let list_checked_requires lookups path =
-  match lookups.find_form_origin path with
-  | Some (Written _, _) -> (
-      match read_contract lookups path with
-      | Some { form = { requires = _ :: _ as requires; _ }; _ }
-        when List.for_all
-               (fun (requirement : Tree.requirement) -> requirement.is_executable)
-               requires ->
-          requires
-      | _ -> [])
-  | Some ((Inherited _ | Derived _), _) | None -> []

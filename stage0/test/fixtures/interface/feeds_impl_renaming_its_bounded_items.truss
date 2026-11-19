@@ -1,0 +1,34 @@
+trait Convert[Target] {
+  fn convert(self) -> Target
+}
+
+trait Sized[count: UInt64] {
+  fn cells(self) -> Array[Int64, count]
+}
+
+trait Feeds {
+  fn feed[Item: Convert[Int64]](self, item: Item) -> UInt64
+
+  fn feed_both[First: Cursor, Second: Cursor[Element = First.Element]](self, first: First, second: Second) -> UInt64
+
+  fn feed_cells[count: UInt64, Item: Sized[count]](self, item: Item) -> Array[Int64, count]
+
+  fn feed_each[Item: Convert[Int64]](self, item: Item, visit: (fn(Item) uses generic Granted))
+    uses generic Granted
+}
+
+type Reader()
+
+impl Feeds for Reader {
+  fn feed[Morsel: Convert[Int64]](self, item: Morsel) -> UInt64 { todo }
+
+  fn feed_both[Left: Cursor, Right: Cursor[Element = Left.Element]](self, first: Left, second: Right) -> UInt64 { todo }
+
+  fn feed_cells[size: UInt64, Morsel: Sized[size]](self, item: Morsel) -> Array[Int64, size] { todo }
+
+  fn feed_each[Morsel: Convert[Int64]](self, item: Morsel, visit: (fn(Morsel) uses generic Granted))
+    uses generic Granted
+  {
+    todo
+  }
+}

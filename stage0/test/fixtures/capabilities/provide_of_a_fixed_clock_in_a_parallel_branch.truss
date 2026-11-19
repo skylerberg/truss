@@ -1,0 +1,16 @@
+type FixedClock(time: Instant)
+
+impl Clock for FixedClock {
+  fn now(self) -> Instant { self.time }
+  fn monotonic(self) -> Duration { todo }
+  fn sleep(self, duration: Duration) {}
+}
+
+fn f() -> Instant {
+  parallel {
+    let now = provide FixedClock(time: Instant.epoch) {
+      Clock.now()
+    }
+  }
+  now
+}

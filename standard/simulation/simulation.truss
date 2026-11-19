@@ -11,7 +11,7 @@ use standard::streams
 use standard::tasks
 
 public type Operation = Open | Read | Write | Connect | Accept | Resolve | Spawn
-  derives Equal, Hash
+  derives Equal, Hash, Ordered
 
 type Fault(operation: Operation, error: SystemError)
 
@@ -48,7 +48,9 @@ public fn Setup.new() -> Setup {
   )
 }
 
-public fn Setup.with_file(own self, path: Path, contents: StringSlice) -> Setup {
+public fn Setup.with_file(own self, path: Path, contents: StringSlice) -> Setup
+  uses RunForever
+{
   var changed = own self
   changed.files = own changed.files.with_text(path, contents: contents)
   changed
@@ -179,7 +181,6 @@ fn endpoint_of(handle: streams::Handle) -> Option[UInt64] {
 }
 
 fn same_host(first: network::IpAddress, second: network::IpAddress) -> Bool
-  cost time finite
 {
   first == second || first.is_unspecified() || second.is_unspecified()
 }
@@ -248,7 +249,7 @@ internal fn State.resolve(mut self, host: StringSlice) -> Result[List[network::I
   }
   var addresses: List[network::IpAddress] = []
   for known in self.hosts {
-    if known.name.slice() == host {
+    if known.name == host {
       mut addresses.push(known.address)
     }
   }
@@ -426,7 +427,9 @@ internal fn State.timeout_of(self, blocking: Blocking) -> Option[Duration] {
   }
 }
 
-internal fn State.close(mut self, endpoint: UInt64) -> Result[Unit, SystemError] {
+internal fn State.close(mut self, endpoint: UInt64) -> Result[Unit, SystemError]
+  uses RunForever
+{
   match self.endpoint(endpoint) {
     Closed => return Err(SystemError.Closed)
     Connected(stream) => {
@@ -476,9 +479,9 @@ internal fn State.send(mut self, endpoint: UInt64, bytes: Slice[UInt8]) -> Resul
     Console(errors) => {
       let text = String.from_utf8_lossy(bytes)
       if errors {
-        mut self.console.errors.push(text.slice())
+        mut self.console.errors.push(text)
       } else {
-        mut self.console.output.push(text.slice())
+        mut self.console.output.push(text)
       }
       Ok(bytes.length())
     }
@@ -630,24 +633,12 @@ internal fn State.attempt(mut self, blocking: Blocking, cancelled: Bool) -> Atte
   if cancelled { Attempt.Finished(Err(SystemError.Cancelled)) } else { Attempt.Waiting }
 }
 
-fn begins_with(arguments: Slice[String], beginning: Slice[String]) -> Bool {
-  if beginning.length() > arguments.length() {
-    return false
-  }
-  for index in 0..beginning.length() {
-    if arguments[index] != beginning[index] {
-      return false
-    }
-  }
-  true
-}
-
 internal fn State.program_for(self, command: processes::Command) -> Option[UInt64] {
   var chosen: Option[UInt64] = None
   var most: UInt64 = 0
   for index in 0..self.programs.length() {
-    if self.programs[index].name.slice() == command.program()
-      && begins_with(command.argument_list(), beginning: self.programs[index].arguments.slice())
+    if self.programs[index].name == command.program()
+      && command.argument_list().starts_with(self.programs[index].arguments.slice())
       && self.programs[index].arguments.length() >= most
     {
       chosen = Some(index)
@@ -678,7 +669,7 @@ internal fn State.start(mut self, command: processes::Command) -> Result[Started
       match command.output {
         Inherit => {
           let text = String.from_utf8_lossy(output.slice())
-          mut self.console.output.push(text.slice())
+          mut self.console.output.push(text)
         }
         Discard => {}
         _ => {
@@ -688,7 +679,7 @@ internal fn State.start(mut self, command: processes::Command) -> Result[Started
       match command.error_output {
         Inherit => {
           let text = String.from_utf8_lossy(error_output.slice())
-          mut self.console.errors.push(text.slice())
+          mut self.console.errors.push(text)
         }
         Discard => {}
         _ => {
@@ -796,7 +787,7 @@ public fn World.from(setup: own Setup, seed: UInt64 = 0) -> World {
 }
 
 fn World.preemption_point(self)
-  uses Panic
+  uses Panic, RunForever
 {
   provide self.tasks {
     Tasks.yield_now()
@@ -804,7 +795,7 @@ fn World.preemption_point(self)
 }
 
 fn World.clock_time(self) -> Instant
-  uses Panic
+  uses Panic, RunForever
 {
   provide self.tasks {
     self.start + self.tasks.elapsed()
@@ -898,7 +889,7 @@ public fn World.commands(self) -> List[List[String]]
 }
 
 fn World.wake(self)
-  uses Panic
+  uses Panic, RunForever
 {
   provide self.tasks {
     Tasks.wake(intrinsic::shared_key(self.state))
@@ -906,7 +897,7 @@ fn World.wake(self)
 }
 
 fn World.wait_until_done(self, blocking: Blocking, reason: StringSlice) -> Result[Completion, SystemError]
-  uses Panic
+  uses Panic, RunForever
 {
   provide self.tasks {
     let key = intrinsic::shared_key(self.state)
@@ -927,7 +918,7 @@ fn World.wait_until_done(self, blocking: Blocking, reason: StringSlice) -> Resul
 }
 
 fn World.perform(self, blocking: Blocking, reason: StringSlice) -> Result[Completion, SystemError]
-  uses Panic
+  uses Panic, RunForever
 {
   self.preemption_point()
   provide self.tasks {
@@ -950,7 +941,7 @@ fn World.perform(self, blocking: Blocking, reason: StringSlice) -> Result[Comple
 }
 
 impl Console for World
-  uses Panic
+  uses Panic, RunForever
 {
   fn print(self, text: StringSlice) {
     self.preemption_point()
@@ -1008,7 +999,7 @@ impl Console for World
 }
 
 impl FileRead for World
-  uses Panic
+  uses Panic, RunForever
 {
   fn read(self, file: Path) -> Result[List[UInt8], SystemError] {
     self.preemption_point()
@@ -1102,7 +1093,7 @@ impl FileRead for World
 }
 
 impl FileWrite for World
-  uses Panic
+  uses Panic, RunForever
 {
   fn write(self, file: Path, contents: Slice[UInt8]) -> Result[Unit, SystemError] {
     self.preemption_point()
@@ -1222,7 +1213,7 @@ impl FileWrite for World
 }
 
 impl NetworkClient for World
-  uses Panic
+  uses Panic, RunForever
 {
   fn resolve(self, host: StringSlice) -> Result[List[network::IpAddress], SystemError] {
     self.preemption_point()
@@ -1259,7 +1250,7 @@ impl NetworkClient for World
 }
 
 impl NetworkServer for World
-  uses Panic
+  uses Panic, RunForever
 {
   fn listen(self, address: network::SocketAddress, options: network::ListenOptions) -> Result[network::Listener, SystemError] {
     self.preemption_point()
@@ -1287,7 +1278,7 @@ impl NetworkServer for World
 }
 
 fn World.arrival(self, listener: streams::Handle) -> Result[network::Accepted, SystemError]
-  uses Panic
+  uses Panic, RunForever
 {
   match endpoint_of(listener) {
     Some(endpoint) => {
@@ -1305,7 +1296,7 @@ fn World.arrival(self, listener: streams::Handle) -> Result[network::Accepted, S
 }
 
 impl Handles for World
-  uses Panic
+  uses Panic, RunForever
 {
   fn read(self, handle: streams::Handle, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError] {
     match endpoint_of(handle) {
@@ -1633,7 +1624,7 @@ impl Handles for World
 }
 
 impl Clock for World
-  uses Panic
+  uses Panic, RunForever
 {
   fn now(self) -> Instant {
     provide self.tasks {
@@ -1657,7 +1648,7 @@ impl Clock for World
 }
 
 impl Random for World
-  uses Panic
+  uses Panic, RunForever
 {
   fn next(self) -> UInt64 {
     self.preemption_point()
@@ -1668,7 +1659,7 @@ impl Random for World
 }
 
 impl Environment for World
-  uses Panic
+  uses Panic, RunForever
 {
   fn variable(self, name: StringSlice) -> Option[String] {
     self.preemption_point()
@@ -1735,7 +1726,7 @@ impl Environment for World
 }
 
 impl Processes for World
-  uses Panic
+  uses Panic, RunForever
 {
   fn run(self, command: processes::Command) -> Result[processes::Output, SystemError] {
     self.preemption_point()
@@ -1754,7 +1745,7 @@ impl Processes for World
 }
 
 impl Signals for World
-  uses Panic
+  uses Panic, RunForever
 {
   fn wait(self, signals: Slice[processes::Signal]) -> Option[processes::Signal] {
     match self.perform(
@@ -1768,7 +1759,7 @@ impl Signals for World
 }
 
 impl Tasks for World
-  uses Panic
+  uses Panic, RunForever
 {
   fn open(self) -> UInt64 {
     provide self.tasks {
@@ -1838,7 +1829,7 @@ impl Tasks for World
 }
 
 impl Log for World
-  uses Panic
+  uses Panic, RunForever
 {
   fn record(self, record: log::Record) {
     self.preemption_point()

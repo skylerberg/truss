@@ -18,7 +18,7 @@ public fn Form.parse(text: StringSlice) -> Result[Form, Error] {
 
 public fn Form.get(self, name: StringSlice) -> Option[StringSlice] {
   for field in self.fields {
-    if field.name.slice() == name {
+    if field.name == name {
       return Some(field.value.slice())
     }
   }
@@ -28,7 +28,7 @@ public fn Form.get(self, name: StringSlice) -> Option[StringSlice] {
 public fn Form.all(self, name: StringSlice) -> List[StringSlice] {
   var values: List[StringSlice] = []
   for field in self.fields {
-    if field.name.slice() == name {
+    if field.name == name {
       mut values.push(field.value.slice())
     }
   }
@@ -61,13 +61,13 @@ fn media_type(headers: Headers) -> String {
 }
 
 public fn Request.form(own self) -> Result[Form, Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   if media_type(self.headers) != "application/x-www-form-urlencoded" {
     return Err(Error.Unsupported(message: "a body that is not application/x-www-form-urlencoded"))
   }
   let text = own self.text()?
-  Form.parse(text.slice())
+  Form.parse(text)
 }
 
 fn parameter_of(value: StringSlice, name: StringSlice) -> Option[String] {
@@ -90,6 +90,7 @@ fn parameter_of(value: StringSlice, name: StringSlice) -> Option[String] {
 }
 
 public type Part(name: String, filename: Option[String], content_type: Option[String], headers: Headers)
+  derives Equal
 
 type Section = Preamble | Between | Body | Finished
   derives Equal
@@ -143,7 +144,7 @@ fn index_of(haystack: Slice[UInt8], needle: Slice[UInt8]) -> Option[UInt64]
 }
 
 fn fill_buffer(multipart: mut Multipart) -> Result[UInt64, Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   mut multipart.body.read(mut multipart.buffer, limit: 65536)
 }
@@ -155,7 +156,7 @@ fn drop_front(bytes: mut List[UInt8], count: UInt64) -> List[UInt8] {
 }
 
 fn content_piece(multipart: mut Multipart, limit: UInt64) -> Result[Option[List[UInt8]], Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   while true {
     match index_of(multipart.buffer.slice(), needle: multipart.delimiter.slice()) {
@@ -170,10 +171,10 @@ fn content_piece(multipart: mut Multipart, limit: UInt64) -> Result[Option[List[
         }
         let _ = drop_front(mut multipart.buffer, count: multipart.delimiter.length())
         let suffix = drop_front(mut multipart.buffer, count: 2)
-        if suffix.slice() == [45, 45].slice() {
+        if suffix == [45, 45] {
           multipart.section = Section.Finished
           mut multipart.buffer.clear()
-        } else if suffix.slice() == [13, 10].slice() {
+        } else if suffix == [13, 10] {
           multipart.section = Section.Between
         } else {
           return Err(malformed("a multipart boundary followed by neither a line break nor --"))
@@ -195,7 +196,7 @@ fn content_piece(multipart: mut Multipart, limit: UInt64) -> Result[Option[List[
 }
 
 fn read_part_headers(multipart: mut Multipart) -> Result[Headers, Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   let ending: List[UInt8] = [13, 10, 13, 10]
   while true {
@@ -233,7 +234,7 @@ fn read_part_headers(multipart: mut Multipart) -> Result[Headers, Error]
 }
 
 public fn Multipart.next_part(mut self) -> Result[Option[Part], Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   while self.section == Section.Preamble || self.section == Section.Body {
     let _ = content_piece(mut self, limit: 65536)?
@@ -257,7 +258,7 @@ public fn Multipart.next_part(mut self) -> Result[Option[Part], Error]
 }
 
 public fn Multipart.read(mut self, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   if self.section != Section.Body || limit == 0 {
     return Ok(0)
@@ -273,7 +274,7 @@ public fn Multipart.read(mut self, buffer: mut List[UInt8], limit: UInt64) -> Re
 }
 
 public fn Multipart.read_all(mut self, limit: UInt64 = 8388608) -> Result[List[UInt8], Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   var bytes: List[UInt8] = []
   while self.section == Section.Body {
@@ -291,7 +292,7 @@ public fn Multipart.read_all(mut self, limit: UInt64 = 8388608) -> Result[List[U
 }
 
 public fn Multipart.copy_to[Sink: streams::Writer](mut self, sink: mut Sink) -> Result[UInt64, Error]
-  uses Handles, Tasks
+  uses Handles, Tasks, RunForever
 {
   var copied: UInt64 = 0
   while self.section == Section.Body {
@@ -307,8 +308,10 @@ public fn Multipart.copy_to[Sink: streams::Writer](mut self, sink: mut Sink) -> 
 }
 
 public type FilePart(name: String, filename: String, content_type: String, bytes: List[UInt8])
+  derives Equal
 
 public type Encoded(content_type: String, body: List[UInt8])
+  derives Equal
 
 fn quoted(text: StringSlice) -> String {
   let without_quotes = text.replace("\"", replacement: "%22")
@@ -322,15 +325,15 @@ public fn encode_multipart(fields: Form, files: Slice[FilePart] = []) -> Encoded
   let boundary = "truss-${Random.next().format(radix: 16, minimum_digits: 16)}${Random.next().format(radix: 16, minimum_digits: 16)}"
   var body: List[UInt8] = []
   for field in fields.entries() {
-    push_text(mut body, text: "--${boundary}\r\nContent-Disposition: form-data; name=\"${quoted(field.name.slice())}\"\r\n\r\n".slice())
-    push_text(mut body, text: field.value.slice())
+    push_text(mut body, text: "--${boundary}\r\nContent-Disposition: form-data; name=\"${quoted(field.name)}\"\r\n\r\n")
+    push_text(mut body, text: field.value)
     push_text(mut body, text: "\r\n")
   }
   for file in files {
-    push_text(mut body, text: "--${boundary}\r\nContent-Disposition: form-data; name=\"${quoted(file.name.slice())}\"; filename=\"${quoted(file.filename.slice())}\"\r\nContent-Type: ${file.content_type}\r\n\r\n".slice())
+    push_text(mut body, text: "--${boundary}\r\nContent-Disposition: form-data; name=\"${quoted(file.name)}\"; filename=\"${quoted(file.filename)}\"\r\nContent-Type: ${file.content_type}\r\n\r\n")
     mut body.append_slice(file.bytes.slice())
     push_text(mut body, text: "\r\n")
   }
-  push_text(mut body, text: "--${boundary}--\r\n".slice())
+  push_text(mut body, text: "--${boundary}--\r\n")
   Encoded(content_type: "multipart/form-data; boundary=${boundary}", body: own body)
 }

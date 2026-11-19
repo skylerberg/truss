@@ -1,0 +1,12 @@
+type Countdown(left: UInt64)
+
+impl Cursor for Countdown {
+  type Element = UInt64
+  capability Uses = Panic
+
+  fn next(mut self) -> Option[UInt64]
+    uses Self.Uses
+  {
+    Panic.crash("no")
+  }
+}

@@ -16,7 +16,7 @@ impl Flags for Flag {
 }
 
 fn main(arguments: List[String]) -> ExitCode
-  uses Tasks, Console
+  uses Tasks, Console, RunForever
 {
   var flag = Flag(raised: false)
   provide mut flag {
