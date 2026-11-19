@@ -915,6 +915,26 @@ let () =
       expect_strings
         ~expected:[ "public type Vector(x: Int64, y: Int64)"; "impl Display for Vector {" ]
         (list_headers (run_show (Filename.concat root "app") "acme::geometry::vector::Vector")));
+  test "a dependency's opaque type is shown with its derives and without its representation"
+    (fun () ->
+      let root =
+        make_directory
+          [
+            ("truss.toml", "[project]\n");
+            ("geometry/truss.toml", make_manifest "acme::geometry");
+            ("geometry/tallies/tallies.truss", Fixtures.Cli.opaque_tally_choice_and_token);
+            ("app/truss.toml", make_manifest "app" ^ "[dependencies]\n\"acme::geometry\" = []\n");
+            ("app/main.truss", "fn main() {}\n");
+          ]
+      in
+      expect_strings
+        ~expected:
+          [
+            "public opaque type Choice[Item: Equal,]\n  derives Equal";
+            "public opaque type Tally\n  derives Equal, Hash";
+            "public opaque type Token";
+          ]
+        (run_show (Filename.concat root "app") "acme::geometry::tallies"));
   test "a dependency's module is shown with its law proofs and without its tests" (fun () ->
       let root =
         make_directory
