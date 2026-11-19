@@ -45,7 +45,7 @@ val read_parsed : t -> Path.file -> Syntax.file
 val make_name_lookups : t -> Resolve.Names.lookups
 val read_resolved : t -> Resolve.Names.key -> Resolve.resolved option
 val make_interface_lookups : t -> Interface.Lookups.t
-val find_lowered_lookups : t -> Path.package list -> (Backend.lowered_lookups, string) result
+val find_lowered_lookups : t -> Path.package list -> (Lowering.lowered_lookups, string) result
 val find_main : t -> Path.package -> Path.t option
 
 type read = { dependent : Part.t; dependency : Part.t }

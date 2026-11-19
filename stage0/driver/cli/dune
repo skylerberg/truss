@@ -21,6 +21,7 @@
   emit_c
   unicode
   backend
+  lowering
   database
   solver
   prover
