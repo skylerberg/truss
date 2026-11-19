@@ -179,6 +179,7 @@ module Code = struct
     | Missing_required_impl
     | Implements_built_in_capability
     | Impl_uses
+    | Mut_self_for_slice
     | Unknown_associated_type
     | Unknown_associated_capability
     | Associated_type_not_fixed
@@ -206,7 +207,6 @@ module Code = struct
     | Data_race
     | Lent_part_escapes
     | Lends_other_parameter
-    | Read_only_view
     | Lent_mut_in_variant
     | Needs_lent_mut
     | Task_outlives_view
@@ -445,6 +445,7 @@ module Code = struct
     | Missing_required_impl -> "missing_required_impl"
     | Implements_built_in_capability -> "implements_built_in_capability"
     | Impl_uses -> "impl_uses"
+    | Mut_self_for_slice -> "mut_self_for_slice"
     | Unknown_associated_type -> "unknown_associated_type"
     | Unknown_associated_capability -> "unknown_associated_capability"
     | Associated_type_not_fixed -> "associated_type_not_fixed"
@@ -479,7 +480,6 @@ module Code = struct
     | Data_race -> "data_race"
     | Lent_part_escapes -> "lent_part_escapes"
     | Lends_other_parameter -> "lends_other_parameter"
-    | Read_only_view -> "read_only_view"
     | Lent_mut_in_variant -> "lent_mut_in_variant"
     | Needs_lent_mut -> "needs_lent_mut"
     | Task_outlives_view -> "task_outlives_view"

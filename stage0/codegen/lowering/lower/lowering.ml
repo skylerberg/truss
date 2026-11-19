@@ -353,6 +353,28 @@ let find_place_type state (place : Lowered.place) =
       if Lowered.is_erased state.context.env root then None
       else find_projected_type root place.projections
 
+let is_reached_through_pointer state (place : Lowered.place) =
+  let rec walk (ty : Lowered.ty) (projections : Lowered.projection list) =
+    match (projections, ty) with
+    | [], _ -> false
+    | Deref :: _, _ -> true
+    | Index _ :: _, Raw (Pointer _ | Nullable_pointer _) -> true
+    | _ :: _, (Environment _ | Evidence _) ->
+        List.exists (function Lowered.Deref -> true | _ -> false) projections
+    | projection :: rest, _ -> (
+        match
+          Lowered.find_projection_type state.context.env
+            ~list_environment:(fun _ ->
+              Definitions.raise_bug "a place in an environment, whose type lowering does not track")
+            ty projection
+        with
+        | Some projected -> walk projected rest
+        | None -> false)
+  in
+  match place.root with
+  | Static _ -> true
+  | Local local -> walk (Emit_c.Ir_builder.lookup_local_type state.builder local) place.projections
+
 let make_int_constant integer value = Lowered.Constant (Integer (integer, value))
 
 let classify_scalar state ty =

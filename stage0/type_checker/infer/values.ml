@@ -207,7 +207,7 @@ and check_list_literal state env ?expected (value : Syntax.expression) items =
       register_collection ();
       collection
   | Some (Types.Named { path; arguments = [ Types.Type element; count ] } as array)
-    when Intrinsic.find_builtin path = Some Array ->
+    when Well_known.find_builtin_type path = Some Array ->
       (match count with
       | Types.Value (Known count)
         when (not (Z.fits_int count)) || Z.to_int count <> List.length items ->
@@ -298,7 +298,8 @@ and check_lambda (state : State.state) env ?expected (value : Syntax.expression)
     | Some (Types.Function function_type)
       when List.length function_type.inputs = List.length parameters ->
         List.iter2
-          (fun written (mode, input) -> Pattern_typing.check_pattern state env written input ~mode)
+          (fun written (mode, input) ->
+            Pattern_typing.check_parameter_pattern state env written input ~mode)
           parameters function_type.inputs;
         let output = function_type.output in
         let lambda_env = { env with output = Some (Returns output) } in

@@ -16,7 +16,7 @@ let no_instantiation = { type_arguments = []; capability_arguments = [] }
 let compare = Stdlib.compare
 
 let make_builtin ?(arguments = []) builtin =
-  Named { path = Intrinsic.make_builtin_path builtin; arguments }
+  Named { path = Well_known.make_builtin_type_path builtin; arguments }
 
 let rec to_string = function
   | Named { path; arguments = [] } -> Path.show_name path
@@ -29,7 +29,7 @@ let rec to_string = function
       in
       let result =
         match function_type.result with
-        | Named { path; arguments = [] } when Intrinsic.find_builtin path = Some Unit -> ""
+        | Named { path; arguments = [] } when Well_known.find_builtin_type path = Some Unit -> ""
         | ty -> " -> " ^ to_string ty
       in
       let text = "fn(" ^ String.concat ", " parameters ^ ")" ^ result in

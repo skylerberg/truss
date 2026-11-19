@@ -337,7 +337,7 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
                           ~actual:receiver_type;
                       Modes.check_mode state env receiver.value
                         { name = "self"; mode = wanted_mode; type_; has_default = false }
-                        receiver_type;
+                        receiver_type ~has_generic_type:false;
                       check_method_with_receiver state env ?expected value ~receiver:receiver.value
                         ~receiver_type method_path rest
                   | _ :: _, Some (Trait_overload (trait, method_)) ->

@@ -33,6 +33,7 @@ let make_context ?node (lookups : Lookups.t) ~home ~current ~terminates ~measure
       local_names = Tables.Local_table.create 16;
       local_origins = Tables.Local_table.create 16;
       returns = [];
+      enclosing_provides = [];
       lent_back = [];
       instantiating = [];
       axiomatizing = [];
@@ -90,7 +91,6 @@ let make_empty_frame source =
     substitution = Types.no_substitution;
     self_type = None;
     aliases = Locals.empty;
-    slices = Locals.empty;
     lends = Locals.empty;
     yielded = None;
     yielded_so_far = None;

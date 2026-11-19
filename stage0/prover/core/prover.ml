@@ -67,7 +67,7 @@ let list_integer_instances (lookups : Lookups.t) (path : Path.t) =
                   ( shown
                     @ [
                         Printf.sprintf "`%s` is `%s`" parameter.name
-                          (Intrinsic.show_builtin builtin);
+                          (Language.Builtin_type.show builtin);
                       ],
                     Types.bind_argument parameter
                       (Types.Type (Types.make_builtin builtin))

@@ -90,7 +90,11 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
             root = Local local;
             steps =
               List.map
-                (function Mir.Field field | Variant_field { field; _ } -> Place.Field field)
+                (function
+                  | Mir.Field field | Variant_field { field; _ } -> Place.Field field
+                  | Element _ | Range _ ->
+                      Compiler_bug.raise_bug ~stage:"Ownership"
+                        "a moved path through an element or a range")
                 path.projections;
           }
     | Source { is_binding = false; _ } | Temporary | Lent _ -> None

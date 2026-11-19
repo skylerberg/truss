@@ -1,0 +1,21 @@
+capability Fetch {
+  fn get() -> UInt64
+}
+
+type Fixed()
+
+impl Fetch for Fixed {
+  fn get(self) -> UInt64 {
+    7
+  }
+}
+
+fn wrapped() -> UInt64
+  uses Fetch
+  cost calls(Fetch.get) == 1
+{
+  let inner = provide Fixed() {
+    Fetch.get()
+  }
+  inner.saturating_add(Fetch.get())
+}

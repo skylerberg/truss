@@ -686,26 +686,8 @@ let merge_known_on_paths (paths : (Logic.term * State.frame) list) =
       each
   in
   let aliases = merge_known (fun frame -> frame.aliases) ~is_same:( = ) ~on_differing:guard_each in
-  let slices =
-    merge_known
-      (fun frame -> frame.slices)
-      ~is_same:( = )
-      ~on_differing:(fun each ->
-        if
-          List.exists
-            (function _, (None | Some State.Unknown_slice) -> true | _, Some (Slices _) -> false)
-            each
-        then Unknown_slice
-        else
-          Slices
-            (List.concat_map
-               (function
-                 | condition, Some (State.Slices slices) -> guard condition slices
-                 | _, (Some Unknown_slice | None) -> [])
-               each))
-  in
   let lends = merge_known (fun frame -> frame.lends) ~is_same:( == ) ~on_differing:guard_each in
-  (aliases, slices, lends)
+  (aliases, lends)
 
 let name_path_condition context (frame : State.frame) condition =
   match condition with
@@ -720,10 +702,8 @@ let merge context ?value_type ~condition
     (paths : (Logic.term * State.frame * Logic.term option) list) =
   let first = match paths with (_, first, _) :: _ -> first | [] -> raise_bug "no paths meet" in
   let is_expression = not first.makes_obligations in
-  let aliases, slices, lends =
-    merge_known_on_paths (List.map (fun (on, frame, _) -> (on, frame)) paths)
-  in
-  let merged = { first with condition; aliases; slices; lends } in
+  let aliases, lends = merge_known_on_paths (List.map (fun (on, frame, _) -> (on, frame)) paths) in
+  let merged = { first with condition; aliases; lends } in
   let choose values =
     match List.rev values with
     | (_, _, last) :: earlier ->

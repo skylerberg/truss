@@ -158,16 +158,17 @@ let collect context (mir : Mir.Graph.t) ~mode_keywords =
         List.iter
           (fun (statement : Mir.Graph.statement) ->
             match statement.kind with
-            | Assign
-                {
-                  target = { root = Local local; projections = [] };
-                  value = Operand (Borrow { place = { root = Literal _; _ }; _ });
-                } -> (
+            | Basic
+                (Assign
+                   {
+                     target = { root = Local local; projections = [] };
+                     value = Operand (Borrow { place = { root = Literal _; _ }; _ });
+                   }) -> (
                 match body.locals.(local).kind with
                 | Source { local = core; is_binding = true; _ } ->
                     Local_table.replace context.literal_views core ()
                 | Source { is_binding = false; _ } | Temporary | Lent _ -> ())
-            | _ -> ())
+            | Basic _ | Provide_start _ | Provide_end -> ())
           basic.statements)
       body.blocks
   in
