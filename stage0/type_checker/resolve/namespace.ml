@@ -75,15 +75,16 @@ let builtin_entries =
 
 let find_head_type (lookups : Names.lookups) ~(from : Path.module_) ~imports (path : Syntax.path) =
   match path.modules with
-  | [] -> Names.find_bare_type lookups ~from path.last.text
+  | [] -> Names.Scope.find_bare_type lookups ~from path.last.text
   | first :: rest -> (
       match
-        Names.lookup_module lookups ~from ~imports first.text
+        Names.Scope.lookup_module lookups ~from ~imports first.text
           (List.map (fun (name : Syntax.name) -> name.text) rest)
       with
       | Found_module module_ -> (
           match
-            Names.lookup_in lookups ~from module_ path.last.text ~is_kind:Names.is_type_kind
+            Names.Scope.lookup_in lookups ~from module_ path.last.text
+              ~is_kind:Names.Scope.is_type_kind
           with
           | Visible (item, path) -> Some (item, path)
           | Hidden _ | Absent -> None)
@@ -112,7 +113,7 @@ let resolve_count (lookups : Names.lookups) ~(file : Path.file) ~parameters (nam
   if List.mem name.text parameters then Parameter name.text
   else
     match lookups.find file.module_ name.text with
-    | Some { kind = Constant; _ } -> Constant (Names.make_top_path file.module_ name.text)
+    | Some { kind = Constant; _ } -> Constant (Names.Scope.make_top_path file.module_ name.text)
     | _ -> Constant (make_unresolved_path file [ name.text ])
 
 let rec resolve_reference (lookups : Names.lookups) ~file ~imports ~spell ~parameters ~self
@@ -284,7 +285,7 @@ let list_file_declarations (lookups : Names.lookups) (file : Path.file) ~imports
     | Method_declaration _ | Definition_error _ ->
         Option.bind (find_entry item.value) (fun (entry : Names.entry) ->
             make_written index ~visibility:entry.visibility item
-              (Names.make_top_path module_ entry.name)
+              (Names.Scope.make_top_path module_ entry.name)
               (Names.convert_named entry.kind) entry.generic)
   in
   let _, declared =
@@ -489,7 +490,7 @@ let build (lookups : Names.lookups) package
     List.map
       (fun (item : Syntax.path Syntax.item) ->
         let used = Names.resolve_used_module lookups ~from:file.module_ item.value in
-        (Names.extract_last_name used, used))
+        (Names.Scope.extract_last_name used, used))
       uses
   in
   let imports =
