@@ -10,7 +10,8 @@ let takes_literal (state : State.state) (collection : Types.ty) (trait : Types.t
   | _ -> false
 
 let record_conversion (state : State.state) (value : Syntax.expression) (collection : Types.ty)
-    (trait : Types.trait_reference) name =
+    (trait : Types.trait_reference) method_ =
+  let { Well_known.name; receiver; _ } = Well_known.locate_method method_ in
   state.tables.calls.(value.id) <-
     Some
       {
@@ -19,7 +20,7 @@ let record_conversion (state : State.state) (value : Syntax.expression) (collect
             {
               trait;
               name;
-              receiver = Static;
+              receiver;
               self_type = collection;
               instantiation = Types.no_instantiation;
               evidence = Built_in;
@@ -57,8 +58,9 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
             }
     | None -> ()
   in
-  let trait_call ?(mode = Types.Read) trait name receiver self_type evidence arguments result :
+  let trait_call ?(mode = Types.Read) trait method_ self_type evidence arguments result :
       Tables.call =
+    let { Well_known.name; receiver; _ } = Well_known.locate_method method_ in
     {
       callee =
         Trait_method
@@ -95,7 +97,7 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
                 (match State.find_evidence state part_type display with
                 | Some evidence ->
                     set_part index
-                      (trait_call display "display" Path.Read part_type evidence [ part ] Types.unit)
+                      (trait_call display Display_display part_type evidence [ part ] Types.unit)
                 | None ->
                     State.report state No_impl (State.read_span state part.id)
                       (Printf.sprintf
@@ -152,12 +154,12 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
                               template with
                               from_template =
                                 Some
-                                  (trait_call template_trait "from_template" Path.Static tag_type
+                                  (trait_call template_trait From_template_from_template tag_type
                                      evidence [] tag_type);
                             }
                     | None -> ());
                     let part =
-                      State.resolve_associated_type state tag_type template_trait "Part"
+                      State.resolve_associated_type state tag_type template_trait From_template_part
                         ~at:(State.read_span state literal.id)
                     in
                     part_type := Some part;
@@ -172,7 +174,7 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
                           match State.find_evidence state part from with
                           | Some evidence ->
                               set_part index
-                                (trait_call ~mode:Own from "from" Path.Static part evidence
+                                (trait_call ~mode:Own from From_from part evidence
                                    [ part_expression ] part)
                           | None ->
                               State.report state No_impl
@@ -228,11 +230,11 @@ and check_list_literal state env ?expected (value : Syntax.expression) items =
       array
   | Some collection when takes_literal state collection from_elements ->
       let element =
-        State.resolve_associated_type state collection from_elements "Element"
+        State.resolve_associated_type state collection from_elements From_elements_element
           ~at:(State.read_span state value.id)
       in
       check_items element;
-      record_conversion state value collection from_elements "from_elements";
+      record_conversion state value collection from_elements From_elements_from_elements;
       State.register_expression state value (fun () ->
           Form.build_converted_literal state value
             ~element:(State.finalize_type state element)
@@ -277,10 +279,12 @@ and check_map_literal state env ?expected (value : Syntax.expression) entries =
               [ State.make_fresh_type state; State.make_fresh_type state ]
       in
       let at = State.read_span state value.id in
-      let key = State.resolve_associated_type state map from_entries "Key" ~at in
-      let value_type = State.resolve_associated_type state map from_entries "Value" ~at in
+      let key = State.resolve_associated_type state map from_entries From_entries_key ~at in
+      let value_type =
+        State.resolve_associated_type state map from_entries From_entries_value ~at
+      in
       check_entries key value_type;
-      record_conversion state value map from_entries "from_entries";
+      record_conversion state value map from_entries From_entries_from_entries;
       State.register_expression state value (fun () ->
           Form.build_converted_map_literal state value ~key:(State.finalize_type state key)
             ~value_type:(State.finalize_type state value_type)

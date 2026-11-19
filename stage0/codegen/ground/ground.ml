@@ -31,7 +31,7 @@ let rec to_string = function
       in
       let result =
         match function_type.result with
-        | Named { path; arguments = [] } when Path.show_name path = "Unit" -> ""
+        | Named { path; arguments = [] } when Intrinsic.find_builtin path = Some Unit -> ""
         | ty -> " -> " ^ to_string ty
       in
       let text = "fn(" ^ String.concat ", " parameters ^ ")" ^ result in

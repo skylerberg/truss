@@ -33,4 +33,4 @@ val check_contract :
 
 val check_body : Lookups.t -> Resolve.Names.key -> (checked, Diagnostic.in_definition list) result
 val derive_form : Lookups.t -> Path.t -> Core.t option
-val derives : Path.t -> string -> bool
+val is_derived_method : Path.t -> bool

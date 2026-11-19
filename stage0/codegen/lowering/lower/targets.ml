@@ -623,13 +623,16 @@ let lower_template_value (state : Lowering.state) template_ty literals ~site ~pa
     let _, _, element = read_list_parts state.context.monomorphic list_ty in
     element
   in
-  let literals_ty = read_field_type template_ty "literals" in
-  let parts_ty = read_field_type template_ty "parts" in
+  let literals_field = Well_known.show_field Template_literals
+  and parts_field = Well_known.show_field Template_parts
+  and text_field = Well_known.show_field Literal_text in
+  let literals_ty = read_field_type template_ty literals_field in
+  let parts_ty = read_field_type template_ty parts_field in
   let literal_ty = read_element_type literals_ty in
-  let slice_ty = read_field_type literal_ty "text" in
+  let slice_ty = read_field_type literal_ty text_field in
   let built = Lowering.allocate_temporary state template_ty in
   lower_list_into state literals_ty
-    (Lowered.project built (Field "literals"))
+    (Lowered.project built (Field literals_field))
     ~site
     (List.map
        (fun text value ->
@@ -640,10 +643,10 @@ let lower_template_value (state : Lowering.state) template_ty literals ~site ~pa
                   {
                     ty = literal_ty;
                     variant = None;
-                    fields = [ ("text", Copy (lower_literal_place state slice_ty text)) ];
+                    fields = [ (text_field, Copy (lower_literal_place state slice_ty text)) ];
                   } )))
        literals);
-  lower_list_into state parts_ty (Lowered.project built (Field "parts")) ~site parts;
+  lower_list_into state parts_ty (Lowered.project built (Field parts_field)) ~site parts;
   built
 
 let pull_loop state ~(option : Ground.ty) ~(call_next : Lowered.place -> unit)
@@ -657,11 +660,15 @@ let pull_loop state ~(option : Ground.ty) ~(call_next : Lowered.place -> unit)
       Emit_c.Ir_builder.finish state.builder (Goto test);
       Emit_c.Ir_builder.start state.builder test;
       call_next next;
+      let some_variant = Well_known.show_variant Option_some in
       Emit_c.Ir_builder.finish state.builder
-        (Switch_variant { place = next; cases = [ ("Some", inside) ]; default = Some after });
+        (Switch_variant { place = next; cases = [ (some_variant, inside) ]; default = Some after });
       Emit_c.Ir_builder.start state.builder inside;
       Lowering.run_in_scope state (fun () ->
           Lowering.run_in_loop state ~continue_:test ~break_:after ~depth (fun () ->
-              body (Lowered.project next (Variant_field { variant = "Some"; field = "value" }))));
+              body
+                (Lowered.project next
+                   (Variant_field
+                      { variant = some_variant; field = Well_known.show_field Option_some_value }))));
       Emit_c.Ir_builder.finish state.builder (Goto test);
       Emit_c.Ir_builder.start state.builder after)

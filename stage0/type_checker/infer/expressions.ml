@@ -356,16 +356,18 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
             ignore (check_expression state env key);
             base_type
         | _ -> (
+            let { Well_known.owner; name; receiver } = Well_known.locate_method Index_at in
             let index_trait =
-              State.make_trait_reference ~arguments:[] (Well_known.make_path Index)
+              State.make_trait_reference ~arguments:[] (Well_known.make_path owner)
             in
             match State.find_evidence state base_type index_trait with
             | Some evidence ->
-                let resolve_associated name =
-                  State.resolve_associated_type state base_type index_trait name
+                let resolve_associated associated =
+                  State.resolve_associated_type state base_type index_trait associated
                     ~at:(State.read_span state value.id)
                 in
-                let key_type = resolve_associated "Key" and output = resolve_associated "Output" in
+                let key_type = resolve_associated Index_key
+                and output = resolve_associated Index_output in
                 let actual = check_expression state env ~expected:key_type key in
                 Name_lookup.coerce state env ~argument:Read ~takes_view_as_owner:true key ~actual
                   ~expected:key_type;
@@ -376,8 +378,8 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
                         Trait_method
                           {
                             trait = index_trait;
-                            name = "at";
-                            receiver = Read;
+                            name;
+                            receiver;
                             self_type = base_type;
                             instantiation = Types.no_instantiation;
                             evidence = State.convert_evidence evidence;

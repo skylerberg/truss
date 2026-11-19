@@ -1,6 +1,7 @@
-let make_tasks_call (state : Lowering.state) name ?result (places : Lowered.place list) :
+let make_tasks_call (state : Lowering.state) method_ ?result (places : Lowered.place list) :
     Lowered.statement =
-  let capability = Well_known.make_path Tasks in
+  let { Well_known.owner; name; _ } = Well_known.locate_method method_ in
+  let capability = Well_known.make_path owner in
   let slot, signature = Targets.lookup_capability_method state.context capability name in
   let c_signature, convention = Targets.make_entry_signature state.context signature in
   Call
@@ -28,12 +29,12 @@ let make_tasks_call (state : Lowering.state) name ?result (places : Lowered.plac
         | None -> Discarded);
     }
 
-let call_tasks_bool (state : Lowering.state) name places : Lowered.operand =
+let call_tasks_bool (state : Lowering.state) method_ places : Lowered.operand =
   let result =
     Lowered.make_local_place
       (Emit_c.Ir_builder.allocate_local state.builder (Value state.context.bool))
   in
-  Emit_c.Ir_builder.emit state.builder (make_tasks_call state name ~result places);
+  Emit_c.Ir_builder.emit state.builder (make_tasks_call state method_ ~result places);
   Copy result
 
 let with_group state (f : Lowered.place -> unit) =
@@ -42,8 +43,8 @@ let with_group state (f : Lowered.place -> unit) =
     Lowered.make_local_place
       (Emit_c.Ir_builder.allocate_local state.builder (Value (Ground.make_builtin UInt64)))
   in
-  Emit_c.Ir_builder.emit state.builder (make_tasks_call state "open" ~result:group []);
-  let join = make_tasks_call state "join" [ group ] in
+  Emit_c.Ir_builder.emit state.builder (make_tasks_call state Tasks_open ~result:group []);
+  let join = make_tasks_call state Tasks_join [ group ] in
   let cleanup = Lowering.Join_group join in
   scope.owned <- [ cleanup ];
   f group;
@@ -52,8 +53,9 @@ let with_group state (f : Lowered.place -> unit) =
   Lowering.close_scope state scope
 
 let compute_task_function_type (state : Lowering.state) : Lowered.ty =
+  let { Well_known.owner; name; _ } = Well_known.locate_method Tasks_spawn in
   let _, signature =
-    Targets.lookup_capability_method state.context (Well_known.make_path Tasks) "spawn"
+    Targets.lookup_capability_method state.context (Well_known.make_path owner) name
   in
   match signature.parameters with
   | [ _; work; _ ] ->
@@ -117,7 +119,7 @@ let cancel (state : Lowering.state) ~(task : Mir.task) ~winner ~number ~value =
       and lost = Emit_c.Ir_builder.allocate_block state.builder
       and after = Emit_c.Ir_builder.allocate_block state.builder in
       Emit_c.Ir_builder.branch state.builder
-        (Holds (call_tasks_bool state "cancel" [ current.group ]))
+        (Holds (call_tasks_bool state Tasks_cancel [ current.group ]))
         ~yes:won ~no:lost;
       Emit_c.Ir_builder.start state.builder won;
       Emit_c.Ir_builder.emit state.builder
@@ -161,7 +163,7 @@ let spawn_iteration (state : Lowering.state) (loop : Lowering.spawn_loop)
              Lowering.run_in_loop state ~continue_:task.end_block ~break_:task.end_block
                ~depth:task.scope_depth f) ));
   let spawned =
-    call_tasks_bool state "spawn"
+    call_tasks_bool state Tasks_spawn
       [ loop.group; Lowered.make_local_place function_value; Lowered.make_local_place loop.item ]
   in
   let next = Emit_c.Ir_builder.allocate_block state.builder

@@ -536,9 +536,10 @@ let rec copy_plain_bindings state (pattern : Core.pattern) : Core.pattern =
 
 let build_scrutinee_pattern state written = copy_plain_bindings state (build_pattern state written)
 
-let resolve_associated_type state type_ (trait : Types.trait_reference) name
+let resolve_associated_type state type_ (trait : Types.trait_reference) associated
     ~(at : Source.Definition_span.t) =
   let type_ = normalize state type_ and trait = normalize_trait state trait in
+  let name = Well_known.show_associated associated in
   match
     Interface.Impls.project_associated_type state.lookups.interface
       ~list_bounds:(lookup_bounds state) type_ trait name

@@ -677,18 +677,20 @@ let emit_statement builder (statement : Mir.Graph.statement) =
   | Lend { part; call = called } -> (
       let is_loop_element = List.mem part builder.loop_elements in
       let selects_element (receiver : Mir.operand) =
-        match called.callee.target with
-        | Trait_method { trait; name = "at"; self_type; _ } ->
-            (Well_known.is Index trait.trait || Well_known.is Index_mut trait.trait)
-            && Place.is_storage_type self_type
-        | Trait_method { name = "element"; _ }
-        | Function { path = Method { name = "element"; _ }; _ } -> (
-            is_loop_element
-            &&
-            match find_operand_type receiver with
-            | Some type_ -> Place.is_storage_type type_
-            | None -> false)
-        | _ -> false
+        if is_loop_element then
+          match find_operand_type receiver with
+          | Some type_ -> Place.is_storage_type type_
+          | None -> false
+        else
+          match called.callee.target with
+          | Trait_method { trait; name; receiver = method_receiver; self_type; _ } -> (
+              match
+                Well_known.find_method
+                  (Method { owner = trait.trait; name; receiver = method_receiver })
+              with
+              | Some (Index_at | Index_mut_at) -> Place.is_storage_type self_type
+              | _ -> false)
+          | _ -> false
       in
       let element =
         match called.arguments with

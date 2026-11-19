@@ -81,10 +81,15 @@ let rec use_mutable_indexes (state : State.state) ~(report_with : Diagnostic.Cod
   | Bracket (base, _) ->
       (match state.tables.calls.(value.id) with
       | Some
-          ({ callee = Trait_method ({ name = "at"; self_type; _ } as method_); arguments; _ } as
-           call) -> (
+          ({
+             callee = Trait_method ({ trait; name; receiver; self_type; _ } as method_);
+             arguments;
+             _;
+           } as call)
+        when Well_known.is_method Index_at (Method { owner = trait.trait; name; receiver }) -> (
+          let index_mut_at = Well_known.locate_method Index_mut_at in
           let index_mut =
-            State.make_trait_reference ~arguments:[] (Well_known.make_path Index_mut)
+            State.make_trait_reference ~arguments:[] (Well_known.make_path index_mut_at.owner)
           in
           match State.find_evidence state self_type index_mut with
           | Some evidence ->
@@ -97,7 +102,8 @@ let rec use_mutable_indexes (state : State.state) ~(report_with : Diagnostic.Cod
                         {
                           method_ with
                           trait = index_mut;
-                          receiver = Mut;
+                          name = index_mut_at.name;
+                          receiver = index_mut_at.receiver;
                           evidence = State.convert_evidence evidence;
                         };
                     arguments =

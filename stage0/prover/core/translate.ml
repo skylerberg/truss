@@ -214,7 +214,7 @@ let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_sub
     &&
     match inherited with
     | Some ({ callee = { key = Some { path = Method { owner; _ }; _ }; _ }; _ }, _) ->
-        not (Path.equal owner Laws.template_trait)
+        not (Well_known.is From_template owner)
     | Some _ | None -> true
   in
   let home = require_home source in

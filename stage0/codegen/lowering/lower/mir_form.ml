@@ -133,7 +133,7 @@ and lower_concurrent_block state (region : Mir_drops.region) ~fork
           in
           Emit_c.Ir_builder.emit state.builder (Assign (function_value, code));
           ignore
-            (Mir_tasks.call_tasks_bool state "spawn"
+            (Mir_tasks.call_tasks_bool state Tasks_spawn
                [ group; function_value; Lowered.make_local_place item ]))
         functions);
   match join with

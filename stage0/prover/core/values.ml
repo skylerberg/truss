@@ -11,8 +11,6 @@ let run_ghost_code (context : State.context) frame (code : Mir.t) =
         (Lambdas.run_lambda_body context frame ~lambdas:code.lambdas code.body ~type_:Types.unit);
       Logic.disjunction context.unfinished)
 
-let finite_map_path : Path.t = Well_known.make_path Finite_map
-
 let assume_extensional context frame (ty : Types.ty) left right =
   match ty with
   | Types.Named { path; arguments = [ Types.Type element ] }
@@ -35,18 +33,18 @@ let assume_extensional context frame (ty : Types.ty) left right =
               ==> equal left right)
       | _ -> ())
   | Types.Named { path; arguments }
-    when Path.equal path Models.finite_set_path || Path.equal path finite_map_path -> (
-      let finite_map = Path.equal path finite_map_path in
+    when Well_known.is Finite_set path || Well_known.is Finite_map path -> (
+      let finite_map = Well_known.is Finite_map path in
       match arguments with
       | Types.Type key :: rest ->
           let each = Facts.make_fresh_name context "key" in
-          let apply_function name output inputs =
-            Models.make_finite_function context ty name output inputs
+          let apply_function method_ output inputs =
+            Models.make_finite_function context method_ ~arguments output inputs
           in
           let key_sort = Facts.declare_sort context key in
           let has =
             apply_function
-              (if finite_map then "contains_key" else "contains")
+              (if finite_map then Well_known.Finite_map_contains_key else Finite_set_contains)
               Logic.Bool
               [ (Logic.Symbol each, key_sort) ]
           in
@@ -55,7 +53,7 @@ let assume_extensional context frame (ty : Types.ty) left right =
               match rest with
               | [ Types.Type value_type ] ->
                   let get =
-                    apply_function "get"
+                    apply_function Finite_map_get
                       (Facts.declare_sort context value_type)
                       [ (Logic.Symbol each, key_sort) ]
                   in
@@ -105,11 +103,11 @@ let assume_only_members context frame label sort contains members =
            (Logic.disjunction (List.map (Logic.equal (Logic.Symbol each)) members)) ))
 
 let make_set context frame (ty : Types.ty) ~element values =
-  let finite = Types.Named { path = Models.finite_set_path; arguments = [ Types.Type element ] } in
+  let arguments = [ Types.Type element ] in
   let literal = Facts.arrive context frame "literal" ty in
   let model =
     match ty with
-    | Types.Named { path; _ } when Path.equal path Models.finite_set_path -> Some literal
+    | Types.Named { path; _ } when Well_known.is Finite_set path -> Some literal
     | _ -> None
   in
   Option.map
@@ -117,13 +115,15 @@ let make_set context frame (ty : Types.ty) ~element values =
       Validity.assume_valid context frame ty literal;
       let element_sort = Facts.declare_sort context element in
       let contains value =
-        Models.make_finite_function context finite "contains" Logic.Bool
+        Models.make_finite_function context Finite_set_contains ~arguments Logic.Bool
           [ (value, element_sort) ]
           model
       in
       List.iter (fun value -> Facts.assume context frame (contains value)) values;
       assume_only_members context frame "value" element_sort contains values;
-      let size = Models.make_finite_function context finite "size" Logic.Int [] model in
+      let size =
+        Models.make_finite_function context Finite_set_size ~arguments Logic.Int [] model
+      in
       Facts.assume context frame (Logic.less_equal size (Logic.int (List.length values)));
       literal)
     model
@@ -156,7 +156,9 @@ let reads_only_literals (parameter : Core.local) (clause : Mir.formula) =
   Mir.iter_places_read
     (fun (place : Mir.place) ->
       match place with
-      | { root = Local local; projections = Field "literals" :: _ } when is_parameter local -> ()
+      | { root = Local local; projections = Field field :: _ }
+        when is_parameter local && field = Well_known.show_field Template_literals ->
+          ()
       | { root = Local local; _ } when is_parameter local -> is_literal_only := false
       | _ -> ())
     clause.value;
@@ -264,23 +266,22 @@ let apply_map_literal context frame ~(ty : Types.ty) ~location terms =
               (Logic.not_ (Operations.make_equality context frame key_type key_term other_term)))
         terms)
     terms;
-  let finite =
-    Types.Named
-      { path = finite_map_path; arguments = [ Types.Type key_type; Types.Type value_type ] }
-  in
+  let arguments = [ Types.Type key_type; Types.Type value_type ] in
   let literal = Facts.arrive context frame "literal" ty in
   let model =
     match ty with
-    | Types.Named { path; _ } when Path.equal path finite_map_path -> literal
+    | Types.Named { path; _ } when Well_known.is Finite_map path -> literal
     | _ -> Facts.raise_unsupported location "a literal of `%s`" (Types.show ty)
   in
   Validity.assume_valid context frame ty literal;
   let key_sort = Facts.declare_sort context key_type in
   let has key =
-    Models.make_finite_function context finite "contains_key" Logic.Bool [ (key, key_sort) ] model
+    Models.make_finite_function context Finite_map_contains_key ~arguments Logic.Bool
+      [ (key, key_sort) ]
+      model
   in
   let get key =
-    Models.make_finite_function context finite "get"
+    Models.make_finite_function context Finite_map_get ~arguments
       (Facts.declare_sort context value_type)
       [ (key, key_sort) ]
       model
@@ -291,7 +292,7 @@ let apply_map_literal context frame ~(ty : Types.ty) ~location terms =
   assume_only_members context frame "key" key_sort has (List.map (fun (_, key, _) -> key) terms);
   Facts.assume context frame
     (Logic.equal
-       (Models.make_finite_function context finite "size" Logic.Int [] model)
+       (Models.make_finite_function context Finite_map_size ~arguments Logic.Int [] model)
        (Logic.int (List.length terms)));
   (frame, literal)
 
@@ -676,7 +677,7 @@ let copy_value ?literal (context : State.context) frame ty term =
   else
     let declare_copy_cost metric =
       Amounts.declare_method_cost context frame metric
-        (Path.Method { owner = Well_known.make_path Copyable; name = "copy"; receiver = Read })
+        (Well_known.make_method_path Copyable_copy)
         ~trait_arguments:[] ty
     in
     Operations.spend context frame (fun (counter : Costs.counter) ->

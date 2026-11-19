@@ -170,23 +170,21 @@ let find_concrete_impl (context : State.context) (trait : Types.trait_reference)
   | _ -> None
 
 let find_written_equal context ty left right =
-  match
-    find_concrete_impl context
-      { trait = Facts.equal_trait; trait_arguments = []; associated = [] }
-      ty
-  with
+  let equal = Well_known.locate_method Equal_equal in
+  let trait : Types.trait_reference =
+    { trait = Well_known.make_path equal.owner; trait_arguments = []; associated = [] }
+  in
+  match find_concrete_impl context trait ty with
   | Some (((Impl _ : Path.t) as impl), substitution) -> (
       let evidence : Core.evidence = Impl { impl; substitution } in
       match
-        Contracts.find_method_contract context.lookups
-          { trait = Facts.equal_trait; trait_arguments = []; associated = [] }
-          "equal" Read evidence
+        Contracts.find_method_contract context.lookups trait equal.name equal.receiver evidence
       with
       | Some contract when contract.is_logic_function ->
           let symbol =
             Logic.Symbol.Function
               {
-                callee = Path.Method { owner = impl; name = "equal"; receiver = Read };
+                callee = Well_known.make_impl_method_path Equal_equal ~impl;
                 type_arguments = [ Types.Type ty ];
               }
           in

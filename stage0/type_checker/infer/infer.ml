@@ -43,7 +43,7 @@ let check_body (lookups : Lookups.t) key =
   check lookups key ~checks_body:true
 
 let derive_form = Derived.derive_form
-let derives = Derived.derives
+let is_derived_method = Derived.is_derived_method
 let show_resolution = Tables.show_resolution
 
 let statement_diverges (tables : tables) =

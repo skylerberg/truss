@@ -85,7 +85,7 @@ and check_name (state : State.state) (env : State.env) (value : Syntax.expressio
   | Definition (Type, path) ->
       if Intrinsic.find_builtin path = Some Unit then begin
         state.tables.resolutions.(value.id) <-
-          Some (Variant_value { type_ = Types.unit; variant = "Unit" });
+          Some (Variant_value { type_ = Types.unit; variant = Intrinsic.show_builtin Unit });
         State.register_expression state value (fun () -> Construct { variant = None; fields = [] });
         Types.unit
       end
@@ -619,7 +619,7 @@ and find_consuming_cursor state (span : Source.Definition_span.t) type_ :
                   cursor_call = Some (make_argumentless_call callee cursor);
                   remaining = find_remaining_call state span cursor;
                 },
-              State.resolve_associated_type state cursor trait "Element" ~at:span )
+              State.resolve_associated_type state cursor trait Cursor_element ~at:span )
       | None -> Absent)
   | Hidden hidden -> Hidden hidden
   | Visible _ | Absent -> Absent

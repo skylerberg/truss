@@ -368,12 +368,14 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       let result_sort = Facts.declare_sort context result_type in
       Facts.declare context (Logic.Function (function_symbol, sorts, result_sort));
       (match (path, callee_bindings) with
-      | Method { owner; name = "model"; receiver = Read }, [ (self, _) ] when self.local = Self ->
+      | Method { owner = Impl { trait; _ } as impl; name; receiver }, [ (self, _) ]
+        when self.local = Self
+             && Well_known.is_method Model_model (Method { owner = trait.path; name; receiver }) ->
           Models.rank_model context
             ((Interface.Impls.normalize context.lookups.interface
                 ~list_bounds:Interface.Impls.list_no_bounds)
                (Types.substitute (substitution_of callee_clauses) self.type_))
-            ~model:result_type ~impl:owner function_symbol
+            ~model:result_type ~impl function_symbol
       | _ -> ());
       let symbol =
         if List.mem function_symbol context.axiomatizing then begin
@@ -977,30 +979,33 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
         in
         Laws.assume_laws context frame ~at:location trait self_type;
         let list_operands () = List.map (fun (passed : State.passed) -> passed.term) values in
-        match (name, evidence, list_operands ()) with
-        | ("minimum_value" | "maximum_value" | "bit_width"), _, []
-          when Well_known.is Fixed_width_integer trait.trait
-               && Types.find_integer_bits self_type <> None ->
+        let trait_path = Path.Method { owner = trait.trait; name; receiver } in
+        let method_ = Well_known.find_method trait_path in
+        match (method_, evidence, list_operands ()) with
+        | ( Some
+              ( Fixed_width_integer_minimum_value | Fixed_width_integer_maximum_value
+              | Fixed_width_integer_bit_width ),
+            _,
+            [] )
+          when Types.find_integer_bits self_type <> None ->
             Without_contract
               (match
-                 (name, Types.find_integer_range self_type, Types.find_integer_bits self_type)
+                 (method_, Types.find_integer_range self_type, Types.find_integer_bits self_type)
                with
-              | "minimum_value", Some (low, _), _ -> Some (frame, Logic.Integer low)
-              | "maximum_value", Some (_, high), _ -> Some (frame, Logic.Integer high)
-              | _, _, Some (bits, _) -> Some (frame, Logic.int bits)
+              | Some Fixed_width_integer_minimum_value, Some (low, _), _ ->
+                  Some (frame, Logic.Integer low)
+              | Some Fixed_width_integer_maximum_value, Some (_, high), _ ->
+                  Some (frame, Logic.Integer high)
+              | Some Fixed_width_integer_bit_width, _, Some (bits, _) -> Some (frame, Logic.int bits)
               | _ -> None)
-        | "equal", _, [ left; right ]
-          when Path.equal trait.trait Facts.equal_trait
-               && Facts.is_equality_identity context self_type ->
+        | Some Equal_equal, _, [ left; right ] when Facts.is_equality_identity context self_type ->
             Without_contract (Some (frame, Logic.equal left right))
-        | "equal", Impl { impl = Derived _; _ }, [ left; right ]
-          when Path.equal trait.trait Facts.equal_trait ->
+        | Some Equal_equal, Impl { impl = Derived _; _ }, [ left; right ] ->
             Without_contract
               (Some (frame, Operations.make_equality context frame self_type left right))
         | _ ->
-            (match evidence with
-            | (Bound | Dynamic)
-              when name = "from_template" && Path.equal trait.trait Laws.template_trait ->
+            (match (method_, evidence) with
+            | Some From_template_from_template, (Bound | Dynamic) ->
                 Facts.oblige context frame Requires location
                   [
                     Text
@@ -1010,7 +1015,6 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
                   ]
                   (Logic.Boolean false)
             | _ -> ());
-            let trait_path = Path.Method { owner = trait.trait; name; receiver } in
             let trait_substitution =
               Types.combine_substitutions
                 (bind_parameters (list_generics trait_path) arguments

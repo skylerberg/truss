@@ -1,65 +1,83 @@
-let types =
-  List.filter_map
-    (fun (builtin : Intrinsic.builtin) ->
-      match builtin with
-      | Storage | View | Handle | Shared -> None
-      | _ -> Some (Intrinsic.show_builtin builtin, Intrinsic.module_))
-    Intrinsic.builtins
-  @ List.concat_map
-      (fun (modules, names) ->
-        List.map (fun name -> (name, Path.make_standard_module modules)) names)
-      [
-        ([ "option" ], [ "Option" ]);
-        ([ "result" ], [ "Result" ]);
-        ([ "numbers"; "integers" ], [ "FixedWidthInteger"; "SignedInteger"; "UnsignedInteger" ]);
-        ( [ "core" ],
-          [
-            "Equal";
-            "Ordered";
-            "Ordering";
-            "Hash";
-            "Hasher";
-            "Default";
-            "Display";
-            "From";
-            "TryFrom";
-            "Copyable";
-            "Plain";
-            "Storable";
-            "Add";
-            "Subtract";
-            "Multiply";
-            "Divide";
-            "Remainder";
-            "Negate";
-            "Index";
-            "IndexMut";
-            "IndexAssign";
-            "Model";
-            "Iterable";
-            "Cursor";
-            "Range";
-            "ExitCode";
-          ] );
-        ([ "text" ], [ "String"; "StringSlice"; "FromTemplate"; "Template" ]);
-        ([ "list" ], [ "List"; "Slice"; "FromElements" ]);
-        ([ "specification" ], [ "Sequence"; "FiniteSet"; "FiniteMap"; "Multiset" ]);
-        ([ "map" ], [ "Map"; "FromEntries" ]);
-        ([ "set" ], [ "Set" ]);
-        (Grant.prelude_capability_module.modules, Grant.prelude_capabilities @ [ "SystemError" ]);
-        ([ "time" ], [ "Instant"; "Duration" ]);
-        ([ "files" ], [ "Path" ]);
-      ]
+let items : Well_known.t list =
+  [
+    Option;
+    Result;
+    Fixed_width_integer;
+    Signed_integer;
+    Unsigned_integer;
+    Equal;
+    Ordered;
+    Ordering;
+    Hash;
+    Hasher;
+    Default;
+    Display;
+    From;
+    Try_from;
+    Copyable;
+    Plain;
+    Storable;
+    Add;
+    Subtract;
+    Multiply;
+    Divide;
+    Remainder;
+    Negate;
+    Index;
+    Index_mut;
+    Index_assign;
+    Model;
+    Iterable;
+    Cursor;
+    Range;
+    Exit_code;
+    String;
+    String_slice;
+    From_template;
+    Template;
+    List;
+    Slice;
+    From_elements;
+    Sequence;
+    Finite_set;
+    Finite_map;
+    Multiset;
+    Map;
+    From_entries;
+    Set;
+    System_error;
+    Instant;
+    Duration;
+    File_path;
+  ]
 
-let variants = [ ("Some", "Option"); ("None", "Option"); ("Ok", "Result"); ("Err", "Result") ]
+let locate (path : Path.t) =
+  match path with
+  | Top { module_; name } -> (name, module_)
+  | _ ->
+      Compiler_bug.raise_bug ~stage:"Resolve" "the prelude's `%s` is not a top-level definition"
+        (Path.show path)
+
+let types =
+  List.map locate
+    (List.filter_map
+       (fun (builtin : Intrinsic.builtin) ->
+         match builtin with
+         | Storage | View | Handle | Shared -> None
+         | _ -> Some (Intrinsic.make_builtin_path builtin))
+       Intrinsic.builtins
+    @ List.map Well_known.make_path items)
+  @ List.map (fun name -> (name, Grant.prelude_capability_module)) Grant.prelude_capabilities
+
+let variants : Well_known.variant list = [ Option_some; Option_none; Result_ok; Result_err ]
 let find_type name = List.assoc_opt name types
 
 let find_variant name =
-  match List.assoc_opt name variants with
-  | None -> None
-  | Some type_ -> (
-      match find_type type_ with
-      | Some module_ -> Some (Path.Top { module_; name = type_ }, name)
-      | None -> None)
+  List.find_map
+    (fun variant ->
+      if Well_known.show_variant variant = name then
+        Some (Well_known.make_variant_type_path variant, name)
+      else None)
+    variants
 
-let names = List.map fst types @ List.map fst variants
+let names = List.map fst types @ List.map Well_known.show_variant variants

@@ -468,12 +468,12 @@ let evaluate_call_values context frame run (invocation : Invocation.t)
 let read_call context frame run (call : Mir.call) ~result_type =
   let invocation = make_invocation call.callee ~lends:None in
   match (invocation.callee, call.arguments) with
-  | ( Trait_method { trait; name = "equal"; _ },
+  | ( Trait_method { trait; name; receiver; _ },
       [
         Passed { value = tested; _ };
         Passed { value = Borrow { place = { root = Literal { text; _ }; projections = [] }; _ }; _ };
       ] )
-    when Path.equal trait.trait Facts.equal_trait ->
+    when Well_known.is_method Equal_equal (Method { owner = trait.trait; name; receiver }) ->
       let ty = compute_operand_type context frame tested in
       Some
         ( frame,
