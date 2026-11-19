@@ -171,24 +171,24 @@ let () =
                 (List.map (fun ((file : Path.file), _) -> file.module_) Standard_library.files)))
       in
       let has_real_implementation (capability : Resolve.Names.declaration) =
-        Option.is_some (Interface.Definition.find_real_implementation interface capability.path)
+        Option.is_some (Interface.Definition.find_real_implementation interface capability.key.path)
       in
       match
         List.partition
           (fun (capability : Resolve.Names.declaration) ->
-            Types.is_built_in_capability (Capability capability.path))
+            Types.is_built_in_capability (Capability capability.key.path))
           capabilities
       with
       | [ first; second ], others ->
           List.iter
             (fun (built_in : Resolve.Names.declaration) ->
               if has_real_implementation built_in then
-                Harness.fail "%s has a real implementation" (Path.show built_in.path))
+                Harness.fail "%s has a real implementation" (Path.show built_in.key.path))
             [ first; second ];
           List.iter
             (fun (capability : Resolve.Names.declaration) ->
               if not (has_real_implementation capability) then
-                Harness.fail "%s has no real implementation" (Path.show capability.path))
+                Harness.fail "%s has no real implementation" (Path.show capability.key.path))
             others
       | _ -> Harness.fail "the standard library does not declare Panic and RunForever exactly once");
   Harness.test "a test declares Panic or RunForever, which leaves it deterministic" (fun () ->
@@ -536,16 +536,16 @@ let () =
     Interface.Impls.is_plain;
   expect_property "a List is Copyable" true "" (fun _ -> list int64) Interface.Impls.is_copyable;
   expect_property "a handle is not Copyable" false ""
-    (fun _ -> Types.make_named (Intrinsic.make_builtin_path Handle) [])
+    (fun _ -> Types.make_builtin Handle)
     Interface.Impls.is_copyable;
   expect_property "a handle is not Plain" false ""
-    (fun _ -> Types.make_named (Intrinsic.make_builtin_path Handle) [])
+    (fun _ -> Types.make_builtin Handle)
     Interface.Impls.is_plain;
   expect_property "an Option of a handle is not Copyable" false ""
-    (fun _ -> option (Types.make_named (Intrinsic.make_builtin_path Handle) []))
+    (fun _ -> option (Types.make_builtin Handle))
     Interface.Impls.is_copyable;
   expect_property "an Option of a handle is not Plain" false ""
-    (fun _ -> option (Types.make_named (Intrinsic.make_builtin_path Handle) []))
+    (fun _ -> option (Types.make_builtin Handle))
     Interface.Impls.is_plain;
   expect_property "a List is not Plain" false "" (fun _ -> list int64) Interface.Impls.is_plain;
   expect_property "an Option of a Slice is a view" true ""
@@ -957,7 +957,7 @@ let () =
       let packages = Support.setup [] in
       let declared =
         List.map
-          (fun (declaration : Resolve.Names.declaration) -> declaration.path)
+          (fun (declaration : Resolve.Names.declaration) -> declaration.key.path)
           ((Support.make_names packages).list_package_declarations Path.standard_package)
       in
       List.iter

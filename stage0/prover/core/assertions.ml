@@ -37,37 +37,36 @@ let add_bitwise_definitions (query : Logic.query) =
     | Logic.Apply (name, arguments) -> (
         match (find_bitwise_operation name, arguments) with
         | Some (operation, bits, signed), first :: rest ->
-            let convert_to_bits value =
-              Logic.Operation (Printf.sprintf "(_ int2bv %d)" bits, [ value ])
-            in
+            let convert_to_bits value = Logic.Operation (Int2bv { width = bits }, [ value ]) in
             let operand_bits = convert_to_bits first in
             let result =
               match (operation, rest) with
-              | Intrinsic.Complement, _ -> Some (Logic.Operation ("bvnot", [ operand_bits ]))
+              | Intrinsic.Complement, _ -> Some (Logic.Operation (Bvnot, [ operand_bits ]))
               | Bit_and, [ second_operand ] ->
-                  Some (Logic.Operation ("bvand", [ operand_bits; convert_to_bits second_operand ]))
+                  Some (Logic.Operation (Bvand, [ operand_bits; convert_to_bits second_operand ]))
               | Bit_or, [ second_operand ] ->
-                  Some (Logic.Operation ("bvor", [ operand_bits; convert_to_bits second_operand ]))
+                  Some (Logic.Operation (Bvor, [ operand_bits; convert_to_bits second_operand ]))
               | Bit_xor, [ second_operand ] ->
-                  Some (Logic.Operation ("bvxor", [ operand_bits; convert_to_bits second_operand ]))
+                  Some (Logic.Operation (Bvxor, [ operand_bits; convert_to_bits second_operand ]))
               | Shift_left, [ second_operand ] ->
-                  Some (Logic.Operation ("bvshl", [ operand_bits; convert_to_bits second_operand ]))
+                  Some (Logic.Operation (Bvshl, [ operand_bits; convert_to_bits second_operand ]))
               | Shift_right, [ second_operand ] ->
                   Some
                     (Logic.Operation
-                       ( (if signed then "bvashr" else "bvlshr"),
+                       ( (if signed then Bvashr else Bvlshr),
                          [ operand_bits; convert_to_bits second_operand ] ))
               | (Rotate_left | Rotate_right), [ second_operand ] ->
                   let by =
-                    convert_to_bits (Logic.Operation ("mod", [ second_operand; Logic.int bits ]))
+                    convert_to_bits (Logic.Operation (Mod, [ second_operand; Logic.int bits ]))
                   in
-                  let rest = Logic.Operation ("bvsub", [ convert_to_bits (Logic.int bits); by ]) in
+                  let rest = Logic.Operation (Bvsub, [ convert_to_bits (Logic.int bits); by ]) in
                   let towards, back =
-                    if operation = Rotate_left then ("bvshl", "bvlshr") else ("bvlshr", "bvshl")
+                    if operation = Rotate_left then (Logic.Bvshl, Logic.Bvlshr)
+                    else (Logic.Bvlshr, Logic.Bvshl)
                   in
                   Some
                     (Logic.Operation
-                       ( "bvor",
+                       ( Bvor,
                          [
                            Logic.Operation (towards, [ operand_bits; by ]);
                            Logic.Operation (back, [ operand_bits; rest ]);
@@ -75,13 +74,12 @@ let add_bitwise_definitions (query : Logic.query) =
               | Swap_bytes, _ ->
                   let extract_byte index =
                     Logic.Operation
-                      ( Printf.sprintf "(_ extract %d %d)" ((8 * index) + 7) (8 * index),
-                        [ operand_bits ] )
+                      (Extract { high = (8 * index) + 7; low = 8 * index }, [ operand_bits ])
                   in
                   let bytes = List.init (bits / 8) extract_byte in
                   Some
                     (List.fold_left
-                       (fun swapped next -> Logic.Operation ("concat", [ swapped; next ]))
+                       (fun swapped next -> Logic.Operation (Concat, [ swapped; next ]))
                        (List.hd bytes) (List.tl bytes))
               | _ -> None
             in

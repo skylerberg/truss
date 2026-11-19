@@ -3,8 +3,8 @@ let list_choice_blocks = function
       List.concat_map
         (fun (case : Tree.case) -> (case.tests :: Option.to_list case.guard) @ [ case.value ])
         cases
-  | Conditional { then_; else_; _ } -> [ then_; else_ ]
-  | Connective { right; _ } -> [ right ]
+  | Conditional { condition; then_; else_; _ } -> [ condition; then_; else_ ]
+  | Connective { left; right; _ } -> [ left; right ]
 
 let list_nested_blocks_of_kind (kind : Tree.statement_kind) : Tree.block list =
   match kind with
@@ -38,7 +38,7 @@ let list_nested_blocks (statement : Tree.statement) = list_nested_blocks_of_kind
 
 let visit_operand_places visit = function
   | Tree.Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> visit place
-  | Constant _ -> ()
+  | Immediate _ -> ()
 
 let visit_target_places visit : Tree.operand Core.target -> unit = function
   | Indirect function_value -> visit_operand_places visit function_value
@@ -115,8 +115,7 @@ and visit_statement_places visit (kind : Tree.statement_kind) =
       visit base;
       visit_call_places visit call
   | Basic (Assert value | Echo value | Loan_start { borrowed = value; _ })
-  | Assert_by_bit_vector { condition = value; _ }
-  | Choose { choice = Conditional { condition = value; _ } | Connective { left = value; _ }; _ } ->
+  | Assert_by_bit_vector { condition = value; _ } ->
       visit_operand_places visit value
   | Basic (Provide { provided; _ }) ->
       List.iter
@@ -129,7 +128,7 @@ and visit_statement_places visit (kind : Tree.statement_kind) =
       Option.iter (fun (value, _) -> visit_operand_places visit value) returned
   | Jump (Break | Continue | Unreachable | Written_unreachable | Todo)
   | Basic (Live _ | Dead _ | Provide_end | Loan_end _ | Ghost_assert _ | Matched _ | Proof _)
-  | Choose { choice = Cases _; _ }
+  | Choose { choice = Cases _ | Conditional _ | Connective _; _ }
   | While _ | Fork _ | Resume _ ->
       ());
   List.iter (iter_places_read visit) (list_nested_blocks_of_kind kind)
@@ -185,4 +184,4 @@ let find_callee (statement : Tree.statement) : Tree.callee option =
       None
 
 let extract_operand_type : Tree.operand -> Types.ty = function
-  | Use { type_; _ } | Borrow { type_; _ } | Take { type_; _ } | Constant { type_; _ } -> type_
+  | Use { type_; _ } | Borrow { type_; _ } | Take { type_; _ } | Immediate { type_; _ } -> type_

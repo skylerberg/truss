@@ -1,0 +1,4 @@
+fn f(count: UInt64)
+  cost time O(forall check: (fn(log: fn(Int64) -> Int64) requires log(1) > 0) => true)
+{
+}

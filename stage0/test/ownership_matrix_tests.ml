@@ -257,12 +257,7 @@ let () =
         (fun () ->
           let text, functions = generate maker in
           let packages = Support.setup [ ("app::main", text) ] in
-          let file = Support.parse_file "app::main" in
-          (match Support.parse_errors packages file with
-          | [] -> ()
-          | errors ->
-              Harness.fail "the generated module does not parse: %s" (String.concat " " errors));
-          let diagnostics = check packages file in
+          let diagnostics = Support.run_check ~check packages "app::main" in
           let check_generated (generated : generated) =
             List.filter
               (fun (diagnostic : Diagnostic.t) ->

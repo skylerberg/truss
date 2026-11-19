@@ -1,14 +1,9 @@
-let find_main snapshot database packages (package : Path.package) =
-  if List.mem { Path.package; modules = [] } (Command_packages.list_modules snapshot packages) then
-    Database.find_main database package
-  else None
-
 let list_mains snapshot packages =
-  List.filter_map (find_main snapshot (Workspace.open_database snapshot) packages) packages
+  List.filter_map (Database.find_main (Workspace.open_database snapshot)) packages
 
-let require_main snapshot database packages =
+let require_main database packages =
   let package = Command_packages.require_one packages in
-  match find_main snapshot database packages package with
+  match Database.find_main database package with
   | Some main -> main
   | None ->
       Outcome.raise_cannot_run
@@ -19,7 +14,7 @@ let require_main snapshot database packages =
 let refuse_unshippable snapshot packages lookups main proofs =
   let in_code =
     List.map
-      (fun ({ failure; file; line; column; way } : Backend.unshippable) ->
+      (fun ({ failure; location = { file; line; column }; way } : Backend.unshippable) ->
         ( Command_packages.show_file snapshot packages file,
           line,
           column,
@@ -76,28 +71,28 @@ let refuse_unshippable snapshot packages lookups main proofs =
 let build_program ?output snapshot packages (profile : Backend.profile) =
   let database = Workspace.open_database snapshot in
   let report = Report.gather ~proofs:(profile = Release) database snapshot packages in
-  if not (Report.clean report) then raise (Report.Errors report);
-  let main = require_main snapshot database packages in
+  Report.require_no_errors report;
+  let main = require_main database packages in
   let lookups = Workspace_backend.require_lowered_lookups database packages in
   Option.iter (refuse_unshippable snapshot packages lookups main) (Report.force_proofs report);
   let backend = Workspace_backend.create snapshot packages lookups profile in
   let output = Option.value output ~default:(Backend.make_program_path backend) in
   match Backend.build_program backend ~main ~output with
   | Error message -> Outcome.raise_cannot_run "%s" message
-  | Ok () -> output
+  | Ok () -> (output, report)
 
 let run ~release ~arguments =
   let snapshot, packages = Command_packages.load_current () in
-  let program = build_program snapshot packages (if release then Release else Development) in
+  let program, _ = build_program snapshot packages (if release then Release else Development) in
   Outcome.Run_program { program; arguments }
 
 let build ~output =
   let snapshot, packages = Command_packages.load_current () in
   let package = Command_packages.require_one packages in
   let output = Shown_path.normalize (Option.value output ~default:(Path.show_package package)) in
-  ignore (build_program snapshot packages Release ~output);
+  let _, report = build_program snapshot packages Release ~output in
   if Output.json () then
     Json.print
-      (Json.make_document ~diagnostics:[] [ ("output", Json.String (Shown_path.show_path output)) ])
+      (Report.make_document report [ ("output", Json.String (Shown_path.show_path output)) ])
   else Output.printf "Built %s.\n" (Shown_path.show_path output);
   Outcome.Exit 0

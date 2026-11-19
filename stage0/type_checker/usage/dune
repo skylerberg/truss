@@ -9,5 +9,6 @@
   syntax
   syntax_walk
   infer
+  interface
   types
   zarith))

@@ -1,19 +1,13 @@
-let view_ty = Codegen_support.named "View" ~arguments:[ Type Codegen_support.uint8 ]
+let view_ty = Storage.make_view_type Codegen_support.uint8
 let bytes_ty = Storage.make_storage_type Codegen_support.uint8
 
-let extra =
-  [
-    ( Ground.to_string view_ty,
-      Storage.make_view_shape ~uint64:Codegen_support.uint64 Codegen_support.uint8 );
-  ]
-
-let intrinsic_types : Backend.For_testing.Intrinsics.types =
+let intrinsic_types : Lowering.For_testing.Intrinsics.types =
   { uint64 = Codegen_support.uint64; string_slice = Codegen_support.named "StringSlice" }
 
 let operate builder ?destination ?(type_arguments = []) operation arguments =
   ignore
-    (Backend.For_testing.Intrinsics.lower
-       (Codegen_support.make_shape_env ~extra ())
+    (Lowering.For_testing.Intrinsics.lower
+       (Codegen_support.make_shape_env ())
        builder intrinsic_types operation ~type_arguments arguments ~destination
        ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
        ~trace:None)
@@ -32,7 +26,7 @@ let make_view builder text =
   Emit_c.Ir_builder.emit builder
     (Assign
        ( Lowered.make_local_place view,
-         Storage.build_view view_ty ~elements:(Constant (Bytes text))
+         Storage.build_view view_ty ~buffer:(Constant (Bytes text))
            ~length:(Lowered.make_uint64_constant (String.length text)) ));
   view
 
@@ -103,7 +97,7 @@ let () =
       if is_checked linux then Codegen_support.fail "the check for Linux looks for proc_pidpath");
   Codegen_support.test "a call of a function the system lacks stops the program, and calls nothing"
     (fun () ->
-      let env = Memory_layout.create linux ~compute_shape:(Codegen_support.compute_shape extra) in
+      let env = Memory_layout.create linux ~compute_shape:(Codegen_support.compute_shape []) in
       let builder = Emit_c.Ir_builder.create env ~item:(Codegen_support.code_item "entry") in
       Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
       let length =
@@ -111,7 +105,7 @@ let () =
       in
       let path = Emit_c.Ir_builder.allocate_local builder (Codegen_support.value bytes_ty) in
       ignore
-        (Backend.For_testing.Intrinsics.lower env builder intrinsic_types
+        (Lowering.For_testing.Intrinsics.lower env builder intrinsic_types
            (Runtime (Libc Proc_pidpath)) ~type_arguments:[]
            [
              Value (Codegen_support.constant_int32 1);
@@ -202,7 +196,7 @@ let () =
 let () =
   Codegen_support.test "a program writes a view's bytes with write" (fun () ->
       let status, output, _ =
-        Codegen_support.run_program ~extra
+        Codegen_support.run_program
           [
             build_entry (fun builder ->
                 let view = make_view builder "written\n" in
@@ -239,7 +233,7 @@ let () =
       if names <> [ "descriptor"; "least" ] then
         Codegen_support.fail "fcntl_dupfd_cloexec takes %s" (String.concat ", " names);
       let status, output, _ =
-        Codegen_support.run_program ~extra
+        Codegen_support.run_program
           [
             build_entry (fun builder ->
                 let copy =
@@ -272,7 +266,7 @@ let () =
       Codegen_support.expect_string ~expected:"through the copy\n" output);
   Codegen_support.test "open is given its mode as C passes an argument through ..." (fun () ->
       let path = Filename.concat (Lazy.force Codegen_support.scratch) "opened" in
-      Codegen_support.expect_status ~extra 0
+      Codegen_support.expect_status 0
         [
           build_entry (fun builder ->
               let name = make_view builder (path ^ "\000") in
@@ -299,7 +293,7 @@ let () =
         ];
       Codegen_support.expect_int ~expected:0o600 (Unix.stat path).st_perm);
   Codegen_support.test "errno is the number at the address the C library returns" (fun () ->
-      Codegen_support.expect_status ~extra
+      Codegen_support.expect_status
         (Libc.evaluate_number Codegen_support.host Enoent)
         [
           build_entry (fun builder ->
@@ -321,7 +315,7 @@ let () =
         ]);
   Codegen_support.test "read fills the room storage has after its last element" (fun () ->
       let status, _, _ =
-        Codegen_support.run_program ~extra ~input:"hello"
+        Codegen_support.run_program ~input:"hello"
           [
             build_entry (fun builder ->
                 let storage =
@@ -380,7 +374,7 @@ let () =
       Codegen_support.expect_int ~expected:(Char.code 'h' + 5) status);
   Codegen_support.test
     "a structure the C library writes arrives in the arguments named for its numbers" (fun () ->
-      Codegen_support.expect_status ~extra 1
+      Codegen_support.expect_status 1
         [
           build_entry (fun builder ->
               let seconds =
@@ -407,37 +401,28 @@ let () =
                   Place (Lowered.make_local_place seconds);
                   Place (Lowered.make_local_place nanoseconds);
                 ];
-              let recent = Emit_c.Ir_builder.allocate_local builder (Raw Bool)
-              and whole = Emit_c.Ir_builder.allocate_local builder (Raw Bool) in
-              Emit_c.Ir_builder.emit builder
-                (Assign
-                   ( Lowered.make_local_place recent,
-                     Binary
-                       ( Greater,
-                         Copy (Lowered.make_local_place seconds),
-                         Codegen_support.constant_int64 1_700_000_000 ) ));
-              Emit_c.Ir_builder.emit builder
-                (Assign
-                   ( Lowered.make_local_place whole,
-                     Binary
-                       ( Less,
-                         Copy (Lowered.make_local_place nanoseconds),
-                         Codegen_support.constant_int64 1_000_000_000 ) ));
-              Emit_c.Ir_builder.emit builder
-                (Assign
-                   ( Lowered.make_local_place recent,
-                     Binary
-                       ( Bit_and,
-                         Copy (Lowered.make_local_place recent),
-                         Copy (Lowered.make_local_place whole) ) ));
+              let emit_bool rvalue = Emit_c.Ir_builder.emit_value builder (Raw Bool) rvalue in
+              let is_recent =
+                emit_bool
+                  (Compare
+                     ( Greater,
+                       Copy (Lowered.make_local_place seconds),
+                       Codegen_support.constant_int64 1_700_000_000 ))
+              in
+              let is_whole =
+                emit_bool
+                  (Compare
+                     ( Less,
+                       Copy (Lowered.make_local_place nanoseconds),
+                       Codegen_support.constant_int64 1_000_000_000 ))
+              in
+              let is_plausible = emit_bool (Binary (Bit_and, is_recent, is_whole)) in
               let status =
                 Emit_c.Ir_builder.allocate_local builder
                   (Codegen_support.value Codegen_support.int32)
               in
               Emit_c.Ir_builder.emit builder
-                (Assign
-                   ( Lowered.make_local_place status,
-                     Convert (Copy (Lowered.make_local_place recent), Integer Int32) ));
+                (Assign (Lowered.make_local_place status, Convert (is_plausible, Integer Int32)));
               Emit_c.Ir_builder.emit builder
                 (Assign
                    ( Lowered.make_local_place status,
@@ -449,18 +434,17 @@ let () =
         ]);
   Codegen_support.test "a number passed by address is read by the function and then written"
     (fun () ->
-      let uint32 = Codegen_support.named "UInt32" in
-      let extra = extra @ [ (Ground.to_string uint32, Memory_layout.Scalar (Integer UInt32)) ] in
+      let uint32 = Ground.make_builtin UInt32 in
       let operate builder ~destination operation arguments =
         ignore
-          (Backend.For_testing.Intrinsics.lower
-             (Codegen_support.make_shape_env ~extra ())
+          (Lowering.For_testing.Intrinsics.lower
+             (Codegen_support.make_shape_env ())
              builder intrinsic_types operation ~type_arguments:[] arguments
              ~destination:(Some destination)
              ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
              ~trace:None)
       in
-      Codegen_support.expect_status ~extra 16
+      Codegen_support.expect_status 16
         [
           build_entry (fun builder ->
               let domain = make_flags builder [ Af_inet ]
@@ -480,8 +464,8 @@ let () =
               in
               let operate_on_bytes ?destination operation arguments =
                 ignore
-                  (Backend.For_testing.Intrinsics.lower
-                     (Codegen_support.make_shape_env ~extra ())
+                  (Lowering.For_testing.Intrinsics.lower
+                     (Codegen_support.make_shape_env ())
                      builder intrinsic_types operation ~type_arguments:[ Codegen_support.uint8 ]
                      arguments ~destination
                      ~site:{ definition = Codegen_support.definition "entry"; offset = 0 }
@@ -528,7 +512,7 @@ let () =
               status);
         ]);
   Codegen_support.test "an argument a row fixes is no argument of the Truss call" (fun () ->
-      Codegen_support.expect_status ~extra 1
+      Codegen_support.expect_status 1
         [
           build_entry (fun builder ->
               let draw () =
@@ -548,28 +532,25 @@ let () =
               in
               let first = draw () in
               let second = draw () in
-              let differ = Emit_c.Ir_builder.allocate_local builder (Raw Bool)
-              and status =
+              let differ =
+                Emit_c.Ir_builder.emit_value builder (Raw Bool)
+                  (Compare
+                     ( Not_equal,
+                       Copy (Lowered.make_local_place first),
+                       Copy (Lowered.make_local_place second) ))
+              in
+              let status =
                 Emit_c.Ir_builder.allocate_local builder
                   (Codegen_support.value Codegen_support.int32)
               in
               Emit_c.Ir_builder.emit builder
-                (Assign
-                   ( Lowered.make_local_place differ,
-                     Binary
-                       ( Not_equal,
-                         Copy (Lowered.make_local_place first),
-                         Copy (Lowered.make_local_place second) ) ));
-              Emit_c.Ir_builder.emit builder
-                (Assign
-                   ( Lowered.make_local_place status,
-                     Convert (Copy (Lowered.make_local_place differ), Integer Int32) ));
+                (Assign (Lowered.make_local_place status, Convert (differ, Integer Int32)));
               status);
         ])
 
 let () =
   Codegen_support.test "nothing after a call of a function that does not return is run" (fun () ->
-      Codegen_support.expect_status ~extra 7
+      Codegen_support.expect_status 7
         [
           build_entry (fun builder ->
               operate builder (Runtime (Libc Exit)) [ Value (Codegen_support.constant_int32 7) ];
@@ -585,7 +566,7 @@ let () =
     "a pipe's two ends arrive in the arguments named for them, and poll finds the written data"
     (fun () ->
       let waited_ty = Storage.make_storage_type Codegen_support.int32 in
-      Codegen_support.expect_status ~extra 1
+      Codegen_support.expect_status 1
         [
           build_entry (fun builder ->
               let read_end =
@@ -679,11 +660,11 @@ let () =
         Memory_layout.create Codegen_support.host
           ~compute_shape:(Monomorphic.compute_shape Codegen_support.standard_context)
       in
-      let drop_and_copy = Backend.For_testing.drop_and_copy env in
+      let drop_and_copy = Lowering.For_testing.drop_and_copy env in
       let int32 = Ground.make_builtin Int32 in
       let view_ty = Storage.make_view_type (Ground.make_builtin UInt8) in
       let handle_ty = Ground.make_builtin Handle in
-      let types : Backend.For_testing.Intrinsics.types =
+      let types : Lowering.For_testing.Intrinsics.types =
         {
           uint64 = Ground.make_builtin UInt64;
           string_slice = Codegen_support.make_standard_type "text" "StringSlice" ();
@@ -697,12 +678,12 @@ let () =
         Emit_c.Ir_builder.emit builder
           (Assign
              ( Lowered.make_local_place name,
-               Storage.build_view view_ty ~elements:(Constant (Bytes text))
+               Storage.build_view view_ty ~buffer:(Constant (Bytes text))
                  ~length:(Lowered.make_uint64_constant (String.length text)) ));
         let open_test_file () =
           let descriptor = Emit_c.Ir_builder.allocate_local builder (Codegen_support.value int32) in
           ignore
-            (Backend.For_testing.Intrinsics.lower env builder types (Runtime (Libc Open))
+            (Lowering.For_testing.Intrinsics.lower env builder types (Runtime (Libc Open))
                ~type_arguments:[]
                [
                  Place (Lowered.make_local_place name);
@@ -721,28 +702,19 @@ let () =
         Emit_c.Ir_builder.emit builder
           (Assign
              ( Lowered.make_local_place handle,
-               Build
-                 {
-                   ty = handle_ty;
-                   variant = None;
-                   fields = [ ("descriptor", Copy (Lowered.make_local_place first)) ];
-                 } ));
+               Builtin_records.Handle.build ~descriptor:(Copy (Lowered.make_local_place first)) ));
         Emit_c.Ir_builder.emit builder (Drop (Lowered.make_local_place handle));
         let second = open_test_file () in
-        let same = Emit_c.Ir_builder.allocate_local builder (Raw Bool)
-        and status = Emit_c.Ir_builder.allocate_local builder (Codegen_support.value int32) in
-        Emit_c.Ir_builder.emit builder
-          (Assign
-             ( Lowered.make_local_place same,
-               Binary
-                 ( Equal,
-                   Copy (Lowered.make_local_place first),
-                   Copy (Lowered.make_local_place second) ) ));
-        Emit_c.Ir_builder.emit builder
-          (Assign
-             ( Lowered.make_local_place status,
-               Convert (Copy (Lowered.make_local_place same), Integer Int32) ));
-        Emit_c.Ir_builder.finish builder (Return (Some (Copy (Lowered.make_local_place status))));
+        let same =
+          Emit_c.Ir_builder.emit_value builder (Raw Bool)
+            (Compare
+               (Equal, Copy (Lowered.make_local_place first), Copy (Lowered.make_local_place second)))
+        in
+        let status =
+          Emit_c.Ir_builder.emit_value builder (Codegen_support.value int32)
+            (Convert (same, Integer Int32))
+        in
+        Emit_c.Ir_builder.finish builder (Return (Some status));
         Emit_c.Ir_builder.build builder
           { parameters = []; result = Some (Codegen_support.value int32); returns = true }
       in
@@ -750,14 +722,15 @@ let () =
         Codegen_support.run_program ~env
           [
             Codegen_support.make_program_fragment entry;
-            Codegen_support.make_program_fragment (Backend.For_testing.drop drop_and_copy handle_ty);
+            Codegen_support.make_program_fragment
+              (Lowering.For_testing.drop drop_and_copy handle_ty);
           ]
       in
       if status <> 1 then
         Codegen_support.fail "the descriptor was not free again (status %d, %s)" status errors)
 
 let expect_panic ~saying program =
-  let status, _, errors = Codegen_support.run_program ~extra program in
+  let status, _, errors = Codegen_support.run_program program in
   if status <> 101 then Codegen_support.fail "expected a panic, got status %d (%s)" status errors;
   if not (String.includes ~affix:saying errors) then
     Codegen_support.fail "expected %S in %S" saying errors
@@ -840,15 +813,14 @@ let () =
         ]);
   Codegen_support.test
     "a checked build stops a float converted to an integer type that cannot hold it" (fun () ->
-      let float64 = Codegen_support.named "Float64" in
-      let extra = extra @ [ (Ground.to_string float64, Memory_layout.Scalar Float64) ] in
+      let float64 = Codegen_support.float64 in
       let convert builder number =
         let result =
           Emit_c.Ir_builder.allocate_local builder (Codegen_support.value Codegen_support.int32)
         in
         ignore
-          (Backend.For_testing.Intrinsics.lower
-             (Codegen_support.make_shape_env ~extra ())
+          (Lowering.For_testing.Intrinsics.lower
+             (Codegen_support.make_shape_env ())
              builder intrinsic_types (Scalar Convert)
              ~type_arguments:[ float64; Codegen_support.int32 ]
              [ Value (Constant (Float64 (Int64.bits_of_float number))) ]
@@ -857,9 +829,9 @@ let () =
              ~trace:None);
         result
       in
-      Codegen_support.expect_status ~extra 7 [ build_entry (fun builder -> convert builder 7.9) ];
+      Codegen_support.expect_status 7 [ build_entry (fun builder -> convert builder 7.9) ];
       let status, _, errors =
-        Codegen_support.run_program ~extra [ build_entry (fun builder -> convert builder 1.0e30) ]
+        Codegen_support.run_program [ build_entry (fun builder -> convert builder 1.0e30) ]
       in
       if status <> 101 || not (String.includes ~affix:"conversion out of range" errors) then
         Codegen_support.fail "expected a panic about the conversion, got status %d (%s)" status

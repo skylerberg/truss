@@ -1,94 +1,14 @@
-module Lookups = Lookups
-
-type unsupported = Lower.unsupported = { construct : string; at : Lowered.site option }
-
-type lowered =
-  | Compiled of Emit_c.fragment
-  | Folded of Lowered.data * Emit_c.fragment
-  | Evaluate of Path.t * Ground.ty
-
-type lowered_lookups = {
-  system : Libc.system;
-  read_source : Path.file -> Source.t;
-  interface : Interface.Lookups.t;
-  find_lowered : Lowered.Item.t -> (lowered, unsupported) result option;
-  read_test_key : Lowered.Item.t -> (string, unsupported) result;
-  list_reached_todo_types : Lowered.Item.t -> Path.t list;
-}
-
 type profile = Emit_c.profile = Development | Release
-
-exception Todo_type = Monomorphic.Todo_type
-exception Infinite_size = Memory_layout.Infinite_size
 
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Backend" format
 
-let make (context : Lower.context) (item : Lowered.Item.t) : lowered =
-  let env = Lower.env context in
-  let drop_and_copy = Lower.drop_and_copy context in
-  match item with
-  | Code { path; instantiation } -> Compiled (Lower.lower_source_code context ~path ~instantiation)
-  | Generated generated -> Compiled (Lower.lower_generated context generated)
-  | Table table -> Compiled (Emit_c.make_table_fragment env (Lower.lower_table context table))
-  | Constant path -> (
-      match Lower.lower_constant context path with
-      | Folded data -> Folded (data, Emit_c.make_data_fragment env data)
-      | Run ty -> Evaluate (path, ty))
-  | Drop ty -> Compiled (Drop_and_copy.drop drop_and_copy ty)
-  | Copy ty -> Compiled (Drop_and_copy.copy drop_and_copy ty)
-  | Any_drop ty -> Compiled (Drop_and_copy.build_any_drop drop_and_copy ty)
-  | Any_copy ty -> Compiled (Drop_and_copy.build_any_copy drop_and_copy ty)
-  | Debug ty -> Compiled (Debug_output.build_debug env ty)
-  | Encode ty -> Compiled (Encoding.encode env ty)
-  | Evaluator path -> Compiled (Lower.lower_evaluator context path)
-  | Template_check { from_template; literals; clauses } ->
-      Compiled (Lower.lower_template_check context ~from_template ~literals ~clauses)
-  | Call_evaluation { function_; arguments } ->
-      Compiled (Lower.lower_call_evaluation context ~function_ ~arguments)
-
-let lower system (lookups : Lookups.t) item =
-  let env =
-    Memory_layout.create system
-      ~compute_shape:(Monomorphic.compute_shape (Lower.make_monomorphic_context lookups.interface))
-  in
-  match
-    Compiler_bug.run_while_doing ~stage:"Backend"
-      ("lowering " ^ Lowered.Item.to_string item)
-      (fun () -> make (Lower.make_context ~env lookups) item)
-  with
-  | lowered -> Ok lowered
-  | exception Lower.Unsupported unsupported -> Error unsupported
-
-let list_references = function
-  | Compiled fragment | Folded (_, fragment) -> Emit_c.references fragment
-  | Evaluate (path, _) -> [ Lowered.Item.Evaluator path ]
-
-let check_calls interface ~find_call_edges item = function
-  | Compiled fragment -> Call_edge_check.check interface ~find_call_edges item fragment
-  | Folded _ | Evaluate _ -> ()
-
 module Item_table = Hashtbl.Make (Lowered.Item)
-
-let derive_fragment_hash = Blake3.derive_key ~context:"truss 2026-11-17 item fragment hash"
-
-let evaluated_fragment_hash =
-  Blake3.derive_key ~context:"truss 2026-11-16 evaluated constant fragment hash" ""
-
-let hash_fragment = function
-  | Compiled fragment | Folded (_, fragment) ->
-      derive_fragment_hash (Emit_c.render_fragment fragment)
-  | Evaluate _ -> evaluated_fragment_hash
-
-let derive_test_keys ~read_lowered ~read_known_key =
-  Test_keys.derive ~read_known_key ~read_hash_and_references:(fun item ->
-      let lowered = read_lowered item in
-      (hash_fragment lowered, list_references lowered))
 
 type 'a ran = Ran of 'a | Ran_too_long | Stopped of string
 type results = { find : string -> string option; add : string -> string -> unit }
 
 type t = {
-  lookups : lowered_lookups;
+  lookups : Lowering.lowered_lookups;
   monomorphic : Monomorphic.context;
   c_compiler : C_compiler.t;
   profile : profile;
@@ -104,50 +24,13 @@ let make_env backend =
   Memory_layout.create backend.lookups.system
     ~compute_shape:(Monomorphic.compute_shape backend.monomorphic)
 
-let read_lowered backend item =
-  match backend.lookups.find_lowered item with
-  | Some (Ok lowered) -> lowered
-  | Some (Error unsupported) -> raise (Lower.Unsupported unsupported)
-  | None -> raise_bug "%s is requested from code with errors" (Lowered.Item.to_string item)
-
-let read_test_key backend root =
-  match backend.lookups.read_test_key root with
-  | Ok test_key -> test_key
-  | Error unsupported -> raise (Lower.Unsupported unsupported)
-
-let programs_built = Atomic.make 0
-
-let make_program_path backend =
-  Filename.concat backend.programs
-    (Printf.sprintf "program-%d-%d" (Unix.getpid ()) (Atomic.fetch_and_add programs_built 1))
-
 exception Cannot_build of string
 
 let raise_cannot_build format = Printf.ksprintf (fun message -> raise (Cannot_build message)) format
 
-let select_optimization : profile -> C_compiler.optimization = function
-  | Development -> O1
-  | Release -> O2_lto
-
-let show_profile = function Development -> "development" | Release -> "release"
-let derive_result_key = Blake3.derive_key ~context:"truss 2026-11-17 result key"
-
-let make_result_key backend root =
-  derive_result_key
-    (Cbor.encode
-       (Cbor.Array
-          [
-            Cbor.int Emit_c.version;
-            Cbor.Text (Libc.show_system backend.lookups.system);
-            Cbor.Text (show_profile backend.profile);
-            Bytes
-              (C_compiler.make_fingerprint backend.c_compiler (select_optimization backend.profile));
-            Bytes (read_test_key backend root);
-          ]))
-
 type location = { file : Path.file; line : int; column : int }
 
-let locate_offset (lookups : lowered_lookups) (definition : Path.t) offset =
+let locate_offset (lookups : Lowering.lowered_lookups) (definition : Path.t) offset =
   let names = lookups.interface.names in
   match Option.map names.read_place (names.find_key definition) with
   | Some { file; base } ->
@@ -157,7 +40,7 @@ let locate_offset (lookups : lowered_lookups) (definition : Path.t) offset =
 
 let locate_site lookups (site : Lowered.site) = locate_offset lookups site.definition site.offset
 
-let locate_todo_type (lookups : lowered_lookups) (path : Path.t) =
+let locate_todo_type (lookups : Lowering.lowered_lookups) (path : Path.t) =
   let names = lookups.interface.names in
   match
     Option.map (fun key -> (names.read_definition key, names.read_spans key)) (names.find_key path)
@@ -173,6 +56,51 @@ let make_position backend ({ file; line; column } : location) : Emit_c.position 
 let show_location backend ({ file; line; column } : location) =
   Printf.sprintf "%s:%d:%d" (backend.show_file file) line column
 
+let raise_unsupported backend (unsupported : Lowering.unsupported) =
+  let where =
+    match unsupported.at with
+    | None -> ""
+    | Some at -> show_location backend (locate_site backend.lookups at) ^ ": "
+  in
+  raise_cannot_build "%sStage0 cannot build this yet: %s." where unsupported.construct
+
+let read_lowered backend item =
+  match backend.lookups.find_lowered item with
+  | Some (Ok lowered) -> lowered
+  | Some (Error unsupported) -> raise_unsupported backend unsupported
+  | None -> raise_bug "%s is requested from code with errors" (Lowered.Item.to_string item)
+
+let read_test_key backend root =
+  match backend.lookups.read_test_key root with
+  | Ok test_key -> test_key
+  | Error unsupported -> raise_unsupported backend unsupported
+
+let programs_built = Atomic.make 0
+
+let make_program_path backend =
+  Filename.concat backend.programs
+    (Printf.sprintf "program-%d-%d" (Unix.getpid ()) (Atomic.fetch_and_add programs_built 1))
+
+let select_optimization : profile -> C_compiler.optimization = function
+  | Development -> O1
+  | Release -> O2_lto
+
+let show_profile = function Development -> "development" | Release -> "release"
+let derive_result_key = Blake3.derive_key ~context:"truss 2026-11-18 result key"
+
+let make_result_key backend root =
+  derive_result_key
+    (Cbor.encode
+       (Cbor.Array
+          [
+            Cbor.int Emit_c.version;
+            Cbor.Text (Libc.show_system backend.lookups.system);
+            Cbor.Text (show_profile backend.profile);
+            Bytes
+              (C_compiler.make_fingerprint backend.c_compiler (select_optimization backend.profile));
+            Bytes (read_test_key backend root);
+          ]))
+
 let list_small_callees ~find ~is_worked_on fragment =
   match Emit_c.item fragment with
   | Code _ as caller ->
@@ -187,15 +115,6 @@ let list_small_callees ~find ~is_worked_on fragment =
           | _ -> None)
         (List.sort_uniq Lowered.Item.compare (Emit_c.called fragment))
   | _ -> []
-
-let test_runner : Lowered.Item.t =
-  Code { path = Well_known.make_path Run_tests; instantiation = Ground.no_instantiation }
-
-let make_test_root path = Lowered.Item.Generated (Test_main path)
-
-let list_roots ~tests ~mains =
-  (if tests = [] then [] else test_runner :: List.map make_test_root tests)
-  @ List.map (fun main -> Lowered.Item.Generated (Program_main main)) mains
 
 let rec build ?report_progress ?(tests = false) ?(supplied = []) backend ~roots ~startup ~output =
   let lookup item =
@@ -233,6 +152,7 @@ let rec build ?report_progress ?(tests = false) ?(supplied = []) backend ~roots 
           Emit_c.render_sites_file
             ~resolve_position:(fun site -> make_position backend (locate_site backend.lookups site))
             linked );
+        ("capabilities", Emit_c.render_capabilities_file linked);
       ]
   in
   match
@@ -244,9 +164,10 @@ let rec build ?report_progress ?(tests = false) ?(supplied = []) backend ~roots 
   | Error message -> raise (Cannot_build message)
 
 and build_test_program ?report_progress ?supplied backend ~time_limit_ms ~roots ~output =
-  build ?report_progress ?supplied backend ~tests:true ~roots:(test_runner :: roots)
+  build ?report_progress ?supplied backend ~tests:true ~roots:(Lowering.test_runner :: roots)
     ~startup:
-      (Startup.render_tests_start ~time_limit_ms ~runner:(Emit_c.make_symbol test_runner)
+      (Startup.render_tests_start ~time_limit_ms
+         ~runner:(Emit_c.make_symbol Lowering.test_runner)
          (List.map Emit_c.make_symbol roots))
     ~output
 
@@ -301,7 +222,7 @@ and compile_fragment backend item =
     | Evaluate (path, ty) -> (
         match
           run_while_compiling backend (Lowered.Item.Evaluator path) ~read:(fun encoded ->
-              Encoding.decode (make_env backend) ty encoded)
+              Lowering.Encoding.decode (make_env backend) ty encoded)
         with
         | Ran value ->
             Emit_c.make_data_fragment (make_env backend) { data_item = Constant path; ty; value }
@@ -315,20 +236,11 @@ and compile_fragment backend item =
       (Lowered.Item.to_string (Emit_c.item compiled));
   compiled
 
-let show_unsupported backend (unsupported : Lower.unsupported) =
-  let where =
-    match unsupported.at with
-    | None -> ""
-    | Some at -> show_location backend (locate_site backend.lookups at) ^ ": "
-  in
-  where ^ "Stage0 cannot build this yet: " ^ unsupported.construct ^ "."
-
-let capture_failure backend work =
+let capture_failure work =
   match work () with
   | result -> Ok result
   | exception Cannot_build message -> Error message
   | exception Test_report.Malformed message -> Error message
-  | exception Lower.Unsupported unsupported -> Error (show_unsupported backend unsupported)
 
 module Test_report = Test_report
 
@@ -346,10 +258,10 @@ let find_stored results key =
         microseconds;
         cached = true;
       })
-    (Option.bind (results.find key) int_of_string_opt)
+    (Option.bind (Option.bind (results.find key) Cbor.decode) Cbor.find_int)
 
 let store results key (record : Test_report.record) =
-  results.add key (string_of_int record.microseconds)
+  results.add key (Cbor.encode (Cbor.int record.microseconds))
 
 type progress =
   | Lowering
@@ -376,9 +288,9 @@ let make_incomplete_record backend todo_types =
   }
 
 let run_tests ?(rerun = false) ?(report_progress = ignore) backend ~time_limit_ms tests =
-  capture_failure backend @@ fun () ->
+  capture_failure @@ fun () ->
   let results = backend.results in
-  let roots = List.map make_test_root tests in
+  let roots = List.map Lowering.make_root tests in
   report_progress Lowering;
   let is_keyed test =
     results <> None && not (Interface.Definition.is_external_test backend.lookups.interface test)
@@ -429,13 +341,14 @@ let run_tests ?(rerun = false) ?(report_progress = ignore) backend ~time_limit_m
           | _ -> ());
           report_progress (Ended { test = index; record }))
     in
-    let _, report, errors =
+    let status, _, errors =
       Fun.protect
         ~finally:(fun () -> try Sys.remove output with Sys_error _ -> ())
         (fun () -> Process.run ~input:"" ~on_output:(Test_report.feed reader) output [])
     in
     if Array.exists Option.is_none fresh then
-      raise_cannot_build "The test program ended before reporting every test:\n%s%s" report errors
+      raise_cannot_build "The test program ended with status %d before reporting every test:\n%s"
+        status errors
   end;
   let fresh = ref (List.filter_map Fun.id (Array.to_list fresh)) in
   List.map
@@ -451,31 +364,22 @@ let run_tests ?(rerun = false) ?(report_progress = ignore) backend ~time_limit_m
     known
 
 let build_supplied_tests backend ~time_limit_ms supplied ~output =
-  capture_failure backend @@ fun () ->
+  capture_failure @@ fun () ->
   let supplied_env = make_env backend in
   let fragments = List.map (fun build -> build supplied_env) supplied in
   build_test_program backend ~supplied:fragments ~time_limit_ms
     ~roots:(List.map Emit_c.item fragments) ~output
 
-type unshippable = {
-  failure : [ `Todo | `Echo ];
-  file : Path.file;
-  line : int;
-  column : int;
-  way : Path.t list;
-}
+type unshippable = { failure : [ `Todo | `Echo ]; location : location; way : Path.t list }
 
-let make_root_key (root : Path.t) : Lowered.Item.t =
-  match root with Test _ -> make_test_root root | _ -> Generated (Program_main root)
-
-let rec read_executed_fragment (lookups : lowered_lookups) item =
+let rec read_executed_fragment (lookups : Lowering.lowered_lookups) item =
   match lookups.find_lowered item with
   | Some (Ok (Compiled fragment | Folded (_, fragment))) -> Some fragment
   | Some (Ok (Evaluate (path, _))) -> read_executed_fragment lookups (Lowered.Item.Evaluator path)
   | Some (Error _) | None -> None
 
 let trace_root lookups root =
-  Emit_c.trace_reachable ~lookup:(read_executed_fragment lookups) [ make_root_key root ]
+  Emit_c.trace_reachable ~lookup:(read_executed_fragment lookups) [ Lowering.make_root root ]
 
 let list_reached_definitions lookups root =
   List.sort_uniq Path.compare
@@ -490,7 +394,7 @@ let list_reached_definitions lookups root =
          | _ -> None)
        (trace_root lookups root))
 
-let list_unshippable (lookups : lowered_lookups) ~main =
+let list_unshippable (lookups : Lowering.lowered_lookups) ~main =
   let reached = trace_root lookups main in
   begin
     let list_definitions keys =
@@ -506,43 +410,34 @@ let list_unshippable (lookups : lowered_lookups) ~main =
     let reports =
       List.map
         (fun path ->
-          let ({ file; line; column } : location) = locate_todo_type lookups path in
-          { failure = `Todo; file; line; column; way = [ main; path ] })
-        (lookups.list_reached_todo_types (make_root_key main))
+          { failure = `Todo; location = locate_todo_type lookups path; way = [ main; path ] })
+        (lookups.list_reached_todo_types (Lowering.make_root main))
       @ List.concat_map
           (fun (compiled, keys) ->
             List.map
               (fun (failure, site) ->
-                let ({ file; line; column } : location) = locate_site lookups site in
                 {
                   failure = (match failure with Emit_c.Echo -> `Echo | Todo -> `Todo);
-                  file;
-                  line;
-                  column;
+                  location = locate_site lookups site;
                   way = list_definitions keys;
                 })
               (Emit_c.failures compiled))
           reached
     in
     List.sort_uniq
-      (fun left right ->
-        compare
-          (left.file, left.line, left.column, left.failure)
-          (right.file, right.line, right.column, right.failure))
+      (fun left right -> compare (left.location, left.failure) (right.location, right.failure))
       reports
     |> List.fold_left
          (fun acc report ->
            match acc with
-           | last :: _
-             when (last.file, last.line, last.column) = (report.file, report.line, report.column) ->
-               acc
+           | last :: _ when last.location = report.location -> acc
            | _ -> report :: acc)
          []
     |> List.rev
   end
 
 let make_program_root backend ~main =
-  let root = make_root_key main in
+  let root = Lowering.make_root main in
   match backend.lookups.list_reached_todo_types root with
   | [] -> root
   | todo_types ->
@@ -557,30 +452,23 @@ let make_program_root backend ~main =
                   (Path.show path))
               todo_types))
 
-let run_program ?input backend ~main ~arguments =
-  capture_failure backend @@ fun () ->
-  let root = make_program_root backend ~main in
-  build_and_run backend ~roots:[ root ]
-    ~startup:(Startup.render_program_start (Emit_c.make_symbol root))
-    (fun program -> Process.run ?input program arguments)
-
 let build_program backend ~main ~output =
-  capture_failure backend @@ fun () ->
+  capture_failure @@ fun () ->
   let root = make_program_root backend ~main in
   build backend ~roots:[ root ]
     ~startup:(Startup.render_program_start (Emit_c.make_symbol root))
     ~output
 
-let list_reached_todo_types (lookups : lowered_lookups) root =
-  lookups.list_reached_todo_types (make_root_key root)
+let list_reached_todo_types (lookups : Lowering.lowered_lookups) root =
+  lookups.list_reached_todo_types (Lowering.make_root root)
 
 let run_template_check backend ~from_template ~literals ~clauses =
   let ran =
-    capture_failure backend @@ fun () ->
+    capture_failure @@ fun () ->
     run_while_compiling backend
       (Lowered.Item.Template_check { from_template; literals; clauses })
       ~read:(fun output ->
-        let holds = Encoding.decode_booleans output in
+        let holds = Lowering.Encoding.decode_booleans output in
         if List.length holds <> List.length clauses then
           raise_bug "checking a template of %s wrote %d results for %d clauses"
             (Path.show from_template) (List.length holds) (List.length clauses);
@@ -593,13 +481,13 @@ let run_template_check backend ~from_template ~literals ~clauses =
   | Ok (Stopped report) | Error report -> Error report
 
 let evaluate_call backend ~function_ ~arguments =
-  capture_failure backend @@ fun () ->
+  capture_failure @@ fun () ->
   match Interface.Impls.read_signature backend.lookups.interface function_ with
   | Some { output = Returns result; _ } ->
       let ty = Monomorphic.ground backend.monomorphic Types.no_substitution result in
       let item = Lowered.Item.Call_evaluation { function_; arguments } in
       run_while_compiling backend item ~read:(fun encoded ->
-          Encoding.decode (make_env backend) ty encoded)
+          Lowering.Encoding.decode (make_env backend) ty encoded)
   | _ -> raise_bug "%s has no result to evaluate" (Path.show function_)
 
 let create ?(show_file = Path.show_file) ?results ?(evaluation_time_limit_ms = 10_000)
@@ -607,7 +495,7 @@ let create ?(show_file = Path.show_file) ?results ?(evaluation_time_limit_ms = 1
     ?(is_worked_on = fun package -> package <> Path.standard_package) lookups c_compiler profile =
   {
     lookups;
-    monomorphic = Lower.make_monomorphic_context lookups.interface;
+    monomorphic = Lowering.make_monomorphic_context lookups.interface;
     c_compiler;
     profile;
     show_file;
@@ -625,17 +513,7 @@ module For_testing = struct
     | Evaluate _ -> false
     | Compiled _ -> raise_bug "%s is not a constant" (Path.show path)
 
-  let make_lowered fragment = Compiled fragment
-
-  module Intrinsics = Intrinsics
-
   let build_supplied_tests = build_supplied_tests
   let compile_fragment = compile_fragment
-  let run_program = run_program
   let evaluate_call = evaluate_call
-  let drop_and_copy = Drop_and_copy.create
-  let is_trivial = Drop_and_copy.is_trivial
-  let drop = Drop_and_copy.drop
-  let copy = Drop_and_copy.copy
-  let copy_signature = Drop_and_copy.For_testing.copy_signature
 end

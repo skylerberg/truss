@@ -13,8 +13,10 @@ val make_request :
 
 val show_input : request * Logic.query -> string
 val solve_all : t -> (request * Logic.query) list -> answer list
-val count_queries_run : t -> int
 
 module For_testing : sig
   val hash_query : Logic.query -> string
+  val count_queries_run : t -> int
+  val proven_entry : string
+  val make_incomplete_entry : string -> string
 end

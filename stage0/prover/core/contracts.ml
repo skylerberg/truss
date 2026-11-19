@@ -7,7 +7,7 @@ let read_source_at_key (lookups : Lookups.t) key =
 
 let find_source (lookups : Lookups.t) (path : Path.t) =
   Option.map
-    (fun ((origin : Infer.form_origin), substitution) ->
+    (fun ((origin : Interface.form_origin), substitution) ->
       let source =
         match origin with
         | Written key | Inherited key -> make_source key
@@ -166,7 +166,7 @@ let find_method_contract lookups (trait : Types.trait_reference) name receiver
 
 let find_integer_literal (formula : Mir.formula) =
   match formula.value with
-  | { statements = []; value = Some (Constant { value = Integer number; _ }) } -> Some number
+  | { statements = []; value = Some (Immediate { value = Integer number; _ }) } -> Some number
   | _ -> None
 
 let deduplicate_counters counters =
@@ -183,12 +183,3 @@ let find_resource (cost : Mir.cost) ~locals : Costs.resource option =
         (Locals.find_opt (Core_local local) locals)
   | Calls (Capability path) -> Some (Calls (Capability path))
   | Calls (Capability_method (path, name)) -> Some (Calls (Capability_method (path, name)))
-
-let find_comparison_operator (comparison : Core.comparison) =
-  match comparison with
-  | Equal -> Some "="
-  | Less -> Some "<"
-  | Less_equal -> Some "<="
-  | Greater -> Some ">"
-  | Greater_equal -> Some ">="
-  | Not_equal -> None

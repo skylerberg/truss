@@ -44,7 +44,7 @@ let encode_diagnostic encoding ~uri source (diagnostic : Diagnostic.t) =
   Json.Object
     [
       ("range", encode_range encoding source diagnostic.span);
-      ("severity", Json.Int 1);
+      ("severity", Json.Int (match diagnostic.severity with Error -> 1 | Warning -> 2));
       ("code", Json.String (Diagnostic.Code.name diagnostic.code));
       ("source", Json.String "truss");
       ("message", Json.String diagnostic.message);
@@ -65,9 +65,9 @@ let encode_diagnostic encoding ~uri source (diagnostic : Diagnostic.t) =
 let encode_state encoding source (state : Source.span Prover.state) =
   Json.Object
     [
-      ("range", encode_range encoding source state.span);
-      ("code", Json.String (Diagnostic.Code.name (Prover state.code)));
-      ("shows", Json.String state.shows);
+      ("range", encode_range encoding source state.site.span);
+      ("code", Json.String (Diagnostic.Code.name (Prover state.site.code)));
+      ("shows", Json.String state.site.shows);
       ("proven", Json.Bool (state.failure = None));
       ("trustsCompiledCode", Json.Bool state.trusts_compiled_code);
     ]

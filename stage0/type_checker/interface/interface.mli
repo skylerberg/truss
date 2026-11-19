@@ -73,17 +73,24 @@ module Properties : sig
     defining : Path.t list;
   }
 
-  type contents = Properties.contents = {
-    contained : (Types.ty * occurrence) list;
-    recursions : recursion list;
-  }
-
   val list_field_type_paths : package:Path.package -> Types.type_interface -> Path.t list
 
   val compute_component_facts :
     Lookups.t -> (Path.t * Types.type_interface) list -> (Path.t * Environment.type_facts) list
 end
 
-module Impls = Impls
+module Impls : module type of struct
+  include Impls
+end
+with module Conformance := Impls.Conformance
+
 module Grants = Grants
 module Check = Check
+
+type form_origin =
+  | Written of Resolve.Names.key
+  | Derived of Resolve.Names.key
+  | Inherited of Resolve.Names.key
+
+val find_form_origin :
+  Lookups.t -> is_derived:(Path.t -> bool) -> Path.t -> (form_origin * Types.substitution) option

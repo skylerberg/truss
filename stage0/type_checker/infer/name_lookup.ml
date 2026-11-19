@@ -234,8 +234,7 @@ and check_function_value state (value : Syntax.expression) (signature : Types.si
 and check_static_member state (value : Syntax.expression) type_ (member : Syntax.name) =
   match type_ with
   | Types.Named { path; arguments } -> (
-      if State.is_variant_name member then
-        check_variant_value state value path member.text ~arguments
+      if member.case = Upper then check_variant_value state value path member.text ~arguments
       else
         match
           Resolve.Names.choose_visible

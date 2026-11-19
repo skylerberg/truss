@@ -13,7 +13,6 @@ type implementation = {
   substitution : Types.substitution;
 }
 
-val find_implementation_of : Lookups.t -> Types.impl_interface -> implementation option
 val find_implementation : Lookups.t -> Path.t -> implementation option
 
 type implemented_method = {
@@ -91,21 +90,25 @@ val normalize_capabilities :
 
 val normalize : Lookups.t -> list_bounds:bounds -> ?defining:Path.t list ref -> Types.ty -> Types.ty
 
-val list_impl_bounds :
-  Types.impl_interface -> list_bounds:bounds -> Types.parameter -> Types.trait_reference list
+module Conformance : sig
+  val find_implementation_of : Lookups.t -> Types.impl_interface -> implementation option
 
-val normalize_capabilities_in_impl :
-  Lookups.t ->
-  list_bounds:bounds ->
-  Types.impl_interface ->
-  Types.capability_set ->
-  Types.capability_set
+  val list_impl_bounds :
+    Types.impl_interface -> list_bounds:bounds -> Types.parameter -> Types.trait_reference list
 
-val normalize_signature_in_impl :
-  Lookups.t -> list_bounds:bounds -> implementation -> Types.signature -> Types.signature
+  val normalize_capabilities_in_impl :
+    Lookups.t ->
+    list_bounds:bounds ->
+    Types.impl_interface ->
+    Types.capability_set ->
+    Types.capability_set
 
-val make_expected_signature :
-  Lookups.t -> ?written:Types.signature -> implemented_method -> Types.signature
+  val normalize_signature_in_impl :
+    Lookups.t -> list_bounds:bounds -> implementation -> Types.signature -> Types.signature
+
+  val make_expected_signature :
+    Lookups.t -> ?written:Types.signature -> implemented_method -> Types.signature
+end
 
 val read_signature : Lookups.t -> Path.t -> Types.signature option
 val read_scope : Lookups.t -> Resolve.Names.key -> Environment.scope
