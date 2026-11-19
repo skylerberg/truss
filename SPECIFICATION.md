@@ -42,8 +42,7 @@ has a body, except a method declared in a trait or a capability.
   one line break; a carriage return on its own is an error.
 
 These characters are an error anywhere in a file, including inside string
-literals, because they can make code display differently from how it
-compiles:
+literals:
 
 - the bidirectional controls: U+061C, U+200E, U+200F, U+202A to U+202E, and
   U+2066 to U+2069
@@ -321,9 +320,8 @@ its file or its position in the file.
 - A local or a parameter may shadow a function, a constant, or a theorem of
   its module, so adding a definition to one file breaks no local in another.
 - A generic parameter cannot shadow a type, a trait, or a capability of its
-  module. An `impl`'s head declares the names in its brackets, so
-  `impl Shown for Box[Marker]` would otherwise mean every `Box` where the
-  type `Marker` was meant.
+  module, so `impl Shown for Box[Marker]` is an error where `Marker` is a
+  type of the module.
 - Module names are a namespace of their own, written only before `::`. A
   variable can be named `url` in a file that imports the `url` module.
 - `::` reaches into a module, and `.` into a type or a value.
@@ -414,9 +412,8 @@ type Expression =
 - A variant that is not recursive may be `indirect` too.
 - In its own fields, at any depth, a type does not occur in the input of a
   function type without `RunForever`: `type Knot(run: fn(Knot) -> Bool)` is
-  an error. A function stored in a `Knot` could call itself through it, so
-  it would be proven to terminate without a measure.
-  `type Knot(run: (fn(Knot) -> Bool uses RunForever))` is legal.
+  an error, and `type Knot(run: (fn(Knot) -> Bool uses RunForever))` is
+  legal.
 
 ### Type expressions
 
@@ -626,19 +623,13 @@ it.
 - **A slice's elements are written only through a `mut Slice` parameter or
   a range of a mutable place.** `mut self` of a `Slice` method is such a
   parameter, and `mut items[1..]` such a range. A slice held in a variable,
-  a field, an element, or a pattern's binding is read-only. Write access
-  held in a variable would let `var target = items[1..5]` overwrite
-  elements that `items[0..4]`, passed beside it, still views. Assigning a
+  a field, an element, or a pattern's binding is read-only. Assigning a
   slice held in a variable makes it view other elements and changes none.
 - **A `mut Slice` parameter cannot be assigned,** whole or by field, so its
   length is fixed for the call. A slice is passed `mut` only to a parameter
-  declared as a slice. A callee that took it as a type parameter could
-  assign it another slice, and the caller would read the callee's contract
-  as a write to elements that did not change.
+  declared as a slice.
 - **A slice implements no trait with a `mut self` method,** and so
-  satisfies no bound of one. Generic code could call the method on a copy,
-  and a copy of a slice views the same elements, so the write would reach
-  elements lent read-only.
+  satisfies no bound of one.
 - **A temporary is dropped at the end of its statement,** except where a
   `let` keeps it until the end of the block that holds the `let`. A `let`
   keeps the base of a slice that it binds, directly or through fields. It
@@ -906,9 +897,8 @@ fn serve(listener: mut Listener)
   without it takes only functions that terminate, and a capability
   parameter holds it where a function passed for the parameter may run
   forever (see [Capability parameters](#capability-parameters)).
-- `RunForever` has no methods, and nothing implements it, since a `provide`
-  of it would let a function that does not declare it run forever. A
-  `parallel` branch or a quantifier may run forever where its function may.
+- `RunForever` has no methods, and nothing implements it. A `parallel`
+  branch or a quantifier may run forever where its function may.
 - A function that uses `RunForever` has no `time` clause. One that uses
   `RunForever unless C` states its `time` clause `when` a condition that
   implies `C`.
@@ -980,8 +970,7 @@ fn serve(listener: mut Listener)
   body is also checked once, for every `impl`. In that check a call on `Self`
   is followed to the method of every `impl` of the trait.
 - **Code that supplies other code to a callee is followed to all of the
-  supplied code.** The callee is checked for every type argument and every
-  function value, so it cannot name the code that it is given:
+  supplied code:**
 
   | The supplier | The supplied code |
   |---|---|
@@ -996,8 +985,8 @@ fn serve(listener: mut Listener)
   | The way back to the function | The requirement |
   |---|---|
   | A call of a function, of a method written in an `impl`, or of a trait's method through `any Trait` or on `Self` | The call is on a part of a parameter, or each function in the cycle states `decreases` |
-  | A call of a method that its `impl` derives or inherits | Rejected. The `impl` states no measure for that code, so nothing proves that the recursion through it terminates |
-  | Supplied code | Rejected. A use of supplied code passes no arguments to compare with a measure |
+  | A call of a method that its `impl` derives or inherits | Rejected |
+  | Supplied code | Rejected |
 
   A function that uses `RunForever` is not rejected for any of these. Its
   recursive call is compared only where it and its callee both state

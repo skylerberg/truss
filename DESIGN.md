@@ -68,8 +68,7 @@ it:
 Rules: [Source files](SPECIFICATION.md#source-files).
 
 The invisible characters behind known attacks are an error anywhere in a
-source file, including inside a string literal. A string that needs one
-writes it as an escape.
+source file, including inside a string literal.
 
 | Characters | Attack |
 |---|---|
@@ -138,14 +137,6 @@ gets its type.
 
 Rules: [String literals](SPECIFICATION.md#string-literals).
 
-```truss
-let script = Shell$$"""
-  echo "${HOME}/$${folder}"
-  """
-```
-
-In `script`, `${HOME}` is text and `folder` is interpolated.
-
 | Rule | Reason |
 |---|---|
 | A raw string has no escapes. | A regular expression or a Windows path keeps its backslashes, without the doubling that causes bugs. |
@@ -161,8 +152,6 @@ Rules: [Rejected sequences](SPECIFICATION.md#rejected-sequences).
 habit from another language never compiles to a different program. Rejecting a
 sequence also keeps it free: a later language version can give `//` a meaning
 without changing existing code.
-
-A stray `;` is rejected, not ignored.
 
 ### Line breaks
 
@@ -224,20 +213,10 @@ Rules: [Types](SPECIFICATION.md#types).
 
 Rules: [Built-in types](SPECIFICATION.md#built-in-types).
 
-**A size, a length, and an index are `UInt64`, and an offset is `Int64`.**
-
 | Rule | Reason |
 |---|---|
-| A size, a length, and an index are unsigned. | A length is never negative, and a bounds check is one comparison. A subtraction that may go below zero is a compile error, so an unsigned index does not wrap. |
+| A size, a length, and an index are `UInt64`, and an offset is `Int64`. | A length is never negative, and a bounds check is one comparison. A subtraction that may go below zero is a compile error, so an unsigned index does not wrap. |
 | A `Character` is a Unicode scalar value. | It has a fixed size, so it is `Plain`, and its definition does not change between Unicode versions. A grapheme cluster has no fixed size, and its boundaries change as Unicode adds rules, so a grapheme is a slice of its string. |
-
-### Type definitions
-
-Rules: [Type definitions](SPECIFICATION.md#type-definitions).
-
-**A record with one field is how Truss writes a newtype.** Values with
-different meanings get different types, as in
-`type UserId(number: UInt64)`.
 
 ### Recursive types
 
@@ -267,19 +246,13 @@ the declaration states the type that the body sees.
 
 Rules: [Invariants](SPECIFICATION.md#invariants).
 
-```truss
-public type DateRange(start: Date, end: Date)
-  invariant start <= end
-```
-
 **An invariant holds wherever other code can observe the value, and a body
 may break it in between.** `SortedList.insert` appends an element and then
 moves it into place. No code observes the list while it is unsorted: the
 list has no alias, a panic ends the program, and a capability call always
 returns to its caller. A private method that takes `mut self` neither
 assumes the invariant on entry nor establishes it on return, so `insert` can
-call a helper while the list is unsorted. The helper states its own
-precondition and postcondition.
+call a helper while the list is unsorted.
 
 | Rule | Reason |
 |---|---|
@@ -290,13 +263,12 @@ precondition and postcondition.
 
 Rules: [Values and ownership](SPECIFICATION.md#values-and-ownership).
 
-Truss has mutable value semantics: every variable holds its own value, and
-no two names alias a value that either can mutate. A value is freed when its
-owner's scope ends, so there is no garbage collector. There is no mutable
-global state either: a top-level `let` is a constant, so tests can share one
-process.
+Under mutable value semantics, a value is freed when its owner's scope ends,
+so there is no garbage collector. There is no mutable global state either: a
+top-level `let` is a constant, so tests can share one process.
 
-Four guarantees made elsewhere in the design depend on this:
+Four guarantees made elsewhere in the design depend on mutable value
+semantics:
 
 | Guarantee | Failure with aliasing |
 |---|---|
@@ -322,14 +294,6 @@ signatures it calls (*local reasoning*).
 ### Parameter modes
 
 Rules: [Parameter modes](SPECIFICATION.md#parameter-modes).
-
-A parameter is read-only unless it is declared `mut` or `own`.
-
-```truss
-sort(mut scores)
-push(mut names, item: own name)
-push(mut names, item: name.copy())
-```
 
 | Rule | Reason |
 |---|---|
@@ -363,20 +327,9 @@ change to its API.
 
 Rules: [Views](SPECIFICATION.md#views).
 
-A view is a read-only reference to a value that another variable owns. A
-read-only parameter, a `let` bound to a place or to a string literal, the
-variable of a `for` loop, and a slice are views:
-
-```truss
-let middle = items[1..4]
-let total = middle.sum()
-mut items.push(9)
-```
-
-While a view is live, that is, until its last use, its original cannot be
-mutated or moved. This prevents a dangling view: `push` may reallocate
-`items`, and `middle` would then view freed memory. The `push` above is
-accepted because `middle` is not used after it.
+A view is a read-only reference to a value that another variable owns.
+While a view is live, its original cannot be mutated or moved. This prevents
+a dangling view: a `push` may reallocate the list that a slice views.
 
 Three decisions let views exist without lifetimes.
 
@@ -416,20 +369,11 @@ Rules: [Lending methods](SPECIFICATION.md#lending-methods),
 [Indexing](SPECIFICATION.md#indexing).
 
 A method cannot return `mut` access to a part of `self`, because `mut`
-access is never stored. `scores[i] += 1` needs that access. A lending method
-provides it: `lends` in place of a result type lends one part of `self` to
-the caller for the rest of the caller's statement.
-
-```truss
-fn Grid.cell(mut self, position: Position) lends mut Cell {
-  mut self.cells[position.row * self.width + position.column]
-}
-
-mut grid.cell(position).visit()
-```
-
-Indexing any other type is a lending method of the prelude trait `Index`,
-so a user's `Grid` gets the syntax of a `List`.
+access is never stored, and `scores[i] += 1` needs that access. A lending
+method lends the part to the caller instead, for the rest of the caller's
+statement. Indexing a type other than a `List`, a `Slice`, or an `Array` is
+a lending method of the prelude trait `Index`, so a user's collection gets
+the syntax of a `List`.
 
 **No code of a lending method runs after the lend.** Swift's `_read` and
 `_modify` accessors also lend a part for one access, but they are
@@ -458,16 +402,9 @@ mutated. Such a type takes the new value in an ordinary method, as
 
 Rules: [Loops](SPECIFICATION.md#loops).
 
-A `for` loop over a collection visits it by position. The loop evaluates
-`count()` once, and each iteration is lent `element(position)`. A type
-supports `for` by defining those two methods:
-
-```truss
-fn Grid.count(self) -> UInt64
-fn Grid.element(self, position: UInt64) lends Cell
-```
-
-The alternative is a generator: a method that is suspended between
+A `for` loop over a collection visits it by position: the loop evaluates
+`count()` once, and each iteration is lent `element(position)`. The
+alternative is a generator: a method that is suspended between
 iterations. A generator keeps its locals alive across the loop's body, and
 it needs rules for the code that runs when the loop exits early. That is
 the coroutine that lending methods avoid.
@@ -509,12 +446,7 @@ be stored, passed, and returned.
 Rules: [Lambdas](SPECIFICATION.md#lambdas),
 [Function types](SPECIFICATION.md#function-types).
 
-A lambda captures local variables by view, and it cannot mutate them:
-
-```truss
-let passing = scores.filter(fn(score) { score >= threshold })
-```
-
+A lambda captures local variables by view, and it cannot mutate them.
 Read-only capture makes every lambda safe to call from parallel branches, so
 any lambda can be passed as a comparator, to `map`, or as a `parallel`
 callback. It also leaves one kind of function type, where Rust has `Fn`,
@@ -525,21 +457,11 @@ a trait.
 
 A lambda's parameters have no annotations, so its body can prove a fact
 about an argument only if the callee states one. The function type of a
-parameter can therefore carry a `requires`:
-
-```truss
-fn List[Element].generate(
-  count: UInt64,
-  make: (fn(index: UInt64) -> Element requires index < count),
-) -> List[Element]
-
-let reversed = List.generate(values.length(), make: fn(index) { values[values.length() - 1 - index] })
-```
-
-The `requires` gives the lambda the fact `index < count`. From it, the
-lambda proves that `values.length() - 1 - index` does not underflow and
-indexes `values` in bounds. A `requires` is allowed only on the type of a
-parameter, so no type that values are stored in or compared by carries one.
+parameter can therefore carry a `requires`, as in
+`make: (fn(index: UInt64) -> Element requires index < count)`, and a lambda
+passed for `make` may rely on `index < count`. A `requires` is allowed only
+on the type of a parameter, so no type that values are stored in or compared
+by carries one.
 
 | Rule | Reason |
 |---|---|
@@ -554,9 +476,8 @@ parameter, so no type that values are stored in or compared by carries one.
 
 Rules: [Handles](SPECIFICATION.md#handles).
 
-A handle stands for a resource of the operating system, such as an open
-file. A handle is released as memory is: when its owner's scope ends, on
-every path. `?` and `return` therefore need no cleanup code.
+A handle is released as memory is: when its owner's scope ends, on every
+path. `?` and `return` therefore need no cleanup code.
 
 A buffered writer is a resource whose release could lose data. Closing a
 file that was only read loses nothing, but flushing a buffer can fail, and a
@@ -596,12 +517,6 @@ number.
 ### Calls and arguments
 
 Rules: [Calls and arguments](SPECIFICATION.md#calls-and-arguments).
-
-```truss
-copy(original, destination: backup)
-copy(source, destination)
-let connection = connect(host, port: 8080)?
-```
 
 One set of rules covers calls, construction, and patterns: a record is
 declared as parameters are, constructed as a function is called, and matched
@@ -664,18 +579,16 @@ Rules: [Termination](SPECIFICATION.md#termination), [Loops](SPECIFICATION.md#loo
 [Recursive types](SPECIFICATION.md#recursive-types).
 
 **Running forever is a capability.** A function may run forever only where
-its `uses` names `RunForever`: a loop without a measure uses it, and so does
-a call of a function that uses it. Every other rule is the capability check.
-A function type without `RunForever` takes only functions that terminate, a
-capability parameter holds `RunForever` where a function passed for it may
-run forever, and a specification, which uses no capability, calls only
-functions that terminate. Koka tracks divergence as the effect `div` in the
-same way, and Truss writes it as it writes every capability. The
-alternative is that a function without a `time` clause may run forever.
-That default gives an omitted clause two meanings: a function type that
-names a capability parameter has to leave termination to the parameter, and
-the type of a function that uses the parameter's capabilities and runs
-forever has no written form.
+its `uses` names `RunForever`, so every other rule is the capability check:
+a function type without `RunForever` takes only functions that terminate,
+and a specification, which uses no capability, calls only functions that
+terminate. Koka tracks divergence as the effect `div` in the same way, and
+Truss writes it as it writes every capability. The alternative is that a
+function without a `time` clause may run forever. That default gives an
+omitted clause two meanings: a function type that names a capability
+parameter has to leave termination to the parameter, and the type of a
+function that uses the parameter's capabilities and runs forever has no
+written form.
 
 **The recursion check follows every edge of the call graph.** A function
 reaches itself by a direct call, and by supplying code to a callee: by
@@ -684,9 +597,10 @@ by converting a value to `any`, and by providing an `impl`, because the
 code that receives the function or the `impl` can call back. If the check
 ignored the supplied code, a package could implement a trait with a method
 that calls a generic function that calls the method back, and each
-termination proof would assume the other. Every such cycle is visible within
-one package, because Truss has no mutable state outside variables and
-because of the next rule.
+termination proof would assume the other, so a function without
+`RunForever` could run forever. Every such cycle is visible within one
+package, because Truss has no mutable state outside variables and because of
+the next rule.
 
 **A type cannot hold a terminating function that takes the type.** With
 `type Knot(run: fn(Knot) -> Bool)`, a function that calls `knot.run(knot)`
@@ -704,7 +618,7 @@ not.
 | Rule | Reason |
 |---|---|
 | Structural recursion needs no annotation, and other recursion states `decreases`. | Lean accepts structural recursion in the same way. Dafny infers a measure. A structural check with an explicit clause is more predictable than an inference that may fail. |
-| Code that supplies other code to a callee answers for the calls made to the supplied code. The suppliers are a type argument's `impl` given to a bound, a function named as a value, a value converted to `any`, and a provided `impl`. A recursion through supplied code is rejected. | A generic callee is checked once, for every type argument, so it cannot know the code that it is given, and a call through a bound passes the supplier no arguments to compare with a measure. If neither side answered, an `impl`'s method could call a generic function that calls the method back, and each termination proof would assume the other: a function without `RunForever` would never return. |
+| A recursion through supplied code is rejected. | A generic callee is checked once, for every type argument, so it cannot know the code that it is given, and a call through a bound passes the supplier no arguments to compare with a measure. |
 | A recursion through a method that an `impl` derives or inherits is rejected. | A derived method is generated, and an inherited method is the trait's provided body, which is checked once for every `impl`. Neither states a measure for the `impl`, so a caller on the cycle has nothing to compare, and accepting the call would assume that the cycle ends. A method written in the `impl` states the measure. The alternative is to check each provided body again for each `impl` that inherits it, which proves the same code once per `impl` and gives a trait's author errors in code that the author did not write. |
 | A `while` loop whose condition compares two sides with `<`, `<=`, `>`, or `>=` has the distance between them as its default measure, and a `for` loop over a `FiniteCursor` has the cursor's `remaining()`. | Most loops count toward a bound that their condition names, so `decreases high - low` would only repeat the condition. The default is one measure read from the loop's own code, never chosen by a search among candidates, so a reader knows the measure that the proof uses. Dafny takes the same default for a loop. A cursor's `remaining()` states its measure once, in its `impl` of `FiniteCursor`, for every loop over it. |
 | A written measure holds in every function, including one that uses `RunForever`. | A reader takes a written `decreases` as a fact. If `RunForever` switched measures off, a function that declares it for one loop would leave the measures of its other loops unchecked. A cursor's `remaining()` is written too, in its `impl` of `FiniteCursor`, and no loop body can change the cursor. |
@@ -718,13 +632,6 @@ not.
 ### Cost clauses
 
 Rules: [Cost clauses](SPECIFICATION.md#cost-clauses).
-
-```truss
-public fn load_configs(paths: List[Path]) -> Result[List[Config], ConfigError]
-  uses FileRead
-  cost calls(FileRead.read) == paths.length()
-  cost time O(paths.length())
-```
 
 A caller's cost is proven from the cost clauses of its callees, so an edit
 to one function invalidates only the bounds of its dependents (*O(change)*).
@@ -860,10 +767,8 @@ loops, specifications, and conjunctions with other conditions, where Rust
 has three: `if let`, `while let`, and let-chains.
 
 A name that `is` binds is in scope only where the test is known to be true,
-so it is never in scope after the `if` that bound it, and scope follows
-blocks. `let ... else` is the form for a binding that outlives the test: its
-names are in scope for the rest of the enclosing block, and its `else` block
-must exit.
+so scope follows blocks. A binding that outlives the test is a
+`let ... else`.
 
 ### Errors
 
@@ -980,24 +885,22 @@ compile time equals the value in the compiled program.
 
 Rules: [Failure](SPECIFICATION.md#failure).
 
-Code panics only where it has `Panic`. The exceptions are running out of
-memory and overflowing the stack, which no language rules out.
+Running out of memory and overflowing the stack can panic in any code,
+because no language rules them out.
 
-Every operation that can fail is a proof obligation: an integer overflow, a
-division by zero, an index out of bounds, a shift that is too large, and
-`unreachable`. Code meets an obligation in one of three ways. It establishes
-the fact locally, requires the fact of its caller, or calls a checked variant
-that returns an `Option` or a `Result`.
-
-**In code that has `Panic`, an integer operation that fails panics.** Code
-without `Panic` proves the operation, and its release build checks nothing.
+**In code that has `Panic`, an integer operation that fails panics.**
+`uses Panic` declares that the function may crash, so the signature already
+says what a caller needs to know. A call to a function that panics on bad
+input is not marked at the call site either. Writing
+`checked_add(...).expect(...)` at each operator adds only a message, and the
+panic already names the failure and its location. Code without `Panic`
+proves the operation, and its release build checks nothing.
 
 | Rule | Reason |
 |---|---|
-| A failing overflow, division, or shift panics where `Panic` is available. | `uses Panic` declares that the function may crash, so the signature already says what a caller needs to know. A call to a function that panics on bad input is not marked at the call site either. Writing `checked_add(...).expect(...)` at each operator adds only a message, and the panic already names the failure and its location. |
 | Code that uses `Panic unless C` proves its integer operations where `C` holds. | A function that declares `Panic` for one `expect` would otherwise lose the compile-time check of every other operation. The condition keeps the check for the instantiations that never panic. |
 | A lambda whose capabilities are inferred takes `Panic` for an integer operation where the code it is written in has `Panic`. | A lambda passed to `map` would otherwise have to prove what the code around it need not. A lambda passed as a function type without `Panic` still proves its operations, since its caller relies on that type. |
-| Indexing, slicing, and `unreachable` are proven in code that has `Panic` too. | They are methods with a `requires` and a claim, not integer operations. A crash at `unreachable` would contradict the claim that the point is not reached. |
+| Indexing, slicing, and `unreachable` are proven in code that has `Panic` too. | Indexing and slicing state their bounds as a `requires`, which every caller proves. `unreachable` claims that the point is not reached, and a crash there would contradict the claim. Code that panics on purpose calls `Panic.crash`, which its signature shows. |
 
 **A panic cannot be caught.** Code that caught a panic could hold a value
 whose invariant was broken partway through an update. A program that must
@@ -1005,39 +908,9 @@ keep running proves that it cannot panic instead: a server requires a
 handler type without `Panic`, so no request can end the process. If the
 process fails anyway, a supervisor restarts it.
 
-`unreachable` must be proven. Code that claims a point is unreachable must
-not panic when the point is reached. Code that panics on purpose calls
-`Panic.crash`, which its signature shows.
-
 ## Capabilities
 
 Rules: [Capabilities](SPECIFICATION.md#capabilities).
-
-A capability is a named set of methods for acting outside pure computation.
-A function lists the capabilities it `uses`, and its caller provides the
-implementations:
-
-```truss
-capability Random {
-  fn next() -> UInt64
-}
-
-fn roll_die() -> UInt64
-  uses Random
-{
-  Random.next() % 6 + 1
-}
-
-type LoadedDie(face: UInt64)
-
-impl Random for LoadedDie {
-  fn next(self) -> UInt64 { self.face }
-}
-
-let rolled = provide LoadedDie(face: 5) {
-  roll_die()
-}
-```
 
 A function without `uses` is pure. Two goals rest on that rule:
 
@@ -1133,15 +1006,6 @@ Parallelism uses several cores to finish a computation sooner. In Truss it
 is deterministic: a `parallel` block has the result of running its branches
 in order.
 
-```truss
-let halves = players.split_at(players.length() / 2)
-parallel {
-  let left = sum_scores(halves.first)
-  let right = sum_scores(halves.second)
-}
-left.saturating_add(right)
-```
-
 | Rule | Reason |
 |---|---|
 | A place that one branch mutates is used by no other branch. | This is the rule for calls, where a place passed `mut` is used by nothing else during the call: `swap(mut first, second: mut first)` is rejected. Applied across branches, it prevents every data race. |
@@ -1158,21 +1022,9 @@ serving connections, or waiting for a reply and a timer at once. The
 behavior of such code can depend on the order of events, so concurrency is
 an effect: code that does it declares `uses Tasks`.
 
-```truss
-fn profile(id: UserId) -> Result[Profile, DatabaseError]
-  uses Tasks, Database
-{
-  concurrent {
-    let user = Database.user(id)?
-    let orders = Database.orders(id)?
-  }
-  Ok(Profile(user: own user, orders: own orders))
-}
-```
-
-A `concurrent` branch differs from a `parallel` branch in one way: it may
-use the capabilities of the code around it. The rule about places that
-prevents data races in `parallel` therefore prevents them here.
+A `concurrent` branch follows the rules of a `parallel` branch, except that
+it may use capabilities and exit the block, so the rule about places
+prevents data races here too.
 
 **A task never outlives the block that started it.** This is structured
 concurrency, as in Trio's nurseries. A branch can therefore read the places
@@ -1245,10 +1097,6 @@ Rules: [Strings](SPECIFICATION.md#strings).
 
 Rules: [Tagged templates](SPECIFICATION.md#tagged-templates).
 
-```truss
-let query = SqlQuery"select name from users where id = ${user_id}"
-```
-
 A tagged template keeps its literal text separate from its interpolated
 values, which makes an injection attack impossible by construction:
 
@@ -1272,23 +1120,6 @@ values, which makes an injection attack impossible by construction:
 ## Traits and laws
 
 Rules: [Traits and laws](SPECIFICATION.md#traits-and-laws).
-
-```truss
-trait Ordered: Equal {
-  fn compare(self, other: Self) -> Ordering
-
-  fn max(own self, other: own Self) -> Self {
-    if self.compare(other) == Ordering.Less { other } else { self }
-  }
-
-  law transitive(first: Self, second: Self, third: Self)
-    requires first <= second
-    requires second <= third
-  {
-    first <= third
-  }
-}
-```
 
 **A provided method states its result in the trait's `ensures`, and an
 override keeps it.** `Equal.not_equal` ensures `result == !self.equal(other)`,
@@ -1362,11 +1193,6 @@ identity:
 | `String`'s equality | Two equal strings can differ in `capacity()`. |
 | The equality of an opaque type, outside its package | It would depend on fields that other packages cannot see. |
 
-A constant in a pattern needs only structural equality, which compares
-contents and which `String` has ([Patterns](#patterns)). Whether a type's
-equality is structural, and whether it is identity, is derived from its
-fields, as `Plain` is.
-
 ### Deriving
 
 Rules: [Deriving](SPECIFICATION.md#deriving).
@@ -1413,20 +1239,6 @@ Rules: [Dynamic dispatch](SPECIFICATION.md#dynamic-dispatch).
 
 Rules: [Tests](SPECIFICATION.md#tests).
 
-```truss
-test "config loads with defaults" uses RunForever {
-  var disk = files::MemoryFiles.new().with_text(Path.new("app.toml"), contents: "")
-  let config = provide mut disk, log::DiscardLog() {
-    load_config(Path.new("app.toml"))
-  }
-  assert config == Ok(Config.default())
-}
-```
-
-A test provides every capability that its code uses other than `Panic` and
-`RunForever`, which it declares, so its result is deterministic and is
-cached until the code it runs changes.
-
 **A test does not wait for proofs.** A program is built only when every
 proof obligation that it reaches is proven. A test build instead inserts a
 run-time check at every primitive operation that can fail. Generated code
@@ -1456,18 +1268,6 @@ deterministic.
 ## Proofs
 
 Rules: [Proofs](SPECIFICATION.md#proofs).
-
-Every promise of a program is proven at compile time: contracts,
-invariants, laws, loop invariants, and every operation that can fail.
-
-```truss
-theorem reverse_twice[Element](items: Sequence[Element])
-  ensures identical(items.reversed().reversed(), items)
-{
-  assert forall i in 0..items.length() =>
-    identical(items.reversed().reversed()[i], items[i])
-}
-```
 
 **Verification is modular.** The prover knows another function by its
 signature, and reads a body only in the cases that
@@ -1535,12 +1335,8 @@ contract about a whole collection needs a value to state it in. Stated with
 quantifier in every clause, and a collection's own `Equal` may be
 hand-written and so not identity. The prelude therefore has mathematical
 collections that exist only in specifications, such as `Sequence`, and a
-type gives its value in their terms through the trait `Model`:
-
-```truss
-fn List[Element].push(mut self, item: own Element)
-  ensures identical(self.model(), old(self.model()).append(item))
-```
+type gives its value in their terms through the trait `Model`. `List.push`
+then ensures `identical(self.model(), old(self.model()).append(item))`.
 
 | Rule | Reason |
 |---|---|
@@ -1550,12 +1346,10 @@ fn List[Element].push(mut self, item: own Element)
 
 ### What proofs do not model
 
-Every proof treats a value as a value. A call changes only its `mut`
-arguments and the state behind the capabilities it uses, and `mut` access
-lasts one call, one iteration, or one `provide mut` block. The prover
-therefore models no memory and no time. Each feature below would need a
-model of one, so the language leaves it out, and adding it would change
-every proof.
+Mutable value semantics lets every proof treat a value as a value, so the
+prover models no memory and no time. Each feature below would need a model
+of one, so the language leaves it out, and adding it would change every
+proof.
 
 | Not modeled | Reason, or the section that gives it |
 |---|---|
@@ -1566,14 +1360,6 @@ every proof.
 ## Unfinished code
 
 Rules: [Unfinished code](SPECIFICATION.md#unfinished-code).
-
-```truss
-fn render(report: Report) -> String {
-  let header = render_header(report.title)
-  let body = todo
-  "${header}\n${body}"
-}
-```
 
 The API of a package can be designed before it is implemented, with `todo`
 in place of an expression, a body, or a type definition.
@@ -1598,12 +1384,6 @@ Rules: [Debug output](SPECIFICATION.md#debug-output).
 ## Modules and visibility
 
 Rules: [Modules and visibility](SPECIFICATION.md#modules-and-visibility).
-
-```truss
-use standard::json
-
-let settings = json::parse(text)?
-```
 
 | Rule | Reason |
 |---|---|
@@ -1863,7 +1643,7 @@ expensive results are cache hits.
 | `assume` | [Proofs](#proofs) |
 | Import aliases and relative module paths | [Modules and visibility](#modules-and-visibility) |
 | A visibility level between `internal` and `public` | [Visibility](#visibility) |
-| Foreign code and conditional compilation | Foreign code doesn't have any guarentees |
+| Foreign code and conditional compilation | Foreign code doesn't have any guarantees |
 | Version ranges, a version solver, and 0.x versions | [Versions](#versions) |
 | Optional features of a package, such as Cargo's features | Features exist to keep unwanted code out of a build. Truss never compiles code that nothing reaches and grants it nothing, so a switch has nothing to save. Features cost Cargo builds that work only with some sets of switches. |
 | A separate list of dependencies for tests | The dependencies that only tests reach are computed when a package is published. |
