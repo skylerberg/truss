@@ -264,6 +264,16 @@ Rules: [Generic parameters](SPECIFICATION.md#generic-parameters).
 Generic code is monomorphized, so a generic function costs nothing at run
 time. Monomorphization rules out polymorphic recursion.
 
+**A value parameter is a `UInt64`.** A type depends on a value only where
+the value fixes the type's layout or identity, as the length of
+`Array[UInt8, 32]` does. Each such value is a count, and the body compares
+it with lengths, which are `UInt64`. A choice among a few cases is a type
+parameter over marker types, which can carry an impl for each case. A
+signed value parameter would serve only arithmetic on type arguments, such
+as the exponents of units of measure, and a type argument holds no
+arithmetic. The parameter's type is still written, as `count: UInt64`, so
+the declaration states the type that the body sees.
+
 ### Invariants
 
 Rules: [Invariants](SPECIFICATION.md#invariants).

@@ -566,7 +566,17 @@ let elaborate_generics context owner (written : Syntax.generic_parameter list) :
           Parameter_table.replace context.bounds parameter bounds;
           Option.iter (Parameter_table.replace context.broken_parameters parameter) broken;
           { Types.generic = parameter; kind = Type_generic bounds }
-      | `Value _ -> { Types.generic = parameter; kind = Value_generic })
+      | `Value (written : Syntax.type_expression) ->
+          let type_ = elaborate_type context written in
+          if not (Types.is_builtin UInt64 type_ || Types.is_error type_) then begin
+            let span = context.spans.(written.id) in
+            ignore
+              (record_diagnostic context.diagnostics Wrong_value_parameter_type span
+                 ~fixes:[ Diagnostic.fix "Write `UInt64`." [ Diagnostic.replace span "UInt64" ] ]
+                 (Printf.sprintf "`%s` is a value parameter, so its type is `UInt64`, not `%s`."
+                    parameter.name (Types.show type_)))
+          end;
+          { Types.generic = parameter; kind = Value_generic })
     declared
 
 let list_constant_costs (clauses : Syntax.clause list) : Types.cost list =

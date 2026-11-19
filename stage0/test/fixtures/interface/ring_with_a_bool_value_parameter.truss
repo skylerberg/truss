@@ -1,0 +1,1 @@
+type Ring[size: Bool](start: UInt64)
