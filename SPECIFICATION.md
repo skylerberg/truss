@@ -64,7 +64,7 @@ token = UPPER_NAME | LOWER_NAME | "_" | keyword
 ```
 
 Whitespace and line feeds separate tokens, and a line feed becomes a
-`NEWLINE` only as [Line breaks](#line-breaks) says. Truss has no comments.
+`NEWLINE` only as [Line breaks](#line-breaks) says.
 
 ### Names
 

@@ -1685,8 +1685,7 @@ dependency is a target for a supply-chain attack.
 A client for a product, such as `truss::postgres`, is an approved package
 instead, owned by `truss` on the registry.
 
-The standard library is part of the toolchain: it has no version of its own, and
-it appears in no manifest and no lock file. A package instead names the language
+The standard library is part of the toolchain. A package names the language
 version that it is written for, as in `truss = "1.4"`. Packages written for
 different versions build together, as Rust's editions allow.
 
@@ -1764,13 +1763,12 @@ Rules: [The registry](PACKAGES.md#the-registry).
 ## Incremental builds
 
 GOALS.md asks that building, testing, and proving cost O(change), not
-O(project). Text files stay the source of truth: programmers and tools edit
-ordinary files. A code database holds each definition of a project and the
-facts derived from it, such as its interface, its contract, its checked
-body, its proof, and its compiled code. Each of these facts is a *part*. A
-change to the files propagates through the database as far as it changes a
-part, and no further, and the rules of the language keep that distance
-short.
+O(project). Text files stay the source of truth. A code database holds each
+definition of a project and the facts derived from it, such as its interface,
+its contract, its checked body, its proof, and its compiled code. Each of these
+facts is a *part*. A change to the files propagates through the database as far
+as it changes a part, and no further, and the rules of the language keep that
+distance short.
 
 A definition's identity is its kind, its structure, the names it resolves
 to, the names of its local variables, the values of its literals, and the
@@ -1794,11 +1792,9 @@ changes no definition.
 
 ### The code database
 
-**The database is a function of the files and the compiler.** A database
-that propagated a thousand edits equals one built from the same files from
-scratch. Nothing in it depends on the order of the edits, so a copy of one
-worktree's database is a correct start for another, and a hot build and a
-cold one agree.
+**The database is a function of the files and the compiler.** Nothing in it
+depends on the order of the edits, so a copy of one worktree's database is a
+correct start for another, and a hot build and a cold one agree.
 
 **A definition is identified by its name, not by its content.** Unison
 identifies a definition by a hash of its content and of its dependencies'
@@ -1821,8 +1817,7 @@ the body's module, so an unqualified name resolves without a search.
 **A part that fails holds its errors in place of a value.** Nothing is
 derived from it. A part that reads it is blocked: it is not computed, and it
 reports no error of its own, so one broken signature reports one error, not
-one in each of its callers. Fixing the error computes the failed part and
-the parts blocked behind it, and nothing else.
+one in each of its callers.
 
 **A failure belongs to the part whose syntax holds it.** A resolution error
 or a type error in a body fails the body, never the interface or the
