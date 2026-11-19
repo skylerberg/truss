@@ -241,42 +241,47 @@ let () =
       expect_only_code Fixtures.Prover.check_reaching_itself_through_a_generic "prover.termination")
 
 let () =
-  Harness.test "a proof that reads a contract that fails to check is blocked and reports nothing"
-    (fun () ->
-      let packages =
-        Support.setup
-          [
-            ("app::main", Fixtures.Prover.caller_of_double);
-            ("app::main/broken", Fixtures.Prover.double_with_an_ill_typed_ensures);
-          ]
-      in
-      let main = Support.parse_file "app::main" in
-      (match
-         Support.list_codes
-           (Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers
-              (Support.make_database packages) main)
-       with
-      | [] -> ()
-      | codes -> Harness.fail "the caller does not check: %s" (String.concat ", " codes));
-      (match
-         Support.list_codes (Support.list_proof_diagnostics (Support.make_database packages) main)
-       with
-      | [] -> ()
-      | codes -> Harness.fail "the blocked proof reports %s" (String.concat ", " codes));
-      let caller =
-        List.find
-          (fun (declaration : Resolve.Names.declaration) ->
-            Path.equal declaration.key.path (Support.make_top_path "app::main" "caller"))
-          (Support.list_declarations packages (Support.parse_module "app::main"))
-      in
-      match
-        Database.For_testing.find_proof
-          (Support.prove (Support.make_database packages) main)
-          caller.key
-      with
-      | Some Blocked -> ()
-      | Some (Value _ | Failed _) -> Harness.fail "the proof is computed"
-      | None -> Harness.fail "the caller has no proof")
+  List.iter
+    (fun (failure, broken) ->
+      Harness.test
+        ("a proof that reads a contract with " ^ failure ^ " is blocked and reports nothing")
+        (fun () ->
+          let packages =
+            Support.setup
+              [ ("app::main", Fixtures.Prover.caller_of_double); ("app::main/broken", broken) ]
+          in
+          let main = Support.parse_file "app::main" in
+          (match
+             Support.list_codes
+               (Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers
+                  (Support.make_database packages) main)
+           with
+          | [] -> ()
+          | codes -> Harness.fail "the caller does not check: %s" (String.concat ", " codes));
+          (match
+             Support.list_codes
+               (Support.list_proof_diagnostics (Support.make_database packages) main)
+           with
+          | [] -> ()
+          | codes -> Harness.fail "the blocked proof reports %s" (String.concat ", " codes));
+          let caller =
+            List.find
+              (fun (declaration : Resolve.Names.declaration) ->
+                Path.equal declaration.key.path (Support.make_top_path "app::main" "caller"))
+              (Support.list_declarations packages (Support.parse_module "app::main"))
+          in
+          match
+            Database.For_testing.find_proof
+              (Support.prove (Support.make_database packages) main)
+              caller.key
+          with
+          | Some Blocked -> ()
+          | Some (Value _ | Failed _) -> Harness.fail "the proof is computed"
+          | None -> Harness.fail "the caller has no proof"))
+    [
+      ("a type error", Fixtures.Prover.double_with_an_ill_typed_ensures);
+      ("a match that misses a case", Fixtures.Prover.double_with_an_ensures_that_misses_a_case);
+    ]
 
 let () =
   Harness.test "a proof blocked by an error in a package its package depends on is not a bug"

@@ -34,6 +34,10 @@ let show_kind : kind -> string = function
   | Test -> "a test"
   | Law_proof -> "a law's proof"
 
+let is_constant : kind -> bool = function
+  | Constant | Member_constant -> true
+  | Function | Type | Trait | Capability | Theorem | Method | Impl | Test | Law_proof -> false
+
 type visibility = Private | Internal | Public | Public_opaque
 type key = { module_ : Path.module_; path : Path.t; ordinal : int }
 type declaration = { key : key; kind : kind; visibility : visibility; generic : bool }

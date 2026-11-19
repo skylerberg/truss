@@ -669,7 +669,6 @@ let list_package_parts database (names : Resolve.Names.lookups) package : Part.a
         Any (Checked_body key);
         Any (Body_mir key);
         Any (Contract_mir key);
-        Any (Patterns key);
         Any (Usage key);
         Any (Ownership key);
         Any (Proof key);
@@ -738,12 +737,6 @@ let make_recording_call_edge_lookups database note : Mir.Call_edges.lookups =
   {
     interface = make_recording_interface_lookups database note ~is_checked:true;
     mir = make_recording_mir_lookups database note;
-  }
-
-let make_recording_patterns_lookups database note : Patterns.Lookups.t =
-  {
-    read_core = read_checked_form database note;
-    interface = make_recording_interface_lookups database note ~is_checked:true;
   }
 
 let make_recording_usage_lookups database note : Usage.Lookups.t =
@@ -824,7 +817,6 @@ let make_recording_proof_lookups database note : Prover.Lookups.t =
         read_source database file);
     interface = make_recording_interface_lookups database note ~is_checked:true;
     mir = make_recording_mir_lookups database note;
-    read_patterns = (fun key -> read_value database note (Patterns key));
     list_must_be_disjoint = (fun key -> read_value database note (Ownership key));
     list_recursion_group = read_recursion_group database note;
   }
@@ -1321,11 +1313,6 @@ let compute_part database (Part.Any typed as part) =
           make_part
             (Mir.Call_edges.list_path_edges (make_recording_call_edge_lookups database note))
             path)
-  | Patterns key ->
-      compute_value (Patterns key) (fun note ->
-          make_checked_part
-            (fun key -> (Patterns.check (make_recording_patterns_lookups database note) key, ()))
-            key)
   | Usage key ->
       compute_value (Usage key) (fun note ->
           make_checked_part
@@ -1424,6 +1411,14 @@ let list_components database (stage : Stage.t) package parts =
                    (Interface.Properties.list_field_type_paths ~package interface)
              | None -> [])
            paths)
+  | Contracts ->
+      let names = make_untracked_name_lookups database in
+      let is_constant_contract = function
+        | Part.Any (Contract key) -> Resolve.Names.is_constant (names.read_declaration key).kind
+        | _ -> false
+      in
+      let constants, others = List.partition is_constant_contract parts in
+      List.map (fun part -> Single part) (constants @ others)
   | _ -> List.map (fun part -> Single part) parts
 
 let list_test_key_components database parts =
@@ -1984,7 +1979,6 @@ type checker =
   | Resolve
   | Interface
   | Infer
-  | Patterns
   | Usage
   | Ownership
   | Package_checks
@@ -2000,7 +1994,6 @@ let list_checked_parts (key : Resolve.Names.key) : checker -> Part.any list = fu
   | Resolve -> List.map (fun section -> Part.Any (Resolved (key, section))) Resolve.sections
   | Interface -> [ Any (Header key); Any (Interface key); Any (Signature_check key) ]
   | Infer -> [ Any (Contract key); Any (Checked_body key) ]
-  | Patterns -> [ Any (Patterns key) ]
   | Usage -> [ Any (Usage key) ]
   | Ownership -> [ Any (Ownership key) ]
   | Parse | Package_checks | Unexported -> []
@@ -2067,10 +2060,9 @@ let list_checker_diagnostics database (file : Path.file) checker =
         @ of_definitions ()
     | Package_checks -> of_package_checks (fun check -> check <> Unexported)
     | Unexported -> of_package_checks (fun check -> check = Unexported)
-    | Interface | Infer | Patterns | Usage | Ownership -> of_definitions ())
+    | Interface | Infer | Usage | Ownership -> of_definitions ())
 
-let checkers =
-  [ Parse; Resolve; Interface; Infer; Patterns; Usage; Ownership; Package_checks; Unexported ]
+let checkers = [ Parse; Resolve; Interface; Infer; Usage; Ownership; Package_checks; Unexported ]
 
 let list_diagnostics checkers database (file : Path.file) =
   remove_duplicates (List.concat_map (list_checker_diagnostics database file) checkers)
@@ -2094,7 +2086,7 @@ let list_blocking_diagnostics database (file : Path.file) =
               place_diagnostics names file key
                 (List.concat_map
                    (list_definition_diagnostics database key)
-                   [ Resolve; Interface; Infer; Patterns; Usage; Ownership ]))
+                   [ Resolve; Interface; Infer; Usage; Ownership ]))
         (list_file_keys names file))
 
 let list_dependency_diagnostics database package =
@@ -2384,7 +2376,6 @@ module For_testing = struct
     | Resolve
     | Interface
     | Infer
-    | Patterns
     | Usage
     | Ownership
     | Package_checks

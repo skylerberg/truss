@@ -15,6 +15,7 @@ type named = Function | Type | Trait | Capability | Constant | Theorem
 
 val convert_named : named -> kind
 val show_kind : kind -> string
+val is_constant : kind -> bool
 
 type visibility = Private | Internal | Public | Public_opaque
 type key = { module_ : Path.module_; path : Path.t; ordinal : int }

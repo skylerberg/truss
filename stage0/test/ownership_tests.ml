@@ -1,6 +1,6 @@
 let check packages =
   Database.For_testing.list_diagnostics
-    [ Resolve; Interface; Infer; Patterns; Usage; Ownership ]
+    [ Resolve; Interface; Infer; Usage; Ownership ]
     (Support.make_database packages)
 
 let expect_one_diagnostic = Support.expect_one_diagnostic ~check

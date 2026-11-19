@@ -93,8 +93,8 @@ let is_signature_part : type a. a Database.Part.stored -> bool = function
   | Signature_check _ | Contract _ | Contract_mir _ ->
       true
   | Parsed _ | Namespace _ | Resolved _ | Grant _ | Checked_body _ | Body_mir _ | Generated_mir _
-  | Mir_call_edges _ | Patterns _ | Usage _ | Ownership _ | Import_check _ | Package_check _
-  | Call_edges _ | Recursion_group _ | Proof _ | Lowered _ | Test_key _ ->
+  | Mir_call_edges _ | Usage _ | Ownership _ | Import_check _ | Package_check _ | Call_edges _
+  | Recursion_group _ | Proof _ | Lowered _ | Test_key _ ->
       false
 
 let is_signature : Database.Part.t -> bool = function
