@@ -2378,15 +2378,7 @@ let () =
   Harness.test "a loop that mutates an array's elements keeps their potentials" (fun () ->
       expect_proven Fixtures.Prover.array_reset);
   Harness.test "a slice of an array is within it only as far as its count" (fun () ->
-      expect_not_proven Fixtures.Prover.reverse_of_an_array_after_its_first "prover.requires");
-  Harness.test "a permutation of a range argument is a permutation of the whole slice" (fun () ->
-      expect_proven Fixtures.Prover.permutation_through_a_range_argument);
-  Harness.test "a permutation keeps every bound of its elements" (fun () ->
-      expect_proven Fixtures.Prover.bound_kept_through_a_permutation);
-  Harness.test "a permutation does not strengthen a bound of its elements" (fun () ->
-      expect_not_proven Fixtures.Prover.bound_strengthened_through_a_permutation "prover.ensures");
-  Harness.test "sorting both parts around a pivot sorts the slice" (fun () ->
-      expect_proven Fixtures.Prover.sorted_parts_around_a_pivot)
+      expect_not_proven Fixtures.Prover.reverse_of_an_array_after_its_first "prover.requires")
 
 let () =
   Harness.test "a nested call's arguments are written once, however deep it nests" (fun () ->
@@ -2613,6 +2605,16 @@ let () =
       expect_proven Fixtures.Prover.count_cells);
   Harness.test "a loop's bound that leaves out its iterations' sum does not hold" (fun () ->
       expect_not_proven Fixtures.Prover.count_cells_in_rows_time "prover.cost")
+
+let () =
+  Harness.test "a permutation of a range argument is a permutation of the whole slice" (fun () ->
+      expect_proven Fixtures.Prover.permutation_through_a_range_argument);
+  Harness.test "a permutation keeps every bound of its elements" (fun () ->
+      expect_proven Fixtures.Prover.bound_kept_through_a_permutation);
+  Harness.test "a permutation does not strengthen a bound of its elements" (fun () ->
+      expect_not_proven Fixtures.Prover.bound_strengthened_through_a_permutation "prover.ensures");
+  Harness.test "sorting both parts around a pivot sorts the slice" (fun () ->
+      expect_proven Fixtures.Prover.sorted_parts_around_a_pivot)
 
 let check_in_standard text =
   check_file
