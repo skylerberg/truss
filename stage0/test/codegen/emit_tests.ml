@@ -600,7 +600,8 @@ let () =
       let item =
         Lowered.Item.Code
           {
-            path = Method { owner = Well_known.make_path List; name = "each"; receiver = Read };
+            path =
+              Method { owner = Well_known.make_path List; name = "each"; receiver = Instance Read };
             instantiation =
               { Ground.no_instantiation with type_arguments = [ Type Codegen_support.int64 ] };
           }

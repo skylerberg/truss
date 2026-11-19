@@ -289,7 +289,8 @@ let make_level_source ~height =
     height
 
 let make_shelf_method name =
-  make_impl_method ~trait:(make_main_path "Level") ~for_type:(make_main_path "Shelf") name Read
+  make_impl_method ~trait:(make_main_path "Level") ~for_type:(make_main_path "Shelf") name
+    (Instance Read)
 
 let raised_of_shelf = make_shelf_method "raised"
 
@@ -334,7 +335,7 @@ let raised_of_library_shelf =
   make_impl_method ~module_:"lib::tools"
     ~trait:(Support.make_top_path "lib::tools" "Level")
     ~for_type:(Support.make_top_path "lib::tools" "Shelf")
-    "raised" Read
+    "raised" (Instance Read)
 
 let make_step_library ~follow =
   Printf.sprintf
@@ -359,7 +360,7 @@ let hop_stepping_through_a_library =
 let step_of_hop =
   make_impl_method
     ~trait:(Support.make_top_path "lib::tools" "Step")
-    ~for_type:(make_main_path "Hop") "step" Read
+    ~for_type:(make_main_path "Hop") "step" (Instance Read)
 
 let count_termination_obligations database ~of_:path =
   match
@@ -663,7 +664,7 @@ let () =
            ~after:[ ("app::main", stepper_that_runs) ])
         ~parts:
           [
-            Any (Call_edges (make_method (make_main_path "Step") "step" Own, app));
+            Any (Call_edges (make_method (make_main_path "Step") "step" (Instance Own), app));
             Any (Proof (make_main_key "run"));
           ]);
   Harness.test "only a trait method's call edges read the dependencies of the calling package"
@@ -673,7 +674,7 @@ let () =
         [ Input (Dependencies app); Input (Dependencies Path.standard_package) ]
       in
       expect_reads database
-        (Any (Call_edges (make_method (make_main_path "Step") "step" Own, app)))
+        (Any (Call_edges (make_method (make_main_path "Step") "step" (Instance Own), app)))
         ~includes:dependencies ~excludes:[];
       expect_reads database
         (Any (Call_edges (make_main_path "run", app)))
@@ -761,7 +762,10 @@ let () =
         (Any (Mir_call_edges raised_of_shelf))
         ~includes:
           [
-            Stored (Any (Body_mir (make_key (make_method (make_main_path "Level") "raised" Read))));
+            Stored
+              (Any
+                 (Body_mir
+                    (make_key (make_method (make_main_path "Level") "raised" (Instance Read)))));
           ]
         ~excludes:[]);
   Harness.test

@@ -17,7 +17,7 @@ type file = { module_ : module_; name : string }
 val list_file_names : file -> string list
 val show_file : file -> string
 
-type receiver = Static | Read | Mut | Own
+type receiver = Static | Instance of Language.Mode.t
 
 val show_receiver : receiver -> string
 

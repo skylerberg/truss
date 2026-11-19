@@ -57,17 +57,9 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
           in
           let parameters : Core.parameter list =
             (match signature.receiver with
-              | Some (((Read | Mut | Own) as receiver), type_) ->
-                  [
-                    {
-                      Core.local = Self;
-                      mode = (match receiver with Mut -> Mut | Own -> Own | _ -> Read);
-                      type_;
-                      default = None;
-                      callback_contract = None;
-                    };
-                  ]
-              | Some (Static, _) | None -> [])
+              | Some (mode, type_) ->
+                  [ { Core.local = Self; mode; type_; default = None; callback_contract = None } ]
+              | None -> [])
             @ List.mapi
                 (fun index (info : Types.parameter_info) : Core.parameter ->
                   {
@@ -256,7 +248,10 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                       in
                       match so_far with
                       | None -> Some this
-                      | Some so_far -> Some (node bool (And (so_far, this))))
+                      | Some so_far ->
+                          Some
+                            (node bool
+                               (Connective { connective = And; left = so_far; right = this })))
                     None mine theirs
                   |> function
                   | Some all -> all

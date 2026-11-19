@@ -19,7 +19,9 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
     }
   in
   let make_parameter_type name = Types.Parameter (make_parameter operation name) in
-  let input ?(mode = Types.Read) name type_ = { Types.name; mode; type_; has_default = false } in
+  let input ?(mode = Language.Mode.Read) name type_ =
+    { Types.name; mode; type_; has_default = false }
+  in
   let make ?(generics = []) ?(output = Types.Returns Types.unit) parameters : Types.signature =
     {
       generics = List.map generic generics;
@@ -64,7 +66,7 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
         costs = [];
       }
   in
-  let with_storage ?(mode = Types.Read) ?(output = Types.Returns Types.unit) rest =
+  let with_storage ?(mode = Language.Mode.Read) ?(output = Types.Returns Types.unit) rest =
     make ~generics:[ "Element" ] ~output (input ~mode "storage" (make_storage_type element) :: rest)
   in
   let with_plain_storage rest =

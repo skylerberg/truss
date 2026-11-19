@@ -19,9 +19,9 @@ let mangle_text value =
 
 let mangle_receiver : Path.receiver -> string = function
   | Static -> render_marker "Static"
-  | Read -> ""
-  | Mut -> render_marker "Mut"
-  | Own -> render_marker "Own"
+  | Instance Read -> ""
+  | Instance Mut -> render_marker "Mut"
+  | Instance Own -> render_marker "Own"
 
 let rec mangle_path : Path.t -> string = function
   | Top { module_; name } -> mangle_module_path module_ ^ "__" ^ name
@@ -67,7 +67,7 @@ and mangle_path_argument : Path.argument -> string = function
   | Count value -> render_marker "Count" ^ mangle_text (Z.to_string value)
   | Constant constant -> render_marker "Constant" ^ mangle_path constant
 
-let mangle_mode : Ground.mode -> string = function
+let mangle_mode : Language.Mode.t -> string = function
   | Read -> ""
   | Mut -> render_marker "Mut"
   | Own -> render_marker "Own"

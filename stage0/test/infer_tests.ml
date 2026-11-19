@@ -442,9 +442,9 @@ let () =
             (Well_known.of_path owner, receiver)
         | _ -> failwith "the callee is not a method"
       in
-      if find_owner 1 <> (Some String_slice, Read) then
+      if find_owner 1 <> (Some String_slice, Instance Read) then
         Harness.fail "a read-only receiver does not call the view's overload";
-      if find_owner 2 <> (Some String, Own) then
+      if find_owner 2 <> (Some String, Instance Own) then
         Harness.fail "an `own` receiver does not call the `String`'s own overload");
   Harness.test "a method of a view takes no `mut` receiver" (fun () ->
       expect_one_diagnostic Fixtures.Infer.to_string_of_a_string_passed_mut "types.wrong_receiver");
@@ -585,7 +585,7 @@ let () =
       | [ Trait_method { name = "part"; _ } ] -> ()
       | _ -> Harness.fail "the call in `app` does not reach `Parted.part`");
       match list_callees "tools::kits" "measure" with
-      | [ Function { path = Method { name = "part"; receiver = Read; _ }; _ } ] -> ()
+      | [ Function { path = Method { name = "part"; receiver = Instance Read; _ }; _ } ] -> ()
       | _ -> Harness.fail "the call in `tools` does not reach `Kit.part`")
 
 let () =
@@ -1033,7 +1033,7 @@ let () =
             .patterns
       in
       List.iter
-        (fun (name, (expected : Types.mode)) ->
+        (fun (name, (expected : Language.Mode.t)) ->
           match List.assoc_opt name modes with
           | Some mode when mode = expected -> ()
           | Some _ -> Harness.fail "`%s` is bound in another mode" name

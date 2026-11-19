@@ -8,7 +8,6 @@ type context = {
 
 val ground : context -> Types.substitution -> Types.ty -> Ground.ty
 val ground_argument : context -> Types.substitution -> Types.argument -> Ground.argument
-val ground_mode : Types.mode -> Ground.mode
 val list_capabilities : context -> Types.substitution -> Types.capability_set -> Path.t list
 val convert_capability_arguments : Ground.instantiation -> (string * Types.capability_set) list
 val make_substitution : Types.generic list -> Ground.argument list -> Types.substitution

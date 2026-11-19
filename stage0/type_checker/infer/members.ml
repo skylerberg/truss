@@ -5,7 +5,8 @@ let lookup_method state owner name receiver : Path.t Resolve.Names.lookup =
   lookup_member state (Method { owner; name; receiver })
 
 let list_method_lookups state owner name =
-  List.map (lookup_method state owner name) [ Path.Static; Read; Mut; Own ]
+  List.map (lookup_method state owner name)
+    [ Path.Static; Instance Read; Instance Mut; Instance Own ]
 
 let has_visible_method state owner name =
   match Resolve.Names.choose_visible (list_method_lookups state owner name) with

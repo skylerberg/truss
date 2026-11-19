@@ -229,7 +229,7 @@ let call_libc context frame ~(site : Invocation.site) (function_ : Libc.function
 
 let measure_type element : Types.function_type =
   {
-    inputs = [ (Types.Read, element) ];
+    inputs = [ (Language.Mode.Read, element) ];
     output = Types.Integer;
     uses = Types.no_capabilities;
     costs = [];

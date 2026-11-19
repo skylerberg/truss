@@ -42,11 +42,11 @@ val list_lending_parameters : context -> Types.substitution -> Types.result -> L
 val make_c_signature :
   context ->
   Types.substitution ->
-  parameters:(Types.mode * Types.ty) list ->
+  parameters:(Language.Mode.t * Types.ty) list ->
   has_defaults:bool ->
   ?uses:Types.capability_set ->
   Types.result ->
   Lowered.signature * Convention.result
 
 val has_defaults : Types.signature -> bool
-val list_interface_parameters : Types.signature -> (Types.mode * Types.ty) list
+val list_interface_parameters : Types.signature -> (Language.Mode.t * Types.ty) list

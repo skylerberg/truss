@@ -169,15 +169,14 @@ let list_lending_parameters context substitution (result : Types.result) : Lower
       @ [ Pointer { target = Lend; writable = true }; Raw (Pointer Opaque) ]
   | Returns _ -> []
 
-let make_c_signature context substitution ~(parameters : (Types.mode * Types.ty) list) ~has_defaults
-    ?(uses = Types.no_capabilities) (result : Types.result) : Lowered.signature * Convention.result
-    =
+let make_c_signature context substitution ~(parameters : (Language.Mode.t * Types.ty) list)
+    ~has_defaults ?(uses = Types.no_capabilities) (result : Types.result) :
+    Lowered.signature * Convention.result =
   let ground ty = Monomorphic.ground context.monomorphic substitution ty in
   let result_ty, returns = classify_result context substitution result in
   let written =
     List.filter_map
-      (fun (mode, ty) ->
-        Convention.classify_parameter context.env (Monomorphic.ground_mode mode) (ground ty))
+      (fun (mode, ty) -> Convention.classify_parameter context.env mode (ground ty))
       parameters
   in
   let mask = if has_defaults then [ Lowered.Raw (Integer UInt64) ] else [] in
@@ -204,8 +203,5 @@ let has_defaults (signature : Types.signature) =
   List.exists (fun (parameter : Types.parameter_info) -> parameter.has_default) signature.parameters
 
 let list_interface_parameters (signature : Types.signature) =
-  (match signature.receiver with
-    | Some (receiver, ty) ->
-        [ ((match receiver with Mut -> Types.Mut | Own -> Own | Read | Static -> Read), ty) ]
-    | None -> [])
+  Option.to_list signature.receiver
   @ List.map (fun (info : Types.parameter_info) -> (info.mode, info.type_)) signature.parameters

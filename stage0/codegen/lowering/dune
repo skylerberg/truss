@@ -4,6 +4,7 @@
  (name lowering)
  (modules_without_implementation lookups)
  (libraries
+  language
   compiler_bug
   path
   well_known

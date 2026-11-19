@@ -1,10 +1,10 @@
-type local = { name : string; type_ : Types.ty; is_var : bool; mode : Types.mode }
+type local = { name : string; type_ : Types.ty; is_var : bool; mode : Language.Mode.t }
 
 type env = {
   output : Types.result option;
   specification : bool;
   self : Types.ty option;
-  self_mode : Types.mode;
+  self_mode : Language.Mode.t;
   loop_element : Types.ty option;
   compile_time : bool;
   in_quantifier : bool;
@@ -75,10 +75,10 @@ type state = {
   mutable law_parameters : (string * Types.ty) list;
   mutable frames : frame list;
   mutable locals_read : Syntax.id list;
-  mutable keyword_modes : (Syntax.id * Types.mode) list;
-  mutable places_without_keyword : (Syntax.id * Types.mode) list;
+  mutable keyword_modes : (Syntax.id * Language.Mode.t) list;
+  mutable places_without_keyword : (Syntax.id * Language.Mode.t) list;
   mutable mode_keywords : Core.mode_keyword list;
-  yielded : (Syntax.id, Types.mode) Hashtbl.t;
+  yielded : (Syntax.id, Language.Mode.t) Hashtbl.t;
   lent_tails : (Syntax.id, unit) Hashtbl.t;
   mutable lambdas : Source.Definition_span.t list;
   mutable unsolved : Diagnostic.reported option;
@@ -162,7 +162,7 @@ val decide_property :
 
 val is_plain : state -> Types.ty -> bool
 val is_view : state -> Types.ty -> bool
-val decide_binding_mode : state -> Types.mode -> Types.ty -> Types.mode
+val decide_binding_mode : state -> Language.Mode.t -> Types.ty -> Language.Mode.t
 
 val resolve_associated_type :
   state ->
@@ -178,7 +178,7 @@ val make_call :
   state ->
   callee:Core.operand Core.target ->
   arguments:Core.argument list ->
-  lends:Types.mode option ->
+  lends:Language.Mode.t option ->
   Core.call
 
 val convert_evidence : Interface.Impls.evidence -> Tables.evidence
@@ -188,10 +188,10 @@ val run_in_statement : state -> env -> Source.Definition_span.t -> (unit -> 'a) 
 val diverges : is_never:(Syntax.expression -> bool) -> Syntax.statement -> bool
 val statement_diverges : state -> Syntax.statement -> bool
 val build_block : state -> Syntax.block -> Core.block
-val declare : state -> Syntax.name -> Types.ty -> is_var:bool -> mode:Types.mode -> unit
+val declare : state -> Syntax.name -> Types.ty -> is_var:bool -> mode:Language.Mode.t -> unit
 
 val declare_compiled :
-  state -> env -> Syntax.name -> Types.ty -> is_var:bool -> mode:Types.mode -> unit
+  state -> env -> Syntax.name -> Types.ty -> is_var:bool -> mode:Language.Mode.t -> unit
 
 val find_target : state -> Syntax.name -> Resolve.target option
 val decide_default_literal : state -> at:Source.Definition_span.t -> Types.ty -> Types.ty
@@ -234,7 +234,7 @@ val find_view_as : state -> owned:Types.ty -> view:Types.ty -> Types.ty option
 val convert :
   state ->
   env ->
-  ?argument:Types.mode ->
+  ?argument:Language.Mode.t ->
   ?takes_view_as_owner:bool ->
   ?expression:Core.origin ->
   Source.Definition_span.t ->

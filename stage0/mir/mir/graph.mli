@@ -20,7 +20,7 @@ type terminator =
   | Fork of { fork : Core.origin; concurrent : bool; branches : branch list; join : block option }
   | Join of { fork : Core.origin; next : block }
   | Iteration_end of { loop : block }
-  | Yield of { mode : Types.mode; part : Tree.yielded; resume : block }
+  | Yield of { mode : Language.Mode.t; part : Tree.yielded; resume : block }
   | Return of Tree.operand option
   | Cancel of {
       task : Tree.task;

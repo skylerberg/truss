@@ -17,7 +17,7 @@ val make_trait_method_item :
   evidence:Core.evidence ->
   Lowered.Item.t
 
-val pass : Lowering.state -> Types.mode -> Ground.ty -> Lowered.place -> Lowered.operand option
+val pass : Lowering.state -> Language.Mode.t -> Ground.ty -> Lowered.place -> Lowered.operand option
 val raise_lending_capability_method : Path.t -> string -> 'a
 val lookup_capability_method : Definitions.context -> Path.t -> string -> int * Types.signature
 
@@ -56,7 +56,7 @@ val lower_nested_function :
   body:
     (Lowering.state ->
     captures:Lowered.place list ->
-    (Lowered.place * Ground.mode * Ground.ty) list ->
+    (Lowered.place * Language.Mode.t * Ground.ty) list ->
     unit) ->
   Lowered.place ->
   unit
@@ -77,7 +77,7 @@ val lower_call_through_any :
   name:string ->
   receiver:Path.receiver ->
   any:Lowered.place ->
-  arguments:(Types.mode * Ground.ty * Lowered.place) list ->
+  arguments:(Language.Mode.t * Ground.ty * Lowered.place) list ->
   ?lending:Lowered.operand list ->
   site:Lowered.site option ->
   Lowered.place ->
@@ -114,7 +114,7 @@ val lower_item_call :
   Lowered.Item.t ->
   signature:Types.signature ->
   substitution:Types.substitution ->
-  arguments:(Types.mode * Ground.ty * Lowered.place) list ->
+  arguments:(Language.Mode.t * Ground.ty * Lowered.place) list ->
   ?mask:int ->
   ?lending:Lowered.operand list ->
   destination:Lowered.place ->

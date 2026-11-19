@@ -149,7 +149,13 @@ and check_prefix state env ?expected (value : Syntax.expression) operator
             Form.register_call state value;
             check_operator_call
               ~operands:
-                [ { Tables.expression = inner.id; core_argument_index = 0; mode = Types.Read } ]
+                [
+                  {
+                    Tables.expression = inner.id;
+                    core_argument_index = 0;
+                    mode = Language.Mode.Read;
+                  };
+                ]
               state value ~method_:Well_known.Negate_negate ~output:Well_known.Negate_output
               ~left:type_ ~right:None
           end)
@@ -285,12 +291,9 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
       Hooks.check state env right Types.bool;
       check_built_in_operator state value [ left; right ] Types.bool;
       State.register_expression state value (fun () ->
-          let first = State.build_expression state left in
-          let second = State.build_expression state right in
-          match connective with
-          | And -> And (first, second)
-          | Or -> Or (first, second)
-          | Implies -> Implies (first, second));
+          let left = State.build_expression state left in
+          let right = State.build_expression state right in
+          Connective { connective; left; right });
       Types.bool
   | Operation (Bitwise _ as operation) ->
       let left_type = Hooks.check_expression state env ?expected left in
@@ -338,11 +341,11 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
               State.find_view_as state ~owned:left_type ~view:right_type )
           with
           | Some _, _ ->
-              Name_lookup.coerce state env ~argument:Types.Read right ~actual:right_type
+              Name_lookup.coerce state env ~argument:Language.Mode.Read right ~actual:right_type
                 ~expected:left_type;
               left_type
           | None, Some _ ->
-              Name_lookup.coerce state env ~argument:Types.Read left ~actual:left_type
+              Name_lookup.coerce state env ~argument:Language.Mode.Read left ~actual:left_type
                 ~expected:right_type;
               right_type
           | None, None ->
@@ -445,8 +448,16 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
             check_operator_call
               ~operands:
                 [
-                  { Tables.expression = left.id; core_argument_index = 0; mode = Types.Read };
-                  { Tables.expression = right.id; core_argument_index = 1; mode = Types.Read };
+                  {
+                    Tables.expression = left.id;
+                    core_argument_index = 0;
+                    mode = Language.Mode.Read;
+                  };
+                  {
+                    Tables.expression = right.id;
+                    core_argument_index = 1;
+                    mode = Language.Mode.Read;
+                  };
                 ]
               state value ~method_ ~output ~left:left_type ~right:(Some right_type)
           end

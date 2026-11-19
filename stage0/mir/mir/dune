@@ -1,7 +1,7 @@
 (library
  (name mir)
  (libraries
-  metric
+  language
   structural_key
   compiler_bug
   path

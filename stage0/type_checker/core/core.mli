@@ -1,6 +1,6 @@
 type id = int
 type origin = int
-type mode_keyword = { mode : Types.mode; written : origin; operand : origin; place : origin }
+type mode_keyword = { mode : Language.Mode.t; written : origin; operand : origin; place : origin }
 
 type local =
   | Declared of { origin : origin; name : string }
@@ -8,7 +8,6 @@ type local =
   | Self
   | Synthetic of int
 
-type quantifier = Forall | Exists
 type evidence = Impl of { impl : Path.t; substitution : Types.substitution } | Bound | Dynamic
 
 type pattern_constant =
@@ -34,8 +33,8 @@ type 'indirect target =
   | Indirect of 'indirect
 
 type callee = { target : operand target; uses : Types.capability_set }
-and call = { callee : callee; arguments : argument list; lends : Types.mode option }
-and argument = Passed of { mode : Types.mode; value : operand } | Default
+and call = { callee : callee; arguments : argument list; lends : Language.Mode.t option }
+and argument = Passed of { mode : Language.Mode.t; value : operand } | Default
 and operand = Place of place | Value of expression
 
 and place =
@@ -70,11 +69,9 @@ and kind =
   | Slice of { base : place; callee : callee; bounds : argument list }
   | Call of call
   | Operator of { operation : Intrinsic.scalar; arguments : expression list }
-  | Compare of { comparison : comparison; left : expression; right : expression }
+  | Compare of { comparison : Language.Comparison.t; left : expression; right : expression }
   | Not of expression
-  | And of expression * expression
-  | Or of expression * expression
-  | Implies of expression * expression
+  | Connective of { connective : Language.Connective.t; left : expression; right : expression }
   | Matches of { value : operand; pattern : pattern }
   | Convert of { conversion : conversion; value : expression }
   | To_any of { value : expression; trait : Types.trait_reference; evidence : evidence }
@@ -91,15 +88,14 @@ and kind =
   | Result
   | Old of expression
   | Current_target
-  | Quantified of { quantifier : quantifier; binder : binder; body : expression }
+  | Quantified of { quantifier : Language.Quantifier.t; binder : binder; body : expression }
   | Yielded
   | Identical of expression * expression
   | Specification_function of { function_ : specification_function; arguments : expression list }
-  | Method_cost of { metric : Metric.t; method_ : operand target }
+  | Method_cost of { metric : Language.Metric.t; method_ : operand target }
 
 and capture = { local : local; type_ : Types.ty }
-and specification_function = Log | Power | Callback_cost of Metric.t | Calls
-and comparison = Equal | Not_equal | Less | Less_equal | Greater | Greater_equal
+and specification_function = Log | Power | Callback_cost of Language.Metric.t | Calls
 and construction = Array | Specification_only
 and conversion = Widen | To_integer | From_integer | View_to_owned
 
@@ -110,7 +106,7 @@ and binder =
 
 and implementation = {
   origin : origin;
-  mode : Types.mode;
+  mode : Language.Mode.t;
   value : operand;
   type_ : Types.ty;
   provides : provided list;
@@ -130,7 +126,7 @@ and statement_kind =
       iteration : iteration;
       clauses : loop_clause list;
       body : block;
-      mode : loop_mode;
+      mode : Language.Loop_mode.t;
     }
   | While of {
       condition : expression;
@@ -142,9 +138,7 @@ and statement_kind =
   | Concurrent of statement list
   | Proof of block
   | Assert of { condition : condition; by_bit_vector : bool }
-  | Yield of { mode : Types.mode; part : operand }
-
-and loop_mode = Sequential | Parallel_loop | Concurrent_loop
+  | Yield of { mode : Language.Mode.t; part : operand }
 
 and iteration =
   | Integer_range of { start : expression; stop : expression; inclusive : bool }
@@ -154,7 +148,7 @@ and iteration =
 and elements = { count : expression; position : pattern; element : place }
 and loop_clause = Invariant of expression | Decreases of expression list | Cost of cost
 and cost = { origin : origin; amortized : bool; resource : resource; bound : bound }
-and resource = Metric of Metric.t | Calls of calls_target
+and resource = Metric of Language.Metric.t | Calls of calls_target
 
 and calls_target =
   | Function_parameter of local
@@ -168,7 +162,7 @@ and pattern = { id : id; origin : origin; type_ : Types.ty; kind : pattern_kind 
 
 and pattern_kind =
   | Wildcard
-  | Bind of { local : local; is_var : bool; mode : Types.mode }
+  | Bind of { local : local; is_var : bool; mode : Language.Mode.t }
   | Variant of { variant : string; fields : (string * pattern) list }
   | Record of (string * pattern) list
   | Literal of pattern_constant
@@ -178,7 +172,7 @@ and pattern_kind =
 
 type parameter = {
   local : local;
-  mode : Types.mode;
+  mode : Language.Mode.t;
   type_ : Types.ty;
   default : expression option;
   callback_contract : callback_contract option;

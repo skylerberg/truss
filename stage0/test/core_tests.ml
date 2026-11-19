@@ -65,7 +65,7 @@ and show_operand (value : Core.operand) =
 
 and show_argument (passed : Core.argument) =
   match passed with
-  | Passed { mode; value; _ } -> Types.show_mode mode ^ show_operand value
+  | Passed { mode; value; _ } -> Language.Mode.show_prefix mode ^ show_operand value
   | Default -> "default"
 
 let make_definition_form text (path : Path.t) =
@@ -294,7 +294,7 @@ let () =
               (match function_ with
               | Log -> "log"
               | Power -> "power"
-              | Callback_cost metric -> Metric.show metric
+              | Callback_cost metric -> Language.Metric.show metric
               | Calls -> "calls")
         | Call call -> Some ("call " ^ Core_lint.show_target call.callee.target)
         | _ -> None)
@@ -306,7 +306,7 @@ let () =
         (fun (cost : Core.cost) ->
           let resource =
             match cost.resource with
-            | Metric metric -> Metric.show metric
+            | Metric metric -> Language.Metric.show metric
             | Calls (Function_parameter local) -> "calls through " ^ name local
             | Calls (Capability path) -> "calls of " ^ Path.show path
             | Calls (Capability_method (path, method_)) ->
@@ -334,11 +334,12 @@ let () =
         match node.kind with
         | Method_cost { metric; method_ = Trait_method { self_type; evidence; _ } as method_ } ->
             Some
-              (Printf.sprintf "%s(%s) for %s by %s" (Metric.show metric)
+              (Printf.sprintf "%s(%s) for %s by %s" (Language.Metric.show metric)
                  (Core_lint.show_target method_) (Types.show self_type)
                  (match evidence with Bound -> "a bound" | Impl _ -> "an impl" | Dynamic -> "any"))
         | Method_cost { metric; method_ } ->
-            Some (Printf.sprintf "%s(%s)" (Metric.show metric) (Core_lint.show_target method_))
+            Some
+              (Printf.sprintf "%s(%s)" (Language.Metric.show metric) (Core_lint.show_target method_))
         | _ -> None)
       (list_expressions form)
   in
@@ -484,7 +485,7 @@ let () =
     in
     match
       Database.For_testing.read_core (Support.make_database packages)
-        (Method { owner; name; receiver = Read })
+        (Method { owner; name; receiver = Instance Read })
     with
     | Some (form, substitution) ->
         ( form,
@@ -514,9 +515,9 @@ let () =
       let owner : Path.t = Derived { type_ = both; trait = Well_known.make_path Equal } in
       match
         ( Database.For_testing.read_core (Support.make_database packages)
-            (Method { owner; name = "equal"; receiver = Read }),
+            (Method { owner; name = "equal"; receiver = Instance Read }),
           Database.For_testing.read_core (Support.make_database packages)
-            (Method { owner; name = "not_equal"; receiver = Read }) )
+            (Method { owner; name = "not_equal"; receiver = Instance Read }) )
       with
       | Some (_, derived), Some (_, inherited)
         when Types.For_testing.list_arguments derived = []

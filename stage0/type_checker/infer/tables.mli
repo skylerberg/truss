@@ -22,7 +22,7 @@ type callee =
   | Intrinsic of { operation : Intrinsic.operation; type_arguments : Types.argument list }
   | Built_in_operator
 
-type argument = { expression : Syntax.id; core_argument_index : int; mode : Types.mode }
+type argument = { expression : Syntax.id; core_argument_index : int; mode : Language.Mode.t }
 
 type call = {
   callee : callee;
@@ -46,7 +46,7 @@ type literal = Integer_value of Z.t | Float_value of float
 
 type loop =
   | Integer_range of { element : Types.ty; inclusive : bool }
-  | Elements of { count : call; element : call; lends : Types.mode }
+  | Elements of { count : call; element : call; lends : Language.Mode.t }
   | Pulled of { cursor : Types.ty; cursor_call : call option; remaining : call option }
 
 type pattern =
@@ -79,7 +79,7 @@ type t = {
   scrutinee_types : Types.ty option array;
   loops : loop option array;
   templates : template option array;
-  lend_modes : Types.mode option array;
+  lend_modes : Language.Mode.t option array;
 }
 
 val create : int -> t

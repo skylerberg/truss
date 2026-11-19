@@ -213,8 +213,8 @@ let find_model context (ty : Types.ty) term ~element =
     (fun model_of -> model_of term)
     (find_model_function context ty ~model:(make_sequence_type element))
 
-let quantify_over (context : State.context) (frame : State.frame) (quantifier : Core.quantifier)
-    (range : quantified_range) ~bind ~read =
+let quantify_over (context : State.context) (frame : State.frame)
+    (quantifier : Language.Quantifier.t) (range : quantified_range) ~bind ~read =
   let make ?count bound_symbol sort premise body_frame bound_value =
     let mark = context.fresh in
     let body_frame, (after, body_value), with_facts =

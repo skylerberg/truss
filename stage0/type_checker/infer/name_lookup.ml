@@ -3,8 +3,11 @@ type overload =
   | View_overload of Path.t
   | Trait_overload of Types.trait_reference * Types.trait_method
 
-let classify_receiver (receiver : Syntax.expression) : Path.receiver =
-  match receiver.kind with Mode (Mut, _) -> Mut | Mode (Own, _) -> Own | _ -> Read
+let classify_receiver_mode (arguments : Syntax.argument list) : Language.Mode.t =
+  match arguments with
+  | { value = { kind = Mode (Mut, _); _ }; _ } :: _ -> Mut
+  | { value = { kind = Mode (Own, _); _ }; _ } :: _ -> Own
+  | _ -> Read
 
 let describe_missing_method state type_ name =
   match Types.find_view (State.normalize state type_) with
@@ -154,7 +157,7 @@ and check_variant_value state (value : Syntax.expression) type_path variant ~arg
       | Some { fields = Some [ field ]; _ } ->
           Types.Function
             {
-              inputs = [ (Types.Own, field.field_type) ];
+              inputs = [ (Language.Mode.Own, field.field_type) ];
               output = type_;
               uses = Types.no_capabilities;
               costs = [ { amortized = false; resource = Metric Time; bound = Order_of } ];
@@ -519,7 +522,7 @@ and resolve_overloads state receiver_type name :
                       (fun method_path -> View_overload method_path)
                       (Types.find_view receiver_type) receiver;
                   ] ))
-            [ Path.Read; Mut; Own ]))
+            [ Path.Instance Read; Instance Mut; Instance Own ]))
 
 and find_method_version state (span : Source.Definition_span.t) type_ name
     (receiver : Path.receiver) : (Tables.callee * Types.signature) Resolve.Names.lookup =
@@ -578,12 +581,12 @@ and instantiate_trait_method state span ~self_type (trait : Types.trait_referenc
 and make_argumentless_call callee result : Tables.call =
   { callee; arguments = []; omitted_defaults = []; callee_result = result }
 
-and find_elements_calls state (span : Source.Definition_span.t) type_ (mode : Types.mode) :
-    (Tables.loop * Types.ty * Types.mode) Resolve.Names.lookup =
-  let receiver : Path.receiver = match mode with Read -> Read | Mut -> Mut | Own -> Own in
+and find_elements_calls state (span : Source.Definition_span.t) type_ (mode : Language.Mode.t) :
+    (Tables.loop * Types.ty * Language.Mode.t) Resolve.Names.lookup =
+  let receiver = Path.Instance mode in
   let is_uint64 type_ = Types.is_builtin UInt64 (State.normalize state type_) in
   match
-    ( find_method_version state span type_ "count" Read,
+    ( find_method_version state span type_ "count" (Instance Read),
       find_method_version state span type_ "element" receiver )
   with
   | Visible (count, counted), Visible (element, lent) -> (
@@ -606,7 +609,7 @@ and find_elements_calls state (span : Source.Definition_span.t) type_ (mode : Ty
 
 and find_consuming_cursor state (span : Source.Definition_span.t) type_ :
     (Tables.loop * Types.ty) Resolve.Names.lookup =
-  match find_method_version state span type_ "cursor" Own with
+  match find_method_version state span type_ "cursor" (Instance Own) with
   | Visible (callee, { parameters = []; output = Returns cursor; _ }) -> (
       let cursor = State.normalize state cursor in
       let trait = State.make_trait_reference ~arguments:[] (Well_known.make_path Cursor) in
@@ -625,7 +628,7 @@ and find_consuming_cursor state (span : Source.Definition_span.t) type_ :
   | Visible _ | Absent -> Absent
 
 and find_remaining_call state (span : Source.Definition_span.t) cursor =
-  match find_method_version state span cursor "remaining" Read with
+  match find_method_version state span cursor "remaining" (Instance Read) with
   | Visible (callee, { parameters = []; output = Returns bound; _ })
     when Types.is_builtin UInt64 (State.normalize state bound) ->
       Some (make_argumentless_call callee (Types.make_builtin UInt64))

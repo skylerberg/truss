@@ -3,13 +3,13 @@ type overload =
   | View_overload of Path.t
   | Trait_overload of Types.trait_reference * Types.trait_method
 
-val classify_receiver : Syntax.expression -> Path.receiver
+val classify_receiver_mode : Syntax.argument list -> Language.Mode.t
 val describe_missing_method : State.state -> Types.ty -> string -> string
 
 val coerce :
   State.state ->
   State.env ->
-  ?argument:Types.mode ->
+  ?argument:Language.Mode.t ->
   ?takes_view_as_owner:bool ->
   Syntax.expression ->
   actual:Types.ty ->
@@ -68,8 +68,8 @@ val find_elements_calls :
   State.state ->
   Source.Definition_span.t ->
   Types.ty ->
-  Types.mode ->
-  (Tables.loop * Types.ty * Types.mode) Resolve.Names.lookup
+  Language.Mode.t ->
+  (Tables.loop * Types.ty * Language.Mode.t) Resolve.Names.lookup
 
 val find_consuming_cursor :
   State.state ->
