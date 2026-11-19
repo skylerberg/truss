@@ -1,21 +1,17 @@
-let raise_bug format = Context.raise_bug format
-
 let lower (context : Context.t) (scalar : Intrinsic.scalar) =
   let builder = context.builder in
   let env = context.env in
-  let destination = context.destination in
-  let arguments = context.arguments in
   let set = Context.set context in
   let read_operand = Context.read_operand context in
   let read_type_argument = Context.read_type_argument context in
   let call = Context.call context in
   let fail_obligation_when = Context.fail_obligation_when context in
-  let make_operand = Context.make_operand in
-  let classify_scalar = Context.classify_scalar in
   let set_binary op = set (Binary (op, read_operand 0, read_operand 1)) in
   let set_comparison comparison = set (Compare (comparison, read_operand 0, read_operand 1)) in
   let set_unary op = set (Unary (op, read_operand 0)) in
-  let call_into intrinsic = call ?result:destination intrinsic (List.map make_operand arguments) in
+  let call_into intrinsic =
+    call ?result:context.destination intrinsic (List.map Context.make_operand context.arguments)
+  in
   let find_integer_argument () =
     match (Memory_layout.of_type env (read_type_argument 0)).form with
     | Scalar (Integer integer) -> Some integer
@@ -57,7 +53,7 @@ let lower (context : Context.t) (scalar : Intrinsic.scalar) =
   in
   let lower_overflow_test overflow =
     let ignored = Emit_c.Ir_builder.allocate_local builder (Value (read_type_argument 0)) in
-    call ?result:destination overflow
+    call ?result:context.destination overflow
       [
         read_operand 0;
         read_operand 1;
@@ -65,7 +61,7 @@ let lower (context : Context.t) (scalar : Intrinsic.scalar) =
       ]
   in
   let lower_checked_shift op =
-    (match (find_integer_argument (), classify_scalar env (read_type_argument 1)) with
+    (match (find_integer_argument (), Context.classify_scalar env (read_type_argument 1)) with
     | Some integer, Integer amount ->
         let bits = 8 * Memory_layout.compute_integer_size integer in
         let make_constant number : Lowered.operand = Constant (Integer (amount, Z.of_int number)) in
@@ -83,7 +79,8 @@ let lower (context : Context.t) (scalar : Intrinsic.scalar) =
   in
   let make_fits_test () : Emit_c.Ir_builder.condition =
     match
-      (classify_scalar env (read_type_argument 0), classify_scalar env (read_type_argument 1))
+      ( Context.classify_scalar env (read_type_argument 0),
+        Context.classify_scalar env (read_type_argument 1) )
     with
     | Integer source, Integer target_integer -> (
         let source_low, source_high = Memory_layout.compute_integer_range source in
@@ -122,7 +119,7 @@ let lower (context : Context.t) (scalar : Intrinsic.scalar) =
               (if is_held under then (Ieee_less, make_constant under, read_operand 0)
                else (Ieee_less_equal, make_constant low, read_operand 0)),
             Test (Ieee_less, read_operand 0, make_constant (Z.succ high)) )
-    | _ -> raise_bug "fits between these types"
+    | _ -> Context.raise_bug "fits between these types"
   in
   match scalar with
   | Add -> lower_checked_arithmetic Add Add_overflow
@@ -166,12 +163,13 @@ let lower (context : Context.t) (scalar : Intrinsic.scalar) =
   | Fits -> set (Emit_c.Ir_builder.evaluate builder (make_fits_test ()))
   | Convert ->
       (match
-         (classify_scalar env (read_type_argument 0), classify_scalar env (read_type_argument 1))
+         ( Context.classify_scalar env (read_type_argument 0),
+           Context.classify_scalar env (read_type_argument 1) )
        with
       | (Float32 | Float64), Integer _ ->
           fail_obligation_when (Negation (make_fits_test ())) "conversion out of range"
       | _ -> ());
-      set (Convert (read_operand 0, classify_scalar env (read_type_argument 1)))
+      set (Convert (read_operand 0, Context.classify_scalar env (read_type_argument 1)))
   | Square_root -> call_into Square_root
   | Fused_multiply_add -> call_into Fused_multiply_add
   | Floor -> call_into Floor

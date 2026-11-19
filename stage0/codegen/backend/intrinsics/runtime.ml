@@ -1,40 +1,23 @@
-let raise_bug format = Context.raise_bug format
-
 let lower (context : Context.t) (runtime : Intrinsic.runtime) =
   let builder = context.builder in
   let env = context.env in
-  let types = context.types in
   let destination = context.destination in
-  let site = context.site in
-  let reported = context.reported in
-  let trace = context.trace in
   let set = Context.set context in
   let read_argument = Context.read_argument context in
   let read_operand = Context.read_operand context in
-  let read_type_argument = Context.read_type_argument context in
   let call = Context.call context in
-  let allocate_uint64_local () = Context.allocate_uint64_local context in
-  let extract_place = Context.extract_place in
-  let read = Context.read in
   let byte = Ground.make_builtin UInt8 in
   match runtime with
   | Crash ->
-      let message = read (read_argument 0) in
+      let message = Context.read (read_argument 0) in
       let bytes =
-        match (Memory_layout.of_type env types.string_slice).form with
+        match (Memory_layout.of_type env context.types.string_slice).form with
         | Struct [ only ] -> Lowered.project message (Field only.name)
-        | _ -> raise_bug "a StringSlice that is not a record of one field"
+        | _ -> Context.raise_bug "a StringSlice that is not a record of one field"
       in
-      Emit_c.Ir_builder.finish builder
-        (Fail
-           {
-             failure = Panic;
-             message = Copy (Storage.project_buffer bytes);
-             length = Copy (Storage.project_length bytes);
-             site;
-             reported;
-             trace;
-           });
+      Context.fail_with_message context Panic
+        ~message:(Copy (Storage.project_buffer bytes))
+        ~length:(Copy (Storage.project_length bytes));
       Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder)
   | Handle_from ->
       set
@@ -45,9 +28,9 @@ let lower (context : Context.t) (runtime : Intrinsic.runtime) =
              fields = [ ("descriptor", read_operand 0) ];
            })
   | Handle_descriptor ->
-      set (Use (Copy (Lowered.project (read (read_argument 0)) (Field "descriptor"))))
+      set (Use (Copy (Lowered.project (Context.read (read_argument 0)) (Field "descriptor"))))
   | Shared_new ->
-      let ty = read_type_argument 0 in
+      let ty = Context.read_type_argument context 0 in
       let block = Emit_c.Ir_builder.allocate_local builder (Raw (Pointer Opaque)) in
       call ~result:(Lowered.make_local_place block) Shared_allocate
         [ Constant (Size_of ty); Constant (Alignment_of ty) ];
@@ -69,9 +52,11 @@ let lower (context : Context.t) (runtime : Intrinsic.runtime) =
            })
   | Shared_key ->
       set
-        (Convert (Copy (Lowered.project (read (read_argument 0)) (Field "value")), Integer UInt64))
-  | Shared_update -> raise_bug "shared_update is lowered with the call of its function value"
-  | Holds_invariant -> raise_bug "holds_invariant is lowered with its type's invariant"
+        (Convert
+           (Copy (Lowered.project (Context.read (read_argument 0)) (Field "value")), Integer UInt64))
+  | Shared_update ->
+      Context.raise_bug "shared_update is lowered with the call of its function value"
+  | Holds_invariant -> Context.raise_bug "holds_invariant is lowered with its type's invariant"
   | Handle_release ->
       let released =
         Emit_c.Ir_builder.allocate_local builder (Value (Ground.make_builtin Handle))
@@ -81,12 +66,13 @@ let lower (context : Context.t) (runtime : Intrinsic.runtime) =
       set (Use (Copy (Lowered.project (Lowered.make_local_place released) (Field "descriptor"))))
   | Run_test -> call Run_test [ read_operand 0 ]
   | Coroutine_start ->
-      call ?result:destination Coroutine_start [ Copy (read (read_argument 0)); read_operand 1 ]
+      call ?result:destination Coroutine_start
+        [ Copy (Context.read (read_argument 0)); read_operand 1 ]
   | Coroutine_resume -> call ?result:destination Coroutine_resume [ read_operand 0 ]
   | Coroutine_suspend -> call Coroutine_suspend []
   | Tasks_spawn ->
       call ?result:destination Tasks_spawn
-        [ read_operand 0; Copy (read (read_argument 1)); read_operand 2 ]
+        [ read_operand 0; Copy (Context.read (read_argument 1)); read_operand 2 ]
   | Report_tests_to -> call Report_tests_to [ read_operand 0 ]
   | Live_blocks -> call ?result:destination Live_blocks []
   | System_is_os os -> set (Use (Constant (Bool ((Memory_layout.system env).os = os))))
@@ -95,7 +81,7 @@ let lower (context : Context.t) (runtime : Intrinsic.runtime) =
   | Environment_entry ->
       let environment = Emit_c.Ir_builder.allocate_local builder (Raw (Pointer Opaque)) in
       call ~result:(Lowered.make_local_place environment) Environment [];
-      let position = allocate_uint64_local () in
+      let position = Context.allocate_uint64_local context in
       Emit_c.Ir_builder.emit builder
         (Assign (Lowered.make_local_place position, Use (Lowered.make_uint64_constant 0)));
       let entry = Emit_c.Ir_builder.allocate_local builder (Raw (Nullable_pointer (Data byte))) in
@@ -119,6 +105,6 @@ let lower (context : Context.t) (runtime : Intrinsic.runtime) =
            ));
       Emit_c.Ir_builder.finish builder (Goto test);
       Emit_c.Ir_builder.start builder after;
-      Libc_calls.load_text_at context entry ~is_present:(extract_place (read_argument 1))
+      Libc_calls.load_text_at context entry ~is_present:(Context.read_place context 1)
   | Libc function_ -> Libc_calls.lower context function_
   | Libc_number number -> set (Use (Libc_calls.make_number_constant context number))

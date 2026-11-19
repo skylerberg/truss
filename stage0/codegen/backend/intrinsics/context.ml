@@ -39,6 +39,7 @@ let set context rvalue =
 
 let read_argument context position = List.nth context.arguments position
 let read_operand context position = make_operand (read_argument context position)
+let read_place context position = extract_place (read_argument context position)
 
 let read_type_argument context position =
   match List.nth_opt context.type_arguments position with
@@ -58,17 +59,21 @@ let emit_uint64 context rvalue =
 let emit_bool context rvalue = Emit_c.Ir_builder.emit_temporary context.builder (Raw Bool) rvalue
 let copy_length sequence = Lowered.Copy (Storage.project_length sequence)
 
-let fail context failure message =
+let fail_with_message context failure ~message ~length =
   Emit_c.Ir_builder.finish context.builder
     (Fail
        {
          failure;
-         message = Constant (Bytes message);
-         length = Lowered.make_uint64_constant (String.length message);
+         message;
+         length;
          site = context.site;
          reported = context.reported;
          trace = context.trace;
        })
+
+let fail context failure message =
+  fail_with_message context failure ~message:(Constant (Bytes message))
+    ~length:(Lowered.make_uint64_constant (String.length message))
 
 let fail_when context failure condition message =
   let failed = Emit_c.Ir_builder.allocate_block context.builder

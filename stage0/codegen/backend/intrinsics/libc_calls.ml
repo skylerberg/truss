@@ -1,28 +1,23 @@
-let raise_bug format = Context.raise_bug format
 let byte = Ground.make_builtin UInt8
 
 let make_number_constant (context : Context.t) number : Lowered.operand =
-  let env = context.env in
-  let classify_scalar = Context.classify_scalar in
   let integer =
     match
-      classify_scalar env
+      Context.classify_scalar context.env
         (Ground.make_builtin (Intrinsic.convert_libc_scalar (Libc.classify_number number)))
     with
     | Integer integer -> integer
-    | _ -> raise_bug "a number of the C library that is not an integer"
+    | _ -> Context.raise_bug "a number of the C library that is not an integer"
   in
-  Constant (Integer (integer, Z.of_int (Libc.evaluate_number (Memory_layout.system env) number)))
+  Constant
+    (Integer (integer, Z.of_int (Libc.evaluate_number (Memory_layout.system context.env) number)))
 
 let load_text_at (context : Context.t) address ~is_present =
   let builder = context.builder in
-  let set = Context.set context in
-  let call = Context.call context in
-  let allocate_uint64_local () = Context.allocate_uint64_local context in
   Emit_c.Ir_builder.emit builder
     (Assign (is_present, Compare (Not_equal, Copy (Lowered.make_local_place address), Constant Null)));
   let elements = Emit_c.Ir_builder.allocate_local builder (Raw (Pointer (Data byte))) in
-  let count = allocate_uint64_local () in
+  let count = Context.allocate_uint64_local context in
   Emit_c.Ir_builder.emit builder
     (Assign (Lowered.make_local_place elements, Use (Constant Storage.empty_buffer)));
   Emit_c.Ir_builder.emit builder
@@ -30,30 +25,22 @@ let load_text_at (context : Context.t) address ~is_present =
   Emit_c.Ir_builder.emit_when builder (Holds (Copy is_present)) (fun () ->
       Emit_c.Ir_builder.emit builder
         (Assign (Lowered.make_local_place elements, Use (Copy (Lowered.make_local_place address))));
-      call ~result:(Lowered.make_local_place count) Terminated_length
+      Context.call context ~result:(Lowered.make_local_place count) Terminated_length
         [ Copy (Lowered.make_local_place address) ]);
-  set
+  Context.set context
     (Storage.build_view (Storage.make_view_type byte)
        ~buffer:(Copy (Lowered.make_local_place elements))
        ~length:(Copy (Lowered.make_local_place count)))
 
 let lower (context : Context.t) (function_ : Libc.function_) =
-  let index_element = Storage.index_element in
+  let read_place = Context.read_place context in
   let builder = context.builder in
   let env = context.env in
-  let destination = context.destination in
-  let set = Context.set context in
-  let read_argument = Context.read_argument context in
-  let read_operand = Context.read_operand context in
   let emit_uint64 = Context.emit_uint64 context in
-  let fail = Context.fail context in
   let fail_obligation_when = Context.fail_obligation_when context in
-  let compute_room = Context.compute_room context in
-  let copy_length = Context.copy_length in
-  let extract_place = Context.extract_place in
-  let classify_scalar = Context.classify_scalar in
   if not (Libc.is_available (Memory_layout.system env) function_) then begin
-    fail Panic (Printf.sprintf "this system's C library has no %s" (Libc.show_function function_));
+    Context.fail context Panic
+      (Printf.sprintf "this system's C library has no %s" (Libc.show_function function_));
     Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder)
   end
   else begin
@@ -70,14 +57,17 @@ let lower (context : Context.t) (function_ : Libc.function_) =
       List.map
         (fun (_, (passes : Libc.passes)) : Lowered.operand ->
           match passes with
-          | Value _ -> read_operand (take_argument_index ())
-          | Elements _ ->
-              Copy (Storage.project_buffer (extract_place (read_argument (take_argument_index ()))))
+          | Value _ -> Context.read_operand context (take_argument_index ())
+          | Elements _ -> Copy (Storage.project_buffer (read_place (take_argument_index ())))
           | Room _ ->
-              let storage = extract_place (read_argument (take_argument_index ())) in
-              Address { place = index_element storage (copy_length storage); writable = true }
+              let storage = read_place (take_argument_index ()) in
+              Address
+                {
+                  place = Storage.index_element storage (Context.copy_length storage);
+                  writable = true;
+                }
           | Elements_to_change _ ->
-              Copy (Storage.project_buffer (extract_place (read_argument (take_argument_index ()))))
+              Copy (Storage.project_buffer (read_place (take_argument_index ())))
           | Written (scalar, names) ->
               let structure =
                 Emit_c.Ir_builder.allocate_local builder
@@ -87,7 +77,7 @@ let lower (context : Context.t) (function_ : Libc.function_) =
               in
               List.iteri
                 (fun index _ ->
-                  let written = extract_place (read_argument (take_argument_index ())) in
+                  let written = read_place (take_argument_index ()) in
                   Emit_c.Ir_builder.emit builder
                     (Assign
                        ( Lowered.project
@@ -136,10 +126,10 @@ let lower (context : Context.t) (function_ : Libc.function_) =
       | Counted { by; each } -> (
           match List.find_opt (fun (name, _, _) -> name = by) passed with
           | Some (_, _, index) ->
-              let count = cast_to_uint64 (read_operand index) in
+              let count = cast_to_uint64 (Context.read_operand context index) in
               if each = 1 then Some count
               else Some (emit_uint64 (Binary (Multiply, count, Lowered.make_uint64_constant each)))
-          | None -> raise_bug "a C library row counts by %s, which it does not take" by)
+          | None -> Context.raise_bug "a C library row counts by %s, which it does not take" by)
       | Exactly elements -> Some (Lowered.make_uint64_constant elements)
       | Number number -> Some (cast_to_uint64 (make_number_constant context number))
       | Through_zero -> None
@@ -151,35 +141,37 @@ let lower (context : Context.t) (function_ : Libc.function_) =
             Option.iter
               (fun count ->
                 fail_obligation_when
-                  (Test (Greater, count, compute_room (extract_place (read_argument index))))
+                  (Test (Greater, count, Context.compute_room context (read_place index)))
                   "a call of the C library with less room than it writes")
               (find_count extent)
         | Some (Elements_to_change (_, extent)) ->
             Option.iter
               (fun count ->
                 fail_obligation_when
-                  (Test (Greater, count, copy_length (extract_place (read_argument index))))
+                  (Test (Greater, count, Context.copy_length (read_place index)))
                   "a call of the C library with fewer elements than it mutates")
               (find_count extent)
         | Some (Elements (element, extent)) -> (
-            let view = extract_place (read_argument index) in
+            let view = read_place index in
             match find_count extent with
             | Some count ->
                 fail_obligation_when
-                  (Test (Greater, count, copy_length view))
+                  (Test (Greater, count, Context.copy_length view))
                   "a call of the C library with fewer elements than it reads"
             | None ->
                 let message = "a call of the C library with text that does not end with a zero" in
                 let zero : Lowered.operand =
-                  match classify_scalar env (ground element) with
+                  match Context.classify_scalar env (ground element) with
                   | Integer integer -> Constant (Integer (integer, Z.zero))
-                  | _ -> raise_bug "a C library row reads up to a zero that is not an integer"
+                  | _ ->
+                      Context.raise_bug "a C library row reads up to a zero that is not an integer"
                 in
                 fail_obligation_when
-                  (Test (Equal, copy_length view, Lowered.make_uint64_constant 0))
+                  (Test (Equal, Context.copy_length view, Lowered.make_uint64_constant 0))
                   message;
                 let last =
-                  emit_uint64 (Binary (Subtract, copy_length view, Lowered.make_uint64_constant 1))
+                  emit_uint64
+                    (Binary (Subtract, Context.copy_length view, Lowered.make_uint64_constant 1))
                 in
                 fail_obligation_when
                   (Test (Not_equal, Copy (Storage.index_element view last), zero))
@@ -199,7 +191,8 @@ let lower (context : Context.t) (function_ : Libc.function_) =
       List.iter (fun write -> write ()) (List.rev !after)
     in
     match result with
-    | Returns _ -> call (match destination with Some place -> Returned place | None -> Discarded)
+    | Returns _ ->
+        call (match context.destination with Some place -> Returned place | None -> Discarded)
     | Never ->
         call Discarded;
         Emit_c.Ir_builder.finish builder Unreachable;
@@ -209,12 +202,11 @@ let lower (context : Context.t) (function_ : Libc.function_) =
           Emit_c.Ir_builder.allocate_local builder (Raw (Pointer (Data (ground scalar))))
         in
         call (Returned (Lowered.make_local_place address));
-        set (Use (Copy (Lowered.project (Lowered.make_local_place address) Deref)))
+        Context.set context (Use (Copy (Lowered.project (Lowered.make_local_place address) Deref)))
     | Text ->
         let address =
           Emit_c.Ir_builder.allocate_local builder (Raw (Nullable_pointer (Data byte)))
         in
         call (Returned (Lowered.make_local_place address));
-        load_text_at context address
-          ~is_present:(extract_place (read_argument (take_argument_index ())))
+        load_text_at context address ~is_present:(read_place (take_argument_index ()))
   end

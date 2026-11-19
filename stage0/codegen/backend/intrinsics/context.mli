@@ -18,18 +18,22 @@ type t = {
 }
 
 val make_operand : argument -> Lowered.operand
-val extract_place : argument -> Lowered.place
 val read : argument -> Lowered.place
 val classify_scalar : Memory_layout.env -> Ground.ty -> Memory_layout.scalar
 val set : t -> Lowered.rvalue -> unit
 val read_argument : t -> int -> argument
 val read_operand : t -> int -> Lowered.operand
+val read_place : t -> int -> Lowered.place
 val read_type_argument : t -> int -> Ground.ty
 val call : t -> ?result:Lowered.place -> Lowered.intrinsic -> Lowered.operand list -> unit
 val allocate_uint64_local : t -> Lowered.local
 val emit_uint64 : t -> Lowered.rvalue -> Lowered.operand
 val emit_bool : t -> Lowered.rvalue -> Lowered.operand
 val copy_length : Lowered.place -> Lowered.operand
+
+val fail_with_message :
+  t -> Lowered.failure -> message:Lowered.operand -> length:Lowered.operand -> unit
+
 val fail : t -> Lowered.failure -> string -> unit
 val fail_when : t -> Lowered.failure -> Emit_c.Ir_builder.condition -> string -> unit
 val fail_obligation_when : t -> Emit_c.Ir_builder.condition -> string -> unit
