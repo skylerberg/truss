@@ -745,7 +745,7 @@ order they have in a definition, and the parentheses mark where they end.
 
 | Rule | Reason |
 |---|---|
-| A call of a function value passes the caller's capabilities as one table, and the function finds each capability it uses in the table by name. | A value of `fn()` can be passed where `(fn() uses Clock)` is allowed, and stored or returned there, with no wrapper and no change to how it is called. A wrapper would need storage that lives as long as the value, which a function value that captures nothing does not have. |
+| A call of a function value passes the caller's capabilities as one table, and the function finds each capability it uses in the table by the address of the capability's symbol. | A value of `fn()` can be passed where `(fn() uses Clock)` is allowed, and stored or returned there, with no wrapper and no change to how it is called. A wrapper would need storage that lives as long as the value, which a function value that captures nothing does not have. |
 
 ## Methods
 
@@ -807,6 +807,7 @@ an API toward returning `Unit` when the result is usually not needed.
 |---|---|
 | Every variable is used, and every `match` arm is reachable. | Such code is almost always a mistake, often a typo. The two rules also catch a constant that is written as a bare name in a pattern ([Patterns](#patterns)). A parameter is exempt, because an implementation of a trait may not need every parameter. |
 | Unreachable code is an error. | It is almost always a line left behind by an edit. The check uses types alone, so it never reasons about values. Code after a `todo` is unfinished, not unreachable. |
+| A comparison of a place with itself is an error outside specifications. | `x != x` tests for NaN in C, Java, and JavaScript, and is always false in Truss, where every NaN equals every NaN (*LLM habits*). Any other comparison of a place with itself is a typo, since the laws of `Equal` and `Ordered` decide its result. A law states such a comparison on purpose. |
 
 ### Patterns
 
@@ -819,11 +820,13 @@ module then silently changes the semantics of a pattern in another file, and
 every binding in a pattern depends on the names of the module. In Truss, a
 constant written as the bare name `limit` still compiles, as in Python, but
 the binding matches every value. It therefore makes a later arm unreachable
-or is itself unused, and both are errors.
+or is itself unused, and both are errors. When a constant of the module has
+the binding's name and type, both errors name it, and their fixes write its
+path.
 
 | Rule | Reason |
 |---|---|
-| A constant in a pattern has a type with structural equality. | Matching the constant and comparing with `==` then agree. |
+| A constant in a pattern has a type with structural equality. | The checks that a `match` covers every case and that every arm is reachable compare constants by their contents. Under float equality or a hand-written `Equal`, two constants with different contents can be equal, so an arm that never runs, such as one for a constant `-0.0` after one for a constant `0.0`, would pass as reachable. |
 | A variant is written under its type in an expression, and bare in a pattern. | The name shows its type, and two types can share a variant name. In a pattern the variant is resolved in the type of the scrutinee, as a method is resolved in the type of its receiver. |
 | A float literal is not a pattern. | `-0.0 == 0.0`, so a pattern `0.0` would silently match both. A guard states which is meant. |
 
@@ -1292,7 +1295,8 @@ it is.
 
 | Rule | Reason |
 |---|---|
-| A trait can require other traits. | A law can then span traits. `Hash` requires `Equal`, so its law, that equal values hash equally, is stated and proven. In Rust, `Hash` does not require `Eq`, and that law is only a comment. |
+| A trait can require other traits. | A law can then span traits. `Ordered` requires `Equal`, so its law `agrees_with_equal` states that `compare` returns `Ordering.Equal` exactly when `==` holds. Rust's `Ord` requires `Eq` too, but that agreement is only documentation. |
+| `Hash` has no law relating it to `Equal`. | A law is a specification, and a specification cannot call `hash`, which mutates its `Hasher`. Stating the law would take a `hash` that returns its hash, which gives up a keyed hasher provided through a capability, or a specification form for the state a mutating call leaves. A derived `Hash` agrees with a derived `Equal` by construction. |
 | A type has one `impl` of each trait. | Two traits that both require `Equal` share that `impl`, so there is no diamond problem. |
 | An `impl`'s method has its trait's signature, which the `impl` restates. | The body of the method and every call of it are checked against the same types. A method with a signature of its own would have a body checked against types that no call is checked against. |
 
@@ -1328,18 +1332,22 @@ value cannot name the capabilities of the type that `any` hides.
 
 Rules: [Equality](SPECIFICATION.md#equality).
 
-**Only structural equality lets the prover substitute.** From `a == b` the
-prover concludes `f(a) == f(b)` only when no function can distinguish equal
-values. Three kinds of equality are not structural:
+**Only equality that is identity lets the prover substitute.** From `a == b`
+the prover concludes `f(a) == f(b)` only when equal values are `identical`,
+so that no function can distinguish them. Four kinds of equality are not
+identity:
 
 | Equality | Reason |
 |---|---|
 | A hand-written `Equal` | It promises only an equivalence relation. |
 | Float equality | `Point(x: 0.0, y: 0.0) == Point(x: -0.0, y: 0.0)`, and `1.0 / x` distinguishes the two. |
+| `String`'s equality | Two equal strings can differ in `capacity()`. |
 | The equality of an opaque type, outside its package | It would depend on fields that other packages cannot see. |
 
-Whether a type's equality is structural is derived from its fields, as
-`Plain` is.
+A constant in a pattern needs only structural equality, which compares
+contents and which `String` has ([Patterns](#patterns)). Whether a type's
+equality is structural, and whether it is identity, is derived from its
+fields, as `Plain` is.
 
 ### Deriving
 
@@ -1348,7 +1356,7 @@ Rules: [Deriving](SPECIFICATION.md#deriving).
 | Rule | Reason |
 |---|---|
 | Deriving is opt-in. | An `Equal` on a public type is a promise to its users, and structural equality is wrong for some types, such as a set stored as an unsorted list. |
-| A derived `Ordered` or `Hash` needs a derived `Equal`. | The laws of `Ordered` and `Hash` relate them to `Equal`, and two derived implementations agree by construction. A hand-written `Equal`, such as that of a set stored as a list, would not agree with a field-by-field `Ordered` or `Hash`. |
+| A derived `Ordered` or `Hash` needs a derived `Equal`. | The laws of `Ordered` relate it to `Equal`, and a map finds a key only when its hash agrees with `Equal`. Two derived implementations agree by construction. A hand-written `Equal`, such as that of a set stored as a list, would not agree with a field-by-field `Ordered` or `Hash`. |
 | One derived `Serialize` serves every format. | Its methods are generic over a `Serializer`. A type that needs other field names writes the `impl`, because Truss has no attributes. |
 | Every type has debug output, with no derive. | The test runner can show any value. Text for people goes through `Display`, which is written by hand, because a structural dump is rarely fit for a user. |
 
@@ -1435,17 +1443,11 @@ Every promise of a program is proven at compile time: contracts,
 invariants, laws, loop invariants, and every operation that can fail.
 
 ```truss
-theorem reverse_twice[Element](items: Slice[Element])
-  ensures items.reverse().reverse() == items.to_list()
-  decreases items.length()
+theorem reverse_twice[Element](items: Sequence[Element])
+  ensures identical(items.reversed().reversed(), items)
 {
-  match items.split_first() {
-    None => {}
-    Some((first, rest)) => {
-      reverse_twice(rest)
-      reverse_of_append(rest.reverse(), suffix: [first])
-    }
-  }
+  assert forall i in 0..items.length() =>
+    identical(items.reversed().reversed()[i], items[i])
 }
 ```
 
@@ -1490,6 +1492,7 @@ only, to state the definition.
 | Rule | Reason |
 |---|---|
 | A method of a trait or of an `impl` is known by its contract too. | An `impl` states what it adds to the trait's contract in its own `ensures`: `Int64.compare` ensures the order of the integers. An edit to a provided body then changes no fact that callers know. An edit to an `impl`'s body re-proves that method and the `impl`'s laws alone. |
+| An `ensures` that fixes a pure function's result is the call's value: `identical(result, e)`, or `result == e` where `==` is identity, as on integers. An `e` that calls the function itself is not used. | A fact about a call then needs no term of the call to take effect. `List.element` ensures `identical(result, self.model()[position])`, so a quantifier over a list's elements is a quantifier over its model, which code that indexes the list instantiates. A hand-written `Equal` is not identity, and neither is a structural equality such as `String`'s, under which two equal strings can differ in `capacity()`, so neither fixes a value. A recursive definition is not unfolded. |
 | A clause applies only where every name it mentions is visible. | An `ensures` that reads the fields of an opaque type is a fact inside the type's package and no fact elsewhere, so `opaque` hides the representation from proofs too. |
 | A public `requires` or `cost` names only public definitions, and an `ensures` may name a private function. | The proofs of callers in other packages read a `requires` and a `cost`, and a clause applies only where every name it mentions is visible. The `ensures` lets callers inside the package know a result in terms of private helpers. |
 | A bit-level fact is requested with `assert ... by bit_vector`. | Bit-blasting is slow on most queries, so only the assertion that asks for it is proven that way, as with Verus's `by (bit_vector)`. Every other query knows a bitwise operation by a few facts, and no query falls back to bit-blasting. |
@@ -1513,7 +1516,7 @@ Rules: [Writing specifications](SPECIFICATION.md#writing-specifications).
 contract about a whole collection needs a value to state it in. Stated with
 `length()` and indexing alone, "`push` appends an element" takes a
 quantifier in every clause, and a collection's own `Equal` may be
-hand-written and so not structural. The prelude therefore has mathematical
+hand-written and so not identity. The prelude therefore has mathematical
 collections that exist only in specifications, such as `Sequence`, and a
 type gives its value in their terms through the trait `Model`:
 
@@ -1524,7 +1527,7 @@ fn List[Element].push(mut self, item: own Element)
 
 | Rule | Reason |
 |---|---|
-| The mathematical types have structural equality. | The prover substitutes through a model where the collection's own `Equal` is hand-written. |
+| The equality of the mathematical types is identity. | The prover substitutes through a model where the collection's own `Equal` is hand-written. |
 | An opaque type has a model. | Other packages reason about the type through its model, without its fields. |
 | `identical(a, b)` is identity, and is separate from `==`. | A generic contract must say that an element is a given value, whatever its type. `==` cannot say that: it is the type's `Equal`, which `List[Element]` does not require, and which is an equivalence and not identity for a set stored as an unsorted list. `==` therefore keeps one meaning everywhere. |
 
@@ -1630,9 +1633,11 @@ in review, because the fields are written in the public declaration. The
 fields of an opaque type are accessible throughout its package, not only in
 one file, because the methods of a type can live in any file of the package.
 
-**A private or `internal` definition that nothing in its package uses is an
-error,** as an unused variable is. No other package can call it, so it is
-dead code, and it keeps alive the code it calls.
+**An `internal` definition that nothing in its package uses is an error,**
+as an unused variable is. No other package can call it, so it is dead code,
+and it keeps alive the code it calls. **A private definition that nothing
+uses is a warning.** A private helper is often written before its first
+caller, and an error would fail the check while that caller is unwritten.
 
 **There is no level between `internal` and `public`.** Swift's `package`
 level works because the code it spans is versioned as one unit. Truss

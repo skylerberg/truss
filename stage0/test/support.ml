@@ -72,17 +72,50 @@ let read_source packages (file : Path.file) =
 let parse_errors packages file =
   List.map
     (fun (diagnostic : Diagnostic.t) -> diagnostic.message)
-    (let tokens, lexer_diagnostics = Lexer.lex (read_source packages file) in
-     lexer_diagnostics @ snd (Parser.parse tokens ~lexer_diagnostics))
-
-let list_fragment_diagnostics database file =
-  List.filter
-    (fun (diagnostic : Diagnostic.t) ->
-      not (Diagnostic.For_testing.is_unused_definition diagnostic.code))
-    (Database.list_file_diagnostics database file)
+    (snd (Parser.parse_source (read_source packages file)))
 
 let list_codes diagnostics =
   List.map (fun (diagnostic : Diagnostic.t) -> Diagnostic.Code.name diagnostic.code) diagnostics
+
+let expect_error ~list_diagnostics ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
+  match list_diagnostics text with
+  | [ (diagnostic : Diagnostic.t) ] -> (
+      let message = diagnostic.message in
+      if
+        message = ""
+        || (not (Char.uppercase_ascii message.[0] = message.[0] && message.[0] <> ' '))
+        || message.[String.length message - 1] <> '.'
+      then Harness.fail "the message %S is not written in sentences" message;
+      if diagnostic.code <> code then
+        Harness.fail "expected %s, got %s" (Diagnostic.Code.name code)
+          (Diagnostic.Code.name diagnostic.code);
+      let expected = locate_occurrence ~sub:at ~occurrence text in
+      if diagnostic.span.start <> expected then
+        Harness.fail "expected the error at %d (%S), got %d" expected at diagnostic.span.start;
+      let results =
+        List.map
+          (fun (fix : Source.span Diagnostic.fix) -> Diagnostic.apply_edits text fix.edits)
+          diagnostic.fixes
+      in
+      match (fixed, results) with
+      | None, [] -> ()
+      | None, result :: _ -> Harness.fail "expected no fix, got one giving %S" result
+      | Some _, [] -> Harness.fail "expected a fix, got none"
+      | Some fixed, results ->
+          if fixed :: alternatives <> results then
+            Harness.fail "expected the fixes to give [%s], got [%s]"
+              (String.concat "; " (List.map (Printf.sprintf "%S") (fixed :: alternatives)))
+              (String.concat "; " (List.map (Printf.sprintf "%S") results));
+          List.iter
+            (fun result ->
+              List.iter
+                (Harness.fail "the fixed text %S has %s" result)
+                (list_codes (list_diagnostics result)))
+            results)
+  | diagnostics ->
+      Harness.fail "expected one diagnostic, got [%s] for %S"
+        (String.concat "; " (list_codes diagnostics))
+        text
 
 let run_check ~check packages name =
   let file = parse_file name in
@@ -123,8 +156,7 @@ let list_declarations packages (module_ : Path.module_) =
 
 let collect_first_core_nodes text =
   let packages = setup [ ("app::main", text) ] in
-  collect_core_nodes packages
-    (Resolve.Names.make_key (List.hd (list_declarations packages (parse_module "app::main"))))
+  collect_core_nodes packages (List.hd (list_declarations packages (parse_module "app::main"))).key
 
 let expect_no_diagnostics ~check files =
   let packages = setup files in
@@ -196,7 +228,7 @@ let expect_one_diagnostic ~check ?(setup = fun files -> setup files) ?(file = "a
       | None, _ -> ()
       | Some _, [] -> Harness.fail "no fix"
       | Some expected, fix :: _ -> (
-          let after = Diagnostic.apply_fix text fix in
+          let after = Diagnostic.apply_edits text fix.edits in
           if after <> expected then Harness.fail "fixed to %S" after
           else
             let packages = setup ((file, after) :: others) in

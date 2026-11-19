@@ -858,8 +858,17 @@ let () =
       expect_fine Fixtures.Ownership.match_of_string_literals);
   Harness.test "a `let` bound to a string literal is a view" (fun () ->
       expect_fine Fixtures.Ownership.string_literal_let_read_twice);
-  Harness.test "a `let` bound to a string literal is not owned" (fun () ->
-      expect_one_diagnostic Fixtures.Ownership.string_literal_let_returned "ownership.needs_owned")
+  Harness.test "a returned `let` bound to a string literal is reported as a view of the literal"
+    (fun () ->
+      expect_one_diagnostic ~says:"`text` views a string literal. Return a copy."
+        Fixtures.Ownership.string_literal_let_returned "ownership.needs_owned");
+  Harness.test "a moved `let` bound to a string literal is reported as a view of the literal"
+    (fun () ->
+      expect_one_diagnostic ~says:"`text` views a string literal, so it cannot be moved"
+        Fixtures.Ownership.string_literal_let_moved_into_a_var "ownership.not_owned");
+  Harness.test "a moved `let` bound to a place is reported as a view" (fun () ->
+      expect_one_diagnostic ~says:"`other` is a view, so it cannot be moved"
+        Fixtures.Ownership.let_of_a_place_moved_into_a_var "ownership.not_owned")
 
 let () =
   Harness.test "a view of a local cannot outlive the local's block" (fun () ->
@@ -1029,8 +1038,8 @@ let count_disjoint_obligations text =
   let file = Support.parse_file "app::main" in
   let database = Support.make_database packages in
   List.fold_left
-    (fun total declaration ->
-      match Database.For_testing.read_ownership database (Resolve.Names.make_key declaration) with
+    (fun total (declaration : Resolve.Names.declaration) ->
+      match Database.For_testing.read_ownership database declaration.key with
       | Value must_be_disjoint -> total + List.length must_be_disjoint
       | Failed _ | Blocked -> total)
     0
@@ -1257,3 +1266,11 @@ let () =
   Harness.test "a move in the right operand is the only move of the place" (fun () ->
       expect_fine (take ^ Fixtures.Ownership.move_in_the_right_operand_of_and);
       expect_fine (take ^ Fixtures.Ownership.move_in_the_right_operand_of_or))
+
+let () =
+  Harness.test "the shorthand of with in a lambda captures its name" (fun () ->
+      expect_fine Fixtures.Ownership.record_update_shorthand_captured_by_a_lambda);
+  Harness.test "a value of with that is not Plain is passed own, as to a construction" (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.record_update_moving_a_value_without_own
+        "ownership.needs_owned";
+      expect_fine Fixtures.Ownership.record_update_shorthand_passed_own)

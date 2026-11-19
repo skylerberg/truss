@@ -51,6 +51,56 @@ module Symbol : sig
     | Condition of int
 end
 
+type rounding_mode = Nearest_ties_to_even | Toward_positive | Toward_negative | Toward_zero
+
+type operator =
+  | Not
+  | And
+  | Or
+  | Implies
+  | Equal
+  | Ite
+  | Negate
+  | Add
+  | Subtract
+  | Multiply
+  | Div
+  | Mod
+  | Power
+  | Less
+  | Less_equal
+  | Greater
+  | Greater_equal
+  | To_real
+  | Int2bv of { width : int }
+  | Bv2nat
+  | Bvnot
+  | Bvand
+  | Bvor
+  | Bvxor
+  | Bvshl
+  | Bvlshr
+  | Bvashr
+  | Bvsub
+  | Concat
+  | Extract of { high : int; low : int }
+  | Fp
+  | Fp_neg
+  | Fp_add of rounding_mode
+  | Fp_sub of rounding_mode
+  | Fp_mul of rounding_mode
+  | Fp_div of rounding_mode
+  | Fp_fma of rounding_mode
+  | Fp_sqrt of rounding_mode
+  | Fp_round_to_integral of rounding_mode
+  | Fp_eq
+  | Fp_lt
+  | Fp_leq
+  | Fp_is_nan
+  | To_fp of { exponent : int; significand : int; rounding_mode : rounding_mode option }
+  | Fp_to_sbv of { width : int; rounding_mode : rounding_mode }
+  | Fp_to_ubv of { width : int; rounding_mode : rounding_mode }
+
 type term =
   | Symbol of symbol
   | Integer of Z.t
@@ -58,7 +108,7 @@ type term =
   | Bits of int * Z.t
   | Apply of symbol * term list
   | Is of symbol * term
-  | Operation of string * term list
+  | Operation of operator * term list
   | Forall of (symbol * sort) list * term list * term
   | Exists of (symbol * sort) list * term
 
@@ -81,6 +131,14 @@ val ( ==> ) : term -> term -> term
 val not_ : term -> term
 val equal : term -> term -> term
 val ite : term -> term -> term -> term
+val negate : term -> term
+val add : term -> term -> term
+val subtract : term -> term -> term
+val multiply : term -> term -> term
+val less : term -> term -> term
+val less_equal : term -> term -> term
+val greater : term -> term -> term
+val greater_equal : term -> term -> term
 val conjunction : term list -> term
 val disjunction : term list -> term
 val truncated_divide : term -> term -> term

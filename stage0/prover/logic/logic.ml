@@ -51,6 +51,56 @@ module Symbol = struct
     | Condition of int
 end
 
+type rounding_mode = Nearest_ties_to_even | Toward_positive | Toward_negative | Toward_zero
+
+type operator =
+  | Not
+  | And
+  | Or
+  | Implies
+  | Equal
+  | Ite
+  | Negate
+  | Add
+  | Subtract
+  | Multiply
+  | Div
+  | Mod
+  | Power
+  | Less
+  | Less_equal
+  | Greater
+  | Greater_equal
+  | To_real
+  | Int2bv of { width : int }
+  | Bv2nat
+  | Bvnot
+  | Bvand
+  | Bvor
+  | Bvxor
+  | Bvshl
+  | Bvlshr
+  | Bvashr
+  | Bvsub
+  | Concat
+  | Extract of { high : int; low : int }
+  | Fp
+  | Fp_neg
+  | Fp_add of rounding_mode
+  | Fp_sub of rounding_mode
+  | Fp_mul of rounding_mode
+  | Fp_div of rounding_mode
+  | Fp_fma of rounding_mode
+  | Fp_sqrt of rounding_mode
+  | Fp_round_to_integral of rounding_mode
+  | Fp_eq
+  | Fp_lt
+  | Fp_leq
+  | Fp_is_nan
+  | To_fp of { exponent : int; significand : int; rounding_mode : rounding_mode option }
+  | Fp_to_sbv of { width : int; rounding_mode : rounding_mode }
+  | Fp_to_ubv of { width : int; rounding_mode : rounding_mode }
+
 type term =
   | Symbol of symbol
   | Integer of Z.t
@@ -58,7 +108,7 @@ type term =
   | Bits of int * Z.t
   | Apply of symbol * term list
   | Is of symbol * term
-  | Operation of string * term list
+  | Operation of operator * term list
   | Forall of (symbol * sort) list * term list * term
   | Exists of (symbol * sort) list * term
 
@@ -97,6 +147,67 @@ let show_sort = function
   | Float (exponent, significand) -> Printf.sprintf "Float%d_%d" exponent significand
   | Type_sort ty -> Types.show ty
   | Function_sort arity -> Printf.sprintf "function/%d" arity
+
+let render_rounding_mode = function
+  | Nearest_ties_to_even -> "RNE"
+  | Toward_positive -> "RTP"
+  | Toward_negative -> "RTN"
+  | Toward_zero -> "RTZ"
+
+let render_operator operator =
+  let render_rounded name rounding_mode = name ^ " " ^ render_rounding_mode rounding_mode in
+  match operator with
+  | Not -> "not"
+  | And -> "and"
+  | Or -> "or"
+  | Implies -> "=>"
+  | Equal -> "="
+  | Ite -> "ite"
+  | Negate | Subtract -> "-"
+  | Add -> "+"
+  | Multiply -> "*"
+  | Div -> "div"
+  | Mod -> "mod"
+  | Power -> "^"
+  | Less -> "<"
+  | Less_equal -> "<="
+  | Greater -> ">"
+  | Greater_equal -> ">="
+  | To_real -> "to_real"
+  | Int2bv { width } -> Printf.sprintf "(_ int2bv %d)" width
+  | Bv2nat -> "bv2nat"
+  | Bvnot -> "bvnot"
+  | Bvand -> "bvand"
+  | Bvor -> "bvor"
+  | Bvxor -> "bvxor"
+  | Bvshl -> "bvshl"
+  | Bvlshr -> "bvlshr"
+  | Bvashr -> "bvashr"
+  | Bvsub -> "bvsub"
+  | Concat -> "concat"
+  | Extract { high; low } -> Printf.sprintf "(_ extract %d %d)" high low
+  | Fp -> "fp"
+  | Fp_neg -> "fp.neg"
+  | Fp_add rounding_mode -> render_rounded "fp.add" rounding_mode
+  | Fp_sub rounding_mode -> render_rounded "fp.sub" rounding_mode
+  | Fp_mul rounding_mode -> render_rounded "fp.mul" rounding_mode
+  | Fp_div rounding_mode -> render_rounded "fp.div" rounding_mode
+  | Fp_fma rounding_mode -> render_rounded "fp.fma" rounding_mode
+  | Fp_sqrt rounding_mode -> render_rounded "fp.sqrt" rounding_mode
+  | Fp_round_to_integral rounding_mode -> render_rounded "fp.roundToIntegral" rounding_mode
+  | Fp_eq -> "fp.eq"
+  | Fp_lt -> "fp.lt"
+  | Fp_leq -> "fp.leq"
+  | Fp_is_nan -> "fp.isNaN"
+  | To_fp { exponent; significand; rounding_mode } -> (
+      let name = Printf.sprintf "(_ to_fp %d %d)" exponent significand in
+      match rounding_mode with
+      | Some rounding_mode -> render_rounded name rounding_mode
+      | None -> name)
+  | Fp_to_sbv { width; rounding_mode } ->
+      render_rounded (Printf.sprintf "(_ fp.to_sbv %d)" width) rounding_mode
+  | Fp_to_ubv { width; rounding_mode } ->
+      render_rounded (Printf.sprintf "(_ fp.to_ubv %d)" width) rounding_mode
 
 let show_type_arguments = function
   | [] -> ""
@@ -162,7 +273,7 @@ and show_term term =
     | Boolean value -> if value then "true" else "false"
     | Bits (width, value) -> show_bits width value
     | Apply (name, arguments) -> show_applied (show_symbol name) arguments
-    | Operation (name, arguments) -> show_applied name arguments
+    | Operation (operator, arguments) -> show_applied (render_operator operator) arguments
     | Is (constructor, argument) ->
         show_applied (Printf.sprintf "(_ is %s)" (show_symbol constructor)) [ argument ]
     | Forall (bound, _, body) -> show_binder "forall" bound body
@@ -195,7 +306,7 @@ let list_arguments = function
 
 let map_arguments transform = function
   | Apply (name, arguments) -> Apply (name, List.map transform arguments)
-  | Operation (name, arguments) -> Operation (name, List.map transform arguments)
+  | Operation (operator, arguments) -> Operation (operator, List.map transform arguments)
   | Is (constructor, argument) -> Is (constructor, transform argument)
   | (Symbol _ | Integer _ | Boolean _ | Bits _ | Forall _ | Exists _) as term -> term
 
@@ -205,54 +316,61 @@ let ( &&& ) left right =
   match (left, right) with
   | Boolean true, other | other, Boolean true -> other
   | Boolean false, _ | _, Boolean false -> Boolean false
-  | _ -> Operation ("and", [ left; right ])
+  | _ -> Operation (And, [ left; right ])
 
 let ( ||| ) left right =
   match (left, right) with
   | Boolean false, other | other, Boolean false -> other
   | Boolean true, _ | _, Boolean true -> Boolean true
-  | _ -> Operation ("or", [ left; right ])
+  | _ -> Operation (Or, [ left; right ])
 
 let ( ==> ) premise conclusion =
   match (premise, conclusion) with
   | Boolean true, other -> other
   | Boolean false, _ | _, Boolean true -> Boolean true
-  | _ -> Operation ("=>", [ premise; conclusion ])
+  | _ -> Operation (Implies, [ premise; conclusion ])
 
 let not_ = function
   | Boolean value -> Boolean (not value)
-  | Operation ("not", [ inner ]) -> inner
-  | other -> Operation ("not", [ other ])
+  | Operation (Not, [ inner ]) -> inner
+  | other -> Operation (Not, [ other ])
 
-let equal left right = if left = right then Boolean true else Operation ("=", [ left; right ])
+let equal left right = if left = right then Boolean true else Operation (Equal, [ left; right ])
 
 let ite condition then_ else_ =
   match condition with
   | Boolean true -> then_
   | Boolean false -> else_
-  | _ -> if then_ = else_ then then_ else Operation ("ite", [ condition; then_; else_ ])
+  | _ -> if then_ = else_ then then_ else Operation (Ite, [ condition; then_; else_ ])
 
+let negate value = Operation (Negate, [ value ])
+let add left right = Operation (Add, [ left; right ])
+let subtract left right = Operation (Subtract, [ left; right ])
+let multiply left right = Operation (Multiply, [ left; right ])
+let less left right = Operation (Less, [ left; right ])
+let less_equal left right = Operation (Less_equal, [ left; right ])
+let greater left right = Operation (Greater, [ left; right ])
+let greater_equal left right = Operation (Greater_equal, [ left; right ])
 let conjunction terms = List.fold_left ( &&& ) (Boolean true) terms
 let disjunction terms = List.fold_left ( ||| ) (Boolean false) terms
-let zero = Integer Z.zero
-let negate value = Operation ("-", [ value ])
 
 let truncated_divide left right =
-  let ge0 value = Operation (">=", [ value; zero ]) in
-  let div dividend divisor = Operation ("div", [ dividend; divisor ]) in
-  ite (ge0 left)
-    (ite (ge0 right) (div left right) (negate (div left (negate right))))
-    (ite (ge0 right) (negate (div (negate left) right)) (div (negate left) (negate right)))
+  let is_nonnegative value = greater_equal value (Integer Z.zero) in
+  let div dividend divisor = Operation (Div, [ dividend; divisor ]) in
+  ite (is_nonnegative left)
+    (ite (is_nonnegative right) (div left right) (negate (div left (negate right))))
+    (ite (is_nonnegative right)
+       (negate (div (negate left) right))
+       (div (negate left) (negate right)))
 
-let truncated_remainder left right =
-  Operation ("-", [ left; Operation ("*", [ right; truncated_divide left right ]) ])
+let truncated_remainder left right = subtract left (multiply right (truncated_divide left right))
 
 let integer_of_bits ~is_signed ~width bits =
-  let unsigned = Operation ("bv2nat", [ bits ]) in
+  let unsigned = Operation (Bv2nat, [ bits ]) in
   if is_signed then
     ite
-      (Operation (">=", [ unsigned; Integer (Z.shift_left Z.one (width - 1)) ]))
-      (Operation ("-", [ unsigned; Integer (Z.shift_left Z.one width) ]))
+      (greater_equal unsigned (Integer (Z.shift_left Z.one (width - 1))))
+      (subtract unsigned (Integer (Z.shift_left Z.one width)))
       unsigned
   else unsigned
 
@@ -286,7 +404,8 @@ let rec replace ~from ~into term =
     match term with
     | Symbol _ | Integer _ | Boolean _ | Bits _ -> term
     | Apply (name, arguments) -> Apply (name, List.map (replace ~from ~into) arguments)
-    | Operation (name, arguments) -> Operation (name, List.map (replace ~from ~into) arguments)
+    | Operation (operator, arguments) ->
+        Operation (operator, List.map (replace ~from ~into) arguments)
     | Is (constructor, argument) -> Is (constructor, replace ~from ~into argument)
     | Forall (bound, trigger, body) ->
         if mentions (List.map fst bound) from then term
@@ -299,7 +418,8 @@ let rec substitute substitution term =
   | Symbol name -> ( match List.assoc_opt name substitution with Some into -> into | None -> term)
   | Integer _ | Boolean _ | Bits _ -> term
   | Apply (name, arguments) -> Apply (name, List.map (substitute substitution) arguments)
-  | Operation (name, arguments) -> Operation (name, List.map (substitute substitution) arguments)
+  | Operation (operator, arguments) ->
+      Operation (operator, List.map (substitute substitution) arguments)
   | Is (constructor, argument) -> Is (constructor, substitute substitution argument)
   | Forall (bound, trigger, body) ->
       let inner = remove_bound bound substitution in
@@ -369,12 +489,12 @@ let list_triggers ~is_triggering variables body =
       applications
   in
   let rec extract_conclusion = function
-    | Operation ("=>", [ _; inner ]) -> extract_conclusion inner
+    | Operation (Implies, [ _; inner ]) -> extract_conclusion inner
     | term -> term
   in
   let names_every_variable term = is_candidate term && list_bound_names_in term = names in
   match extract_conclusion body with
-  | Operation ("=", [ (Apply _ as defined); other ])
+  | Operation (Equal, [ (Apply _ as defined); other ])
     when names_every_variable defined && not (names_every_variable other) ->
       [ [ defined ] ]
   | _ -> (
@@ -454,7 +574,7 @@ let make_triggering_test declarations =
 let has_untriggered_fact query =
   let is_triggering = make_triggering_test query.declarations in
   let rec is_untriggered = function
-    | Operation ("=>", [ _; inner ]) -> is_untriggered inner
+    | Operation (Implies, [ _; inner ]) -> is_untriggered inner
     | Forall (variables, trigger, body) ->
         choose_triggers ~is_triggering variables trigger body = []
     | _ -> false
@@ -506,7 +626,7 @@ let prune query =
   let is_triggering = make_triggering_test query.declarations in
   let rec needs fact symbols =
     match fact with
-    | Operation ("=>", [ _; (Forall _ as inner) ]) -> needs inner symbols
+    | Operation (Implies, [ _; (Forall _ as inner) ]) -> needs inner symbols
     | Forall (variables, trigger, body) -> (
         match choose_triggers ~is_triggering variables trigger body with
         | [] -> fun () -> List.exists (Symbol_table.mem reached) symbols
@@ -634,7 +754,8 @@ and print numbering bound buffer term =
   | Bits (width, value) -> add (show_bits width value)
   | Apply (name, arguments) ->
       render_application numbering bound buffer (render_function_name numbering name) arguments
-  | Operation (name, arguments) -> render_application numbering bound buffer name arguments
+  | Operation (operator, arguments) ->
+      render_application numbering bound buffer (render_operator operator) arguments
   | Is (constructor, argument) ->
       render_application numbering bound buffer
         (Printf.sprintf "(_ is %s)" (render_function_name numbering constructor))

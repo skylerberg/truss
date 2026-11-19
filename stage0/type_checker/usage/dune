@@ -1,4 +1,14 @@
 (library
  (name usage)
  (modules_without_implementation lookups)
- (libraries diagnostic source resolve syntax syntax_walk infer))
+ (libraries
+  diagnostic
+  path
+  source
+  resolve
+  syntax
+  syntax_walk
+  infer
+  interface
+  types
+  zarith))

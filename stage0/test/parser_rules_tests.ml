@@ -20,8 +20,8 @@ let () =
       Parse_support.expect_error "fn f() cost tme O(1) {}" ~code:Cost_word ~at:"tme"
         ~fixed:"fn f() cost time O(1) {}";
       let _, diagnostics = Parse_support.parse "fn f() cost tme fnite {}" in
-      if Parse_support.list_codes diagnostics <> [ "parser.cost_word"; "parser.cost_word" ] then
-        Harness.fail "got [%s]" (String.concat "; " (Parse_support.list_codes diagnostics)));
+      if Support.list_codes diagnostics <> [ "parser.cost_word"; "parser.cost_word" ] then
+        Harness.fail "got [%s]" (String.concat "; " (Support.list_codes diagnostics)));
   Harness.test "a trait's body on the next line" (fun () ->
       Parse_support.expect_definition Fixtures.Parser_rules.trait_with_its_body_on_the_next_line
         "(trait T (type K))");
@@ -368,11 +368,11 @@ let () =
       in
       ignore file;
       if List.length diagnostics > 2 then
-        Harness.fail "got [%s]" (String.concat "; " (Parse_support.list_codes diagnostics)));
+        Harness.fail "got [%s]" (String.concat "; " (Support.list_codes diagnostics)));
   Harness.test "nothing is reported before a closer the lexer inserted" (fun () ->
       let _, diagnostics = Parse_support.parse Fixtures.Parser_rules.unclosed_parenthesis in
-      if Parse_support.list_codes diagnostics <> [ "lexer.unclosed_bracket" ] then
-        Harness.fail "got [%s]" (String.concat "; " (Parse_support.list_codes diagnostics)));
+      if Support.list_codes diagnostics <> [ "lexer.unclosed_bracket" ] then
+        Harness.fail "got [%s]" (String.concat "; " (Support.list_codes diagnostics)));
   Harness.test "a reserved word is reported as reserved" (fun () ->
       Parse_support.expect_error "fn f[T]() where T: Hash {}" ~code:Reserved_word ~at:"where")
 
@@ -396,9 +396,25 @@ let () =
             Harness.fail "no %s for %S" (Diagnostic.Code.name (Parser code)) text;
             []
       in
-      if list_fixes "count :=== 0" Short_declaration <> [] then Harness.fail "offered the `let` fix";
-      if list_fixes "match a {\n  A => 0,e(b) => 1\n}" Match_arm_comma <> [] then
-        Harness.fail "offered the comma fix");
+      if list_fixes "count :=== 0" Short_declaration <> [] then Harness.fail "offered the `let` fix");
+  Harness.test "a comma between arms on one line becomes a line break" (fun () ->
+      List.iter
+        (fun (written, expected) ->
+          let text = "fn example() {\n" ^ written ^ "\n}" in
+          match
+            List.find_opt
+              (fun (diagnostic : Diagnostic.t) -> diagnostic.code = Parser Match_arm_comma)
+              (snd (Parse_support.parse text))
+          with
+          | Some { fixes = [ fix ]; _ } ->
+              let fixed = Diagnostic.apply_edits text fix.edits in
+              if fixed <> "fn example() {\n" ^ expected ^ "\n}" then Harness.fail "fixed %S" fixed;
+              if snd (Parse_support.parse fixed) <> [] then Harness.fail "%S does not parse" fixed
+          | _ -> Harness.fail "no single comma fix for %S" written)
+        [
+          ("match a { A => 1, B => 2 }", "match a { A => 1\nB => 2 }");
+          ("match a {\n  A => 0,B(b) => 1\n}", "match a {\n  A => 0\nB(b) => 1\n}");
+        ]);
   Harness.test "a comma after a match arm" (fun () ->
       Parse_support.expect_body_error "match a {\n  A => 1,\n  B => 2\n}" ~code:Match_arm_comma
         ~at:"," ~fixed:"match a {\n  A => 1\n  B => 2\n}");
@@ -450,14 +466,14 @@ let () =
         ~fixed:"type Box[Item](item: Item)");
   Harness.test "a comparison after a type is not angle brackets" (fun () ->
       let _, diagnostics = Parse_support.parse_body "let small = count as Int64 < limit" in
-      if Parse_support.list_codes diagnostics <> [ "parser.as_conversion" ] then
-        Harness.fail "got [%s]" (String.concat "; " (Parse_support.list_codes diagnostics)));
+      if Support.list_codes diagnostics <> [ "parser.as_conversion" ] then
+        Harness.fail "got [%s]" (String.concat "; " (Support.list_codes diagnostics)));
   Harness.test "a comparison in a function type inside angle brackets stays a comparison" (fun () ->
       let _, diagnostics =
         Parse_support.parse_body "let checks: List<(fn(index: UInt64) requires index < 3)> = []"
       in
-      if Parse_support.list_codes diagnostics <> [ "parser.angle_brackets" ] then
-        Harness.fail "got [%s]" (String.concat "; " (Parse_support.list_codes diagnostics)));
+      if Support.list_codes diagnostics <> [ "parser.angle_brackets" ] then
+        Harness.fail "got [%s]" (String.concat "; " (Support.list_codes diagnostics)));
   Harness.test "Shape::Circle" (fun () ->
       Parse_support.expect_body_error "let shape = Shape::Circle(radius: 1.0)" ~code:Path_separator
         ~at:"::" ~fixed:"let shape = Shape.Circle(radius: 1.0)";
@@ -479,8 +495,8 @@ let () =
       List.iter
         (fun text ->
           let _, diagnostics = Parse_support.parse_body text in
-          if Parse_support.list_codes diagnostics <> [] then
-            Harness.fail "got [%s]" (String.concat "; " (Parse_support.list_codes diagnostics)))
+          if Support.list_codes diagnostics <> [] then
+            Harness.fail "got [%s]" (String.concat "; " (Support.list_codes diagnostics)))
         [ "let teapot = status is Status.teapot"; "let teapot = status is http::Status.teapot" ]);
   Harness.test "vec![...]" (fun () ->
       Parse_support.expect_body_error "let items = vec![1, 2]" ~code:Macro_call ~at:"!"
@@ -492,8 +508,8 @@ let () =
       Parse_support.expect_body_error "unreachable!(\"never\")" ~code:Macro_call ~at:"!");
   Harness.test "a negation after a name is not a macro" (fun () ->
       let _, diagnostics = Parse_support.parse_body "let different = a != (b)" in
-      if Parse_support.list_codes diagnostics <> [] then
-        Harness.fail "got [%s]" (String.concat "; " (Parse_support.list_codes diagnostics)));
+      if Support.list_codes diagnostics <> [] then
+        Harness.fail "got [%s]" (String.concat "; " (Support.list_codes diagnostics)));
   Harness.test "a tuple" (fun () ->
       Parse_support.expect_body_error "let pair = (1, 2)" ~code:Tuple ~at:"(" ~occurrence:2;
       Parse_support.expect_body_error "let first = pair.0" ~code:Tuple ~at:"0";
@@ -522,8 +538,8 @@ let () =
         ~fixed:"let names = List[String].new()");
   Harness.test "a comparison of uppercase names is not angle brackets" (fun () ->
       let _, diagnostics = Parse_support.parse_body "let between = Low < value && value > High" in
-      if Parse_support.list_codes diagnostics <> [] then
-        Harness.fail "got [%s]" (String.concat "; " (Parse_support.list_codes diagnostics)));
+      if Support.list_codes diagnostics <> [] then
+        Harness.fail "got [%s]" (String.concat "; " (Support.list_codes diagnostics)));
   Harness.test "impl<T>" (fun () ->
       Parse_support.expect_error "impl<Item> Shown for Box[Item] {}" ~code:Impl_parameters ~at:"<"
         ~fixed:"impl Shown for Box[Item] {}";
@@ -538,8 +554,8 @@ let () =
         ~alternatives:[ "let off = (!flags.ready) is true" ]);
   Harness.test "a negation that is not the whole left operand of is needs none" (fun () ->
       let _, diagnostics = Parse_support.parse_body Fixtures.Parser_rules.negations_around_is in
-      if Parse_support.list_codes diagnostics <> [] then
-        Harness.fail "got [%s]" (String.concat "; " (Parse_support.list_codes diagnostics)));
+      if Support.list_codes diagnostics <> [] then
+        Harness.fail "got [%s]" (String.concat "; " (Support.list_codes diagnostics)));
   Harness.test "a ?? b" (fun () ->
       Parse_support.expect_body_error "let name = user.name ?? \"guest\"" ~code:Null_coalescing
         ~at:"?" ~fixed:"let name = user.name.unwrap_or(\"guest\")";
@@ -551,8 +567,8 @@ let () =
       let _, diagnostics =
         Parse_support.parse_body Fixtures.Parser_rules.question_marks_after_calls_and_names
       in
-      if Parse_support.list_codes diagnostics <> [] then
-        Harness.fail "got [%s]" (String.concat "; " (Parse_support.list_codes diagnostics)));
+      if Support.list_codes diagnostics <> [] then
+        Harness.fail "got [%s]" (String.concat "; " (Support.list_codes diagnostics)));
   Harness.test "items.map { it.name }" (fun () ->
       Parse_support.expect_body_error "let names = items.map { it.name }" ~code:Trailing_lambda
         ~at:"{ it" ~fixed:"let names = items.map(fn(item) { item.name })");

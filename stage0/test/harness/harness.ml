@@ -1,5 +1,17 @@
+let suite = Filename.remove_extension (Filename.basename Sys.executable_name)
+
 let () =
-  let suite = Filename.remove_extension (Filename.basename Sys.executable_name) in
+  match Array.to_list Sys.argv with
+  | _ :: (_ :: _ as arguments) ->
+      Printf.eprintf
+        "%s takes no arguments, and was given %s. Set TRUSS_TEST to run only the tests whose names \
+         contain its value.\n"
+        suite
+        (String.concat " " (List.map (Printf.sprintf "`%s`") arguments));
+      exit 2
+  | [] | [ _ ] -> ()
+
+let () =
   match Sys.getenv_opt "TRUSS_SKIP_SUITES" with
   | Some names when List.mem suite (String.split_on_char ',' names) ->
       print_endline ("skipped: TRUSS_SKIP_SUITES names " ^ suite);

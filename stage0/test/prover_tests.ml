@@ -1,5 +1,7 @@
 let check_file database file =
-  match Support.list_fragment_diagnostics database file with
+  match
+    Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers database file
+  with
   | [] -> Support.list_proof_diagnostics database file
   | errors -> errors
 
@@ -70,9 +72,9 @@ let () =
         String.includes ~affix:"`name` is" actual
         || not (String.includes ~affix:"`count` is 255" actual)
       then Harness.fail "message %S" actual);
-  Harness.test "an obligation with neither a proof nor a counterexample says so" (fun () ->
+  Harness.test "an obligation that the solver runs out of steps on says so" (fun () ->
       let actual = read_message Fixtures.Prover.sum_of_two_cubes in
-      if not (String.includes ~affix:"found neither a proof nor a counterexample" actual) then
+      if not (String.includes ~affix:"reached its step limit" actual) then
         Harness.fail "message %S" actual);
   Harness.test "code generic over an integer trait is proven for each type that implements it"
     (fun () ->
@@ -217,7 +219,7 @@ let () =
       in
       match
         Support.read_proofs (Support.make_database packages) (Support.parse_file "app::main")
-          (Resolve.Names.make_key caller)
+          caller.key
       with
       | Obligations { obligations = [ obligation ]; _ } ->
           if not (List.exists applies_limited obligation.query.facts) then
@@ -251,7 +253,8 @@ let () =
       let main = Support.parse_file "app::main" in
       (match
          Support.list_codes
-           (Support.list_fragment_diagnostics (Support.make_database packages) main)
+           (Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers
+              (Support.make_database packages) main)
        with
       | [] -> ()
       | codes -> Harness.fail "the caller does not check: %s" (String.concat ", " codes));
@@ -263,13 +266,13 @@ let () =
       let caller =
         List.find
           (fun (declaration : Resolve.Names.declaration) ->
-            Path.equal declaration.path (Support.make_top_path "app::main" "caller"))
+            Path.equal declaration.key.path (Support.make_top_path "app::main" "caller"))
           (Support.list_declarations packages (Support.parse_module "app::main"))
       in
       match
         Database.For_testing.find_proof
           (Support.prove (Support.make_database packages) main)
-          (Resolve.Names.make_key caller)
+          caller.key
       with
       | Some Blocked -> ()
       | Some (Value _ | Failed _) -> Harness.fail "the proof is computed"
@@ -289,20 +292,21 @@ let () =
       let main = Support.parse_file "app::main" in
       (match
          Support.list_codes
-           (Support.list_fragment_diagnostics (Support.make_database packages) main)
+           (Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers
+              (Support.make_database packages) main)
        with
       | [] -> ()
       | codes -> Harness.fail "the caller does not check: %s" (String.concat ", " codes));
       let caller =
         List.find
           (fun (declaration : Resolve.Names.declaration) ->
-            Path.equal declaration.path (Support.make_top_path "app::main" "caller"))
+            Path.equal declaration.key.path (Support.make_top_path "app::main" "caller"))
           (Support.list_declarations packages (Support.parse_module "app::main"))
       in
       match
         Database.For_testing.find_proof
           (Support.prove (Support.make_database packages) main)
-          (Resolve.Names.make_key caller)
+          caller.key
       with
       | Some Blocked -> ()
       | Some (Value _ | Failed _) -> Harness.fail "the proof is computed"
@@ -334,13 +338,13 @@ let () =
       let caller =
         List.find
           (fun (declaration : Resolve.Names.declaration) ->
-            Path.equal declaration.path (Support.make_top_path "app::main" "caller"))
+            Path.equal declaration.key.path (Support.make_top_path "app::main" "caller"))
           (Support.list_declarations packages (Support.parse_module "app::main"))
       in
       match
         Database.For_testing.find_proof
           (Support.prove (Support.make_database packages) main)
-          (Resolve.Names.make_key caller)
+          caller.key
       with
       | Some (Value (Obligations _)) -> ()
       | Some (Value (Unsupported _ | Not_proven_here)) ->
@@ -364,13 +368,13 @@ let () =
       let caller =
         List.find
           (fun (declaration : Resolve.Names.declaration) ->
-            Path.equal declaration.path (Support.make_top_path "app::main" "caller"))
+            Path.equal declaration.key.path (Support.make_top_path "app::main" "caller"))
           (Support.list_declarations packages (Support.parse_module "app::main"))
       in
       match
         Database.For_testing.find_proof
           (Support.prove (Support.make_database packages) main)
-          (Resolve.Names.make_key caller)
+          caller.key
       with
       | Some (Value (Obligations _)) -> ()
       | Some (Value (Unsupported _ | Not_proven_here)) ->
@@ -391,11 +395,16 @@ let () =
       let main = Support.parse_file "app::main" in
       (match
          Support.list_codes
-           (Support.list_fragment_diagnostics database (Support.parse_file "app::main/measured"))
+           (Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers database
+              (Support.parse_file "app::main/measured"))
        with
       | [ "resolve.unknown_name" ] -> ()
       | codes -> Harness.fail "the trait reports %s" (String.concat ", " codes));
-      (match Support.list_codes (Support.list_fragment_diagnostics database main) with
+      (match
+         Support.list_codes
+           (Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers database
+              main)
+       with
       | [] -> ()
       | codes -> Harness.fail "a caller does not check: %s" (String.concat ", " codes));
       (match Support.list_codes (Support.list_proof_diagnostics database main) with
@@ -404,13 +413,13 @@ let () =
       let proofs = Support.prove database main in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
-          match Database.For_testing.find_proof proofs (Resolve.Names.make_key declaration) with
+          match Database.For_testing.find_proof proofs declaration.key with
           | Some (Value (Obligations _)) -> ()
           | Some (Value (Unsupported _ | Not_proven_here)) ->
-              Harness.fail "%s has no obligations" (Path.show declaration.path)
+              Harness.fail "%s has no obligations" (Path.show declaration.key.path)
           | Some (Failed _ | Blocked) ->
-              Harness.fail "the proof of %s is blocked" (Path.show declaration.path)
-          | None -> Harness.fail "%s has no proof" (Path.show declaration.path))
+              Harness.fail "the proof of %s is blocked" (Path.show declaration.key.path)
+          | None -> Harness.fail "%s has no proof" (Path.show declaration.key.path))
         ((Support.make_names packages).list_declarations_in main))
 
 let tree = Fixtures.Prover.tree
@@ -420,6 +429,8 @@ let () =
       expect_proven (tree ^ Fixtures.Prover.leftmost));
   Harness.test "recursion on the parameter itself does not end" (fun () ->
       expect_not_proven (tree ^ Fixtures.Prover.spin_on_its_tree) "prover.termination");
+  Harness.test "a user's model is not known to be smaller than its value" (fun () ->
+      expect_not_proven Fixtures.Prover.spin_on_a_knot_whose_model_holds_it "prover.termination");
   Harness.test "a match with guards ends in an unreachable that is proven" (fun () ->
       expect_proven Fixtures.Prover.match_with_exhaustive_guards;
       expect_not_proven Fixtures.Prover.match_with_guards_missing_zero "prover.unreachable")
@@ -555,6 +566,8 @@ let () =
   Harness.test
     "the elements that a loop has read meet the postcondition of the collection's `element`"
     (fun () -> expect_proven (couple ^ Fixtures.Prover.couple_loop_with_known_elements));
+  Harness.test "a loop over a user's collection has visited the collection's model when it ends"
+    (fun () -> expect_proven Fixtures.Prover.couple_with_a_model_totaled_by_a_loop);
   Harness.test "the elements that a loop has read are not known beyond that postcondition"
     (fun () ->
       expect_not_proven
@@ -685,12 +698,41 @@ let () =
       expect_not_proven (span ^ Fixtures.Prover.span_high_assigned_below_low) "prover.invariant");
   Harness.test "a body may break an invariant between calls" (fun () ->
       expect_proven (span ^ Fixtures.Prover.span_low_assigned_above_high));
+  Harness.test "a var must meet its invariant when its scope ends" (fun () ->
+      expect_not_proven
+        (span ^ Fixtures.Prover.span_var_assigned_past_its_invariant)
+        "prover.invariant";
+      expect_not_proven
+        (span ^ Fixtures.Prover.span_var_in_a_loop_body_past_its_invariant)
+        "prover.invariant");
+  Harness.test "a with must meet the invariant" (fun () ->
+      expect_not_proven (span ^ Fixtures.Prover.span_updated_past_its_invariant) "prover.invariant";
+      expect_proven (span ^ Fixtures.Prover.span_updated_within_its_invariant));
+  Harness.test "a with through a path must meet the invariant of the record it rebuilds" (fun () ->
+      expect_not_proven
+        (span ^ Fixtures.Prover.interval_updated_past_its_span_invariant)
+        "prover.invariant");
+  Harness.test "a var may break its invariant before its scope ends" (fun () ->
+      expect_proven (span ^ Fixtures.Prover.span_var_restored_before_its_scope_ends));
+  Harness.test "a var changed through a field passed mut must meet its invariant" (fun () ->
+      expect_not_proven
+        (span ^ Fixtures.Prover.span_var_field_passed_mut_past_its_invariant)
+        "prover.invariant");
+  Harness.test "a var that a step of an update leaves broken must meet its invariant" (fun () ->
+      expect_not_proven (span ^ Fixtures.Prover.span_var_left_broken_by_a_step) "prover.invariant");
   Harness.test "a value passed to a call must meet its invariant" (fun () ->
       expect_not_proven
         (span ^ Fixtures.Prover.span_passed_after_breaking_its_invariant)
         "prover.invariant");
   Harness.test "a private method that takes mut self is a step of an update" (fun () ->
-      expect_proven (span ^ Fixtures.Prover.span_restore))
+      expect_proven (span ^ Fixtures.Prover.span_restore));
+  Harness.test "a public method that takes mut self is not a step of an update" (fun () ->
+      expect_not_proven (span ^ Fixtures.Prover.span_restored_by_a_public_method) "prover.invariant");
+  Harness.test "a method of a private trait that takes mut self is not a step of an update"
+    (fun () ->
+      expect_not_proven
+        (span ^ Fixtures.Prover.span_restored_by_a_method_of_a_private_trait)
+        "prover.invariant")
 
 let run = Fixtures.Prover.run
 
@@ -909,6 +951,10 @@ let () =
       expect_proven Fixtures.Prover.quantifier_over_counted_elements_in_a_body);
   Harness.test "a quantifier in a specification reads the collection's `count` and `element`"
     (fun () -> expect_proven Fixtures.Prover.specification_quantifier_over_counted_elements);
+  Harness.test "a postcondition that fixes a call's result is the call's value" (fun () ->
+      expect_proven Fixtures.Prover.specification_quantifier_over_twins_read_through_a_field);
+  Harness.test "a postcondition through a type's own `==` does not fix a call's value" (fun () ->
+      expect_not_proven Fixtures.Prover.postcondition_through_a_hand_written_equal "prover.ensures");
   Harness.test "a quantifier's pattern leaves out the elements it does not match" (fun () ->
       expect_proven Fixtures.Prover.specification_quantifier_with_a_refutable_pattern);
   Harness.test "a quantifier over a range value reads the range's `count` and `element`" (fun () ->
@@ -1183,8 +1229,8 @@ let count_holes text =
     Support.read_proofs (Support.make_database packages) (Support.parse_file "app::main")
   in
   List.fold_left
-    (fun total declaration ->
-      match prove_key (Resolve.Names.make_key declaration) with
+    (fun total (declaration : Resolve.Names.declaration) ->
+      match prove_key declaration.key with
       | Obligations outcome -> total + List.length outcome.holes
       | Unsupported _ | Not_proven_here -> total)
     0
@@ -1195,6 +1241,17 @@ let () =
       let text = Fixtures.Prover.theorem_of_todo in
       expect_proven text;
       if count_holes text <> 1 then Harness.fail "%d holes" (count_holes text));
+  Harness.test "a todo in a contract is a hole where it is written and where it is relied on"
+    (fun () ->
+      List.iter
+        (fun (text, holes) ->
+          expect_proven text;
+          if count_holes text <> holes then Harness.fail "%d holes" (count_holes text))
+        [
+          (Fixtures.Prover.todo_requires_with_a_caller, 2);
+          (Fixtures.Prover.todo_ensures_with_a_caller, 3);
+          (Fixtures.Prover.positive_with_a_todo_invariant, 2);
+        ]);
   Harness.test "a todo in a proof block leaves the rest of its path to it" (fun () ->
       let text = Fixtures.Prover.proof_block_of_todo in
       expect_proven text;
@@ -1644,6 +1701,17 @@ let () =
       expect_proven Fixtures.Prover.zeros_filled)
 
 let () =
+  Harness.test "a requires fix reads a negated negation as the value it negates" (fun () ->
+      let text = Fixtures.Prover.negation_of_a_negated_parameter in
+      let packages = Support.setup [ ("app::main", text) ] in
+      match check packages (Support.parse_file "app::main") with
+      | [ { fixes = [ fix ]; _ } ] ->
+          if fix.title <> "Add `requires value <= Int64.maximum - 1`" then
+            Harness.fail "%s" fix.title;
+          expect_proven (Diagnostic.apply_edits text fix.edits)
+      | actual -> Harness.fail "%d diagnostics" (List.length actual))
+
+let () =
   Harness.test "a callee's requires about the caller's parameters is offered as the caller's"
     (fun () ->
       let packages =
@@ -1676,7 +1744,12 @@ let () =
   Harness.test "a concurrent for may return early, with a value known by its type" (fun () ->
       expect_proven Fixtures.Prover.any_negative_through_a_concurrent_for);
   Harness.test "a value returned from a concurrent for is not known to be any one iteration's"
-    (fun () -> expect_not_proven Fixtures.Prover.claimed_through_a_concurrent_for "prover.ensures")
+    (fun () -> expect_not_proven Fixtures.Prover.claimed_through_a_concurrent_for "prover.ensures");
+  Harness.test "a function that waits for its tasks has no time bound" (fun () ->
+      expect_not_proven Fixtures.Prover.concurrent_block_under_a_time_bound "prover.cost";
+      expect_not_proven Fixtures.Prover.concurrent_for_under_a_time_bound "prover.cost");
+  Harness.test "waiting for tasks allocates nothing" (fun () ->
+      expect_proven Fixtures.Prover.concurrent_block_under_an_allocation_bound)
 
 let () =
   let fix_titles text =
@@ -2025,12 +2098,14 @@ let () =
     }
   in
   Harness.test "an answer in the cache is read, and the solver is not run" (fun () ->
-      let query = make_self_comparison ">=" in
+      let query = make_self_comparison Logic.Greater_equal in
       let request = Solver.make_request query in
       let cache =
         {
           Solver.find =
-            (fun key -> if key = Solver.For_testing.hash_query query then Some "proven\n" else None);
+            (fun key ->
+              if key = Solver.For_testing.hash_query query then Some Solver.For_testing.proven_entry
+              else None);
           add = (fun _ _ -> Harness.fail "kept an answer the cache already had");
         }
       in
@@ -2039,10 +2114,10 @@ let () =
       | Ok solver ->
           if List.hd (Solver.solve_all solver [ (request, query) ]) <> Solver.Proven then
             Harness.fail "expected the cached answer";
-          if Solver.count_queries_run solver <> 0 then Harness.fail "ran the solver");
+          if Solver.For_testing.count_queries_run solver <> 0 then Harness.fail "ran the solver");
   Harness.test "a proven answer in the cache is read whatever values the request asks for"
     (fun () ->
-      let query = make_self_comparison ">=" in
+      let query = make_self_comparison Logic.Greater_equal in
       let request =
         Solver.make_request
           ~symbols:[ Logic.Symbol.Variable { label = "compared"; numbers = [] } ]
@@ -2051,7 +2126,9 @@ let () =
       let cache =
         {
           Solver.find =
-            (fun key -> if key = Solver.For_testing.hash_query query then Some "proven\n" else None);
+            (fun key ->
+              if key = Solver.For_testing.hash_query query then Some Solver.For_testing.proven_entry
+              else None);
           add = (fun _ _ -> Harness.fail "kept an answer the cache already had");
         }
       in
@@ -2060,19 +2137,20 @@ let () =
       | Ok solver ->
           if List.hd (Solver.solve_all solver [ (request, query) ]) <> Solver.Proven then
             Harness.fail "expected the cached answer";
-          if Solver.count_queries_run solver <> 0 then Harness.fail "ran the solver");
+          if Solver.For_testing.count_queries_run solver <> 0 then Harness.fail "ran the solver");
   Harness.test "each solver keeps its own answers" (fun () ->
-      let query = make_self_comparison "<" in
+      let query = make_self_comparison Logic.Less in
       let request = Solver.make_request query in
       match (Solver.find (), Solver.find ()) with
       | Ok first, Ok second ->
           ignore (Solver.solve_all first [ (request, query) ]);
           ignore (Solver.solve_all second [ (request, query) ]);
-          if Solver.count_queries_run second <> 1 then
-            Harness.fail "the second solver ran %d queries" (Solver.count_queries_run second)
+          if Solver.For_testing.count_queries_run second <> 1 then
+            Harness.fail "the second solver ran %d queries"
+              (Solver.For_testing.count_queries_run second)
       | Error message, _ | _, Error message -> Harness.fail "%s" message);
   Harness.test "a solved answer is added to the cache under its query's key" (fun () ->
-      let query = make_self_comparison "<=" in
+      let query = make_self_comparison Logic.Less_equal in
       let request = Solver.make_request query in
       let cached_answers = Hashtbl.create 1 in
       let cache =
@@ -2082,20 +2160,21 @@ let () =
       | Error message -> Harness.fail "%s" message
       | Ok solver ->
           ignore (Solver.solve_all solver [ (request, query) ]);
-          if Solver.count_queries_run solver <> 1 then Harness.fail "did not run the solver";
+          if Solver.For_testing.count_queries_run solver <> 1 then
+            Harness.fail "did not run the solver";
           if
-            Hashtbl.find_opt cached_answers (Solver.For_testing.hash_query query) <> Some "proven\n"
+            Hashtbl.find_opt cached_answers (Solver.For_testing.hash_query query)
+            <> Some Solver.For_testing.proven_entry
           then Harness.fail "the cache does not have the answer");
   let find_obligation_query text code =
     let packages = Support.setup [ ("app::main", text) ] in
     let key = List.hd (Support.list_declarations packages (Support.parse_module "app::main")) in
     match
-      Support.read_proofs (Support.make_database packages) (Support.parse_file "app::main")
-        (Resolve.Names.make_key key)
+      Support.read_proofs (Support.make_database packages) (Support.parse_file "app::main") key.key
     with
     | Obligations { obligations; _ } ->
         List.find_map
-          (fun (obligation : Prover.State.obligation) ->
+          (fun (obligation : Prover.Obligation.t) ->
             if obligation.code = code then Some obligation.query else None)
           obligations
     | Unsupported _ | Not_proven_here -> None
@@ -2106,10 +2185,101 @@ let () =
       | _, Error message -> Harness.fail "%s" message
       | Some query, Ok solver ->
           let request = Solver.make_request query in
-          if List.hd (Solver.solve_all solver [ (request, query) ]) <> Unknown then
-            Harness.fail "expected an unknown answer";
-          if Solver.count_queries_run solver <> 1 then
-            Harness.fail "ran %d queries" (Solver.count_queries_run solver));
+          if List.hd (Solver.solve_all solver [ (request, query) ]) <> Unknown Out_of_steps then
+            Harness.fail "expected an unknown answer from the step limit";
+          if Solver.For_testing.count_queries_run solver <> 1 then
+            Harness.fail "ran %d queries" (Solver.For_testing.count_queries_run solver));
+  let power_of_itself_is_three =
+    let symbol = Logic.Symbol.Variable { label = "base"; numbers = [] } in
+    {
+      Logic.declarations = [ Logic.Constant (symbol, Logic.Int) ];
+      facts = [];
+      goal =
+        Logic.not_
+          (Logic.equal
+             (Logic.Operation (Power, [ Logic.Symbol symbol; Logic.Symbol symbol ]))
+             (Logic.int 3));
+    }
+  in
+  Harness.test "an unknown answer before the step limit carries Z3's reason" (fun () ->
+      let query = power_of_itself_is_three in
+      match Solver.find () with
+      | Error message -> Harness.fail "%s" message
+      | Ok solver -> (
+          match Solver.solve_all solver [ (Solver.make_request query, query) ] with
+          | [ Unknown (Incomplete reason) ] ->
+              if not (String.includes ~affix:"incomplete (theory arithmetic)" reason) then
+                Harness.fail "reason %S" reason
+          | _ -> Harness.fail "expected an unknown answer with Z3's reason"));
+  Harness.test "an unknown answer's reason is read back from the cache" (fun () ->
+      let query = power_of_itself_is_three in
+      let request = Solver.make_request query in
+      let cached_answers = Hashtbl.create 1 in
+      let cache =
+        { Solver.find = Hashtbl.find_opt cached_answers; add = Hashtbl.replace cached_answers }
+      in
+      match (Solver.find ~cache (), Solver.find ~cache ()) with
+      | Ok first, Ok second ->
+          let solved = Solver.solve_all first [ (request, query) ] in
+          if Solver.solve_all second [ (request, query) ] <> solved then
+            Harness.fail "the cache gave another answer";
+          if Solver.For_testing.count_queries_run second <> 0 then
+            Harness.fail "ran the solver again"
+      | Error message, _ | _, Error message -> Harness.fail "%s" message);
+  Harness.test "a counterexample's values are read back from the cache" (fun () ->
+      let query = make_self_comparison Logic.Less in
+      let request =
+        Solver.make_request
+          ~symbols:[ Logic.Symbol.Variable { label = "compared"; numbers = [] } ]
+          ~terms:[ (Logic.Symbol.Reached 0, Logic.int (-1)) ]
+          query
+      in
+      let cached_answers = Hashtbl.create 2 in
+      let cache =
+        { Solver.find = Hashtbl.find_opt cached_answers; add = Hashtbl.replace cached_answers }
+      in
+      match (Solver.find ~cache (), Solver.find ~cache ()) with
+      | Ok first, Ok second -> (
+          match Solver.solve_all first [ (request, query) ] with
+          | [ Counterexample (_ :: _ :: _) ] as solved ->
+              if Solver.solve_all second [ (request, query) ] <> solved then
+                Harness.fail "the cache gave other values";
+              if Solver.For_testing.count_queries_run second <> 0 then
+                Harness.fail "ran the solver again"
+          | _ -> Harness.fail "expected a counterexample with both values")
+      | Error message, _ | _, Error message -> Harness.fail "%s" message);
+  Harness.test "an obligation that the solver stops on before the step limit names Z3's reason"
+    (fun () ->
+      let cache =
+        {
+          Solver.find =
+            (fun _ -> Some (Solver.For_testing.make_incomplete_entry "(incomplete quantifiers)"));
+          add = (fun _ _ -> Harness.fail "kept an answer the cache already had");
+        }
+      in
+      match Solver.find ~cache () with
+      | Error message -> Harness.fail "%s" message
+      | Ok solver -> (
+          let database =
+            Support.make_database
+              (Support.setup [ ("app::main", Fixtures.Prover.addition_that_can_overflow) ])
+          in
+          let file = Support.parse_file "app::main" in
+          match
+            Prover.list_diagnostics
+              (Prover.decide ~runs:[]
+                 (Database.make_proof_lookups database)
+                 solver
+                 (Database.list_proofs (Support.prove database file)))
+              file
+          with
+          | [ diagnostic ] ->
+              if
+                not
+                  (String.includes ~affix:"Z3 gives the reason `(incomplete quantifiers)`"
+                     diagnostic.message)
+              then Harness.fail "message %S" diagnostic.message
+          | diagnostics -> Harness.fail "%d diagnostics" (List.length diagnostics)));
   Harness.test "a second request for a query solved in a small model runs one query" (fun () ->
       match
         ( find_obligation_query Fixtures.Prover.addition_under_an_exists_in_a_forall Overflow,
@@ -2121,11 +2291,11 @@ let () =
           let first = Solver.make_request query
           and second = Solver.make_request ~terms:[ (Logic.Symbol.Reached 0, Logic.int 1) ] query in
           match List.hd (Solver.solve_all solver [ (first, query) ]) with
-          | Proven | Unknown -> Harness.fail "expected a counterexample"
+          | Proven | Unknown _ -> Harness.fail "expected a counterexample"
           | Counterexample _ ->
-              let queries_before = Solver.count_queries_run solver in
+              let queries_before = Solver.For_testing.count_queries_run solver in
               ignore (Solver.solve_all solver [ (second, query) ]);
-              let queries_run = Solver.count_queries_run solver - queries_before in
+              let queries_run = Solver.For_testing.count_queries_run solver - queries_before in
               if queries_run <> 1 then Harness.fail "ran %d queries" queries_run));
   Harness.test "a function defined by a quantified formula reaches the solver as a definition"
     (fun () ->
@@ -2139,7 +2309,7 @@ let () =
       let key = List.hd (Support.list_declarations packages (Support.parse_module "app::main")) in
       match
         Support.read_proofs (Support.make_database packages) (Support.parse_file "app::main")
-          (Resolve.Names.make_key key)
+          key.key
       with
       | Obligations { obligations = [ obligation ]; _ } ->
           let text = Logic.show_query obligation.query in
@@ -2151,7 +2321,7 @@ let () =
         let key = List.hd (Support.list_declarations packages (Support.parse_module "app::main")) in
         match
           Support.read_proofs (Support.make_database packages) (Support.parse_file "app::main")
-            (Resolve.Names.make_key key)
+            key.key
         with
         | Obligations { obligations = [ obligation ]; _ } ->
             Solver.For_testing.hash_query obligation.query
@@ -2199,16 +2369,16 @@ let () =
         let key =
           List.find
             (fun (declaration : Resolve.Names.declaration) ->
-              Path.equal declaration.path (Support.make_top_path "app::main" "f"))
+              Path.equal declaration.key.path (Support.make_top_path "app::main" "f"))
             (Support.list_declarations packages (Support.parse_module "app::main"))
         in
         match
           Support.read_proofs (Support.make_database packages) (Support.parse_file "app::main")
-            (Resolve.Names.make_key key)
+            key.key
         with
         | Obligations { obligations; _ } ->
             List.fold_left
-              (fun most (obligation : Prover.State.obligation) ->
+              (fun most (obligation : Prover.Obligation.t) ->
                 let text = Logic.show_query obligation.query in
                 max most (String.find_all ~sub:"12345" (fun _ matches -> matches + 1) text 0))
               0 obligations
@@ -2245,7 +2415,7 @@ let render_triggered fact =
           Constant (variable "n", Int);
         ];
       facts = [ fact ];
-      goal = Operation (">", [ Apply (variable "f", [ Symbol (variable "n") ]); int 0 ]);
+      goal = greater (Apply (variable "f", [ Symbol (variable "n") ])) (int 0);
     }
 
 let () =
@@ -2253,7 +2423,7 @@ let () =
   let i_term = Symbol (variable "i") and j_term = Symbol (variable "j") in
   let applied_f term = Apply (variable "f", [ term ])
   and applied_g term = Apply (variable "g", [ term ]) in
-  let positive term = Operation (">", [ term; int 0 ]) in
+  let positive term = greater term (int 0) in
   let expect fact fragment =
     let text = render_triggered fact in
     if not (String.includes ~affix:fragment text) then
@@ -2262,29 +2432,26 @@ let () =
   Harness.test "a quantified fact triggers on an application of its variable" (fun () ->
       expect
         (forall
-           ( [ (variable "i", Int) ],
-             Operation (">=", [ i_term; int 0 ]) ==> positive (applied_f i_term) ))
+           ([ (variable "i", Int) ], greater_equal i_term (int 0) ==> positive (applied_f i_term)))
         ":pattern ((x0 b0))");
   Harness.test "a trigger has no arithmetic on a bound variable" (fun () ->
       let text =
         render_triggered
-          (forall
-             ([ (variable "i", Int) ], positive (applied_f (Operation ("+", [ i_term; int 1 ])))))
+          (forall ([ (variable "i", Int) ], positive (applied_f (add i_term (int 1)))))
       in
       if String.includes ~affix:":pattern" text then Harness.fail "%s" text);
   Harness.test "a trigger that would match its own body's larger term is passed over" (fun () ->
       expect
         (forall
            ( [ (variable "i", Int) ],
-             Operation ("<", [ applied_f i_term; applied_f (Operation ("+", [ i_term; int 1 ])) ])
+             less (applied_f i_term) (applied_f (add i_term (int 1)))
              &&& positive (applied_g i_term) ))
         ":pattern ((x2 b0)))");
   Harness.test "a definition triggers on the term it defines" (fun () ->
       let text =
         render_triggered
           (forall
-             ( [ (variable "i", Int) ],
-               equal (applied_f i_term) (Operation ("+", [ applied_g i_term; int 1 ])) ))
+             ([ (variable "i", Int) ], equal (applied_f i_term) (add (applied_g i_term) (int 1))))
       in
       if
         (not (String.includes ~affix:":pattern ((x0 b0)))" text))
@@ -2299,7 +2466,7 @@ let () =
           Constant (variable "n", Int);
         ];
       facts = [ fact ];
-      goal = Operation (">", [ Apply (variable "f", [ Symbol (variable "n") ]); int 0 ]);
+      goal = greater (Apply (variable "f", [ Symbol (variable "n") ])) (int 0);
     }
   in
   Harness.test "a quantified fact with no trigger is told apart" (fun () ->
@@ -2307,9 +2474,7 @@ let () =
         not
           (has_untriggered_fact
              (make_query
-                (forall
-                   ( [ (variable "i", Int) ],
-                     positive (applied_f (Operation ("+", [ i_term; int 1 ]))) ))))
+                (forall ([ (variable "i", Int) ], positive (applied_f (add i_term (int 1)))))))
       then Harness.fail "a fact on f(i + 1) alone has no trigger";
       if
         has_untriggered_fact
@@ -2318,17 +2483,14 @@ let () =
   Harness.test "variables named by no one application share a trigger" (fun () ->
       expect
         (forall
-           ( [ (variable "i", Int); (variable "j", Int) ],
-             Operation ("<", [ applied_f i_term; applied_g j_term ]) ))
+           ([ (variable "i", Int); (variable "j", Int) ], less (applied_f i_term) (applied_g j_term)))
         ":pattern ((x0 b0) (x2 b1))");
   let count_patterns text = String.find_all ~sub:":pattern" (fun _ matches -> matches + 1) text 0 in
   Harness.test
     "transitivity triggers on all three of its applications, so it makes no matching loop"
     (fun () ->
       let k_term = Symbol (variable "k") in
-      let at_most first second =
-        Operation ("<=", [ Apply (variable "h", [ first; second ]); int 0 ])
-      in
+      let at_most first second = less_equal (Apply (variable "h", [ first; second ])) (int 0) in
       let text =
         render_triggered
           (forall

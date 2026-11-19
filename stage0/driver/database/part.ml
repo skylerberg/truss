@@ -29,7 +29,7 @@ type parsed = { tree : Syntax.file; diagnostics : Diagnostic.t list; text : stri
 
 type _ stored =
   | Parsed : Path.file -> parsed stored
-  | Namespace : Path.package -> Resolve.Names.namespace stored
+  | Namespace : Path.package -> Resolve.Namespace.t stored
   | Resolved : Resolve.Names.key * Resolve.section -> Resolve.resolved stored
   | Trait_header : Resolve.Names.key -> Resolve.trait_header stored
   | Constant_value : Path.t -> Z.t option stored
@@ -53,50 +53,18 @@ type _ stored =
   | Call_edges : Path.t * Path.package -> Path.t list stored
   | Recursion_group : Path.t -> Path.t list stored
   | Proof : Resolve.Names.key -> Prover.proof stored
-  | Lowered : Lowered.Item.t -> (Backend.lowered, Backend.unsupported) result stored
-  | Test_key : Lowered.Item.t -> (string, Backend.unsupported) result stored
+  | Lowered : Lowered.Item.t -> (Lowering.lowered, Lowering.unsupported) result stored
+  | Test_key : Lowered.Item.t -> (string, Lowering.unsupported) result stored
 
 type any = Any : 'a stored -> any [@@unboxed]
 type t = Input of input | Name of name | Stored of any
 
-let find_type_equality : type a b. a stored -> b stored -> (a, b) Type.eq option =
- fun left right ->
-  match (left, right) with
-  | Parsed _, Parsed _ -> Some Equal
-  | Namespace _, Namespace _ -> Some Equal
-  | Resolved _, Resolved _ -> Some Equal
-  | Trait_header _, Trait_header _ -> Some Equal
-  | Constant_value _, Constant_value _ -> Some Equal
-  | Header _, Header _ -> Some Equal
-  | Interface _, Interface _ -> Some Equal
-  | Derived_interface _, Derived_interface _ -> Some Equal
-  | Type_facts _, Type_facts _ -> Some Equal
-  | Grant _, Grant _ -> Some Equal
-  | Signature_check _, Signature_check _ -> Some Equal
-  | Contract _, Contract _ -> Some Equal
-  | Checked_body _, Checked_body _ -> Some Equal
-  | Body_mir _, Body_mir _ -> Some Equal
-  | Contract_mir _, Contract_mir _ -> Some Equal
-  | Generated_mir _, Generated_mir _ -> Some Equal
-  | Mir_call_edges _, Mir_call_edges _ -> Some Equal
-  | Patterns _, Patterns _ -> Some Equal
-  | Usage _, Usage _ -> Some Equal
-  | Ownership _, Ownership _ -> Some Equal
-  | Import_check _, Import_check _ -> Some Equal
-  | Package_check _, Package_check _ -> Some Equal
-  | Call_edges _, Call_edges _ -> Some Equal
-  | Recursion_group _, Recursion_group _ -> Some Equal
-  | Proof _, Proof _ -> Some Equal
-  | Lowered _, Lowered _ -> Some Equal
-  | Test_key _, Test_key _ -> Some Equal
-  | _ -> None
+let find_type_definition : Ground.ty -> Path.t option = function
+  | Named { path; _ } -> Some path
+  | Any { trait; _ } -> Some trait
+  | Function _ | Never -> None
 
-let locate_type_package : Ground.ty -> Path.package = function
-  | Named { path; _ } -> Path.locate_package path
-  | Any { trait; _ } -> Path.locate_package trait
-  | Function _ | Never -> Path.standard_package
-
-let locate_item_package : Lowered.Item.t -> Path.package = function
+let find_item_definition : Lowered.Item.t -> Path.t option = function
   | Code { path; _ }
   | Constant path
   | Evaluator path
@@ -108,54 +76,95 @@ let locate_item_package : Lowered.Item.t -> Path.package = function
       | Program_main path
       | Test_main path )
   | Table (Impl_table { impl = path; _ } | Any_table { impl = path; _ } | Locked_table path) ->
-      Path.locate_package path
-  | Drop ty | Copy ty | Debug ty | Any_drop ty | Any_copy ty | Encode ty -> locate_type_package ty
+      Some path
+  | Drop ty | Copy ty | Debug ty | Any_drop ty | Any_copy ty | Encode ty -> find_type_definition ty
   | Generated (Entry impl_method | Any_entry impl_method) ->
-      Path.locate_package (Lowered.Item.make_method_path impl_method)
+      Some (Lowered.Item.make_method_path impl_method)
 
-let locate_stored_package : type a. a stored -> Path.package = function
-  | Parsed file | Import_check file -> file.module_.package
-  | Namespace package | Grant (package, _) | Package_check (package, _) | Call_edges (_, package) ->
-      package
-  | Resolved (key, _)
-  | Trait_header key
-  | Header key
-  | Interface key
-  | Signature_check key
-  | Contract key
-  | Checked_body key
-  | Body_mir key
-  | Contract_mir key
-  | Patterns key
-  | Usage key
-  | Ownership key
-  | Proof key ->
-      key.module_.package
-  | Constant_value path
-  | Type_facts path
-  | Generated_mir path
-  | Mir_call_edges path
-  | Recursion_group path
-  | Derived_interface { type_ = path; _ } ->
-      Path.locate_package path
-  | Lowered key | Test_key key -> locate_item_package key
+module Storage = struct
+  let find_type_equality : type a b. a stored -> b stored -> (a, b) Type.eq option =
+   fun left right ->
+    match (left, right) with
+    | Parsed _, Parsed _ -> Some Equal
+    | Namespace _, Namespace _ -> Some Equal
+    | Resolved _, Resolved _ -> Some Equal
+    | Trait_header _, Trait_header _ -> Some Equal
+    | Constant_value _, Constant_value _ -> Some Equal
+    | Header _, Header _ -> Some Equal
+    | Interface _, Interface _ -> Some Equal
+    | Derived_interface _, Derived_interface _ -> Some Equal
+    | Type_facts _, Type_facts _ -> Some Equal
+    | Grant _, Grant _ -> Some Equal
+    | Signature_check _, Signature_check _ -> Some Equal
+    | Contract _, Contract _ -> Some Equal
+    | Checked_body _, Checked_body _ -> Some Equal
+    | Body_mir _, Body_mir _ -> Some Equal
+    | Contract_mir _, Contract_mir _ -> Some Equal
+    | Generated_mir _, Generated_mir _ -> Some Equal
+    | Mir_call_edges _, Mir_call_edges _ -> Some Equal
+    | Patterns _, Patterns _ -> Some Equal
+    | Usage _, Usage _ -> Some Equal
+    | Ownership _, Ownership _ -> Some Equal
+    | Import_check _, Import_check _ -> Some Equal
+    | Package_check _, Package_check _ -> Some Equal
+    | Call_edges _, Call_edges _ -> Some Equal
+    | Recursion_group _, Recursion_group _ -> Some Equal
+    | Proof _, Proof _ -> Some Equal
+    | Lowered _, Lowered _ -> Some Equal
+    | Test_key _, Test_key _ -> Some Equal
+    | _ -> None
 
-let locate_package (Any part) = locate_stored_package part
+  let locate_stored_package : type a. a stored -> Path.package = function
+    | Parsed file | Import_check file -> file.module_.package
+    | Namespace package | Grant (package, _) | Package_check (package, _) | Call_edges (_, package)
+      ->
+        package
+    | Resolved (key, _)
+    | Trait_header key
+    | Header key
+    | Interface key
+    | Signature_check key
+    | Contract key
+    | Checked_body key
+    | Body_mir key
+    | Contract_mir key
+    | Patterns key
+    | Usage key
+    | Ownership key
+    | Proof key ->
+        key.module_.package
+    | Constant_value path
+    | Type_facts path
+    | Generated_mir path
+    | Mir_call_edges path
+    | Recursion_group path
+    | Derived_interface { type_ = path; _ } ->
+        Path.locate_package path
+    | Lowered key | Test_key key ->
+        Option.fold ~none:Path.standard_package ~some:Path.locate_package (find_item_definition key)
 
-let locate_name_package : name -> Path.package = function
-  | File_declarations file -> file.module_.package
-  | Package_declarations package
-  | Traits_declaring (package, _)
-  | Impl_index package
-  | Impls_of_type (package, _)
-  | Impls_of_trait (package, _)
-  | Law_proofs (package, _) ->
-      package
-  | Entry (module_, _) | Entries module_ | Module_declarations module_ -> module_.package
-  | Imports key | Declaration key | Tree key | Text key | Place key | Container key | Contained key
-    ->
-      key.module_.package
-  | Members (path, _) -> Path.locate_package path
+  let locate_package (Any part) = locate_stored_package part
+
+  let locate_name_package : name -> Path.package = function
+    | File_declarations file -> file.module_.package
+    | Package_declarations package
+    | Traits_declaring (package, _)
+    | Impl_index package
+    | Impls_of_type (package, _)
+    | Impls_of_trait (package, _)
+    | Law_proofs (package, _) ->
+        package
+    | Entry (module_, _) | Entries module_ | Module_declarations module_ -> module_.package
+    | Imports key
+    | Declaration key
+    | Tree key
+    | Text key
+    | Place key
+    | Container key
+    | Contained key ->
+        key.module_.package
+    | Members (path, _) -> Path.locate_package path
+end
 
 let show_key = Resolve.Names.show_key
 
@@ -245,28 +254,6 @@ let show = function
   | Input part -> show_input part
   | Name part -> show_name part
   | Stored (Any part) -> show_stored part
-
-let find_type_definition : Ground.ty -> Path.t option = function
-  | Named { path; _ } -> Some path
-  | Any { trait; _ } -> Some trait
-  | Function _ | Never -> None
-
-let find_item_definition : Lowered.Item.t -> Path.t option = function
-  | Code { path; _ }
-  | Constant path
-  | Evaluator path
-  | Template_check { from_template = path; _ }
-  | Call_evaluation { function_ = path; _ }
-  | Generated
-      ( Locked_entry { capability = path; _ }
-      | Adapter { function_ = path; _ }
-      | Program_main path
-      | Test_main path )
-  | Table (Impl_table { impl = path; _ } | Any_table { impl = path; _ } | Locked_table path) ->
-      Some path
-  | Drop ty | Copy ty | Debug ty | Any_drop ty | Any_copy ty | Encode ty -> find_type_definition ty
-  | Generated (Entry impl_method | Any_entry impl_method) ->
-      Some (Lowered.Item.make_method_path impl_method)
 
 let find_name_definition = function
   | Entries _ | Module_declarations _ | File_declarations _ | Package_declarations _

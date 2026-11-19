@@ -124,6 +124,15 @@ let read_constant_type lookups path =
   | Some ty -> ty
   | None -> Compiler_bug.raise_bug ~stage:"Interface" "%s is not a constant" (Path.show path)
 
+let find_shadowed_constant (lookups : Lookups.t) module_ ~name ~type_ =
+  match lookups.names.find module_ name with
+  | Some ({ kind = Constant; _ } : Resolve.Names.entry) -> (
+      let path : Path.t = Top { module_; name } in
+      match find_constant_type lookups path with
+      | Some constant_type when Types.equal constant_type type_ -> Some path
+      | _ -> None)
+  | _ -> None
+
 let read_method_signature lookups ~owner (method_ : Types.trait_method) =
   let path =
     Path.Method { owner; name = method_.method_name; receiver = method_.method_receiver }

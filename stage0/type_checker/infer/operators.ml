@@ -46,6 +46,11 @@ let infer_shift_result state ~left:(left_span, left_type) ~right:(right_span, ri
   infer_integer_result state left_span left_type
     ~describe:(Printf.sprintf "Shifts work on built-in integers, not `%s`.")
 
+let is_integer_operand state type_ =
+  let type_ = State.normalize state type_ in
+  State.is_integer_type state type_ || type_ = Types.Integer
+  || match State.resolve state type_ with Types.Literal (Integer_literal, _) -> true | _ -> false
+
 let rec try_ state env (value : Syntax.expression) (inner : Syntax.expression) =
   State.reject_in_formula state env (State.read_span state value.id) "`?`";
   let inner_type = State.normalize state (Hooks.check_expression state env inner) in
@@ -76,94 +81,6 @@ let rec try_ state env (value : Syntax.expression) (inner : Syntax.expression) =
       State.make_error_type state Wrong_try (State.read_span state value.id)
         "`?` works on a `Result` in a function that returns a `Result`, and on an `Option` in a \
          function that returns an `Option`. Convert between them with `ok_or` or `ok`."
-
-and check_record_update state env (value : Syntax.expression) (base : Syntax.expression) updates =
-  let base_type = State.normalize state (Hooks.check_expression state env base) in
-  (match List.assoc_opt value.id state.keyword_modes with
-  | None -> Modes.note_owned_value state env base
-  | Some Own -> ()
-  | Some Mut ->
-      State.report state Wrong_mode (State.read_span state base.id)
-        "`with` takes ownership of its base, so the base is passed `own`, not `mut`."
-  | Some Read -> State.raise_bug "a mode keyword recorded as `Read`");
-  (match base_type with
-  | Types.Named { path; _ }
-    when not (Members.are_fields_visible state.lookups ~package:state.package path) ->
-      State.report state Private_field (State.read_span state value.id)
-        (Printf.sprintf "`%s` is opaque, so only its own package can update its fields."
-           (Types.show base_type))
-  | _ -> ());
-  List.iter
-    (fun (update : Syntax.update) ->
-      match update.kind with
-      | Update { field = first; path = rest; value = new_value } -> (
-          let rec find_field_type type_ (names : Syntax.name list) =
-            match (names, State.normalize state type_) with
-            | [], type_ -> Some type_
-            | (name : Syntax.name) :: rest, (Types.Named { path; arguments } as record_type) -> (
-                match Members.find_fields state.lookups path arguments with
-                | Some fields -> (
-                    match
-                      List.find_opt
-                        (fun (written : Types.field) -> written.field_name = name.text)
-                        fields
-                    with
-                    | Some written -> find_field_type written.field_type rest
-                    | None ->
-                        State.report state Unknown_member (State.read_span state name.id)
-                          (Printf.sprintf "`%s` has no field `%s`." (State.show state record_type)
-                             name.text);
-                        None)
-                | None ->
-                    State.report state Not_a_record (State.read_span state name.id)
-                      (Printf.sprintf "`with` works on records, and `%s` is not one."
-                         (State.show state record_type));
-                    None)
-            | _, _ -> None
-          in
-          match find_field_type base_type (first :: rest) with
-          | Some type_ -> (
-              match new_value with
-              | Some new_value -> Hooks.check state env new_value type_
-              | None -> (
-                  match State.find_target state first with
-                  | Some (Local id) -> (
-                      match Hashtbl.find_opt state.locals id with
-                      | Some local ->
-                          if not (State.unify state type_ local.type_) then
-                            State.report_mismatch state (State.read_span state first.id)
-                              ~expected:type_ ~actual:local.type_
-                      | None -> ())
-                  | _ -> ()))
-          | None ->
-              Option.iter
-                (fun new_value -> ignore (Hooks.check_expression state env new_value))
-                new_value)
-      | Update_error -> ())
-    updates;
-  State.register_expression state value (fun () ->
-      let base = State.build_expression state base in
-      Record_update
-        {
-          base;
-          updates =
-            List.filter_map
-              (fun (update : Syntax.update) ->
-                match update.kind with
-                | Update { field = first; path = rest; value = new_value } ->
-                    Some
-                      ( List.map (fun (name : Syntax.name) -> name.text) (first :: rest),
-                        match (new_value, State.find_target state first) with
-                        | Some new_value, _ -> State.build_expression state new_value
-                        | None, Some (Local id) ->
-                            State.make_synthetic_expression state ~origin:update.id
-                              (Form.read_local_type state id)
-                              (Form.build_local_use state ~origin:update.id id)
-                        | None, _ -> State.raise_bug "`with (%s)` names no local" first.text )
-                | Update_error -> None)
-              updates;
-        });
-  base_type
 
 and check_prefix state env ?expected (value : Syntax.expression) operator
     (inner : Syntax.expression) =
@@ -401,15 +318,11 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
       let left_type = Option.get state.tables.types.(left.id) in
       let right_type = Option.get state.tables.types.(right.id) in
       check_literal_operands state ~left:left_type ~right:right_type;
-      let are_integers type_ =
-        let type_ = State.normalize state type_ in
-        State.is_integer_type state type_ || type_ = Types.Integer
-        ||
-        match State.resolve state type_ with
-        | Types.Literal (Integer_literal, _) -> true
-        | _ -> false
-      in
-      if env.specification && are_integers left_type && are_integers right_type then begin
+      if
+        env.specification
+        && is_integer_operand state left_type
+        && is_integer_operand state right_type
+      then begin
         State.register_expression state value (fun () ->
             Form.build_built_in_comparison state comparison left right);
         Types.bool
@@ -499,16 +412,12 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
         State.make_error_type state String_addition (State.read_span state value.id) ~fixes
           "Strings have no `+`. Join them with interpolation, or with methods such as `push`."
       end
-      else begin
-        let are_integers type_ =
-          let type_ = State.normalize state type_ in
-          State.is_integer_type state type_ || type_ = Types.Integer
-          ||
-          match State.resolve state type_ with
-          | Types.Literal (Integer_literal, _) -> true
-          | _ -> false
-        in
-        if env.specification && are_integers left_type && are_integers right_type then begin
+      else
+        begin if
+          env.specification
+          && is_integer_operand state left_type
+          && is_integer_operand state right_type
+        then begin
           ignore
             (match State.resolve state left_type with
             | Types.Literal _ -> State.unify state left_type Types.Integer
@@ -539,7 +448,7 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
                 ]
               state value ~trait ~method_ ~left:left_type ~right:(Some right_type)
           end
-      end
+        end
 
 and add_operand_mismatch state (value : Syntax.expression) (left : Syntax.expression)
     (right : Syntax.expression) ~left_type ~right_type =
@@ -617,10 +526,10 @@ and check_any state env ?expected (value : Syntax.expression) (inner : Syntax.ex
                       List.iter
                         (fun name ->
                           match
-                            (Interface.Impls.project_capability_set state.lookups.interface
-                               ~list_bounds:(State.lookup_bounds state) inner_type
-                               { bound with associated = [] } name
-                              :> Types.capability list)
+                            Types.list_capabilities
+                              (Interface.Impls.project_capability_set state.lookups.interface
+                                 ~list_bounds:(State.lookup_bounds state) inner_type
+                                 { bound with associated = [] } name)
                           with
                           | [] -> ()
                           | set ->

@@ -40,6 +40,7 @@ and constant =
   | Null
   | Symbol_address of Item.t
   | Site of site
+  | Capability of Path.t
   | Size_of of Ground.ty
   | Alignment_of of Ground.ty
 
@@ -59,6 +60,8 @@ type binary =
   | Bit_xor
   | Shift_left
   | Shift_right
+
+type comparison =
   | Equal
   | Not_equal
   | Less
@@ -68,6 +71,8 @@ type binary =
   | Ieee_equal
   | Ieee_less
   | Ieee_less_equal
+
+type test = comparison * operand * operand
 
 type intrinsic =
   | Allocate
@@ -128,7 +133,7 @@ type intrinsic =
 
 type target =
   | Direct of { function_ : function_ref; signature : signature }
-  | Indirect of { value : operand; signature : signature }
+  | Indirect of { code : operand; environment : operand; signature : signature }
   | Intrinsic of intrinsic
   | Foreign of Libc.declaration
   | Evidence_call of { evidence : operand; capability : Path.t; slot : int; signature : signature }
@@ -138,6 +143,7 @@ type rvalue =
   | Use of operand
   | Unary of unary * operand
   | Binary of binary * operand * operand
+  | Compare of test
   | Convert of operand * Memory_layout.scalar
   | Build of { ty : Ground.ty; variant : string option; fields : (string * operand) list }
   | Is_variant of place * string
@@ -158,6 +164,7 @@ type statement =
 
 type terminator =
   | Goto of block
+  | Branch of { test : test; yes : block; no : block }
   | Switch of { value : operand; cases : (Z.t * block) list; default : block }
   | Switch_variant of { place : place; cases : (string * block) list; default : block option }
   | Return of operand option

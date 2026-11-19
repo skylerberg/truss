@@ -178,14 +178,8 @@ and check_field state (value : Syntax.expression) base_type (member : Syntax.nam
   let report_unknown candidates =
     State.make_error_type state Unknown_member (State.read_span state member.id)
       ~fixes:
-        (match Diagnostic.find_closest member.text candidates with
-        | Some candidate ->
-            [
-              State.fix
-                (Printf.sprintf "Write `%s`." candidate)
-                [ State.replace (State.read_span state member.id) candidate ];
-            ]
-        | None -> [])
+        (Diagnostic.list_spelling_fixes (State.read_span state member.id) ~written:member.text
+           candidates)
       (Printf.sprintf "%s has no field `%s`."
          (String.capitalize_ascii (State.describe state base_type))
          member.text)
@@ -240,8 +234,7 @@ and check_function_value state (value : Syntax.expression) (signature : Types.si
 and check_static_member state (value : Syntax.expression) type_ (member : Syntax.name) =
   match type_ with
   | Types.Named { path; arguments } -> (
-      if State.is_variant_name member then
-        check_variant_value state value path member.text ~arguments
+      if member.case = Upper then check_variant_value state value path member.text ~arguments
       else
         match
           Resolve.Names.choose_visible

@@ -219,6 +219,16 @@ fn algorithm_of(value: der::Value) -> Option[SignatureAlgorithm] {
   }
 }
 
+fn find_named_curve(identifier: der::Value) -> Option[cryptography::Curve] {
+  if is_oid(identifier, expected: "2a8648ce3d030107") {
+    Some(cryptography::Curve.P256)
+  } else if is_oid(identifier, expected: "2b81040022") {
+    Some(cryptography::Curve.P384)
+  } else {
+    None
+  }
+}
+
 public fn public_key_of(info: der::Value) -> Option[PublicKey]
   uses Panic
 {
@@ -235,13 +245,7 @@ public fn public_key_of(info: der::Value) -> Option[PublicKey]
     return None
   }
   if is_oid(algorithm[0], expected: "2a8648ce3d0201") && algorithm.length() == 2 {
-    let curve = if is_oid(algorithm[1], expected: "2a8648ce3d030107") {
-      cryptography::Curve.P256
-    } else if is_oid(algorithm[1], expected: "2b81040022") {
-      cryptography::Curve.P384
-    } else {
-      return None
-    }
+    let curve = find_named_curve(algorithm[1])?
     return match cryptography::EcdsaVerifyingKey.from_sec1(curve, bytes: key.slice()) {
       Some(verifying) => Some(PublicKey.Ecdsa(key: own verifying))
       None => None
@@ -818,13 +822,7 @@ public fn parse_private_key(encoded: Slice[UInt8]) -> Option[PrivateKey]
     return None
   }
   if is_oid(algorithm[0], expected: "2a8648ce3d0201") && algorithm.length() == 2 {
-    let curve = if is_oid(algorithm[1], expected: "2a8648ce3d030107") {
-      cryptography::Curve.P256
-    } else if is_oid(algorithm[1], expected: "2b81040022") {
-      cryptography::Curve.P384
-    } else {
-      return None
-    }
+    let curve = find_named_curve(algorithm[1])?
     let fields = items_of(der::parse(inner.slice()).ok()?)
     if fields.length() < 2 {
       return None

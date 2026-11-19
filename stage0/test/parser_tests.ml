@@ -145,14 +145,14 @@ let () =
       let file, diagnostics = Parse_support.parse "fn f() -> {\n}\nfn g() {}" in
       if List.length diagnostics <> 1 then
         Harness.fail "expected one diagnostic, got [%s]"
-          (String.concat "; " (Parse_support.list_codes diagnostics));
+          (String.concat "; " (Support.list_codes diagnostics));
       match Parse_support.list_items file with
       | [ _; { value = { kind = Function _; _ }; _ } ] -> ()
       | _ -> Harness.fail "g did not parse");
   Harness.test "a missing } does not swallow the next definition" (fun () ->
       let file, diagnostics = Parse_support.parse "fn f() {\n  todo\nfn g() {}" in
-      if Parse_support.list_codes diagnostics <> [ "lexer.unclosed_bracket" ] then
-        Harness.fail "got [%s]" (String.concat "; " (Parse_support.list_codes diagnostics));
+      if Support.list_codes diagnostics <> [ "lexer.unclosed_bracket" ] then
+        Harness.fail "got [%s]" (String.concat "; " (Support.list_codes diagnostics));
       if List.length file.definitions <> 2 then Harness.fail "expected two definitions")
 
 let () =
@@ -215,15 +215,14 @@ let () =
       | _ -> Harness.fail "wrong tree");
   Harness.test "nesting deeper than the limit is one error, not a stack overflow" (fun () ->
       let text = "fn f() { " ^ String.make 300 '(' ^ "1" ^ String.make 300 ')' ^ " }" in
-      if Parse_support.list_codes (snd (Parse_support.parse text)) <> [ "parser.nesting_too_deep" ]
-      then
+      if Support.list_codes (snd (Parse_support.parse text)) <> [ "parser.nesting_too_deep" ] then
         Harness.fail "got [%s]"
-          (String.concat "; " (Parse_support.list_codes (snd (Parse_support.parse text)))))
+          (String.concat "; " (Support.list_codes (snd (Parse_support.parse text)))))
 
 let () =
   let list_too_deep text =
     List.filter (( = ) "parser.nesting_too_deep")
-      (Parse_support.list_codes (snd (Parse_support.parse text)))
+      (Support.list_codes (snd (Parse_support.parse text)))
   in
   Harness.test "nested echo counts toward the limit" (fun () ->
       let text =
@@ -288,15 +287,12 @@ let () =
       let text =
         "fn f() {\n  let x = 1" ^ String.concat "" (List.init 300 (fun _ -> " + a.b")) ^ "\n}"
       in
-      if Parse_support.list_codes (snd (Parse_support.parse text)) <> [] then
-        Harness.fail "a diagnostic");
+      if Support.list_codes (snd (Parse_support.parse text)) <> [] then Harness.fail "a diagnostic");
   Harness.test "an inserted closer in an inner statement leaves errors in the outer one reported"
     (fun () ->
       let _, diagnostics = Parse_support.parse "fn f() {\n  let x = run(fn() { g( }) +\n}" in
-      if
-        Parse_support.list_codes diagnostics
-        <> [ "lexer.unclosed_bracket"; "parser.unexpected_token" ]
-      then Harness.fail "got [%s]" (String.concat "; " (Parse_support.list_codes diagnostics)))
+      if Support.list_codes diagnostics <> [ "lexer.unclosed_bracket"; "parser.unexpected_token" ]
+      then Harness.fail "got [%s]" (String.concat "; " (Support.list_codes diagnostics)))
 
 let () =
   let split_pieces text =
@@ -376,7 +372,7 @@ let () =
 let () =
   Harness.test "Layout lets every token in the first set of a statement begin one" (fun () ->
       let kinds =
-        List.map (fun (_, keyword) -> Token.Keyword keyword) Token.keywords
+        List.map (fun (_, keyword) -> Token.Keyword keyword) Token.For_testing.keywords
         @ List.map (fun (_, punctuation) -> Token.Punctuation punctuation) Token.punctuation
         @ [
             Upper "Name";
@@ -578,6 +574,10 @@ let () =
   Harness.test "postfix operators" (fun () ->
       expect_expression "a.b[0](c, label: d)?.e with (f.g: 1, h)"
         "(with (. (? (call ([] (. a b) 0) c (label: d))) e) (f.g: 1) h)");
+  Harness.test "the shorthand of with takes a mode keyword" (fun () ->
+      expect_expression "a with (own b)" "(with a (own b))");
+  Harness.test "the label of an update is a path of fields" (fun () ->
+      Parse_support.expect_error "fn f() { p with (g(x): 1) }" ~code:Unexpected_token ~at:"g(x)");
   Harness.test "modes and any take a postfix expression" (fun () ->
       Parse_support.expect_statement "mut config.servers.sort()"
         "(mut (call (. (. config servers) sort)))";
@@ -622,7 +622,7 @@ let () =
   Harness.test "a field and an update that do not parse are errors in the tree" (fun () ->
       Parse_support.expect_recovered_definitions "type T(x: Int64, 1)"
         [ "(type T ((x: Int64) error))" ];
-      Parse_support.expect_recovered_statements "let y = x with (1)" [ "(let y (with x error))" ]);
+      Parse_support.expect_recovered_statements "let y = x with (1: 2)" [ "(let y (with x error))" ]);
   Harness.test "lists and maps" (fun () ->
       expect_expression "[1, 2,]" "(list 1 2)";
       expect_expression "[]" "(list)";
@@ -655,13 +655,13 @@ let () =
       if
         List.filter
           (fun code -> String.starts_with ~prefix:"parser." code)
-          (Parse_support.list_codes diagnostics)
+          (Support.list_codes diagnostics)
         <> []
-      then Harness.fail "got [%s]" (String.concat "; " (Parse_support.list_codes diagnostics)));
+      then Harness.fail "got [%s]" (String.concat "; " (Support.list_codes diagnostics)));
   Harness.test "an error in an interpolation stays there" (fun () ->
       let statements, diagnostics = Parse_support.parse_body "let x = \"${a +}\"\nlet y = 1" in
-      if Parse_support.list_codes diagnostics <> [ "parser.unexpected_token" ] then
-        Harness.fail "got [%s]" (String.concat "; " (Parse_support.list_codes diagnostics));
+      if Support.list_codes diagnostics <> [ "parser.unexpected_token" ] then
+        Harness.fail "got [%s]" (String.concat "; " (Support.list_codes diagnostics));
       if List.length statements <> 2 then Harness.fail "expected two statements");
   Harness.test "constants and names" (fun () ->
       expect_expression "true" "true";

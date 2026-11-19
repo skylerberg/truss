@@ -157,15 +157,11 @@ and match_arguments state ?constructor (value : Syntax.expression)
               | None ->
                   reject Unknown_label (State.read_span state label.id)
                     ~fixes:
-                      (match Diagnostic.find_closest label.text (List.map fst named) with
-                      | Some candidate ->
-                          [
-                            State.fix
-                              (Printf.sprintf "Write `%s`." candidate)
-                              [ State.replace (State.read_span state label.id) candidate ];
-                          ]
-                      | None -> [])
-                    (Printf.sprintf "No parameter is named `%s`." label.text);
+                      (Diagnostic.list_spelling_fixes (State.read_span state label.id)
+                         ~written:label.text (List.map fst named))
+                    (match constructor with
+                    | Some name -> Printf.sprintf "`%s` has no field `%s`." name label.text
+                    | None -> Printf.sprintf "No parameter is named `%s`." label.text);
                   None)
           | None -> (
               match find_bare_name_index argument with
@@ -228,7 +224,8 @@ and match_arguments state ?constructor (value : Syntax.expression)
         match parameter_index with
         | Some index when Hashtbl.mem assigned index ->
             reject Repeated_argument
-              (State.read_span state argument.value.id)
+              (State.read_span state
+                 (match argument.label with Some label -> label.id | None -> argument.value.id))
               (Printf.sprintf "`%s` is given more than once." (List.nth parameters index).name);
             (argument, None)
         | Some index ->
@@ -402,14 +399,7 @@ and construct state env ?expected ?type_arguments (value : Syntax.expression) ty
   in
   let fields =
     match variant with
-    | None -> (
-        match Members.find_fields state.lookups type_path type_arguments with
-        | Some fields -> Ok fields
-        | None ->
-            Error
-              (State.make_error_type state Not_a_record (State.read_span state value.id)
-                 (Printf.sprintf "`%s` is not a record, so it cannot be built this way."
-                    (State.show state type_))))
+    | None -> Result.map snd (find_record_fields state (State.read_span state value.id) type_)
     | Some variant -> (
         match Members.find_variants state.lookups type_path type_arguments with
         | Some variants -> (
@@ -426,28 +416,11 @@ and construct state env ?expected ?type_arguments (value : Syntax.expression) ty
             | None -> report_unknown_variant variant)
         | None -> report_unknown_variant variant)
   in
-  let opaque_error =
-    if Members.are_fields_visible state.lookups ~package:state.package type_path then None
-    else
-      Some
-        (State.make_error_type state Private_field (State.read_span state value.id)
-           (Printf.sprintf "`%s` is opaque, so only its own package can build it."
-              (State.show state type_)))
-  in
+  let opaque_error = find_opaque_error state (State.read_span state value.id) type_path type_ in
   match fields with
   | Error error -> check_arguments_alone state env arguments error
   | Ok fields -> (
-      let parameters =
-        List.map
-          (fun (field : Types.field) ->
-            {
-              Types.name = field.field_name;
-              mode = Own;
-              type_ = field.field_type;
-              has_default = field.field_has_default;
-            })
-          fields
-      in
+      let parameters = make_field_parameters ~keeps_unlisted:false fields in
       Option.iter
         (fun mode ->
           List.iter
@@ -477,3 +450,124 @@ and construct state env ?expected ?type_arguments (value : Syntax.expression) ty
               };
           Form.register_call state value;
           type_)
+
+and find_record_fields state span type_ =
+  match State.normalize state type_ with
+  | Types.Named { path; arguments } as type_ -> (
+      match Members.find_fields state.lookups path arguments with
+      | Some fields -> Ok (path, fields)
+      | None -> Error (report_not_a_record state span type_))
+  | (Types.Error _ | Types.Hole) as unknown -> Error unknown
+  | type_ -> Error (report_not_a_record state span type_)
+
+and report_not_a_record state span type_ =
+  State.make_error_type state Not_a_record span
+    (Printf.sprintf "`%s` is not a record, so it cannot be built this way." (State.show state type_))
+
+and find_opaque_error state span type_path type_ =
+  if Members.are_fields_visible state.lookups ~package:state.package type_path then None
+  else
+    Some
+      (State.make_error_type state Private_field span
+         (Printf.sprintf "`%s` is opaque, so only its own package can build it."
+            (State.show state type_)))
+
+and make_field_parameters ~keeps_unlisted (fields : Types.field list) =
+  List.map
+    (fun (field : Types.field) ->
+      {
+        Types.name = field.field_name;
+        mode = Own;
+        type_ = field.field_type;
+        has_default = keeps_unlisted || field.field_has_default;
+      })
+    fields
+
+and check_record_update state env (value : Syntax.expression) (base : Syntax.expression) updates =
+  let base_type = State.normalize state (Hooks.check_expression state env base) in
+  (match List.assoc_opt value.id state.keyword_modes with
+  | None -> Modes.note_owned_value state env base
+  | Some Own -> ()
+  | Some Mut ->
+      State.report state Wrong_mode (State.read_span state base.id)
+        "`with` takes ownership of its base, so the base is passed `own`, not `mut`."
+  | Some Read -> State.raise_bug "a mode keyword recorded as `Read`");
+  let written =
+    List.filter_map
+      (fun (update : Syntax.update) ->
+        match update.kind with Update { path; value } -> Some (path, value) | Update_error -> None)
+      updates
+  in
+  let paths =
+    check_updates state env value ~at:(State.read_span state value.id) base_type written
+  in
+  State.register_expression state value (fun () ->
+      Record_update
+        {
+          base = State.build_expression state base;
+          updates =
+            List.map
+              (fun (_, (written : Syntax.expression)) ->
+                match List.assoc_opt written.id paths with
+                | Some path -> (path, State.build_expression state written)
+                | None -> State.raise_bug "an update that names no field is built")
+              written;
+        });
+  base_type
+
+and check_updates state env (value : Syntax.expression) ~at record_type
+    (updates : (Syntax.name list * Syntax.expression) list) =
+  match find_record_fields state at record_type with
+  | Error unknown ->
+      ignore (check_arguments_alone state env (List.map make_update_argument updates) unknown);
+      []
+  | Ok (path, fields) ->
+      ignore (find_opaque_error state at path record_type);
+      let parameters = make_field_parameters ~keeps_unlisted:true fields in
+      let groups = group_updates updates in
+      let { matched; unmatched; error; _ } =
+        match_arguments state ~constructor:(State.show state record_type) value parameters
+          (List.map fst groups)
+      in
+      Option.iter (fun error -> ignore (check_arguments_alone state env unmatched error)) error;
+      List.concat_map
+        (fun ((argument : Syntax.argument), index) ->
+          let parameter = List.nth parameters index in
+          match List.assq argument groups with
+          | [] ->
+              ignore
+                (check_argument state env argument.value parameter
+                   ~has_generic_type:
+                     (match parameter.type_ with
+                     | Types.Parameter _ | Projection _ -> true
+                     | _ -> false));
+              [ (argument.value.id, [ parameter.name ]) ]
+          | nested ->
+              let at =
+                match argument.label with
+                | Some label -> State.read_span state label.id
+                | None -> at
+              in
+              List.map
+                (fun (id, path) -> (id, parameter.name :: path))
+                (check_updates state env value ~at parameter.type_ nested))
+        matched
+
+and make_update_argument ((path : Syntax.name list), value) : Syntax.argument =
+  { label = List.nth_opt path 0; value }
+
+and group_updates (updates : (Syntax.name list * Syntax.expression) list) =
+  match updates with
+  | [] -> []
+  | ((([] | [ _ ]), _) as update) :: rest -> (make_update_argument update, []) :: group_updates rest
+  | (((field : Syntax.name) :: _ :: _, _) as first) :: _ ->
+      let is_inside (names, _) =
+        match names with (name : Syntax.name) :: _ :: _ -> name.text = field.text | _ -> false
+      in
+      let inside, outside = List.partition is_inside updates in
+      ( make_update_argument first,
+        List.filter_map
+          (fun (names, written) ->
+            match names with _ :: rest -> Some (rest, written) | [] -> None)
+          inside )
+      :: group_updates outside

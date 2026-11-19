@@ -464,12 +464,17 @@ public type Interval =
 - Repeated invariants all hold, and each may rely on the ones before it.
 - Invariants are proven, never checked when the program runs. An invariant
   holds wherever other code can observe the value: when it is built,
-  directly or with `with`, passed to a call, or returned, and when the
-  function that holds it ends. A `with` is checked after all of its updates.
+  directly or with `with`, passed to a call, or returned, and when its
+  holder ends: a `var` at the end of its scope, and a `mut` parameter or
+  `mut self` when the function returns. A `with` is checked after all of
+  its updates.
 - A private method that takes `mut self` is a step of an update: the
   invariant of its `self` is neither assumed when it is called nor required
-  when it returns. It states its precondition and postcondition with
-  `requires` and `ensures`:
+  when it returns. A method written in a trait, a capability, or an `impl`
+  is never one: a caller that reaches it through the trait assumes that
+  `self` meets its invariant when the call returns, and would otherwise
+  observe a broken value. A step states its precondition and postcondition
+  with `requires` and `ensures`:
 
   ```truss
   fn SortedList[Element: Ordered].sift_into_place(mut self, index: UInt64)
@@ -1321,10 +1326,14 @@ fn summarize(scores: List[Int64]) -> Result[Summary, SummaryError] {
 - **Every value is used.** A statement whose value is not `Unit` is an error;
   `let _ = expression` discards a value.
 - **Every variable is used.** A binding that nothing reads is an error.
-  Parameters are exempt.
+  Parameters are exempt. Assigning a variable as a whole does not read it,
+  and a compound assignment such as `+=` does.
 - **Unreachable code is an error:** a statement after an expression of type
   `Never`. The check uses types alone, so `if false { ... }` is not
   reported. Code after a `todo` is exempt.
+- **A comparison of a place with itself is an error,** as in `x != x` or
+  `items[i] < items[i]`, since the laws of `Equal` and `Ordered` decide its
+  result. A specification is exempt.
 - `return`, `break`, `continue`, and `unreachable` have type `Never`. `break`
   and `continue` appear only in loops.
 - `assert` appears only in tests, theorems, and proofs. In a proof it is
@@ -1437,18 +1446,39 @@ greet(user)
 ### Updating records
 
 ```ebnf
-update = LOWER_NAME { "." LOWER_NAME } ":" expression | LOWER_NAME ;
+update = [ LOWER_NAME { "." LOWER_NAME } ":" ] expression ;
 ```
 
 ```truss
-let moved = origin with (x: 1.0)
-let production = own config with (server.port: 443, log_level: LogLevel.Warning)
+type Point(x: Float64, y: Float64)
+
+type LogLevel =
+  | Information
+  | Warning
+
+type Server(host: String, port: Int64)
+
+type Config(server: Server, log_level: LogLevel)
+
+fn moved(origin: Point) -> Point {
+  origin with (x: 1.0)
+}
+
+fn production(config: own Config) -> Config {
+  own config with (server.port: 443, log_level: LogLevel.Warning)
+}
 ```
 
 - `base with (updates)` means copying the base into a new variable,
   assigning its fields, and returning it.
 - The base is passed as an `own` argument is: a base that is a place takes
   `own`, unless it copies implicitly.
+- The updates follow the rules of a construction's arguments, with a path
+  of fields for a label: each names a field of the record once, a bare name
+  goes to the field it names, as in `with (own name)`, and each value is
+  passed to its field as an `own` argument is.
+- `a.b: value` builds `a` anew with `b` updated, so it names `a`, and no
+  other update names `a` itself.
 - `with` works on records, and updates only fields visible at that point.
 
 ### Lambdas
@@ -2030,7 +2060,8 @@ fn profile(id: UserId) -> Result[Profile, DatabaseError]
   `Result`, `None` where it returns an `Option`, and early where it returns
   nothing. `Tasks.cancelled()` tells whether the task is cancelled. A task
   blocked on the mutex of a `mut` implementation waits until it acquires it.
-- A function that waits for another task has no `time` clause.
+- A function that waits for another task has no `time` clause, and the end
+  of a `concurrent` block or a `concurrent for` waits for its tasks.
 
 The iterations of a `parallel for` and of a `concurrent for` run at the same
 time, and a `concurrent for` iteration keeps running after the loop
@@ -2242,12 +2273,19 @@ fn count[Source: Cursor](source: own Source) -> UInt64
 
 ### Equality
 
-A type's equality is *structural* when two equal values cannot be distinguished
-by any function, so `a == b` implies `f(a) == f(b)`. The
-built-in integers, `Bool`, `Character`, `Unit`, `String`, and the types of
-specifications have it, and so does a type that derives `Equal` when all its
+A type's equality is *structural* when `==` compares contents: two values are
+equal exactly when they are the same variant and their fields are equal. The
+built-in integers, `Bool`, `Character`, `Unit`, and `String`, whose `==`
+compares text, have it, and so does a type that derives `Equal` when all its
 fields do. A hand-written `Equal`, float equality, and an opaque type's
 equality outside its package are not structural.
+
+A type's equality is *identity* when equal values are `identical`, so
+`a == b` implies `f(a) == f(b)` for every function `f`. The built-in
+integers, `Bool`, `Character`, `Unit`, and the types of specifications have
+it, and so does a type that derives `Equal` when the equality of all its
+fields is identity. `String`'s equality is structural but not identity: two
+equal strings can differ in `capacity()`.
 
 ### Deriving
 
@@ -2369,17 +2407,11 @@ laws, loop invariants, and every operation that could fail.
 There is no `assume`.
 
 ```truss
-theorem reverse_twice[Element](items: Slice[Element])
-  ensures items.reverse().reverse() == items.to_list()
-  decreases items.length()
+theorem reverse_twice[Element](items: Sequence[Element])
+  ensures identical(items.reversed().reversed(), items)
 {
-  match items.split_first() {
-    None => {}
-    Some((first, rest)) => {
-      reverse_twice(rest)
-      reverse_of_append(rest.reverse(), suffix: [first])
-    }
-  }
+  assert forall i in 0..items.length() =>
+    identical(items.reversed().reversed()[i], items[i])
 }
 
 proof Ordered.transitive for Box[Item: Ordered] {
@@ -2427,6 +2459,8 @@ an invariant, a law, or a proof.
   `requires`, and each index is in bounds. `&&`, `||`, `==>`, and `if` read
   left to right, so the right side can rely on the left.
 - `==` is the type's `Equal`, and `identical(a, b)` is identity, for any type.
+- A specification is read as a formula, not run: it holds no `return`,
+  `break`, `continue`, `?`, `var`, loop, or `unreachable`.
 
 | Form | Meaning |
 |---|---|
@@ -2465,9 +2499,9 @@ an invariant, a law, or a proof.
 - Float arithmetic in a specification follows IEEE 754.
 
 The prelude types `Sequence`, `FiniteSet`, `FiniteMap`, and `Multiset` exist
-only in specifications and have structural equality. A type gives its value
-in their terms with the prelude trait `Model`, whose `model()` can be called
-only in specifications:
+only in specifications, and their equality is identity. A type gives its
+value in their terms with the prelude trait `Model`, whose `model()` can be
+called only in specifications:
 
 ```truss
 fn List[Element].push(mut self, item: own Element)
@@ -2494,9 +2528,11 @@ public opaque type Session = todo
   definition.
 - Code with a `todo` is type-checked and proven, and callers are checked
   against the signature of an unfinished function.
-- A release build refuses a program whose `main` can reach a `todo`. In a
-  development build, a `todo` that runs stops the program and reports its
-  position.
+- A `todo` in a specification is a hole: on the paths through it, the
+  specification is neither proven nor assumed.
+- A release build refuses a program whose `main` can reach a `todo`, in its
+  code or its specifications. In a development build, a `todo` that runs
+  stops the program and reports its position.
 - A type defined as `todo` can be named, but its contents cannot be used.
 
 ## Debug output
@@ -2603,14 +2639,15 @@ and the prelude changes only with a language version.
   use call no private or `internal` function and name no such constant. An
   `ensures` may name any function the definition can, so that callers in its
   package can know its result in terms of private helpers.
-- A private or `internal` function, method, or constant that no definition
-  of its package uses is an error. A method or constant written in a trait,
-  a capability, or an impl is not checked. A use counts when the user is
+- An `internal` function, method, or constant that no definition of its
+  package uses is an error, and a private one is a warning. A warning is
+  reported as an error is, but it does not make `truss check`, a build, a
+  test run, or a publish fail. A method or constant written in a trait, a
+  capability, or an impl is not checked. A use counts when the user is
   public, is a test, an `impl`, or another definition the rule does not
-  check, or is itself used, so definitions that use only each other are an
-  error together. The `main` of a package's root module is exempt, and so
-  is a definition the compiler calls, such as the static `new` of a
-  `system` module's type, which builds the implementation of a capability.
+  check, or is itself used, so definitions that use only each other are
+  reported together. The `main` of a package's root module is exempt, and
+  so is a definition the compiler calls by name.
 
 ## No foreign code
 

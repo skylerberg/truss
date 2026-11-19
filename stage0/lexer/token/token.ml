@@ -168,7 +168,6 @@ let equal_punctuation (first : punctuation) (second : punctuation) =
   | (Open _ | Close _), _ | _, (Open _ | Close _) -> false
   | _ -> first == second
 
-let list_texts literal = Array.append [| literal.first |] (Array.map snd literal.rest)
 let list_interpolations literal = Array.map fst literal.rest
 
 let keywords =
@@ -449,3 +448,9 @@ let can_begin = function
       | Opaque | Requires | Uses | With ) ->
       false
   | Punctuation _ | Newline | End_of_file -> false
+
+module For_testing = struct
+  let list_texts literal = Array.append [| literal.first |] (Array.map snd literal.rest)
+  let keywords = keywords
+  let reserved_words = reserved_words
+end

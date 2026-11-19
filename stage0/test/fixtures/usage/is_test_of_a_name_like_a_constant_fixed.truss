@@ -1,0 +1,5 @@
+let lucky: Int64 = 7
+
+fn f(value: Int64) -> Bool {
+  value is app::main::lucky
+}

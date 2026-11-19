@@ -1,0 +1,6 @@
+type Inner(a: Int64)
+type Outer(inner: Inner, b: Int64)
+
+fn f(outer: Outer) -> Outer {
+  outer with (inner: Inner(a: 1), inner.a: 2)
+}

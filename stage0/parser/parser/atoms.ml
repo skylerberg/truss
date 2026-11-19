@@ -25,24 +25,30 @@ let parse_mode cursor =
   else if Cursor.accept_keyword cursor Own then Some Own
   else None
 
-let make_name cursor (token : Token.t) text : Syntax.name =
-  { text; id = Cursor.allocate_id cursor (Cursor.make_definition_span cursor token.span) }
+let make_name cursor (token : Token.t) : Syntax.name =
+  let ((text, case) : string * Syntax.case) =
+    match token.kind with
+    | Upper text -> (text, Upper)
+    | Lower text -> (text, Lower)
+    | _ -> Compiler_bug.raise_bug ~stage:"Parser" "a name is made from a token that is not a name"
+  in
+  { text; case; id = Cursor.allocate_id cursor (Cursor.make_definition_span cursor token.span) }
 
 let lower_name cursor expected =
   match Cursor.peek_kind cursor with
-  | Lower text -> make_name cursor (Cursor.take cursor) text
+  | Lower _ -> make_name cursor (Cursor.take cursor)
   | _ -> Cursor.fail cursor expected
 
 let parse_upper_name cursor expected =
   match Cursor.peek_kind cursor with
-  | Upper text -> make_name cursor (Cursor.take cursor) text
+  | Upper _ -> make_name cursor (Cursor.take cursor)
   | _ -> Cursor.fail cursor expected
 
 let parse_module_prefix cursor =
   let rec gather modules =
     match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
-    | Lower text, Punctuation Colon_colon ->
-        let module_name = make_name cursor (Cursor.take cursor) text in
+    | Lower _, Punctuation Colon_colon ->
+        let module_name = make_name cursor (Cursor.take cursor) in
         Cursor.advance cursor;
         gather (module_name :: modules)
     | _ -> List.rev modules
@@ -67,7 +73,12 @@ let make_string_literal cursor ~start ~modules (literal : Token.string_literal) 
       (fun (text, span) : Syntax.path ->
         {
           modules;
-          last = { text; id = Cursor.allocate_id cursor (Cursor.make_definition_span cursor span) };
+          last =
+            {
+              text;
+              case = Upper;
+              id = Cursor.allocate_id cursor (Cursor.make_definition_span cursor span);
+            };
         })
       literal.tag
   in

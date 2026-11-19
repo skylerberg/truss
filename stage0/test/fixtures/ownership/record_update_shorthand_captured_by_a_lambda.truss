@@ -1,0 +1,6 @@
+type Point(x: Int64, y: Int64)
+
+fn shift(x: Int64) -> Point {
+  let make: fn() -> Point = fn() { Point(x: 1, y: 2) with (x) }
+  make()
+}

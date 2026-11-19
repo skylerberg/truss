@@ -1,0 +1,4 @@
+fn f(span: Span) -> Int64 {
+  let narrowed = span with (low: span.high)
+  narrowed.low
+}

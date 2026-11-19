@@ -1,4 +1,10 @@
-type entry = { name : Path.package; version : Version.t; hash : string; holds : string list }
+type entry = {
+  name : Path.package;
+  version : Version.t;
+  hash : string;
+  holds : Grant.capability list;
+}
+
 type t = entry list
 
 exception Malformed of { line : int; message : string }
@@ -42,14 +48,19 @@ let parse_entry line text =
       let holds =
         match rest with
         | [] -> []
-        | "holds" :: (_ :: _ as capabilities) ->
-            List.map
-              (fun capability ->
-                let length = String.length capability in
-                if length > 0 && capability.[length - 1] = ',' then
-                  String.sub capability 0 (length - 1)
-                else capability)
-              capabilities
+        | "holds" :: (_ :: _ as words) ->
+            List.sort_uniq Grant.compare_capability
+              (List.map
+                 (fun item ->
+                   let written = String.trim item in
+                   match Grant.parse_capability written with
+                   | Some capability -> capability
+                   | None ->
+                       raise_malformed line
+                         "`%s` is not a capability's name or full path. The capabilities after \
+                          `holds` have `, ` between them."
+                         written)
+                 (String.split_on_char ',' (String.concat " " words)))
         | _ ->
             raise_malformed line
               "After a package's hash comes nothing, or `holds` and the capabilities it holds."
@@ -88,5 +99,9 @@ let print entries =
              entry.hash
              (match entry.holds with
              | [] -> ""
-             | holds -> " holds " ^ String.concat ", " (List.sort String.compare holds)))
+             | holds ->
+                 " holds "
+                 ^ String.concat ", "
+                     (List.map Grant.show_capability
+                        (List.sort_uniq Grant.compare_capability holds))))
          (sort_entries entries))

@@ -22,7 +22,7 @@ type operand =
   | Use of { place : place; type_ : Types.ty; origin : Core.origin }
   | Borrow of { place : place; type_ : Types.ty; mode : Types.mode; origin : Core.origin }
   | Take of { place : place; type_ : Types.ty; origin : Core.origin }
-  | Constant of { value : constant; type_ : Types.ty }
+  | Immediate of { value : constant; type_ : Types.ty }
 
 type callee = { target : operand Core.target; uses : Types.capability_set }
 
@@ -88,13 +88,13 @@ type rvalue =
 
 and choice =
   | Conditional of {
-      condition : operand;
+      condition : block;
       then_ : block;
       else_ : block;
       if_condition : Core.origin option;
     }
   | Cases of case list
-  | Connective of { connective : connective; left : operand; right : block }
+  | Connective of { connective : connective; left : block; right : block }
 
 and specification =
   | Result

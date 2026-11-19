@@ -76,14 +76,16 @@ and zonk_argument unifier = function
   | Types.Value value -> Types.Value (resolve_value unifier value)
 
 and zonk_capabilities unifier capabilities =
-  Types.flat_map_capabilities
+  Types.replace_capabilities
     (function
       | Types.Capability_projection { base; trait; name } ->
-          [
-            Types.Capability_projection
-              { base = zonk unifier base; trait = zonk_trait unifier trait; name };
-          ]
-      | capability -> [ capability ])
+          Some
+            (Types.make_capability_set
+               [
+                 Types.Capability_projection
+                   { base = zonk unifier base; trait = zonk_trait unifier trait; name };
+               ])
+      | _ -> None)
     capabilities
 
 and zonk_trait unifier (trait : Types.trait_reference) =

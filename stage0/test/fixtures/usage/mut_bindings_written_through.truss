@@ -1,0 +1,11 @@
+type Point(x: Int64, y: Int64)
+
+fn f(holder: mut Option[Point], points: mut List[Point]) {
+  match mut holder {
+    Some(point) => point.x = 0
+    None => {}
+  }
+  for point in mut points {
+    point.y = 0
+  }
+}

@@ -38,6 +38,14 @@ val check_named_call :
   Syntax.argument list ->
   Types.ty
 
+val check_record_update :
+  State.state ->
+  State.env ->
+  Syntax.expression ->
+  Syntax.expression ->
+  Syntax.update list ->
+  Types.ty
+
 val construct :
   State.state ->
   State.env ->

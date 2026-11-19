@@ -1,0 +1,6 @@
+type Interval(span: Span, name: Int64)
+
+fn f(interval: Interval) -> Int64 {
+  let widened = interval with (span.low: 10)
+  widened.name
+}
