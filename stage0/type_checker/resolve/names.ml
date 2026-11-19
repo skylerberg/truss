@@ -139,12 +139,17 @@ let list_generic_kinds (generics : Syntax.generic_parameter list) =
       | Generic_error -> None)
     generics
 
+let list_builtin_generics : Intrinsic.builtin -> (string * generic_kind) list = function
+  | Array -> [ ("Element", Type_kind); ("count", Value_kind) ]
+  | Storage | View -> [ ("Element", Type_kind) ]
+  | Shared -> [ ("Value", Type_kind) ]
+  | Int8 | Int16 | Int32 | Int64 | UInt8 | UInt16 | UInt32 | UInt64 | Float32 | Float64 | Bool
+  | Character | Unit | Never | Integer | Handle ->
+      []
+
 let find_generics lookups (path : Path.t) =
   match Intrinsic.find_builtin path with
-  | Some Array -> Some [ ("Element", Type_kind); ("count", Value_kind) ]
-  | Some (Storage | View) -> Some [ ("Element", Type_kind) ]
-  | Some Shared -> Some [ ("Value", Type_kind) ]
-  | Some _ -> Some []
+  | Some builtin -> Some (list_builtin_generics builtin)
   | None -> (
       match find_definition lookups path with
       | Some (key, definition) -> (
@@ -300,7 +305,17 @@ let list_members_visible_to_package lookups ~(package : Path.package) owner name
       declaration.key.module_.package = package || is_public declaration.visibility)
     (lookups.list_members owner name)
 
+let derived_methods : Well_known.method_ list =
+  [
+    Equal_equal;
+    Hash_hash;
+    Ordered_compare;
+    Default_default;
+    Serialize_serialize;
+    Deserialize_deserialize;
+  ]
+
 let is_derivable (trait : Path.t) =
-  match Well_known.of_path trait with
-  | Some (Equal | Hash | Ordered | Default | Serialize | Deserialize) -> true
-  | _ -> false
+  List.exists
+    (fun method_ -> Well_known.is (Well_known.locate_method method_).owner trait)
+    derived_methods

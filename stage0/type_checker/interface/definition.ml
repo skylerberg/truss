@@ -34,27 +34,20 @@ let sort_in_declared_order lookups path ~variant ~name_of fields =
         fields
   | None -> fields
 
-let make_builtin_shape builtin : Types.type_interface =
-  let element : Types.parameter =
-    { owner = Intrinsic.make_builtin_path builtin; name = "Element" }
-  in
-  let count : Types.parameter = { owner = Intrinsic.make_builtin_path builtin; name = "count" } in
-  let type_generics : Types.generic list =
+let make_builtin_shape (builtin : Intrinsic.builtin) : Types.type_interface =
+  let bounds : Types.trait_reference list =
     match builtin with
-    | Array ->
-        [ { generic = element; kind = Type_generic [] }; { generic = count; kind = Value_generic } ]
-    | Storage | View -> [ { generic = element; kind = Type_generic [] } ]
-    | Shared ->
-        let storable : Types.trait_reference =
-          { trait = Well_known.make_path Storable; trait_arguments = []; associated = [] }
-        in
-        [
-          {
-            generic = { owner = Intrinsic.make_builtin_path builtin; name = "Value" };
-            kind = Type_generic [ storable ];
-          };
-        ]
+    | Shared -> [ { trait = Well_known.make_path Storable; trait_arguments = []; associated = [] } ]
     | _ -> []
+  in
+  let type_generics =
+    List.map
+      (fun (name, (kind : Resolve.Names.generic_kind)) : Types.generic ->
+        {
+          generic = { owner = Intrinsic.make_builtin_path builtin; name };
+          kind = (match kind with Type_kind -> Type_generic bounds | Value_kind -> Value_generic);
+        })
+      (Resolve.Names.list_builtin_generics builtin)
   in
   { type_generics; shape = Builtin_type builtin; opaque = true; derives = [] }
 

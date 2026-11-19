@@ -55,7 +55,8 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
           let parts : Types.ty =
             Named { path = Well_known.make_path Sequence; arguments = [ Types.Type part ] }
           in
-          let index = State.make_trait_reference ~arguments:[] (Well_known.make_path Index) in
+          let { Well_known.owner; name; receiver } = Well_known.locate_method Index_at in
+          let index = State.make_trait_reference ~arguments:[] (Well_known.make_path owner) in
           let evidence =
             match State.find_evidence state parts index with
             | Some evidence -> Form.convert_evidence (State.convert_evidence evidence)
@@ -73,8 +74,8 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
                           (Trait_method
                              {
                                trait = index;
-                               name = "at";
-                               receiver = Read;
+                               name;
+                               receiver;
                                self_type = parts;
                                instantiation = Types.no_instantiation;
                                evidence;

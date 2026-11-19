@@ -502,7 +502,6 @@ let make_constructor_symbol (ty : Types.ty) variant =
 
 let make_selector_symbol ty variant field = Logic.Symbol.Field { type_ = ty; variant; field }
 let is_standard_equal = Well_known.is Equal
-let equal_trait = Well_known.make_path Equal
 
 let find_visible_type (context : State.context) (ty : Types.ty) =
   match ty with

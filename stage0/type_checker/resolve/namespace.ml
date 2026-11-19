@@ -60,7 +60,7 @@ let builtin_entries =
         name = Intrinsic.show_builtin builtin;
         kind = Type;
         visibility = Public;
-        generic = (match builtin with Array | Storage | View | Shared -> true | _ -> false);
+        generic = Names.list_builtin_generics builtin <> [];
       })
     Intrinsic.builtins
   @ List.map

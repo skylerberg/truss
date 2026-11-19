@@ -402,18 +402,14 @@ let () =
 let () =
   Harness.test "a `todo` type has no derived core form" (fun () ->
       let packages = Support.setup [ ("app::main", "type Later = todo\n  derives Equal\n") ] in
-      let path : Path.t =
-        Method
-          {
-            owner =
-              Derived
-                {
-                  type_ = Top { module_ = Support.parse_module "app::main"; name = "Later" };
-                  trait = Well_known.make_path Equal;
-                };
-            name = "equal";
-            receiver = Read;
-          }
+      let path =
+        Well_known.make_impl_method_path Equal_equal
+          ~impl:
+            (Derived
+               {
+                 type_ = Top { module_ = Support.parse_module "app::main"; name = "Later" };
+                 trait = Well_known.make_path Equal;
+               })
       in
       if Database.For_testing.read_derived_form (Support.make_database packages) path <> None then
         Harness.fail "it has a core form");

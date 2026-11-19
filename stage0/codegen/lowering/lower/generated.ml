@@ -121,10 +121,10 @@ let build_locked_entry context (item : Lowered.Item.t) ~capability ~name : Emit_
   in
   Emit_c.Ir_builder.emit builder
     (Assign (mutex, Convert (Copy (Lowered.make_local_place address), Integer UInt64)));
-  let call_tasks name =
-    let slot, signature =
-      Targets.lookup_capability_method context (Well_known.make_path Tasks) name
-    in
+  let call_tasks method_ =
+    let { Well_known.owner; name; _ } = Well_known.locate_method method_ in
+    let tasks_capability = Well_known.make_path owner in
+    let slot, signature = Targets.lookup_capability_method context tasks_capability name in
     Emit_c.Ir_builder.emit builder
       (Call
          {
@@ -132,7 +132,7 @@ let build_locked_entry context (item : Lowered.Item.t) ~capability ~name : Emit_
              Evidence_call
                {
                  evidence = tasks;
-                 capability = Well_known.make_path Tasks;
+                 capability = tasks_capability;
                  slot;
                  signature = fst (Targets.make_entry_signature context signature);
                };
@@ -144,7 +144,7 @@ let build_locked_entry context (item : Lowered.Item.t) ~capability ~name : Emit_
     Monomorphic.ground context.monomorphic Types.no_substitution
       (Types.extract_result_type capability_signature.output)
   in
-  call_tasks "lock";
+  call_tasks Tasks_lock;
   Emit_c.Ir_builder.emit builder
     (Call
        {
@@ -156,7 +156,7 @@ let build_locked_entry context (item : Lowered.Item.t) ~capability ~name : Emit_
              parameter_places;
          result = Convention.make_destination result (choose_result_place state result_ty);
        });
-  call_tasks "unlock";
+  call_tasks Tasks_unlock;
   Emit_c.Ir_builder.build state.builder
     (Lowering.finish_function state
        ~returns:(capability_signature.output <> Returns Never)
@@ -226,7 +226,7 @@ let build_real_implementation (state : Lowering.state) ~user capability =
             { trait = Well_known.make_path Default; trait_arguments = []; associated = [] }
         with
         | Some (From_impl { impl = default_impl; _ }) ->
-            Path.Method { owner = default_impl; name = "default"; receiver = Static }
+            Well_known.make_impl_method_path Default_default ~impl:default_impl
         | _ ->
             Definitions.raise_bug "%s implements %s and has no impl of Default"
               (Types.show for_type) (Path.show capability)

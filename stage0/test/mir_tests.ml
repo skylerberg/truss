@@ -1324,10 +1324,10 @@ let () =
   let expect_edges path ~expected =
     expect_paths ~expected (Mir.Call_edges.list_path_edges (Lazy.force lookups) path)
   in
-  let equal_of type_name : Path.t =
-    Method { owner = make_derived_impl type_name Equal; name = "equal"; receiver = Read }
-  and default_of type_name : Path.t =
-    Method { owner = make_derived_impl type_name Default; name = "default"; receiver = Static }
+  let equal_of type_name =
+    Well_known.make_impl_method_path Equal_equal ~impl:(make_derived_impl type_name Equal)
+  and default_of type_name =
+    Well_known.make_impl_method_path Default_default ~impl:(make_derived_impl type_name Default)
   in
   let meters_equal = "app::main::impl standard::core::Equal for app::main::Meters.equal" in
   Harness.test "a derived method of a record calls the method of each field's impl" (fun () ->
@@ -1375,7 +1375,7 @@ let () =
         List.map Path.show
           (Mir.Call_edges.list_implementations (Lazy.force lookups)
              ~calling_package:(Support.parse_module "app::main").package
-             (Method { owner = Well_known.make_path Equal; name = "equal"; receiver = Read }))
+             (Well_known.make_method_path Equal_equal))
       in
       List.iter
         (fun expected ->

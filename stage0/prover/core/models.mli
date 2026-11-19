@@ -19,14 +19,13 @@ val rank : State.context -> Types.ty -> Logic.term -> Logic.term
 
 val make_finite_function :
   State.context ->
-  Types.ty ->
-  string ->
+  Well_known.method_ ->
+  arguments:Types.argument list ->
   Logic.sort ->
   (Logic.term * Logic.sort) list ->
   Logic.term ->
   Logic.term
 
-val finite_set_path : Path.t
 val rank_model : State.context -> Types.ty -> model:Types.ty -> impl:Path.t -> Logic.symbol -> unit
 
 val find_model_function :

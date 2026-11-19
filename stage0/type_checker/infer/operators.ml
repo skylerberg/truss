@@ -1,9 +1,10 @@
-let select_arithmetic_trait : Syntax.arithmetic -> Path.t * string = function
-  | Add -> (Well_known.make_path Add, "add")
-  | Subtract -> (Well_known.make_path Subtract, "subtract")
-  | Multiply -> (Well_known.make_path Multiply, "multiply")
-  | Divide -> (Well_known.make_path Divide, "divide")
-  | Remainder -> (Well_known.make_path Remainder, "remainder")
+let select_arithmetic_method : Syntax.arithmetic -> Well_known.method_ * Well_known.associated =
+  function
+  | Add -> (Add_add, Add_output)
+  | Subtract -> (Subtract_subtract, Subtract_output)
+  | Multiply -> (Multiply_multiply, Multiply_output)
+  | Divide -> (Divide_divide, Divide_output)
+  | Remainder -> (Remainder_remainder, Remainder_output)
 
 let infer_integer_result state span type_ ~(describe : string -> string) =
   let is_integer resolved = State.is_integer_type state resolved || Types.is_error resolved in
@@ -149,13 +150,14 @@ and check_prefix state env ?expected (value : Syntax.expression) operator
             check_operator_call
               ~operands:
                 [ { Tables.expression = inner.id; core_argument_index = 0; mode = Types.Read } ]
-              state value ~trait:(Well_known.make_path Negate) ~method_:"negate" ~left:type_
-              ~right:None
+              state value ~method_:Well_known.Negate_negate ~output:Well_known.Negate_output
+              ~left:type_ ~right:None
           end)
 
-and check_operator_call ~operands state (value : Syntax.expression) ~trait ~method_ ~left ~right =
+and check_operator_call ~operands state (value : Syntax.expression) ~method_ ~output ~left ~right =
+  let { Well_known.owner; name; receiver } = Well_known.locate_method method_ in
   let arguments = match right with Some right -> [ Types.Type right ] | None -> [] in
-  let reference = State.make_trait_reference ~arguments trait in
+  let reference = State.make_trait_reference ~arguments (Well_known.make_path owner) in
   let result = State.make_fresh_type state in
   let is_one_built_in_number =
     match (State.resolve state left, Option.map (State.resolve state) right) with
@@ -173,8 +175,8 @@ and check_operator_call ~operands state (value : Syntax.expression) ~trait ~meth
           Trait_method
             {
               trait = reference;
-              name = method_;
-              receiver = Read;
+              name;
+              receiver;
               self_type = left;
               instantiation = Types.no_instantiation;
               evidence = Built_in;
@@ -196,7 +198,7 @@ and check_operator_call ~operands state (value : Syntax.expression) ~trait ~meth
         (match State.find_evidence state left reference with
         | Some evidence ->
             let output =
-              State.resolve_associated_type state left reference "Output"
+              State.resolve_associated_type state left reference output
                 ~at:(State.read_span state value.id)
             in
             let decided = State.zonk state result in
@@ -212,8 +214,8 @@ and check_operator_call ~operands state (value : Syntax.expression) ~trait ~meth
                     Trait_method
                       {
                         trait = reference;
-                        name = method_;
-                        receiver = Read;
+                        name;
+                        receiver;
                         self_type = left;
                         instantiation = Types.no_instantiation;
                         evidence = State.convert_evidence evidence;
@@ -348,14 +350,14 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
                 ignore (add_operand_mismatch state value left right ~left_type ~right_type);
               left_type
         in
-        let trait, method_, result =
+        let method_, result =
           match comparison with
-          | Equal | Not_equal -> (Well_known.make_path Equal, "equal", Types.bool)
+          | Equal | Not_equal -> (Well_known.Equal_equal, Types.bool)
           | Less | Less_equal | Greater | Greater_equal ->
-              ( Well_known.make_path Ordered,
-                "compare",
-                Types.make_named (Well_known.make_path Ordering) [] )
+              (Ordered_compare, Types.make_named (Well_known.make_path Ordering) [])
         in
+        let { Well_known.owner; name; receiver } = Well_known.locate_method method_ in
+        let trait = Well_known.make_path owner in
         state.tables.calls.(value.id) <-
           Some
             {
@@ -363,8 +365,8 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
                 Trait_method
                   {
                     trait = State.make_trait_reference ~arguments:[] trait;
-                    name = method_;
-                    receiver = Read;
+                    name;
+                    receiver;
                     self_type = compared_type;
                     instantiation = Types.no_instantiation;
                     evidence = Built_in;
@@ -431,7 +433,7 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
           Types.Integer
         end
         else
-          let trait, method_ = select_arithmetic_trait arithmetic in
+          let method_, output = select_arithmetic_method arithmetic in
           if
             (State.is_integer_type state (State.normalize state left_type)
             && State.is_integer_type state (State.normalize state right_type))
@@ -446,7 +448,7 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
                   { Tables.expression = left.id; core_argument_index = 0; mode = Types.Read };
                   { Tables.expression = right.id; core_argument_index = 1; mode = Types.Read };
                 ]
-              state value ~trait ~method_ ~left:left_type ~right:(Some right_type)
+              state value ~method_ ~output ~left:left_type ~right:(Some right_type)
           end
         end
 

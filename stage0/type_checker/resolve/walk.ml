@@ -241,7 +241,7 @@ let resolve_type_name state scope ?(variants = false) (path : Syntax.path) =
               | None ->
                   report_unknown state path.last ~expected:"a type here"
                     (list_type_candidates state scope
-                    @ if variants then List.map fst Prelude.variants else []))))
+                    @ if variants then List.map Well_known.show_variant Prelude.variants else []))))
 
 let find_target state (name : Syntax.name) = (lookup_current_names state).names.(name.id)
 

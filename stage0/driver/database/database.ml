@@ -652,11 +652,6 @@ let list_unwritten_methods (names : Resolve.Names.lookups) package =
       | Some _ | None -> [])
     (names.list_impls package)
 
-let is_derived_method (path : Path.t) =
-  match path with
-  | Method { owner = Derived { trait; _ }; name; _ } -> Infer.derives trait name
-  | _ -> false
-
 let list_package_parts database (names : Resolve.Names.lookups) package : Part.any list =
   let package_database = obtain_owner database package in
   let declarations = names.list_package_declarations package in
@@ -697,7 +692,7 @@ let list_package_parts database (names : Resolve.Names.lookups) package : Part.a
       (names.list_impls package)
   @ List.map
       (fun path -> Part.Any (Generated_mir path))
-      (List.filter is_derived_method unwritten_methods)
+      (List.filter Infer.is_derived_method unwritten_methods)
   @ List.concat_map
       (fun path -> [ Part.Any (Mir_call_edges path); Any (Call_edges (path, package)) ])
       (List.sort_uniq Path.compare (paths @ unwritten_methods))

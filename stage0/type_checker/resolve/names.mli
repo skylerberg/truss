@@ -31,6 +31,7 @@ val is_public : visibility -> bool
 
 type law_proof_name = { trait : Path.t; law : string; type_head : Path.t }
 
+val derived_methods : Well_known.method_ list
 val is_derivable : Path.t -> bool
 
 type lookups = {
@@ -70,6 +71,7 @@ type generic_kind = Type_kind | Value_kind
 
 val find_syntax_error : lookups -> key -> Parts.part -> Diagnostic.reported option
 val is_broken : lookups -> key -> Parts.part -> bool
+val list_builtin_generics : Intrinsic.builtin -> (string * generic_kind) list
 val find_generics : lookups -> Path.t -> (string * generic_kind) list option
 
 type 'visible lookup = Visible of 'visible | Hidden of (Path.t * visibility) | Absent

@@ -87,7 +87,6 @@ val find_float_format : Types.ty -> (int * int) option
 val make_constructor_symbol : Types.ty -> string option -> 'a Logic.Symbol.t
 val make_selector_symbol : Types.ty -> string option -> string -> 'a Logic.Symbol.t
 val is_standard_equal : Path.t -> bool
-val equal_trait : Path.t
 
 val find_visible_type :
   State.context -> Types.ty -> (Types.type_interface * Types.substitution) option

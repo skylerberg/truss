@@ -524,8 +524,13 @@ let () =
       expect_one_diagnostic Fixtures.Resolve.parallel_lets_of_one_name "resolve.shadowed_name");
   Harness.test "two concurrent branches cannot bind one name" (fun () ->
       expect_one_diagnostic Fixtures.Resolve.concurrent_lets_of_one_name "resolve.shadowed_name");
-  Harness.test "a definition cannot take a prelude name" (fun () ->
-      expect_one_diagnostic "type List(count: Int64)\n" "resolve.shadowed_name");
+  List.iter
+    (fun name ->
+      Harness.test (Printf.sprintf "a definition cannot take the prelude name `%s`" name) (fun () ->
+          expect_one_diagnostic
+            (Printf.sprintf "type %s(count: Int64)\n" name)
+            "resolve.shadowed_name"))
+    [ "List"; "Unit"; "Clock"; "Duration" ];
   Harness.test "a generic parameter cannot take a prelude variant's name" (fun () ->
       expect_one_diagnostic "fn f[Some](value: Some) {}\n" "resolve.shadowed_name");
   Harness.test "a trait whose header did not parse is not resolved" (fun () ->
