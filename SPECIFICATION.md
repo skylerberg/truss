@@ -460,8 +460,10 @@ public type Interval =
 - Repeated invariants all hold, and each may rely on the ones before it.
 - Invariants are proven, never checked when the program runs. An invariant
   holds wherever other code can observe the value: when it is built,
-  directly or with `with`, passed to a call, or returned, and when the
-  function that holds it ends. A `with` is checked after all of its updates.
+  directly or with `with`, passed to a call, or returned, and when its
+  holder ends: a `var` at the end of its scope, and a `mut` parameter or
+  `mut self` when the function returns. A `with` is checked after all of
+  its updates.
 - A private method that takes `mut self` is a step of an update: the
   invariant of its `self` is neither assumed when it is called nor required
   when it returns. A method written in a trait, a capability, or an `impl`

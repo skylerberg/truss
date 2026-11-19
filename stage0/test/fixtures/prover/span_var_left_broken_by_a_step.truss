@@ -1,0 +1,13 @@
+fn Span.lift(mut self)
+  requires self.high < 1000
+{
+  self.low = self.high + 1
+}
+
+fn f(high: Int64) -> Int64
+  requires 0 <= high && high < 1000
+{
+  var range = Span(low: 0, high: high)
+  mut range.lift()
+  range.low
+}
