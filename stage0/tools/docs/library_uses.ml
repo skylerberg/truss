@@ -154,32 +154,52 @@ let find_canonical_path units path =
       | None -> None)
   | Some _ | None -> None
 
+let rec expand_aliases aliases (path : Path.t) : Path.t =
+  match path with
+  | Pident ident -> (
+      match List.find_opt (fun (alias, _) -> Ident.same alias ident) aliases with
+      | Some (_, target) -> expand_aliases aliases target
+      | None -> path)
+  | Pdot (parent, name) -> Pdot (expand_aliases aliases parent, name)
+  | Papply _ | Pextra_ty _ -> path
+
 let rec find_module_path (module_expr : Typedtree.module_expr) =
   match module_expr.mod_desc with
   | Tmod_ident (path, _) -> Some path
   | Tmod_constraint (constrained, _, _, _) -> find_module_path constrained
   | _ -> None
 
-let rec is_module_reexport (module_type : Typedtree.module_type) =
+let rec find_typeof_module (module_type : Typedtree.module_type) =
   match module_type.mty_desc with
-  | Tmty_alias _ | Tmty_typeof _ -> true
-  | Tmty_with (constrained, _) -> is_module_reexport constrained
-  | Tmty_ident _ | Tmty_signature _ | Tmty_functor _ -> false
+  | Tmty_typeof module_expr -> Some module_expr
+  | Tmty_with (constrained, _) -> find_typeof_module constrained
+  | Tmty_ident _ | Tmty_signature _ | Tmty_functor _ | Tmty_alias _ -> None
+
+let list_typeof_paths (module_expr : Typedtree.module_expr) =
+  match module_expr.mod_desc with
+  | Tmod_structure structure ->
+      List.filter_map
+        (fun (item : Typedtree.structure_item) ->
+          match item.str_desc with
+          | Tstr_include { incl_mod; _ } -> find_module_path incl_mod
+          | _ -> None)
+        structure.str_items
+  | _ -> Option.to_list (find_module_path module_expr)
+
+let find_reexported_module (module_type : Typedtree.module_type) =
+  match module_type.mty_desc with
+  | Tmty_alias (path, _) -> Some path
+  | Tmty_ident _ | Tmty_signature _ | Tmty_functor _ | Tmty_typeof _ | Tmty_with _ -> (
+      match Option.map list_typeof_paths (find_typeof_module module_type) with
+      | Some [ path ] -> Some path
+      | Some _ | None -> None)
 
 let list_included_modules (signature : Typedtree.signature) =
   List.concat_map
     (fun (item : Typedtree.signature_item) ->
       match item.sig_desc with
-      | Tsig_include { incl_mod = { mty_desc = Tmty_typeof module_expr; _ }; _ } -> (
-          match module_expr.mod_desc with
-          | Tmod_structure structure ->
-              List.filter_map
-                (fun (item : Typedtree.structure_item) ->
-                  match item.str_desc with
-                  | Tstr_include { incl_mod; _ } -> find_module_path incl_mod
-                  | _ -> None)
-                structure.str_items
-          | _ -> Option.to_list (find_module_path module_expr))
+      | Tsig_include { incl_mod; _ } ->
+          Option.fold ~none:[] ~some:list_typeof_paths (find_typeof_module incl_mod)
       | _ -> [])
     signature.sig_items
 
@@ -228,8 +248,12 @@ let collect_uses units inclusions ~user_library ~user file =
     traverse ();
     is_reexporting := was_reexporting
   in
+  let aliases = ref [] in
+  let record_alias alias target =
+    Option.iter (fun alias -> aliases := (alias, target) :: !aliases) alias
+  in
   let record ?member kind path =
-    match find_canonical_path units path with
+    match find_canonical_path units (expand_aliases !aliases path) with
     | Some (owner, _) when !is_reexporting && Some owner = user_library -> ()
     | Some (owner, path) ->
         let path = to_documented_path inclusions (path @ Option.to_list member) in
@@ -253,15 +277,25 @@ let collect_uses units inclusions ~user_library ~user file =
       structure_item =
         (fun iterator item ->
           match item.str_desc with
-          | (Tstr_module { mb_expr = module_expr; _ } | Tstr_include { incl_mod = module_expr; _ })
-            when Option.is_some (find_module_path module_expr) ->
+          | Tstr_module { mb_id; mb_expr; _ } -> (
+              match find_module_path mb_expr with
+              | Some target ->
+                  record_alias mb_id target;
+                  while_reexporting (fun () -> default.structure_item iterator item)
+              | None -> default.structure_item iterator item)
+          | Tstr_include { incl_mod; _ } when Option.is_some (find_module_path incl_mod) ->
               while_reexporting (fun () -> default.structure_item iterator item)
           | _ -> default.structure_item iterator item);
       signature_item =
         (fun iterator item ->
           match item.sig_desc with
-          | (Tsig_module { md_type = module_type; _ } | Tsig_include { incl_mod = module_type; _ })
-            when is_module_reexport module_type ->
+          | Tsig_module { md_id; md_type; _ } -> (
+              match find_reexported_module md_type with
+              | Some target ->
+                  record_alias md_id target;
+                  while_reexporting (fun () -> default.signature_item iterator item)
+              | None -> default.signature_item iterator item)
+          | Tsig_include { incl_mod; _ } when Option.is_some (find_typeof_module incl_mod) ->
               while_reexporting (fun () -> default.signature_item iterator item)
           | _ -> default.signature_item iterator item);
       type_declaration =
