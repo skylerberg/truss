@@ -6,6 +6,7 @@ let lower (context : Context.t) (scalar : Intrinsic.scalar) =
   let read_type_argument = Context.read_type_argument context in
   let call = Context.call context in
   let fail_obligation_when = Context.fail_obligation_when context in
+  let fail_operation_when = Context.fail_operation_when context in
   let set_binary op = set (Binary (op, read_operand 0, read_operand 1)) in
   let set_comparison comparison = set (Compare (comparison, read_operand 0, read_operand 1)) in
   let set_unary op = set (Unary (op, read_operand 0)) in
@@ -28,21 +29,21 @@ let lower (context : Context.t) (scalar : Intrinsic.scalar) =
             read_operand 1;
             Address { place = Lowered.make_local_place result; writable = true };
           ];
-        fail_obligation_when (Holds (Copy (Lowered.make_local_place over))) "arithmetic overflow";
+        fail_operation_when (Holds (Copy (Lowered.make_local_place over))) "arithmetic overflow";
         set (Use (Copy (Lowered.make_local_place result)))
     | _ -> set_binary op
   in
   let lower_checked_division op =
     match find_integer_argument () with
     | Some integer ->
-        fail_obligation_when
+        fail_operation_when
           (Test (Equal, read_operand 1, Constant (Integer (integer, Z.zero))))
           "division by zero";
         (match integer with
         | Int8 | Int16 | Int32 | Int64 ->
             let bits = 8 * Memory_layout.compute_integer_size integer in
             let least = Z.neg (Z.shift_left Z.one (bits - 1)) in
-            fail_obligation_when
+            fail_operation_when
               (Conjunction
                  ( Test (Equal, read_operand 1, Constant (Integer (integer, Z.minus_one))),
                    Test (Equal, read_operand 0, Constant (Integer (integer, least))) ))
@@ -67,11 +68,11 @@ let lower (context : Context.t) (scalar : Intrinsic.scalar) =
         let make_constant number : Lowered.operand = Constant (Integer (amount, Z.of_int number)) in
         (match amount with
         | Int8 | Int16 | Int32 | Int64 ->
-            fail_obligation_when
+            fail_operation_when
               (Test (Less, read_operand 1, make_constant 0))
               "shift amount out of range"
         | _ -> ());
-        fail_obligation_when
+        fail_operation_when
           (Test (Greater_equal, read_operand 1, make_constant bits))
           "shift amount out of range"
     | _ -> ());
@@ -132,7 +133,7 @@ let lower (context : Context.t) (scalar : Intrinsic.scalar) =
       | Some ((Int8 | Int16 | Int32 | Int64) as integer) ->
           let bits = 8 * Memory_layout.compute_integer_size integer in
           let least = Z.neg (Z.shift_left Z.one (bits - 1)) in
-          fail_obligation_when
+          fail_operation_when
             (Test (Equal, read_operand 0, Constant (Integer (integer, least))))
             "arithmetic overflow";
           set_unary Negate

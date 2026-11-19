@@ -17,7 +17,7 @@ type function_body = { path : Path.t; implementation : Interface.Impls.implement
 
 type scope_kind =
   | Function_body of function_body
-  | Lambda_body of Core.origin
+  | Lambda_body of { origin : Core.origin; enclosing_panic : Types.capability option }
   | Restricted of { description : string; reason : string; enclosing : scope option }
 
 and scope = { allowed : Types.capability_set; provided : Types.capability_set; kind : scope_kind }
@@ -137,7 +137,7 @@ let rec require_available checking scope (origin : Core.origin) ?(subject = "Thi
       (fun capability ->
         let shown = Types.show_capability capability in
         match scope.kind with
-        | Lambda_body lambda ->
+        | Lambda_body { origin = lambda; _ } ->
             report checking Lambda_uses lambda
               ~notes:
                 (if Option.is_some alternative then
@@ -228,6 +228,35 @@ let require_run_forever_unless checking scope (origin : Core.origin) condition =
     (Types.make_capability_set
        (Option.to_list (Types.make_unless (Built_in Run_forever) condition)))
 
+let find_available_panic scope =
+  List.find_opt
+    (fun capability -> Types.find_base capability = Built_in Panic)
+    (Types.list_capabilities (compute_available scope))
+
+let find_panic_for_lambda scope =
+  match (find_available_panic scope, scope.kind) with
+  | Some panic, _ -> Some panic
+  | None, Lambda_body { enclosing_panic; _ } when Types.contains_capability_variable scope.allowed
+    ->
+      enclosing_panic
+  | None, (Function_body _ | Lambda_body _ | Restricted _) -> None
+
+let can_fail (operation : Intrinsic.scalar) ty =
+  Types.is_integer_type ty
+  &&
+  match operation with
+  | Add | Subtract | Multiply | Divide | Remainder | Negate | Shift_left | Shift_right -> true
+  | _ -> false
+
+let require_panic_of_failing_operation checking scope (origin : Core.origin) =
+  match scope.kind with
+  | Lambda_body { enclosing_panic = Some panic; _ }
+    when Option.is_none (find_available_panic scope)
+         && Types.contains_capability_variable scope.allowed ->
+      require_available checking scope origin ~subject:"This operation may fail, so it"
+        (Types.make_capability_set [ panic ])
+  | Function_body _ | Lambda_body _ | Restricted _ -> ()
+
 let compute_node_origin = function
   | `Expression (inner : Core.expression) -> inner.origin
   | `Statement (inner : Core.statement) -> inner.origin
@@ -239,7 +268,13 @@ let rec check_expression checking scope (node : Core.expression) =
       let allowed =
         match node.type_ with Types.Function { uses; _ } -> uses | _ -> Types.no_capabilities
       in
-      check_block checking (make_scope ~allowed (Lambda_body node.origin)) body
+      check_block checking
+        (make_scope ~allowed
+           (Lambda_body { origin = node.origin; enclosing_panic = find_panic_for_lambda scope }))
+        body
+  | Operator { operation; _ } when can_fail operation node.type_ ->
+      require_panic_of_failing_operation checking scope node.origin;
+      check_children checking scope (`Expression node)
   | Provide { implementations; body } -> check_provide checking scope implementations body
   | Quantified _ ->
       check_children checking (make_quantifier_scope ~enclosing:scope) (`Expression node)

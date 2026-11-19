@@ -1215,7 +1215,8 @@ A capability parameter passes on the capabilities a callback uses,
 - A call infers `Granted` from the functions it passes, and writes no type
   argument for it (see [Explicit type arguments](#explicit-type-arguments)).
   Where the function passed may run forever, `Granted` holds `RunForever`,
-  and so does the call.
+  and so does the call. Where it is a lambda that takes `Panic` (see
+  [Failure](#failure)), `Granted` holds `Panic`.
 - A function declares `uses generic Granted` only where it calls a function
   that uses it. One that returns or stores such a function does not, and its
   caller needs the capabilities only where it calls the result:
@@ -2022,8 +2023,9 @@ public trait Add[Right] {
 ### Integers
 
 - **No integer operation overflows silently.** An operation that could
-  overflow is proven not to, or the code calls the standard library's
-  checked, wrapping, or saturating method.
+  overflow is proven not to, panics in code that has `Panic` (see
+  [Failure](#failure)), or is the standard library's checked, wrapping, or
+  saturating method.
 - `/` rounds toward zero, and `%` has the sign of its left operand.
 - `>>` on a signed integer copies the sign bit, and on an unsigned integer
   shifts in zeros. A shift amount is any unsigned integer type, proven
@@ -2045,9 +2047,10 @@ public trait Add[Right] {
 
 ## Failure
 
-Code panics only where it calls `Panic.crash`, directly or through a
-callee such as `expect`, so only code that has `Panic` panics. Running out
-of memory and overflowing the stack are the exceptions.
+Only code that has `Panic` panics. It panics where it calls `Panic.crash`,
+directly or through a callee such as `expect`, and where an integer
+operation fails. Running out of memory and overflowing the stack are the
+exceptions.
 
 Every operation that can fail is a proof obligation, in every function and
 every test: integer overflow, division by zero, indexing or slicing out of
@@ -2059,11 +2062,22 @@ compile:
 2. Require it with `requires`.
 3. Call a method that returns an `Option` or a `Result`, such as
    `checked_add` or `get`.
+4. For an integer operation, declare `uses Panic`.
 
-`unreachable` admits only the first. Code that crashes when the operation
-would fail calls the third kind of method and `expect` on its result, as in
-`left.checked_add(right).expect("the total fits Int64")`, and declares
-`uses Panic`.
+**In code that has `Panic`, an integer operation that fails panics.** An
+overflow, a division by zero, and a shift that is too large are then not
+proof obligations. Indexing, slicing, and `unreachable` are proven there
+too.
+
+- Code that uses `Panic unless C` proves its integer operations where `C`
+  holds.
+- A lambda has `Panic` where its type uses it. A lambda whose capabilities
+  are inferred, such as one passed to `map`, takes `Panic` for an integer
+  operation where the code it is written in has `Panic`.
+- `unreachable` admits only the first way.
+- `left.checked_add(right).expect("the total fits Int64")` panics with the
+  message given to `expect`. A failing operation panics with a message that
+  names the failure, such as `arithmetic overflow`.
 
 `Panic` is a built-in capability. `Panic.crash(message)` prints its message
 and location to standard error and ends the process with a nonzero exit
