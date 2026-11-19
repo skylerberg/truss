@@ -25,7 +25,10 @@ let () =
                  { package = { Path.owner = None; name = "forecast" }; capabilities = [] };
                  {
                    package = { Path.owner = Some "truss"; name = "postgres" };
-                   capabilities = [ "NetworkClient"; "Handles"; "Clock" ];
+                   capabilities =
+                     [
+                       Grant.Prelude "NetworkClient"; Grant.Prelude "Handles"; Grant.Prelude "Clock";
+                     ];
                  };
                ];
            };
@@ -55,6 +58,26 @@ let () =
         Harness.fail "not found";
       if Manifest.has_project_table "[package]\nname = \"project\"\n# [project]\n" then
         Harness.fail "found one");
+  Harness.test "a [project] table written with spaces or quotes in its brackets makes a project"
+    (fun () ->
+      List.iter
+        (fun text ->
+          if not (Manifest.has_project_table text) then Harness.fail "%S is not a project" text)
+        [ "[ project ]\n"; "[\"project\"]\n"; "[project]\n" ]);
+  Harness.test "a grant names a prelude capability alike by its name and by its full path"
+    (fun () ->
+      let read_grant written =
+        match
+          Manifest.parse
+            (Printf.sprintf "[package]\nname = \"a\"\n[dependencies]\nb = [\"%s\"]\n" written)
+        with
+        | { package = Some { dependencies = [ { capabilities; _ } ]; _ }; _ } -> capabilities
+        | _ -> failwith "the grant is read differently"
+      in
+      if read_grant "Clock" <> read_grant "standard::capabilities::Clock" then
+        Harness.fail "the two are different grants";
+      if read_grant "acme::store::Ledger" = read_grant "Ledger" then
+        Harness.fail "a capability outside the prelude is its name alone");
   Harness.test "the toolchain builds a package written for its own Truss or an older one" (fun () ->
       if not (Manifest.toolchain_builds Manifest.truss_version) then Harness.fail "refuses its own";
       if not (Manifest.toolchain_builds "0.0") then Harness.fail "refuses an older one";
@@ -120,7 +143,7 @@ let () =
                [
                  {
                    package = { Path.owner = None; name = "http" };
-                   capabilities = [ "NetworkClient"; "Clock" ];
+                   capabilities = [ Grant.Prelude "NetworkClient"; Grant.Prelude "Clock" ];
                  };
                ];
              _;
@@ -140,13 +163,17 @@ let () =
            {
              name = { Path.owner = None; name = "a" };
              dependencies =
-               [ { package = { Path.owner = None; name = "b" }; capabilities = [ "c#d" ] } ];
+               [ { package = { Path.owner = None; name = "b" }; capabilities = [ Prelude "c#d" ] } ];
              _;
            };
        _;
       } ->
           ()
       | _ -> Harness.fail "read differently");
+  Harness.test "a grant that is neither a capability's name nor a path is malformed, at its line"
+    (fun () -> expect_malformed_at 4 "[package]\nname = \"a\"\n[dependencies]\nb = [\"a:b\"]\n");
+  Harness.test "the first malformed line is reported, whatever the mistake on a later line"
+    (fun () -> expect_malformed_at 2 "[package]\nname\n[dependencies]\nb = [\"c\"] %\n");
   Harness.test "a string that is not closed on its line is malformed" (fun () ->
       expect_malformed_at 2 "[package]\nname = \"a\n")
 

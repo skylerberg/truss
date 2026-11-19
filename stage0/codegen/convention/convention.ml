@@ -61,9 +61,5 @@ let make_function_value_signature env (function_type : Ground.function_type) : L
   let signature = make_signature ~returns (written @ [ capabilities ]) result_ty in
   { signature with parameters = environment :: signature.parameters }
 
-let make_function_value_shape function_type : Memory_layout.shape =
-  Record
-    [ ("code", Raw (Pointer (Code function_type))); ("environment", Raw (Nullable_pointer Opaque)) ]
-
 let drop_signature ty : Lowered.signature =
   { parameters = [ Pointer { target = Value ty; writable = true } ]; result = None; returns = true }

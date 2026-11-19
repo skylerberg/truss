@@ -84,9 +84,9 @@ let measure_character text offset =
 let choose_problem value issues ~fixed =
   let find_leftmost issues =
     List.fold_left
-      (fun best candidate ->
+      (fun best (candidate : issue) ->
         match best with
-        | Some best when best.problem.start <= candidate.problem.start -> Some best
+        | Some (best : issue) when best.problem.start <= candidate.problem.start -> Some best
         | _ -> Some candidate)
       None issues
   in
@@ -94,7 +94,7 @@ let choose_problem value issues ~fixed =
   | _ :: _ as unfixable ->
       {
         value;
-        problem = Option.map (fun issue -> issue.problem) (find_leftmost unfixable);
+        problem = Option.map (fun (issue : issue) -> issue.problem) (find_leftmost unfixable);
         fixes = [];
       }
   | [] -> (

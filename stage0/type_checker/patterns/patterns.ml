@@ -12,6 +12,7 @@ type space = Wild | Constructed of constructor * space list | Alternatives of sp
 
 type context = {
   lookups : Lookups.t;
+  module_ : Path.module_;
   spans : Source.Definition_span.t array Lazy.t;
   text : string Lazy.t;
   mutable diagnostics : Diagnostic.in_definition list;
@@ -427,34 +428,129 @@ let rec list_or_patterns (written : Core.pattern) =
       List.concat_map (fun (_, inner) -> list_or_patterns inner) fields
   | Wildcard | Bind _ | Literal _ | Range _ | Equal_to _ -> []
 
+type shadowing = { name : string; constant : Path.t; bindings : Core.pattern list }
+
+let list_shadowings context (patterns : Core.pattern list) =
+  let rec list_bindings (written : Core.pattern) =
+    match written.kind with
+    | Bind { local = Declared { name; _ }; _ } -> [ (name, written) ]
+    | Variant { variant; fields } -> list_field_bindings written.type_ (Variant variant) fields
+    | Record fields -> list_field_bindings written.type_ Record fields
+    | Alternatives alternatives -> List.concat_map list_bindings alternatives
+    | Bind _ | Wildcard | Literal _ | Range _ | Equal_to _ -> []
+  and list_field_bindings type_ constructor fields =
+    let has_several_fields = compute_arity context type_ constructor > 1 in
+    List.concat_map
+      (fun (field, (inner : Core.pattern)) ->
+        match inner.kind with
+        | Bind { local = Declared { name; _ }; _ } when has_several_fields && name = field -> []
+        | _ -> list_bindings inner)
+      fields
+  in
+  let bindings = List.concat_map list_bindings patterns in
+  let names =
+    List.fold_left
+      (fun names (name, _) -> if List.mem name names then names else names @ [ name ])
+      [] bindings
+  in
+  List.filter_map
+    (fun name ->
+      match
+        List.filter_map (fun (other, bound) -> if other = name then Some bound else None) bindings
+      with
+      | (first : Core.pattern) :: _ as named ->
+          Option.map
+            (fun constant -> { name; constant; bindings = named })
+            (Interface.Definition.find_shadowed_constant context.lookups.interface context.module_
+               ~name ~type_:first.type_)
+      | [] -> None)
+    names
+
+let rec substitute_constant shadowing (written : Core.pattern) : Core.pattern =
+  if List.exists (fun (bound : Core.pattern) -> bound.id = written.id) shadowing.bindings then
+    { written with kind = Literal (Named_constant shadowing.constant) }
+  else
+    let substitute_fields =
+      List.map (fun (field, inner) -> (field, substitute_constant shadowing inner))
+    in
+    match written.kind with
+    | Variant { variant; fields } ->
+        { written with kind = Variant { variant; fields = substitute_fields fields } }
+    | Record fields -> { written with kind = Record (substitute_fields fields) }
+    | Alternatives alternatives ->
+        { written with kind = Alternatives (List.map (substitute_constant shadowing) alternatives) }
+    | Wildcard | Bind _ | Literal _ | Range _ | Equal_to _ -> written
+
+let find_shadowing context types covering_arms unreachable_row =
+  let rows = List.map (List.map (build_space context)) covering_arms in
+  List.find_mapi
+    (fun index patterns ->
+      List.find_opt
+        (fun shadowing ->
+          let row_with_constant =
+            List.map
+              (fun written -> build_space context (substitute_constant shadowing written))
+              patterns
+          in
+          is_useful context types
+            (List.mapi
+               (fun other other_row -> if other = index then row_with_constant else other_row)
+               rows)
+            unreachable_row)
+        (list_shadowings context patterns))
+    covering_arms
+
 let witness_limit = 8
 
 let check_match context (node : Core.expression) scrutinees (arms : Core.arm list) =
   let types = List.map read_operand_type scrutinees in
   if not (List.exists (has_error context) types) then begin
     let rows = ref [] in
+    let covering_arms = ref [] in
     List.iter
       (fun (arm : Core.arm) ->
         if List.length arm.patterns = List.length types then begin
           let row = List.map (build_space context) arm.patterns in
           let arm_span = read_span context arm.origin in
           let reachable = is_useful context types !rows row in
-          if not reachable then
-            report context Unreachable_arm arm_span
-              ~fixes:
-                [
-                  Diagnostic.fix "Delete the arm."
-                    [
-                      Diagnostic.delete
-                        (Source.Definition_span.make
-                           (arm_span.start
-                           - String.length
-                               (read_indentation (Lazy.force context.text) arm_span.start)
-                           - 1)
-                           arm_span.stop);
-                    ];
-                ]
+          if not reachable then begin
+            let unreachable =
               "Earlier arms already match everything this arm matches, so it is never reached."
+            in
+            match find_shadowing context types !covering_arms row with
+            | Some shadowing ->
+                let written = Path.show shadowing.constant in
+                report context Unreachable_arm arm_span
+                  ~fixes:
+                    [
+                      Diagnostic.fix
+                        (Printf.sprintf "Write `%s`." written)
+                        (List.map
+                           (fun (bound : Core.pattern) ->
+                             Diagnostic.replace (read_span context bound.origin) written)
+                           shadowing.bindings);
+                    ]
+                  (Printf.sprintf
+                     "%s `%s` in an earlier arm binds a variable, which matches every value. To \
+                      match the constant, write `%s`."
+                     unreachable shadowing.name written)
+            | None ->
+                report context Unreachable_arm arm_span
+                  ~fixes:
+                    [
+                      Diagnostic.fix "Delete the arm."
+                        [
+                          Diagnostic.delete
+                            (Source.Definition_span.make
+                               (arm_span.start
+                               - String.length
+                                   (read_indentation (Lazy.force context.text) arm_span.start)
+                               - 1)
+                               arm_span.stop);
+                        ];
+                    ]
+                  unreachable
+          end
           else
             List.iter
               (fun ((group : Core.pattern), alternatives) ->
@@ -491,7 +587,10 @@ let check_match context (node : Core.expression) scrutinees (arms : Core.arm lis
                            "The alternatives before this one already match everything it matches."))
                   alternatives)
               (List.concat_map list_or_patterns arm.patterns);
-          if Option.is_none arm.guard then rows := !rows @ [ row ]
+          if Option.is_none arm.guard then begin
+            rows := !rows @ [ row ];
+            covering_arms := !covering_arms @ [ arm.patterns ]
+          end
         end)
       arms;
     let rec collect_witnesses rows witnesses_so_far =
@@ -566,10 +665,11 @@ let check_definition context (definition : Core.definition) =
     }
     definition
 
-let check (lookups : Lookups.t) key =
+let check (lookups : Lookups.t) (key : Resolve.Names.key) =
   let context =
     {
       lookups;
+      module_ = key.module_;
       spans = lazy (lookups.interface.names.read_spans key);
       text = lazy (lookups.interface.names.read_text key);
       diagnostics = [];

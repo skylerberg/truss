@@ -5,17 +5,19 @@ val expect_int : expected:int -> int -> unit
 val render_records : Backend.Test_report.record list -> string
 val definition : string -> Path.t
 val named : ?arguments:Ground.argument list -> string -> Ground.ty
+val int32 : Ground.ty
 val int64 : Ground.ty
+val uint8 : Ground.ty
+val uint64 : Ground.ty
+val float64 : Ground.ty
 val bool : Ground.ty
 val character : Ground.ty
 val unit : Ground.ty
+val array : Ground.ty -> int -> Ground.ty
 val text : Ground.ty
 val pair : Ground.ty
-val float64 : Ground.ty
-val uint8 : Ground.ty
 val option : Ground.ty -> Ground.ty
 val list : Ground.ty -> Ground.ty
-val array : Ground.ty -> int -> Ground.ty
 val host : Libc.system
 val field : 'a -> Ground.ty -> 'a * Memory_layout.member
 
@@ -25,8 +27,6 @@ val variant :
 val compute_shape : (string * Memory_layout.shape) list -> Ground.ty -> Memory_layout.shape
 val lay_out : ?extra:(string * Memory_layout.shape) list -> Ground.ty -> Memory_layout.t
 val describe : ?extra:(string * Memory_layout.shape) list -> Ground.ty -> string
-val int32 : Ground.ty
-val uint64 : Ground.ty
 
 type local_info
 type block

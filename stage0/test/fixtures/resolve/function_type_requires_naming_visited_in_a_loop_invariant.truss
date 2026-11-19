@@ -1,0 +1,6 @@
+fn f(items: List[Int64]) {
+  for item in items
+    invariant forall check: (fn(value: Int64) requires visited.length() > 0) => true
+  {
+  }
+}

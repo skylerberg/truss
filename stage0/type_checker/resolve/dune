@@ -4,11 +4,11 @@
   metric
   structural_key
   path
+  grant
   intrinsic
   well_known
   types
   source
   diagnostic
   syntax
-  syntax_walk
   compiler_bug))

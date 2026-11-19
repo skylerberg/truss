@@ -7,6 +7,7 @@ let ages: Map[String, Int64] = ["grace": 85, "ada": 36]
 let colors: Set[String] = ["red", "green", "red"]
 let welcome: String = "hello ada"
 let maybe: Option[Int64] = Some(3 * 3)
+let nested: List[List[Int64]] = [[], [1]]
 
 test "a constant that needs its code run is evaluated while compiling" {
   assert area == 49
@@ -19,4 +20,10 @@ test "a constant that needs its code run is evaluated while compiling" {
   assert maybe == Some(9)
   let copied = welcome.copy()
   assert copied == "hello ada"
+}
+
+test "a constant holds an empty list inside a list" {
+  assert nested.length() == 2
+  assert nested[0].length() == 0
+  assert nested[1][0] == 1
 }

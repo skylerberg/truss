@@ -72,11 +72,9 @@ let make_definition_form text (path : Path.t) =
   let packages = Support.setup [ ("app::main", text) ] in
   let file = Support.parse_file "app::main" in
   (match
-     List.map
-       (fun message -> Diagnostic.make ~code:(Types Mismatch) (Source.make_span 0 0) message)
-       (Support.parse_errors packages file)
-     @ Database.For_testing.list_diagnostics [ Resolve; Interface; Infer ]
-         (Support.make_database packages) file
+     Database.For_testing.list_diagnostics
+       [ Parse; Resolve; Interface; Infer ]
+       (Support.make_database packages) file
    with
   | [] -> ()
   | reported ->
@@ -86,7 +84,7 @@ let make_definition_form text (path : Path.t) =
   let definition =
     List.find_map
       (fun (declaration : Resolve.Names.declaration) ->
-        let key = Resolve.Names.make_key declaration in
+        let key = declaration.key in
         if Path.equal key.path path then
           Option.map (fun core -> (key, core)) (find_core packages key)
         else None)
@@ -260,7 +258,7 @@ let () =
       let packages = Support.setup [ ("app::main", text) ] in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
-          let key = Resolve.Names.make_key declaration in
+          let key = declaration.key in
           match
             ( find_core packages key,
               (Support.make_names packages).read_spans key,
@@ -369,7 +367,7 @@ let () =
       let packages = Support.setup [ ("app::main", text) ] in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
-          let key = Resolve.Names.make_key declaration in
+          let key = declaration.key in
           match
             ( find_core packages key,
               (Support.make_names packages).read_spans key,

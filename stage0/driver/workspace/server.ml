@@ -1,10 +1,32 @@
 let locate_executable () =
   try Unix.realpath Sys.executable_name with Unix.Unix_error _ -> Sys.executable_name
 
+type executable = { path : string; stamp : Cbor.t; identity : string }
+
 let read_stamp path =
   match Unix.stat path with
-  | stat -> Some (Printf.sprintf "%d %h %h %d" stat.st_size stat.st_mtime stat.st_ctime stat.st_ino)
+  | stat ->
+      Some
+        (Cbor.Array
+           [
+             Cbor.int stat.st_size;
+             Cbor.Float stat.st_mtime;
+             Cbor.Float stat.st_ctime;
+             Cbor.int stat.st_ino;
+           ])
   | exception Unix.Unix_error _ -> None
+
+let encode_executables executables =
+  Cbor.encode
+    (Cbor.Array
+       (List.map
+          (fun { path; stamp; identity } ->
+            Cbor.Array [ Cbor.Bytes path; stamp; Cbor.Text identity ])
+          executables))
+
+let decode_executable = function
+  | Cbor.Array [ Cbor.Bytes path; stamp; Cbor.Text identity ] -> Some { path; stamp; identity }
+  | _ -> None
 
 let make_cache_root () = Result.bind (Cache.locate_default_directory ()) Cache.make_root
 
@@ -15,32 +37,33 @@ let compute_executable_identity () =
   | None, _ -> "unknown"
   | Some _, Error _ -> digest_executable ()
   | Some current, Ok root -> (
-      let remembered = Filename.concat root "identities" in
-      let entries =
-        (try In_channel.with_open_bin remembered In_channel.input_lines with Sys_error _ -> [])
-        |> List.filter_map (fun line ->
-            match String.split_on_char '\t' line with
-            | [ path; stamp; identity ] -> Some (path, stamp, identity)
-            | _ -> None)
+      let identities_path = Filename.concat root "identities" in
+      let executables =
+        match
+          Option.bind
+            (Cbor.decode (File_system.read identities_path))
+            (Cbor.find_list decode_executable)
+        with
+        | Some executables -> executables
+        | None | (exception Sys_error _) -> []
       in
       match
-        List.find_opt (fun (known, known_stamp, _) -> known = path && known_stamp = current) entries
+        List.find_opt
+          (fun (executable : executable) -> executable.path = path && executable.stamp = current)
+          executables
       with
-      | Some (_, _, identity) -> identity
+      | Some executable -> executable.identity
       | None ->
           let identity = digest_executable () in
-          let existing =
+          let unchanged_others =
             List.filter
-              (fun (known, known_stamp, _) -> known <> path && read_stamp known = Some known_stamp)
-              entries
+              (fun (executable : executable) ->
+                executable.path <> path && read_stamp executable.path = Some executable.stamp)
+              executables
           in
           (try
-             File_system.write_atomically remembered
-               (String.concat ""
-                  (List.map
-                     (fun (path, stamp, identity) ->
-                       Printf.sprintf "%s\t%s\t%s\n" path stamp identity)
-                     (existing @ [ (path, current, identity) ])))
+             File_system.write_atomically identities_path
+               (encode_executables (unchanged_others @ [ { path; stamp = current; identity } ]))
            with Sys_error _ -> ());
           identity)
 

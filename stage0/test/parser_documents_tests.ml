@@ -53,8 +53,8 @@ let () =
 let () =
   Harness.test "a signature without a body in an example is checked" (fun () ->
       let _, _, diagnostics = parse_snippet "fn f(x: Int64)\n  requires x & 1 < 2" in
-      if Parse_support.list_codes diagnostics <> [ "parser.needs_parentheses" ] then
-        Harness.fail "got [%s]" (String.concat "; " (Parse_support.list_codes diagnostics)))
+      if Support.list_codes diagnostics <> [ "parser.needs_parentheses" ] then
+        Harness.fail "got [%s]" (String.concat "; " (Support.list_codes diagnostics)))
 
 let () =
   List.iter

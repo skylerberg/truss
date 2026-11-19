@@ -26,7 +26,7 @@ let make_diagnostic (key : Resolve.Names.key) ?(fixes = []) code (span : Source.
   { key; diagnostic = Diagnostic.make ~fixes ~code:(Package code) span message }
 
 let read_definition (lookups : Lookups.t) (declaration : Resolve.Names.declaration) =
-  let key = Resolve.Names.make_key declaration in
+  let key = declaration.key in
   (lookups.interface.names.read_definition key, lookups.interface.names.read_spans key)
 
 let locate_header (spans : Source.Definition_span.t array) (definition : Syntax.definition) =
@@ -45,8 +45,8 @@ let list_outer_packages (impl : Types.impl_interface) =
 
 let check_location (declaration : Resolve.Names.declaration) spans (definition : Syntax.definition)
     (impl : Types.impl_interface) =
-  let key = Resolve.Names.make_key declaration in
-  let package = declaration.module_.package in
+  let key = declaration.key in
+  let package = key.module_.package in
   if List.mem package (list_outer_packages impl) then None
   else
     Some
@@ -58,10 +58,10 @@ let check_location (declaration : Resolve.Names.declaration) spans (definition :
             (Types.show impl.for_type)))
 
 let check_sealed (lookups : Lookups.t) (declaration : Resolve.Names.declaration) =
-  let package = declaration.module_.package in
+  let package = declaration.key.module_.package in
   match
     ( List.find_opt
-        (fun (_, impl) -> Path.equal impl declaration.path)
+        (fun (_, impl) -> Path.equal impl declaration.key.path)
         (lookups.interface.names.list_impls package),
       read_definition lookups declaration )
   with
@@ -70,9 +70,7 @@ let check_sealed (lookups : Lookups.t) (declaration : Resolve.Names.declaration)
       | Some builtins, Some builtin when List.mem builtin builtins -> []
       | Some _, _ ->
           [
-            make_diagnostic
-              (Resolve.Names.make_key declaration)
-              Sealed_trait_impl (locate_header spans definition)
+            make_diagnostic declaration.key Sealed_trait_impl (locate_header spans definition)
               (Printf.sprintf
                  "Only the built-in integer types implement `%s`, so `%s` cannot: generic code \
                   over the trait is proven for each of them."
@@ -139,7 +137,7 @@ let check_method_names (lookups : Lookups.t) (declaration : Resolve.Names.declar
       let view = Types.find_view impl.for_type in
       let list_counted_members owner =
         Resolve.Names.list_members_visible_to_package lookups.interface.names
-          ~package:declaration.module_.package owner
+          ~package:declaration.key.module_.package owner
       in
       List.filter_map
         (fun (method_ : Types.trait_method) ->
@@ -172,9 +170,8 @@ let check_method_names (lookups : Lookups.t) (declaration : Resolve.Names.declar
           in
           let make_clash message =
             Some
-              (make_diagnostic
-                 (Resolve.Names.make_key declaration)
-                 Method_name_clash (locate_header spans definition) message)
+              (make_diagnostic declaration.key Method_name_clash (locate_header spans definition)
+                 message)
           in
           let is_own_version = List.exists is_same_version own in
           if is_own_version || List.exists is_same_version of_view then
@@ -185,7 +182,7 @@ let check_method_names (lookups : Lookups.t) (declaration : Resolve.Names.declar
                  (Path.show_receiver method_.method_receiver)
                  (Types.show_trait impl.implements))
           else if own = [] && of_view = [] then None
-          else if declaration.module_.package <> Path.locate_package path then
+          else if declaration.key.module_.package <> Path.locate_package path then
             make_clash
               (Printf.sprintf
                  "`%s` has %s, so only an `impl` in its own package can give it another."
@@ -366,17 +363,15 @@ let locate_field (spans : Source.Definition_span.t array) (body : Syntax.type_bo
 let check_recursion lookups ~list_contained (declaration : Resolve.Names.declaration) spans
     (definition : Syntax.definition) =
   match definition.kind with
-  | Type_definition _ when grows lookups declaration.path ->
+  | Type_definition _ when grows lookups declaration.key.path ->
       [
-        make_diagnostic
-          (Resolve.Names.make_key declaration)
-          Growing_type (locate_header spans definition)
+        make_diagnostic declaration.key Growing_type (locate_header spans definition)
           "This type contains itself with different type arguments, so it has no fixed set of \
            instances, and generic code is compiled once for each set of arguments.";
       ]
   | Type_definition { name; body; _ } ->
-      let key = Resolve.Names.make_key declaration in
-      let occurrences = list_self_occurrences ~list_contained declaration.path in
+      let key = declaration.key in
+      let occurrences = list_self_occurrences ~list_contained key.path in
       let find_first (wanted : Interface.Properties.occurrence) =
         List.find_map
           (fun (field, occurrence) -> if occurrence = wanted then Some field else None)
@@ -427,7 +422,7 @@ let check_recursion lookups ~list_contained (declaration : Resolve.Names.declara
 let check_associated_types (lookups : Lookups.t) ~list_contained
     (declaration : Resolve.Names.declaration) spans (definition : Syntax.definition)
     (impl : Types.impl_interface) =
-  let key = Resolve.Names.make_key declaration in
+  let key = declaration.key in
   let list_bounds = Types.list_bounds impl.impl_generics in
   let find_written name =
     match definition.kind with
@@ -479,7 +474,7 @@ let check_associated_types (lookups : Lookups.t) ~list_contained
            (List.filter_map
               (fun (recursion : Interface.Properties.recursion) ->
                 if
-                  List.exists (Path.equal declaration.path) recursion.defining
+                  List.exists (Path.equal declaration.key.path) recursion.defining
                   && not (is_reported_at_definition recursion)
                 then Some (recursion.recursive, recursion.occurrence)
                 else None)
@@ -517,15 +512,15 @@ let check_instantiation (lookups : Lookups.t) (package : Path.package) =
   let generic =
     List.filter
       (fun (declaration : Resolve.Names.declaration) ->
-        declaration.generic && declaration.ordinal = 0
+        declaration.generic && declaration.key.ordinal = 0
         && (declaration.kind = Function || declaration.kind = Method))
       (lookups.interface.names.list_package_declarations package)
   in
   let edges = Path_table.create 64 in
   List.iter
     (fun (declaration : Resolve.Names.declaration) ->
-      Path_table.replace edges declaration.path
-        (list_instantiation_edges lookups (Resolve.Names.make_key declaration)))
+      Path_table.replace edges declaration.key.path
+        (list_instantiation_edges lookups declaration.key))
     generic;
   let list_outgoing path = Option.value ~default:[] (Path_table.find_opt edges path) in
   let component_index = Path_table.create 64 in
@@ -535,18 +530,16 @@ let check_instantiation (lookups : Lookups.t) (package : Path.package) =
     (Strongly_connected.list_components
        (module Path)
        ~list_successors:(fun path -> List.map fst (list_outgoing path))
-       (List.map (fun (declaration : Resolve.Names.declaration) -> declaration.path) generic));
+       (List.map (fun (declaration : Resolve.Names.declaration) -> declaration.key.path) generic));
   let grows_on_cycle path (callee, grows) =
     grows && Path_table.find component_index callee = Path_table.find component_index path
   in
   List.filter_map
     (fun (declaration : Resolve.Names.declaration) ->
-      if List.exists (grows_on_cycle declaration.path) (list_outgoing declaration.path) then
+      if List.exists (grows_on_cycle declaration.key.path) (list_outgoing declaration.key.path) then
         let definition, spans = read_definition lookups declaration in
         Some
-          (make_diagnostic
-             (Resolve.Names.make_key declaration)
-             Instantiation_cycle (locate_header spans definition)
+          (make_diagnostic declaration.key Instantiation_cycle (locate_header spans definition)
              "This generic code instantiates itself with type arguments that grow each time \
               around, so it would be compiled without end.")
       else None)
@@ -556,21 +549,19 @@ let check_tests (lookups : Lookups.t) (package : Path.package) =
   let tests =
     List.filter
       (fun (declaration : Resolve.Names.declaration) ->
-        declaration.kind = Test && declaration.ordinal = 0)
+        declaration.kind = Test && declaration.key.ordinal = 0)
       (lookups.interface.names.list_package_declarations package)
   in
   snd
     (List.fold_left
        (fun (seen, diagnostics) (declaration : Resolve.Names.declaration) ->
-         let name = match declaration.path with Test { name; _ } -> name | _ -> "" in
+         let name = match declaration.key.path with Test { name; _ } -> name | _ -> "" in
          if List.mem name seen then
            let definition, spans = read_definition lookups declaration in
            ( seen,
              diagnostics
              @ [
-                 make_diagnostic
-                   (Resolve.Names.make_key declaration)
-                   Duplicate_test spans.(definition.id)
+                 make_diagnostic declaration.key Duplicate_test spans.(definition.id)
                    (Printf.sprintf "Another test of this package is named %S." name);
                ] )
          else (name :: seen, diagnostics))
@@ -578,14 +569,14 @@ let check_tests (lookups : Lookups.t) (package : Path.package) =
 
 let check_overlaps (lookups : Lookups.t) (declaration : Resolve.Names.declaration) spans definition
     (impl : Types.impl_interface) =
-  let package = declaration.module_.package in
+  let package = declaration.key.module_.package in
   match Interface.Impls.find_head impl.for_type with
   | Some type_ when List.mem package (list_outer_packages impl) ->
       let trait = impl.implements.trait in
       let rec list_before = function
         | [] -> []
         | ((indexed_trait, indexed_type), path) :: rest ->
-            if Path.equal path declaration.path then []
+            if Path.equal path declaration.key.path then []
             else if Path.equal indexed_trait trait && Path.equal indexed_type type_ then
               path :: list_before rest
             else list_before rest
@@ -609,9 +600,7 @@ let check_overlaps (lookups : Lookups.t) (declaration : Resolve.Names.declaratio
         (fun (other : Types.impl_interface) ->
           if impls_overlap impl other then
             Some
-              (make_diagnostic
-                 (Resolve.Names.make_key declaration)
-                 Overlapping_impls (locate_header spans definition)
+              (make_diagnostic declaration.key Overlapping_impls (locate_header spans definition)
                  (Printf.sprintf
                     "This `impl` overlaps another `impl` of `%s` for `%s`: a type has at most one \
                      `impl` of a trait for each set of its arguments."
@@ -623,7 +612,7 @@ let check_overlaps (lookups : Lookups.t) (declaration : Resolve.Names.declaratio
 
 let check_impl (lookups : Lookups.t) ~list_contained (declaration : Resolve.Names.declaration) =
   match
-    ( Interface.Definition.find_impl_interface lookups.interface declaration.path,
+    ( Interface.Definition.find_impl_interface lookups.interface declaration.key.path,
       read_definition lookups declaration )
   with
   | Some impl, (definition, spans) ->
@@ -723,7 +712,7 @@ let describe_constant_cycle ~cyclic (named : named_constant) =
         field constant constant cyclic consequence
 
 let check_constant (lookups : Lookups.t) (declaration : Resolve.Names.declaration) =
-  let path = declaration.path in
+  let path = declaration.key.path in
   match read_constant_value lookups path with
   | None -> []
   | Some value ->
@@ -741,7 +730,7 @@ let check_constant (lookups : Lookups.t) (declaration : Resolve.Names.declaratio
              | None -> false
            end
       in
-      let key = Resolve.Names.make_key declaration in
+      let key = declaration.key in
       let spans = lookups.interface.names.read_spans key in
       List.filter_map
         (fun (named : named_constant) ->
@@ -754,10 +743,10 @@ let check_constant (lookups : Lookups.t) (declaration : Resolve.Names.declaratio
 
 let must_be_used (lookups : Lookups.t) (declaration : Resolve.Names.declaration) =
   (match declaration.visibility with Private | Internal -> true | Public | Public_opaque -> false)
-  && declaration.ordinal = 0
-  && Option.is_none (lookups.interface.names.find_container (Resolve.Names.make_key declaration))
-  && Option.is_none (Well_known.of_path declaration.path)
-  && (not (Path.is_entry_point declaration.path))
+  && declaration.key.ordinal = 0
+  && Option.is_none (lookups.interface.names.find_container declaration.key)
+  && Option.is_none (Well_known.of_path declaration.key.path)
+  && (not (Path.is_entry_point declaration.key.path))
   &&
   match declaration.kind with
   | Function | Method | Constant | Member_constant -> true
@@ -815,44 +804,43 @@ let report_unused (lookups : Lookups.t) (declaration : Resolve.Names.declaration
     | Constant | Member_constant -> (Unused_constant, "constant")
     | _ -> (Unused_function, "function")
   in
-  let visibility =
+  let visibility, (severity : Diagnostic.severity) =
     match declaration.visibility with
-    | Internal -> "internal"
-    | Private -> "private"
+    | Internal -> ("internal", Error)
+    | Private -> ("private", Warning)
     | Public | Public_opaque -> raise_bug "an unused definition that is public"
   in
   let message =
     if is_named then
       Printf.sprintf "Only unused definitions use the %s %s `%s`. Delete it with them." visibility
-        noun (Path.show declaration.path)
+        noun (Path.show declaration.key.path)
     else
       Printf.sprintf "Nothing in `%s` uses the %s %s `%s`. Delete it."
-        (Path.show_package declaration.module_.package)
-        visibility noun (Path.show declaration.path)
+        (Path.show_package declaration.key.module_.package)
+        visibility noun (Path.show declaration.key.path)
   in
   let definition, spans = read_definition lookups declaration in
   {
-    key = Resolve.Names.make_key declaration;
-    diagnostic = Diagnostic.make ~code:(Usage code) (locate_name spans definition) message;
+    key = declaration.key;
+    diagnostic = Diagnostic.make ~severity ~code:(Usage code) (locate_name spans definition) message;
   }
 
 let check_unexported (lookups : Lookups.t) package =
   let uses =
     List.map
       (fun declaration ->
-        ( declaration,
-          must_be_used lookups declaration,
-          list_used_paths lookups (Resolve.Names.make_key declaration) ))
+        (declaration, must_be_used lookups declaration, list_used_paths lookups declaration.key))
       (lookups.interface.names.list_package_declarations package)
   in
   let uses_of_unexported = Path_table.create 64 in
   let named_by_another = Path_table.create 64 in
   List.iter
     (fun ((declaration : Resolve.Names.declaration), is_checked, paths) ->
-      if is_checked then Path_table.replace uses_of_unexported declaration.path paths;
+      if is_checked then Path_table.replace uses_of_unexported declaration.key.path paths;
       List.iter
         (fun path ->
-          if not (Path.equal path declaration.path) then Path_table.replace named_by_another path ())
+          if not (Path.equal path declaration.key.path) then
+            Path_table.replace named_by_another path ())
         paths)
     uses;
   let reached = Path_table.create 64 in
@@ -868,10 +856,10 @@ let check_unexported (lookups : Lookups.t) package =
   List.iter (fun (_, is_checked, paths) -> if not is_checked then reach paths) uses;
   List.filter_map
     (fun ((declaration : Resolve.Names.declaration), is_checked, _) ->
-      if is_checked && not (Path_table.mem reached declaration.path) then
+      if is_checked && not (Path_table.mem reached declaration.key.path) then
         Some
           (report_unused lookups declaration
-             ~is_named:(Path_table.mem named_by_another declaration.path))
+             ~is_named:(Path_table.mem named_by_another declaration.key.path))
       else None)
     uses
 
@@ -888,15 +876,12 @@ type check =
 let list_checks (declarations : Resolve.Names.declaration list) =
   List.concat_map
     (fun (declaration : Resolve.Names.declaration) ->
-      if declaration.ordinal <> 0 then []
+      if declaration.key.ordinal <> 0 then []
       else
         match declaration.kind with
-        | Impl ->
-            [
-              Sealed (Resolve.Names.make_key declaration); Impl (Resolve.Names.make_key declaration);
-            ]
-        | Type -> [ Type (Resolve.Names.make_key declaration) ]
-        | Constant | Member_constant -> [ Constant (Resolve.Names.make_key declaration) ]
+        | Impl -> [ Sealed declaration.key; Impl declaration.key ]
+        | Type -> [ Type declaration.key ]
+        | Constant | Member_constant -> [ Constant declaration.key ]
         | _ -> [])
     declarations
   @ [ Instantiations; Tests; Unexported; Dependencies ]
@@ -908,8 +893,7 @@ let describe_unused_dependency ~package dependency =
 let list_unused_dependencies (lookups : Lookups.t) package =
   let used =
     List.concat_map
-      (fun (declaration : Resolve.Names.declaration) ->
-        lookups.list_used_packages (Resolve.Names.make_key declaration))
+      (fun (declaration : Resolve.Names.declaration) -> lookups.list_used_packages declaration.key)
       (lookups.interface.names.list_package_declarations package)
   in
   List.filter

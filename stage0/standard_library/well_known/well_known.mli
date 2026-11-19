@@ -36,6 +36,10 @@ type t =
   | From_template
   | From_elements
   | Map
+  | Set
+  | Sorted_set
+  | Sorted_map
+  | List_cursor
   | Entry
   | From_entries
   | Sequence

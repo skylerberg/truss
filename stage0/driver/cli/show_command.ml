@@ -8,16 +8,16 @@ type shown_definition = {
 let list_top_level (names : Resolve.Names.lookups) declarations =
   List.filter
     (fun (declaration : Resolve.Names.declaration) ->
-      declaration.ordinal = 0 && names.find_container (Resolve.Names.make_key declaration) = None)
+      declaration.key.ordinal = 0 && names.find_container declaration.key = None)
     declarations
 
 let list_type_parts declarations (type_ : Path.t) =
   let is_member (declaration : Resolve.Names.declaration) =
-    match declaration.path with
+    match declaration.key.path with
     | Method { owner; _ } | Member_constant { owner; _ } -> Path.equal owner type_
     | _ -> false
   and is_impl (declaration : Resolve.Names.declaration) =
-    match declaration.path with Impl { for_type; _ } -> Path.equal for_type type_ | _ -> false
+    match declaration.key.path with Impl { for_type; _ } -> Path.equal for_type type_ | _ -> false
   in
   List.filter is_member declarations @ List.filter is_impl declarations
 
@@ -40,9 +40,9 @@ let list_target_declarations (names : Resolve.Names.lookups) packages :
 
 let show_definition snapshot database (names : Resolve.Names.lookups) packages ~body
     (declaration : Resolve.Names.declaration) =
-  let key = Resolve.Names.make_key declaration in
+  let key = declaration.key in
   let opaque =
-    declaration.visibility = Public_opaque && not (List.mem declaration.module_.package packages)
+    declaration.visibility = Public_opaque && not (List.mem key.module_.package packages)
   in
   let ({ file = written; base } : Resolve.Names.place) = names.read_place key in
   let source = Command_packages.read_source snapshot database packages written in
@@ -81,7 +81,7 @@ let run ~paths ~body =
                   (fun definition ->
                     Json.Object
                       [
-                        ("path", Json.String (Path.show definition.declaration.path));
+                        ("path", Json.String (Path.show definition.declaration.key.path));
                         ("kind", Json.String (Signatures.show_kind definition.declaration.kind));
                         ("file", Json.String definition.file);
                         ("line", Json.Int definition.line);

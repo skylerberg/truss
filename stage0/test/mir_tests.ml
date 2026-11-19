@@ -7,7 +7,7 @@ let list_place_locals (place : Mir.place) =
 
 let list_operand_locals : Mir.operand -> Mir.local list = function
   | Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> list_place_locals place
-  | Constant _ -> []
+  | Immediate _ -> []
 
 let list_call_locals (call : Mir.call) =
   (match call.callee.target with Indirect callee -> list_operand_locals callee | _ -> [])
@@ -55,7 +55,7 @@ let rec list_rvalue_locals : Mir.rvalue -> Mir.local list = function
 
 and list_choice_locals : Mir.choice -> Mir.local list = function
   | Conditional { condition; then_; else_; _ } ->
-      list_operand_locals condition @ list_block_locals then_ @ list_block_locals else_
+      list_block_locals condition @ list_block_locals then_ @ list_block_locals else_
   | Cases cases ->
       List.concat_map
         (fun (case : Mir.case) ->
@@ -63,7 +63,7 @@ and list_choice_locals : Mir.choice -> Mir.local list = function
           @ Option.fold ~none:[] ~some:list_block_locals case.guard
           @ list_block_locals case.value)
         cases
-  | Connective { left; right; _ } -> list_operand_locals left @ list_block_locals right
+  | Connective { left; right; _ } -> list_block_locals left @ list_block_locals right
 
 and list_block_locals (block : Mir.block) =
   let read, given =
@@ -434,7 +434,7 @@ let () =
         (fun () ->
           List.iter
             (fun (declaration : Resolve.Names.declaration) ->
-              let key = Resolve.Names.make_key declaration in
+              let key = declaration.key in
               let definition = Resolve.Names.show_key key in
               match
                 try find_graph (Lazy.force parts) key
@@ -457,7 +457,7 @@ let lower_tree_and_graph text =
   match
     List.find_map
       (fun (declaration : Resolve.Names.declaration) ->
-        let key = Resolve.Names.make_key declaration in
+        let key = declaration.key in
         if key.path = Path.Top { module_ = Support.parse_module "app::main"; name = "g" } then
           Some key
         else None)
@@ -518,7 +518,7 @@ let () =
                   call =
                     {
                       callee = { target = Function { path = Top { name = "step"; _ }; _ }; _ };
-                      arguments = [ _; Passed { value = Constant { value = Integer next; _ }; _ } ];
+                      arguments = [ _; Passed { value = Immediate { value = Integer next; _ }; _ } ];
                       _;
                     };
                   _;
@@ -674,7 +674,7 @@ let () =
           basic.statements
       in
       let returns_one = function
-        | Mir.Graph.Return (Some (Constant { value = Integer one; _ })) -> Z.equal one Z.one
+        | Mir.Graph.Return (Some (Immediate { value = Integer one; _ })) -> Z.equal one Z.one
         | _ -> false
       in
       match
@@ -795,6 +795,31 @@ let () =
                match block.terminator with Branch _ -> true | _ -> false)
              graph.body.blocks)
       then Harness.fail "nothing in the graph branches");
+  let count_boolean_assignments (body : Mir.Graph.body) truth =
+    Array.fold_left
+      (fun count (block : Mir.Graph.basic_block) ->
+        List.fold_left
+          (fun count (statement : Mir.Graph.statement) ->
+            match statement.kind with
+            | Assign { value = Operand (Immediate { value = Boolean value; _ }); _ }
+              when value = truth ->
+                count + 1
+            | _ -> count)
+          count block.statements)
+      0 body.blocks
+  in
+  Harness.test "an `if` on a conjunction branches on each comparison and stores no truth value"
+    (fun () ->
+      let graph = lower_graph Fixtures.Mir.if_else_on_two_comparisons in
+      let stored =
+        count_boolean_assignments graph.body true + count_boolean_assignments graph.body false
+      in
+      if stored <> 0 then Harness.fail "the graph stores %d truth values" stored);
+  Harness.test "a chain of conjunctions used as a value decides it false in one block" (fun () ->
+      let graph = lower_graph Fixtures.Mir.chain_of_conjunctions in
+      match count_boolean_assignments graph.body false with
+      | 1 -> ()
+      | count -> Harness.fail "the graph stores false %d times" count);
   Harness.test "a loop is one statement that holds its body, and a break is a jump in it" (fun () ->
       let built, graph = lower_tree_and_graph Fixtures.Mir.while_loop_with_a_break in
       let loops =
@@ -957,7 +982,7 @@ let () =
         List.find_map
           (fun (_, (terminator : Mir.Graph.terminator)) ->
             match terminator with
-            | Return (Some (Constant { value = Integer value; _ })) -> Some (Z.to_int value)
+            | Return (Some (Immediate { value = Integer value; _ })) -> Some (Z.to_int value)
             | _ -> None)
           (list_terminators default.body)
       in

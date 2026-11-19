@@ -1443,8 +1443,23 @@ update = LOWER_NAME { "." LOWER_NAME } ":" expression | LOWER_NAME ;
 ```
 
 ```truss
-let moved = origin with (x: 1.0)
-let production = own config with (server.port: 443, log_level: LogLevel.Warning)
+type Point(x: Float64, y: Float64)
+
+type LogLevel =
+  | Information
+  | Warning
+
+type Server(host: String, port: Int64)
+
+type Config(server: Server, log_level: LogLevel)
+
+fn moved(origin: Point) -> Point {
+  origin with (x: 1.0)
+}
+
+fn production(config: own Config) -> Config {
+  own config with (server.port: 443, log_level: LogLevel.Warning)
+}
 ```
 
 - `base with (updates)` means copying the base into a new variable,
@@ -2378,17 +2393,11 @@ laws, loop invariants, and every operation that could fail.
 There is no `assume`.
 
 ```truss
-theorem reverse_twice[Element](items: Slice[Element])
-  ensures items.reverse().reverse() == items.to_list()
-  decreases items.length()
+theorem reverse_twice[Element](items: Sequence[Element])
+  ensures identical(items.reversed().reversed(), items)
 {
-  match items.split_first() {
-    None => {}
-    Some((first, rest)) => {
-      reverse_twice(rest)
-      reverse_of_append(rest.reverse(), suffix: [first])
-    }
-  }
+  assert forall i in 0..items.length() =>
+    identical(items.reversed().reversed()[i], items[i])
 }
 
 proof Ordered.transitive for Box[Item: Ordered] {
@@ -2612,13 +2621,15 @@ and the prelude changes only with a language version.
   use call no private or `internal` function and name no such constant. An
   `ensures` may name any function the definition can, so that callers in its
   package can know its result in terms of private helpers.
-- A private or `internal` function, method, or constant that no definition
-  of its package uses is an error. A method or constant written in a trait,
-  a capability, or an impl is not checked. A use counts when the user is
+- An `internal` function, method, or constant that no definition of its
+  package uses is an error, and a private one is a warning. A warning is
+  reported as an error is, but it does not make `truss check`, a build, a
+  test run, or a publish fail. A method or constant written in a trait, a
+  capability, or an impl is not checked. A use counts when the user is
   public, is a test, an `impl`, or another definition the rule does not
-  check, or is itself used, so definitions that use only each other are an
-  error together. The `main` of a package's root module is exempt, and so
-  is a definition the compiler calls by name.
+  check, or is itself used, so definitions that use only each other are
+  reported together. The `main` of a package's root module is exempt, and
+  so is a definition the compiler calls by name.
 
 ## No foreign code
 

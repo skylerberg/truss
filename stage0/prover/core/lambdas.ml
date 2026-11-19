@@ -452,8 +452,8 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
                 let spent = compute_spent exit_ counter in
                 let goal =
                   match bound with
-                  | Order_of -> Costs.at_most spent (Costs.bound (Logic.int 1))
-                  | No_more_than (Some limit) -> Costs.at_most spent (Logic.Integer limit)
+                  | Order_of -> Logic.less_equal spent (Costs.bound (Logic.int 1))
+                  | No_more_than (Some limit) -> Logic.less_equal spent (Logic.Integer limit)
                   | Exactly_cost (Some limit) -> Logic.equal spent (Logic.Integer limit)
                   | _ -> Logic.Boolean true
                 in
@@ -500,7 +500,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
                                  | Allocations -> "makes no more allocations"
                                  | Allocated_bytes -> "allocates no more bytes"));
                           ]
-                          (Costs.at_most spent bound))
+                          (Logic.less_equal spent bound))
                       (List.combine exits spent) ) ))
               (Costs.find_cost_bound ~varies:(Facts.mentions_fresh_after context mark) ~facts most))
           operand_counters)
