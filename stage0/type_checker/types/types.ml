@@ -122,11 +122,17 @@ let signed_integer_types : Intrinsic.builtin list = [ Int8; Int16; Int32; Int64 
 let unsigned_integer_types : Intrinsic.builtin list = [ UInt8; UInt16; UInt32; UInt64 ]
 let integer_types = signed_integer_types @ unsigned_integer_types
 
+let sealed_traits : (Well_known.t * Intrinsic.builtin list) list =
+  [
+    (Fixed_width_integer, integer_types);
+    (Signed_integer, signed_integer_types);
+    (Unsigned_integer, unsigned_integer_types);
+  ]
+
 let find_integer_implementors trait =
-  if Well_known.is Signed_integer trait then Some signed_integer_types
-  else if Well_known.is Unsigned_integer trait then Some unsigned_integer_types
-  else if Well_known.is Fixed_width_integer trait then Some integer_types
-  else None
+  List.find_map
+    (fun (sealed, implementors) -> if Well_known.is sealed trait then Some implementors else None)
+    sealed_traits
 
 let find_bound_integer_implementors bounds =
   List.fold_left

@@ -366,6 +366,84 @@ let () =
       expect_type text "limit" ~occurrence:3 "UInt8")
 
 let () =
+  Harness.test "a sealed integer bound decides a literal's default" (fun () ->
+      let text = Fixtures.Infer.literal_passed_to_an_unsigned_integer_parameter in
+      expect_fine text;
+      expect_type text "count" ~occurrence:2 "UInt64");
+  Harness.test "a literal's default ignores the impls of a trait that is not sealed" (fun () ->
+      expect_one_diagnostic
+        Fixtures.Infer.literal_passed_to_a_parameter_bounded_by_a_trait_of_uint64
+        "types.unsatisfied_bound" ~says:"needs `Int64: Tagged`");
+  Harness.test
+    "associated types under different trait arguments are not equated argument by argument"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.associated_types_under_different_trait_arguments
+        "types.mismatch"
+        ~says:
+          "The `Output` of `Value` under `Add[Int64]` may differ from the `Output` of `Value` \
+           under `Add[UInt64]`.");
+  Harness.test "a literal operand takes the argument of the parameter's one bound" (fun () ->
+      let text = Fixtures.Infer.literal_operand_of_a_parameter_with_one_add_bound in
+      expect_fine text;
+      expect_type text "1" "UInt8");
+  Harness.test
+    "a literal for a bound's trait argument waits for the impl that the other argument selects"
+    (fun () -> expect_fine Fixtures.Infer.literal_for_a_trait_argument_of_a_bound);
+  Harness.test "a literal multiplying a record takes its default type, whose impl takes the record"
+    (fun () ->
+      let text = Fixtures.Infer.literal_times_a_span in
+      expect_fine text;
+      expect_type text "2 * span" "Span");
+  Harness.test
+    "an operator's impl for a generic type unifies a literal type argument with the other operand's"
+    (fun () ->
+      let text = Fixtures.Infer.sum_of_vectors_of_a_literal_and_a_uint8 in
+      expect_fine text;
+      expect_type text "other" ~occurrence:2 "Vector[UInt8]";
+      expect_type text "sum" ~occurrence:2 "Vector[UInt8]");
+  Harness.test "an operator's impl for a generic type unifies the operand's unknown type argument"
+    (fun () ->
+      let text = Fixtures.Infer.sum_of_vectors_of_an_unknown_and_an_int64 in
+      expect_fine text;
+      expect_type text "make() + right" "Vector[Int64]");
+  Harness.test
+    "a literal multiplying a record in a specification is an Integer, which no impl takes"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.requires_multiplies_a_span_by_a_literal "types.no_impl"
+        ~says:"`Span` does not implement `Multiply[Integer]`");
+  Harness.test
+    "a goal of a loop invariant keeps the specification's rule when a later statement lets it \
+     select an impl" (fun () ->
+      expect_one_diagnostic
+        Fixtures.Infer.invariant_adds_vectors_whose_argument_a_later_statement_decides
+        "types.decided_in_specification" ~says:"A specification cannot decide the type of `first`.");
+  Harness.test "a proof in a lambda's body does not decide the length of the lambda's parameter"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.proof_in_a_lambda_compares_the_length_of_its_parameter
+        "types.decided_in_specification" ~says:"A specification cannot decide the type of `bytes`.");
+  Harness.test "a method that two traits declare is the one whose impl's conditions hold" (fun () ->
+      let text = Fixtures.Infer.method_declared_by_two_traits_with_conditional_impls in
+      expect_fine text;
+      match locate_core_call text "box.describe()" 1 with
+      | ( {
+            callee =
+              {
+                target =
+                  Trait_method
+                    {
+                      evidence =
+                        Impl { impl = Impl { trait = { path = Top { name; _ }; _ }; _ }; _ };
+                      _;
+                    };
+                _;
+              };
+            _;
+          },
+          _ ) ->
+          if name <> "First" then Harness.fail "`box.describe()` calls the `describe` of `%s`" name
+      | _ -> Harness.fail "`box.describe()` records no impl")
+
+let () =
   Harness.test "comparing integer types that differ is an error with a fix that converts" (fun () ->
       expect_one_diagnostic Fixtures.Infer.comparison_of_uint64_and_uint32
         "types.mismatched_integers" ~fixed:Fixtures.Infer.comparison_of_uint64_and_uint32_fixed);

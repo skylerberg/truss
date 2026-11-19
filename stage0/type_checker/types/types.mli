@@ -65,6 +65,7 @@ val integer_types : Intrinsic.builtin list
 val float_types : Intrinsic.builtin list
 val list_scalar_members : ty -> Intrinsic.builtin list
 val list_fitting_integer_types : Z.t -> Intrinsic.builtin list
+val sealed_traits : (Well_known.t * Intrinsic.builtin list) list
 val find_integer_implementors : Path.t -> Intrinsic.builtin list option
 val find_bound_integer_implementors : trait_reference list -> Intrinsic.builtin list option
 val is_float_type : ty -> bool

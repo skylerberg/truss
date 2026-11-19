@@ -28,7 +28,7 @@ let record_conversion (state : State.state) (value : Syntax.expression) (collect
         omitted_defaults = [];
         callee_result = collection;
       };
-  Name_lookup.check_implements state (State.read_span state value.id) collection trait
+  Solver.require state (Method_call (State.read_span state value.id)) collection trait
 
 let rec check_string_literal state env ?expected (value : Syntax.expression)
     (literal : Syntax.string_literal) =
@@ -355,7 +355,7 @@ and check_lambda (state : State.state) env ?expected (value : Syntax.expression)
 and check_if state env ?expected (value : Syntax.expression) (test : Syntax.expression) then_ else_
     =
   let condition_type =
-    State.run_in_statement state env (State.read_span state test.id) (fun () ->
+    Solver.run_in_statement state env (State.read_span state test.id) (fun () ->
         Hooks.check_expression state env test)
   in
   Name_lookup.coerce state env test ~actual:condition_type ~expected:Types.bool;
@@ -433,7 +433,7 @@ and match_ state env ?expected (value : Syntax.expression) scrutinees arms =
     List.map
       (fun (scrutinee : Syntax.expression) ->
         ( scrutinee,
-          State.run_in_statement state env (State.read_span state scrutinee.id) (fun () ->
+          Solver.run_in_statement state env (State.read_span state scrutinee.id) (fun () ->
               Hooks.check_expression state env scrutinee) ))
       scrutinees
   in
@@ -514,7 +514,7 @@ and check_collection_element state env ~(quantifier : Syntax.expression)
           collection_type Language.Mode.Read
       with
       | Visible (loop, element, _) ->
-          State.record_loop state ~loop:quantifier.id ~iterable:collection loop;
+          State.record_loop state ~loop:quantifier.id loop;
           element
       | Hidden hidden ->
           Members.make_hidden_error state (State.read_span state collection.id) hidden

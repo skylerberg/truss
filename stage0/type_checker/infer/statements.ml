@@ -40,7 +40,7 @@ let rec check_block_value state env ?expected (written : Syntax.block) =
             if State.statement_diverges state last then Types.Never else Types.unit)
     | (first : Syntax.statement) :: rest ->
         ignore
-          (State.run_in_statement state env (State.read_span state first.id) (fun () ->
+          (Solver.run_in_statement state env (State.read_span state first.id) (fun () ->
                check_statement state env first ~last:false));
         infer_statements_value rest
   in
@@ -126,23 +126,10 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
           match operation with
           | Arithmetic arithmetic ->
               let method_, output = Operators.select_arithmetic_method arithmetic in
-              let call_site : Syntax.expression = { kind = Expression_error; id = written.id } in
               let result =
-                Operators.check_operator_call
-                  ~operands:
-                    [
-                      {
-                        Tables.expression = written_target.id;
-                        core_argument_index = 0;
-                        mode = Language.Mode.Read;
-                      };
-                      {
-                        Tables.expression = value.id;
-                        core_argument_index = 1;
-                        mode = Language.Mode.Read;
-                      };
-                    ]
-                  state call_site ~method_ ~output ~left:target_type ~right:(Some right_type)
+                Operators.check_operator_call state written.id ~method_ ~output
+                  ~left:(written_target.id, target_type)
+                  ~right:(Some (value.id, right_type))
               in
               if not (State.unify state result target_type) then
                 State.report_mismatch state (State.read_span state value.id) ~expected:target_type
@@ -170,7 +157,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
         | _ -> (Language.Mode.Read, iterable)
       in
       let loop_element = ref None in
-      State.run_in_statement state env (State.read_span state iterable.id) (fun () ->
+      Solver.run_in_statement state env (State.read_span state iterable.id) (fun () ->
           let element, variable_mode = check_loop_iterable state env written ~mode inner in
           (match annotation with
           | Some written_annotation ->
@@ -208,7 +195,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
       check_loop_body state env body
   | While { condition = test; clauses; body } ->
       State.reject_in_formula state env (State.read_span state written.id) "A `while` loop";
-      State.run_in_statement state env (State.read_span state test.id) (fun () ->
+      Solver.run_in_statement state env (State.read_span state test.id) (fun () ->
           Hooks.check state env test Types.bool);
       List.iter (check_loop_clause state env) clauses;
       State.register_statement state written (fun () ->
@@ -232,7 +219,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
           if concurrent then Concurrent branches else Parallel branches);
       List.iter
         (fun (branch : Syntax.statement) ->
-          State.run_in_statement state env (State.read_span state branch.id) (fun () ->
+          Solver.run_in_statement state env (State.read_span state branch.id) (fun () ->
               check_statement state env branch ~last:false))
         body.statements
   | Proof body ->
@@ -311,13 +298,13 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
 and check_loop_body state env (body : Syntax.block) =
   List.iter
     (fun (written : Syntax.statement) ->
-      State.run_in_statement state env (State.read_span state written.id) (fun () ->
+      Solver.run_in_statement state env (State.read_span state written.id) (fun () ->
           check_statement state env written ~last:false))
     body.statements
 
 and check_loop_clause state env (clause : Syntax.loop_clause) =
   let env = { env with specification = true } in
-  State.run_in_statement state env (State.read_span state clause.id) (fun () ->
+  Solver.run_in_statement state env (State.read_span state clause.id) (fun () ->
       match clause.kind with
       | Invariant value -> Hooks.check state env value Types.bool
       | Loop_decreases measures ->
@@ -356,13 +343,13 @@ and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable :
           in
           match (by_position, consumed, State.find_evidence state type_ cursor) with
           | Visible (loop, element, lends), _, _ ->
-              State.record_loop state ~loop:written.id ~iterable loop;
+              State.record_loop state ~loop:written.id loop;
               (element, lends)
           | _, Visible (loop, element), _ ->
-              State.record_loop state ~loop:written.id ~iterable loop;
+              State.record_loop state ~loop:written.id loop;
               (element, Language.Mode.Own)
           | _, _, Some _ ->
-              State.record_loop state ~loop:written.id ~iterable
+              State.record_loop state ~loop:written.id
                 (Pulled
                    {
                      cursor = type_;

@@ -46,14 +46,6 @@ val list_trait_static_methods :
   Path.receiver ->
   (Types.trait_reference * Types.trait_method) list
 
-val check_implements :
-  ?code:Diagnostic.Code.types ->
-  State.state ->
-  Source.Definition_span.t ->
-  Types.ty ->
-  Types.trait_reference ->
-  unit
-
 val instantiate_trait_method :
   State.state ->
   Source.Definition_span.t ->

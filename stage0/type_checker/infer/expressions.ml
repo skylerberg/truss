@@ -134,7 +134,7 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
       Operators.check_binary state env ?expected value operator left right
   | Is { value = tested; pattern = written; _ } ->
       let tested_type =
-        State.run_in_statement state env (State.read_span state tested.id) (fun () ->
+        Solver.run_in_statement state env (State.read_span state tested.id) (fun () ->
             check_expression state env tested)
       in
       let mode = Modes.classify_scrutinee_mode state tested in

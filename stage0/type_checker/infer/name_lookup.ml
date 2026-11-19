@@ -375,26 +375,6 @@ and list_trait_static_methods (state : State.state) path name receiver =
     (Resolve.Names.list_visible_traits_declaring state.lookups.interface.names
        ~from:state.key.module_ name)
 
-and check_implements ?(code : Diagnostic.Code.types = No_impl) state
-    (span : Source.Definition_span.t) self_type (reference : Types.trait_reference) =
-  State.defer state (fun () ->
-      let self_type = State.zonk state self_type in
-      let reference = State.solve_trait_arguments state self_type reference in
-      if
-        Types.contains_unsolved self_type
-        || List.exists Types.is_unsolved_argument reference.trait_arguments
-      then false
-      else begin
-        if
-          Option.is_none (State.find_evidence state self_type reference)
-          && not (Types.is_error self_type)
-        then
-          State.report state code span
-            (Printf.sprintf "`%s` does not implement `%s`." (Types.show self_type)
-               (Types.show_trait reference));
-        true
-      end)
-
 and list_trait_candidates (state : State.state) receiver_type name =
   let with_method (trait : Types.trait_reference) =
     match
@@ -526,7 +506,7 @@ and find_method_version state (span : Source.Definition_span.t) type_ name
           let instance, callee =
             instantiate_trait_method state span ~self_type:type_ trait method_
           in
-          check_implements ~code:Not_indexable state span type_ trait;
+          Solver.require state (Loop span) type_ trait;
           Visible (callee, (instance : Instantiation.instance).signature)
       | Some (View_overload _) | None -> Absent)
 

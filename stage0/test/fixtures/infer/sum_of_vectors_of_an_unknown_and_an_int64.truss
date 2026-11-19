@@ -1,0 +1,21 @@
+type Vector[Element](first: Element)
+
+impl Add[Vector[Element]] for Vector[Element: FixedWidthInteger] {
+  type Output = Vector[Element]
+
+  fn add_is_defined(self, right: Vector[Element]) -> Bool {
+    true
+  }
+
+  fn add(self, right: Vector[Element]) -> Vector[Element] {
+    self
+  }
+}
+
+fn make[Element]() -> Vector[Element] {
+  todo
+}
+
+fn f(right: Vector[Int64]) -> Vector[Int64] {
+  make() + right
+}

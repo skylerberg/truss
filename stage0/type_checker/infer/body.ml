@@ -32,7 +32,7 @@ let check_body state (env : State.env) (written : Syntax.block) =
                    (State.show state output))
         | _ -> ())
     | [ (last : Syntax.statement) ] ->
-        State.run_in_statement state env (State.read_span state last.id) (fun () ->
+        Solver.run_in_statement state env (State.read_span state last.id) (fun () ->
             match (last.kind, env.output) with
             | Expression _, Some (Returns output) when State.resolve state output = Types.unit ->
                 Statements.check_statement state env last ~last:false
@@ -49,11 +49,11 @@ let check_body state (env : State.env) (written : Syntax.block) =
                        (State.show state output))
             | _ -> Statements.check_statement state env last ~last:false)
     | (first : Syntax.statement) :: rest ->
-        State.run_in_statement state env (State.read_span state first.id) (fun () ->
+        Solver.run_in_statement state env (State.read_span state first.id) (fun () ->
             Statements.check_statement state env first ~last:false);
         check_statements rest
   in
-  State.run_in_statement state env (State.read_span state written.id) (fun () ->
+  Solver.run_in_statement state env (State.read_span state written.id) (fun () ->
       check_statements written.statements)
 
 let declare_parameters state (written : Syntax.parameter list) (signature : Types.signature) =
@@ -93,7 +93,7 @@ let check_clauses state env (clauses : Syntax.clause list) =
     clauses;
   List.iter
     (fun ((value : Syntax.expression), kind) ->
-      State.run_in_statement state env (State.read_span state value.id) (fun () ->
+      Solver.run_in_statement state env (State.read_span state value.id) (fun () ->
           match kind with
           | `Bool -> Expressions.check state env value Types.bool
           | `Cost_function -> ignore (Expressions.check_expression state env value)))
@@ -124,7 +124,7 @@ let check_function_type_requires state env (written : Syntax.parameter list)
                 (fun (clause : Syntax.clause) ->
                   match clause.kind with
                   | Requires value ->
-                      State.run_in_statement state env (State.read_span state value.id) (fun () ->
+                      Solver.run_in_statement state env (State.read_span state value.id) (fun () ->
                           Expressions.check state env value Types.bool)
                   | _ -> ())
                 clauses
@@ -144,7 +144,7 @@ let check_defaults state env (written : Syntax.parameter list) (signature : Type
               default )
           with
           | Some info, Some value ->
-              State.run_in_statement state env (State.read_span state value.id) (fun () ->
+              Solver.run_in_statement state env (State.read_span state value.id) (fun () ->
                   let actual = Expressions.check_expression state env ~expected:info.type_ value in
                   Name_lookup.coerce state env ~argument:info.mode value ~actual
                     ~expected:info.type_);
@@ -319,10 +319,10 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
           (fun (clause : Syntax.type_clause) ->
             match clause.kind with
             | Type_invariant value ->
-                State.run_in_statement state env (State.read_span state value.id) (fun () ->
+                Solver.run_in_statement state env (State.read_span state value.id) (fun () ->
                     Expressions.check state env value Types.bool)
             | Potential value ->
-                State.run_in_statement state env (State.read_span state value.id) (fun () ->
+                Solver.run_in_statement state env (State.read_span state value.id) (fun () ->
                     ignore (Expressions.check_expression state env value))
             | Derives _ -> ())
           clauses;
@@ -384,7 +384,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                       lowered_fields
                   with
                   | Some elaborated ->
-                      State.run_in_statement state constant_expression
+                      Solver.run_in_statement state constant_expression
                         (State.read_span state value.id) (fun () ->
                           Expressions.check state constant_expression value elaborated.field_type);
                       Constant.check state ~default:true value
@@ -466,7 +466,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                     law.parameters;
                   List.iter
                     (fun (requirement : Syntax.expression) ->
-                      State.run_in_statement state env (State.read_span state requirement.id)
+                      Solver.run_in_statement state env (State.read_span state requirement.id)
                         (fun () -> Expressions.check state env requirement Types.bool))
                     law.requires;
                   if not (is_broken (Member_body index)) then
@@ -486,7 +486,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                 Option.is_some (Types.find_specification_only_type constant.constant_type);
             }
           in
-          State.run_in_statement state env (State.read_span state value.id) (fun () ->
+          Solver.run_in_statement state env (State.read_span state value.id) (fun () ->
               Expressions.check state env value constant.constant_type);
           Constant.check state ~default:false value
         end
@@ -740,7 +740,8 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
       narrowings = [];
     }
   in
-  check_definition state elaborated ~checks_body;
+  Solver.run_in_statement state no_output (State.read_span state definition.id) (fun () ->
+      check_definition state elaborated ~checks_body);
   List.iter (fun check -> check ()) (List.rev state.final_type_checks);
   state.diagnostics <- Interface.Elaborator.list_diagnostics context @ state.diagnostics;
   state.diagnostics <-

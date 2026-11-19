@@ -246,6 +246,41 @@ let find_built_in_evidence : Properties.decision -> evidence option = function
   | Fails -> None
   | Depends_on open_type -> Some (Accepted open_type)
 
+let list_candidate_impls lookups ~head (wanted : Types.trait_reference) =
+  let packages =
+    List.sort_uniq compare
+      (Path.locate_package wanted.trait :: Path.locate_package head
+      :: List.filter_map
+           (function
+             | Types.Type (Types.Named { path; _ }) -> Some (Path.locate_package path) | _ -> None)
+           wanted.trait_arguments)
+  in
+  List.concat_map
+    (fun package -> list_impls_of_trait_for_type lookups ~trait:wanted.trait ~type_:head package)
+    packages
+
+let list_impl_variables (impl : Types.impl_interface) =
+  List.map (fun (generic : Types.generic) -> generic.generic) impl.impl_generics
+
+let select_impl lookups ~head (wanted : Types.trait_reference) =
+  List.find_map
+    (fun impl_path ->
+      Option.bind (Definition.find_impl_interface lookups impl_path) (fun impl ->
+          Option.map
+            (fun substitution -> (impl, substitution))
+            (match_arguments ~variables:(list_impl_variables impl) Types.no_substitution
+               impl.implements.trait_arguments wanted.trait_arguments)))
+    (list_candidate_impls lookups ~head wanted)
+
+let check_recursion_depth ~depth type_ trait =
+  if depth > Properties.recursion_limit then
+    raise
+      (Properties.Recursion_limit
+         (Printf.sprintf
+            "Deciding whether `%s` implements `%s` needs more than %d nested impls. The compiler \
+             stops there: bounds that ask for ever larger types never finish."
+            (Types.show type_) (Types.show_trait trait) Properties.recursion_limit))
+
 let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_conditions = true)
     (type_ : Types.ty) (wanted : Types.trait_reference) : evidence option =
   let broken_trait =
@@ -253,93 +288,70 @@ let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_cond
     | Some (Error_interface report) -> Some report
     | _ -> None
   in
-  if depth > Properties.recursion_limit then
-    raise
-      (Properties.Recursion_limit
-         (Printf.sprintf
-            "Deciding whether `%s` implements `%s` needs more than %d nested impls. The compiler \
-             stops there: bounds that ask for ever larger types never finish."
-            (Types.show type_) (Types.show_trait wanted) Properties.recursion_limit))
-  else if Option.is_some broken_trait then
+  check_recursion_depth ~depth type_ wanted;
+  if Option.is_some broken_trait then
     Option.map (fun report -> Accepted (Types.Error report)) broken_trait
-  else if Well_known.is Copyable wanted.trait || Well_known.is Plain wanted.trait then
-    let property : Properties.property =
-      if Well_known.is Plain wanted.trait then Plain else Copyable
-    in
-    if not checks_conditions then Some Built_in
-    else
-      find_built_in_evidence
-        (Properties.decide_property lookups ~list_bounds ~normalize:(normalize lookups ~list_bounds)
-           property type_)
-  else if Well_known.is Storable wanted.trait then
-    if not checks_conditions then Some Built_in
-    else
-      find_built_in_evidence
-        (Properties.decide_storable lookups ~list_bounds ~normalize:(normalize lookups ~list_bounds)
-           type_)
   else
-    match type_ with
-    | Types.Error _ | Types.Hole | Types.Variable _ -> Some (Accepted type_)
-    | Types.Never | Types.Integer | Types.Function _ -> None
-    | Types.Parameter _ | Types.Projection _ ->
-        if list_matching_bounds lookups ~list_bounds type_ wanted <> [] then Some From_bound
-        else None
-    | Types.Any _ ->
-        if list_matching_bounds lookups ~list_bounds type_ wanted <> [] then Some From_any else None
-    | Types.Named { path; _ } ->
-        let packages =
-          List.sort_uniq compare
-            (Path.locate_package wanted.trait :: Path.locate_package path
-            :: List.filter_map
-                 (function
-                   | Types.Type (Types.Named { path; _ }) -> Some (Path.locate_package path)
-                   | _ -> None)
-                 wanted.trait_arguments)
-        in
-        let candidates =
-          List.concat_map
-            (fun package ->
-              list_impls_of_trait_for_type lookups ~trait:wanted.trait ~type_:path package)
-            packages
-        in
-        List.find_map
-          (fun impl_path ->
-            match Definition.find_impl_interface lookups impl_path with
-            | None -> None
-            | Some impl -> (
-                let variables =
-                  List.map (fun (generic : Types.generic) -> generic.generic) impl.impl_generics
-                in
-                match match_type ~variables Types.no_substitution impl.for_type type_ with
+    match decide_property_trait lookups ~list_bounds wanted.trait type_ with
+    | Some _ when not checks_conditions -> Some Built_in
+    | Some decision -> find_built_in_evidence decision
+    | None -> (
+        match type_ with
+        | Types.Error _ | Types.Hole | Types.Variable _ -> Some (Accepted type_)
+        | Types.Never | Types.Integer | Types.Function _ -> None
+        | Types.Parameter _ | Types.Projection _ ->
+            if list_matching_bounds lookups ~list_bounds type_ wanted <> [] then Some From_bound
+            else None
+        | Types.Any _ ->
+            if list_matching_bounds lookups ~list_bounds type_ wanted <> [] then Some From_any
+            else None
+        | Types.Named { path; _ } ->
+            List.find_map
+              (fun impl_path ->
+                match Definition.find_impl_interface lookups impl_path with
                 | None -> None
-                | Some substitution -> (
-                    match
-                      match_arguments ~variables substitution impl.implements.trait_arguments
-                        wanted.trait_arguments
-                    with
+                | Some impl -> (
+                    let variables = list_impl_variables impl in
+                    match match_type ~variables Types.no_substitution impl.for_type type_ with
                     | None -> None
-                    | Some substitution ->
-                        let associated =
-                          List.map
-                            (fun (name, type_) -> (name, Types.substitute substitution type_))
-                            impl.implements.associated
-                        in
-                        let conditions_hold =
-                          (not checks_conditions)
-                          || List.for_all
-                               (fun (argument, bound) ->
-                                 Option.is_some
-                                   (find_evidence lookups ~list_bounds ~depth:(depth + 1) argument
-                                      bound))
-                               (list_required_bounds impl.impl_generics substitution)
-                        in
-                        if
-                          conditions_hold
-                          && has_matching_associated_types lookups ~list_bounds wanted ~base:None
-                               associated
-                        then Some (From_impl { impl = impl_path; substitution })
-                        else None)))
-          candidates
+                    | Some substitution -> (
+                        match
+                          match_arguments ~variables substitution impl.implements.trait_arguments
+                            wanted.trait_arguments
+                        with
+                        | None -> None
+                        | Some substitution ->
+                            let associated =
+                              List.map
+                                (fun (name, type_) -> (name, Types.substitute substitution type_))
+                                impl.implements.associated
+                            in
+                            let conditions_hold =
+                              (not checks_conditions)
+                              || List.for_all
+                                   (fun (argument, bound) ->
+                                     Option.is_some
+                                       (find_evidence lookups ~list_bounds ~depth:(depth + 1)
+                                          argument bound))
+                                   (list_required_bounds impl.impl_generics substitution)
+                            in
+                            if
+                              conditions_hold
+                              && has_matching_associated_types lookups ~list_bounds wanted
+                                   ~base:None associated
+                            then Some (From_impl { impl = impl_path; substitution })
+                            else None)))
+              (list_candidate_impls lookups ~head:path wanted))
+
+and decide_property_trait lookups ~list_bounds trait type_ =
+  let normalize = normalize lookups ~list_bounds in
+  if Well_known.is Copyable trait then
+    Some (Properties.decide_property lookups ~list_bounds ~normalize Copyable type_)
+  else if Well_known.is Plain trait then
+    Some (Properties.decide_property lookups ~list_bounds ~normalize Plain type_)
+  else if Well_known.is Storable trait then
+    Some (Properties.decide_storable lookups ~list_bounds ~normalize type_)
+  else None
 
 and list_matching_bounds lookups ~list_bounds (type_ : Types.ty) (wanted : Types.trait_reference) =
   let arguments_match actual_arguments =

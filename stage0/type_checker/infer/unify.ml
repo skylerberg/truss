@@ -25,20 +25,20 @@ let create ~list_rigid_members =
     refused_code_unknown = None;
   }
 
-let make_fresh_type unifier =
+let allocate_unknown unifier =
   unifier.next <- unifier.next + 1;
   if unifier.checks_specification then
     Hashtbl.replace unifier.specification_unknowns unifier.next ();
-  Types.Variable unifier.next
+  unifier.next
+
+let make_fresh_type unifier = Types.Variable (allocate_unknown unifier)
 
 let make_fresh_number unifier domain =
   let number = make_fresh_type unifier in
   Hashtbl.replace unifier.domains unifier.next domain;
   number
 
-let make_fresh_value unifier =
-  unifier.next <- unifier.next + 1;
-  Types.Value_variable unifier.next
+let make_fresh_value unifier = Types.Value_variable (allocate_unknown unifier)
 
 let make_fresh_capability_variable unifier =
   unifier.capability_variable_count <- unifier.capability_variable_count + 1;
@@ -249,13 +249,18 @@ and unify_arguments unifier left right =
        left right
 
 and unify_value unifier left right =
-  let left = resolve_value unifier left and right = resolve_value unifier right in
-  match (left, right) with
-  | Value_variable index, other | other, Value_variable index ->
-      (match other with
-      | Value_variable other_index when other_index = index -> ()
-      | _ -> Hashtbl.replace unifier.value_solutions index other);
+  let bind_value index value =
+    (not (refuses_to_decide unifier index))
+    && begin
+      Hashtbl.replace unifier.value_solutions index value;
       true
+    end
+  in
+  match (resolve_value unifier left, resolve_value unifier right) with
+  | Value_variable left_index, Value_variable right_index ->
+      left_index = right_index
+      || bind_value (max left_index right_index) (Value_variable (min left_index right_index))
+  | Value_variable index, other | other, Value_variable index -> bind_value index other
   | left, right -> left = right
 
 and unify_trait unifier (left : Types.trait_reference) (right : Types.trait_reference) =

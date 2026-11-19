@@ -52,9 +52,9 @@ and check_pattern_with state env (written : Syntax.pattern) type_ ~is_var ~mode 
               inclusive;
             });
       match
-        State.narrow state type_
+        Solver.require_within state type_
           (Types.integer_types @ [ Intrinsic.Character; Integer ])
-          ~report_excluded:(fun excluded ->
+          ~reason:(fun excluded ->
             State.add_diagnostic state Mismatch
               (State.read_span state written.id)
               (Printf.sprintf "A range pattern matches an integer or a `Character`, not %s."
@@ -425,9 +425,9 @@ and check_literal_pattern state id (span : Source.Definition_span.t) literal typ
   | Literal_integer number ->
       state.tables.literals.(id) <- Some (Integer_value number);
       ignore
-        (State.narrow state type_
+        (Solver.require_within state type_
            (Types.list_fitting_integer_types number @ [ Intrinsic.Integer ])
-           ~report_excluded:(fun excluded ->
+           ~reason:(fun excluded ->
              if State.is_within state excluded Types.integer_types then
                report_out_of_range state span number excluded
              else
