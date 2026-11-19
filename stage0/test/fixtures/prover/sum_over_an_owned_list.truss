@@ -1,0 +1,7 @@
+fn total(numbers: own List[UInt8]) -> UInt8 {
+  var sum: UInt8 = 0
+  for value in own numbers {
+    sum += value
+  }
+  sum
+}

@@ -772,10 +772,11 @@ let rec lend_statements state (mode : Language.Mode.t) (value : Core.expression)
              else_ = Some (lend_block state mode else_);
              binds_lent_part;
            })
-  | Match { scrutinees; arms } ->
+  | Match { scrutinees; arms; is_written } ->
       make_branching
         (Match
            {
+             is_written;
              scrutinees;
              arms =
                List.map
@@ -823,6 +824,7 @@ let build_collection_place state (iterable : Syntax.expression) (mode : Language
           (fun ~type_:_ body ->
             Match
               {
+                is_written = false;
                 scrutinees = [ scrutinee ];
                 arms = [ { patterns = [ pattern ]; guard = None; body; origin } ];
               }) )
@@ -983,6 +985,7 @@ let build_for_loop (state : State.state) (written : Syntax.statement) (iterable 
             (State.make_synthetic_expression state ~origin:written.id Types.unit
                (Match
                   {
+                    is_written = false;
                     scrutinees = [ Operands.build Own pulled ];
                     arms =
                       [
@@ -1083,6 +1086,7 @@ let build_try state (value : Syntax.expression) (inner : Syntax.expression) ~(ou
   let make_arm patterns body : Core.arm = { patterns; guard = None; body; origin = value.id } in
   Match
     {
+      is_written = false;
       scrutinees = [ Operands.build Own scrutinee ];
       arms =
         [
