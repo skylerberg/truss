@@ -1419,7 +1419,7 @@ if response is Ok(body) && body.length() > 0 {
   render(body)
 }
 
-while queue.pop() is Some(task) {
+while mut queue.pop() is Some(task) {
   run(task)
 }
 ```
@@ -2371,8 +2371,8 @@ test = "test" plain_string [ "uses" capability_list ] block ;
 
 ```truss
 test "config loads with defaults" uses RunForever {
-  let disk = files::MemoryFiles.new().with_text(Path.new("app.toml"), contents: "")
-  let config = provide disk, log::DiscardLog() {
+  var disk = files::MemoryFiles.new().with_text(Path.new("app.toml"), contents: "")
+  let config = provide mut disk, log::DiscardLog() {
     load_config(Path.new("app.toml"))
   }
   assert config == Ok(Config.default())
