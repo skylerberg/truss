@@ -16,6 +16,7 @@ type t =
   | Index_assign
   | Iterable
   | Cursor
+  | Finite_cursor
   | Model
   | Add
   | Subtract
@@ -93,6 +94,7 @@ type method_ =
   | Index_mut_at
   | Index_assign_assign
   | Cursor_next
+  | Finite_cursor_remaining
   | Fixed_width_integer_minimum_value
   | Fixed_width_integer_maximum_value
   | Fixed_width_integer_bit_width
@@ -187,6 +189,7 @@ let items =
     (Index_assign, [ "core" ], "IndexAssign");
     (Iterable, [ "core" ], "Iterable");
     (Cursor, [ "core" ], "Cursor");
+    (Finite_cursor, [ "core" ], "FiniteCursor");
     (Model, [ "core" ], "Model");
     (Add, [ "core" ], "Add");
     (Subtract, [ "core" ], "Subtract");
@@ -266,6 +269,7 @@ let methods =
     (Index_mut_at, Index_mut, "at", Instance Mut);
     (Index_assign_assign, Index_assign, "assign", Instance Mut);
     (Cursor_next, Cursor, "next", Instance Mut);
+    (Finite_cursor_remaining, Finite_cursor, "remaining", Instance Read);
     (Fixed_width_integer_minimum_value, Fixed_width_integer, "minimum_value", Static);
     (Fixed_width_integer_maximum_value, Fixed_width_integer, "maximum_value", Static);
     (Fixed_width_integer_bit_width, Fixed_width_integer, "bit_width", Static);
@@ -410,6 +414,11 @@ let builtin_types_by_path =
           Language.Builtin_type.all))
 
 let find_builtin_type path = Path.Map.find_opt path builtin_types_by_path
+
+let find_view path =
+  if is List path || find_builtin_type path = Some Array then Some (make_path Slice)
+  else if is String path then Some (make_path String_slice)
+  else None
 
 let make_builtin_capability_path builtin_capability =
   Path.make_standard_path [ "capabilities" ] (Language.Builtin_capability.show builtin_capability)

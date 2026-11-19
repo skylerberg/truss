@@ -659,7 +659,7 @@ and lend ?(forwards = 0) state part (call : Mir.call) ~origin =
               | receiver -> Definitions.raise_bug "a call through any on %s" (Types.show receiver)
             in
             let _, signature =
-              Targets.lookup_dynamic_method state.context trait.trait name receiver
+              Targets.lookup_dynamic_method state.context ~any:any_type trait.trait name receiver
             in
             match List.map (Mir_calls.lower_argument_place state) call.arguments with
             | (_, _, any) :: arguments ->

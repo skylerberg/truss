@@ -324,6 +324,23 @@ let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_cond
                             (fun (name, type_) -> (name, Types.substitute substitution type_))
                             impl.implements.associated
                         in
+                        let associated =
+                          associated
+                          @ List.filter_map
+                              (fun (name, _) ->
+                                if List.mem_assoc name associated then None
+                                else
+                                  Some
+                                    ( name,
+                                      normalize lookups ~list_bounds
+                                        (Types.Projection
+                                           {
+                                             base = type_;
+                                             trait = { wanted with associated = [] };
+                                             name;
+                                           }) ))
+                              wanted.associated
+                        in
                         let conditions_hold =
                           (not checks_conditions)
                           || List.for_all

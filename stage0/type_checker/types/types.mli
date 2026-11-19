@@ -189,12 +189,19 @@ val list_field_types : type_interface -> ty list
 type associated_type = { associated_name : string; associated_bounds : trait_reference list }
 type trait_method = { method_name : string; method_receiver : Path.receiver; provided : bool }
 
+type restated_method = {
+  restated_name : string;
+  restated_receiver : Path.receiver;
+  declared_by : Path.t;
+}
+
 type trait_interface = {
   trait_generics : generic list;
   requires : trait_reference list;
   associated_types : associated_type list;
   associated_capabilities : string list;
   methods : trait_method list;
+  restated : restated_method list;
   laws : (string * (string * ty) list) list;
   is_capability : bool;
 }

@@ -9,6 +9,11 @@ let make_standard_path = Path.make_standard_path
 let int64 = Types.make_builtin Int64
 
 let () =
+  Harness.test "a constant of type UInt64 is a type argument in a signature" (fun () ->
+      expect_no_diagnostics [ ("app::main", Fixtures.Interface.array_sized_by_a_uint64_constant) ]);
+  Harness.test "a constant of another type is not a type argument in a signature" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.array_sized_by_an_int64_constant "types.arity"
+        ~says:"`size` in a type argument must be a constant of type `UInt64`.");
   Harness.test "a function's signature is elaborated" (fun () ->
       let packages =
         Support.setup
@@ -285,7 +290,26 @@ let () =
       expect_one_diagnostic Fixtures.Interface.subtrait_redeclaring_compare
         "types.redeclared_method");
   Harness.test "a trait may add an overload of a method of a trait it requires" (fun () ->
-      expect_no_diagnostics [ ("app::main", Fixtures.Interface.subtrait_overloading_element) ])
+      expect_no_diagnostics [ ("app::main", Fixtures.Interface.subtrait_overloading_element) ]);
+  Harness.test "a trait may restate a method of a trait it requires to promise more" (fun () ->
+      expect_no_diagnostics [ ("app::main", Fixtures.Interface.subtrait_restating_next) ]);
+  Harness.test "a restated method has no body" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.subtrait_restating_next_with_a_body
+        "types.restated_method_body");
+  Harness.test "a restated method adds no requires" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.subtrait_restating_next_with_a_requires
+        "types.restated_method_clause" ~at:("requires", 1));
+  Harness.test "a restated method keeps the result of the method it restates" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.subtrait_restating_next_with_another_result
+        "types.signature_mismatch"
+        ~says:"so it has the signature `next(mut self) -> Option[Self.Element] uses Self.Uses`");
+  Harness.test "a restated method keeps the uses of the method it restates" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.subtrait_restating_next_without_its_uses
+        "types.signature_mismatch");
+  Harness.test "an impl of a trait that restates a method does not give the method" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.impl_giving_a_restated_method "types.extra_member"
+        ~says:"Give `next` in the `impl` of `standard::core::Cursor` for `Countdown`."
+        ~at:("next", 2))
 
 let expect_signature_mismatch text ~declared =
   expect_one_diagnostic text "types.signature_mismatch" ~says:declared
@@ -889,6 +913,28 @@ let () =
       expect_one_diagnostic Fixtures.Interface.clock_impl_taking_own_self "types.wrong_receiver");
   Harness.test "a method's head names every generic parameter of its type" (fun () ->
       expect_one_diagnostic Fixtures.Interface.method_head_without_generics "types.arity");
+  Harness.test "a function's value parameter of a type other than UInt64 is an error" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.offset_with_an_int64_value_parameter
+        "types.wrong_value_parameter_type"
+        ~says:"`shift` is a value parameter, so its type is `UInt64`, not `Int64`."
+        ~fixed:Fixtures.Interface.offset_with_an_int64_value_parameter_fixed);
+  Harness.test "a type's value parameter of a type other than UInt64 is an error" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.ring_with_a_bool_value_parameter
+        "types.wrong_value_parameter_type");
+  Harness.test "a value parameter of an unknown type reports only the unknown name" (fun () ->
+      match
+        Support.list_codes
+          (Database.For_testing.list_diagnostics [ Resolve; Interface ]
+             (Support.make_database
+                (Support.setup
+                   [
+                     ( "app::main",
+                       Fixtures.Interface.offset_with_a_value_parameter_of_an_unknown_type );
+                   ]))
+             (Support.parse_file "app::main"))
+      with
+      | [ code ] when code <> "types.wrong_value_parameter_type" -> ()
+      | codes -> Harness.fail "found [%s]" (String.concat "; " codes));
   Harness.test "a type argument must be of its parameter's kind" (fun () ->
       expect_one_diagnostic "fn f(items: List[3]) {}\n" "types.argument_kind");
   Harness.test "a constant in a type argument must have a value" (fun () ->

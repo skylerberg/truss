@@ -1,0 +1,19 @@
+trait QuickCursor: Cursor {
+  fn next(mut self) -> Option[Self.Element]
+    uses Self.Uses
+    cost time O(1)
+}
+
+type Walk(left: UInt64)
+
+impl Cursor for Walk {
+  type Element = UInt64
+
+  fn next(mut self) -> Option[UInt64]
+    cost time O(1)
+  {
+    None
+  }
+}
+
+impl QuickCursor for Walk {}

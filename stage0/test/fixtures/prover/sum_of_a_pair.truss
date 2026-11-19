@@ -1,0 +1,7 @@
+type Pair(left: UInt8, right: UInt8)
+
+fn sum(pair: Pair) -> UInt8 {
+  match pair {
+    (left, right) => left + right
+  }
+}
