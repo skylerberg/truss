@@ -1,0 +1,13 @@
+fn apply[Made](make: fn() -> Made) -> Made {
+  todo
+}
+
+fn f(flag: Bool) -> UInt8 {
+  let made = apply(fn() {
+    if flag {
+      return 3
+    }
+    4
+  })
+  made
+}

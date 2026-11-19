@@ -11,7 +11,7 @@ let rec check_expression (state : State.state) env ?expected (value : Syntax.exp
     when env.specification
          && (not (Hashtbl.mem state.unifier.specification_unknowns index))
          && State.is_within state type_ Types.integer_types ->
-      Name_lookup.coerce state env value ~actual:type_ ~expected:Types.Integer;
+      Conversions.coerce state env value ~actual:type_ ~expected:Types.Integer;
       Types.Integer
   | _ -> type_
 
@@ -30,13 +30,13 @@ and check_lent_part state env (value : Syntax.expression) : Types.ty =
       let actual = check_expression state env ~expected:part inner in
       if inner != value then State.alias_expression state value inner;
       if mode = Mut then Modes.mutate state env ~by:Passed_mut inner;
-      Name_lookup.coerce state env inner ~actual ~expected:part;
+      Conversions.coerce state env inner ~actual ~expected:part;
       actual
   | _ -> check_expression_kind state env value
 
 and check state env (value : Syntax.expression) (expected : Types.ty) =
   let actual = check_expression state env ~expected value in
-  Name_lookup.coerce state env value ~actual ~expected
+  Conversions.coerce state env value ~actual ~expected
 
 and check_expression_kind state env ?expected (value : Syntax.expression) : Types.ty =
   match value.kind with
@@ -61,7 +61,7 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
         with
         | [] -> Types.Error (report_too_large "`Float64`")
         | allowed ->
-            State.make_literal_type state allowed ~report_excluded:(fun excluded ->
+            State.make_literal_type state value allowed ~report_excluded:(fun excluded ->
                 report_too_large (State.describe state excluded))
       in
       State.check_when_final state (fun () ->
@@ -270,7 +270,7 @@ and check_member_value state env (value : Syntax.expression) (base : Syntax.expr
       State.make_error_type state Not_a_value (State.read_span state value.id)
         (Printf.sprintf "`%s` is a method; call it with `(...)`." member.text)
   | None -> (
-      let base_type = State.normalize state (check_expression state env base) in
+      let base_type = Conversions.read_checked_head state env base in
       match base_type with
       | Types.Error _ | Types.Hole -> base_type
       | _ ->
@@ -308,7 +308,7 @@ and is_field state env (inner : Syntax.expression) (member : Syntax.name) =
     | Some type_ -> type_
     | None -> check_expression state env inner
   in
-  match State.normalize state base_type with
+  match Conversions.read_actual_head state inner base_type with
   | Types.Named { path; arguments } -> (
       match Members.find_fields state.lookups path arguments with
       | Some fields ->
@@ -318,7 +318,7 @@ and is_field state env (inner : Syntax.expression) (member : Syntax.name) =
 
 and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax.expression) items =
   let base_type =
-    State.normalize state
+    Conversions.read_actual_head state base
       (match state.tables.types.(base.id) with
       | Some type_ -> type_
       | None -> check_expression state env base)
@@ -364,7 +364,7 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
         | Some element, _ ->
             let uint64 = Types.make_builtin UInt64 in
             let actual = check_expression state env ~expected:uint64 key in
-            Name_lookup.coerce state env ~argument:Read key ~actual ~expected:uint64;
+            Conversions.coerce state env ~argument:Read key ~actual ~expected:uint64;
             State.register_expression state value (fun () ->
                 Use
                   (Element
@@ -389,7 +389,7 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
                 let key_type = resolve_associated Index_key
                 and output = resolve_associated Index_output in
                 let actual = check_expression state env ~expected:key_type key in
-                Name_lookup.coerce state env ~argument:Read ~takes_view_as_owner:true key ~actual
+                Conversions.coerce state env ~argument:Read ~takes_view_as_owner:true key ~actual
                   ~expected:key_type;
                 state.tables.calls.(value.id) <-
                   Some

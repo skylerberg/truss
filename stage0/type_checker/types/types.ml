@@ -141,6 +141,7 @@ let find_bound_integer_implementors bounds =
     None bounds
 
 let float_types : Language.Builtin_type.t list = [ Float32; Float64 ]
+let number_types = integer_types @ float_types @ [ Language.Builtin_type.Integer ]
 
 let find_sealed_implementors trait =
   if Well_known.is Floating_point trait then Some float_types else find_integer_implementors trait

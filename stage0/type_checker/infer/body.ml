@@ -42,7 +42,9 @@ let check_body state (env : State.env) (written : Syntax.block) =
                 Expressions.check state env value part
             | _, Some (Returns output) ->
                 Statements.check_statement state env last ~last:true;
-                if not (State.statement_diverges state last || State.unify state output Types.unit)
+                if
+                  not
+                    (Statements.statement_diverges state last || State.unify state output Types.unit)
                 then
                   State.report state Mismatch (State.read_span state last.id)
                     (Printf.sprintf "This body must end with a value of type `%s`."
@@ -131,7 +133,7 @@ let check_defaults state env (written : Syntax.parameter list) (signature : Type
           | Some info, Some value ->
               Solver.run_in_statement state env (State.read_span state value.id) (fun () ->
                   let actual = Expressions.check_expression state env ~expected:info.type_ value in
-                  Name_lookup.coerce state env ~argument:info.mode value ~actual
+                  Conversions.coerce state env ~argument:info.mode value ~actual
                     ~expected:info.type_);
               Constant.check state ~default:true value
           | Some { has_default = true; _ }, None ->
@@ -660,7 +662,7 @@ let list_used_packages (resolved : Resolve.resolved) ~evidence_packages (form : 
     form.definition;
   List.sort_uniq compare (named @ !called)
 
-let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
+let infer (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body ~assumed_types =
   let resolved =
     Resolve.merge
       (List.map
@@ -719,10 +721,11 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
       capability_solution = None;
       evidence_packages = [];
       final_type_checks = [];
-      undecided = [];
-      decisions = Hashtbl.create 4;
+      log = [];
       annotatable = Hashtbl.create 8;
-      narrowings = [];
+      goals = [];
+      assumed_types;
+      unchecked_fixes = [];
     }
   in
   Solver.run_in_statement state no_output (State.read_span state definition.id) (fun () ->
@@ -736,6 +739,28 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
     @ state.diagnostics;
   finalize state;
   Exported_parts.check state;
+  (state, elaborated, resolved)
+
+let keep_validated_fixes lookups key ~checks_body (state : State.state) =
+  let is_valid (fixed : Diagnostic.in_definition) assumed_types =
+    match infer lookups key ~checks_body ~assumed_types with
+    | checked_again, _, _ ->
+        List.for_all
+          (fun (diagnostic : Diagnostic.in_definition) ->
+            diagnostic.span <> fixed.span && List.mem diagnostic state.diagnostics)
+          checked_again.diagnostics
+    | exception Interface.Properties.Recursion_limit _ -> false
+  in
+  List.map
+    (fun (diagnostic : Diagnostic.in_definition) ->
+      let is_kept fix =
+        Option.fold ~none:true ~some:(is_valid diagnostic) (List.assq_opt fix state.unchecked_fixes)
+      in
+      { diagnostic with fixes = List.filter is_kept diagnostic.fixes })
+    state.diagnostics
+
+let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
+  let state, elaborated, resolved = infer lookups key ~checks_body ~assumed_types:[] in
   let has_any_type is_unwanted =
     let contains table =
       Seq.exists
@@ -804,4 +829,4 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
         (List.sort_uniq
            (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
              compare (left.span, left.code, left.message) (right.span, right.code, right.message))
-           state.diagnostics)
+           (keep_validated_fixes lookups key ~checks_body state))
