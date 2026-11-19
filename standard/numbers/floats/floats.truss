@@ -148,38 +148,6 @@ impl Hash for Float32 {
   }
 }
 
-public fn Float32.ieee_equal(self, other: Float32) -> Bool
-  ensures result == (intrinsic::ieee_equal(self, right: other))
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::ieee_equal(self, right: other)
-}
-
-public fn Float32.ieee_less(self, other: Float32) -> Bool
-  ensures result == (intrinsic::ieee_less(self, right: other))
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::ieee_less(self, right: other)
-}
-
-public fn Float32.is_nan(self) -> Bool
-  ensures result == (intrinsic::is_nan(self))
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::is_nan(self)
-}
-
-public fn Float32.square_root(self) -> Float32
-  ensures identical(result, intrinsic::square_root(self))
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::square_root(self)
-}
-
 impl Equal for Float64 {
   fn equal(self, other: Float64) -> Bool
     cost time O(1)
@@ -370,36 +338,4 @@ impl Hash for Float64 {
   {
     mut hasher.write(if self == 0.0 { 0 } else { intrinsic::to_bits[Float64, UInt64](self) })
   }
-}
-
-public fn Float64.ieee_equal(self, other: Float64) -> Bool
-  ensures result == (intrinsic::ieee_equal(self, right: other))
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::ieee_equal(self, right: other)
-}
-
-public fn Float64.ieee_less(self, other: Float64) -> Bool
-  ensures result == (intrinsic::ieee_less(self, right: other))
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::ieee_less(self, right: other)
-}
-
-public fn Float64.is_nan(self) -> Bool
-  ensures result == (intrinsic::is_nan(self))
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::is_nan(self)
-}
-
-public fn Float64.square_root(self) -> Float64
-  ensures identical(result, intrinsic::square_root(self))
-  cost time O(1)
-  cost allocations == 0
-{
-  intrinsic::square_root(self)
 }

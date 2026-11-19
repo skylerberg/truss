@@ -1,6 +1,5 @@
 let check packages =
-  Database.For_testing.list_diagnostics
-    [ Resolve; Interface; Infer; Patterns ]
+  Database.For_testing.list_diagnostics [ Resolve; Interface; Infer ]
     (Support.make_database packages)
 
 let expect_one_diagnostic = Support.expect_one_diagnostic ~check
@@ -32,6 +31,10 @@ let () =
       expect_one_diagnostic Fixtures.Patterns.match_with_only_a_guarded_arm "patterns.not_covered");
   Harness.test "integer ranges that cover the type are exhaustive" (fun () ->
       expect_fine Fixtures.Patterns.byte_ranges_covering_the_type);
+  Harness.test "a match that misses two cases names one and counts the other" (fun () ->
+      let actual = read_message Fixtures.Patterns.match_missing_two_variants in
+      let expected = "`Green` is not covered, nor 1 other." in
+      if not (String.includes ~affix:expected actual) then Harness.fail "message %S" actual);
   Harness.test "integer ranges that leave a gap name it" (fun () ->
       let actual = read_message Fixtures.Patterns.byte_ranges_with_a_gap in
       if not (String.includes ~affix:"`100`" actual) then Harness.fail "message %S" actual);
@@ -85,6 +88,8 @@ let () =
       expect Fixtures.Patterns.bool_constant_and_false_arms []);
   Harness.test "a variant constant covers its variant" (fun () ->
       expect Fixtures.Patterns.variant_constant_arm []);
+  Harness.test "a constant in a contract's pattern covers its value" (fun () ->
+      expect Fixtures.Patterns.ensures_matching_a_variant_constant []);
   Harness.test "a constant whose value is not evaluated at compile time covers only itself"
     (fun () -> expect Fixtures.Patterns.unevaluated_constant_arm []);
   Harness.test "a range with Character constant ends covers their values" (fun () ->
@@ -119,6 +124,11 @@ let () =
           | [] -> ()
           | actual -> Harness.fail "found [%s]" (String.concat "; " actual))
         [ "own name"; "\"${name}\"" ]);
+  Harness.test "a pattern that names a constant whose value fails to check reports only its error"
+    (fun () ->
+      match list_codes Fixtures.Patterns.arm_naming_a_constant_with_an_ill_typed_value with
+      | [ code ] when not (String.starts_with ~prefix:"patterns." code) -> ()
+      | actual -> Harness.fail "found [%s]" (String.concat "; " actual));
   Harness.test "a sub-pattern that failed to type makes no arm unreachable" (fun () ->
       match list_codes Fixtures.Patterns.arm_with_a_misspelled_variant with
       | actual when List.exists (fun code -> String.starts_with ~prefix:"patterns." code) actual ->

@@ -1,0 +1,3 @@
+fn f(items: mut List[Int64]) {
+  mut items.swap(0, second: 0)
+}

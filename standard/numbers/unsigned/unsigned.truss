@@ -1,4 +1,5 @@
 use standard::intrinsic
+use standard::numbers::integers
 
 impl Equal for UInt8 {
   fn equal(self, other: UInt8) -> Bool
@@ -605,10 +606,71 @@ impl FixedWidthInteger for UInt8 {
   {
     UInt8.bits
   }
+
+  type Bytes = Array[UInt8, 1]
+
+  fn to_big_endian_bytes(self) -> Array[UInt8, 1]
+    cost time O(1)
+  {
+    [self]
+  }
+
+  fn to_little_endian_bytes(self) -> Array[UInt8, 1]
+    cost time O(1)
+  {
+    [self]
+  }
+
+  fn from_big_endian_bytes(bytes: Array[UInt8, 1]) -> UInt8
+    ensures result == (bytes[0])
+    cost time O(1)
+  {
+    bytes[0]
+  }
+
+  fn from_little_endian_bytes(bytes: Array[UInt8, 1]) -> UInt8
+    ensures result == (bytes[0])
+    cost time O(1)
+  {
+    bytes[0]
+  }
+
+  fn reverse_bits(self) -> UInt8
+    cost time O(1)
+  {
+    intrinsic::convert(integers::reverse_uint64_bits(intrinsic::convert(self)) >> 56)
+  }
 }
 
 impl UnsignedInteger for UInt8 {
   type Signed = Int8
+
+  fn integer_square_root(self) -> UInt8
+    ensures result * result <= self
+    ensures self < (result + 1) * (result + 1)
+    cost time O(8)
+  {
+    var result: UInt8 = 0
+    var width: UInt8 = 16
+    while width > 1
+      invariant width >= 1
+      invariant result + width <= 16
+      invariant result * result <= self
+      invariant self < (result + width) * (result + width)
+      decreases width
+      cost time O(log(15) - log(width - 1))
+    {
+      let half = width / 2
+      let candidate = result + half
+      if candidate * candidate <= self {
+        result = candidate
+        width = width - half
+      } else {
+        width = half
+      }
+    }
+    result
+  }
 }
 
 impl FixedWidthInteger for UInt16 {
@@ -632,10 +694,71 @@ impl FixedWidthInteger for UInt16 {
   {
     UInt16.bits
   }
+
+  type Bytes = Array[UInt8, 2]
+
+  fn to_big_endian_bytes(self) -> Array[UInt8, 2]
+    cost time O(1)
+  {
+    [intrinsic::convert((self >> 8) & 255), intrinsic::convert((self >> 0) & 255)]
+  }
+
+  fn to_little_endian_bytes(self) -> Array[UInt8, 2]
+    cost time O(1)
+  {
+    [intrinsic::convert((self >> 0) & 255), intrinsic::convert((self >> 8) & 255)]
+  }
+
+  fn from_big_endian_bytes(bytes: Array[UInt8, 2]) -> UInt16
+    ensures result == ((intrinsic::convert[UInt8, UInt16](bytes[0]) << 8) | intrinsic::convert[UInt8, UInt16](bytes[1]))
+    cost time O(1)
+  {
+    (intrinsic::convert[UInt8, UInt16](bytes[0]) << 8) | intrinsic::convert[UInt8, UInt16](bytes[1])
+  }
+
+  fn from_little_endian_bytes(bytes: Array[UInt8, 2]) -> UInt16
+    ensures result == (intrinsic::convert[UInt8, UInt16](bytes[0]) | (intrinsic::convert[UInt8, UInt16](bytes[1]) << 8))
+    cost time O(1)
+  {
+    intrinsic::convert[UInt8, UInt16](bytes[0]) | (intrinsic::convert[UInt8, UInt16](bytes[1]) << 8)
+  }
+
+  fn reverse_bits(self) -> UInt16
+    cost time O(1)
+  {
+    intrinsic::convert(integers::reverse_uint64_bits(intrinsic::convert(self)) >> 48)
+  }
 }
 
 impl UnsignedInteger for UInt16 {
   type Signed = Int16
+
+  fn integer_square_root(self) -> UInt16
+    ensures result * result <= self
+    ensures self < (result + 1) * (result + 1)
+    cost time O(16)
+  {
+    var result: UInt16 = 0
+    var width: UInt16 = 256
+    while width > 1
+      invariant width >= 1
+      invariant result + width <= 256
+      invariant result * result <= self
+      invariant self < (result + width) * (result + width)
+      decreases width
+      cost time O(log(255) - log(width - 1))
+    {
+      let half = width / 2
+      let candidate = result + half
+      if candidate * candidate <= self {
+        result = candidate
+        width = width - half
+      } else {
+        width = half
+      }
+    }
+    result
+  }
 }
 
 impl FixedWidthInteger for UInt32 {
@@ -659,10 +782,71 @@ impl FixedWidthInteger for UInt32 {
   {
     UInt32.bits
   }
+
+  type Bytes = Array[UInt8, 4]
+
+  fn to_big_endian_bytes(self) -> Array[UInt8, 4]
+    cost time O(1)
+  {
+    [intrinsic::convert((self >> 24) & 255), intrinsic::convert((self >> 16) & 255), intrinsic::convert((self >> 8) & 255), intrinsic::convert((self >> 0) & 255)]
+  }
+
+  fn to_little_endian_bytes(self) -> Array[UInt8, 4]
+    cost time O(1)
+  {
+    [intrinsic::convert((self >> 0) & 255), intrinsic::convert((self >> 8) & 255), intrinsic::convert((self >> 16) & 255), intrinsic::convert((self >> 24) & 255)]
+  }
+
+  fn from_big_endian_bytes(bytes: Array[UInt8, 4]) -> UInt32
+    ensures result == ((intrinsic::convert[UInt8, UInt32](bytes[0]) << 24) | (intrinsic::convert[UInt8, UInt32](bytes[1]) << 16) | (intrinsic::convert[UInt8, UInt32](bytes[2]) << 8) | intrinsic::convert[UInt8, UInt32](bytes[3]))
+    cost time O(1)
+  {
+    (intrinsic::convert[UInt8, UInt32](bytes[0]) << 24) | (intrinsic::convert[UInt8, UInt32](bytes[1]) << 16) | (intrinsic::convert[UInt8, UInt32](bytes[2]) << 8) | intrinsic::convert[UInt8, UInt32](bytes[3])
+  }
+
+  fn from_little_endian_bytes(bytes: Array[UInt8, 4]) -> UInt32
+    ensures result == (intrinsic::convert[UInt8, UInt32](bytes[0]) | (intrinsic::convert[UInt8, UInt32](bytes[1]) << 8) | (intrinsic::convert[UInt8, UInt32](bytes[2]) << 16) | (intrinsic::convert[UInt8, UInt32](bytes[3]) << 24))
+    cost time O(1)
+  {
+    intrinsic::convert[UInt8, UInt32](bytes[0]) | (intrinsic::convert[UInt8, UInt32](bytes[1]) << 8) | (intrinsic::convert[UInt8, UInt32](bytes[2]) << 16) | (intrinsic::convert[UInt8, UInt32](bytes[3]) << 24)
+  }
+
+  fn reverse_bits(self) -> UInt32
+    cost time O(1)
+  {
+    intrinsic::convert(integers::reverse_uint64_bits(intrinsic::convert(self)) >> 32)
+  }
 }
 
 impl UnsignedInteger for UInt32 {
   type Signed = Int32
+
+  fn integer_square_root(self) -> UInt32
+    ensures result * result <= self
+    ensures self < (result + 1) * (result + 1)
+    cost time O(32)
+  {
+    var result: UInt32 = 0
+    var width: UInt32 = 65536
+    while width > 1
+      invariant width >= 1
+      invariant result + width <= 65536
+      invariant result * result <= self
+      invariant self < (result + width) * (result + width)
+      decreases width
+      cost time O(log(65535) - log(width - 1))
+    {
+      let half = width / 2
+      let candidate = result + half
+      if candidate * candidate <= self {
+        result = candidate
+        width = width - half
+      } else {
+        width = half
+      }
+    }
+    result
+  }
 }
 
 impl FixedWidthInteger for UInt64 {
@@ -686,8 +870,69 @@ impl FixedWidthInteger for UInt64 {
   {
     UInt64.bits
   }
+
+  type Bytes = Array[UInt8, 8]
+
+  fn to_big_endian_bytes(self) -> Array[UInt8, 8]
+    cost time O(1)
+  {
+    [intrinsic::convert((self >> 56) & 255), intrinsic::convert((self >> 48) & 255), intrinsic::convert((self >> 40) & 255), intrinsic::convert((self >> 32) & 255), intrinsic::convert((self >> 24) & 255), intrinsic::convert((self >> 16) & 255), intrinsic::convert((self >> 8) & 255), intrinsic::convert((self >> 0) & 255)]
+  }
+
+  fn to_little_endian_bytes(self) -> Array[UInt8, 8]
+    cost time O(1)
+  {
+    [intrinsic::convert((self >> 0) & 255), intrinsic::convert((self >> 8) & 255), intrinsic::convert((self >> 16) & 255), intrinsic::convert((self >> 24) & 255), intrinsic::convert((self >> 32) & 255), intrinsic::convert((self >> 40) & 255), intrinsic::convert((self >> 48) & 255), intrinsic::convert((self >> 56) & 255)]
+  }
+
+  fn from_big_endian_bytes(bytes: Array[UInt8, 8]) -> UInt64
+    ensures result == ((intrinsic::convert[UInt8, UInt64](bytes[0]) << 56) | (intrinsic::convert[UInt8, UInt64](bytes[1]) << 48) | (intrinsic::convert[UInt8, UInt64](bytes[2]) << 40) | (intrinsic::convert[UInt8, UInt64](bytes[3]) << 32) | (intrinsic::convert[UInt8, UInt64](bytes[4]) << 24) | (intrinsic::convert[UInt8, UInt64](bytes[5]) << 16) | (intrinsic::convert[UInt8, UInt64](bytes[6]) << 8) | intrinsic::convert[UInt8, UInt64](bytes[7]))
+    cost time O(1)
+  {
+    (intrinsic::convert[UInt8, UInt64](bytes[0]) << 56) | (intrinsic::convert[UInt8, UInt64](bytes[1]) << 48) | (intrinsic::convert[UInt8, UInt64](bytes[2]) << 40) | (intrinsic::convert[UInt8, UInt64](bytes[3]) << 32) | (intrinsic::convert[UInt8, UInt64](bytes[4]) << 24) | (intrinsic::convert[UInt8, UInt64](bytes[5]) << 16) | (intrinsic::convert[UInt8, UInt64](bytes[6]) << 8) | intrinsic::convert[UInt8, UInt64](bytes[7])
+  }
+
+  fn from_little_endian_bytes(bytes: Array[UInt8, 8]) -> UInt64
+    ensures result == (intrinsic::convert[UInt8, UInt64](bytes[0]) | (intrinsic::convert[UInt8, UInt64](bytes[1]) << 8) | (intrinsic::convert[UInt8, UInt64](bytes[2]) << 16) | (intrinsic::convert[UInt8, UInt64](bytes[3]) << 24) | (intrinsic::convert[UInt8, UInt64](bytes[4]) << 32) | (intrinsic::convert[UInt8, UInt64](bytes[5]) << 40) | (intrinsic::convert[UInt8, UInt64](bytes[6]) << 48) | (intrinsic::convert[UInt8, UInt64](bytes[7]) << 56))
+    cost time O(1)
+  {
+    intrinsic::convert[UInt8, UInt64](bytes[0]) | (intrinsic::convert[UInt8, UInt64](bytes[1]) << 8) | (intrinsic::convert[UInt8, UInt64](bytes[2]) << 16) | (intrinsic::convert[UInt8, UInt64](bytes[3]) << 24) | (intrinsic::convert[UInt8, UInt64](bytes[4]) << 32) | (intrinsic::convert[UInt8, UInt64](bytes[5]) << 40) | (intrinsic::convert[UInt8, UInt64](bytes[6]) << 48) | (intrinsic::convert[UInt8, UInt64](bytes[7]) << 56)
+  }
+
+  fn reverse_bits(self) -> UInt64
+    cost time O(1)
+  {
+    integers::reverse_uint64_bits(self)
+  }
 }
 
 impl UnsignedInteger for UInt64 {
   type Signed = Int64
+
+  fn integer_square_root(self) -> UInt64
+    ensures result * result <= self
+    ensures self < (result + 1) * (result + 1)
+    cost time O(64)
+  {
+    var result: UInt64 = 0
+    var width: UInt64 = 4294967296
+    while width > 1
+      invariant width >= 1
+      invariant result + width <= 4294967296
+      invariant result * result <= self
+      invariant self < (result + width) * (result + width)
+      decreases width
+      cost time O(log(4294967295) - log(width - 1))
+    {
+      let half = width / 2
+      let candidate = result + half
+      if candidate * candidate <= self {
+        result = candidate
+        width = width - half
+      } else {
+        width = half
+      }
+    }
+    result
+  }
 }

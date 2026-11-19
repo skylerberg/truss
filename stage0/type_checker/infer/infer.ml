@@ -26,7 +26,11 @@ type checked = Body.checked = {
 
 let check lookups (key : Resolve.Names.key) ~checks_body =
   Compiler_bug.run_while_doing ~stage:"Infer" (Resolve.Names.show_key key) (fun () ->
-      try Body.check lookups key ~checks_body
+      try
+        Result.bind (Body.check lookups key ~checks_body) (fun (checked : checked) ->
+            match Patterns.check lookups key checked.form with
+            | [] -> Ok checked
+            | diagnostics -> Error diagnostics)
       with Interface.Properties.Recursion_limit message ->
         let names = lookups.interface.names in
         Error
@@ -36,7 +40,9 @@ let check lookups (key : Resolve.Names.key) ~checks_body =
               message;
           ])
 
-let check_contract lookups key = check lookups key ~checks_body:false
+let check_contract (lookups : Lookups.t) key =
+  check lookups key
+    ~checks_body:(Resolve.Names.is_constant (lookups.interface.names.read_declaration key).kind)
 
 let check_body (lookups : Lookups.t) key =
   ignore (lookups.read_contract key);

@@ -413,6 +413,9 @@ rule excludes `Plain` arguments, such as indexes, so that case is rare.
 | Generic code that keeps a value requires `Storable`. | A type parameter may stand for a view, and the bound stops generic code from storing one. |
 | An `any Trait` is a view unless `Trait` requires `Storable`. | `any` hides the type, so the compiler cannot see whether the value holds a view. |
 | `mut` access is never stored. | It lasts for one call, one iteration, or one `provide mut` block, so the ownership check tracks no mutable reference from one statement to the next. |
+| A slice's elements are written only through a `mut Slice` parameter or a range of a mutable place, and a slice held in a variable, a field, or an element is read-only. | Write access then always names the place it writes, so the ownership check compares the written place with every other argument and view, and the prover writes the callee's changes back to that place. Write access held in a variable would let `var target = items[1..5]` overwrite elements that `items[0..4]`, passed beside it, still views. |
+| A `mut Slice` parameter cannot be assigned, and a slice is passed `mut` only to a `mut Slice` parameter. | A callee that assigned the slice another one would leave the caller's elements unchanged while the caller read the callee's contract as a write to them, and would carry write access to elements lent read-only. A slice's length is then fixed for the call, so the prover knows it with no clause, and the slice is passed by value. |
+| A slice implements no trait with a `mut self` method, so `Slice` has no `IndexMut`. | Generic code can copy a value of its type parameter, and a copy of a slice views the same elements, so a `mut self` method called on the copy would write through a read-only view. |
 | A view is passed as its owning type to a read-only parameter whose declared type is a type parameter or an associated type. | Generic code cannot name the view of its type parameter, so `Map.get`, which takes `key: Key`, would make a lookup in a `Map[String, Int64]` allocate a `String`. A callee cannot mutate, move, drop, or store a read-only parameter, so it cannot tell a view from an owned value. Rust needs the `Borrow` trait and a blanket `impl` for this lookup. |
 | A parameter declared as `List` or `String` takes no view. | Its signature can declare `Slice` or `StringSlice`, which takes both. If it took a view too, the two declarations would accept the same arguments, and every signature would choose between them for no reason. |
 
@@ -434,8 +437,8 @@ fn Grid.cell(mut self, position: Position) lends mut Cell {
 mut grid.cell(position).visit()
 ```
 
-Indexing is a lending method of the prelude trait `Index`, so a user's
-`Grid` gets the syntax and the proof rules of a `List`.
+Indexing any other type is a lending method of the prelude trait `Index`,
+so a user's `Grid` gets the syntax of a `List`.
 
 **No code of a lending method runs after the lend.** Swift's `_read` and
 `_modify` accessors also lend a part for one access, but they are
@@ -458,6 +461,7 @@ mutated. Such a type takes the new value in an ordinary method, as
 | A method may lend a value that it computes, and a mutation of that value is not written back. | Writing back would be code after the lend. |
 | A method lends a part of its first parameter, or a whole value that it made, and never a part inside a value it owns. | Nothing of the method then has to outlive its call except the part, which the caller holds. So the method can be compiled as a function, be called through `any`, and call itself. Rust has the same rule for a reference into a local. Swift's accessors lend such a part by keeping the accessor's frame alive. |
 | A lending call lends its whole receiver. | The method was proven on the assumption that nothing else uses `self` while the part is lent. |
+| An element or a range of a `List`, a `Slice`, or an `Array` is a place, as a field is, and calls no method. | A lending call lends its whole receiver, so `mut items[0]` passed beside `items[1]` would conflict, and the ownership check and the prover would not see which element a call wrote. As places, elements are parts of the sequence: disjoint parts pass side by side, and a write changes one element of the prover's model. |
 
 ### Loops
 
@@ -478,13 +482,14 @@ it needs rules for the code that runs when the loop exits early. That is
 the coroutine that lending methods avoid.
 
 In a loop by position, the collection's code runs only inside `count` and
-`element`. The ownership check, the prover, and code generation therefore
-treat the loop as a loop over a range of positions, and it compiles to a
-plain loop. The prover takes the loop's facts from the contract of
-`element`: each position is in bounds, each element is visited once, and the
-loop terminates. Most loops therefore need no annotation, and a user's
-collection gives its loops the same facts as a `List` by stating the same
-contract.
+`element`. A loop over a `List`, a `Slice`, or an `Array` calls no
+`element`: each iteration is lent the element place `items[position]`. The
+ownership check, the prover, and code generation therefore treat the loop as
+a loop over a range of positions, and it compiles to a plain loop. The
+prover takes the loop's facts from the contract of `element`: each position
+is in bounds, each element is visited once, and the loop terminates. Most
+loops therefore need no annotation, and a user's collection gives its loops
+the same facts as a `List` by stating the same contract.
 
 The cost is that a loop by position visits one collection, and the
 collection must have positions. Such a loop cannot advance two sequences
@@ -1704,6 +1709,8 @@ which a `cost` clause can promise. This is why a key is `Ordered` as well as
 | Convention | Reason |
 |---|---|
 | A method that needs no ownership of the storage is declared once, on the view type. | A `String`, a `List`, and an `Array` have the methods of their views ([Method lookup](#method-lookup)), so `mut names.sort()` works without `names[..]`, and a second declaration on the owning type would only forward. The owning type declares a method of that name where it uses its storage: `List.reverse` keeps the list's capacity. |
+| A method that every integer type has, or both float types have, is declared once, in a sealed trait. | Generic code over the trait can call the method, and the method's contract in the trait holds for every type. A method declared on each type is a separate function per type, which generic code cannot call. |
+| `FloatingPoint` is sealed: only `Float32` and `Float64` implement it. | The trait describes their IEEE 754 formats, which its `Bits` and methods such as `is_nan` expose. In generic code over the trait, `is_nan` and the `ieee_` comparisons then mean what IEEE 754 defines, for every instantiation. |
 | A capability declares only primitive operations. | A narrowing implementation or a fake has few methods to write. |
 | Every failure of the operating system is a `SystemError`. | Code that reads a file and sends it over a connection handles one error type. |
 | Text in an embedded language is a tagged template, and a `processes::Command` is a program and a list of arguments. | Neither is a string that is passed to an interpreter, so neither allows an injection. |
@@ -1826,6 +1833,7 @@ contract, so a typo in a body blocks no caller.
 |---|---|
 | The database keeps no earlier version of a failing part. | An earlier version would make the database depend on the order of the edits. A caller checked against an earlier signature would also report errors that the files do not hold. |
 | A build, a test run, or a template check requires that no definition it reaches has errors. | No run executes code that the files do not hold, and a test whose code is correct runs while unrelated code is broken. |
+| A constant's value belongs to its contract. | A pattern that names a constant covers the constant's value, and a contract can hold a pattern. The check of that contract reads the value, as a caller's proof reads a callee's contract. |
 
 ### Caches
 

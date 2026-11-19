@@ -180,6 +180,7 @@ module Code : sig
     | Missing_required_impl
     | Implements_built_in_capability
     | Impl_uses
+    | Mut_self_for_slice
     | Unknown_associated_type
     | Unknown_associated_capability
     | Associated_type_not_fixed
@@ -207,7 +208,6 @@ module Code : sig
     | Data_race
     | Lent_part_escapes
     | Lends_other_parameter
-    | Read_only_view
     | Lent_mut_in_variant
     | Needs_lent_mut
     | Task_outlives_view

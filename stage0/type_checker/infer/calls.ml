@@ -121,7 +121,7 @@ and check_argument state env (value : Syntax.expression) (parameter : Types.para
   Name_lookup.coerce state env ~argument:parameter.mode
     ~takes_view_as_owner:(has_generic_type && parameter.mode = Read)
     value ~actual ~expected:parameter.type_;
-  Modes.check_mode state env value parameter actual;
+  Modes.check_mode state env value parameter actual ~has_generic_type;
   parameter.mode
 
 and match_arguments state ?constructor (value : Syntax.expression)

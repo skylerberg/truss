@@ -1,12 +1,18 @@
 type block = int
 type early_exit = { resume : block; returned : Tree.local option }
 type branch = { entry : block; blocks : block list }
-type statement = { kind : Tree.basic; origin : Core.origin }
+
+type statement_kind =
+  | Basic of Tree.basic
+  | Provide_start of { provided : Tree.provided list; can_use_tasks : bool }
+  | Provide_end
+
+type statement = { kind : statement_kind; origin : Core.origin }
 
 type loop_head = {
   iteration : Tree.iteration;
   part : Tree.local;
-  lent : Tree.lent_element option;
+  elements : Tree.elements option;
   body : block;
   blocks : block list;
   after : block;

@@ -100,8 +100,8 @@ let is_always_read_kind : type a. a Database.Part.stored -> bool = function
   | Checked_body _ | Body_mir _ | Contract_mir _ | Mir_call_edges _ ->
       true
   | Namespace _ | Constant_value _ | Header _ | Derived_interface _ | Type_facts _ | Grant _
-  | Generated_mir _ | Patterns _ | Usage _ | Ownership _ | Import_check _ | Package_check _
-  | Call_edges _ | Recursion_group _ | Proof _ | Lowered _ | Test_key _ ->
+  | Generated_mir _ | Usage _ | Ownership _ | Import_check _ | Package_check _ | Call_edges _
+  | Recursion_group _ | Proof _ | Lowered _ | Test_key _ ->
       false
 
 let is_always_read (Database.Part.Any part) = is_always_read_kind part

@@ -62,7 +62,7 @@ let transfer context (step : Actions.step) (before : state) : state =
   | End_loans ended ->
       { before with loans = List.filter (fun (loan, _) -> not (List.mem loan ended)) before.loans }
   | Read _ | Move _ | Move_out_of_lent _ | Mutate _ | Assign _ | Yield_point _ | Return_view _
-  | Drop _ | Bind_lent_part _ | Pass_owned_function _ | Write_through _ | Arguments _ ->
+  | Drop _ | Bind_lent_part _ | Pass_owned_function _ | Arguments _ ->
       before
 
 let join (after : state) ~(into : state) =

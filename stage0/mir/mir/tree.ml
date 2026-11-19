@@ -12,13 +12,18 @@ type local_info = {
   has_several_bindings : bool;
 }
 
-type place = { root : root; projections : projection list }
-and root = Local of local | Constant of Path.t | Literal of { text : string; type_ : Types.ty }
-and projection = Field of string | Variant_field of { variant : string; field : string }
-
 type constant = Unit | Integer of Z.t | Float of float | Boolean of bool
 
-type operand =
+type place = { root : root; projections : projection list }
+and root = Local of local | Constant of Path.t | Literal of { text : string; type_ : Types.ty }
+
+and projection =
+  | Field of string
+  | Variant_field of { variant : string; field : string }
+  | Element of { index : operand; sequence : Types.ty; origin : Core.origin }
+  | Range of { start : operand; stop : operand option; sequence : Types.ty; origin : Core.origin }
+
+and operand =
   | Use of { place : place; type_ : Types.ty; origin : Core.origin }
   | Borrow of { place : place; type_ : Types.ty; mode : Language.Mode.t; origin : Core.origin }
   | Take of { place : place; type_ : Types.ty; origin : Core.origin }
@@ -143,7 +148,12 @@ and loop = {
   quantified : quantified option;
 }
 
-and lent_element = { element : local; collection : place; count : block }
+and elements = { element : loop_element; collection : place; count : block }
+
+and loop_element =
+  | Lent_by_call of local
+  | Sequence_element of { place : place; mode : Language.Mode.t }
+
 and compared = { comparison : Language.Comparison.t; left : operand; right : operand }
 and early_exit = { resumed : block; returned : local option }
 and statement = { kind : statement_kind; origin : Core.origin }
@@ -152,14 +162,11 @@ and basic =
   | Assign of { target : place; value : rvalue }
   | Call of { destination : place option; call : call }
   | Lend of { part : local; call : call }
-  | Slice of { destination : place; base : place; base_type : Types.ty; call : call }
   | Template of { destination : place; literals : string list; call : call }
   | Live of local list
   | Dead of local list
   | Assert of operand
   | Echo of operand
-  | Provide of { provided : provided list; can_use_tasks : bool }
-  | Provide_end
   | Loan_start of {
       loan : int;
       borrowed : operand;
@@ -186,11 +193,12 @@ and statement_kind =
       loop : loop;
       iteration : iteration;
       part : local;
-      lent : lent_element option;
+      elements : elements option;
       binding_count : int;
       body : block;
     }
   | Fork of { fork : Core.origin; concurrent : bool; branches : block list }
+  | Provide of { target : place; provided : provided list; can_use_tasks : bool; body : block }
   | Resume of { winner : local; exits : early_exit list }
   | Yield of { mode : Language.Mode.t; part : yielded }
   | Jump of jump

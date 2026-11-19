@@ -45,7 +45,6 @@ type _ stored =
   | Contract_mir : Resolve.Names.key -> Mir.contract_part stored
   | Generated_mir : Path.t -> (Mir.body_part * Mir.contract_part) stored
   | Mir_call_edges : Path.t -> Path.t list stored
-  | Patterns : Resolve.Names.key -> unit stored
   | Usage : Resolve.Names.key -> unit stored
   | Ownership : Resolve.Names.key -> (Core.origin list * Core.origin list) list stored
   | Import_check : Path.file -> Diagnostic.t list stored

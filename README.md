@@ -35,8 +35,9 @@ The executable is `_build/default/stage0/driver/truss/truss.exe`.
 The documentation is odoc's pages for the stage0 libraries, with graphs of
 the libraries' dependencies. The page of each library also lists the names
 it uses from other libraries and the names other libraries use from it, and
-each definition lists the modules that use it. It needs odoc, dune-deps,
-Graphviz, and jq:
+each definition lists the modules that use it. Both lists leave out the
+libraries and modules of stage0/test and stage0/tools until you check Show
+test and tools. It needs odoc, dune-deps, Graphviz, and jq:
 
 ```sh
 opam install odoc dune-deps

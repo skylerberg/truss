@@ -45,7 +45,6 @@ type _ stored =
   | Contract_mir : Resolve.Names.key -> Mir.contract_part stored
   | Generated_mir : Path.t -> (Mir.body_part * Mir.contract_part) stored
   | Mir_call_edges : Path.t -> Path.t list stored
-  | Patterns : Resolve.Names.key -> unit stored
   | Usage : Resolve.Names.key -> unit stored
   | Ownership : Resolve.Names.key -> (Core.origin list * Core.origin list) list stored
   | Import_check : Path.file -> Diagnostic.t list stored
@@ -102,7 +101,6 @@ module Storage = struct
     | Contract_mir _, Contract_mir _ -> Some Equal
     | Generated_mir _, Generated_mir _ -> Some Equal
     | Mir_call_edges _, Mir_call_edges _ -> Some Equal
-    | Patterns _, Patterns _ -> Some Equal
     | Usage _, Usage _ -> Some Equal
     | Ownership _, Ownership _ -> Some Equal
     | Import_check _, Import_check _ -> Some Equal
@@ -128,7 +126,6 @@ module Storage = struct
     | Checked_body key
     | Body_mir key
     | Contract_mir key
-    | Patterns key
     | Usage key
     | Ownership key
     | Proof key ->
@@ -228,7 +225,6 @@ let show_stored : type a. a stored -> string =
   | Contract_mir declared -> "contract mir " ^ show_key declared
   | Generated_mir path -> "generated mir " ^ Path.show path
   | Mir_call_edges path -> "MIR call edges " ^ Path.show path
-  | Patterns declared -> "patterns " ^ show_key declared
   | Usage declared -> "usage " ^ show_key declared
   | Ownership declared -> "ownership " ^ show_key declared
   | Import_check file -> "import check " ^ Path.show_file file
@@ -282,7 +278,6 @@ let find_stored_definition : type a. a stored -> Path.t option = function
   | Checked_body key
   | Body_mir key
   | Contract_mir key
-  | Patterns key
   | Usage key
   | Ownership key
   | Proof key
@@ -344,7 +339,6 @@ let show_stored_kind : type a. a stored -> string = function
   | Generated_mir _ -> "generated MIR"
   | Contract_mir _ -> "MIR of the contract"
   | Mir_call_edges _ -> "MIR call edges"
-  | Patterns _ -> "pattern check"
   | Usage _ -> "usage check"
   | Ownership _ -> "ownership check"
   | Import_check _ -> "import check"

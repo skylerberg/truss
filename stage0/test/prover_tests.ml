@@ -241,42 +241,47 @@ let () =
       expect_only_code Fixtures.Prover.check_reaching_itself_through_a_generic "prover.termination")
 
 let () =
-  Harness.test "a proof that reads a contract that fails to check is blocked and reports nothing"
-    (fun () ->
-      let packages =
-        Support.setup
-          [
-            ("app::main", Fixtures.Prover.caller_of_double);
-            ("app::main/broken", Fixtures.Prover.double_with_an_ill_typed_ensures);
-          ]
-      in
-      let main = Support.parse_file "app::main" in
-      (match
-         Support.list_codes
-           (Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers
-              (Support.make_database packages) main)
-       with
-      | [] -> ()
-      | codes -> Harness.fail "the caller does not check: %s" (String.concat ", " codes));
-      (match
-         Support.list_codes (Support.list_proof_diagnostics (Support.make_database packages) main)
-       with
-      | [] -> ()
-      | codes -> Harness.fail "the blocked proof reports %s" (String.concat ", " codes));
-      let caller =
-        List.find
-          (fun (declaration : Resolve.Names.declaration) ->
-            Path.equal declaration.key.path (Support.make_top_path "app::main" "caller"))
-          (Support.list_declarations packages (Support.parse_module "app::main"))
-      in
-      match
-        Database.For_testing.find_proof
-          (Support.prove (Support.make_database packages) main)
-          caller.key
-      with
-      | Some Blocked -> ()
-      | Some (Value _ | Failed _) -> Harness.fail "the proof is computed"
-      | None -> Harness.fail "the caller has no proof")
+  List.iter
+    (fun (failure, broken) ->
+      Harness.test
+        ("a proof that reads a contract with " ^ failure ^ " is blocked and reports nothing")
+        (fun () ->
+          let packages =
+            Support.setup
+              [ ("app::main", Fixtures.Prover.caller_of_double); ("app::main/broken", broken) ]
+          in
+          let main = Support.parse_file "app::main" in
+          (match
+             Support.list_codes
+               (Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers
+                  (Support.make_database packages) main)
+           with
+          | [] -> ()
+          | codes -> Harness.fail "the caller does not check: %s" (String.concat ", " codes));
+          (match
+             Support.list_codes
+               (Support.list_proof_diagnostics (Support.make_database packages) main)
+           with
+          | [] -> ()
+          | codes -> Harness.fail "the blocked proof reports %s" (String.concat ", " codes));
+          let caller =
+            List.find
+              (fun (declaration : Resolve.Names.declaration) ->
+                Path.equal declaration.key.path (Support.make_top_path "app::main" "caller"))
+              (Support.list_declarations packages (Support.parse_module "app::main"))
+          in
+          match
+            Database.For_testing.find_proof
+              (Support.prove (Support.make_database packages) main)
+              caller.key
+          with
+          | Some Blocked -> ()
+          | Some (Value _ | Failed _) -> Harness.fail "the proof is computed"
+          | None -> Harness.fail "the caller has no proof"))
+    [
+      ("a type error", Fixtures.Prover.double_with_an_ill_typed_ensures);
+      ("a match that misses a case", Fixtures.Prover.double_with_an_ensures_that_misses_a_case);
+    ]
 
 let () =
   Harness.test "a proof blocked by an error in a package its package depends on is not a bug"
@@ -801,6 +806,12 @@ let () =
       expect_not_proven Fixtures.Prover.slice_past_the_end "prover.requires");
   Harness.test "two slices lent together must not overlap" (fun () ->
       expect_not_proven Fixtures.Prover.both_of_overlapping_slices "prover.disjoint");
+  Harness.test "a range copied into from an overlapping range of one list" (fun () ->
+      expect_not_proven Fixtures.Prover.range_copied_from_an_overlapping_range "prover.disjoint");
+  Harness.test "an element bound to `_` is still proven in bounds" (fun () ->
+      expect_not_proven Fixtures.Prover.element_out_of_bounds_bound_to_a_wildcard "prover.requires");
+  Harness.test "a `mut Slice` parameter keeps its length through a call that writes it" (fun () ->
+      expect_proven Fixtures.Prover.slice_parameter_keeps_its_length_through_a_call);
   Harness.test "two halves of a list can be lent together" (fun () ->
       expect_proven Fixtures.Prover.both_halves_of_a_list)
 
@@ -1024,7 +1035,15 @@ let () =
   Harness.test "a loop forgets self when it mutates it" (fun () ->
       expect_not_proven Fixtures.Prover.box_fill_loop "prover.assertion");
   Harness.test "a loop forgets a place that it provides `mut`" (fun () ->
-      expect_not_proven Fixtures.Prover.marker_provided_mut_in_a_loop "prover.assertion")
+      expect_not_proven Fixtures.Prover.marker_provided_mut_in_a_loop "prover.assertion");
+  Harness.test "a `return` from a `provide mut` forgets the provided place" (fun () ->
+      expect_not_proven Fixtures.Prover.provider_state_after_a_return_inside_provide
+        "prover.ensures");
+  Harness.test
+    "an early exit from a `concurrent` block in a `provide mut` forgets the provided place"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.provider_state_after_a_concurrent_early_exit
+        "prover.ensures")
 
 let constant_step = Fixtures.Prover.constant_step
 
@@ -1095,6 +1114,22 @@ let () =
       expect_not_proven Fixtures.Prover.while_loop_with_a_small_cost_clause "prover.cost");
   Harness.test "calls of a capability's method are counted" (fun () ->
       expect_proven Fixtures.Prover.meter_ticks_counted);
+  Harness.test
+    "a call inside a `provide` whose implementation uses the capability has no known count"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.calls_through_a_provider_that_uses_the_capability
+        "prover.cost");
+  Harness.test "a call inside a `provide` whose implementation uses nothing reaches no caller"
+    (fun () -> expect_proven Fixtures.Prover.calls_through_a_provider_that_uses_nothing);
+  Harness.test
+    "a call to a provider of another capability that uses the counted one has no known count"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.calls_through_a_provider_of_another_capability "prover.cost");
+  Harness.test "a `provide` that `break` leaves takes no calls after the loop" (fun () ->
+      expect_proven Fixtures.Prover.calls_after_a_provide_left_by_break);
+  Harness.test "a capability method that uses another capability may call it any number of times"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.calls_of_a_capability_method_that_uses_another "prover.cost");
   Harness.test "a callee's allocations add up" (fun () ->
       expect_proven Fixtures.Prover.tree_built_by_callees);
   Harness.test "a lambda's time is bounded where it is written" (fun () ->
@@ -1685,7 +1720,7 @@ let () =
 
 let () =
   Harness.test "a callee's clause in another file is named by its file and line" (fun () ->
-      let actual = read_message Fixtures.Prover.first_element_of_a_list in
+      let actual = read_message Fixtures.Prover.swap_in_a_list_that_may_be_empty in
       if
         not
           (String.includes ~affix:"The clause that must hold is at `standard/list/list.truss:"
@@ -2063,29 +2098,26 @@ let () =
       expect_proven Fixtures.Prover.or_pattern_binding_a_side_value);
   Harness.test "a match mut binding of alternatives is the part of the alternative that matched"
     (fun () -> expect_proven Fixtures.Prover.match_mut_on_sides);
-  Harness.test "a slice chosen by a condition gives its run back to the collection it views"
-    (fun () -> expect_proven Fixtures.Prover.slice_chosen_by_a_flag);
-  Harness.test "a copy of a mut slice parameter cannot be passed mut" (fun () ->
-      expect_not_proven Fixtures.Prover.copy_of_a_mut_slice_passed_mut "prover.unsupported");
-  Harness.test "a slice that a loop assigns cannot be passed mut after the loop" (fun () ->
-      expect_not_proven Fixtures.Prover.slice_assigned_in_a_loop_then_passed_mut
-        "prover.unsupported");
-  Harness.test "a slice chosen by a condition may mutate either collection" (fun () ->
-      expect_not_proven Fixtures.Prover.slice_chosen_by_a_flag_ensured_to_keep_the_second
-        "prover.ensures");
   Harness.test "a match mut binding of alternatives is no other alternative's part" (fun () ->
       expect_not_proven Fixtures.Prover.match_mut_on_sides_with_a_wrong_ensures "prover.ensures");
-  Harness.test "a mut lend in a condition is written back on each path" (fun () ->
+  Harness.test "a `mut` element argument in a condition is written back on each path" (fun () ->
       expect_proven Fixtures.Prover.if_condition_bumping_an_element);
-  Harness.test "a mut lend in a condition is written back where the condition holds" (fun () ->
+  Harness.test "a `mut` element argument in a condition is written back where the condition holds"
+    (fun () ->
       expect_not_proven Fixtures.Prover.if_condition_bumping_a_positive_element "prover.ensures");
-  Harness.test "a mut lend in a condition is written back where the condition fails" (fun () ->
+  Harness.test "a `mut` element argument in a condition is written back where the condition fails"
+    (fun () ->
       expect_not_proven Fixtures.Prover.if_condition_bumping_a_negative_element "prover.ensures");
-  Harness.test "a mut lend in a loop's condition is written back" (fun () ->
+  Harness.test "a `mut` element argument in a loop's condition is written back" (fun () ->
       expect_proven Fixtures.Prover.while_condition_bumping_an_element);
-  Harness.test "a mut lend in the right operand of && is written back where the operand ran"
+  Harness.test
+    "a `while` compares its measure before each evaluation of its condition, so a condition that \
+     undoes the body does not prove termination" (fun () ->
+      expect_not_proven Fixtures.Prover.loop_condition_undoing_the_body "prover.termination");
+  Harness.test
+    "a `mut` element argument in the right operand of && is written back where the operand ran"
     (fun () -> expect_proven Fixtures.Prover.and_operand_bumping_an_element_under_a_flag);
-  Harness.test "a mut lend in the right operand of && changes the element" (fun () ->
+  Harness.test "a `mut` element argument in the right operand of && changes the element" (fun () ->
       expect_not_proven Fixtures.Prover.and_operand_bumping_a_negative_element "prover.ensures")
 
 let () =

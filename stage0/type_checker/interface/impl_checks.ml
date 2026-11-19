@@ -214,7 +214,19 @@ let check_impl (state : Checking.state) (written_members : Syntax.impl_member Sy
         if (not trait.is_capability) && impl.impl_uses <> Types.no_capabilities then
           Checking.report state Impl_uses state.spans.(trait_path.id)
             "Only an `impl` of a capability can have `uses`. A trait's methods can use only the \
-             capabilities the trait declares."
+             capabilities the trait declares.";
+        if
+          (Types.is_well_known Slice impl.for_type || Types.is_well_known String_slice impl.for_type)
+          && List.exists
+               (fun (method_ : Types.trait_method) -> method_.method_receiver = Instance Mut)
+               trait.methods
+        then
+          Checking.report state Mut_self_for_slice state.spans.(trait_path.id)
+            (Printf.sprintf
+               "`%s` has a `mut self` method, so it cannot be implemented for `%s`. Generic code \
+                could call the method on a copy of a slice, and a copy views the same elements, so \
+                the write would reach elements that were lent read-only."
+               shown_trait (Types.show impl.for_type))
 
 let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : Path.receiver)
     (written : Types.signature) (impl : Types.impl_interface) ~trait_span

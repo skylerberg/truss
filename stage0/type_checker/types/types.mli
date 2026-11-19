@@ -48,25 +48,26 @@ and cost_bound = Order_of | No_more_than of Z.t option | Exactly_cost of Z.t opt
 
 val unit : ty
 val bool : ty
-val make_builtin : ?arguments:argument list -> Intrinsic.builtin -> ty
+val make_builtin : ?arguments:argument list -> Language.Builtin_type.t -> ty
 val make_self_parameter : Path.t -> parameter
 val is_self_parameter : parameter -> bool
 val make_named : Path.t -> ty list -> ty
-val is_builtin : Intrinsic.builtin -> ty -> bool
-val find_builtin : ty -> Intrinsic.builtin option
+val is_builtin : Language.Builtin_type.t -> ty -> bool
+val find_builtin : ty -> Language.Builtin_type.t option
 val is_well_known : Well_known.t -> ty -> bool
 val find_view : ty -> ty option
 val find_integer_bits : ty -> (int * bool) option
 val find_integer_range : ty -> (Z.t * Z.t) option
 val is_integer_type : ty -> bool
-val signed_integer_types : Intrinsic.builtin list
-val unsigned_integer_types : Intrinsic.builtin list
-val integer_types : Intrinsic.builtin list
-val float_types : Intrinsic.builtin list
-val list_scalar_members : ty -> Intrinsic.builtin list
-val list_fitting_integer_types : Z.t -> Intrinsic.builtin list
-val find_integer_implementors : Path.t -> Intrinsic.builtin list option
-val find_bound_integer_implementors : trait_reference list -> Intrinsic.builtin list option
+val signed_integer_types : Language.Builtin_type.t list
+val unsigned_integer_types : Language.Builtin_type.t list
+val integer_types : Language.Builtin_type.t list
+val float_types : Language.Builtin_type.t list
+val list_scalar_members : ty -> Language.Builtin_type.t list
+val list_fitting_integer_types : Z.t -> Language.Builtin_type.t list
+val find_integer_implementors : Path.t -> Language.Builtin_type.t list option
+val find_bound_integer_implementors : trait_reference list -> Language.Builtin_type.t list option
+val find_sealed_implementors : Path.t -> Language.Builtin_type.t list option
 val is_float_type : ty -> bool
 val make_capability_set : capability list -> capability_set
 val no_capabilities : capability_set
@@ -173,7 +174,7 @@ type shape =
   | Record of field list
   | Sum of variant list
   | Todo_type
-  | Builtin_type of Intrinsic.builtin
+  | Builtin_type of Language.Builtin_type.t
 
 type type_interface = {
   type_generics : generic list;

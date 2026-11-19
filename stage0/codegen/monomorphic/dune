@@ -1,12 +1,12 @@
 (library
  (name monomorphic)
  (libraries
+  language
   storage
   builtin_records
   compiler_bug
   path
   well_known
-  intrinsic
   types
   ground
   memory_layout

@@ -1,0 +1,5 @@
+type Meters(value: Float64)
+
+impl FloatingPoint for Meters {
+  type Bits = UInt64
+}

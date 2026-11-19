@@ -79,16 +79,18 @@ let is_view : Core.argument -> bool = function
   | Passed
       {
         value =
-          Value
-            {
-              kind =
-                Call
-                  {
-                    callee = { target = Function { path = Method { name = "slice"; _ }; _ }; _ };
-                    _;
-                  };
-              _;
-            };
+          ( Value
+              {
+                kind =
+                  ( Call
+                      {
+                        callee = { target = Function { path = Method { name = "slice"; _ }; _ }; _ };
+                        _;
+                      }
+                  | Use (Range { stop = None; _ }) );
+                _;
+              }
+          | Place (Range { stop = None; _ }) );
         _;
       } ->
       true
@@ -512,7 +514,13 @@ let () =
   Harness.test "an `Array` receiver passed `mut` to a method of `Slice` is sliced whole" (fun () ->
       let text = Fixtures.Infer.sort_of_a_mut_array in
       match locate_core_call text "values.sort()" 1 with
-      | { arguments = [ Passed { mode = Mut; value = Value { kind = Slice _; _ } } ]; _ }, _ -> ()
+      | ( {
+            arguments =
+              [ Passed { mode = Mut; value = Value { kind = Use (Range _); _ } | Place (Range _) } ];
+            _;
+          },
+          _ ) ->
+          ()
       | _ -> Harness.fail "the receiver is not a slice of the whole array");
   Harness.test
     "a type argument of a view's method is counted after the view's parameters, not the array's"
@@ -542,21 +550,8 @@ let () =
                   {
                     mode = Mut;
                     value =
-                      Value
-                        {
-                          kind =
-                            Slice
-                              {
-                                callee =
-                                  {
-                                    target =
-                                      Function { path = Method { name = "slice_from"; _ }; _ };
-                                    _;
-                                  };
-                                _;
-                              };
-                          _;
-                        };
+                      ( Value { kind = Use (Range { stop = None; _ }); _ }
+                      | Place (Range { stop = None; _ }) );
                   };
               ];
             _;
@@ -756,6 +751,74 @@ let () =
         ~says:"so the base is passed `own`, not `mut`");
   Harness.test "a let cannot be assigned" (fun () ->
       expect_one_diagnostic Fixtures.Infer.assignment_to_a_let "types.not_assignable");
+  List.iter
+    (fun (written, text, code) ->
+      Harness.test
+        ("a slice that is not a `mut Slice` parameter cannot be written through: " ^ written)
+        (fun () ->
+          expect_one_diagnostic text code ~says:"so its elements cannot be written through it"))
+    [
+      ( "a `var` copied into",
+        Fixtures.Infer.slice_variable_copied_into_from_an_overlapping_slice,
+        "types.wrong_mode" );
+      ( "a `var` of a read-only parameter",
+        Fixtures.Infer.slice_of_a_read_only_parameter_bumped,
+        "types.wrong_mode" );
+      ("a `var` of a constant", Fixtures.Infer.slice_of_a_constant_list, "types.wrong_mode");
+      ("a `var` of a `let`", Fixtures.Infer.slice_of_a_let_list_assigned, "types.not_assignable");
+      ("a field", Fixtures.Infer.window_rest_bumped, "types.wrong_mode");
+      ( "the variable of a `mut` loop over a list of slices",
+        Fixtures.Infer.element_of_a_slice_in_a_list_assigned,
+        "types.not_assignable" );
+      ( "a range of a `var`",
+        Fixtures.Infer.range_of_a_view_of_a_read_only_list_sorted,
+        "types.wrong_mode" );
+      ( "a range of a range of a `var`",
+        Fixtures.Infer.range_of_a_range_of_a_view_of_a_read_only_list_sorted,
+        "types.wrong_mode" );
+      ( "an assigned element of a range of a `var`",
+        Fixtures.Infer.element_of_a_range_of_a_view_of_a_read_only_list_assigned,
+        "types.not_assignable" );
+      ( "an element of a range of a `var` passed `mut`",
+        Fixtures.Infer.element_of_a_range_of_a_view_of_a_read_only_list_passed_mut,
+        "types.wrong_mode" );
+      ( "an assigned element of an element of a `var`",
+        Fixtures.Infer.element_of_an_element_of_a_view_of_a_read_only_list_assigned,
+        "types.not_assignable" );
+      ( "an element of an element of a `var` passed `mut`",
+        Fixtures.Infer.element_of_an_element_of_a_view_of_a_read_only_list_passed_mut,
+        "types.wrong_mode" );
+      ( "a range of an element of a `var`",
+        Fixtures.Infer.range_of_an_element_of_a_view_of_a_read_only_list_sorted,
+        "types.wrong_mode" );
+      ( "a `mut` loop over a `var`",
+        Fixtures.Infer.loop_variable_over_a_view_of_a_read_only_list_passed_mut,
+        "types.wrong_mode" );
+      ( "an assigned variable of a `mut` loop over a `var`",
+        Fixtures.Infer.loop_variable_over_a_view_of_a_read_only_list_assigned,
+        "types.wrong_mode" );
+      ( "a `mut` loop over a range of a `var`",
+        Fixtures.Infer.loop_variable_over_a_range_of_a_view_of_a_read_only_list_passed_mut,
+        "types.wrong_mode" );
+      ( "a `match` on an element of a `var`",
+        Fixtures.Infer.match_binding_of_an_element_of_a_view_of_a_read_only_list_passed_mut,
+        "types.wrong_mode" );
+    ];
+  Harness.test "a `mut Slice` parameter and a range of a mutable place can be written through"
+    (fun () -> expect_fine Fixtures.Infer.slices_written_through_parameters_and_ranges);
+  Harness.test "a `mut Slice` parameter cannot be assigned" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.slice_parameter_assigned "types.not_assignable"
+        ~says:"is a `mut` slice parameter, so it cannot be assigned");
+  Harness.test "a slice cannot be passed `mut` to a parameter whose type is a type parameter"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.slice_reset_through_a_type_parameter "types.wrong_mode"
+        ~says:"A slice is passed `mut` only to a `mut Slice` parameter");
+  Harness.test "a slice satisfies no bound whose trait has a `mut self` method" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.slice_written_through_a_copy_in_generic_code
+        "types.unsatisfied_bound" ~says:"a slice implements no trait with a `mut self` method");
+  Harness.test "a trait with a `mut self` method cannot be implemented for a slice" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.trait_with_a_mut_self_method_for_a_slice
+        "types.mut_self_for_slice");
   List.iter
     (fun (construct, text) ->
       Harness.test (construct ^ " cannot be passed `mut`") (fun () ->

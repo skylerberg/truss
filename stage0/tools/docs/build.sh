@@ -48,7 +48,9 @@ while read -r library dir; do
   done
   echo "$library $dir $area $page"
 done < "$work/directories" > "$work/libraries"
-awk '$3 != "test" && $3 != "tools"' "$work/libraries" > "$work/libraries_without_test_and_tools"
+printf '%s\n' test tools > "$work/test_and_tools"
+awk 'FNR == NR { hidden[$1] = 1; next } !($3 in hidden)' "$work/test_and_tools" "$work/libraries" \
+  > "$work/libraries_without_test_and_tools"
 find _build/default/stage0 -type d -name '.*.eobjs' | sort | while read -r objects; do
   objects=${objects#_build/default/}
   area=${objects#stage0/}
@@ -168,15 +170,16 @@ jq -r '.[] | select(.kind.kind != "Doc")
   | [.kind.kind, (.display.url | ltrimstr("docs/"))] + (.id | map(.name)) | @tsv' \
   "$work/index.json" > "$work/index"
 _build/default/stage0/tools/docs/library_uses.exe \
-  "$work/libraries" "$work/executables" "$work/areas" "$work/index" _build/default "$docs"
+  "$work/libraries" "$work/executables" "$work/areas" "$work/test_and_tools" "$work/index" \
+  _build/default "$docs"
 
 cp "$here/graph.html" "$here/graph.css" "$here/graph.js" "$here/areas.html" "$here/areas.js" \
-  "$here/area_colors.css" "$here/library_uses.css" "$docs/"
+  "$here/area_colors.css" "$here/library_uses.css" "$here/library_uses.js" "$docs/"
 insert_after "$docs/graph.html" '<div id="canvas">' "$(cat "$work/graph.svg")"
 insert_after "$docs/areas.html" '<div id="canvas">' "$(cat "$work/areas.svg")"
 insert_after "$docs/index.html" '<nav class="odoc-toc odoc-local-toc"><ul>' \
   '<li><a href="#dependency-graph">Dependency graph</a></li>'
 insert_after "$docs/index.html" '<div class="odoc-content">' \
-  '<h2 id="dependency-graph"><a href="#dependency-graph" class="anchor"></a>Dependency graph</h2><p><a href="graph.html">The library dependency graph</a> shows which library depends on which. Each library in it links to its documentation. <a href="areas.html">The area graph</a> shows how many dependencies each area of stage0 has on each other area. Both leave out the libraries of stage0/test and stage0/tools until you show them.</p><p>The page of each library lists the names it uses from other libraries and the names other libraries use from it. After each definition, a list names the modules that use it, in any library or executable.</p>'
+  '<h2 id="dependency-graph"><a href="#dependency-graph" class="anchor"></a>Dependency graph</h2><p><a href="graph.html">The library dependency graph</a> shows which library depends on which. Each library in it links to its documentation. <a href="areas.html">The area graph</a> shows how many dependencies each area of stage0 has on each other area. Both leave out the libraries of stage0/test and stage0/tools until you show them.</p><p>The page of each library lists the names it uses from other libraries and the names other libraries use from it. After each definition, a list names the modules that use it, in any library or executable. Both leave out the libraries and modules of stage0/test and stage0/tools until you check Show test and tools.</p>'
 
 echo "$root/$docs/index.html"

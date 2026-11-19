@@ -23,7 +23,8 @@ let record_integer_range state ~(loop : Syntax.id) ~described ~admits_integer
       if
         State.is_within state element
           (Types.integer_types
-          @ (Intrinsic.Character :: (if admits_integer then [ Intrinsic.Integer ] else [])))
+          @ Language.Builtin_type.Character
+            :: (if admits_integer then [ Language.Builtin_type.Integer ] else []))
       then state.tables.loops.(loop) <- Some (Integer_range { element; inclusive })
       else if not (Types.is_error element) then
         State.report state Not_indexable (State.read_span state range.id)
