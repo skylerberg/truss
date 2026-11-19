@@ -12,6 +12,7 @@ let types =
         ([ "option" ], [ "Option" ]);
         ([ "result" ], [ "Result" ]);
         ([ "numbers"; "integers" ], [ "FixedWidthInteger"; "SignedInteger"; "UnsignedInteger" ]);
+        ([ "numbers"; "float_math" ], [ "FloatingPoint" ]);
         ( [ "core" ],
           [
             "Equal";

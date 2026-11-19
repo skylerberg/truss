@@ -97,6 +97,7 @@ type state = {
   mutable undecided : undecided_literal list;
   decisions : (int, literal_decision) Hashtbl.t;
   annotatable : (Syntax.id, unit) Hashtbl.t;
+  mutable unmet_impls : (Types.ty * Types.trait_reference * Diagnostic.reported) list;
 }
 
 val add_diagnostic :
@@ -176,6 +177,7 @@ val finalize_instantiation : state -> Types.instantiation -> Types.instantiation
 val unify : state -> Types.ty -> Types.ty -> bool
 val unify_as_hint : state -> Types.ty -> Types.ty -> unit
 val normalize_trait : state -> Types.trait_reference -> Types.trait_reference
+val find_unmet_impl : state -> Types.ty -> Types.trait_reference -> Diagnostic.reported option
 val find_evidence : state -> Types.ty -> Types.trait_reference -> Interface.Impls.evidence option
 val solve_trait_arguments : state -> Types.ty -> Types.trait_reference -> Types.trait_reference
 

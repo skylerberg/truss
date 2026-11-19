@@ -232,7 +232,7 @@ and check_operator_call ?(report_no_impl = fun _ -> None) ~operands state
     (value : Syntax.expression) ~trait ~method_ ~left ~right =
   let arguments = match right with Some right -> [ Types.Type right ] | None -> [] in
   let reference = State.make_trait_reference ~arguments trait in
-  let result = State.make_fresh_type state in
+  let result = Types.Projection { base = left; trait = reference; name = "Output" } in
   state.tables.calls.(value.id) <-
     Some
       {
@@ -250,24 +250,15 @@ and check_operator_call ?(report_no_impl = fun _ -> None) ~operands state
         omitted_defaults = [];
         callee_result = result;
       };
-  Name_lookup.resolve_evidence state value left reference
-    ~solved:[ ("Output", result) ]
-    ~report_unmet:(fun left output ->
-      match output with
-      | None -> (
-          match report_no_impl left with
-          | Some report -> report
-          | None ->
-              State.add_diagnostic state No_impl (State.read_span state value.id)
-                (Printf.sprintf "`%s` does not implement `%s`, so the operator does not apply."
-                   (Types.show left)
-                   (Types.show_trait (Unify.zonk_trait state.unifier reference))))
-      | Some (_, output) ->
-          State.add_diagnostic state Mismatch (State.read_span state value.id)
-            (Printf.sprintf "This operator gives `%s`, and `%s` is expected."
-               (Types.show (State.zonk state output))
-               (Types.show (State.zonk state result))));
-  result
+  Name_lookup.resolve_evidence state value left reference ~report_unmet:(fun left _ ->
+      match report_no_impl left with
+      | Some report -> report
+      | None ->
+          State.add_diagnostic state No_impl (State.read_span state value.id)
+            (Printf.sprintf "`%s` does not implement `%s`, so the operator does not apply."
+               (Types.show left)
+               (Types.show_trait (Unify.zonk_trait state.unifier reference))));
+  State.normalize state result
 
 and check_literal_operands state ~left ~right =
   match (State.resolve state left, State.resolve state right) with

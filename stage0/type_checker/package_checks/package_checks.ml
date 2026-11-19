@@ -66,14 +66,20 @@ let check_sealed (lookups : Lookups.t) (declaration : Resolve.Names.declaration)
       read_definition lookups declaration )
   with
   | Some ((trait, type_), _), (definition, spans) -> (
-      match (Types.find_integer_implementors trait, Intrinsic.find_builtin type_) with
+      match (Types.find_sealed_implementors trait, Intrinsic.find_builtin type_) with
       | Some builtins, Some builtin when List.mem builtin builtins -> []
-      | Some _, _ ->
+      | Some builtins, _ ->
           [
             make_diagnostic declaration.key Sealed_trait_impl (locate_header spans definition)
               (Printf.sprintf
-                 "Only the built-in integer types implement `%s`, so `%s` cannot: generic code \
-                  over the trait is proven for each of them."
+                 "Only the built-in %s types implement `%s`, so `%s` cannot: generic code over the \
+                  trait is proven for each of them."
+                 (if
+                    List.for_all
+                      (fun builtin -> Types.is_float_type (Types.make_builtin builtin))
+                      builtins
+                  then "float"
+                  else "integer")
                  (Path.show trait) (Path.show type_));
           ]
       | None, _ -> [])

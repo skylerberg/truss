@@ -3,3 +3,12 @@ public trait Equal {
 }
 
 public type Ordering = Less | Same | Greater
+
+public trait Add[Right] {
+  type Output
+
+  fn add_is_defined(self, right: Right) -> Bool
+
+  fn add(self, right: Right) -> Self.Output
+    requires self.add_is_defined(right)
+}

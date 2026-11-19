@@ -237,12 +237,30 @@ let () =
       expect_type text "limit" ~occurrence:2 "UInt64";
       expect_fine text);
   Harness.test
-    "a local given its default type by a method call that needs it is one error, with a fix"
+    "a local given its default type by a method of an unsealed trait is one error, with a fix"
     (fun () ->
-      expect_one_diagnostic Fixtures.Infer.local_converted_to_bytes_then_bound_to_a_uint64
-        "types.mismatch"
+      expect_one_diagnostic Fixtures.Infer.local_halved_then_bound_to_a_uint64 "types.mismatch"
         ~says:"`value` took its default type, `Int64`, at a method call that needs its type."
-        ~fixed:Fixtures.Infer.local_converted_to_bytes_then_bound_to_a_uint64_fixed);
+        ~fixed:Fixtures.Infer.local_halved_then_bound_to_a_uint64_fixed);
+  Harness.test "a literal's method with an associated result type waits for the literal's type"
+    (fun () ->
+      let text = Fixtures.Infer.local_converted_to_bytes_then_bound_to_a_uint32 in
+      expect_type text "bytes" ~occurrence:3 "Array[UInt8, 4]";
+      expect_fine text);
+  Harness.test "a literal's method of a narrower sealed trait constrains its default" (fun () ->
+      let text = Fixtures.Infer.literal_methods_of_narrower_sealed_traits in
+      expect_type text "count" ~occurrence:2 "UInt64";
+      expect_type text "level" ~occurrence:2 "Int8";
+      expect_fine text);
+  Harness.test "a literal's method that two sealed traits declare gives it its default type"
+    (fun () ->
+      let text = Fixtures.Infer.literal_absolute_difference in
+      expect_type text "first" ~occurrence:2 "Int64";
+      expect_fine text);
+  Harness.test "a float literal's method waits for the literal's type" (fun () ->
+      let text = Fixtures.Infer.float_literal_method_then_bound_to_a_float32 in
+      expect_type text "ratio" ~occurrence:2 "Float32";
+      expect_fine text);
   Harness.test "a negated local of literals waits for the same decision" (fun () ->
       expect_type Fixtures.Infer.negation_of_a_literal_local "-count" "Int64";
       expect_type Fixtures.Infer.negation_of_a_float_literal_local "-ratio" "Float64");
@@ -263,6 +281,15 @@ let () =
       let text = Fixtures.Infer.duration_times_a_literal_local in
       expect_type text "count" ~occurrence:2 "Int64";
       expect_fine text);
+  Harness.test "an associated type of an undecided type waits for the type when it is compared"
+    (fun () ->
+      expect_fine
+        Fixtures.Infer.literal_passed_to_a_function_returning_an_associated_type_of_its_bound;
+      expect_fine Fixtures.Infer.method_of_an_associated_type_of_an_earlier_literal);
+  Harness.test "a deferred associated type that differs from its use is one error at the statement"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.associated_type_of_a_literal_mismatched_with_its_use
+        "types.mismatch" ~says:"The `Output` of `Int64` is `Int64`, and `UInt8` is expected.");
   Harness.test "a scrutinee's literal type is decided by the statement that holds the match"
     (fun () ->
       let text = Fixtures.Infer.match_on_a_literal_decided_by_an_arm in

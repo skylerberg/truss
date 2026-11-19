@@ -50,6 +50,7 @@ let decide (state : State.state) (obligation : State.obligation) =
             match State.find_evidence state subject unannotated with
             | None ->
                 let report = implements.on_unmet subject None in
+                state.unmet_impls <- (subject, unannotated, report) :: state.unmet_impls;
                 List.iter
                   (fun (_, wanted) -> ignore (State.unify state wanted (Types.Error report)))
                   trait.associated;
@@ -89,7 +90,7 @@ let is_met_by_trial (state : State.state) (obligation : State.obligation) =
   | Implements { trait; _ } -> (
       is_open [ subject ]
       ||
-      match (Types.find_builtin subject, Types.find_integer_implementors trait.trait) with
+      match (Types.find_builtin subject, Types.find_sealed_implementors trait.trait) with
       | Some builtin, Some implementors -> List.mem builtin implementors
       | _ -> true)
   | Satisfies { holds; _ } -> is_open [ subject ] || holds subject
@@ -97,14 +98,7 @@ let is_met_by_trial (state : State.state) (obligation : State.obligation) =
 let is_pending state obligation =
   match decide state obligation with Pending -> true | Met | Unmet _ | Vacuous -> false
 
-let rec solve (state : State.state) (frame : State.frame) =
-  let pending = List.rev frame.obligations in
-  frame.obligations <- [];
-  let remaining = List.filter (is_pending state) pending in
-  frame.obligations <- frame.obligations @ List.rev remaining;
-  if List.length remaining < List.length pending then solve state frame
-
-let add (state : State.state) (obligation : State.obligation) =
+let rec add (state : State.state) (obligation : State.obligation) =
   (match obligation.requirement with
   | Implements { trait; _ } ->
       Option.iter
@@ -118,8 +112,46 @@ let add (state : State.state) (obligation : State.obligation) =
   | _ -> ());
   outcome
 
-let require state subject trait ~on_met ~on_unmet =
+and require state subject trait ~on_met ~on_unmet =
   ignore (add state { subject; requirement = Implements { trait; on_met; on_unmet } })
+
+let require_projection_equalities (state : State.state) (frame : State.frame) =
+  let equalities = List.rev state.unifier.deferred_projection_equalities in
+  state.unifier.deferred_projection_equalities <- [];
+  List.iter
+    (function
+      | Types.Projection { base; trait; name }, wanted ->
+          require state base
+            { trait with associated = [ (name, wanted) ] }
+            ~on_met:ignore
+            ~on_unmet:(fun base mismatch ->
+              match mismatch with
+              | Some (_, actual) ->
+                  State.add_diagnostic state Mismatch frame.span
+                    (Printf.sprintf "The `%s` of `%s` is `%s`, and `%s` is expected." name
+                       (Types.show base) (State.show state actual) (State.show state wanted))
+              | None -> (
+                  match State.find_unmet_impl state base (State.normalize_trait state trait) with
+                  | Some report -> report
+                  | None ->
+                      State.add_diagnostic state No_impl frame.span
+                        (Printf.sprintf "`%s` does not implement `%s`, so it has no `%s`."
+                           (Types.show base)
+                           (Types.show_trait (Unify.zonk_trait state.unifier trait))
+                           name)))
+      | projection, _ ->
+          State.raise_bug "`%s` is deferred, and it is not an associated type"
+            (State.show state projection))
+    equalities
+
+let rec solve (state : State.state) (frame : State.frame) =
+  let pending = List.rev frame.obligations in
+  frame.obligations <- [];
+  let remaining = List.filter (is_pending state) pending in
+  frame.obligations <- frame.obligations @ List.rev remaining;
+  let has_deferred = state.unifier.deferred_projection_equalities <> [] in
+  require_projection_equalities state frame;
+  if List.length remaining < List.length pending || has_deferred then solve state frame
 
 let require_type state subject ~holds ?(on_met = ignore) ~on_unmet () =
   match add state { subject; requirement = Satisfies { holds; on_met; on_unmet } } with
@@ -176,21 +208,33 @@ let record_decisions (state : State.state) ~(at : Source.Definition_span.t) ~is_
       state.undecided
 
 let decide_for_method_call (state : State.state) ~at type_ =
-  match (State.resolve state type_, State.find_current_frame state) with
-  | Types.Literal (kind, root), Some frame ->
+  match
+    ( List.filter_map
+        (function Unify.Unknown_literal (kind, root) -> Some (kind, root) | _ -> None)
+        (Unify.list_unknowns state.unifier (State.normalize state type_)),
+      State.find_current_frame state )
+  with
+  | [], _ -> type_
+  | literals, Some frame ->
       List.iter (solve state) state.frames;
       record_decisions state ~at:frame.span ~is_default:false;
-      let default =
-        choose_default state ~specification:false
-          ~obligations:
-            (List.concat_map (fun (frame : State.frame) -> frame.obligations) state.frames)
-          (kind, root)
-      in
-      ignore (State.unify state type_ default);
+      List.iter
+        (fun (kind, root) ->
+          match Unify.resolve state.unifier (Types.Literal (kind, root)) with
+          | Types.Literal (kind, root) ->
+              let default =
+                choose_default state ~specification:false
+                  ~obligations:
+                    (List.concat_map (fun (frame : State.frame) -> frame.obligations) state.frames)
+                  (kind, root)
+              in
+              ignore (State.unify state (Types.Literal (kind, root)) default);
+              List.iter (solve state) state.frames
+          | _ -> ())
+        literals;
       record_decisions state ~at ~is_default:true;
-      default
-  | Types.Literal _, None -> State.raise_bug "a method is called outside every statement"
-  | _ -> type_
+      State.normalize state type_
+  | _ :: _, None -> State.raise_bug "a method is called outside every statement"
 
 let constrain_capability_equalities (state : State.state) (frame : State.frame) =
   List.iter
@@ -257,7 +301,7 @@ let hand_literals_to_parent (state : State.state) (frame : State.frame) ~escapin
                   Hashtbl.replace state.unifier.code_literals index ();
                 state.undecided <- { index; kind; local } :: state.undecided
             | _ -> ())
-          (Unify.list_unknowns state.unifier type_))
+          (Unify.list_reachable_unknowns state.unifier type_))
       (declared @ escaping)
 
 let default_literals (state : State.state) (frame : State.frame) =
@@ -451,6 +495,7 @@ let run_in_statement state env span body =
   run_frame state env span body ~list_escaping:(fun () -> [])
 
 let infer_in_statement state env (value : Syntax.expression) =
-  run_frame state env (State.read_span state value.id)
-    (fun () -> Hooks.check_expression state env value)
-    ~list_escaping:(fun type_ -> [ (value.id, type_) ])
+  State.normalize state
+    (run_frame state env (State.read_span state value.id)
+       (fun () -> Hooks.check_expression state env value)
+       ~list_escaping:(fun type_ -> [ (value.id, type_) ]))

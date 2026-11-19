@@ -535,7 +535,18 @@ and normalize lookups ~list_bounds ?defining (type_ : Types.ty) : Types.ty =
     (function
       | Types.Projection { base; trait; name } -> (
           let base = normalize base in
-          let trait = read_declaring_type_trait lookups ~base trait name in
+          let trait =
+            read_declaring_type_trait lookups ~base
+              {
+                trait with
+                trait_arguments =
+                  List.map
+                    (function
+                      | Types.Type argument -> Types.Type (normalize argument) | value -> value)
+                    trait.trait_arguments;
+              }
+              name
+          in
           match base with
           | Types.Variable _ | Types.Hole -> Some (Types.Projection { base; trait; name })
           | Types.Error _ -> Some base

@@ -378,10 +378,9 @@ and list_trait_static_methods (state : State.state) path name receiver =
     (Resolve.Names.list_visible_traits_declaring state.lookups.interface.names
        ~from:state.key.module_ name)
 
-and resolve_evidence ?(solved = []) ?report_unmet state (value : Syntax.expression) self_type
+and resolve_evidence ?report_unmet state (value : Syntax.expression) self_type
     (reference : Types.trait_reference) =
-  Solver.require state self_type
-    { reference with associated = reference.associated @ solved }
+  Solver.require state self_type reference
     ~on_met:(fun evidence ->
       match state.tables.calls.(value.id) with
       | Some ({ callee = Trait_method method_; _ } as call) ->
@@ -428,14 +427,32 @@ and list_trait_candidates (state : State.state) receiver_type name =
            (Interface.Properties.list_bound_closure state.lookups.interface ~self:receiver_type
               trait))
   | _ ->
-      List.filter_map
-        (fun trait ->
-          let reference = Instantiation.make_fresh_trait_reference state trait in
-          if Option.is_some (State.find_evidence state receiver_type reference) then
-            with_method reference
-          else None)
-        (Resolve.Names.list_visible_traits_declaring state.lookups.interface.names
-           ~from:state.key.module_ name)
+      let is_sealed_trait_of_its_kind trait =
+        match (State.resolve state receiver_type, Types.find_sealed_implementors trait) with
+        | Types.Literal (kind, _), Some implementors ->
+            List.for_all
+              (fun implementor ->
+                List.mem (Types.make_builtin implementor) (Types.list_literal_types kind))
+              implementors
+        | _ -> false
+      in
+      let implemented, unimplemented =
+        List.partition
+          (fun reference -> Option.is_some (State.find_evidence state receiver_type reference))
+          (List.map
+             (Instantiation.make_fresh_trait_reference state)
+             (Resolve.Names.list_visible_traits_declaring state.lookups.interface.names
+                ~from:state.key.module_ name))
+      in
+      List.filter_map with_method
+        (match
+           List.filter
+             (fun (reference : Types.trait_reference) ->
+               is_sealed_trait_of_its_kind reference.trait)
+             unimplemented
+         with
+        | [ only ] -> implemented @ [ only ]
+        | [] | _ :: _ :: _ -> implemented)
 
 and merge_bounds_by_trait state = function
   | [] -> []

@@ -167,20 +167,29 @@ and `Float64` for a float. In a specification, an integer literal tries
   for the same decision.
 - A shift amount is unsigned, so a literal shift amount that no use decides
   is a `UInt64`. So is an integer literal too large for an `Int64`.
-- A bound decides a default only through the sealed integer traits. A bound
+- A bound decides a default only through the sealed number traits. A bound
   of any other trait does not, so adding an `impl` never changes the type of
   a literal.
 - Until its type is decided, a literal meets a bound that every type of its
   kind meets, and has the methods of such a trait: `count.saturating_add(1)`
   leaves `count` undecided, and after `let range = 0..3`, `for index in range`
   finds `Range`'s `Iterable`, whose bound `Countable` every integer type meets.
+- A literal also has the methods of a sealed trait that only some types of
+  its kind implement, and calling one bounds the literal by the trait:
+  `count.integer_square_root()` makes `count` an unsigned integer, a `UInt64`
+  unless a later use decides another.
 - An associated type of a literal is the one that every type of its kind
   gives alike. With `fn doubled[Value: Add[Value]](value: Value) -> Value.Output`,
   `doubled(3)` has the literal's own type, because every integer type's
   `Output` under `Add` is itself.
-- A call of a method that no such trait declares, such as
-  `value.to_big_endian_bytes()`, needs the literal's type, so the literal
-  takes its default type at the call.
+- An associated type of an undecided type waits for that type wherever it is
+  compared with another type. With
+  `fn widened[Value: Add[Int64]](value: Value) -> Value.Output`, the result of
+  `widened(first)` is checked once `first` is decided. An associated type that
+  differs from the type it is compared with is an error at the statement.
+- A call of a method that only a trait implemented by some types of the
+  literal's kind declares, where the trait is not sealed, needs the literal's
+  type, so the literal takes its default type at the call.
 - An integer literal is never a float.
 - A literal that does not fit its type is an error. A negated literal is
   checked after the negation, so `-128` fits an `Int8`.
@@ -1863,10 +1872,13 @@ public trait Add[Right] {
   shifts in zeros. A shift amount is any unsigned integer type, proven
   smaller than the bit width of the value.
 - The traits `FixedWidthInteger`, `SignedInteger`, and `UnsignedInteger` are
-  sealed: only the built-in integer types implement them.
+  sealed: only the built-in integer types implement them. A method that every
+  integer type has is declared in one of them.
 
 ### Floats
 
+- The trait `FloatingPoint` is sealed: only `Float32` and `Float64`
+  implement it. A method that both float types have is declared in it.
 - Float arithmetic follows IEEE 754. NaN and infinity are values, so no
   float operation fails.
 - Float results are the same on every platform. The operations IEEE 754

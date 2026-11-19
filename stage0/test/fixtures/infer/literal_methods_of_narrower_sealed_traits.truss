@@ -1,0 +1,7 @@
+fn f() {
+  let count = 16
+  let root = count.integer_square_root()
+  let level = 5
+  let magnitude = level.absolute()
+  let small: Int8 = level
+}

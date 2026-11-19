@@ -4,6 +4,7 @@ type t = {
   value_solutions : (int, Types.value) Hashtbl.t;
   mutable capability_variable_count : int;
   mutable deferred_capability_equalities : (Types.capability_set * Types.capability_set) list;
+  mutable deferred_projection_equalities : (Types.ty * Types.ty) list;
   mutable find_integer_range : Types.ty -> (Z.t * Z.t) option;
   code_literals : (int, unit) Hashtbl.t;
   levels : (int, int) Hashtbl.t;
@@ -27,6 +28,7 @@ type unknown =
   | Unknown_value of int
 
 val list_unknowns : t -> Types.ty -> unknown list
+val list_reachable_unknowns : t -> Types.ty -> unknown list
 val read_unknown_index : unknown -> int
 val read_level : t -> int -> int
 val lower : t -> level:int -> Types.ty -> unit

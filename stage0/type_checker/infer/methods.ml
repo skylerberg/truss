@@ -576,13 +576,14 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
       receiver_type
   | _ -> (
       let receiver_type, overloads =
-        match (receiver_type, Name_lookup.resolve_overloads state receiver_type member.text) with
-        | Types.Literal _, Ok Absent ->
-            let decided =
+        match Name_lookup.resolve_overloads state receiver_type member.text with
+        | Ok Absent as absent -> (
+            match
               Solver.decide_for_method_call state ~at:(State.read_span state value.id) receiver_type
-            in
-            (decided, Name_lookup.resolve_overloads state decided member.text)
-        | lookup -> lookup
+            with
+            | decided when Types.equal decided receiver_type -> (receiver_type, absent)
+            | decided -> (decided, Name_lookup.resolve_overloads state decided member.text))
+        | lookup -> (receiver_type, lookup)
       in
       match overloads with
       | Ok (Hidden hidden) ->
@@ -754,37 +755,12 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
               finish_trait_call state value ~self_type:receiver_type ~trait ~callee instance
                 (receiver_argument :: checked) left_out))
 
-and name_unknown_associated_types state self_type (reference : Types.trait_reference) result =
-  let self_type = State.zonk state self_type in
-  let associated = ref [] in
-  let result =
-    Types.map
-      (function
-        | Types.Projection { base; trait; name }
-          when Path.equal trait.trait reference.trait
-               && Types.equal (State.zonk state base) self_type
-               && Unify.list_unknowns state.unifier self_type <> [] ->
-            Some
-              (match List.assoc_opt name !associated with
-              | Some variable -> variable
-              | None ->
-                  let variable = State.make_fresh_type state in
-                  associated := (name, variable) :: !associated;
-                  variable)
-        | _ -> None)
-      (State.normalize state result)
-  in
-  (result, List.rev !associated)
-
 and finish_trait_call state (value : Syntax.expression) ~self_type ~trait ~callee
     (instance : Instantiation.instance) arguments left_out =
-  let result, solved =
-    name_unknown_associated_types state self_type trait
-      (Types.extract_result_type instance.signature.output)
-  in
+  let result = Types.extract_result_type instance.signature.output in
   Modes.note_lending state value instance.signature.output;
   state.tables.calls.(value.id) <-
     Some { callee; arguments; omitted_defaults = left_out; callee_result = result };
   Form.register_call state value;
-  Name_lookup.resolve_evidence ~solved state value self_type trait;
-  result
+  Name_lookup.resolve_evidence state value self_type trait;
+  State.normalize state result

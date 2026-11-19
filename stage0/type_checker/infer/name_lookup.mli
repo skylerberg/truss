@@ -48,7 +48,6 @@ val list_trait_static_methods :
   (Types.trait_reference * Types.trait_method) list
 
 val resolve_evidence :
-  ?solved:(string * Types.ty) list ->
   ?report_unmet:(Types.ty -> (string * Types.ty) option -> Diagnostic.reported) ->
   State.state ->
   Syntax.expression ->

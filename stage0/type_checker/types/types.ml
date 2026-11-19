@@ -138,6 +138,11 @@ let find_bound_integer_implementors bounds =
 
 let float_types : Intrinsic.builtin list = [ Float32; Float64 ]
 
+let find_sealed_implementors trait =
+  match find_integer_implementors trait with
+  | Some implementors -> Some implementors
+  | None -> if Well_known.is Floating_point trait then Some float_types else None
+
 let is_integer_type type_ =
   match find_builtin type_ with Some builtin -> List.mem builtin integer_types | None -> false
 

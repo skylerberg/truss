@@ -4,6 +4,7 @@ type t = {
   value_solutions : (int, Types.value) Hashtbl.t;
   mutable capability_variable_count : int;
   mutable deferred_capability_equalities : (Types.capability_set * Types.capability_set) list;
+  mutable deferred_projection_equalities : (Types.ty * Types.ty) list;
   mutable find_integer_range : Types.ty -> (Z.t * Z.t) option;
   code_literals : (int, unit) Hashtbl.t;
   levels : (int, int) Hashtbl.t;
@@ -17,6 +18,7 @@ let create () =
     value_solutions = Hashtbl.create 4;
     capability_variable_count = 0;
     deferred_capability_equalities = [];
+    deferred_projection_equalities = [];
     find_integer_range = (fun _ -> None);
     code_literals = Hashtbl.create 4;
     levels = Hashtbl.create 16;
@@ -127,7 +129,7 @@ type unknown =
 let read_unknown_index = function
   | Unknown_type index | Unknown_literal (_, index) | Unknown_value index -> index
 
-let list_unknowns unifier (type_ : Types.ty) =
+let collect_unknowns unifier ~through_projections (type_ : Types.ty) =
   let unknowns = ref [] in
   let rec collect (type_ : Types.ty) =
     match resolve unifier type_ with
@@ -135,8 +137,10 @@ let list_unknowns unifier (type_ : Types.ty) =
     | Literal (kind, index) -> unknowns := Unknown_literal (kind, index) :: !unknowns
     | Named { arguments; _ } -> List.iter collect_argument arguments
     | Projection { base; trait = reference; _ } ->
-        collect base;
-        collect_trait reference
+        if through_projections then begin
+          collect base;
+          collect_trait reference
+        end
     | Function { inputs; output; _ } ->
         List.iter (fun (_, type_) -> collect type_) inputs;
         collect output
@@ -155,10 +159,15 @@ let list_unknowns unifier (type_ : Types.ty) =
   collect type_;
   List.sort_uniq compare !unknowns
 
+let list_unknowns unifier type_ = collect_unknowns unifier ~through_projections:true type_
+
+let list_reachable_unknowns unifier type_ =
+  collect_unknowns unifier ~through_projections:false type_
+
 let lower unifier ~level type_ =
   List.iter
     (fun unknown -> lower_to unifier ~level (read_unknown_index unknown))
-    (list_unknowns unifier type_)
+    (list_reachable_unknowns unifier type_)
 
 let find_lowest_level unifier unknowns =
   List.fold_left
@@ -182,6 +191,19 @@ let list_argument_unknowns unifier = function
       | Value_variable index -> [ Unknown_value index ]
       | _ -> [])
 
+let is_unsolved_projection unifier : Types.ty -> bool = function
+  | Projection { base; trait; _ } ->
+      list_unknowns unifier base <> []
+      || List.exists
+           (fun argument -> list_argument_unknowns unifier argument <> [])
+           trait.trait_arguments
+  | _ -> false
+
+let defer_projection_equality unifier projection other =
+  unifier.deferred_projection_equalities <-
+    (projection, other) :: unifier.deferred_projection_equalities;
+  true
+
 let rec unify unifier (left : Types.ty) (right : Types.ty) =
   let left = resolve unifier left and right = resolve unifier right in
   match (left, right) with
@@ -200,6 +222,16 @@ let rec unify unifier (left : Types.ty) (right : Types.ty) =
       true
   | Variable left_index, Variable right_index when left_index = right_index -> true
   | Variable index, other | other, Variable index -> bind unifier index other
+  | Projection left_projection, Projection right_projection
+    when left_projection.name = right_projection.name
+         && Path.equal left_projection.trait.trait right_projection.trait.trait
+         && Types.equal left_projection.base right_projection.base ->
+      unify_arguments unifier left_projection.trait.trait_arguments
+        right_projection.trait.trait_arguments
+  | (Projection _ as projection), other when is_unsolved_projection unifier projection ->
+      defer_projection_equality unifier projection other
+  | other, (Projection _ as projection) when is_unsolved_projection unifier projection ->
+      defer_projection_equality unifier projection other
   | Literal (left_kind, left_index), Literal (right_kind, right_index) ->
       let join () =
         let root = min left_index right_index and joined = max left_index right_index in

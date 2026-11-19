@@ -98,6 +98,7 @@ type state = {
   mutable undecided : undecided_literal list;
   decisions : (int, literal_decision) Hashtbl.t;
   annotatable : (Syntax.id, unit) Hashtbl.t;
+  mutable unmet_impls : (Types.ty * Types.trait_reference * Diagnostic.reported) list;
 }
 
 let add_diagnostic state ?notes ?(fixes = []) code (span : Source.Definition_span.t) message =
@@ -393,9 +394,28 @@ let is_signed_type state (type_ : Types.ty) =
 
 let lookup_bounds state parameter = Interface.Elaborator.list_bounds state.context parameter
 
+let find_unmet_impl state subject (trait : Types.trait_reference) =
+  List.find_map
+    (fun (unmet_subject, unmet_trait, report) ->
+      if Types.equal unmet_subject subject && unmet_trait = { trait with associated = [] } then
+        Some report
+      else None)
+    state.unmet_impls
+
 let normalize state type_ =
-  Interface.Impls.normalize state.lookups.interface ~list_bounds:(lookup_bounds state)
-    (zonk state type_)
+  let normalized =
+    Interface.Impls.normalize state.lookups.interface ~list_bounds:(lookup_bounds state)
+      (zonk state type_)
+  in
+  match state.unmet_impls with
+  | [] -> normalized
+  | _ :: _ ->
+      Types.map
+        (function
+          | Types.Projection { base; trait; _ } ->
+              Option.map (fun report -> Types.Error report) (find_unmet_impl state base trait)
+          | _ -> None)
+        normalized
 
 let make_unsolved_type state =
   match state.unsolved with
