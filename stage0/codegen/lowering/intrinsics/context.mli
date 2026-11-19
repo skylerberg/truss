@@ -30,12 +30,9 @@ val allocate_uint64_local : t -> Lowered.local
 val emit_uint64 : t -> Lowered.rvalue -> Lowered.operand
 val emit_bool : t -> Lowered.rvalue -> Lowered.operand
 val copy_length : Lowered.place -> Lowered.operand
-
-val fail_with_message :
-  t -> Lowered.failure -> message:Lowered.operand -> length:Lowered.operand -> unit
-
-val fail : t -> Lowered.failure -> string -> unit
-val fail_when : t -> Lowered.failure -> Emit_c.Ir_builder.condition -> string -> unit
+val panic_with_message : t -> message:Lowered.operand -> length:Lowered.operand -> unit
+val panic : t -> string -> unit
+val panic_when : t -> Emit_c.Ir_builder.condition -> string -> unit
 val fail_obligation_when : t -> Emit_c.Ir_builder.condition -> string -> unit
 val check_index : t -> Lowered.operand -> Lowered.operand -> unit
 val compute_room : t -> Lowered.place -> Lowered.operand

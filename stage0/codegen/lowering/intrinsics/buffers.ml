@@ -28,9 +28,7 @@ let lower (context : Context.t) (buffer : Intrinsic.buffer) =
         Lowered.make_uint64_constant layout.size;
         Address { place = Lowered.make_local_place bytes; writable = true };
       ];
-    Context.fail_when context Panic
-      (Holds (Copy (Lowered.make_local_place too_many)))
-      "out of memory";
+    Context.panic_when context (Holds (Copy (Lowered.make_local_place too_many))) "out of memory";
     let buffer = Emit_c.Ir_builder.allocate_local builder (Raw (Pointer Opaque)) in
     Emit_c.Ir_builder.emit_if builder
       (Test (Storage.make_owned_block_test storage))

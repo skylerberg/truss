@@ -17,7 +17,13 @@ type reference =
   | Helper of C_runtime.helper
   | Capability of Path.t
 
-type t = Text of string | Name of reference | Concat of t list
+type t =
+  | Text of string
+  | Name of reference
+  | Concat of t list
+  | Line_control of Lowered.site option
+
+type segment = { site : Lowered.site option; text : string }
 
 val empty : t
 val ( ++ ) : t -> t -> t
@@ -25,3 +31,4 @@ val join : string -> t list -> t
 val render_braces : t list -> t
 val render_key_name : key -> string
 val render : t -> resolve:(reference -> string) -> string
+val render_segments : t -> site:Lowered.site option -> resolve:(reference -> string) -> segment list

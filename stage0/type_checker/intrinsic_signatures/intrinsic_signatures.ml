@@ -8,6 +8,33 @@ let make_libc_scalar_type scalar = Types.make_builtin (Intrinsic.convert_libc_sc
 let make_sequence_type element =
   Types.Named { path = Well_known.make_path Sequence; arguments = [ Types.Type element ] }
 
+let list_uses : Intrinsic.operation -> Types.capability list = function
+  | Runtime (Shared_update | Shared_key) -> [ Capability (Well_known.make_path Tasks) ]
+  | Runtime
+      ( Libc
+          ( Write | Read | Open | Close | Dup2 | Errno | Clock_gettime | Getentropy | Getenv
+          | Posix_spawnp | Waitpid | Fork | Pipe | Poll | Kill | Sysconf | Exit | Pread | Pwrite
+          | Lseek | Ftruncate | Fsync | Fstat | Stat | Lstat | Mkdir | Remove | Rename | Symlink
+          | Link | Chmod | Utimensat | Readlink | Realpath | Getcwd | Gethostname | Getpid
+          | Proc_pidpath | Fcntl_dupfd_cloexec | Fcntl_setfd_cloexec | Posix_spawn_file_actions_init
+          | Posix_spawn_file_actions_destroy | Posix_spawn_file_actions_adddup2
+          | Posix_spawn_file_actions_addopen | Posix_spawn_file_actions_addchdir | Getdents64
+          | Getattrlistbulk | Ioctl_tiocgwinsz | Tcgetattr | Tcsetattr | Socket | Bind | Connect
+          | Listen | Accept | Getsockname | Getpeername | Shutdown | Setsockopt | Getsockopt
+          | Sendto | Recvfrom | Fcntl_getfl | Fcntl_setfl | Addresses_of_host | Signals_wait
+          | Descriptor_watch | Descriptor_wait | Descriptors_watch | Descriptors_wait | Sleep
+          | Tasks_open | Tasks_join | Tasks_cancel | Tasks_cancelled | Tasks_watch | Tasks_wait
+          | Tasks_wake | Tasks_lock | Tasks_unlock | Tasks_yield )
+      | Environment_entry | Live_blocks | Run_test | Report_tests_to | Tasks_spawn ) ->
+      [ Built_in System ]
+  | Runtime
+      ( Libc (Snprintf | Strtod | Strtof)
+      | Crash | Handle_from | Handle_descriptor | Handle_release | Coroutine_start
+      | Coroutine_resume | Coroutine_suspend | Shared_new | Holds_invariant | System_is_os _
+      | System_is_architecture _ | Libc_number _ )
+  | Scalar _ | Buffer _ | Lend _ ->
+      []
+
 let make_signature (operation : Intrinsic.operation) : Types.signature =
   let generic name = { Types.generic = make_parameter operation name; kind = Type_generic [] } in
   let make_bounded_generic known name =
@@ -29,9 +56,7 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
       receiver = None;
       parameters;
       output;
-      uses =
-        Types.make_capability_set
-          (List.map (fun capability -> Types.Capability capability) (Intrinsic.list_uses operation));
+      uses = Types.make_capability_set (list_uses operation);
       costs = [];
       specification_only = false;
       is_update_step = false;
@@ -62,7 +87,7 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
       {
         inputs = [ (Read, work_item) ];
         output = Types.unit;
-        uses = Types.make_capability_set [ Types.run_forever ];
+        uses = Types.make_capability_set [ Built_in Run_forever ];
         costs = [];
       }
   in
@@ -236,7 +261,7 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
             {
               inputs = [ (Mut, value); (Own, make_parameter_type "Input") ];
               output = make_parameter_type "Result";
-              uses = Types.make_capability_set [ Types.run_forever ];
+              uses = Types.make_capability_set [ Built_in Run_forever ];
               costs = [];
             }
           in

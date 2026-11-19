@@ -50,11 +50,17 @@ let list_missing (lookups : Lookups.t) ~package ~of_ (uses : Types.capability_se
     let granted =
       match lookups.find_grant package of_ with Some grant -> grant.capabilities | None -> []
     in
-    List.filter_map
-      (function
-        | Types.Capability path when not (List.exists (Path.equal path) granted) -> Some path
-        | _ -> None)
-      (Types.list_capabilities uses)
+    List.filter
+      (fun path -> not (List.exists (Path.equal path) granted))
+      (List.filter_map
+         (function
+           | Types.Built_in builtin_capability ->
+               Some (Well_known.make_builtin_capability_path builtin_capability)
+           | Capability path -> Some path
+           | Capability_parameter _ | Capability_projection _ | Capability_variable _
+           | Capability_error _ ->
+               None)
+         (Types.list_capabilities uses))
 
 let describe_missing ~subject ~of_ capability =
   let of_ = Path.show_package of_ in

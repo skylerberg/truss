@@ -22,6 +22,16 @@ val find_declared_clauses : Lookups.t -> Path.t -> State.clauses option
 val find_capability_contract : Lookups.t -> Path.t -> string -> State.contract option
 val find_capability_clauses : Lookups.t -> Path.t -> string -> State.clauses option
 
+val list_restated_clauses :
+  Lookups.t ->
+  list_bounds:Interface.Impls.bounds ->
+  packages:Path.package list ->
+  self_type:Types.ty ->
+  Path.t ->
+  string ->
+  Path.receiver ->
+  (Types.trait_reference * State.clauses) list
+
 val find_method_contract :
   Lookups.t ->
   Types.trait_reference ->

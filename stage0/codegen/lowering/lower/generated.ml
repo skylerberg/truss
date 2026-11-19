@@ -1,8 +1,6 @@
 let make_generated_state context ~item ~definition ~substitution =
-  Lowering.enter context
-    ~builder:(Emit_c.Ir_builder.create context.env ~item)
-    (Lowering.make_frame
-       (Definitions.make_unwritten_code ~definition ~substitution ~result:(Returns Types.unit)))
+  Lowering.enter_item context ~item
+    (Definitions.make_unwritten_code ~definition ~substitution ~result:(Returns Types.unit))
 
 let choose_result_place state result_ty =
   match Lowering.find_result_place state with
@@ -392,7 +390,15 @@ let build_any_entry context (item : Lowered.Item.t) (impl_method : Lowered.Item.
   let path = Lowered.Item.make_method_path impl_method in
   let interface = Definitions.read_impl_interface context impl in
   let trait = interface.implements.trait in
-  let _, trait_signature = Targets.lookup_dynamic_method context trait name receiver in
+  let trait_signature =
+    match
+      Interface.Definition.find_trait_method context.lookups.interface trait ~name ~receiver
+    with
+    | Some trait_method ->
+        Interface.Definition.read_method_signature context.lookups.interface ~owner:trait
+          trait_method
+    | None -> Definitions.raise_bug "%s declares no %s" (Path.show trait) name
+  in
   let method_signature = Definitions.read_signature context path in
   let substitution = Definitions.bind method_signature.generics type_arguments in
   let any = Types.substitute_trait substitution interface.implements in
@@ -446,28 +452,68 @@ let build_any_entry context (item : Lowered.Item.t) (impl_method : Lowered.Item.
 
 let build_any_table context (item : Lowered.Item.t) ~impl ~type_arguments : Lowered.table =
   let interface = Definitions.read_impl_interface context impl in
-  let trait = interface.implements.trait in
   let substitution = Definitions.bind interface.impl_generics type_arguments in
   let self_ty = Monomorphic.ground context.monomorphic substitution interface.for_type in
-  let any = Types.substitute_trait substitution interface.implements in
-  let trait_interface = Definitions.read_trait_interface context trait in
+  let slots = Targets.list_any_slots context ~self:interface.for_type interface.implements in
+  let any =
+    let implements = Types.substitute_trait substitution interface.implements in
+    let for_type = Types.substitute substitution interface.for_type in
+    let required =
+      List.concat_map
+        (fun (bound : Types.trait_reference) ->
+          List.filter_map
+            (fun (associated : Types.associated_type) ->
+              if List.mem_assoc associated.associated_name implements.associated then None
+              else
+                Some
+                  ( associated.associated_name,
+                    context.monomorphic.normalize
+                      (Types.Projection
+                         {
+                           base = for_type;
+                           trait = Types.substitute_trait substitution bound;
+                           name = associated.associated_name;
+                         }) ))
+            (Definitions.read_trait_interface context bound.trait).associated_types)
+        (List.sort_uniq compare (List.map fst slots))
+    in
+    { implements with associated = implements.associated @ required }
+  in
   let entries =
     List.map
-      (fun (trait_method : Types.trait_method) ->
+      (fun ((bound : Types.trait_reference), (trait_method : Types.trait_method)) ->
+        let trait = bound.trait in
+        let implementing, implementing_arguments =
+          if Path.equal trait interface.implements.trait then (impl, type_arguments)
+          else
+            Targets.resolve_impl context substitution ~trait:bound ~self_type:interface.for_type
+              ~evidence:Bound
+        in
         let receiver =
-          match Types.find_implementing_receiver trait_interface interface trait_method with
+          match
+            Types.find_implementing_receiver
+              (Definitions.read_trait_interface context trait)
+              (Definitions.read_impl_interface context implementing)
+              trait_method
+          with
           | Some receiver -> receiver
           | None -> trait_method.method_receiver
         in
         ( Lowered.Item.Generated
-            (Any_entry { impl; name = trait_method.method_name; receiver; type_arguments }),
+            (Any_entry
+               {
+                 impl = implementing;
+                 name = trait_method.method_name;
+                 receiver;
+                 type_arguments = implementing_arguments;
+               }),
           let signature, _, _ =
             Targets.make_any_entry_signature context ~any ~trait
               (Interface.Definition.read_method_signature context.lookups.interface ~owner:trait
                  trait_method)
           in
           signature ))
-      (Targets.list_any_methods context trait)
+      slots
   in
   {
     table_item = item;

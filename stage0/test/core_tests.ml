@@ -124,7 +124,10 @@ let list_final_expressions (form : Core.t) =
 
 let list_capabilities (set : Types.capability_set) =
   List.map
-    (function Types.Capability path -> Path.show path | _ -> "a capability that is not named")
+    (function
+      | Types.Built_in builtin_capability -> Language.Builtin_capability.show builtin_capability
+      | Types.Capability path -> Path.show path
+      | _ -> "a capability that is not named")
     (Types.list_capabilities set)
 
 let shape = Fixtures.Core.shape

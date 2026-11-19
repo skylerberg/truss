@@ -33,6 +33,7 @@ let find_clauses (lookups : Lookups.t) path callee =
         costs = contract.costs;
         callbacks = contract.callbacks;
         inherited = false;
+        bindings = Types.no_substitution;
       })
     (Option.map
        (fun ({ form; _ } : Mir.contract Mir.sourced) -> form)
@@ -105,8 +106,8 @@ let make_contract ?trait_clauses (lookups : Lookups.t) path callee_clauses =
            (Types.exists_capability
               (function
                 | Types.Capability_parameter _ -> false
-                | Types.Capability _ | Types.Capability_projection _ | Types.Capability_variable _
-                | Types.Capability_error _ ->
+                | Types.Built_in _ | Types.Capability _ | Types.Capability_projection _
+                | Types.Capability_variable _ | Types.Capability_error _ ->
                     true)
               signature.uses))
         && List.for_all
@@ -116,10 +117,10 @@ let make_contract ?trait_clauses (lookups : Lookups.t) path callee_clauses =
     | None -> false
   in
   let result_kind = match signature with Some { output = Lends _; _ } -> `Lends | _ -> `Returns in
-  { State.callee_clauses; trait_clauses; is_logic_function; result_kind }
+  { State.callee_clauses; trait_clauses; restated_clauses = []; is_logic_function; result_kind }
 
 let list_declared_clauses (contract : State.contract) =
-  contract.callee_clauses :: Option.to_list contract.trait_clauses
+  (contract.callee_clauses :: Option.to_list contract.trait_clauses) @ contract.restated_clauses
 
 let select_precondition_clauses (contract : State.contract) =
   match contract.trait_clauses with
@@ -137,6 +138,49 @@ let find_trait_clauses lookups (trait : Path.t) name receiver =
   Option.map
     (fun (clauses : State.clauses) -> { clauses with inherited = true })
     (find_declared_clauses lookups (Path.Method { owner = trait; name; receiver }))
+
+let restates ~(trait : Path.t) ~name ~receiver (interface : Types.trait_interface) =
+  List.exists
+    (fun (restated : Types.restated_method) ->
+      restated.restated_name = name
+      && restated.restated_receiver = receiver
+      && Path.equal restated.declared_by trait)
+    interface.restated
+
+let list_implemented_traits (lookups : Lookups.t) ~list_bounds (self_type : Types.ty) ~packages =
+  match self_type with
+  | Types.Named { path; _ } ->
+      List.concat_map
+        (fun package ->
+          List.filter_map
+            (fun (_, impl) ->
+              let interface = Interface.Definition.read_impl_interface lookups.interface impl in
+              let variables =
+                List.map (fun (generic : Types.generic) -> generic.generic) interface.impl_generics
+              in
+              Option.bind
+                (Interface.Impls.match_type ~variables Types.no_substitution interface.for_type
+                   self_type) (fun arguments ->
+                  let implemented = Types.substitute_trait arguments interface.implements in
+                  Option.map
+                    (fun _ -> implemented)
+                    (Interface.Impls.find_evidence lookups.interface ~list_bounds self_type
+                       implemented)))
+            (Interface.Impls.list_impls_for_type lookups.interface path package))
+        packages
+  | _ -> Interface.Properties.list_known_bounds lookups.interface ~list_bounds self_type
+
+let list_restated_clauses (lookups : Lookups.t) ~list_bounds ~packages ~self_type (trait : Path.t)
+    name receiver =
+  List.filter_map
+    (fun (subtrait : Types.trait_reference) ->
+      match Interface.Definition.find_trait_interface lookups.interface subtrait.trait with
+      | Some interface when restates ~trait ~name ~receiver interface ->
+          Option.map
+            (fun clauses -> (subtrait, clauses))
+            (find_declared_clauses lookups (Path.Method { owner = subtrait.trait; name; receiver }))
+      | _ -> None)
+    (List.sort_uniq compare (list_implemented_traits lookups ~list_bounds self_type ~packages))
 
 let find_capability_contract lookups (capability : Path.t) name =
   let path = Path.make_capability_method capability name in

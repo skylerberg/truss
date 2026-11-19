@@ -162,6 +162,8 @@ let find_capability_reach (context : State.context) ~(uses : Types.capability_se
       (fun reached (used : Types.capability) ->
         join_reach reached
           (match used with
+          | Built_in _ ->
+              if used = Types.make_capability capability then Reached_directly else Not_reached
           | Capability path -> (
               match find_provider path with
               | Some found -> reach_through found

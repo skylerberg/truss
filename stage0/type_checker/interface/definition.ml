@@ -90,8 +90,14 @@ let read_impl_interface lookups path =
 let is_external_test lookups path =
   match find_interface lookups path with
   | Some (Test_interface signature) ->
-      Types.subtract_capabilities signature.uses Types.built_in_capabilities
-      <> Types.no_capabilities
+      Types.exists_capability
+        (function
+          | Types.Built_in (Panic | Run_forever) -> false
+          | Built_in System
+          | Capability _ | Capability_parameter _ | Capability_projection _ | Capability_variable _
+          | Capability_error _ ->
+              true)
+        signature.uses
   | _ -> Compiler_bug.raise_bug ~stage:"Interface" "%s has no test interface" (Path.show path)
 
 let find_real_implementation (lookups : Lookups.t) capability =

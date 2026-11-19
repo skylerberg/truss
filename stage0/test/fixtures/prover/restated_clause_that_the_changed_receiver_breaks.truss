@@ -1,0 +1,31 @@
+trait Frozen: Cursor {
+  fn size(self) -> UInt64
+
+  fn next(mut self) -> Option[Self.Element]
+    uses Self.Uses
+    ensures self.size() == old(self.size())
+}
+
+type Countdown(left: UInt64)
+
+impl Cursor for Countdown {
+  type Element = UInt64
+
+  fn next(mut self) -> Option[UInt64]
+    ensures (result is Some(_)) ==> self.left < old(self.left)
+  {
+    if self.left == 0 {
+      return None
+    }
+    self.left -= 1
+    Some(self.left)
+  }
+}
+
+impl Frozen for Countdown {
+  fn size(self) -> UInt64
+    ensures result == self.left
+  {
+    self.left
+  }
+}

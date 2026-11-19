@@ -85,21 +85,16 @@ let split_arguments state type_arguments =
     List.filter_map (function Ground.Value value -> Some value | _ -> None) ground_arguments )
 
 let fail_out_of_bounds state ~origin condition message =
-  let failed = Emit_c.Ir_builder.allocate_block state.Lowering.builder
-  and after = Emit_c.Ir_builder.allocate_block state.builder in
-  Emit_c.Ir_builder.branch state.builder condition ~yes:failed ~no:after;
-  Emit_c.Ir_builder.start state.builder failed;
-  Emit_c.Ir_builder.finish state.builder
-    (Fail
+  Emit_c.Ir_builder.emit state.Lowering.builder
+    (Fail_obligation_when
        {
-         failure = Obligation;
+         test = Emit_c.Ir_builder.evaluate_test state.builder condition;
          message = Constant (Bytes message);
          length = Lowered.make_uint64_constant (String.length message);
          site = locate_site state origin;
          reported = find_reported_site state;
          trace = None;
-       });
-  Emit_c.Ir_builder.start state.builder after
+       })
 
 type sequence =
   | Buffer of { buffer : Lowered.place; element : Ground.ty }

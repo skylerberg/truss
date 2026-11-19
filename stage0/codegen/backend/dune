@@ -13,6 +13,7 @@
   cbor
   blake3
   c_compiler
+  profile
   process
   startup
   unix

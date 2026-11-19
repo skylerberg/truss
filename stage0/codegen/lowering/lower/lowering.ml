@@ -95,6 +95,12 @@ let enter context ?(nested = ref 0) ~builder frame =
     lend_record = None;
   }
 
+let enter_item context ~item (code : Definitions.code) =
+  let site =
+    Option.map (fun _ : Lowered.site -> { definition = code.definition; offset = 0 }) code.written
+  in
+  enter context ~builder:(Emit_c.Ir_builder.create ?site context.env ~item) (make_frame code)
+
 let may_fork state = state.frame.exit = None
 
 let allocate_local state ?name ty : Lowered.place =

@@ -59,11 +59,11 @@ let emit_uint64 context rvalue =
 let emit_bool context rvalue = Emit_c.Ir_builder.emit_value context.builder (Raw Bool) rvalue
 let copy_length sequence = Lowered.Copy (Storage.project_length sequence)
 
-let fail_with_message context failure ~message ~length =
+let panic_with_message context ~message ~length =
   Emit_c.Ir_builder.finish context.builder
     (Fail
        {
-         failure;
+         failure = Panic;
          message;
          length;
          site = context.site;
@@ -71,19 +71,29 @@ let fail_with_message context failure ~message ~length =
          trace = context.trace;
        })
 
-let fail context failure message =
-  fail_with_message context failure ~message:(Constant (Bytes message))
+let panic context message =
+  panic_with_message context ~message:(Constant (Bytes message))
     ~length:(Lowered.make_uint64_constant (String.length message))
 
-let fail_when context failure condition message =
+let panic_when context condition message =
   let failed = Emit_c.Ir_builder.allocate_block context.builder
   and after = Emit_c.Ir_builder.allocate_block context.builder in
   Emit_c.Ir_builder.branch context.builder condition ~yes:failed ~no:after;
   Emit_c.Ir_builder.start context.builder failed;
-  fail context failure message;
+  panic context message;
   Emit_c.Ir_builder.start context.builder after
 
-let fail_obligation_when context condition message = fail_when context Obligation condition message
+let fail_obligation_when context condition message =
+  Emit_c.Ir_builder.emit context.builder
+    (Fail_obligation_when
+       {
+         test = Emit_c.Ir_builder.evaluate_test context.builder condition;
+         message = Constant (Bytes message);
+         length = Lowered.make_uint64_constant (String.length message);
+         site = context.site;
+         reported = context.reported;
+         trace = context.trace;
+       })
 
 let check_index context index count =
   fail_obligation_when context (Test (Greater_equal, index, count)) "index out of bounds"
