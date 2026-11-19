@@ -26,6 +26,7 @@ type t =
   | Fixed_width_integer
   | Signed_integer
   | Unsigned_integer
+  | Floating_point
   | Range
   | Exit_code
   | Option
@@ -199,6 +200,7 @@ let items =
     (Fixed_width_integer, [ "numbers"; "integers" ], "FixedWidthInteger");
     (Signed_integer, [ "numbers"; "integers" ], "SignedInteger");
     (Unsigned_integer, [ "numbers"; "integers" ], "UnsignedInteger");
+    (Floating_point, [ "numbers"; "float_math" ], "FloatingPoint");
     (Range, [ "core" ], "Range");
     (Exit_code, [ "core" ], "ExitCode");
     (Option, [ "option" ], "Option");
@@ -366,6 +368,7 @@ let by_path =
 
 let of_path path = Path.Map.find_opt path by_path
 let is known path = of_path path = Some known
+let is_buffer_sequence path = is List path || is Slice path
 
 let locate_method =
   index_rows "method"
@@ -400,6 +403,19 @@ let make_variant_type_path =
 
 let show_field = index_rows "field" (List.map (fun (field, _, name) -> (field, name)) fields)
 let specification = Path.make_standard_module [ "specification" ]
+let intrinsic_module = Path.make_standard_module [ "intrinsic" ]
+
+let make_builtin_type_path builtin_type =
+  Path.Top { module_ = intrinsic_module; name = Language.Builtin_type.show builtin_type }
+
+let builtin_types_by_path =
+  Path.Map.of_seq
+    (List.to_seq
+       (List.map
+          (fun builtin_type -> (make_builtin_type_path builtin_type, builtin_type))
+          Language.Builtin_type.all))
+
+let find_builtin_type path = Path.Map.find_opt path builtin_types_by_path
 
 let is_system_module (module_ : Path.module_) =
   module_.package = Path.standard_package

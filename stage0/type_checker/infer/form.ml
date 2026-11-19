@@ -794,7 +794,7 @@ and lend_block state mode (body : Core.block) : Core.block =
 let rec is_fixed_place : Core.place -> bool = function
   | Local _ | Constant _ -> true
   | Field { base; _ } -> is_fixed_place base
-  | Lent _ | Temporary _ -> false
+  | Element _ | Range _ | Lent _ | Temporary _ -> false
 
 let build_collection_place state (iterable : Syntax.expression) (mode : Language.Mode.t) :
     Core.place * (type_:Types.ty -> Core.block -> Core.kind) option =
@@ -852,17 +852,22 @@ let build_elements state ~origin (collection : Core.place) ~(count : Tables.call
         kind = Bind { local; is_var = false; mode = Own };
       };
     element =
-      Lent
-        (State.make_synthetic_expression state ~origin element.callee_result
-           (Call
-              (State.make_call state
-                 ~callee:(convert_callee state element.callee)
-                 ~arguments:
-                   [
-                     make_receiver lends;
-                     Passed { mode = Read; value = Operands.build Read position };
-                   ]
-                 ~lends:(Some lends))));
+      (match State.find_sequence_element (Core_walk.compute_place_type collection) with
+      | Some element_type ->
+          Element { base = collection; index = position; type_ = element_type; origin }
+      | None ->
+          Lent
+            (State.make_synthetic_expression state ~origin element.callee_result
+               (Call
+                  (State.make_call state
+                     ~callee:(convert_callee state element.callee)
+                     ~arguments:
+                       [
+                         make_receiver lends;
+                         Passed { mode = Read; value = Operands.build Read position };
+                       ]
+                     ~lends:(Some lends)))));
+    lends;
   }
 
 let quantify_over_elements state (collection : Syntax.expression) ~count ~element ~lends ~origin
@@ -1114,7 +1119,7 @@ let build_collection_literal state (value : Syntax.expression) (elements : Core.
   match read_type state value with
   | Types.Named { path; arguments = [ Types.Type element ] } when Well_known.is List path ->
       build_list_literal state ~origin:value.id element elements
-  | Types.Named { path; _ } when Intrinsic.find_builtin path = Some Array ->
+  | Types.Named { path; _ } when Well_known.find_builtin_type path = Some Array ->
       Collection_literal { elements; construction = Array }
   | Types.Named { path; _ } when Well_known.is Sequence path || Well_known.is Finite_set path ->
       Collection_literal { elements; construction = Specification_only }

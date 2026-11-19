@@ -1,0 +1,5 @@
+fn f(parts: mut List[Slice[Int64]]) {
+  for part in mut parts {
+    part[0] = 1
+  }
+}

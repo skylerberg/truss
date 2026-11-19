@@ -50,7 +50,7 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
         match
           List.filter_map
             (fun (builtin, rounded) -> Option.map (fun _ -> builtin) rounded)
-            [ (Intrinsic.Float32, rounded_float32); (Float64, rounded_float64) ]
+            [ (Language.Builtin_type.Float32, rounded_float32); (Float64, rounded_float64) ]
         with
         | [] -> Types.Error (report_too_large "`Float64`")
         | allowed ->
@@ -168,7 +168,7 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
                bodies of functions for specifications only. Quantify over a range or a collection.";
           State.declare state bound
             (Interface.Elaborator.elaborate_type state.context written)
-            ~is_var:false ~mode:Language.Mode.Read);
+            ~binding:Let ~mode:Language.Mode.Read);
       check state { env with in_quantifier = true } body Types.bool;
       State.register_expression state value (fun () ->
           let make_quantified binder : Core.kind =
@@ -330,18 +330,17 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
           let base = State.make_place (State.build_expression state base) in
           let start = Option.map (State.build_expression state) start in
           let stop = Option.map (State.build_expression state) stop in
-          State.make_slice state ~origin:value.id base ~start ~stop
+          State.make_range state ~origin:value.id base ~start ~stop
             ~inclusive:(match range.kind with Range { inclusive; _ } -> inclusive | _ -> false));
-      match base_type with
-      | Types.Named { path; arguments = Types.Type element :: _ }
-        when Well_known.is List path || Well_known.is Slice path
-             || Intrinsic.find_builtin path = Some Array ->
+      match (State.find_sequence_element base_type, base_type) with
+      | Some element, _ ->
           Types.Named { path = Well_known.make_path Slice; arguments = [ Types.Type element ] }
-      | Types.Named { path; _ } when Well_known.is String path || Well_known.is String_slice path ->
+      | None, Types.Named { path; _ }
+        when Well_known.is String path || Well_known.is String_slice path ->
           State.make_error_type state Not_indexable (State.read_span state value.id)
             "Strings cannot be indexed: say which you mean with `bytes()` or `characters()`."
-      | Types.Error _ | Types.Hole -> base_type
-      | _ ->
+      | None, (Types.Error _ | Types.Hole) -> base_type
+      | None, _ ->
           State.make_error_type state Not_indexable (State.read_span state value.id)
             (Printf.sprintf "%s cannot be sliced."
                (String.capitalize_ascii (State.describe state base_type))))
@@ -351,11 +350,25 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
           "Strings cannot be indexed: say which you mean with `bytes()` or `characters()`."
       end
       else
-        match base_type with
-        | Types.Error _ | Types.Hole ->
+        match (State.find_sequence_element base_type, base_type) with
+        | _, (Types.Error _ | Types.Hole) ->
             ignore (check_expression state env key);
             base_type
-        | _ -> (
+        | Some element, _ ->
+            let uint64 = Types.make_builtin UInt64 in
+            let actual = check_expression state env ~expected:uint64 key in
+            Name_lookup.coerce state env ~argument:Read key ~actual ~expected:uint64;
+            State.register_expression state value (fun () ->
+                Use
+                  (Element
+                     {
+                       base = State.make_place (State.build_expression state base);
+                       index = State.build_expression state key;
+                       type_ = State.finalize_type state element;
+                       origin = value.id;
+                     }));
+            element
+        | None, _ -> (
             let { Well_known.owner; name; receiver } = Well_known.locate_method Index_at in
             let index_trait =
               State.make_trait_reference ~arguments:[] (Well_known.make_path owner)

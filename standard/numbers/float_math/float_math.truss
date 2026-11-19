@@ -3,6 +3,168 @@ use standard::growth
 use standard::intrinsic
 use standard::text
 
+public trait FloatingPoint {
+  type Bits
+
+  fn absolute(self) -> Self
+    cost time O(1)
+
+  fn arccosine(self) -> Self
+    cost time O(1)
+
+  fn arcsine(self) -> Self
+    cost time O(1)
+
+  fn arctangent(self) -> Self
+    cost time O(1)
+
+  fn arctangent_2(self, x: Self) -> Self
+    cost time O(1)
+
+  fn ceiling(self) -> Self
+    cost time O(1)
+
+  fn copy_sign(self, sign: Self) -> Self
+    cost time O(1)
+
+  fn cosine(self) -> Self
+    cost time O(1)
+
+  fn cube_root(self) -> Self
+    cost time O(1)
+
+  fn exponential(self) -> Self
+    cost time O(1)
+
+  fn exponential_minus_one(self) -> Self
+    cost time O(1)
+
+  fn floor(self) -> Self
+    cost time O(1)
+
+  fn fraction(self) -> Self
+    cost time O(1)
+
+  fn from_bits(bits: Self.Bits) -> Self
+    cost time O(1)
+
+  fn fused_multiply_add(self, multiplier: Self, addend: Self) -> Self
+    cost time O(1)
+
+  fn hyperbolic_cosine(self) -> Self
+    cost time O(1)
+
+  fn hyperbolic_sine(self) -> Self
+    cost time O(1)
+
+  fn hyperbolic_tangent(self) -> Self
+    cost time O(1)
+
+  fn hypotenuse(self, other: Self) -> Self
+    cost time O(1)
+
+  fn ieee_equal(self, other: Self) -> Bool
+    cost time O(1)
+    cost allocations == 0
+
+  fn ieee_greater(self, other: Self) -> Bool
+    cost time O(1)
+
+  fn ieee_greater_or_equal(self, other: Self) -> Bool
+    cost time O(1)
+
+  fn ieee_less(self, other: Self) -> Bool
+    cost time O(1)
+    cost allocations == 0
+
+  fn ieee_less_or_equal(self, other: Self) -> Bool
+    cost time O(1)
+
+  fn ieee_not_equal(self, other: Self) -> Bool
+    cost time O(1)
+
+  fn inverse_hyperbolic_cosine(self) -> Self
+    cost time O(1)
+
+  fn inverse_hyperbolic_sine(self) -> Self
+    cost time O(1)
+
+  fn inverse_hyperbolic_tangent(self) -> Self
+    cost time O(1)
+
+  fn is_finite(self) -> Bool
+    cost time O(1)
+
+  fn is_infinite(self) -> Bool
+    cost time O(1)
+
+  fn is_nan(self) -> Bool
+    cost time O(1)
+    cost allocations == 0
+
+  fn is_negative(self) -> Bool
+    cost time O(1)
+
+  fn logarithm(self) -> Self
+    cost time O(1)
+
+  fn logarithm_10(self) -> Self
+    cost time O(1)
+
+  fn logarithm_2(self) -> Self
+    cost time O(1)
+
+  fn logarithm_base(self, base: Self) -> Self
+    cost time O(1)
+
+  fn logarithm_one_plus(self) -> Self
+    cost time O(1)
+
+  fn power(self, exponent: Self) -> Self
+    cost time O(1)
+
+  fn power_integer(self, exponent: Int32) -> Self
+    cost time O(1)
+
+  fn round(self) -> Self
+    cost time O(1)
+
+  fn round_to_even(self) -> Self
+    cost time O(1)
+
+  fn sign(self) -> Self
+    cost time O(1)
+
+  fn sine(self) -> Self
+    cost time O(1)
+
+  fn square_root(self) -> Self
+    cost time O(1)
+    cost allocations == 0
+
+  fn sum(items: Slice[Self]) -> Self
+    cost time O(items.length())
+
+  fn tangent(self) -> Self
+    cost time O(1)
+
+  fn to_bits(self) -> Self.Bits
+    cost time O(1)
+
+  fn to_degrees(self) -> Self
+    cost time O(1)
+
+  fn to_fixed(self, decimals: UInt64) -> String
+
+  fn to_radians(self) -> Self
+    cost time O(1)
+
+  fn to_scientific(self, decimals: UInt64) -> String
+
+  fn truncate(self) -> Self
+    cost time O(1)
+}
+
 public let Float32.infinity: Float32 = 1.0 / 0.0
 
 public let Float32.negative_infinity: Float32 = 0.0 - (1.0 / 0.0)
@@ -16,351 +178,6 @@ public let Float32.minimum: Float32 = -3.4028235e38
 public let Float32.smallest_positive_normal: Float32 = 1.1754944e-38
 
 public let Float32.epsilon: Float32 = 1.1920929e-7
-
-public fn Float32.is_infinite(self) -> Bool
-  ensures result == ((self.to_bits() & 0x7fff_ffff) == 0x7f80_0000)
-  cost time O(1)
-{
-  (self.to_bits() & 0x7fff_ffff) == 0x7f80_0000
-}
-
-public fn Float32.is_finite(self) -> Bool
-  ensures result == ((self.to_bits() & 0x7fff_ffff) < 0x7f80_0000)
-  cost time O(1)
-{
-  (self.to_bits() & 0x7fff_ffff) < 0x7f80_0000
-}
-
-public fn Float32.is_negative(self) -> Bool
-  ensures result == (self.to_bits() >= 0x8000_0000)
-  cost time O(1)
-{
-  self.to_bits() >= 0x8000_0000
-}
-
-public fn Float32.absolute(self) -> Float32
-  ensures identical(result, Float32.from_bits(self.to_bits() & 0x7fff_ffff))
-  cost time O(1)
-{
-  Float32.from_bits(self.to_bits() & 0x7fff_ffff)
-}
-
-public fn Float32.floor(self) -> Float32
-  ensures identical(result, intrinsic::floor(self))
-  cost time O(1)
-{
-  intrinsic::floor(self)
-}
-
-public fn Float32.ceiling(self) -> Float32
-  ensures identical(result, intrinsic::ceiling(self))
-  cost time O(1)
-{
-  intrinsic::ceiling(self)
-}
-
-public fn Float32.round(self) -> Float32
-  cost time O(1)
-{
-  let whole = intrinsic::truncate(self)
-  let one: Float32 = 1.0
-  if (self - whole).absolute() >= 0.5 { whole + one.copy_sign(self) } else { whole }
-}
-
-public fn Float32.round_to_even(self) -> Float32
-  ensures identical(result, intrinsic::round_to_even(self))
-  cost time O(1)
-{
-  intrinsic::round_to_even(self)
-}
-
-public fn Float32.truncate(self) -> Float32
-  ensures identical(result, intrinsic::truncate(self))
-  cost time O(1)
-{
-  intrinsic::truncate(self)
-}
-
-public fn Float32.fraction(self) -> Float32
-  ensures identical(result, self - intrinsic::truncate(self))
-  cost time O(1)
-{
-  self - intrinsic::truncate(self)
-}
-
-public fn Float32.sign(self) -> Float32
-  ensures identical(result, if intrinsic::is_nan(self) || self == 0.0 {
-      self
-    } else if self < 0.0 {
-      -1.0
-    } else {
-      1.0
-    })
-  cost time O(1)
-{
-  if intrinsic::is_nan(self) || self == 0.0 {
-    self
-  } else if self < 0.0 {
-    -1.0
-  } else {
-    1.0
-  }
-}
-
-public fn Float32.cube_root(self) -> Float32
-  cost time O(1)
-{
-  self.widened().cube_root().to_float32()
-}
-
-public fn Float32.exponential(self) -> Float32
-  cost time O(1)
-{
-  self.widened().exponential().to_float32()
-}
-
-public fn Float32.exponential_minus_one(self) -> Float32
-  cost time O(1)
-{
-  self.widened().exponential_minus_one().to_float32()
-}
-
-public fn Float32.logarithm(self) -> Float32
-  cost time O(1)
-{
-  self.widened().logarithm().to_float32()
-}
-
-public fn Float32.logarithm_2(self) -> Float32
-  cost time O(1)
-{
-  self.widened().logarithm_2().to_float32()
-}
-
-public fn Float32.logarithm_10(self) -> Float32
-  cost time O(1)
-{
-  self.widened().logarithm_10().to_float32()
-}
-
-public fn Float32.logarithm_one_plus(self) -> Float32
-  cost time O(1)
-{
-  self.widened().logarithm_one_plus().to_float32()
-}
-
-public fn Float32.sine(self) -> Float32
-  cost time O(1)
-{
-  self.widened().sine().to_float32()
-}
-
-public fn Float32.cosine(self) -> Float32
-  cost time O(1)
-{
-  self.widened().cosine().to_float32()
-}
-
-public fn Float32.tangent(self) -> Float32
-  cost time O(1)
-{
-  self.widened().tangent().to_float32()
-}
-
-public fn Float32.arcsine(self) -> Float32
-  cost time O(1)
-{
-  self.widened().arcsine().to_float32()
-}
-
-public fn Float32.arccosine(self) -> Float32
-  cost time O(1)
-{
-  self.widened().arccosine().to_float32()
-}
-
-public fn Float32.arctangent(self) -> Float32
-  cost time O(1)
-{
-  self.widened().arctangent().to_float32()
-}
-
-public fn Float32.hyperbolic_sine(self) -> Float32
-  cost time O(1)
-{
-  self.widened().hyperbolic_sine().to_float32()
-}
-
-public fn Float32.hyperbolic_cosine(self) -> Float32
-  cost time O(1)
-{
-  self.widened().hyperbolic_cosine().to_float32()
-}
-
-public fn Float32.hyperbolic_tangent(self) -> Float32
-  cost time O(1)
-{
-  self.widened().hyperbolic_tangent().to_float32()
-}
-
-public fn Float32.inverse_hyperbolic_sine(self) -> Float32
-  cost time O(1)
-{
-  self.widened().inverse_hyperbolic_sine().to_float32()
-}
-
-public fn Float32.inverse_hyperbolic_cosine(self) -> Float32
-  cost time O(1)
-{
-  self.widened().inverse_hyperbolic_cosine().to_float32()
-}
-
-public fn Float32.inverse_hyperbolic_tangent(self) -> Float32
-  cost time O(1)
-{
-  self.widened().inverse_hyperbolic_tangent().to_float32()
-}
-
-public fn Float32.to_degrees(self) -> Float32
-  ensures identical(result, self * 57.29577951308232)
-  cost time O(1)
-{
-  self * 57.29577951308232
-}
-
-public fn Float32.to_radians(self) -> Float32
-  ensures identical(result, self * 0.017453292519943295)
-  cost time O(1)
-{
-  self * 0.017453292519943295
-}
-
-public fn Float32.power(self, exponent: Float32) -> Float32
-  cost time O(1)
-{
-  self.widened().power(exponent.widened()).to_float32()
-}
-
-public fn Float32.logarithm_base(self, base: Float32) -> Float32
-  cost time O(1)
-{
-  self.widened().logarithm_base(base.widened()).to_float32()
-}
-
-public fn Float32.arctangent_2(self, x: Float32) -> Float32
-  cost time O(1)
-{
-  self.widened().arctangent_2(x.widened()).to_float32()
-}
-
-public fn Float32.copy_sign(self, sign: Float32) -> Float32
-  ensures identical(result, Float32.from_bits((self.to_bits() & 0x7fff_ffff) | (sign.to_bits() & 0x8000_0000)))
-  cost time O(1)
-{
-  Float32.from_bits((self.to_bits() & 0x7fff_ffff) | (sign.to_bits() & 0x8000_0000))
-}
-
-public fn Float32.hypotenuse(self, other: Float32) -> Float32
-  cost time O(1)
-{
-  let first = self.absolute()
-  let second = other.absolute()
-  if first.is_infinite() || second.is_infinite() {
-    return Float32.infinity
-  }
-  let larger = if first < second { second } else { first }
-  let smaller = if first < second { first } else { second }
-  if larger == 0.0 || intrinsic::is_nan(larger) {
-    return larger
-  }
-  let ratio = smaller / larger
-  larger * intrinsic::square_root(1.0 + ratio * ratio)
-}
-
-public fn Float32.ieee_not_equal(self, other: Float32) -> Bool
-  ensures result == (!intrinsic::ieee_equal(self, right: other))
-  cost time O(1)
-{
-  !intrinsic::ieee_equal(self, right: other)
-}
-
-public fn Float32.ieee_less_or_equal(self, other: Float32) -> Bool
-  ensures result == (intrinsic::ieee_less(self, right: other) || intrinsic::ieee_equal(self, right: other))
-  cost time O(1)
-{
-  intrinsic::ieee_less(self, right: other) || intrinsic::ieee_equal(self, right: other)
-}
-
-public fn Float32.ieee_greater(self, other: Float32) -> Bool
-  ensures result == (intrinsic::ieee_less(other, right: self))
-  cost time O(1)
-{
-  intrinsic::ieee_less(other, right: self)
-}
-
-public fn Float32.ieee_greater_or_equal(self, other: Float32) -> Bool
-  ensures result == (intrinsic::ieee_less(other, right: self) || intrinsic::ieee_equal(self, right: other))
-  cost time O(1)
-{
-  intrinsic::ieee_less(other, right: self) || intrinsic::ieee_equal(self, right: other)
-}
-
-public fn Float32.power_integer(self, exponent: Int32) -> Float32
-  cost time O(1)
-{
-  let magnitude = exponent.unsigned_absolute()
-  var result: Float32 = 1.0
-  var square = self
-  var bit: UInt64 = 0
-  while bit < 32 && (magnitude >> bit) != 0
-    invariant bit <= 32
-    decreases 32 - bit
-  {
-    if (magnitude >> bit) % 2 == 1 {
-      result = result * square
-    }
-    square = square * square
-    bit += 1
-  }
-  if exponent < 0 { 1.0 / result } else { result }
-}
-
-public fn Float32.fused_multiply_add(self, multiplier: Float32, addend: Float32) -> Float32
-  ensures identical(result, intrinsic::fused_multiply_add(self, multiplier: multiplier, addend: addend))
-  cost time O(1)
-{
-  intrinsic::fused_multiply_add(self, multiplier: multiplier, addend: addend)
-}
-
-public fn Float32.to_bits(self) -> UInt32
-  cost time O(1)
-{
-  intrinsic::to_bits[Float32, UInt32](self)
-}
-
-public fn Float32.from_bits(bits: UInt32) -> Float32
-  ensures identical(result, intrinsic::from_bits[UInt32, Float32](bits))
-  cost time O(1)
-{
-  intrinsic::from_bits[UInt32, Float32](bits)
-}
-
-public fn Float32.sum(items: Slice[Float32]) -> Float32
-  cost time O(items.length())
-{
-  var total: Float32 = 0.0
-  var lost: Float32 = 0.0
-  for item in items {
-    let next = total + item
-    if total.absolute() >= item.absolute() {
-      lost = lost + ((total - next) + item)
-    } else {
-      lost = lost + ((item - next) + total)
-    }
-    total = next
-  }
-  if lost.is_finite() { total + lost } else { total }
-}
 
 fn format_with(value: Float64, format: intrinsic::View[UInt8], precision: Int32) -> String
   requires intrinsic::view_length(format) > 0
@@ -542,16 +359,6 @@ internal fn parse_float64(text: StringSlice) -> Result[Float64, core::ParseFloat
   }
 }
 
-public fn Float32.to_fixed(self, decimals: UInt64) -> String
-{
-  format_fixed(intrinsic::convert(self), decimals: decimals)
-}
-
-public fn Float32.to_scientific(self, decimals: UInt64) -> String
-{
-  format_scientific(intrinsic::convert(self), decimals: decimals)
-}
-
 impl text::Parse for Float32 {
   type Error = core::ParseFloatError
 
@@ -583,96 +390,6 @@ public let Float64.minimum: Float64 = -1.7976931348623157e308
 public let Float64.smallest_positive_normal: Float64 = 2.2250738585072014e-308
 
 public let Float64.epsilon: Float64 = 2.220446049250313e-16
-
-public fn Float64.is_infinite(self) -> Bool
-  ensures result == ((self.to_bits() & 0x7fff_ffff_ffff_ffff) == 0x7ff0_0000_0000_0000)
-  cost time O(1)
-{
-  (self.to_bits() & 0x7fff_ffff_ffff_ffff) == 0x7ff0_0000_0000_0000
-}
-
-public fn Float64.is_finite(self) -> Bool
-  ensures result == ((self.to_bits() & 0x7fff_ffff_ffff_ffff) < 0x7ff0_0000_0000_0000)
-  cost time O(1)
-{
-  (self.to_bits() & 0x7fff_ffff_ffff_ffff) < 0x7ff0_0000_0000_0000
-}
-
-public fn Float64.is_negative(self) -> Bool
-  ensures result == (self.to_bits() >= 0x8000_0000_0000_0000)
-  cost time O(1)
-{
-  self.to_bits() >= 0x8000_0000_0000_0000
-}
-
-public fn Float64.absolute(self) -> Float64
-  ensures identical(result, Float64.from_bits(self.to_bits() & 0x7fff_ffff_ffff_ffff))
-  cost time O(1)
-{
-  Float64.from_bits(self.to_bits() & 0x7fff_ffff_ffff_ffff)
-}
-
-public fn Float64.floor(self) -> Float64
-  ensures identical(result, intrinsic::floor(self))
-  cost time O(1)
-{
-  intrinsic::floor(self)
-}
-
-public fn Float64.ceiling(self) -> Float64
-  ensures identical(result, intrinsic::ceiling(self))
-  cost time O(1)
-{
-  intrinsic::ceiling(self)
-}
-
-public fn Float64.round(self) -> Float64
-  cost time O(1)
-{
-  let whole = intrinsic::truncate(self)
-  let one: Float64 = 1.0
-  if (self - whole).absolute() >= 0.5 { whole + one.copy_sign(self) } else { whole }
-}
-
-public fn Float64.round_to_even(self) -> Float64
-  ensures identical(result, intrinsic::round_to_even(self))
-  cost time O(1)
-{
-  intrinsic::round_to_even(self)
-}
-
-public fn Float64.truncate(self) -> Float64
-  ensures identical(result, intrinsic::truncate(self))
-  cost time O(1)
-{
-  intrinsic::truncate(self)
-}
-
-public fn Float64.fraction(self) -> Float64
-  ensures identical(result, self - intrinsic::truncate(self))
-  cost time O(1)
-{
-  self - intrinsic::truncate(self)
-}
-
-public fn Float64.sign(self) -> Float64
-  ensures identical(result, if intrinsic::is_nan(self) || self == 0.0 {
-      self
-    } else if self < 0.0 {
-      -1.0
-    } else {
-      1.0
-    })
-  cost time O(1)
-{
-  if intrinsic::is_nan(self) || self == 0.0 {
-    self
-  } else if self < 0.0 {
-    -1.0
-  } else {
-    1.0
-  }
-}
 
 internal type Parts(fraction: Float64, exponent: Int64)
 
@@ -802,124 +519,6 @@ internal fn Float64.is_odd_integer(self) -> Bool
   intrinsic::convert[Float64, Int64](whole) % 2 != 0
 }
 
-public fn Float64.cube_root(self) -> Float64
-  cost time O(1)
-{
-  if self == 0.0 || !self.is_finite() {
-    return self
-  }
-  let magnitude = self.absolute()
-  let first = (magnitude.logarithm() / 3.0).exponential()
-  let ratio = first * first / magnitude * first
-  let second = first * ((ratio + 2.0) / (2.0 * ratio + 1.0))
-  let again = second * second / magnitude * second
-  let third = second * ((again + 2.0) / (2.0 * again + 1.0))
-  third.copy_sign(self)
-}
-
-public fn Float64.exponential(self) -> Float64
-  cost time O(1)
-{
-  if intrinsic::is_nan(self) || self == Float64.infinity {
-    return self
-  }
-  if self < -745.1332191019411 {
-    return 0.0
-  }
-  if self > 709.782712893384 {
-    return Float64.infinity
-  }
-  if self > -3.725290298461914e-09 && self < 3.725290298461914e-09 {
-    return 1.0 + self
-  }
-  let scaled = if self < 0.0 { 1.4426950408889634 * self - 0.5 } else { 1.4426950408889634 * self + 0.5 }
-  let count: Int64 = if intrinsic::fits[Float64, Int64](scaled) { intrinsic::convert(scaled) } else { 0 }
-  let steps = count.to_float64()
-  let high = self - steps * 0.6931471803691238
-  let low = steps * 1.9082149292705877e-10
-  let rest = high - low
-  let square = rest * rest
-  let correction = rest - square * (0.16666666666666666 + square * (-0.0027777777777015593 + square * (6.613756321437934e-05 + square * (-1.6533902205465252e-06 + square * 4.1381367970572385e-08))))
-  let value = 1.0 - ((low - (rest * correction) / (2.0 - correction)) - high)
-  value.scaled_by_power(count)
-}
-
-public fn Float64.exponential_minus_one(self) -> Float64
-  cost time O(1)
-{
-  if intrinsic::is_nan(self) || self == Float64.infinity {
-    return self
-  }
-  let power = self.exponential()
-  if power == 1.0 {
-    return self
-  }
-  if power == Float64.infinity {
-    return power
-  }
-  let below = power - 1.0
-  if below == -1.0 {
-    return -1.0
-  }
-  below * self / power.logarithm()
-}
-
-public fn Float64.logarithm(self) -> Float64
-  cost time O(1)
-{
-  if intrinsic::is_nan(self) || self == Float64.infinity {
-    return self
-  }
-  if self < 0.0 {
-    return Float64.not_a_number
-  }
-  if self == 0.0 {
-    return Float64.negative_infinity
-  }
-  let parts = self.split_exponent()
-  let low_half = parts.fraction < 0.7071067811865476
-  let fraction = if low_half { parts.fraction * 2.0 } else { parts.fraction }
-  let power = (parts.exponent - (if low_half { 1 } else { 0 })).to_float64()
-  let above = fraction - 1.0
-  let ratio = above / (2.0 + above)
-  let square = ratio * ratio
-  let fourth = square * square
-  let odd = square * (0.6666666666666735 + fourth * (0.2857142874366239 + fourth * (0.1818357216161805 + fourth * 0.14798198605116586)))
-  let even = fourth * (0.3999999999940942 + fourth * (0.22222198432149784 + fourth * 0.15313837699209373))
-  let series = odd + even
-  let half_square = 0.5 * above * above
-  power * 0.6931471803691238 - ((half_square - (ratio * (half_square + series) + power * 1.9082149292705877e-10)) - above)
-}
-
-public fn Float64.logarithm_2(self) -> Float64
-  cost time O(1)
-{
-  let parts = self.split_exponent()
-  if parts.fraction == 0.5 {
-    return (parts.exponent - 1).to_float64()
-  }
-  parts.fraction.logarithm() * 1.4426950408889634 + parts.exponent.to_float64()
-}
-
-public fn Float64.logarithm_10(self) -> Float64
-  cost time O(1)
-{
-  self.logarithm_2() * 0.3010299956639812
-}
-
-public fn Float64.logarithm_one_plus(self) -> Float64
-  cost time O(1)
-{
-  if intrinsic::is_nan(self) || self == Float64.infinity {
-    return self
-  }
-  let sum = 1.0 + self
-  if sum == 1.0 {
-    return self
-  }
-  sum.logarithm() * (self / (sum - 1.0))
-}
-
 let four_over_pi: Array[UInt64, 20] = [
   0x1, 0x45f306dc9c882a53, 0xf84eafa3ea69bb81, 0xb6c52b3278872083,
   0xfca2c757bd778ac3, 0x6e48dc74849ba5c0, 0xc925dd413a32439, 0xfc3bd63962534e7d,
@@ -1032,440 +631,6 @@ internal fn arctangent_of_positive(value: Float64) -> Float64
   }
 }
 
-public fn Float64.sine(self) -> Float64
-  cost time O(1)
-{
-  if self == 0.0 || intrinsic::is_nan(self) {
-    return self
-  }
-  if self.is_infinite() {
-    return Float64.not_a_number
-  }
-  let reduced = self.absolute().reduced()
-  let flipped = reduced.octant > 3
-  let octant = if flipped { reduced.octant - 4 } else { reduced.octant }
-  let result_before_sign = if octant == 1 || octant == 2 { cosine_near_zero(reduced.angle) } else { sine_near_zero(reduced.angle) }
-  if (self < 0.0) != flipped { -result_before_sign } else { result_before_sign }
-}
-
-public fn Float64.cosine(self) -> Float64
-  cost time O(1)
-{
-  if intrinsic::is_nan(self) {
-    return self
-  }
-  if self.is_infinite() {
-    return Float64.not_a_number
-  }
-  let reduced = self.absolute().reduced()
-  let flipped = reduced.octant > 3
-  let octant = if flipped { reduced.octant - 4 } else { reduced.octant }
-  let result_before_sign = if octant == 1 || octant == 2 { sine_near_zero(reduced.angle) } else { cosine_near_zero(reduced.angle) }
-  if flipped != (octant > 1) { -result_before_sign } else { result_before_sign }
-}
-
-public fn Float64.tangent(self) -> Float64
-  cost time O(1)
-{
-  if self == 0.0 || intrinsic::is_nan(self) {
-    return self
-  }
-  if self.is_infinite() {
-    return Float64.not_a_number
-  }
-  let reduced = self.absolute().reduced()
-  let angle = reduced.angle
-  let square = angle * angle
-  let near = if square > 1.0e-14 {
-    angle + angle * (square * ((-13093.693918138379 * square + 1153516.6483858742) * square + -17956525.197648488) / ((((square + 13681.296347069296) * square + -1320892.3444021097) * square + 25008380.18233579) * square + -53869575.592945464))
-  } else {
-    angle
-  }
-  let result_before_sign = if reduced.octant % 4 >= 2 { -1.0 / near } else { near }
-  if self < 0.0 { -result_before_sign } else { result_before_sign }
-}
-
-public fn Float64.arcsine(self) -> Float64
-  cost time O(1)
-{
-  if self == 0.0 || intrinsic::is_nan(self) {
-    return self
-  }
-  let magnitude = self.absolute()
-  if magnitude > 1.0 {
-    return Float64.not_a_number
-  }
-  let other = intrinsic::square_root(1.0 - magnitude * magnitude)
-  let result_before_sign = if magnitude > 0.7 {
-    1.5707963267948966 - arctangent_of_positive(other / magnitude)
-  } else {
-    arctangent_of_positive(magnitude / other)
-  }
-  result_before_sign.copy_sign(self)
-}
-
-public fn Float64.arccosine(self) -> Float64
-  cost time O(1)
-{
-  1.5707963267948966 - self.arcsine()
-}
-
-public fn Float64.arctangent(self) -> Float64
-  cost time O(1)
-{
-  if self == 0.0 || intrinsic::is_nan(self) {
-    return self
-  }
-  arctangent_of_positive(self.absolute()).copy_sign(self)
-}
-
-public fn Float64.hyperbolic_sine(self) -> Float64
-  cost time O(1)
-{
-  if !self.is_finite() {
-    return self
-  }
-  let magnitude = self.absolute()
-  if magnitude < 3.725290298461914e-09 {
-    return self
-  }
-  if magnitude > 709.0 {
-    let half = (magnitude * 0.5).exponential()
-    return (half * 0.5 * half).copy_sign(self)
-  }
-  let grown = magnitude.exponential_minus_one()
-  ((grown + grown / (grown + 1.0)) * 0.5).copy_sign(self)
-}
-
-public fn Float64.hyperbolic_cosine(self) -> Float64
-  cost time O(1)
-{
-  if intrinsic::is_nan(self) {
-    return self
-  }
-  let magnitude = self.absolute()
-  if magnitude > 709.0 {
-    let half = (magnitude * 0.5).exponential()
-    return half * 0.5 * half
-  }
-  let power = magnitude.exponential()
-  (power + 1.0 / power) * 0.5
-}
-
-public fn Float64.hyperbolic_tangent(self) -> Float64
-  cost time O(1)
-{
-  if intrinsic::is_nan(self) {
-    return self
-  }
-  let magnitude = self.absolute()
-  let one: Float64 = 1.0
-  if magnitude > 22.0 {
-    return one.copy_sign(self)
-  }
-  let grown = (2.0 * magnitude).exponential_minus_one()
-  (grown / (grown + 2.0)).copy_sign(self)
-}
-
-public fn Float64.inverse_hyperbolic_sine(self) -> Float64
-  cost time O(1)
-{
-  if !self.is_finite() {
-    return self
-  }
-  let magnitude = self.absolute()
-  if magnitude < 3.725290298461914e-09 {
-    return self
-  }
-  let result_before_sign = if magnitude > 268435456.0 {
-    magnitude.logarithm() + 0.6931471805599453
-  } else if magnitude > 2.0 {
-    (2.0 * magnitude + 1.0 / (intrinsic::square_root(magnitude * magnitude + 1.0) + magnitude)).logarithm()
-  } else {
-    let square = magnitude * magnitude
-    (magnitude + square / (1.0 + intrinsic::square_root(1.0 + square))).logarithm_one_plus()
-  }
-  result_before_sign.copy_sign(self)
-}
-
-public fn Float64.inverse_hyperbolic_cosine(self) -> Float64
-  cost time O(1)
-{
-  if intrinsic::is_nan(self) {
-    return self
-  }
-  if self < 1.0 {
-    return Float64.not_a_number
-  }
-  if self >= 268435456.0 {
-    self.logarithm() + 0.6931471805599453
-  } else if self > 2.0 {
-    (2.0 * self - 1.0 / (self + intrinsic::square_root(self * self - 1.0))).logarithm()
-  } else {
-    let above = self - 1.0
-    (above + intrinsic::square_root(2.0 * above + above * above)).logarithm_one_plus()
-  }
-}
-
-public fn Float64.inverse_hyperbolic_tangent(self) -> Float64
-  cost time O(1)
-{
-  if intrinsic::is_nan(self) {
-    return self
-  }
-  let magnitude = self.absolute()
-  if magnitude > 1.0 {
-    return Float64.not_a_number
-  }
-  if magnitude == 1.0 {
-    return Float64.infinity.copy_sign(self)
-  }
-  if magnitude < 3.725290298461914e-09 {
-    return self
-  }
-  let double = magnitude + magnitude
-  let result_before_sign = if magnitude < 0.5 {
-    0.5 * (double + double * magnitude / (1.0 - magnitude)).logarithm_one_plus()
-  } else {
-    0.5 * (double / (1.0 - magnitude)).logarithm_one_plus()
-  }
-  result_before_sign.copy_sign(self)
-}
-
-public fn Float64.to_degrees(self) -> Float64
-  ensures identical(result, self * 57.29577951308232)
-  cost time O(1)
-{
-  self * 57.29577951308232
-}
-
-public fn Float64.to_radians(self) -> Float64
-  ensures identical(result, self * 0.017453292519943295)
-  cost time O(1)
-{
-  self * 0.017453292519943295
-}
-
-public fn Float64.power(self, exponent: Float64) -> Float64
-  cost time O(1)
-{
-  if exponent == 0.0 || self == 1.0 {
-    return 1.0
-  }
-  if exponent == 1.0 {
-    return self
-  }
-  if intrinsic::is_nan(self) || intrinsic::is_nan(exponent) {
-    return Float64.not_a_number
-  }
-  let odd = exponent.is_odd_integer()
-  if self == 0.0 {
-    if exponent < 0.0 {
-      return if odd { Float64.infinity.copy_sign(self) } else { Float64.infinity }
-    }
-    return if odd { self } else { 0.0 }
-  }
-  if exponent.is_infinite() {
-    if self == -1.0 {
-      return 1.0
-    }
-    return if (self.absolute() < 1.0) == (exponent > 0.0) { 0.0 } else { Float64.infinity }
-  }
-  if self.is_infinite() {
-    if exponent < 0.0 {
-      return if odd && self < 0.0 { -0.0 } else { 0.0 }
-    }
-    return if odd && self < 0.0 { Float64.negative_infinity } else { Float64.infinity }
-  }
-  if exponent == 0.5 {
-    return intrinsic::square_root(self)
-  }
-  if exponent == -0.5 {
-    return 1.0 / intrinsic::square_root(self)
-  }
-  let whole = intrinsic::truncate(exponent) == exponent
-  if !whole && self < 0.0 {
-    return Float64.not_a_number
-  }
-  let base = self.absolute()
-  let steps = exponent.absolute()
-  let result_before_sign = if whole && steps <= 64.0 && intrinsic::fits[Float64, UInt64](steps) {
-    let raised = base.raised_to_whole(1.0, whole: intrinsic::convert(steps))
-    if exponent < 0.0 {
-      (1.0 / raised.fraction).scaled_by_power(raised.exponent.saturating_multiply(-1))
-    } else {
-      raised.fraction.scaled_by_power(raised.exponent)
-    }
-  } else {
-    let logarithm = base.precise_logarithm()
-    let high = exponent * logarithm.high
-    let low = intrinsic::fused_multiply_add(exponent, multiplier: logarithm.high, addend: -high) + exponent * logarithm.low
-    let grown = high.exponential()
-    if grown.is_finite() && grown != 0.0 {
-      intrinsic::fused_multiply_add(grown, multiplier: low, addend: grown)
-    } else {
-      grown
-    }
-  }
-  if odd && self < 0.0 { -result_before_sign } else { result_before_sign }
-}
-
-public fn Float64.logarithm_base(self, base: Float64) -> Float64
-  cost time O(1)
-{
-  self.logarithm() / base.logarithm()
-}
-
-public fn Float64.arctangent_2(self, x: Float64) -> Float64
-  cost time O(1)
-{
-  if intrinsic::is_nan(self) || intrinsic::is_nan(x) {
-    return Float64.not_a_number
-  }
-  let zero: Float64 = 0.0
-  let straight: Float64 = 3.141592653589793
-  let right: Float64 = 1.5707963267948966
-  if self == 0.0 {
-    return if x.is_negative() { straight.copy_sign(self) } else { zero.copy_sign(self) }
-  }
-  if x == 0.0 {
-    return right.copy_sign(self)
-  }
-  if x.is_infinite() {
-    let diagonal: Float64 = if x > 0.0 { 0.7853981633974483 } else { 2.356194490192345 }
-    let level: Float64 = if x > 0.0 { 0.0 } else { 3.141592653589793 }
-    return if self.is_infinite() { diagonal.copy_sign(self) } else { level.copy_sign(self) }
-  }
-  if self.is_infinite() {
-    return right.copy_sign(self)
-  }
-  let angle = (self / x).arctangent()
-  if x < 0.0 {
-    if angle <= 0.0 { angle + 3.141592653589793 } else { angle - 3.141592653589793 }
-  } else {
-    angle
-  }
-}
-
-public fn Float64.copy_sign(self, sign: Float64) -> Float64
-  ensures identical(result, Float64.from_bits((self.to_bits() & 0x7fff_ffff_ffff_ffff) | (sign.to_bits() & 0x8000_0000_0000_0000)))
-  cost time O(1)
-{
-  Float64.from_bits((self.to_bits() & 0x7fff_ffff_ffff_ffff) | (sign.to_bits() & 0x8000_0000_0000_0000))
-}
-
-public fn Float64.hypotenuse(self, other: Float64) -> Float64
-  cost time O(1)
-{
-  let first = self.absolute()
-  let second = other.absolute()
-  if first.is_infinite() || second.is_infinite() {
-    return Float64.infinity
-  }
-  let larger = if first < second { second } else { first }
-  let smaller = if first < second { first } else { second }
-  if larger == 0.0 || intrinsic::is_nan(larger) {
-    return larger
-  }
-  let ratio = smaller / larger
-  larger * intrinsic::square_root(1.0 + ratio * ratio)
-}
-
-public fn Float64.ieee_not_equal(self, other: Float64) -> Bool
-  ensures result == (!intrinsic::ieee_equal(self, right: other))
-  cost time O(1)
-{
-  !intrinsic::ieee_equal(self, right: other)
-}
-
-public fn Float64.ieee_less_or_equal(self, other: Float64) -> Bool
-  ensures result == (intrinsic::ieee_less(self, right: other) || intrinsic::ieee_equal(self, right: other))
-  cost time O(1)
-{
-  intrinsic::ieee_less(self, right: other) || intrinsic::ieee_equal(self, right: other)
-}
-
-public fn Float64.ieee_greater(self, other: Float64) -> Bool
-  ensures result == (intrinsic::ieee_less(other, right: self))
-  cost time O(1)
-{
-  intrinsic::ieee_less(other, right: self)
-}
-
-public fn Float64.ieee_greater_or_equal(self, other: Float64) -> Bool
-  ensures result == (intrinsic::ieee_less(other, right: self) || intrinsic::ieee_equal(self, right: other))
-  cost time O(1)
-{
-  intrinsic::ieee_less(other, right: self) || intrinsic::ieee_equal(self, right: other)
-}
-
-public fn Float64.power_integer(self, exponent: Int32) -> Float64
-  cost time O(1)
-{
-  let magnitude = exponent.unsigned_absolute()
-  var result: Float64 = 1.0
-  var square = self
-  var bit: UInt64 = 0
-  while bit < 32 && (magnitude >> bit) != 0
-    invariant bit <= 32
-    decreases 32 - bit
-  {
-    if (magnitude >> bit) % 2 == 1 {
-      result = result * square
-    }
-    square = square * square
-    bit += 1
-  }
-  if exponent < 0 { 1.0 / result } else { result }
-}
-
-public fn Float64.fused_multiply_add(self, multiplier: Float64, addend: Float64) -> Float64
-  ensures identical(result, intrinsic::fused_multiply_add(self, multiplier: multiplier, addend: addend))
-  cost time O(1)
-{
-  intrinsic::fused_multiply_add(self, multiplier: multiplier, addend: addend)
-}
-
-public fn Float64.to_bits(self) -> UInt64
-  cost time O(1)
-{
-  intrinsic::to_bits[Float64, UInt64](self)
-}
-
-public fn Float64.from_bits(bits: UInt64) -> Float64
-  ensures identical(result, intrinsic::from_bits[UInt64, Float64](bits))
-  cost time O(1)
-{
-  intrinsic::from_bits[UInt64, Float64](bits)
-}
-
-public fn Float64.sum(items: Slice[Float64]) -> Float64
-  cost time O(items.length())
-{
-  var total: Float64 = 0.0
-  var lost: Float64 = 0.0
-  for item in items {
-    let next = total + item
-    if total.absolute() >= item.absolute() {
-      lost = lost + ((total - next) + item)
-    } else {
-      lost = lost + ((item - next) + total)
-    }
-    total = next
-  }
-  if lost.is_finite() { total + lost } else { total }
-}
-
-public fn Float64.to_fixed(self, decimals: UInt64) -> String
-{
-  format_fixed(self, decimals: decimals)
-}
-
-public fn Float64.to_scientific(self, decimals: UInt64) -> String
-{
-  format_scientific(self, decimals: decimals)
-}
-
 impl text::Parse for Float64 {
   type Error = core::ParseFloatError
 
@@ -1490,5 +655,1074 @@ public fn Float64.to_float32(self) -> Float32
     if self < 0.0 { Float32.negative_infinity } else { Float32.infinity }
   } else {
     intrinsic::convert(self)
+  }
+}
+
+impl FloatingPoint for Float32 {
+  type Bits = UInt32
+
+  fn absolute(self) -> Float32
+    ensures identical(result, Float32.from_bits(self.to_bits() & 0x7fff_ffff))
+    cost time O(1)
+  {
+    Float32.from_bits(self.to_bits() & 0x7fff_ffff)
+  }
+
+  fn arccosine(self) -> Float32
+    cost time O(1)
+  {
+    self.widened().arccosine().to_float32()
+  }
+
+  fn arcsine(self) -> Float32
+    cost time O(1)
+  {
+    self.widened().arcsine().to_float32()
+  }
+
+  fn arctangent(self) -> Float32
+    cost time O(1)
+  {
+    self.widened().arctangent().to_float32()
+  }
+
+  fn arctangent_2(self, x: Float32) -> Float32
+    cost time O(1)
+  {
+    self.widened().arctangent_2(x.widened()).to_float32()
+  }
+
+  fn ceiling(self) -> Float32
+    ensures identical(result, intrinsic::ceiling(self))
+    cost time O(1)
+  {
+    intrinsic::ceiling(self)
+  }
+
+  fn copy_sign(self, sign: Float32) -> Float32
+    ensures identical(result, Float32.from_bits((self.to_bits() & 0x7fff_ffff) | (sign.to_bits() & 0x8000_0000)))
+    cost time O(1)
+  {
+    Float32.from_bits((self.to_bits() & 0x7fff_ffff) | (sign.to_bits() & 0x8000_0000))
+  }
+
+  fn cosine(self) -> Float32
+    cost time O(1)
+  {
+    self.widened().cosine().to_float32()
+  }
+
+  fn cube_root(self) -> Float32
+    cost time O(1)
+  {
+    self.widened().cube_root().to_float32()
+  }
+
+  fn exponential(self) -> Float32
+    cost time O(1)
+  {
+    self.widened().exponential().to_float32()
+  }
+
+  fn exponential_minus_one(self) -> Float32
+    cost time O(1)
+  {
+    self.widened().exponential_minus_one().to_float32()
+  }
+
+  fn floor(self) -> Float32
+    ensures identical(result, intrinsic::floor(self))
+    cost time O(1)
+  {
+    intrinsic::floor(self)
+  }
+
+  fn fraction(self) -> Float32
+    ensures identical(result, self - intrinsic::truncate(self))
+    cost time O(1)
+  {
+    self - intrinsic::truncate(self)
+  }
+
+  fn from_bits(bits: UInt32) -> Float32
+    ensures identical(result, intrinsic::from_bits[UInt32, Float32](bits))
+    cost time O(1)
+  {
+    intrinsic::from_bits[UInt32, Float32](bits)
+  }
+
+  fn fused_multiply_add(self, multiplier: Float32, addend: Float32) -> Float32
+    ensures identical(result, intrinsic::fused_multiply_add(self, multiplier: multiplier, addend: addend))
+    cost time O(1)
+  {
+    intrinsic::fused_multiply_add(self, multiplier: multiplier, addend: addend)
+  }
+
+  fn hyperbolic_cosine(self) -> Float32
+    cost time O(1)
+  {
+    self.widened().hyperbolic_cosine().to_float32()
+  }
+
+  fn hyperbolic_sine(self) -> Float32
+    cost time O(1)
+  {
+    self.widened().hyperbolic_sine().to_float32()
+  }
+
+  fn hyperbolic_tangent(self) -> Float32
+    cost time O(1)
+  {
+    self.widened().hyperbolic_tangent().to_float32()
+  }
+
+  fn hypotenuse(self, other: Float32) -> Float32
+    cost time O(1)
+  {
+    let first = self.absolute()
+    let second = other.absolute()
+    if first.is_infinite() || second.is_infinite() {
+      return Float32.infinity
+    }
+    let larger = if first < second { second } else { first }
+    let smaller = if first < second { first } else { second }
+    if larger == 0.0 || intrinsic::is_nan(larger) {
+      return larger
+    }
+    let ratio = smaller / larger
+    larger * intrinsic::square_root(1.0 + ratio * ratio)
+  }
+
+  fn ieee_equal(self, other: Float32) -> Bool
+    ensures result == (intrinsic::ieee_equal(self, right: other))
+    cost time O(1)
+    cost allocations == 0
+  {
+    intrinsic::ieee_equal(self, right: other)
+  }
+
+  fn ieee_greater(self, other: Float32) -> Bool
+    ensures result == (intrinsic::ieee_less(other, right: self))
+    cost time O(1)
+  {
+    intrinsic::ieee_less(other, right: self)
+  }
+
+  fn ieee_greater_or_equal(self, other: Float32) -> Bool
+    ensures result == (intrinsic::ieee_less(other, right: self) || intrinsic::ieee_equal(self, right: other))
+    cost time O(1)
+  {
+    intrinsic::ieee_less(other, right: self) || intrinsic::ieee_equal(self, right: other)
+  }
+
+  fn ieee_less(self, other: Float32) -> Bool
+    ensures result == (intrinsic::ieee_less(self, right: other))
+    cost time O(1)
+    cost allocations == 0
+  {
+    intrinsic::ieee_less(self, right: other)
+  }
+
+  fn ieee_less_or_equal(self, other: Float32) -> Bool
+    ensures result == (intrinsic::ieee_less(self, right: other) || intrinsic::ieee_equal(self, right: other))
+    cost time O(1)
+  {
+    intrinsic::ieee_less(self, right: other) || intrinsic::ieee_equal(self, right: other)
+  }
+
+  fn ieee_not_equal(self, other: Float32) -> Bool
+    ensures result == (!intrinsic::ieee_equal(self, right: other))
+    cost time O(1)
+  {
+    !intrinsic::ieee_equal(self, right: other)
+  }
+
+  fn inverse_hyperbolic_cosine(self) -> Float32
+    cost time O(1)
+  {
+    self.widened().inverse_hyperbolic_cosine().to_float32()
+  }
+
+  fn inverse_hyperbolic_sine(self) -> Float32
+    cost time O(1)
+  {
+    self.widened().inverse_hyperbolic_sine().to_float32()
+  }
+
+  fn inverse_hyperbolic_tangent(self) -> Float32
+    cost time O(1)
+  {
+    self.widened().inverse_hyperbolic_tangent().to_float32()
+  }
+
+  fn is_finite(self) -> Bool
+    ensures result == ((self.to_bits() & 0x7fff_ffff) < 0x7f80_0000)
+    cost time O(1)
+  {
+    (self.to_bits() & 0x7fff_ffff) < 0x7f80_0000
+  }
+
+  fn is_infinite(self) -> Bool
+    ensures result == ((self.to_bits() & 0x7fff_ffff) == 0x7f80_0000)
+    cost time O(1)
+  {
+    (self.to_bits() & 0x7fff_ffff) == 0x7f80_0000
+  }
+
+  fn is_nan(self) -> Bool
+    ensures result == (intrinsic::is_nan(self))
+    cost time O(1)
+    cost allocations == 0
+  {
+    intrinsic::is_nan(self)
+  }
+
+  fn is_negative(self) -> Bool
+    ensures result == (self.to_bits() >= 0x8000_0000)
+    cost time O(1)
+  {
+    self.to_bits() >= 0x8000_0000
+  }
+
+  fn logarithm(self) -> Float32
+    cost time O(1)
+  {
+    self.widened().logarithm().to_float32()
+  }
+
+  fn logarithm_10(self) -> Float32
+    cost time O(1)
+  {
+    self.widened().logarithm_10().to_float32()
+  }
+
+  fn logarithm_2(self) -> Float32
+    cost time O(1)
+  {
+    self.widened().logarithm_2().to_float32()
+  }
+
+  fn logarithm_base(self, base: Float32) -> Float32
+    cost time O(1)
+  {
+    self.widened().logarithm_base(base.widened()).to_float32()
+  }
+
+  fn logarithm_one_plus(self) -> Float32
+    cost time O(1)
+  {
+    self.widened().logarithm_one_plus().to_float32()
+  }
+
+  fn power(self, exponent: Float32) -> Float32
+    cost time O(1)
+  {
+    self.widened().power(exponent.widened()).to_float32()
+  }
+
+  fn power_integer(self, exponent: Int32) -> Float32
+    cost time O(1)
+  {
+    let magnitude = exponent.unsigned_absolute()
+    var result: Float32 = 1.0
+    var square = self
+    var bit: UInt64 = 0
+    while bit < 32 && (magnitude >> bit) != 0
+      invariant bit <= 32
+      decreases 32 - bit
+    {
+      if (magnitude >> bit) % 2 == 1 {
+        result = result * square
+      }
+      square = square * square
+      bit += 1
+    }
+    if exponent < 0 { 1.0 / result } else { result }
+  }
+
+  fn round(self) -> Float32
+    cost time O(1)
+  {
+    let whole = intrinsic::truncate(self)
+    let one: Float32 = 1.0
+    if (self - whole).absolute() >= 0.5 { whole + one.copy_sign(self) } else { whole }
+  }
+
+  fn round_to_even(self) -> Float32
+    ensures identical(result, intrinsic::round_to_even(self))
+    cost time O(1)
+  {
+    intrinsic::round_to_even(self)
+  }
+
+  fn sign(self) -> Float32
+    ensures identical(result, if intrinsic::is_nan(self) || self == 0.0 {
+        self
+      } else if self < 0.0 {
+        -1.0
+      } else {
+        1.0
+      })
+    cost time O(1)
+  {
+    if intrinsic::is_nan(self) || self == 0.0 {
+      self
+    } else if self < 0.0 {
+      -1.0
+    } else {
+      1.0
+    }
+  }
+
+  fn sine(self) -> Float32
+    cost time O(1)
+  {
+    self.widened().sine().to_float32()
+  }
+
+  fn square_root(self) -> Float32
+    ensures identical(result, intrinsic::square_root(self))
+    cost time O(1)
+    cost allocations == 0
+  {
+    intrinsic::square_root(self)
+  }
+
+  fn sum(items: Slice[Float32]) -> Float32
+    cost time O(items.length())
+  {
+    var total: Float32 = 0.0
+    var lost: Float32 = 0.0
+    for item in items {
+      let next = total + item
+      if total.absolute() >= item.absolute() {
+        lost = lost + ((total - next) + item)
+      } else {
+        lost = lost + ((item - next) + total)
+      }
+      total = next
+    }
+    if lost.is_finite() { total + lost } else { total }
+  }
+
+  fn tangent(self) -> Float32
+    cost time O(1)
+  {
+    self.widened().tangent().to_float32()
+  }
+
+  fn to_bits(self) -> UInt32
+    cost time O(1)
+  {
+    intrinsic::to_bits[Float32, UInt32](self)
+  }
+
+  fn to_degrees(self) -> Float32
+    ensures identical(result, self * 57.29577951308232)
+    cost time O(1)
+  {
+    self * 57.29577951308232
+  }
+
+  fn to_fixed(self, decimals: UInt64) -> String
+  {
+    format_fixed(intrinsic::convert(self), decimals: decimals)
+  }
+
+  fn to_radians(self) -> Float32
+    ensures identical(result, self * 0.017453292519943295)
+    cost time O(1)
+  {
+    self * 0.017453292519943295
+  }
+
+  fn to_scientific(self, decimals: UInt64) -> String
+  {
+    format_scientific(intrinsic::convert(self), decimals: decimals)
+  }
+
+  fn truncate(self) -> Float32
+    ensures identical(result, intrinsic::truncate(self))
+    cost time O(1)
+  {
+    intrinsic::truncate(self)
+  }
+}
+
+impl FloatingPoint for Float64 {
+  type Bits = UInt64
+
+  fn absolute(self) -> Float64
+    ensures identical(result, Float64.from_bits(self.to_bits() & 0x7fff_ffff_ffff_ffff))
+    cost time O(1)
+  {
+    Float64.from_bits(self.to_bits() & 0x7fff_ffff_ffff_ffff)
+  }
+
+  fn arccosine(self) -> Float64
+    cost time O(1)
+  {
+    1.5707963267948966 - self.arcsine()
+  }
+
+  fn arcsine(self) -> Float64
+    cost time O(1)
+  {
+    if self == 0.0 || intrinsic::is_nan(self) {
+      return self
+    }
+    let magnitude = self.absolute()
+    if magnitude > 1.0 {
+      return Float64.not_a_number
+    }
+    let other = intrinsic::square_root(1.0 - magnitude * magnitude)
+    let result_before_sign = if magnitude > 0.7 {
+      1.5707963267948966 - arctangent_of_positive(other / magnitude)
+    } else {
+      arctangent_of_positive(magnitude / other)
+    }
+    result_before_sign.copy_sign(self)
+  }
+
+  fn arctangent(self) -> Float64
+    cost time O(1)
+  {
+    if self == 0.0 || intrinsic::is_nan(self) {
+      return self
+    }
+    arctangent_of_positive(self.absolute()).copy_sign(self)
+  }
+
+  fn arctangent_2(self, x: Float64) -> Float64
+    cost time O(1)
+  {
+    if intrinsic::is_nan(self) || intrinsic::is_nan(x) {
+      return Float64.not_a_number
+    }
+    let zero: Float64 = 0.0
+    let straight: Float64 = 3.141592653589793
+    let right: Float64 = 1.5707963267948966
+    if self == 0.0 {
+      return if x.is_negative() { straight.copy_sign(self) } else { zero.copy_sign(self) }
+    }
+    if x == 0.0 {
+      return right.copy_sign(self)
+    }
+    if x.is_infinite() {
+      let diagonal: Float64 = if x > 0.0 { 0.7853981633974483 } else { 2.356194490192345 }
+      let level: Float64 = if x > 0.0 { 0.0 } else { 3.141592653589793 }
+      return if self.is_infinite() { diagonal.copy_sign(self) } else { level.copy_sign(self) }
+    }
+    if self.is_infinite() {
+      return right.copy_sign(self)
+    }
+    let angle = (self / x).arctangent()
+    if x < 0.0 {
+      if angle <= 0.0 { angle + 3.141592653589793 } else { angle - 3.141592653589793 }
+    } else {
+      angle
+    }
+  }
+
+  fn ceiling(self) -> Float64
+    ensures identical(result, intrinsic::ceiling(self))
+    cost time O(1)
+  {
+    intrinsic::ceiling(self)
+  }
+
+  fn copy_sign(self, sign: Float64) -> Float64
+    ensures identical(result, Float64.from_bits((self.to_bits() & 0x7fff_ffff_ffff_ffff) | (sign.to_bits() & 0x8000_0000_0000_0000)))
+    cost time O(1)
+  {
+    Float64.from_bits((self.to_bits() & 0x7fff_ffff_ffff_ffff) | (sign.to_bits() & 0x8000_0000_0000_0000))
+  }
+
+  fn cosine(self) -> Float64
+    cost time O(1)
+  {
+    if intrinsic::is_nan(self) {
+      return self
+    }
+    if self.is_infinite() {
+      return Float64.not_a_number
+    }
+    let reduced = self.absolute().reduced()
+    let flipped = reduced.octant > 3
+    let octant = if flipped { reduced.octant - 4 } else { reduced.octant }
+    let result_before_sign = if octant == 1 || octant == 2 { sine_near_zero(reduced.angle) } else { cosine_near_zero(reduced.angle) }
+    if flipped != (octant > 1) { -result_before_sign } else { result_before_sign }
+  }
+
+  fn cube_root(self) -> Float64
+    cost time O(1)
+  {
+    if self == 0.0 || !self.is_finite() {
+      return self
+    }
+    let magnitude = self.absolute()
+    let first = (magnitude.logarithm() / 3.0).exponential()
+    let ratio = first * first / magnitude * first
+    let second = first * ((ratio + 2.0) / (2.0 * ratio + 1.0))
+    let again = second * second / magnitude * second
+    let third = second * ((again + 2.0) / (2.0 * again + 1.0))
+    third.copy_sign(self)
+  }
+
+  fn exponential(self) -> Float64
+    cost time O(1)
+  {
+    if intrinsic::is_nan(self) || self == Float64.infinity {
+      return self
+    }
+    if self < -745.1332191019411 {
+      return 0.0
+    }
+    if self > 709.782712893384 {
+      return Float64.infinity
+    }
+    if self > -3.725290298461914e-09 && self < 3.725290298461914e-09 {
+      return 1.0 + self
+    }
+    let scaled = if self < 0.0 { 1.4426950408889634 * self - 0.5 } else { 1.4426950408889634 * self + 0.5 }
+    let count: Int64 = if intrinsic::fits[Float64, Int64](scaled) { intrinsic::convert(scaled) } else { 0 }
+    let steps = count.to_float64()
+    let high = self - steps * 0.6931471803691238
+    let low = steps * 1.9082149292705877e-10
+    let rest = high - low
+    let square = rest * rest
+    let correction = rest - square * (0.16666666666666666 + square * (-0.0027777777777015593 + square * (6.613756321437934e-05 + square * (-1.6533902205465252e-06 + square * 4.1381367970572385e-08))))
+    let value = 1.0 - ((low - (rest * correction) / (2.0 - correction)) - high)
+    value.scaled_by_power(count)
+  }
+
+  fn exponential_minus_one(self) -> Float64
+    cost time O(1)
+  {
+    if intrinsic::is_nan(self) || self == Float64.infinity {
+      return self
+    }
+    let power = self.exponential()
+    if power == 1.0 {
+      return self
+    }
+    if power == Float64.infinity {
+      return power
+    }
+    let below = power - 1.0
+    if below == -1.0 {
+      return -1.0
+    }
+    below * self / power.logarithm()
+  }
+
+  fn floor(self) -> Float64
+    ensures identical(result, intrinsic::floor(self))
+    cost time O(1)
+  {
+    intrinsic::floor(self)
+  }
+
+  fn fraction(self) -> Float64
+    ensures identical(result, self - intrinsic::truncate(self))
+    cost time O(1)
+  {
+    self - intrinsic::truncate(self)
+  }
+
+  fn from_bits(bits: UInt64) -> Float64
+    ensures identical(result, intrinsic::from_bits[UInt64, Float64](bits))
+    cost time O(1)
+  {
+    intrinsic::from_bits[UInt64, Float64](bits)
+  }
+
+  fn fused_multiply_add(self, multiplier: Float64, addend: Float64) -> Float64
+    ensures identical(result, intrinsic::fused_multiply_add(self, multiplier: multiplier, addend: addend))
+    cost time O(1)
+  {
+    intrinsic::fused_multiply_add(self, multiplier: multiplier, addend: addend)
+  }
+
+  fn hyperbolic_cosine(self) -> Float64
+    cost time O(1)
+  {
+    if intrinsic::is_nan(self) {
+      return self
+    }
+    let magnitude = self.absolute()
+    if magnitude > 709.0 {
+      let half = (magnitude * 0.5).exponential()
+      return half * 0.5 * half
+    }
+    let power = magnitude.exponential()
+    (power + 1.0 / power) * 0.5
+  }
+
+  fn hyperbolic_sine(self) -> Float64
+    cost time O(1)
+  {
+    if !self.is_finite() {
+      return self
+    }
+    let magnitude = self.absolute()
+    if magnitude < 3.725290298461914e-09 {
+      return self
+    }
+    if magnitude > 709.0 {
+      let half = (magnitude * 0.5).exponential()
+      return (half * 0.5 * half).copy_sign(self)
+    }
+    let grown = magnitude.exponential_minus_one()
+    ((grown + grown / (grown + 1.0)) * 0.5).copy_sign(self)
+  }
+
+  fn hyperbolic_tangent(self) -> Float64
+    cost time O(1)
+  {
+    if intrinsic::is_nan(self) {
+      return self
+    }
+    let magnitude = self.absolute()
+    let one: Float64 = 1.0
+    if magnitude > 22.0 {
+      return one.copy_sign(self)
+    }
+    let grown = (2.0 * magnitude).exponential_minus_one()
+    (grown / (grown + 2.0)).copy_sign(self)
+  }
+
+  fn hypotenuse(self, other: Float64) -> Float64
+    cost time O(1)
+  {
+    let first = self.absolute()
+    let second = other.absolute()
+    if first.is_infinite() || second.is_infinite() {
+      return Float64.infinity
+    }
+    let larger = if first < second { second } else { first }
+    let smaller = if first < second { first } else { second }
+    if larger == 0.0 || intrinsic::is_nan(larger) {
+      return larger
+    }
+    let ratio = smaller / larger
+    larger * intrinsic::square_root(1.0 + ratio * ratio)
+  }
+
+  fn ieee_equal(self, other: Float64) -> Bool
+    ensures result == (intrinsic::ieee_equal(self, right: other))
+    cost time O(1)
+    cost allocations == 0
+  {
+    intrinsic::ieee_equal(self, right: other)
+  }
+
+  fn ieee_greater(self, other: Float64) -> Bool
+    ensures result == (intrinsic::ieee_less(other, right: self))
+    cost time O(1)
+  {
+    intrinsic::ieee_less(other, right: self)
+  }
+
+  fn ieee_greater_or_equal(self, other: Float64) -> Bool
+    ensures result == (intrinsic::ieee_less(other, right: self) || intrinsic::ieee_equal(self, right: other))
+    cost time O(1)
+  {
+    intrinsic::ieee_less(other, right: self) || intrinsic::ieee_equal(self, right: other)
+  }
+
+  fn ieee_less(self, other: Float64) -> Bool
+    ensures result == (intrinsic::ieee_less(self, right: other))
+    cost time O(1)
+    cost allocations == 0
+  {
+    intrinsic::ieee_less(self, right: other)
+  }
+
+  fn ieee_less_or_equal(self, other: Float64) -> Bool
+    ensures result == (intrinsic::ieee_less(self, right: other) || intrinsic::ieee_equal(self, right: other))
+    cost time O(1)
+  {
+    intrinsic::ieee_less(self, right: other) || intrinsic::ieee_equal(self, right: other)
+  }
+
+  fn ieee_not_equal(self, other: Float64) -> Bool
+    ensures result == (!intrinsic::ieee_equal(self, right: other))
+    cost time O(1)
+  {
+    !intrinsic::ieee_equal(self, right: other)
+  }
+
+  fn inverse_hyperbolic_cosine(self) -> Float64
+    cost time O(1)
+  {
+    if intrinsic::is_nan(self) {
+      return self
+    }
+    if self < 1.0 {
+      return Float64.not_a_number
+    }
+    if self >= 268435456.0 {
+      self.logarithm() + 0.6931471805599453
+    } else if self > 2.0 {
+      (2.0 * self - 1.0 / (self + intrinsic::square_root(self * self - 1.0))).logarithm()
+    } else {
+      let above = self - 1.0
+      (above + intrinsic::square_root(2.0 * above + above * above)).logarithm_one_plus()
+    }
+  }
+
+  fn inverse_hyperbolic_sine(self) -> Float64
+    cost time O(1)
+  {
+    if !self.is_finite() {
+      return self
+    }
+    let magnitude = self.absolute()
+    if magnitude < 3.725290298461914e-09 {
+      return self
+    }
+    let result_before_sign = if magnitude > 268435456.0 {
+      magnitude.logarithm() + 0.6931471805599453
+    } else if magnitude > 2.0 {
+      (2.0 * magnitude + 1.0 / (intrinsic::square_root(magnitude * magnitude + 1.0) + magnitude)).logarithm()
+    } else {
+      let square = magnitude * magnitude
+      (magnitude + square / (1.0 + intrinsic::square_root(1.0 + square))).logarithm_one_plus()
+    }
+    result_before_sign.copy_sign(self)
+  }
+
+  fn inverse_hyperbolic_tangent(self) -> Float64
+    cost time O(1)
+  {
+    if intrinsic::is_nan(self) {
+      return self
+    }
+    let magnitude = self.absolute()
+    if magnitude > 1.0 {
+      return Float64.not_a_number
+    }
+    if magnitude == 1.0 {
+      return Float64.infinity.copy_sign(self)
+    }
+    if magnitude < 3.725290298461914e-09 {
+      return self
+    }
+    let double = magnitude + magnitude
+    let result_before_sign = if magnitude < 0.5 {
+      0.5 * (double + double * magnitude / (1.0 - magnitude)).logarithm_one_plus()
+    } else {
+      0.5 * (double / (1.0 - magnitude)).logarithm_one_plus()
+    }
+    result_before_sign.copy_sign(self)
+  }
+
+  fn is_finite(self) -> Bool
+    ensures result == ((self.to_bits() & 0x7fff_ffff_ffff_ffff) < 0x7ff0_0000_0000_0000)
+    cost time O(1)
+  {
+    (self.to_bits() & 0x7fff_ffff_ffff_ffff) < 0x7ff0_0000_0000_0000
+  }
+
+  fn is_infinite(self) -> Bool
+    ensures result == ((self.to_bits() & 0x7fff_ffff_ffff_ffff) == 0x7ff0_0000_0000_0000)
+    cost time O(1)
+  {
+    (self.to_bits() & 0x7fff_ffff_ffff_ffff) == 0x7ff0_0000_0000_0000
+  }
+
+  fn is_nan(self) -> Bool
+    ensures result == (intrinsic::is_nan(self))
+    cost time O(1)
+    cost allocations == 0
+  {
+    intrinsic::is_nan(self)
+  }
+
+  fn is_negative(self) -> Bool
+    ensures result == (self.to_bits() >= 0x8000_0000_0000_0000)
+    cost time O(1)
+  {
+    self.to_bits() >= 0x8000_0000_0000_0000
+  }
+
+  fn logarithm(self) -> Float64
+    cost time O(1)
+  {
+    if intrinsic::is_nan(self) || self == Float64.infinity {
+      return self
+    }
+    if self < 0.0 {
+      return Float64.not_a_number
+    }
+    if self == 0.0 {
+      return Float64.negative_infinity
+    }
+    let parts = self.split_exponent()
+    let low_half = parts.fraction < 0.7071067811865476
+    let fraction = if low_half { parts.fraction * 2.0 } else { parts.fraction }
+    let power = (parts.exponent - (if low_half { 1 } else { 0 })).to_float64()
+    let above = fraction - 1.0
+    let ratio = above / (2.0 + above)
+    let square = ratio * ratio
+    let fourth = square * square
+    let odd = square * (0.6666666666666735 + fourth * (0.2857142874366239 + fourth * (0.1818357216161805 + fourth * 0.14798198605116586)))
+    let even = fourth * (0.3999999999940942 + fourth * (0.22222198432149784 + fourth * 0.15313837699209373))
+    let series = odd + even
+    let half_square = 0.5 * above * above
+    power * 0.6931471803691238 - ((half_square - (ratio * (half_square + series) + power * 1.9082149292705877e-10)) - above)
+  }
+
+  fn logarithm_10(self) -> Float64
+    cost time O(1)
+  {
+    self.logarithm_2() * 0.3010299956639812
+  }
+
+  fn logarithm_2(self) -> Float64
+    cost time O(1)
+  {
+    let parts = self.split_exponent()
+    if parts.fraction == 0.5 {
+      return (parts.exponent - 1).to_float64()
+    }
+    parts.fraction.logarithm() * 1.4426950408889634 + parts.exponent.to_float64()
+  }
+
+  fn logarithm_base(self, base: Float64) -> Float64
+    cost time O(1)
+  {
+    self.logarithm() / base.logarithm()
+  }
+
+  fn logarithm_one_plus(self) -> Float64
+    cost time O(1)
+  {
+    if intrinsic::is_nan(self) || self == Float64.infinity {
+      return self
+    }
+    let sum = 1.0 + self
+    if sum == 1.0 {
+      return self
+    }
+    sum.logarithm() * (self / (sum - 1.0))
+  }
+
+  fn power(self, exponent: Float64) -> Float64
+    cost time O(1)
+  {
+    if exponent == 0.0 || self == 1.0 {
+      return 1.0
+    }
+    if exponent == 1.0 {
+      return self
+    }
+    if intrinsic::is_nan(self) || intrinsic::is_nan(exponent) {
+      return Float64.not_a_number
+    }
+    let odd = exponent.is_odd_integer()
+    if self == 0.0 {
+      if exponent < 0.0 {
+        return if odd { Float64.infinity.copy_sign(self) } else { Float64.infinity }
+      }
+      return if odd { self } else { 0.0 }
+    }
+    if exponent.is_infinite() {
+      if self == -1.0 {
+        return 1.0
+      }
+      return if (self.absolute() < 1.0) == (exponent > 0.0) { 0.0 } else { Float64.infinity }
+    }
+    if self.is_infinite() {
+      if exponent < 0.0 {
+        return if odd && self < 0.0 { -0.0 } else { 0.0 }
+      }
+      return if odd && self < 0.0 { Float64.negative_infinity } else { Float64.infinity }
+    }
+    if exponent == 0.5 {
+      return intrinsic::square_root(self)
+    }
+    if exponent == -0.5 {
+      return 1.0 / intrinsic::square_root(self)
+    }
+    let whole = intrinsic::truncate(exponent) == exponent
+    if !whole && self < 0.0 {
+      return Float64.not_a_number
+    }
+    let base = self.absolute()
+    let steps = exponent.absolute()
+    let result_before_sign = if whole && steps <= 64.0 && intrinsic::fits[Float64, UInt64](steps) {
+      let raised = base.raised_to_whole(1.0, whole: intrinsic::convert(steps))
+      if exponent < 0.0 {
+        (1.0 / raised.fraction).scaled_by_power(raised.exponent.saturating_multiply(-1))
+      } else {
+        raised.fraction.scaled_by_power(raised.exponent)
+      }
+    } else {
+      let logarithm = base.precise_logarithm()
+      let high = exponent * logarithm.high
+      let low = intrinsic::fused_multiply_add(exponent, multiplier: logarithm.high, addend: -high) + exponent * logarithm.low
+      let grown = high.exponential()
+      if grown.is_finite() && grown != 0.0 {
+        intrinsic::fused_multiply_add(grown, multiplier: low, addend: grown)
+      } else {
+        grown
+      }
+    }
+    if odd && self < 0.0 { -result_before_sign } else { result_before_sign }
+  }
+
+  fn power_integer(self, exponent: Int32) -> Float64
+    cost time O(1)
+  {
+    let magnitude = exponent.unsigned_absolute()
+    var result: Float64 = 1.0
+    var square = self
+    var bit: UInt64 = 0
+    while bit < 32 && (magnitude >> bit) != 0
+      invariant bit <= 32
+      decreases 32 - bit
+    {
+      if (magnitude >> bit) % 2 == 1 {
+        result = result * square
+      }
+      square = square * square
+      bit += 1
+    }
+    if exponent < 0 { 1.0 / result } else { result }
+  }
+
+  fn round(self) -> Float64
+    cost time O(1)
+  {
+    let whole = intrinsic::truncate(self)
+    let one: Float64 = 1.0
+    if (self - whole).absolute() >= 0.5 { whole + one.copy_sign(self) } else { whole }
+  }
+
+  fn round_to_even(self) -> Float64
+    ensures identical(result, intrinsic::round_to_even(self))
+    cost time O(1)
+  {
+    intrinsic::round_to_even(self)
+  }
+
+  fn sign(self) -> Float64
+    ensures identical(result, if intrinsic::is_nan(self) || self == 0.0 {
+        self
+      } else if self < 0.0 {
+        -1.0
+      } else {
+        1.0
+      })
+    cost time O(1)
+  {
+    if intrinsic::is_nan(self) || self == 0.0 {
+      self
+    } else if self < 0.0 {
+      -1.0
+    } else {
+      1.0
+    }
+  }
+
+  fn sine(self) -> Float64
+    cost time O(1)
+  {
+    if self == 0.0 || intrinsic::is_nan(self) {
+      return self
+    }
+    if self.is_infinite() {
+      return Float64.not_a_number
+    }
+    let reduced = self.absolute().reduced()
+    let flipped = reduced.octant > 3
+    let octant = if flipped { reduced.octant - 4 } else { reduced.octant }
+    let result_before_sign = if octant == 1 || octant == 2 { cosine_near_zero(reduced.angle) } else { sine_near_zero(reduced.angle) }
+    if (self < 0.0) != flipped { -result_before_sign } else { result_before_sign }
+  }
+
+  fn square_root(self) -> Float64
+    ensures identical(result, intrinsic::square_root(self))
+    cost time O(1)
+    cost allocations == 0
+  {
+    intrinsic::square_root(self)
+  }
+
+  fn sum(items: Slice[Float64]) -> Float64
+    cost time O(items.length())
+  {
+    var total: Float64 = 0.0
+    var lost: Float64 = 0.0
+    for item in items {
+      let next = total + item
+      if total.absolute() >= item.absolute() {
+        lost = lost + ((total - next) + item)
+      } else {
+        lost = lost + ((item - next) + total)
+      }
+      total = next
+    }
+    if lost.is_finite() { total + lost } else { total }
+  }
+
+  fn tangent(self) -> Float64
+    cost time O(1)
+  {
+    if self == 0.0 || intrinsic::is_nan(self) {
+      return self
+    }
+    if self.is_infinite() {
+      return Float64.not_a_number
+    }
+    let reduced = self.absolute().reduced()
+    let angle = reduced.angle
+    let square = angle * angle
+    let near = if square > 1.0e-14 {
+      angle + angle * (square * ((-13093.693918138379 * square + 1153516.6483858742) * square + -17956525.197648488) / ((((square + 13681.296347069296) * square + -1320892.3444021097) * square + 25008380.18233579) * square + -53869575.592945464))
+    } else {
+      angle
+    }
+    let result_before_sign = if reduced.octant % 4 >= 2 { -1.0 / near } else { near }
+    if self < 0.0 { -result_before_sign } else { result_before_sign }
+  }
+
+  fn to_bits(self) -> UInt64
+    cost time O(1)
+  {
+    intrinsic::to_bits[Float64, UInt64](self)
+  }
+
+  fn to_degrees(self) -> Float64
+    ensures identical(result, self * 57.29577951308232)
+    cost time O(1)
+  {
+    self * 57.29577951308232
+  }
+
+  fn to_fixed(self, decimals: UInt64) -> String
+  {
+    format_fixed(self, decimals: decimals)
+  }
+
+  fn to_radians(self) -> Float64
+    ensures identical(result, self * 0.017453292519943295)
+    cost time O(1)
+  {
+    self * 0.017453292519943295
+  }
+
+  fn to_scientific(self, decimals: UInt64) -> String
+  {
+    format_scientific(self, decimals: decimals)
+  }
+
+  fn truncate(self) -> Float64
+    ensures identical(result, intrinsic::truncate(self))
+    cost time O(1)
+  {
+    intrinsic::truncate(self)
   }
 }

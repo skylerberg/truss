@@ -1763,7 +1763,7 @@ internal fn MemoryFiles.copy_out(self, inode: UInt64, from: UInt64, buffer: mut 
         }
         let available = contents.length() - from
         let count = if limit < available { limit } else { available }
-        mut buffer.append_slice(contents.slice_range(from, stop: from + count))
+        mut buffer.append_slice(contents[from..from + count])
         Ok(count)
       }
       Directory => Err(SystemError.IsADirectory)

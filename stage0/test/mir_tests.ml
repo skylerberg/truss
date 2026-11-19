@@ -2,10 +2,18 @@ let make_mir_parts packages = Database.For_testing.make_mir_lookups (Support.mak
 let find_graph (parts : Mir.lookups) key = Mir.find_graph (parts.read_body_part key)
 let find_code (parts : Mir.lookups) key = Mir.find_code (parts.read_body_part key)
 
-let list_place_locals (place : Mir.place) =
-  match place.root with Local local -> [ local ] | Constant _ | Literal _ -> []
+let rec list_place_locals (place : Mir.place) =
+  (match place.root with Local local -> [ local ] | Constant _ | Literal _ -> [])
+  @ List.concat_map
+      (fun (projection : Mir.projection) ->
+        match projection with
+        | Element { index; _ } -> list_operand_locals index
+        | Range { start; stop; _ } ->
+            list_operand_locals start @ Option.fold ~none:[] ~some:list_operand_locals stop
+        | Field _ | Variant_field _ -> [])
+      place.projections
 
-let list_operand_locals : Mir.operand -> Mir.local list = function
+and list_operand_locals : Mir.operand -> Mir.local list = function
   | Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> list_place_locals place
   | Immediate _ -> []
 
@@ -85,7 +93,7 @@ and collect_tree_effects : Mir.statement_kind -> Mir.local list * Mir.local list
       let read, given = list_written target in
       (list_choice_locals choice @ read, given, [])
   | Assert_by_bit_vector { condition; _ } -> (list_operand_locals condition, [], [])
-  | While _ | For _ | Fork _ | Resume _ | Yield _ | Jump _ ->
+  | While _ | For _ | Fork _ | Provide _ | Resume _ | Yield _ | Jump _ ->
       failwith "a statement that holds blocks or jumps, where a formula holds none"
 
 and collect_effects : Mir.basic -> Mir.local list * Mir.local list * Mir.local list = function
@@ -96,23 +104,25 @@ and collect_effects : Mir.basic -> Mir.local list * Mir.local list * Mir.local l
       let read, given = Option.fold ~none:([], []) ~some:list_written destination in
       (list_call_locals call @ read, given, [])
   | Lend { part; call } -> (list_call_locals call, [ part ], [])
-  | Slice { destination; base; call; _ } ->
-      let read, given = list_written destination in
-      (list_call_locals call @ list_place_locals base @ read, given, [])
   | Template { destination; call; _ } ->
       let read, given = list_written destination in
       (list_call_locals call @ read, given, [])
   | Live locals -> ([], locals, [])
   | Dead locals -> ([], [], locals)
   | Assert value | Echo value -> (list_operand_locals value, [], [])
-  | Provide { provided; _ } ->
+  | Loan_start { borrowed; _ } -> (list_operand_locals borrowed, [], [])
+  | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ -> ([], [], [])
+
+let collect_graph_effects :
+    Mir.Graph.statement_kind -> Mir.local list * Mir.local list * Mir.local list = function
+  | Basic basic -> collect_effects basic
+  | Provide_start { provided; _ } ->
       ( List.concat_map
           (fun (provided : Mir.provided) -> list_operand_locals provided.value)
           provided,
         [],
         [] )
-  | Loan_start { borrowed; _ } -> (list_operand_locals borrowed, [], [])
-  | Provide_end | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ -> ([], [], [])
+  | Provide_end -> ([], [], [])
 
 let rec list_yielded_locals : Mir.yielded -> Mir.local list = function
   | Part value -> list_operand_locals value
@@ -156,7 +166,7 @@ let validate definition (body : Mir.Graph.body) =
           List.fold_left
             (fun found (statement : Mir.Graph.statement) ->
               match (found, statement.kind) with
-              | None, Assign { target = { root = Local l; projections = [] }; value; _ }
+              | None, Basic (Assign { target = { root = Local l; projections = [] }; value; _ })
                 when l = local ->
                   Some
                     (match value with
@@ -176,10 +186,10 @@ let validate definition (body : Mir.Graph.body) =
                     | Lambda _ -> "lambda"
                     | Value_parameter _ -> "value_parameter"
                     | Specification _ -> "specification")
-              | None, Call { destination = Some { root = Local l; projections = [] }; _ }
+              | None, Basic (Call { destination = Some { root = Local l; projections = [] }; _ })
                 when l = local ->
                   Some "call"
-              | None, Lend { part; _ } when part = local -> Some "lend"
+              | None, Basic (Lend { part; _ }) when part = local -> Some "lend"
               | _ -> found)
             found basic.statements)
         None body.blocks
@@ -195,7 +205,9 @@ let validate definition (body : Mir.Graph.body) =
       (fun most (basic : Mir.Graph.basic_block) ->
         List.fold_left
           (fun most (statement : Mir.Graph.statement) ->
-            match statement.kind with Loan_start { loan; _ } -> max most (loan + 1) | _ -> most)
+            match statement.kind with
+            | Basic (Loan_start { loan; _ }) -> max most (loan + 1)
+            | _ -> most)
           most basic.statements)
       0 body.blocks
   in
@@ -205,9 +217,13 @@ let validate definition (body : Mir.Graph.body) =
       List.iter
         (fun (statement : Mir.Graph.statement) ->
           match statement.kind with
-          | Assign
-              { target = { root = Local bound; projections = [] }; value = Operand (Borrow _); _ }
-            -> (
+          | Basic
+              (Assign
+                 {
+                   target = { root = Local bound; projections = [] };
+                   value = Operand (Borrow _);
+                   _;
+                 }) -> (
               bindings.(bound) <- bindings.(bound) + 1;
               match body.locals.(bound).kind with
               | Lent _ | Source { mode = Read | Mut; _ } -> ()
@@ -226,7 +242,7 @@ let validate definition (body : Mir.Graph.body) =
     (fun (basic : Mir.Graph.basic_block) ->
       List.iter
         (fun (statement : Mir.Graph.statement) ->
-          let read, given, ends = collect_effects statement.kind in
+          let read, given, ends = collect_graph_effects statement.kind in
           List.iter check_local (read @ given @ ends))
         basic.statements;
       List.iter check_local (list_terminator_reads basic.terminator);
@@ -340,13 +356,14 @@ let validate definition (body : Mir.Graph.body) =
         raise_problem "block %d reads _%d where a path has ended it" at local
     in
     let apply at (statement : Mir.Graph.statement) =
-      let read_locals, given, ends = collect_effects statement.kind in
+      let read_locals, given, ends = collect_graph_effects statement.kind in
       List.iter (read at) read_locals;
       List.iter (fun local -> state.(local) <- alive) given;
       List.iter (fun local -> state.(local) <- ended) ends;
       match statement.kind with
-      | Loan_start { loan; _ } -> open_loans.(loan) <- alive
-      | Loan_end ended_loans -> List.iter (fun loan -> open_loans.(loan) <- ended) ended_loans
+      | Basic (Loan_start { loan; _ }) -> open_loans.(loan) <- alive
+      | Basic (Loan_end ended_loans) ->
+          List.iter (fun loan -> open_loans.(loan) <- ended) ended_loans
       | _ -> ()
     in
     let list_still_alive ~kept =
@@ -513,16 +530,18 @@ let () =
         List.filter_map
           (fun (statement : Mir.Graph.statement) ->
             match statement.kind with
-            | Call
-                {
-                  call =
-                    {
-                      callee = { target = Function { path = Top { name = "step"; _ }; _ }; _ };
-                      arguments = [ _; Passed { value = Immediate { value = Integer next; _ }; _ } ];
-                      _;
-                    };
-                  _;
-                } ->
+            | Basic
+                (Call
+                   {
+                     call =
+                       {
+                         callee = { target = Function { path = Top { name = "step"; _ }; _ }; _ };
+                         arguments =
+                           [ _; Passed { value = Immediate { value = Integer next; _ }; _ } ];
+                         _;
+                       };
+                     _;
+                   }) ->
                 Some (Z.to_int next)
             | _ -> None)
           (list_statements mir.body)
@@ -540,7 +559,7 @@ let () =
         List.exists
           (fun (statement : Mir.Graph.statement) ->
             match statement.kind with
-            | Assign { value = Not value; _ } -> List.mem b (list_operand_locals value)
+            | Basic (Assign { value = Not value; _ }) -> List.mem b (list_operand_locals value)
             | _ -> false)
           basic.statements
       in
@@ -588,6 +607,46 @@ let () =
               blocks
           in
           if List.length ends < 2 then Harness.fail "the continue does not end the iteration");
+  Harness.test "a loop over a list binds each element place and calls no `element`" (fun () ->
+      let body = (lower_graph Fixtures.Mir.for_loop_with_a_break).body in
+      (match
+         List.find_map
+           (fun (_, (terminator : Mir.Graph.terminator)) ->
+             match terminator with For { elements; _ } -> elements | _ -> None)
+           (list_terminators body)
+       with
+      | Some
+          {
+            element = Sequence_element { place = { projections = [ Element _ ]; _ }; mode = Read };
+            _;
+          } ->
+          ()
+      | _ -> Harness.fail "the loop's element is not the place of the list's element");
+      if
+        List.exists
+          (fun (statement : Mir.Graph.statement) ->
+            match statement.kind with Basic (Lend _) -> true | _ -> false)
+          (list_statements body)
+      then Harness.fail "the loop lends its element through a call");
+  Harness.test "a loop over another collection is lent each element by its `element`" (fun () ->
+      let body = (lower_graph Fixtures.Mir.for_loop_over_a_row_with_its_own_element).body in
+      match
+        List.find_map
+          (fun (_, (terminator : Mir.Graph.terminator)) ->
+            match terminator with For { elements; _ } -> elements | _ -> None)
+          (list_terminators body)
+      with
+      | Some { element = Lent_by_call part; _ } ->
+          if
+            not
+              (List.exists
+                 (fun (statement : Mir.Graph.statement) ->
+                   match statement.kind with
+                   | Basic (Lend { part = lent; _ }) -> lent = part
+                   | _ -> false)
+                 (list_statements body))
+          then Harness.fail "no call lends the loop's element"
+      | _ -> Harness.fail "the loop's element is not lent by a call");
   Harness.test "a loop over a collection runs its body for each element, and a break exits it"
     (fun () ->
       let mir = lower_graph Fixtures.Mir.for_loop_with_a_break in
@@ -596,7 +655,8 @@ let () =
         List.find_map
           (fun (_, terminator) ->
             match (terminator : Mir.Graph.terminator) with
-            | For { iteration = Range _; lent = Some _; blocks; after; _ } -> Some (blocks, after)
+            | For { iteration = Range _; elements = Some _; blocks; after; _ } ->
+                Some (blocks, after)
             | _ -> None)
           (list_terminators body)
       with
@@ -611,19 +671,20 @@ let () =
                         (Mir.Graph.For_testing.list_successors body.blocks.(block).terminator))
                  blocks)
           then Harness.fail "the break does not leave the loop");
-  let check_slice_base_ends body name compare =
+  let check_range_base_ends body name compare =
     let all = list_statements body in
     let rec read_base_root (local : Mir.local) =
       match
         List.find_map
           (fun (statement : Mir.Graph.statement) ->
             match statement.kind with
-            | Assign
-                {
-                  target = { root = Local target; projections = [] };
-                  value = Operand (Borrow { place = { root = Local borrowed; _ }; _ });
-                  _;
-                }
+            | Basic
+                (Assign
+                   {
+                     target = { root = Local target; projections = [] };
+                     value = Operand (Borrow { place = { root = Local borrowed; _ }; _ });
+                     _;
+                   })
               when target = local && body.locals.(local).kind <> Temporary ->
                 Some borrowed
             | _ -> None)
@@ -635,34 +696,47 @@ let () =
     let find_end local =
       List.find_index
         (fun (statement : Mir.Graph.statement) ->
-          match statement.kind with Dead locals -> List.mem local locals | _ -> false)
+          match statement.kind with Basic (Dead locals) -> List.mem local locals | _ -> false)
         all
+    in
+    let find_ranged_root : Mir.operand -> Mir.local option = function
+      | Use { place = { root = Local base; projections = Range _ :: _ }; _ }
+      | Borrow { place = { root = Local base; projections = Range _ :: _ }; _ } ->
+          Some (read_base_root base)
+      | _ -> None
     in
     match
       List.find_map
         (fun (statement : Mir.Graph.statement) ->
           match statement.kind with
-          | Slice { base = { root = Local base; _ }; _ } -> Some (read_base_root base)
+          | Basic (Assign { value = Operand operand; _ }) -> find_ranged_root operand
+          | Basic (Call { call; _ }) ->
+              List.find_map
+                (fun (argument : Mir.argument) ->
+                  match argument with
+                  | Passed { value; _ } -> find_ranged_root value
+                  | Default -> None)
+                call.arguments
           | _ -> None)
         all
     with
-    | None -> Harness.fail "no slice"
+    | None -> Harness.fail "no range"
     | Some base -> (
         if body.locals.(base).kind <> Temporary then
-          Harness.fail "the slice's base is not a temporary";
+          Harness.fail "the range's base is not a temporary";
         match (find_end base, find_end (locate_named body name)) with
         | Some base_end, Some named_end -> compare base_end named_end
         | _ -> Harness.fail "the base or %s is never ended" name)
   in
-  Harness.test "a let keeps the temporary that the slice it binds views until its bindings end"
+  Harness.test "a let keeps the base temporary of a range it binds until its bindings end"
     (fun () ->
       let mir = lower_graph Fixtures.Mir.let_of_a_slice_of_a_temporary in
-      check_slice_base_ends mir.body "middle" (fun base_end middle_end ->
-          if base_end < middle_end then Harness.fail "the slice's base ends before middle"));
+      check_range_base_ends mir.body "middle" (fun base_end middle_end ->
+          if base_end < middle_end then Harness.fail "the range's base ends before middle"));
   Harness.test "a let ends a temporary that its bindings do not view with its statement" (fun () ->
       let mir = lower_graph Fixtures.Mir.let_of_a_temporary_slices_length in
-      check_slice_base_ends mir.body "count" (fun base_end count_end ->
-          if base_end > count_end then Harness.fail "the slice's base outlives its statement"));
+      check_range_base_ends mir.body "count" (fun base_end count_end ->
+          if base_end > count_end then Harness.fail "the range's base outlives its statement"));
   Harness.test "a let with an else binds its pattern only where it matches" (fun () ->
       let mir = lower_graph Fixtures.Mir.let_else_on_an_option in
       let body = mir.body in
@@ -670,7 +744,7 @@ let () =
       let binds (basic : Mir.Graph.basic_block) =
         List.exists
           (fun (statement : Mir.Graph.statement) ->
-            match statement.kind with Live locals -> List.mem x locals | _ -> false)
+            match statement.kind with Basic (Live locals) -> List.mem x locals | _ -> false)
           basic.statements
       in
       let returns_one = function
@@ -701,8 +775,9 @@ let () =
         :: List.filter_map
              (fun (statement : Mir.Graph.statement) ->
                match statement.kind with
-               | Assign
-                   { target = { root = Local held; projections = [] }; value = Operand value; _ }
+               | Basic
+                   (Assign
+                      { target = { root = Local held; projections = [] }; value = Operand value; _ })
                  when list_operand_locals value = [ x ] ->
                    Some held
                | _ -> None)
@@ -712,12 +787,13 @@ let () =
         List.find_map
           (fun (statement : Mir.Graph.statement) ->
             match statement.kind with
-            | Assign
-                {
-                  target = { root = Local result; projections = [] };
-                  value = Compare { left; _ };
-                  _;
-                }
+            | Basic
+                (Assign
+                   {
+                     target = { root = Local result; projections = [] };
+                     value = Compare { left; _ };
+                     _;
+                   })
               when List.exists (fun local -> List.mem local holding_x) (list_operand_locals left) ->
                 Some result
             | _ -> None)
@@ -730,12 +806,13 @@ let () =
             :: List.filter_map
                  (fun (statement : Mir.Graph.statement) ->
                    match statement.kind with
-                   | Assign
-                       {
-                         target = { root = Local held; projections = [] };
-                         value = Operand value;
-                         _;
-                       }
+                   | Basic
+                       (Assign
+                          {
+                            target = { root = Local held; projections = [] };
+                            value = Operand value;
+                            _;
+                          })
                      when list_operand_locals value = [ guard ] ->
                        Some held
                    | _ -> None)
@@ -766,8 +843,8 @@ let () =
                       (Mir.Graph.For_testing.list_successors basic.terminator)
                 | (statement : Mir.Graph.statement) :: rest -> (
                     match statement.kind with
-                    | Dead locals when List.mem x locals -> ()
-                    | Assign { value = Is_variant _; _ } ->
+                    | Basic (Dead locals) when List.mem x locals -> ()
+                    | Basic (Assign { value = Is_variant _; _ }) ->
                         Harness.fail "block %d tests the next arm with x bound" block
                     | _ -> walk_successors rest)
               in
@@ -801,7 +878,7 @@ let () =
         List.fold_left
           (fun count (statement : Mir.Graph.statement) ->
             match statement.kind with
-            | Assign { value = Operand (Immediate { value = Boolean value; _ }); _ }
+            | Basic (Assign { value = Operand (Immediate { value = Boolean value; _ }); _ })
               when value = truth ->
                 count + 1
             | _ -> count)
@@ -898,7 +975,7 @@ let () =
               (List.exists
                  (fun (statement : Mir.Graph.statement) ->
                    match statement.kind with
-                   | Assign { value = Lambda { captures = [ capture ]; _ }; _ } ->
+                   | Basic (Assign { value = Lambda { captures = [ capture ]; _ }; _ }) ->
                        list_place_locals capture.place = [ offset ]
                    | _ -> false)
                  (list_statements mir.body))
@@ -910,7 +987,7 @@ let () =
       let is_ended (body : Mir.Graph.body) local =
         List.exists
           (fun (statement : Mir.Graph.statement) ->
-            match statement.kind with Dead locals -> List.mem local locals | _ -> false)
+            match statement.kind with Basic (Dead locals) -> List.mem local locals | _ -> false)
           (list_statements body)
       in
       let mir = lower_graph Fixtures.Mir.lambda_with_a_destructured_and_a_plain_parameter in
@@ -1193,7 +1270,7 @@ let () =
                   (List.exists
                      (fun (statement : Mir.Graph.statement) ->
                        match statement.kind with
-                       | Assign { target = { root = Local local; projections = [] }; _ } ->
+                       | Basic (Assign { target = { root = Local local; projections = [] }; _ }) ->
                            local = winner
                        | _ -> false)
                      (list_statements mir.body))
@@ -1223,7 +1300,7 @@ let find_status_where_ended (body : Mir.Graph.body) moves (path : Moves.path) =
         List.iter
           (fun (statement : Mir.Graph.statement) ->
             match statement.kind with
-            | Dead locals when !found = None && List.mem path.local locals ->
+            | Basic (Dead locals) when !found = None && List.mem path.local locals ->
                 found := Some (Moves.find_status moves state path)
             | _ -> if !found = None then Moves.apply moves state statement)
           basic.statements
@@ -1502,15 +1579,13 @@ let () =
         (String.concat "; " actual)
   in
   Harness.test
-    "a slice's call, the call of a pattern's `equal`, and a pulled `next` carry the capability set \
-     of Core's callee" (fun () ->
+    "the call of a pattern's `equal` and a pulled `next` carry the capability set of Core's callee"
+    (fun () ->
       let built, _ = lower_tree_and_graph program in
       let carried = ref [] in
       Mir.iter_code
         (fun (statement : Mir.statement) ->
           match statement.kind with
-          | Basic (Slice { call; _ }) ->
-              carried := ("a slice carries " ^ show_callee call.callee) :: !carried
           | Basic
               (Call
                  {
@@ -1526,11 +1601,9 @@ let () =
         ~expected:
           [
             "a loop carries standard::core::Cursor.next uses {Meter}";
-            "a slice carries standard::list::List.slice_from uses {}";
             "a pattern carries standard::core::Equal.equal uses {}";
           ]);
-  Harness.test "the callee that a statement invokes is found for a call, a slice, and a pull"
-    (fun () ->
+  Harness.test "the callee that a statement invokes is found for a call and a pull" (fun () ->
       let built, _ = lower_tree_and_graph program in
       let invoked = ref [] in
       Mir.iter_code
@@ -1543,7 +1616,6 @@ let () =
         ~expected:
           [
             "standard::core::Cursor.next uses {Meter}";
-            "standard::list::List.slice_from uses {}";
             "standard::core::Equal.equal uses {}";
             "standard::list::Slice.length uses {}";
           ]);
@@ -1568,7 +1640,7 @@ let () =
       Mir.iter_code
         (fun (statement : Mir.statement) ->
           match statement.kind with
-          | Basic (Provide { can_use_tasks; _ }) -> provides := can_use_tasks :: !provides
+          | Provide { can_use_tasks; _ } -> provides := can_use_tasks :: !provides
           | _ -> ())
         built;
       if !provides <> [ true ] then Harness.fail "the `provide` cannot use tasks")

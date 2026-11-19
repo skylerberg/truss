@@ -896,11 +896,11 @@ let () =
       expect_headers
         ~expected:
           [
-            "public fn Int64.to_big_endian_bytes(self) -> Array[UInt8, 8]";
-            "impl FixedWidthInteger for Int64 {";
-            "impl Serialize for Int64 {";
+            "public fn Float64.to_float32(self) -> Float32";
+            "impl FloatingPoint for Float64 {";
+            "impl Serialize for Float64 {";
           ]
-        (run_show root "Int64"));
+        (run_show root "Float64"));
   test "a dependency's type is shown with its impls of public traits only" (fun () ->
       let root =
         make_directory
@@ -915,6 +915,26 @@ let () =
       expect_strings
         ~expected:[ "public type Vector(x: Int64, y: Int64)"; "impl Display for Vector {" ]
         (list_headers (run_show (Filename.concat root "app") "acme::geometry::vector::Vector")));
+  test "a dependency's opaque type is shown with its derives and without its representation"
+    (fun () ->
+      let root =
+        make_directory
+          [
+            ("truss.toml", "[project]\n");
+            ("geometry/truss.toml", make_manifest "acme::geometry");
+            ("geometry/tallies/tallies.truss", Fixtures.Cli.opaque_tally_choice_and_token);
+            ("app/truss.toml", make_manifest "app" ^ "[dependencies]\n\"acme::geometry\" = []\n");
+            ("app/main.truss", "fn main() {}\n");
+          ]
+      in
+      expect_strings
+        ~expected:
+          [
+            "public opaque type Choice[Item: Equal,]\n  derives Equal";
+            "public opaque type Tally\n  derives Equal, Hash";
+            "public opaque type Token";
+          ]
+        (run_show (Filename.concat root "app") "acme::geometry::tallies"));
   test "a dependency's module is shown with its law proofs and without its tests" (fun () ->
       let root =
         make_directory

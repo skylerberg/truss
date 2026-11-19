@@ -51,7 +51,6 @@ let weights =
     ("standard::numbers::float_math", 68);
     ("standard::numbers::floats", 7);
     ("standard::numbers::integer_arithmetic", 106);
-    ("standard::numbers::integer_bits", 42);
     ("standard::numbers::integer_text", 24);
     ("standard::numbers::integers", 523);
     ("standard::numbers::signed", 38);

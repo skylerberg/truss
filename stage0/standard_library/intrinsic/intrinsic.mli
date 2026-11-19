@@ -1,32 +1,4 @@
-val module_ : Path.module_
-
-type builtin =
-  | Int8
-  | Int16
-  | Int32
-  | Int64
-  | UInt8
-  | UInt16
-  | UInt32
-  | UInt64
-  | Float32
-  | Float64
-  | Bool
-  | Character
-  | Unit
-  | Never
-  | Integer
-  | Array
-  | Storage
-  | View
-  | Handle
-  | Shared
-
-val builtins : builtin list
-val show_builtin : builtin -> string
-val make_builtin_path : builtin -> Path.t
-val find_builtin : Path.t -> builtin option
-val convert_libc_scalar : Libc.scalar -> builtin
+val convert_libc_scalar : Libc.scalar -> Language.Builtin_type.t
 
 type scalar =
   | Add
@@ -96,7 +68,7 @@ type buffer =
   | Array_model
   | View_address
 
-type lend = Storage_at | Storage_at_mut | View_at | View_at_mut | Array_at_mut
+type lend = Storage_at | View_at
 
 type runtime =
   | Crash

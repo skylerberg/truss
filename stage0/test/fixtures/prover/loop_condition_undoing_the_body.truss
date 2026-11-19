@@ -1,0 +1,18 @@
+fn shrink(count: mut Int64) -> Bool
+  requires -100 < count && count < 100
+  ensures count == old(count) - 1
+  ensures result == (count < 50)
+{
+  count = count - 1
+  count < 50
+}
+
+public fn spin() {
+  var count: Int64 = 0
+  while shrink(mut count)
+    invariant -1 <= count && count <= 0
+    decreases 50 - count
+  {
+    count += 1
+  }
+}

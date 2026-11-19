@@ -30,7 +30,6 @@ type action =
   | Pass_owned_function of view list
   | Start_loan of { loan : int; loans : loan list }
   | End_loans of int list
-  | Write_through of Place.t
   | Arguments of {
       borrowed_arguments : borrowed_argument list;
       view_arguments : view_argument list;

@@ -9,7 +9,6 @@
   path
   grant
   well_known
-  intrinsic
   types
   syntax
   syntax_walk

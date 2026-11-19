@@ -83,7 +83,6 @@ module For_testing : sig
     | Resolve
     | Interface
     | Infer
-    | Patterns
     | Usage
     | Ownership
     | Package_checks

@@ -10,7 +10,6 @@
   resolve
   syntax
   types
-  intrinsic
   well_known
   core
   core_walk

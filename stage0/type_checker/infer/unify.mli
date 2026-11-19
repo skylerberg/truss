@@ -4,22 +4,22 @@ type t = {
   value_solutions : (int, Types.value) Hashtbl.t;
   mutable capability_variable_count : int;
   mutable deferred_capability_equalities : (Types.capability_set * Types.capability_set) list;
-  domains : (int, Intrinsic.builtin list) Hashtbl.t;
-  list_rigid_members : Types.ty -> Intrinsic.builtin list;
+  domains : (int, Language.Builtin_type.t list) Hashtbl.t;
+  list_rigid_members : Types.ty -> Language.Builtin_type.t list;
 }
 
-val create : list_rigid_members:(Types.ty -> Intrinsic.builtin list) -> t
+val create : list_rigid_members:(Types.ty -> Language.Builtin_type.t list) -> t
 val make_fresh_type : t -> Types.ty
-val make_fresh_number : t -> Intrinsic.builtin list -> Types.ty
+val make_fresh_number : t -> Language.Builtin_type.t list -> Types.ty
 val make_fresh_value : t -> Types.value
 val make_fresh_capability_variable : t -> Types.capability_set
 val resolve : t -> Types.ty -> Types.ty
 val resolve_value : t -> Types.value -> Types.value
 val zonk : t -> Types.ty -> Types.ty
 val zonk_trait : t -> Types.trait_reference -> Types.trait_reference
-val find_domain : t -> int -> Intrinsic.builtin list option
-val list_possible_members : t -> Types.ty -> Intrinsic.builtin list
-val is_within : t -> Types.ty -> Intrinsic.builtin list -> bool
+val find_domain : t -> int -> Language.Builtin_type.t list option
+val list_possible_members : t -> Types.ty -> Language.Builtin_type.t list
+val is_within : t -> Types.ty -> Language.Builtin_type.t list -> bool
 
 type unknown = Unknown_type of int | Unknown_value of int
 

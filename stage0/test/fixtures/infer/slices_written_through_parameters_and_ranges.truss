@@ -1,0 +1,16 @@
+fn first_to_one(part: mut Slice[Int64]) {
+  mut part[..].reverse()
+}
+
+fn apply(items: mut List[Int64], change: fn(mut Slice[Int64])) {
+  change(mut items[..])
+}
+
+fn f(items: mut List[Int64]) -> UInt64 {
+  first_to_one(mut items[1..])
+  mut items[..].reverse()
+  apply(mut items, change: fn(part) { mut part.reverse() })
+  var window = items[..]
+  window = items[1..]
+  window.length()
+}
