@@ -16,34 +16,8 @@ let read_expected_head (state : State.state) type_ =
 let read_actual_head_at (state : State.state) ~at type_ =
   match read_expected_head state type_ with
   | Types.Variable root ->
-      let frame = State.read_current_frame state in
-      let list_inputs index =
-        List.filter_map
-          (fun (goal : State.goal) ->
-            match goal.requirement with
-            | Implements trait
-              when List.exists
-                     (fun (_, output) -> State.resolve state output = Types.Variable index)
-                     goal.outputs ->
-                Some
-                  (List.concat_map
-                     (Unify.list_argument_unknowns state.unifier)
-                     (Types.Type goal.subject :: trait.trait_arguments))
-            | _ -> None)
-          frame.goals
-      in
-      let rec force visited = function
-        | Unify.Unknown_type index when not (List.mem index visited) -> (
-            match list_inputs index with
-            | [] ->
-                if Unify.may_decide state.unifier index then
-                  ignore
-                    (State.decide_default_literal state ~at ~site:Actual_head (Types.Variable index));
-                index :: visited
-            | inputs -> List.fold_left force (index :: visited) (List.concat inputs))
-        | _ -> visited
-      in
-      ignore (List.fold_left force [ root ] (List.concat (list_inputs root)));
+      State.default_inputs state ~site:Actual_head ~at
+        (List.filter (State.gives state root) (State.read_current_frame state).goals);
       read_expected_head state type_
   | head -> head
 

@@ -736,10 +736,8 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
       capability_solution = None;
       evidence_packages = [];
       final_type_checks = [];
-      undecided = [];
-      decisions = Hashtbl.create 4;
+      log = [];
       annotatable = Hashtbl.create 8;
-      narrowings = [];
     }
   in
   Solver.run_in_statement state no_output (State.read_span state definition.id) (fun () ->

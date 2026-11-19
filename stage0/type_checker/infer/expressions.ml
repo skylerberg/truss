@@ -61,8 +61,8 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
         with
         | [] -> Types.Error (report_too_large "`Float64`")
         | allowed ->
-            State.make_literal_type state allowed ~report_excluded:(fun excluded ->
-                report_too_large (State.describe state excluded))
+            State.make_literal_type state ~at:(State.read_span state value.id) allowed
+              ~report_excluded:(fun excluded -> report_too_large (State.describe state excluded))
       in
       State.check_when_final state (fun () ->
           Option.iter

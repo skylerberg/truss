@@ -61,6 +61,11 @@ let rec resolve unifier (type_ : Types.ty) =
       | None -> type_)
   | _ -> type_
 
+let rec read_root unifier index =
+  match Hashtbl.find_opt unifier.type_solutions index with
+  | Some (Types.Variable next) -> read_root unifier next
+  | _ -> index
+
 let rec resolve_value unifier (value : Types.value) =
   match value with
   | Value_variable index -> (

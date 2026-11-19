@@ -17,6 +17,7 @@ val make_fresh_number : t -> Language.Builtin_type.t list -> Types.ty
 val make_fresh_value : t -> Types.value
 val make_fresh_capability_variable : t -> Types.capability_set
 val resolve : t -> Types.ty -> Types.ty
+val read_root : t -> int -> int
 val resolve_value : t -> Types.value -> Types.value
 val zonk : t -> Types.ty -> Types.ty
 val zonk_trait : t -> Types.trait_reference -> Types.trait_reference

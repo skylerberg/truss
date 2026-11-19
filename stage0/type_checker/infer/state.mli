@@ -24,7 +24,10 @@ type requirement = Implements of Types.trait_reference | Within of Language.Buil
 
 type cause =
   | Bound of { at : Source.Definition_span.t; of_type : Types.ty option }
-  | Operator of Source.Definition_span.t
+  | Operator of {
+      at : Source.Definition_span.t;
+      operands : (Source.Definition_span.t * Source.Definition_span.t) option;
+    }
   | Method_call of Source.Definition_span.t
   | Loop of Source.Definition_span.t
   | Any_conversion of { at : Source.Definition_span.t; any_type : Types.ty }
@@ -42,7 +45,6 @@ type frame = {
   first_variable : int;
   mutable recorded_expressions : int list;
   mutable bindings : int list;
-  mutable declared : int list;
   mutable goals : goal list;
   mutable reported_unmet_bounds : (Types.ty * Types.trait_reference * Diagnostic.reported) list;
   mutable compiled_expressions : int list;
@@ -52,23 +54,8 @@ type frame = {
   span : Source.Definition_span.t;
 }
 
-type undecided_literal = { index : int; local : Syntax.id; owner : frame }
-
-type narrowing = {
-  narrowed : Types.ty;
-  allowed : Language.Builtin_type.t list;
-  report_excluded : Types.ty -> Diagnostic.reported;
-}
-
-type default_site = Method_lookup | Actual_head
-
-type literal_decision = {
-  decided_local : Syntax.id;
-  decided_type : Types.ty;
-  decided_at : Source.Definition_span.t;
-  default_site : default_site option;
-  mutable decision_report : Diagnostic.reported option;
-}
+type default_site = Statement_end | Actual_head | Method_call | Definition_end
+type logged
 
 type form = {
   expression_builders : (unit -> Core.expression) option array;
@@ -107,10 +94,8 @@ type state = {
   mutable capability_solution : (int, Types.capability_set) Hashtbl.t option;
   mutable evidence_packages : Path.package list;
   mutable final_type_checks : (unit -> unit) list;
-  mutable undecided : undecided_literal list;
-  decisions : (int, literal_decision) Hashtbl.t;
+  mutable log : logged list;
   annotatable : (Syntax.id, unit) Hashtbl.t;
-  mutable narrowings : narrowing list;
 }
 
 val add_diagnostic :
@@ -185,6 +170,7 @@ val read_integer_range : state -> Types.ty -> Z.t * Z.t
 
 val make_literal_type :
   state ->
+  at:Source.Definition_span.t ->
   Language.Builtin_type.t list ->
   report_excluded:(Types.ty -> Diagnostic.reported) ->
   Types.ty
@@ -225,6 +211,23 @@ val make_call :
 val make_trait_reference : arguments:Types.argument list -> Path.t -> Types.trait_reference
 val string_type : Types.ty
 
+val report_decided_in_specification :
+  state -> Source.Definition_span.t -> int -> Diagnostic.reported
+
+val decide_default :
+  state -> site:default_site -> at:Source.Definition_span.t -> Types.ty -> Types.ty
+
+val record_narrowing :
+  state ->
+  int ->
+  allowed:Language.Builtin_type.t list ->
+  report_excluded:(Types.ty -> Diagnostic.reported) ->
+  unit
+
+val record_failure : state -> goal -> Diagnostic.reported -> unit
+val gives : state -> int -> goal -> bool
+val default_inputs : state -> site:default_site -> at:Source.Definition_span.t -> goal list -> unit
+
 val run_in_statement :
   state -> env -> Source.Definition_span.t -> solve:(frame -> unit) -> (unit -> 'a) -> 'a
 
@@ -236,13 +239,6 @@ val declare_compiled :
   state -> env -> Syntax.name -> Types.ty -> binding:binding -> mode:Language.Mode.t -> unit
 
 val find_target : state -> Syntax.name -> Resolve.target option
-
-val decide_default_literal :
-  state -> at:Source.Definition_span.t -> site:default_site -> Types.ty -> Types.ty
-
-val report_decided_in_specification :
-  state -> Source.Definition_span.t -> int -> Diagnostic.reported
-
 val find_head : state -> Syntax.expression -> Resolve.head option
 val show : state -> Types.ty -> string
 val describe : state -> Types.ty -> string
@@ -258,6 +254,13 @@ val add_mismatch_diagnostic :
 
 val add_mismatch :
   state -> Source.Definition_span.t -> expected:Types.ty -> actual:Types.ty -> Diagnostic.reported
+
+val add_operand_mismatch :
+  state ->
+  at:Source.Definition_span.t ->
+  left:Source.Definition_span.t * Types.ty ->
+  right:Source.Definition_span.t * Types.ty ->
+  Diagnostic.reported
 
 val report_mismatch :
   state -> Source.Definition_span.t -> expected:Types.ty -> actual:Types.ty -> unit

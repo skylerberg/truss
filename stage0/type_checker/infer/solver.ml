@@ -6,7 +6,7 @@ type failure =
 type decision = Holds | Waits | Fails of failure
 
 let read_cause_span : State.cause -> Source.Definition_span.t = function
-  | Bound { at; _ } | Operator at | Method_call at | Loop at | Any_conversion { at; _ } -> at
+  | Bound { at; _ } | Operator { at; _ } | Method_call at | Loop at | Any_conversion { at; _ } -> at
   | Excluded _ -> State.raise_bug "a requirement of a set has no span of its own"
 
 let describe_associated state type_ =
@@ -67,7 +67,13 @@ let report_failure (state : State.state) (goal : State.goal) ?associated subject
   | Excluded reason, _ -> reason shown
   | Bound { at; of_type }, Implements bound ->
       report_unmet_bound state ~at ~of_type shown (Unify.zonk_trait state.unifier bound) ~associated
-  | Operator at, Implements trait ->
+  | ( Operator { at; operands = Some (left, right) },
+      Implements { trait_arguments = [ Types.Type argument ]; _ } )
+    when Option.is_none associated
+         && State.is_within state goal.subject Types.number_types
+         && State.is_within state argument Types.number_types ->
+      State.add_operand_mismatch state ~at ~left:(left, goal.subject) ~right:(right, argument)
+  | Operator { at; _ }, Implements trait ->
       State.add_diagnostic state
         (if Option.is_some associated then Mismatch else No_impl)
         at
@@ -105,6 +111,7 @@ let fail (state : State.state) (goal : State.goal) failure =
     | Refused root -> State.report_decided_in_specification state (read_cause_span goal.cause) root
   in
   List.iter (fun (_, output) -> ignore (State.unify state output (Types.Error report))) goal.outputs;
+  State.record_failure state goal report;
   report
 
 let fail_unification (state : State.state) (goal : State.goal) =
@@ -138,17 +145,13 @@ let project (state : State.state) subject wanted name =
     name
 
 let narrow (state : State.state) goal variable set =
-  if Unify.unify state.unifier variable (Unify.make_fresh_number state.unifier set) then begin
-    state.narrowings <-
-      {
-        narrowed = variable;
-        allowed = set;
-        report_excluded = (fun excluded -> report_failure state goal excluded);
-      }
-      :: state.narrowings;
-    Holds
-  end
-  else Fails (Unmet variable)
+  match variable with
+  | Types.Variable member
+    when Unify.unify state.unifier variable (Unify.make_fresh_number state.unifier set) ->
+      State.record_narrowing state member ~allowed:set ~report_excluded:(fun excluded ->
+          report_failure state goal excluded);
+      Holds
+  | _ -> Fails (Unmet variable)
 
 let decide_within state (goal : State.goal) set =
   match State.normalize state goal.subject with
@@ -330,7 +333,7 @@ let require_within state subject set ~reason =
 let solve_frame (state : State.state) (frame : State.frame) =
   let enclosing = state.unifier.checks_specification in
   let rec loop () =
-    let pending = frame.goals and narrowings = state.narrowings in
+    let pending = frame.goals and log = state.log in
     frame.goals <-
       List.filter
         (fun (goal : State.goal) ->
@@ -342,10 +345,7 @@ let solve_frame (state : State.state) (frame : State.frame) =
               ignore (fail state goal failure);
               false)
         pending;
-    if
-      List.compare_lengths frame.goals pending < 0
-      || List.compare_lengths state.narrowings narrowings > 0
-    then loop ()
+    if List.compare_lengths frame.goals pending < 0 || state.log != log then loop ()
   in
   loop ();
   state.unifier.checks_specification <- enclosing
