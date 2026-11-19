@@ -131,13 +131,13 @@ let is_saved_part database (Part.Any typed as part) =
   match typed with
   | Namespace _ -> false
   | Lowered _ | Test_key _ -> true
-  | _ -> List.mem (Part.locate_package part) database.project
+  | _ -> List.mem (Part.Storage.locate_package part) database.project
 
 let mark_package_database_unsaved database (package_database : package_database) =
   mark_unsaved database (Package package_database.name);
   List.iter (fun file -> mark_unsaved database (File file)) package_database.files
 
-let locate_stale_parts part = (Part.locate_package part, Stage.of_part part)
+let locate_stale_parts part = (Part.Storage.locate_package part, Stage.of_part part)
 
 let mark_stale database part =
   let slot = locate_stale_parts part in
@@ -350,14 +350,14 @@ let obtain_call_graph database package =
 let locate_values database (Part.Any typed as part) =
   match typed with
   | Lowered _ | Test_key _ -> database.item_values
-  | _ -> (obtain_owner database (Part.locate_package part)).values
+  | _ -> (obtain_owner database (Part.Storage.locate_package part)).values
 
 let find_stored (type a) database (typed : a Part.stored) : a part option =
   let part = Part.Any typed in
   match Stored_table.find_opt (locate_values database part) part with
   | None -> None
   | Some (Binding (stored, value)) -> (
-      match Part.find_type_equality typed stored with
+      match Part.Storage.find_type_equality typed stored with
       | Some Equal -> Some value
       | None ->
           Compiler_bug.raise_bug ~stage:"Database" "%s holds a value of another kind"
@@ -431,7 +431,7 @@ let note_untracked_read database (part : Part.t) =
   !observer (Untracked_read part);
   match part with
   | Name name ->
-      let namespace = Part.Any (Namespace (Part.locate_name_package name)) in
+      let namespace = Part.Any (Namespace (Part.Storage.locate_name_package name)) in
       if is_stale database namespace then
         raise_stale_read database namespace
           (Part.show part ^ " is read while its namespace is stale")
@@ -1088,7 +1088,7 @@ let mark_change database package (change : Resolve.Namespace.change) =
 
 let is_package_namespace_part package (part : Part.t) =
   match part with
-  | Name part -> Part.locate_name_package part = package
+  | Name part -> Part.Storage.locate_name_package part = package
   | Stored (Any (Namespace namespace_package)) -> namespace_package = package
   | Input _ | Stored _ -> false
 
@@ -1171,7 +1171,7 @@ let compute_type_facts database paths =
     paths
 
 let compute_part database (Part.Any typed as part) =
-  let package_database = obtain_owner database (Part.locate_package part) in
+  let package_database = obtain_owner database (Part.Storage.locate_package part) in
   let compute_into slot compute = compute_into database part slot compute in
   let compute_value typed compute =
     compute_into (make_value_slot database typed) (fun note -> Some (compute note))
@@ -1511,7 +1511,7 @@ let drain_stage database ~is_drained ~on_raise (stage : Stage.t) packages =
             (Stored_table.iter (fun reader () ->
                  if
                    Stage.of_part reader = stage
-                   && List.mem (Part.locate_package reader) packages
+                   && List.mem (Part.Storage.locate_package reader) packages
                    && is_drained reader
                  then close reader))
             (Part_table.find_opt database.readers (Stored part))
@@ -1551,7 +1551,7 @@ let drain_stage database ~is_drained ~on_raise (stage : Stage.t) packages =
             (fun package ->
               compute_components
                 (list_components database stage package
-                   (list_parts_where (fun part -> Part.locate_package part = package))))
+                   (list_parts_where (fun part -> Part.Storage.locate_package part = package))))
             packages)
 
 let drain_where ?on_bug database ~drains requested =
@@ -1754,7 +1754,7 @@ let retire database (package_database : package_database) =
       | Part.Any (Proof _) as claimant -> claim_roots database (Stored claimant) [] | _ -> ())
     (list_stored_parts package_database);
   let is_package_part part =
-    (not (Stage.is_lowering (Stage.of_part part))) && Part.locate_package part = package
+    (not (Stage.is_lowering (Stage.of_part part))) && Part.Storage.locate_package part = package
   in
   mark_package_database_unsaved database package_database;
   List.iter (fun part -> mark_unsaved database (Value part)) (list_stored_parts package_database);

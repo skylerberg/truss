@@ -1,4 +1,7 @@
-module Part = Part
+module Part : module type of struct
+  include Part
+end
+with module Storage := Part.Storage
 
 type t
 type package_database

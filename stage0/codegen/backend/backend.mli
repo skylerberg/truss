@@ -14,7 +14,30 @@ val create :
   profile ->
   t
 
-module Test_report = Test_report
+module Test_report : sig
+  type outcome = Test_report.outcome =
+    | Passed
+    | Failed
+    | Panicked
+    | Incomplete
+    | Timed_out
+    | Crashed
+
+  val show_outcome : outcome -> string
+
+  type record = Test_report.record = {
+    outcome : outcome;
+    message : string option;
+    echo : string option;
+    output : string option;
+    microseconds : int;
+    cached : bool;
+  }
+
+  module For_testing : sig
+    val parse : tests:int -> string -> (record list, string) result
+  end
+end
 
 type progress =
   | Lowering
