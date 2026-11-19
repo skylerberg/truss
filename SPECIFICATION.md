@@ -907,6 +907,12 @@ public fn load_configs(paths: List[Path]) -> Result[List[Config], ConfigError]
 
 - The target of `calls` is a function parameter, a capability method, or a
   whole capability, never an associated capability set.
+- **`calls` of a capability counts the calls that reach the caller's
+  provider.** A call inside a `provide` goes to the provided
+  implementation, which calls the next provider out only if its `impl`
+  uses that capability. No clause bounds those calls, so a call to an
+  implementation that uses the counted capability has no known count, and
+  a call to one that does not counts as none.
 - `O(f)` means that the cost is at most `c * f + d` for every input, for
   some constants `c` and `d`.
 - `time` counts abstract steps: each primitive operation and each call is one.

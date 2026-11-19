@@ -748,7 +748,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       values
   in
   let after =
-    Operations.spend context after (fun counter ->
+    Operations.spend_on_call context after ~uses:invocation.uses (fun counter ->
         match (invocation.callee, counter.resource) with
         | Capability_method _, Calls _ ->
             Amounts.compute_step_amount context after invocation values counter
@@ -840,17 +840,8 @@ let compute_function_value_amount context frame ~location (function_type : Types
           (Amounts.make_may_be_target context frame callee_term (Types.Function function_type) term)
           (Logic.int 1)
   | Calls (Capability path | Capability_method (path, _)) ->
-      if
-        Types.exists_capability
-          (function
-            | Types.Capability used -> Path.equal used path
-            | Types.Capability_parameter _ | Types.Capability_projection _
-            | Types.Capability_variable _ ->
-                true
-            | Types.Capability_error _ ->
-                Facts.raise_bug "the prover reads a capability with an error")
-          function_type.uses
-      then Operations.declare_unknown_amount context frame counter
+      if Facts.may_use_capability function_type.uses path then
+        Operations.declare_unknown_amount context frame counter
       else Costs.zero
 
 type modelled =
@@ -945,7 +936,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
     | None ->
         let frame = havoc_mut frame in
         let frame =
-          Operations.spend context frame
+          Operations.spend_on_call context frame ~uses:invocation.uses
             (Amounts.compute_step_amount context frame invocation values)
         in
         Without_contract (Some (frame, Facts.arrive context frame "result" result_type))
@@ -1046,9 +1037,11 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
           match through with
           | _ when context.counters = [] -> frame
           | Some (Types.Function function_type, callee_term, _) ->
-              Operations.spend context frame
+              Operations.spend_on_call context frame ~uses:invocation.uses
                 (compute_function_value_amount context frame ~location function_type callee_term)
-          | _ -> Operations.spend context frame (Operations.declare_unknown_amount context frame)
+          | _ ->
+              Operations.spend_on_call context frame ~uses:invocation.uses
+                (Operations.declare_unknown_amount context frame)
         in
         let result =
           match through with
@@ -1101,7 +1094,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
             result_type
         in
         let frame =
-          Operations.spend context frame
+          Operations.spend_on_call context frame ~uses:invocation.uses
             (Amounts.compute_step_amount context frame invocation values)
         in
         Without_contract (Some (frame, result))

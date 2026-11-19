@@ -9,7 +9,6 @@ type loop_exits = {
 type run = {
   infos : Mir.local_info array;
   lambdas : Mir.body array;
-  provides : (Core.origin, Mir.provided list) Hashtbl.t;
   mutable loops : loop_exits list;
   mutable cancelled : (Mir.task * State.frame list ref) list;
 }
@@ -1405,11 +1404,10 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
           Some (write_place context frame run destination tagged)
       | _ -> Facts.raise_unsupported location "a tagged template whose tag the prover cannot read")
   | Provide { provided; _ } ->
-      Hashtbl.replace run.provides statement.origin provided;
-      Some frame
+      Some { frame with enclosing_provides = provided :: frame.enclosing_provides }
   | Provide_end -> (
-      match Hashtbl.find_opt run.provides statement.origin with
-      | Some provided ->
+      match frame.enclosing_provides with
+      | provided :: outer ->
           Some
             (List.fold_left
                (fun frame place ->
@@ -1417,9 +1415,9 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
                  refresh_place context frame
                    (compute_place_type context frame run root)
                    (make_passed_place context run root))
-               frame
+               { frame with enclosing_provides = outer }
                (list_mut_provided_places provided))
-      | None -> Some frame)
+      | [] -> Facts.raise_bug "a `provide` block ends that the prover did not see start")
 
 and write_assignment context run (target : Mir.place) ~(copied : Mir.operand list) read =
   let copied =
@@ -1459,8 +1457,7 @@ and write_assignment context run (target : Mir.place) ~(copied : Mir.operand lis
         }
     | _ -> written)
 
-let make_run ~locals ~lambdas =
-  { infos = locals; lambdas; provides = Hashtbl.create 2; loops = []; cancelled = [] }
+let make_run ~locals ~lambdas = { infos = locals; lambdas; loops = []; cancelled = [] }
 
 let read_formula context (frame : State.frame) (formula : Mir.formula) ~arguments =
   let run = make_run ~locals:formula.locals ~lambdas:formula.lambdas in

@@ -127,16 +127,7 @@ let make_reach_formula context frame (uses : Types.capability_set) (values : Sta
              else make_may_be_target context frame passed.term passed.type_ term)
            values)
   | Capability path | Capability_method (path, _) ->
-      Logic.Boolean
-        (Types.exists_capability
-           (function
-             | Types.Capability used -> Path.equal used path
-             | Types.Capability_parameter _ | Types.Capability_projection _
-             | Types.Capability_variable _ ->
-                 true
-             | Types.Capability_error _ ->
-                 Facts.raise_bug "the prover reads a capability with an error")
-           uses)
+      Logic.Boolean (Facts.may_use_capability uses path)
 
 let make_conditional_amount condition amount =
   match condition with

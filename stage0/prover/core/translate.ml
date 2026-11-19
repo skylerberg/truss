@@ -92,6 +92,7 @@ let make_empty_frame source =
     aliases = Locals.empty;
     slices = Locals.empty;
     lends = Locals.empty;
+    enclosing_provides = [];
     yielded = None;
     yielded_so_far = None;
     spent = [];

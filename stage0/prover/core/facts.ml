@@ -24,6 +24,16 @@ let run_in_source (context : State.context) (source : State.source) read =
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Prover" format
 let list_method_type_arguments ~self_type arguments = Types.Type self_type :: arguments
 
+let may_use_capability (uses : Types.capability_set) capability =
+  Types.exists_capability
+    (function
+      | Types.Capability used -> Path.equal used capability
+      | Types.Capability_parameter _ | Types.Capability_projection _ | Types.Capability_variable _
+        ->
+          true
+      | Types.Capability_error _ -> raise_bug "the prover reads a capability with an error")
+    uses
+
 let read_parameter_name (parameter : Mir.parameter) =
   match Mir.find_local_name parameter.local with
   | Some name -> name

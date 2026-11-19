@@ -96,6 +96,70 @@ let declare_unknown_amount context frame (counter : Costs.counter) =
     (Logic.Operation ("<=", [ Costs.least_amount counter.resource; amount ]));
   amount
 
+type reach = { is_direct : bool; is_through_providers : bool }
+
+let rec find_reach (context : State.context) ~capability (enclosing : Mir.provided list list) uses =
+  let rec find_provider used = function
+    | [] -> None
+    | block :: outer -> (
+        match
+          List.find_opt
+            (fun (provider : Core.provided) -> Path.equal provider.capability used)
+            (List.concat_map (fun (provided : Mir.provided) -> provided.provides) block)
+        with
+        | Some provider -> Some (provider, outer)
+        | None -> find_provider used outer)
+  in
+  let reaches_through ((provider : Core.provided), outer) =
+    match Interface.Definition.find_impl_interface context.lookups.interface provider.impl with
+    | Some impl ->
+        let inner =
+          find_reach context ~capability outer
+            (Types.substitute_capabilities provider.arguments impl.impl_uses)
+        in
+        inner.is_direct || inner.is_through_providers
+    | None -> Facts.raise_bug "the provided `%s` has no interface" (Path.show provider.impl)
+  in
+  let rec list_providers = function
+    | [] -> []
+    | block :: outer ->
+        List.map
+          (fun provider -> (provider, outer))
+          (List.concat_map (fun (provided : Mir.provided) -> provided.provides) block)
+        @ list_providers outer
+  in
+  List.fold_left
+    (fun reach (used : Types.capability) ->
+      let found =
+        match used with
+        | Capability path -> (
+            match find_provider path enclosing with
+            | None -> { is_direct = Path.equal path capability; is_through_providers = false }
+            | Some found -> { is_direct = false; is_through_providers = reaches_through found })
+        | Capability_parameter _ | Capability_projection _ | Capability_variable _ ->
+            {
+              is_direct = Option.is_none (find_provider capability enclosing);
+              is_through_providers = List.exists reaches_through (list_providers enclosing);
+            }
+        | Capability_error _ -> Facts.raise_bug "the prover reads a capability with an error"
+      in
+      {
+        is_direct = reach.is_direct || found.is_direct;
+        is_through_providers = reach.is_through_providers || found.is_through_providers;
+      })
+    { is_direct = false; is_through_providers = false }
+    (Types.list_capabilities uses)
+
+let spend_on_call (context : State.context) (frame : State.frame) ~uses amount_of =
+  spend context frame (fun (counter : Costs.counter) ->
+      match (counter.resource, frame.enclosing_provides) with
+      | Calls (Capability capability | Capability_method (capability, _)), (_ :: _ as enclosing) ->
+          let reach = find_reach context ~capability enclosing uses in
+          if reach.is_through_providers then declare_unknown_amount context frame counter
+          else if reach.is_direct then amount_of counter
+          else Costs.zero
+      | Calls _, _ | Metric _, _ -> amount_of counter)
+
 let convert_to_any context frame (site : Invocation.site) =
   let frame =
     spend context frame (fun (counter : Costs.counter) ->

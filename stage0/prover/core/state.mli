@@ -47,6 +47,7 @@ type frame = {
   aliases : (Logic.term * Mir.place) list Locals.t;
   slices : held_slice Locals.t;
   lends : (Logic.term * (frame -> Logic.term -> frame)) list Locals.t;
+  enclosing_provides : Mir.provided list list;
 }
 
 type changed = {
