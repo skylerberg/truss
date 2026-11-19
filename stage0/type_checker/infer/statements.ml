@@ -267,7 +267,7 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
           Interface.Definition.find_trait_method state.lookups.interface trait.trait ~name ~receiver
         )
       with
-      | Some ((Interface.Impls.From_impl _ | From_bound | From_any) as evidence_source), Some _ ->
+      | Some (Interface.Impls.From_impl _ | From_bound | From_any), Some _ ->
           let index = State.make_trait_reference ~arguments:[] (Well_known.make_path Index) in
           let make_parameter parameter_name type_ : Types.parameter_info =
             { name = parameter_name; mode = Own; type_; has_default = false }
@@ -302,7 +302,6 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
                       receiver;
                       self_type = base_type;
                       instantiation = Types.no_instantiation;
-                      evidence = State.convert_evidence evidence_source;
                     };
                 arguments =
                   [ make_argument base 0 Mut; make_argument key 1 Own; make_argument value 2 Own ];

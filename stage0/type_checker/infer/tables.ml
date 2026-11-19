@@ -1,11 +1,5 @@
 type local = Syntax.id
 
-type evidence =
-  | Impl of { impl : Path.t; substitution : Types.substitution }
-  | Bound
-  | Dynamic
-  | Built_in
-
 type callee =
   | Function of { path : Path.t; instantiation : Types.instantiation }
   | Trait_method of {
@@ -14,7 +8,6 @@ type callee =
       receiver : Path.receiver;
       self_type : Types.ty;
       instantiation : Types.instantiation;
-      evidence : evidence;
     }
   | Capability_method of { capability : Path.t; name : string }
   | Constructor of { type_ : Path.t; variant : string option; type_arguments : Types.argument list }

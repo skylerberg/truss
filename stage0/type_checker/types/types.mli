@@ -99,13 +99,6 @@ val substitute_trait : substitution -> trait_reference -> trait_reference
 val substitute_function : substitution -> function_type -> function_type
 val substitute_capabilities : substitution -> capability_set -> capability_set
 val substitute_substitution : substitution -> substitution -> substitution
-
-val map_substitution :
-  argument:(argument -> argument) ->
-  capabilities:(capability_set -> capability_set) ->
-  substitution ->
-  substitution
-
 val extract_result_type : result -> ty
 val map : ?map_capabilities:(capability_set -> capability_set) -> (ty -> ty option) -> ty -> ty
 val exists : ?resolve:(ty -> ty) -> (ty -> bool) -> ty -> bool

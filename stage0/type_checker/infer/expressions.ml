@@ -360,7 +360,7 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
               State.make_trait_reference ~arguments:[] (Well_known.make_path owner)
             in
             match State.find_evidence state base_type index_trait with
-            | Some evidence ->
+            | Some _ ->
                 let resolve_associated associated =
                   State.resolve_associated_type state base_type index_trait associated
                     ~at:(State.read_span state value.id)
@@ -381,7 +381,6 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
                             receiver;
                             self_type = base_type;
                             instantiation = Types.no_instantiation;
-                            evidence = State.convert_evidence evidence;
                           };
                       arguments =
                         [
