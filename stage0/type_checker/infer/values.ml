@@ -217,7 +217,7 @@ and check_list_literal state env ?expected (value : Syntax.expression) items =
       register_collection ();
       collection
   | Some (Types.Named { path; arguments = [ Types.Type element; count ] } as array)
-    when Intrinsic.find_builtin path = Some Array ->
+    when Well_known.find_builtin_type path = Some Array ->
       (match count with
       | Types.Value (Known count)
         when (not (Z.fits_int count)) || Z.to_int count <> List.length items ->

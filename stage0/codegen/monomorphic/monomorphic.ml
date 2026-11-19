@@ -129,8 +129,8 @@ let ground_fields context substitution (fields : Types.field list) =
       (field.field_name, Memory_layout.Typed (ground context substitution field.field_type)))
     fields
 
-let compute_named_builtin_shape ty (builtin : Intrinsic.builtin) (arguments : Ground.argument list)
-    : Memory_layout.shape =
+let compute_named_builtin_shape ty (builtin : Language.Builtin_type.t)
+    (arguments : Ground.argument list) : Memory_layout.shape =
   match (builtin, arguments) with
   | Int8, [] -> Scalar (Integer Int8)
   | Int16, [] -> Scalar (Integer Int16)
@@ -162,7 +162,7 @@ let find_builtin_shape (ty : Ground.ty) : Memory_layout.shape option =
   | Named { path; arguments } ->
       Option.map
         (fun builtin -> compute_named_builtin_shape ty builtin arguments)
-        (Intrinsic.find_builtin path)
+        (Well_known.find_builtin_type path)
 
 let compute_defined_shape context ty path arguments : Memory_layout.shape =
   match context.find_type_interface path with

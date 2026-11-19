@@ -64,8 +64,7 @@ develop as well as make it easier to bootstrap the compiler in parts.
 ### Libraries
 
 - **A library is a contract with more than one consumer, or a unit that
-  must not see its consumer's dependencies,** as `parser` lists `token` but
-  not `lexer`, so it cannot call the scanner.
+  must not see its consumer's dependencies.**
 - **Each library belongs to one area of stage0,** a directory under
   `stage0`. The dependencies between areas form no cycle.
 - **A unit of several modules inside a library is a subdirectory.** The

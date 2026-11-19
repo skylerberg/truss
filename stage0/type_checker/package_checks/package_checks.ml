@@ -66,7 +66,7 @@ let check_sealed (lookups : Lookups.t) (declaration : Resolve.Names.declaration)
       read_definition lookups declaration )
   with
   | Some ((trait, type_), _), (definition, spans) -> (
-      match (Types.find_integer_implementors trait, Intrinsic.find_builtin type_) with
+      match (Types.find_integer_implementors trait, Well_known.find_builtin_type type_) with
       | Some builtins, Some builtin when List.mem builtin builtins -> []
       | Some _, _ ->
           [

@@ -1121,7 +1121,7 @@ let build_collection_literal state (value : Syntax.expression) (elements : Core.
   match read_type state value with
   | Types.Named { path; arguments = [ Types.Type element ] } when Well_known.is List path ->
       build_list_literal state ~origin:value.id element elements
-  | Types.Named { path; _ } when Intrinsic.find_builtin path = Some Array ->
+  | Types.Named { path; _ } when Well_known.find_builtin_type path = Some Array ->
       Collection_literal { elements; construction = Array }
   | Types.Named { path; _ } when Well_known.is Sequence path || Well_known.is Finite_set path ->
       Collection_literal { elements; construction = Specification_only }

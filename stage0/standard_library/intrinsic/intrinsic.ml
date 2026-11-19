@@ -1,82 +1,4 @@
-let module_ = Path.make_standard_module [ "intrinsic" ]
-
-type builtin =
-  | Int8
-  | Int16
-  | Int32
-  | Int64
-  | UInt8
-  | UInt16
-  | UInt32
-  | UInt64
-  | Float32
-  | Float64
-  | Bool
-  | Character
-  | Unit
-  | Never
-  | Integer
-  | Array
-  | Storage
-  | View
-  | Handle
-  | Shared
-
-let builtins =
-  [
-    Int8;
-    Int16;
-    Int32;
-    Int64;
-    UInt8;
-    UInt16;
-    UInt32;
-    UInt64;
-    Float32;
-    Float64;
-    Bool;
-    Character;
-    Unit;
-    Never;
-    Integer;
-    Array;
-    Storage;
-    View;
-    Handle;
-    Shared;
-  ]
-
-let show_builtin = function
-  | Int8 -> "Int8"
-  | Int16 -> "Int16"
-  | Int32 -> "Int32"
-  | Int64 -> "Int64"
-  | UInt8 -> "UInt8"
-  | UInt16 -> "UInt16"
-  | UInt32 -> "UInt32"
-  | UInt64 -> "UInt64"
-  | Float32 -> "Float32"
-  | Float64 -> "Float64"
-  | Bool -> "Bool"
-  | Character -> "Character"
-  | Unit -> "Unit"
-  | Never -> "Never"
-  | Integer -> "Integer"
-  | Array -> "Array"
-  | Storage -> "Storage"
-  | View -> "View"
-  | Handle -> "Handle"
-  | Shared -> "Shared"
-
-let make_builtin_path builtin = Path.Top { module_; name = show_builtin builtin }
-
-let builtins_by_path =
-  Path.Map.of_seq
-    (List.to_seq (List.map (fun builtin -> (make_builtin_path builtin, builtin)) builtins))
-
-let find_builtin path = Path.Map.find_opt path builtins_by_path
-
-let convert_libc_scalar : Libc.scalar -> builtin = function
+let convert_libc_scalar : Libc.scalar -> Language.Builtin_type.t = function
   | UInt8 -> UInt8
   | Int32 -> Int32
   | UInt32 -> UInt32
@@ -390,7 +312,8 @@ let show_operation = function
   | Lend operation -> show_lend operation
   | Runtime operation -> show_runtime operation
 
-let make_operation_path operation = Path.Top { module_; name = show_operation operation }
+let make_operation_path operation =
+  Path.Top { module_ = Well_known.intrinsic_module; name = show_operation operation }
 
 let list_uses : operation -> Path.t list = function
   | Runtime (Shared_update | Shared_key) -> [ Well_known.make_path Tasks ]

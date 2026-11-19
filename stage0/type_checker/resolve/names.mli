@@ -71,7 +71,7 @@ type generic_kind = Type_kind | Value_kind
 
 val find_syntax_error : lookups -> key -> Parts.part -> Diagnostic.reported option
 val is_broken : lookups -> key -> Parts.part -> bool
-val list_builtin_generics : Intrinsic.builtin -> (string * generic_kind) list
+val list_builtin_generics : Language.Builtin_type.t -> (string * generic_kind) list
 val find_generics : lookups -> Path.t -> (string * generic_kind) list option
 
 type 'visible lookup = Visible of 'visible | Hidden of (Path.t * visibility) | Absent

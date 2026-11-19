@@ -388,14 +388,14 @@ and find_character_tag state (literal : Syntax.string_literal) =
   | Some tag -> (
       match State.find_target state tag.last with
       | Some (Definition (Type, path)) -> (
-          match Intrinsic.find_builtin path with
+          match Well_known.find_builtin_type path with
           | Some ((Character | UInt8) as builtin) -> Some builtin
           | _ -> None)
       | _ -> None)
   | None -> None
 
 and check_character_value (state : State.state) id (literal : Syntax.string_literal)
-    (builtin : Intrinsic.builtin) =
+    (builtin : Language.Builtin_type.t) =
   let text = literal.first.value in
   let scalars =
     let rec count index scalars =

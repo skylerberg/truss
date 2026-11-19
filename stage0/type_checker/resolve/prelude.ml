@@ -61,11 +61,11 @@ let locate (path : Path.t) =
 let types =
   List.map locate
     (List.filter_map
-       (fun (builtin : Intrinsic.builtin) ->
+       (fun (builtin : Language.Builtin_type.t) ->
          match builtin with
          | Storage | View | Handle | Shared -> None
-         | _ -> Some (Intrinsic.make_builtin_path builtin))
-       Intrinsic.builtins
+         | _ -> Some (Well_known.make_builtin_type_path builtin))
+       Language.Builtin_type.all
     @ List.map Well_known.make_path items)
   @ List.map (fun name -> (name, Grant.prelude_capability_module)) Grant.prelude_capabilities
 

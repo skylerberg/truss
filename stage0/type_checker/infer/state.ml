@@ -1118,7 +1118,7 @@ let check_cost state (cost : Syntax.cost) =
 let find_sequence_element (sequence : Types.ty) =
   match sequence with
   | Types.Named { path; arguments = Types.Type element :: _ }
-    when Well_known.is_buffer_sequence path || Intrinsic.find_builtin path = Some Array ->
+    when Well_known.is_buffer_sequence path || Well_known.find_builtin_type path = Some Array ->
       Some element
   | _ -> None
 

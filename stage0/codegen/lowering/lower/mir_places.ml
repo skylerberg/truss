@@ -108,7 +108,7 @@ type sequence =
 let find_sequence state (place : Lowered.place) (sequence : Types.ty) =
   match Lowering.ground state sequence with
   | Named { path; arguments = [ Type element; Value count ] } as ty
-    when Intrinsic.find_builtin path = Some Array ->
+    when Well_known.find_builtin_type path = Some Array ->
       Inline_array
         {
           array = place;

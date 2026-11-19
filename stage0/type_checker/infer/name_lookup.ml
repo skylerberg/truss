@@ -86,9 +86,9 @@ and check_name (state : State.state) (env : State.env) (value : Syntax.expressio
           Use (Form.build_constant_place state ~origin:value.id path));
       Interface.Definition.read_constant_type state.lookups.interface path
   | Definition (Type, path) ->
-      if Intrinsic.find_builtin path = Some Unit then begin
+      if Well_known.find_builtin_type path = Some Unit then begin
         state.tables.resolutions.(value.id) <-
-          Some (Variant_value { type_ = Types.unit; variant = Intrinsic.show_builtin Unit });
+          Some (Variant_value { type_ = Types.unit; variant = Language.Builtin_type.show Unit });
         State.register_expression state value (fun () -> Construct { variant = None; fields = [] });
         Types.unit
       end

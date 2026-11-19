@@ -88,7 +88,7 @@ let make_buffer_capacity context element term =
   Facts.declare context (Logic.Function (symbol, [ Facts.declare_sort context ty ], Logic.Int));
   Logic.Apply (symbol, [ term ])
 
-let make_buffer_model context (builtin : Intrinsic.builtin) element term =
+let make_buffer_model context (builtin : Language.Builtin_type.t) element term =
   let ty = Types.make_builtin builtin ~arguments:[ Type element ] in
   let symbol = Logic.Symbol.Model ty in
   Facts.declare context
@@ -300,7 +300,7 @@ let find_scalar_bytes element : int option =
 let make_length_in_range value =
   Logic.(less_equal (int 0) value &&& Facts.make_in_range (Types.make_builtin Int64) value)
 
-let model_buffer context frame (builtin : Intrinsic.builtin) element term =
+let model_buffer context frame (builtin : Language.Builtin_type.t) element term =
   let sequence = make_buffer_model context builtin element term in
   Facts.assume context frame
     (make_length_in_range (Models.make_sequence_length context element sequence));
@@ -736,7 +736,7 @@ let find_sequence_element context frame (sequence : Types.ty) =
 
 let find_sequence_model context frame (sequence : Types.ty) term =
   match sequence with
-  | Types.Named { path; _ } when Intrinsic.find_builtin path = Some Array ->
+  | Types.Named { path; _ } when Well_known.find_builtin_type path = Some Array ->
       Models.make_array_model context frame sequence term
   | _ -> (
       match
@@ -777,7 +777,7 @@ let write_sequence context frame (sequence : Types.ty) before ~write_model =
   let element = find_sequence_element context frame sequence in
   let after =
     match (sequence, Facts.find_constructors context sequence) with
-    | Types.Named { path; _ }, _ when Intrinsic.find_builtin path = Some Array ->
+    | Types.Named { path; _ }, _ when Well_known.find_builtin_type path = Some Array ->
         let after = Facts.arrive context frame "changed" sequence in
         write_model
           ~before:(Models.make_array_model context frame sequence before)
@@ -790,7 +790,7 @@ let write_sequence context frame (sequence : Types.ty) before ~write_model =
         let builtin =
           match buffer_type with
           | Types.Named { path; _ } -> (
-              match Intrinsic.find_builtin path with
+              match Well_known.find_builtin_type path with
               | Some ((Storage | View) as builtin) -> builtin
               | _ -> Facts.raise_bug "the field of `%s` is no buffer" (Types.show sequence))
           | _ -> Facts.raise_bug "the field of `%s` is no buffer" (Types.show sequence)

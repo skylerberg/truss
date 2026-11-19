@@ -252,7 +252,7 @@ let compute_step_amount context frame (invocation : Invocation.t) (values : Stat
               | Some passed -> (
                   match passed.type_ with
                   | Types.Named { path; arguments = [ Types.Type element ] } -> (
-                      match Intrinsic.find_builtin path with
+                      match Well_known.find_builtin_type path with
                       | Some ((Storage | View) as builtin) ->
                           Models.make_sequence_length context element
                             (Intrinsics.make_buffer_model context builtin element passed.term)
@@ -320,15 +320,15 @@ let declare_held_symbol context ty term =
 let compute_buffer_elements context (ty : Types.ty) =
   match ty with
   | Types.Named { path; arguments = [ Types.Type element; Types.Value _ ] }
-    when Intrinsic.find_builtin path = Some Array ->
+    when Well_known.find_builtin_type path = Some Array ->
       Option.map
         (fun model_of -> (element, model_of))
         (Models.find_model_function context ty ~model:(Models.make_sequence_type element))
   | Types.Named { path; arguments = [ Types.Type element ] }
-    when Intrinsic.find_builtin path = Some Storage ->
+    when Well_known.find_builtin_type path = Some Storage ->
       Some (element, fun term -> Intrinsics.make_buffer_model context Storage element term)
   | Types.Named { path; arguments = [ Types.Type element ] }
-    when Intrinsic.find_builtin path = Some View ->
+    when Well_known.find_builtin_type path = Some View ->
       Some (element, fun term -> Intrinsics.make_buffer_model context View element term)
   | Types.Named { path; arguments } when Types.find_builtin ty = None -> (
       match Interface.Definition.find_interface context.lookups.interface path with
@@ -337,8 +337,8 @@ let compute_buffer_elements context (ty : Types.ty) =
           let substitution = Types.make_substitution type_generics arguments in
           match Types.substitute substitution field.field_type with
           | Types.Named { path = field_path; arguments = [ Types.Type element ] }
-            when Intrinsic.find_builtin field_path = Some Storage
-                 || Intrinsic.find_builtin field_path = Some View ->
+            when Well_known.find_builtin_type field_path = Some Storage
+                 || Well_known.find_builtin_type field_path = Some View ->
               Option.map
                 (fun model_of -> (element, model_of))
                 (Models.find_model_function context ty ~model:(Models.make_sequence_type element))
@@ -462,7 +462,7 @@ and compute_potential context (frame : State.frame) ?(seen = []) (ty : Types.ty)
               Facts.add_frame_fact context frame
                 Logic.(less_equal (int 0) slack &&& less_equal slack (multiply (int 2) length));
               (match ty with
-              | Types.Named { path; _ } when Intrinsic.find_builtin path = Some Storage ->
+              | Types.Named { path; _ } when Well_known.find_builtin_type path = Some Storage ->
                   let saved =
                     Logic.subtract
                       (Logic.multiply (Logic.int 2) length)
@@ -472,8 +472,8 @@ and compute_potential context (frame : State.frame) ?(seen = []) (ty : Types.ty)
                     (Logic.equal slack
                        (Logic.ite (Logic.greater_equal saved (Logic.int 0)) saved (Logic.int 0)))
               | Types.Named { path; _ }
-                when Intrinsic.find_builtin path = Some View
-                     || Intrinsic.find_builtin path = Some Array ->
+                when Well_known.find_builtin_type path = Some View
+                     || Well_known.find_builtin_type path = Some Array ->
                   Facts.add_frame_fact context frame (Logic.equal slack (Logic.int 0))
               | _ -> ());
               let elements =
