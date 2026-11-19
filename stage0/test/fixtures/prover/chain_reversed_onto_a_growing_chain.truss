@@ -1,0 +1,10 @@
+type Chain =
+  | End
+  | indirect Link(value: Int64, rest: Chain)
+
+fn reverse_onto(chain: Chain, reversed: own Chain) -> Chain {
+  match chain {
+    End => reversed
+    Link(value, rest) => reverse_onto(rest, reversed: Chain.Link(value, rest: own reversed))
+  }
+}

@@ -79,7 +79,7 @@ let rec index_sequence (context : State.context) element term index =
                   Logic.(
                     less_equal (int 0) position
                     &&& less position (make_sequence_length context element ranked)
-                    ==> (less_equal (int 0) below &&& less below (rank context sequence ranked))) )
+                    ==> less below (rank context sequence ranked)) )
             in
             Facts.add_fact context fact);
       Some (at term index)
@@ -88,6 +88,12 @@ let rec index_sequence (context : State.context) element term index =
 and rank context ty term =
   let symbol = Logic.Symbol.Rank ty in
   Facts.declare context (Logic.Function (symbol, [ Facts.declare_sort context ty ], Logic.Int));
+  Facts.run_once context (Non_negative_rank ty) (fun () ->
+      let each = Logic.Symbol.Variable { label = "ranked.value"; numbers = [] } in
+      Facts.add_fact context
+        (Logic.forall
+           ( [ (each, Facts.declare_sort context ty) ],
+             Logic.less_equal (Logic.int 0) (Logic.Apply (symbol, [ Logic.Symbol each ])) )));
   (match ty with
   | Types.Named { path; arguments = [ Types.Type element ] }
     when context.ranking && Path.equal path sequence_path ->

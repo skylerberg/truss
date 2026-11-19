@@ -118,14 +118,14 @@ let list_structural_parameters context (frame : State.frame) (clauses : State.cl
          match parameter.local with
          | Self -> (
              match (frame.old_self, frame.self_type) with
-             | Some entry, Some ty when is_datatype ty -> [ (ty, entry, index) ]
+             | Some entry, Some ty when is_datatype ty -> [ (parameter, ty, entry, index) ]
              | _ -> [])
          | local -> (
              match
                ( Locals.find_opt (Core_local local) frame.old_locals,
                  Facts.find_local_type context frame (Core_local local) )
              with
-             | Some entry, Some ty when is_datatype ty -> [ (ty, entry, index) ]
+             | Some entry, Some ty when is_datatype ty -> [ (parameter, ty, entry, index) ]
              | _ -> []))
        clauses.parameters)
 
@@ -250,21 +250,32 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       when context.terminates && is_self_call
            && list_structural_parameters context frame callee_clauses <> [] ->
         let pairs = list_structural_parameters context frame callee_clauses in
-        let before = List.map (fun (ty, entry, _) -> Models.rank context ty entry) pairs in
+        let before = List.map (fun (_, ty, entry, _) -> Models.rank context ty entry) pairs in
         let after =
           List.map
-            (fun (ty, _, index) -> Models.rank context ty (lookup_argument_at_index values index))
+            (fun (_, ty, _, index) ->
+              Models.rank context ty (lookup_argument_at_index values index))
             pairs
+        in
+        let compared =
+          match
+            List.map
+              (fun (parameter, _, _, _) ->
+                Printf.sprintf "`%s`" (Facts.read_parameter_name parameter))
+              pairs
+          with
+          | [ name ] -> name
+          | names -> "the first of " ^ String.concat " and " names ^ " that it changes"
         in
         Facts.oblige context frame Termination location
           [
             Text
-              "This recursive call may not be on a part of its parameters: give the function a \
-               `decreases` clause.";
+              (Printf.sprintf
+                 "This recursive call may not be on a part of %s: give the function a `decreases` \
+                  clause."
+                 compared);
           ]
-          Logic.(
-            conjunction (List.map (fun right_term -> less_equal (int 0) right_term) before)
-            &&& Amounts.compare_lexicographically before after)
+          (Amounts.compare_lexicographically before after)
     | ([], _ | _, []) when context.terminates ->
         Facts.oblige context frame Termination location
           [
