@@ -129,16 +129,18 @@ let list_structural_parameters context (frame : State.frame) (clauses : State.cl
              | _ -> []))
        clauses.parameters)
 
-let rec applies symbol (term : Logic.term) =
+let rec has_application_of symbol (term : Logic.term) =
   match term with
   | Apply (applied, _) when applied = symbol -> true
-  | Forall (_, _, body) | Exists (_, body) -> applies symbol body
-  | _ -> List.exists (applies symbol) (Logic.list_arguments term)
+  | Forall (_, _, body) | Exists (_, body) -> has_application_of symbol body
+  | _ -> List.exists (has_application_of symbol) (Logic.list_arguments term)
 
 let find_definition ~symbol result (term : Logic.term) =
   match term with
-  | Operation ("=", [ left; right ]) when left = result && not (applies symbol right) -> Some right
-  | Operation ("=", [ left; right ]) when right = result && not (applies symbol left) -> Some left
+  | Operation ("=", [ left; right ]) when left = result && not (has_application_of symbol right) ->
+      Some right
+  | Operation ("=", [ left; right ]) when right = result && not (has_application_of symbol left) ->
+      Some left
   | _ -> None
 
 let call_contract context (frame : State.frame) (site : Invocation.site) (invocation : Invocation.t)
