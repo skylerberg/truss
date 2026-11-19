@@ -201,13 +201,11 @@ let look_up_capabilities state ~table capabilities =
     List.map
       (fun capability ->
         let evidence = Emit_c.Ir_builder.allocate_local state.builder Convention.evidence in
-        let name = Path.show capability in
         Emit_c.Ir_builder.emit state.builder
           (Call
              {
                target = Intrinsic Capability_find;
-               arguments =
-                 [ table; Constant (Bytes name); Lowered.make_uint64_constant (String.length name) ];
+               arguments = [ table; Constant (Capability capability) ];
                result = Returned (Lowered.make_local_place evidence);
              });
         (capability, Lowered.Copy (Lowered.make_local_place evidence)))

@@ -702,12 +702,7 @@ let () =
         Emit_c.Ir_builder.emit builder
           (Assign
              ( Lowered.make_local_place handle,
-               Build
-                 {
-                   ty = handle_ty;
-                   variant = None;
-                   fields = [ ("descriptor", Copy (Lowered.make_local_place first)) ];
-                 } ));
+               Builtin_records.Handle.build ~descriptor:(Copy (Lowered.make_local_place first)) ));
         Emit_c.Ir_builder.emit builder (Drop (Lowered.make_local_place handle));
         let second = open_test_file () in
         let same =

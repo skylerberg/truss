@@ -40,6 +40,7 @@ and constant =
   | Null
   | Symbol_address of Item.t
   | Site of site
+  | Capability of Path.t
   | Size_of of Ground.ty
   | Alignment_of of Ground.ty
 
@@ -132,7 +133,7 @@ type intrinsic =
 
 type target =
   | Direct of { function_ : function_ref; signature : signature }
-  | Indirect of { value : operand; signature : signature }
+  | Indirect of { code : operand; environment : operand; signature : signature }
   | Intrinsic of intrinsic
   | Foreign of Libc.declaration
   | Evidence_call of { evidence : operand; capability : Path.t; slot : int; signature : signature }

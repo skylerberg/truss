@@ -25,6 +25,7 @@
   monomorphic
   zarith
   storage
+  builtin_records
   intrinsic
   types
   core

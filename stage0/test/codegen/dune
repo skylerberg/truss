@@ -88,6 +88,7 @@
   intrinsic_signatures
   libc
   storage
+  builtin_records
   unix
   monomorphic
   resolve

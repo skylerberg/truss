@@ -69,14 +69,11 @@ let check_calls interface ~find_call_edges item = function
 
 module Item_table = Hashtbl.Make (Lowered.Item)
 
-let derive_fragment_hash = Blake3.derive_key ~context:"truss 2026-11-17 item fragment hash"
-
 let evaluated_fragment_hash =
   Blake3.derive_key ~context:"truss 2026-11-16 evaluated constant fragment hash" ""
 
 let hash_fragment = function
-  | Compiled fragment | Folded (_, fragment) ->
-      derive_fragment_hash (Emit_c.render_fragment fragment)
+  | Compiled fragment | Folded (_, fragment) -> Emit_c.hash fragment
   | Evaluate _ -> evaluated_fragment_hash
 
 let derive_test_keys ~read_lowered ~read_known_key =
@@ -233,6 +230,7 @@ let rec build ?report_progress ?(tests = false) ?(supplied = []) backend ~roots 
           Emit_c.render_sites_file
             ~resolve_position:(fun site -> make_position backend (locate_site backend.lookups site))
             linked );
+        ("capabilities", Emit_c.render_capabilities_file linked);
       ]
   in
   match
