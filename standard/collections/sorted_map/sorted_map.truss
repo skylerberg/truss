@@ -1,7 +1,6 @@
 use standard::collections
 use standard::core
 use standard::list
-use standard::list::slice
 use standard::map
 
 fn strictly_ascending[Key: Ordered, Value](entries: Sequence[map::Entry[Key, Value]]) -> Bool
@@ -26,7 +25,6 @@ theorem ascending_below[Key: Ordered, Value](
 {
   if bound > 0 {
     ascending_below(entries, key: key, last: last, bound: bound - 1)
-    slice::less_then_at_most(entries[bound - 1].key, second: entries[last].key, third: key)
   }
 }
 
@@ -46,7 +44,6 @@ theorem ascending_above[Key: Ordered, Value](
 {
   if bound < entries.length() {
     ascending_above(entries, key: key, first: first, bound: bound + 1)
-    slice::at_most_then_less(key, second: entries[first].key, third: entries[bound].key)
   }
 }
 
@@ -84,16 +81,11 @@ fn collections::SortedMap[Key: Ordered, Value].search(self, key: Key) -> Result[
       }
       Greater => {
         proof {
-          slice::greater_is_less_reversed(self.entries[middle].key, second: key)
           ascending_above(self.entries.model(), key: key, first: middle, bound: middle + 1)
         }
         high = middle
       }
       Equal => {
-        proof {
-          slice::equal_by_compare(self.entries[middle].key, second: key)
-          slice::equal_is_at_most_reversed(self.entries[middle].key, second: key)
-        }
         return Ok(middle)
       }
     }
@@ -110,16 +102,6 @@ theorem present_where_equal[Key: Ordered, Value](
   requires map.entries.model()[position].key == key
   ensures map.search(key) is Ok(_)
 {
-  match map.search(key) {
-    Ok(_) => {}
-    Err(after) => {
-      if position < after {
-        slice::less_is_not_equal(map.entries.model()[position].key, second: key)
-      } else {
-        slice::less_is_not_equal(key, second: map.entries.model()[position].key)
-      }
-    }
-  }
 }
 
 theorem absent_where_split[Key: Ordered, Value](
@@ -132,16 +114,6 @@ theorem absent_where_split[Key: Ordered, Value](
   requires forall i in split..map.entries.length() => key < map.entries.model()[i].key
   ensures map.search(key) is Err(_)
 {
-  match map.search(key) {
-    Ok(index) => {
-      if index < split {
-        slice::less_is_not_equal(map.entries.model()[index].key, second: key)
-      } else {
-        slice::less_is_not_equal(key, second: map.entries.model()[index].key)
-      }
-    }
-    Err(_) => {}
-  }
 }
 
 type Numbered[Key, Value](entry: map::Entry[Key, Value], ordinal: UInt64)
@@ -202,7 +174,6 @@ fn merged[Key: Ordered, Value](
         }
         Greater => {
           proof {
-            slice::greater_is_less_reversed(left[last_left].key, second: right[last_right].key)
             ascending_below(right.model(), key: left.model()[last_left].key, last: last_right, bound: last_right)
           }
           from_left = true
@@ -513,9 +484,6 @@ public fn collections::SortedMap[Key: Ordered, Value].at_or_before(self, key: Ke
 {
   let position = self.index_after(key)
   if position > 0 {
-    proof {
-      slice::at_most_is_not_less_reversed(self.entries.model()[position - 1].key, second: key)
-    }
     Some(self.entries[position - 1])
   } else {
     None
@@ -528,9 +496,6 @@ public fn collections::SortedMap[Key: Ordered, Value].at_or_after(self, key: Key
 {
   let position = self.index_at_or_after(key)
   if position < self.entries.length() {
-    proof {
-      slice::at_most_is_not_less_reversed(key, second: self.entries.model()[position].key)
-    }
     Some(self.entries[position])
   } else {
     None
