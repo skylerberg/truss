@@ -322,9 +322,9 @@ and decide_implements state ~depth goal trait =
 
 and select state ~depth goal trait ~subject ~wanted =
   Interface.Impls.check_recursion_depth ~depth subject wanted;
-  match Interface.Impls.select_impl state.lookups.interface subject wanted with
-  | None -> Fails Unmet
-  | Some impl -> (
+  match Interface.Impls.list_matching_impls state.lookups.interface subject wanted with
+  | [] -> Fails Unmet
+  | { impl; _ } :: _ -> (
       let substitution =
         Types.make_substitution impl.impl_generics
           (State.make_fresh_generic_arguments state impl.impl_generics)

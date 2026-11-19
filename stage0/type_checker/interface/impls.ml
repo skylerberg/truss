@@ -116,7 +116,10 @@ let rec match_type ~variables (substitution : Types.substitution) pattern type_ 
   | Types.Parameter parameter, _ when List.mem parameter variables -> (
       match Types.find_argument parameter substitution with
       | Some (Types.Type bound) ->
-          if Types.equal bound type_ || Types.is_open_type type_ then Some substitution else None
+          if Types.equal bound type_ || Types.is_open_type type_ then Some substitution
+          else if Types.is_open_type bound then
+            Some (Types.bind_argument parameter (Types.Type type_) substitution)
+          else None
       | Some (Types.Value _) -> None
       | None -> Some (Types.bind_argument parameter (Types.Type type_) substitution))
   | _, argument_type when Types.is_open_type argument_type -> Some substitution
@@ -262,20 +265,26 @@ let list_candidate_impls lookups ~head (wanted : Types.trait_reference) =
 let list_impl_variables (impl : Types.impl_interface) =
   List.map (fun (generic : Types.generic) -> generic.generic) impl.impl_generics
 
-let select_impl lookups type_ (wanted : Types.trait_reference) =
-  List.find_opt
-    (fun (impl : Types.impl_interface) ->
-      let variables = list_impl_variables impl in
-      Option.is_some
-        (Option.bind
-           (match_arguments ~variables Types.no_substitution impl.implements.trait_arguments
-              wanted.trait_arguments) (fun substitution ->
-             match_type ~variables substitution impl.for_type type_)))
-    (List.filter_map
-       (Definition.find_impl_interface lookups)
-       (Option.fold ~none:[]
-          ~some:(fun head -> list_candidate_impls lookups ~head wanted)
-          (find_head type_)))
+type matched_impl = {
+  impl_path : Path.t;
+  impl : Types.impl_interface;
+  substitution : Types.substitution;
+}
+
+let list_matching_impls lookups type_ (wanted : Types.trait_reference) =
+  List.filter_map
+    (fun impl_path ->
+      Option.bind (Definition.find_impl_interface lookups impl_path) (fun impl ->
+          let variables = list_impl_variables impl in
+          Option.map
+            (fun substitution -> { impl_path; impl; substitution })
+            (Option.bind (match_type ~variables Types.no_substitution impl.for_type type_)
+               (fun substitution ->
+                 match_arguments ~variables substitution impl.implements.trait_arguments
+                   wanted.trait_arguments))))
+    (Option.fold ~none:[]
+       ~some:(fun head -> list_candidate_impls lookups ~head wanted)
+       (find_head type_))
 
 let check_recursion_depth ~depth type_ trait =
   if depth > Properties.recursion_limit then
@@ -310,60 +319,42 @@ let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_cond
         | Types.Any _ ->
             if list_matching_bounds lookups ~list_bounds type_ wanted <> [] then Some From_any
             else None
-        | Types.Named { path; _ } ->
+        | Types.Named _ ->
             List.find_map
-              (fun impl_path ->
-                match Definition.find_impl_interface lookups impl_path with
-                | None -> None
-                | Some impl -> (
-                    let variables = list_impl_variables impl in
-                    match match_type ~variables Types.no_substitution impl.for_type type_ with
-                    | None -> None
-                    | Some substitution -> (
-                        match
-                          match_arguments ~variables substitution impl.implements.trait_arguments
-                            wanted.trait_arguments
-                        with
-                        | None -> None
-                        | Some substitution ->
-                            let associated =
-                              List.map
-                                (fun (name, type_) -> (name, Types.substitute substitution type_))
-                                impl.implements.associated
-                            in
-                            let associated =
-                              associated
-                              @ List.filter_map
-                                  (fun (name, _) ->
-                                    if List.mem_assoc name associated then None
-                                    else
-                                      Some
-                                        ( name,
-                                          normalize lookups ~list_bounds
-                                            (Types.Projection
-                                               {
-                                                 base = type_;
-                                                 trait = { wanted with associated = [] };
-                                                 name;
-                                               }) ))
-                                  wanted.associated
-                            in
-                            let conditions_hold =
-                              (not checks_conditions)
-                              || List.for_all
-                                   (fun (argument, bound) ->
-                                     Option.is_some
-                                       (find_evidence lookups ~list_bounds ~depth:(depth + 1)
-                                          argument bound))
-                                   (list_required_bounds impl.impl_generics substitution)
-                            in
-                            if
-                              conditions_hold
-                              && has_matching_associated_types lookups ~list_bounds wanted
-                                   ~base:None associated
-                            then Some (From_impl { impl = impl_path; substitution })
-                            else None)))
-              (list_candidate_impls lookups ~head:path wanted))
+              (fun { impl_path; impl; substitution } ->
+                let associated =
+                  List.map
+                    (fun (name, type_) -> (name, Types.substitute substitution type_))
+                    impl.implements.associated
+                in
+                let associated =
+                  associated
+                  @ List.filter_map
+                      (fun (name, _) ->
+                        if List.mem_assoc name associated then None
+                        else
+                          Some
+                            ( name,
+                              normalize lookups ~list_bounds
+                                (Types.Projection
+                                   { base = type_; trait = { wanted with associated = [] }; name })
+                            ))
+                      wanted.associated
+                in
+                let conditions_hold =
+                  (not checks_conditions)
+                  || List.for_all
+                       (fun (argument, bound) ->
+                         Option.is_some
+                           (find_evidence lookups ~list_bounds ~depth:(depth + 1) argument bound))
+                       (list_required_bounds impl.impl_generics substitution)
+                in
+                if
+                  conditions_hold
+                  && has_matching_associated_types lookups ~list_bounds wanted ~base:None associated
+                then Some (From_impl { impl = impl_path; substitution })
+                else None)
+              (list_matching_impls lookups type_ wanted))
 
 and decide_property_trait lookups ~list_bounds trait type_ =
   let normalize = normalize lookups ~list_bounds in
