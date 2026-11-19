@@ -1,0 +1,10 @@
+let first: Int64 = 7
+
+type Pair(first: Int64, second: Int64)
+
+fn f(pair: Pair) -> Int64 {
+  match pair {
+    (first, ..) => first
+    (..) => 2
+  }
+}

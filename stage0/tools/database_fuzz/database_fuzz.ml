@@ -70,7 +70,7 @@ let list_words ~starts ~continues text =
   in
   scan 0 []
 
-let keywords = List.map fst Token.keywords
+let keywords = List.map fst Token.For_testing.keywords
 
 let list_identifiers text =
   List.filter
@@ -338,7 +338,9 @@ let () =
             | parts ->
                 report step edit
                   ("the propagated database differs from a cold build in "
-                  ^ String.concat ", " (List.take 20 parts));
+                  ^ String.concat ", "
+                      (List.map (fun part -> Database.Part.show (Stored part)) (List.take 20 parts))
+                  );
                 start_over ())
         | Error failure, Ok _ ->
             report step edit ("propagating it raised " ^ show_failure failure);

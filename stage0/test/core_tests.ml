@@ -72,11 +72,9 @@ let make_definition_form text (path : Path.t) =
   let packages = Support.setup [ ("app::main", text) ] in
   let file = Support.parse_file "app::main" in
   (match
-     List.map
-       (fun message -> Diagnostic.make ~code:(Types Mismatch) (Source.make_span 0 0) message)
-       (Support.parse_errors packages file)
-     @ Database.For_testing.list_diagnostics [ Resolve; Interface; Infer ]
-         (Support.make_database packages) file
+     Database.For_testing.list_diagnostics
+       [ Parse; Resolve; Interface; Infer ]
+       (Support.make_database packages) file
    with
   | [] -> ()
   | reported ->
@@ -86,7 +84,7 @@ let make_definition_form text (path : Path.t) =
   let definition =
     List.find_map
       (fun (declaration : Resolve.Names.declaration) ->
-        let key = Resolve.Names.make_key declaration in
+        let key = declaration.key in
         if Path.equal key.path path then
           Option.map (fun core -> (key, core)) (find_core packages key)
         else None)
@@ -126,7 +124,7 @@ let list_final_expressions (form : Core.t) =
 let list_capabilities (set : Types.capability_set) =
   List.map
     (function Types.Capability path -> Path.show path | _ -> "a capability that is not named")
-    (set :> Types.capability list)
+    (Types.list_capabilities set)
 
 let shape = Fixtures.Core.shape
 
@@ -222,61 +220,37 @@ let () =
     (apply ^ Fixtures.Core.named_function_passed_for_a_capability_generic)
     list_granted
     [ "standard::capabilities::Console" ];
-  Harness.test
-    "a call's `uses` and a lambda's type contain the inferred set, not the callee's parameter"
-    (fun () ->
-      let text = apply ^ Fixtures.Core.lambda_using_console_passed_to_apply in
-      let packages = Support.setup [ ("app::main", text) ] in
-      let actual = ref [] in
-      List.iter
-        (fun (declaration : Resolve.Names.declaration) ->
-          let key = Resolve.Names.make_key declaration in
-          if Path.equal key.path (Support.make_top_path "app::main" "g") then
-            match find_core packages key with
-            | Some form ->
-                Core_walk.walk_definition
-                  {
-                    Core_walk.ignore_all with
-                    expression =
-                      (fun (node : Core.expression) ->
-                        match node.kind with
-                        | Call { callee = { target = Function { path; _ }; uses }; _ }
-                          when Path.equal path (Support.make_top_path "app::main" "apply") ->
-                            actual := ("needs " ^ Types.show_capabilities uses) :: !actual
-                        | Lambda _ -> actual := Types.show node.type_ :: !actual
-                        | _ -> ());
-                  }
-                  form.definition
-            | None -> Harness.fail "no core form")
-        (Support.list_declarations packages (Support.parse_module "app::main"));
-      if List.sort compare !actual <> [ "(fn() uses Console)"; "needs {Console}" ] then
-        Harness.fail "found [%s]" (String.concat "; " !actual));
-  Harness.test "a capability parameter in a result type is inferred separately for each call"
-    (fun () ->
-      let text = Fixtures.Core.two_calls_of_later_with_different_capabilities in
-      let packages = Support.setup [ ("app::main", text) ] in
-      let actual = ref [] in
-      List.iter
-        (fun (declaration : Resolve.Names.declaration) ->
-          let key = Resolve.Names.make_key declaration in
-          if Path.equal key.path (Support.make_top_path "app::main" "g") then
-            match find_core packages key with
-            | Some form ->
-                Core_walk.walk_definition
-                  {
-                    Core_walk.ignore_all with
-                    pattern =
-                      (fun (node : Core.pattern) ->
-                        match node.kind with
-                        | Bind { local = Declared { name; _ }; _ } ->
-                            actual := (name ^ ": " ^ Types.show node.type_) :: !actual
-                        | _ -> ());
-                  }
-                  form.definition
-            | None -> Harness.fail "no core form")
-        (Support.list_declarations packages (Support.parse_module "app::main"));
-      if List.sort compare !actual <> [ "first: (fn() uses Console)"; "second: (fn() uses Clock)" ]
-      then Harness.fail "found [%s]" (String.concat "; " !actual))
+  expect "a call's `uses` and a lambda's type contain the inferred set, not the callee's parameter"
+    (apply ^ Fixtures.Core.lambda_using_console_passed_to_apply)
+    (fun form ->
+      List.sort compare
+        (List.filter_map
+           (fun (node : Core.expression) ->
+             match node.kind with
+             | Call { callee = { target = Function { path; _ }; uses }; _ }
+               when Path.equal path (Support.make_top_path "app::main" "apply") ->
+                 Some ("needs " ^ Types.show_capabilities uses)
+             | Lambda _ -> Some (Types.show node.type_)
+             | _ -> None)
+           (list_expressions form)))
+    [ "(fn() uses Console)"; "needs {Console}" ];
+  expect "a capability parameter in a result type is inferred separately for each call"
+    Fixtures.Core.two_calls_of_later_with_different_capabilities
+    (fun form ->
+      let bindings = ref [] in
+      Core_walk.walk_definition
+        {
+          Core_walk.ignore_all with
+          pattern =
+            (fun (node : Core.pattern) ->
+              match node.kind with
+              | Bind { local = Declared { name; _ }; _ } ->
+                  bindings := (name ^ ": " ^ Types.show node.type_) :: !bindings
+              | _ -> ());
+        }
+        form.definition;
+      List.sort compare !bindings)
+    [ "first: (fn() uses Console)"; "second: (fn() uses Clock)" ]
 
 let () =
   Harness.test "a node's origin gives its source span" (fun () ->
@@ -284,7 +258,7 @@ let () =
       let packages = Support.setup [ ("app::main", text) ] in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
-          let key = Resolve.Names.make_key declaration in
+          let key = declaration.key in
           match
             ( find_core packages key,
               (Support.make_names packages).read_spans key,
@@ -393,7 +367,7 @@ let () =
       let packages = Support.setup [ ("app::main", text) ] in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
-          let key = Resolve.Names.make_key declaration in
+          let key = declaration.key in
           match
             ( find_core packages key,
               (Support.make_names packages).read_spans key,

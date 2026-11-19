@@ -1,0 +1,11 @@
+type Holder(id: Int64)
+
+fn Holder.label(self) lends String {
+  let text = "label ${self.id}"
+  text
+}
+
+test "a lending method lends a local it owns, which lives until the caller's statement ends" {
+  let holder = Holder(id: 1)
+  assert holder.label() == "label 1"
+}

@@ -236,7 +236,7 @@ let list_mut_provided_places (provided : Mir.provided list) =
     (fun (implementation : Mir.provided) ->
       match (implementation.mode, implementation.value) with
       | Types.Mut, Borrow { place; _ } -> Some place
-      | Mut, (Use _ | Take _ | Constant _) | (Read | Own), _ -> None)
+      | Mut, (Use _ | Take _ | Immediate _) | (Read | Own), _ -> None)
     provided
 
 let compute_changes ?(also = []) run (frame : State.frame) (blocks : Mir.block list) : State.changed
@@ -322,7 +322,7 @@ let make_float_literal (exponent, significand) value =
   in
   let fraction = significand - 1 in
   Logic.Operation
-    ( "fp",
+    ( Fp,
       [
         Logic.Bits (1, Z.extract bits (exponent + fraction) 1);
         Logic.Bits (exponent, Z.extract bits fraction exponent);
@@ -332,7 +332,7 @@ let make_float_literal (exponent, significand) value =
 let read_operand context frame run (operand : Mir.operand) =
   match operand with
   | Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> read_place context frame run place
-  | Constant { value; type_ } -> (
+  | Immediate { value; type_ } -> (
       let ty = Facts.substitute_type context frame type_ in
       match value with
       | Unit ->
@@ -350,13 +350,13 @@ let compute_operand_type context frame operand =
 
 let find_operand_origin : Mir.operand -> Core.origin option = function
   | Use { origin; _ } | Borrow { origin; _ } | Take { origin; _ } -> Some origin
-  | Constant _ -> None
+  | Immediate _ -> None
 
 let find_whole_local : Mir.operand -> Mir.local option = function
   | Use { place = { root = Local local; projections = [] }; _ }
   | Borrow { place = { root = Local local; projections = [] }; _ } ->
       Some local
-  | Use _ | Borrow _ | Take _ | Constant _ -> None
+  | Use _ | Borrow _ | Take _ | Immediate _ -> None
 
 let make_passed_place context run place =
   {
@@ -559,7 +559,7 @@ let compute_target_type context frame run (target : Mir.place) =
   | _ -> compute_place_type context frame run target
 
 let lends_places (part : Mir.yielded) =
-  match part with Built _ | Part (Borrow _) -> true | Part (Use _ | Take _ | Constant _) -> false
+  match part with Built _ | Part (Borrow _) -> true | Part (Use _ | Take _ | Immediate _) -> false
 
 let rec read_yielded_value context frame run ~origin (part : Mir.yielded) =
   match part with
@@ -605,7 +605,7 @@ let rec write_back_part context run ty (part : Mir.yielded) frame after =
               | _ -> frame)
             frame fields
       | None -> Facts.raise_unsupported Whole_definition "the fields of `%s`" (Types.show ty))
-  | Part (Use _ | Take _ | Constant _) -> frame
+  | Part (Use _ | Take _ | Immediate _) -> frame
 
 let bind_parts context (frame : State.frame) run =
   Locals.fold
@@ -879,16 +879,18 @@ and merge_alternatives context ~outer ~condition (entered, read) (entered_otherw
 
 and read_choice context frame run (choice : Mir.choice) =
   match choice with
-  | Conditional { condition; then_; else_; if_condition } ->
-      let test = read_operand context frame run condition in
-      (match if_condition with
-      | Some origin -> note_decision context frame origin test
-      | None -> ());
-      let entered_then = Facts.restrict frame test
-      and entered_else = Facts.restrict frame (Logic.not_ test) in
-      merge_alternatives context ~outer:frame ~condition:test
-        (entered_then, read_block context entered_then run then_)
-        (entered_else, read_block context entered_else run else_)
+  | Conditional { condition; then_; else_; if_condition } -> (
+      match read_block context frame run condition with
+      | None -> None
+      | Some (frame, test) ->
+          (match if_condition with
+          | Some origin -> note_decision context frame origin test
+          | None -> ());
+          let entered_then = Facts.restrict frame test
+          and entered_else = Facts.restrict frame (Logic.not_ test) in
+          merge_alternatives context ~outer:frame ~condition:test
+            (entered_then, read_block context entered_then run then_)
+            (entered_else, read_block context entered_else run else_))
   | Cases cases ->
       let rec find_first_taken (current : State.frame) = function
         | [] -> Facts.raise_bug "a `match` with no case"
@@ -925,21 +927,24 @@ and read_choice context frame run (choice : Mir.choice) =
       in
       find_first_taken frame cases
   | Connective { connective; left; right } -> (
-      let left = read_operand context frame run left in
-      let reads_right = match connective with And | Implies -> left | Or -> Logic.not_ left in
-      let entered = Facts.restrict frame reads_right in
-      match read_block context entered run right with
-      | Some (after, right) ->
-          let skipped = Facts.restrict frame (Logic.not_ reads_right) in
-          Some
-            ( join_after_either context ~outer:frame ~condition:reads_right (entered, after)
-                (skipped, skipped),
-              match connective with
-              | And -> Logic.( &&& ) left right
-              | Or -> Logic.( ||| ) left right
-              | Implies -> Logic.( ==> ) left right )
-      | None ->
-          Some (Facts.restrict frame (Logic.not_ reads_right), Logic.Boolean (connective <> And)))
+      match read_block context frame run left with
+      | None -> None
+      | Some (frame, left) -> (
+          let reads_right = match connective with And | Implies -> left | Or -> Logic.not_ left in
+          let entered = Facts.restrict frame reads_right in
+          match read_block context entered run right with
+          | Some (after, right) ->
+              let skipped = Facts.restrict frame (Logic.not_ reads_right) in
+              Some
+                ( join_after_either context ~outer:frame ~condition:reads_right (entered, after)
+                    (skipped, skipped),
+                  match connective with
+                  | And -> Logic.( &&& ) left right
+                  | Or -> Logic.( ||| ) left right
+                  | Implies -> Logic.( ==> ) left right )
+          | None ->
+              Some (Facts.restrict frame (Logic.not_ reads_right), Logic.Boolean (connective <> And))
+          ))
 
 and read_statement context frame run (statement : Mir.statement) =
   let location = Facts.locate context frame.source statement.origin in
@@ -1117,7 +1122,7 @@ and read_statement context frame run (statement : Mir.statement) =
           ~matches:
             {
               statements = [];
-              value = Some (Constant { value = Boolean true; type_ = Types.bool });
+              value = Some (Immediate { value = Boolean true; type_ = Types.bool });
             }
           ~body:{ body with value = Some decision }
       in

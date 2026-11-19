@@ -65,4 +65,4 @@ type type_facts = {
   contains : (Types.ty * occurrence) list;
 }
 
-type grant = { capabilities : Path.t list; unknown : string list }
+type grant = { capabilities : Path.t list; unknown : Grant.capability list }

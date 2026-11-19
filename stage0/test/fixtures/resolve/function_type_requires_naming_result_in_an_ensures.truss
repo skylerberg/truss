@@ -1,0 +1,5 @@
+fn f() -> Int64
+  ensures forall check: (fn(value: Int64) -> Int64 requires result > 0) => result > 0
+{
+  1
+}

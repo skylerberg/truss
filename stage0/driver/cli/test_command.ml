@@ -7,19 +7,17 @@ let select snapshot database packages ~paths ~match_ =
       let source = Command_packages.read_source snapshot database packages file in
       List.filter_map
         (fun (declaration : Resolve.Names.declaration) ->
-          match declaration.path with
+          match declaration.key.path with
           | Test { name; _ }
-            when declaration.ordinal = 0
+            when declaration.key.ordinal = 0
                  && match match_ with Some text -> String.includes ~affix:text name | None -> true
             ->
               let line =
-                fst
-                  (Source.compute_position source
-                     (names.read_place (Resolve.Names.make_key declaration)).base)
+                fst (Source.compute_position source (names.read_place declaration.key).base)
               in
               Some
                 {
-                  path = declaration.path;
+                  path = declaration.key.path;
                   module_ = file.module_;
                   name;
                   file = Source.path source;
@@ -138,7 +136,7 @@ let encode_timings timings =
     ]
 
 type progress = {
-  line : Status_line.t;
+  status_line : Status_line.t;
   tests : test array;
   mutable ended : int;
   mutable not_passed : int;
@@ -146,7 +144,7 @@ type progress = {
   running : (int, int) Hashtbl.t;
 }
 
-let draw progress =
+let draw (progress : progress) =
   let now = read_microseconds () in
   let total = Array.length progress.tests in
   let width = String.length (string_of_int total) in
@@ -174,13 +172,13 @@ let draw progress =
         ]
     | None -> []
   in
-  Status_line.show progress.line (String.concat " · " parts)
+  Status_line.show progress.status_line (String.concat " · " parts)
 
 let handle_progress progress ~build_ended (event : Backend.progress) =
   match event with
-  | Lowering -> Status_line.show progress.line "building · lowering"
+  | Lowering -> Status_line.show progress.status_line "building · lowering"
   | Compiling { compiled; total } ->
-      Status_line.show progress.line
+      Status_line.show progress.status_line
         (Printf.sprintf "building · compiling %d/%d C files" compiled total)
   | Running _ ->
       let now = read_microseconds () in
@@ -218,10 +216,10 @@ let run ~paths ~match_ ~timings:show_timings ~rerun =
   let report = Report.gather database snapshot packages in
   let checked = read_microseconds () in
   let tests = select snapshot database packages ~paths ~match_ in
-  if not (Report.clean report) then raise (Report.Errors report);
+  Report.require_no_errors report;
   let progress =
     {
-      line = Status_line.create ~enabled:(not json);
+      status_line = Status_line.create ~enabled:(not json);
       tests = Array.of_list tests;
       ended = 0;
       not_passed = 0;
@@ -232,7 +230,7 @@ let run ~paths ~match_ ~timings:show_timings ~rerun =
   let build_ended = ref None in
   let records =
     Fun.protect
-      ~finally:(fun () -> Status_line.clear progress.line)
+      ~finally:(fun () -> Status_line.clear progress.status_line)
       (fun () ->
         run_tests ~rerun
           ~report_progress:(handle_progress progress ~build_ended)
@@ -250,7 +248,7 @@ let run ~paths ~match_ ~timings:show_timings ~rerun =
   in
   if json then
     Json.print
-      (Json.make_document ~diagnostics:[]
+      (Report.make_document report
          [
            ("tests", Json.List (List.map2 test_json tests records));
            ("timings", encode_timings timings);

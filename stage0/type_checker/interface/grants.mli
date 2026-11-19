@@ -1,7 +1,7 @@
 val resolve_grant :
-  Resolve.Names.lookups -> package:Path.package -> string list -> Environment.grant
+  Resolve.Names.lookups -> package:Path.package -> Grant.capability list -> Environment.grant
 
-val describe_not_a_capability : dependency:Path.package -> string -> string
+val describe_not_a_capability : dependency:Path.package -> Grant.capability -> string
 
 val list_missing :
   Lookups.t -> package:Path.package -> of_:Path.package -> Types.capability_set -> Path.t list
@@ -19,6 +19,3 @@ val describe_missing_in_impls :
   package:Path.package ->
   (Path.t * Types.impl_interface * Types.capability_set) list ->
   string list
-
-val describe_missing_in_evidence :
-  Lookups.t -> package:Path.package -> list_bounds:Impls.bounds -> Impls.evidence -> string list

@@ -75,6 +75,7 @@ let find_projection_type env ~list_environment ty projection =
 
 let list_successors = function
   | Goto block -> [ block ]
+  | Branch { yes; no; _ } -> [ yes; no ]
   | Switch { cases; default; _ } -> List.map snd cases @ [ default ]
   | Switch_variant { cases; default; _ } -> List.map snd cases @ Option.to_list default
   | Return _ | Unreachable | Fail _ -> []

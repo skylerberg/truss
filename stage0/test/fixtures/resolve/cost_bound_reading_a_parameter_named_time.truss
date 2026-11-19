@@ -1,0 +1,4 @@
+fn f(time: UInt64)
+  cost time O(time)
+{
+}

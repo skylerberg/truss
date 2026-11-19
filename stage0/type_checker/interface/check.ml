@@ -24,7 +24,8 @@ let list_bound_diagnostics lookups ~package ~list_bounds ~spans named =
                   | Some evidence ->
                       List.map
                         (make_diagnostic (Capabilities Not_granted))
-                        (Grants.describe_missing_in_evidence lookups ~package ~list_bounds evidence))
+                        (Grants.describe_missing_in_impls lookups ~package
+                           (Grants.list_evidence_uses lookups ~list_bounds evidence)))
                 required
           | None -> [])
       | _ -> [])
@@ -410,7 +411,7 @@ let check (state : Checking.state) =
         (match signature.name with
         | Member_name (head, _) -> check_method_location state head
         | Plain_name name ->
-            if name.text = "main" && state.key.module_.modules = [] then
+            if Path.is_entry_point state.key.path then
               check_main state resolved signature.clauses elaborated state.spans.(name.id));
         let span =
           match signature.name with

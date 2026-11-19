@@ -165,6 +165,11 @@ let parse tokens ~lexer_diagnostics =
       (fun (left : Diagnostic.t) (right : Diagnostic.t) -> compare left.span.start right.span.start)
       diagnostics )
 
+let parse_source source =
+  let tokens, lexer_diagnostics = Lexer.lex source in
+  let file, parser_diagnostics = parse tokens ~lexer_diagnostics in
+  (file, lexer_diagnostics @ parser_diagnostics)
+
 module For_testing = struct
   type piece = Split.piece = { first : int; stop : int }
   type example = Example_definition | Example_signature

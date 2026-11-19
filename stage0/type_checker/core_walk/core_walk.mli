@@ -9,7 +9,6 @@ type visit = {
 val ignore_all : visit
 val compute_place_type : Core.place -> Types.ty
 val compute_place_origin : Core.place -> Core.origin
-val walk_place : visit -> Core.place -> unit
 val walk_operand : visit -> Core.operand -> unit
 val walk_block : visit -> Core.block -> unit
 val walk_loop_clause : visit -> Core.loop_clause -> unit

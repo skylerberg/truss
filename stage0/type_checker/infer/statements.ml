@@ -16,6 +16,23 @@ let check_bit_vector_names state (value : Core.expression) =
        })
     value
 
+let record_integer_range state ~(loop : Syntax.id) ~described ~admits_integer
+    (range : Syntax.expression) element ~inclusive =
+  State.defer state (fun () ->
+      let element = State.normalize state element in
+      if Types.contains_unsolved element then false
+      else begin
+        if
+          State.is_integer_type state element
+          || Types.is_builtin Character element
+          || (admits_integer && Types.equal element Types.Integer)
+        then state.tables.loops.(loop) <- Some (Integer_range { element; inclusive })
+        else if not (Types.is_error element) then
+          State.report state Not_indexable (State.read_span state range.id)
+            (Printf.sprintf "%s range is of integers, not `%s`." described (Types.show element));
+        true
+      end)
+
 let rec check_block_value state env ?expected (written : Syntax.block) =
   let rec infer_statements_value = function
     | [] -> Types.unit
@@ -325,19 +342,8 @@ and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable :
       let range_type = State.normalize state (Hooks.check_expression state env iterable) in
       match range_type with
       | Types.Named { arguments = [ Types.Type element ]; _ } ->
-          State.defer state (fun () ->
-              let element = State.normalize state element in
-              if Types.contains_unsolved element then false
-              else begin
-                if State.is_integer_type state element || Types.is_builtin Character element then
-                  state.tables.loops.(written.id) <- Some (Integer_range { element; inclusive })
-                else if not (Types.is_error element) then
-                  State.report state Not_indexable
-                    (State.read_span state iterable.id)
-                    (Printf.sprintf "A `for` loop's range is of integers, not `%s`."
-                       (Types.show element));
-                true
-              end);
+          record_integer_range state ~loop:written.id ~described:"A `for` loop's"
+            ~admits_integer:false iterable element ~inclusive;
           (element, mode)
       | _ -> State.raise_bug "a range is not of the range type")
   | _ -> (

@@ -8,6 +8,7 @@
   compiler_bug_tests
   process_tests
   lock_file_tests
+  file_system_tests
   cache_tests
   resolve_tests
   standard_library_tests
@@ -56,6 +57,7 @@
   cache
   unix
   path
+  grant
   well_known
   project
   resolve
@@ -64,6 +66,7 @@
   solver
   prover
   database
+  lowered
   types
   intrinsic
   interface
@@ -72,6 +75,7 @@
   manifest
   registry)
  (deps
+  served_length/served_length.exe
   (glob_files %{workspace_root}/*.md)
   (glob_files_rec %{workspace_root}/standard/*.md)
   (glob_files_rec %{workspace_root}/standard/*.truss)

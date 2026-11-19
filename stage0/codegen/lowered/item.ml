@@ -98,6 +98,5 @@ and show_capability_arguments arguments =
   String.concat ""
     (List.map
        (fun (name, set) ->
-         Printf.sprintf " generic %s = {%s}" name
-           (String.concat ", " (List.map Ground.show_path_name set)))
+         Printf.sprintf " generic %s = {%s}" name (String.concat ", " (List.map Path.show_name set)))
        arguments)

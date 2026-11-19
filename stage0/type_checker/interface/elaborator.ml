@@ -403,7 +403,7 @@ and elaborate_capability context (written : Syntax.capability_reference) : Types
       | _ -> raise_bug "`generic %s` is not resolved as a capability parameter" name.text)
   | Self_capabilities key -> (
       match List.assoc_opt key.text context.self_capabilities with
-      | Some set -> (set :> Types.capability list)
+      | Some set -> Types.list_capabilities set
       | None -> (
           match (elaborate_self context context.spans.(written.id), context.self_trait) with
           | Error report, _ -> [ Types.Capability_error report ]
@@ -813,6 +813,7 @@ let elaborate_signature context ~owner ~head ~self_type (written : Syntax.signat
     costs = list_constant_costs written.clauses;
     specification_only =
       Well_known.is Model owner || Types.mentions_specification_only_type parameters output;
+    is_update_step = false;
     capture_free_parameters = Types.list_capture_free_parameters parameters;
   }
 
@@ -987,7 +988,7 @@ let elaborate_container (context : t) (path : Path.t) (definition : Syntax.defin
                       | _ -> false
                     in
                     if List.mem_assoc name.text sets then sets
-                    else if List.exists is_defined_by_this_impl (set :> Types.capability list) then
+                    else if Types.exists_capability is_defined_by_this_impl set then
                       ( name.text,
                         Types.make_capability_set
                           (report_error_capability context Unknown_associated_capability
@@ -1160,9 +1161,19 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
                     (generics, Some self)
               in
               let context = { context with self_type } in
+              let elaborated = elaborate_signature context ~owner:path ~head ~self_type signature in
+              let takes_mut_self =
+                match elaborated.receiver with
+                | Some (Mut, _) -> true
+                | Some ((Static | Read | Own), _) | None -> false
+              in
               make_elaborated_interface context
                 (Function_interface
-                   (elaborate_signature context ~owner:path ~head ~self_type signature))
+                   {
+                     elaborated with
+                     is_update_step =
+                       takes_mut_self && (lookups.names.read_declaration key).visibility = Private;
+                   })
           | Type_definition { generics; body; clauses; _ } ->
               let type_generics = elaborate_generics context path generics in
               let self =
@@ -1228,6 +1239,7 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
                      uses = elaborate_capabilities context uses;
                      costs = [];
                      specification_only = false;
+                     is_update_step = false;
                      capture_free_parameters = [];
                    })
           | Theorem { name; generics; parameters; clauses; _ } ->

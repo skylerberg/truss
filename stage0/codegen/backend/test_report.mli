@@ -20,4 +20,5 @@ val feed : reader -> string -> unit
 
 module For_testing : sig
   val parse : tests:int -> string -> (record list, string) result
+  val list_records_by_piece : tests:int -> string list -> (int * record) list
 end

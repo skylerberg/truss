@@ -159,10 +159,11 @@ _Noreturn void t_runtime_compiler_bug(void) {
   t_end(t_panicked, "compiler bug: ", 101);
 }
 
-void *t_runtime_find_capability(const struct t_capability *capabilities, const uint8_t *name,
-                                uint64_t length) {
-  for (const struct t_capability *entry = capabilities; entry != 0 && entry->name != 0; entry++) {
-    if (entry->length == length && memcmp(entry->name, name, length) == 0) return entry->evidence;
+void *t_runtime_find_capability(const struct t_capability *capabilities,
+                                const uint8_t *capability) {
+  for (const struct t_capability *entry = capabilities; entry != 0 && entry->capability != 0;
+       entry++) {
+    if (entry->capability == capability) return entry->evidence;
   }
   t_runtime_compiler_bug();
 }

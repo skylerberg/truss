@@ -53,18 +53,21 @@ let union_capabilities (left : capability_set) (right : capability_set) =
   make_capability_set (left @ right)
 
 let run_forever : capability = Capability (Well_known.make_path Run_forever)
+let has_capability capability (set : capability_set) = List.mem capability set
+let exists_capability predicate (set : capability_set) = List.exists predicate set
+let list_capabilities (set : capability_set) : capability list = set
 let built_in_capabilities = make_capability_set [ panic; run_forever ]
-let is_built_in_capability capability = List.mem capability built_in_capabilities
-let terminates (set : capability_set) = not (List.mem run_forever set)
+let is_built_in_capability capability = has_capability capability built_in_capabilities
+let terminates set = not (has_capability run_forever set)
 
-let has_capability_error (capabilities : capability_set) =
+let contains_capability_error (capabilities : capability_set) =
   List.exists (function Capability_error _ -> true | _ -> false) capabilities
 
 let subtract_capabilities (left : capability_set) (right : capability_set) =
   List.filter (fun capability -> not (List.mem capability right)) left
 
 let is_capability_subset (smaller : capability_set) (larger : capability_set) =
-  has_capability_error smaller || has_capability_error larger
+  contains_capability_error smaller || contains_capability_error larger
   || subtract_capabilities smaller larger = []
 
 let intersect_capabilities (sets : capability_set list) : capability_set =
@@ -74,11 +77,18 @@ let intersect_capabilities (sets : capability_set list) : capability_set =
        (List.concat sets))
 
 let compute_missing_capabilities ~(required : capability_set) ~(available : capability_set) =
-  if has_capability_error required || has_capability_error available then no_capabilities
+  if contains_capability_error required || contains_capability_error available then no_capabilities
   else subtract_capabilities required available
 
-let flat_map_capabilities f (set : capability_set) = make_capability_set (List.concat_map f set)
-let make_builtin builtin = Named { path = Intrinsic.make_builtin_path builtin; arguments = [] }
+let replace_capabilities find_replacement (set : capability_set) =
+  make_capability_set
+    (List.concat_map
+       (fun capability -> Option.value ~default:[ capability ] (find_replacement capability))
+       set)
+
+let make_builtin ?(arguments = []) builtin =
+  Named { path = Intrinsic.make_builtin_path builtin; arguments }
+
 let unit = make_builtin Unit
 let bool = make_builtin Bool
 let make_self_parameter trait = { owner = trait; name = "Self" }
@@ -208,22 +218,20 @@ and substitute_argument substitution = function
   | Value _ as value -> value
 
 and substitute_capabilities substitution capabilities =
-  flat_map_capabilities
+  replace_capabilities
     (function
-      | Capability_parameter parameter as capability -> (
-          match List.assoc_opt parameter substitution.capability_arguments with
-          | Some replacement -> replacement
-          | None -> [ capability ])
+      | Capability_parameter parameter -> List.assoc_opt parameter substitution.capability_arguments
       | Capability_projection { base; trait; name } ->
-          [
-            Capability_projection
-              {
-                base = substitute substitution base;
-                trait = substitute_trait substitution trait;
-                name;
-              };
-          ]
-      | (Capability _ | Capability_variable _ | Capability_error _) as capability -> [ capability ])
+          Some
+            [
+              Capability_projection
+                {
+                  base = substitute substitution base;
+                  trait = substitute_trait substitution trait;
+                  name;
+                };
+            ]
+      | Capability _ | Capability_variable _ | Capability_error _ -> None)
     capabilities
 
 and substitute_trait substitution (trait : trait_reference) =
@@ -321,12 +329,12 @@ let find_specification_only_type type_ =
        type_);
   !specification_type
 
-let has_capability_variable capabilities =
+let contains_capability_variable capabilities =
   List.exists (function Capability_variable _ -> true | _ -> false) capabilities
 
 let equal left right = left = right
-let is_error = function Error _ -> true | _ -> false
-let is_open_type = function Error _ | Variable _ | Hole -> true | _ -> false
+let is_error : ty -> bool = function Error _ -> true | _ -> false
+let is_open_type : ty -> bool = function Error _ | Variable _ | Hole -> true | _ -> false
 
 let rec contains_unsolved = function
   | Variable _ | Literal _ | Hole -> true
@@ -376,24 +384,22 @@ let costs_imply ~(provided : cost list) ~(required : cost list) =
         provided)
     required
 
-let show_path_name = function Path.Top { name; _ } -> name | path -> Path.show path
-
 let show_resource = function
   | Metric metric -> Metric.show metric
   | Calls { capability; method_ } ->
-      Printf.sprintf "calls(%s%s)" (show_path_name capability)
+      Printf.sprintf "calls(%s%s)" (Path.show_name capability)
         (match method_ with Some method_ -> "." ^ method_ | None -> "")
 
 let rec show_capability = function
-  | Capability path -> show_path_name path
+  | Capability path -> Path.show_name path
   | Capability_parameter { name; _ } -> "generic " ^ name
   | Capability_projection { base; name; _ } -> show base ^ "." ^ name
   | Capability_variable _ | Capability_error _ -> "_"
 
 and show = function
-  | Named { path; arguments = [] } -> show_path_name path
+  | Named { path; arguments = [] } -> Path.show_name path
   | Named { path; arguments } ->
-      Printf.sprintf "%s[%s]" (show_path_name path)
+      Printf.sprintf "%s[%s]" (Path.show_name path)
         (String.concat ", " (List.map show_argument arguments))
   | Parameter { name; _ } -> name
   | Projection { base; name; _ } -> show base ^ "." ^ name
@@ -422,8 +428,8 @@ and show_trait trait =
   let arguments = List.map show_argument trait.trait_arguments in
   let associated = List.map (fun (name, type_) -> name ^ " = " ^ show type_) trait.associated in
   match arguments @ associated with
-  | [] -> show_path_name trait.trait
-  | all -> Printf.sprintf "%s[%s]" (show_path_name trait.trait) (String.concat ", " all)
+  | [] -> Path.show_name trait.trait
+  | all -> Printf.sprintf "%s[%s]" (Path.show_name trait.trait) (String.concat ", " all)
 
 and show_output = function
   | Returns type_ when type_ = unit -> ""
@@ -535,6 +541,7 @@ type signature = {
   uses : capability_set;
   costs : cost list;
   specification_only : bool;
+  is_update_step : bool;
   capture_free_parameters : string list;
 }
 

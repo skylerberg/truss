@@ -12,7 +12,7 @@ type hole = {
 
 let list_holes snapshot packages database (names : Resolve.Names.lookups)
     (declaration : Resolve.Names.declaration) =
-  let key = Resolve.Names.make_key declaration in
+  let key = declaration.key in
   match Database.read_resolved database key with
   | Some resolved ->
       let ({ file; base } : Resolve.Names.place) = names.read_place key in
@@ -21,7 +21,7 @@ let list_holes snapshot packages database (names : Resolve.Names.lookups)
         (fun (hole : Inspect.hole) ->
           let line, column = Source.compute_position source (base + hole.offset) in
           {
-            definition = declaration.path;
+            definition = key.path;
             file = Source.path source;
             line;
             column;
@@ -41,7 +41,8 @@ let gather snapshot packages database paths =
     (fun file ->
       List.concat_map
         (fun (declaration : Resolve.Names.declaration) ->
-          if declaration.ordinal = 0 then list_holes snapshot packages database names declaration
+          if declaration.key.ordinal = 0 then
+            list_holes snapshot packages database names declaration
           else [])
         (names.list_declarations_in file))
     (Command_packages.select_files snapshot packages paths)
@@ -127,4 +128,4 @@ let run ~paths =
     List.iter print holes;
     if holes = [] then Output.print_line "No holes."
   end;
-  if Report.clean report then 0 else 1
+  if Report.has_errors report then 1 else 0

@@ -19,6 +19,7 @@ let decide_move context (place : Place.t) ~origin ~type_ ~is_returned ~is_captur
   let root_mode : Types.mode =
     if is_captured then Read else Context.classify_binding_mode context place.root
   in
+  let views_literal = (not is_captured) && Context.views_literal context place.root in
   if Hashtbl.find_opt context.places_without_keyword origin = Some Mut then
     Refused
       (fun context at type_ ->
@@ -38,8 +39,8 @@ let decide_move context (place : Place.t) ~origin ~type_ ~is_returned ~is_captur
         (fun context at type_ ->
           Context.report context Needs_owned at
             ~fixes:(Context.copy_fix context "Return a copy." type_ origin)
-            (Printf.sprintf
-               "A returned value must be owned, and `%s` is not owned here. Return a copy." shown))
+            (Printf.sprintf "A returned value must be owned, and `%s` %s. Return a copy." shown
+               (if views_literal then "views a string literal" else "is not owned here")))
   else if List.exists (function Place.Element _ | Range _ -> true | Field _ -> false) place.steps
   then
     refuse
@@ -56,6 +57,12 @@ let decide_move context (place : Place.t) ~origin ~type_ ~is_returned ~is_captur
         refuse
           (Printf.sprintf "`%s` is %s, so it cannot be moved. Copy it instead." shown
              (if place.steps = [] then "a constant" else "part of a constant"))
+    | Read, _ when views_literal ->
+        refuse
+          (Printf.sprintf
+             "`%s` views a string literal, so it cannot be moved: its new owner would free the \
+              literal's static buffer. Copy it instead."
+             shown)
     | Read, _ ->
         refuse
           (Printf.sprintf "`%s` is %s, so it cannot be moved. Copy it instead." shown
@@ -96,7 +103,7 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
   let moved_types = Hashtbl.create 8 in
   let record_moved_type (use : Moves.use) =
     match use.operand with
-    | Some (Use { type_; _ } | Borrow { type_; _ } | Take { type_; _ } | Constant { type_; _ })
+    | Some (Use { type_; _ } | Borrow { type_; _ } | Take { type_; _ } | Immediate { type_; _ })
       when use.moves ->
         Hashtbl.replace moved_types use.origin type_
     | Some _ | None -> ()
