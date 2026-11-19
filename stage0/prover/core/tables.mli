@@ -7,6 +7,7 @@ type stated =
   | Array_length of Logic.symbol
   | Ranked_model of Logic.symbol
   | Ranked_elements of Types.ty
+  | Non_negative_rank of Types.ty
 
 module Symbol_table : Hashtbl.S with type key = Logic.symbol
 module Term_table : Hashtbl.S with type key = Logic.term

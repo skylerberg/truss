@@ -31,6 +31,7 @@ and function_type = {
 and result = Returns of ty | Lends of Language.Mode.t * ty
 
 and capability =
+  | Built_in of Language.Builtin_capability.t
   | Capability of Path.t
   | Capability_parameter of parameter
   | Capability_projection of { base : ty; trait : trait_reference; name : string }
@@ -46,20 +47,21 @@ and resource =
 
 and cost_bound = Order_of | No_more_than of Z.t option | Exactly_cost of Z.t option
 
-let panic : capability = Capability (Well_known.make_path Panic)
 let make_capability_set capabilities : capability_set = List.sort_uniq compare capabilities
 let no_capabilities : capability_set = []
 
 let union_capabilities (left : capability_set) (right : capability_set) =
   make_capability_set (left @ right)
 
-let run_forever : capability = Capability (Well_known.make_path Run_forever)
+let make_capability path =
+  match Well_known.find_builtin_capability path with
+  | Some builtin_capability -> Built_in builtin_capability
+  | None -> Capability path
+
 let has_capability capability (set : capability_set) = List.mem capability set
 let exists_capability predicate (set : capability_set) = List.exists predicate set
 let list_capabilities (set : capability_set) : capability list = set
-let built_in_capabilities = make_capability_set [ panic; run_forever ]
-let is_built_in_capability capability = has_capability capability built_in_capabilities
-let terminates set = not (has_capability run_forever set)
+let terminates set = not (has_capability (Built_in Run_forever) set)
 
 let contains_capability_error (capabilities : capability_set) =
   List.exists (function Capability_error _ -> true | _ -> false) capabilities
@@ -110,12 +112,10 @@ let is_builtin wanted type_ = find_builtin type_ = Some wanted
 let is_well_known wanted = function Named { path; _ } -> Well_known.is wanted path | _ -> false
 
 let find_view = function
-  | Named { path; arguments } when Well_known.is List path ->
-      Some (Named { path = Well_known.make_path Slice; arguments })
-  | Named { path; arguments = [] } when Well_known.is String path ->
-      Some (Named { path = Well_known.make_path String_slice; arguments = [] })
-  | Named { arguments = element :: _; _ } as array when is_builtin Array array ->
-      Some (Named { path = Well_known.make_path Slice; arguments = [ element ] })
+  | Named { path; arguments } ->
+      Option.map
+        (fun view -> Named { path = view; arguments = List.take 1 arguments })
+        (Well_known.find_view path)
   | _ -> None
 
 let signed_integer_types : Language.Builtin_type.t list = [ Int8; Int16; Int32; Int64 ]
@@ -250,7 +250,7 @@ and substitute_capabilities substitution capabilities =
                   name;
                 };
             ]
-      | Capability _ | Capability_variable _ | Capability_error _ -> None)
+      | Built_in _ | Capability _ | Capability_variable _ | Capability_error _ -> None)
     capabilities
 
 and substitute_trait substitution (trait : trait_reference) =
@@ -377,7 +377,7 @@ let has_unsolved_capabilities capabilities =
     (function
       | Capability_variable _ -> true
       | Capability_projection { base; _ } -> contains_unsolved base
-      | Capability _ | Capability_parameter _ | Capability_error _ -> false)
+      | Built_in _ | Capability _ | Capability_parameter _ | Capability_error _ -> false)
     capabilities
 
 let has_same_clauses (left : function_type) (right : function_type) =
@@ -409,6 +409,7 @@ let show_resource = function
         (match method_ with Some method_ -> "." ^ method_ | None -> "")
 
 let rec show_capability = function
+  | Built_in builtin_capability -> Language.Builtin_capability.show builtin_capability
   | Capability path -> Path.show_name path
   | Capability_parameter { name; _ } -> "generic " ^ name
   | Capability_projection { base; name; _ } -> show base ^ "." ^ name
@@ -703,12 +704,19 @@ let list_field_types interface =
 type associated_type = { associated_name : string; associated_bounds : trait_reference list }
 type trait_method = { method_name : string; method_receiver : Path.receiver; provided : bool }
 
+type restated_method = {
+  restated_name : string;
+  restated_receiver : Path.receiver;
+  declared_by : Path.t;
+}
+
 type trait_interface = {
   trait_generics : generic list;
   requires : trait_reference list;
   associated_types : associated_type list;
   associated_capabilities : string list;
   methods : trait_method list;
+  restated : restated_method list;
   laws : (string * (string * ty) list) list;
   is_capability : bool;
 }

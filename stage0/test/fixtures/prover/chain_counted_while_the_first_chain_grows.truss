@@ -1,0 +1,10 @@
+type Chain =
+  | End
+  | indirect Link(value: Int64, rest: Chain)
+
+fn count(grown: own Chain, chain: Chain) -> UInt64 {
+  match chain {
+    End => 0
+    Link(rest, ..) => count(Chain.Link(value: 0, rest: own grown), chain: rest)
+  }
+}

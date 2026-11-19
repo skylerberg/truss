@@ -10,11 +10,13 @@ impl Model for FromTheBack {
   }
 }
 
-fn FromTheBack.remaining(self) -> UInt64
-  ensures result == self.items.length()
-  cost time O(1)
-{
-  self.items.length()
+impl FiniteCursor for FromTheBack {
+  fn remaining(self) -> UInt64
+    ensures result == self.items.length()
+    cost time O(1)
+  {
+    self.items.length()
+  }
 }
 
 impl Cursor for FromTheBack {

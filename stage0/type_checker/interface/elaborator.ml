@@ -116,13 +116,6 @@ let show_path (path : Syntax.path) =
   String.concat "::"
     (List.map (fun (name : Syntax.name) -> name.text) (path.modules @ [ path.last ]))
 
-let is_uint64 (lookups : Lookups.t) path =
-  match Resolve.Names.find_definition lookups.names path with
-  | Some (key, { kind = Constant { type_ = { kind = Path_type written; _ }; _ }; _ }) ->
-      (lookups.read_resolved Interface key).names.(written.path.last.id)
-      = Some (Definition (Type, Well_known.make_builtin_type_path UInt64))
-  | _ -> false
-
 let rec elaborate_type context (written : Syntax.type_expression) : Types.ty =
   match written.kind with
   | Path_type path -> elaborate_path_type context path
@@ -234,21 +227,10 @@ and elaborate_count_name context (name : Syntax.name) : Types.argument =
   match find_target context name with
   | Some (Value_parameter parameter) -> Types.Value (Types.Value_parameter parameter)
   | Some (Definition (Constant, path)) -> (
-      if not (is_uint64 context.lookups path) then
-        Types.Type
-          (report_error_type context Arity context.spans.(name.id)
-             (Printf.sprintf "`%s` in a type argument must be a constant of type `UInt64`."
-                name.text))
-      else
-        match context.lookups.find_constant_value path with
-        | Some value -> Types.Value (Types.Known value)
-        | None ->
-            Types.Type
-              (report_error_type context Arity context.spans.(name.id)
-                 (Printf.sprintf
-                    "The value of `%s` cannot be computed: a constant used in a type cannot refer \
-                     to itself, and is made of literals, arithmetic, and other such constants."
-                    name.text)))
+      match Constants.evaluate_count context.lookups path ~written:name.text with
+      | Ok value -> Types.Value (Types.Known value)
+      | Error message ->
+          Types.Type (report_error_type context Arity context.spans.(name.id) message))
   | Some (Unknown report) -> Types.Type (Types.Error report)
   | _ -> raise_bug "`%s` is not resolved as a type argument" name.text
 
@@ -376,7 +358,7 @@ and elaborate_capability_path context (path : Syntax.path_type) : Types.capabili
            "`%s` is a type parameter, not a capability. A capability parameter is written `generic \
             %s` at each use."
            shown shown)
-  | Some (Definition (Capability, path_)) -> [ Types.Capability path_ ]
+  | Some (Definition (Capability, path_)) -> [ Types.make_capability path_ ]
   | Some (Definition _) ->
       report_error_capability context Not_a_capability context.spans.(path.id)
         (Printf.sprintf "`%s` is not a capability." shown)
@@ -1071,12 +1053,56 @@ let list_methods (lookups : Lookups.t) key =
       | _ -> None)
     (lookups.names.list_contained key)
 
+let list_required_traits (lookups : Lookups.t) trait =
+  match Option.bind (lookups.names.find_key trait) lookups.find_header with
+  | Some { container = Trait_parts { requires; _ }; _ } ->
+      List.map (fun (required : Types.trait_reference) -> required.trait) requires
+  | Some { container = Capability_parts | Impl_parts _; _ } | None -> []
+
+let list_requirements_first lookups (requires : Types.trait_reference list) =
+  let visited = ref [] in
+  let rec visit trait =
+    if not (List.exists (Path.equal trait) !visited) then begin
+      visited := trait :: !visited;
+      List.concat_map visit (list_required_traits lookups trait) @ [ trait ]
+    end
+    else []
+  in
+  List.concat_map (fun (required : Types.trait_reference) -> visit required.trait) requires
+
+let split_restated_methods (lookups : Lookups.t) (requires : Types.trait_reference list) members =
+  let inherited =
+    List.concat_map
+      (fun trait ->
+        match lookups.names.find_key trait with
+        | Some key ->
+            List.map
+              (fun (method_ : Types.trait_method) ->
+                ((method_.method_name, method_.method_receiver), trait))
+              (list_methods lookups key)
+        | None -> [])
+      (list_requirements_first lookups requires)
+  in
+  List.partition_map
+    (fun (method_ : Types.trait_method) ->
+      match List.assoc_opt (method_.method_name, method_.method_receiver) inherited with
+      | Some declared_by ->
+          Either.Right
+            {
+              Types.restated_name = method_.method_name;
+              restated_receiver = method_.method_receiver;
+              declared_by;
+            }
+      | None -> Either.Left method_)
+    members
+
 let make_container_interface lookups key (header : Environment.header) :
     Environment.elaborated_interface =
   let methods = list_methods lookups key in
   let interface =
     match header.container with
     | Trait_parts { trait_generics; requires; associated_types; associated_capabilities; laws } ->
+        let methods, restated = split_restated_methods lookups requires methods in
         Environment.Trait_interface
           {
             trait_generics;
@@ -1085,6 +1111,7 @@ let make_container_interface lookups key (header : Environment.header) :
             associated_capabilities;
             laws;
             methods;
+            restated;
             is_capability = false;
           }
     | Capability_parts ->
@@ -1096,6 +1123,7 @@ let make_container_interface lookups key (header : Environment.header) :
             associated_capabilities = [];
             laws = [];
             methods;
+            restated = [];
             is_capability = true;
           }
     | Impl_parts { impl_generics; implements; for_type; impl_uses; capability_sets } ->

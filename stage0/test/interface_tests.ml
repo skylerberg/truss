@@ -9,6 +9,11 @@ let make_standard_path = Path.make_standard_path
 let int64 = Types.make_builtin Int64
 
 let () =
+  Harness.test "a constant of type UInt64 is a type argument in a signature" (fun () ->
+      expect_no_diagnostics [ ("app::main", Fixtures.Interface.array_sized_by_a_uint64_constant) ]);
+  Harness.test "a constant of another type is not a type argument in a signature" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.array_sized_by_an_int64_constant "types.arity"
+        ~says:"`size` in a type argument must be a constant of type `UInt64`.");
   Harness.test "a function's signature is elaborated" (fun () ->
       let packages =
         Support.setup
@@ -157,9 +162,8 @@ let () =
         ~says:
           "Nothing can implement `RunForever`, since a `provide` of it would let a function that \
            does not declare `RunForever` run forever.");
-  Harness.test
-    "every standard capability except Panic, RunForever, and System has exactly one real \
-     implementation" (fun () ->
+  Harness.test "every standard capability is built in or has exactly one real implementation"
+    (fun () ->
       let packages = Support.setup [] in
       let interface = make_interface packages in
       let capabilities =
@@ -173,31 +177,24 @@ let () =
       let has_real_implementation (capability : Resolve.Names.declaration) =
         Option.is_some (Interface.Definition.find_real_implementation interface capability.key.path)
       in
-      let granted, capabilities =
-        List.partition
-          (fun (capability : Resolve.Names.declaration) -> Well_known.is System capability.key.path)
-          capabilities
-      in
-      match
+      let built_in, others =
         List.partition
           (fun (capability : Resolve.Names.declaration) ->
-            Types.is_built_in_capability (Capability capability.key.path))
+            Option.is_some (Well_known.find_builtin_capability capability.key.path))
           capabilities
-      with
-      | [ first; second ], others ->
-          List.iter
-            (fun (built_in : Resolve.Names.declaration) ->
-              if has_real_implementation built_in then
-                Harness.fail "%s has a real implementation" (Path.show built_in.key.path))
-            (first :: second :: granted);
-          if List.length granted <> 1 then
-            Harness.fail "the standard library does not declare System exactly once";
-          List.iter
-            (fun (capability : Resolve.Names.declaration) ->
-              if not (has_real_implementation capability) then
-                Harness.fail "%s has no real implementation" (Path.show capability.key.path))
-            others
-      | _ -> Harness.fail "the standard library does not declare Panic and RunForever exactly once");
+      in
+      if List.length built_in <> List.length Language.Builtin_capability.all then
+        Harness.fail "the standard library does not declare each built-in capability once";
+      List.iter
+        (fun (capability : Resolve.Names.declaration) ->
+          if has_real_implementation capability then
+            Harness.fail "%s has a real implementation" (Path.show capability.key.path))
+        built_in;
+      List.iter
+        (fun (capability : Resolve.Names.declaration) ->
+          if not (has_real_implementation capability) then
+            Harness.fail "%s has no real implementation" (Path.show capability.key.path))
+        others);
   Harness.test "a test declares Panic or RunForever, which leaves it deterministic" (fun () ->
       List.iter
         (fun (written, is_external) ->
@@ -293,7 +290,26 @@ let () =
       expect_one_diagnostic Fixtures.Interface.subtrait_redeclaring_compare
         "types.redeclared_method");
   Harness.test "a trait may add an overload of a method of a trait it requires" (fun () ->
-      expect_no_diagnostics [ ("app::main", Fixtures.Interface.subtrait_overloading_element) ])
+      expect_no_diagnostics [ ("app::main", Fixtures.Interface.subtrait_overloading_element) ]);
+  Harness.test "a trait may restate a method of a trait it requires to promise more" (fun () ->
+      expect_no_diagnostics [ ("app::main", Fixtures.Interface.subtrait_restating_next) ]);
+  Harness.test "a restated method has no body" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.subtrait_restating_next_with_a_body
+        "types.restated_method_body");
+  Harness.test "a restated method adds no requires" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.subtrait_restating_next_with_a_requires
+        "types.restated_method_clause" ~at:("requires", 1));
+  Harness.test "a restated method keeps the result of the method it restates" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.subtrait_restating_next_with_another_result
+        "types.signature_mismatch"
+        ~says:"so it has the signature `next(mut self) -> Option[Self.Element] uses Self.Uses`");
+  Harness.test "a restated method keeps the uses of the method it restates" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.subtrait_restating_next_without_its_uses
+        "types.signature_mismatch");
+  Harness.test "an impl of a trait that restates a method does not give the method" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.impl_giving_a_restated_method "types.extra_member"
+        ~says:"Give `next` in the `impl` of `standard::core::Cursor` for `Countdown`."
+        ~at:("next", 2))
 
 let expect_signature_mismatch text ~declared =
   expect_one_diagnostic text "types.signature_mismatch" ~says:declared
@@ -968,11 +984,11 @@ let () =
           ((Support.make_names packages).list_package_declarations Path.standard_package)
       in
       List.iter
-        (fun known ->
-          let path = Well_known.make_path known in
+        (fun path ->
           if not (List.exists (Path.equal path) declared) then
             Harness.fail "the standard library has no `%s`" (Path.show path))
-        Well_known.For_testing.all);
+        (List.map Well_known.make_path Well_known.For_testing.all
+        @ List.map Well_known.make_builtin_capability_path Language.Builtin_capability.all));
   Harness.test "every member the compiler names is in the standard library" (fun () ->
       let interface = make_interface (Support.setup []) in
       let find_shape path =
@@ -1038,4 +1054,10 @@ let () =
           if Well_known.find_method (Well_known.make_method_path method_) <> Some method_ then
             Harness.fail "`%s` is not found by its path"
               (Path.show (Well_known.make_method_path method_)))
-        Well_known.For_testing.all_methods)
+        Well_known.For_testing.all_methods;
+      List.iter
+        (fun builtin_capability ->
+          let path = Well_known.make_builtin_capability_path builtin_capability in
+          if Well_known.find_builtin_capability path <> Some builtin_capability then
+            Harness.fail "`%s` is not found by its path" (Path.show path))
+        Language.Builtin_capability.all)

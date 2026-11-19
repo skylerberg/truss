@@ -12,8 +12,12 @@ impl Meter for Fixed {
 
 type Readings(left: UInt64)
 
-fn Readings.remaining(self) -> UInt64 {
-  self.left
+impl FiniteCursor for Readings {
+  fn remaining(self) -> UInt64
+    ensures result == self.left
+  {
+    self.left
+  }
 }
 
 impl Cursor for Readings {
@@ -22,6 +26,7 @@ impl Cursor for Readings {
 
   fn next(mut self) -> Option[Int64]
     uses Meter
+    ensures (result is Some(_)) ==> self.left < old(self.left)
   {
     if self.left == 0 {
       return None

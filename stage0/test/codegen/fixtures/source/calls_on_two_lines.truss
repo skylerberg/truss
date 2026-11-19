@@ -1,0 +1,12 @@
+fn scale(value: Int64, factor: Int64) -> Int64 {
+  let product = multiply(value, factor)
+  offset(product)
+}
+
+fn multiply(value: Int64, factor: Int64) -> Int64 {
+  value * factor
+}
+
+fn offset(product: Int64) -> Int64 {
+  product + 1
+}

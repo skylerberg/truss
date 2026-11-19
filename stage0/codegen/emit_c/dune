@@ -12,5 +12,6 @@
   memory_layout
   libc
   lowered
+  profile
   convention
   zarith))

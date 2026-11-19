@@ -151,11 +151,7 @@ let make_constant_state (context : Definitions.context) path =
       written = Some (Definitions.read_written context source);
     }
   in
-  let state =
-    Lowering.enter context
-      ~builder:(Emit_c.Ir_builder.create context.env ~item:(Evaluator path))
-      (Lowering.make_frame code)
-  in
+  let state = Lowering.enter_item context ~item:(Evaluator path) code in
   (state, mir, ty)
 
 let rec fold_initializer context ~visiting path =

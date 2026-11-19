@@ -39,7 +39,7 @@ let lower (context : Context.t) (function_ : Libc.function_) =
   let emit_uint64 = Context.emit_uint64 context in
   let fail_obligation_when = Context.fail_obligation_when context in
   if not (Libc.is_available (Memory_layout.system env) function_) then begin
-    Context.fail context Panic
+    Context.panic context
       (Printf.sprintf "this system's C library has no %s" (Libc.show_function function_));
     Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder)
   end

@@ -118,14 +118,14 @@ let list_structural_parameters context (frame : State.frame) (clauses : State.cl
          match parameter.local with
          | Self -> (
              match (frame.old_self, frame.self_type) with
-             | Some entry, Some ty when is_datatype ty -> [ (ty, entry, index) ]
+             | Some entry, Some ty when is_datatype ty -> [ (parameter, ty, entry, index) ]
              | _ -> [])
          | local -> (
              match
                ( Locals.find_opt (Core_local local) frame.old_locals,
                  Facts.find_local_type context frame (Core_local local) )
              with
-             | Some entry, Some ty when is_datatype ty -> [ (ty, entry, index) ]
+             | Some entry, Some ty when is_datatype ty -> [ (parameter, ty, entry, index) ]
              | _ -> []))
        clauses.parameters)
 
@@ -145,9 +145,29 @@ let find_definition ~symbol result (term : Logic.term) =
       Some left
   | _ -> None
 
+let add_restated_clauses (context : State.context) ~self_type ~bind trait name receiver
+    (contract : State.contract) =
+  {
+    contract with
+    restated_clauses =
+      List.map
+        (fun ((subtrait : Types.trait_reference), (clauses : State.clauses)) ->
+          {
+            clauses with
+            bindings = bind subtrait (Path.Method { owner = subtrait.trait; name; receiver });
+          })
+        (Contracts.list_restated_clauses context.lookups
+           ~list_bounds:(Operations.compute_bounds_with_self context)
+           ~packages:(Operations.list_impl_packages context self_type)
+           ~self_type trait name receiver);
+  }
+
 let call_contract context (frame : State.frame) (site : Invocation.site) (invocation : Invocation.t)
     path (contract : State.contract) (values : State.passed list) ~recursive_callee ~lent_final
     ~havoc_mut ~substitution_of ~type_arguments =
+  let substitution_of (clauses : State.clauses) =
+    Types.combine_substitutions (substitution_of clauses) clauses.bindings
+  in
   let is_logic_call = contract.is_logic_function && invocation.uses = Types.no_capabilities in
   let values =
     if is_logic_call then
@@ -230,21 +250,32 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       when context.terminates && is_self_call
            && list_structural_parameters context frame callee_clauses <> [] ->
         let pairs = list_structural_parameters context frame callee_clauses in
-        let before = List.map (fun (ty, entry, _) -> Models.rank context ty entry) pairs in
+        let before = List.map (fun (_, ty, entry, _) -> Models.rank context ty entry) pairs in
         let after =
           List.map
-            (fun (ty, _, index) -> Models.rank context ty (lookup_argument_at_index values index))
+            (fun (_, ty, _, index) ->
+              Models.rank context ty (lookup_argument_at_index values index))
             pairs
+        in
+        let compared =
+          match
+            List.map
+              (fun (parameter, _, _, _) ->
+                Printf.sprintf "`%s`" (Facts.read_parameter_name parameter))
+              pairs
+          with
+          | [ name ] -> name
+          | names -> "the first of " ^ String.concat " and " names ^ " that it changes"
         in
         Facts.oblige context frame Termination location
           [
             Text
-              "This recursive call may not be on a part of its parameters: give the function a \
-               `decreases` clause.";
+              (Printf.sprintf
+                 "This recursive call may not be on a part of %s: give the function a `decreases` \
+                  clause."
+                 compared);
           ]
-          Logic.(
-            conjunction (List.map (fun right_term -> less_equal (int 0) right_term) before)
-            &&& Amounts.compare_lexicographically before after)
+          (Amounts.compare_lexicographically before after)
     | ([], _ | _, []) when context.terminates ->
         Facts.oblige context frame Termination location
           [
@@ -1046,10 +1077,21 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
             let compute_substitution (clauses : State.clauses) =
               if clauses.inherited then trait_substitution else callee_substitution
             in
+            let bind_restated subtrait restated =
+              Types.combine_substitutions
+                (bind_parameters (list_generics restated) arguments
+                   ~fixed:(Contracts.make_trait_substitution context.lookups subtrait self_type))
+                (Types.make_capability_substitution
+                   (list_capability_parameters restated)
+                   capability_arguments)
+            in
             with_contract ~substitution_of:compute_substitution
               ~type_arguments:(Facts.list_method_type_arguments ~self_type arguments)
               path
-              (Contracts.find_method_contract context.lookups trait name receiver evidence))
+              (Option.map
+                 (add_restated_clauses context ~self_type ~bind:bind_restated trait.trait name
+                    receiver)
+                 (Contracts.find_method_contract context.lookups trait name receiver evidence)))
     | Indirect () ->
         Laws.check_callback_requires context frame site through values;
         let frame = havoc_mut frame in

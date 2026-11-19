@@ -453,6 +453,7 @@ and match_ state env ?expected (value : Syntax.expression) scrutinees arms =
       in
       Match
         {
+          is_written = true;
           scrutinees;
           arms =
             List.map

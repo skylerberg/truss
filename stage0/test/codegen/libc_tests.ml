@@ -60,12 +60,10 @@ let free builder storage =
        })
 
 let try_compile text =
-  let directory = Lazy.force Codegen_support.scratch in
-  let source = Filename.temp_file ~temp_dir:directory "libc" ".c" in
-  Out_channel.with_open_text source (fun channel -> output_string channel text);
   C_compiler.For_testing.compile
     (Lazy.force Codegen_support.c_compiler)
-    O1 ~source ~output:(source ^ ".o")
+    Development ~text
+    ~output:(Filename.temp_file ~temp_dir:(Lazy.force Codegen_support.scratch) "libc" ".o")
 
 let linux : Libc.system = { os = Linux; architecture = X86_64 }
 

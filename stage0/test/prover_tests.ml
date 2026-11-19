@@ -184,10 +184,27 @@ let () =
       expect_not_proven
         Fixtures.Prover.while_loop_whose_measure_does_not_decrease_where_it_may_run_forever
         "prover.termination");
-  Harness.test "a cursor's remaining holds where the function may run forever" (fun () ->
-      expect_not_proven
-        Fixtures.Prover.cursor_whose_remaining_does_not_decrease_where_it_may_run_forever
-        "prover.termination");
+  Harness.test "an impl of FiniteCursor whose next does not decrease remaining is rejected"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.finite_cursor_whose_next_does_not_decrease_remaining
+        "prover.ensures");
+  Harness.test "a restated clause is proven of the receiver that the method changes" (fun () ->
+      expect_not_proven Fixtures.Prover.restated_clause_that_the_changed_receiver_breaks
+        "prover.ensures");
+  Harness.test "an impl of FiniteCursor proves the decrease from its next's ensures" (fun () ->
+      expect_proven Fixtures.Prover.finite_cursor_kept_by_its_next);
+  Harness.test "a loop over a type parameter bound by FiniteCursor ends" (fun () ->
+      expect_proven Fixtures.Prover.loop_over_a_bound_finite_cursor);
+  Harness.test "a call through a bound has the clauses that the bound's trait restates" (fun () ->
+      expect_proven Fixtures.Prover.restated_clause_through_a_bound);
+  Harness.test "a call that names the restating trait has the restated clauses" (fun () ->
+      expect_proven Fixtures.Prover.restated_method_called_through_its_trait);
+  Harness.test "a loop over a take of a list ends through FiniteCursor's restated next" (fun () ->
+      expect_proven Fixtures.Prover.loop_over_a_take_of_a_list);
+  Harness.test "an impl whose method's cost exceeds the restated cost is rejected" (fun () ->
+      expect_not_proven Fixtures.Prover.restated_cost_that_the_contract_breaks "prover.cost");
+  Harness.test "an impl whose method's cost meets the restated cost is proven" (fun () ->
+      expect_proven Fixtures.Prover.restated_cost_that_the_contract_keeps);
   Harness.test "a loop that counts up to its bound ends" (fun () ->
       expect_proven Fixtures.Prover.while_loop_counting_up);
   Harness.test "a for loop over a range knows its index is in range" (fun () ->
@@ -434,6 +451,19 @@ let () =
       expect_proven (tree ^ Fixtures.Prover.leftmost));
   Harness.test "recursion on the parameter itself does not end" (fun () ->
       expect_not_proven (tree ^ Fixtures.Prover.spin_on_its_tree) "prover.termination");
+  Harness.test "recursion on a part of the first parameter ends while a second one grows" (fun () ->
+      expect_proven Fixtures.Prover.chain_reversed_onto_a_growing_chain);
+  Harness.test "recursion on a part of a parameter ends while a later one is unchanged" (fun () ->
+      expect_proven Fixtures.Prover.chain_searched_beside_an_unchanged_chain);
+  Harness.test "recursion on a part of a parameter ends while an earlier one is unchanged"
+    (fun () -> expect_proven Fixtures.Prover.chain_searched_after_an_unchanged_chain);
+  Harness.test "recursion on a part of a parameter does not end while an earlier one grows"
+    (fun () ->
+      expect_one_termination_failure
+        ~says:
+          "This recursive call may not be on a part of the first of `grown` and `chain` that it \
+           changes: give the function a `decreases` clause."
+        Fixtures.Prover.chain_counted_while_the_first_chain_grows);
   Harness.test "a user's model is not known to be smaller than its value" (fun () ->
       expect_not_proven Fixtures.Prover.spin_on_a_knot_whose_model_holds_it "prover.termination");
   Harness.test "a match with guards ends in an unreachable that is proven" (fun () ->
@@ -1936,7 +1966,22 @@ let () =
   Harness.test "a counterexample says which arm of a match its path takes" (fun () ->
       let actual = read_message Fixtures.Prover.bump_of_an_option in
       if not (String.includes ~affix:"On that path, the arm `Some(count)` is taken." actual) then
-        Harness.fail "message %S" actual)
+        Harness.fail "message %S" actual);
+  let expect_overflow_naming_no_path text =
+    let actual = read_message text in
+    if
+      (not (String.includes ~affix:"may overflow" actual))
+      || String.includes ~affix:"On that path" actual
+    then Harness.fail "message %S" actual
+  in
+  Harness.test "a counterexample names no arm of a match with one arm" (fun () ->
+      expect_overflow_naming_no_path Fixtures.Prover.sum_of_a_pair);
+  Harness.test "a counterexample names no arm for a `for` loop over a call's result" (fun () ->
+      expect_overflow_naming_no_path Fixtures.Prover.sum_over_an_enumeration);
+  Harness.test "a counterexample names no arm for a `for` loop that moves each element out"
+    (fun () -> expect_overflow_naming_no_path Fixtures.Prover.sum_over_an_owned_list);
+  Harness.test "a counterexample names no arm for a `?`" (fun () ->
+      expect_overflow_naming_no_path Fixtures.Prover.question_mark_on_an_option)
 
 let () =
   Harness.test "a pure call's result is in its type's range for every bound value" (fun () ->

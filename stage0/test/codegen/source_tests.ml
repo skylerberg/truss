@@ -163,3 +163,119 @@ let () =
   Codegen_support.test "negating the least value of a signed type panics in a test" (fun () ->
       Codegen_support.expect_output Fixtures.Source.flip_of_an_int8
         "test 0 panicked\nmessage 47\narithmetic overflow\n  at example/main.truss:2:3\n")
+
+let make_example_item name : Lowered.Item.t =
+  Code
+    {
+      path = Top { module_ = Codegen_support.example; name };
+      instantiation = Ground.no_instantiation;
+    }
+
+type presumed_line = { text : string; file : string; line : int }
+
+let list_presumed_lines unit_text =
+  let file = ref "" and line = ref 0 in
+  List.filter_map
+    (fun text ->
+      match Scanf.sscanf_opt text "#line %d %S%!" (fun number name -> (number, name)) with
+      | Some (number, name) ->
+          line := number;
+          file := name;
+          None
+      | None ->
+          let presumed = { text; file = !file; line = !line } in
+          incr line;
+          Some presumed)
+    (String.split_on_char '\n' unit_text)
+
+let render_unit ~profile source name =
+  let item = make_example_item name in
+  let _, backend = Codegen_support.load ~profile ~roots:[ item ] source in
+  Backend.For_testing.render_unit backend item
+
+let find_last_presumed_line unit_text ~affix =
+  match
+    List.find_opt
+      (fun (presumed : presumed_line) -> String.includes ~affix presumed.text)
+      (List.rev (list_presumed_lines unit_text))
+  with
+  | Some presumed -> presumed
+  | None -> Printf.ksprintf failwith "no line has %s in:\n%s" affix unit_text
+
+let expect_presumed_at unit_text ~affix ~line =
+  let presumed = find_last_presumed_line unit_text ~affix in
+  if presumed.file <> "example/main.truss" || presumed.line <> line then
+    Codegen_support.fail "%s is at %s:%d, not example/main.truss:%d, in:\n%s" affix presumed.file
+      presumed.line line unit_text
+
+let calls affix = Emit_c.make_symbol (make_example_item affix) ^ "("
+
+let () =
+  Codegen_support.test "a release unit puts each call on the line of the Truss call" (fun () ->
+      let unit_text = render_unit ~profile:Release Fixtures.Source.calls_on_two_lines "scale" in
+      expect_presumed_at unit_text ~affix:(calls "scale") ~line:1;
+      expect_presumed_at unit_text ~affix:(calls "multiply") ~line:2;
+      expect_presumed_at unit_text ~affix:(calls "offset") ~line:3)
+
+let () =
+  Codegen_support.test "a development unit has no line control" (fun () ->
+      let unit_text = render_unit ~profile:Development Fixtures.Source.calls_on_two_lines "scale" in
+      if String.includes ~affix:"#line" unit_text then
+        Codegen_support.fail "a line control in:\n%s" unit_text)
+
+let () =
+  Codegen_support.test "every C line of an allocating assignment is on the line of its Truss call"
+    (fun () ->
+      let unit_text = render_unit ~profile:Release Fixtures.Source.indirect_variant "box" in
+      let allocating =
+        List.filter
+          (fun (presumed : presumed_line) ->
+            presumed.file = "example/main.truss" && String.includes ~affix:"block" presumed.text)
+          (list_presumed_lines unit_text)
+      in
+      if List.length allocating < 3 then
+        Codegen_support.fail "an allocating assignment of fewer than three lines in:\n%s" unit_text;
+      List.iter
+        (fun (presumed : presumed_line) ->
+          if presumed.line <> 6 then
+            Codegen_support.fail "`%s` is at line %d, not 6, in:\n%s" presumed.text presumed.line
+              unit_text)
+        allocating)
+
+let () =
+  Codegen_support.test "every line of a release unit for a drop is on <generated>" (fun () ->
+      let named =
+        Ground.Named
+          { path = Top { module_ = Codegen_support.example; name = "Named" }; arguments = [] }
+      in
+      let drop : Lowered.Item.t = Drop named in
+      let _, backend =
+        Codegen_support.load ~profile:Release ~roots:[ drop ] "type Named(name: String)\n"
+      in
+      let unit_text = Backend.For_testing.render_unit backend drop in
+      match
+        List.find_opt
+          (fun (presumed : presumed_line) -> presumed.text <> "" && presumed.file <> "<generated>")
+          (list_presumed_lines unit_text)
+      with
+      | Some presumed ->
+          Codegen_support.fail "`%s` is at %s:%d, in:\n%s" presumed.text presumed.file presumed.line
+            unit_text
+      | None -> ())
+
+let () =
+  Codegen_support.test "moving a definition changes only the line numbers of its release unit"
+    (fun () ->
+      let moved = "\n\n" ^ Fixtures.Source.calls_on_two_lines in
+      let read_fragment source =
+        let item = make_example_item "scale" in
+        let _, backend = Codegen_support.load ~roots:[ item ] source in
+        Emit_c.hash (Backend.For_testing.compile_fragment backend item)
+      in
+      if read_fragment moved <> read_fragment Fixtures.Source.calls_on_two_lines then
+        Codegen_support.fail "the fragment's hash changed when its definition moved";
+      let render ~profile source = render_unit ~profile source "scale" in
+      Codegen_support.expect_string
+        ~expected:(render ~profile:Development Fixtures.Source.calls_on_two_lines)
+        (render ~profile:Development moved);
+      expect_presumed_at (render ~profile:Release moved) ~affix:(calls "multiply") ~line:4)

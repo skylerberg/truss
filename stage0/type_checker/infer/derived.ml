@@ -201,6 +201,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   (node type_
                      (Match
                         {
+                          is_written = false;
                           scrutinees = [ Place self_place ];
                           arms =
                             List.mapi
@@ -220,6 +221,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                 node type_
                   (Match
                      {
+                       is_written = false;
                        scrutinees = [ Place other ];
                        arms =
                          arm (binding variant theirs)
@@ -341,6 +343,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                           node result
                             (Match
                                {
+                                 is_written = false;
                                  scrutinees = [ Operands.build Own compared ];
                                  arms =
                                    [
@@ -378,6 +381,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                       node number
                         (Match
                            {
+                             is_written = false;
                              scrutinees = [ Place other ];
                              arms =
                                List.mapi
@@ -524,6 +528,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   node ok
                     (Match
                        {
+                         is_written = false;
                          scrutinees = [ Operands.build Own call ];
                          arms =
                            [
@@ -742,6 +747,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                              (node unit
                                 (Match
                                    {
+                                     is_written = false;
                                      scrutinees =
                                        [
                                          Operands.build Own
@@ -926,6 +932,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                           (node result
                              (Match
                                 {
+                                  is_written = false;
                                   scrutinees = [ Place name_place ];
                                   arms =
                                     List.map

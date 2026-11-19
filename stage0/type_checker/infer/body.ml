@@ -76,30 +76,15 @@ let declare_parameters state (written : Syntax.parameter list) (signature : Type
 let classify_self_mode (signature : Types.signature) =
   match signature.receiver with Some (mode, _) -> mode | None -> Language.Mode.Read
 
-let list_clause_expressions (clauses : Syntax.clause list) =
-  List.concat_map
+let check_clauses state env (clauses : Syntax.clause list) =
+  List.iter
     (fun (clause : Syntax.clause) ->
       match clause.kind with
-      | Requires value | Ensures value -> [ (value, `Bool) ]
-      | Decreases measures -> List.map (fun measure -> (measure, `Cost_function)) measures
-      | Cost { bound = Big_o value | At_most value | Exactly value; _ } ->
-          [ (value, `Cost_function) ]
-      | Uses _ | Clause_error -> [])
+      | Requires value | Ensures value -> Clauses.check_condition state env value
+      | Decreases measures -> Clauses.check_measures state env measures
+      | Cost cost -> Clauses.check_cost state env cost
+      | Uses _ | Clause_error -> ())
     clauses
-
-let check_clauses state env (clauses : Syntax.clause list) =
-  let env = { env with State.specification = true } in
-  List.iter
-    (fun (clause : Syntax.clause) ->
-      match clause.kind with Cost cost -> State.check_cost state cost | _ -> ())
-    clauses;
-  List.iter
-    (fun ((value : Syntax.expression), kind) ->
-      Solver.run_in_statement state env (State.read_span state value.id) (fun () ->
-          match kind with
-          | `Bool -> Expressions.check state env value Types.bool
-          | `Cost_function -> ignore (Expressions.check_expression state env value)))
-    (list_clause_expressions clauses)
 
 let check_function_type_requires state env (written : Syntax.parameter list)
     (signature : Types.signature) =
