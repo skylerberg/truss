@@ -1352,6 +1352,10 @@ let () =
   Harness.test "a quantifier over a type in a compiled body" (fun () ->
       expect_one_diagnostic Fixtures.Infer.quantifier_over_int64_in_a_body
         "types.specification_only");
+  Harness.test "a quantifier's range from an Integer to a UInt64 is a range of Integer" (fun () ->
+      let text = Fixtures.Infer.range_in_a_specification_from_an_integer_to_a_uint64 in
+      expect_fine text;
+      expect_type text "middle + 1..items.length()" "Range[Integer]");
   Harness.test "a quantifier's range is of integers or characters, as a `for` loop's is" (fun () ->
       expect_one_diagnostic Fixtures.Infer.quantifier_over_a_float_range "types.not_indexable";
       expect_fine Fixtures.Infer.quantifier_over_a_character_range);

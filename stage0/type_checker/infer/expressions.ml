@@ -150,13 +150,26 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
       let element =
         match (start, stop) with
         | Some start, Some stop ->
-            let element = check_expression state env start in
-            let stop_type = check_expression state env ~expected:element stop in
-            Operators.check_literal_operands state ~left:element ~right:stop_type;
-            if not (State.unify state element stop_type) then
-              State.report_mismatch state (State.read_span state stop.id) ~expected:element
+            let start_type = check_expression state env start in
+            let stop_type = check_expression state env ~expected:start_type stop in
+            Operators.check_literal_operands state ~left:start_type ~right:stop_type;
+            let is_integer type_ =
+              State.is_within state type_ (Types.integer_types @ [ Language.Builtin_type.Integer ])
+            in
+            if State.unify state start_type stop_type then start_type
+            else if env.specification && is_integer start_type && is_integer stop_type then begin
+              List.iter
+                (fun ((bound : Syntax.expression), actual) ->
+                  State.convert state env ~expression:bound.id (State.read_span state bound.id)
+                    ~actual ~expected:Types.Integer)
+                [ (start, start_type); (stop, stop_type) ];
+              Types.Integer
+            end
+            else begin
+              State.report_mismatch state (State.read_span state stop.id) ~expected:start_type
                 ~actual:stop_type;
-            element
+              start_type
+            end
         | Some only, None | None, Some only -> check_expression state env only
         | None, None -> State.make_fresh_type state
       in
