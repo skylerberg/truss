@@ -1,0 +1,6 @@
+fn tail_is_shorter(items: Slice[Int64]) -> Bool
+  requires items.length() >= 1
+  ensures items.model()[1..].length() == items.length() - 1
+{
+  true
+}

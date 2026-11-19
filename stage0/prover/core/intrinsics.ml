@@ -42,10 +42,17 @@ let apply_slice context (frame : State.frame) (site : Invocation.site) ~(base_ty
     | Types.Named { arguments = Types.Type element :: _; _ } -> element
     | _ -> Facts.raise_unsupported location "a slice of `%s`" (Types.show base_type)
   in
+  let is_sequence =
+    match base_type with
+    | Types.Named { path; _ } -> Path.equal path Models.sequence_path
+    | _ -> false
+  in
   let model =
-    match Models.find_model context base_type collection ~element with
-    | Some model -> model
-    | None -> Facts.raise_unsupported location "a slice of `%s`" (Types.show base_type)
+    if is_sequence then collection
+    else
+      match Models.find_model context base_type collection ~element with
+      | Some model -> model
+      | None -> Facts.raise_unsupported location "a slice of `%s`" (Types.show base_type)
   in
   let length = Models.make_sequence_length context element model in
   let high =
@@ -58,16 +65,17 @@ let apply_slice context (frame : State.frame) (site : Invocation.site) ~(base_ty
   Facts.oblige context frame Requires location
     [ Text "`"; Facts.quote frame.source site.origin; Text "` may not be within the collection." ]
     Logic.(less_equal (int 0) low &&& less_equal low high &&& less_equal high length);
-  Validity.note_place context frame site.origin (Run (low, high));
-  let slice_type = Facts.substitute_type context frame site.type_ in
-  let viewed = Facts.arrive context frame "slice" slice_type in
-  (match Models.find_model context slice_type viewed ~element with
-  | Some viewed_model ->
-      Facts.assume context frame
-        (Logic.equal viewed_model
-           (make_sequence_range context frame element model ~start:low ~stop:high))
-  | None -> ());
-  (frame, viewed, low, high)
+  let range = make_sequence_range context frame element model ~start:low ~stop:high in
+  if is_sequence then (frame, range, low, high)
+  else begin
+    Validity.note_place context frame site.origin (Run (low, high));
+    let slice_type = Facts.substitute_type context frame site.type_ in
+    let viewed = Facts.arrive context frame "slice" slice_type in
+    (match Models.find_model context slice_type viewed ~element with
+    | Some viewed_model -> Facts.assume context frame (Logic.equal viewed_model range)
+    | None -> ());
+    (frame, viewed, low, high)
+  end
 
 let index_element context element term index =
   match Models.index_sequence context element term index with
@@ -242,6 +250,17 @@ let make_each_sum context element relation =
         (fun sequence -> make_sequence_sum context element sequence (Logic.Symbol measure))
         (fun value ->
           Lambdas.apply_function context (measure_type element) (Logic.Symbol measure) [ value ]) )
+
+let make_empty_parts context frame element =
+  let parts =
+    Facts.declare_fresh context frame "parts"
+      (Facts.declare_sort context (Models.make_sequence_type element))
+  in
+  Facts.assume context frame
+    (Logic.equal (Models.make_sequence_length context element parts) (Logic.int 0));
+  Facts.assume context frame
+    (make_each_sum context element (fun sum _ -> Logic.equal (sum parts) Costs.zero));
+  parts
 
 let append_part context frame element parts part =
   let longer =

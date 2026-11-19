@@ -1,0 +1,4 @@
+theorem tail_length[Element](items: Sequence[Element])
+  ensures items[1..].length() >= 0
+{
+}

@@ -546,7 +546,7 @@ let prove_receiving_loop ~prove_iteration ~most ~(for_loop : for_loop) context f
     ~changed ~holds ~start ~receive =
   let clauses = for_loop.for_clauses in
   let entry =
-    { frame with State.yielded = Some (Amounts.make_empty_parts context frame element_type) }
+    { frame with State.yielded = Some (Intrinsics.make_empty_parts context frame element_type) }
   in
   check_invariants context entry clauses ~when_:"on entry to the loop";
   let loop = enter_loop ~holds context frame ~entry clauses ~changed in
@@ -841,7 +841,7 @@ let run_for_loop context frame (for_loop : for_loop) =
       let bind_at_index (exit_frame : State.frame) next = for_loop.bind_element exit_frame next in
       let entry =
         bind_at_index
-          { frame with yielded = Some (Amounts.make_empty_parts context frame element) }
+          { frame with yielded = Some (Intrinsics.make_empty_parts context frame element) }
           low
       in
       check_invariants context entry clauses ~when_:"on entry to the loop";
