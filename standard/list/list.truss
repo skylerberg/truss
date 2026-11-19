@@ -90,7 +90,7 @@ impl Iterable for Windows[Element] {
     cost time O(1)
     cost allocations == 0
   {
-    self.elements.slice_range(position, stop: position + self.size)
+    self.elements[position..position + self.size]
   }
 }
 
@@ -118,7 +118,7 @@ impl Iterable for Chunks[Element] {
   {
     let start = position * self.size
     let stop = if self.size < self.elements.length() - start { start + self.size } else { self.elements.length() }
-    self.elements.slice_range(start, stop: stop)
+    self.elements[start..stop]
   }
 }
 
@@ -231,52 +231,6 @@ public fn List[Element].slice(self) -> Slice[Element]
   cost allocations == 0
 {
   Slice(elements: intrinsic::storage_view(self.storage))
-}
-
-internal fn List[Element].slice_range(self, start: UInt64, stop: UInt64) -> Slice[Element]
-  requires start <= stop
-  requires stop <= self.length()
-  ensures result.length() == stop - start
-  ensures forall index in 0..result.length() =>
-    identical(result.model()[index], self.model()[start + index])
-  cost time O(1)
-  cost allocations == 0
-{
-  self.slice().slice_range(start, stop: stop)
-}
-
-internal fn List[Element].slice_from(self, start: UInt64) -> Slice[Element]
-  requires start <= self.length()
-  ensures result.length() == self.length() - start
-  ensures forall index in 0..result.length() =>
-    identical(result.model()[index], self.model()[start + index])
-  cost time O(1)
-  cost allocations == 0
-{
-  self.slice().slice_from(start)
-}
-
-internal fn Slice[Element].slice_range(self, start: UInt64, stop: UInt64) -> Slice[Element]
-  requires start <= stop
-  requires stop <= self.length()
-  ensures result.length() == stop - start
-  ensures forall index in 0..result.length() =>
-    identical(result.model()[index], self.model()[start + index])
-  cost time O(1)
-  cost allocations == 0
-{
-  Slice(elements: intrinsic::view_slice(self.elements, start, stop))
-}
-
-internal fn Slice[Element].slice_from(self, start: UInt64) -> Slice[Element]
-  requires start <= self.length()
-  ensures result.length() == self.length() - start
-  ensures forall index in 0..result.length() =>
-    identical(result.model()[index], self.model()[start + index])
-  cost time O(1)
-  cost allocations == 0
-{
-  self.slice_range(start, stop: self.length())
 }
 
 impl Iterable for List[Element] {
@@ -495,7 +449,6 @@ public fn Slice[Element].element(mut self, position: UInt64) lends mut Element
   requires position < self.count()
   ensures identical(result, old(self.model())[position])
   ensures identical(self.model(), old(self.model()).update(position, value: final(result)))
-  ensures self.length() == old(self.length())
   cost time O(1)
   cost amortized time O(1)
   cost allocations == 0
@@ -521,7 +474,7 @@ impl Index for List[Element] {
     cost time O(1)
     cost allocations == 0
   {
-    intrinsic::storage_at(self.storage, index: key)
+    self[key]
   }
 }
 
@@ -534,7 +487,7 @@ impl IndexMut for List[Element] {
     cost amortized time O(1)
     cost allocations == 0
   {
-    intrinsic::storage_at_mut(mut self.storage, index: key)
+    mut self[key]
   }
 }
 
@@ -556,20 +509,7 @@ impl Index for Slice[Element] {
     cost time O(1)
     cost allocations == 0
   {
-    intrinsic::view_at(self.elements, index: key)
-  }
-}
-
-impl IndexMut for Slice[Element] {
-  fn at(mut self, key: UInt64) lends mut Element
-    requires key < self.length()
-    ensures identical(result, old(self.model())[key])
-    ensures identical(self.model(), old(self.model()).update(key, value: final(result)))
-    cost time O(1)
-    cost amortized time O(1)
-    cost allocations == 0
-  {
-    intrinsic::view_at_mut(mut self.elements, index: key)
+    self[key]
   }
 }
 

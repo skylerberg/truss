@@ -801,6 +801,12 @@ let () =
       expect_not_proven Fixtures.Prover.slice_past_the_end "prover.requires");
   Harness.test "two slices lent together must not overlap" (fun () ->
       expect_not_proven Fixtures.Prover.both_of_overlapping_slices "prover.disjoint");
+  Harness.test "a range copied into from an overlapping range of one list" (fun () ->
+      expect_not_proven Fixtures.Prover.range_copied_from_an_overlapping_range "prover.disjoint");
+  Harness.test "an element bound to `_` is still proven in bounds" (fun () ->
+      expect_not_proven Fixtures.Prover.element_out_of_bounds_bound_to_a_wildcard "prover.requires");
+  Harness.test "a `mut Slice` parameter keeps its length through a call that writes it" (fun () ->
+      expect_proven Fixtures.Prover.slice_parameter_keeps_its_length_through_a_call);
   Harness.test "two halves of a list can be lent together" (fun () ->
       expect_proven Fixtures.Prover.both_halves_of_a_list)
 
@@ -1685,7 +1691,7 @@ let () =
 
 let () =
   Harness.test "a callee's clause in another file is named by its file and line" (fun () ->
-      let actual = read_message Fixtures.Prover.first_element_of_a_list in
+      let actual = read_message Fixtures.Prover.swap_in_a_list_that_may_be_empty in
       if
         not
           (String.includes ~affix:"The clause that must hold is at `standard/list/list.truss:"
@@ -2063,29 +2069,26 @@ let () =
       expect_proven Fixtures.Prover.or_pattern_binding_a_side_value);
   Harness.test "a match mut binding of alternatives is the part of the alternative that matched"
     (fun () -> expect_proven Fixtures.Prover.match_mut_on_sides);
-  Harness.test "a slice chosen by a condition gives its run back to the collection it views"
-    (fun () -> expect_proven Fixtures.Prover.slice_chosen_by_a_flag);
-  Harness.test "a copy of a mut slice parameter cannot be passed mut" (fun () ->
-      expect_not_proven Fixtures.Prover.copy_of_a_mut_slice_passed_mut "prover.unsupported");
-  Harness.test "a slice that a loop assigns cannot be passed mut after the loop" (fun () ->
-      expect_not_proven Fixtures.Prover.slice_assigned_in_a_loop_then_passed_mut
-        "prover.unsupported");
-  Harness.test "a slice chosen by a condition may mutate either collection" (fun () ->
-      expect_not_proven Fixtures.Prover.slice_chosen_by_a_flag_ensured_to_keep_the_second
-        "prover.ensures");
   Harness.test "a match mut binding of alternatives is no other alternative's part" (fun () ->
       expect_not_proven Fixtures.Prover.match_mut_on_sides_with_a_wrong_ensures "prover.ensures");
-  Harness.test "a mut lend in a condition is written back on each path" (fun () ->
+  Harness.test "a `mut` element argument in a condition is written back on each path" (fun () ->
       expect_proven Fixtures.Prover.if_condition_bumping_an_element);
-  Harness.test "a mut lend in a condition is written back where the condition holds" (fun () ->
+  Harness.test "a `mut` element argument in a condition is written back where the condition holds"
+    (fun () ->
       expect_not_proven Fixtures.Prover.if_condition_bumping_a_positive_element "prover.ensures");
-  Harness.test "a mut lend in a condition is written back where the condition fails" (fun () ->
+  Harness.test "a `mut` element argument in a condition is written back where the condition fails"
+    (fun () ->
       expect_not_proven Fixtures.Prover.if_condition_bumping_a_negative_element "prover.ensures");
-  Harness.test "a mut lend in a loop's condition is written back" (fun () ->
+  Harness.test "a `mut` element argument in a loop's condition is written back" (fun () ->
       expect_proven Fixtures.Prover.while_condition_bumping_an_element);
-  Harness.test "a mut lend in the right operand of && is written back where the operand ran"
+  Harness.test
+    "a `while` compares its measure before each evaluation of its condition, so a condition that \
+     undoes the body does not prove termination" (fun () ->
+      expect_not_proven Fixtures.Prover.loop_condition_undoing_the_body "prover.termination");
+  Harness.test
+    "a `mut` element argument in the right operand of && is written back where the operand ran"
     (fun () -> expect_proven Fixtures.Prover.and_operand_bumping_an_element_under_a_flag);
-  Harness.test "a mut lend in the right operand of && changes the element" (fun () ->
+  Harness.test "a `mut` element argument in the right operand of && changes the element" (fun () ->
       expect_not_proven Fixtures.Prover.and_operand_bumping_a_negative_element "prover.ensures")
 
 let () =

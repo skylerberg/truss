@@ -172,6 +172,7 @@ type method_location = { owner : t; name : string; receiver : Path.receiver }
 val make_path : t -> Path.t
 val of_path : Path.t -> t option
 val is : t -> Path.t -> bool
+val is_buffer_sequence : Path.t -> bool
 val locate_method : method_ -> method_location
 val make_method_path : method_ -> Path.t
 val make_impl_method_path : method_ -> impl:Path.t -> Path.t

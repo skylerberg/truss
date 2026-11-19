@@ -66,45 +66,6 @@ let assume_unchanged_outside context frame element ~before ~after ~start ~stop =
            ==> (less_equal start index &&& less index stop
                ||| equal (at after index) (at before index))) ))
 
-let write_sliced_owner context frame ~(owner : State.passed_place) ~owner_type ~start ~stop =
-  let element =
-    match owner_type with
-    | Types.Named { arguments = Types.Type element :: _; _ } -> element
-    | _ -> Facts.raise_unsupported Whole_definition "a slice of `%s`" (Types.show owner_type)
-  in
-  let before_value = owner.read frame in
-  let changed = Facts.arrive context frame "changed" owner_type in
-  match
-    ( Models.find_model context owner_type before_value ~element,
-      Models.find_model context owner_type changed ~element )
-  with
-  | Some before, Some after ->
-      assume_unchanged_outside context frame element ~before ~after ~start ~stop;
-      Validity.assume_valid context frame owner_type changed;
-      owner.write frame changed
-  | _ -> Facts.raise_unsupported Whole_definition "a slice of `%s`" (Types.show owner_type)
-
-let slice_place context (site : Invocation.site) ~(owner : State.passed_place) ~owner_type ~low
-    ~high =
-  {
-    State.read =
-      (fun frame ->
-        let frame = { frame with makes_obligations = false } in
-        let _, viewed, _, _ =
-          apply_slice context frame site ~base_type:(owner_type frame)
-            ~collection:(owner.read frame) ~low ~high:(Some high)
-        in
-        viewed);
-    write =
-      (fun frame _ ->
-        try
-          write_sliced_owner context frame ~owner ~owner_type:(owner_type frame) ~start:low
-            ~stop:high
-        with Facts.Unsupported _ ->
-          owner.write frame (Facts.arrive context frame "changed" (owner_type frame)));
-    note_changed_in_place = owner.note_changed_in_place;
-  }
-
 let handle_descriptor context handle =
   let handle_sort = Facts.declare_sort context (Types.make_builtin Handle) in
   Facts.declare context
@@ -628,9 +589,8 @@ let translate_lend context frame ~(site : Invocation.site) (lend : Intrinsic.len
   | element :: _, [ container; index ] ->
       let sequence =
         match lend with
-        | Storage_at | Storage_at_mut -> model_storage context frame element container.term
-        | View_at | View_at_mut -> model_buffer context frame View element container.term
-        | Array_at_mut -> Models.make_array_model context frame container.type_ container.term
+        | Storage_at -> model_storage context frame element container.term
+        | View_at -> model_buffer context frame View element container.term
       in
       require_element context frame site element index.term sequence;
       index_element context element sequence index.term
@@ -763,49 +723,128 @@ let replace_element context frame element ~before ~after index part =
            &&& not_ (equal (Symbol limit) index)
            ==> equal (at after (Symbol limit)) (at before (Symbol limit))) ))
 
-let update_storage context frame element storage index part =
-  let storage_type = Types.make_builtin Storage ~arguments:[ Type element ] in
-  let updated = Facts.arrive context frame "changed" storage_type in
-  replace_element context frame element
-    ~before:(make_buffer_model context Storage element storage)
-    ~after:(make_buffer_model context Storage element updated)
-    index part;
+let declare_buffer_slack context (ty : Types.ty) term =
+  let symbol = Logic.Symbol.Slack ty in
+  Facts.declare context (Logic.Function (symbol, [ Facts.declare_sort context ty ], Logic.Int));
+  Logic.Apply (symbol, [ term ])
+
+let find_sequence_element context frame (sequence : Types.ty) =
+  match sequence with
+  | Types.Named { arguments = Types.Type element :: _; _ } ->
+      Facts.substitute_type context frame element
+  | _ -> Facts.raise_bug "an element of `%s`, which is no sequence" (Types.show sequence)
+
+let find_sequence_model context frame (sequence : Types.ty) term =
+  match sequence with
+  | Types.Named { path; _ } when Well_known.find_builtin_type path = Some Array ->
+      Models.make_array_model context frame sequence term
+  | _ -> (
+      match
+        Models.find_model context sequence term
+          ~element:(find_sequence_element context frame sequence)
+      with
+      | Some model -> model
+      | None ->
+          Facts.raise_unsupported Whole_definition "the elements of `%s`" (Types.show sequence))
+
+let oblige_in_bounds context (frame : State.frame) ~origin condition =
+  Facts.oblige context frame Requires
+    (Facts.locate context frame.source origin)
+    [ Text "`"; Facts.quote frame.source origin; Text "` may not be within the collection." ]
+    condition
+
+let read_sequence_element context frame (sequence : Types.ty) term index ~origin =
+  let element = find_sequence_element context frame sequence in
+  let model = find_sequence_model context frame sequence term in
+  oblige_in_bounds context frame ~origin
+    Logic.(
+      less_equal (int 0) index &&& less index (Models.make_sequence_length context element model));
+  Validity.note_place context frame origin (One index);
+  let read = index_element context element model index in
+  Facts.assume context frame (Facts.make_in_range element read);
+  Validity.assume_valid context frame element read;
+  read
+
+let write_sequence context frame (sequence : Types.ty) before ~write_model =
+  let element = find_sequence_element context frame sequence in
+  let after =
+    match (sequence, Facts.find_constructors context sequence) with
+    | Types.Named { path; _ }, _ when Well_known.find_builtin_type path = Some Array ->
+        let after = Facts.arrive context frame "changed" sequence in
+        write_model
+          ~before:(Models.make_array_model context frame sequence before)
+          ~after:(Models.make_array_model context frame sequence after);
+        after
+    | _, Some [ (None, [ (field, buffer_type) ]) ] ->
+        ignore (Facts.declare_sort context sequence);
+        let buffer = Validity.select_field context sequence None field before in
+        let written = Facts.arrive context frame "changed" buffer_type in
+        let builtin =
+          match buffer_type with
+          | Types.Named { path; _ } -> (
+              match Well_known.find_builtin_type path with
+              | Some ((Storage | View) as builtin) -> builtin
+              | _ -> Facts.raise_bug "the field of `%s` is no buffer" (Types.show sequence))
+          | _ -> Facts.raise_bug "the field of `%s` is no buffer" (Types.show sequence)
+        in
+        write_model
+          ~before:(make_buffer_model context builtin element buffer)
+          ~after:(make_buffer_model context builtin element written);
+        if builtin = Storage then
+          Facts.assume context frame
+            (Logic.equal
+               (make_buffer_capacity context element written)
+               (make_buffer_capacity context element buffer));
+        let after = Logic.Apply (Facts.make_constructor_symbol sequence None, [ written ]) in
+        write_model
+          ~before:(find_sequence_model context frame sequence before)
+          ~after:(find_sequence_model context frame sequence after);
+        after
+    | _, None ->
+        let after = Facts.arrive context frame "changed" sequence in
+        write_model
+          ~before:(find_sequence_model context frame sequence before)
+          ~after:(find_sequence_model context frame sequence after);
+        Facts.assume context frame
+          (Logic.equal
+             (declare_buffer_slack context sequence after)
+             (declare_buffer_slack context sequence before));
+        after
+    | _, Some _ -> Facts.raise_bug "a sequence `%s` with more than one field" (Types.show sequence)
+  in
+  Validity.assume_valid context frame sequence after;
+  after
+
+let write_sequence_element context frame (sequence : Types.ty) before index part =
+  let element = find_sequence_element context frame sequence in
+  write_sequence context frame sequence before ~write_model:(fun ~before ~after ->
+      replace_element context frame element ~before ~after index part)
+
+let write_sequence_range context frame (sequence : Types.ty) before ~start ~stop slice =
+  let element = find_sequence_element context frame sequence in
+  let slice_model =
+    find_sequence_model context frame
+      (Types.Named { path = Well_known.make_path Slice; arguments = [ Types.Type element ] })
+      slice
+  in
+  write_sequence context frame sequence before ~write_model:(fun ~before ~after ->
+      assume_unchanged_outside context frame element ~before ~after ~start ~stop;
+      let position = Facts.make_fresh_name context "index" in
+      Facts.assume context frame
+        (Logic.forall
+           ( [ (position, Logic.Int) ],
+             Logic.(
+               less_equal (int 0) (Symbol position)
+               &&& less (Symbol position) (Costs.minus stop start)
+               ==> equal
+                     (index_element context element after (Costs.plus start (Symbol position)))
+                     (index_element context element slice_model (Symbol position))) )))
+
+let assume_same_length context frame (sequence : Types.ty) ~before ~after =
+  let element = find_sequence_element context frame sequence in
   Facts.assume context frame
     (Logic.equal
-       (make_buffer_capacity context element updated)
-       (make_buffer_capacity context element storage));
-  updated
-
-let update_array context frame (array_type : Types.ty) array index part =
-  match array_type with
-  | Types.Named { arguments = Types.Type element :: _; _ } ->
-      let updated = Facts.arrive context frame "changed" array_type in
-      replace_element context frame element
-        ~before:(Models.make_array_model context frame array_type array)
-        ~after:(Models.make_array_model context frame array_type updated)
-        index part;
-      updated
-  | _ -> Facts.raise_unsupported Whole_definition "the elements of `%s`" (Types.show array_type)
-
-let write_element_back context frame ~(lend : Intrinsic.lend) ~type_arguments
-    ~(receiver : State.passed_place) ~receiver_type index final =
-  let read_element_type () =
-    match type_arguments with
-    | Types.Type element :: _ -> Facts.substitute_type context frame element
-    | _ -> Facts.raise_bug "an element's lend with no element type"
-  in
-  match lend with
-  | Storage_at | Storage_at_mut ->
-      receiver.write frame
-        (update_storage context frame (read_element_type ()) (receiver.read frame) index final)
-  | Array_at_mut ->
-      receiver.write frame
-        (update_array context frame receiver_type (receiver.read frame) index final)
-  | View_at | View_at_mut ->
-      let element = read_element_type () in
-      let updated = Facts.arrive context frame "changed" receiver_type in
-      replace_element context frame element
-        ~before:(make_buffer_model context View element (receiver.read frame))
-        ~after:(make_buffer_model context View element updated)
-        index final;
-      receiver.write frame updated
+       (Models.make_sequence_length context element
+          (find_sequence_model context frame sequence after))
+       (Models.make_sequence_length context element
+          (find_sequence_model context frame sequence before)))

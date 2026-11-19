@@ -366,6 +366,7 @@ let by_path =
 
 let of_path path = Path.Map.find_opt path by_path
 let is known path = of_path path = Some known
+let is_buffer_sequence path = is List path || is Slice path
 
 let locate_method =
   index_rows "method"

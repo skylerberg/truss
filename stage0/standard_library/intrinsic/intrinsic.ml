@@ -75,7 +75,7 @@ type buffer =
   | Array_model
   | View_address
 
-type lend = Storage_at | Storage_at_mut | View_at | View_at_mut | Array_at_mut
+type lend = Storage_at | View_at
 
 type runtime =
   | Crash
@@ -173,7 +173,7 @@ let list_buffer_operations =
     View_address;
   ]
 
-let list_lend_operations = [ Storage_at; Storage_at_mut; View_at; View_at_mut; Array_at_mut ]
+let list_lend_operations = [ Storage_at; View_at ]
 
 let list_runtime_operations =
   [
@@ -273,12 +273,7 @@ let show_buffer : buffer -> string = function
   | Array_model -> "array_model"
   | View_address -> "view_address"
 
-let show_lend : lend -> string = function
-  | Storage_at -> "storage_at"
-  | Storage_at_mut -> "storage_at_mut"
-  | View_at -> "view_at"
-  | View_at_mut -> "view_at_mut"
-  | Array_at_mut -> "array_at_mut"
+let show_lend : lend -> string = function Storage_at -> "storage_at" | View_at -> "view_at"
 
 let show_runtime : runtime -> string = function
   | Crash -> "crash"

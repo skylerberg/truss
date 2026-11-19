@@ -157,8 +157,6 @@ and lower_statement state (statement : Mir.Graph.statement) =
       in
       lower_call_into state call destination ~origin
   | Lend { part; call } -> lend state part call ~origin
-  | Slice { destination; call; _ } ->
-      lower_call_into state call (Mir_places.lower_place state destination) ~origin
   | Template { destination; call; _ } ->
       lower_call_into state call (Mir_places.lower_place state destination) ~origin
   | Live _ | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ -> ()
@@ -577,14 +575,19 @@ and lend ?(forwards = 0) state part (call : Mir.call) ~origin =
           with
           | Some place -> Mir_places.bind_local state part place
           | None -> Definitions.raise_bug "a lent place from an intrinsic that does not lend")
-  | _, Some { setup; call = inner } ->
+  | _, Some { setup; lent } -> (
       List.iter
         (fun (local, type_, (computing : Mir.call)) ->
           let destination = Lowering.allocate_local state (Value (Lowering.ground state type_)) in
           Hashtbl.replace (Mir_places.require_mir_frame state).places local destination;
           lower_call_into state computing destination ~origin)
         setup;
-      lend ~forwards:(forwards + 1) state part inner ~origin
+      match lent with
+      | Call inner -> lend ~forwards:(forwards + 1) state part inner ~origin
+      | Place place ->
+          Hashtbl.replace (Mir_places.require_mir_frame state).placed_parts part ();
+          Lowering.run_in_statement state (fun () ->
+              Mir_places.bind_local state part (Mir_places.lower_place state place)))
   | callee, None ->
       let frame = Mir_places.require_mir_frame state in
       let lent = Mir_lends.obtain_lent_call state part in
@@ -689,12 +692,8 @@ and lend_part state ~(mode : Language.Mode.t) (part : Mir.yielded) =
   in
   let find_lent_in_place (written : Mir.place) : Lowered.place option =
     let lowered = Mir_places.lower_place state written in
-    let is_reached_through_pointer =
-      match lowered.root with
-      | Static _ -> true
-      | Local _ -> List.exists (function Lowered.Deref -> true | _ -> false) lowered.projections
-    in
-    if outlives written && is_reached_through_pointer then Some lowered else None
+    if outlives written && Lowering.is_reached_through_pointer state lowered then Some lowered
+    else None
   in
   let rec write (yielded : Mir.yielded) (destination : Lowered.place) :
       (Lowered.projection list * deferred) list =

@@ -355,11 +355,6 @@ let find_buffer_elements (context : State.context) (ty : Types.ty) =
       Tables.Type_table.replace context.buffers key elements;
       elements
 
-let declare_buffer_slack context (ty : Types.ty) term =
-  let symbol = Logic.Symbol.Slack ty in
-  Facts.declare context (Logic.Function (symbol, [ Facts.declare_sort context ty ], Logic.Int));
-  Logic.Apply (symbol, [ term ])
-
 let declare_potential_measure context element =
   let symbol = Logic.Symbol.Potential_measure element in
   let measure = Intrinsics.measure_type element in
@@ -462,7 +457,7 @@ and compute_potential context (frame : State.frame) ?(seen = []) (ty : Types.ty)
           match find_buffer_elements context ty with
           | Some (element, model_of) ->
               let sequence = model_of term in
-              let slack = declare_buffer_slack context ty term in
+              let slack = Intrinsics.declare_buffer_slack context ty term in
               let length = Models.make_sequence_length context element sequence in
               Facts.add_frame_fact context frame
                 Logic.(less_equal (int 0) slack &&& less_equal slack (multiply (int 2) length));
@@ -550,6 +545,21 @@ let compute_elements_potential context (ty : Types.ty) term =
           | _ -> Costs.zero)
   in
   sum_elements ~enclosing:[] ty term
+
+let assume_element_potential_change context frame (sequence : Types.ty) ~before ~after ~replaced
+    ~written =
+  match find_buffer_elements context sequence with
+  | Some (element, model_of) -> (
+      try
+        if has_potential context element then
+          let sum term = sum_element_potentials context element (model_of term) in
+          Facts.assume context frame
+            (Logic.equal (sum after)
+               (Costs.plus
+                  (Costs.minus (sum before) (compute_potential context frame element replaced))
+                  (compute_potential context frame element written)))
+      with Facts.Unsupported _ -> ())
+  | None -> ()
 
 let find_literal_bound (metric : Language.Metric.t) (costs : Mir.cost list) =
   let counter = Costs.make_operand_counter metric in

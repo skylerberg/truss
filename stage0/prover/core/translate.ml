@@ -90,7 +90,6 @@ let make_empty_frame source =
     substitution = Types.no_substitution;
     self_type = None;
     aliases = Locals.empty;
-    slices = Locals.empty;
     lends = Locals.empty;
     yielded = None;
     yielded_so_far = None;

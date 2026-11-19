@@ -665,7 +665,7 @@ let list_named_constants (lookups : Lookups.t) (value : Core.expression) =
                 | None -> (origin, None)
               in
               named := { origin; constant = path; omitted_field } :: !named
-          | Local _ | Field _ | Lent _ | Temporary _ -> ());
+          | Local _ | Field _ | Element _ | Range _ | Lent _ | Temporary _ -> ());
         expression =
           (fun (node : Core.expression) ->
             match node.kind with
@@ -778,7 +778,7 @@ let list_used_paths (lookups : Lookups.t) key =
       place =
         (function
         | Constant { path; _ } -> use path
-        | Local _ | Field _ | Lent _ | Temporary _ -> ());
+        | Local _ | Field _ | Element _ | Range _ | Lent _ | Temporary _ -> ());
       pattern =
         (fun (node : Core.pattern) ->
           match node.kind with
