@@ -64,7 +64,8 @@ let walk_block visit (body : Core.block) =
 let walk_cost visit (cost : Core.cost) =
   match cost.bound with Order_of value | At_most value | Exactly value -> visit.expression value
 
-let walk_loop_clause visit = function
+let walk_loop_clause visit (written : Core.loop_clause Core.conditional) =
+  match written.clause with
   | Core.Invariant value -> visit.expression value
   | Decreases measures -> List.iter visit.expression measures
   | Cost bound -> walk_cost visit bound
@@ -221,11 +222,18 @@ let walk_definition_children visit : Core.definition -> unit = function
   | Core.Function { parameters; contract; body } ->
       List.iter (walk_parameter visit) parameters;
       List.iter
-        (fun (condition : Core.condition) -> visit.expression condition.value)
+        (fun (requirement : Core.condition Core.conditional) ->
+          visit.expression requirement.clause.value)
         contract.requires;
-      List.iter visit.expression contract.ensures;
-      List.iter visit.expression contract.decreases;
-      List.iter (walk_cost visit) contract.costs;
+      List.iter
+        (fun (promise : Core.expression Core.conditional) -> visit.expression promise.clause)
+        contract.ensures;
+      List.iter
+        (fun (measure : Core.expression Core.conditional) -> visit.expression measure.clause)
+        contract.decreases;
+      List.iter
+        (fun (cost : Core.cost Core.conditional) -> walk_cost visit cost.clause)
+        contract.costs;
       Option.iter (walk_block visit) body
   | Type { defaults; invariants; potential } ->
       List.iter (fun (_, _, value) -> visit.expression value) defaults;
@@ -284,9 +292,12 @@ let is_functional walk =
   walk visit;
   !fine
 
-let states_measure (clauses : Core.loop_clause list) =
-  List.exists
-    (function Core.Decreases _ -> true | Core.Invariant _ | Core.Cost _ -> false)
+let find_measure_condition (clauses : Core.loop_clause Core.conditional list) =
+  List.find_map
+    (fun (written : Core.loop_clause Core.conditional) ->
+      match written.clause with
+      | Core.Decreases _ -> Some written.holds_when
+      | Core.Invariant _ | Core.Cost _ -> None)
     clauses
 
 let has_implicit_measure (condition : Core.expression) =
@@ -311,6 +322,7 @@ let compute_tasks_use ?(read_solved = fun (_ : int) : Types.capability_set -> Ty
         List.iter mark_used (Types.list_capabilities (read_solved variable))
     | Capability_error _ ->
         Compiler_bug.raise_bug ~stage:"Core_walk" "a core form uses a capability with an error"
+    | Capability_unless { capability; _ } -> mark_used capability
   in
   walk_block
     (make_deep_visitor

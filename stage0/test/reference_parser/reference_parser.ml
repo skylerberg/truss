@@ -60,10 +60,12 @@ let token_of_kind (kind : Token.kind) : Truss.token option =
         | Trait -> TRAIT
         | True -> TRUE
         | Type -> TYPE
+        | Unless -> UNLESS
         | Unreachable -> UNREACHABLE
         | Use -> USE
         | Uses -> USES
         | Var -> VAR
+        | When -> WHEN
         | While -> WHILE
         | With -> WITH)
   | Punctuation punctuation ->

@@ -1,0 +1,38 @@
+type decision = Always | In_run of Types.condition | Elsewhere
+
+let decide (context : State.context) ~substitution (holds_when : Types.condition) =
+  match holds_when with
+  | [] -> Always
+  | _ -> (
+      let bounds =
+        Facts.list_definition_bounds context.lookups ~current:context.current ~condition:[]
+      in
+      match
+        Interface.Impls.decide_condition context.lookups.interface
+          ~list_bounds:(Operations.compute_bounds_with_self ~bounds context)
+          (Types.substitute_condition substitution holds_when)
+      with
+      | None -> Elsewhere
+      | Some [] -> Always
+      | Some undecided ->
+          if Types.implies_condition context.condition undecided then In_run undecided
+          else begin
+            if context.condition = [] && not (List.mem undecided context.skipped_conditions) then
+              context.skipped_conditions <- undecided :: context.skipped_conditions;
+            Elsewhere
+          end)
+
+let holds_here context ?(substitution = Types.no_substitution) holds_when =
+  match decide context ~substitution holds_when with
+  | Always | In_run _ -> true
+  | Elsewhere -> false
+
+let find_obligation_condition = function
+  | Always -> Some []
+  | In_run undecided -> Some undecided
+  | Elsewhere -> None
+
+let with_obligation_condition (context : State.context) condition run =
+  let outer = context.obligation_condition in
+  context.obligation_condition <- condition;
+  Fun.protect ~finally:(fun () -> context.obligation_condition <- outer) run

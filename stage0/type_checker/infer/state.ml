@@ -89,6 +89,7 @@ type state = {
   mutable capability_solution : (int, Types.capability_set) Hashtbl.t option;
   mutable evidence_packages : Path.package list;
   mutable final_type_checks : (unit -> unit) list;
+  mutable condition_bounds : Types.condition;
   mutable undecided : undecided_literal list;
   decisions : (int, literal_decision) Hashtbl.t;
   annotatable : (Syntax.id, unit) Hashtbl.t;
@@ -386,16 +387,47 @@ let compare_in_source_order state left right =
   and right : Source.Definition_span.t = read_span state right in
   compare (left.start, -left.stop) (right.start, -right.stop)
 
+let apply_condition_bounds state (condition : Types.condition) run =
+  match condition with
+  | [] -> run ()
+  | _ ->
+      let active = state.condition_bounds in
+      state.condition_bounds <- Types.make_condition (active @ condition);
+      Fun.protect
+        ~finally:(fun () -> state.condition_bounds <- active)
+        (fun () -> Interface.Elaborator.with_added_bounds state.context condition run)
+
+let keep_condition_bounds state run =
+  let active = state.condition_bounds in
+  fun () -> apply_condition_bounds state active run
+
 let defer state check =
+  let check = keep_condition_bounds state check in
   match find_current_frame state with
   | Some frame -> if not (check ()) then frame.deferred_checks <- check :: frame.deferred_checks
   | None -> ignore (check ())
 
-let check_when_final state check = state.final_type_checks <- check :: state.final_type_checks
+let check_when_final state check =
+  state.final_type_checks <- keep_condition_bounds state check :: state.final_type_checks
+
 let resolve state type_ = Unify.resolve state.unifier type_
 let zonk state type_ = Unify.zonk state.unifier type_
 let make_fresh_type state = Unify.make_fresh_type state.unifier
 let lookup_bounds state parameter = Interface.Elaborator.list_bounds state.context parameter
+
+let reduce_condition state (condition : Types.condition) =
+  Interface.Impls.decide_condition state.lookups.interface ~list_bounds:(lookup_bounds state)
+    condition
+
+let record_condition state id (written : Syntax.condition option) =
+  let condition =
+    reduce_condition state
+      (Option.fold ~none:[] ~some:(Interface.Elaborator.elaborate_condition state.context) written)
+  in
+  state.tables.conditions.(id) <- condition;
+  condition
+
+let find_condition state id = state.tables.conditions.(id)
 
 let normalize state type_ =
   Interface.Impls.normalize state.lookups.interface ~list_bounds:(lookup_bounds state)
@@ -757,7 +789,8 @@ let settle state frame =
     in
     let list_loop_calls : Tables.loop -> Tables.call list = function
       | Elements { count; element; _ } -> [ count; element ]
-      | Pulled { cursor_call; remaining; _ } -> List.filter_map Fun.id [ cursor_call; remaining ]
+      | Pulled { cursor_call; remaining; _ } ->
+          Option.to_list cursor_call @ Option.to_list (Option.map snd remaining)
       | Integer_range _ -> []
     in
     let undetermined =

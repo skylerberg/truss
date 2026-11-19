@@ -145,6 +145,11 @@ type context = {
   quantifier_facts : Logic.term list Tables.Term_table.t;
   mutable quantifier_symbols : Logic.symbol list;
   mutable validating : Types.ty list;
+  condition : Types.condition;
+  bounds : Interface.Impls.bounds;
+  keeps_termination : bool;
+  mutable obligation_condition : Types.condition;
+  mutable skipped_conditions : Types.condition list;
   run_body : frame -> lambdas:Mir.body array -> Mir.body -> unit;
   read_formula : frame -> Mir.formula -> arguments:Logic.term list -> frame * Logic.term;
 }

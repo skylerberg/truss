@@ -83,7 +83,7 @@ val build_for_loop :
   Syntax.statement ->
   Syntax.expression ->
   pattern:Core.pattern ->
-  clauses:Core.loop_clause list ->
+  clauses:Core.loop_clause Core.conditional list ->
   body:Core.block ->
   mode:Language.Loop_mode.t ->
   Core.origin * Core.statement_kind

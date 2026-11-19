@@ -519,7 +519,9 @@ be stored, passed, and returned.
 |---|---|
 | A cursor never holds `mut` access. | `mut` access is never stored. A `mut` loop mutates elements in place, by position. |
 | A tree is visited by recursion, by `fold`, or by a cursor that holds an explicit stack. | *Nothing hidden.* The stack's allocations are written. C# and Python allocate the same stack behind a recursive generator. |
-| A cursor whose values run out implements `FiniteCursor`, which adds `remaining()` and promises that each `next` that returns `Some` makes it smaller. | A loop over it terminates with no measure written, and generic code reaches the measure through a bound. A method found by its name, the alternative, cannot be named in a bound, so neither generic code nor an adapter such as `Take` could use it. |
+| A cursor whose values run out implements `FiniteCursor`, which adds `remaining()` and promises that each `next` that returns `Some` makes it smaller. | A loop over it terminates with no measure written, and generic code reaches the measure through a bound or a condition. A method found by its name, the alternative, cannot be named in a bound, so neither generic code nor an adapter such as `Take` could use it. |
+| `Zip` is a `FiniteCursor` where its first cursor is. | A type has one `impl` of each trait, so `Zip` cannot also be one where only its second cursor is. |
+| `Chain` and `Peekable` are not `FiniteCursor`s. | Each measure would add two counts: the `remaining()` of both cursors, or of the cursor and its peeked value. A sum of two `UInt64`s can overflow, and a sum that saturates need not decrease. |
 
 ### Lambdas
 
@@ -658,6 +660,27 @@ less-than operator. Brackets have no such conflict. The kind of the name
 before the brackets decides between the two readings, and the rules of
 [Scope](#scope) keep that kind easy to see.
 
+### Conditions
+
+Rules: [Conditions](SPECIFICATION.md#conditions).
+
+**A clause can hold for some instantiations, and then says which.** Whether
+`List.collect` terminates depends on the cursor it is given, and a written
+clause always holds, so the clause carries the condition:
+`uses RunForever unless Source: FiniteCursor`. The alternative is a function
+for each case, and then every generic caller needs one for each case too,
+which is the function coloring problem. `uses Source.Uses` already passes on
+the capabilities of the code that a function calls. A condition covers the
+other case: a capability that the function's own code needs for some type
+arguments only.
+
+| Rule | Reason |
+|---|---|
+| A condition is a conjunction of bounds. | A bound is decided by the `impl` lookup that a call's bounds already use, so the capability check decides a condition without the prover. A condition on values, as in a planned `uses Panic unless index < self.length()`, extends the same syntax. |
+| Every clause of a function and of a loop takes a condition. | A clause with a condition is proven through the body's loops and recursion, and their invariants and measures name the methods that the clause names: an `ensures` of `extend` that counts the elements `when Source: FiniteCursor` needs a loop `invariant` that names `remaining()`, and a recursion over a cursor needs `decreases source.remaining() when Source: FiniteCursor`. A call decides the condition of a `requires` by the `impl` lookup that decides every other clause's. |
+| A clause with a condition is checked and proven with the condition's bounds, and the body without them. | The body runs for every instantiation, so it calls only methods that every instantiation has. The clause describes the instantiations that meet the condition, so it can call the methods of the condition's traits, such as `source.remaining()`. |
+| The condition follows `when` or `unless`. | A line that starts with `if` begins a statement, so `if` could not put a condition on the line after a long `ensures`. `where` stays an error, because Rust's `where` states a bound that the caller must meet (*LLM habits*). |
+
 ### Termination
 
 Rules: [Termination](SPECIFICATION.md#termination), [Loops](SPECIFICATION.md#loops),
@@ -711,7 +734,7 @@ not.
 | A `while` loop's default measure and structural recursion are checked only in a function without `RunForever`. | Both are inferred from code that may not be meant to end. A loop that draws samples until it has accepted enough, as `sample_ntt` does, compares toward a bound that an iteration may not approach. |
 | A loop without a measure uses `RunForever`. | The capability check then covers the loop in every body, as it covers a call. A lambda's loop needs no rule of its own: the lambda's capabilities are inferred from its body. |
 | Nothing implements `RunForever`. | A `provide` of it would let a function that does not declare `RunForever` run forever. |
-| A function that uses `RunForever` has no `time` clause. | A written clause holds, and the time of a function that may run forever has no bound. |
+| A function that uses `RunForever` has no `time` clause, and one that uses `RunForever unless C` states its `time` clause `when` a condition that implies `C`. | A written clause holds, and the time of a function that may run forever has no bound. Where `C` holds, the function terminates, and its time has a bound. |
 | A manifest grants `RunForever` to a dependency as it grants any other capability. | A dependency that is granted nothing then terminates, as well as reaching nothing outside its arguments. |
 | A capability method that waits for the world terminates unless it declares `RunForever`. | A capability method returns to its caller once the world answers. If waiting counted as running forever, nearly every function that reads input would declare `RunForever`, and the capability would no longer separate a loop that has no measure from one that has. |
 
@@ -1319,7 +1342,7 @@ added clauses are between an `impl` and its trait.
 
 | Rule | Reason |
 |---|---|
-| Each `impl` proves a restated method's added clauses from the contract of its type's method, not from the method's body. | Laws are proven the same way, and proofs stay modular. A release may change a body within its contract ([Versions](#versions)), so a proof that read another package's body could break with a compatible release. |
+| Each `impl` proves a restated method's added clauses from the contract of its type's method, not from the method's body. | Laws are proven the same way, and proofs stay modular. A release may change a body within its contract ([Versions](#versions)), so a proof that read another package's body could break with a compatible release. A generic `impl` whose method promises more under a stronger bound says so with a condition: `Skip`'s `next` ensures that `remaining()` decreases `when Source: FiniteCursor`. |
 | A restated method adds only `ensures` and `cost`, and has no body. | A caller through the required trait keeps every obligation it had. A weaker `requires` cannot be proven from a contract, which states the `impl`'s own `requires`, and a body would give one method two implementations. |
 | A trait can require other traits. | A law can then span traits. `Ordered` requires `Equal`, so its law `agrees_with_equal` states that `compare` returns `Ordering.Equal` exactly when `==` holds. Rust's `Ord` requires `Eq` too, but that agreement is only documentation. |
 | `Hash` has no law relating it to `Equal`. | A law is a specification, and a specification cannot call `hash`, which mutates its `Hasher`. Stating the law would take a `hash` that returns its hash, which gives up a keyed hasher provided through a capability, or a specification form for the state a mutating call leaves. A derived `Hash` agrees with a derived `Equal` by construction. |

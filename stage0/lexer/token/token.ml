@@ -44,10 +44,12 @@ type keyword =
   | Trait
   | True
   | Type
+  | Unless
   | Unreachable
   | Use
   | Uses
   | Var
+  | When
   | While
   | With
 
@@ -217,10 +219,12 @@ let keywords =
     ("trait", Trait);
     ("true", True);
     ("type", Type);
+    ("unless", Unless);
     ("unreachable", Unreachable);
     ("use", Use);
     ("uses", Uses);
     ("var", Var);
+    ("when", When);
     ("while", While);
     ("with", With);
   ]
@@ -445,7 +449,7 @@ let can_begin = function
       true
   | Keyword
       ( Cost | Decreases | Derives | Else | Ensures | In | Indirect | Invariant | Is | Lends
-      | Opaque | Requires | Uses | With ) ->
+      | Opaque | Requires | Unless | Uses | When | With ) ->
       false
   | Punctuation _ | Newline | End_of_file -> false
 

@@ -88,6 +88,7 @@ type state = {
   mutable capability_solution : (int, Types.capability_set) Hashtbl.t option;
   mutable evidence_packages : Path.package list;
   mutable final_type_checks : (unit -> unit) list;
+  mutable condition_bounds : Types.condition;
   mutable undecided : undecided_literal list;
   decisions : (int, literal_decision) Hashtbl.t;
   annotatable : (Syntax.id, unit) Hashtbl.t;
@@ -162,6 +163,10 @@ val record : state -> Syntax.expression -> Types.ty -> unit
 val record_loop : state -> loop:Syntax.id -> iterable:Syntax.expression -> Tables.loop -> unit
 val note_compiled_expression : state -> env -> Syntax.expression -> unit
 val report_specification_only : state -> Source.Definition_span.t -> string -> Diagnostic.reported
+val reduce_condition : state -> Types.condition -> Types.condition option
+val record_condition : state -> Syntax.id -> Syntax.condition option -> Types.condition option
+val find_condition : state -> Syntax.id -> Types.condition option
+val apply_condition_bounds : state -> Types.condition -> (unit -> 'a) -> 'a
 val defer : state -> (unit -> bool) -> unit
 val check_when_final : state -> (unit -> unit) -> unit
 val resolve : state -> Types.ty -> Types.ty

@@ -47,6 +47,9 @@ let find_local_name = Core_walk.find_local_name
 let make_parameter ({ local; mode; type_; default; _ } : Core.parameter) : parameter =
   { local; mode; type_; has_default = default <> None }
 
+let of_conditional_clause ~parameters ({ holds_when; clause } : Core.expression Core.conditional) =
+  { (Builder.of_clause ~parameters clause) with holds_when }
+
 let find_contract (definition : Core.definition) =
   match definition with
   | Function { parameters; contract; _ } ->
@@ -55,26 +58,31 @@ let find_contract (definition : Core.definition) =
           parameters = List.map make_parameter parameters;
           requires =
             List.map
-              (fun (written : Core.condition) ->
+              (fun ({ holds_when; clause = written } : Core.condition Core.conditional) ->
                 {
                   clause =
-                    Builder.of_clause ~is_executable:written.executable ~parameters written.value;
+                    {
+                      (Builder.of_clause ~is_executable:written.executable ~parameters written.value)
+                      with
+                      holds_when;
+                    };
                   is_executable = written.executable;
                   names = Builder.list_names written.value;
                 })
               contract.requires;
-          ensures = List.map (Builder.of_clause ~parameters) contract.ensures;
-          decreases = List.map (Builder.of_clause ~parameters) contract.decreases;
+          ensures = List.map (of_conditional_clause ~parameters) contract.ensures;
+          decreases = List.map (of_conditional_clause ~parameters) contract.decreases;
           costs =
             List.map
-              (fun ({ origin; amortized; resource; bound } : Core.cost) ->
+              (fun ({ holds_when; clause = { origin; amortized; resource; bound } } :
+                     Core.cost Core.conditional) ->
                 let bound : bound =
                   match bound with
                   | Order_of amount -> Order_of (Builder.of_clause ~parameters amount)
                   | At_most amount -> At_most (Builder.of_clause ~parameters amount)
                   | Exactly amount -> Exactly (Builder.of_clause ~parameters amount)
                 in
-                { origin = Written origin; amortized; resource; bound })
+                { origin = Written origin; amortized; resource; bound; holds_when })
               contract.costs;
           callbacks =
             (let entry_locals =

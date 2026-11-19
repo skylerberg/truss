@@ -604,12 +604,21 @@ and find_remaining_call state (span : Source.Definition_span.t) cursor =
   let finite_cursor =
     State.make_trait_reference ~arguments:[] (Well_known.make_path Finite_cursor)
   in
+  let make_call () =
+    let { Well_known.name; receiver; _ } = Well_known.locate_method Finite_cursor_remaining in
+    let _, callee =
+      instantiate_trait_method state span ~self_type:cursor finite_cursor
+        { method_name = name; method_receiver = receiver; provided = false }
+    in
+    make_argumentless_call callee (Types.make_builtin UInt64)
+  in
+  let is_on_a_parameter (bound : Types.bound_condition) =
+    match bound.subject with Types.Parameter _ -> true | _ -> false
+  in
   match State.find_evidence state cursor finite_cursor with
-  | Some _ ->
-      let { Well_known.name; receiver; _ } = Well_known.locate_method Finite_cursor_remaining in
-      let _, callee =
-        instantiate_trait_method state span ~self_type:cursor finite_cursor
-          { method_name = name; method_receiver = receiver; provided = false }
-      in
-      Some (make_argumentless_call callee (Types.make_builtin UInt64))
-  | None -> None
+  | Some _ -> Some ([], make_call ())
+  | None -> (
+      match State.reduce_condition state [ { subject = cursor; bound = finite_cursor } ] with
+      | Some (_ :: _ as condition) when List.for_all is_on_a_parameter condition ->
+          Some (condition, State.apply_condition_bounds state condition make_call)
+      | Some _ | None -> None)

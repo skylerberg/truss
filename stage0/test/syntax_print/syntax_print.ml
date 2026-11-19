@@ -111,14 +111,35 @@ and show_capability_reference (reference : Syntax.capability_reference) =
   | Associated_capabilities (parameter, name) -> parameter.text ^ "." ^ name.text
   | Generic_capability name -> "generic " ^ name.text
 
+and show_condition (condition : Syntax.condition) =
+  String.concat " && "
+    (list
+       (fun (bound : Syntax.bound_condition) ->
+         show_type_expression bound.subject
+         ^ ": "
+         ^ String.concat " + " (list show_path_type bound.bounds))
+       condition)
+
+and show_conditional shown = function
+  | Some condition -> make_form "when" [ shown; show_condition condition ]
+  | None -> shown
+
+and show_capability_use (use : Syntax.capability_use) =
+  match use.unless with
+  | Some condition ->
+      make_form "unless" [ show_capability_reference use.capability; show_condition condition ]
+  | None -> show_capability_reference use.capability
+
 and show_clause (clause : Syntax.clause) =
-  match clause.kind with
-  | Uses capabilities -> make_form "uses" (list show_capability_reference capabilities)
-  | Requires value -> make_form "requires" [ show_expression value ]
-  | Ensures value -> make_form "ensures" [ show_expression value ]
-  | Decreases measures -> make_form "decreases" (list show_expression measures)
-  | Cost cost_ -> show_cost cost_
-  | Clause_error -> "error"
+  show_conditional
+    (match clause.kind with
+    | Uses uses -> make_form "uses" (list show_capability_use uses)
+    | Requires value -> make_form "requires" [ show_expression value ]
+    | Ensures value -> make_form "ensures" [ show_expression value ]
+    | Decreases measures -> make_form "decreases" (list show_expression measures)
+    | Cost cost_ -> show_cost cost_
+    | Clause_error -> "error")
+    clause.condition
 
 and show_cost { amortized; resource; bound } =
   let resource =
@@ -246,10 +267,12 @@ and show_arm (arm : Syntax.arm) =
 and show_block (block : Syntax.block) = make_form "block" (list show_statement block.statements)
 
 and show_loop_clause (clause : Syntax.loop_clause) =
-  match clause.kind with
-  | Invariant value -> make_form "invariant" [ show_expression value ]
-  | Loop_decreases measures -> make_form "decreases" (list show_expression measures)
-  | Loop_cost cost_ -> show_cost cost_
+  show_conditional
+    (match clause.kind with
+    | Invariant value -> make_form "invariant" [ show_expression value ]
+    | Loop_decreases measures -> make_form "decreases" (list show_expression measures)
+    | Loop_cost cost_ -> show_cost cost_)
+    clause.condition
 
 and show_statement (statement : Syntax.statement) =
   match statement.kind with

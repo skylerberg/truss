@@ -137,7 +137,7 @@ let parse_clauses cursor =
                   skip ()
             in
             skip ();
-            { kind = Clause_error; id = Cursor.allocate_id_from cursor start }
+            { kind = Clause_error; condition = None; id = Cursor.allocate_id_from cursor start }
       in
       let reject_repeated is_same message =
         if List.exists (fun (earlier : Syntax.clause) -> is_same earlier.kind) clauses then

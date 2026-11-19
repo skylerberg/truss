@@ -22,9 +22,22 @@ and visit_capability_reference on_expression (reference : Syntax.capability_refe
   | Capability_path path -> visit_path_type on_expression path
   | Self_capabilities _ | Associated_capabilities _ | Generic_capability _ -> ()
 
+and visit_condition on_expression (condition : Syntax.condition) =
+  List.iter
+    (fun (bound : Syntax.bound_condition) ->
+      visit_type_expression on_expression bound.subject;
+      List.iter (visit_path_type on_expression) bound.bounds)
+    condition
+
 and visit_clause on_expression (clause : Syntax.clause) =
+  Option.iter (visit_condition on_expression) clause.condition;
   match clause.kind with
-  | Uses capabilities -> List.iter (visit_capability_reference on_expression) capabilities
+  | Uses uses ->
+      List.iter
+        (fun (use : Syntax.capability_use) ->
+          visit_capability_reference on_expression use.capability;
+          Option.iter (visit_condition on_expression) use.unless)
+        uses
   | Requires value | Ensures value -> on_expression value
   | Decreases measures -> List.iter on_expression measures
   | Cost cost -> (
@@ -32,6 +45,7 @@ and visit_clause on_expression (clause : Syntax.clause) =
   | Clause_error -> ()
 
 and visit_loop_clause on_expression (clause : Syntax.loop_clause) =
+  Option.iter (visit_condition on_expression) clause.condition;
   match clause.kind with
   | Invariant value -> on_expression value
   | Loop_decreases measures -> List.iter on_expression measures
@@ -313,9 +327,24 @@ let walk_names ~on_name (definition : Syntax.definition) =
     | Associated_capabilities (base, name) ->
         on_name base;
         on_name name
+  and walk_condition (condition : Syntax.condition) =
+    List.iter
+      (fun (bound : Syntax.bound_condition) ->
+        walk_type bound.subject;
+        List.iter walk_path_type bound.bounds)
+      condition
+  and walk_loop_clause (clause : Syntax.loop_clause) =
+    Option.iter walk_condition clause.condition;
+    visit_loop_clause walk_expression { clause with condition = None }
   and walk_clause (clause : Syntax.clause) =
+    Option.iter walk_condition clause.condition;
     match clause.kind with
-    | Uses capabilities -> List.iter walk_capability capabilities
+    | Uses uses ->
+        List.iter
+          (fun (use : Syntax.capability_use) ->
+            walk_capability use.capability;
+            Option.iter walk_condition use.unless)
+          uses
     | Requires value | Ensures value -> walk_expression value
     | Decreases measures -> List.iter walk_expression measures
     | Cost cost -> (
@@ -399,7 +428,11 @@ let walk_names ~on_name (definition : Syntax.definition) =
         Option.iter walk_type annotation;
         walk_expression iterable;
         walk_pattern bound;
-        List.iter (visit_loop_clause walk_expression) clauses;
+        List.iter walk_loop_clause clauses;
+        walk_block body
+    | While { condition; clauses; body } ->
+        walk_expression condition;
+        List.iter walk_loop_clause clauses;
         walk_block body
     | _ ->
         visit_statement_parts ~on_expression:walk_expression ~on_statement:walk_statement statement

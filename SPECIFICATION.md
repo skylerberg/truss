@@ -94,7 +94,8 @@ Reserved everywhere:
 any assert break capability concurrent continue cost decreases derives echo else
 ensures exists false fn for forall if impl in indirect internal invariant is law
 lends let match mut opaque own parallel proof provide public requires return self
-Self test theorem todo trait true type unreachable use uses var while with
+Self test theorem todo trait true type unless unreachable use uses var when
+while with
 ```
 
 Reserved for later use, and an error if written:
@@ -282,8 +283,8 @@ end a statement and the token after it can begin one, outside `(` and `[`:
 
 So no `NEWLINE` comes before a closing `}`, and statements, arms, and members
 are separated by `NEWLINE`s. A `NEWLINE` before a `{` that must open a body
-is ignored. A line that starts with `.`, `else`, a clause keyword, or a
-binary operator other than `-` continues the line before:
+is ignored. A line that starts with `.`, `else`, a clause keyword, `when`,
+`unless`, or a binary operator other than `-` continues the line before:
 
 ```truss
 let active_names = users
@@ -775,11 +776,12 @@ function's name.
 ### Clauses
 
 ```ebnf
-clause               = "uses" capability_list
-                     | "requires" expression
-                     | "ensures" expression
-                     | "decreases" expression { "," expression }
-                     | "cost" cost ;
+clause               = "uses" capability_use { "," capability_use }
+                     | "requires" expression [ "when" condition ]
+                     | "ensures" expression [ "when" condition ]
+                     | "decreases" expression { "," expression } [ "when" condition ]
+                     | "cost" cost [ "when" condition ] ;
+capability_use       = capability_reference [ "unless" condition ] ;
 capability_list      = capability_reference { "," capability_reference } ;
 capability_reference = path_type
                      | "Self" "." UPPER_NAME
@@ -811,12 +813,72 @@ public fn binary_search[Element: Ordered](sorted: Slice[Element], target: Elemen
 
 - Repeated clauses all hold. Each `requires` may rely on the `requires`
   before it, and each `ensures` on every `requires` and the `ensures`
-  before it.
+  before it. A clause with a condition relies only on the clauses whose
+  conditions its own implies.
 - A function's *contract* is its `requires`, `ensures`, `decreases`, and
   `cost` clauses.
 - No clause is evaluated when the program runs.
 - `Self.Uses` and `Source.Uses` name an associated capability set (see
   [Associated capability sets](#associated-capability-sets)).
+- Every clause but `uses` can end with `when` and a condition, and each
+  capability in `uses` with `unless` and a condition (see
+  [Conditions](#conditions)).
+
+### Conditions
+
+```ebnf
+condition       = bound_condition { "&&" bound_condition } ;
+bound_condition = ( UPPER_NAME | "Self" ) ":" bound ;
+```
+
+```truss
+public fn List[Element].collect[Source: Cursor[Element = Element]](source: own Source) -> List[Element]
+  uses Source.Uses, RunForever unless Source: FiniteCursor
+  ensures result.length() <= old(source.remaining()) when Source: FiniteCursor
+```
+
+A *condition* states that type arguments implement traits. A clause with a
+condition holds for the instantiations that meet it.
+
+- `T: Trait` holds where the type argument for `T` implements `Trait`, and
+  `T: First + Second` where it implements both. `&&` joins conditions that
+  all hold.
+- A condition names a type parameter of its definition or of the
+  definition's type or `impl`, or `Self` in a trait or an `impl`.
+- A clause holds where its `when` condition holds, and a capability in
+  `uses` is used only where its `unless` condition does not hold. Every
+  clause of a function and of a loop takes a condition: `requires`,
+  `ensures`, `decreases`, `cost`, and `invariant`.
+- **A clause is checked with its condition's bounds,** so it can call the
+  methods of the condition's traits: the `ensures` above calls
+  `source.remaining()`, a method of `FiniteCursor`. The body is checked
+  without them, because it runs for every instantiation.
+- **A clause with a condition is proven where the condition holds.** An
+  `ensures`, a `cost`, an `invariant`, and a measure are proven for the body
+  with the condition's bounds: a call through them has their traits'
+  contracts, and a callee's clause holds where the bounds imply its
+  condition.
+- **A call has each clause of its callee whose condition holds for the
+  call's type arguments.** A condition holds where an `impl` gives it, as a
+  bound does, or where the caller's bounds or the condition of the caller's
+  own clause imply it. `List.collect(word.characters())` uses no
+  `RunForever`, since `Characters` implements `FiniteCursor`.
+  `List.collect(channel.messages())` uses `RunForever`. In a function generic
+  over `Items: Cursor`, `List.collect(own items)` uses
+  `RunForever unless Items: FiniteCursor`.
+- A call whose type arguments leave the condition of a `requires` undecided
+  proves the `requires` with the condition's bounds.
+- A condition on a type built from type parameters holds where an `impl`
+  gives it: `Skip[Source]: FiniteCursor` holds where `Source: FiniteCursor`
+  does, by `impl FiniteCursor for Skip[Source: FiniteCursor]`.
+- A capability that code uses `unless` a condition is available where the
+  function's `uses` names it with no condition, or `unless` a condition that
+  implies the code's.
+- A written function type takes no condition. The type of a function named
+  as a value keeps each condition that its type arguments do not decide.
+- A condition that names neither a type parameter nor `Self` is an error,
+  since it is decided where it is written, and so is a clause whose
+  condition no instantiation meets.
 
 ### Termination
 
@@ -830,24 +892,28 @@ fn serve(listener: mut Listener)
 }
 ```
 
-- **A function terminates unless its `uses` names `RunForever`.** A loop
-  without a measure uses `RunForever` (see [Loops](#loops)), and so does a
-  call of a function that uses it. `RunForever` is otherwise a capability
-  like any other: a function type without it takes only functions that
-  terminate, and a capability parameter holds it where a function passed for
-  the parameter may run forever (see
-  [Capability parameters](#capability-parameters)).
+- **A function terminates unless its `uses` names `RunForever`.** One whose
+  `uses` names `RunForever unless C` terminates where `C` holds (see
+  [Conditions](#conditions)). A loop without a measure uses `RunForever`
+  (see [Loops](#loops)), and so does a call of a function that uses it.
+  `RunForever` is otherwise a capability like any other: a function type
+  without it takes only functions that terminate, and a capability
+  parameter holds it where a function passed for the parameter may run
+  forever (see [Capability parameters](#capability-parameters)).
 - `RunForever` has no methods, and nothing implements it, since a `provide`
   of it would let a function that does not declare it run forever. A
   `parallel` branch or a quantifier may run forever where its function may.
-- A function that uses `RunForever` has no `time` clause.
+- A function that uses `RunForever` has no `time` clause. One that uses
+  `RunForever unless C` states its `time` clause `when` a condition that
+  implies `C`.
 - A call of a capability's method terminates unless the method's `uses`
   names `RunForever`. A method that waits for the world, such as
   `Console.read_line`, returns once the world answers, so waiting is not
   running forever. An implementation whose method may run forever declares
   `uses RunForever` on its `impl`, and providing it requires `RunForever`.
-- A trait's method runs forever only where its `uses` names `RunForever`, or
-  names an associated capability set that an `impl` puts `RunForever` in
+- A trait's method runs forever only where its `uses` names `RunForever` and
+  no `unless` condition of it holds, or names an associated capability set
+  that an `impl` puts `RunForever` in
   (see [Associated capability sets](#associated-capability-sets)). `any`
   fixes those sets to the empty set, so a method called through `any`
   terminates unless its trait's method names `RunForever`.
@@ -889,6 +955,9 @@ fn serve(listener: mut Listener)
 - A function that uses `RunForever` may state `decreases` as well. Each of
   its recursive calls to a function that states one then makes the measure
   smaller.
+- A function whose `decreases` has a condition `C` uses
+  `RunForever unless C`, and its recursion is proven to end where `C` holds,
+  as with `decreases source.remaining() when Source: FiniteCursor`.
 - **A recursion is followed through each call to the code that the call
   runs.** The callee decides which code that is:
 
@@ -1380,8 +1449,8 @@ statement = "let" pattern [ ":" type ] "=" expression [ "else" block ]
 
 assignment_operator = "=" | "+=" | "-=" | "*=" | "/=" | "%="
                     | "&=" | "|=" | "^=" | "<<=" | ">>=" ;
-loop_clause = "invariant" expression | "decreases" expression { "," expression }
-            | "cost" cost ;
+loop_clause = ( "invariant" expression | "decreases" expression { "," expression }
+              | "cost" cost ) [ "when" condition ] ;
 ```
 
 ```truss
@@ -1639,11 +1708,12 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
   one that uses `RunForever`. A `while` compares its measure before each
   evaluation of its condition, so a change that the condition makes counts
   toward the iteration.
-- Where a `for` loop over a cursor states no measure, and the cursor's type
-  implements `FiniteCursor`, the cursor's `remaining()` is the loop's
-  measure, and it holds as a written one does. A loop over a cursor of type
-  `Items: Cursor` has no measure, and one over `Items: FiniteCursor` has
-  `remaining()`.
+- A loop whose measure has a condition `C` uses `RunForever unless C`.
+- Where a `for` loop over a `cursor` of type `T` states no measure, it has
+  `decreases cursor.remaining() when T: FiniteCursor`, which holds as a
+  written measure does. A loop over a `ListCursor` therefore terminates, and
+  a loop over a cursor of type `Items: Cursor` uses
+  `RunForever unless Items: FiniteCursor`.
 - In a function without `RunForever`, a `while` loop that states no measure,
   and whose condition compares two sides that mutate nothing with `<`, `<=`,
   `>`, or `>=`, has the distance between them as its measure.
