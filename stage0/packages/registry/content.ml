@@ -18,13 +18,14 @@ let is_input name =
 let walk ~enters_directory ~keeps_file directory =
   let files = ref [] in
   let rec visit relative =
-    let absolute = if relative = "" then directory else Filename.concat directory relative in
-    let entries = try Sys.readdir absolute with Sys_error _ -> [||] in
+    let entries =
+      try Sys.readdir (File_system.join_path directory relative) with Sys_error _ -> [||]
+    in
     Array.sort String.compare entries;
     Array.iter
       (fun entry ->
-        let path = if relative = "" then entry else relative ^ "/" ^ entry in
-        let full = Filename.concat directory path in
+        let path = File_system.join_path relative entry in
+        let full = File_system.join_path directory path in
         match (Unix.lstat full).st_kind with
         | exception Unix.Unix_error _ -> ()
         | S_DIR -> if enters_directory ~entry ~full then visit path

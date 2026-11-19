@@ -36,6 +36,10 @@ type t =
   | From_template
   | From_elements
   | Map
+  | Set
+  | Sorted_set
+  | Sorted_map
+  | List_cursor
   | Entry
   | From_entries
   | Sequence
@@ -68,7 +72,6 @@ val of_path : Path.t -> t option
 val is : t -> Path.t -> bool
 val specification : Path.module_
 val is_system_module : Path.module_ -> bool
-val is_runtime_constructor : Path.t -> bool
 
 module For_testing : sig
   val all : t list

@@ -16,7 +16,6 @@ type instantiation = {
 
 val no_instantiation : instantiation
 val compare : ty -> ty -> int
-val make_builtin : Intrinsic.builtin -> ty
-val show_path_name : Path.t -> string
+val make_builtin : ?arguments:argument list -> Intrinsic.builtin -> ty
 val to_string : ty -> string
 val show_argument : argument -> string

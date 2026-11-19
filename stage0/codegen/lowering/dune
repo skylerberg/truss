@@ -1,0 +1,29 @@
+(include_subdirs qualified)
+
+(library
+ (name lowering)
+ (modules_without_implementation lookups)
+ (libraries
+  compiler_bug
+  path
+  well_known
+  resolve
+  interface
+  source
+  ground
+  memory_layout
+  libc
+  lowered
+  moves
+  emit_c
+  cbor
+  blake3
+  monomorphic
+  zarith
+  storage
+  builtin_records
+  intrinsic
+  types
+  core
+  mir
+  convention))

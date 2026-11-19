@@ -2,7 +2,11 @@ type package = { owner : string option; name : string }
 
 let list_package_parts package = Option.to_list package.owner @ [ package.name ]
 let show_package package = String.concat "::" (list_package_parts package)
-let compare_package left right = String.compare (show_package left) (show_package right)
+
+let compare_package left right =
+  match Option.compare String.compare left.owner right.owner with
+  | 0 -> String.compare left.name right.name
+  | order -> order
 
 let parse_package_parts = function
   | [ name ] -> Some { owner = None; name }
@@ -99,6 +103,15 @@ let show_receiver = function
   | Mut -> "`mut self`"
   | Own -> "`own self`"
 
+let rec show_name = function
+  | Top { name; _ } | Test { name; _ } -> name
+  | Impl { trait; for_type; _ } -> show_name trait.path ^ " for " ^ show_name for_type
+  | Law_proof { trait; law; for_type; _ } ->
+      show_name trait.path ^ "." ^ law ^ " for " ^ show_name for_type
+  | Unresolved { names; _ } -> String.concat "::" names
+  | Method { name; _ } | Member_constant { name; _ } -> name
+  | Derived { trait; _ } -> show_name trait
+
 let rec show = function
   | Top { module_; name } -> show_module module_ ^ "::" ^ name
   | Method { owner; name; receiver } -> (
@@ -148,4 +161,3 @@ module Ordered = struct
 end
 
 module Map = Map.Make (Ordered)
-module Set = Set.Make (Ordered)

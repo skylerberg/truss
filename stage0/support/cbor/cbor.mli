@@ -11,3 +11,6 @@ type t =
 
 val int : int -> t
 val encode : t -> string
+val decode : string -> t option
+val find_int : t -> int option
+val find_list : (t -> 'a option) -> t -> 'a list option

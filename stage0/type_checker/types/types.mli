@@ -47,7 +47,7 @@ and cost_bound = Order_of | No_more_than of Z.t option | Exactly_cost of Z.t opt
 
 val unit : ty
 val bool : ty
-val make_builtin : Intrinsic.builtin -> ty
+val make_builtin : ?arguments:argument list -> Intrinsic.builtin -> ty
 val make_self_parameter : Path.t -> parameter
 val is_self_parameter : parameter -> bool
 val make_named : Path.t -> ty list -> ty
@@ -67,6 +67,8 @@ val no_capabilities : capability_set
 val union_capabilities : capability_set -> capability_set -> capability_set
 val run_forever : capability
 val has_capability : capability -> capability_set -> bool
+val exists_capability : (capability -> bool) -> capability_set -> bool
+val list_capabilities : capability_set -> capability list
 val built_in_capabilities : capability_set
 val is_built_in_capability : capability -> bool
 val terminates : capability_set -> bool
@@ -77,7 +79,7 @@ val is_capability_subset : capability_set -> capability_set -> bool
 val compute_missing_capabilities :
   required:capability_set -> available:capability_set -> capability_set
 
-val flat_map_capabilities : (capability -> capability list) -> capability_set -> capability_set
+val replace_capabilities : (capability -> capability_set option) -> capability_set -> capability_set
 
 type substitution
 
@@ -105,7 +107,7 @@ val show_mode : mode -> string
 val map : ?map_capabilities:(capability_set -> capability_set) -> (ty -> ty option) -> ty -> ty
 val exists : ?resolve:(ty -> ty) -> (ty -> bool) -> ty -> bool
 val find_specification_only_type : ty -> ty option
-val has_capability_variable : capability_set -> bool
+val contains_capability_variable : capability_set -> bool
 val has_unsolved_capabilities : capability_set -> bool
 val equal : ty -> ty -> bool
 val is_error : ty -> bool

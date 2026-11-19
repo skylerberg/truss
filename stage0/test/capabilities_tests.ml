@@ -269,7 +269,9 @@ let () =
       | actual -> Harness.fail "found [%s]" (String.concat "; " actual));
   Harness.test "a dependency's trait method can use a granted capability" (fun () ->
       match
-        with_grant [ ("app::main", Fixtures.Capabilities.wall_stamp_call); library ] [ "Clock" ]
+        with_grant
+          [ ("app::main", Fixtures.Capabilities.wall_stamp_call); library ]
+          [ Grant.Prelude "Clock" ]
       with
       | [] -> ()
       | actual -> Harness.fail "found [%s]" (String.concat "; " actual));
@@ -317,7 +319,7 @@ let () =
   Harness.test "a function value of a dependency's function can use a granted capability" (fun () ->
       expect_codes ~expected:[]
         (list_codes_with_grants [ value; time ]
-           [ ({ owner = None; name = "clock_library" }, [ "Clock" ]) ]));
+           [ ({ owner = None; name = "clock_library" }, [ Grant.Prelude "Clock" ]) ]));
   let bound = ("app::main", Fixtures.Capabilities.bound) in
   Harness.test
     "an impl of a dependency that satisfies a bound can use only the granted capabilities"
@@ -325,7 +327,7 @@ let () =
       expect_codes ~expected:[ "capabilities.not_granted" ]
         (list_codes_with_grants [ bound; sources; timers ]
            [
-             ({ owner = None; name = "framework" }, [ "Clock" ]);
+             ({ owner = None; name = "framework" }, [ Grant.Prelude "Clock" ]);
              ({ owner = None; name = "plugins" }, []);
            ]));
   Harness.test "an impl of a dependency that satisfies a bound can use a granted capability"
@@ -333,8 +335,8 @@ let () =
       expect_codes ~expected:[]
         (list_codes_with_grants [ bound; sources; timers ]
            [
-             ({ owner = None; name = "framework" }, [ "Clock" ]);
-             ({ owner = None; name = "plugins" }, [ "Clock" ]);
+             ({ owner = None; name = "framework" }, [ Grant.Prelude "Clock" ]);
+             ({ owner = None; name = "plugins" }, [ Grant.Prelude "Clock" ]);
            ]));
   Harness.test "an impl of a dependency behind an `any` value can use only the granted capabilities"
     (fun () ->
@@ -342,7 +344,7 @@ let () =
         (list_codes_with_grants
            [ ("app::main", Fixtures.Capabilities.any_timer_from_plugins); sources; timers ]
            [
-             ({ owner = None; name = "framework" }, [ "Clock" ]);
+             ({ owner = None; name = "framework" }, [ Grant.Prelude "Clock" ]);
              ({ owner = None; name = "plugins" }, []);
            ]))
 
@@ -358,21 +360,27 @@ let () =
   Harness.test "a grant names a capability outside the prelude by its full path" (fun () ->
       expect_codes ~expected:[]
         (list_codes_with_grants [ pays; ledger ]
-           [ ({ owner = None; name = "store" }, [ "store::ledger::Ledger" ]) ]));
+           [
+             ( { owner = None; name = "store" },
+               [ Grant.Full_path { module_names = [ "store"; "ledger" ]; name = "Ledger" } ] );
+           ]));
   Harness.test "a capability's name alone grants only one of the prelude" (fun () ->
       let packages, actual =
-        list_codes_with_grants [ pays; ledger ] [ ({ owner = None; name = "store" }, [ "Ledger" ]) ]
+        list_codes_with_grants [ pays; ledger ]
+          [ ({ owner = None; name = "store" }, [ Grant.Prelude "Ledger" ]) ]
       in
       expect_codes ~expected:[ "capabilities.not_granted" ] (packages, actual);
       match list_problems packages with
-      | [ Not_a_capability { dependency = { Path.owner = None; name = "store" }; name = "Ledger" } ]
-        ->
+      | [
+       Not_a_capability
+         { dependency = { Path.owner = None; name = "store" }; capability = Prelude "Ledger" };
+      ] ->
           ()
       | _ -> Harness.fail "the grant is not reported");
   Harness.test "a grant covers only the capabilities it names" (fun () ->
       expect_codes ~expected:[ "capabilities.not_granted" ]
         (list_codes_with_grants [ pays; ledger ]
-           [ ({ Path.owner = None; name = "store" }, [ "Clock" ]) ]))
+           [ ({ Path.owner = None; name = "store" }, [ Grant.Prelude "Clock" ]) ]))
 
 let () =
   Harness.test "a dependency that nothing in the package names is reported" (fun () ->
@@ -387,7 +395,10 @@ let () =
   Harness.test "a dependency named in a path is used" (fun () ->
       let packages, _ =
         list_codes_with_grants [ pays; ledger ]
-          [ ({ Path.owner = None; name = "store" }, [ "store::ledger::Ledger" ]) ]
+          [
+            ( { Path.owner = None; name = "store" },
+              [ Grant.Full_path { module_names = [ "store"; "ledger" ]; name = "Ledger" } ] );
+          ]
       in
       if list_problems packages <> [] then Harness.fail "reported");
   Harness.test "a dependency whose trait's method is called with a dot is used" (fun () ->
@@ -779,7 +790,7 @@ let () =
         List.filter_map
           (fun (node : Core.expression) ->
             match (node.kind, node.type_) with
-            | Lambda _, Function { uses; _ } -> Some (uses :> Types.capability list)
+            | Lambda _, Function { uses; _ } -> Some (Types.list_capabilities uses)
             | _ -> None)
           (list_core_expressions text ~of_function:"run")
       with

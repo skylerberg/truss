@@ -9,7 +9,7 @@ let make_zero_width position = make_span position position
 module Definition_span = struct
   type t = { start : int; stop : int }
 
-  let make start stop =
+  let make start stop : t =
     if start < 0 || stop < start then
       invalid_arg (Printf.sprintf "Source.Definition_span.make %d %d" start stop);
     { start; stop }
@@ -28,7 +28,7 @@ module Definition_span = struct
            (Array.length spans));
     spans.(origin)
 
-  let quote text span =
+  let quote text (span : t) =
     if span.stop > String.length text then
       invalid_arg
         (Printf.sprintf "Source.Definition_span.quote: %d..%d is past a text of %d" span.start
@@ -57,7 +57,6 @@ let compute_line_starts text =
   Dynarray.to_array starts
 
 let create ~path text = { path; text; line_starts = compute_line_starts text }
-let read_file path = create ~path (In_channel.with_open_bin path In_channel.input_all)
 let path source = source.path
 let text source = source.text
 
@@ -126,3 +125,7 @@ let compute_offset units source ~line ~column =
     walk source.line_starts.(line) 0
 
 let starts_line source offset = offset = compute_line_start source offset
+
+module For_testing = struct
+  let read_file path = create ~path (In_channel.with_open_bin path In_channel.input_all)
+end

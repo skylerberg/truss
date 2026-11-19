@@ -4,6 +4,7 @@
   structural_key
   compiler_bug
   path
+  grant
   source
   syntax
   types
@@ -12,7 +13,6 @@
   core
   manifest
   project
-  lexer
   parser
   resolve
   interface
@@ -22,7 +22,7 @@
   mir
   ownership
   package_checks
-  backend
+  lowering
   lowered
   ground
   libc

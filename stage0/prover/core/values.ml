@@ -29,8 +29,8 @@ let assume_extensional context frame (ty : Types.ty) left right =
               equal (length left) (length right)
               &&& forall
                     ( [ (index, Int) ],
-                      Operation ("<=", [ int 0; Symbol index ])
-                      &&& Operation ("<", [ Symbol index; length left ])
+                      less_equal (int 0) (Symbol index)
+                      &&& less (Symbol index) (length left)
                       ==> equal at_a at_b )
               ==> equal left right)
       | _ -> ())
@@ -124,7 +124,7 @@ let make_set context frame (ty : Types.ty) ~element values =
       List.iter (fun value -> Facts.assume context frame (contains value)) values;
       assume_only_members context frame "value" element_sort contains values;
       let size = Models.make_finite_function context finite "size" Logic.Int [] model in
-      Facts.assume context frame (Costs.at_most size (Logic.int (List.length values)));
+      Facts.assume context frame (Logic.less_equal size (Logic.int (List.length values)));
       literal)
     model
 
@@ -186,7 +186,7 @@ let apply_template context (frame : State.frame) (site : Invocation.site) ~trait
           in
           let template_check =
             {
-              State.from_template = path;
+              Obligation.from_template = path;
               literals;
               clauses =
                 List.filter_map Fun.id
@@ -200,7 +200,7 @@ let apply_template context (frame : State.frame) (site : Invocation.site) ~trait
             (fun index (requirement : Mir.requirement) ->
               let template_clause =
                 if List.mem index template_check.clauses then
-                  Some { State.check = template_check; clause = index }
+                  Some { Obligation.check = template_check; clause = index }
                 else None
               in
               Facts.oblige ?template_clause context frame Requires location
@@ -231,7 +231,7 @@ let apply_template context (frame : State.frame) (site : Invocation.site) ~trait
                      with
                      result = Some result;
                    })
-                 ~uses:[] ~values:[] ~change:None)
+                 ~uses:Types.no_capabilities ~values:[] ~change:None)
           in
           (frame, result)
       | None ->
@@ -356,9 +356,7 @@ let project_field context frame ty variant field field_type term =
   if context.ranking then begin
     let below = Models.rank context field_type part in
     Facts.assume context frame
-      Logic.(
-        Operation ("<=", [ int 0; below ])
-        &&& Operation ("<", [ below; Models.rank context ty term ]))
+      Logic.(less_equal (int 0) below &&& less below (Models.rank context ty term))
   end;
   part
 
@@ -550,8 +548,7 @@ let construct_amount context frame (ty : Types.ty) variant (counter : Costs.coun
   | Metric Allocated_bytes ->
       let symbol = Logic.Symbol.Block_bytes { type_ = ty; variant } in
       Facts.declare context (Logic.Constant (symbol, Logic.Int));
-      Facts.add_frame_fact context frame
-        (Logic.Operation ("<=", [ Logic.int 1; Logic.Symbol symbol ]));
+      Facts.add_frame_fact context frame (Logic.less_equal (Logic.int 1) (Logic.Symbol symbol));
       Logic.Symbol symbol
   | Metric Time | Calls _ -> Costs.zero
 
@@ -608,27 +605,22 @@ let make_log_facts number ~halving =
   let log number = Logic.Apply (Logic.Symbol.Cost_log, [ number ]) in
   let basic =
     Logic.(
-      Operation ("<=", [ int 0; log number ])
-      &&& (Operation ("<=", [ number; int 0 ]) ==> equal (log number) (int 0))
-      &&& (Operation (">=", [ number; int 0 ]) ==> Operation ("<=", [ log number; number ])))
+      less_equal (int 0) (log number)
+      &&& (less_equal number (int 0) ==> equal (log number) (int 0))
+      &&& (greater_equal number (int 0) ==> less_equal (log number) number))
   in
   if halving then
-    let half = Logic.Operation ("div", [ number; Logic.int 2 ]) in
-    ( [
-        basic;
-        Logic.(
-          Operation (">=", [ number; int 1 ])
-          ==> equal (log number) (Operation ("+", [ log half; int 1 ])));
-      ],
+    let half = Logic.Operation (Div, [ number; Logic.int 2 ]) in
+    ( [ basic; Logic.(greater_equal number (int 1) ==> equal (log number) (add (log half) (int 1))) ],
       Some half )
   else ([ basic ], None)
 
 let make_log_order left right =
   let log number = Logic.Apply (Logic.Symbol.Cost_log, [ number ]) in
   Logic.(
-    Operation ("<=", [ left; right ])
-    ==> Operation ("<=", [ log left; log right ])
-    &&& (Operation ("<=", [ right; left ]) ==> Operation ("<=", [ log right; log left ])))
+    less_equal left right
+    ==> less_equal (log left) (log right)
+    &&& (less_equal right left ==> less_equal (log right) (log left)))
 
 let declare_log context frame log_argument =
   Facts.declare context (Logic.Function (Logic.Symbol.Cost_log, [ Logic.Int ], Logic.Int));
@@ -665,9 +657,7 @@ let apply_specification_function context frame ~location (measure : Core.specifi
       (match Facts.find_bounds unconverted with
       | Some (_, high) when not (Logic.mentions frame.bound log_argument) ->
           Facts.add_frame_fact context frame
-            Logic.(
-              Operation ("<=", [ log_argument; Integer high ])
-              ==> Operation ("<=", [ log; int (Z.numbits high) ]))
+            Logic.(less_equal log_argument (Integer high) ==> less_equal log (int (Z.numbits high)))
       | _ -> ());
       (frame, log)
   | Power, [ base; exponent ], _, _ -> (frame, Operations.declare_power context frame base exponent)

@@ -403,7 +403,7 @@ and elaborate_capability context (written : Syntax.capability_reference) : Types
       | _ -> raise_bug "`generic %s` is not resolved as a capability parameter" name.text)
   | Self_capabilities key -> (
       match List.assoc_opt key.text context.self_capabilities with
-      | Some set -> (set :> Types.capability list)
+      | Some set -> Types.list_capabilities set
       | None -> (
           match (elaborate_self context context.spans.(written.id), context.self_trait) with
           | Error report, _ -> [ Types.Capability_error report ]
@@ -988,7 +988,7 @@ let elaborate_container (context : t) (path : Path.t) (definition : Syntax.defin
                       | _ -> false
                     in
                     if List.mem_assoc name.text sets then sets
-                    else if List.exists is_defined_by_this_impl (set :> Types.capability list) then
+                    else if Types.exists_capability is_defined_by_this_impl set then
                       ( name.text,
                         Types.make_capability_set
                           (report_error_capability context Unknown_associated_capability

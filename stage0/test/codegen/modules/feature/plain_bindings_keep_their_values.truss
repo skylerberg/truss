@@ -1,0 +1,44 @@
+type Point(x: Int64, y: Int64)
+
+type Line(start: Point, finish: Point)
+
+type Shape = Dot(at: Point) | Segment(from: Point, to: Point)
+
+test "a name bound to a `Plain` record, array, or part keeps its value when the original is assigned" {
+  var point = Point(x: 1, y: 2)
+  let copy = point
+  point.x = 7
+  assert copy.x == 1
+
+  var line = Line(start: Point(x: 1, y: 2), finish: Point(x: 3, y: 4))
+  let start = line.start
+  line.start.x = 7
+  assert start.x == 1
+
+  var values: Array[Int64, 4] = [1, 2, 3, 4]
+  let kept = values
+  values[0] = 7
+  assert kept[0] == 1
+
+  var points: List[Point] = [Point(x: 1, y: 2)]
+  match points[0] {
+    first => {
+      points[0] = Point(x: 9, y: 9)
+      assert first.x == 1
+    }
+  }
+
+  var others: List[Point] = [Point(x: 1, y: 2)]
+  if others[0] is first {
+    others[0] = Point(x: 9, y: 9)
+    assert first.x == 1
+  }
+
+  var shape = Shape.Segment(from: Point(x: 1, y: 2), to: Point(x: 3, y: 4))
+  match shape {
+    Dot(at: corner) | Segment(from: corner, to: _) => {
+      shape = Shape.Dot(at: Point(x: 9, y: 9))
+      assert corner.x == 1
+    }
+  }
+}

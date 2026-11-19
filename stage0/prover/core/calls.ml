@@ -129,6 +129,22 @@ let list_structural_parameters context (frame : State.frame) (clauses : State.cl
              | _ -> []))
        clauses.parameters)
 
+let rec has_application_of symbol (term : Logic.term) =
+  match term with
+  | Apply (applied, _) when applied = symbol -> true
+  | Forall (_, _, body) | Exists (_, body) -> has_application_of symbol body
+  | _ -> List.exists (has_application_of symbol) (Logic.list_arguments term)
+
+let find_definition ~symbol result (term : Logic.term) =
+  match term with
+  | Operation (Equal, [ left; right ]) when left = result && not (has_application_of symbol right)
+    ->
+      Some right
+  | Operation (Equal, [ left; right ]) when right = result && not (has_application_of symbol left)
+    ->
+      Some left
+  | _ -> None
+
 let call_contract context (frame : State.frame) (site : Invocation.site) (invocation : Invocation.t)
     path (contract : State.contract) (values : State.passed list) ~recursive_callee ~lent_final
     ~havoc_mut ~substitution_of ~type_arguments =
@@ -227,8 +243,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
                `decreases` clause.";
           ]
           Logic.(
-            conjunction
-              (List.map (fun right_term -> Operation ("<=", [ int 0; right_term ])) before)
+            conjunction (List.map (fun right_term -> less_equal (int 0) right_term) before)
             &&& Amounts.compare_lexicographically before after)
     | ([], _ | _, []) when context.terminates ->
         Facts.oblige context frame Termination location
@@ -268,11 +283,11 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
         in
         let before, after = split_prefix before after in
         Facts.oblige context frame Termination location
-          (State.Text "This call may not decrease `"
+          (Obligation.Text "This call may not decrease `"
            :: List.concat
                 (List.mapi
                    (fun index (measure : Mir.formula) ->
-                     (if index = 0 then [] else [ State.Text ", " ])
+                     (if index = 0 then [] else [ Obligation.Text ", " ])
                      @ [ Facts.quote caller measure.origin ])
                    measures)
           @ [ Text "`." ])
@@ -291,7 +306,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
           list_required_fixes context frame precondition_clauses requirement term values
             ~type_names:(list_type_names (substitution_of precondition_clauses))
         in
-        let message : State.message =
+        let message : Obligation.message =
           [
             Text "`";
             Facts.quote precondition_clauses.callee clause.origin;
@@ -333,6 +348,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   let is_on_bound_values = List.exists (Logic.mentions after.bound) callee_arguments in
   let result_type = Facts.substitute_type context frame site.type_ in
   let applied_as = ref None in
+  let definition = ref None in
   let is_limited_call = ref false in
   let result =
     if is_logic_call && List.length callee_arguments = List.length callee_bindings then begin
@@ -352,12 +368,12 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       let result_sort = Facts.declare_sort context result_type in
       Facts.declare context (Logic.Function (function_symbol, sorts, result_sort));
       (match (path, callee_bindings) with
-      | Method { name = "model"; receiver = Read; _ }, [ (self, _) ] when self.local = Self ->
+      | Method { owner; name = "model"; receiver = Read }, [ (self, _) ] when self.local = Self ->
           Models.rank_model context
             ((Interface.Impls.normalize context.lookups.interface
                 ~list_bounds:Interface.Impls.list_no_bounds)
                (Types.substitute (substitution_of callee_clauses) self.type_))
-            ~model:result_type function_symbol
+            ~model:result_type ~impl:owner function_symbol
       | _ -> ());
       let symbol =
         if List.mem function_symbol context.axiomatizing then begin
@@ -551,7 +567,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
                 match (is_triggered, facts, readable_clauses) with
                 | ( true,
                     Logic.Boolean true,
-                    [ (_, required, [ (_, Logic.Operation ("=", [ left; right ])) ]) ] ) -> (
+                    [ (_, required, [ (_, Logic.Operation (Equal, [ left; right ])) ]) ] ) -> (
                     let defined_by body =
                       if
                         Logic.mentions [ symbol ] body
@@ -679,7 +695,11 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
                   else ensures_frame
                 in
                 match Validity.read_specification context frame_for_clause clause with
-                | _, term -> state (Logic.( ==> ) (compute_required clauses) term)
+                | _, term ->
+                    (match (!applied_as, !definition) with
+                    | Some (symbol, _), None -> definition := find_definition ~symbol result term
+                    | _ -> ());
+                    state (Logic.( ==> ) (compute_required clauses) term)
                 | exception Facts.Unsupported _ -> ())
             clauses.ensures)
         (Contracts.list_declared_clauses contract)
@@ -749,10 +769,9 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
                   result = Some result;
                   condition = after.condition;
                 })
-              ~uses:(invocation.uses :> Types.capability list)
-              ~values ~change:(Some compute_change) counter)
+              ~uses:invocation.uses ~values ~change:(Some compute_change) counter)
   in
-  (after, result)
+  (after, Option.value !definition ~default:result)
 
 let make_callback_cost (context : State.context) frame (metric : Metric.t) (ty : Types.ty) term =
   let stated_by_type =
@@ -768,7 +787,7 @@ let make_callback_cost (context : State.context) frame (metric : Metric.t) (ty :
       Facts.declare context (Logic.Function (symbol, [ sort ], Logic.Int));
       let cost = Logic.Apply (symbol, [ term ]) in
       let least = Costs.least_amount (Metric metric) in
-      Facts.add_frame_fact context frame (Logic.Operation ("<=", [ least; cost ]));
+      Facts.add_frame_fact context frame (Logic.less_equal least cost);
       let state_value value =
         Facts.add_frame_fact context frame (Logic.equal cost (Costs.larger least value))
       in
@@ -823,7 +842,7 @@ let compute_function_value_amount context frame ~location (function_type : Types
           (Logic.int 1)
   | Calls (Capability path | Capability_method (path, _)) ->
       if
-        List.exists
+        Types.exists_capability
           (function
             | Types.Capability used -> Path.equal used path
             | Types.Capability_parameter _ | Types.Capability_projection _
@@ -831,7 +850,7 @@ let compute_function_value_amount context frame ~location (function_type : Types
                 true
             | Types.Capability_error _ ->
                 Facts.raise_bug "the prover reads a capability with an error")
-          (function_type.uses :> Types.capability list)
+          function_type.uses
       then Operations.declare_unknown_amount context frame counter
       else Costs.zero
 
@@ -1018,7 +1037,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
               if clauses.inherited then trait_substitution else callee_substitution
             in
             with_contract ~substitution_of:compute_substitution
-              ~type_arguments:(Types.Type self_type :: arguments)
+              ~type_arguments:(Facts.list_method_type_arguments ~self_type arguments)
               path
               (Contracts.find_method_contract context.lookups trait name receiver evidence))
     | Indirect () ->

@@ -1,6 +1,8 @@
 module Lookups = Lookups
 
 type context = {
+  interface : Interface.Lookups.t;
+  module_ : Path.module_;
   resolved : Resolve.resolved;
   tables : Infer.tables;
   spans : Source.Definition_span.t array;
@@ -13,20 +15,19 @@ let report context ~fixes code (span : Source.Definition_span.t) message =
     Diagnostic.make ~fixes ~code:(Usage code) span message :: context.diagnostics
 
 type removal = Wildcard | Field_wildcard | Field_deletion of Source.Definition_span.t
-type binding = { name : Syntax.name; removal : removal; is_var : bool }
+type site = { is_var : bool; is_refutable_position : bool }
+type binding = { name : Syntax.name; removal : removal; site : site }
 
 let collect_bindings context (definition : Syntax.definition) =
   let bindings = ref [] and assigned = ref [] in
-  let bind ~is_var (name : Syntax.name) removal =
-    bindings := { name; removal; is_var } :: !bindings
-  in
-  let rec visit_pattern ~is_var (written : Syntax.pattern) =
+  let bind ~site (name : Syntax.name) removal = bindings := { name; removal; site } :: !bindings in
+  let rec visit_pattern ~site (written : Syntax.pattern) =
     match written.kind with
-    | Binding name -> bind ~is_var name Wildcard
-    | Variant { fields = Some fields; _ } | Record fields -> visit_pattern_fields ~is_var fields
-    | Alternatives alternatives -> List.iter (visit_pattern ~is_var) alternatives
+    | Binding name -> bind ~site name Wildcard
+    | Variant { fields = Some fields; _ } | Record fields -> visit_pattern_fields ~site fields
+    | Alternatives alternatives -> List.iter (visit_pattern ~site) alternatives
     | _ -> ()
-  and visit_pattern_fields ~is_var (fields : Syntax.pattern_field list) =
+  and visit_pattern_fields ~site (fields : Syntax.pattern_field list) =
     let has_rest = List.exists (fun (field : Syntax.pattern_field) -> field.kind = Rest) fields in
     let has_several_fields =
       List.length (List.filter (fun (field : Syntax.pattern_field) -> field.kind <> Rest) fields)
@@ -37,34 +38,37 @@ let collect_bindings context (definition : Syntax.definition) =
       | (field : Syntax.pattern_field) :: following ->
           (match (field.kind, following) with
           | Field { kind = Binding name; _ }, next :: _ when has_rest ->
-              bind ~is_var name
+              bind ~site name
                 (Field_deletion
                    (Source.Definition_span.make context.spans.(field.id).start
                       context.spans.(next.id).start))
           | Field { kind = Binding name; _ }, _ when has_rest || has_several_fields ->
-              bind ~is_var name Field_wildcard
-          | (Named_field (_, inner) | Field inner), _ -> visit_pattern ~is_var inner
+              bind ~site name Field_wildcard
+          | (Named_field (_, inner) | Field inner), _ -> visit_pattern ~site inner
           | Rest, _ -> ());
           bind_fields following
     in
     bind_fields fields
   in
+  let refutable = { is_var = false; is_refutable_position = true }
+  and irrefutable = { is_var = false; is_refutable_position = false } in
   let rec visit_expression (value : Syntax.expression) =
     (match value.kind with
-    | Is { pattern = written; _ } -> visit_pattern ~is_var:false written
-    | Lambda { parameters; _ } -> List.iter (visit_pattern ~is_var:false) parameters
+    | Is { pattern = written; _ } -> visit_pattern ~site:refutable written
+    | Lambda { parameters; _ } -> List.iter (visit_pattern ~site:irrefutable) parameters
     | Match { arms; _ } ->
         List.iter
-          (fun (arm : Syntax.arm) -> List.iter (visit_pattern ~is_var:false) arm.patterns)
+          (fun (arm : Syntax.arm) -> List.iter (visit_pattern ~site:refutable) arm.patterns)
           arms
-    | Quantified { binder = Binder_in (written, _); _ } -> visit_pattern ~is_var:false written
+    | Quantified { binder = Binder_in (written, _); _ } -> visit_pattern ~site:irrefutable written
     | _ -> ());
     Syntax_walk.visit_expression_parts ~on_expression:visit_expression ~on_statement:visit_statement
       value
   and visit_statement (written : Syntax.statement) =
     (match written.kind with
-    | Let { pattern = written_pattern; is_var; _ } -> visit_pattern ~is_var written_pattern
-    | For { pattern = written_pattern; _ } -> visit_pattern ~is_var:false written_pattern
+    | Let { pattern = written_pattern; is_var; else_; _ } ->
+        visit_pattern ~site:{ is_var; is_refutable_position = Option.is_some else_ } written_pattern
+    | For { pattern = written_pattern; _ } -> visit_pattern ~site:irrefutable written_pattern
     | Assignment { target = { kind = Name { modules = []; last }; _ }; operator = Assign; _ } ->
         assigned := last.id :: !assigned
     | _ -> ());
@@ -90,6 +94,18 @@ let make_edit context (binding : binding) =
   | Field_wildcard -> Diagnostic.replace span (binding.name.text ^ ": _")
   | Field_deletion field -> Diagnostic.delete field
 
+let find_shadowed_constant context (occurrences : binding list) =
+  let may_be_constant (occurrence : binding) =
+    occurrence.site.is_refutable_position
+    && match occurrence.removal with Wildcard -> true | Field_wildcard | Field_deletion _ -> false
+  in
+  match occurrences with
+  | first :: _ when List.for_all may_be_constant occurrences ->
+      Option.bind context.tables.local_types.(first.name.id) (fun type_ ->
+          Interface.Definition.find_shadowed_constant context.interface context.module_
+            ~name:first.name.text ~type_)
+  | _ -> None
+
 let check_unused context (definition : Syntax.definition) =
   let targets = context.resolved.names in
   let bindings, assigned = collect_bindings context definition in
@@ -97,7 +113,7 @@ let check_unused context (definition : Syntax.definition) =
   List.iter (fun (binding : binding) -> is_binding.(binding.name.id) <- true) bindings;
   let is_var = Array.make (Array.length targets) false in
   List.iter
-    (fun (binding : binding) -> if binding.is_var then is_var.(binding.name.id) <- true)
+    (fun (binding : binding) -> if binding.site.is_var then is_var.(binding.name.id) <- true)
     bindings;
   let is_assigned = Array.make (Array.length targets) false
   and is_written = Array.make (Array.length targets) false in
@@ -146,9 +162,27 @@ let check_unused context (definition : Syntax.definition) =
                 ( "Remove it from every alternative of the pattern.",
                   Printf.sprintf "Remove `%s` from every alternative." name.text )
           in
-          report context Unused_variable context.spans.(name.id)
-            ~fixes:[ Diagnostic.fix title (List.map (make_edit context) occurrences) ]
-            (Printf.sprintf "`%s` is never used. %s" name.text instruction))
+          let removal = Diagnostic.fix title (List.map (make_edit context) occurrences) in
+          match find_shadowed_constant context occurrences with
+          | Some constant ->
+              let written = Path.show constant in
+              let qualification =
+                Diagnostic.fix
+                  (Printf.sprintf "Write `%s`." written)
+                  (List.map
+                     (fun (occurrence : binding) ->
+                       Diagnostic.replace context.spans.(occurrence.name.id) written)
+                     occurrences)
+              in
+              report context Unused_variable context.spans.(name.id)
+                ~fixes:[ qualification; removal ]
+                (Printf.sprintf
+                   "`%s` is never used. A bare name in a pattern binds a variable, which matches \
+                    every value. To match the constant, write `%s`."
+                   name.text written)
+          | None ->
+              report context Unused_variable context.spans.(name.id) ~fixes:[ removal ]
+                (Printf.sprintf "`%s` is never used. %s" name.text instruction))
     bindings
 
 let check_block context (written : Syntax.block) =
@@ -330,13 +364,15 @@ let check_self_comparisons context (definition : Syntax.definition) =
   match definition.kind with Function { body; _ } | Test { body; _ } -> visit_block body | _ -> ()
 
 let check (lookups : Lookups.t) key =
-  let definition = lookups.names.read_definition key in
+  let definition = lookups.interface.names.read_definition key in
   let context =
     {
+      interface = lookups.interface;
+      module_ = key.module_;
       resolved = lookups.read_resolved key;
       tables = lookups.read_tables key;
-      spans = lookups.names.read_spans key;
-      text = lazy (lookups.names.read_text key);
+      spans = lookups.interface.names.read_spans key;
+      text = lazy (lookups.interface.names.read_text key);
       diagnostics = [];
     }
   in

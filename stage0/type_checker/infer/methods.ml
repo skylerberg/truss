@@ -267,7 +267,7 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
     | [] -> Read
   in
   match type_ with
-  | Types.Named { path; arguments = type_arguments } when State.is_variant_name member ->
+  | Types.Named { path; arguments = type_arguments } when member.case = Upper ->
       Calls.construct state env ?expected ~type_arguments value path (Some member.text) arguments
   | Types.Named { path; _ } -> (
       let static_method = Members.lookup_method state path member.text Static in

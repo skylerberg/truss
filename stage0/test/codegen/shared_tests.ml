@@ -1,31 +1,14 @@
-let extend_standard_library files =
-  Database.For_testing.extend_package
-    ~loaded:[ Workspace.For_testing.load_standard_package_database () ]
-    ~package:Path.standard_package files
-
 let probe : Path.file =
   { module_ = { package = Path.standard_package; modules = [ "shared_probe" ] }; name = "probe" }
 
+let probe_main : Path.t = Top { module_ = probe.module_; name = "main" }
 let source = Fixtures.Shared.shared_probe
 
 let loaded =
   lazy
-    (let database = extend_standard_library [ (probe, source) ] in
-     Database.For_testing.add_root database
-       (Generated (Program_main (Top { module_ = probe.module_; name = "main" })));
-     let text = Source.create ~path:(Path.show_file probe) source in
-     (match Codegen_support.list_fragment_diagnostics database probe with
-     | [] -> ()
-     | diagnostics ->
-         Codegen_support.fail "the source has diagnostics:\n%s"
-           (String.concat "" (List.map (Diagnostic.render text) diagnostics)));
-     ( database,
-       Backend.create
-         (match Database.find_lowered_lookups database [ Path.standard_package ] with
-         | Ok lookups -> lookups
-         | Error message -> failwith message)
-         (Lazy.force Codegen_support.c_compiler)
-         Development ))
+    (Codegen_support.load_standard_probe
+       ~roots:[ Generated (Program_main probe_main) ]
+       probe source)
 
 let () =
   Codegen_support.test "shared values are updated, copied, and dropped without a leak" (fun () ->
@@ -44,18 +27,16 @@ let () =
   Codegen_support.test "on threads, references to one shared value are copied and dropped"
     (fun () ->
       let _, backend = Lazy.force loaded in
-      List.iter
-        (fun workers ->
-          Unix.putenv "TRUSS_WORKERS" (string_of_int workers);
-          match
-            Backend.For_testing.run_program backend
-              ~main:(Top { module_ = probe.module_; name = "main" })
-              ~arguments:[]
-          with
-          | Ok (0, output, _) -> Codegen_support.expect_string ~expected:"released\n" output
-          | Ok (status, _, errors) -> Codegen_support.fail "ended with status %d: %s" status errors
-          | Error message -> failwith message)
-        (Codegen_support.list_worker_counts ()))
+      match Codegen_support.build_program backend ~main:probe_main with
+      | Error message -> failwith message
+      | Ok program ->
+          List.iter
+            (fun workers ->
+              Unix.putenv "TRUSS_WORKERS" (string_of_int workers);
+              match Process.run program [] with
+              | 0, output, _ -> Codegen_support.expect_string ~expected:"released\n" output
+              | status, _, errors -> Codegen_support.fail "ended with status %d: %s" status errors)
+            (Codegen_support.list_worker_counts ()))
 
 let checks : Path.file =
   { module_ = { package = Path.standard_package; modules = [ "shared_checks" ] }; name = "checks" }
@@ -66,7 +47,7 @@ let () =
   Codegen_support.test
     "Shared's operations need Tasks except directly in a method of a capability's impl, and its \
      value must be Storable" (fun () ->
-      let database = extend_standard_library [ (checks, checks_source) ] in
+      let database = Codegen_support.extend_standard_library [ (checks, checks_source) ] in
       let text = checks_source in
       let actual =
         List.map
@@ -74,7 +55,8 @@ let () =
             ( Diagnostic.Code.name diagnostic.code,
               String.sub text diagnostic.span.start (diagnostic.span.stop - diagnostic.span.start)
             ))
-          (Codegen_support.list_fragment_diagnostics database checks)
+          (Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers database
+             checks)
       in
       let expected =
         [

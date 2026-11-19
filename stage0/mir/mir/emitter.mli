@@ -42,9 +42,10 @@ val start_loan : t -> Tree.operand -> Types.mode -> Tree.loan_duration -> Core.o
 val end_loans : t -> int list -> Core.origin -> unit
 
 type scope
-type held
 
-val run_in_scope : ?provides:bool -> ?held:held -> t -> Core.origin -> (unit -> 'a) -> 'a
+val make_block_scope : ?provides:bool -> unit -> scope
+val run_in_block_scope : t -> scope -> Core.origin -> (unit -> 'a) -> 'a
+val run_in_scope : ?provides:bool -> t -> Core.origin -> (unit -> 'a) -> 'a
 val run_in_statement : t -> Core.origin -> (unit -> 'a) -> 'a
 
 val run_in_value_scope :
@@ -58,7 +59,7 @@ type lowered_condition = {
   value : Tree.operand option;
   ended_if_true : scope;
   ended_if_false : scope;
-  held_if_true : held;
+  block_scope_if_true : scope;
 }
 
 val run_in_condition_scope :

@@ -90,8 +90,8 @@ let list_occurrences database snapshot packages =
   List.concat_map
     (fun file ->
       List.concat_map
-        (fun declaration ->
-          let key = Resolve.Names.make_key declaration in
+        (fun (declaration : Resolve.Names.declaration) ->
+          let key = declaration.key in
           match Database.read_resolved database key with
           | Some resolved ->
               let ({ file; base } : Resolve.Names.place) = names.read_place key in
@@ -220,7 +220,7 @@ let run ~from_ ~to_ =
   let snapshot, packages = Command_packages.load_worktree () in
   let database = Workspace.open_database snapshot in
   let report = Report.gather database snapshot packages in
-  if not (Report.clean report) then raise (Report.Errors report);
+  Report.require_no_errors report;
   let plan =
     match resolve_target database packages from_ with
     | Definition { path; module_; owner } ->
@@ -270,7 +270,7 @@ let run ~from_ ~to_ =
       let count = List.length edits in
       if json then
         Json.print
-          (Json.make_document ~diagnostics:[]
+          (Report.make_document report
              [
                ("edits", Json.List edits);
                ( "moved",
