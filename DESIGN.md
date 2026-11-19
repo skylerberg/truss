@@ -37,12 +37,11 @@ obligation or a declared `Panic`, and there is no `assume`. See
 [Proofs](#proofs) and [Incremental builds](#incremental-builds).
 
 **No two names alias a value that either can mutate.** This is mutable value
-semantics. A call can then mutate only its `mut` arguments and the state
-behind the capabilities it uses, code that runs in parallel has no data
-races, and a value is freed when its owner's scope ends, with no garbage
-collector. The cost is that a reference cannot be stored. Views, lending
-methods, and cursors do the jobs of stored references. See
-[Values and ownership](#values-and-ownership).
+semantics. A call can then mutate only its `mut` arguments and the state behind
+the capabilities it uses, code that runs in parallel has no data races, and a
+value is freed when its owner's scope ends. The cost is that a reference cannot
+be stored. Views, lending methods, and cursors do the jobs of stored references.
+See [Values and ownership](#values-and-ownership).
 
 **Effects are capabilities.** A function that acts outside pure computation
 lists the capabilities it `uses`, and its caller provides their
@@ -50,12 +49,6 @@ implementations. A test provides fakes, so its result is deterministic and
 is cached until the code it runs changes. A dependency has only the effects
 that its signatures and its grant allow. The cost is a `uses` clause on
 every function that has an effect. See [Capabilities](#capabilities).
-
-**There is no foreign code.** A C function can do anything, so its
-capabilities and contract could only be assumed, and the three
-decisions above would hold for only part of a program. The cost is reach:
-the operating system and special hardware are available only through the
-standard library. See [No foreign code](#no-foreign-code).
 
 These reasons recur. A later section cites one by name instead of restating
 it:
@@ -102,9 +95,8 @@ Rules: [Lexical elements](SPECIFICATION.md#lexical-elements).
 
 ### Comments
 
-Truss has no comments. A comment goes stale without the compiler noticing, and
-LLMs fill code with comments. The content of a comment moves into a form that
-the compiler checks:
+Truss has no comments. A comment goes stale, and LLMs write too many comments.
+The content of a comment moves into a form that the compiler checks:
 
 | Content of a comment | Form in Truss |
 |---|---|
@@ -127,7 +119,7 @@ Rules: [Keywords](SPECIFICATION.md#keywords).
 
 | Rule | Reason |
 |---|---|
-| Keywords of other languages, such as `loop` and `async`, are reserved for later use. | Adding one later breaks no code. |
+| Keywords of other languages, such as `loop` and `async`, are reserved for later use. | Adding one later doesn't break code. |
 
 ### Number literals
 
@@ -233,9 +225,6 @@ Rules: [Types](SPECIFICATION.md#types).
 Rules: [Built-in types](SPECIFICATION.md#built-in-types).
 
 **A size, a length, and an index are `UInt64`, and an offset is `Int64`.**
-Truss has no integer type of the pointer's width. A proof about a size
-therefore holds on every target, and every package runs on every target. A
-target with 32-bit pointers, such as 32-bit WebAssembly, keeps 64-bit sizes.
 
 | Rule | Reason |
 |---|---|
@@ -283,10 +272,6 @@ public type DateRange(start: Date, end: Date)
   invariant start <= end
 ```
 
-An invariant moves a fact from signatures into a type. Every `SortedList` is
-sorted, so a function that takes one needs no `requires is_sorted(...)`, and
-no call site can forget the fact.
-
 **An invariant holds wherever other code can observe the value, and a body
 may break it in between.** `SortedList.insert` appends an element and then
 moves it into place. No code observes the list while it is unsorted: the
@@ -326,9 +311,6 @@ stored references instead, as Hylo does. No signature carries a lifetime,
 and the ownership check reads one function at a time: its body and the
 signatures it calls (*local reasoning*).
 
-The cost falls on every use of a reference in other languages. Each use has
-a replacement, and the rest of this section gives the reasons for each:
-
 | Use of a reference | Replacement |
 |---|---|
 | Pass an argument by reference | [Parameter modes](#parameter-modes) and [views](#views) |
@@ -341,8 +323,7 @@ a replacement, and the rest of this section gives the reasons for each:
 
 Rules: [Parameter modes](SPECIFICATION.md#parameter-modes).
 
-A parameter is read-only unless it is declared `mut` or `own`. The call site
-repeats the mode keyword on the argument:
+A parameter is read-only unless it is declared `mut` or `own`.
 
 ```truss
 sort(mut scores)
@@ -352,7 +333,7 @@ push(mut names, item: name.copy())
 
 | Rule | Reason |
 |---|---|
-| The call site repeats `mut` and `own`. | *Nothing hidden.* The call shows which arguments it mutates or moves, and a search for `mut scores` finds every call site that can mutate `scores`. |
+| The call site declares `mut` and `own`. | *Nothing hidden.* The call shows which arguments it mutates or moves, and a search for `mut scores` finds every call site that can mutate `scores`. |
 | A temporary takes no mode keyword. | A temporary has no other owner, so the keyword would tell the reader nothing. |
 | `own` can move one field out of a record. | Without a partial move, taking one field means copying it or moving the whole record. |
 
@@ -576,11 +557,6 @@ Rules: [Handles](SPECIFICATION.md#handles).
 A handle stands for a resource of the operating system, such as an open
 file. A handle is released as memory is: when its owner's scope ends, on
 every path. `?` and `return` therefore need no cleanup code.
-
-Truss has no destructors: no type defines code that runs when its value is
-released. None is needed. There is no foreign code, so only the standard
-library's capability implementations create handles. Releasing a value
-therefore runs no Truss code and cannot fail.
 
 A buffered writer is a resource whose release could lose data. Closing a
 file that was only read loses nothing, but flushing a buffer can fail, and a
@@ -1207,11 +1183,10 @@ separates code that can wait from code that cannot. A second marker for the
 same fact, such as `async`, would split functions into two kinds that cannot
 easily call each other.
 
-Blocking calls also leave the scheduler free. Every call that waits is in
-the standard library's capability implementations, because there is no
-foreign code. The runtime can therefore give each task a thread, or switch
-many tasks on a few threads, with no change to any code. Go and Java cannot
-switch away from a task that waits inside foreign code.
+Blocking calls also leave the scheduler free. Every call that waits is in the
+standard library's capability implementations. The runtime can therefore give
+each task a thread, or switch many tasks on a few threads, with no change to any
+code.
 
 **Cancellation is an error value.** In a cancelled task, a call that would
 wait returns a value that says it did not finish, and `?` propagates that
@@ -1586,7 +1561,6 @@ every proof.
 | A fact about a capability's state that relates two calls, such as a counter that never decreases or the order of a channel's messages | Such a fact needs ghost state or permissions that persist across calls, as Verus's tracked tokens and Iris provide. The prover never models an implementation's state between calls ([Shared state](#shared-state)), and it proves the invariant of the shared value's type, which each update re-establishes. |
 | Stored `mut` access: a cursor over mutable elements, a returned mutable view, or a record that holds one | [Views](#views): `mut` access is never stored. |
 | Code that runs after a lend | [Lending methods](#lending-methods) |
-| Foreign code | [No foreign code](#no-foreign-code) |
 
 ## Unfinished code
 
@@ -1701,33 +1675,6 @@ versions each package separately, so two packages that shared more than
 their public definitions could be paired at versions that were never checked
 together. Code that shares its internals belongs in one package. That costs
 nothing, because a package is not a unit of building.
-
-## No foreign code
-
-Rules: [No foreign code](SPECIFICATION.md#no-foreign-code).
-
-Truss code cannot call code written in another language.
-
-**Foreign code would escape every guarantee.** A C function can do anything,
-so its capabilities and contract could only be assumed, and Truss has no
-`assume`.
-
-**An ecosystem that could wrap C would be built on C.** Wrapping an existing
-library is the quickest way to get one, and an LLM would take that shortcut
-every time. The result would be an ecosystem over C code that no proof,
-capability, or cost clause covers. Without foreign code, a young ecosystem
-grows by being written in Truss.
-
-Other decisions rely on the absence of foreign code:
-
-| Decision | Reliance |
-|---|---|
-| Truss has no destructors ([Handles](#handles)). | Only the standard library creates handles. |
-| The runtime chooses how tasks are scheduled ([Concurrency](#concurrency)). | Every call that blocks is in the standard library. |
-| No package needs conditional compilation. | Code for one platform lives only in the standard library. Other code asks `Environment`, so the answer is tracked and a test can supply a different one. |
-
-The cost is reach. Anything that needs the operating system or special
-hardware is available only through the standard library.
 
 ## The standard library
 
@@ -1895,7 +1842,7 @@ expensive results are cache hits.
 
 ## Omitted features
 
-| Feature | Reason, or the section that gives it |
+| Feature | Reason |
 |---|---|
 | Comments | [Comments](#comments) |
 | Numeric literal suffixes | [Number literals](#number-literals) |
@@ -1920,7 +1867,7 @@ expensive results are cache hits.
 | `assume` | [Proofs](#proofs) |
 | Import aliases and relative module paths | [Modules and visibility](#modules-and-visibility) |
 | A visibility level between `internal` and `public` | [Visibility](#visibility) |
-| Foreign code and conditional compilation | [No foreign code](#no-foreign-code) |
+| Foreign code and conditional compilation | Foreign code doesn't have any guarentees |
 | Version ranges, a version solver, and 0.x versions | [Versions](#versions) |
 | Optional features of a package, such as Cargo's features | Features exist to keep unwanted code out of a build. Truss never compiles code that nothing reaches and grants it nothing, so a switch has nothing to save. Features cost Cargo builds that work only with some sets of switches. |
 | A separate list of dependencies for tests | The dependencies that only tests reach are computed when a package is published. |
