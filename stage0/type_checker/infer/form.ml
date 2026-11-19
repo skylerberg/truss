@@ -519,7 +519,7 @@ let read_pattern_type (state : State.state) (id : Syntax.id) =
 let build_constant_pattern state (id : Syntax.id) (value : Core.pattern_constant) :
     Core.pattern_kind =
   let type_ = read_pattern_type state id in
-  if is_built_in_scalar type_ then Literal value
+  if is_built_in_scalar type_ || type_ = Types.Integer then Literal value
   else
     let { Well_known.owner; name; receiver } = Well_known.locate_method Equal_equal in
     let equal = State.make_trait_reference ~arguments:[] (Well_known.make_path owner) in

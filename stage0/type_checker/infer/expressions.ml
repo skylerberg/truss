@@ -6,7 +6,14 @@ let rec check_expression (state : State.state) env ?expected (value : Syntax.exp
   in
   State.record state value type_;
   State.note_compiled_expression state env value;
-  type_
+  match State.resolve state type_ with
+  | Types.Variable index
+    when env.specification
+         && (not (Hashtbl.mem state.unifier.specification_unknowns index))
+         && State.is_within state type_ Types.integer_types ->
+      Name_lookup.coerce state env value ~actual:type_ ~expected:Types.Integer;
+      Types.Integer
+  | _ -> type_
 
 and check_lent_part state env (value : Syntax.expression) : Types.ty =
   Hashtbl.remove state.lent_tails value.id;

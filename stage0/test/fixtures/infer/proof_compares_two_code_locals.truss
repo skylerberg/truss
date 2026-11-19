@@ -1,0 +1,10 @@
+fn f() -> Bool {
+  let first = 1
+  let second = 2
+  proof {
+    assert first < second
+  }
+  let small: UInt8 = first
+  let reveal: Bool = second
+  reveal
+}

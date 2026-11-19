@@ -149,6 +149,7 @@ module Code : sig
     | Unknown_variant
     | Specification_only
     | Not_in_specification
+    | Decided_in_specification
     | Not_structural
     | Wrong_receiver
     | Not_indexable

@@ -1,0 +1,17 @@
+fn same_value[Value](first: Value, second: Value) -> Bool {
+  true
+}
+
+fn f(small: UInt8) -> Bool {
+  let first = 1
+  let second = 2
+  var index: UInt64 = 0
+  while index < 3
+    invariant same_value(first, second)
+  {
+    index = index + 1
+  }
+  let same = small == first
+  let reveal: Bool = second
+  reveal && same
+}

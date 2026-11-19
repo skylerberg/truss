@@ -425,7 +425,8 @@ and check_literal_pattern state id (span : Source.Definition_span.t) literal typ
   | Literal_integer number ->
       state.tables.literals.(id) <- Some (Integer_value number);
       ignore
-        (State.narrow state type_ (Types.list_fitting_integer_types number)
+        (State.narrow state type_
+           (Types.list_fitting_integer_types number @ [ Intrinsic.Integer ])
            ~report_excluded:(fun excluded ->
              if State.is_within state excluded Types.integer_types then
                report_out_of_range state span number excluded

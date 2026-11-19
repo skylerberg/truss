@@ -1,0 +1,12 @@
+type Both[Value](first: Value, second: Value) derives Equal
+
+fn f(other: Both[UInt8]) -> Bool {
+  let both = Both(first: 1, second: 2)
+  var index: UInt64 = 0
+  while index < 3
+    invariant both == other
+  {
+    index = index + 1
+  }
+  index == 3
+}

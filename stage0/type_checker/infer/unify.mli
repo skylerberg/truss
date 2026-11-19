@@ -6,6 +6,9 @@ type t = {
   mutable deferred_capability_equalities : (Types.capability_set * Types.capability_set) list;
   domains : (int, Intrinsic.builtin list) Hashtbl.t;
   list_rigid_members : Types.ty -> Intrinsic.builtin list;
+  specification_unknowns : (int, unit) Hashtbl.t;
+  mutable checks_specification : bool;
+  mutable refused_code_unknown : int option;
 }
 
 val create : list_rigid_members:(Types.ty -> Intrinsic.builtin list) -> t
