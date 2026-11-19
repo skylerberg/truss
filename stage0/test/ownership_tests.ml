@@ -858,8 +858,17 @@ let () =
       expect_fine Fixtures.Ownership.match_of_string_literals);
   Harness.test "a `let` bound to a string literal is a view" (fun () ->
       expect_fine Fixtures.Ownership.string_literal_let_read_twice);
-  Harness.test "a `let` bound to a string literal is not owned" (fun () ->
-      expect_one_diagnostic Fixtures.Ownership.string_literal_let_returned "ownership.needs_owned")
+  Harness.test "a returned `let` bound to a string literal is reported as a view of the literal"
+    (fun () ->
+      expect_one_diagnostic ~says:"`text` views a string literal. Return a copy."
+        Fixtures.Ownership.string_literal_let_returned "ownership.needs_owned");
+  Harness.test "a moved `let` bound to a string literal is reported as a view of the literal"
+    (fun () ->
+      expect_one_diagnostic ~says:"`text` views a string literal, so it cannot be moved"
+        Fixtures.Ownership.string_literal_let_moved_into_a_var "ownership.not_owned");
+  Harness.test "a moved `let` bound to a place is reported as a view" (fun () ->
+      expect_one_diagnostic ~says:"`other` is a view, so it cannot be moved"
+        Fixtures.Ownership.let_of_a_place_moved_into_a_var "ownership.not_owned")
 
 let () =
   Harness.test "a view of a local cannot outlive the local's block" (fun () ->
