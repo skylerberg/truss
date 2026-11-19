@@ -1,0 +1,18 @@
+trait Convert[Value] {
+  fn convert(self) -> Value
+}
+
+fn converts[Source: Convert[Value], Value](source: Source, value: Value) -> Bool {
+  true
+}
+
+fn f[Item](item: Item) -> Bool {
+  let converted = converts(item, value: 3)
+  var index: UInt64 = 0
+  while index < 2
+    invariant index <= 2 when Item: Convert[Int64]
+  {
+    index = index + 1
+  }
+  converted
+}

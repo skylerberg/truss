@@ -32,7 +32,7 @@ let check_body state (env : State.env) (written : Syntax.block) =
                    (State.show state output))
         | _ -> ())
     | [ (last : Syntax.statement) ] ->
-        State.run_in_statement state env (State.read_span state last.id) (fun () ->
+        Solver.run_in_statement state env (State.read_span state last.id) (fun () ->
             match (last.kind, env.output) with
             | Expression _, Some (Returns output) when State.resolve state output = Types.unit ->
                 Statements.check_statement state env last ~last:false
@@ -42,18 +42,20 @@ let check_body state (env : State.env) (written : Syntax.block) =
                 Expressions.check state env value part
             | _, Some (Returns output) ->
                 Statements.check_statement state env last ~last:true;
-                if not (State.statement_diverges state last || State.unify state output Types.unit)
+                if
+                  not
+                    (Statements.statement_diverges state last || State.unify state output Types.unit)
                 then
                   State.report state Mismatch (State.read_span state last.id)
                     (Printf.sprintf "This body must end with a value of type `%s`."
                        (State.show state output))
             | _ -> Statements.check_statement state env last ~last:false)
     | (first : Syntax.statement) :: rest ->
-        State.run_in_statement state env (State.read_span state first.id) (fun () ->
+        Solver.run_in_statement state env (State.read_span state first.id) (fun () ->
             Statements.check_statement state env first ~last:false);
         check_statements rest
   in
-  State.run_in_statement state env (State.read_span state written.id) (fun () ->
+  Solver.run_in_statement state env (State.read_span state written.id) (fun () ->
       check_statements written.statements)
 
 let declare_parameters state (written : Syntax.parameter list) (signature : Types.signature) =
@@ -110,7 +112,7 @@ let check_function_type_requires state env (written : Syntax.parameter list)
                 (fun (clause : Syntax.clause) ->
                   match clause.kind with
                   | Requires value ->
-                      State.run_in_statement state env (State.read_span state value.id) (fun () ->
+                      Solver.run_in_statement state env (State.read_span state value.id) (fun () ->
                           Expressions.check state env value Types.bool)
                   | _ -> ())
                 clauses
@@ -130,9 +132,9 @@ let check_defaults state env (written : Syntax.parameter list) (signature : Type
               default )
           with
           | Some info, Some value ->
-              State.run_in_statement state env (State.read_span state value.id) (fun () ->
+              Solver.run_in_statement state env (State.read_span state value.id) (fun () ->
                   let actual = Expressions.check_expression state env ~expected:info.type_ value in
-                  Name_lookup.coerce state env ~argument:info.mode value ~actual
+                  Conversions.coerce state env ~argument:info.mode value ~actual
                     ~expected:info.type_);
               Constant.check state ~default:true value
           | Some { has_default = true; _ }, None ->
@@ -318,10 +320,10 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
           (fun (clause : Syntax.type_clause) ->
             match clause.kind with
             | Type_invariant value ->
-                State.run_in_statement state env (State.read_span state value.id) (fun () ->
+                Solver.run_in_statement state env (State.read_span state value.id) (fun () ->
                     Expressions.check state env value Types.bool)
             | Potential value ->
-                State.run_in_statement state env (State.read_span state value.id) (fun () ->
+                Solver.run_in_statement state env (State.read_span state value.id) (fun () ->
                     ignore (Expressions.check_expression state env value))
             | Derives _ -> ())
           clauses;
@@ -383,7 +385,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                       lowered_fields
                   with
                   | Some elaborated ->
-                      State.run_in_statement state constant_expression
+                      Solver.run_in_statement state constant_expression
                         (State.read_span state value.id) (fun () ->
                           Expressions.check state constant_expression value elaborated.field_type);
                       Constant.check state ~default:true value
@@ -465,7 +467,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                     law.parameters;
                   List.iter
                     (fun (requirement : Syntax.expression) ->
-                      State.run_in_statement state env (State.read_span state requirement.id)
+                      Solver.run_in_statement state env (State.read_span state requirement.id)
                         (fun () -> Expressions.check state env requirement Types.bool))
                     law.requires;
                   if not (is_broken (Member_body index)) then
@@ -485,7 +487,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                 Option.is_some (Types.find_specification_only_type constant.constant_type);
             }
           in
-          State.run_in_statement state env (State.read_span state value.id) (fun () ->
+          Solver.run_in_statement state env (State.read_span state value.id) (fun () ->
               Expressions.check state env value constant.constant_type);
           Constant.check state ~default:false value
         end
@@ -677,7 +679,7 @@ let list_used_packages (resolved : Resolve.resolved) ~evidence_packages (form : 
     form.definition;
   List.sort_uniq compare (named @ !called)
 
-let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
+let infer (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body ~assumed_types =
   let resolved =
     Resolve.merge
       (List.map
@@ -736,14 +738,16 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
       capability_solution = None;
       evidence_packages = [];
       final_type_checks = [];
+      log = [];
       condition_bounds = [];
-      undecided = [];
-      decisions = Hashtbl.create 4;
       annotatable = Hashtbl.create 8;
-      narrowings = [];
+      goals = [];
+      assumed_types;
+      unchecked_fixes = [];
     }
   in
-  check_definition state elaborated ~checks_body;
+  Solver.run_in_statement state no_output (State.read_span state definition.id) (fun () ->
+      check_definition state elaborated ~checks_body);
   List.iter (fun check -> check ()) (List.rev state.final_type_checks);
   state.diagnostics <- Interface.Elaborator.list_diagnostics context @ state.diagnostics;
   state.diagnostics <-
@@ -753,6 +757,28 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
     @ state.diagnostics;
   finalize state;
   Exported_parts.check state;
+  (state, elaborated, resolved)
+
+let keep_validated_fixes lookups key ~checks_body (state : State.state) =
+  let is_valid (fixed : Diagnostic.in_definition) assumed_types =
+    match infer lookups key ~checks_body ~assumed_types with
+    | checked_again, _, _ ->
+        List.for_all
+          (fun (diagnostic : Diagnostic.in_definition) ->
+            diagnostic.span <> fixed.span && List.mem diagnostic state.diagnostics)
+          checked_again.diagnostics
+    | exception Interface.Properties.Recursion_limit _ -> false
+  in
+  List.map
+    (fun (diagnostic : Diagnostic.in_definition) ->
+      let is_kept fix =
+        Option.fold ~none:true ~some:(is_valid diagnostic) (List.assq_opt fix state.unchecked_fixes)
+      in
+      { diagnostic with fixes = List.filter is_kept diagnostic.fixes })
+    state.diagnostics
+
+let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
+  let state, elaborated, resolved = infer lookups key ~checks_body ~assumed_types:[] in
   let has_any_type is_unwanted =
     let contains table =
       Seq.exists
@@ -821,4 +847,4 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
         (List.sort_uniq
            (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
              compare (left.span, left.code, left.message) (right.span, right.code, right.message))
-           state.diagnostics)
+           (keep_validated_fixes lookups key ~checks_body state))

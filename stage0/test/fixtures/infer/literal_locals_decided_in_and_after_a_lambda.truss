@@ -1,0 +1,17 @@
+fn apply[Made](make: fn() -> Made) -> Made {
+  todo
+}
+
+fn f(small: UInt8) -> Bool {
+  let made = apply(fn() {
+    let inner = 3
+    inner
+  })
+  small == made
+}
+
+fn g(small: UInt8) -> Bool {
+  let scale = 2
+  let made = apply(fn() { small == scale })
+  made
+}

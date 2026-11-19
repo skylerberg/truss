@@ -1,0 +1,8 @@
+fn scale[Value: Multiply[By], By](value: Value, by: By) -> Bool {
+  true
+}
+
+fn f(flag: Bool) -> Bool {
+  let by = todo
+  scale(flag, by: by)
+}

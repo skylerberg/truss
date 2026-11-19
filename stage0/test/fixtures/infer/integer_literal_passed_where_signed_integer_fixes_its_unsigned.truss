@@ -1,0 +1,7 @@
+fn magnitude_of[T: SignedInteger[Unsigned = UInt64]](value: T) -> UInt64 {
+  value.unsigned_absolute()
+}
+
+fn f() -> UInt64 {
+  magnitude_of(-5)
+}

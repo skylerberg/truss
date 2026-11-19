@@ -21,94 +21,30 @@ type static_ =
   | Static_trait of Path.t * Types.argument list option
   | Static_capability of Path.t
 
-let require state ~(at : Source.Definition_span.t) type_ (bound : Types.trait_reference) ~on_unmet =
-  let trait = { bound with associated = [] } in
-  State.defer state (fun () ->
-      let type_ = State.normalize state type_ in
-      if Unify.list_unknowns state.unifier type_ <> [] then false
-      else begin
-        (match State.find_evidence state type_ trait with
-        | None -> on_unmet type_ None
-        | Some evidence ->
-            check_evidence_grants state at evidence;
-            List.iter
-              (fun (name, wanted) ->
-                match
-                  Interface.Impls.project_associated_type state.lookups.interface
-                    ~list_bounds:(State.lookup_bounds state) type_ trait name
-                with
-                | Some associated_type when not (State.unify state associated_type wanted) ->
-                    on_unmet type_ (Some (name, associated_type))
-                | _ -> ())
-              bound.associated);
-        true
-      end)
+let check_grants_when_final state at subject (trait : Types.trait_reference) =
+  State.check_when_final state (fun () ->
+      let subject = State.normalize state subject in
+      if not (Types.contains_unsolved subject) then
+        Option.iter (check_evidence_grants state at)
+          (State.find_evidence state subject { trait with associated = [] }))
 
-let require_bounds state (span : Source.Definition_span.t) ?of_type generics substitution =
+let require_bounds state at ?of_type generics substitution =
   List.iter
     (fun (argument, bound) ->
-      require state ~at:span argument bound ~on_unmet:(fun argument other ->
-          let bound = Unify.zonk_trait state.unifier bound in
-          let reported =
-            match State.find_current_frame state with
-            | Some frame ->
-                let reported = List.mem (argument, bound) frame.reported_unmet_bounds in
-                frame.reported_unmet_bounds <- (argument, bound) :: frame.reported_unmet_bounds;
-                reported
-            | None -> false
-          in
-          if not reported then
-            let needs =
-              Printf.sprintf "%s needs `%s: %s`"
-                (match of_type with
-                | Some type_ -> Printf.sprintf "`%s`" (State.show state type_)
-                | None -> "This")
-                (Types.show argument) (Types.show_trait bound)
-            in
-            let is_slice =
-              Types.is_well_known Slice argument || Types.is_well_known String_slice argument
-            in
-            let has_mut_self_method =
-              match
-                Interface.Definition.find_trait_interface state.lookups.interface bound.trait
-              with
-              | Some trait ->
-                  List.exists
-                    (fun (method_ : Types.trait_method) -> method_.method_receiver = Instance Mut)
-                    trait.methods
-              | None -> false
-            in
-            State.report state Unsatisfied_bound span
-              (match other with
-              | None when is_slice && has_mut_self_method ->
-                  needs
-                  ^ ", which does not hold: a slice implements no trait with a `mut self` method. \
-                     Generic code could call the method on a copy of the slice, and a copy views \
-                     the same elements."
-              | None -> needs ^ ", which does not hold."
-              | Some (name, associated_type) ->
-                  Printf.sprintf "%s, and its `%s` is `%s`." needs name
-                    (State.show state associated_type))))
+      Solver.require state (Bound { at; of_type }) argument bound;
+      check_grants_when_final state at argument bound)
     (Interface.Impls.list_required_bounds generics substitution)
-
-let make_fresh_generic_arguments (state : State.state) (generics : Types.generic list) =
-  List.map
-    (fun (generic : Types.generic) ->
-      match generic.kind with
-      | Value_generic -> Types.Value (Unify.make_fresh_value state.unifier)
-      | Type_generic _ -> Types.Type (State.make_fresh_type state))
-    generics
 
 let make_fresh_arguments (state : State.state) (path : Path.t) =
   match Interface.Definition.find_type_interface state.lookups.interface path with
-  | Some interface -> make_fresh_generic_arguments state interface.type_generics
+  | Some interface -> State.make_fresh_generic_arguments state interface.type_generics
   | None -> []
 
 let make_fresh_trait_reference (state : State.state) (trait : Path.t) =
   State.make_trait_reference trait
     ~arguments:
       (match Interface.Definition.find_trait_interface state.lookups.interface trait with
-      | Some interface -> make_fresh_generic_arguments state interface.trait_generics
+      | Some interface -> State.make_fresh_generic_arguments state interface.trait_generics
       | None -> [])
 
 let require_type_bounds (state : State.state) span path arguments =
@@ -220,7 +156,7 @@ let instantiate (state : State.state) (span : Source.Definition_span.t)
     ?(extra = Types.no_substitution) (signature : Types.signature) =
   let instantiation : Types.instantiation =
     {
-      type_arguments = make_fresh_generic_arguments state signature.generics;
+      type_arguments = State.make_fresh_generic_arguments state signature.generics;
       capability_arguments =
         List.map
           (fun (parameter : Types.parameter) ->

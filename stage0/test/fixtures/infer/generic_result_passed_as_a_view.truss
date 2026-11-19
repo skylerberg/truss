@@ -1,0 +1,21 @@
+type Text(content: String)
+
+fn render(text: Text) -> String {
+  "rendered"
+}
+
+fn identity[Value](value: own Value) -> Value {
+  value
+}
+
+fn measure(text: StringSlice) -> UInt64 {
+  text.length()
+}
+
+fn f(text: Text) -> UInt64 {
+  measure(render(text))
+}
+
+fn g(text: Text) -> UInt64 {
+  measure(identity(render(text)))
+}

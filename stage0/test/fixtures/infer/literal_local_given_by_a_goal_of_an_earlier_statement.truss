@@ -1,0 +1,70 @@
+type Scale(factor: Int64)
+type Other(ticks: Int64)
+
+impl Multiply[Int64] for Scale {
+  type Output = UInt64
+
+  fn multiply_is_defined(self, right: Int64) -> Bool {
+    true
+  }
+
+  fn multiply(self, right: Int64) -> UInt64 {
+    todo
+  }
+}
+
+impl Multiply[UInt8] for Scale {
+  type Output = UInt16
+
+  fn multiply_is_defined(self, right: UInt8) -> Bool {
+    true
+  }
+
+  fn multiply(self, right: UInt8) -> UInt16 {
+    todo
+  }
+}
+
+impl Multiply[UInt64] for Other {
+  type Output = Other
+
+  fn multiply_is_defined(self, right: UInt64) -> Bool {
+    true
+  }
+
+  fn multiply(self, right: UInt64) -> Other {
+    todo
+  }
+}
+
+impl Multiply[Int64] for Other {
+  type Output = Other
+
+  fn multiply_is_defined(self, right: Int64) -> Bool {
+    true
+  }
+
+  fn multiply(self, right: Int64) -> Other {
+    todo
+  }
+}
+
+impl Multiply[UInt16] for Other {
+  type Output = Other
+
+  fn multiply_is_defined(self, right: UInt16) -> Bool {
+    true
+  }
+
+  fn multiply(self, right: UInt16) -> Other {
+    todo
+  }
+}
+
+fn f(scale: Scale, other: Other, flag: Bool) -> UInt64 {
+  let level = 1
+  let magnitude = 1
+  let chosen = if flag { scale * level } else { magnitude }
+  let product = other * magnitude
+  chosen
+}

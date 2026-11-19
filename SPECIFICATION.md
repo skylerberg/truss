@@ -176,10 +176,20 @@ decides it: after `let limit = 10`, `count < limit` with a `UInt8` count makes
 - A literal whose type is a type parameter bounded by an integer trait fits
   every type that implements the trait: -128 to 127 under `SignedInteger`, 0
   to 255 under `UnsignedInteger`, and 0 to 127 under `FixedWidthInteger`.
-- A literal meets a bound once its type is decided. Until then, a lookup
-  proceeds as if the bound is met: after `let range = 0..3`,
-  `for index in range` finds `Range`'s `Iterable`, and the loop's body may
-  still decide the type, which must then meet `Countable`.
+- A literal meets a bound of a sealed number trait that every type it may
+  have implements. A sealed bound that only some of those types implement
+  narrows the literal to them: `kept(3)` with `Value: UnsignedInteger` makes
+  the `3` a `UInt64`. A literal meets any other bound once its type is
+  decided. Until then, a lookup proceeds as if the bound is met: after
+  `let range = 0..3`, `for index in range` finds `Range`'s `Iterable`, and
+  the loop's body may still decide the type, which must then meet
+  `Countable`.
+- A statement whose type depends on an undecided literal through an
+  operator's or a trait's result gives the literal its default type at the
+  statement's end, and so does reading a member, an index, or a method of
+  such a result: after `let count = 2`, `let scaled = span * count` and
+  `(span * count).ticks` make `count` an `Int64` when `Span` implements
+  `Multiply[Int64]`.
 
 ### String literals
 

@@ -1,0 +1,5 @@
+fn f() -> Float32 {
+  let ratio = 0.5
+  let small: Float32 = -ratio
+  small
+}
