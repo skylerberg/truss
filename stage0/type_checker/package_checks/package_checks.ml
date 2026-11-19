@@ -69,13 +69,19 @@ let check_sealed (lookups : Lookups.t) (declaration : Resolve.Names.declaration)
       match (Types.find_sealed_implementors trait, Intrinsic.find_builtin type_) with
       | Some builtins, Some builtin when List.mem builtin builtins -> []
       | Some _, _ ->
+          let implementors, reason =
+            if Well_known.is Floating_point trait then
+              ( "the built-in float types",
+                "the trait describes the IEEE 754 formats of `Float32` and `Float64`, which its \
+                 `Bits` and methods such as `is_nan` expose" )
+            else
+              ( "the built-in integer types",
+                "generic code over the trait is proven for each of them" )
+          in
           [
             make_diagnostic declaration.key Sealed_trait_impl (locate_header spans definition)
-              (Printf.sprintf
-                 "Only the built-in %s types implement `%s`, so `%s` cannot: generic code over the \
-                  trait is proven for each of them."
-                 (if Well_known.is Floating_point trait then "float" else "integer")
-                 (Path.show trait) (Path.show type_));
+              (Printf.sprintf "Only %s implement `%s`, so `%s` cannot: %s." implementors
+                 (Path.show trait) (Path.show type_) reason);
           ]
       | None, _ -> [])
   | _ -> []

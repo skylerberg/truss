@@ -20,12 +20,14 @@ let () =
               (List.exists
                  (fun (diagnostic : Diagnostic.t) ->
                    Diagnostic.Code.name diagnostic.code = "package.sealed_trait_impl"
-                   && String.includes ~affix:says diagnostic.message)
+                   && List.for_all (fun affix -> String.includes ~affix diagnostic.message) says)
                  diagnostics)
           then Harness.fail "found [%s]" (String.concat "; " (Support.list_codes diagnostics)))
         [
-          (Fixtures.Package_checks.signed_integer_impl_for_count, "the built-in integer types");
-          (Fixtures.Package_checks.floating_point_impl_for_meters, "the built-in float types");
+          ( Fixtures.Package_checks.signed_integer_impl_for_count,
+            [ "the built-in integer types"; "proven for each of them" ] );
+          ( Fixtures.Package_checks.floating_point_impl_for_meters,
+            [ "the built-in float types"; "the IEEE 754 formats" ] );
         ]);
   Harness.test "an impl may live with a type its trait's arguments name" (fun () ->
       expect_fine Fixtures.Package_checks.impl_from_user_id_for_int64);
