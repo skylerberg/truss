@@ -983,7 +983,7 @@ let () =
       let with_lib = Support.setup ~dependencies:[ ("app", "lib") ] tool_user in
       ignore (lay_out_again ~before:alone ~after:with_lib ());
       expect_untouched (lay_out_again ~before:with_lib ~after:alone ()) ~is_excluded:(fun part ->
-          Database.Part.locate_package part = { Path.owner = None; name = "lib" }));
+          Database.For_testing.locate_package part = { Path.owner = None; name = "lib" }));
   Harness.test "a new version of a loaded package recomputes only the readers of what changed"
     (fun () ->
       let make_version second =

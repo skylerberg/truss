@@ -91,6 +91,7 @@ module For_testing : sig
 
   val list_diagnostics : checker list -> t -> Path.file -> Diagnostic.t list
   val fragment_checkers : checker list
+  val locate_package : Part.any -> Path.package
   val make_unchecked_interface_lookups : t -> Interface.Lookups.t
   val read_derived_form : t -> Path.t -> Core.t option
   val read_core : t -> Path.t -> (Core.t * Types.substitution) option

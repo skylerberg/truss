@@ -2397,6 +2397,7 @@ module For_testing = struct
 
   let list_diagnostics = list_diagnostics
   let fragment_checkers = List.filter (fun checker -> checker <> Unexported) checkers
+  let locate_package = Part.Storage.locate_package
 
   let make_unchecked_interface_lookups database =
     make_recording_interface_lookups database (note_untracked_read database) ~is_checked:false
