@@ -90,7 +90,7 @@ let replace_capabilities find_replacement (set : capability_set) =
        set)
 
 let make_builtin ?(arguments = []) builtin =
-  Named { path = Intrinsic.make_builtin_path builtin; arguments }
+  Named { path = Well_known.make_builtin_type_path builtin; arguments }
 
 let unit = make_builtin Unit
 let bool = make_builtin Bool
@@ -101,9 +101,9 @@ let make_named path arguments =
   Named { path; arguments = List.map (fun type_ -> Type type_) arguments }
 
 let find_builtin = function
-  | Named { path; arguments = [] } -> Intrinsic.find_builtin path
+  | Named { path; arguments = [] } -> Well_known.find_builtin_type path
   | Named { path; _ } -> (
-      match Intrinsic.find_builtin path with
+      match Well_known.find_builtin_type path with
       | Some (Array | Storage | View | Shared) as builtin -> builtin
       | _ -> None)
   | _ -> None
@@ -120,8 +120,8 @@ let find_view = function
       Some (Named { path = Well_known.make_path Slice; arguments = [ element ] })
   | _ -> None
 
-let signed_integer_types : Intrinsic.builtin list = [ Int8; Int16; Int32; Int64 ]
-let unsigned_integer_types : Intrinsic.builtin list = [ UInt8; UInt16; UInt32; UInt64 ]
+let signed_integer_types : Language.Builtin_type.t list = [ Int8; Int16; Int32; Int64 ]
+let unsigned_integer_types : Language.Builtin_type.t list = [ UInt8; UInt16; UInt32; UInt64 ]
 let integer_types = signed_integer_types @ unsigned_integer_types
 
 let find_integer_implementors trait =
@@ -139,7 +139,7 @@ let find_bound_integer_implementors bounds =
       | None, these | these, None -> these)
     None bounds
 
-let float_types : Intrinsic.builtin list = [ Float32; Float64 ]
+let float_types : Language.Builtin_type.t list = [ Float32; Float64 ]
 
 let is_integer_type type_ =
   match find_builtin type_ with Some builtin -> List.mem builtin integer_types | None -> false
@@ -650,7 +650,7 @@ type shape =
   | Record of field list
   | Sum of variant list
   | Todo_type
-  | Builtin_type of Intrinsic.builtin
+  | Builtin_type of Language.Builtin_type.t
 
 type type_interface = {
   type_generics : generic list;

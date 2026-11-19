@@ -120,7 +120,7 @@ let is_uint64 (lookups : Lookups.t) path =
   match Resolve.Names.find_definition lookups.names path with
   | Some (key, { kind = Constant { type_ = { kind = Path_type written; _ }; _ }; _ }) ->
       (lookups.read_resolved Interface key).names.(written.path.last.id)
-      = Some (Definition (Type, Intrinsic.make_builtin_path UInt64))
+      = Some (Definition (Type, Well_known.make_builtin_type_path UInt64))
   | _ -> false
 
 let rec elaborate_type context (written : Syntax.type_expression) : Types.ty =
@@ -305,7 +305,7 @@ and elaborate_path_type context (path : Syntax.path_type) : Types.ty =
       | Some report -> Types.Error report
       | None -> Types.Parameter parameter)
   | Some (Definition (Type, definition_path)) -> (
-      match Intrinsic.find_builtin definition_path with
+      match Well_known.find_builtin_type definition_path with
       | Some Never -> Types.Never
       | Some Integer -> Types.Integer
       | Some _ | None -> (
@@ -829,7 +829,7 @@ let elaborate_type_head context owner (head : Syntax.type_head) =
                     "generic parameters")
                  (List.length generics))
         | _ -> (
-            match Intrinsic.find_builtin type_path with
+            match Well_known.find_builtin_type type_path with
             | Some Never -> Types.Never
             | Some Integer -> Types.Integer
             | _ ->
