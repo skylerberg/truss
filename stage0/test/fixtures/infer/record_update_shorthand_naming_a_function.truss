@@ -1,0 +1,7 @@
+type Point(limit: Int64)
+
+fn limit() {}
+
+fn shift(origin: Point) -> Point {
+  origin with (limit)
+}

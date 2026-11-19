@@ -106,7 +106,7 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
   | Bracket (base, items) -> check_bracket state env ?expected value base items
   | Call (callee, arguments) -> Methods.check_call state env ?expected value callee arguments
   | Try inner -> Operators.try_ state env value inner
-  | With (base, updates) -> Operators.check_record_update state env value base updates
+  | With (base, updates) -> Calls.check_record_update state env value base updates
   | Prefix (operator, inner) -> Operators.check_prefix state env ?expected value operator inner
   | Mode (mode, inner) ->
       State.note_mode_keyword state value mode inner;

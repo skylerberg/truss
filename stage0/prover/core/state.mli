@@ -57,7 +57,12 @@ type changed = {
 }
 
 type place_value = One of Logic.term | Run of Logic.term * Logic.term
-type passed_place = { read : frame -> Logic.term; write : frame -> Logic.term -> frame }
+
+type passed_place = {
+  read : frame -> Logic.term;
+  write : frame -> Logic.term -> frame;
+  note_changed_in_place : unit -> unit;
+}
 
 type passed = {
   position : int;

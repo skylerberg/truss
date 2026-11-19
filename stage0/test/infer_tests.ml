@@ -1180,6 +1180,8 @@ let () =
       expect_one_diagnostic Fixtures.Infer.proof_block_assigning_a_var "types.not_in_specification");
   Harness.test "a proof block cannot return" (fun () ->
       expect_one_diagnostic Fixtures.Infer.proof_block_returning "types.not_in_specification");
+  Harness.test "unreachable is not part of a formula" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.requires_unreachable "types.not_in_specification");
   Harness.test "a quantifier's body in code cannot return" (fun () ->
       expect_one_diagnostic Fixtures.Infer.quantifier_returning_in_a_body
         "types.not_in_specification");
@@ -1661,5 +1663,13 @@ let () =
         "types.signature_mismatch" ~at:("feed", 2))
 
 let () =
-  Harness.test "unreachable is not part of a formula" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.requires_unreachable "types.not_in_specification")
+  Harness.test "the shorthand of with names its value, whatever the name resolves to" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.record_update_shorthand_naming_a_function
+        "types.mismatch");
+  Harness.test "with names fields as a construction does" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.record_update_of_an_unknown_field "types.unknown_label"
+        ~says:"`Config` has no field `nme`.");
+  Harness.test "with updates a field once" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.record_update_of_a_field_twice "types.repeated_argument";
+      expect_one_diagnostic Fixtures.Infer.record_update_of_a_field_and_its_part
+        "types.repeated_argument")
