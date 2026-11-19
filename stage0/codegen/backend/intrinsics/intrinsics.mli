@@ -1,5 +1,5 @@
-type argument = Place of Lowered.place | Value of Lowered.operand
-type types = { uint64 : Ground.ty; string_slice : Ground.ty }
+type argument = Context.argument = Place of Lowered.place | Value of Lowered.operand
+type types = Context.types = { uint64 : Ground.ty; string_slice : Ground.ty }
 
 val list_consumed_places : Intrinsic.operation -> int list
 

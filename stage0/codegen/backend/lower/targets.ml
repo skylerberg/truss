@@ -550,7 +550,7 @@ let lower_literal_place st (ty : Ground.ty) text =
   let field, part =
     match (ty, Monomorphic.compute_shape st.context.monomorphic ty) with
     | Named { path; _ }, Record [ (field, Typed storage) ] when Well_known.is String path ->
-        (field, build storage (Storage.build_storage storage ~buffer:bytes ~length ~capacity:length))
+        (field, build storage (Storage.build_borrowed storage ~buffer:bytes ~length))
     | _, Record [ (field, Typed view) ] ->
         (field, build view (Storage.build_view view ~buffer:bytes ~length))
     | _ -> Definitions.raise_bug "a string literal of type %s" (Ground.to_string ty)
@@ -571,14 +571,13 @@ let lower_owner_of_view (st : Lowering.state) ~(owner : Ground.ty) ~(view : Grou
         Lowered.project viewed (Field field)
     | _ -> Definitions.raise_bug "%s views no storage" (Ground.to_string view)
   in
-  let length : Lowered.operand = Copy (Storage.project_length view_place) in
   let built = Lowering.allocate_local st (Value storage) in
   Emit_c.Ir_builder.emit st.builder
     (Assign
        ( built,
-         Storage.build_storage storage
+         Storage.build_borrowed storage
            ~buffer:(Copy (Storage.project_buffer view_place))
-           ~length ~capacity:length ));
+           ~length:(Copy (Storage.project_length view_place)) ));
   Emit_c.Ir_builder.emit st.builder
     (Assign
        (destination, Build { ty = owner; variant = None; fields = [ (storage_field, Copy built) ] }))
