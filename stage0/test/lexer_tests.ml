@@ -61,44 +61,16 @@ let list_interpolation_tokens text index =
   | Some literal -> show_tokens (Token.list_interpolations literal).(index).tokens
   | None -> []
 
-let expect_error ?fixed ?(alternatives = []) ?(occurrence = 1) text ~code ~at =
-  match snd (lex text) with
-  | [ diagnostic ] -> (
-      if diagnostic.code <> Lexer code then
-        Harness.fail "expected %s, got %s"
-          (Diagnostic.Code.name (Lexer code))
-          (Diagnostic.Code.name diagnostic.code);
-      let expected = Support.locate_occurrence ~sub:at ~occurrence text in
-      if diagnostic.span.start <> expected then
-        Harness.fail "expected the error at %d (%S), got %d" expected at diagnostic.span.start;
-      let results =
-        List.map
-          (fun (fix : Source.span Diagnostic.fix) -> Diagnostic.apply_edits text fix.edits)
-          diagnostic.fixes
-      in
-      match (fixed, results) with
-      | None, [] -> ()
-      | None, result :: _ -> Harness.fail "expected no fix, got one giving %S" result
-      | Some _, [] -> Harness.fail "expected a fix, got none"
-      | Some fixed, results ->
-          expect_equal_lists (Printf.sprintf "%S") "fixed text" (fixed :: alternatives) results;
-          List.iter
-            (fun result ->
-              List.iter (Harness.fail "the fixed text %S has %s" result) (list_codes result))
-            results;
-          let recovered = list_recovered_tokens text in
-          if
-            List.length results = 1
-            && not (List.exists (fun result -> list_recovered_tokens result = recovered) results)
-          then
-            Harness.fail "%S recovers as [%s], which no fix writes" text
-              (String.concat "; " recovered))
-  | diagnostics ->
-      Harness.fail "expected one diagnostic, got [%s]"
-        (String.concat "; "
-           (List.map
-              (fun (diagnostic : Diagnostic.t) -> Diagnostic.Code.name diagnostic.code)
-              diagnostics))
+let expect_error ?fixed ?(alternatives = []) ?occurrence text ~code ~at =
+  Support.expect_error
+    ~list_diagnostics:(fun text -> snd (lex text))
+    ?fixed ~alternatives ?occurrence text ~code:(Lexer code) ~at;
+  match (fixed, alternatives) with
+  | Some fixed, [] ->
+      let recovered = list_recovered_tokens text in
+      if list_recovered_tokens fixed <> recovered then
+        Harness.fail "%S recovers as [%s], which no fix writes" text (String.concat "; " recovered)
+  | _ -> ()
 
 let list_fixed_texts text ~code =
   List.concat_map

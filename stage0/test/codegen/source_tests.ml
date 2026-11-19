@@ -23,7 +23,7 @@ let () =
       match
         List.map
           (fun (diagnostic : Diagnostic.t) -> Diagnostic.Code.name diagnostic.code)
-          (Codegen_support.list_fragment_diagnostics
+          (Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers
              (Codegen_support.make_database packages)
              Codegen_support.example_file)
       with
@@ -58,7 +58,7 @@ let () =
       let branches =
         List.length
           (String.split_on_char '\n' c
-          |> List.filter (fun line -> String.starts_with ~prefix:"  switch (" line))
+          |> List.filter (fun line -> String.starts_with ~prefix:"  if (" line))
       in
       if branches <> 1 then
         Codegen_support.fail "expected a branch after each field but the last, got %d:\n%s" branches

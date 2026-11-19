@@ -1,0 +1,5 @@
+fn f(items: List[Int64]) -> Int64
+  ensures forall result in items => result > 0
+{
+  1
+}

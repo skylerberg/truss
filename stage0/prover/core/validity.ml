@@ -23,9 +23,7 @@ let note_place (context : State.context) (frame : State.frame) origin place =
   let mentions (first, second) = List.mem origin first || List.mem origin second in
   if frame.source.key = Some context.home && List.exists mentions context.disjoint then begin
     context.indexes <- (origin, place) :: context.indexes;
-    let outside index start stop =
-      Logic.(Operation ("<", [ index; start ]) ||| Operation ("<=", [ stop; index ]))
-    in
+    let outside index start stop = Logic.(less index start ||| less_equal stop index) in
     List.iter
       (fun (first, second) ->
         if read_innermost first = origin || read_innermost second = origin then
@@ -39,10 +37,10 @@ let note_place (context : State.context) (frame : State.frame) origin place =
                 | Run (start, stop), Run (other_start, other_stop) ->
                     Logic.disjunction
                       [
-                        Logic.Operation ("<=", [ stop; other_start ]);
-                        Logic.Operation ("<=", [ other_stop; start ]);
-                        Logic.Operation ("<=", [ stop; start ]);
-                        Logic.Operation ("<=", [ other_stop; other_start ]);
+                        Logic.less_equal stop other_start;
+                        Logic.less_equal other_stop start;
+                        Logic.less_equal stop start;
+                        Logic.less_equal other_stop other_start;
                       ]
               in
               Facts.oblige context frame Disjoint

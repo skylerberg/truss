@@ -175,32 +175,25 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
             Quantified { quantifier; binder; body = State.build_expression state body }
           in
           match (binder, state.tables.loops.(value.id)) with
+          | Binder_type (bound, _), _ ->
+              make_quantified
+                (Over_type
+                   {
+                     local = Declared { origin = bound.id; name = bound.text };
+                     type_ = Form.read_local_type state bound.id;
+                   })
           | Binder_in (written, collection), Some (Elements { count; element; lends }) ->
               let pattern = State.build_pattern state written in
               Form.quantify_over_elements state collection ~count ~element ~lends ~origin:value.id
                 (fun elements -> make_quantified (Over_elements { pattern; elements }))
-          | _ ->
-              let binder : Core.binder =
-                match binder with
-                | Binder_type (bound, _) ->
-                    Over_type
-                      {
-                        local = Declared { origin = bound.id; name = bound.text };
-                        type_ = Form.read_local_type state bound.id;
-                      }
-                | Binder_in
-                    ( written,
-                      { kind = Range { start = Some start; stop = Some stop; inclusive; _ }; _ } )
-                  ->
-                    let pattern = State.build_pattern state written in
-                    let start = State.build_expression state start in
-                    Over_range
-                      { pattern; start; stop = State.build_expression state stop; inclusive }
-                | Binder_in _ ->
-                    State.raise_bug
-                      "the checker recorded no elements for a quantifier over a collection"
-              in
-              make_quantified binder);
+          | ( Binder_in (written, { kind = Range { start = Some start; stop = Some stop; _ }; _ }),
+              Some (Integer_range { inclusive; _ }) ) ->
+              let pattern = State.build_pattern state written in
+              let start = State.build_expression state start in
+              make_quantified
+                (Over_range { pattern; start; stop = State.build_expression state stop; inclusive })
+          | Binder_in _, (None | Some (Integer_range _ | Pulled _)) ->
+              State.raise_bug "the checker recorded no iteration for a quantifier over a collection");
       Types.bool
   | Echo inner ->
       let type_ = check_expression state env ?expected inner in

@@ -7,6 +7,7 @@
   source
   compiler_bug
   path
+  grant
   well_known
   intrinsic
   types

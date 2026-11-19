@@ -31,8 +31,8 @@ let project_length sequence = Lowered.project sequence (Lowered.Field length_fie
 let project_capacity storage = Lowered.project storage (Lowered.Field capacity_field)
 let index_element sequence index = Lowered.project (project_buffer sequence) (Index index)
 
-let build_is_allocated storage : Lowered.rvalue =
-  Binary (Not_equal, Copy (project_capacity storage), Lowered.make_uint64_constant 0)
+let make_owned_block_test storage : Lowered.test =
+  (Not_equal, Copy (project_capacity storage), Lowered.make_uint64_constant 0)
 
 let build_storage ty ~buffer ~length ~capacity : Lowered.rvalue =
   Build
@@ -41,6 +41,12 @@ let build_storage ty ~buffer ~length ~capacity : Lowered.rvalue =
       variant = None;
       fields = [ (buffer_field, buffer); (length_field, length); (capacity_field, capacity) ];
     }
+
+let list_borrowed_fields ~buffer ~length =
+  [ (buffer_field, buffer); (length_field, length); (capacity_field, length) ]
+
+let build_borrowed ty ~buffer ~length : Lowered.rvalue =
+  Build { ty; variant = None; fields = list_borrowed_fields ~buffer ~length }
 
 let build_empty ty =
   build_storage ty ~buffer:(Constant empty_buffer) ~length:(Lowered.make_uint64_constant 0)

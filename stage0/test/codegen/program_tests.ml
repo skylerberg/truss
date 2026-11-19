@@ -662,7 +662,7 @@ let () =
             Codegen_support.make_example_package [ (Codegen_support.example_file, text) ]
           in
           if
-            Codegen_support.list_fragment_diagnostics
+            Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers
               (Codegen_support.make_database packages)
               Codegen_support.example_file
             = []
@@ -676,8 +676,9 @@ let () =
                   List.filter_map
                     (fun (declaration : Resolve.Names.declaration) ->
                       match
-                        ( declaration.path,
-                          Interface.Definition.find_declared_signature interface declaration.path )
+                        ( declaration.key.path,
+                          Interface.Definition.find_declared_signature interface
+                            declaration.key.path )
                       with
                       | ( Top _,
                           Some
@@ -689,7 +690,10 @@ let () =
                             } ) ->
                           Some
                             (Lowered.Item.Code
-                               { path = declaration.path; instantiation = Ground.no_instantiation })
+                               {
+                                 path = declaration.key.path;
+                                 instantiation = Ground.no_instantiation;
+                               })
                       | _ -> None)
                     ((Database.make_name_lookups checked).list_declarations Codegen_support.example)
                 in

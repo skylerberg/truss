@@ -48,23 +48,16 @@ let start ~is_skipped_name ~cookie_directory root =
 
 let extract_descriptor watcher = handle_descriptor watcher.handle
 
-let find_relative_path watcher path =
-  if path = watcher.root then Some ""
-  else
-    let prefix = watcher.root ^ "/" in
-    if String.starts_with ~prefix path then Some (String.drop_first (String.length prefix) path)
-    else None
-
 let is_skipped watcher relative =
   List.exists watcher.is_skipped_name (String.split_on_char '/' relative)
 
 let drain watcher =
   let paths, is_overflowed = take watcher.handle in
-  let relatives = List.filter_map (find_relative_path watcher) paths in
+  let relatives = List.filter_map (File_system.find_relative_path ~root:watcher.root) paths in
   if not (is_recursive ()) then
     List.iter
       (fun relative ->
-        let path = Filename.concat watcher.root relative in
+        let path = File_system.join_path watcher.root relative in
         if relative <> "" && (not (is_skipped watcher relative)) && is_directory path then
           watch_tree watcher path)
       relatives;
@@ -76,9 +69,10 @@ let list_relevant watcher relatives =
 let synchronize watcher ~pending_paths ~is_overflowed =
   watcher.cookies <- watcher.cookies + 1;
   let cookie =
-    Printf.sprintf "%s/sync-%d-%d" watcher.cookie_directory (Unix.getpid ()) watcher.cookies
+    File_system.join_path watcher.cookie_directory
+      (Printf.sprintf "sync-%d-%d" (Unix.getpid ()) watcher.cookies)
   in
-  let cookie_path = Filename.concat watcher.root cookie in
+  let cookie_path = File_system.join_path watcher.root cookie in
   let rec wait ~deadline paths is_overflowed =
     let remaining = deadline -. Unix.gettimeofday () in
     if remaining <= 0. then Rescan

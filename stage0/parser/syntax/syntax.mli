@@ -1,5 +1,6 @@
 type id = int
-type name = { text : string; id : id }
+type case = Upper | Lower
+type name = { text : string; case : case; id : id }
 type path = { modules : name list; last : name }
 type mode = Mut | Own
 type prefix = Negate | Not | Complement

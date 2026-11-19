@@ -1,4 +1,4 @@
-type dependency = { package : Path.package; capabilities : string list }
+type dependency = { package : Path.package; capabilities : Grant.capability list }
 type package = { name : Path.package; truss : string option; dependencies : dependency list }
 type t = { package : package option; time_limit_seconds : int option }
 

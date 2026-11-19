@@ -48,3 +48,31 @@ let write_directory_atomically path files =
   remove temporary;
   write_directory temporary files;
   try Sys.rename temporary path with Sys_error _ -> remove temporary
+
+let remove_trailing_separators path =
+  match String.drop_last_while (Char.equal '/') path with
+  | "" when path <> "" -> "/"
+  | trimmed -> trimmed
+
+let join_path directory relative =
+  if relative = "" then directory else Filename.concat directory relative
+
+let find_relative_path ~root path =
+  let root = remove_trailing_separators root and path = remove_trailing_separators path in
+  if path = root then Some ""
+  else if root = "" then if Filename.is_relative path then Some path else None
+  else
+    let prefix = if root = "/" then root else root ^ "/" in
+    if String.starts_with ~prefix path then Some (String.drop_first (String.length prefix) path)
+    else None
+
+let is_inside ~directory path = Option.is_some (find_relative_path ~root:directory path)
+
+let find_parent path =
+  match remove_trailing_separators path with
+  | "" | "/" -> None
+  | path -> (
+      match String.split_last ~sep:"/" path with
+      | Some ("", _) -> Some "/"
+      | Some (parent, _) -> Some (remove_trailing_separators parent)
+      | None -> Some "")

@@ -11,6 +11,7 @@ exception Unsupported of unsupported
 val raise_unsupported : Obligation.location -> ('a, unit, string, 'b) format4 -> 'a
 val run_in_source : State.context -> State.source -> (unit -> 'a) -> 'a
 val raise_bug : ('a, unit, string, 'b) format4 -> 'a
+val list_method_type_arguments : self_type:Types.ty -> Types.argument list -> Types.argument list
 val read_parameter_name : Mir.parameter -> string
 val list_clauses : Mir.requirement list -> Mir.formula list
 val declare : State.context -> Logic.declaration -> unit

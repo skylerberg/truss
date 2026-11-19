@@ -28,5 +28,5 @@ val list_differences : written:Lock.t -> current:Lock.t -> string list
 
 module For_testing : sig
   val list_holds :
-    project:Manifest.dependency list -> package list -> (Path.package * string list) list
+    project:Manifest.dependency list -> package list -> (Path.package * Grant.capability list) list
 end

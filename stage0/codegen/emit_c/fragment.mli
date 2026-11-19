@@ -3,30 +3,38 @@ type kind =
   | Static_data
   | Table_entries of Path.t option
 
+type function_text = { symbol : string; header : string; body : string }
+
+type function_pieces = {
+  symbol : C_text.reference;
+  header : C_text.t;
+  body : C_text.t;
+  name_local : Lowered.local -> string;
+}
+
 type t = {
   item : Lowered.Item.t;
   kind : kind;
-  functions : (string * string) list;
+  functions : function_text list;
   definition : string;
-  types : C_types.key list;
-  environments : (C_types.key * C_types.defined) list;
+  types : C_text.key list;
+  environments : (C_text.key * string C_types.defined) list;
   prototypes : (string * string) list;
   statics : string list;
   sites : Lowered.site list;
-  helpers : string list;
+  capabilities : Path.t list;
+  helpers : C_runtime.helper list;
   references : Lowered.Item.t list;
   calls : (Path.t * int) list;
   called : Lowered.Item.t list;
   failures : (C_runtime.failure * Lowered.site) list;
+  hash : string;
 }
-
-val iter_identifiers : string -> on_identifier:(string -> unit) -> on_other:(char -> unit) -> unit
 
 val make :
   Emission.t ->
-  item:Lowered.Item.t ->
   kind:kind ->
-  functions:(string * string) list ->
-  definition:string ->
   references:Lowered.Item.t list ->
+  functions:function_pieces list ->
+  definition:C_text.t ->
   t
