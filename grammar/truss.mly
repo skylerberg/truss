@@ -3,8 +3,8 @@
 %token ANY ASSERT BREAK CAPABILITY CONCURRENT CONTINUE COST DECREASES DERIVES ECHO ELSE
 %token ENSURES EXISTS FALSE FN FOR FORALL IF IMPL IN INDIRECT INTERNAL INVARIANT IS LAW LENDS
 %token LET MATCH MUT OPAQUE OWN PARALLEL PROOF PROVIDE PUBLIC REQUIRES RETURN
-%token SELF SELF_TYPE TEST THEOREM TODO TRAIT TRUE TYPE UNREACHABLE USE USES
-%token VAR WHILE WITH
+%token SELF SELF_TYPE TEST THEOREM TODO TRAIT TRUE TYPE UNLESS UNREACHABLE USE USES
+%token VAR WHEN WHILE WITH
 
 %token LPAREN RPAREN LBRACKET RBRACKET LBRACE RBRACE COMMA COLON COLONCOLON
 %token DOT DOTDOT DOTDOTEQ ARROW FATARROW QUESTION BAR
@@ -127,11 +127,25 @@ signature:
   | FN LOWER generics_opt parameters result_opt list(clause) { () }
 
 clause:
-  | USES capability_list { () }
-  | REQUIRES expression { () }
-  | ENSURES expression { () }
-  | DECREASES separated_nonempty_list(COMMA, expression) { () }
-  | COST cost { () }
+  | USES separated_nonempty_list(COMMA, capability_use) { () }
+  | REQUIRES expression when_opt { () }
+  | ENSURES expression when_opt { () }
+  | DECREASES separated_nonempty_list(COMMA, expression) when_opt { () }
+  | COST cost when_opt { () }
+
+capability_use:
+  | capability_reference { () }
+  | capability_reference UNLESS condition { () }
+
+when_opt:
+  | { () }
+  | WHEN condition { () }
+
+condition:
+  | separated_nonempty_list(ANDAND, bound_condition) { () }
+
+bound_condition:
+  | type_expression COLON bound_list { () }
 
 capability_list:
   | separated_nonempty_list(COMMA, capability_reference) { () }
@@ -341,9 +355,9 @@ assignment_operator:
   | SHLEQ { () } | SHREQ { () }
 
 loop_clause:
-  | INVARIANT expression { () }
-  | DECREASES separated_nonempty_list(COMMA, expression) { () }
-  | COST cost { () }
+  | INVARIANT expression when_opt { () }
+  | DECREASES separated_nonempty_list(COMMA, expression) when_opt { () }
+  | COST cost when_opt { () }
 
 expression:
   | ECHO expression { () }

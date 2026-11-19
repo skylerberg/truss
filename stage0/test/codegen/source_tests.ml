@@ -126,7 +126,7 @@ let () =
             Emit_c.For_testing.render_c
               (Backend.For_testing.compile_fragment backend (function_ name))
           in
-          if String.includes ~affix:"t_lend" c then
+          if String.includes ~affix:"truss_lend" c then
             Codegen_support.fail "expected no lend record in `%s`:\n%s" name c)
         names)
 

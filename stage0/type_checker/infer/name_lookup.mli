@@ -5,17 +5,6 @@ type overload =
 
 val classify_receiver_mode : Syntax.argument list -> Language.Mode.t
 val describe_missing_method : State.state -> Types.ty -> string -> string
-
-val coerce :
-  State.state ->
-  State.env ->
-  ?argument:Language.Mode.t ->
-  ?takes_view_as_owner:bool ->
-  Syntax.expression ->
-  actual:Types.ty ->
-  expected:Types.ty ->
-  unit
-
 val check_name : State.state -> State.env -> Syntax.expression -> Resolve.head -> Types.ty
 val check_field : State.state -> Syntax.expression -> Types.ty -> Syntax.name -> Types.ty
 val check_static_member : State.state -> Syntax.expression -> Types.ty -> Syntax.name -> Types.ty
@@ -46,14 +35,6 @@ val list_trait_static_methods :
   Path.receiver ->
   (Types.trait_reference * Types.trait_method) list
 
-val check_implements :
-  ?code:Diagnostic.Code.types ->
-  State.state ->
-  Source.Definition_span.t ->
-  Types.ty ->
-  Types.trait_reference ->
-  unit
-
 val instantiate_trait_method :
   State.state ->
   Source.Definition_span.t ->
@@ -70,15 +51,13 @@ val resolve_overloads :
 
 val find_elements_calls :
   State.state ->
-  Source.Definition_span.t ->
+  Syntax.expression ->
   Types.ty ->
   Language.Mode.t ->
   (Tables.loop * Types.ty * Language.Mode.t) Resolve.Names.lookup
 
 val find_consuming_cursor :
-  State.state ->
-  Source.Definition_span.t ->
-  Types.ty ->
-  (Tables.loop * Types.ty) Resolve.Names.lookup
+  State.state -> Syntax.expression -> Types.ty -> (Tables.loop * Types.ty) Resolve.Names.lookup
 
-val find_remaining_call : State.state -> Source.Definition_span.t -> Types.ty -> Tables.call option
+val find_remaining_call :
+  State.state -> Source.Definition_span.t -> Types.ty -> (Types.condition * Tables.call) option

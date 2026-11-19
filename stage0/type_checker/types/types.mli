@@ -37,7 +37,10 @@ and capability =
   | Capability_projection of { base : ty; trait : trait_reference; name : string }
   | Capability_variable of int
   | Capability_error of Diagnostic.reported
+  | Capability_unless of { capability : capability; unless : condition }
 
+and condition = bound_condition list
+and bound_condition = { subject : ty; bound : trait_reference }
 and capability_set = private capability list
 and cost = { amortized : bool; resource : resource; bound : cost_bound }
 
@@ -64,17 +67,26 @@ val signed_integer_types : Language.Builtin_type.t list
 val unsigned_integer_types : Language.Builtin_type.t list
 val integer_types : Language.Builtin_type.t list
 val float_types : Language.Builtin_type.t list
+val number_types : Language.Builtin_type.t list
 val list_scalar_members : ty -> Language.Builtin_type.t list
 val list_fitting_integer_types : Z.t -> Language.Builtin_type.t list
 val find_integer_implementors : Path.t -> Language.Builtin_type.t list option
 val find_bound_integer_implementors : trait_reference list -> Language.Builtin_type.t list option
 val find_sealed_implementors : Path.t -> Language.Builtin_type.t list option
+val sealed_traits : Well_known.t list
 val is_float_type : ty -> bool
 val make_capability_set : capability list -> capability_set
 val no_capabilities : capability_set
 val union_capabilities : capability_set -> capability_set -> capability_set
 val make_capability : Path.t -> capability
+val make_condition : condition -> condition
+val make_unless : capability -> condition -> capability option
+val find_base : capability -> capability
 val has_capability : capability -> capability_set -> bool
+val may_use : capability -> capability_set -> bool
+val find_unless : capability -> capability_set -> condition option
+val implies_condition : condition -> condition -> bool
+val terminates_when : condition -> capability_set -> bool
 val exists_capability : (capability -> bool) -> capability_set -> bool
 val list_capabilities : capability_set -> capability list
 val terminates : capability_set -> bool
@@ -100,6 +112,8 @@ val substitute_argument : substitution -> argument -> argument
 val substitute_trait : substitution -> trait_reference -> trait_reference
 val substitute_function : substitution -> function_type -> function_type
 val substitute_capabilities : substitution -> capability_set -> capability_set
+val substitute_condition : substitution -> condition -> condition
+val map_conditions : (condition -> condition) -> capability_set -> capability_set
 val substitute_substitution : substitution -> substitution -> substitution
 val extract_result_type : result -> ty
 val map : ?map_capabilities:(capability_set -> capability_set) -> (ty -> ty option) -> ty -> ty
@@ -116,6 +130,7 @@ val has_same_clauses : function_type -> function_type -> bool
 val costs_imply : provided:cost list -> required:cost list -> bool
 val show : ty -> string
 val show_capability : capability -> string
+val show_condition : condition -> string
 val show_trait : trait_reference -> string
 val show_argument : argument -> string
 val show_capabilities : capability_set -> string

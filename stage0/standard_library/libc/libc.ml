@@ -528,7 +528,7 @@ let describe function_ =
         (make_portable_type (Named "int32_t"))
         (Returns Int32)
         [ ("descriptor", Value Int32, make_portable_type (Named "int32_t")) ]
-        ~symbol:(make_portable_type "t_runtime_close")
+        ~symbol:(make_portable_type "truss_runtime_close")
         ~headers:[]
   | Dup2 ->
       make_row
@@ -538,13 +538,13 @@ let describe function_ =
           ("descriptor", Value Int32, make_portable_type (Named "int32_t"));
           ("onto", Value Int32, make_portable_type (Named "int32_t"));
         ]
-        ~symbol:(make_portable_type "t_runtime_dup2")
+        ~symbol:(make_portable_type "truss_runtime_dup2")
         ~headers:[]
   | Errno ->
       make_row
         (make_portable_type (Pointer (Named "int")))
         (Points_at Int32) []
-        ~symbol:(make_portable_type "t_runtime_errno_address_uncached")
+        ~symbol:(make_portable_type "truss_runtime_errno_address_uncached")
         ~headers:[]
   | Clock_gettime ->
       make_row
@@ -606,7 +606,7 @@ let describe function_ =
             make_portable_type (Pointer (Const (Pointer (Named "char")))) );
         ]
         ~named:[ ("file_actions", Pointer (Const (Named "posix_spawn_file_actions_t"))) ]
-        ~symbol:(make_portable_type "t_runtime_posix_spawnp")
+        ~symbol:(make_portable_type "truss_runtime_posix_spawnp")
         ~headers:[ "spawn.h" ]
         ~layout:[ "sizeof(char *) == sizeof(__SIZE_TYPE__)" ]
   | Waitpid ->
@@ -1295,7 +1295,7 @@ let describe function_ =
         ~headers:[ "fcntl.h" ]
   | Addresses_of_host ->
       make_row ~at_most:"room"
-        ~symbol:(make_portable_type "t_runtime_addresses_of_host")
+        ~symbol:(make_portable_type "truss_runtime_addresses_of_host")
         (make_portable_type (Named "long"))
         (Returns Int64)
         [
@@ -1308,7 +1308,7 @@ let describe function_ =
         ~headers:[]
   | Signals_wait ->
       make_row
-        ~symbol:(make_portable_type "t_runtime_signals_wait")
+        ~symbol:(make_portable_type "truss_runtime_signals_wait")
         (make_portable_type (Named "int32_t"))
         (Returns Int32)
         [
@@ -1323,24 +1323,24 @@ let describe function_ =
       let writing = ("writing", Value Int32, make_portable_type (Named "int32_t")) in
       if waiting = Descriptor_watch then
         make_row
-          ~symbol:(make_portable_type "t_runtime_descriptor_watch")
+          ~symbol:(make_portable_type "truss_runtime_descriptor_watch")
           (make_portable_type (Named "uint64_t"))
           (Returns UInt64) [ descriptor; writing ] ~headers:[]
       else
         make_row
-          ~symbol:(make_portable_type "t_runtime_descriptor_wait")
+          ~symbol:(make_portable_type "truss_runtime_descriptor_wait")
           (make_portable_type (Named "int32_t"))
           (Returns Int32)
           [ descriptor; writing; ("ticket", Value UInt64, make_portable_type (Named "uint64_t")) ]
           ~headers:[]
   | Descriptors_watch ->
       make_row
-        ~symbol:(make_portable_type "t_runtime_descriptors_watch")
+        ~symbol:(make_portable_type "truss_runtime_descriptors_watch")
         (make_portable_type (Named "uint64_t"))
         (Returns UInt64) [] ~headers:[]
   | Descriptors_wait ->
       make_row
-        ~symbol:(make_portable_type "t_runtime_descriptors_wait")
+        ~symbol:(make_portable_type "truss_runtime_descriptors_wait")
         (make_portable_type (Named "int32_t"))
         (Returns Int32)
         [
@@ -1353,7 +1353,7 @@ let describe function_ =
         ~headers:[]
   | Sleep ->
       make_row
-        ~symbol:(make_portable_type "t_runtime_sleep")
+        ~symbol:(make_portable_type "truss_runtime_sleep")
         (make_portable_type (Named "int32_t"))
         (Returns Int32)
         [
@@ -1364,7 +1364,7 @@ let describe function_ =
   | ( Tasks_open | Tasks_join | Tasks_cancel | Tasks_cancelled | Tasks_watch | Tasks_wait
     | Tasks_wake | Tasks_lock | Tasks_unlock | Tasks_yield ) as task -> (
       let handle name = (name, Value UInt64, make_portable_type (Named "uint64_t")) in
-      let symbol = make_portable_type ("t_runtime_" ^ show_function task) in
+      let symbol = make_portable_type ("truss_runtime_" ^ show_function task) in
       let make_handle_row =
         make_row ~symbol (make_portable_type (Named "uint64_t")) (Returns UInt64) ~headers:[]
       in

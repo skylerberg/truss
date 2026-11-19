@@ -1,0 +1,7 @@
+fn bits_of[F: FloatingPoint[Bits = UInt64]](value: F) -> UInt64 {
+  value.to_bits()
+}
+
+fn f() -> UInt64 {
+  bits_of(1.5)
+}

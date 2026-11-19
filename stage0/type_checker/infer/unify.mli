@@ -9,6 +9,7 @@ type t = {
   specification_unknowns : (int, unit) Hashtbl.t;
   mutable checks_specification : bool;
   mutable refused_code_unknown : int option;
+  mutable decided_numbers : int list;
 }
 
 val create : list_rigid_members:(Types.ty -> Language.Builtin_type.t list) -> t
@@ -17,12 +18,15 @@ val make_fresh_number : t -> Language.Builtin_type.t list -> Types.ty
 val make_fresh_value : t -> Types.value
 val make_fresh_capability_variable : t -> Types.capability_set
 val resolve : t -> Types.ty -> Types.ty
+val read_root : t -> int -> int
 val resolve_value : t -> Types.value -> Types.value
 val zonk : t -> Types.ty -> Types.ty
 val zonk_trait : t -> Types.trait_reference -> Types.trait_reference
 val find_domain : t -> int -> Language.Builtin_type.t list option
 val list_possible_members : t -> Types.ty -> Language.Builtin_type.t list
 val is_within : t -> Types.ty -> Language.Builtin_type.t list -> bool
+val may_decide : t -> int -> bool
+val count_solutions : t -> through:int -> int
 
 type unknown = Unknown_type of int | Unknown_value of int
 

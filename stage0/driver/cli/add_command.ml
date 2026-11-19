@@ -29,7 +29,9 @@ let run ~names =
   let with_entries =
     try List.fold_left (fun text (name, _) -> Manifest.add_dependency text name) written wanted
     with Manifest.Malformed { line; message } ->
-      Outcome.raise_cannot_run "%s:%d: %s" (Shown_path.show_path manifest) line message
+      Outcome.raise_cannot_run "%s:%d: %s"
+        (Command_packages.show_project_path snapshot manifest)
+        line message
   in
   if with_entries <> written then Command_packages.write_file manifest with_entries;
   match Workspace.plan_lock (Command_packages.retake snapshot) ~set:wanted ~all:false with

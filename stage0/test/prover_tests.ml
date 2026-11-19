@@ -205,6 +205,26 @@ let () =
       expect_not_proven Fixtures.Prover.restated_cost_that_the_contract_breaks "prover.cost");
   Harness.test "an impl whose method's cost meets the restated cost is proven" (fun () ->
       expect_proven Fixtures.Prover.restated_cost_that_the_contract_keeps);
+  Harness.test "a clause with a condition is proven with the condition's bounds" (fun () ->
+      expect_proven Fixtures.Prover.conditional_ensures_kept;
+      expect_not_proven Fixtures.Prover.conditional_ensures_broken "prover.ensures");
+  Harness.test "a call has the clause whose condition its type arguments meet" (fun () ->
+      expect_proven Fixtures.Prover.conditional_ensures_at_a_call_that_meets_it;
+      expect_not_proven Fixtures.Prover.conditional_ensures_at_a_call_that_does_not_meet_it
+        "prover.ensures");
+  Harness.test "a loop's measure with a condition is proven where the condition holds" (fun () ->
+      expect_not_proven Fixtures.Prover.conditional_measure_that_does_not_decrease
+        "prover.termination");
+  Harness.test "a condition's run reads a bound's associated type as its constraint" (fun () ->
+      expect_proven Fixtures.Prover.conditional_measure_of_a_cursor_with_a_constrained_element);
+  Harness.test "a requires that a call leaves undecided is proven with its condition" (fun () ->
+      Support.expect_one_diagnostic ~check
+        Fixtures.Prover.conditional_requires_left_undecided_at_a_call "prover.requires"
+        ~says:"`source.remaining() > 0` may not hold for this call to `first`.");
+  Harness.test "a recursion measured under a condition ends where the condition holds" (fun () ->
+      expect_proven Fixtures.Prover.recursion_measured_under_a_condition;
+      expect_not_proven Fixtures.Prover.recursion_that_does_not_end_under_its_condition
+        "prover.termination");
   Harness.test "a loop that counts up to its bound ends" (fun () ->
       expect_proven Fixtures.Prover.while_loop_counting_up);
   Harness.test "a for loop over a range knows its index is in range" (fun () ->

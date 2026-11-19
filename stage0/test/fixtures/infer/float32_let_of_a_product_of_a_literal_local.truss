@@ -1,0 +1,6 @@
+fn f() -> Float32 {
+  let ratio = 0.5
+  let scaled = ratio * 2.0
+  let small: Float32 = scaled
+  small
+}

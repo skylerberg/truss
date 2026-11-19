@@ -1,0 +1,19 @@
+type Vector[Element](first: Element)
+
+impl Add[Vector[Element]] for Vector[Element] {
+  type Output = Vector[Element]
+
+  fn add_is_defined(self, right: Vector[Element]) -> Bool {
+    true
+  }
+
+  fn add(self, right: Vector[Element]) -> Vector[Element] {
+    todo
+  }
+}
+
+fn f(narrow: Vector[UInt8]) {
+  let other = Vector(first: 2)
+  let sum = other + narrow
+  let _ = sum
+}

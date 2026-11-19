@@ -240,3 +240,13 @@ test "the adapters work on a cursor that uses a capability" uses Panic, RunForev
     assert longer.length() == 1
   }
 }
+
+test "a finite cursor is collected, counted, and adapted without RunForever" {
+  assert List.collect("héllo".characters()).length() == 5
+  assert String.collect("ab".characters()) == "ab"
+  assert [1, 2, 3].cursor().count() == 3
+  assert List.collect([1, 2, 3, 4].cursor().skip(1).take(2)) == [2, 3]
+  assert [10, 20].cursor().zip([1, 2, 3].cursor()).count() == 2
+  assert [5, 6].cursor().enumerate().last() is Some(_)
+  assert [1, 2, 3, 4, 5].cursor().step_by(2).to_list() == [1, 3, 5]
+}

@@ -13,7 +13,7 @@ let remove_unused_dependencies snapshot database packages =
             (Json.to_string
                (Json.Object
                   [
-                    ("file", Json.String (Shown_path.show_path path));
+                    ("file", Json.String file);
                     ( "message",
                       Json.String (Package_checks.describe_unused_dependency ~package dependency) );
                   ]))
@@ -30,7 +30,7 @@ let lock_file snapshot =
         Json.to_string
           (Json.Object
              [
-               ("file", Json.String (Shown_path.show_path path));
+               ("file", Json.String (Command_packages.show_project_path snapshot path));
                ("message", Json.String "This is not the lock file the manifests give.");
              ]);
       ]
@@ -45,7 +45,7 @@ let fix snapshot packages =
           match Diagnostic.list_machine_applicable diagnostics with
           | [] -> []
           | chosen ->
-              let source = Command_packages.read_source snapshot database packages file in
+              let source = Command_packages.read_source snapshot database file in
               let edits =
                 List.concat_map
                   (fun (diagnostic : Diagnostic.t) ->
