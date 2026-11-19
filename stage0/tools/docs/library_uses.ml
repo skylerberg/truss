@@ -7,6 +7,7 @@ type user =
   | Executable_module of { directory : string; area : string; module_name : string }
 
 type use = { user : user; owner : string; item : item }
+type areas = { names : string list; test_and_tools : string list }
 
 module Uses = Set.Make (struct
   type t = use
@@ -438,34 +439,46 @@ let group_by_library uses =
       | groups -> (library, [ owned_item ]) :: groups)
     (List.sort_uniq compare uses) []
 
-let read_area_class areas area =
-  match List.find_index (String.equal area) areas with
-  | Some index -> Printf.sprintf "area-%d" index
+let is_test_or_tools areas area = List.mem area areas.test_and_tools
+
+let read_user_area ~libraries = function
+  | Library_module { library; _ } -> (Hashtbl.find libraries library).area
+  | Executable_module { area; _ } -> area
+
+let is_test_or_tools_user ~areas ~libraries user =
+  is_test_or_tools areas (read_user_area ~libraries user)
+
+let is_test_or_tools_library ~areas ~libraries library_name =
+  is_test_or_tools areas (Hashtbl.find libraries library_name).area
+
+let to_tag_class areas area =
+  match List.find_index (String.equal area) areas.names with
+  | Some index when is_test_or_tools areas area -> Printf.sprintf "tag area-%d test-and-tools" index
+  | Some index -> Printf.sprintf "tag area-%d" index
   | None -> failwith (Printf.sprintf "%s is not an area" area)
 
 let render_library_tag ~root ~areas library =
-  let area_class = read_area_class areas library.area in
+  let tag_class = to_tag_class areas library.area in
   if library.page = "" then
-    Printf.sprintf "<span class=\"tag %s\">%s</span>" area_class (escape library.name)
+    Printf.sprintf "<span class=\"%s\">%s</span>" tag_class (escape library.name)
   else
-    Printf.sprintf "<a class=\"tag %s\" href=\"%s%s\">%s</a>" area_class root (escape library.page)
+    Printf.sprintf "<a class=\"%s\" href=\"%s%s\">%s</a>" tag_class root (escape library.page)
       (escape library.name)
 
 let render_user_tag ~root ~areas ~libraries ~index user =
   let label = escape (show_user user) in
+  let tag_class = to_tag_class areas (read_user_area ~libraries user) in
   match user with
   | Library_module { library; module_path } -> (
-      let area_class = read_area_class areas (Hashtbl.find libraries library).area in
       let title = "module of the library " ^ escape library in
       match find_url index { kind = Module; path = module_path } with
       | Some url ->
-          Printf.sprintf "<a class=\"tag %s\" href=\"%s%s\" title=\"%s\">%s</a>" area_class root
+          Printf.sprintf "<a class=\"%s\" href=\"%s%s\" title=\"%s\">%s</a>" tag_class root
             (escape url) title label
-      | None ->
-          Printf.sprintf "<span class=\"tag %s\" title=\"%s\">%s</span>" area_class title label)
-  | Executable_module { directory; area; _ } ->
-      Printf.sprintf "<span class=\"tag %s\" title=\"module of an executable in %s\">%s</span>"
-        (read_area_class areas area) (escape directory) label
+      | None -> Printf.sprintf "<span class=\"%s\" title=\"%s\">%s</span>" tag_class title label)
+  | Executable_module { directory; _ } ->
+      Printf.sprintf "<span class=\"%s\" title=\"module of an executable in %s\">%s</span>"
+        tag_class (escape directory) label
 
 let render_item ~root ~index (owner, item) =
   let label = Printf.sprintf "<code>%s</code>" (escape (show_item owner item)) in
@@ -481,12 +494,31 @@ let render_rows ~root ~areas ~index ~libraries groups =
   String.concat ""
     (List.map
        (fun (library_name, owned_items) ->
-         Printf.sprintf "<dt>%s</dt><dd>%s</dd>"
+         let row_class =
+           if is_test_or_tools_library ~areas ~libraries library_name then
+             " class=\"test-and-tools\""
+           else ""
+         in
+         Printf.sprintf "<dt%s>%s</dt><dd%s>%s</dd>" row_class
            (render_library_tag ~root ~areas (Hashtbl.find libraries library_name))
+           row_class
            (String.concat ""
               (List.map (render_item ~root ~index)
                  (sort_by (fun (owner, item) -> show_item owner item) owned_items))))
        groups)
+
+let render_summary ~areas ~libraries ~describe groups =
+  let groups_without_test_and_tools =
+    List.filter
+      (fun (library_name, _) -> not (is_test_or_tools_library ~areas ~libraries library_name))
+      groups
+  in
+  if List.length groups_without_test_and_tools = List.length groups then describe groups
+  else
+    Printf.sprintf
+      "<span class=\"without-test-and-tools\">%s</span><span class=\"test-and-tools\">%s</span>"
+      (describe groups_without_test_and_tools)
+      (describe groups)
 
 let render_section ~id ~heading ~summary rows =
   Printf.sprintf "<h2 id=\"%s\"><a href=\"#%s\" class=\"anchor\"></a>%s</h2><p>%s</p>%s" id id
@@ -515,33 +547,45 @@ let render_library_sections ~root ~areas ~index ~libraries uses library =
   let used_groups = group_by_library used in
   let used_by_groups = group_by_library used_by in
   let count_items groups = List.length (List.sort_uniq compare (List.concat_map snd groups)) in
-  let uses_summary =
-    if used_groups = [] then "No names from other libraries."
+  let describe_uses groups =
+    if groups = [] then "No names from other libraries."
     else
       Printf.sprintf "%s from %s."
-        (show_count (count_items used_groups) ~singular:"name" ~plural:"names")
-        (show_count (List.length used_groups) ~singular:"library" ~plural:"libraries")
+        (show_count (count_items groups) ~singular:"name" ~plural:"names")
+        (show_count (List.length groups) ~singular:"library" ~plural:"libraries")
   in
-  let used_by_summary =
-    if used_by_groups = [] then "No names used by other libraries."
+  let describe_used_by groups =
+    if groups = [] then "No names used by other libraries."
     else
       Printf.sprintf "%s used by %s."
-        (show_count (count_items used_by_groups) ~singular:"name" ~plural:"names")
-        (show_count (List.length used_by_groups) ~singular:"library" ~plural:"libraries")
+        (show_count (count_items groups) ~singular:"name" ~plural:"names")
+        (show_count (List.length groups) ~singular:"library" ~plural:"libraries")
   in
-  String.concat ""
-    [
-      "<section class=\"library-uses\">";
-      render_section ~id:"uses" ~heading:"Uses" ~summary:uses_summary
-        (render_rows ~root ~areas ~index ~libraries used_groups);
-      render_section ~id:"used-by" ~heading:"Used by" ~summary:used_by_summary
-        (render_rows ~root ~areas ~index ~libraries used_by_groups);
-      "</section>";
-    ]
+  let has_test_and_tools =
+    List.exists
+      (fun (library_name, _) -> is_test_or_tools_library ~areas ~libraries library_name)
+      (used_groups @ used_by_groups)
+  in
+  ( String.concat ""
+      [
+        "<section class=\"library-uses\">";
+        render_section ~id:"uses" ~heading:"Uses"
+          ~summary:(render_summary ~areas ~libraries ~describe:describe_uses used_groups)
+          (render_rows ~root ~areas ~index ~libraries used_groups);
+        render_section ~id:"used-by" ~heading:"Used by"
+          ~summary:(render_summary ~areas ~libraries ~describe:describe_used_by used_by_groups)
+          (render_rows ~root ~areas ~index ~libraries used_by_groups);
+        "</section>";
+      ],
+    has_test_and_tools )
 
 let render_item_users ~root ~areas ~libraries ~index ~is_inline users =
   let element = if is_inline then "span" else "div" in
-  Printf.sprintf "<%s class=\"item-users\"><span class=\"label\">Used by</span>%s</%s>" element
+  let row_class =
+    if List.for_all (is_test_or_tools_user ~areas ~libraries) users then "item-users test-and-tools"
+    else "item-users"
+  in
+  Printf.sprintf "<%s class=\"%s\"><span class=\"label\">Used by</span>%s</%s>" element row_class
     (String.concat "" (List.map (render_user_tag ~root ~areas ~libraries ~index) users))
     element
 
@@ -602,16 +646,29 @@ let edit_page ~docs_directory ~root ~areas ~index ~libraries ~section ~item_user
   let path = Filename.concat docs_directory page in
   let text = In_channel.with_open_bin path In_channel.input_all in
   let after pattern = read_unique_position page text pattern + String.length pattern in
-  let stylesheets =
+  let head =
     Printf.sprintf
       "<link rel=\"stylesheet\" href=\"%sarea_colors.css\"/><link rel=\"stylesheet\" \
-       href=\"%slibrary_uses.css\"/>"
-      root root
+       href=\"%slibrary_uses.css\"/><script src=\"%slibrary_uses.js\" defer></script>"
+      root root root
   in
-  let section_insertions =
-    match section with
-    | Some section -> [ (after "<div class=\"odoc-content\">", section) ]
-    | None -> []
+  let section_html, section_has_test_and_tools = Option.value ~default:("", false) section in
+  let has_test_and_tools =
+    section_has_test_and_tools
+    || List.exists
+         (fun (_, users) -> List.exists (is_test_or_tools_user ~areas ~libraries) users)
+         item_users
+  in
+  let toggle =
+    if has_test_and_tools then
+      "<label class=\"test-and-tools-toggle\"><input type=\"checkbox\" \
+       id=\"show-test-and-tools\"/>Show test and tools</label>"
+    else ""
+  in
+  let content_insertions =
+    match toggle ^ section_html with
+    | "" -> []
+    | inserted -> [ (after "<div class=\"odoc-content\">", inserted) ]
   in
   let item_insertions =
     List.map
@@ -622,7 +679,7 @@ let edit_page ~docs_directory ~root ~areas ~index ~libraries ~section ~item_user
   in
   let edited =
     insert_texts text
-      (((after "odoc.support/odoc.css\"/>", stylesheets) :: section_insertions) @ item_insertions)
+      (((after "odoc.support/odoc.css\"/>", head) :: content_insertions) @ item_insertions)
   in
   Out_channel.with_open_bin path (fun channel -> output_string channel edited)
 
@@ -656,11 +713,20 @@ let to_executable_module file =
 let () =
   match Sys.argv with
   | [|
-   _; libraries_file; executables_file; areas_file; index_file; build_directory; docs_directory;
+   _;
+   libraries_file;
+   executables_file;
+   areas_file;
+   test_and_tools_file;
+   index_file;
+   build_directory;
+   docs_directory;
   |] ->
       let libraries = read_libraries libraries_file in
       let executables = read_executables executables_file in
-      let areas = read_lines areas_file in
+      let areas =
+        { names = read_lines areas_file; test_and_tools = read_lines test_and_tools_file }
+      in
       let index = read_index index_file libraries in
       let library_files =
         List.map
@@ -738,5 +804,6 @@ let () =
         pages
   | _ ->
       prerr_endline
-        "usage: library_uses LIBRARIES EXECUTABLES AREAS INDEX BUILD_DIRECTORY DOCS_DIRECTORY";
+        "usage: library_uses LIBRARIES EXECUTABLES AREAS TEST_AND_TOOLS_AREAS INDEX \
+         BUILD_DIRECTORY DOCS_DIRECTORY";
       exit 2

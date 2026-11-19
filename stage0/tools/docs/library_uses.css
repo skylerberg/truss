@@ -1,3 +1,23 @@
+html:not(:has(#show-test-and-tools:checked)) .test-and-tools,
+html:has(#show-test-and-tools:checked) .without-test-and-tools {
+  display: none;
+}
+
+.test-and-tools-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 1em;
+  font-size: 0.875rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.test-and-tools-toggle input {
+  margin: 0;
+  accent-color: var(--link-color);
+}
+
 .tag {
   display: inline-block;
   padding: 1px 7px;
