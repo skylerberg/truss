@@ -1678,3 +1678,15 @@ let () =
       List.iter
         (fun literal -> expect_no_diagnostics [ ("app::main", declare literal) ])
         [ "2e-324"; "1e-99999999999"; "-1e-9999999999999999999" ])
+
+let () =
+  Harness.test "the shorthand of with names its value, whatever the name resolves to" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.record_update_shorthand_naming_a_function
+        "types.mismatch");
+  Harness.test "with names fields as a construction does" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.record_update_of_an_unknown_field "types.unknown_label"
+        ~says:"`Config` has no field `nme`.");
+  Harness.test "with updates a field once" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.record_update_of_a_field_twice "types.repeated_argument";
+      expect_one_diagnostic Fixtures.Infer.record_update_of_a_field_and_its_part
+        "types.repeated_argument")

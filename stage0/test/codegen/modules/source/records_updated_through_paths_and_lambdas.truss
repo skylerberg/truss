@@ -1,0 +1,15 @@
+type Server(host: String, port: UInt16)
+type Config(server: Server, name: String, level: Int64)
+
+test "with updates through a field path and inside a lambda" {
+  let level = 7
+  let port: UInt16 = 80
+  let make: fn() -> Server = fn() { Server(host: "x", port: 1) with (port) }
+  let base = Config(server: Server(host: "h", port: 1), name: "n", level: 3)
+  let next = own base with (server.port: 443, name: "m", level)
+  assert next.server.host == "h"
+  assert next.server.port == 443
+  assert next.name == "m"
+  assert next.level == 7
+  assert make().port == 80
+}

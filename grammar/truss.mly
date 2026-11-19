@@ -488,12 +488,8 @@ argument:
   | LOWER COLON expression { () }
 
 update:
-  | update_path { () }
-  | update_path COLON expression { () }
-
-update_path:
-  | LOWER { () }
-  | update_path DOT LOWER { () }
+  | expression { () }
+  | expression COLON expression { () }
 
 primary:
   | INTEGER { () } | FLOAT { () } | STRING { () } | tagged_string { () }

@@ -228,13 +228,11 @@ and show_argument (argument : Syntax.argument) =
 
 and update (update : Syntax.update) =
   match update.kind with
-  | Update { field; path; value } -> (
-      let fields =
-        String.concat "." (List.map (fun (name : Syntax.name) -> name.text) (field :: path))
-      in
-      match value with
-      | Some value -> make_form (fields ^ ":") [ show_expression value ]
-      | None -> fields)
+  | Update { path = []; value } -> show_expression value
+  | Update { path; value } ->
+      make_form
+        (String.concat "." (List.map (fun (name : Syntax.name) -> name.text) path) ^ ":")
+        [ show_expression value ]
   | Update_error -> "error"
 
 and show_arm (arm : Syntax.arm) =

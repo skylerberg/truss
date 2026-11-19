@@ -698,6 +698,28 @@ let () =
       expect_not_proven (span ^ Fixtures.Prover.span_high_assigned_below_low) "prover.invariant");
   Harness.test "a body may break an invariant between calls" (fun () ->
       expect_proven (span ^ Fixtures.Prover.span_low_assigned_above_high));
+  Harness.test "a var must meet its invariant when its scope ends" (fun () ->
+      expect_not_proven
+        (span ^ Fixtures.Prover.span_var_assigned_past_its_invariant)
+        "prover.invariant";
+      expect_not_proven
+        (span ^ Fixtures.Prover.span_var_in_a_loop_body_past_its_invariant)
+        "prover.invariant");
+  Harness.test "a with must meet the invariant" (fun () ->
+      expect_not_proven (span ^ Fixtures.Prover.span_updated_past_its_invariant) "prover.invariant";
+      expect_proven (span ^ Fixtures.Prover.span_updated_within_its_invariant));
+  Harness.test "a with through a path must meet the invariant of the record it rebuilds" (fun () ->
+      expect_not_proven
+        (span ^ Fixtures.Prover.interval_updated_past_its_span_invariant)
+        "prover.invariant");
+  Harness.test "a var may break its invariant before its scope ends" (fun () ->
+      expect_proven (span ^ Fixtures.Prover.span_var_restored_before_its_scope_ends));
+  Harness.test "a var changed through a field passed mut must meet its invariant" (fun () ->
+      expect_not_proven
+        (span ^ Fixtures.Prover.span_var_field_passed_mut_past_its_invariant)
+        "prover.invariant");
+  Harness.test "a var that a step of an update leaves broken must meet its invariant" (fun () ->
+      expect_not_proven (span ^ Fixtures.Prover.span_var_left_broken_by_a_step) "prover.invariant");
   Harness.test "a value passed to a call must meet its invariant" (fun () ->
       expect_not_proven
         (span ^ Fixtures.Prover.span_passed_after_breaking_its_invariant)

@@ -460,8 +460,10 @@ public type Interval =
 - Repeated invariants all hold, and each may rely on the ones before it.
 - Invariants are proven, never checked when the program runs. An invariant
   holds wherever other code can observe the value: when it is built,
-  directly or with `with`, passed to a call, or returned, and when the
-  function that holds it ends. A `with` is checked after all of its updates.
+  directly or with `with`, passed to a call, or returned, and when its
+  holder ends: a `var` at the end of its scope, and a `mut` parameter or
+  `mut self` when the function returns. A `with` is checked after all of
+  its updates.
 - A private method that takes `mut self` is a step of an update: the
   invariant of its `self` is neither assumed when it is called nor required
   when it returns. A method written in a trait, a capability, or an `impl`
@@ -1439,7 +1441,7 @@ greet(user)
 ### Updating records
 
 ```ebnf
-update = LOWER_NAME { "." LOWER_NAME } ":" expression | LOWER_NAME ;
+update = [ LOWER_NAME { "." LOWER_NAME } ":" ] expression ;
 ```
 
 ```truss
@@ -1466,6 +1468,12 @@ fn production(config: own Config) -> Config {
   assigning its fields, and returning it.
 - The base is passed as an `own` argument is: a base that is a place takes
   `own`, unless it copies implicitly.
+- The updates follow the rules of a construction's arguments, with a path
+  of fields for a label: each names a field of the record once, a bare name
+  goes to the field it names, as in `with (own name)`, and each value is
+  passed to its field as an `own` argument is.
+- `a.b: value` builds `a` anew with `b` updated, so it names `a`, and no
+  other update names `a` itself.
 - `with` works on records, and updates only fields visible at that point.
 
 ### Lambdas
