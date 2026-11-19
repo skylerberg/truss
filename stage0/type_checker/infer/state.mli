@@ -45,16 +45,14 @@ type frame = {
   first_variable : int;
   mutable recorded_expressions : int list;
   mutable bindings : int list;
-  mutable goals : goal list;
   mutable reported_unmet_bounds : (Types.ty * Types.trait_reference * Diagnostic.reported) list;
   mutable compiled_expressions : int list;
   mutable compiled_bindings : int list;
   mutable specification_only_report : Diagnostic.reported option;
-  frame_specification : bool;
   span : Source.Definition_span.t;
 }
 
-type default_site = Statement_end | Actual_head | Method_call | Definition_end
+type decision_site = Use | Statement_end | Actual_head | Method_call
 type logged
 
 type form = {
@@ -82,6 +80,7 @@ type state = {
   locals : (Syntax.id, local) Hashtbl.t;
   mutable law_parameters : (string * Types.ty) list;
   mutable frames : frame list;
+  mutable goals : goal list;
   mutable locals_read : Syntax.id list;
   mutable keyword_modes : (Syntax.id * Language.Mode.t) list;
   mutable places_without_keyword : (Syntax.id * Language.Mode.t) list;
@@ -96,6 +95,9 @@ type state = {
   mutable final_type_checks : (unit -> unit) list;
   mutable log : logged list;
   annotatable : (Syntax.id, unit) Hashtbl.t;
+  assumed_types : (Syntax.id * Types.ty) list;
+  mutable unchecked_fixes :
+    (Source.Definition_span.t Diagnostic.fix * (Syntax.id * Types.ty) list) list;
 }
 
 val add_diagnostic :
@@ -154,9 +156,10 @@ val replace : Source.Definition_span.t -> string -> Source.Definition_span.t Dia
 val insert : int -> string -> Source.Definition_span.t Diagnostic.edit
 val read_current_frame : state -> frame
 val record : state -> Syntax.expression -> Types.ty -> unit
-val record_loop : state -> loop:Syntax.id -> Tables.loop -> unit
 val note_compiled_expression : state -> env -> Syntax.expression -> unit
 val report_specification_only : state -> Source.Definition_span.t -> string -> Diagnostic.reported
+val check_compiled_binding : state -> Syntax.id -> unit
+val check_compiled_expression : state -> Syntax.id -> unit
 val check_when_final : state -> (unit -> unit) -> unit
 val resolve : state -> Types.ty -> Types.ty
 val zonk : state -> Types.ty -> Types.ty
@@ -170,11 +173,22 @@ val read_integer_range : state -> Types.ty -> Z.t * Z.t
 
 val make_literal_type :
   state ->
-  at:Source.Definition_span.t ->
+  Syntax.expression ->
   Language.Builtin_type.t list ->
   report_excluded:(Types.ty -> Diagnostic.reported) ->
   Types.ty
 
+val record_narrowing :
+  state ->
+  int ->
+  allowed:Language.Builtin_type.t list ->
+  report_excluded:(Types.ty -> Diagnostic.reported) ->
+  unit
+
+val record_decided :
+  state -> int -> site:decision_site -> decided_type:Types.ty -> at:Source.Definition_span.t -> unit
+
+val resolve_capabilities : state -> Types.capability_set -> Types.capability_set
 val finalize_type : state -> Types.ty -> Types.ty
 val finalize_capabilities : state -> Types.capability_set -> Types.capability_set
 val finalize_argument : state -> Types.argument -> Types.argument
@@ -210,26 +224,10 @@ val make_call :
 
 val make_trait_reference : arguments:Types.argument list -> Path.t -> Types.trait_reference
 val string_type : Types.ty
+val find_refused_class : state -> sides:(Types.ty * Types.ty) list -> int option
 
 val report_decided_in_specification :
   state -> Source.Definition_span.t -> int -> Diagnostic.reported
-
-val decide_default :
-  state -> site:default_site -> at:Source.Definition_span.t -> Types.ty -> Types.ty
-
-val record_narrowing :
-  state ->
-  int ->
-  allowed:Language.Builtin_type.t list ->
-  report_excluded:(Types.ty -> Diagnostic.reported) ->
-  unit
-
-val record_failure : state -> goal -> Diagnostic.reported -> unit
-val gives : state -> int -> goal -> bool
-val default_inputs : state -> site:default_site -> at:Source.Definition_span.t -> goal list -> unit
-
-val run_in_statement :
-  state -> env -> Source.Definition_span.t -> solve:(frame -> unit) -> (unit -> 'a) -> 'a
 
 val diverges : is_never:(Syntax.expression -> bool) -> Syntax.statement -> bool
 val build_block : state -> Syntax.block -> Core.block
@@ -242,6 +240,7 @@ val find_target : state -> Syntax.name -> Resolve.target option
 val find_head : state -> Syntax.expression -> Resolve.head option
 val show : state -> Types.ty -> string
 val describe : state -> Types.ty -> string
+val list_class_pairs : state -> Types.ty * Types.ty -> (int * Types.ty) list
 
 val add_mismatch_diagnostic :
   state ->
@@ -251,9 +250,6 @@ val add_mismatch_diagnostic :
   sides:(Types.ty * Types.ty) list ->
   string ->
   Diagnostic.reported
-
-val add_mismatch :
-  state -> Source.Definition_span.t -> expected:Types.ty -> actual:Types.ty -> Diagnostic.reported
 
 val add_operand_mismatch :
   state ->

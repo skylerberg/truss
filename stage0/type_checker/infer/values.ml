@@ -504,9 +504,7 @@ and check_arm_value state env ?expected (body : Syntax.statement) =
 
 and check_collection_element state env ~(quantifier : Syntax.expression)
     (collection : Syntax.expression) =
-  let collection_type =
-    Conversions.read_actual_head state collection (Hooks.check_expression state env collection)
-  in
+  let collection_type = Conversions.read_checked_head state env collection in
   match (collection.kind, collection_type) with
   | ( Range { start = Some _; stop = Some _; inclusive; _ },
       Types.Named { path; arguments = [ Types.Type element ] } )
@@ -518,7 +516,7 @@ and check_collection_element state env ~(quantifier : Syntax.expression)
   | _ -> (
       match Name_lookup.find_elements_calls state collection collection_type Language.Mode.Read with
       | Visible (loop, element, _) ->
-          State.record_loop state ~loop:quantifier.id loop;
+          state.tables.loops.(quantifier.id) <- Some loop;
           element
       | Hidden hidden ->
           Members.make_hidden_error state (State.read_span state collection.id) hidden

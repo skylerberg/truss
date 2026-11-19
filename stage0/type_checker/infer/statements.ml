@@ -251,9 +251,7 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
   match (target.kind, state.resolved.brackets.(target.id)) with
   | Bracket (_, [ Item { kind = Range _; _ } ]), _ -> false
   | Bracket (base, [ Item key ]), (Some Index | None) -> (
-      let base_type =
-        Conversions.read_actual_head state base (Hooks.check_expression state env base)
-      in
+      let base_type = Conversions.read_checked_head state env base in
       let { Well_known.owner; name; receiver } = Well_known.locate_method Index_assign_assign in
       let trait = State.make_trait_reference ~arguments:[] (Well_known.make_path owner) in
       match
@@ -334,9 +332,7 @@ and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable :
           (element, mode)
       | _ -> State.raise_bug "a range is not of the range type")
   | _ -> (
-      let type_ =
-        Conversions.read_actual_head state iterable (Hooks.check_expression state env iterable)
-      in
+      let type_ = Conversions.read_checked_head state env iterable in
       match type_ with
       | Types.Error _ | Types.Hole -> (type_, mode)
       | _ -> (
@@ -350,19 +346,20 @@ and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable :
           in
           match (by_position, consumed, State.find_evidence state type_ cursor) with
           | Visible (loop, element, lends), _, _ ->
-              State.record_loop state ~loop:written.id loop;
+              state.tables.loops.(written.id) <- Some loop;
               (element, lends)
           | _, Visible (loop, element), _ ->
-              State.record_loop state ~loop:written.id loop;
+              state.tables.loops.(written.id) <- Some loop;
               (element, Language.Mode.Own)
           | _, _, Some _ ->
-              State.record_loop state ~loop:written.id
-                (Pulled
-                   {
-                     cursor = type_;
-                     cursor_call = None;
-                     remaining = Name_lookup.find_remaining_call state iterable type_;
-                   });
+              state.tables.loops.(written.id) <-
+                Some
+                  (Pulled
+                     {
+                       cursor = type_;
+                       cursor_call = None;
+                       remaining = Name_lookup.find_remaining_call state iterable type_;
+                     });
               ( State.resolve_associated_type state type_ cursor Cursor_element
                   ~at:(State.read_span state iterable.id),
                 Language.Mode.Own )

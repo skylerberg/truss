@@ -435,7 +435,7 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
               Calls.check_argument state env first.value parameter ~has_generic_type:false
             in
             ignore
-              (State.decide_default state ~site:Method_call ~at:(State.read_span state value.id)
+              (Solver.decide_default state ~site:Method_call ~at:(State.read_span state value.id)
                  self_type);
             ([ { Tables.expression = first.value.id; core_argument_index = 0; mode } ], rest)
         | [] -> ([], []))
@@ -543,8 +543,8 @@ and check_capability_call state env (value : Syntax.expression) capability (memb
 and check_method_call state env ?expected (value : Syntax.expression) (base : Syntax.expression)
     (member : Syntax.name) ~type_arguments arguments =
   let receiver_type =
-    State.decide_default state ~site:Method_call ~at:(State.read_span state value.id)
-      (Conversions.read_actual_head state base (Hooks.check_expression state env base))
+    Solver.decide_default state ~site:Method_call ~at:(State.read_span state value.id)
+      (Conversions.read_checked_head state env base)
   in
   let has_mode_keyword = List.mem_assoc value.id state.keyword_modes in
   let lent_mode = if has_mode_keyword then None else Modes.find_lent_mode state base in

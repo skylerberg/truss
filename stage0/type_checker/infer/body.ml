@@ -662,7 +662,7 @@ let list_used_packages (resolved : Resolve.resolved) ~evidence_packages (form : 
     form.definition;
   List.sort_uniq compare (named @ !called)
 
-let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
+let infer (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body ~assumed_types =
   let resolved =
     Resolve.merge
       (List.map
@@ -723,6 +723,9 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
       final_type_checks = [];
       log = [];
       annotatable = Hashtbl.create 8;
+      goals = [];
+      assumed_types;
+      unchecked_fixes = [];
     }
   in
   Solver.run_in_statement state no_output (State.read_span state definition.id) (fun () ->
@@ -736,6 +739,28 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
     @ state.diagnostics;
   finalize state;
   Exported_parts.check state;
+  (state, elaborated, resolved)
+
+let keep_validated_fixes lookups key ~checks_body (state : State.state) =
+  let is_valid (fixed : Diagnostic.in_definition) assumed_types =
+    match infer lookups key ~checks_body ~assumed_types with
+    | checked_again, _, _ ->
+        List.for_all
+          (fun (diagnostic : Diagnostic.in_definition) ->
+            diagnostic.span <> fixed.span && List.mem diagnostic state.diagnostics)
+          checked_again.diagnostics
+    | exception Interface.Properties.Recursion_limit _ -> false
+  in
+  List.map
+    (fun (diagnostic : Diagnostic.in_definition) ->
+      let is_kept fix =
+        Option.fold ~none:true ~some:(is_valid diagnostic) (List.assq_opt fix state.unchecked_fixes)
+      in
+      { diagnostic with fixes = List.filter is_kept diagnostic.fixes })
+    state.diagnostics
+
+let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
+  let state, elaborated, resolved = infer lookups key ~checks_body ~assumed_types:[] in
   let has_any_type is_unwanted =
     let contains table =
       Seq.exists
@@ -804,4 +829,4 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
         (List.sort_uniq
            (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
              compare (left.span, left.code, left.message) (right.span, right.code, right.message))
-           state.diagnostics)
+           (keep_validated_fixes lookups key ~checks_body state))

@@ -30,9 +30,7 @@ let is_integer_operand state (operand : Syntax.expression) type_ =
 
 let rec try_ state env (value : Syntax.expression) (inner : Syntax.expression) =
   State.reject_in_formula state env (State.read_span state value.id) "`?`";
-  let inner_type =
-    Conversions.read_actual_head state inner (Hooks.check_expression state env inner)
-  in
+  let inner_type = Conversions.read_checked_head state env inner in
   let output =
     match env.output with
     | Some (Returns output) -> Some (Conversions.read_expected_head state output)

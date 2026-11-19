@@ -576,6 +576,58 @@ let () =
         "types.literal_out_of_range" ~at:("300", 1))
 
 let () =
+  Harness.test "a literal local that a goal of an earlier statement gives takes the goal's output"
+    (fun () ->
+      let text = Fixtures.Infer.literal_local_given_by_a_goal_of_an_earlier_statement in
+      expect_fine text;
+      expect_type text "magnitude" ~occurrence:3 "UInt64");
+  Harness.test "a fix that a later goal of the local would reject is not offered" (fun () ->
+      let text =
+        Fixtures.Infer.field_of_a_product_then_another_product_then_literal_local_bound_to_a_uint8
+      in
+      expect_one_diagnostic text "types.mismatch";
+      expect_fix_titles text []);
+  Harness.test "a fix that a later use of the local would reject is not offered" (fun () ->
+      let text =
+        Fixtures.Infer.field_of_a_product_then_literal_local_bound_to_an_int64_and_a_uint8
+      in
+      expect_one_diagnostic text "types.mismatch";
+      expect_fix_titles text []);
+  Harness.test "a float fix that the operator's impls would reject is not offered" (fun () ->
+      let text = Fixtures.Infer.field_of_a_product_then_literal_local_bound_to_a_float64 in
+      expect_one_diagnostic text "types.integer_for_float";
+      expect_fix_titles text []);
+  Harness.test
+    "a local given its default type by a method call has no fix to a type that is no number"
+    (fun () ->
+      let text = Fixtures.Infer.local_wrapping_added_then_bound_to_a_bool in
+      expect_one_diagnostic text "types.mismatch"
+        ~says:"`count` took its default type, `Int64`, at an earlier method call.";
+      expect_fix_titles text []);
+  Harness.test "a hexadecimal integer literal compared with a float has no float fix" (fun () ->
+      let text = Fixtures.Infer.float_compared_with_a_hexadecimal_local in
+      expect_one_diagnostic text "types.integer_for_float";
+      expect_fix_titles text []);
+  Harness.test "a default inside a type argument is explained at the mismatch" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.vector_of_a_literal_added_then_bound_to_a_vector_of_uint8
+        "types.mismatch" ~says:"`1` took its default type, `Int64`, at an earlier statement."
+        ~notes:
+          [
+            ( "This statement needs the type of `1`, so `1` takes its default type `Int64` here.",
+              ("let sum", 1) );
+          ]);
+  Harness.test "a goal whose output cannot be inferred reports no later failure" (fun () ->
+      match
+        Support.list_codes
+          (check
+             (Support.setup
+                [ ("app::main", Fixtures.Infer.invariant_multiplies_a_span_by_a_float_local) ])
+             (Support.parse_file "app::main"))
+      with
+      | [ "types.cannot_infer"; "types.unknown_member" ] -> ()
+      | reported -> Harness.fail "reported [%s]" (String.concat "; " reported))
+
+let () =
   Harness.test "comparing integer types that differ is an error with a fix that converts" (fun () ->
       expect_one_diagnostic Fixtures.Infer.comparison_of_uint64_and_uint32
         "types.mismatched_integers" ~fixed:Fixtures.Infer.comparison_of_uint64_and_uint32_fixed);

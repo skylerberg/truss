@@ -9,6 +9,7 @@ type t = {
   specification_unknowns : (int, unit) Hashtbl.t;
   mutable checks_specification : bool;
   mutable refused_code_unknown : int option;
+  mutable decided_numbers : int list;
 }
 
 val create : list_rigid_members:(Types.ty -> Language.Builtin_type.t list) -> t
@@ -25,6 +26,7 @@ val find_domain : t -> int -> Language.Builtin_type.t list option
 val list_possible_members : t -> Types.ty -> Language.Builtin_type.t list
 val is_within : t -> Types.ty -> Language.Builtin_type.t list -> bool
 val may_decide : t -> int -> bool
+val count_solutions : t -> through:int -> int
 
 type unknown = Unknown_type of int | Unknown_value of int
 

@@ -61,8 +61,8 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
         with
         | [] -> Types.Error (report_too_large "`Float64`")
         | allowed ->
-            State.make_literal_type state ~at:(State.read_span state value.id) allowed
-              ~report_excluded:(fun excluded -> report_too_large (State.describe state excluded))
+            State.make_literal_type state value allowed ~report_excluded:(fun excluded ->
+                report_too_large (State.describe state excluded))
       in
       State.check_when_final state (fun () ->
           Option.iter
@@ -270,7 +270,7 @@ and check_member_value state env (value : Syntax.expression) (base : Syntax.expr
       State.make_error_type state Not_a_value (State.read_span state value.id)
         (Printf.sprintf "`%s` is a method; call it with `(...)`." member.text)
   | None -> (
-      let base_type = Conversions.read_actual_head state base (check_expression state env base) in
+      let base_type = Conversions.read_checked_head state env base in
       match base_type with
       | Types.Error _ | Types.Hole -> base_type
       | _ ->

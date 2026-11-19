@@ -9,6 +9,7 @@ type t = {
   specification_unknowns : (int, unit) Hashtbl.t;
   mutable checks_specification : bool;
   mutable refused_code_unknown : int option;
+  mutable decided_numbers : int list;
 }
 
 let create ~list_rigid_members =
@@ -23,6 +24,7 @@ let create ~list_rigid_members =
     specification_unknowns = Hashtbl.create 8;
     checks_specification = false;
     refused_code_unknown = None;
+    decided_numbers = [];
   }
 
 let allocate_unknown unifier =
@@ -147,8 +149,17 @@ let bind unifier index type_ =
   if occurs unifier index type_ || refuses_to_decide unifier index then false
   else begin
     Hashtbl.replace unifier.type_solutions index type_;
+    if Hashtbl.mem unifier.domains index then
+      unifier.decided_numbers <- index :: unifier.decided_numbers;
     true
   end
+
+let count_solutions unifier ~through =
+  Hashtbl.length unifier.type_solutions
+  - List.length
+      (List.filter
+         (Hashtbl.mem unifier.type_solutions)
+         (List.init (unifier.next - through) (fun offset -> through + 1 + offset)))
 
 let join unifier left right =
   let older = min left right and younger = max left right in

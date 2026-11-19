@@ -39,9 +39,7 @@ let make_arity_error state ?constructor ~has_receiver (value : Syntax.expression
 
 let rec check_function_value_call state env (value : Syntax.expression) (callee : Syntax.expression)
     arguments =
-  let callee_type =
-    Conversions.read_actual_head state callee (Hooks.check_expression state env callee)
-  in
+  let callee_type = Conversions.read_checked_head state env callee in
   match callee_type with
   | Types.Function function_type when List.length function_type.inputs <> List.length arguments ->
       check_arguments_alone state env arguments
@@ -486,7 +484,7 @@ and make_field_parameters ~keeps_unlisted (fields : Types.field list) =
     fields
 
 and check_record_update state env (value : Syntax.expression) (base : Syntax.expression) updates =
-  let base_type = Conversions.read_actual_head state base (Hooks.check_expression state env base) in
+  let base_type = Conversions.read_checked_head state env base in
   (match List.assoc_opt value.id state.keyword_modes with
   | None -> Modes.note_owned_value state env base
   | Some Own -> ()
