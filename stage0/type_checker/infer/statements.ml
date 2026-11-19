@@ -30,6 +30,12 @@ let record_integer_range state ~(loop : Syntax.id) ~described ~admits_integer
         State.report state Not_indexable (State.read_span state range.id)
           (Printf.sprintf "%s range is of integers, not `%s`." described (Types.show element)))
 
+let statement_diverges (state : State.state) =
+  State.diverges ~is_never:(fun (value : Syntax.expression) ->
+      match state.tables.types.(value.id) with
+      | Some type_ -> Conversions.read_expected_head state type_ = Types.Never
+      | None -> false)
+
 let rec check_block_value state env ?expected (written : Syntax.block) =
   let rec infer_statements_value = function
     | [] -> Types.unit
@@ -38,7 +44,7 @@ let rec check_block_value state env ?expected (written : Syntax.block) =
         | Expression value -> Hooks.check_expression state env ?expected value
         | _ ->
             ignore (check_statement state env last ~last:true);
-            if State.statement_diverges state last then Types.Never else Types.unit)
+            if statement_diverges state last then Types.Never else Types.unit)
     | (first : Syntax.statement) :: rest ->
         ignore
           (Solver.run_in_statement state env (State.read_span state first.id) (fun () ->
@@ -77,7 +83,12 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
             let annotated = Interface.Elaborator.elaborate_type state.context annotation in
             Hooks.check state env value annotated;
             annotated
-        | None -> Hooks.check_expression state env value
+        | None -> (
+            let type_ = Hooks.check_expression state env value in
+            match written_pattern.kind with
+            | Variant _ | Record _ | Literal (Literal_string _) ->
+                Conversions.read_actual_head state value type_
+            | _ -> type_)
       in
       if is_var then begin
         State.reject_in_formula state env (State.read_span state written.id) "A `var`";
@@ -86,7 +97,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
       (match else_ with
       | Some block -> (
           let else_type = check_block_value state env block in
-          match State.resolve state else_type with
+          match Conversions.read_expected_head state else_type with
           | Types.Never -> ()
           | _ ->
               State.report state Mismatch (State.read_span state block.id)
@@ -240,7 +251,9 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
   match (target.kind, state.resolved.brackets.(target.id)) with
   | Bracket (_, [ Item { kind = Range _; _ } ]), _ -> false
   | Bracket (base, [ Item key ]), (Some Index | None) -> (
-      let base_type = State.normalize state (Hooks.check_expression state env base) in
+      let base_type =
+        Conversions.read_actual_head state base (Hooks.check_expression state env base)
+      in
       let { Well_known.owner; name; receiver } = Well_known.locate_method Index_assign_assign in
       let trait = State.make_trait_reference ~arguments:[] (Well_known.make_path owner) in
       match
@@ -328,18 +341,18 @@ and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable :
           (element, mode)
       | _ -> State.raise_bug "a range is not of the range type")
   | _ -> (
-      let type_ = State.normalize state (Hooks.check_expression state env iterable) in
+      let type_ =
+        Conversions.read_actual_head state iterable (Hooks.check_expression state env iterable)
+      in
       match type_ with
       | Types.Error _ | Types.Hole -> (type_, mode)
       | _ -> (
           let cursor = State.make_trait_reference ~arguments:[] (Well_known.make_path Cursor) in
           let by_position : (Tables.loop * Types.ty * Language.Mode.t) Resolve.Names.lookup =
             if mode = Language.Mode.Own then Absent
-            else
-              Name_lookup.find_elements_calls state (State.read_span state iterable.id) type_ mode
+            else Name_lookup.find_elements_calls state iterable type_ mode
           and consumed : (Tables.loop * Types.ty) Resolve.Names.lookup =
-            if mode = Language.Mode.Own then
-              Name_lookup.find_consuming_cursor state (State.read_span state iterable.id) type_
+            if mode = Language.Mode.Own then Name_lookup.find_consuming_cursor state iterable type_
             else Absent
           in
           match (by_position, consumed, State.find_evidence state type_ cursor) with
@@ -355,10 +368,7 @@ and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable :
                    {
                      cursor = type_;
                      cursor_call = None;
-                     remaining =
-                       Name_lookup.find_remaining_call state
-                         (State.read_span state iterable.id)
-                         type_;
+                     remaining = Name_lookup.find_remaining_call state iterable type_;
                    });
               ( State.resolve_associated_type state type_ cursor Cursor_element
                   ~at:(State.read_span state iterable.id),

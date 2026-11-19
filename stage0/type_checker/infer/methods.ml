@@ -168,8 +168,12 @@ and check_callee_cost state env (value : Syntax.expression) (metric : Language.M
       match Interface.Elaborator.find_bounded_type state.context base with
       | Some type_ -> check_method_cost state value metric type_ member
       | None -> report_not_a_callee "its operand is neither")
-  | [ { value = { kind = Name { modules = []; last }; _ }; _ } ] -> (
-      match (State.find_target state last, State.find_local_type state last) with
+  | [ { value = { kind = Name { modules = []; last }; _ } as operand; _ } ] -> (
+      match
+        ( State.find_target state last,
+          Option.map (Conversions.read_actual_head state operand) (State.find_local_type state last)
+        )
+      with
       | ( Some (Local _),
           (Some (Types.Function _ | Types.Variable _ | Types.Hole | Types.Error _) | None) )
       | Some (Unknown _), _ ->
@@ -225,7 +229,7 @@ and report_unknown_static_method state ?expected (value : Syntax.expression) typ
     else None
   in
   let is_expected =
-    match (Option.map (State.normalize state) expected, type_) with
+    match (Option.map (Conversions.read_expected_head state) expected, type_) with
     | Some (Types.Named { path = expected; _ }), Types.Named { path; _ } -> Path.equal expected path
     | _ -> false
   in
@@ -322,6 +326,7 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
                         | _ -> receiver.value
                       in
                       let receiver_type = Hooks.check_expression state env inner in
+                      let receiver_head = Conversions.read_actual_head state inner receiver_type in
                       if inner != receiver.value then begin
                         State.record state receiver.value receiver_type;
                         State.alias_expression state receiver.value inner
@@ -330,7 +335,7 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
                         not
                           (State.unify state
                              (Option.value ~default:receiver_type
-                                (State.find_view_as state ~owned:receiver_type ~view:type_))
+                                (Conversions.find_view_as ~owned:receiver_head ~view:type_))
                              type_)
                       then
                         State.report_mismatch state (State.read_span state inner.id) ~expected:type_
@@ -426,7 +431,8 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
               Calls.check_argument state env first.value parameter ~has_generic_type:false
             in
             ignore
-              (State.decide_default_literal state ~at:(State.read_span state value.id) self_type);
+              (State.decide_default_literal state ~at:(State.read_span state value.id)
+                 ~site:Method_lookup self_type);
             ([ { Tables.expression = first.value.id; core_argument_index = 0; mode } ], rest)
         | [] -> ([], []))
     | None -> ([], arguments)
@@ -507,8 +513,8 @@ and check_capability_call state env (value : Syntax.expression) capability (memb
 and check_method_call state env ?expected (value : Syntax.expression) (base : Syntax.expression)
     (member : Syntax.name) ~type_arguments arguments =
   let receiver_type =
-    State.decide_default_literal state ~at:(State.read_span state value.id)
-      (State.normalize state (Hooks.check_expression state env base))
+    State.decide_default_literal state ~at:(State.read_span state value.id) ~site:Method_lookup
+      (Conversions.read_actual_head state base (Hooks.check_expression state env base))
   in
   let has_mode_keyword = List.mem_assoc value.id state.keyword_modes in
   let lent_mode = if has_mode_keyword then None else Modes.find_lent_mode state base in
@@ -659,9 +665,10 @@ and check_method_with_receiver state env ?expected ?(type_arguments = [])
       | Ok () -> (
           (match instance.signature.receiver with
           | Some (mode, self_type) -> (
-              match State.find_view_as state ~owned:receiver_type ~view:self_type with
+              let receiver_head = Conversions.read_actual_head state receiver receiver_type in
+              match Conversions.find_view_as ~owned:receiver_head ~view:self_type with
               | Some _ ->
-                  Name_lookup.coerce state env ~argument:mode receiver ~actual:receiver_type
+                  Conversions.coerce state env ~argument:mode receiver ~actual:receiver_type
                     ~expected:self_type
               | None ->
                   if not (State.unify state self_type receiver_type) then

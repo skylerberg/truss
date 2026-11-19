@@ -39,7 +39,9 @@ let make_arity_error state ?constructor ~has_receiver (value : Syntax.expression
 
 let rec check_function_value_call state env (value : Syntax.expression) (callee : Syntax.expression)
     arguments =
-  let callee_type = State.normalize state (Hooks.check_expression state env callee) in
+  let callee_type =
+    Conversions.read_actual_head state callee (Hooks.check_expression state env callee)
+  in
   match callee_type with
   | Types.Function function_type when List.length function_type.inputs <> List.length arguments ->
       check_arguments_alone state env arguments
@@ -118,7 +120,7 @@ and check_argument state env (value : Syntax.expression) (parameter : Types.para
     | Some mode -> { parameter with mode }
     | None -> parameter
   in
-  Name_lookup.coerce state env ~argument:parameter.mode
+  Conversions.coerce state env ~argument:parameter.mode
     ~takes_view_as_owner:(has_generic_type && parameter.mode = Read)
     value ~actual ~expected:parameter.type_;
   Modes.check_mode state env value parameter actual ~has_generic_type;
@@ -484,7 +486,7 @@ and make_field_parameters ~keeps_unlisted (fields : Types.field list) =
     fields
 
 and check_record_update state env (value : Syntax.expression) (base : Syntax.expression) updates =
-  let base_type = State.normalize state (Hooks.check_expression state env base) in
+  let base_type = Conversions.read_actual_head state base (Hooks.check_expression state env base) in
   (match List.assoc_opt value.id state.keyword_modes with
   | None -> Modes.note_owned_value state env base
   | Some Own -> ()
@@ -517,7 +519,7 @@ and check_record_update state env (value : Syntax.expression) (base : Syntax.exp
 
 and check_updates state env (value : Syntax.expression) ~at record_type
     (updates : (Syntax.name list * Syntax.expression) list) =
-  match find_record_fields state at record_type with
+  match find_record_fields state at (Conversions.read_actual_head state value record_type) with
   | Error unknown ->
       ignore (check_arguments_alone state env (List.map make_update_argument updates) unknown);
       []

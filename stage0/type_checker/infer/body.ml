@@ -42,7 +42,9 @@ let check_body state (env : State.env) (written : Syntax.block) =
                 Expressions.check state env value part
             | _, Some (Returns output) ->
                 Statements.check_statement state env last ~last:true;
-                if not (State.statement_diverges state last || State.unify state output Types.unit)
+                if
+                  not
+                    (Statements.statement_diverges state last || State.unify state output Types.unit)
                 then
                   State.report state Mismatch (State.read_span state last.id)
                     (Printf.sprintf "This body must end with a value of type `%s`."
@@ -146,7 +148,7 @@ let check_defaults state env (written : Syntax.parameter list) (signature : Type
           | Some info, Some value ->
               Solver.run_in_statement state env (State.read_span state value.id) (fun () ->
                   let actual = Expressions.check_expression state env ~expected:info.type_ value in
-                  Name_lookup.coerce state env ~argument:info.mode value ~actual
+                  Conversions.coerce state env ~argument:info.mode value ~actual
                     ~expected:info.type_);
               Constant.check state ~default:true value
           | Some { has_default = true; _ }, None ->

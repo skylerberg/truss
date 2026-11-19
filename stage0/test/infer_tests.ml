@@ -467,6 +467,46 @@ let () =
       | _ -> Harness.fail "`box.describe()` records no impl")
 
 let () =
+  Harness.test "a member of an operator's result gives a literal operand its default type"
+    (fun () ->
+      let text = Fixtures.Infer.field_of_a_product_of_a_literal_local in
+      expect_fine text;
+      expect_type text "(span * count).ticks" "Int64";
+      expect_type text "count" ~occurrence:2 "Int64");
+  Harness.test "a member of a chain of operator results gives each literal operand its default type"
+    (fun () ->
+      let text = Fixtures.Infer.field_of_a_product_of_two_literal_locals in
+      expect_fine text;
+      expect_type text "first" ~occurrence:2 "Int64";
+      expect_type text "second" ~occurrence:2 "Int64");
+  Harness.test
+    "a literal local given its default type by a member read is one error, with a note and no fix"
+    (fun () ->
+      let text = Fixtures.Infer.field_of_a_product_then_literal_local_bound_to_a_uint8 in
+      expect_one_diagnostic text "types.mismatch"
+        ~says:
+          "Expected `UInt8`, found `Int64`. `count` took its default type, `Int64`, where the type \
+           of an earlier value was needed."
+        ~notes:
+          [
+            ( "The type of this value is needed here, so `count` takes its default type `Int64`.",
+              ("(span * count)", 1) );
+          ];
+      List.iter
+        (fun (diagnostic : Diagnostic.t) ->
+          if diagnostic.fixes <> [] then
+            Harness.fail "declaring `count` a `UInt8` leaves `Span` no `Multiply[UInt8]`")
+        (check (Support.setup [ ("app::main", text) ]) (Support.parse_file "app::main")));
+  Harness.test "literal arguments whose parameter type is a type parameter wait for a later use"
+    (fun () ->
+      let text = Fixtures.Infer.literals_passed_to_generic_parameters_then_bound_to_a_uint8 in
+      expect_fine text;
+      expect_type text "3" "UInt8";
+      expect_type text "4" "UInt8");
+  Harness.test "a generic call's result converts to the parameter's view" (fun () ->
+      expect_fine Fixtures.Infer.generic_result_passed_as_a_view)
+
+let () =
   Harness.test "comparing integer types that differ is an error with a fix that converts" (fun () ->
       expect_one_diagnostic Fixtures.Infer.comparison_of_uint64_and_uint32
         "types.mismatched_integers" ~fixed:Fixtures.Infer.comparison_of_uint64_and_uint32_fixed);

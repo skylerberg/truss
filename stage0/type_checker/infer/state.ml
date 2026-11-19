@@ -61,11 +61,13 @@ type narrowing = {
   report_excluded : Types.ty -> Diagnostic.reported;
 }
 
+type default_site = Method_lookup | Actual_head
+
 type literal_decision = {
   decided_local : Syntax.id;
   decided_type : Types.ty;
   decided_at : Source.Definition_span.t;
-  is_default : bool;
+  default_site : default_site option;
   mutable decision_report : Diagnostic.reported option;
 }
 
@@ -580,7 +582,7 @@ let make_default_type domain =
   | default :: _ -> Types.make_builtin default
   | [] -> raise_bug "a number has no default type"
 
-let decide_literals state ~(at : Source.Definition_span.t) ~is_default =
+let decide_literals state ~(at : Source.Definition_span.t) ?default_site () =
   state.undecided <-
     List.filter
       (fun (undecided : undecided_literal) ->
@@ -592,7 +594,7 @@ let decide_literals state ~(at : Source.Definition_span.t) ~is_default =
                 decided_local = undecided.local;
                 decided_type = zonk state (Types.Variable undecided.index);
                 decided_at = at;
-                is_default;
+                default_site;
                 decision_report = None;
               };
             false)
@@ -617,7 +619,7 @@ let settle state frame ~solve =
   state.unifier.deferred_capability_equalities <- [];
   solve frame;
   let parent = match state.frames with _ :: parent :: _ -> Some parent | _ -> None in
-  decide_literals state ~at:frame.span ~is_default:false;
+  decide_literals state ~at:frame.span ();
   let list_types ids table = List.filter_map (fun id -> table.(id)) ids in
   let list_all_types () =
     list_types frame.recorded_expressions state.tables.types
@@ -814,12 +816,6 @@ let rec diverges ~is_never (written : Syntax.statement) =
   | Parallel body | Concurrent body -> List.exists (diverges ~is_never) body.statements
   | _ -> false
 
-let statement_diverges state =
-  diverges ~is_never:(fun (value : Syntax.expression) ->
-      match state.tables.types.(value.id) with
-      | Some type_ -> resolve state type_ = Types.Never
-      | None -> false)
-
 let build_block state (written : Syntax.block) : Core.block =
   let rec build_statements (statements : Syntax.statement list) =
     match statements with
@@ -880,14 +876,14 @@ let report_decided_in_specification state span root =
   Hashtbl.replace state.unifier.type_solutions root (Types.Error report);
   report
 
-let decide_default_literal state ~at type_ =
+let decide_default_literal state ~at ~site type_ =
   let decide default =
-    decide_literals state ~at:(read_current_frame state).span ~is_default:false;
+    decide_literals state ~at:(read_current_frame state).span ();
     ignore (Unify.unify state.unifier type_ default);
     match find_refused_class state ~sides:[ (type_, default) ] with
     | Some root -> Types.Error (report_decided_in_specification state at root)
     | None ->
-        decide_literals state ~at ~is_default:true;
+        decide_literals state ~at ~default_site:site ();
         default
   in
   match find_domain state type_ with
@@ -949,18 +945,28 @@ let add_mismatch_diagnostic state ?(fixes = []) code (span : Source.Definition_s
       let local = Printf.sprintf "`%s`" text in
       let decided = Types.show decision.decided_type and wanted = zonk state wanted in
       let explanation, note =
-        if decision.is_default then
-          ( Printf.sprintf "%s took its default type, `%s`, at an earlier method call." local decided,
-            Printf.sprintf
-              "Method lookup needs the type of %s, so %s takes its default type `%s` here." local
-              local decided )
-        else
-          ( Printf.sprintf "An earlier statement decided that the type of %s is `%s`." local decided,
-            Printf.sprintf "This statement decides that the type of %s is `%s`." local decided )
+        match decision.default_site with
+        | Some Method_lookup ->
+            ( Printf.sprintf "%s took its default type, `%s`, at an earlier method call." local
+                decided,
+              Printf.sprintf
+                "Method lookup needs the type of %s, so %s takes its default type `%s` here." local
+                local decided )
+        | Some Actual_head ->
+            ( Printf.sprintf
+                "%s took its default type, `%s`, where the type of an earlier value was needed."
+                local decided,
+              Printf.sprintf
+                "The type of this value is needed here, so %s takes its default type `%s`." local
+                decided )
+        | None ->
+            ( Printf.sprintf "An earlier statement decided that the type of %s is `%s`." local
+                decided,
+              Printf.sprintf "This statement decides that the type of %s is `%s`." local decided )
       in
       let fixes =
         if
-          decision.is_default
+          decision.default_site = Some Method_lookup
           && Hashtbl.mem state.annotatable decision.decided_local
           && not (Types.contains_unsolved wanted || Types.is_error wanted)
         then
@@ -1173,142 +1179,3 @@ let make_range state ~origin (base : Core.place) ~start ~stop ~inclusive : Core.
            Types.Named { path = Well_known.make_path Slice; arguments = [ Types.Type element ] };
          origin;
        })
-
-type conversion =
-  | From_never
-  | Owned_to_view
-  | View_to_owned
-  | Function_widening
-  | To_integer
-  | From_integer
-
-let find_view_as state ~owned ~view =
-  match (Types.find_view (normalize state owned), normalize state view) with
-  | Some (Types.Named found as found_view), Types.Named wanted
-    when Path.equal found.path wanted.path ->
-      Some found_view
-  | _ -> None
-
-let find_owner_as state ~view ~owner =
-  match normalize state owner with
-  | Types.Named { path; _ } as owner when Well_known.is List path || Well_known.is String path ->
-      find_view_as state ~owned:owner ~view
-  | _ -> None
-
-let convert state env ?argument ?(takes_view_as_owner = false) ?expression
-    (span : Source.Definition_span.t) ~actual ~expected =
-  let is_argument = Option.is_some argument in
-  let record_conversion (conversion : conversion option) =
-    match (conversion, expression) with
-    | Some conversion, Some id ->
-        let before = state.form.expression_builders.(id) in
-        state.form.expression_builders.(id) <-
-          Option.map
-            (fun build () ->
-              let inner : Core.expression = build () in
-              let expected = finalize_type state expected in
-              let convert conversion =
-                make_synthetic_expression state ~origin:id expected
-                  (Convert { conversion; value = inner })
-              in
-              match conversion with
-              | From_never -> inner
-              | Function_widening ->
-                  if Types.equal inner.type_ expected then inner else convert Widen
-              | To_integer -> convert To_integer
-              | From_integer -> convert From_integer
-              | View_to_owned -> convert View_to_owned
-              | Owned_to_view
-                when Types.is_well_known List inner.type_ || Types.is_builtin Array inner.type_ ->
-                  let base : Core.place =
-                    match inner.kind with Use place -> place | _ -> Temporary inner
-                  in
-                  make_synthetic_expression state ~origin:id expected
-                    (make_range state ~origin:id base ~start:None ~stop:None ~inclusive:false)
-              | Owned_to_view -> (
-                  match inner.type_ with
-                  | Types.Named { path; arguments } ->
-                      make_synthetic_expression state ~origin:id expected
-                        (Call
-                           (make_call state
-                              ~callee:
-                                (Function
-                                   {
-                                     path =
-                                       Method
-                                         { owner = path; name = "slice"; receiver = Instance Read };
-                                     instantiation =
-                                       { Types.no_instantiation with type_arguments = arguments };
-                                   })
-                              ~arguments:[ Operands.build_argument Read inner ]
-                              ~lends:None))
-                  | other -> raise_bug "`%s` is viewed and has no view" (Types.show other)))
-            before
-    | _ -> ()
-  in
-  record_conversion
-  @@
-  let actual_type = normalize state actual and wanted = normalize state expected in
-  let refuse () =
-    report_mismatch state span ~expected ~actual;
-    None
-  in
-  let between_owner_and_view =
-    match if is_argument then find_view_as state ~owned:actual ~view:expected else None with
-    | Some view -> Some (Owned_to_view, wanted, view)
-    | None when takes_view_as_owner ->
-        Option.map
-          (fun view -> (View_to_owned, actual_type, view))
-          (find_owner_as state ~view:actual ~owner:expected)
-    | None -> None
-  in
-  match between_owner_and_view with
-  | Some (conversion, written_view, view) ->
-      if not (Unify.unify state.unifier written_view view) then
-        report_mismatch state span ~expected ~actual;
-      Some conversion
-  | None -> (
-      match (actual_type, wanted, expression) with
-      | Types.Never, _, _ -> Some From_never
-      | Types.Integer, _, Some _
-        when is_argument && env.specification && is_within state wanted Types.integer_types ->
-          Some From_integer
-      | _, Types.Integer, _
-        when env.specification && is_within state actual_type Types.integer_types ->
-          Some To_integer
-      | Types.Function actual_function, Types.Function wanted_function, _
-        when not (Types.has_same_clauses actual_function wanted_function) ->
-          let unlisted =
-            Types.compute_missing_capabilities ~required:actual_function.uses
-              ~available:wanted_function.uses
-          in
-          let unknown =
-            Types.has_unsolved_capabilities actual_function.uses
-            || Types.has_unsolved_capabilities wanted_function.uses
-          in
-          let proven =
-            Types.costs_imply ~provided:actual_function.costs ~required:wanted_function.costs
-          in
-          if
-            Unify.unify state.unifier wanted
-              (Types.Function
-                 { actual_function with uses = wanted_function.uses; costs = wanted_function.costs })
-            && (unlisted = Types.no_capabilities || unknown)
-            && proven
-          then begin
-            if unlisted <> Types.no_capabilities then
-              state.capability_constraints <-
-                {
-                  subset = actual_function.uses;
-                  restriction = None;
-                  superset = wanted_function.uses;
-                  report_missing =
-                    (fun _ ->
-                      report_mismatch state span ~expected:(finalize_type state expected)
-                        ~actual:(finalize_type state actual));
-                }
-                :: state.capability_constraints;
-            Some Function_widening
-          end
-          else refuse ()
-      | _ -> if Unify.unify state.unifier wanted actual_type then None else refuse ())

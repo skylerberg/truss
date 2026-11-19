@@ -128,9 +128,11 @@ let is_within unifier type_ set =
   | [] -> false
   | members -> List.for_all (fun member -> List.mem member set) members
 
+let may_decide unifier index =
+  (not unifier.checks_specification) || Hashtbl.mem unifier.specification_unknowns index
+
 let refuses_to_decide unifier index =
-  unifier.checks_specification
-  && (not (Hashtbl.mem unifier.specification_unknowns index))
+  (not (may_decide unifier index))
   && begin
     unifier.refused_code_unknown <- Some index;
     true

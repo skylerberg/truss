@@ -60,11 +60,13 @@ type narrowing = {
   report_excluded : Types.ty -> Diagnostic.reported;
 }
 
+type default_site = Method_lookup | Actual_head
+
 type literal_decision = {
   decided_local : Syntax.id;
   decided_type : Types.ty;
   decided_at : Source.Definition_span.t;
-  is_default : bool;
+  default_site : default_site option;
   mutable decision_report : Diagnostic.reported option;
 }
 
@@ -227,7 +229,6 @@ val run_in_statement :
   state -> env -> Source.Definition_span.t -> solve:(frame -> unit) -> (unit -> 'a) -> 'a
 
 val diverges : is_never:(Syntax.expression -> bool) -> Syntax.statement -> bool
-val statement_diverges : state -> Syntax.statement -> bool
 val build_block : state -> Syntax.block -> Core.block
 val declare : state -> Syntax.name -> Types.ty -> binding:binding -> mode:Language.Mode.t -> unit
 
@@ -235,7 +236,9 @@ val declare_compiled :
   state -> env -> Syntax.name -> Types.ty -> binding:binding -> mode:Language.Mode.t -> unit
 
 val find_target : state -> Syntax.name -> Resolve.target option
-val decide_default_literal : state -> at:Source.Definition_span.t -> Types.ty -> Types.ty
+
+val decide_default_literal :
+  state -> at:Source.Definition_span.t -> site:default_site -> Types.ty -> Types.ty
 
 val report_decided_in_specification :
   state -> Source.Definition_span.t -> int -> Diagnostic.reported
@@ -274,16 +277,3 @@ val make_range :
   stop:Core.expression option ->
   inclusive:bool ->
   Core.kind
-
-val find_view_as : state -> owned:Types.ty -> view:Types.ty -> Types.ty option
-
-val convert :
-  state ->
-  env ->
-  ?argument:Language.Mode.t ->
-  ?takes_view_as_owner:bool ->
-  ?expression:Core.origin ->
-  Source.Definition_span.t ->
-  actual:Types.ty ->
-  expected:Types.ty ->
-  unit
