@@ -53,15 +53,18 @@ type _ stored =
   | Call_edges : Path.t * Path.package -> Path.t list stored
   | Recursion_group : Path.t -> Path.t list stored
   | Proof : Resolve.Names.key -> Prover.proof stored
-  | Lowered : Lowered.Item.t -> (Backend.lowered, Backend.unsupported) result stored
-  | Test_key : Lowered.Item.t -> (string, Backend.unsupported) result stored
+  | Lowered : Lowered.Item.t -> (Lowering.lowered, Lowering.unsupported) result stored
+  | Test_key : Lowered.Item.t -> (string, Lowering.unsupported) result stored
 
 type any = Any : 'a stored -> any [@@unboxed]
 type t = Input of input | Name of name | Stored of any
 
-val find_type_equality : 'a stored -> 'b stored -> ('a, 'b) Type.eq option
-val locate_package : any -> Path.package
-val locate_name_package : name -> Path.package
+module Storage : sig
+  val find_type_equality : 'a stored -> 'b stored -> ('a, 'b) Type.eq option
+  val locate_package : any -> Path.package
+  val locate_name_package : name -> Path.package
+end
+
 val show : t -> string
 val find_definition : t -> Path.t option
 val show_kind : t -> string

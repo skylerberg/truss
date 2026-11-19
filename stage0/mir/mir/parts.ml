@@ -10,7 +10,7 @@ type contract_part = {
 }
 
 type lookups = {
-  find_form_origin : Path.t -> (Infer.form_origin * Types.substitution) option;
+  find_form_origin : Path.t -> (Interface.form_origin * Types.substitution) option;
   read_body_part : Resolve.Names.key -> body_part;
   read_contract_part : Resolve.Names.key -> contract_part;
   read_generated_parts : Path.t -> body_part * contract_part;
@@ -23,7 +23,7 @@ let find_graph = function Body code -> Some code.graph | Initializer _ | No_code
 
 let read_body_part lookups path =
   Option.map
-    (fun ((origin : Infer.form_origin), _) ->
+    (fun ((origin : Interface.form_origin), _) ->
       match origin with
       | Written key | Inherited key -> { source = key; form = lookups.read_body_part key }
       | Derived type_key -> { source = type_key; form = fst (lookups.read_generated_parts path) })
@@ -31,7 +31,7 @@ let read_body_part lookups path =
 
 let read_contract_part lookups path =
   Option.map
-    (fun ((origin : Infer.form_origin), _) ->
+    (fun ((origin : Interface.form_origin), _) ->
       match origin with
       | Written key | Inherited key -> { source = key; form = lookups.read_contract_part key }
       | Derived type_key -> { source = type_key; form = snd (lookups.read_generated_parts path) })

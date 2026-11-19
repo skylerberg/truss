@@ -1,4 +1,4 @@
-let raise_bug format = Compiler_bug.raise_bug ~stage:"Backend" format
+let raise_bug format = Compiler_bug.raise_bug ~stage:"Call_edge_check" format
 let is_runtime_call (path : Path.t) = Well_known.is Write_fully path
 
 let list_code_supplied_to (interface : Interface.Lookups.t) path instantiation =

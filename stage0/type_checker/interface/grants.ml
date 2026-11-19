@@ -92,6 +92,3 @@ let describe_missing_in_impls lookups ~package impls =
            ~of_)
         (list_missing lookups ~package ~of_ uses))
     impls
-
-let describe_missing_in_evidence lookups ~package ~list_bounds evidence =
-  describe_missing_in_impls lookups ~package (list_evidence_uses lookups ~list_bounds evidence)

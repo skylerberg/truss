@@ -24,7 +24,8 @@ let list_bound_diagnostics lookups ~package ~list_bounds ~spans named =
                   | Some evidence ->
                       List.map
                         (make_diagnostic (Capabilities Not_granted))
-                        (Grants.describe_missing_in_evidence lookups ~package ~list_bounds evidence))
+                        (Grants.describe_missing_in_impls lookups ~package
+                           (Grants.list_evidence_uses lookups ~list_bounds evidence)))
                 required
           | None -> [])
       | _ -> [])
