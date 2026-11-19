@@ -168,7 +168,7 @@ let allocate_flagged_binding state ty ~flag =
   end;
   place
 
-let allocate_parameter state ?(in_scope = true) ?name ~owned (mode : Ground.mode) ty =
+let allocate_parameter state ?(in_scope = true) ?name ~owned (mode : Language.Mode.t) ty =
   let own place = if in_scope && owned && not (is_trivial state ty) then own_in_scope state place in
   match Convention.classify_parameter state.context.env mode ty with
   | None -> (None, allocate_temporary state ty)
@@ -352,6 +352,28 @@ let find_place_type state (place : Lowered.place) =
       in
       if Lowered.is_erased state.context.env root then None
       else find_projected_type root place.projections
+
+let is_reached_through_pointer state (place : Lowered.place) =
+  let rec walk (ty : Lowered.ty) (projections : Lowered.projection list) =
+    match (projections, ty) with
+    | [], _ -> false
+    | Deref :: _, _ -> true
+    | Index _ :: _, Raw (Pointer _ | Nullable_pointer _) -> true
+    | _ :: _, (Environment _ | Evidence _) ->
+        List.exists (function Lowered.Deref -> true | _ -> false) projections
+    | projection :: rest, _ -> (
+        match
+          Lowered.find_projection_type state.context.env
+            ~list_environment:(fun _ ->
+              Definitions.raise_bug "a place in an environment, whose type lowering does not track")
+            ty projection
+        with
+        | Some projected -> walk projected rest
+        | None -> false)
+  in
+  match place.root with
+  | Static _ -> true
+  | Local local -> walk (Emit_c.Ir_builder.lookup_local_type state.builder local) place.projections
 
 let make_int_constant integer value = Lowered.Constant (Integer (integer, value))
 

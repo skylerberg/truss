@@ -1,0 +1,21 @@
+capability Fetch {
+  fn get() -> UInt64
+}
+
+type Counted(calls: UInt64)
+
+impl Fetch for Counted {
+  fn get(mut self) -> UInt64 {
+    self.calls = self.calls.saturating_add(1)
+    7
+  }
+}
+
+fn tally(counted: mut Counted) -> UInt64
+  ensures counted.calls == old(counted.calls)
+{
+  provide mut counted {
+    let fetched = Fetch.get()
+    return fetched
+  }
+}

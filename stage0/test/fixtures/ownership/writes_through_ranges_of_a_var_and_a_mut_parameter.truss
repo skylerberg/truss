@@ -1,3 +1,9 @@
+fn bump(items: mut Slice[Int64])
+  requires items.length() > 0
+{
+  items[0] = 9
+}
+
 type Window(rest: Slice[Int64])
 
 fn narrow(window: mut Window, count: UInt64) {
@@ -6,10 +12,8 @@ fn narrow(window: mut Window, count: UInt64) {
 
 fn f(supplied: mut List[Int64]) -> UInt64 {
   var items: List[Int64] = [3, 1, 2]
-  var part = items.slice()
-  bump(mut part)
-  part[1] = 4
-  var other = supplied.slice()
-  bump(mut other)
+  bump(mut items[..])
+  items[1..][0] = 4
+  bump(mut supplied[..])
   items.length()
 }

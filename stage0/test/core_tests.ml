@@ -25,6 +25,11 @@ let rec show_access_path (place : Core.place) =
   match place with
   | Local { local; _ } -> name local
   | Field { base; field; _ } -> show_access_path base ^ "." ^ field
+  | Element { base; index; _ } -> show_access_path base ^ "[" ^ show_expression index ^ "]"
+  | Range { base; start; stop; _ } ->
+      show_access_path base ^ "[" ^ show_expression start ^ ".."
+      ^ Option.fold ~none:"" ~some:show_expression stop
+      ^ "]"
   | Constant { path; _ } -> Path.show path
   | Lent call -> "lent " ^ show_expression call
   | Temporary value -> "temporary " ^ show_expression value
@@ -34,10 +39,6 @@ and show_expression (node : Core.expression) =
   match node.kind with
   | Integer number -> Z.to_string number
   | Use place -> "use " ^ show_access_path place
-  | Slice { base; callee; bounds } ->
-      Printf.sprintf "slice %s(%s)"
-        (Core_lint.show_target callee.target)
-        (list show_argument (Passed { mode = Read; value = Place base } :: bounds))
   | Operator { operation; arguments } ->
       Printf.sprintf "%s(%s)"
         (Intrinsic.show_operation (Scalar operation))
@@ -65,7 +66,7 @@ and show_operand (value : Core.operand) =
 
 and show_argument (passed : Core.argument) =
   match passed with
-  | Passed { mode; value; _ } -> Types.show_mode mode ^ show_operand value
+  | Passed { mode; value; _ } -> Language.Mode.show_prefix mode ^ show_operand value
   | Default -> "default"
 
 let make_definition_form text (path : Path.t) =
@@ -139,7 +140,7 @@ let () =
           | _ -> [])
         (list_expressions form))
     [ "place shape" ];
-  expect "a list passed to a `mut` slice parameter is passed as a mutable view of all of it"
+  expect "a list passed to a `mut Slice` parameter is passed as a `mut` range of the whole list"
     Fixtures.Core.list_passed_to_a_mut_slice_parameter
     (fun form ->
       List.filter_map
@@ -148,7 +149,7 @@ let () =
             Some (String.concat ", " (List.map show_argument call.arguments))
           else None)
         (list_calls form))
-    [ "mut slice standard::list::List.slice_from(place items, 0)" ]
+    [ "mut place items[0..]" ]
 
 let () =
   List.iter
@@ -294,7 +295,7 @@ let () =
               (match function_ with
               | Log -> "log"
               | Power -> "power"
-              | Callback_cost metric -> Metric.show metric
+              | Callback_cost metric -> Language.Metric.show metric
               | Calls -> "calls")
         | Call call -> Some ("call " ^ Core_lint.show_target call.callee.target)
         | _ -> None)
@@ -306,7 +307,7 @@ let () =
         (fun (cost : Core.cost) ->
           let resource =
             match cost.resource with
-            | Metric metric -> Metric.show metric
+            | Metric metric -> Language.Metric.show metric
             | Calls (Function_parameter local) -> "calls through " ^ name local
             | Calls (Capability path) -> "calls of " ^ Path.show path
             | Calls (Capability_method (path, method_)) ->
@@ -334,11 +335,12 @@ let () =
         match node.kind with
         | Method_cost { metric; method_ = Trait_method { self_type; evidence; _ } as method_ } ->
             Some
-              (Printf.sprintf "%s(%s) for %s by %s" (Metric.show metric)
+              (Printf.sprintf "%s(%s) for %s by %s" (Language.Metric.show metric)
                  (Core_lint.show_target method_) (Types.show self_type)
                  (match evidence with Bound -> "a bound" | Impl _ -> "an impl" | Dynamic -> "any"))
         | Method_cost { metric; method_ } ->
-            Some (Printf.sprintf "%s(%s)" (Metric.show metric) (Core_lint.show_target method_))
+            Some
+              (Printf.sprintf "%s(%s)" (Language.Metric.show metric) (Core_lint.show_target method_))
         | _ -> None)
       (list_expressions form)
   in
@@ -484,7 +486,7 @@ let () =
     in
     match
       Database.For_testing.read_core (Support.make_database packages)
-        (Method { owner; name; receiver = Read })
+        (Method { owner; name; receiver = Instance Read })
     with
     | Some (form, substitution) ->
         ( form,
@@ -514,9 +516,9 @@ let () =
       let owner : Path.t = Derived { type_ = both; trait = Well_known.make_path Equal } in
       match
         ( Database.For_testing.read_core (Support.make_database packages)
-            (Method { owner; name = "equal"; receiver = Read }),
+            (Method { owner; name = "equal"; receiver = Instance Read }),
           Database.For_testing.read_core (Support.make_database packages)
-            (Method { owner; name = "not_equal"; receiver = Read }) )
+            (Method { owner; name = "not_equal"; receiver = Instance Read }) )
       with
       | Some (_, derived), Some (_, inherited)
         when Types.For_testing.list_arguments derived = []
@@ -571,19 +573,15 @@ let () =
   in
   let text = Fixtures.Core.slice_match_on_a_constant_and_loop_over_a_ticking_countdown in
   expect
-    "a slice, a pattern that compares with a constant, and a loop over a cursor each hold their \
-     callee with the capability set that the callee gives"
+    "a pattern that compares with a constant and a loop over a cursor each hold their callee with \
+     the capability set that the callee gives"
     text
     (fun form ->
       let held = ref [] in
       Core_walk.walk_definition
         {
           Core_walk.ignore_all with
-          expression =
-            (fun node ->
-              match node.kind with
-              | Slice { callee; _ } -> held := ("a slice holds " ^ show_callee callee) :: !held
-              | _ -> ());
+          expression = (fun node -> match node.kind with _ -> ());
           statement =
             (fun node ->
               match node.kind with
@@ -600,7 +598,6 @@ let () =
       List.rev !held)
     [
       "a loop holds standard::core::Cursor.next uses [app::main::Meter]";
-      "a slice holds standard::list::List.slice_from uses []";
       "a pattern holds standard::core::Equal.equal uses []";
     ];
   expect "the walker hands every callee that a body invokes to its callee hook" text
@@ -615,7 +612,6 @@ let () =
       List.rev !invoked)
     [
       "standard::core::Cursor.next uses [app::main::Meter]";
-      "standard::list::List.slice_from uses []";
       "standard::core::Equal.equal uses []";
       "standard::list::Slice.length uses []";
     ];

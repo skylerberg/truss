@@ -123,7 +123,7 @@ let is_model_built_from_contents : Path.t -> bool = function
   | Impl { module_; trait; for_type } ->
       module_.package = Path.standard_package
       && Path.equal trait.path (Well_known.make_path Model)
-      && (Intrinsic.find_builtin for_type = Some Array
+      && (Well_known.find_builtin_type for_type = Some Array
          || List.exists
               (fun name -> Path.equal for_type (Well_known.make_path name))
               [
@@ -185,7 +185,7 @@ let compute_model_function (context : State.context) (ty : Types.ty) ~(model : T
       rank_model context ty ~model ~impl symbol;
       (match ty with
       | Types.Named { path; arguments = [ Types.Type element; Types.Value count ] }
-        when Intrinsic.find_builtin path = Some Array ->
+        when Well_known.find_builtin_type path = Some Array ->
           Facts.run_once context (Array_length symbol) (fun () ->
               let each = Logic.Symbol.Variable { label = "array.value"; numbers = [] } in
               let elements = Logic.Apply (symbol, [ Logic.Symbol each ]) in
@@ -213,8 +213,8 @@ let find_model context (ty : Types.ty) term ~element =
     (fun model_of -> model_of term)
     (find_model_function context ty ~model:(make_sequence_type element))
 
-let quantify_over (context : State.context) (frame : State.frame) (quantifier : Core.quantifier)
-    (range : quantified_range) ~bind ~read =
+let quantify_over (context : State.context) (frame : State.frame)
+    (quantifier : Language.Quantifier.t) (range : quantified_range) ~bind ~read =
   let make ?count bound_symbol sort premise body_frame bound_value =
     let mark = context.fresh in
     let body_frame, (after, body_value), with_facts =

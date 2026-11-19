@@ -10,7 +10,7 @@ let is_declared_public (lookups : Lookups.t) path =
 
 let rec is_visible_to_other_packages (lookups : Lookups.t) (path : Path.t) =
   match path with
-  | Top { module_; name } -> module_ = Intrinsic.module_ || is_public lookups module_ name
+  | Top { module_; name } -> module_ = Well_known.intrinsic_module || is_public lookups module_ name
   | Method { owner; _ } | Member_constant { owner; _ } ->
       is_visible_to_other_packages lookups owner && is_declared_public lookups path
   | Impl _ -> is_declared_public lookups path

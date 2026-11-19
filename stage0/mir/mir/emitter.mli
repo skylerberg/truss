@@ -16,7 +16,7 @@ val add_source : t -> Core.local -> Tree.local -> unit
 val obtain_free_source : t -> Core.local -> type_:Types.ty -> origin:Core.origin -> Tree.local
 
 val bind_source :
-  ?is_var:bool -> t -> Core.local -> Types.mode -> Types.ty -> Core.origin -> Tree.local
+  ?is_var:bool -> t -> Core.local -> Language.Mode.t -> Types.ty -> Core.origin -> Tree.local
 
 val register_binding : t -> Tree.local -> unit
 val note_bound_to_place : t -> Tree.local -> unit
@@ -24,6 +24,7 @@ val allocate_place_temporary : t -> node:Core.id -> Types.ty -> Core.origin -> T
 val free_locals : t -> Tree.local list
 val emit : t -> Tree.statement_kind -> Core.origin -> unit
 val assign : t -> Tree.place -> Tree.rvalue -> Core.origin -> unit
+val hold_in_temporary : t -> Types.ty -> Core.origin -> (Tree.place -> unit) -> Tree.operand option
 val hold : t -> Types.ty -> Core.origin -> Tree.rvalue -> Tree.operand option
 val hold_choice : t -> Types.ty -> Core.origin -> Tree.choice -> Tree.operand option
 val hold_operand : t -> Tree.operand -> Types.ty -> Core.origin -> Tree.operand
@@ -38,19 +39,16 @@ type suspended
 val suspend_block : t -> suspended
 val resume_block : t -> suspended -> Tree.statement list
 val emitted : t -> Tree.statement list
-val start_loan : t -> Tree.operand -> Types.mode -> Tree.loan_duration -> Core.origin -> int
+val start_loan : t -> Tree.operand -> Language.Mode.t -> Tree.loan_duration -> Core.origin -> int
 val end_loans : t -> int list -> Core.origin -> unit
 
 type scope
 
-val make_block_scope : ?provides:bool -> unit -> scope
+val make_block_scope : unit -> scope
 val run_in_block_scope : t -> scope -> Core.origin -> (unit -> 'a) -> 'a
-val run_in_scope : ?provides:bool -> t -> Core.origin -> (unit -> 'a) -> 'a
+val run_in_scope : t -> Core.origin -> (unit -> 'a) -> 'a
 val run_in_statement : t -> Core.origin -> (unit -> 'a) -> 'a
-
-val run_in_value_scope :
-  ?provides:bool -> t -> Core.origin -> (unit -> Tree.operand option) -> Tree.operand option
-
+val run_in_value_scope : t -> Core.origin -> (unit -> Tree.operand option) -> Tree.operand option
 val run_in_arm_scope : t -> (scope -> 'a) -> 'a
 val end_scope : t -> scope -> Core.origin -> unit
 val make_dead_statements : scope -> Core.origin -> Tree.statement list

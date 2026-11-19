@@ -42,7 +42,7 @@ let list_file_names file = file.module_.modules @ [ file.name ^ ".truss" ]
 let show_file file =
   String.concat "/" (list_package_parts file.module_.package @ list_file_names file)
 
-type receiver = Static | Read | Mut | Own
+type receiver = Static | Instance of Language.Mode.t
 
 type t =
   | Top of { module_ : module_; name : string }
@@ -99,9 +99,7 @@ and is_resolved_argument = function
 
 let show_receiver = function
   | Static -> "no `self`"
-  | Read -> "`self`"
-  | Mut -> "`mut self`"
-  | Own -> "`own self`"
+  | Instance mode -> "`" ^ Language.Mode.show_prefix mode ^ "self`"
 
 let rec show_name = function
   | Top { name; _ } | Test { name; _ } -> name
@@ -117,9 +115,8 @@ let rec show = function
   | Method { owner; name; receiver } -> (
       let base = show owner ^ "." ^ name in
       match receiver with
-      | Static | Read -> base
-      | Mut -> base ^ "(mut self)"
-      | Own -> base ^ "(own self)")
+      | Static | Instance Read -> base
+      | Instance mode -> base ^ "(" ^ Language.Mode.show_prefix mode ^ "self)")
   | Member_constant { owner; name } -> show owner ^ "." ^ name
   | Impl { module_; trait; for_type } ->
       Printf.sprintf "%s::impl %s for %s" (show_module module_) (show_reference trait)

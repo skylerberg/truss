@@ -1,0 +1,17 @@
+fn scribble[Collection: IndexMut + Copyable](
+  source: Collection,
+  key: Collection.Key,
+  value: own Collection.Output,
+)
+  requires source.contains_key(key)
+{
+  var copied = source.copy()
+  copied[key] = own value
+}
+
+fn f(others: List[Int64]) {
+  let part: Slice[Int64] = others[..]
+  let first: UInt64 = 0
+  let nine: Int64 = 9
+  scribble[Slice[Int64]](part, key: first, value: nine)
+}

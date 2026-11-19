@@ -66,7 +66,7 @@ let check_sealed (lookups : Lookups.t) (declaration : Resolve.Names.declaration)
       read_definition lookups declaration )
   with
   | Some ((trait, type_), _), (definition, spans) -> (
-      match (Types.find_sealed_implementors trait, Intrinsic.find_builtin type_) with
+      match (Types.find_sealed_implementors trait, Well_known.find_builtin_type type_) with
       | Some builtins, Some builtin when List.mem builtin builtins -> []
       | Some _, _ ->
           let implementors, reason =
@@ -672,7 +672,7 @@ let list_named_constants (lookups : Lookups.t) (value : Core.expression) =
                 | None -> (origin, None)
               in
               named := { origin; constant = path; omitted_field } :: !named
-          | Local _ | Field _ | Lent _ | Temporary _ -> ());
+          | Local _ | Field _ | Element _ | Range _ | Lent _ | Temporary _ -> ());
         expression =
           (fun (node : Core.expression) ->
             match node.kind with
@@ -785,7 +785,7 @@ let list_used_paths (lookups : Lookups.t) key =
       place =
         (function
         | Constant { path; _ } -> use path
-        | Local _ | Field _ | Lent _ | Temporary _ -> ());
+        | Local _ | Field _ | Element _ | Range _ | Lent _ | Temporary _ -> ());
       pattern =
         (fun (node : Core.pattern) ->
           match node.kind with

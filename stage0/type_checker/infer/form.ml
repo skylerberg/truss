@@ -157,7 +157,7 @@ let register_call ?function_value state (value : Syntax.expression) =
 let register_index state (value : Syntax.expression) =
   State.register_expression state value (fun () ->
       match (read_call state value.id).callee with
-      | Trait_method { receiver = Mut; _ } -> build_call_kind ~lends:Mut state value
+      | Trait_method { receiver = Instance Mut; _ } -> build_call_kind ~lends:Mut state value
       | _ -> build_call_kind ~lends:Read state value)
 
 let build_numeric_literal (state : State.state) (id : Syntax.id) : Core.kind =
@@ -309,7 +309,9 @@ let build_provide state (implementations : Syntax.expression list) (body : Synta
   let implementations =
     List.map
       (fun (implementation : Syntax.expression) : Core.implementation ->
-        let mode : Types.mode = match implementation.kind with Mode (Mut, _) -> Mut | _ -> Read in
+        let mode : Language.Mode.t =
+          match implementation.kind with Mode (Mut, _) -> Mut | _ -> Read
+        in
         let node = State.build_expression state implementation in
         {
           origin = implementation.id;
@@ -601,14 +603,6 @@ let build_operator state (value : Syntax.expression) operation (operands : Synta
          else arguments);
     }
 
-let convert_to_comparison : Syntax.comparison -> Core.comparison = function
-  | Equal -> Equal
-  | Not_equal -> Not_equal
-  | Less -> Less
-  | Less_equal -> Less_equal
-  | Greater -> Greater
-  | Greater_equal -> Greater_equal
-
 let build_built_in_comparison state comparison (left : Syntax.expression)
     (right : Syntax.expression) : Core.kind =
   let left = State.build_expression state left in
@@ -617,7 +611,7 @@ let build_built_in_comparison state comparison (left : Syntax.expression)
     if Types.equal left.type_ right.type_ then (left, right)
     else (convert_to_integer state left, convert_to_integer state right)
   in
-  Compare { comparison = convert_to_comparison comparison; left; right }
+  Compare { comparison; left; right }
 
 let build_comparison state (value : Syntax.expression) comparison (left : Syntax.expression)
     (right : Syntax.expression) : Core.kind =
@@ -735,7 +729,7 @@ let build_compound_assign state (written : Syntax.statement) (target : Syntax.ex
                   recorded.arguments
               with
               | Some argument -> argument.mode
-              | None -> Types.Read
+              | None -> Language.Mode.Read
             in
             ( Call
                 (State.make_call state ~callee:(convert_callee recorded.callee)
@@ -759,7 +753,8 @@ let build_compound_assign state (written : Syntax.statement) (target : Syntax.ex
       value = State.make_synthetic_expression state ~origin:written.id target_type kind;
     }
 
-let rec lend_statements state (mode : Types.mode) (value : Core.expression) : Core.statement list =
+let rec lend_statements state (mode : Language.Mode.t) (value : Core.expression) :
+    Core.statement list =
   let make_statement kind : Core.statement list =
     [ { id = State.allocate_node_id state; origin = value.origin; kind } ]
   in
@@ -799,9 +794,9 @@ and lend_block state mode (body : Core.block) : Core.block =
 let rec is_fixed_place : Core.place -> bool = function
   | Local _ | Constant _ -> true
   | Field { base; _ } -> is_fixed_place base
-  | Lent _ | Temporary _ -> false
+  | Element _ | Range _ | Lent _ | Temporary _ -> false
 
-let build_collection_place state (iterable : Syntax.expression) (mode : Types.mode) :
+let build_collection_place state (iterable : Syntax.expression) (mode : Language.Mode.t) :
     Core.place * (type_:Types.ty -> Core.block -> Core.kind) option =
   let collection = State.build_expression state iterable in
   match collection.kind with
@@ -833,7 +828,7 @@ let build_collection_place state (iterable : Syntax.expression) (mode : Types.mo
               }) )
 
 let build_elements state ~origin (collection : Core.place) ~(count : Tables.call)
-    ~(element : Tables.call) ~(lends : Types.mode) : Core.elements =
+    ~(element : Tables.call) ~(lends : Language.Mode.t) : Core.elements =
   let uint64 = Types.make_builtin UInt64 in
   let local = State.allocate_synthetic_local state in
   let make_receiver mode : Core.argument = Passed { mode; value = Place collection } in
@@ -856,16 +851,21 @@ let build_elements state ~origin (collection : Core.place) ~(count : Tables.call
         kind = Bind { local; is_var = false; mode = Own };
       };
     element =
-      Lent
-        (State.make_synthetic_expression state ~origin element.callee_result
-           (Call
-              (State.make_call state ~callee:(convert_callee element.callee)
-                 ~arguments:
-                   [
-                     make_receiver lends;
-                     Passed { mode = Read; value = Operands.build Read position };
-                   ]
-                 ~lends:(Some lends))));
+      (match State.find_sequence_element (Core_walk.compute_place_type collection) with
+      | Some element_type ->
+          Element { base = collection; index = position; type_ = element_type; origin }
+      | None ->
+          Lent
+            (State.make_synthetic_expression state ~origin element.callee_result
+               (Call
+                  (State.make_call state ~callee:(convert_callee element.callee)
+                     ~arguments:
+                       [
+                         make_receiver lends;
+                         Passed { mode = Read; value = Operands.build Read position };
+                       ]
+                     ~lends:(Some lends)))));
+    lends;
   }
 
 let quantify_over_elements state (collection : Syntax.expression) ~count ~element ~lends ~origin
@@ -1121,7 +1121,7 @@ let build_collection_literal state (value : Syntax.expression) (elements : Core.
   match read_type state value with
   | Types.Named { path; arguments = [ Types.Type element ] } when Well_known.is List path ->
       build_list_literal state ~origin:value.id element elements
-  | Types.Named { path; _ } when Intrinsic.find_builtin path = Some Array ->
+  | Types.Named { path; _ } when Well_known.find_builtin_type path = Some Array ->
       Collection_literal { elements; construction = Array }
   | Types.Named { path; _ } when Well_known.is Sequence path || Well_known.is Finite_set path ->
       Collection_literal { elements; construction = Specification_only }

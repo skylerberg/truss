@@ -8,8 +8,6 @@ type context = {
   normalize_capabilities : Types.capability_set -> Types.capability_set;
 }
 
-let ground_mode : Types.mode -> Ground.mode = function Read -> Read | Mut -> Mut | Own -> Own
-
 let list_capabilities context substitution (set : Types.capability_set) : Path.t list =
   List.sort_uniq Path.compare
     (List.filter_map
@@ -63,13 +61,11 @@ and ground_function context substitution (function_type : Types.function_type) :
   {
     parameters =
       List.map
-        (fun (yield_mode, ty) -> (ground_mode yield_mode, ground context Types.no_substitution ty))
+        (fun (yield_mode, ty) -> (yield_mode, ground context Types.no_substitution ty))
         function_type.inputs;
     result = ground context Types.no_substitution function_type.output;
     uses = list_capabilities context Types.no_substitution function_type.uses;
   }
-
-let convert_mode : Ground.mode -> Types.mode = function Read -> Read | Mut -> Mut | Own -> Own
 
 let rec convert_ty : Ground.ty -> Types.ty = function
   | Named { path; arguments } -> Named { path; arguments = List.map convert_argument arguments }
@@ -78,9 +74,7 @@ let rec convert_ty : Ground.ty -> Types.ty = function
       Function
         {
           inputs =
-            List.map
-              (fun (yield_mode, ty) -> (convert_mode yield_mode, convert_ty ty))
-              function_type.parameters;
+            List.map (fun (yield_mode, ty) -> (yield_mode, convert_ty ty)) function_type.parameters;
           output = convert_ty function_type.result;
           uses =
             Types.make_capability_set
@@ -135,8 +129,8 @@ let ground_fields context substitution (fields : Types.field list) =
       (field.field_name, Memory_layout.Typed (ground context substitution field.field_type)))
     fields
 
-let compute_named_builtin_shape ty (builtin : Intrinsic.builtin) (arguments : Ground.argument list)
-    : Memory_layout.shape =
+let compute_named_builtin_shape ty (builtin : Language.Builtin_type.t)
+    (arguments : Ground.argument list) : Memory_layout.shape =
   match (builtin, arguments) with
   | Int8, [] -> Scalar (Integer Int8)
   | Int16, [] -> Scalar (Integer Int16)
@@ -168,7 +162,7 @@ let find_builtin_shape (ty : Ground.ty) : Memory_layout.shape option =
   | Named { path; arguments } ->
       Option.map
         (fun builtin -> compute_named_builtin_shape ty builtin arguments)
-        (Intrinsic.find_builtin path)
+        (Well_known.find_builtin_type path)
 
 let compute_defined_shape context ty path arguments : Memory_layout.shape =
   match context.find_type_interface path with

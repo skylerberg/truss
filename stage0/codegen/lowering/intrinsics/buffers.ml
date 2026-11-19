@@ -304,11 +304,7 @@ let lower_lend (context : Context.t) (lend : Intrinsic.lend) : Lowered.place =
   let read_place = Context.read_place context in
   let read_operand = Context.read_operand context in
   match lend with
-  | Storage_at | Storage_at_mut | View_at | View_at_mut ->
+  | Storage_at | View_at ->
       let sequence = read_place 0 in
       Context.check_index context (read_operand 1) (Context.copy_length sequence);
       Storage.index_element sequence (read_operand 1)
-  | Array_at_mut ->
-      Context.check_index context (read_operand 1)
-        (Constant (Integer (UInt64, Context.read_array_length context)));
-      Lowered.project (read_place 0) (Index (read_operand 1))

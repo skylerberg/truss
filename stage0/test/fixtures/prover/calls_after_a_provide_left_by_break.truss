@@ -1,0 +1,25 @@
+capability Fetch {
+  fn get() -> UInt64
+}
+
+type Fixed()
+
+impl Fetch for Fixed {
+  fn get(self) -> UInt64 {
+    7
+  }
+}
+
+fn wrapped(rounds: UInt64) -> UInt64
+  uses Fetch
+  cost calls(Fetch.get) == 1
+{
+  for _ in 0..rounds {
+    provide Fixed() {
+      if Fetch.get() == 7 {
+        break
+      }
+    }
+  }
+  Fetch.get()
+}

@@ -58,7 +58,7 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
             }
     | None -> ()
   in
-  let trait_call ?(mode = Types.Read) trait method_ self_type evidence arguments result :
+  let trait_call ?(mode = Language.Mode.Read) trait method_ self_type evidence arguments result :
       Tables.call =
     let { Well_known.name; receiver; _ } = Well_known.locate_method method_ in
     {
@@ -217,7 +217,7 @@ and check_list_literal state env ?expected (value : Syntax.expression) items =
       register_collection ();
       collection
   | Some (Types.Named { path; arguments = [ Types.Type element; count ] } as array)
-    when Intrinsic.find_builtin path = Some Array ->
+    when Well_known.find_builtin_type path = Some Array ->
       (match count with
       | Types.Value (Known count)
         when (not (Z.fits_int count)) || Z.to_int count <> List.length items ->
@@ -297,7 +297,8 @@ and check_lambda (state : State.state) env ?expected (value : Syntax.expression)
   let expected = Option.map (State.normalize state) expected in
   let make_untyped unknown =
     List.iter
-      (fun written -> Pattern_typing.check_pattern state env written unknown ~mode:Types.Read)
+      (fun written ->
+        Pattern_typing.check_pattern state env written unknown ~mode:Language.Mode.Read)
       parameters;
     ignore (Statements.check_block_value state env body);
     unknown
@@ -307,7 +308,8 @@ and check_lambda (state : State.state) env ?expected (value : Syntax.expression)
     | Some (Types.Function function_type)
       when List.length function_type.inputs = List.length parameters ->
         List.iter2
-          (fun written (mode, input) -> Pattern_typing.check_pattern state env written input ~mode)
+          (fun written (mode, input) ->
+            Pattern_typing.check_parameter_pattern state env written input ~mode)
           parameters function_type.inputs;
         let output = function_type.output in
         let lambda_env = { env with output = Some (Returns output) } in
@@ -491,7 +493,8 @@ and match_ state env ?expected (value : Syntax.expression) scrutinees arms =
                  (List.length arm.patterns) (List.length types))
           in
           List.iter
-            (fun written -> Pattern_typing.check_pattern state env written unknown ~mode:Types.Read)
+            (fun written ->
+              Pattern_typing.check_pattern state env written unknown ~mode:Language.Mode.Read)
             arm.patterns
         else
           List.iter2
@@ -529,7 +532,7 @@ and check_collection_element state env ~(quantifier : Syntax.expression)
       match
         Name_lookup.find_elements_calls state
           (State.read_span state collection.id)
-          collection_type Types.Read
+          collection_type Language.Mode.Read
       with
       | Visible (loop, element, _) ->
           State.record_loop state ~loop:quantifier.id ~iterable:collection loop;

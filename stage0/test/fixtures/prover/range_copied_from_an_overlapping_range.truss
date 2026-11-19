@@ -1,0 +1,5 @@
+fn overlap(items: mut List[Int64])
+  requires items.length() == 6
+{
+  mut items[1..5].copy_from(items[0..4])
+}

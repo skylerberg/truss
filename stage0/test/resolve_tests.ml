@@ -466,7 +466,7 @@ let () =
       let packages = setup [ ("app::main", Fixtures.Resolve.counter_method) ] in
       let owner = Path.Top { module_ = parse_module "app::main"; name = "Counter" } in
       match (Support.make_names packages).list_members owner "get" with
-      | [ { path = Method { receiver = Read; _ }; _ } ] -> ()
+      | [ { path = Method { receiver = Instance Read; _ }; _ } ] -> ()
       | reported -> Harness.fail "found %d members" (List.length reported));
   Harness.test "a method can be written in another file of its type's package" (fun () ->
       let packages =

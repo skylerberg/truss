@@ -63,6 +63,7 @@
   lowering_tests)
  (libraries
   codegen_support
+  language
   harness
   core_lint
   compiler_bug

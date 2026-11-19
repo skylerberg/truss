@@ -34,7 +34,7 @@ module Elaborator : sig
   type cost_operand = Elaborator.cost_operand = {
     written : Syntax.expression;
     cost_function : Syntax.name;
-    metric : Metric.t;
+    metric : Language.Metric.t;
     callee : operand_callee;
   }
 

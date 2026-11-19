@@ -600,7 +600,8 @@ let () =
       let item =
         Lowered.Item.Code
           {
-            path = Method { owner = Well_known.make_path List; name = "each"; receiver = Read };
+            path =
+              Method { owner = Well_known.make_path List; name = "each"; receiver = Instance Read };
             instantiation =
               { Ground.no_instantiation with type_arguments = [ Type Codegen_support.int64 ] };
           }
@@ -1323,3 +1324,29 @@ let () =
       match Convention.classify_parameter env Own (make_array_type 4) with
       | Some (Value _) -> ()
       | _ -> Codegen_support.fail "a small array that is given away is passed by address")
+
+let () =
+  Codegen_support.test
+    "a `mut Slice` is passed by value, since the callee cannot assign it, and another `mut` \
+     parameter by address" (fun () ->
+      let slice : Ground.ty =
+        Named { path = Well_known.make_path Slice; arguments = [ Type Codegen_support.int64 ] }
+      in
+      let env =
+        Codegen_support.make_shape_env
+          ~extra:
+            [
+              ( Ground.to_string slice,
+                Memory_layout.Record
+                  [
+                    Codegen_support.field "elements" (Storage.make_view_type Codegen_support.int64);
+                  ] );
+            ]
+          ()
+      in
+      (match Convention.classify_parameter env Mut slice with
+      | Some (Value _) -> ()
+      | _ -> Codegen_support.fail "a `mut Slice` is passed by address");
+      match Convention.classify_parameter env Mut Codegen_support.int64 with
+      | Some (Pointer { writable = true; _ }) -> ()
+      | _ -> Codegen_support.fail "a `mut` number is not passed by a writable address")

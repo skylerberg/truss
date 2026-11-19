@@ -296,7 +296,7 @@ and is_same_index_key left right =
   | Place_key left, Place_key right -> is_same_place left right
   | _ -> false
 
-let describe_comparison (comparison : Syntax.comparison) =
+let describe_comparison (comparison : Language.Comparison.t) =
   match comparison with
   | Equal -> ("==", true)
   | Not_equal -> ("!=", false)

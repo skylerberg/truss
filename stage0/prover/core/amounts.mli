@@ -17,7 +17,7 @@ val compute_amount_within :
   State.context -> State.frame -> Costs.counter -> Logic.term -> Logic.term
 
 val compute_callee_amount :
-  ?method_cost:(Metric.t -> Logic.term) ->
+  ?method_cost:(Language.Metric.t -> Logic.term) ->
   State.context ->
   State.frame ->
   is_recursive:bool ->
@@ -27,6 +27,15 @@ val compute_callee_amount :
   values:State.passed list ->
   change:(unit -> Logic.term) option ->
   Costs.counter ->
+  Logic.term
+
+val compute_capability_amount :
+  State.context ->
+  State.frame ->
+  uses:Types.capability_set ->
+  Path.t ->
+  Costs.counter ->
+  direct:(unit -> Logic.term) ->
   Logic.term
 
 val compute_step_amount :
@@ -39,14 +48,24 @@ val compute_potential :
 
 val compute_elements_potential : State.context -> Types.ty -> Logic.term -> Logic.term
 
+val assume_element_potential_change :
+  State.context ->
+  State.frame ->
+  Types.ty ->
+  before:Logic.term ->
+  after:Logic.term ->
+  replaced:Logic.term ->
+  written:Logic.term ->
+  unit
+
 val declare_method_cost :
   State.context ->
   State.frame ->
-  Metric.t ->
+  Language.Metric.t ->
   Path.t ->
   trait_arguments:Types.argument list ->
   Types.ty ->
   Logic.term
 
 val compute_method_cost :
-  State.context -> State.frame -> Metric.t -> Invocation.callee -> Logic.term
+  State.context -> State.frame -> Language.Metric.t -> Invocation.callee -> Logic.term

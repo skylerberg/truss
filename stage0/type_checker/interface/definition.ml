@@ -34,7 +34,7 @@ let sort_in_declared_order lookups path ~variant ~name_of fields =
         fields
   | None -> fields
 
-let make_builtin_shape (builtin : Intrinsic.builtin) : Types.type_interface =
+let make_builtin_shape (builtin : Language.Builtin_type.t) : Types.type_interface =
   let bounds : Types.trait_reference list =
     match builtin with
     | Shared -> [ { trait = Well_known.make_path Storable; trait_arguments = []; associated = [] } ]
@@ -44,7 +44,7 @@ let make_builtin_shape (builtin : Intrinsic.builtin) : Types.type_interface =
     List.map
       (fun (name, (kind : Resolve.Names.generic_kind)) : Types.generic ->
         {
-          generic = { owner = Intrinsic.make_builtin_path builtin; name };
+          generic = { owner = Well_known.make_builtin_type_path builtin; name };
           kind = (match kind with Type_kind -> Type_generic bounds | Value_kind -> Value_generic);
         })
       (Resolve.Names.list_builtin_generics builtin)
@@ -52,7 +52,7 @@ let make_builtin_shape (builtin : Intrinsic.builtin) : Types.type_interface =
   { type_generics; shape = Builtin_type builtin; opaque = true; derives = [] }
 
 let find_type_interface lookups (path : Path.t) =
-  match Intrinsic.find_builtin path with
+  match Well_known.find_builtin_type path with
   | Some builtin -> Some (make_builtin_shape builtin)
   | None -> (
       match find_interface lookups path with Some (Type_interface type_) -> Some type_ | _ -> None)

@@ -9,5 +9,5 @@ val make_call :
   list_bounds:(Types.parameter -> Types.trait_reference list) ->
   callee:Core.operand Core.target ->
   arguments:Core.argument list ->
-  lends:Types.mode option ->
+  lends:Language.Mode.t option ->
   Core.call

@@ -1,2 +1,2 @@
-val build : Types.mode -> Core.expression -> Core.operand
-val build_argument : Types.mode -> Core.expression -> Core.argument
+val build : Language.Mode.t -> Core.expression -> Core.operand
+val build_argument : Language.Mode.t -> Core.expression -> Core.argument

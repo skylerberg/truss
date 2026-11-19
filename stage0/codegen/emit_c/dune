@@ -1,6 +1,7 @@
 (library
  (name emit_c)
  (libraries
+  language
   structural_key
   storage
   builtin_records

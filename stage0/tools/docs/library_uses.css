@@ -1,3 +1,38 @@
+html:not(:has(#show-test-and-tools:checked)) .test-and-tools,
+html:has(#show-test-and-tools:checked) .without-test-and-tools {
+  display: none;
+}
+
+.test-and-tools-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 1em;
+  font-size: 0.875rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.test-and-tools-toggle input {
+  margin: 0;
+  accent-color: var(--link-color);
+}
+
+.tag {
+  display: inline-block;
+  padding: 1px 7px;
+  border: 1px solid var(--area);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--area) 13%, var(--main-background));
+  color: var(--color);
+  font: 0.8125rem/1.4 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+a.tag:hover {
+  background: color-mix(in srgb, var(--area) 35%, var(--main-background));
+  box-shadow: inset 0 0 0 1px var(--area);
+}
+
 .library-uses dl {
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
@@ -13,19 +48,27 @@
   margin: 0;
 }
 
-.library-uses .library {
-  display: inline-block;
-  padding: 1px 7px;
-  border: 1px solid var(--area);
-  border-radius: 5px;
-  background: color-mix(in srgb, var(--area) 13%, var(--main-background));
-  color: var(--color);
-  font: 0.8125rem/1.4 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+.item-users {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+  margin: 6px 0 2px;
 }
 
-.library-uses a.library:hover {
-  background: color-mix(in srgb, var(--area) 35%, var(--main-background));
-  box-shadow: inset 0 0 0 1px var(--area);
+span.item-users {
+  display: inline-flex;
+  margin: 0 0 0 1.5em;
+}
+
+.item-users .label {
+  opacity: 0.65;
+  font-size: 0.8125rem;
+}
+
+.item-users .tag {
+  padding: 0 5px;
+  font-size: 0.75rem;
 }
 
 @media (max-width: 640px) {

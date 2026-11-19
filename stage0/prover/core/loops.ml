@@ -35,7 +35,7 @@ type while_loop = {
   test : State.frame -> (State.frame * Logic.term) option;
   run_body : State.frame -> State.frame list * State.frame list;
   on_failure : State.frame -> State.frame option;
-  measure_operands : (Core.comparison * (State.frame -> Logic.term * Logic.term)) option;
+  measure_operands : (Language.Comparison.t * (State.frame -> Logic.term * Logic.term)) option;
 }
 
 type iterable =
@@ -365,15 +365,6 @@ let havoc context frame (changed : State.changed) =
         in
         { frame with locals = Locals.add local (Facts.arrive context frame "loop" ty) frame.locals })
       frame changed.changed_locals
-  in
-  let frame =
-    {
-      frame with
-      slices =
-        List.fold_left
-          (fun slices local -> Locals.add local State.Unknown_slice slices)
-          frame.slices changed.reassigned;
-    }
   in
   match (changed.changes_self, frame.self_type) with
   | true, Some ty -> { frame with self = Some (Facts.arrive context frame "loop" ty) }
@@ -773,7 +764,7 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
           [
             {
               position = 0;
-              mode = Types.Mut;
+              mode = Language.Mode.Mut;
               shape = Other;
               origin = None;
               passed_place = Some cursor_access;
@@ -966,7 +957,7 @@ let run_while_loop context (frame : State.frame) (loop : while_loop) =
         let left, right = Validity.run_without_costs context (fun () -> read_operands at) in
         let distance from into = Logic.subtract into from in
         let through distance = Logic.add distance (Logic.int 1) in
-        match (comparison : Core.comparison) with
+        match (comparison : Language.Comparison.t) with
         | Less -> Some [ distance left right ]
         | Less_equal -> Some [ through (distance left right) ]
         | Greater -> Some [ distance right left ]
@@ -974,7 +965,7 @@ let run_while_loop context (frame : State.frame) (loop : while_loop) =
         | Equal | Not_equal -> Facts.raise_bug "an equality gives a loop its measure")
     | None, _ -> None
   in
-  let start_measures = measure_terms inside in
+  let start_measures = measure_terms head in
   if context.terminates && start_measures = None then
     Facts.raise_bug "a `while` loop has no measure in a body that terminates";
   let most =

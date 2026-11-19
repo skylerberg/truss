@@ -2,14 +2,13 @@
  (name interface)
  (modules_without_implementation environment lookups)
  (libraries
-  metric
+  language
   structural_key
   source
   compiler_bug
   path
   grant
   well_known
-  intrinsic
   types
   syntax
   syntax_walk

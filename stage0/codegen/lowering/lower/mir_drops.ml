@@ -100,7 +100,9 @@ let rec drop_path state (path : Moves.path) =
                  (List.map
                     (function
                       | Mir.Field field -> "." ^ field
-                      | Variant_field { variant; field } -> Printf.sprintf ".(%s).%s" variant field)
+                      | Variant_field { variant; field } -> Printf.sprintf ".(%s).%s" variant field
+                      | Element _ -> "[_]"
+                      | Range _ -> "[_.._]")
                     path.projections))
       in
       Emit_c.Ir_builder.emit_when state.builder (Holds (Copy flag)) (fun () -> drop_held state path)
@@ -212,9 +214,10 @@ let drop_parameters state =
 let drop_overwritten state (target : Mir.place) (destination : Lowered.place) ty =
   match Moves.find_place_path target with
   | Some path
-    when Moves.find_status (Mir_places.require_mir_frame state).moves
-           (Mir_places.require_mir_frame state).move_state { path with projections = [] }
-         <> None ->
+    when (not (Mir.is_in_sequence target))
+         && Moves.find_status (Mir_places.require_mir_frame state).moves
+              (Mir_places.require_mir_frame state).move_state { path with projections = [] }
+            <> None ->
       drop_path state path
   | _ ->
       if not (Lowering.is_trivial state ty) then

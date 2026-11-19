@@ -1,10 +1,11 @@
-type local = { name : string; type_ : Types.ty; is_var : bool; mode : Types.mode }
+type binding = Parameter | Var | Let
+type local = { name : string; type_ : Types.ty; binding : binding; mode : Language.Mode.t }
 
 type env = {
   output : Types.result option;
   specification : bool;
   self : Types.ty option;
-  self_mode : Types.mode;
+  self_mode : Language.Mode.t;
   loop_element : Types.ty option;
   compile_time : bool;
   in_quantifier : bool;
@@ -76,10 +77,10 @@ type state = {
   mutable law_parameters : (string * Types.ty) list;
   mutable frames : frame list;
   mutable locals_read : Syntax.id list;
-  mutable keyword_modes : (Syntax.id * Types.mode) list;
-  mutable places_without_keyword : (Syntax.id * Types.mode) list;
+  mutable keyword_modes : (Syntax.id * Language.Mode.t) list;
+  mutable places_without_keyword : (Syntax.id * Language.Mode.t) list;
   mutable mode_keywords : Core.mode_keyword list;
-  yielded : (Syntax.id, Types.mode) Hashtbl.t;
+  yielded : (Syntax.id, Language.Mode.t) Hashtbl.t;
   lent_tails : (Syntax.id, unit) Hashtbl.t;
   mutable lambdas : Source.Definition_span.t list;
   mutable unsolved : Diagnostic.reported option;
@@ -518,7 +519,7 @@ let is_view state type_ =
   Interface.Impls.is_view state.lookups.interface ~list_bounds:(lookup_bounds state)
     (zonk state type_)
 
-let decide_binding_mode state (mode : Types.mode) type_ : Types.mode =
+let decide_binding_mode state (mode : Language.Mode.t) type_ : Language.Mode.t =
   match mode with Read when is_plain state type_ -> Own | Read | Mut | Own -> mode
 
 let rec copy_plain_bindings state (pattern : Core.pattern) : Core.pattern =
@@ -859,8 +860,8 @@ let build_block state (written : Syntax.block) : Core.block =
   let statements, value = build_statements written.statements in
   { statements; value }
 
-let declare state (name : Syntax.name) type_ ~is_var ~mode =
-  Hashtbl.replace state.locals name.id { name = name.text; type_; is_var; mode };
+let declare state (name : Syntax.name) type_ ~binding ~mode =
+  Hashtbl.replace state.locals name.id { name = name.text; type_; binding; mode };
   state.tables.local_types.(name.id) <- Some type_;
   match find_current_frame state with
   | Some frame ->
@@ -868,8 +869,8 @@ let declare state (name : Syntax.name) type_ ~is_var ~mode =
       frame.declared <- name.id :: frame.declared
   | None -> ()
 
-let declare_compiled state env (name : Syntax.name) type_ ~is_var ~mode =
-  declare state name type_ ~is_var ~mode;
+let declare_compiled state env (name : Syntax.name) type_ ~binding ~mode =
+  declare state name type_ ~binding ~mode;
   match find_current_frame state with
   | Some frame when is_compiled env ->
       frame.compiled_bindings <- name.id :: frame.compiled_bindings;
@@ -1081,7 +1082,7 @@ let check_operand_clause state (cost : Syntax.cost) (operand : Interface.Elabora
   (match cost.resource with
   | Metric bounded when bounded = operand.metric -> ()
   | Metric bounded ->
-      let bounded = Metric.show bounded in
+      let bounded = Language.Metric.show bounded in
       report state Cost_of_other_resource span
         ~fixes:
           [
@@ -1114,41 +1115,40 @@ let check_cost state (cost : Syntax.cost) =
       List.iter (check_operand_clause state cost)
         (Interface.Elaborator.list_cost_operands state.context value)
 
-let make_slice state ~origin (base : Core.place) ~start ~stop ~inclusive : Core.kind =
+let find_sequence_element (sequence : Types.ty) =
+  match sequence with
+  | Types.Named { path; arguments = Types.Type element :: _ }
+    when Well_known.is_buffer_sequence path || Well_known.find_builtin_type path = Some Array ->
+      Some element
+  | _ -> None
+
+let make_range state ~origin (base : Core.place) ~start ~stop ~inclusive : Core.kind =
   let make = make_synthetic_expression state ~origin in
   let uint64 = Types.make_builtin UInt64 in
-  let path, type_arguments =
+  let element =
     match Core_walk.compute_place_type base with
-    | Types.Named { path; arguments } -> (path, arguments)
-    | type_ -> raise_bug "a slice of `%s`" (Types.show type_)
+    | Types.Named { arguments = Types.Type element :: _; _ } -> element
+    | type_ -> raise_bug "a range of `%s`" (Types.show type_)
   in
-  let make_method_callee name =
-    make_callee state
-      (Function
-         {
-           path = Method { owner = path; name; receiver = Read };
-           instantiation = { Types.no_instantiation with type_arguments };
-         })
-  in
-  let build_read_argument = Operands.build_argument Read in
-  let start = match start with Some start -> start | None -> make uint64 (Integer Z.zero) in
-  match stop with
-  | None ->
-      Slice
-        { base; callee = make_method_callee "slice_from"; bounds = [ build_read_argument start ] }
-  | Some stop ->
-      let stop =
+  let stop =
+    Option.map
+      (fun stop ->
         if inclusive then
           make uint64
             (Operator { operation = Add; arguments = [ stop; make uint64 (Integer Z.one) ] })
-        else stop
-      in
-      Slice
-        {
-          base;
-          callee = make_method_callee "slice_range";
-          bounds = [ build_read_argument start; build_read_argument stop ];
-        }
+        else stop)
+      stop
+  in
+  Use
+    (Range
+       {
+         base;
+         start = (match start with Some start -> start | None -> make uint64 (Integer Z.zero));
+         stop;
+         type_ =
+           Types.Named { path = Well_known.make_path Slice; arguments = [ Types.Type element ] };
+         origin;
+       })
 
 type conversion =
   | From_never
@@ -1195,14 +1195,12 @@ let convert state env ?argument ?(takes_view_as_owner = false) ?expression
               | From_integer -> convert From_integer
               | View_to_owned -> convert View_to_owned
               | Owned_to_view
-                when argument = Some Types.Mut
-                     && (Types.is_well_known List inner.type_ || Types.is_builtin Array inner.type_)
-                ->
+                when Types.is_well_known List inner.type_ || Types.is_builtin Array inner.type_ ->
                   let base : Core.place =
                     match inner.kind with Use place -> place | _ -> Temporary inner
                   in
                   make_synthetic_expression state ~origin:id expected
-                    (make_slice state ~origin:id base ~start:None ~stop:None ~inclusive:false)
+                    (make_range state ~origin:id base ~start:None ~stop:None ~inclusive:false)
               | Owned_to_view -> (
                   match inner.type_ with
                   | Types.Named { path; arguments } ->
@@ -1212,7 +1210,9 @@ let convert state env ?argument ?(takes_view_as_owner = false) ?expression
                               ~callee:
                                 (Function
                                    {
-                                     path = Method { owner = path; name = "slice"; receiver = Read };
+                                     path =
+                                       Method
+                                         { owner = path; name = "slice"; receiver = Instance Read };
                                      instantiation =
                                        { Types.no_instantiation with type_arguments = arguments };
                                    })

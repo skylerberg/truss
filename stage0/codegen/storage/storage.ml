@@ -3,7 +3,8 @@ let make_view_type element = Ground.make_builtin View ~arguments:[ Type element 
 
 let find_element builtin (ty : Ground.ty) =
   match ty with
-  | Named { path; arguments = [ Type element ] } when Intrinsic.find_builtin path = Some builtin ->
+  | Named { path; arguments = [ Type element ] }
+    when Well_known.find_builtin_type path = Some builtin ->
       Some element
   | _ -> None
 

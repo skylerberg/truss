@@ -76,7 +76,7 @@ let fold_negation (value : Lowered.static_value) =
         (Lowered.Static_scalar (Float32 (Int32.bits_of_float (Float.neg (Int32.float_of_bits x)))))
   | _ -> None
 
-let fold_comparison (comparison : Core.comparison) (left : Lowered.static_value)
+let fold_comparison (comparison : Language.Comparison.t) (left : Lowered.static_value)
     (right : Lowered.static_value) =
   match (left, right) with
   | Static_scalar (Integer (_, x)), Static_scalar (Integer (_, y)) ->
@@ -286,14 +286,15 @@ and fold_body ~visiting ~depth ~steps state (mir : Mir.Graph.t)
   in
   let fold_statement (statement : Mir.Graph.statement) =
     match statement.kind with
-    | Assign { target = { root = Local local; projections = [] } as target; value; _ } ->
+    | Basic (Assign { target = { root = Local local; projections = [] } as target; value; _ }) ->
         let* value = fold_rvalue local value in
         assign (Some target) value
-    | Call { destination; call = called } -> fold_call destination called
-    | Assert condition -> (
+    | Basic (Call { destination; call = called }) -> fold_call destination called
+    | Basic (Assert condition) -> (
         match fold_operand condition with Some (Static_scalar (Bool true)) -> Some () | _ -> None)
-    | Live _ | Dead _ | Loan_start _ | Loan_end _ | Matched _ | Ghost_assert _ | Proof _ -> Some ()
-    | Assign _ | Lend _ | Slice _ | Template _ | Echo _ | Provide _ | Provide_end -> None
+    | Basic (Live _ | Dead _ | Loan_start _ | Loan_end _ | Matched _ | Ghost_assert _ | Proof _) ->
+        Some ()
+    | Basic (Assign _ | Lend _ | Template _ | Echo _) | Provide_start _ | Provide_end -> None
   in
   let rec run block =
     if !steps <= 0 then None

@@ -10,11 +10,21 @@ let ignore_all =
   { expression = ignore; statement = ignore; pattern = ignore; callee = ignore; place = ignore }
 
 let compute_place_type : Core.place -> Types.ty = function
-  | Local { type_; _ } | Constant { type_; _ } | Field { type_; _ } -> type_
+  | Local { type_; _ }
+  | Constant { type_; _ }
+  | Field { type_; _ }
+  | Element { type_; _ }
+  | Range { type_; _ } ->
+      type_
   | Lent value | Temporary value -> value.type_
 
 let compute_place_origin : Core.place -> Core.origin = function
-  | Local { origin; _ } | Constant { origin; _ } | Field { origin; _ } -> origin
+  | Local { origin; _ }
+  | Constant { origin; _ }
+  | Field { origin; _ }
+  | Element { origin; _ }
+  | Range { origin; _ } ->
+      origin
   | Lent value | Temporary value -> value.origin
 
 let rec walk_place visit core_place =
@@ -22,6 +32,13 @@ let rec walk_place visit core_place =
   match core_place with
   | Local _ | Constant _ -> ()
   | Field { base; _ } -> walk_place visit base
+  | Element { base; index; _ } ->
+      walk_place visit base;
+      visit.expression index
+  | Range { base; start; stop; _ } ->
+      walk_place visit base;
+      visit.expression start;
+      Option.iter visit.expression stop
   | Lent call -> visit.expression call
   | Temporary value -> visit.expression value
 
@@ -64,12 +81,6 @@ let walk_expression_children visit (node : Core.expression) =
   | Record_update { base; updates } ->
       visit.expression base;
       List.iter (fun (_, value) -> visit.expression value) updates
-  | Slice { base; callee; bounds } ->
-      walk_place visit base;
-      visit.callee callee;
-      List.iter
-        (function Core.Passed { value; _ } -> walk_operand visit value | Default -> ())
-        bounds
   | Call call ->
       (match call.callee.target with
       | Indirect function_value -> walk_operand visit function_value
@@ -80,11 +91,7 @@ let walk_expression_children visit (node : Core.expression) =
       visit.callee call.callee
   | Operator { arguments; _ } | Specification_function { arguments; _ } ->
       List.iter visit.expression arguments
-  | Compare { left; right; _ }
-  | And (left, right)
-  | Or (left, right)
-  | Implies (left, right)
-  | Identical (left, right) ->
+  | Compare { left; right; _ } | Connective { left; right; _ } | Identical (left, right) ->
       visit.expression left;
       visit.expression right
   | Not inner | Echo inner | Old inner | To_any { value = inner; _ } -> visit.expression inner
@@ -118,7 +125,7 @@ let walk_expression_children visit (node : Core.expression) =
           visit.expression start;
           visit.expression stop;
           visit.pattern pattern
-      | Over_elements { pattern; elements = { count; position; element } } ->
+      | Over_elements { pattern; elements = { count; position; element; _ } } ->
           visit.expression count;
           visit.pattern position;
           walk_place visit element;
@@ -129,7 +136,7 @@ let walk_iteration visit : Core.iteration -> unit = function
   | Integer_range { start; stop; _ } ->
       visit.expression start;
       visit.expression stop
-  | Elements { count; position; element } ->
+  | Elements { count; position; element; _ } ->
       visit.expression count;
       visit.pattern position;
       walk_place visit element
@@ -241,7 +248,7 @@ let is_functional walk =
               if
                 List.exists
                   (function
-                    | Core.Passed { mode = Types.Mut; _ } -> true
+                    | Core.Passed { mode = Language.Mode.Mut; _ } -> true
                     | Core.Passed _ | Core.Default -> false)
                   arguments
               then fine := false;
@@ -301,8 +308,8 @@ let compute_tasks_use ?(read_solved = fun (_ : int) : Types.capability_set -> Ty
          statement =
            (fun node ->
              match node.kind with
-             | Concurrent _ | For { mode = Concurrent_loop; _ } -> usage := Uses_tasks
-             | For { mode = Sequential | Parallel_loop; _ }
+             | Concurrent _ | For { mode = Concurrent; _ } -> usage := Uses_tasks
+             | For { mode = Sequential | Parallel; _ }
              | Let _ | Evaluate _ | Assign _ | Compound_assign _ | While _ | Parallel _ | Proof _
              | Assert _ | Yield _ ->
                  ());

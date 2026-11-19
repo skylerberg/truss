@@ -113,27 +113,76 @@ let lambda_captures_target (context : State.context) lambda target =
   | Some captured, Some local -> List.mem local captured
   | _ -> false
 
-let make_reach_formula context frame (uses : Types.capability_set) (values : State.passed list)
-    (target : Costs.target) =
-  match target with
-  | Through term ->
-      Logic.disjunction
-        (List.map
-           (fun (passed : State.passed) ->
-             if lambda_captures_target context passed.term term then Logic.Boolean true
-             else make_may_be_target context frame passed.term passed.type_ term)
-           values)
-  | Capability path | Capability_method (path, _) ->
-      Logic.Boolean
-        (Types.exists_capability
-           (function
-             | Types.Capability used -> Path.equal used path
-             | Types.Capability_parameter _ | Types.Capability_projection _
-             | Types.Capability_variable _ ->
-                 true
-             | Types.Capability_error _ ->
-                 Facts.raise_bug "the prover reads a capability with an error")
-           uses)
+let make_reach_formula context frame (values : State.passed list) term =
+  Logic.disjunction
+    (List.map
+       (fun (passed : State.passed) ->
+         if lambda_captures_target context passed.term term then Logic.Boolean true
+         else make_may_be_target context frame passed.term passed.type_ term)
+       values)
+
+type capability_reach = Not_reached | Reached_directly | Reached_through_providers
+
+let join_reach first second =
+  match (first, second) with
+  | Reached_through_providers, _ | _, Reached_through_providers -> Reached_through_providers
+  | Reached_directly, _ | _, Reached_directly -> Reached_directly
+  | Not_reached, Not_reached -> Not_reached
+
+let list_providers (enclosing : Mir.provided list list) =
+  let rec list = function
+    | [] -> []
+    | block :: outer ->
+        List.map
+          (fun provider -> (provider, outer))
+          (List.concat_map (fun (provided : Mir.provided) -> provided.provides) block)
+        @ list outer
+  in
+  list enclosing
+
+let find_capability_reach (context : State.context) ~(uses : Types.capability_set) capability =
+  let rec reach enclosing uses =
+    let providers = list_providers enclosing in
+    let find_provider used =
+      List.find_opt
+        (fun ((provider : Core.provided), _) -> Path.equal provider.capability used)
+        providers
+    in
+    let reach_through ((provider : Core.provided), outer) =
+      match Interface.Definition.find_impl_interface context.lookups.interface provider.impl with
+      | Some impl ->
+          if
+            reach outer (Types.substitute_capabilities provider.arguments impl.impl_uses)
+            = Not_reached
+          then Not_reached
+          else Reached_through_providers
+      | None -> Facts.raise_bug "the provided `%s` has no interface" (Path.show provider.impl)
+    in
+    List.fold_left
+      (fun reached (used : Types.capability) ->
+        join_reach reached
+          (match used with
+          | Capability path -> (
+              match find_provider path with
+              | Some found -> reach_through found
+              | None -> if Path.equal path capability then Reached_directly else Not_reached)
+          | Capability_parameter _ | Capability_projection _ | Capability_variable _ ->
+              List.fold_left
+                (fun reached found -> join_reach reached (reach_through found))
+                (match find_provider capability with
+                | Some _ -> Not_reached
+                | None -> Reached_directly)
+                providers
+          | Capability_error _ -> Facts.raise_bug "the prover reads a capability with an error"))
+      Not_reached (Types.list_capabilities uses)
+  in
+  reach context.enclosing_provides uses
+
+let compute_capability_amount context frame ~uses capability counter ~direct =
+  match find_capability_reach context ~uses capability with
+  | Not_reached -> Costs.zero
+  | Reached_through_providers -> Operations.declare_unknown_amount context frame counter
+  | Reached_directly -> direct ()
 
 let make_conditional_amount condition amount =
   match condition with
@@ -141,8 +190,8 @@ let make_conditional_amount condition amount =
   | Logic.Boolean false -> Costs.zero
   | condition -> Logic.ite condition amount Costs.zero
 
-let compute_callee_amount ?(method_cost : (Metric.t -> Logic.term) option) (context : State.context)
-    after ~is_recursive ~clauses:(declared_clauses : State.clauses list)
+let compute_callee_amount ?(method_cost : (Language.Metric.t -> Logic.term) option)
+    (context : State.context) after ~is_recursive ~clauses:(declared_clauses : State.clauses list)
     ~(bind_frame : State.clauses -> State.frame) ~uses ~(values : State.passed list) ~change
     (counter : Costs.counter) =
   let is_recursive_call =
@@ -187,10 +236,15 @@ let compute_callee_amount ?(method_cost : (Metric.t -> Logic.term) option) (cont
       declared_clauses
   in
   match counter.resource with
-  | Calls target when make_reach_formula context after uses values target = Logic.Boolean false ->
+  | Calls (Capability capability | Capability_method (capability, _)) ->
+      compute_capability_amount context after ~uses capability counter ~direct:(fun () ->
+          match find_first_clauses () with
+          | Some (clause :: _) -> compute_amount clause
+          | Some [] | None -> Operations.declare_unknown_amount context after counter)
+  | Calls (Through term) when make_reach_formula context after values term = Logic.Boolean false ->
       Costs.zero
   | Calls (Through term) -> (
-      let reaches = make_reach_formula context after uses values (Through term) in
+      let reaches = make_reach_formula context after values term in
       let receiving =
         List.filter_map
           (fun (passed : State.passed) -> if passed.term = term then Some passed.position else None)
@@ -209,7 +263,7 @@ let compute_callee_amount ?(method_cost : (Metric.t -> Logic.term) option) (cont
             Costs.zero clauses
       | _ ->
           make_conditional_amount reaches (Operations.declare_unknown_amount context after counter))
-  | _ -> (
+  | Metric _ -> (
       let compute_method_amount () =
         match (method_cost, counter.resource, counter.counting) with
         | Some compute_cost, Metric Time, Units ->
@@ -252,7 +306,7 @@ let compute_step_amount context frame (invocation : Invocation.t) (values : Stat
               | Some passed -> (
                   match passed.type_ with
                   | Types.Named { path; arguments = [ Types.Type element ] } -> (
-                      match Intrinsic.find_builtin path with
+                      match Well_known.find_builtin_type path with
                       | Some ((Storage | View) as builtin) ->
                           Models.make_sequence_length context element
                             (Intrinsics.make_buffer_model context builtin element passed.term)
@@ -283,11 +337,15 @@ let compute_step_amount context frame (invocation : Invocation.t) (values : Stat
       | Calls _ -> Costs.zero)
   | Capability_method { capability; name } -> (
       match counter.resource with
-      | Calls (Capability path) when Path.equal path capability -> Logic.int 1
-      | Calls (Capability_method (path, method_)) when Path.equal path capability && method_ = name
-        ->
-          Logic.int 1
-      | Calls (Capability _ | Capability_method _ | Through _) -> Costs.zero
+      | Calls (Capability counted | Capability_method (counted, _)) ->
+          compute_capability_amount context frame ~uses:invocation.uses counted counter
+            ~direct:(fun () ->
+              match counter.resource with
+              | _ when not (Path.equal counted capability) ->
+                  Operations.declare_unknown_amount context frame counter
+              | Calls (Capability_method (_, method_)) when method_ <> name -> Costs.zero
+              | Calls _ | Metric _ -> Logic.int 1)
+      | Calls (Through _) -> Costs.zero
       | Metric _ -> (
           match Contracts.find_capability_clauses context.lookups capability name with
           | Some capability_clauses ->
@@ -306,9 +364,12 @@ let compute_step_amount context frame (invocation : Invocation.t) (values : Stat
           | None -> Operations.declare_unknown_amount context frame counter))
   | Function _ | Trait_method _ | Indirect () -> (
       match counter.resource with
-      | Calls target ->
+      | Calls (Capability capability | Capability_method (capability, _)) ->
+          compute_capability_amount context frame ~uses:invocation.uses capability counter
+            ~direct:(fun () -> Operations.declare_unknown_amount context frame counter)
+      | Calls (Through term) ->
           make_conditional_amount
-            (make_reach_formula context frame invocation.uses values target)
+            (make_reach_formula context frame values term)
             (Operations.declare_unknown_amount context frame counter)
       | Metric _ -> Operations.declare_unknown_amount context frame counter)
 
@@ -320,15 +381,15 @@ let declare_held_symbol context ty term =
 let compute_buffer_elements context (ty : Types.ty) =
   match ty with
   | Types.Named { path; arguments = [ Types.Type element; Types.Value _ ] }
-    when Intrinsic.find_builtin path = Some Array ->
+    when Well_known.find_builtin_type path = Some Array ->
       Option.map
         (fun model_of -> (element, model_of))
         (Models.find_model_function context ty ~model:(Models.make_sequence_type element))
   | Types.Named { path; arguments = [ Types.Type element ] }
-    when Intrinsic.find_builtin path = Some Storage ->
+    when Well_known.find_builtin_type path = Some Storage ->
       Some (element, fun term -> Intrinsics.make_buffer_model context Storage element term)
   | Types.Named { path; arguments = [ Types.Type element ] }
-    when Intrinsic.find_builtin path = Some View ->
+    when Well_known.find_builtin_type path = Some View ->
       Some (element, fun term -> Intrinsics.make_buffer_model context View element term)
   | Types.Named { path; arguments } when Types.find_builtin ty = None -> (
       match Interface.Definition.find_interface context.lookups.interface path with
@@ -337,8 +398,8 @@ let compute_buffer_elements context (ty : Types.ty) =
           let substitution = Types.make_substitution type_generics arguments in
           match Types.substitute substitution field.field_type with
           | Types.Named { path = field_path; arguments = [ Types.Type element ] }
-            when Intrinsic.find_builtin field_path = Some Storage
-                 || Intrinsic.find_builtin field_path = Some View ->
+            when Well_known.find_builtin_type field_path = Some Storage
+                 || Well_known.find_builtin_type field_path = Some View ->
               Option.map
                 (fun model_of -> (element, model_of))
                 (Models.find_model_function context ty ~model:(Models.make_sequence_type element))
@@ -354,11 +415,6 @@ let find_buffer_elements (context : State.context) (ty : Types.ty) =
       let elements = compute_buffer_elements context ty in
       Tables.Type_table.replace context.buffers key elements;
       elements
-
-let declare_buffer_slack context (ty : Types.ty) term =
-  let symbol = Logic.Symbol.Slack ty in
-  Facts.declare context (Logic.Function (symbol, [ Facts.declare_sort context ty ], Logic.Int));
-  Logic.Apply (symbol, [ term ])
 
 let declare_potential_measure context element =
   let symbol = Logic.Symbol.Potential_measure element in
@@ -462,12 +518,12 @@ and compute_potential context (frame : State.frame) ?(seen = []) (ty : Types.ty)
           match find_buffer_elements context ty with
           | Some (element, model_of) ->
               let sequence = model_of term in
-              let slack = declare_buffer_slack context ty term in
+              let slack = Intrinsics.declare_buffer_slack context ty term in
               let length = Models.make_sequence_length context element sequence in
               Facts.add_frame_fact context frame
                 Logic.(less_equal (int 0) slack &&& less_equal slack (multiply (int 2) length));
               (match ty with
-              | Types.Named { path; _ } when Intrinsic.find_builtin path = Some Storage ->
+              | Types.Named { path; _ } when Well_known.find_builtin_type path = Some Storage ->
                   let saved =
                     Logic.subtract
                       (Logic.multiply (Logic.int 2) length)
@@ -477,8 +533,8 @@ and compute_potential context (frame : State.frame) ?(seen = []) (ty : Types.ty)
                     (Logic.equal slack
                        (Logic.ite (Logic.greater_equal saved (Logic.int 0)) saved (Logic.int 0)))
               | Types.Named { path; _ }
-                when Intrinsic.find_builtin path = Some View
-                     || Intrinsic.find_builtin path = Some Array ->
+                when Well_known.find_builtin_type path = Some View
+                     || Well_known.find_builtin_type path = Some Array ->
                   Facts.add_frame_fact context frame (Logic.equal slack (Logic.int 0))
               | _ -> ());
               let elements =
@@ -551,7 +607,22 @@ let compute_elements_potential context (ty : Types.ty) term =
   in
   sum_elements ~enclosing:[] ty term
 
-let find_literal_bound (metric : Metric.t) (costs : Mir.cost list) =
+let assume_element_potential_change context frame (sequence : Types.ty) ~before ~after ~replaced
+    ~written =
+  match find_buffer_elements context sequence with
+  | Some (element, model_of) -> (
+      try
+        if has_potential context element then
+          let sum term = sum_element_potentials context element (model_of term) in
+          Facts.assume context frame
+            (Logic.equal (sum after)
+               (Costs.plus
+                  (Costs.minus (sum before) (compute_potential context frame element replaced))
+                  (compute_potential context frame element written)))
+      with Facts.Unsupported _ -> ())
+  | None -> ()
+
+let find_literal_bound (metric : Language.Metric.t) (costs : Mir.cost list) =
   let counter = Costs.make_operand_counter metric in
   List.find_map
     (fun (cost : Mir.cost) ->
@@ -563,8 +634,8 @@ let find_literal_bound (metric : Metric.t) (costs : Mir.cost list) =
         | (Units | At_most | Exactly), (Order_of _ | At_most _ | Exactly _) -> None)
     costs
 
-let find_method_cost_bound context (metric : Metric.t) (method_ : Path.t) ~trait_arguments self_type
-    =
+let find_method_cost_bound context (metric : Language.Metric.t) (method_ : Path.t) ~trait_arguments
+    self_type =
   let holds ty = try has_potential context ty with Facts.Unsupported _ -> true in
   let includes_potential_made = metric = Time in
   match method_ with
@@ -587,7 +658,7 @@ let find_method_cost_bound context (metric : Metric.t) (method_ : Path.t) ~trait
               | Some (signature : Types.signature) -> (
                   List.for_all
                     (fun (parameter : Types.parameter_info) ->
-                      parameter.mode <> Types.Mut || not (holds parameter.type_))
+                      parameter.mode <> Language.Mode.Mut || not (holds parameter.type_))
                     signature.parameters
                   && (match signature.receiver with Some (Mut, ty) -> not (holds ty) | _ -> true)
                   && match signature.output with Returns ty -> not (holds ty) | _ -> false)
@@ -607,8 +678,8 @@ let find_method_cost_bound context (metric : Metric.t) (method_ : Path.t) ~trait
         | None -> None)
   | _ -> None
 
-let declare_method_cost context frame (metric : Metric.t) (method_ : Path.t) ~trait_arguments
-    self_type =
+let declare_method_cost context frame (metric : Language.Metric.t) (method_ : Path.t)
+    ~trait_arguments self_type =
   let symbol = Logic.Symbol.Method_cost { metric; method_; trait_arguments; self_type } in
   Facts.declare context (Logic.Constant (symbol, Logic.Int));
   let least = Costs.least_amount (Metric metric) in
@@ -620,7 +691,7 @@ let declare_method_cost context frame (metric : Metric.t) (method_ : Path.t) ~tr
   | None -> ());
   Logic.Symbol symbol
 
-let compute_method_cost context frame (metric : Metric.t) (callee : Invocation.callee) =
+let compute_method_cost context frame (metric : Language.Metric.t) (callee : Invocation.callee) =
   match callee with
   | Trait_method { trait; name; receiver; self_type; _ } ->
       let substitute_argument : Types.argument -> Types.argument = function
@@ -633,4 +704,4 @@ let compute_method_cost context frame (metric : Metric.t) (callee : Invocation.c
         (Facts.substitute_type context frame self_type)
   | _ ->
       Facts.raise_unsupported Whole_definition "the %s of a function that is not a trait's method"
-        (Metric.show metric)
+        (Language.Metric.show metric)

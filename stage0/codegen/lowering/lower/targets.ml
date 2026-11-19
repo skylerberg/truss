@@ -48,11 +48,11 @@ let make_trait_method_item context substitution ~(trait : Types.trait_reference)
       instantiation = { own with type_arguments = impl_arguments @ own.type_arguments };
     }
 
-let convert_operand state (mode : Types.mode) ty (place : Lowered.place)
+let convert_operand state (mode : Language.Mode.t) ty (place : Lowered.place)
     (passed : Lowered.ty option) =
   match passed with
   | None -> None
-  | Some (Pointer _) when mode = Types.Own ->
+  | Some (Pointer _) when mode = Language.Mode.Own ->
       ignore (Lowering.move_place state place);
       Some (Lowered.Moved_address place)
   | Some (Pointer { writable; _ }) -> Some (Lowered.Address { place; writable })
@@ -61,9 +61,8 @@ let convert_operand state (mode : Types.mode) ty (place : Lowered.place)
       | Own -> Some (Lowering.make_owned_operand state place ty)
       | Read | Mut -> Some (Copy place))
 
-let pass state (mode : Types.mode) ty place =
-  convert_operand state mode ty place
-    (Convention.classify_parameter state.context.env (Monomorphic.ground_mode mode) ty)
+let pass state (mode : Language.Mode.t) ty place =
+  convert_operand state mode ty place (Convention.classify_parameter state.context.env mode ty)
 
 let lookup_method_slot (context : Definitions.context) ~owner ~handle_missing
     (methods : Types.trait_method list) ~is_wanted =
@@ -258,7 +257,7 @@ let lower_nested_function (state : Lowering.state) ~(function_type : Ground.func
     ~(body :
        Lowering.state ->
        captures:Lowered.place list ->
-       (Lowered.place * Ground.mode * Ground.ty) list ->
+       (Lowered.place * Language.Mode.t * Ground.ty) list ->
        unit) destination =
   let index = !(state.nested) in
   incr state.nested;
@@ -310,7 +309,7 @@ let lower_nested_function (state : Lowering.state) ~(function_type : Ground.func
         (Convention.classify_result state.context.env function_type.result);
       let parameter_places =
         List.map
-          (fun ((mode : Ground.mode), ty) ->
+          (fun ((mode : Language.Mode.t), ty) ->
             (Lowering.allocate_parameter inner ~in_scope:false ~owned:(mode = Own) mode ty, mode, ty))
           function_type.parameters
       in
@@ -347,9 +346,7 @@ let lower_indirect_call state ~(function_type : Ground.function_type) ~(value : 
   let passed =
     List.concat
       (List.map2
-         (fun ((mode : Ground.mode), ty) place ->
-           let mode : Types.mode = match mode with Read -> Read | Mut -> Mut | Own -> Own in
-           Option.to_list (pass state mode ty place))
+         (fun ((mode : Language.Mode.t), ty) place -> Option.to_list (pass state mode ty place))
          function_type.parameters places)
     @ [ pass_capabilities state ~site function_type.uses ]
   in
@@ -374,8 +371,9 @@ let lower_indirect_call state ~(function_type : Ground.function_type) ~(value : 
   if function_type.result = Never then Lowering.emit_unreachable_block state
 
 let lower_call_through_any (state : Lowering.state) ~(any_type : Types.trait_reference) ~trait ~name
-    ~receiver ~(any : Lowered.place) ~(arguments : (Types.mode * Ground.ty * Lowered.place) list)
-    ?(lending = []) ~site destination =
+    ~receiver ~(any : Lowered.place)
+    ~(arguments : (Language.Mode.t * Ground.ty * Lowered.place) list) ?(lending = []) ~site
+    destination =
   let index, signature = lookup_dynamic_method state.context trait name receiver in
   let slot =
     Drop_and_copy.compute_first_method_slot ~is_copyable:(is_copyable_any state.context any_type)
@@ -497,8 +495,8 @@ let count_passed (signature : Types.signature) =
   (1 lsl defaulted) - 1
 
 let lower_item_call (state : Lowering.state) item ~(signature : Types.signature) ~substitution
-    ~(arguments : (Types.mode * Ground.ty * Lowered.place) list) ?mask ?(lending = []) ~destination
-    ~site () =
+    ~(arguments : (Language.Mode.t * Ground.ty * Lowered.place) list) ?mask ?(lending = [])
+    ~destination ~site () =
   let mask = match mask with Some mask -> mask | None -> count_passed signature in
   let c_signature, result =
     Definitions.make_c_signature state.context substitution

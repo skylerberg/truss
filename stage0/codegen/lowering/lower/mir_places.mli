@@ -1,7 +1,7 @@
 val require_mir_frame : Lowering.state -> Lowering.mir_frame
 val read_mir_graph : Definitions.context -> Path.t -> Mir.Graph.t
 val read_parameter_defaults : Definitions.context -> Path.t -> (int * Mir.Graph.t) list Mir.sourced
-val extract_parameter : Mir.Graph.body -> int -> Types.mode * string option * Types.ty
+val extract_parameter : Mir.Graph.body -> int -> Language.Mode.t * string option * Types.ty
 val read_spans : Lowering.state -> Source.Definition_span.t array
 val locate_site : Lowering.state -> Core.origin -> Lowered.site
 val find_reported_site : Lowering.state -> Lowered.operand option
@@ -9,7 +9,7 @@ val lookup_local_info : Lowering.state -> int -> Mir.local_info
 val bind_local : Lowering.state -> Mir.local -> Lowered.place -> unit
 val find_result_slot : Lowering.state -> Lowered.place option
 val lookup_local_place : Lowering.state -> Mir.local -> Lowered.place
-val convert_comparison : Core.comparison -> Lowered.comparison
+val convert_comparison : Language.Comparison.t -> Lowered.comparison
 val ground_argument : Lowering.state -> Types.argument -> Ground.argument
 val split_arguments : Lowering.state -> Types.argument list -> Ground.ty list * Z.t list
 val lower_place : Lowering.state -> Mir.place -> Lowered.place
@@ -20,7 +20,7 @@ val make_body_frame :
   ?owner:Lowering.scope ->
   ?returns_into:Lowered.place ->
   ?lending:Lowering.lending ->
-  ?passed:Ground.mode list ->
+  ?passed:Language.Mode.t list ->
   lambdas:Mir.Graph.body array ->
   Mir.Graph.body ->
   Lowering.mir_frame
