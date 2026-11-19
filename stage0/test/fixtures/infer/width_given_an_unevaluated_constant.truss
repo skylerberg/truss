@@ -1,4 +1,8 @@
-let size: UInt64 = 3 << 0
+type Point(x: UInt64, y: UInt64)
+
+let origin: Point = Point(x: 3, y: 4)
+
+let size: UInt64 = origin.x
 
 fn width[count: UInt64]() -> UInt64 {
   count

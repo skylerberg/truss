@@ -32,7 +32,7 @@ type _ stored =
   | Namespace : Path.package -> Resolve.Namespace.t stored
   | Resolved : Resolve.Names.key * Resolve.section -> Resolve.resolved stored
   | Trait_header : Resolve.Names.key -> Resolve.trait_header stored
-  | Constant_value : Path.t -> Z.t option stored
+  | Folded_integer : Path.t -> Z.t option stored
   | Header : Resolve.Names.key -> Interface.Environment.header stored
   | Interface : Resolve.Names.key -> Interface.Environment.elaborated_interface stored
   | Derived_interface : { type_ : Path.t; trait : Path.t } -> Types.impl_interface stored

@@ -2,6 +2,7 @@ module Environment = Environment
 module Lookups = Lookups
 module Elaborator = Elaborator
 module Constants = Constants
+module Integer_arithmetic = Integer_arithmetic
 module Definition = Definition
 module Properties = Properties
 module Impls = Impls

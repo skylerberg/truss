@@ -937,17 +937,20 @@ let () =
       | codes -> Harness.fail "found [%s]" (String.concat "; " codes));
   Harness.test "a type argument must be of its parameter's kind" (fun () ->
       expect_one_diagnostic "fn f(items: List[3]) {}\n" "types.argument_kind");
-  Harness.test "a constant in a type argument must have a value" (fun () ->
+  Harness.test "a shift in a constant gives a type argument its value" (fun () ->
+      expect_no_diagnostics [ ("app::main", Fixtures.Interface.array_sized_by_a_shifted_constant) ]);
+  Harness.test "a type argument that names circular constants reports only the cycle" (fun () ->
       let packages =
         Support.setup [ ("app::main", Fixtures.Interface.array_length_from_circular_constants) ]
       in
-      if
-        not
-          (List.mem "types.arity"
-             (Support.list_codes
-                (Database.For_testing.list_diagnostics [ Interface ]
-                   (Support.make_database packages) (Support.parse_file "app::main"))))
-      then Harness.fail "accepted");
+      match
+        Support.list_codes
+          (Database.For_testing.list_diagnostics
+             [ Resolve; Interface; Infer; Package_checks ]
+             (Support.make_database packages) (Support.parse_file "app::main"))
+      with
+      | _ :: _ as codes when List.for_all (String.ends_with ~suffix:".constant_cycle") codes -> ()
+      | codes -> Harness.fail "found [%s]" (String.concat "; " codes));
   Harness.test "any must fix every associated type" (fun () ->
       expect_one_diagnostic "fn f(items: any Iterable) {}\n" "types.associated_type_not_fixed");
   Harness.test "nothing can implement Copyable" (fun () ->

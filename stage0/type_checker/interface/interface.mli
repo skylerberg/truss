@@ -49,6 +49,7 @@ module Elaborator : sig
 end
 
 module Constants = Constants
+module Integer_arithmetic = Integer_arithmetic
 module Definition = Definition
 
 module Properties : sig

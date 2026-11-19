@@ -90,6 +90,9 @@ let () =
       expect Fixtures.Patterns.variant_constant_arm []);
   Harness.test "a constant in a contract's pattern covers its value" (fun () ->
       expect Fixtures.Patterns.ensures_matching_a_variant_constant []);
+  Harness.test "a constant built by a shift covers its value, without the bits past its type"
+    (fun () ->
+      expect Fixtures.Patterns.constant_arm_built_by_a_shift [ "patterns.unreachable_arm" ]);
   Harness.test "a constant whose value is not evaluated at compile time covers only itself"
     (fun () -> expect Fixtures.Patterns.unevaluated_constant_arm []);
   Harness.test "a range with Character constant ends covers their values" (fun () ->

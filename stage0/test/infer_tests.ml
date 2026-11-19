@@ -1920,6 +1920,18 @@ let () =
       expect_one_diagnostic "let flipped: Int8 = -(-128)\n" "types.constant_overflow");
   Harness.test "a constant cannot divide by zero" (fun () ->
       expect_one_diagnostic "let nothing: Int64 = 5 / 0\n" "types.constant_overflow");
+  Harness.test "a constant's remainder of the least value over -1 overflows" (fun () ->
+      expect_one_diagnostic "let rest: Int8 = -128 % -1\n" "types.constant_overflow"
+        ~says:"This overflows `Int8`: the least value over -1.");
+  Harness.test "a constant's shift by its type's width is an error at the amount" (fun () ->
+      expect_one_diagnostic "let too_far: UInt8 = 1 << 8\n" "types.constant_overflow"
+        ~says:"This shifts a `UInt8` by 8, which is not less than its 8 bits.");
+  Harness.test "a constant's left shift drops the bits past its type" (fun () ->
+      expect_fine "let high: UInt8 = 3 << 7\n");
+  Harness.test "a type argument that names a constant whose shift fails reports only the shift"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.array_sized_by_a_constant_whose_shift_is_too_large
+        "types.constant_overflow");
   Harness.test "a default must be a constant expression" (fun () ->
       expect_one_diagnostic Fixtures.Infer.default_calling_a_function "types.default_not_constant");
   Harness.test "a default cannot name a parameter" (fun () ->

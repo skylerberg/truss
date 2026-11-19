@@ -4,7 +4,7 @@ type t =
   | Resolution
   | Import_checks
   | Trait_headers
-  | Constant_values
+  | Folded_integers
   | Headers
   | Interfaces
   | Derived_interfaces
@@ -29,7 +29,7 @@ let all =
     Resolution;
     Import_checks;
     Trait_headers;
-    Constant_values;
+    Folded_integers;
     Headers;
     Interfaces;
     Derived_interfaces;
@@ -58,7 +58,7 @@ let precedes earlier later = compare earlier later <= 0
 
 let is_lowering = function
   | Lowered_code | Test_keys -> true
-  | Parse | Namespaces | Resolution | Import_checks | Trait_headers | Constant_values | Headers
+  | Parse | Namespaces | Resolution | Import_checks | Trait_headers | Folded_integers | Headers
   | Interfaces | Derived_interfaces | Type_facts | Signature_checks | Contracts | Checked_bodies
   | Mir | Mir_call_edges | Body_checks | Package_checks | Call_edges | Recursion_groups | Proofs ->
       false
@@ -75,7 +75,7 @@ let of_part (Part.Any part) =
   | Resolved _ | Grant _ -> Resolution
   | Import_check _ -> Import_checks
   | Trait_header _ -> Trait_headers
-  | Constant_value _ -> Constant_values
+  | Folded_integer _ -> Folded_integers
   | Header _ -> Headers
   | Interface _ -> Interfaces
   | Derived_interface _ -> Derived_interfaces

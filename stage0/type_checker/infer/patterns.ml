@@ -123,7 +123,7 @@ and evaluate_named_constant ?(seen = []) context path : space option =
     | Some key -> (
         match
           ( (context.lookups.read_contract key).definition,
-            context.lookups.interface.find_constant_value path )
+            context.lookups.interface.find_folded_integer path )
         with
         | Constant (Some _), Some folded -> Some (Constructed (Interval (folded, folded), []))
         | Constant (Some value), None -> evaluate_constant_expression context (path :: seen) value

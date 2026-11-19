@@ -614,7 +614,7 @@ let make_recording_interface_lookups database note ~is_checked : Interface.Looku
     find_trait_header =
       (fun path ->
         Option.bind (names.find_key path) (fun key -> find_value database note (Trait_header key)));
-    find_constant_value = (fun path -> Option.join (find_value database note (Constant_value path)));
+    find_folded_integer = (fun path -> Option.join (find_value database note (Folded_integer path)));
     find_header = (fun key -> find_value database note (Header key));
     read_elaborated_interface;
     find_derived_interface =
@@ -679,7 +679,7 @@ let list_package_parts database (names : Resolve.Names.lookups) package : Part.a
       | _ -> [])
     @
     match declaration.kind with
-    | (Constant | Member_constant) when key.ordinal = 0 -> [ Part.Any (Constant_value key.path) ]
+    | (Constant | Member_constant) when key.ordinal = 0 -> [ Part.Any (Folded_integer key.path) ]
     | Type when key.ordinal = 0 -> [ Part.Any (Type_facts key.path) ]
     | _ -> []
   in
@@ -1207,12 +1207,17 @@ let compute_part database (Part.Any typed as part) =
               | Some header -> Value header
               | None -> Blocked)
           | _, (Failed _ | Blocked) -> Blocked)
-  | Constant_value path ->
-      compute_value (Constant_value path) (fun note ->
-          make_part
-            (Interface.Constants.evaluate_constant
-               (make_recording_interface_lookups database note ~is_checked:false))
-            path)
+  | Folded_integer path ->
+      compute_value (Folded_integer path) (fun note ->
+          match
+            make_part
+              (Interface.Constants.evaluate_constant
+                 (make_recording_interface_lookups database note ~is_checked:false))
+              path
+          with
+          | Value (Folded value) -> Value (Some value)
+          | Value Not_folded -> Value None
+          | Value (Fails _ | Depends_on_failure) | Failed _ | Blocked -> Blocked)
   | Header key ->
       compute_value (Header key) (fun note ->
           match

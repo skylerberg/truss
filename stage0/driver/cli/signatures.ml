@@ -111,7 +111,7 @@ let label_signature label signature =
        (String.split_on_char '\n' signature))
 
 let is_signature_part : type a. a Database.Part.stored -> bool = function
-  | Header _ | Trait_header _ | Constant_value _ | Interface _ | Derived_interface _ | Type_facts _
+  | Header _ | Trait_header _ | Folded_integer _ | Interface _ | Derived_interface _ | Type_facts _
   | Signature_check _ | Contract _ | Contract_mir _ ->
       true
   | Parsed _ | Namespace _ | Resolved _ | Grant _ | Checked_body _ | Body_mir _ | Generated_mir _

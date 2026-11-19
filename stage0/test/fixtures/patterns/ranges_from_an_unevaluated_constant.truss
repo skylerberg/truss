@@ -1,4 +1,8 @@
-let low: Int64 = 3 << 0
+type Point(x: Int64, y: Int64)
+
+let origin: Point = Point(x: 3, y: 4)
+
+let low: Int64 = origin.x
 
 fn f(n: Int64) -> Int64 {
   match n {

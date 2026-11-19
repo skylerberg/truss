@@ -32,7 +32,7 @@ type _ stored =
   | Namespace : Path.package -> Resolve.Namespace.t stored
   | Resolved : Resolve.Names.key * Resolve.section -> Resolve.resolved stored
   | Trait_header : Resolve.Names.key -> Resolve.trait_header stored
-  | Constant_value : Path.t -> Z.t option stored
+  | Folded_integer : Path.t -> Z.t option stored
   | Header : Resolve.Names.key -> Interface.Environment.header stored
   | Interface : Resolve.Names.key -> Interface.Environment.elaborated_interface stored
   | Derived_interface : { type_ : Path.t; trait : Path.t } -> Types.impl_interface stored
@@ -88,7 +88,7 @@ module Storage = struct
     | Namespace _, Namespace _ -> Some Equal
     | Resolved _, Resolved _ -> Some Equal
     | Trait_header _, Trait_header _ -> Some Equal
-    | Constant_value _, Constant_value _ -> Some Equal
+    | Folded_integer _, Folded_integer _ -> Some Equal
     | Header _, Header _ -> Some Equal
     | Interface _, Interface _ -> Some Equal
     | Derived_interface _, Derived_interface _ -> Some Equal
@@ -130,7 +130,7 @@ module Storage = struct
     | Ownership key
     | Proof key ->
         key.module_.package
-    | Constant_value path
+    | Folded_integer path
     | Type_facts path
     | Generated_mir path
     | Mir_call_edges path
@@ -210,7 +210,7 @@ let show_stored : type a. a stored -> string =
   | Resolved (declared, part) ->
       Printf.sprintf "resolved %s %s" (show_section part) (show_key declared)
   | Trait_header declared -> "trait header " ^ show_key declared
-  | Constant_value path -> "constant value " ^ Path.show path
+  | Folded_integer path -> "folded integer " ^ Path.show path
   | Header declared -> "header " ^ show_key declared
   | Interface declared -> "interface " ^ show_key declared
   | Derived_interface { type_; trait } ->
@@ -283,7 +283,7 @@ let find_stored_definition : type a. a stored -> Path.t option = function
   | Proof key
   | Package_check (_, (Sealed key | Impl key | Type key | Constant key)) ->
       Some key.path
-  | Constant_value path
+  | Folded_integer path
   | Type_facts path
   | Generated_mir path
   | Mir_call_edges path
@@ -326,7 +326,7 @@ let show_stored_kind : type a. a stored -> string = function
   | Resolved (_, Contract) -> "resolved names of the contract"
   | Resolved (_, Body) -> "resolved names of the body"
   | Trait_header _ -> "trait header"
-  | Constant_value _ -> "value"
+  | Folded_integer _ -> "folded integer"
   | Header _ -> "header"
   | Interface _ -> "interface"
   | Derived_interface _ -> "derived interface"

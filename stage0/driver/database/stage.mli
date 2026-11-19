@@ -4,7 +4,7 @@ type t =
   | Resolution
   | Import_checks
   | Trait_headers
-  | Constant_values
+  | Folded_integers
   | Headers
   | Interfaces
   | Derived_interfaces

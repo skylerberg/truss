@@ -1,0 +1,9 @@
+let mask: UInt8 = 17 << 4
+
+fn f(n: UInt8) -> Int64 {
+  match n {
+    app::main::mask => 1
+    16 => 2
+    _ => 3
+  }
+}
