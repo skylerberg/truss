@@ -251,6 +251,18 @@ let () =
       expect_type text "doubled(3)" "UInt8";
       expect_type text "doubled(3)" ~occurrence:2 "Int64";
       expect_fine text);
+  Harness.test "a literal that reaches an enclosing statement's type is decided there" (fun () ->
+      let text = Fixtures.Infer.literal_returned_early_from_a_lambda in
+      expect_type text "3" "UInt8";
+      expect_fine text);
+  Harness.test "an associated type of an earlier statement's literal is decided with the literal"
+    (fun () ->
+      let text = Fixtures.Infer.associated_type_of_an_earlier_literal in
+      expect_type text "sum" ~occurrence:2 "Int64";
+      expect_fine text;
+      let text = Fixtures.Infer.duration_times_a_literal_local in
+      expect_type text "count" ~occurrence:2 "Int64";
+      expect_fine text);
   Harness.test "a scrutinee's literal type is decided by the statement that holds the match"
     (fun () ->
       let text = Fixtures.Infer.match_on_a_literal_decided_by_an_arm in

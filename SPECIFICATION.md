@@ -706,6 +706,10 @@ fn area(shape: Shape) -> Float64 {
   statement alone cannot decide it, as in `var names = []`, the `let` has a
   type. The exception is a variable declared from literals alone (see
   [Number literals](#number-literals)).
+- A statement inside a block or a lambda is part of the statement that holds
+  it. The inner statement decides the types that only it reaches. A type that
+  the holding statement also reaches, such as the result type of a lambda
+  passed to a generic call, is decided by the end of the holding statement.
 - `self` is only the first parameter of a method (see [Methods](#methods)).
 
 ### Calls and arguments

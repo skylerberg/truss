@@ -600,6 +600,12 @@ A local declared from literals alone is the exception: it takes its type
 from its uses, whatever their order. Otherwise `let limit = 10` would fix
 `limit` at `Int64`, and code that works in `UInt8` or `UInt64` would annotate
 every such local.
+
+An unknown belongs to the outermost statement that reaches it. A statement
+inside a lambda decides only the types that no enclosing statement sees, so
+`return 3` in a lambda takes its type from the call that uses the lambda's
+result. Deciding at the inner statement would give the `3` its default type
+before that call is checked.
 Only the type of a literal is left undecided, and it can only become a
 number type, so the declaration still tells the reader that the local is a
 number.

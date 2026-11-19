@@ -34,12 +34,11 @@ type requirement =
 type obligation = { subject : Types.ty; requirement : requirement }
 
 type frame = {
-  first_variable : int;
+  level : int;
   mutable recorded_expressions : int list;
   mutable recorded_loops : (Syntax.id * Syntax.id) list;
   mutable bindings : int list;
   mutable declared : int list;
-  escaping : Syntax.id option;
   mutable obligations : obligation list;
   mutable reported_unmet_bounds : (Types.ty * Types.trait_reference * Diagnostic.reported) list;
   mutable compiled_expressions : int list;
@@ -49,12 +48,7 @@ type frame = {
   span : Source.Definition_span.t;
 }
 
-type undecided_literal = {
-  index : int;
-  kind : Types.literal_kind;
-  local : Syntax.id;
-  owner : frame;
-}
+type undecided_literal = { index : int; kind : Types.literal_kind; local : Syntax.id }
 
 type literal_decision = {
   decided_local : Syntax.id;

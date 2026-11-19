@@ -8,6 +8,10 @@ let select_arithmetic_trait : Syntax.arithmetic -> Path.t * string = function
 let is_unsigned_integer state type_ =
   State.is_integer_type state type_ && not (State.is_signed_type state type_)
 
+let is_built_in_number : Types.ty -> bool = function
+  | Literal _ -> true
+  | resolved -> Types.is_integer_type resolved || Types.is_float_type resolved
+
 let require_integer state span type_ ~(describe : Types.ty -> string) =
   Solver.require_type state type_ ~holds:(State.is_integer_type state)
     ~on_unmet:(fun resolved -> State.add_diagnostic state No_impl span (describe resolved))
@@ -189,29 +193,35 @@ and check_prefix state env ?expected (value : Syntax.expression) operator
       | _ ->
           let type_ = Hooks.check_expression state env ?expected inner in
           let resolved = State.normalize state type_ in
-          let is_literal = match resolved with Types.Literal _ -> true | _ -> false in
           if resolved = Types.Hole then Types.Hole
           else if env.specification && is_integer_operand state resolved then begin
-            if is_literal then ignore (State.unify state type_ Types.Integer);
+            (match resolved with
+            | Types.Literal _ -> ignore (State.unify state type_ Types.Integer)
+            | _ -> ());
             State.register_expression state value (fun () ->
                 Form.build_operator state value Negate [ inner ]);
             Types.Integer
           end
+          else if is_built_in_number resolved then begin
+            check_built_in_operator state value [ inner ] type_;
+            State.register_expression state value (fun () ->
+                Form.build_operator state value Negate [ inner ]);
+            Solver.require_type state type_
+              ~holds:(fun resolved -> not (is_unsigned_integer state resolved))
+              ~on_unmet:(report_negated_unsigned state value)
+              ()
+          end
           else begin
             Form.register_call state value;
-            let result =
-              check_operator_call
-                ~report_no_impl:(fun resolved ->
-                  if is_unsigned_integer state resolved then
-                    Some (report_negated_unsigned state value resolved)
-                  else None)
-                ~operands:
-                  [ { Tables.expression = inner.id; core_argument_index = 0; mode = Types.Read } ]
-                state value ~trait:(Well_known.make_path Negate) ~method_:"negate" ~left:type_
-                ~right:None
-            in
-            if is_literal then ignore (State.unify state result type_);
-            result
+            check_operator_call
+              ~report_no_impl:(fun resolved ->
+                if is_unsigned_integer state resolved then
+                  Some (report_negated_unsigned state value resolved)
+                else None)
+              ~operands:
+                [ { Tables.expression = inner.id; core_argument_index = 0; mode = Types.Read } ]
+              state value ~trait:(Well_known.make_path Negate) ~method_:"negate" ~left:type_
+              ~right:None
           end)
 
 and report_negated_unsigned state (value : Syntax.expression) resolved =

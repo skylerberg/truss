@@ -105,6 +105,13 @@ let rec solve (state : State.state) (frame : State.frame) =
   if List.length remaining < List.length pending then solve state frame
 
 let add (state : State.state) (obligation : State.obligation) =
+  (match obligation.requirement with
+  | Implements { trait; _ } ->
+      Option.iter
+        (fun level ->
+          List.iter (fun (_, wanted) -> Unify.lower state.unifier ~level wanted) trait.associated)
+        (Unify.find_lowest_level state.unifier (list_obligation_unknowns state obligation))
+  | Satisfies _ -> ());
   let outcome = decide state obligation in
   (match (outcome, State.find_current_frame state) with
   | Pending, Some frame -> frame.obligations <- obligation :: frame.obligations
@@ -229,33 +236,36 @@ let list_frame_unknowns (state : State.state) (frame : State.frame) =
     @ list_types frame.bindings state.tables.local_types)
   @ List.concat_map (Unify.list_argument_unknowns state.unifier) call_arguments
 
-let hand_literals_to_parent (state : State.state) (frame : State.frame) (parent : State.frame) =
-  let escaping_types =
-    List.map (fun local -> (local, state.tables.local_types.(local))) frame.declared
-    @ Option.to_list (Option.map (fun id -> (id, state.tables.types.(id))) frame.escaping)
+let is_owned_by (state : State.state) (frame : State.frame) unknown =
+  Unify.read_level state.unifier (Unify.read_unknown_index unknown) >= frame.level
+
+let hand_literals_to_parent (state : State.state) (frame : State.frame) ~escaping
+    (parent : State.frame) =
+  let declared =
+    List.filter_map
+      (fun local -> Option.map (fun type_ -> (local, type_)) state.tables.local_types.(local))
+      frame.declared
   in
   if parent.frame_specification = frame.frame_specification then
     List.iter
-      (function
-        | local, Some type_ ->
-            List.iter
-              (function
-                | Unify.Unknown_literal (kind, index) when index >= frame.first_variable ->
-                    if not frame.frame_specification then
-                      Hashtbl.replace state.unifier.code_literals index ();
-                    state.undecided <- { index; kind; local; owner = parent } :: state.undecided
-                | _ -> ())
-              (Unify.list_unknowns state.unifier type_)
-        | _, None -> ())
-      escaping_types
+      (fun (local, type_) ->
+        List.iter
+          (function
+            | Unify.Unknown_literal (kind, index) as unknown when is_owned_by state frame unknown ->
+                Unify.lower_to state.unifier ~level:parent.level index;
+                if not frame.frame_specification then
+                  Hashtbl.replace state.unifier.code_literals index ();
+                state.undecided <- { index; kind; local } :: state.undecided
+            | _ -> ())
+          (Unify.list_unknowns state.unifier type_))
+      (declared @ escaping)
 
-let default_literals (state : State.state) (frame : State.frame) ~is_undecided =
+let default_literals (state : State.state) (frame : State.frame) =
   let literals =
     List.sort_uniq compare
       (List.filter_map
          (function
-           | Unify.Unknown_literal (kind, index)
-             when index >= frame.first_variable && not (is_undecided index) ->
+           | Unify.Unknown_literal (kind, index) as unknown when is_owned_by state frame unknown ->
                Some (index, kind)
            | _ -> None)
          (list_frame_unknowns state frame))
@@ -379,44 +389,28 @@ let finish_tables (state : State.state) (frame : State.frame) ~parent ~is_open =
     (State.check_compiled_expression state)
     (List.sort (State.compare_in_source_order state) settled_expressions)
 
-let settle (state : State.state) (frame : State.frame) =
+let settle (state : State.state) (frame : State.frame) ~escaping =
   constrain_capability_equalities state frame;
   solve state frame;
   let parent = match state.frames with _ :: parent :: _ -> Some parent | _ -> None in
   record_decisions state ~at:frame.span ~is_default:false;
-  Option.iter (hand_literals_to_parent state frame) parent;
-  let undecided =
-    List.filter_map
+  Option.iter (hand_literals_to_parent state frame ~escaping) parent;
+  state.undecided <-
+    List.filter
       (fun (undecided : State.undecided_literal) ->
-        if undecided.owner == frame then None
-        else
-          match Unify.resolve state.unifier (make_undecided_type undecided) with
-          | Types.Literal (_, root) -> Some root
-          | _ -> None)
-      state.undecided
-  in
-  let is_undecided index = List.mem index undecided in
-  default_literals state frame ~is_undecided;
+        match Unify.resolve state.unifier (make_undecided_type undecided) with
+        | Types.Literal (kind, root) -> not (is_owned_by state frame (Unknown_literal (kind, root)))
+        | _ -> true)
+      state.undecided;
+  default_literals state frame;
   let unsolved =
-    List.sort_uniq compare
-      (List.filter
-         (function
-           | Unify.Unknown_type index | Unknown_value index -> index >= frame.first_variable
-           | Unknown_literal (_, index) -> index >= frame.first_variable && not (is_undecided index))
-         (list_frame_unknowns state frame))
+    List.sort_uniq compare (List.filter (is_owned_by state frame) (list_frame_unknowns state frame))
   in
   if unsolved <> [] then begin
     report_unsolved state frame unsolved;
     solve state frame
   end;
-  state.undecided <-
-    List.filter
-      (fun (undecided : State.undecided_literal) -> undecided.owner != frame)
-      state.undecided;
-  let is_open = function
-    | Unify.Unknown_type index | Unknown_value index -> index < frame.first_variable
-    | Unknown_literal (_, index) -> index < frame.first_variable || is_undecided index
-  in
+  let is_open unknown = not (is_owned_by state frame unknown) in
   finish_tables state frame ~parent ~is_open;
   match parent with
   | Some parent ->
@@ -427,16 +421,16 @@ let settle (state : State.state) (frame : State.frame) =
         @ parent.obligations
   | None -> ()
 
-let run_in_statement ?escaping (state : State.state) (env : State.env)
-    (span : Source.Definition_span.t) body =
+let run_frame (state : State.state) (env : State.env) (span : Source.Definition_span.t) body
+    ~list_escaping =
+  state.unifier.level <- state.unifier.level + 1;
   let frame : State.frame =
     {
-      first_variable = state.unifier.next + 1;
+      level = state.unifier.level;
       recorded_expressions = [];
       recorded_loops = [];
       bindings = [];
       declared = [];
-      escaping = Option.map (fun (value : Syntax.expression) -> value.id) escaping;
       obligations = [];
       reported_unmet_bounds = [];
       compiled_expressions = [];
@@ -448,6 +442,15 @@ let run_in_statement ?escaping (state : State.state) (env : State.env)
   in
   state.frames <- frame :: state.frames;
   let result = body () in
-  settle state frame;
+  settle state frame ~escaping:(list_escaping result);
   state.frames <- List.tl state.frames;
+  state.unifier.level <- state.unifier.level - 1;
   result
+
+let run_in_statement state env span body =
+  run_frame state env span body ~list_escaping:(fun () -> [])
+
+let infer_in_statement state env (value : Syntax.expression) =
+  run_frame state env (State.read_span state value.id)
+    (fun () -> Hooks.check_expression state env value)
+    ~list_escaping:(fun type_ -> [ (value.id, type_) ])

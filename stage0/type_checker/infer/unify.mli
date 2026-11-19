@@ -6,6 +6,8 @@ type t = {
   mutable deferred_capability_equalities : (Types.capability_set * Types.capability_set) list;
   mutable find_integer_range : Types.ty -> (Z.t * Z.t) option;
   code_literals : (int, unit) Hashtbl.t;
+  levels : (int, int) Hashtbl.t;
+  mutable level : int;
 }
 
 val create : unit -> t
@@ -25,6 +27,11 @@ type unknown =
   | Unknown_value of int
 
 val list_unknowns : t -> Types.ty -> unknown list
+val read_unknown_index : unknown -> int
+val read_level : t -> int -> int
+val lower : t -> level:int -> Types.ty -> unit
+val lower_to : t -> level:int -> int -> unit
+val find_lowest_level : t -> unknown list -> int option
 val list_argument_unknowns : t -> Types.argument -> unknown list
 val unify : t -> Types.ty -> Types.ty -> bool
 val unify_arguments : t -> Types.argument list -> Types.argument list -> bool

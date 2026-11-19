@@ -35,12 +35,11 @@ type requirement =
 type obligation = { subject : Types.ty; requirement : requirement }
 
 type frame = {
-  first_variable : int;
+  level : int;
   mutable recorded_expressions : int list;
   mutable recorded_loops : (Syntax.id * Syntax.id) list;
   mutable bindings : int list;
   mutable declared : int list;
-  escaping : Syntax.id option;
   mutable obligations : obligation list;
   mutable reported_unmet_bounds : (Types.ty * Types.trait_reference * Diagnostic.reported) list;
   mutable compiled_expressions : int list;
@@ -50,12 +49,7 @@ type frame = {
   span : Source.Definition_span.t;
 }
 
-type undecided_literal = {
-  index : int;
-  kind : Types.literal_kind;
-  local : Syntax.id;
-  owner : frame;
-}
+type undecided_literal = { index : int; kind : Types.literal_kind; local : Syntax.id }
 
 type literal_decision = {
   decided_local : Syntax.id;
@@ -570,7 +564,8 @@ let convert_evidence = function
   | Interface.Impls.From_impl { impl; substitution } -> Tables.Impl { impl; substitution }
   | Interface.Impls.From_bound -> Tables.Bound
   | Interface.Impls.From_any -> Tables.Dynamic
-  | Interface.Impls.Built_in | Interface.Impls.Accepted _ -> Tables.Built_in
+  | Interface.Impls.Built_in | Undetermined | Absorbed _ | For_every_type_of_kind _ ->
+      Tables.Built_in
 
 let make_trait_reference ~arguments trait : Types.trait_reference =
   { trait; trait_arguments = arguments; associated = [] }

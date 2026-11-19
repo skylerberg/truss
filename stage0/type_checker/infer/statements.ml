@@ -41,9 +41,8 @@ let rec check_block_value state env ?expected (written : Syntax.block) =
             ignore (check_statement state env last ~last:true);
             if State.statement_diverges state last then Types.Never else Types.unit)
     | (first : Syntax.statement) :: rest ->
-        ignore
-          (Solver.run_in_statement state env (State.read_span state first.id) (fun () ->
-               check_statement state env first ~last:false));
+        Solver.run_in_statement state env (State.read_span state first.id) (fun () ->
+            check_statement state env first ~last:false);
         infer_statements_value rest
   in
   infer_statements_value written.statements

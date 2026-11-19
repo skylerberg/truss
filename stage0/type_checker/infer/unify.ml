@@ -6,6 +6,8 @@ type t = {
   mutable deferred_capability_equalities : (Types.capability_set * Types.capability_set) list;
   mutable find_integer_range : Types.ty -> (Z.t * Z.t) option;
   code_literals : (int, unit) Hashtbl.t;
+  levels : (int, int) Hashtbl.t;
+  mutable level : int;
 }
 
 let create () =
@@ -17,19 +19,22 @@ let create () =
     deferred_capability_equalities = [];
     find_integer_range = (fun _ -> None);
     code_literals = Hashtbl.create 4;
+    levels = Hashtbl.create 16;
+    level = 0;
   }
 
-let make_fresh_type unifier =
+let allocate_unknown unifier =
   unifier.next <- unifier.next + 1;
-  Types.Variable unifier.next
+  Hashtbl.replace unifier.levels unifier.next unifier.level;
+  unifier.next
 
-let make_fresh_literal unifier kind =
-  unifier.next <- unifier.next + 1;
-  Types.Literal (kind, unifier.next)
+let make_fresh_type unifier = Types.Variable (allocate_unknown unifier)
+let make_fresh_literal unifier kind = Types.Literal (kind, allocate_unknown unifier)
+let make_fresh_value unifier = Types.Value_variable (allocate_unknown unifier)
+let read_level unifier index = Hashtbl.find unifier.levels index
 
-let make_fresh_value unifier =
-  unifier.next <- unifier.next + 1;
-  Types.Value_variable unifier.next
+let lower_to unifier ~level index =
+  if read_level unifier index > level then Hashtbl.replace unifier.levels index level
 
 let make_fresh_capability_variable unifier =
   unifier.capability_variable_count <- unifier.capability_variable_count + 1;
@@ -114,17 +119,13 @@ let literal_fits unifier (kind : Types.literal_kind) (type_ : Types.ty) =
   | Integer_literal, _ -> Types.is_integer_type type_ || type_ = Types.Integer
   | Float_literal, _ -> Types.is_float_type type_
 
-let bind unifier index type_ =
-  if occurs unifier index type_ then false
-  else begin
-    Hashtbl.replace unifier.type_solutions index type_;
-    true
-  end
-
 type unknown =
   | Unknown_type of int
   | Unknown_literal of Types.literal_kind * int
   | Unknown_value of int
+
+let read_unknown_index = function
+  | Unknown_type index | Unknown_literal (_, index) | Unknown_value index -> index
 
 let list_unknowns unifier (type_ : Types.ty) =
   let unknowns = ref [] in
@@ -153,6 +154,26 @@ let list_unknowns unifier (type_ : Types.ty) =
   in
   collect type_;
   List.sort_uniq compare !unknowns
+
+let lower unifier ~level type_ =
+  List.iter
+    (fun unknown -> lower_to unifier ~level (read_unknown_index unknown))
+    (list_unknowns unifier type_)
+
+let find_lowest_level unifier unknowns =
+  List.fold_left
+    (fun lowest unknown ->
+      let level = read_level unifier (read_unknown_index unknown) in
+      match lowest with Some lowest when lowest <= level -> Some lowest | _ -> Some level)
+    None unknowns
+
+let bind unifier index type_ =
+  if occurs unifier index type_ then false
+  else begin
+    lower unifier ~level:(read_level unifier index) type_;
+    Hashtbl.replace unifier.type_solutions index type_;
+    true
+  end
 
 let list_argument_unknowns unifier = function
   | Types.Type type_ -> list_unknowns unifier type_
@@ -229,6 +250,9 @@ and unify_value unifier left right =
   | Value_variable index, other | other, Value_variable index ->
       (match other with
       | Value_variable other_index when other_index = index -> ()
+      | Value_variable other_index ->
+          lower_to unifier ~level:(read_level unifier index) other_index;
+          Hashtbl.replace unifier.value_solutions index other
       | _ -> Hashtbl.replace unifier.value_solutions index other);
       true
   | left, right -> left = right

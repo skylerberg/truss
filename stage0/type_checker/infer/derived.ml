@@ -101,7 +101,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
               | Some (From_impl { impl; substitution }) -> Impl { impl; substitution }
               | Some From_bound -> Bound
               | Some From_any -> Dynamic
-              | Some Built_in | Some (Accepted _) | None ->
+              | Some (Built_in | Undetermined | Absorbed _ | For_every_type_of_kind _) | None ->
                   raise_bug "`%s` is derived for a type with a field that has none"
                     (Path.show wanted)
             in

@@ -6,7 +6,8 @@ let takes_literal (state : State.state) (collection : Types.ty) (trait : Types.t
           ~list_bounds:(State.lookup_bounds state) ~checks_conditions:false collection trait
       with
       | Some (From_impl _ | From_bound) -> true
-      | Some (From_any | Built_in | Accepted _) | None -> false)
+      | Some (From_any | Built_in | Undetermined | Absorbed _ | For_every_type_of_kind _) | None ->
+          false)
   | _ -> false
 
 let record_conversion (state : State.state) (value : Syntax.expression) (collection : Types.ty)
@@ -354,10 +355,7 @@ and check_lambda (state : State.state) env ?expected (value : Syntax.expression)
 
 and check_if state env ?expected (value : Syntax.expression) (test : Syntax.expression) then_ else_
     =
-  let condition_type =
-    Solver.run_in_statement state env (State.read_span state test.id) (fun () ->
-        Hooks.check_expression state env test)
-  in
+  let condition_type = Solver.infer_in_statement state env test in
   Name_lookup.coerce state env test ~actual:condition_type ~expected:Types.bool;
   State.register_expression state value (fun () ->
       let condition = State.build_expression state test in
@@ -432,9 +430,7 @@ and match_ state env ?expected (value : Syntax.expression) scrutinees arms =
   let types =
     List.map
       (fun (scrutinee : Syntax.expression) ->
-        ( scrutinee,
-          Solver.run_in_statement ~escaping:scrutinee state env (State.read_span state scrutinee.id)
-            (fun () -> Hooks.check_expression state env scrutinee) ))
+        (scrutinee, Solver.infer_in_statement state env scrutinee))
       scrutinees
   in
   State.register_expression state value (fun () ->

@@ -1,10 +1,7 @@
 val run_in_statement :
-  ?escaping:Syntax.expression ->
-  State.state ->
-  State.env ->
-  Source.Definition_span.t ->
-  (unit -> 'a) ->
-  'a
+  State.state -> State.env -> Source.Definition_span.t -> (unit -> unit) -> unit
+
+val infer_in_statement : State.state -> State.env -> Syntax.expression -> Types.ty
 
 val require :
   State.state ->
