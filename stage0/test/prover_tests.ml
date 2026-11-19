@@ -2408,7 +2408,9 @@ let () =
   Harness.test "a loop that mutates an array's elements keeps their potentials" (fun () ->
       expect_proven Fixtures.Prover.array_reset);
   Harness.test "a slice of an array is within it only as far as its count" (fun () ->
-      expect_not_proven Fixtures.Prover.reverse_of_an_array_after_its_first "prover.requires")
+      expect_not_proven Fixtures.Prover.reverse_of_an_array_after_its_first "prover.requires");
+  Harness.test "a quantifier ranges between an Integer and a UInt64 in either order" (fun () ->
+      expect_proven Fixtures.Prover.quantifier_over_ranges_between_integer_types)
 
 let () =
   Harness.test "a nested call's arguments are written once, however deep it nests" (fun () ->
