@@ -197,7 +197,8 @@ let rec require_available checking scope (origin : Core.origin) ?(subject = "Thi
 
 let compute_required_uses scope (callee : Core.callee) =
   match (callee.target, find_implemented_capability scope) with
-  | Intrinsic _, Some _ -> Types.no_capabilities
+  | Intrinsic _, Some _ ->
+      Types.subtract_capabilities callee.uses (Types.make_capability_set [ tasks ])
   | (Function _ | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _), _ -> callee.uses
 
 let require_callee_uses checking scope (origin : Core.origin) (callee : Core.callee) =

@@ -1,8 +1,11 @@
+use standard::capabilities
 use standard::intrinsic
 
 internal type SystemTasks()
 
-impl Tasks for SystemTasks {
+impl Tasks for SystemTasks
+  uses capabilities::System
+{
   fn open(self) -> UInt64 {
     intrinsic::runtime_tasks_open()
   }

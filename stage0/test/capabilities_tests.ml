@@ -890,6 +890,12 @@ let () =
       expect_one_in_standard Fixtures.Capabilities.error_number_read_without_system
         "capabilities.not_available" ~says:"This call uses `System`" ~at:("intrinsic::libc_errno", 1);
       expect_fine_in_standard Fixtures.Capabilities.error_number_read_using_system);
+  Harness.test
+    "an implementation of a capability that reaches the operating system declares `System`"
+    (fun () ->
+      expect_one_in_standard
+        Fixtures.Capabilities.error_number_read_by_an_implementation_of_a_capability
+        "capabilities.not_available" ~says:"This call uses `System`" ~at:("intrinsic::libc_errno", 1));
   Harness.test "nothing can implement `System`" (fun () ->
       expect_one_in_standard Fixtures.Capabilities.system_implemented
         "types.implements_built_in_capability" ~says:"Nothing can implement `System`");
