@@ -79,7 +79,11 @@ module Properties : sig
     Lookups.t -> (Path.t * Types.type_interface) list -> (Path.t * Environment.type_facts) list
 end
 
-module Impls = Impls
+module Impls : module type of struct
+  include Impls
+end
+with module Conformance := Impls.Conformance
+
 module Grants = Grants
 module Check = Check
 

@@ -59,9 +59,12 @@ type _ stored =
 type any = Any : 'a stored -> any [@@unboxed]
 type t = Input of input | Name of name | Stored of any
 
-val find_type_equality : 'a stored -> 'b stored -> ('a, 'b) Type.eq option
-val locate_package : any -> Path.package
-val locate_name_package : name -> Path.package
+module Storage : sig
+  val find_type_equality : 'a stored -> 'b stored -> ('a, 'b) Type.eq option
+  val locate_package : any -> Path.package
+  val locate_name_package : name -> Path.package
+end
+
 val show : t -> string
 val find_definition : t -> Path.t option
 val show_kind : t -> string

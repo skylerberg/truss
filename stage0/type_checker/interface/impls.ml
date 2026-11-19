@@ -604,6 +604,14 @@ and read_signature lookups (path : Path.t) =
     ->
       Definition.find_declared_signature lookups path
 
+module Conformance = struct
+  let find_implementation_of = find_implementation_of
+  let list_impl_bounds = list_impl_bounds
+  let normalize_capabilities_in_impl = normalize_capabilities_in_impl
+  let normalize_signature_in_impl = normalize_signature_in_impl
+  let make_expected_signature = make_expected_signature
+end
+
 let read_scope (lookups : Lookups.t) (key : Resolve.Names.key) : Environment.scope =
   let scope = (lookups.read_elaborated_interface key).scope in
   match read_signature lookups key.path with

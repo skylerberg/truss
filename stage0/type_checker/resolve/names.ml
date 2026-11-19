@@ -53,20 +53,9 @@ let classify_receiver (parameters : Syntax.parameter list) : Path.receiver =
   | { kind = Self_parameter (Some Own); _ } :: _ -> Own
   | _ -> Static
 
-let extract_last_name (module_ : Path.module_) =
-  match List.rev (Path.list_module_parts module_) with last :: _ -> last | [] -> ""
-
 type entry = { name : string; kind : named; visibility : visibility; generic : bool }
 
-let is_type_kind : named -> bool = function
-  | Type | Trait | Capability -> true
-  | Function | Constant | Theorem -> false
-
-let is_value_kind kind = not (is_type_kind kind)
 let is_public = function Public | Public_opaque -> true | Private | Internal -> false
-
-let is_visible ~(from : Path.module_) (module_ : Path.module_) visibility =
-  module_ = from || is_public visibility || (visibility = Internal && module_.package = from.package)
 
 type law_proof_name = { trait : Path.t; law : string; type_head : Path.t }
 
@@ -128,36 +117,6 @@ let is_visible_module lookups ~(from : Path.module_) (module_ : Path.module_) =
   List.mem module_.package (list_visible_packages lookups from.package)
   && lookups.module_exists module_
 
-let is_restricted_module ~(from : Path.module_) (module_ : Path.module_) =
-  module_ = Intrinsic.module_ && from.package <> Path.standard_package
-
-let restricted_module_message = "Only the `standard` package can use `standard::intrinsic`."
-
-type module_lookup =
-  | Found_module of Path.module_
-  | Restricted_module
-  | Ambiguous_module of Path.module_ * Path.module_
-  | No_module of string
-
-let lookup_module lookups ~(from : Path.module_) ~imports first rest =
-  let imported =
-    Option.map
-      (fun (module_ : Path.module_) : Path.module_ ->
-        { module_ with modules = module_.modules @ rest })
-      (List.assoc_opt first imports)
-  in
-  let package = resolve_full_module lookups ~from first rest in
-  let exists module_ = is_visible_module lookups ~from module_ in
-  match imported with
-  | Some imported when exists imported && exists package && imported <> package ->
-      Ambiguous_module (imported, package)
-  | Some imported when exists imported -> Found_module imported
-  | _ when exists package ->
-      if is_restricted_module ~from package then Restricted_module else Found_module package
-  | _ -> No_module (String.concat "::" (first :: rest))
-
-let make_top_path module_ name : Path.t = Top { module_; name }
-
 let find_syntax_error (lookups : lookups) key part =
   Parts.find_syntax_error ~spans:(lookups.read_spans key)
     ~syntax_errors:(lookups.list_syntax_errors key) (lookups.read_definition key) part
@@ -166,24 +125,6 @@ let is_broken lookups key part = Option.is_some (find_syntax_error lookups key p
 
 let find_definition lookups path =
   Option.map (fun key -> (key, lookups.read_definition key)) (lookups.find_key path)
-
-let find_law_parameters lookups (trait : Path.t) law =
-  match find_definition lookups trait with
-  | Some (_, { kind = Trait { members; _ }; _ }) ->
-      List.find_map
-        (fun (member : Syntax.trait_member Syntax.node) ->
-          match member.kind with
-          | Law written_law when written_law.name.text = law ->
-              Some
-                (List.filter_map
-                   (fun (parameter : Syntax.parameter) ->
-                     match parameter.kind with
-                     | Named_parameter { name; _ } -> Some name.text
-                     | Self_parameter _ | Parameter_error -> None)
-                   written_law.parameters)
-          | _ -> None)
-        members
-  | _ -> None
 
 type generic_kind = Type_kind | Value_kind
 
@@ -222,19 +163,75 @@ let find_kind lookups (path : Path.t) =
 
 type 'visible lookup = Visible of 'visible | Hidden of (Path.t * visibility) | Absent
 
-let lookup_in lookups ~(from : Path.module_) module_ name ~is_kind =
-  match lookups.find module_ name with
-  | Some item when is_kind item.kind ->
-      let path = make_top_path module_ name in
-      if is_visible ~from module_ item.visibility then Visible (item, path)
-      else Hidden (path, item.visibility)
-  | _ -> Absent
+module Scope = struct
+  let extract_last_name (module_ : Path.module_) =
+    match List.rev (Path.list_module_parts module_) with last :: _ -> last | [] -> ""
+
+  let is_type_kind : named -> bool = function
+    | Type | Trait | Capability -> true
+    | Function | Constant | Theorem -> false
+
+  let is_value_kind kind = not (is_type_kind kind)
+
+  let is_visible ~(from : Path.module_) (module_ : Path.module_) visibility =
+    module_ = from || is_public visibility
+    || (visibility = Internal && module_.package = from.package)
+
+  let is_restricted_module ~(from : Path.module_) (module_ : Path.module_) =
+    module_ = Intrinsic.module_ && from.package <> Path.standard_package
+
+  let restricted_module_message = "Only the `standard` package can use `standard::intrinsic`."
+
+  type module_lookup =
+    | Found_module of Path.module_
+    | Restricted_module
+    | Ambiguous_module of Path.module_ * Path.module_
+    | No_module of string
+
+  let lookup_module lookups ~(from : Path.module_) ~imports first rest =
+    let imported =
+      Option.map
+        (fun (module_ : Path.module_) : Path.module_ ->
+          { module_ with modules = module_.modules @ rest })
+        (List.assoc_opt first imports)
+    in
+    let package = resolve_full_module lookups ~from first rest in
+    let exists module_ = is_visible_module lookups ~from module_ in
+    match imported with
+    | Some imported when exists imported && exists package && imported <> package ->
+        Ambiguous_module (imported, package)
+    | Some imported when exists imported -> Found_module imported
+    | _ when exists package ->
+        if is_restricted_module ~from package then Restricted_module else Found_module package
+    | _ -> No_module (String.concat "::" (first :: rest))
+
+  let make_top_path module_ name : Path.t = Top { module_; name }
+
+  let lookup_in lookups ~(from : Path.module_) module_ name ~is_kind =
+    match lookups.find module_ name with
+    | Some item when is_kind item.kind ->
+        let path = make_top_path module_ name in
+        if is_visible ~from module_ item.visibility then Visible (item, path)
+        else Hidden (path, item.visibility)
+    | _ -> Absent
+
+  let find_bare_type lookups ~(from : Path.module_) name =
+    match lookups.find from name with
+    | Some item when is_type_kind item.kind -> Some (item, make_top_path from name)
+    | _ -> (
+        match Prelude.find_type name with
+        | Some module_ -> (
+            match lookups.find module_ name with
+            | Some item when is_type_kind item.kind -> Some (item, make_top_path module_ name)
+            | _ -> None)
+        | None -> None)
+end
 
 let lookup_member lookups ~(from : Path.module_) member =
   match lookups.find_key member with
   | Some key ->
       let declaration = lookups.read_declaration key in
-      if is_visible ~from declaration.key.module_ declaration.visibility then Visible member
+      if Scope.is_visible ~from declaration.key.module_ declaration.visibility then Visible member
       else Hidden (member, declaration.visibility)
   | None -> Absent
 
@@ -275,7 +272,7 @@ let list_visible_traits_declaring lookups ~(from : Path.module_) name =
           match trait with
           | Top { module_; name = trait_name } -> (
               match
-                lookup_in lookups ~from module_ trait_name ~is_kind:(fun (kind : named) ->
+                Scope.lookup_in lookups ~from module_ trait_name ~is_kind:(fun (kind : named) ->
                     kind = Trait)
               with
               | Visible _ -> true
@@ -292,17 +289,6 @@ let list_members_visible_to_package lookups ~(package : Path.package) owner name
       let declaration = lookups.read_declaration key in
       declaration.key.module_.package = package || is_public declaration.visibility)
     (lookups.list_members owner name)
-
-let find_bare_type lookups ~(from : Path.module_) name =
-  match lookups.find from name with
-  | Some item when is_type_kind item.kind -> Some (item, make_top_path from name)
-  | _ -> (
-      match Prelude.find_type name with
-      | Some module_ -> (
-          match lookups.find module_ name with
-          | Some item when is_type_kind item.kind -> Some (item, make_top_path module_ name)
-          | _ -> None)
-      | None -> None)
 
 let is_derivable (trait : Path.t) =
   match Well_known.of_path trait with
