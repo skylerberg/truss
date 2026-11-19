@@ -307,9 +307,9 @@ Rules: [Values and ownership](SPECIFICATION.md#values-and-ownership).
 
 Truss has mutable value semantics: every variable holds its own value, and
 no two names alias a value that either can mutate. A value is freed when its
-owner's scope ends, so there is no garbage collector and no runtime beyond
-libc. There is no mutable global state either: a top-level `let` is a
-constant, so tests can share one process.
+owner's scope ends, so there is no garbage collector. There is no mutable
+global state either: a top-level `let` is a constant, so tests can share one
+process.
 
 Four guarantees made elsewhere in the design depend on this:
 
@@ -596,7 +596,6 @@ Rules: [Constants](SPECIFICATION.md#constants).
 | Rule | Reason |
 |---|---|
 | A constant expression calls no function. | A constant can appear in a type, as in `Array[UInt8, digest_size]`, so type checking never waits for code to run. |
-| Code that runs at compile time is compiled and run as a test is, not interpreted. | Truss then has one implementation of its semantics, and a result computed at compile time equals the result in the compiled program. Such code only discharges proofs and produces static data, so type checking never depends on it. |
 
 ## Functions
 
@@ -781,10 +780,6 @@ A function type puts its clauses after its result, inside parentheses, as in
 `(fn(Request) -> Response uses Database, Log cost time O(1))`. Truss has
 whole clauses, not one or two effect keywords, so the clauses come in the
 order they have in a definition, and the parentheses mark where they end.
-
-| Rule | Reason |
-|---|---|
-| A call of a function value passes the caller's capabilities as one table, and the function finds each capability it uses in the table by the address of the capability's symbol. | A value of `fn()` can be passed where `(fn() uses Clock)` is allowed, and stored or returned there, with no wrapper and no change to how it is called. A wrapper would need storage that lives as long as the value, which a function value that captures nothing does not have. |
 
 ## Methods
 
@@ -1150,10 +1145,6 @@ own dependencies more than it holds. A new release cannot give a function
 that is already called more capabilities unnoticed: each caller's `uses` must
 name them, so the upgrade fails to compile until the caller's author adds
 them.
-
-Grants cannot stop a wrong answer: a pure dependency can still return a
-result that its user acts on. Contracts narrow that risk, and a project's
-dependencies still need review.
 
 ## Parallelism
 
@@ -1541,10 +1532,9 @@ only, to state the definition.
 | Rule | Reason |
 |---|---|
 | A method of a trait or of an `impl` is known by its contract too. | An `impl` states what it adds to the trait's contract in its own `ensures`: `Int64.compare` ensures the order of the integers. An edit to a provided body then changes no fact that callers know. An edit to an `impl`'s body re-proves that method and the `impl`'s laws alone. |
-| An `ensures` that fixes a pure function's result is the call's value: `identical(result, e)`, or `result == e` where `==` is identity, as on integers. An `e` that calls the function itself is not used. | A fact about a call then needs no term of the call to take effect. `List.element` ensures `identical(result, self.model()[position])`, so a quantifier over a list's elements is a quantifier over its model, which code that indexes the list instantiates. A hand-written `Equal` is not identity, and neither is a structural equality such as `String`'s, under which two equal strings can differ in `capacity()`, so neither fixes a value. A recursive definition is not unfolded. |
 | A clause applies only where every name it mentions is visible. | An `ensures` that reads the fields of an opaque type is a fact inside the type's package and no fact elsewhere, so `opaque` hides the representation from proofs too. |
 | A public `requires` or `cost` names only public definitions, and an `ensures` may name a private function. | The proofs of callers in other packages read a `requires` and a `cost`, and a clause applies only where every name it mentions is visible. The `ensures` lets callers inside the package know a result in terms of private helpers. |
-| A bit-level fact is requested with `assert ... by bit_vector`. | Bit-blasting is slow on most queries, so only the assertion that asks for it is proven that way, as with Verus's `by (bit_vector)`. Every other query knows a bitwise operation by a few facts, and no query falls back to bit-blasting. |
+| A bit-level fact is requested with `assert ... by bit_vector`. | Bit-blasting is slow on most queries, so only the assertion that asks for it is proven that way, as with Verus's `by (bit_vector)`. |
 | A quantifier over a range or a collection is also an expression in code. | The binder carries its range, so the body may rely on it. A lambda passed to a method would know nothing about its argument. The standard library therefore has no `all` or `any` methods, and a test of every element has *one spelling*. |
 
 ### Writing specifications
@@ -1693,10 +1683,9 @@ reasons:
 3. Freedom to change the representation. A compatible release may change
    everything inside an opaque type ([Versions](#versions)).
 
-A public type that is not opaque exposes its fields. The exposure is visible
-in review, because the fields are written in the public declaration. The
-fields of an opaque type are accessible throughout its package, not only in
-one file, because the methods of a type can live in any file of the package.
+The fields of an opaque type are accessible throughout its package, not only
+in one file, because the methods of a type can live in any file of the
+package.
 
 **An `internal` definition that nothing in its package uses is an error,**
 as an unused variable is. No other package can call it, so it is dead code,
@@ -1893,20 +1882,14 @@ contract, so a typo in a body blocks no caller.
 |---|---|
 | The database keeps no earlier version of a failing part. | An earlier version would make the database depend on the order of the edits. A caller checked against an earlier signature would also report errors that the files do not hold. |
 | A build, a test run, or a template check requires that no definition it reaches has errors. | No run executes code that the files do not hold, and a test whose code is correct runs while unrelated code is broken. |
-| A constant's value belongs to its contract. | A pattern that names a constant covers the constant's value, and a contract can hold a pattern. The check of that contract reads the value, as a caller's proof reads a callee's contract. |
 
 ### Caches
 
-The user's cache holds the results that are expensive to compute: solver
-answers, object files, test results, the databases of the standard library
-and of registry packages, and fetched packages. Each is keyed by its whole
-input.
-
-A cache never makes a result wrong: deleting it only makes the next build
-slower. Every worktree and CI share the caches. The database itself caches
-nothing, so a revert or a branch switch is a change to the files like any
-other. The database computes the cheap stages again, and the solver, the C
-compiler, and the tests are cache hits.
+The user's cache holds the results that are expensive to compute, each
+keyed by its whole input, and every worktree and CI share it. The database
+itself caches nothing, so a revert or a branch switch is a change to the
+files like any other: the database computes the cheap stages again, and the
+expensive results are cache hits.
 
 ## Omitted features
 
@@ -1914,7 +1897,8 @@ compiler, and the tests are cache hits.
 |---|---|
 | Comments | [Comments](#comments) |
 | Numeric literal suffixes | [Number literals](#number-literals) |
-| Tuples and type aliases | [Type definitions](#type-definitions) |
+| Tuples | Naming by position lets users mix up which is which. Destructuring a record suffices. |
+| Type aliases | A type name always means one type. |
 | A garbage collector, lifetimes, stored references, and mutable global state | [Values and ownership](#values-and-ownership) |
 | Destructors | [Handles](#handles) |
 | Generators and coroutines | [Lending methods](#lending-methods) and [Loops](#loops) |
@@ -1940,5 +1924,3 @@ compiler, and the tests are cache hits.
 | A separate list of dependencies for tests | The dependencies that only tests reach are computed when a package is published. |
 | A dependency on a git repository or a directory | Unpublished code is worked on in the project that uses it. |
 | Build scripts, install scripts, and code generators | [Grants](#grants) |
-| Tuples | Naming by position allows users to mix up which is which. destructuring suffices |
-| Type aliases | A type name always means one type |
