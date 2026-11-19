@@ -26,6 +26,7 @@ type t =
   | Fixed_width_integer
   | Signed_integer
   | Unsigned_integer
+  | Floating_point
   | Range
   | Exit_code
   | Option

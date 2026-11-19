@@ -12,6 +12,20 @@ public trait FixedWidthInteger:
   + Divide[Self, Output = Self]
   + Remainder[Self, Output = Self]
 {
+  type Bytes
+
+  fn to_big_endian_bytes(self) -> Self.Bytes
+    cost time O(1)
+
+  fn to_little_endian_bytes(self) -> Self.Bytes
+    cost time O(1)
+
+  fn from_big_endian_bytes(bytes: Self.Bytes) -> Self
+    cost time O(1)
+
+  fn from_little_endian_bytes(bytes: Self.Bytes) -> Self
+    cost time O(1)
+
   fn minimum_value() -> Self
     cost time O(1)
 
@@ -313,25 +327,29 @@ public trait FixedWidthInteger:
       intrinsic::add(self, right: other)
     }
   }
-}
-
-public trait SignedInteger: FixedWidthInteger + Negate[Output = Self] {
-  type Unsigned: UnsignedInteger[Signed = Self]
 
   fn checked_divide(self, other: Self) -> Option[Self]
-    ensures (result is None) == (other == 0 || (self == Self.minimum_value() && other == -1))
+    ensures (result is None) == (other == 0 || (self == Self.minimum_value() && other + 1 == 0))
     ensures !(result is Some(quotient) && quotient != self / other)
     cost time O(1)
   {
-    if other == 0 || (self == Self.minimum_value() && other == -1) { None } else { Some(self / other) }
+    if other == 0 || (self == Self.minimum_value() && other < 0 && other + 1 == 0) {
+      None
+    } else {
+      Some(self / other)
+    }
   }
 
   fn checked_remainder(self, other: Self) -> Option[Self]
-    ensures (result is None) == (other == 0 || (self == Self.minimum_value() && other == -1))
+    ensures (result is None) == (other == 0 || (self == Self.minimum_value() && other + 1 == 0))
     ensures !(result is Some(remainder) && remainder != self % other)
     cost time O(1)
   {
-    if other == 0 || (self == Self.minimum_value() && other == -1) { None } else { Some(self % other) }
+    if other == 0 || (self == Self.minimum_value() && other < 0 && other + 1 == 0) {
+      None
+    } else {
+      Some(self % other)
+    }
   }
 
   fn saturating_power(self, exponent: UInt32) -> Self
@@ -347,6 +365,8 @@ public trait SignedInteger: FixedWidthInteger + Negate[Output = Self] {
     ensures self - other < Self.minimum_value() ==> result == Self.minimum_value()
     ensures self - other > Self.maximum_value() ==> result == Self.maximum_value()
     ensures Self.minimum_value() <= self - other && self - other <= Self.maximum_value() ==> result == self - other
+    ensures other >= 0 && self >= other ==> result == self - other
+    ensures Self.minimum_value() == 0 && self < other ==> result == 0
     cost time O(1)
   {
     if intrinsic::subtract_overflows(self, right: other) {
@@ -371,10 +391,11 @@ public trait SignedInteger: FixedWidthInteger + Negate[Output = Self] {
 
   fn floor_divide(self, divisor: Self) -> Self
     requires divisor != 0
-    requires self != Self.minimum_value() || divisor != -1
+    requires self != Self.minimum_value() || divisor + 1 != 0
     ensures divisor > 0 ==> result * divisor <= self && self < (result + 1) * divisor
     ensures divisor < 0 ==> result * divisor >= self && self > (result + 1) * divisor
     ensures result == self / divisor || result == self / divisor - 1
+    ensures self >= 0 && divisor > 0 ==> result == self / divisor
     cost time O(1)
   {
     let quotient = self / divisor
@@ -383,15 +404,60 @@ public trait SignedInteger: FixedWidthInteger + Negate[Output = Self] {
 
   fn floor_modulo(self, divisor: Self) -> Self
     requires divisor != 0
-    requires self != Self.minimum_value() || divisor != -1
+    requires self != Self.minimum_value() || divisor + 1 != 0
     ensures divisor > 0 ==> 0 <= result && result < divisor
     ensures divisor < 0 ==> divisor < result && result <= 0
     ensures result == self - self.floor_divide(divisor) * divisor
+    ensures self >= 0 && divisor > 0 ==> result == self % divisor
     cost time O(1)
   {
     let remainder = self % divisor
     if remainder != 0 && (remainder < 0) != (divisor < 0) { remainder + divisor } else { remainder }
   }
+
+  fn reverse_bits(self) -> Self
+    cost time O(1)
+
+  fn parse_radix(text: StringSlice, radix: UInt32) -> Result[Self, core::ParseIntegerError]
+    requires 2 <= radix && radix <= 36
+    cost time O(text.length())
+  {
+    let most: UInt64 = intrinsic::convert(Self.maximum_value())
+    if Self.minimum_value() < 0 && text.length() > 0 && text.byte(0) == 45 {
+      let magnitude = integer_text::parse_magnitude(text, start: 1, radix: radix, limit: most + 1)?
+      if magnitude == 0 {
+        Ok(0)
+      } else {
+        let below: Self = intrinsic::convert(magnitude - 1)
+        Ok(0 - below - 1)
+      }
+    } else {
+      let start: UInt64 = if text.length() > 0 && text.byte(0) == 43 { 1 } else { 0 }
+      let magnitude = integer_text::parse_magnitude(text, start: start, radix: radix, limit: most)?
+      Ok(intrinsic::convert(magnitude))
+    }
+  }
+
+  fn format(self, radix: UInt32 = 10, minimum_digits: UInt64 = 1, uppercase: Bool = false) -> String
+    requires 2 <= radix && radix <= 36
+    ensures result.length() >= 1
+    ensures result.length() <= minimum_digits + 66
+    cost time O(minimum_digits + Self.bit_width())
+  {
+    let magnitude: UInt64 =
+      if self < 0 { intrinsic::convert[Self, UInt64](0 - (self + 1)) + 1 } else { intrinsic::convert(self) }
+    integer_text::format_magnitude(
+      magnitude,
+      negative: self < 0,
+      radix: radix,
+      minimum_digits: minimum_digits,
+      uppercase: uppercase,
+    )
+  }
+}
+
+public trait SignedInteger: FixedWidthInteger + Negate[Output = Self] {
+  type Unsigned: UnsignedInteger[Signed = Self]
 
   fn absolute_difference(self, other: Self) -> Self.Unsigned
     ensures result == self - other || result == other - self
@@ -476,12 +542,6 @@ public trait SignedInteger: FixedWidthInteger + Negate[Output = Self] {
     self > 0
   }
 
-  fn reverse_bits(self) -> Self
-    cost time O(1)
-  {
-    self.to_unsigned_bits().reverse_bits().to_signed_bits()
-  }
-
   fn to_unsigned_bits(self) -> Self.Unsigned
     ensures self >= 0 ==> result == self
     ensures self < 0 ==> result == self + (Self.maximum_value() - Self.minimum_value() + 1)
@@ -495,106 +555,15 @@ public trait SignedInteger: FixedWidthInteger + Negate[Output = Self] {
       half - below + half + 1
     }
   }
-
-  fn parse_radix(text: StringSlice, radix: UInt32) -> Result[Self, core::ParseIntegerError]
-    requires 2 <= radix && radix <= 36
-    cost time O(text.length())
-  {
-    let most: UInt64 = intrinsic::convert(Self.maximum_value())
-    if text.length() > 0 && text.byte(0) == 45 {
-      let magnitude = integer_text::parse_magnitude(text, start: 1, radix: radix, limit: most + 1)?
-      if magnitude == 0 {
-        Ok(0)
-      } else {
-        let below: Self = intrinsic::convert(magnitude - 1)
-        Ok(-below - 1)
-      }
-    } else {
-      let start: UInt64 = if text.length() > 0 && text.byte(0) == 43 { 1 } else { 0 }
-      let magnitude = integer_text::parse_magnitude(text, start: start, radix: radix, limit: most)?
-      Ok(intrinsic::convert(magnitude))
-    }
-  }
-
-  fn format(self, radix: UInt32 = 10, minimum_digits: UInt64 = 1, uppercase: Bool = false) -> String
-    requires 2 <= radix && radix <= 36
-    ensures result.length() >= 1
-    ensures result.length() <= minimum_digits + 66
-    cost time O(minimum_digits + Self.bit_width())
-  {
-    integer_text::format_magnitude(
-      intrinsic::convert(self.unsigned_absolute()),
-      negative: self < 0,
-      radix: radix,
-      minimum_digits: minimum_digits,
-      uppercase: uppercase,
-    )
-  }
 }
 
 public trait UnsignedInteger: FixedWidthInteger {
   type Signed: SignedInteger[Unsigned = Self]
 
-  fn checked_divide(self, other: Self) -> Option[Self]
-    ensures (result is None) == (other == 0)
-    ensures !(result is Some(quotient) && quotient != self / other)
+  fn integer_square_root(self) -> Self
+    ensures result * result <= self
+    ensures self < (result + 1) * (result + 1)
     cost time O(1)
-  {
-    if other == 0 { None } else { Some(self / other) }
-  }
-
-  fn checked_remainder(self, other: Self) -> Option[Self]
-    ensures (result is None) == (other == 0)
-    ensures !(result is Some(remainder) && remainder != self % other)
-    cost time O(1)
-  {
-    if other == 0 { None } else { Some(self % other) }
-  }
-
-  fn saturating_power(self, exponent: UInt32) -> Self
-    cost time O(log(exponent))
-  {
-    match self.checked_power(exponent) {
-      Some(power) => power
-      None => Self.maximum_value()
-    }
-  }
-
-  fn saturating_subtract(self, other: Self) -> Self
-    ensures self < other ==> result == 0
-    ensures self >= other ==> result == self - other
-    cost time O(1)
-  {
-    if self < other { 0 } else { self - other }
-  }
-
-  fn saturating_multiply(self, other: Self) -> Self
-    ensures self * other > Self.maximum_value() ==> result == Self.maximum_value()
-    ensures self * other <= Self.maximum_value() ==> result == self * other
-    cost time O(1)
-  {
-    if intrinsic::multiply_overflows(self, right: other) {
-      Self.maximum_value()
-    } else {
-      intrinsic::multiply(self, right: other)
-    }
-  }
-
-  fn floor_divide(self, divisor: Self) -> Self
-    requires divisor != 0
-    ensures result == self / divisor
-    cost time O(1)
-  {
-    self / divisor
-  }
-
-  fn floor_modulo(self, divisor: Self) -> Self
-    requires divisor != 0
-    ensures result == self % divisor
-    cost time O(1)
-  {
-    self % divisor
-  }
 
   fn absolute_difference(self, other: Self) -> Self
     ensures result == self - other || result == other - self
@@ -657,18 +626,6 @@ public trait UnsignedInteger: FixedWidthInteger {
     }
   }
 
-  fn reverse_bits(self) -> Self
-    cost time O(1)
-  {
-    let nibbles = Self.maximum_value() / 17
-    let twos = Self.maximum_value() / 5
-    let ones = Self.maximum_value() / 3
-    let halves = ((self & (nibbles << 4)) >> 4) | ((self & nibbles) << 4)
-    let quarters = ((halves & (twos << 2)) >> 2) | ((halves & twos) << 2)
-    let pairs = ((quarters & (ones << 1)) >> 1) | ((quarters & ones) << 1)
-    intrinsic::swap_bytes(pairs)
-  }
-
   fn to_signed_bits(self) -> Self.Signed
     ensures self <= Self.maximum_value() / 2 ==> result == self
     ensures self > Self.maximum_value() / 2 ==> result == self - (Self.maximum_value() + 1)
@@ -682,28 +639,16 @@ public trait UnsignedInteger: FixedWidthInteger {
       -below - 1
     }
   }
+}
 
-  fn parse_radix(text: StringSlice, radix: UInt32) -> Result[Self, core::ParseIntegerError]
-    requires 2 <= radix && radix <= 36
-    cost time O(text.length())
-  {
-    let start: UInt64 = if text.length() > 0 && text.byte(0) == 43 { 1 } else { 0 }
-    let magnitude = integer_text::parse_magnitude(text, start: start, radix: radix, limit: intrinsic::convert(Self.maximum_value()))?
-    Ok(intrinsic::convert(magnitude))
-  }
-
-  fn format(self, radix: UInt32 = 10, minimum_digits: UInt64 = 1, uppercase: Bool = false) -> String
-    requires 2 <= radix && radix <= 36
-    ensures result.length() >= 1
-    ensures result.length() <= minimum_digits + 66
-    cost time O(minimum_digits + Self.bit_width())
-  {
-    integer_text::format_magnitude(
-      intrinsic::convert(self),
-      negative: false,
-      radix: radix,
-      minimum_digits: minimum_digits,
-      uppercase: uppercase,
-    )
-  }
+internal fn reverse_uint64_bits(value: UInt64) -> UInt64
+  cost time O(1)
+{
+  let nibbles = UInt64.maximum / 17
+  let twos = UInt64.maximum / 5
+  let ones = UInt64.maximum / 3
+  let halves = ((value & (nibbles << 4)) >> 4) | ((value & nibbles) << 4)
+  let quarters = ((halves & (twos << 2)) >> 2) | ((halves & twos) << 2)
+  let pairs = ((quarters & (ones << 1)) >> 1) | ((quarters & ones) << 1)
+  intrinsic::swap_bytes(pairs)
 }

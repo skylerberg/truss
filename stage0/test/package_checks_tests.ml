@@ -8,13 +8,25 @@ let expect_fine text = Support.expect_no_diagnostics ~check [ ("app::main", text
 let () =
   Harness.test "an impl must live with its trait, its type, or a type its trait names" (fun () ->
       expect_one_diagnostic Fixtures.Package_checks.impl_display_for_int64 "package.impl_location");
-  Harness.test "only the built-in integer types implement the integer traits" (fun () ->
-      let packages =
-        Support.setup [ ("app::main", Fixtures.Package_checks.signed_integer_impl_for_count) ]
-      in
-      let found = Support.list_codes (check packages (Support.parse_file "app::main")) in
-      if not (List.mem "package.sealed_trait_impl" found) then
-        Harness.fail "found [%s]" (String.concat "; " found));
+  Harness.test "only the built-in integer and float types implement the sealed number traits"
+    (fun () ->
+      List.iter
+        (fun (text, says) ->
+          let diagnostics =
+            check (Support.setup [ ("app::main", text) ]) (Support.parse_file "app::main")
+          in
+          if
+            not
+              (List.exists
+                 (fun (diagnostic : Diagnostic.t) ->
+                   Diagnostic.Code.name diagnostic.code = "package.sealed_trait_impl"
+                   && String.includes ~affix:says diagnostic.message)
+                 diagnostics)
+          then Harness.fail "found [%s]" (String.concat "; " (Support.list_codes diagnostics)))
+        [
+          (Fixtures.Package_checks.signed_integer_impl_for_count, "the built-in integer types");
+          (Fixtures.Package_checks.floating_point_impl_for_meters, "the built-in float types");
+        ]);
   Harness.test "an impl may live with a type its trait's arguments name" (fun () ->
       expect_fine Fixtures.Package_checks.impl_from_user_id_for_int64);
   Harness.test "two impls of a trait for one type constructor overlap when their arguments unify"

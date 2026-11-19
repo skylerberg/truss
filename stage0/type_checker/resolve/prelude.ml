@@ -5,6 +5,7 @@ let items : Well_known.t list =
     Fixed_width_integer;
     Signed_integer;
     Unsigned_integer;
+    Floating_point;
     Equal;
     Ordered;
     Ordering;
