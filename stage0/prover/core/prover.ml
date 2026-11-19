@@ -67,7 +67,7 @@ let list_integer_instances (lookups : Lookups.t) (path : Path.t) =
                   ( shown
                     @ [
                         Printf.sprintf "`%s` is `%s`" parameter.name
-                          (Intrinsic.show_builtin builtin);
+                          (Language.Builtin_type.show builtin);
                       ],
                     Types.bind_argument parameter
                       (Types.Type (Types.make_builtin builtin))
@@ -114,7 +114,6 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
   with
   | _ when is_specification_module key -> Not_proven_here
   | declaration, source -> (
-      lookups.read_patterns key;
       try
         match declaration.kind with
         | (Function | Method | Test) when Mir.find_code (lookups.mir.read_body_part key) = None ->

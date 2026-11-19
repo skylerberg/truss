@@ -604,6 +604,27 @@ let () =
         Harness.fail "recomputed only %s" (show_parts recomputed);
       expect_untouched recomputed
         ~is_excluded:(( = ) (Database.Part.Any (Checked_body (make_main_key "caller")))));
+  Harness.test "an edit to a constant recomputes the contracts whose patterns name it" (fun () ->
+      let with_favorite variant =
+        "public type Color =\n\
+        \  | Red\n\
+        \  | Green\n\
+        \  derives Equal\n\n\
+         public fn pick() -> Color\n\
+        \  ensures match result {\n\
+        \    app::main::favorite => true\n\
+        \    Green => true\n\
+        \  }\n\
+         {\n\
+        \  Color.Red\n\
+         }\n\n\
+         let favorite: Color = Color." ^ variant ^ "\n"
+      in
+      expect_included
+        (list_propagated
+           ~before:[ ("app::main", with_favorite "Red") ]
+           ~after:[ ("app::main", with_favorite "Green") ])
+        ~parts:[ Any (Contract (make_main_key "pick")) ]);
   Harness.test "adding the definition that a call names fixes the call" (fun () ->
       ignore
         (list_propagated

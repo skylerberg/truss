@@ -1,0 +1,24 @@
+capability Fetch {
+  fn get() -> UInt64
+}
+
+type Counted(calls: UInt64)
+
+impl Fetch for Counted {
+  fn get(mut self) -> UInt64 {
+    self.calls = self.calls.saturating_add(1)
+    7
+  }
+}
+
+fn tally(counted: mut Counted, second: mut UInt64) -> UInt64
+  uses Tasks
+  ensures counted.calls == old(counted.calls)
+{
+  provide mut counted {
+    concurrent {
+      return Fetch.get()
+      second = 1
+    }
+  }
+}

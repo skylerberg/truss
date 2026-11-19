@@ -216,7 +216,7 @@ let list_statement_edges interface instance (statement : Tree.statement) =
   | Basic (Assign { value = To_any { value; trait; _ }; _ }) ->
       supply Conversion_to_any
         (list_code_supplied_to_bound interface instance (Walk.extract_operand_type value, trait))
-  | Basic (Provide { provided; _ }) ->
+  | Provide { provided; _ } ->
       supply Provide
         (List.concat_map
            (fun (implementation : Tree.provided) ->
@@ -232,8 +232,8 @@ let list_statement_edges interface instance (statement : Tree.statement) =
               | Convert _ | Copy _ | Lambda _ | Value_parameter _ | Specification _ );
             _;
           }
-      | Call _ | Lend _ | Slice _ | Template _ | Live _ | Dead _ | Assert _ | Echo _ | Provide_end
-      | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ )
+      | Call _ | Lend _ | Template _ | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _
+      | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ )
   | For _
   | Jump (Return _ | Break | Continue | Cancel _ | Unreachable | Written_unreachable | Todo)
   | Choose _ | Assert_by_bit_vector _ | While _ | Fork _ | Resume _ | Yield _ ->
@@ -254,8 +254,7 @@ let list_edges (lookups : lookups) instance (code : Tree.t) =
       (function Calls target -> add [ target ] | Supplies { code; _ } -> add code)
       (list_statement_edges lookups.interface instance statement);
     match statement.kind with
-    | Basic (Call { call; _ } | Lend { call; _ } | Template { call; _ } | Slice { call; _ }) ->
-        add_invariant_check call
+    | Basic (Call { call; _ } | Lend { call; _ } | Template { call; _ }) -> add_invariant_check call
     | Basic (Assign { value = Construct { variant; fields; type_ }; _ }) -> (
         match find_head type_ with
         | Some head ->
@@ -275,11 +274,11 @@ let list_edges (lookups : lookups) instance (code : Tree.t) =
                 | Specification _ );
               _;
             }
-        | Provide _ | Live _ | Dead _ | Assert _ | Echo _ | Provide_end | Loan_start _ | Loan_end _
-        | Ghost_assert _ | Matched _ | Proof _ )
+        | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _ | Loan_end _ | Ghost_assert _
+        | Matched _ | Proof _ )
     | For _
     | Jump (Return _ | Break | Continue | Cancel _ | Unreachable | Written_unreachable | Todo)
-    | Choose _ | Assert_by_bit_vector _ | While _ | Fork _ | Resume _ | Yield _ ->
+    | Choose _ | Assert_by_bit_vector _ | While _ | Fork _ | Provide _ | Resume _ | Yield _ ->
         ()
   and visit_field_defaults type_ variant omitted =
     match Parts.read_defaults lookups.mir type_ with

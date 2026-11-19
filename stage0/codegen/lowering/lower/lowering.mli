@@ -140,5 +140,6 @@ val run_in_loop :
   state -> continue_:Lowered.block -> break_:Lowered.block -> depth:int -> (unit -> unit) -> unit
 
 val find_place_type : state -> Lowered.place -> Lowered.ty option
+val is_reached_through_pointer : state -> Lowered.place -> bool
 val make_int_constant : Memory_layout.integer -> Z.t -> Lowered.operand
 val classify_scalar : state -> Ground.ty -> Memory_layout.scalar

@@ -15,6 +15,7 @@ type named = Function | Type | Trait | Capability | Constant | Theorem
 
 val convert_named : named -> kind
 val show_kind : kind -> string
+val is_constant : kind -> bool
 
 type visibility = Private | Internal | Public | Public_opaque
 type key = { module_ : Path.module_; path : Path.t; ordinal : int }
@@ -71,7 +72,7 @@ type generic_kind = Type_kind | Value_kind
 
 val find_syntax_error : lookups -> key -> Parts.part -> Diagnostic.reported option
 val is_broken : lookups -> key -> Parts.part -> bool
-val list_builtin_generics : Intrinsic.builtin -> (string * generic_kind) list
+val list_builtin_generics : Language.Builtin_type.t -> (string * generic_kind) list
 val find_generics : lookups -> Path.t -> (string * generic_kind) list option
 
 type 'visible lookup = Visible of 'visible | Hidden of (Path.t * visibility) | Absent

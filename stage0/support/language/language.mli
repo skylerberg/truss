@@ -1,3 +1,4 @@
+module Builtin_type = Builtin_type
 module Comparison = Comparison
 module Connective = Connective
 module Loop_mode = Loop_mode

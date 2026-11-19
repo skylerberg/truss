@@ -1,6 +1,6 @@
 let check packages =
   Database.For_testing.list_diagnostics
-    [ Resolve; Interface; Infer; Patterns; Usage; Ownership ]
+    [ Resolve; Interface; Infer; Usage; Ownership ]
     (Support.make_database packages)
 
 let helpers = Fixtures.Ownership_matrix.helpers

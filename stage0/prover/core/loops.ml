@@ -366,15 +366,6 @@ let havoc context frame (changed : State.changed) =
         { frame with locals = Locals.add local (Facts.arrive context frame "loop" ty) frame.locals })
       frame changed.changed_locals
   in
-  let frame =
-    {
-      frame with
-      slices =
-        List.fold_left
-          (fun slices local -> Locals.add local State.Unknown_slice slices)
-          frame.slices changed.reassigned;
-    }
-  in
   match (changed.changes_self, frame.self_type) with
   | true, Some ty -> { frame with self = Some (Facts.arrive context frame "loop" ty) }
   | _ -> frame
@@ -974,7 +965,7 @@ let run_while_loop context (frame : State.frame) (loop : while_loop) =
         | Equal | Not_equal -> Facts.raise_bug "an equality gives a loop its measure")
     | None, _ -> None
   in
-  let start_measures = measure_terms inside in
+  let start_measures = measure_terms head in
   if context.terminates && start_measures = None then
     Facts.raise_bug "a `while` loop has no measure in a body that terminates";
   let most =

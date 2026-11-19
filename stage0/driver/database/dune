@@ -17,7 +17,6 @@
   resolve
   interface
   infer
-  patterns
   usage
   mir
   ownership

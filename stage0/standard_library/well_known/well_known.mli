@@ -172,6 +172,7 @@ type method_location = { owner : t; name : string; receiver : Path.receiver }
 val make_path : t -> Path.t
 val of_path : Path.t -> t option
 val is : t -> Path.t -> bool
+val is_buffer_sequence : Path.t -> bool
 val locate_method : method_ -> method_location
 val make_method_path : method_ -> Path.t
 val make_impl_method_path : method_ -> impl:Path.t -> Path.t
@@ -182,6 +183,9 @@ val show_variant : variant -> string
 val make_variant_type_path : variant -> Path.t
 val show_field : field -> string
 val specification : Path.module_
+val intrinsic_module : Path.module_
+val make_builtin_type_path : Language.Builtin_type.t -> Path.t
+val find_builtin_type : Path.t -> Language.Builtin_type.t option
 val is_system_module : Path.module_ -> bool
 
 module For_testing : sig

@@ -1,11 +1,10 @@
 fn f(items: mut List[String]) {
-  var view = items[..]
-  mut view[..].reverse()
-  mut view[..][0].push("x")
-  for item in mut view[..] {
+  mut items[..][..].reverse()
+  mut items[..][..][0].push("x")
+  for item in mut items[..][..] {
     mut item.push("y")
   }
-  for item in mut view {
+  for item in mut items[..] {
     item = "z"
   }
 }
@@ -18,7 +17,6 @@ fn g(view: mut Slice[String]) {
 }
 
 fn h(rows: mut List[List[Int64]]) {
-  var view = rows[..]
-  view[0][0] = 7
-  mut view[0][..].sort()
+  rows[..][0][0] = 7
+  mut rows[..][0][..].sort()
 }

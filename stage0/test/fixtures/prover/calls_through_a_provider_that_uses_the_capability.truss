@@ -1,0 +1,29 @@
+capability Fetch {
+  fn get() -> UInt64
+}
+
+type Doubler()
+
+impl Fetch for Doubler uses Fetch {
+  fn get(self) -> UInt64 {
+    let first = Fetch.get()
+    let second = Fetch.get()
+    first.saturating_add(second)
+  }
+}
+
+fn once() -> UInt64
+  uses Fetch
+  cost calls(Fetch.get) == 1
+{
+  Fetch.get()
+}
+
+fn wrapped() -> UInt64
+  uses Fetch
+  cost calls(Fetch.get) == 1
+{
+  provide Doubler() {
+    once()
+  }
+}

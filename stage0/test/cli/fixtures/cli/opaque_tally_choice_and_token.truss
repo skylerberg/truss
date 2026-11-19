@@ -1,0 +1,11 @@
+public opaque type Tally(count: UInt64, limit: UInt64)
+  invariant count <= limit
+  derives Equal, Hash
+  cost potential count
+
+public opaque type Choice[Item: Equal,] =
+  | First(item: Item)
+  | Second(item: Item)
+  derives Equal
+
+public opaque type Token(value: UInt64)

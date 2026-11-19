@@ -50,20 +50,20 @@ and cost_bound = Order_of | No_more_than of Z.t option | Exactly_cost of Z.t opt
 
 val unit : ty
 val bool : ty
-val make_builtin : ?arguments:argument list -> Intrinsic.builtin -> ty
+val make_builtin : ?arguments:argument list -> Language.Builtin_type.t -> ty
 val make_self_parameter : Path.t -> parameter
 val is_self_parameter : parameter -> bool
 val make_named : Path.t -> ty list -> ty
-val is_builtin : Intrinsic.builtin -> ty -> bool
-val find_builtin : ty -> Intrinsic.builtin option
+val is_builtin : Language.Builtin_type.t -> ty -> bool
+val find_builtin : ty -> Language.Builtin_type.t option
 val is_well_known : Well_known.t -> ty -> bool
 val find_view : ty -> ty option
 val find_integer_bits : ty -> (int * bool) option
 val find_integer_range : ty -> (Z.t * Z.t) option
 val is_integer_type : ty -> bool
 val list_literal_types : literal_kind -> ty list
-val find_integer_implementors : Path.t -> Intrinsic.builtin list option
-val find_bound_integer_implementors : trait_reference list -> Intrinsic.builtin list option
+val find_integer_implementors : Path.t -> Language.Builtin_type.t list option
+val find_bound_integer_implementors : trait_reference list -> Language.Builtin_type.t list option
 val is_signed : ty -> bool
 val is_float_type : ty -> bool
 val make_capability_set : capability list -> capability_set
@@ -172,7 +172,7 @@ type shape =
   | Record of field list
   | Sum of variant list
   | Todo_type
-  | Builtin_type of Intrinsic.builtin
+  | Builtin_type of Language.Builtin_type.t
 
 type type_interface = {
   type_generics : generic list;

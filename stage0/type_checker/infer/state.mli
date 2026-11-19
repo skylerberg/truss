@@ -1,4 +1,5 @@
-type local = { name : string; type_ : Types.ty; is_var : bool; mode : Language.Mode.t }
+type binding = Parameter | Var | Let
+type local = { name : string; type_ : Types.ty; binding : binding; mode : Language.Mode.t }
 
 type env = {
   output : Types.result option;
@@ -189,10 +190,10 @@ val run_in_statement : state -> env -> Source.Definition_span.t -> (unit -> 'a) 
 val diverges : is_never:(Syntax.expression -> bool) -> Syntax.statement -> bool
 val statement_diverges : state -> Syntax.statement -> bool
 val build_block : state -> Syntax.block -> Core.block
-val declare : state -> Syntax.name -> Types.ty -> is_var:bool -> mode:Language.Mode.t -> unit
+val declare : state -> Syntax.name -> Types.ty -> binding:binding -> mode:Language.Mode.t -> unit
 
 val declare_compiled :
-  state -> env -> Syntax.name -> Types.ty -> is_var:bool -> mode:Language.Mode.t -> unit
+  state -> env -> Syntax.name -> Types.ty -> binding:binding -> mode:Language.Mode.t -> unit
 
 val find_target : state -> Syntax.name -> Resolve.target option
 val decide_default_literal : state -> at:Source.Definition_span.t -> Types.ty -> Types.ty
@@ -220,8 +221,9 @@ val find_keyword_operation : state -> Syntax.expression -> (Syntax.id * Syntax.e
 val note_mode_keyword : state -> Syntax.expression -> Syntax.mode -> Syntax.expression -> unit
 val find_local_type : state -> Syntax.name -> Types.ty option
 val check_cost : state -> Syntax.cost -> unit
+val find_sequence_element : Types.ty -> Types.ty option
 
-val make_slice :
+val make_range :
   state ->
   origin:Core.origin ->
   Core.place ->
