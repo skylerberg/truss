@@ -1,0 +1,15 @@
+type State =
+  | Idle
+  | Paused
+  | Running
+
+type Event =
+  | Tick
+  | Stop
+
+fn f(state: State, event: Event) -> Int64 {
+  match state, event {
+    Idle | Paused, Tick | Stop => 1
+    _, _ => 2
+  }
+}

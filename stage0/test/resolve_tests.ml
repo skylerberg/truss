@@ -220,7 +220,13 @@ let () =
         "resolve.alternative_bindings");
   Harness.test "an alternative's name refers to the first alternative's binding" (fun () ->
       expect_binding_reference Fixtures.Resolve.or_pattern_binding_value_in_both ~use:("value", 3)
-        ~binding:("value", 1))
+        ~binding:("value", 1));
+  Harness.test "the rows of an arm must bind the same names" (fun () ->
+      expect_one_diagnostic Fixtures.Resolve.rows_binding_different_names
+        "resolve.alternative_bindings");
+  Harness.test "a row's name refers to the first row's binding" (fun () ->
+      expect_binding_reference Fixtures.Resolve.rows_binding_count_in_both ~use:("count", 3)
+        ~binding:("count", 1))
 
 let () =
   Harness.test "an unknown name is an error with a fix to the closest name" (fun () ->

@@ -1340,11 +1340,11 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
       Some frame
   | Proof code ->
       Some (Facts.restrict frame (Logic.not_ (Values.run_ghost_code context frame code)))
-  | Matched { patterns } ->
+  | Matched { rows } ->
       if frame.makes_obligations then
         context.decisions <-
           ( Printf.sprintf "the arm `%s` is taken"
-              (String.concat ", " (List.map (Facts.quote_origin context frame) patterns)),
+              (String.concat " | " (List.map (Facts.quote_origin context frame) rows)),
             None,
             frame.condition,
             Logic.Boolean true )

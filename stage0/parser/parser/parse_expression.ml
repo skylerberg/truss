@@ -1027,7 +1027,7 @@ and match_expression cursor =
   let arms =
     Cursor.parse_lines cursor ~parse_item:parse_arm ~recover:(fun span ->
         {
-          patterns = [];
+          rows = [];
           guard = None;
           body = { kind = Statement_error; id = Cursor.allocate_id cursor span };
           id = Cursor.allocate_id cursor span;
@@ -1037,7 +1037,7 @@ and match_expression cursor =
 
 and parse_arm cursor : Syntax.arm =
   let start = Cursor.index cursor in
-  let patterns = Cursor.parse_separated cursor ~separator:Comma Parse_pattern.parse_pattern in
+  let rows = Cursor.parse_separated cursor ~separator:Bar parse_row in
   let guard = if Cursor.accept_keyword cursor If then Some (parse_expression cursor) else None in
   Cursor.expect_punctuation cursor Fat_arrow;
   let body = parse_statement cursor in
@@ -1046,7 +1046,12 @@ and parse_arm cursor : Syntax.arm =
       Habits.match_arm_comma cursor ~comma;
       Cursor.advance cursor
   | _ -> ());
-  { patterns; guard; body; id = Cursor.allocate_id_from cursor start }
+  { rows; guard; body; id = Cursor.allocate_id_from cursor start }
+
+and parse_row cursor : Syntax.row =
+  let start = Cursor.index cursor in
+  let patterns = Cursor.parse_separated cursor ~separator:Comma Parse_pattern.parse_primary in
+  { patterns; id = Cursor.allocate_id_from cursor start }
 
 and opens_body cursor =
   Cursor.is_punctuation cursor (Open Curly)

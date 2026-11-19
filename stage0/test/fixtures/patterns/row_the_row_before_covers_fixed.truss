@@ -1,0 +1,6 @@
+fn f(left: Int64, right: Int64) -> Int64 {
+  match left, right {
+    0, _ => 1
+    _, _ => 2
+  }
+}

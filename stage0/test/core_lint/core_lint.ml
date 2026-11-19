@@ -690,9 +690,12 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
              | Match { scrutinees; arms; _ } ->
                  List.iter
                    (fun (arm : Core.arm) ->
-                     if List.length arm.patterns <> List.length scrutinees then
-                       report "a `match` arm does not have one pattern per scrutinee";
-                     List.iter2 (check_binds_own "a `match`") scrutinees arm.patterns)
+                     List.iter
+                       (fun (row : Core.row) ->
+                         if List.length row.patterns <> List.length scrutinees then
+                           report "a `match` row does not have one pattern per scrutinee"
+                         else List.iter2 (check_binds_own "a `match`") scrutinees row.patterns)
+                       arm.rows)
                    arms
              | Function_value { instantiation; _ } ->
                  check_instantiation "a function value" instantiation

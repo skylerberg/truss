@@ -1,0 +1,7 @@
+fn f(left: Bool, right: Bool) -> Int64 {
+  match left, right {
+    true, true => 1
+    true, false | true, _ => 2
+    _, _ => 3
+  }
+}

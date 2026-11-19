@@ -117,7 +117,33 @@ let () =
         ~fixed:Fixtures.Patterns.alternative_an_earlier_arm_covers_fixed);
   Harness.test "a nested alternative that the one before covers is unreachable" (fun () ->
       expect_one_diagnostic Fixtures.Patterns.repeated_nested_alternative
-        "patterns.unreachable_alternative")
+        "patterns.unreachable_alternative");
+  Harness.test "the rows of an arm together cover the pairs they match" (fun () ->
+      expect_fine Fixtures.Patterns.rows_covering_every_pair);
+  Harness.test "a pair that no row matches is not covered" (fun () ->
+      let actual = read_message Fixtures.Patterns.rows_missing_a_pair in
+      if not (String.includes ~affix:"`None, None`" actual) then Harness.fail "message %S" actual);
+  Harness.test "a row that the row before covers is unreachable" (fun () ->
+      expect_one_diagnostic Fixtures.Patterns.row_the_row_before_covers
+        "patterns.unreachable_alternative"
+        ~says:"The alternatives before this one already match everything it matches."
+        ~fixed:Fixtures.Patterns.row_the_row_before_covers_fixed);
+  Harness.test "a row that an earlier arm covers is unreachable, even the first" (fun () ->
+      expect_one_diagnostic Fixtures.Patterns.row_an_earlier_arm_covers
+        "patterns.unreachable_alternative"
+        ~says:"Earlier arms already match everything this alternative matches."
+        ~fixed:Fixtures.Patterns.row_an_earlier_arm_covers_fixed);
+  Harness.test "a row that an earlier arm and the row before cover together is unreachable"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Patterns.row_an_earlier_arm_and_row_cover
+        "patterns.unreachable_alternative"
+        ~says:"Earlier arms and the alternatives before this one together match"
+        ~fixed:Fixtures.Patterns.row_an_earlier_arm_and_row_cover_fixed);
+  Harness.test "a nested alternative that an earlier row covers is unreachable" (fun () ->
+      expect_one_diagnostic Fixtures.Patterns.nested_alternative_an_earlier_row_covers
+        "patterns.unreachable_alternative"
+        ~says:"The alternatives before this one already match everything it matches."
+        ~fixed:Fixtures.Patterns.nested_alternative_an_earlier_row_covers_fixed)
 
 let () =
   Harness.test "character literals and ranges cover their values" (fun () ->

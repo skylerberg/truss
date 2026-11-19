@@ -717,7 +717,7 @@ and lower_truth builder (node : Core.expression) : Tree.operand option =
   | Matches { value; pattern } ->
       let* scrutinee = lower_scrutinee builder value in
       Emitter.run_binding_to_statement builder (fun () ->
-          match_patterns builder [ pattern ]
+          match_patterns builder [ [ pattern ] ]
             [ (scrutinee, compute_operand_origin value) ]
             node.origin)
   | _ -> raise_bug "a condition that is no short-circuit operator and no `is`"
@@ -750,8 +750,8 @@ and lower_pattern_tests ~bind_matched builder (patterns : Core.pattern list) pla
     (Some (Immediate { value = Boolean true; type_ = Types.bool }))
     !tested
 
-and match_patterns ?(covers = false) ?owned builder (patterns : Core.pattern list) scrutinees origin
-    : Tree.operand option =
+and match_patterns ?(covers = false) ?owned builder (rows : Core.pattern list list) scrutinees
+    origin : Tree.operand option =
   let places = List.map fst scrutinees in
   let bind_matched patterns () =
     List.iter2
@@ -773,7 +773,7 @@ and match_patterns ?(covers = false) ?owned builder (patterns : Core.pattern lis
         let right = Emitter.build_block builder (fun () -> lower_alternatives later) in
         Emitter.hold_choice builder Types.bool origin (Connective { connective = Or; left; right })
   in
-  lower_alternatives (expand_patterns patterns)
+  lower_alternatives (List.concat_map expand_patterns rows)
 
 and match_ builder (node : Core.expression) scrutinees (arms : Core.arm list) : Tree.operand option
     =
@@ -803,7 +803,9 @@ and match_ builder (node : Core.expression) scrutinees (arms : Core.arm list) : 
           List.iter
             (fun (ended : Tree.statement) -> Emitter.emit builder ended.kind ended.origin)
             !left_by_arm_before;
-          match_patterns builder arm.patterns scrutinee_places arm.origin)
+          match_patterns builder
+            (List.map (fun (row : Core.row) -> row.patterns) arm.rows)
+            scrutinee_places arm.origin)
     in
     let guard =
       Option.map
@@ -828,14 +830,9 @@ and match_ builder (node : Core.expression) scrutinees (arms : Core.arm list) : 
     in
     let value =
       Emitter.build_block builder (fun () ->
-          if arm.patterns <> [] then
+          if arm.rows <> [] then
             Emitter.emit builder
-              (Basic
-                 (Matched
-                    {
-                      patterns =
-                        List.map (fun (pattern : Core.pattern) -> pattern.origin) arm.patterns;
-                    }))
+              (Basic (Matched { rows = List.map (fun (row : Core.row) -> row.origin) arm.rows }))
               arm.origin;
           let value =
             match (lower_block builder arm.body, result) with
@@ -1054,14 +1051,14 @@ and lower_statement builder (node : Core.statement) =
           | None, _ -> ()
           | Some place, None ->
               ignore
-                (match_patterns ~covers:true builder [ pattern ]
+                (match_patterns ~covers:true builder [ [ pattern ] ]
                    [ (place, compute_operand_origin value) ]
                    origin)
           | Some place, Some else_ ->
               let matches, bound =
                 Emitter.run_deferring builder (fun () ->
                     lower_condition_block builder (fun () ->
-                        match_patterns builder [ pattern ]
+                        match_patterns builder [ [ pattern ] ]
                           [ (place, compute_operand_origin value) ]
                           origin))
               in
@@ -1278,7 +1275,7 @@ and lower_statement builder (node : Core.statement) =
 and bind_or_match ?matched ?owned builder (pattern : Core.pattern) place ~origin =
   match matched with
   | Some matched ->
-      matched := match_patterns ?owned builder [ pattern ] [ (place, pattern.origin) ] origin
+      matched := match_patterns ?owned builder [ [ pattern ] ] [ (place, pattern.origin) ] origin
   | None -> bind ?owned builder pattern place ~scrutinee_origin:pattern.origin
 
 and lower_for_loop ?cursor_type ?(lent = ref None) ?matched builder ~origin
@@ -1464,7 +1461,7 @@ and lower_quantified builder (node : Core.expression) (quantifier : Core.quantif
         let parameter = Emitter.allocate_local builder Temporary value_type origin in
         ( parameter,
           Emitter.build_block builder (fun () ->
-              match_patterns builder [ pattern ]
+              match_patterns builder [ [ pattern ] ]
                 [ (Emitter.make_local_place parameter, pattern.origin) ]
                 origin) )
     | Over_elements { pattern; elements = { position; element; _ } } ->
@@ -1477,7 +1474,7 @@ and lower_quantified builder (node : Core.expression) (quantifier : Core.quantif
               match element with
               | Lent lending ->
                   let* part = lower_lent builder lending ~duration:Operand_evaluation in
-                  match_patterns builder [ pattern ] [ (part, pattern.origin) ] origin
+                  match_patterns builder [ [ pattern ] ] [ (part, pattern.origin) ] origin
               | _ -> raise_bug "a quantifier over elements that no call lends") )
   in
   let body = Emitter.build_block builder (fun () -> lower_expression builder body) in

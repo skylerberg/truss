@@ -601,9 +601,10 @@ and resolve_string_literal state scope (literal : Syntax.string_literal) =
   List.iter (fun (value, _) -> resolve_expression state scope value) literal.rest
 
 and resolve_arm state scope (arm_ : Syntax.arm) =
-  let inner =
-    List.fold_left (fun scope pattern_ -> bind_pattern state scope pattern_) scope arm_.patterns
-  in
+  let bound = ref [] in
+  resolve_alternatives state scope bound
+    (List.map (fun (row : Syntax.row) -> (row.id, row.patterns)) arm_.rows);
+  let inner = declare_bound state scope !bound in
   let guarded =
     match arm_.guard with Some guard -> resolve_condition state inner guard | None -> inner
   in
@@ -631,9 +632,12 @@ and declare_parameter state scope (name : Syntax.name) =
 and bind_pattern state scope (pattern_ : Syntax.pattern) =
   let bound = ref [] in
   resolve_pattern state scope bound pattern_;
+  declare_bound state scope !bound
+
+and declare_bound state scope bound =
   List.fold_left
     (fun scope (name : Syntax.name) -> declare_value state scope name)
-    scope (List.rev !bound)
+    scope (List.rev bound)
 
 and resolve_pattern state scope bound (pattern_ : Syntax.pattern) =
   match pattern_.kind with
@@ -647,45 +651,49 @@ and resolve_pattern state scope bound (pattern_ : Syntax.pattern) =
   | Variant { fields; _ } ->
       Option.iter (List.iter (resolve_pattern_field state scope bound)) fields
   | Record fields -> List.iter (resolve_pattern_field state scope bound) fields
-  | Alternatives alternatives -> (
-      let each =
-        List.map
-          (fun alternative ->
-            let names = ref [] in
-            resolve_pattern state scope names alternative;
-            (alternative, List.rev !names))
-          alternatives
+  | Alternatives alternatives ->
+      resolve_alternatives state scope bound
+        (List.map
+           (fun (alternative : Syntax.pattern) -> (alternative.id, [ alternative ]))
+           alternatives)
+
+and resolve_alternatives state scope bound (alternatives : (Syntax.id * Syntax.pattern list) list) =
+  let each =
+    List.map
+      (fun (id, patterns) ->
+        let names = ref [] in
+        List.iter (resolve_pattern state scope names) patterns;
+        (id, List.rev !names))
+      alternatives
+  in
+  match each with
+  | [] -> ()
+  | (_, first) :: rest ->
+      bound := List.rev_append first !bound;
+      let list_texts names =
+        List.sort compare (List.map (fun (name : Syntax.name) -> name.text) names)
       in
-      match each with
-      | [] -> ()
-      | (_, first) :: rest ->
-          bound := List.rev_append first !bound;
-          let list_texts names =
-            List.sort compare (List.map (fun (name : Syntax.name) -> name.text) names)
-          in
-          List.iter
-            (fun ((alternative : Syntax.pattern), names) ->
-              if list_texts names <> list_texts first then
-                report state Alternative_bindings (read_span state alternative.id)
-                  (Printf.sprintf
-                     "Every alternative of a pattern must bind the same names. The first binds %s, \
-                      and this one binds %s."
-                     (match list_texts first with
-                     | [] -> "none"
-                     | names -> "`" ^ String.concat "`, `" names ^ "`")
-                     (match list_texts names with
-                     | [] -> "none"
-                     | names -> "`" ^ String.concat "`, `" names ^ "`"))
-              else
-                List.iter
-                  (fun (name : Syntax.name) ->
-                    match
-                      List.find_opt (fun (other : Syntax.name) -> other.text = name.text) first
-                    with
-                    | Some other -> set_target state name (Local other.id)
-                    | None -> ())
-                  names)
-            rest)
+      List.iter
+        (fun (id, names) ->
+          if list_texts names <> list_texts first then
+            report state Alternative_bindings (read_span state id)
+              (Printf.sprintf
+                 "Every alternative must bind the same names. The first binds %s, and this one \
+                  binds %s."
+                 (match list_texts first with
+                 | [] -> "none"
+                 | names -> "`" ^ String.concat "`, `" names ^ "`")
+                 (match list_texts names with
+                 | [] -> "none"
+                 | names -> "`" ^ String.concat "`, `" names ^ "`"))
+          else
+            List.iter
+              (fun (name : Syntax.name) ->
+                match List.find_opt (fun (other : Syntax.name) -> other.text = name.text) first with
+                | Some other -> set_target state name (Local other.id)
+                | None -> ())
+              names)
+        rest
 
 and resolve_pattern_field state scope bound (field : Syntax.pattern_field) =
   match field.kind with

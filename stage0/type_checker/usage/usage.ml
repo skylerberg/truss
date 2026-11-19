@@ -52,7 +52,10 @@ let collect_bindings context (definition : Syntax.definition) =
     | Is { pattern = written; _ } -> visit_pattern written
     | Lambda { parameters; _ } -> List.iter visit_pattern parameters
     | Match { arms; _ } ->
-        List.iter (fun (arm : Syntax.arm) -> List.iter visit_pattern arm.patterns) arms
+        List.iter
+          (fun (arm : Syntax.arm) ->
+            List.iter (fun (row : Syntax.row) -> List.iter visit_pattern row.patterns) arm.rows)
+          arms
     | Quantified { binder = Binder_in (written, _); _ } -> visit_pattern written
     | _ -> ());
     Syntax_walk.visit_expression_parts ~on_expression:visit_expression ~on_statement:visit_statement

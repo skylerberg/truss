@@ -30,6 +30,63 @@ let record_conversion (state : State.state) (value : Syntax.expression) (collect
       };
   Name_lookup.resolve_evidence state value collection trait
 
+let list_columns (rows : Syntax.row list) =
+  List.rev_map List.rev
+    (List.fold_left
+       (fun columns (row : Syntax.row) ->
+         match (columns, row.patterns) with
+         | last :: earlier, first :: rest ->
+             List.rev_append
+               (List.map (fun pattern -> [ pattern ]) rest)
+               ((first :: last) :: earlier)
+         | _ -> List.rev_map (fun pattern -> [ pattern ]) row.patterns @ columns)
+       [] rows)
+
+let list_combinations columns =
+  List.fold_right
+    (fun alternatives combinations ->
+      List.concat_map
+        (fun alternative -> List.map (fun rest -> alternative :: rest) combinations)
+        alternatives)
+    columns [ [] ]
+
+let make_arity_error state (rows : Syntax.row list) (row : Syntax.row) ~arity =
+  let show_patterns count = Diagnostic.show_count count "pattern" "patterns" in
+  let show_scrutinees = Diagnostic.show_count arity "scrutinee" "scrutinees" in
+  let columns = list_columns rows in
+  match rows with
+  | first :: _ :: _ when List.length columns = arity ->
+      let quote id = State.quote_span state (State.read_span state id) in
+      let rows_span =
+        Source.Definition_span.make (State.read_span state first.id).start
+          (State.read_span state (List.nth rows (List.length rows - 1)).id).stop
+      in
+      let spelling =
+        String.concat " | "
+          (List.map
+             (fun combination ->
+               String.concat ", "
+                 (List.map (fun (written : Syntax.pattern) -> quote written.id) combination))
+             (list_combinations columns))
+      in
+      State.make_error_type state Arity rows_span
+        ~fixes:
+          [
+            Diagnostic.fix "Write a row for each combination."
+              [ Diagnostic.replace rows_span spelling ];
+          ]
+        (Printf.sprintf
+           "`|` separates the rows of an arm, and the row `%s` has %s for %s. Write a row for each \
+            combination of alternatives: `%s`."
+           (quote row.id)
+           (show_patterns (List.length row.patterns))
+           show_scrutinees spelling)
+  | _ ->
+      State.make_error_type state Arity (State.read_span state row.id)
+        (Printf.sprintf "This row has %s, and the `match` has %s."
+           (show_patterns (List.length row.patterns))
+           show_scrutinees)
+
 let rec check_string_literal state env ?expected (value : Syntax.expression)
     (literal : Syntax.string_literal) =
   let parts =
@@ -467,34 +524,49 @@ and match_ state env ?expected (value : Syntax.expression) scrutinees arms =
           arms =
             List.map
               (fun (arm : Syntax.arm) : Core.arm ->
-                let patterns = List.map (State.build_scrutinee_pattern state) arm.patterns in
+                let rows =
+                  List.map
+                    (fun (row : Syntax.row) : Core.row ->
+                      {
+                        patterns = List.map (State.build_scrutinee_pattern state) row.patterns;
+                        origin = row.id;
+                      })
+                    arm.rows
+                in
                 let guard = Option.map (State.build_expression state) arm.guard in
                 {
-                  patterns;
+                  rows;
                   guard;
                   body = State.build_block state { statements = [ arm.body ]; id = arm.body.id };
                   origin = arm.id;
                 })
               arms;
         });
+  let arity = List.length types in
   let branch_types =
     List.map
       (fun (arm : Syntax.arm) ->
-        if List.length arm.patterns <> List.length types then
-          let unknown =
-            State.make_error_type state Mismatch (State.read_span state arm.id)
-              (Printf.sprintf "This arm has %d patterns, and the `match` has %d values."
-                 (List.length arm.patterns) (List.length types))
-          in
-          List.iter
-            (fun written -> Pattern_typing.check_pattern state env written unknown ~mode:Types.Read)
-            arm.patterns
-        else
-          List.iter2
-            (fun written (scrutinee, type_) ->
-              Pattern_typing.check_pattern state env written type_
-                ~mode:(Modes.classify_scrutinee_mode state scrutinee))
-            arm.patterns types;
+        (match
+           List.find_opt (fun (row : Syntax.row) -> List.length row.patterns <> arity) arm.rows
+         with
+        | Some row ->
+            let unknown = make_arity_error state arm.rows row ~arity in
+            List.iter
+              (fun (row : Syntax.row) ->
+                List.iter
+                  (fun written ->
+                    Pattern_typing.check_pattern state env written unknown ~mode:Types.Read)
+                  row.patterns)
+              arm.rows
+        | None ->
+            List.iter
+              (fun (row : Syntax.row) ->
+                List.iter2
+                  (fun written (scrutinee, type_) ->
+                    Pattern_typing.check_pattern state env written type_
+                      ~mode:(Modes.classify_scrutinee_mode state scrutinee))
+                  row.patterns types)
+              arm.rows);
         Option.iter (fun guard -> Hooks.check state env guard Types.bool) arm.guard;
         ( check_arm_value state env ?expected arm.body,
           State.read_span state arm.body.id,

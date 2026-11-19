@@ -24,6 +24,21 @@ fn both(first: Option[Int64], second: Option[Int64]) -> Int64 {
   }
 }
 
+fn present(first: Option[Int64], second: Option[Int64]) -> Int64 {
+  match first, second {
+    Some(value), None | None, Some(value) => value
+    Some(_), Some(_) => -1
+    None, None => 0
+  }
+}
+
+test "an arm's rows bind a value from whichever value matches" {
+  assert present(Some(1), second: None) == 1
+  assert present(None, second: Some(2)) == 2
+  assert present(Some(1), second: Some(2)) == -1
+  assert present(None, second: None) == 0
+}
+
 test "a match on literals, a range, strings, and two values at once" {
   assert kind(0) == "zero"
   assert kind(2) == "small"

@@ -165,7 +165,7 @@ and basic =
   | Loan_start of { loan : int; borrowed : operand; mode : Types.mode; duration : loan_duration }
   | Loan_end of int list
   | Ghost_assert of { condition : formula; by_bit_vector : bool }
-  | Matched of { patterns : Core.origin list }
+  | Matched of { rows : Core.origin list }
   | Proof of t
 
 and statement_kind =

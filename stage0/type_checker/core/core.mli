@@ -163,7 +163,8 @@ and calls_target =
 
 and bound = Order_of of expression | At_most of expression | Exactly of expression
 and condition = { value : expression; executable : bool }
-and arm = { patterns : pattern list; guard : expression option; body : block; origin : origin }
+and arm = { rows : row list; guard : expression option; body : block; origin : origin }
+and row = { patterns : pattern list; origin : origin }
 and pattern = { id : id; origin : origin; type_ : Types.ty; kind : pattern_kind }
 
 and pattern_kind =

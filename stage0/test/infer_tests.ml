@@ -942,6 +942,23 @@ let () =
       expect_one_diagnostic Fixtures.Infer.exit_code_constant_arm_on_an_integer "types.mismatch");
   Harness.test "the alternatives of a pattern bind each name with one type" (fun () ->
       expect_one_diagnostic Fixtures.Infer.or_pattern_binding_value_of_two_types "types.mismatch");
+  Harness.test "the rows of an arm bind each name with one type" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.rows_binding_count_of_two_types "types.mismatch");
+  Harness.test "an arm written with an alternative within each scrutinee has a fix to one row each"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.alternatives_within_each_scrutinee_of_two "types.arity"
+        ~says:"the row `Idle` has 1 pattern for 2 scrutinees"
+        ~fixed:Fixtures.Infer.alternatives_within_each_scrutinee_of_two_fixed);
+  Harness.test "a row with more patterns than scrutinees has no fix" (fun () ->
+      match
+        Support.run_check ~check
+          (Support.setup [ ("app::main", Fixtures.Infer.row_of_three_patterns_for_two_scrutinees) ])
+          "app::main"
+      with
+      | [ ({ code = Types Arity; fixes = []; message; _ } : Diagnostic.t) ]
+        when message = "This row has 3 patterns, and the `match` has 2 scrutinees." ->
+          ()
+      | reported -> Harness.fail "found [%s]" (String.concat "; " (Support.list_codes reported)));
   Harness.test "a pattern must match every field or write .." (fun () ->
       expect_one_diagnostic Fixtures.Infer.record_pattern_missing_a_field "types.missing_argument");
   (let make_comparison_source depth =

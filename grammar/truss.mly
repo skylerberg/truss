@@ -533,7 +533,10 @@ match_expression:
     LBRACE newline_separated(arm) RBRACE { () }
 
 arm:
-  | separated_nonempty_list(COMMA, pattern) guard_opt FATARROW statement { () }
+  | separated_nonempty_list(BAR, row) guard_opt FATARROW statement { () }
+
+row:
+  | separated_nonempty_list(COMMA, pattern_primary) { () }
 
 guard_opt:
   | { () }

@@ -1393,17 +1393,33 @@ match status_code {
 
 ```ebnf
 match = "match" expression { "," expression } "{" lines(arm) "}" ;
-arm   = pattern { "," pattern } [ "if" expression ] "=>" statement ;
+arm   = row { "|" row } [ "if" expression ] "=>" statement ;
+row   = pattern_primary { "," pattern_primary } ;
 ```
 
+```truss
+match state, event {
+  Idle, Start | Paused, Resume => todo
+  Running, Pause => todo
+  _, Stop => todo
+  _, _ => todo
+}
+```
+
+- A row has one pattern for each scrutinee, and matches when every pattern
+  matches its scrutinee. An arm matches when one of its rows matches.
+- `|` between rows has lower precedence than `,`, so `0, _ | _, 0` is two
+  rows. An alternative within one scrutinee is a row for each combination,
+  as in `Idle, Tick | Paused, Tick`.
+- Every row of an arm binds the same names, with the same types.
 - An arm's body is a statement. When the `match` is used as a value, an arm
   whose body is not an expression has type `Unit`.
-- A guard takes the arm only when the patterns match and the guard is true.
+- A guard takes the arm only when a row matches and the guard is true.
 - **A `match` covers every case.** An arm with a guard never counts toward
-  covering its patterns.
-- **Every arm is reachable.**
-- A `match` on several values has one pattern per value in each arm.
-  Coverage and reachability are checked across all the values.
+  covering its rows.
+- **Every arm is reachable**, and so is every row and every alternative of
+  an or-pattern.
+- Coverage and reachability are checked across all the scrutinees.
 
 ### `is`
 

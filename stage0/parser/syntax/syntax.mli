@@ -173,7 +173,8 @@ and loop_clause_kind =
   | Loop_decreases of expression list
   | Loop_cost of cost
 
-and arm = { patterns : pattern list; guard : expression option; body : statement; id : id }
+and arm = { rows : row list; guard : expression option; body : statement; id : id }
+and row = { patterns : pattern list; id : id }
 and pattern = pattern_kind node
 
 and pattern_kind =

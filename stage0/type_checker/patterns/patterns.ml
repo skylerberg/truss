@@ -429,17 +429,52 @@ let rec list_or_patterns (written : Core.pattern) =
 
 let witness_limit = 8
 
+let explain_unreachable_alternative context types ~earlier_arms ~earlier_alternatives candidate =
+  if not (is_useful context types earlier_arms candidate) then
+    "Earlier arms already match everything this alternative matches."
+  else if not (is_useful context types earlier_alternatives candidate) then
+    "The alternatives before this one already match everything it matches."
+  else "Earlier arms and the alternatives before this one together match everything it matches."
+
+let compute_alternative_deletion (spans : Source.Definition_span.t list) index =
+  let span = List.nth spans index in
+  match if index > 0 then List.nth_opt spans (index - 1) else None with
+  | Some previous -> Source.Definition_span.make previous.stop span.stop
+  | None -> (
+      match List.nth_opt spans 1 with
+      | Some next -> Source.Definition_span.make span.start next.start
+      | None -> span)
+
 let check_match context (node : Core.expression) scrutinees (arms : Core.arm list) =
   let types = List.map read_operand_type scrutinees in
   if not (List.exists (has_error context) types) then begin
     let rows = ref [] in
+    let is_reachable ~earlier_alternatives candidate =
+      is_useful context types (!rows @ earlier_alternatives) candidate
+    in
+    let report_unreachable ~earlier_alternatives spans index candidate =
+      report context Unreachable_alternative (List.nth spans index)
+        ~fixes:
+          [
+            Diagnostic.fix "Delete the alternative."
+              [ Diagnostic.delete (compute_alternative_deletion spans index) ];
+          ]
+        (explain_unreachable_alternative context types ~earlier_arms:!rows ~earlier_alternatives
+           candidate)
+    in
     List.iter
       (fun (arm : Core.arm) ->
-        if List.length arm.patterns = List.length types then begin
-          let row = List.map (build_space context) arm.patterns in
+        if
+          arm.rows <> []
+          && List.for_all
+               (fun (row : Core.row) -> List.length row.patterns = List.length types)
+               arm.rows
+        then begin
+          let arm_rows =
+            List.map (fun (row : Core.row) -> List.map (build_space context) row.patterns) arm.rows
+          in
           let arm_span = read_span context arm.origin in
-          let reachable = is_useful context types !rows row in
-          if not reachable then
+          if not (List.exists (is_useful context types !rows) arm_rows) then
             report context Unreachable_arm arm_span
               ~fixes:
                 [
@@ -455,43 +490,43 @@ let check_match context (node : Core.expression) scrutinees (arms : Core.arm lis
                     ];
                 ]
               "Earlier arms already match everything this arm matches, so it is never reached."
-          else
-            List.iter
-              (fun ((group : Core.pattern), alternatives) ->
-                List.iteri
-                  (fun index (alternative : Core.pattern) ->
-                    let build_row_with only =
-                      List.map (build_space ~replace:(group.id, only) context) arm.patterns
-                    in
-                    let before = List.take index alternatives in
-                    let prior = if before = [] then !rows else !rows @ [ build_row_with before ] in
-                    if not (is_useful context types prior (build_row_with [ alternative ])) then
-                      let read_pattern_span (pattern : Core.pattern) =
-                        read_span context pattern.origin
+          else begin
+            let row_spans =
+              List.map (fun (row : Core.row) -> read_span context row.origin) arm.rows
+            in
+            List.iteri
+              (fun row_index (row : Core.row) ->
+                let earlier_rows = List.take row_index arm_rows in
+                let candidate = List.nth arm_rows row_index in
+                if not (is_reachable ~earlier_alternatives:earlier_rows candidate) then
+                  report_unreachable ~earlier_alternatives:earlier_rows row_spans row_index
+                    candidate
+                else
+                  List.iter
+                    (fun ((group : Core.pattern), alternatives) ->
+                      let build_row_with only =
+                        List.map (build_space ~replace:(group.id, only) context) row.patterns
                       in
-                      let alternative_span = read_pattern_span alternative in
-                      let deleted =
-                        match if index > 0 then List.nth_opt alternatives (index - 1) else None with
-                        | Some previous ->
-                            Source.Definition_span.make (read_pattern_span previous).stop
-                              alternative_span.stop
-                        | None -> (
-                            match List.nth_opt alternatives 1 with
-                            | Some next ->
-                                Source.Definition_span.make alternative_span.start
-                                  (read_pattern_span next).start
-                            | None -> alternative_span)
+                      let spans =
+                        List.map
+                          (fun (alternative : Core.pattern) -> read_span context alternative.origin)
+                          alternatives
                       in
-                      report context Unreachable_alternative alternative_span
-                        ~fixes:
-                          [ Diagnostic.fix "Delete the alternative." [ Diagnostic.delete deleted ] ]
-                        (if before = [] then
-                           "Earlier arms already match everything this alternative matches."
-                         else
-                           "The alternatives before this one already match everything it matches."))
-                  alternatives)
-              (List.concat_map list_or_patterns arm.patterns);
-          if Option.is_none arm.guard then rows := !rows @ [ row ]
+                      List.iteri
+                        (fun index alternative ->
+                          let before = List.take index alternatives in
+                          let earlier_alternatives =
+                            if before = [] then earlier_rows
+                            else earlier_rows @ [ build_row_with before ]
+                          in
+                          let candidate = build_row_with [ alternative ] in
+                          if not (is_reachable ~earlier_alternatives candidate) then
+                            report_unreachable ~earlier_alternatives spans index candidate)
+                        alternatives)
+                    (List.concat_map list_or_patterns row.patterns))
+              arm.rows
+          end;
+          if Option.is_none arm.guard then rows := !rows @ arm_rows
         end)
       arms;
     let rec collect_witnesses rows witnesses_so_far =

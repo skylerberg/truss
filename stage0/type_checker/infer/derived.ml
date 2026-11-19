@@ -49,7 +49,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
           let statement kind : Core.statement = { id = take_id (); origin; kind } in
           let make_giving_block value : Core.block = { statements = []; value = Some value } in
           let arm pattern body : Core.arm =
-            { patterns = [ pattern ]; guard = None; body; origin }
+            { rows = [ { patterns = [ pattern ]; origin } ]; guard = None; body; origin }
           in
           let self_type = interface.for_type in
           let list_bounds = Types.list_bounds interface.impl_generics in

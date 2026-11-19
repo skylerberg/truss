@@ -377,7 +377,7 @@ let walk_names ~on_name (definition : Syntax.definition) =
         List.iter walk_expression scrutinees;
         List.iter
           (fun (arm : Syntax.arm) ->
-            List.iter walk_pattern arm.patterns;
+            List.iter (fun (row : Syntax.row) -> List.iter walk_pattern row.patterns) arm.rows;
             Option.iter walk_expression arm.guard;
             walk_statement arm.body)
           arms

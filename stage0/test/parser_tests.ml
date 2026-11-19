@@ -539,8 +539,14 @@ let () =
       expect_arm "Character\"a\"..=Character\"z\"" "(..= Character\"a\" Character\"z\")");
   Harness.test "a guard" (fun () -> expect_arm "code if code >= 400" "code (if (>= code 400))");
   Harness.test "several values" (fun () ->
+      Parse_support.expect_statement "match state, event {\n  Idle, Start => todo\n}"
+        "(match (state event) (=> Idle Start todo))");
+  Harness.test "| between rows has lower precedence than ," (fun () ->
+      Parse_support.expect_statement
+        "match state, event {\n  Idle, Start | Paused, Resume => todo\n}"
+        "(match (state event) (=> (| (, Idle Start) (, Paused Resume)) todo))";
       Parse_support.expect_statement "match state, event {\n  Idle | Paused, Tick => todo\n}"
-        "(match (state event) (=> (| Idle Paused) Tick todo))");
+        "(match (state event) (=> (| Idle (, Paused Tick)) todo))");
   Harness.test ".. must be the last field" (fun () ->
       Parse_support.expect_body_error "let (.., x) = value" ~code:Unexpected_token ~at:"..");
   Harness.test "a float literal is not a pattern" (fun () ->

@@ -1,0 +1,6 @@
+fn f(first: Option[Int64], second: Option[Bool]) -> Int64 {
+  match first, second {
+    Some(count), _ | _, Some(count) => 0
+    _, _ => 1
+  }
+}

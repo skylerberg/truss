@@ -100,7 +100,7 @@ let walk_expression_children visit (node : Core.expression) =
       List.iter (walk_operand visit) scrutinees;
       List.iter
         (fun (arm : Core.arm) ->
-          List.iter visit.pattern arm.patterns;
+          List.iter (fun (row : Core.row) -> List.iter visit.pattern row.patterns) arm.rows;
           Option.iter visit.expression arm.guard;
           walk_block visit arm.body)
         arms

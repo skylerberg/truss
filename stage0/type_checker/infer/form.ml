@@ -830,7 +830,8 @@ let build_collection_place state (iterable : Syntax.expression) (mode : Types.mo
             Match
               {
                 scrutinees = [ scrutinee ];
-                arms = [ { patterns = [ pattern ]; guard = None; body; origin } ];
+                arms =
+                  [ { rows = [ { patterns = [ pattern ]; origin } ]; guard = None; body; origin } ];
               }) )
 
 let build_elements state ~origin (collection : Core.place) ~(count : Tables.call)
@@ -989,7 +990,7 @@ let build_for_loop (state : State.state) (written : Syntax.statement) (iterable 
                     arms =
                       [
                         {
-                          patterns = [ binding ];
+                          rows = [ { patterns = [ binding ]; origin } ];
                           guard = None;
                           body = { statements = [ statement ]; value = None };
                           origin;
@@ -1082,18 +1083,25 @@ let build_try state (value : Syntax.expression) (inner : Syntax.expression) ~(ou
   in
   let success_pattern, success_fields = bind_fields success in
   let failure_pattern, failure_fields = bind_fields failure in
-  let make_arm patterns body : Core.arm = { patterns; guard = None; body; origin = value.id } in
+  let make_arm pattern body : Core.arm =
+    {
+      rows = [ { patterns = [ pattern ]; origin = value.id } ];
+      guard = None;
+      body;
+      origin = value.id;
+    }
+  in
   Match
     {
       scrutinees = [ Operands.build Own scrutinee ];
       arms =
         [
-          make_arm [ success_pattern ]
+          make_arm success_pattern
             {
               statements = [];
               value = (match success_fields with [ (_, field) ] -> Some field | _ -> None);
             };
-          make_arm [ failure_pattern ]
+          make_arm failure_pattern
             {
               statements = [];
               value =

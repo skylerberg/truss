@@ -835,6 +835,7 @@ Rules: [`match`](SPECIFICATION.md#match).
 | Rule | Reason |
 |---|---|
 | `match state, event` matches several values with no tuple. | State machines are the main use of a match on a tuple. Patterns correspond to values by position only within one `match`, where the scrutinees and the arms are in view together. |
+| `\|` between the rows of an arm has lower precedence than `,`. | One arm then matches any set of combinations, such as `Idle, Start \| Paused, Resume`, where the other precedence needs a copy of the body in a second arm. An alternative within one scrutinee costs a row for each combination, since `(Idle \| Paused)` is a record pattern and cannot group it. An arm written for the other precedence always has a row with the wrong number of patterns, so the mistake is an error, never a different match. |
 | Arms are separated by line breaks, as statements are. | *One spelling.* Rust makes the comma optional after a block arm. The cost is that a `match` does not fit on one line. `is` covers most one-line uses. |
 
 ### `is` and `let ... else`

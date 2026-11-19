@@ -238,8 +238,15 @@ and update (update : Syntax.update) =
   | Update_error -> "error"
 
 and show_arm (arm : Syntax.arm) =
+  let show_row (row : Syntax.row) =
+    match row.patterns with
+    | [ single ] -> show_pattern single
+    | patterns -> make_form "," (list show_pattern patterns)
+  in
   make_form "=>"
-    (list show_pattern arm.patterns
+    ((match arm.rows with
+       | [ row ] -> list show_pattern row.patterns
+       | rows -> [ make_form "|" (list show_row rows) ])
     @ [
         show_optional (fun guard -> make_form "if" [ show_expression guard ]) arm.guard;
         show_statement arm.body;
