@@ -2681,7 +2681,11 @@ let () =
   Harness.test "a permutation does not strengthen a bound of its elements" (fun () ->
       expect_not_proven Fixtures.Prover.bound_strengthened_through_a_permutation "prover.ensures");
   Harness.test "sorting both parts around a pivot sorts the slice" (fun () ->
-      expect_proven Fixtures.Prover.sorted_parts_around_a_pivot)
+      expect_proven Fixtures.Prover.sorted_parts_around_a_pivot);
+  Harness.test "a range of a sequence holds its elements from the range's start" (fun () ->
+      expect_proven Fixtures.Prover.range_of_a_sequence);
+  Harness.test "a range of a sequence is proven within the sequence" (fun () ->
+      expect_not_proven Fixtures.Prover.range_of_a_sequence_past_its_end "prover.requires")
 
 let check_in_standard text =
   check_file

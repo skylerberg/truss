@@ -1,0 +1,17 @@
+theorem range_elements[Element](items: Sequence[Element], start: Integer, stop: Integer)
+  requires 0 <= start && start <= stop && stop <= items.length()
+  ensures items[start..stop].length() == stop - start
+  ensures forall i in 0..stop - start => identical(items[start..stop][i], items[start + i])
+{
+}
+
+theorem prefix_of_an_append[Element](items: Sequence[Element], value: Element)
+  ensures identical(items.append(value)[..items.length()], items)
+{
+}
+
+theorem prefix_and_last[Element](items: Sequence[Element])
+  requires items.length() > 0
+  ensures identical(items, items[..items.length() - 1].append(items[items.length() - 1]))
+{
+}
