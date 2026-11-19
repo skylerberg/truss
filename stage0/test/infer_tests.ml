@@ -1408,7 +1408,27 @@ let () =
   Harness.test "a constant of a derived type of integers in a pattern" (fun () ->
       expect_fine Fixtures.Infer.integer_point_constant_arm);
   Harness.test "a loop's cost bound is checked" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.loop_cost_naming_a_missing_name "resolve.unknown_name")
+      expect_one_diagnostic Fixtures.Infer.loop_cost_naming_a_missing_name "resolve.unknown_name");
+  Harness.test "a function's measure of a sum type is a type error" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.decreases_naming_a_chain "types.mismatch"
+        ~says:"A `decreases` measure is an integer, not `Chain`." ~at:("chain\n", 1));
+  Harness.test "a function's measure of a `Bool` is a type error" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.decreases_naming_a_bool "types.mismatch"
+        ~says:"A `decreases` measure is an integer, not `Bool`." ~at:("flag\n", 1));
+  Harness.test "a loop's measure of a `StringSlice` is a type error" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.loop_decreases_naming_a_string_slice "types.mismatch"
+        ~says:"A `decreases` measure is an integer, not `StringSlice`." ~at:("text\n", 1));
+  Harness.test "a function's cost bound of a sum type is a type error" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.cost_bounded_by_a_chain "types.mismatch"
+        ~says:"A cost bound is an integer, not `Chain`." ~at:("chain)", 1));
+  Harness.test "a loop's cost bound of a list is a type error" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.loop_cost_bounded_by_a_list "types.mismatch"
+        ~says:"A cost bound is an integer, not `List[Int64]`." ~at:("items)", 1));
+  Harness.test "a measure or a cost bound is a fixed-width integer, an `Integer`, or a literal"
+    (fun () ->
+      let text = Fixtures.Infer.integer_measures_and_bounds in
+      expect_fine text;
+      expect_type text "1" "Integer")
 
 let identity = Fixtures.Infer.identity
 

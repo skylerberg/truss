@@ -1,0 +1,9 @@
+fn total(items: List[Int64]) -> Int64 {
+  var sum: Int64 = 0
+  for item in items
+    cost time O(items)
+  {
+    sum = sum.saturating_add(item)
+  }
+  sum
+}
