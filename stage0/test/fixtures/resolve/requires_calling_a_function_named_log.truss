@@ -1,0 +1,8 @@
+fn log(value: Int64) -> Int64 {
+  value
+}
+
+fn f(count: Int64)
+  requires log(count) > 0
+{
+}

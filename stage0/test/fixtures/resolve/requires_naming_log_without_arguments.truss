@@ -1,0 +1,4 @@
+fn f(count: UInt64)
+  requires log > count
+{
+}
