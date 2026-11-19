@@ -2,7 +2,11 @@ type package = { owner : string option; name : string }
 
 let list_package_parts package = Option.to_list package.owner @ [ package.name ]
 let show_package package = String.concat "::" (list_package_parts package)
-let compare_package left right = String.compare (show_package left) (show_package right)
+
+let compare_package left right =
+  match Option.compare String.compare left.owner right.owner with
+  | 0 -> String.compare left.name right.name
+  | order -> order
 
 let parse_package_parts = function
   | [ name ] -> Some { owner = None; name }

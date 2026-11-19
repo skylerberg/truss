@@ -1387,16 +1387,13 @@ let list_component_parts = function
   | Type_fact_component paths -> List.map (fun path -> Part.Any (Type_facts path)) paths
   | Test_key_component items -> List.map (fun item -> Part.Any (Test_key item)) items
 
-let failing_part : string option ref = ref None
+let failing_part : Part.any option ref = ref None
 
 let compute database unit =
   Option.iter
-    (fun shown ->
-      if
-        List.exists
-          (fun part -> String.equal (Part.show (Stored part)) shown)
-          (list_component_parts unit)
-      then Compiler_bug.raise_bug ~stage:"Database" "%s fails for a test" shown)
+    (fun failing ->
+      if List.mem failing (list_component_parts unit) then
+        Compiler_bug.raise_bug ~stage:"Database" "%s fails for a test" (Part.show (Stored failing)))
     !failing_part;
   try
     match unit with
@@ -2121,14 +2118,14 @@ let list_dependency_diagnostics database package =
         (Path.show_package package)
 
 type manifest_problem =
-  | Not_a_capability of { dependency : Path.package; name : string }
+  | Not_a_capability of { dependency : Path.package; capability : Grant.capability }
   | Unused_dependency of Path.package
 
 let list_manifest_problems database package =
   List.concat_map
     (fun dependency ->
       List.map
-        (fun name -> Not_a_capability { dependency; name })
+        (fun capability -> Not_a_capability { dependency; capability })
         (read_value database (note_untracked_read database) (Grant (package, dependency))).unknown)
     ((make_untracked_name_lookups database).list_dependency_names package)
   @ List.concat_map
@@ -2426,14 +2423,11 @@ module For_testing = struct
 
   let make_mir_lookups database = make_recording_mir_lookups database (note_untracked_read database)
 
-  let list_reads database shown =
-    match
-      Stored_table.fold
-        (fun part reads found -> if Part.show (Stored part) = shown then Some reads else found)
-        database.reads None
-    with
-    | Some reads -> List.sort compare (List.map Part.show reads)
-    | None -> Compiler_bug.raise_bug ~stage:"Database" "%s is not computed" shown
+  let list_reads database part =
+    match Stored_table.find_opt database.reads part with
+    | Some reads -> reads
+    | None ->
+        Compiler_bug.raise_bug ~stage:"Database" "%s is not computed" (Part.show (Stored part))
 
   let list_unread_parts database packages =
     drain database ~through:Recursion_groups packages;
@@ -2468,22 +2462,21 @@ module For_testing = struct
            if
              find_reads hot part <> find_reads cold part
              || not ((make_stored hot part).is_equal_in cold)
-           then Part.show (Stored part) :: differences
+           then part :: differences
            else differences)
          parts [])
 
-  type observed = { recomputed : string list; collected : string list }
+  type observed = { recomputed : Part.any list; collected : Part.any list }
 
   let observe run =
     let recomputed = ref [] and collected = ref [] in
     let result =
       with_observer
         (function
-          | Computation { parts; _ } ->
-              recomputed := List.map (fun part -> Part.show (Stored part)) parts @ !recomputed
+          | Computation { parts; _ } -> recomputed := parts @ !recomputed
           | Write { part = Any (Lowered _) as part; is_removal = true }
           | Write { part = Any (Test_key _) as part; is_removal = true } ->
-              collected := Part.show (Stored part) :: !collected
+              collected := part :: !collected
           | Write _ | Unchanged _ | Untracked_read _ -> ())
         run
     in
@@ -2495,8 +2488,8 @@ module For_testing = struct
 
   let propagate = propagate
 
-  let with_failing_part shown run =
-    failing_part := Some shown;
+  let with_failing_part part run =
+    failing_part := Some part;
     Fun.protect ~finally:(fun () -> failing_part := None) run
 
   let add_root database key =
