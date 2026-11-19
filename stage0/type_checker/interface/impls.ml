@@ -348,13 +348,17 @@ let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_cond
           candidates
 
 and list_matching_bounds lookups ~list_bounds (type_ : Types.ty) (wanted : Types.trait_reference) =
+  let is_open : Types.ty -> bool = function
+    | Number_variable _ -> true
+    | type_ -> Types.is_open_type type_
+  in
   let arguments_match actual_arguments =
     List.length actual_arguments = List.length wanted.trait_arguments
     && List.for_all2
          (fun wanted actual ->
            match (wanted, actual) with
            | Types.Type wanted, Types.Type actual ->
-               Types.is_open_type wanted || Types.is_open_type actual
+               is_open wanted || is_open actual
                || Types.equal
                     (normalize lookups ~list_bounds wanted)
                     (normalize lookups ~list_bounds actual)

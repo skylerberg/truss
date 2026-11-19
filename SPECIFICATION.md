@@ -151,14 +151,15 @@ octal_digit   = "0" ... "7" ;
 A number literal is never directly followed by a name character, so `3u8`
 is an error.
 
-A literal takes its type from its context, as in `let small: UInt8 = 3`. A
-local declared from literals alone takes its type from its uses, in any
-order: after `let limit = 10`, `count < limit` with a `UInt8` count makes
-`limit` a `UInt8`, and so does `let digit: UInt8 = index` in the body of
-`for index in 0..10`. When no use decides it, a literal takes the first of its
-default types that its uses allow: `Int64`, then `UInt64`, for an integer,
-and `Float64` for a float. In a specification, an integer literal tries
-`Integer` first.
+A literal takes its type from its context, as in `let small: UInt8 = 3`.
+Until a use decides it, a literal stands for the set of number types its
+value fits, with `Integer` among them only in a specification, and each use
+keeps only the types it allows. A local declared from literals alone takes
+its type from its uses anywhere in the body, in any order: after
+`let limit = 10`, `count < limit` with a `UInt8` count makes `limit` a
+`UInt8`, and so does `let digit: UInt8 = index` in the body of
+`for index in 0..10`. When no use decides it, a literal takes the first of
+`Integer`, `Int64`, `UInt64`, and `Float64` that its set holds.
 
 - A literal operand of an arithmetic operator, a comparison, or a range takes
   the other operand's type when it can be that type: in `count + 1` with a
@@ -167,36 +168,35 @@ and `Float64` for a float. In a specification, an integer literal tries
   for the same decision.
 - A shift amount is unsigned, so a literal shift amount that no use decides
   is a `UInt64`. So is an integer literal too large for an `Int64`.
-- A bound decides a default only through the sealed number traits. A bound
-  of any other trait does not, so adding an `impl` never changes the type of
-  a literal.
-- Until its type is decided, a literal meets a bound that every type of its
-  kind meets, and has the methods of such a trait: `count.saturating_add(1)`
-  leaves `count` undecided, and after `let range = 0..3`, `for index in range`
-  finds `Range`'s `Iterable`, whose bound `Countable` every integer type meets.
-- A literal also has the methods of a sealed trait that only some types of
-  its kind implement, and calling one bounds the literal by the trait:
-  `count.integer_square_root()` makes `count` an unsigned integer, a `UInt64`
-  unless a later use decides another.
-- An associated type of a literal is the one that every type of its kind
-  gives alike. With `fn doubled[Value: Add[Value]](value: Value) -> Value.Output`,
-  `doubled(3)` has the literal's own type, because every integer type's
-  `Output` under `Add` is itself.
-- An associated type waits for its base type and its trait's arguments to be
-  decided wherever it is compared with another type. With
-  `fn widened[Value: Add[Int64]](value: Value) -> Value.Output`, the result of
-  `widened(first)` is checked once `first` is decided. An associated type that
-  differs from the type it is compared with is an error at the statement.
-- Any other method call on an undecided literal needs the literal's type to
-  choose its method, so the literal takes its default type at the call. Such
-  a method belongs to an unsealed trait that only some types of the kind
-  implement, or to two sealed traits, as `absolute_difference` does.
-- An integer literal is never a float.
-- A literal that does not fit its type is an error. A negated literal is
-  checked after the negation, so `-128` fits an `Int8`.
+- A negated literal fits by its negated value, so `-128` fits an `Int8`, and
+  a negated literal other than `-0` is signed.
 - A literal whose type is a type parameter bounded by an integer trait fits
   every type that implements the trait: -128 to 127 under `SignedInteger`, 0
   to 255 under `UnsignedInteger`, and 0 to 127 under `FixedWidthInteger`.
+- A bound narrows a literal's set only through the sealed number traits. A
+  bound of any other trait waits for the literal's type, so adding an `impl`
+  never changes the type of a literal. A literal that is an argument of a
+  type parameter's only bound of a trait takes that bound's argument: with
+  `Value: Add[UInt8]`, the `1` in `value + 1` is a `UInt8`.
+- A method that one trait declares leaves the literal undecided:
+  `count.saturating_add(1)` leaves `count` to later uses. A method of a sealed
+  trait keeps only that trait's types, so `count.integer_square_root()` makes
+  `count` an unsigned integer, and a method of one number type makes the
+  literal that type. If the literal later takes a type that lacks the trait's
+  `impl`, the call is an error. A method that several traits declare, such as
+  `absolute_difference`, gives the literal its default type at the call.
+- A statement decides every other type it holds. When one of them depends on
+  a literal's type, as the result of `value.to_big_endian_bytes()` or of
+  `span * count` does, the literal takes its default type at that statement,
+  and a later use that wants another type is an error.
+- A later use can change what an earlier statement computes from a literal:
+  after `let mask = 255`, `mask.count_zeros()` is 0 when a later
+  `let small: UInt8 = mask` makes `mask` a `UInt8`, and 56 without it.
+- In a specification, a literal that does not fit the other operand's type is
+  an `Integer`, and a specification never decides the type of a literal from
+  code: `invariant small <= limit` leaves `limit` to the code's uses.
+- An integer literal is never a float.
+- A literal that does not fit its type is an error.
 
 ### String literals
 

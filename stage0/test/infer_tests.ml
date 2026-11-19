@@ -312,6 +312,10 @@ let () =
         ~says:
           "The `Output` of `Value` under `Add[Int64]` may differ from the `Output` of `Value` \
            under `Add[UInt64]`.");
+  Harness.test "a literal operand takes the argument of the parameter's one bound" (fun () ->
+      let text = Fixtures.Infer.literal_operand_of_a_parameter_with_one_add_bound in
+      expect_type text "1" "UInt8";
+      expect_fine text);
   Harness.test "a later statement does not change the structured type of an earlier local"
     (fun () ->
       expect_one_diagnostic Fixtures.Infer.later_statement_keeps_an_earlier_structured_type

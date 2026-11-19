@@ -137,11 +137,13 @@ Rules: [Number literals](SPECIFICATION.md#number-literals).
 |---|---|
 | A literal takes its type from its context, and has no suffix. | *One spelling:* `3` is written one way for every integer type. |
 | A literal operand takes the type of the other operand. | Go's untyped constants work this way. The rule never consults the set of `impl`s, so adding an `impl` never changes the type of an existing literal. Rust lets the search for an `impl` decide, so an `impl` added later can make an existing call ambiguous. |
-| A literal that no use decides takes the first default type that its uses allow. | A shift amount and a literal too large for `Int64` need no rule of their own. |
+| A literal's type is the set of number types its uses allow, and a literal that no use decides takes the first default type in the set. | Each rule on literals is an intersection of the set, a conflict is reported at the use that empties it, and a shift amount and a literal too large for `Int64` need no rule of their own. |
 | Only the sealed number traits take part in choosing a default. | No package can implement them, so adding an `impl` never changes the default of an existing literal. Haskell limits its defaulting to the standard classes for the same reason. |
 | A method that every type of a number kind has is declared once, in a sealed trait. | A call on an undecided literal is then one obligation on the literal. Methods declared on each type separately would make the call a choice among them, which only a search can resolve, and the search is exponential in the worst case. |
-| An equation between an associated type with an unknown base type or trait argument and another type is an obligation, even when the other type is an associated type of the same base. | Unification cannot solve the equation: an associated type is a function of its base type and trait arguments, unification cannot invert that function, and the function has no value until its arguments are known. Equating the trait arguments of two associated types would assume that the function is injective, and it is not. The obligation decides the equation once its arguments are known, as rustc's projection obligations do. |
-| A literal has the methods of a trait that every type of its kind implements, and the associated types that every such type gives alike. | `count.saturating_add(1)` would otherwise fix `count` at `Int64` before a later use decides it, and the type of a local would depend on the order of its uses. |
+| An associated type with an unknown base type or trait argument is a fresh unknown, and an obligation gives its value. | Unification stays first order. An associated type is a function of its base type and trait arguments, which unification can neither invert nor evaluate before they are known, and equating the trait arguments of two associated types would assume that the function is injective. rustc's former trait solver normalized the same way. Its new solver keeps associated types inside types to normalize under binders, and Truss types have no binders. |
+| A method that one trait declares is found on an undecided literal, with the literal as `Self`, and without consulting impls. | `count.saturating_add(1)` would otherwise fix `count` at `Int64` before a later use decides it, and a lookup that read impls would change when a package adds one. |
+| A statement leaves only literals undecided. | A type that depends on a literal, as `bytes` in `let bytes = value.to_big_endian_bytes()` does, is then decided on its own line, where the literal takes its default type. A later line could otherwise change the type of an earlier local. |
+| A specification never decides the type of a literal from code. | A specification is not compiled, so it must not change what the compiled code computes. |
 | A leading zero is an error. | `0755` is octal in C and the shell, where it sets file permissions. Read as decimal, it would silently set the wrong permissions (*LLM habits*). |
 
 [Functions](#functions) explains how a local that is declared from a literal
@@ -603,13 +605,12 @@ from its uses, whatever their order. Otherwise `let limit = 10` would fix
 `limit` at `Int64`, and code that works in `UInt8` or `UInt64` would annotate
 every such local.
 
-An unknown belongs to the outermost statement that reaches it. A statement
-inside a lambda decides only the types that no enclosing statement sees, so
-`return 3` in a lambda takes its type from the call that uses the lambda's
-result. Deciding at the inner statement would give the `3` its default type
-before that call is checked. An unknown that a type reaches only inside an
-associated type does not count. No rule infers an associated type's base from
-its value, so the enclosing statement could never decide that unknown.
+Any other unknown belongs to the outermost statement that reaches it. A
+statement inside a lambda decides only the types that no enclosing statement
+sees. A literal's type belongs to the body, so `return 3` in a lambda takes
+its type from the call that uses the lambda's result. A statement decides
+every other type it holds, and when one of them depends on a literal's type,
+the literal takes its default type at that statement.
 Only the type of a literal is left undecided, and it can only become a
 number type, so the declaration still tells the reader that the local is a
 number.

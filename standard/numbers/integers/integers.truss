@@ -365,6 +365,8 @@ public trait FixedWidthInteger:
     ensures self - other < Self.minimum_value() ==> result == Self.minimum_value()
     ensures self - other > Self.maximum_value() ==> result == Self.maximum_value()
     ensures Self.minimum_value() <= self - other && self - other <= Self.maximum_value() ==> result == self - other
+    ensures other >= 0 && self >= other ==> result == self - other
+    ensures Self.minimum_value() == 0 && self < other ==> result == 0
     cost time O(1)
   {
     if intrinsic::subtract_overflows(self, right: other) {
@@ -378,6 +380,7 @@ public trait FixedWidthInteger:
     ensures self * other < Self.minimum_value() ==> result == Self.minimum_value()
     ensures self * other > Self.maximum_value() ==> result == Self.maximum_value()
     ensures Self.minimum_value() <= self * other && self * other <= Self.maximum_value() ==> result == self * other
+    ensures self >= 0 && other >= 0 && self * other <= Self.maximum_value() ==> result == self * other
     cost time O(1)
   {
     if intrinsic::multiply_overflows(self, right: other) {

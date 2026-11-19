@@ -727,11 +727,8 @@ let solve_trait_arguments state type_ (trait : Types.trait_reference) =
                 ~list_bounds:(lookup_bounds state) bounded normalized))
       with
       | [ arguments ] ->
-          if Unify.unify_arguments state.unifier normalized.trait_arguments arguments then
-            Unify.zonk_trait state.unifier trait
-          else
-            raise_bug "`%s` has one bound of `%s`, and its arguments do not unify with the trait's"
-              (Types.show bounded) (Types.show_trait trait)
+          ignore (Unify.unify_arguments state.unifier normalized.trait_arguments arguments);
+          Unify.zonk_trait state.unifier trait
       | _ -> trait)
   | _ -> trait
 
