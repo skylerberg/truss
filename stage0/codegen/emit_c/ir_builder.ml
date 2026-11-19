@@ -88,28 +88,26 @@ let start builder block =
   Dynarray.set builder.bodies block (make_empty_body ());
   builder.current <- block
 
-let is_unsigned_zero : Lowered.operand -> bool = function
-  | Constant (Integer ((UInt8 | UInt16 | UInt32 | UInt64), zero)) -> Z.sign zero = 0
-  | _ -> false
+let find_constant_truth : Lowered.test -> bool option = function
+  | comparison, Constant (Integer (left_integer, left)), Constant (Integer (right_integer, right))
+    when left_integer = right_integer -> (
+      match comparison with
+      | Greater -> Some (Z.gt left right)
+      | Greater_equal -> Some (Z.geq left right)
+      | Less -> Some (Z.lt left right)
+      | Less_equal -> Some (Z.leq left right)
+      | Equal -> Some (Z.equal left right)
+      | Not_equal -> Some (not (Z.equal left right))
+      | Ieee_equal | Ieee_less | Ieee_less_equal -> None)
+  | _ -> None
 
 let fold_constants (rvalue : Lowered.rvalue) : Lowered.rvalue =
-  let decide truth : Lowered.rvalue = Use (Constant (Bool truth)) in
   match rvalue with
-  | Binary (op, Constant (Integer (left_integer, left)), Constant (Integer (right_integer, right)))
-    when left_integer = right_integer -> (
-      match op with
-      | Greater -> decide (Z.gt left right)
-      | Greater_equal -> decide (Z.geq left right)
-      | Less -> decide (Z.lt left right)
-      | Less_equal -> decide (Z.leq left right)
-      | Equal -> decide (Z.equal left right)
-      | Not_equal -> decide (not (Z.equal left right))
-      | _ -> rvalue)
-  | Binary (Greater, zero, _) when is_unsigned_zero zero -> decide false
-  | Binary (Less, _, zero) when is_unsigned_zero zero -> decide false
-  | Binary (Greater_equal, _, zero) when is_unsigned_zero zero -> decide true
-  | Binary (Less_equal, zero, _) when is_unsigned_zero zero -> decide true
-  | Unary (Not, Constant (Bool truth)) -> decide (not truth)
+  | Compare test -> (
+      match find_constant_truth test with
+      | Some truth -> Use (Constant (Bool truth))
+      | None -> rvalue)
+  | Unary (Not, Constant (Bool truth)) -> Use (Constant (Bool (not truth)))
   | _ -> rvalue
 
 let emit builder (statement : Lowered.statement) =
@@ -140,18 +138,22 @@ let emit_temporary builder ty (rvalue : Lowered.rvalue) : Lowered.operand =
   Copy (Lowered.make_local_place temporary)
 
 type condition =
-  | Holds of Lowered.rvalue
+  | Test of Lowered.test
+  | Holds of Lowered.operand
   | Negation of condition
   | Conjunction of condition * condition
   | Disjunction of condition * condition
 
 let rec branch builder condition ~yes ~no =
   match condition with
-  | Holds rvalue -> (
-      match fold_constants rvalue with
-      | Use (Constant (Bool true)) -> finish builder (Goto yes)
-      | Use (Constant (Bool false)) -> finish builder (Goto no)
-      | folded -> finish builder (Branch { condition = folded; yes; no }))
+  | Test test -> (
+      match find_constant_truth test with
+      | Some true -> finish builder (Goto yes)
+      | Some false -> finish builder (Goto no)
+      | None -> finish builder (Branch { test; yes; no }))
+  | Holds (Constant (Bool truth)) -> finish builder (Goto (if truth then yes else no))
+  | Holds operand ->
+      finish builder (Branch { test = (Not_equal, operand, Constant (Bool false)); yes; no })
   | Negation negated -> branch builder negated ~yes:no ~no:yes
   | Conjunction (first, second) ->
       let second_test = allocate_block builder in
@@ -166,7 +168,8 @@ let rec branch builder condition ~yes ~no =
 
 let rec evaluate builder condition : Lowered.rvalue =
   match condition with
-  | Holds rvalue -> rvalue
+  | Test test -> Compare test
+  | Holds operand -> Use operand
   | Negation negated -> Unary (Not, evaluate_operand builder negated)
   | Conjunction (first, second) ->
       let first = evaluate_operand builder first in
@@ -211,9 +214,7 @@ let emit_loop builder ?(integer = Memory_layout.UInt64) ~count body =
   emit builder (Assign (Lowered.make_local_place index, Use (make_constant 0)));
   finish builder (Goto test);
   start builder test;
-  branch builder
-    (Holds (Binary (Less, Copy (Lowered.make_local_place index), count)))
-    ~yes:inside ~no:after;
+  branch builder (Test (Less, Copy (Lowered.make_local_place index), count)) ~yes:inside ~no:after;
   start builder inside;
   body index;
   emit builder

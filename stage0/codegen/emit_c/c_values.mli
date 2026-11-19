@@ -10,6 +10,7 @@ val render_operand :
   Emission.t -> function_context -> Lowered.operand -> (string * Lowered.ty) option
 
 val render_constant : Emission.t -> Lowered.constant -> string * Lowered.ty
+val render_comparison : Emission.t -> function_context -> Lowered.test -> string
 val classify_scalar : Emission.t -> Lowered.ty -> Memory_layout.scalar
 val compute_bit_width : Memory_layout.scalar -> int
 val render_unsigned_type : Emission.t -> Memory_layout.scalar -> string

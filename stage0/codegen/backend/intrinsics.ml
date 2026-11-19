@@ -67,7 +67,7 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
   let check_if condition message = fail_when Obligation condition message in
   let emit_bool rvalue = Emit_c.Ir_builder.emit_temporary builder (Raw Bool) rvalue in
   let check_index index count =
-    check_if (Holds (Binary (Greater_equal, index, count))) "index out of bounds"
+    check_if (Test (Greater_equal, index, count)) "index out of bounds"
   in
   let compute_room storage =
     emit_uint64 (Binary (Subtract, Copy (Storage.project_capacity storage), copy_length storage))
@@ -88,6 +88,7 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
   in
   let lower_scalar (scalar : Intrinsic.scalar) =
     let set_binary op = set (Binary (op, read_operand 0, read_operand 1)) in
+    let set_comparison comparison = set (Compare (comparison, read_operand 0, read_operand 1)) in
     let set_unary op = set (Unary (op, read_operand 0)) in
     let call_into intrinsic =
       call ?result:destination intrinsic (List.map make_operand arguments)
@@ -108,7 +109,7 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
               read_operand 1;
               Address { place = Lowered.make_local_place result; writable = true };
             ];
-          check_if (Holds (Use (Copy (Lowered.make_local_place over)))) "arithmetic overflow";
+          check_if (Holds (Copy (Lowered.make_local_place over))) "arithmetic overflow";
           set (Use (Copy (Lowered.make_local_place result)))
       | _ -> set_binary op
     in
@@ -116,7 +117,7 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
       match find_integer_argument () with
       | Some integer ->
           check_if
-            (Holds (Binary (Equal, read_operand 1, Constant (Integer (integer, Z.zero)))))
+            (Test (Equal, read_operand 1, Constant (Integer (integer, Z.zero))))
             "division by zero";
           (match integer with
           | Int8 | Int16 | Int32 | Int64 ->
@@ -124,9 +125,8 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
               let least = Z.neg (Z.shift_left Z.one (bits - 1)) in
               check_if
                 (Conjunction
-                   ( Holds
-                       (Binary (Equal, read_operand 1, Constant (Integer (integer, Z.minus_one)))),
-                     Holds (Binary (Equal, read_operand 0, Constant (Integer (integer, least)))) ))
+                   ( Test (Equal, read_operand 1, Constant (Integer (integer, Z.minus_one))),
+                     Test (Equal, read_operand 0, Constant (Integer (integer, least))) ))
                 "arithmetic overflow"
           | _ -> ());
           set_binary op
@@ -150,12 +150,10 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
           in
           (match amount with
           | Int8 | Int16 | Int32 | Int64 ->
-              check_if
-                (Holds (Binary (Less, read_operand 1, make_constant 0)))
-                "shift amount out of range"
+              check_if (Test (Less, read_operand 1, make_constant 0)) "shift amount out of range"
           | _ -> ());
           check_if
-            (Holds (Binary (Greater_equal, read_operand 1, make_constant bits)))
+            (Test (Greater_equal, read_operand 1, make_constant bits))
             "shift amount out of range"
       | _ -> ());
       set_binary op
@@ -175,10 +173,10 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
           match
             List.map
               (fun (op, bound) : Emit_c.Ir_builder.condition ->
-                Holds (Binary (op, read_operand 0, make_constant bound)))
+                Test (op, read_operand 0, make_constant bound))
               tests
           with
-          | [] -> Holds (Use (Constant (Bool true)))
+          | [] -> Holds (Constant (Bool true))
           | first :: rest ->
               List.fold_left (fun all test -> Emit_c.Ir_builder.Conjunction (all, test)) first rest)
       | ((Float32 | Float64) as source), Integer target_integer ->
@@ -197,10 +195,10 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
           in
           let under = Z.pred low in
           Conjunction
-            ( Holds
-                (if is_held under then Binary (Ieee_less, make_constant under, read_operand 0)
-                 else Binary (Ieee_less_equal, make_constant low, read_operand 0)),
-              Holds (Binary (Ieee_less, read_operand 0, make_constant (Z.succ high))) )
+            ( Test
+                (if is_held under then (Ieee_less, make_constant under, read_operand 0)
+                 else (Ieee_less_equal, make_constant low, read_operand 0)),
+              Test (Ieee_less, read_operand 0, make_constant (Z.succ high)) )
       | _ -> raise_bug "fits between these types"
     in
     match scalar with
@@ -215,7 +213,7 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
             let bits = 8 * Memory_layout.compute_integer_size integer in
             let least = Z.neg (Z.shift_left Z.one (bits - 1)) in
             check_if
-              (Holds (Binary (Equal, read_operand 0, Constant (Integer (integer, least)))))
+              (Test (Equal, read_operand 0, Constant (Integer (integer, least))))
               "arithmetic overflow";
             set_unary Negate
         | _ -> set_unary Negate)
@@ -225,10 +223,10 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
     | Add_overflows -> lower_overflow_test Add_overflow
     | Subtract_overflows -> lower_overflow_test Subtract_overflow
     | Multiply_overflows -> lower_overflow_test Multiply_overflow
-    | Equal -> set_binary Equal
-    | Less -> set_binary Less
-    | Ieee_equal -> set_binary Ieee_equal
-    | Ieee_less -> set_binary Ieee_less
+    | Equal -> set_comparison Equal
+    | Less -> set_comparison Less
+    | Ieee_equal -> set_comparison Ieee_equal
+    | Ieee_less -> set_comparison Ieee_less
     | Leading_zeros -> call_into Leading_zeros
     | Trailing_zeros -> call_into Trailing_zeros
     | Count_ones -> call_into Count_ones
@@ -262,7 +260,7 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
     | Is_nan ->
         set
           (Emit_c.Ir_builder.evaluate builder
-             (Negation (Holds (Binary (Ieee_equal, read_operand 0, read_operand 0)))))
+             (Negation (Test (Ieee_equal, read_operand 0, read_operand 0))))
   in
   let lower_buffer (buffer : Intrinsic.buffer) =
     let read_element_type () = read_type_argument 0 in
@@ -283,10 +281,10 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
           Lowered.make_uint64_constant layout.size;
           Address { place = Lowered.make_local_place bytes; writable = true };
         ];
-      fail_when Panic (Holds (Use (Copy (Lowered.make_local_place too_many)))) "out of memory";
+      fail_when Panic (Holds (Copy (Lowered.make_local_place too_many))) "out of memory";
       let buffer = Emit_c.Ir_builder.allocate_local builder (Raw (Pointer Opaque)) in
       Emit_c.Ir_builder.emit_if builder
-        (Holds (Storage.build_is_allocated storage))
+        (Test (Storage.make_allocated_test storage))
         ~yes:(fun () ->
           let held =
             emit_uint64
@@ -320,7 +318,7 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
         Emit_c.Ir_builder.emit builder
           (Assign (Lowered.make_local_place count, Use (copy_length right)));
         Emit_c.Ir_builder.emit_when builder
-          (Holds (Binary (Less, copy_length left, copy_length right)))
+          (Test (Less, copy_length left, copy_length right))
           (fun () ->
             Emit_c.Ir_builder.emit builder
               (Assign (Lowered.make_local_place count, Use (copy_length left))));
@@ -332,15 +330,13 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
             Copy (Lowered.make_local_place count);
           ];
         Emit_c.Ir_builder.emit_when builder
-          (Holds
-             (Binary
-                (Equal, Copy (Lowered.make_local_place order), Constant (Integer (Int32, Z.zero)))))
+          (Test (Equal, Copy (Lowered.make_local_place order), Constant (Integer (Int32, Z.zero))))
           (fun () ->
             let emit_int32 rvalue =
               Emit_c.Ir_builder.emit_temporary builder (Raw (Integer Int32)) rvalue
             in
-            let longer = emit_bool (Binary (Greater, copy_length left, copy_length right)) in
-            let shorter = emit_bool (Binary (Less, copy_length left, copy_length right)) in
+            let longer = emit_bool (Compare (Greater, copy_length left, copy_length right)) in
+            let shorter = emit_bool (Compare (Less, copy_length left, copy_length right)) in
             let first = emit_int32 (Convert (longer, Integer Int32)) in
             let second = emit_int32 (Convert (shorter, Integer Int32)) in
             Emit_c.Ir_builder.emit builder
@@ -353,7 +349,7 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
         Emit_c.Ir_builder.emit builder
           (Assign (Lowered.make_local_place result, Storage.build_empty ty));
         Emit_c.Ir_builder.emit_when builder
-          (Holds (Binary (Greater, read_operand 0, Lowered.make_uint64_constant 0)))
+          (Test (Greater, read_operand 0, Lowered.make_uint64_constant 0))
           (fun () -> resize_buffer (Lowered.make_local_place result) (read_operand 0));
         set (Use (Move (Lowered.make_local_place result)))
     | Storage_length | View_length -> set (Use (copy_length (extract_place (read_argument 0))))
@@ -362,10 +358,10 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
     | Storage_set_capacity ->
         let storage = extract_place (read_argument 0) in
         check_if
-          (Holds (Binary (Less, read_operand 1, copy_length storage)))
+          (Test (Less, read_operand 1, copy_length storage))
           "a storage's capacity set to less than its length";
         Emit_c.Ir_builder.emit_if builder
-          (Holds (Binary (Greater, read_operand 1, Lowered.make_uint64_constant 0)))
+          (Test (Greater, read_operand 1, Lowered.make_uint64_constant 0))
           ~yes:(fun () -> resize_buffer storage (read_operand 1))
           ~no:(fun () ->
             Emit_c.Ir_builder.emit builder (Drop storage);
@@ -375,21 +371,20 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
     | Storage_lengthen ->
         let storage = extract_place (read_argument 0) in
         check_if
-          (Holds (Binary (Greater, read_operand 1, compute_room storage)))
+          (Test (Greater, read_operand 1, compute_room storage))
           "a storage lengthened to more than its capacity";
         add_to_length storage (read_operand 1)
     | Storage_shorten ->
         let storage = extract_place (read_argument 0) in
         check_if
-          (Holds (Binary (Greater, read_operand 1, copy_length storage)))
+          (Test (Greater, read_operand 1, copy_length storage))
           "a storage shortened to more than its length";
         Emit_c.Ir_builder.emit builder
           (Assign (Storage.project_length storage, Use (read_operand 1)))
     | Storage_push ->
         let storage = extract_place (read_argument 0) in
         check_if
-          (Holds
-             (Binary (Greater_equal, copy_length storage, Copy (Storage.project_capacity storage))))
+          (Test (Greater_equal, copy_length storage, Copy (Storage.project_capacity storage)))
           "an element pushed to a storage that has no room";
         Emit_c.Ir_builder.emit builder
           (Assign (index_element storage (copy_length storage), Use (read_operand 1)));
@@ -397,7 +392,7 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
     | Storage_pop ->
         let storage = extract_place (read_argument 0) in
         check_if
-          (Holds (Binary (Equal, copy_length storage, Lowered.make_uint64_constant 0)))
+          (Test (Equal, copy_length storage, Lowered.make_uint64_constant 0))
           "an element popped from an empty storage";
         Emit_c.Ir_builder.emit builder
           (Assign
@@ -407,10 +402,9 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
     | Storage_insert ->
         let storage = extract_place (read_argument 0) in
         let index = read_operand 1 in
-        check_if (Holds (Binary (Greater, index, copy_length storage))) "index out of bounds";
+        check_if (Test (Greater, index, copy_length storage)) "index out of bounds";
         check_if
-          (Holds
-             (Binary (Greater_equal, copy_length storage, Copy (Storage.project_capacity storage))))
+          (Test (Greater_equal, copy_length storage, Copy (Storage.project_capacity storage)))
           "an element inserted into a storage that has no room";
         let after = emit_uint64 (Binary (Add, index, Lowered.make_uint64_constant 1)) in
         let tail_length = emit_uint64 (Binary (Subtract, copy_length storage, index)) in
@@ -478,7 +472,7 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
         Emit_c.Ir_builder.emit builder
           (Assign (moved_storage, Use (Move (extract_place (read_argument 0)))));
         check_if
-          (Holds (Binary (Not_equal, copy_length moved_storage, Constant (Integer (UInt64, count)))))
+          (Test (Not_equal, copy_length moved_storage, Constant (Integer (UInt64, count))))
           "a storage made into an array of another length";
         if Z.sign count > 0 && (Memory_layout.of_type env array_ty).size > 0 then begin
           let untyped = Emit_c.Ir_builder.allocate_local builder (Raw (Pointer Opaque)) in
@@ -494,7 +488,7 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
           set (Use (Move { root = Local typed; projections = [ Deref ] }))
         end;
         Emit_c.Ir_builder.emit_when builder
-          (Holds (Storage.build_is_allocated moved_storage))
+          (Test (Storage.make_allocated_test moved_storage))
           (fun () -> call Free [ Copy (Storage.project_buffer moved_storage) ])
     | Array_view ->
         let count = read_array_length () in
@@ -537,8 +531,8 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
           (Convert (Copy (Storage.project_buffer (extract_place (read_argument 0))), Integer UInt64))
     | View_slice ->
         let view = extract_place (read_argument 0) in
-        check_if (Holds (Binary (Greater, read_operand 1, read_operand 2))) "slice out of bounds";
-        check_if (Holds (Binary (Greater, read_operand 2, copy_length view))) "slice out of bounds";
+        check_if (Test (Greater, read_operand 1, read_operand 2)) "slice out of bounds";
+        check_if (Test (Greater, read_operand 2, copy_length view)) "slice out of bounds";
         let count = emit_uint64 (Binary (Subtract, read_operand 2, read_operand 1)) in
         set
           (Storage.build_view
@@ -566,14 +560,14 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
     let load_text_at address ~is_present =
       Emit_c.Ir_builder.emit builder
         (Assign
-           (is_present, Binary (Not_equal, Copy (Lowered.make_local_place address), Constant Null)));
+           (is_present, Compare (Not_equal, Copy (Lowered.make_local_place address), Constant Null)));
       let elements = Emit_c.Ir_builder.allocate_local builder (Raw (Pointer (Data byte))) in
       let count = allocate_uint64_local () in
       Emit_c.Ir_builder.emit builder
         (Assign (Lowered.make_local_place elements, Use (Constant Storage.empty_buffer)));
       Emit_c.Ir_builder.emit builder
         (Assign (Lowered.make_local_place count, Use (Lowered.make_uint64_constant 0)));
-      Emit_c.Ir_builder.emit_when builder (Holds (Use (Copy is_present))) (fun () ->
+      Emit_c.Ir_builder.emit_when builder (Holds (Copy is_present)) (fun () ->
           Emit_c.Ir_builder.emit builder
             (Assign
                (Lowered.make_local_place elements, Use (Copy (Lowered.make_local_place address))));
@@ -676,8 +670,8 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
           [ Copy (Lowered.make_local_place environment); Copy (Lowered.make_local_place position) ];
         Emit_c.Ir_builder.branch builder
           (Disjunction
-             ( Holds (Binary (Equal, Copy (Lowered.make_local_place entry), Constant Null)),
-               Holds (Binary (Equal, Copy (Lowered.make_local_place position), read_operand 0)) ))
+             ( Test (Equal, Copy (Lowered.make_local_place entry), Constant Null),
+               Test (Equal, Copy (Lowered.make_local_place position), read_operand 0) ))
           ~yes:after ~no:next;
         Emit_c.Ir_builder.start builder next;
         Emit_c.Ir_builder.emit builder
@@ -793,16 +787,14 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
                 Option.iter
                   (fun count ->
                     check_if
-                      (Holds
-                         (Binary (Greater, count, compute_room (extract_place (read_argument index)))))
+                      (Test (Greater, count, compute_room (extract_place (read_argument index))))
                       "a call of the C library with less room than it writes")
                   (find_count extent)
             | Some (Elements_to_change (_, extent)) ->
                 Option.iter
                   (fun count ->
                     check_if
-                      (Holds
-                         (Binary (Greater, count, copy_length (extract_place (read_argument index)))))
+                      (Test (Greater, count, copy_length (extract_place (read_argument index))))
                       "a call of the C library with fewer elements than it mutates")
                   (find_count extent)
             | Some (Elements (element, extent)) -> (
@@ -810,7 +802,7 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
                 match find_count extent with
                 | Some count ->
                     check_if
-                      (Holds (Binary (Greater, count, copy_length view)))
+                      (Test (Greater, count, copy_length view))
                       "a call of the C library with fewer elements than it reads"
                 | None ->
                     let message =
@@ -822,14 +814,14 @@ let lower ?(value_arguments = []) ?reported env builder types operation ~type_ar
                       | _ -> raise_bug "a C library row reads up to a zero that is not an integer"
                     in
                     check_if
-                      (Holds (Binary (Equal, copy_length view, Lowered.make_uint64_constant 0)))
+                      (Test (Equal, copy_length view, Lowered.make_uint64_constant 0))
                       message;
                     let last =
                       emit_uint64
                         (Binary (Subtract, copy_length view, Lowered.make_uint64_constant 1))
                     in
                     check_if
-                      (Holds (Binary (Not_equal, Copy (Storage.index_element view last), zero)))
+                      (Test (Not_equal, Copy (Storage.index_element view last), zero))
                       message)
             | Some (Value _ | Written _ | Always _ | Fixed _) | None -> ())
           passed;

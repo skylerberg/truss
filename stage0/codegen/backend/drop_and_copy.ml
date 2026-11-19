@@ -119,7 +119,7 @@ let drop context ty =
              result = Returned (Lowered.make_local_place is_last);
            });
       Emit_c.Ir_builder.emit_when builder
-        (Holds (Use (Copy (Lowered.make_local_place is_last))))
+        (Holds (Copy (Lowered.make_local_place is_last)))
         (fun () ->
           if not (is_trivial context inner) then begin
             let typed =
@@ -150,7 +150,7 @@ let drop context ty =
             Emit_c.Ir_builder.emit builder
               (Drop (Storage.index_element value (Copy (Lowered.make_local_place index)))));
       Emit_c.Ir_builder.emit_when builder
-        (Holds (Storage.build_is_allocated value))
+        (Test (Storage.make_allocated_test value))
         (fun () ->
           Emit_c.Ir_builder.emit builder
             (Call
@@ -336,7 +336,7 @@ let copy context ty =
           (Binary (Multiply, count, Lowered.make_uint64_constant layout.size))
       in
       Emit_c.Ir_builder.emit_if builder
-        (Holds (Storage.build_is_allocated self))
+        (Test (Storage.make_allocated_test self))
         ~yes:(fun () ->
           let bytes = multiply_by_size (Copy (Storage.project_capacity self)) in
           let buffer = Emit_c.Ir_builder.allocate_local builder (Raw (Pointer (Data element))) in

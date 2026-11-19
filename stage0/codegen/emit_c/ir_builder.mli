@@ -16,7 +16,8 @@ val run_in_block : t -> Lowered.block -> (unit -> unit) -> unit
 val emit_temporary : t -> Lowered.ty -> Lowered.rvalue -> Lowered.operand
 
 type condition =
-  | Holds of Lowered.rvalue
+  | Test of Lowered.test
+  | Holds of Lowered.operand
   | Negation of condition
   | Conjunction of condition * condition
   | Disjunction of condition * condition

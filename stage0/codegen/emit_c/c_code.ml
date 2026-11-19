@@ -373,13 +373,9 @@ let write_terminator (emission : Emission.t) fc buffer (terminator : Lowered.ter
   in
   match terminator with
   | Goto block -> write_line "goto b%d;" block
-  | Branch { condition; yes; no } -> (
-      match C_values.render_rvalue emission fc (Raw Bool) condition with
-      | Some (Expression text) ->
-          write_line "if (%s) goto b%d;" text yes;
-          write_line "goto b%d;" no
-      | Some (Allocating _) | None -> C_runtime.raise_bug "a branch condition that is no expression"
-      )
+  | Branch { test; yes; no } ->
+      write_line "if (%s) goto b%d;" (C_values.render_comparison emission fc test) yes;
+      write_line "goto b%d;" no
   | Switch { value; cases; default } ->
       let text, ty = render_operand value in
       let c_type =
