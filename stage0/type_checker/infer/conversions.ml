@@ -6,49 +6,20 @@ type conversion =
   | To_integer
   | From_integer
 
-let read_expected_head (state : State.state) type_ =
+let read_head (state : State.state) ?default_at type_ =
   match State.normalize state type_ with
-  | Types.Variable _ ->
-      Solver.solve_frame state (State.read_current_frame state);
+  | Types.Variable root ->
+      Solver.solve_head state ?default_at root;
       State.normalize state type_
   | head -> head
 
-let read_actual_head_at (state : State.state) ~at type_ =
-  match read_expected_head state type_ with
-  | Types.Variable root ->
-      let frame = State.read_current_frame state in
-      let list_inputs index =
-        List.filter_map
-          (fun (goal : State.goal) ->
-            match goal.requirement with
-            | Implements trait
-              when List.exists
-                     (fun (_, output) -> State.resolve state output = Types.Variable index)
-                     goal.outputs ->
-                Some
-                  (List.concat_map
-                     (Unify.list_argument_unknowns state.unifier)
-                     (Types.Type goal.subject :: trait.trait_arguments))
-            | _ -> None)
-          frame.goals
-      in
-      let rec force visited = function
-        | Unify.Unknown_type index when not (List.mem index visited) -> (
-            match list_inputs index with
-            | [] ->
-                if Unify.may_decide state.unifier index then
-                  ignore
-                    (State.decide_default_literal state ~at ~site:Actual_head (Types.Variable index));
-                index :: visited
-            | inputs -> List.fold_left force (index :: visited) (List.concat inputs))
-        | _ -> visited
-      in
-      ignore (List.fold_left force [ root ] (List.concat (list_inputs root)));
-      read_expected_head state type_
-  | head -> head
+let read_expected_head state type_ = read_head state type_
 
 let read_actual_head state (value : Syntax.expression) type_ =
-  read_actual_head_at state ~at:(State.read_span state value.id) type_
+  read_head state ~default_at:(State.read_span state value.id) type_
+
+let read_checked_head state env (value : Syntax.expression) =
+  read_actual_head state value (Hooks.check_expression state env value)
 
 let find_view_as ~owned ~view =
   match (Types.find_view owned, view) with
@@ -110,7 +81,7 @@ let convert (state : State.state) (env : State.env) ?argument ?(takes_view_as_ow
   in
   record_conversion
   @@
-  let actual_type = read_actual_head_at state ~at:span actual in
+  let actual_type = read_head state ~default_at:span actual in
   let wanted = read_expected_head state expected in
   let refuse () =
     State.report_mismatch state span ~expected ~actual;

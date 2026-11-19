@@ -233,22 +233,26 @@ and report_unknown_static_method state ?expected (value : Syntax.expression) typ
     | Some (Types.Named { path = expected; _ }), Types.Named { path; _ } -> Path.equal expected path
     | _ -> false
   in
-  match empty_literal with
-  | Some literal ->
-      State.make_error_type state Unknown_member (State.read_span state member.id)
-        ~fixes:
-          (if is_expected then
-             [
-               State.fix
-                 (Printf.sprintf "Write `%s`." literal)
-                 [ State.replace (State.read_span state value.id) literal ];
-             ]
-           else [])
-        (Printf.sprintf "`%s` has no method `new`. The literal `%s` is an empty `%s`."
-           (State.show state type_) literal (State.show state type_))
-  | None ->
-      State.make_error_type state Unknown_member (State.read_span state member.id)
-        (Name_lookup.describe_missing_method state type_ member.text)
+  let error =
+    match empty_literal with
+    | Some literal ->
+        State.make_error_type state Unknown_member (State.read_span state member.id)
+          ~fixes:
+            (if is_expected then
+               [
+                 State.fix
+                   (Printf.sprintf "Write `%s`." literal)
+                   [ State.replace (State.read_span state value.id) literal ];
+               ]
+             else [])
+          (Printf.sprintf "`%s` has no method `new`. The literal `%s` is an empty `%s`."
+             (State.show state type_) literal (State.show state type_))
+    | None ->
+        State.make_error_type state Unknown_member (State.read_span state member.id)
+          (Name_lookup.describe_missing_method state type_ member.text)
+  in
+  ignore (State.unify state type_ error);
+  error
 
 and check_static_call state env ?expected (value : Syntax.expression) type_ (member : Syntax.name)
     arguments =
@@ -431,8 +435,8 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
               Calls.check_argument state env first.value parameter ~has_generic_type:false
             in
             ignore
-              (State.decide_default_literal state ~at:(State.read_span state value.id)
-                 ~site:Method_lookup self_type);
+              (Solver.decide_default state ~site:Method_call ~at:(State.read_span state value.id)
+                 self_type);
             ([ { Tables.expression = first.value.id; core_argument_index = 0; mode } ], rest)
         | [] -> ([], []))
     | None -> ([], arguments)
@@ -539,8 +543,8 @@ and check_capability_call state env (value : Syntax.expression) capability (memb
 and check_method_call state env ?expected (value : Syntax.expression) (base : Syntax.expression)
     (member : Syntax.name) ~type_arguments arguments =
   let receiver_type =
-    State.decide_default_literal state ~at:(State.read_span state value.id) ~site:Method_lookup
-      (Conversions.read_actual_head state base (Hooks.check_expression state env base))
+    Solver.decide_default state ~site:Method_call ~at:(State.read_span state value.id)
+      (Conversions.read_checked_head state env base)
   in
   let has_mode_keyword = List.mem_assoc value.id state.keyword_modes in
   let lent_mode = if has_mode_keyword then None else Modes.find_lent_mode state base in

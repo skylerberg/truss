@@ -64,6 +64,7 @@ val signed_integer_types : Language.Builtin_type.t list
 val unsigned_integer_types : Language.Builtin_type.t list
 val integer_types : Language.Builtin_type.t list
 val float_types : Language.Builtin_type.t list
+val number_types : Language.Builtin_type.t list
 val list_scalar_members : ty -> Language.Builtin_type.t list
 val list_fitting_integer_types : Z.t -> Language.Builtin_type.t list
 val find_integer_implementors : Path.t -> Language.Builtin_type.t list option

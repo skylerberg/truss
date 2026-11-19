@@ -1,0 +1,21 @@
+type Vector[Element](first: Element)
+
+impl Add[Vector[Element]] for Vector[Element] {
+  type Output = Vector[Element]
+
+  fn add_is_defined(self, right: Vector[Element]) -> Bool {
+    true
+  }
+
+  fn add(self, right: Vector[Element]) -> Vector[Element] {
+    todo
+  }
+}
+
+fn f() -> Vector[UInt8] {
+  let first = Vector(first: 1)
+  let second = Vector(first: 2)
+  let sum = first + second
+  let decided: Vector[UInt8] = first
+  decided
+}

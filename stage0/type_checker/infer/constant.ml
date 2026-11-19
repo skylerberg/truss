@@ -1,17 +1,18 @@
+let read_final_type (state : State.state) (value : Syntax.expression) =
+  Option.map (State.finalize_type state) state.tables.types.(value.id)
+
 let rec find_offending_expression (state : State.state) (value : Syntax.expression) :
     Syntax.expression option =
   let find_first = List.find_map (find_offending_expression state) in
   let is_built_in (operand : Syntax.expression) =
-    match state.tables.types.(operand.id) with
+    match read_final_type state operand with
     | Some type_ ->
         Types.is_integer_type type_ || Types.is_float_type type_ || Types.is_builtin Bool type_
         || Types.is_error type_
     | None -> true
   in
   let is_rejected (expression : Syntax.expression) =
-    match state.tables.types.(expression.id) with
-    | Some type_ -> Types.is_error type_
-    | None -> false
+    match read_final_type state expression with Some type_ -> Types.is_error type_ | None -> false
   in
   match value.kind with
   | _ when is_rejected value -> None
@@ -41,7 +42,7 @@ let rec check_arithmetic (state : State.state) (value : Syntax.expression) =
   let evaluate part =
     Interface.Constants.evaluate_expression state.lookups.interface ~visiting:[] state.resolved part
   in
-  (match (value.kind, state.tables.types.(value.id)) with
+  (match (value.kind, read_final_type state value) with
   | Prefix (Negate, { kind = Integer _; _ }), _ -> ()
   | (Prefix _ | Binary _), Some type_ -> (
       match (Types.find_integer_range type_, evaluate value, value.kind) with
@@ -59,6 +60,7 @@ let rec check_arithmetic (state : State.state) (value : Syntax.expression) =
     value
 
 let check state ~default (value : Syntax.expression) =
+  State.check_when_final state @@ fun () ->
   (match find_offending_expression state value with
   | Some part ->
       if default then
