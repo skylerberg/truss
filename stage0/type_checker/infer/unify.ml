@@ -4,8 +4,8 @@ type t = {
   value_solutions : (int, Types.value) Hashtbl.t;
   mutable capability_variable_count : int;
   mutable deferred_capability_equalities : (Types.capability_set * Types.capability_set) list;
-  domains : (int, Intrinsic.builtin list) Hashtbl.t;
-  list_rigid_members : Types.ty -> Intrinsic.builtin list;
+  domains : (int, Language.Builtin_type.t list) Hashtbl.t;
+  list_rigid_members : Types.ty -> Language.Builtin_type.t list;
   specification_unknowns : (int, unit) Hashtbl.t;
   mutable checks_specification : bool;
   mutable refused_code_unknown : int option;

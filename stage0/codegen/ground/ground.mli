@@ -14,6 +14,6 @@ type instantiation = {
 
 val no_instantiation : instantiation
 val compare : ty -> ty -> int
-val make_builtin : ?arguments:argument list -> Intrinsic.builtin -> ty
+val make_builtin : ?arguments:argument list -> Language.Builtin_type.t -> ty
 val to_string : ty -> string
 val show_argument : argument -> string

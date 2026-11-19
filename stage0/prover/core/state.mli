@@ -18,15 +18,6 @@ type contract = {
   result_kind : [ `Returns | `Lends ];
 }
 
-type slice = {
-  made_at : Invocation.site;
-  collection : Mir.place;
-  start : Logic.term;
-  stop : Logic.term;
-}
-
-type held_slice = Slices of (Logic.term * slice) list | Unknown_slice
-
 type frame = {
   source : source;
   locals : Logic.term Locals.t;
@@ -46,7 +37,6 @@ type frame = {
   yielded_so_far : Logic.term option;
   spent : (Costs.counter * Logic.term) list;
   aliases : (Logic.term * Mir.place) list Locals.t;
-  slices : held_slice Locals.t;
   lends : (Logic.term * (frame -> Logic.term -> frame)) list Locals.t;
 }
 
@@ -114,6 +104,7 @@ type context = {
   local_names : string Tables.Local_table.t;
   local_origins : Core.origin Tables.Local_table.t;
   mutable returns : (frame * Logic.term option) list;
+  mutable enclosing_provides : Mir.provided list list;
   mutable lent_back : (Types.ty * Logic.term * Logic.term) list;
   mutable instantiating : Path.t list;
   mutable axiomatizing : Logic.symbol list;

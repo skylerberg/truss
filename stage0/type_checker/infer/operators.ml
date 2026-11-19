@@ -6,7 +6,7 @@ let select_arithmetic_method : Syntax.arithmetic -> Well_known.method_ * Well_kn
   | Divide -> (Divide_divide, Divide_output)
   | Remainder -> (Remainder_remainder, Remainder_output)
 
-let number_types = Types.integer_types @ Types.float_types @ [ Intrinsic.Integer ]
+let number_types = Types.integer_types @ Types.float_types @ [ Language.Builtin_type.Integer ]
 
 let infer_integer_result state span type_ ~(describe : string -> string) =
   Solver.require_within state type_ Types.integer_types ~reason:(fun excluded ->

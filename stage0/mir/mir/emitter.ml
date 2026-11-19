@@ -11,7 +11,6 @@ type scope = {
   mutable bound : Tree.local list;
   mutable loans : int list;
   mutable temporaries : Tree.local list;
-  provides : bool;
 }
 
 type lowered_condition = {
@@ -199,16 +198,14 @@ let list_scope_ends scope origin =
     (fun basic -> { Tree.kind = Basic basic; origin })
     ((if scope.loans <> [] then [ Tree.Loan_end (List.rev scope.loans) ] else [])
     @ (if scope.bound <> [] then [ Tree.Dead (List.rev scope.bound) ] else [])
-    @ (if scope.temporaries <> [] then [ Tree.Dead (List.rev scope.temporaries) ] else [])
-    @ if scope.provides then [ Provide_end ] else [])
+    @ if scope.temporaries <> [] then [ Tree.Dead (List.rev scope.temporaries) ] else [])
 
 let end_scope builder scope origin =
   List.iter
     (fun (ended : Tree.statement) -> emit builder ended.kind ended.origin)
     (list_scope_ends scope origin)
 
-let make_block_scope ?(provides = false) () =
-  { frame = Bindings; bound = []; loans = []; temporaries = []; provides }
+let make_block_scope () = { frame = Bindings; bound = []; loans = []; temporaries = [] }
 
 let run_in_block_scope builder scope origin f =
   builder.scopes <- scope :: builder.scopes;
@@ -217,8 +214,7 @@ let run_in_block_scope builder scope origin f =
   end_scope builder scope origin;
   result
 
-let run_in_scope ?provides builder origin f =
-  run_in_block_scope builder (make_block_scope ?provides ()) origin f
+let run_in_scope builder origin f = run_in_block_scope builder (make_block_scope ()) origin f
 
 let leave_scopes builder ~depth origin =
   let rec leave scopes count =
@@ -232,7 +228,7 @@ let leave_scopes builder ~depth origin =
   leave builder.scopes (List.length builder.scopes)
 
 let run_in_statement builder origin f =
-  let scope = { frame = Statement; bound = []; loans = []; temporaries = []; provides = false } in
+  let scope = { frame = Statement; bound = []; loans = []; temporaries = [] } in
   builder.scopes <- scope :: builder.scopes;
   let result = f () in
   builder.scopes <- List.tl builder.scopes;
@@ -294,7 +290,7 @@ let partition_lent builder temporaries =
     temporaries
 
 let run_in_condition_frame builder evaluate =
-  let scope = { frame = Condition; bound = []; loans = []; temporaries = []; provides = false } in
+  let scope = { frame = Condition; bound = []; loans = []; temporaries = [] } in
   builder.scopes <- scope :: builder.scopes;
   let value = evaluate () in
   builder.scopes <- List.tl builder.scopes;
@@ -345,8 +341,8 @@ let run_in_guard_scope builder origin evaluate =
   end_scope builder { scope with temporaries = others; loans = [] } origin;
   holds
 
-let run_in_value_scope ?provides builder origin (build : unit -> Tree.operand option) =
-  run_in_scope ?provides builder origin (fun () ->
+let run_in_value_scope builder origin (build : unit -> Tree.operand option) =
+  run_in_scope builder origin (fun () ->
       let value = build () in
       match (value, builder.scopes) with
       | Some (Use { place = { root = Local local; _ }; type_; _ } as read), scope :: enclosing :: _
@@ -565,7 +561,7 @@ let resume_block builder (enclosing : suspended) =
   statements
 
 let run_in_arm_scope builder build =
-  let scope = { frame = Bindings; bound = []; loans = []; temporaries = []; provides = false } in
+  let scope = { frame = Bindings; bound = []; loans = []; temporaries = [] } in
   builder.scopes <- scope :: builder.scopes;
   Fun.protect ~finally:(fun () -> builder.scopes <- List.tl builder.scopes) (fun () -> build scope)
 

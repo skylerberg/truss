@@ -35,9 +35,25 @@ let report_unmet_bound (state : State.state) ~at ~of_type subject bound ~associa
           | None -> "This")
           (Types.show subject) (Types.show_trait bound)
       in
+      let is_slice =
+        Types.is_well_known Slice subject || Types.is_well_known String_slice subject
+      in
+      let has_mut_self_method =
+        match Interface.Definition.find_trait_interface state.lookups.interface bound.trait with
+        | Some trait ->
+            List.exists
+              (fun (method_ : Types.trait_method) -> method_.method_receiver = Instance Mut)
+              trait.methods
+        | None -> false
+      in
       let report =
         State.add_diagnostic state Unsatisfied_bound at
           (match associated with
+          | None when is_slice && has_mut_self_method ->
+              needs
+              ^ ", which does not hold: a slice implements no trait with a `mut self` method. \
+                 Generic code could call the method on a copy of the slice, and a copy views the \
+                 same elements."
           | None -> needs ^ ", which does not hold."
           | Some (name, found, _) ->
               Printf.sprintf "%s, and its `%s` is `%s`." needs name (State.show state found))

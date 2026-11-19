@@ -343,6 +343,19 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
         | _ -> None)
       values
   in
+  List.iteri
+    (fun position (parameter : Mir.parameter) ->
+      match
+        ( parameter.mode,
+          List.find_opt (fun (passed : State.passed) -> passed.position = position) values,
+          List.assoc_opt position changed )
+      with
+      | Language.Mode.Mut, Some passed, Some after_term
+        when Types.is_well_known Slice parameter.type_ ->
+          Intrinsics.assume_same_length context after passed.type_ ~before:passed.term
+            ~after:after_term
+      | _ -> ())
+    callee_clauses.parameters;
   let callee_bindings = list_bindings callee_clauses in
   let callee_arguments = List.filter_map snd callee_bindings in
   let is_on_bound_values = List.exists (Logic.mentions after.bound) callee_arguments in
@@ -844,19 +857,9 @@ let compute_function_value_amount context frame ~location (function_type : Types
         Amounts.make_conditional_amount
           (Amounts.make_may_be_target context frame callee_term (Types.Function function_type) term)
           (Logic.int 1)
-  | Calls (Capability path | Capability_method (path, _)) ->
-      if
-        Types.exists_capability
-          (function
-            | Types.Capability used -> Path.equal used path
-            | Types.Capability_parameter _ | Types.Capability_projection _
-            | Types.Capability_variable _ ->
-                true
-            | Types.Capability_error _ ->
-                Facts.raise_bug "the prover reads a capability with an error")
-          function_type.uses
-      then Operations.declare_unknown_amount context frame counter
-      else Costs.zero
+  | Calls (Capability capability | Capability_method (capability, _)) ->
+      Amounts.compute_capability_amount context frame ~uses:function_type.uses capability counter
+        ~direct:(fun () -> Operations.declare_unknown_amount context frame counter)
 
 type modelled =
   | By_contract of (State.frame * Logic.term)

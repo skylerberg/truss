@@ -4,7 +4,7 @@ let classify env (ty : Ground.ty) =
   match ty with
   | Any _ -> Any
   | Named { path; arguments } -> (
-      match (Intrinsic.find_builtin path, arguments) with
+      match (Well_known.find_builtin_type path, arguments) with
       | Some Storage, [ Type element ] -> Storage element
       | Some Handle, [] -> Handle
       | Some Shared, [ Type value ] -> Shared value

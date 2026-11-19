@@ -50,29 +50,6 @@ public fn Array[Element, count: UInt64].slice(self) -> Slice[Element]
   Slice(elements: intrinsic::array_view(self))
 }
 
-internal fn Array[Element, count: UInt64].slice_range(self, start: UInt64, stop: UInt64) -> Slice[Element]
-  requires start <= stop
-  requires stop <= count
-  ensures result.length() == stop - start
-  ensures forall index in 0..result.length() =>
-    identical(result.model()[index], self.model()[start + index])
-  cost time O(1)
-  cost allocations == 0
-{
-  self.slice().slice_range(start, stop: stop)
-}
-
-internal fn Array[Element, count: UInt64].slice_from(self, start: UInt64) -> Slice[Element]
-  requires start <= count
-  ensures result.length() == count - start
-  ensures forall index in 0..result.length() =>
-    identical(result.model()[index], self.model()[start + index])
-  cost time O(1)
-  cost allocations == 0
-{
-  self.slice().slice_from(start)
-}
-
 impl Model for Array[Element, count: UInt64] {
   type Value = Sequence[Element]
 
@@ -101,7 +78,7 @@ impl Index for Array[Element, count: UInt64] {
     cost time O(1)
     cost allocations == 0
   {
-    intrinsic::view_at(intrinsic::array_view(self), index: key)
+    self[key]
   }
 }
 
@@ -113,7 +90,7 @@ impl IndexMut for Array[Element, count: UInt64] {
     cost time O(1)
     cost allocations == 0
   {
-    intrinsic::array_at_mut(mut self, index: key)
+    mut self[key]
   }
 }
 

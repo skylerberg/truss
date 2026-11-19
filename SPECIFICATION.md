@@ -472,7 +472,9 @@ public type Interval =
   directly or with `with`, passed to a call, or returned, and when its
   holder ends: a `var` at the end of its scope, and a `mut` parameter or
   `mut self` when the function returns. A `with` is checked after all of
-  its updates.
+  its updates. An element of a `List`, a `Slice`, or an `Array` meets it
+  when a write to a part of the element ends, as in `spans[0].low = 1` or
+  `bump(mut spans[0].low)`, since the next read of the element assumes it.
 - A private method that takes `mut self` is a step of an update: the
   invariant of its `self` is neither assumed when it is called nor required
   when it returns. A method written in a trait, a capability, or an `impl`
@@ -617,6 +619,22 @@ it.
   `Slice`, or `Array` can be passed `mut` side by side, as in
   `sort(mut items[..middle])` and `sort(mut items[middle..])`, when the
   prover shows that they do not overlap.
+- **A slice's elements are written only through a `mut Slice` parameter or
+  a range of a mutable place.** `mut self` of a `Slice` method is such a
+  parameter, and `mut items[1..]` such a range. A slice held in a variable,
+  a field, an element, or a pattern's binding is read-only. Write access
+  held in a variable would let `var target = items[1..5]` overwrite
+  elements that `items[0..4]`, passed beside it, still views. Assigning a
+  slice held in a variable makes it view other elements and changes none.
+- **A `mut Slice` parameter cannot be assigned,** whole or by field, so its
+  length is fixed for the call. A slice is passed `mut` only to a parameter
+  declared as a slice. A callee that took it as a type parameter could
+  assign it another slice, and the caller would read the callee's contract
+  as a write to elements that did not change.
+- **A slice implements no trait with a `mut self` method,** and so
+  satisfies no bound of one. Generic code could call the method on a copy,
+  and a copy of a slice views the same elements, so the write would reach
+  elements lent read-only.
 - **A temporary is dropped at the end of its statement,** except where a
   `let` keeps it until the end of the block that holds the `let`. A `let`
   keeps the base of a slice that it binds, directly or through fields. It
@@ -918,6 +936,14 @@ public fn load_configs(paths: List[Path]) -> Result[List[Config], ConfigError]
 
 - The target of `calls` is a function parameter, a capability method, or a
   whole capability, never an associated capability set.
+- **`calls` of a capability counts the calls that reach the caller's
+  provider.** A call inside a `provide` goes to the provided
+  implementation, which calls the next provider out only if its `impl`
+  uses that capability. No clause bounds those calls, so a call to an
+  implementation that uses the counted capability has no known count, and
+  a call to one that does not counts as none. A capability method whose
+  declaration uses another capability may call that one any number of
+  times.
 - `O(f)` means that the cost is at most `c * f + d` for every input, for
   some constants `c` and `d`.
 - `time` counts abstract steps: each primitive operation and each call is one.
@@ -1542,10 +1568,13 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
   lent `items.element(position)`, for each position from zero up to the
   count. A type supports `for` by defining `count(self) -> UInt64` and
   `element(self, position: UInt64)`, a lending method, as its own methods or
-  by implementing `Iterable`.
+  by implementing `Iterable`. An iteration over a `List`, a `Slice`, or an
+  `Array` is lent the element place `items[position]` instead, and calls no
+  `element`.
 - `for item in mut items` is lent each element by the overload of `element`
-  that takes `mut self`. A `mut` loop mutates elements but does not add or
-  remove them: each iteration leaves the collection's `count` as it was.
+  that takes `mut self`, or the element place `mut items[position]`. A
+  `mut` loop mutates elements but does not add or remove them: each
+  iteration leaves the collection's `count` as it was.
 - `for item in own items` moves each element out: it pulls the cursor that
   `items.cursor()` returns, where `cursor` takes `own self`.
 - **A `for` loop over a cursor pulls it until it has no more values.** Each
@@ -1561,7 +1590,9 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
 - `invariant` holds at the start of every iteration and when the loop ends.
 - `decreases` names a measure that every iteration makes smaller and that
   never goes below zero. It holds in every function, including one that
-  uses `RunForever`.
+  uses `RunForever`. A `while` compares its measure before each evaluation
+  of its condition, so a change that the condition makes counts toward the
+  iteration.
 - Where a `for` loop over a cursor states no measure, and the cursor's type
   has a `remaining(self) -> UInt64` method, that method's value is the
   loop's measure, and it holds as a written one does.
@@ -1577,9 +1608,10 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
 - In the clauses of any other `for` loop, `visited` is the `Sequence` of the
   values of the iterations before. The clauses cannot name the element. A
   local named `visited` shadows the word.
-- In a loop that reads a collection, `visited[i]` is the value of the
-  collection's `element` at position `i`, so it meets that method's
-  `ensures`.
+- In a loop that reads a collection, `visited[i]` is the collection's
+  element at position `i`: `items[i]` of a `List`, a `Slice`, or an
+  `Array`, and otherwise the value of the collection's `element` at
+  position `i`, which meets that method's `ensures`.
 - Where a cursor's `model()` is a `Sequence` of the cursor's `Element`, as a
   `ListCursor`'s is, the model is the values that the cursor has yet to
   give, in order. In a loop that pulls such a cursor, `visited` followed by
@@ -1700,21 +1732,35 @@ let pending: Stack[Int64] = [1, 2, 3]
 | Indexing | Meaning |
 |---|---|
 | `items[i]` | Element `i`, which is proven in bounds |
-| `items[1..4]` | A `Slice`, whose bounds are proven |
+| `items[1..4]` | The range of elements 1 to 3, a `Slice`, whose bounds are proven |
 | `ports[name]` | The value for `name`, which is proven present |
 | `items[i] = value` | Replaces element `i` |
 | `ports[own name] = 8080` | Inserts or replaces the value for `name` |
 
-- A type supports `[]` by implementing the prelude trait `Index` (see
-  [Associated types](#associated-types)), which lends an element read-only.
-- A type whose elements are mutated in place also implements `IndexMut`, whose
-  `at(mut self, key)` lends an element `mut`. `items[i].name = text`,
-  `items[i] += 1`, and `mut items[i]` need it.
+- **An element of a `List`, a `Slice`, or an `Array` is a place,** as a
+  field of a record is. `items[i]` names the element at position `i`, and
+  `items[1..4]` names the range of positions 1 to 3, whose value is a
+  `Slice`. Neither calls a method. So `let first = names[0]` binds a view of
+  the element, `names[0].count += 1` mutates it in place, and
+  `mut names[1..]` passes the range `mut`.
+- An index and the bounds of a range are evaluated before the element or
+  the range is reached, so `items[grow(mut items)]` is checked against the
+  length that `grow` leaves. Evaluating an element or a range checks its
+  bounds even where nothing reads it, as in `let _ = items[2]`.
+- Any other type supports `[]` by implementing the prelude trait `Index`
+  (see [Associated types](#associated-types)), which lends an element
+  read-only. `List`, `Slice`, and `Array` implement it for generic code.
+- Such a type whose elements are mutated in place also implements
+  `IndexMut`, whose `at(mut self, key)` lends an element `mut`.
+  `entries[key].name = text`, `entries[key] += 1`, and `mut entries[key]`
+  need it. `List` and `Array` implement it for generic code. `Slice` does
+  not: a slice implements no trait with a `mut self` method
+  ([Views](#views)).
 - `collection[key] = value` calls `assign` when the type implements
   `IndexAssign`. The collection must accept the key, by its `accepts_key`:
-  a `Map` accepts every key and inserts a missing one. For any other type,
-  the assignment replaces the element that `IndexMut` lends, so the key is
-  there.
+  a `Map` accepts every key and inserts a missing one. For a type that
+  implements `IndexMut` and not `IndexAssign`, the assignment replaces the
+  element that `IndexMut` lends, so the key is there.
 - Each method of the three traits terminates: none uses `RunForever`.
 - Strings cannot be indexed.
 
@@ -1860,10 +1906,13 @@ public trait Add[Right] {
   shifts in zeros. A shift amount is any unsigned integer type, proven
   smaller than the bit width of the value.
 - The traits `FixedWidthInteger`, `SignedInteger`, and `UnsignedInteger` are
-  sealed: only the built-in integer types implement them.
+  sealed: only the built-in integer types implement them. A method that every
+  integer type has is declared in one of them.
 
 ### Floats
 
+- The trait `FloatingPoint` is sealed: only `Float32` and `Float64`
+  implement it. A method that both float types have is declared in it.
 - Float arithmetic follows IEEE 754. NaN and infinity are values, so no
   float operation fails.
 - Float results are the same on every platform. The operations IEEE 754
@@ -1935,7 +1984,8 @@ let rolled = provide LoadedDie(face: 5) {
   default in before the call reaches an implementation.
 - `provide implementation, ... { body }` runs the body with the given
   implementations, passed as arguments are: a place is written with `mut`
-  when its methods mutate it, and it holds the mutations afterward.
+  when its methods mutate it, and it holds the mutations afterward, on
+  every path out of the body, a `return` or a `break` among them.
 - Providing a type provides every capability it implements.
 - An `impl` with a `uses` clause can use those capabilities, and providing
   it requires them. Otherwise an `impl`'s methods use only the capabilities
@@ -2057,7 +2107,9 @@ fn profile(id: UserId) -> Result[Profile, DatabaseError]
 - **A branch that exits the block with `?`, `return`, or `break` cancels the
   other branches,** waits for them to end, and then exits. A branch that has
   not started does not start, and the first branch to exit decides where
-  control goes.
+  control goes. So after an early exit, a place that another branch or
+  iteration mutates holds a value of its type, and which of its writes
+  happened is not known.
 - The code after the block does not run when a branch exits early, so a
   branch that moves a value out of a place reinitializes it before it ends.
 - **In a cancelled task, a standard capability call that would wait returns
@@ -2478,10 +2530,11 @@ an invariant, a law, or a proof.
 - A quantifier over a range or a collection is also an expression in code,
   which runs as a loop that stops when the answer is known. Its body may rely
   on the bound name being in its range, and uses no capabilities.
-- A quantifier over a collection ranges over the values that the
-  collection's `element` lends at the positions below its `count()`, in code
-  and in specifications alike. A pattern that does not match a value leaves
-  that value out.
+- A quantifier over a collection ranges over its elements at the positions
+  below its `count()`, in code and in specifications alike: the element
+  places of a `List`, a `Slice`, or an `Array`, and the values that any
+  other collection's `element` lends. A pattern that does not match a value
+  leaves that value out.
 - A quantifier over a type and `==>` appear only in specifications and in
   functions for specifications only.
 - A quantifier's body runs to the end of the expression.

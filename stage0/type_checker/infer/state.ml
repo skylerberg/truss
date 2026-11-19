@@ -1,4 +1,5 @@
-type local = { name : string; type_ : Types.ty; is_var : bool; mode : Language.Mode.t }
+type binding = Parameter | Var | Let
+type local = { name : string; type_ : Types.ty; binding : binding; mode : Language.Mode.t }
 
 type env = {
   output : Types.result option;
@@ -20,7 +21,7 @@ type subset_constraint = {
   report_missing : Types.capability_set -> unit;
 }
 
-type requirement = Implements of Types.trait_reference | Within of Intrinsic.builtin list
+type requirement = Implements of Types.trait_reference | Within of Language.Builtin_type.t list
 
 type goal = {
   subject : Types.ty;
@@ -58,7 +59,7 @@ type undecided_literal = { index : int; local : Syntax.id; owner : frame }
 
 type narrowing = {
   narrowed : Types.ty;
-  allowed : Intrinsic.builtin list;
+  allowed : Language.Builtin_type.t list;
   report_excluded : Types.ty -> Diagnostic.reported;
 }
 
@@ -591,7 +592,7 @@ let make_default_type state root domain =
   match
     List.filter
       (fun default -> List.mem default domain)
-      [ Intrinsic.Integer; Int64; UInt64; Float64 ]
+      [ Language.Builtin_type.Integer; Int64; UInt64; Float64 ]
   with
   | Integer :: _ -> Types.Integer
   | default :: _ -> Types.make_builtin default
@@ -599,7 +600,7 @@ let make_default_type state root domain =
       make_error_type state Cannot_infer (find_literal_span state root)
         (Printf.sprintf "This literal may be %s, and nothing decides which. Give the `let` a type."
            (String.concat " or "
-              (List.map (fun member -> "`" ^ Intrinsic.show_builtin member ^ "`") domain)))
+              (List.map (fun member -> "`" ^ Language.Builtin_type.show member ^ "`") domain)))
 
 let decide_literals state ~(at : Source.Definition_span.t) ~is_default =
   state.undecided <-
@@ -813,15 +814,15 @@ let build_block state (written : Syntax.block) : Core.block =
   let statements, value = build_statements written.statements in
   { statements; value }
 
-let declare state (name : Syntax.name) type_ ~is_var ~mode =
-  Hashtbl.replace state.locals name.id { name = name.text; type_; is_var; mode };
+let declare state (name : Syntax.name) type_ ~binding ~mode =
+  Hashtbl.replace state.locals name.id { name = name.text; type_; binding; mode };
   state.tables.local_types.(name.id) <- Some type_;
   let frame = find_current_frame state in
   frame.bindings <- name.id :: frame.bindings;
   frame.declared <- name.id :: frame.declared
 
-let declare_compiled state env (name : Syntax.name) type_ ~is_var ~mode =
-  declare state name type_ ~is_var ~mode;
+let declare_compiled state env (name : Syntax.name) type_ ~binding ~mode =
+  declare state name type_ ~binding ~mode;
   if is_compiled env then begin
     let frame = find_current_frame state in
     frame.compiled_bindings <- name.id :: frame.compiled_bindings;
@@ -1153,41 +1154,40 @@ let check_cost state (cost : Syntax.cost) =
       List.iter (check_operand_clause state cost)
         (Interface.Elaborator.list_cost_operands state.context value)
 
-let make_slice state ~origin (base : Core.place) ~start ~stop ~inclusive : Core.kind =
+let find_sequence_element (sequence : Types.ty) =
+  match sequence with
+  | Types.Named { path; arguments = Types.Type element :: _ }
+    when Well_known.is_buffer_sequence path || Well_known.find_builtin_type path = Some Array ->
+      Some element
+  | _ -> None
+
+let make_range state ~origin (base : Core.place) ~start ~stop ~inclusive : Core.kind =
   let make = make_synthetic_expression state ~origin in
   let uint64 = Types.make_builtin UInt64 in
-  let path, type_arguments =
+  let element =
     match Core_walk.compute_place_type base with
-    | Types.Named { path; arguments } -> (path, arguments)
-    | type_ -> raise_bug "a slice of `%s`" (Types.show type_)
+    | Types.Named { arguments = Types.Type element :: _; _ } -> element
+    | type_ -> raise_bug "a range of `%s`" (Types.show type_)
   in
-  let make_method_callee name =
-    make_callee state
-      (Function
-         {
-           path = Method { owner = path; name; receiver = Instance Read };
-           instantiation = { Types.no_instantiation with type_arguments };
-         })
-  in
-  let build_read_argument = Operands.build_argument Read in
-  let start = match start with Some start -> start | None -> make uint64 (Integer Z.zero) in
-  match stop with
-  | None ->
-      Slice
-        { base; callee = make_method_callee "slice_from"; bounds = [ build_read_argument start ] }
-  | Some stop ->
-      let stop =
+  let stop =
+    Option.map
+      (fun stop ->
         if inclusive then
           make uint64
             (Operator { operation = Add; arguments = [ stop; make uint64 (Integer Z.one) ] })
-        else stop
-      in
-      Slice
-        {
-          base;
-          callee = make_method_callee "slice_range";
-          bounds = [ build_read_argument start; build_read_argument stop ];
-        }
+        else stop)
+      stop
+  in
+  Use
+    (Range
+       {
+         base;
+         start = (match start with Some start -> start | None -> make uint64 (Integer Z.zero));
+         stop;
+         type_ =
+           Types.Named { path = Well_known.make_path Slice; arguments = [ Types.Type element ] };
+         origin;
+       })
 
 type conversion =
   | From_never
@@ -1234,14 +1234,12 @@ let convert state env ?argument ?(takes_view_as_owner = false) ?expression
               | From_integer -> convert From_integer
               | View_to_owned -> convert View_to_owned
               | Owned_to_view
-                when argument = Some Language.Mode.Mut
-                     && (Types.is_well_known List inner.type_ || Types.is_builtin Array inner.type_)
-                ->
+                when Types.is_well_known List inner.type_ || Types.is_builtin Array inner.type_ ->
                   let base : Core.place =
                     match inner.kind with Use place -> place | _ -> Temporary inner
                   in
                   make_synthetic_expression state ~origin:id expected
-                    (make_slice state ~origin:id base ~start:None ~stop:None ~inclusive:false)
+                    (make_range state ~origin:id base ~start:None ~stop:None ~inclusive:false)
               | Owned_to_view -> (
                   match inner.type_ with
                   | Types.Named { path; arguments } ->

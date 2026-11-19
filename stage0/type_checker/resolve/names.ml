@@ -34,6 +34,10 @@ let show_kind : kind -> string = function
   | Test -> "a test"
   | Law_proof -> "a law's proof"
 
+let is_constant : kind -> bool = function
+  | Constant | Member_constant -> true
+  | Function | Type | Trait | Capability | Theorem | Method | Impl | Test | Law_proof -> false
+
 type visibility = Private | Internal | Public | Public_opaque
 type key = { module_ : Path.module_; path : Path.t; ordinal : int }
 type declaration = { key : key; kind : kind; visibility : visibility; generic : bool }
@@ -139,7 +143,7 @@ let list_generic_kinds (generics : Syntax.generic_parameter list) =
       | Generic_error -> None)
     generics
 
-let list_builtin_generics : Intrinsic.builtin -> (string * generic_kind) list = function
+let list_builtin_generics : Language.Builtin_type.t -> (string * generic_kind) list = function
   | Array -> [ ("Element", Type_kind); ("count", Value_kind) ]
   | Storage | View -> [ ("Element", Type_kind) ]
   | Shared -> [ ("Value", Type_kind) ]
@@ -148,7 +152,7 @@ let list_builtin_generics : Intrinsic.builtin -> (string * generic_kind) list = 
       []
 
 let find_generics lookups (path : Path.t) =
-  match Intrinsic.find_builtin path with
+  match Well_known.find_builtin_type path with
   | Some builtin -> Some (list_builtin_generics builtin)
   | None -> (
       match find_definition lookups path with
@@ -185,7 +189,7 @@ module Scope = struct
     || (visibility = Internal && module_.package = from.package)
 
   let is_restricted_module ~(from : Path.module_) (module_ : Path.module_) =
-    module_ = Intrinsic.module_ && from.package <> Path.standard_package
+    module_ = Well_known.intrinsic_module && from.package <> Path.standard_package
 
   let restricted_module_message = "Only the `standard` package can use `standard::intrinsic`."
 

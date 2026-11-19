@@ -1,4 +1,5 @@
-type local = { name : string; type_ : Types.ty; is_var : bool; mode : Language.Mode.t }
+type binding = Parameter | Var | Let
+type local = { name : string; type_ : Types.ty; binding : binding; mode : Language.Mode.t }
 
 type env = {
   output : Types.result option;
@@ -19,7 +20,7 @@ type subset_constraint = {
   report_missing : Types.capability_set -> unit;
 }
 
-type requirement = Implements of Types.trait_reference | Within of Intrinsic.builtin list
+type requirement = Implements of Types.trait_reference | Within of Language.Builtin_type.t list
 
 type goal = {
   subject : Types.ty;
@@ -57,7 +58,7 @@ type undecided_literal = { index : int; local : Syntax.id; owner : frame }
 
 type narrowing = {
   narrowed : Types.ty;
-  allowed : Intrinsic.builtin list;
+  allowed : Language.Builtin_type.t list;
   report_excluded : Types.ty -> Diagnostic.reported;
 }
 
@@ -179,11 +180,14 @@ val make_fresh_argument : state -> Types.generic -> Types.argument
 val make_fresh_generic_arguments : state -> Types.generic list -> Types.argument list
 val lookup_bounds : state -> Types.parameter -> Types.trait_reference list
 val normalize : state -> Types.ty -> Types.ty
-val is_within : state -> Types.ty -> Intrinsic.builtin list -> bool
+val is_within : state -> Types.ty -> Language.Builtin_type.t list -> bool
 val read_integer_range : state -> Types.ty -> Z.t * Z.t
 
 val make_literal_type :
-  state -> Intrinsic.builtin list -> report_excluded:(Types.ty -> Diagnostic.reported) -> Types.ty
+  state ->
+  Language.Builtin_type.t list ->
+  report_excluded:(Types.ty -> Diagnostic.reported) ->
+  Types.ty
 
 val finalize_type : state -> Types.ty -> Types.ty
 val finalize_capabilities : state -> Types.capability_set -> Types.capability_set
@@ -228,10 +232,10 @@ val close_frame : state -> frame -> unit
 val diverges : is_never:(Syntax.expression -> bool) -> Syntax.statement -> bool
 val statement_diverges : state -> Syntax.statement -> bool
 val build_block : state -> Syntax.block -> Core.block
-val declare : state -> Syntax.name -> Types.ty -> is_var:bool -> mode:Language.Mode.t -> unit
+val declare : state -> Syntax.name -> Types.ty -> binding:binding -> mode:Language.Mode.t -> unit
 
 val declare_compiled :
-  state -> env -> Syntax.name -> Types.ty -> is_var:bool -> mode:Language.Mode.t -> unit
+  state -> env -> Syntax.name -> Types.ty -> binding:binding -> mode:Language.Mode.t -> unit
 
 val find_target : state -> Syntax.name -> Resolve.target option
 val decide_default_literal : state -> at:Source.Definition_span.t -> Types.ty -> Types.ty
@@ -272,8 +276,9 @@ val find_keyword_operation : state -> Syntax.expression -> (Syntax.id * Syntax.e
 val note_mode_keyword : state -> Syntax.expression -> Syntax.mode -> Syntax.expression -> unit
 val find_local_type : state -> Syntax.name -> Types.ty option
 val check_cost : state -> Syntax.cost -> unit
+val find_sequence_element : Types.ty -> Types.ty option
 
-val make_slice :
+val make_range :
   state ->
   origin:Core.origin ->
   Core.place ->

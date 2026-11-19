@@ -57,12 +57,12 @@ let builtin_entries =
   List.map
     (fun builtin : Names.entry ->
       {
-        name = Intrinsic.show_builtin builtin;
+        name = Language.Builtin_type.show builtin;
         kind = Type;
         visibility = Public;
         generic = Names.list_builtin_generics builtin <> [];
       })
-    Intrinsic.builtins
+    Language.Builtin_type.all
   @ List.map
       (fun operation : Names.entry ->
         {
@@ -416,7 +416,7 @@ let number_written (written : written list) =
 let is_head_kind (lookups : Names.lookups) (path : Path.t) ~(kinds : Names.named list) =
   match Names.find_kind lookups path with
   | Some kind when List.mem kind kinds -> (
-      match Intrinsic.find_builtin path with Some (Never | Integer) -> false | _ -> true)
+      match Well_known.find_builtin_type path with Some (Never | Integer) -> false | _ -> true)
   | _ -> false
 
 let resolve_head (lookups : Names.lookups) ~from ~imports (path : Syntax.path) ~kinds =
@@ -471,8 +471,8 @@ let build (lookups : Names.lookups) package
                 (fun (_, (file : Syntax.file), _) -> list_file_entries file.definitions)
                 files))
           map)
-      (if Intrinsic.module_.package = package then
-         Module_map.singleton Intrinsic.module_ (make_module_names builtin_entries)
+      (if Well_known.intrinsic_module.package = package then
+         Module_map.singleton Well_known.intrinsic_module (make_module_names builtin_entries)
        else Module_map.empty)
       modules
   in
@@ -833,7 +833,7 @@ let make_lookups ~(read_namespace : Path.package -> t) ~split_module ~list_depen
         match path with
         | Top { module_; _ } | Impl { module_; _ } | Test { module_; _ } | Law_proof { module_; _ }
           ->
-            if module_ = Intrinsic.module_ then None
+            if module_ = Well_known.intrinsic_module then None
             else
               Option.map
                 (fun (declared : declared) -> declared.declaration.key)

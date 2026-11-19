@@ -9,7 +9,7 @@ val require :
 val require_within :
   State.state ->
   Types.ty ->
-  Intrinsic.builtin list ->
+  Language.Builtin_type.t list ->
   reason:(Types.ty -> Diagnostic.reported) ->
   Types.ty
 

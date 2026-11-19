@@ -131,7 +131,7 @@ let build_debug env ty =
       | _, Scalar scalar -> write_scalar_debug env builder ~output scalar value
       | Named { path; _ }, Record [] ->
           write_output_text
-            (if Intrinsic.find_builtin path = Some Unit then Path.show_name path
+            (if Well_known.find_builtin_type path = Some Unit then Path.show_name path
              else Path.show_name path ^ "()")
       | Named { path; _ }, Record fields ->
           write_fields (Path.show_name path) fields (fun field ->

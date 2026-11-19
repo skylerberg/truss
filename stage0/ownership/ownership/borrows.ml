@@ -394,39 +394,6 @@ let check_body context (actions : Actions.t) moves =
                        (Context.show_root context place.root)
                        parameter parameter)
               | None, false, None -> ())
-      | Write_through slice -> (
-          let is_mutable_root (root : Place.root) =
-            match root with
-            | Temporary _ -> true
-            | Constant _ | Environment -> false
-            | Local local -> (
-                match Context.classify_binding_mode context root with
-                | Mut -> true
-                | Own -> List.mem local context.mutable_locals
-                | Read -> false)
-          in
-          match slice with
-          | { steps = _ :: _; _ } ->
-              Context.report context Read_only_view at
-                (Printf.sprintf
-                   "`%s` is a slice stored in a field, so it is read-only. Mutate the collection \
-                    that it views instead."
-                   (Context.show context slice))
-          | { root = Local local; _ } when List.mem local context.parameters -> ()
-          | _ -> (
-              match
-                List.find_opt
-                  (fun (viewed : Place.t) -> viewed <> slice && not (is_mutable_root viewed.root))
-                  (list_viewed_places here [ Copy_of_view_in slice ])
-              with
-              | Some viewed ->
-                  Context.report context Read_only_view at
-                    (Printf.sprintf
-                       "`%s` views `%s`, which is read-only here, so `%s` cannot be written \
-                        through."
-                       (Context.show context slice) (Context.show context viewed)
-                       (Context.show context slice))
-              | None -> ()))
       | Yield_point { views; parts; forwarded } -> (
           let forwarded = resolve here.views forwarded in
           let is_dangling =
@@ -484,9 +451,6 @@ let check_body context (actions : Actions.t) moves =
         | Mutate place ->
             uses := (place :: list_viewed place) @ !uses;
             mutations := (place, here.origin) :: !mutations
-        | Write_through place ->
-            mutations :=
-              List.map (fun viewed -> (viewed, here.origin)) (list_viewed place) @ !mutations
         | Assign place -> mutations := (place, here.origin) :: !mutations
         | Move { place; type_; is_returned; is_captured } -> (
             uses := place :: !uses;

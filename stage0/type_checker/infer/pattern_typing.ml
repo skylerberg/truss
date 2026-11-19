@@ -1,14 +1,21 @@
 let rec check_binding_pattern state env written type_ ~is_var ~mode =
-  check_pattern_with state env written type_ ~is_var ~mode
+  check_pattern_with state env written type_ ~binding:(if is_var then State.Var else Let) ~mode
 
 and check_pattern state env written type_ ~mode =
-  check_pattern_with state env written type_ ~is_var:false ~mode
+  check_pattern_with state env written type_ ~binding:Let ~mode
 
-and check_pattern_with state env (written : Syntax.pattern) type_ ~is_var ~mode =
+and check_parameter_pattern state env written type_ ~mode =
+  check_pattern_with state env written type_ ~binding:Parameter ~mode
+
+and check_pattern_with state env (written : Syntax.pattern) type_ ~(binding : State.binding) ~mode =
+  let is_var = binding = Var in
+  let part_binding : State.binding = match binding with Parameter -> Let | Var | Let -> binding in
   let type_ = State.normalize state type_ in
   state.tables.scrutinee_types.(written.id) <- Some type_;
-  let recurse = check_pattern_with state env ~is_var ~mode in
-  let check_unknown type_ = check_unknown_pattern state env written type_ ~is_var ~mode in
+  let recurse = check_pattern_with state env ~binding:part_binding ~mode in
+  let check_unknown type_ =
+    check_unknown_pattern state env written type_ ~binding:part_binding ~mode
+  in
   let binds id (bound : Syntax.name) =
     State.register_pattern state written (fun () ->
         Bind { local = Declared { origin = id; name = bound.text }; is_var; mode })
@@ -19,7 +26,7 @@ and check_pattern_with state env (written : Syntax.pattern) type_ ~is_var ~mode 
       match State.find_target state bound with
       | Some Binding ->
           binds bound.id bound;
-          State.declare_compiled state env bound type_ ~is_var ~mode
+          State.declare_compiled state env bound type_ ~binding ~mode
       | Some (Local id) -> (
           binds id bound;
           match Hashtbl.find_opt state.locals id with
@@ -53,7 +60,7 @@ and check_pattern_with state env (written : Syntax.pattern) type_ ~is_var ~mode 
             });
       match
         Solver.require_within state type_
-          (Types.integer_types @ [ Intrinsic.Character; Integer ])
+          (Types.integer_types @ [ Language.Builtin_type.Character; Integer ])
           ~reason:(fun excluded ->
             State.add_diagnostic state Mismatch
               (State.read_span state written.id)
@@ -106,7 +113,7 @@ and check_pattern_with state env (written : Syntax.pattern) type_ ~is_var ~mode 
                   let declared = Option.value ~default:[] variant.fields in
                   let matched =
                     check_pattern_fields state env written declared
-                      (Option.value ~default:[] fields) ~is_var ~mode
+                      (Option.value ~default:[] fields) ~binding:part_binding ~mode
                   in
                   State.register_pattern state written (fun () ->
                       Variant
@@ -150,7 +157,8 @@ and check_pattern_with state env (written : Syntax.pattern) type_ ~is_var ~mode 
                      (Types.show type_));
               state.tables.patterns.(written.id) <- Some (Record_pattern { type_ });
               let matched =
-                check_pattern_fields state env written record_fields fields ~is_var ~mode
+                check_pattern_fields state env written record_fields fields ~binding:part_binding
+                  ~mode
               in
               State.register_pattern state written (fun () ->
                   Record (Form.build_pattern_fields state record_fields matched))
@@ -173,7 +181,7 @@ and check_pattern_with state env (written : Syntax.pattern) type_ ~is_var ~mode 
           Alternatives (List.map (State.build_pattern state) alternatives))
 
 and check_pattern_fields state env (written : Syntax.pattern) (fields : Types.field list)
-    (written_fields : Syntax.pattern_field list) ~is_var ~mode =
+    (written_fields : Syntax.pattern_field list) ~binding ~mode =
   let find_bare_name (inner : Syntax.pattern) =
     match inner.kind with Binding name -> Some name.text | _ -> None
   in
@@ -221,10 +229,10 @@ and check_pattern_fields state env (written : Syntax.pattern) (fields : Types.fi
             List.find_opt (fun (declared : Types.field) -> declared.field_name = name.text) fields
           with
           | Some declared ->
-              check_pattern_with state env inner declared.field_type ~is_var ~mode;
+              check_pattern_with state env inner declared.field_type ~binding ~mode;
               Some (declared.field_name, inner)
           | None ->
-              check_pattern_with state env inner ~is_var ~mode
+              check_pattern_with state env inner ~binding ~mode
               @@ State.make_error_type state Unknown_member (State.read_span state name.id)
                    ~fixes:
                      (Diagnostic.list_spelling_fixes (State.read_span state name.id)
@@ -239,7 +247,7 @@ and check_pattern_fields state env (written : Syntax.pattern) (fields : Types.fi
           in
           match (named, fields) with
           | Some declared, _ | None, [ declared ] ->
-              check_pattern_with state env inner declared.field_type ~is_var ~mode;
+              check_pattern_with state env inner declared.field_type ~binding ~mode;
               Some (declared.field_name, inner)
           | None, _ ->
               let names =
@@ -248,7 +256,7 @@ and check_pattern_fields state env (written : Syntax.pattern) (fields : Types.fi
                      (fun (declared : Types.field) -> "`" ^ declared.field_name ^ "`")
                      fields)
               in
-              check_pattern_with state env inner ~is_var ~mode
+              check_pattern_with state env inner ~binding ~mode
                 (State.make_error_type state Unknown_member (State.read_span state inner.id)
                    (Printf.sprintf
                       "A bare pattern must name a field, since this has %d fields: %s. Truss has \
@@ -257,7 +265,7 @@ and check_pattern_fields state env (written : Syntax.pattern) (fields : Types.fi
               None))
     written_fields
 
-and check_unknown_pattern state env (written : Syntax.pattern) unknown ~is_var ~mode =
+and check_unknown_pattern state env (written : Syntax.pattern) unknown ~binding ~mode =
   state.tables.scrutinee_types.(written.id) <- Some unknown;
   match written.kind with
   | Variant { fields = Some fields; _ } | Record fields ->
@@ -265,7 +273,7 @@ and check_unknown_pattern state env (written : Syntax.pattern) unknown ~is_var ~
         (fun (field : Syntax.pattern_field) ->
           match field.kind with
           | Named_field (_, inner) | Field inner ->
-              check_pattern_with state env inner unknown ~is_var ~mode
+              check_pattern_with state env inner unknown ~binding ~mode
           | Rest -> ())
         fields
   | _ -> ()
@@ -365,7 +373,7 @@ and check_integer_literal state (env : State.env) ?expected (value : Syntax.expr
   match
     ( Option.map (State.resolve state) expected,
       Types.list_fitting_integer_types number
-      @ if env.specification then [ Intrinsic.Integer ] else [] )
+      @ if env.specification then [ Language.Builtin_type.Integer ] else [] )
   with
   | Some Types.Integer, _ -> Types.Integer
   | _, [] ->
@@ -382,14 +390,14 @@ and find_character_tag state (literal : Syntax.string_literal) =
   | Some tag -> (
       match State.find_target state tag.last with
       | Some (Definition (Type, path)) -> (
-          match Intrinsic.find_builtin path with
+          match Well_known.find_builtin_type path with
           | Some ((Character | UInt8) as builtin) -> Some builtin
           | _ -> None)
       | _ -> None)
   | None -> None
 
 and check_character_value (state : State.state) id (literal : Syntax.string_literal)
-    (builtin : Intrinsic.builtin) =
+    (builtin : Language.Builtin_type.t) =
   let text = literal.first.value in
   let scalars =
     let rec count index scalars =
@@ -426,7 +434,7 @@ and check_literal_pattern state id (span : Source.Definition_span.t) literal typ
       state.tables.literals.(id) <- Some (Integer_value number);
       ignore
         (Solver.require_within state type_
-           (Types.list_fitting_integer_types number @ [ Intrinsic.Integer ])
+           (Types.list_fitting_integer_types number @ [ Language.Builtin_type.Integer ])
            ~reason:(fun excluded ->
              if State.is_within state excluded Types.integer_types then
                report_out_of_range state span number excluded
