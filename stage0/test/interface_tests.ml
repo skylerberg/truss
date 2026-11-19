@@ -158,8 +158,8 @@ let () =
           "Nothing can implement `RunForever`, since a `provide` of it would let a function that \
            does not declare `RunForever` run forever.");
   Harness.test
-    "every standard capability except Panic and RunForever has exactly one real implementation"
-    (fun () ->
+    "every standard capability except Panic, RunForever, and System has exactly one real \
+     implementation" (fun () ->
       let packages = Support.setup [] in
       let interface = make_interface packages in
       let capabilities =
@@ -173,6 +173,11 @@ let () =
       let has_real_implementation (capability : Resolve.Names.declaration) =
         Option.is_some (Interface.Definition.find_real_implementation interface capability.key.path)
       in
+      let granted, capabilities =
+        List.partition
+          (fun (capability : Resolve.Names.declaration) -> Well_known.is System capability.key.path)
+          capabilities
+      in
       match
         List.partition
           (fun (capability : Resolve.Names.declaration) ->
@@ -184,7 +189,9 @@ let () =
             (fun (built_in : Resolve.Names.declaration) ->
               if has_real_implementation built_in then
                 Harness.fail "%s has a real implementation" (Path.show built_in.key.path))
-            [ first; second ];
+            (first :: second :: granted);
+          if List.length granted <> 1 then
+            Harness.fail "the standard library does not declare System exactly once";
           List.iter
             (fun (capability : Resolve.Names.declaration) ->
               if not (has_real_implementation capability) then

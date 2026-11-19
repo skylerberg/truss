@@ -194,7 +194,7 @@ and statement_kind =
       iteration : iteration;
       part : local;
       elements : elements option;
-      binding_count : int;
+      bindings : block;
       body : block;
     }
   | Fork of { fork : Core.origin; concurrent : bool; branches : block list }

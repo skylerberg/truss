@@ -2024,6 +2024,10 @@ These capabilities are in the prelude:
 The runtime holds a *real implementation* of every standard capability.
 Those of `Panic` and `RunForever` are built in, and no `impl` implements
 either. A capability that a package declares has no real implementation.
+An intrinsic that reaches the operating system uses `System`, a
+capability of the standard library that no other package can name. The
+runtime grants it to the real implementations, and nothing implements it,
+so a function without `uses` is pure in the standard library too.
 
 ### Handles
 

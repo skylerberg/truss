@@ -1,10 +1,13 @@
+use standard::capabilities
 use standard::intrinsic
 use standard::processes
 use standard::system::handles
 
 internal type SystemSignals()
 
-impl Signals for SystemSignals {
+impl Signals for SystemSignals
+  uses capabilities::System
+{
   fn wait(self, signals: Slice[processes::Signal]) -> Option[processes::Signal] {
     var numbers: intrinsic::Storage[Int32] = intrinsic::storage_with_capacity(signals.length())
     for signal in signals

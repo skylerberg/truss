@@ -55,6 +55,7 @@ type t =
   | File_path
   | Panic
   | Run_forever
+  | System
   | Tasks
   | System_error
   | Serialize

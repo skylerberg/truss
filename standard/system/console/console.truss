@@ -1,3 +1,4 @@
+use standard::capabilities
 use standard::console
 use standard::system::calls
 use standard::system::handles
@@ -12,7 +13,7 @@ impl Default for SystemConsole {
 }
 
 impl Console for SystemConsole
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   fn print(self, text: StringSlice) {
     let _ = calls::write_fully(1, bytes: text.bytes)

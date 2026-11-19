@@ -3,7 +3,17 @@ use standard::growth
 use standard::intrinsic
 use standard::text
 
-public trait FloatingPoint {
+public trait FloatingPoint:
+  Ordered
+  + Hash
+  + Plain
+  + Add[Self, Output = Self]
+  + Subtract[Self, Output = Self]
+  + Multiply[Self, Output = Self]
+  + Divide[Self, Output = Self]
+  + Remainder[Self, Output = Self]
+  + Negate[Output = Self]
+{
   type Bits
 
   fn absolute(self) -> Self

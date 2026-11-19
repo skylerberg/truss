@@ -1,3 +1,4 @@
+use standard::capabilities
 use standard::intrinsic
 use standard::log
 use standard::system::calls
@@ -5,7 +6,7 @@ use standard::system::calls
 internal type SystemLog()
 
 impl Log for SystemLog
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   fn record(self, record: log::Record) {
     var line = ""

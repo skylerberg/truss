@@ -1,3 +1,4 @@
+use standard::capabilities
 use standard::intrinsic
 
 use standard::system::calls
@@ -14,7 +15,9 @@ internal fn instant_from(seconds: Int64, nanoseconds: Int64) -> Instant {
 
 internal type SystemClock()
 
-impl Clock for SystemClock {
+impl Clock for SystemClock
+  uses capabilities::System
+{
   fn now(self) -> Instant {
     var seconds: Int64 = 0
     var nanoseconds: Int64 = 0

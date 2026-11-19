@@ -123,7 +123,7 @@ let expand_body (body : Tree.body) : Graph.body =
             | None -> ());
             close (expand_block targets (failing, []) failed) (Goto after) origin;
             emit_rest after
-        | For { loop; iteration; part; elements; body; _ } ->
+        | For { loop; iteration; part; elements; bindings; body } ->
             let index, emitted =
               match elements with
               | Some elements -> expand_block targets current elements.count.statements
@@ -146,7 +146,7 @@ let expand_body (body : Tree.body) : Graph.body =
                   | Sequential | Parallel -> targets.task_provides);
               }
             in
-            (match emit in_loop (inside, []) body.statements with
+            (match emit in_loop (inside, []) (bindings.statements @ body.statements) with
             | Some ended -> (
                 match loop.quantified with
                 | None -> close ended (Iteration_end { loop = index }) origin

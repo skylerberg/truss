@@ -1,3 +1,4 @@
+use standard::capabilities
 use standard::console
 use standard::files
 use standard::intrinsic
@@ -9,7 +10,9 @@ use standard::system::clock
 use standard::system::sockets
 use standard::system::terminals
 
-internal fn file_error(number: Int32) -> SystemError {
+internal fn file_error(number: Int32) -> SystemError
+  uses capabilities::System
+{
   if number == intrinsic::libc_enoent() {
     SystemError.NotFound
   } else if number == intrinsic::libc_eacces() || number == intrinsic::libc_eperm() {
@@ -129,7 +132,7 @@ internal fn metadata_from(status: intrinsic::View[UInt8]) -> files::Metadata {
 }
 
 internal fn open_with(file: Path, flags: Int32) -> Result[streams::Handle, SystemError]
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   let descriptor = with_file_error(calls::open_file(file.text.slice().bytes, flags: flags))?
   Ok(streams::Handle(descriptor: own descriptor, number: 0))
@@ -186,12 +189,14 @@ internal fn signal_number(signal: processes::Signal) -> Int32 {
   }
 }
 
-internal fn duplicate(descriptor: Int32) -> streams::Handle {
+internal fn duplicate(descriptor: Int32) -> streams::Handle
+  uses capabilities::System
+{
   of_descriptor(intrinsic::libc_fcntl_dupfd_cloexec(descriptor, least: 3))
 }
 
 internal fn controlling_terminal() -> streams::Handle
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   match calls::open_file("/dev/tty".slice().bytes, flags: intrinsic::libc_o_rdwr()) {
     Ok(descriptor) => streams::Handle(descriptor: own descriptor, number: 0)
@@ -202,6 +207,7 @@ internal fn controlling_terminal() -> streams::Handle
 internal fn with_file_error[Value](outcome: own Result[Value, Int32]) -> Result[Value, SystemError]
   ensures !(result is Ok(converted) && outcome is Ok(original) && !identical(converted, original))
   ensures (result is Ok(_)) == (outcome is Ok(_))
+  uses capabilities::System
 {
   match own outcome {
     Ok(value) => Ok(own value)
@@ -210,20 +216,20 @@ internal fn with_file_error[Value](outcome: own Result[Value, Int32]) -> Result[
 }
 
 internal fn open_to_read(file: Path) -> Result[intrinsic::Handle, SystemError]
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   with_file_error(calls::open_file(file.text.slice().bytes, flags: intrinsic::libc_o_rdonly()))
 }
 
 internal fn open_to_write_from_empty(file: Path) -> Result[intrinsic::Handle, SystemError]
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   let flags = intrinsic::libc_o_wronly() | intrinsic::libc_o_creat() | intrinsic::libc_o_trunc()
   with_file_error(calls::open_file(file.text.slice().bytes, flags: flags))
 }
 
 internal fn read_all(handle: mut intrinsic::Handle) -> Result[intrinsic::Storage[UInt8], SystemError]
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   var bytes: intrinsic::Storage[UInt8] = intrinsic::storage_empty()
   var reading = true
@@ -239,7 +245,7 @@ internal fn read_all(handle: mut intrinsic::Handle) -> Result[intrinsic::Storage
 }
 
 internal fn write_all(handle: mut intrinsic::Handle, bytes: intrinsic::View[UInt8]) -> Result[Unit, SystemError]
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   with_file_error(calls::write_fully(intrinsic::handle_descriptor(handle), bytes: bytes))
 }
@@ -247,7 +253,7 @@ internal fn write_all(handle: mut intrinsic::Handle, bytes: intrinsic::View[UInt
 internal type SystemHandles()
 
 impl Handles for SystemHandles
-  uses RunForever
+  uses RunForever, capabilities::System
 {
   fn read(self, handle: streams::Handle, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError] {
     with_file_error(calls::read_onto_end(descriptor_of(handle), buffer: mut buffer.storage, count: limit))
