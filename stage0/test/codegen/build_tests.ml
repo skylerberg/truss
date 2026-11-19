@@ -283,7 +283,7 @@ let () =
       in
       let compile_objects () =
         match
-          C_compiler.For_testing.compile_objects c_compiler O1
+          C_compiler.For_testing.compile_objects c_compiler Development
             [ ("one", "int one(void) { return 1; }\n") ]
         with
         | Ok [ path ] -> path
@@ -297,3 +297,50 @@ let () =
       Codegen_support.expect_string ~expected:path actual;
       if (Unix.stat actual).st_mtime < Unix.time () -. 3600. then
         Codegen_support.fail "an object that was found kept the time it was compiled at")
+
+let () =
+  Codegen_support.test "a release object names its Truss file and no directory it was built in"
+    (fun () ->
+      let directory = Filename.concat (Lazy.force Codegen_support.scratch) "release-objects" in
+      let c_compiler =
+        match C_compiler.find ~objects:directory with
+        | Ok c_compiler -> c_compiler
+        | Error message -> failwith message
+      in
+      match
+        C_compiler.For_testing.compile_objects c_compiler Release
+          [ ("one", "#line 3 \"example/main.truss\"\nint one(void) { return 1; }\n") ]
+      with
+      | Ok [ path ] ->
+          let object_bytes = In_channel.with_open_bin path In_channel.input_all in
+          if not (String.includes ~affix:"example/main.truss" object_bytes) then
+            Codegen_support.fail "the object does not name example/main.truss";
+          List.iter
+            (fun named ->
+              if String.includes ~affix:named object_bytes then
+                Codegen_support.fail "the object names %s" named)
+            [ Sys.getcwd (); directory ]
+      | Ok _ -> failwith "one source made several objects"
+      | Error message -> failwith message)
+
+let () =
+  Codegen_support.test "a release object of the program's start attributes its code to <runtime>"
+    (fun () ->
+      let directory = Filename.concat (Lazy.force Codegen_support.scratch) "startup-objects" in
+      let c_compiler =
+        match C_compiler.find ~objects:directory with
+        | Ok c_compiler -> c_compiler
+        | Error message -> failwith message
+      in
+      match
+        C_compiler.For_testing.compile_objects c_compiler Release
+          [ ("startup", Startup.render_program_start "t_entry") ]
+      with
+      | Ok [ path ] ->
+          let object_bytes = In_channel.with_open_bin path In_channel.input_all in
+          if not (String.includes ~affix:"<runtime>" object_bytes) then
+            Codegen_support.fail "the object does not name <runtime>";
+          if String.includes ~affix:"<stdin>" object_bytes then
+            Codegen_support.fail "the object names <stdin>"
+      | Ok _ -> failwith "one source made several objects"
+      | Error message -> failwith message)

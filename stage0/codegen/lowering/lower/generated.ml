@@ -1,8 +1,6 @@
 let make_generated_state context ~item ~definition ~substitution =
-  Lowering.enter context
-    ~builder:(Emit_c.Ir_builder.create context.env ~item)
-    (Lowering.make_frame
-       (Definitions.make_unwritten_code ~definition ~substitution ~result:(Returns Types.unit)))
+  Lowering.enter_item context ~item
+    (Definitions.make_unwritten_code ~definition ~substitution ~result:(Returns Types.unit))
 
 let choose_result_place state result_ty =
   match Lowering.find_result_place state with

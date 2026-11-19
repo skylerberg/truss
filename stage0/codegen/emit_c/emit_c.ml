@@ -4,7 +4,6 @@ end))
 
 module Path_table = Hashtbl.Make (Path)
 
-type profile = Development | Release
 type linkage = C_runtime.linkage = External | Internal
 
 let shared_structs = C_runtime.shared_structs
@@ -101,7 +100,67 @@ let render_type_text text =
     | Type_name key -> C_text.render_key_name key
     | _ -> C_runtime.raise_bug "a type definition that names something other than a type")
 
-let render_file env profile (fragments : (fragment * linkage) list) =
+type position = { file : string; line : int; column : int }
+
+let generated_file = "<generated>"
+
+let render_string_literal text =
+  let buffer = Buffer.create (String.length text + 2) in
+  Buffer.add_char buffer '"';
+  String.iter
+    (fun character ->
+      if character = '"' || character = '\\' || character < ' ' || character > '~' then
+        Buffer.add_string buffer (Printf.sprintf "\\%03o" (Char.code character))
+      else Buffer.add_char buffer character)
+    text;
+  Buffer.add_char buffer '"';
+  Buffer.contents buffer
+
+type presumed_location = { presumed_file : string; presumed_line : int }
+
+type line_writer = {
+  buffer : Buffer.t;
+  resolve_position : Lowered.site -> position;
+  mutable presumed : presumed_location option;
+  mutable is_at_line_start : bool;
+}
+
+let write_line_control writer ~file ~line =
+  Buffer.add_string writer.buffer (Printf.sprintf "#line %d %s\n" line (render_string_literal file));
+  writer.presumed <- Some { presumed_file = file; presumed_line = line }
+
+let place_line writer (site : Lowered.site option) =
+  match (site, writer.presumed) with
+  | None, Some { presumed_file; _ } when presumed_file = generated_file -> ()
+  | None, _ -> write_line_control writer ~file:generated_file ~line:1
+  | Some site, presumed ->
+      let { file; line; _ } = writer.resolve_position site in
+      if presumed <> Some { presumed_file = file; presumed_line = line } then
+        write_line_control writer ~file ~line
+
+let write_segment writer ({ site; text } : C_text.segment) =
+  let length = String.length text in
+  let rec write_from start =
+    if start < length then begin
+      if writer.is_at_line_start then place_line writer site;
+      match String.index_from_opt text start '\n' with
+      | Some newline ->
+          Buffer.add_substring writer.buffer text start (newline + 1 - start);
+          writer.is_at_line_start <- true;
+          writer.presumed <-
+            Option.map
+              (fun presumed -> { presumed with presumed_line = presumed.presumed_line + 1 })
+              writer.presumed;
+          write_from (newline + 1)
+      | None ->
+          Buffer.add_substring writer.buffer text start (length - start);
+          writer.is_at_line_start <- false
+    end
+  in
+  write_from 0
+
+let render_file env (profile : Profile.t) ~resolve_position (fragments : (fragment * linkage) list)
+    =
   let types = C_types.create env ~owner:None in
   let local_types = Key_table.create 16 in
   List.iter
@@ -254,12 +313,30 @@ let render_file env profile (fragments : (fragment * linkage) list) =
   List.iter
     (fun ((fragment : fragment), _) -> Buffer.add_string buffer fragment.definition)
     fragments;
-  List.iter
-    (fun (text : Fragment.function_text) -> Buffer.add_string buffer (text.header ^ text.body))
-    function_texts;
-  Buffer.contents buffer
-
-type position = { file : string; line : int; column : int }
+  let list_segments (text : Fragment.function_text) : C_text.segment list =
+    { site = text.opening; text = text.header } :: text.body
+  in
+  match profile with
+  | Development ->
+      List.iter
+        (fun text ->
+          List.iter
+            (fun ({ text; _ } : C_text.segment) -> Buffer.add_string buffer text)
+            (list_segments text))
+        function_texts;
+      Buffer.contents buffer
+  | Release ->
+      let writer =
+        {
+          buffer = Buffer.create (2 * Buffer.length buffer);
+          resolve_position;
+          presumed = None;
+          is_at_line_start = true;
+        }
+      in
+      write_segment writer { site = None; text = Buffer.contents buffer };
+      List.iter (fun text -> List.iter (write_segment writer) (list_segments text)) function_texts;
+      Buffer.contents writer.buffer
 
 let render_sites_file ~resolve_position:resolve fragments =
   let positions =
@@ -301,6 +378,9 @@ let render_capabilities_file fragments =
 module For_testing = struct
   let render_c (fragment : fragment) =
     String.concat ""
-      (List.map (fun (text : Fragment.function_text) -> text.header ^ text.body) fragment.functions
+      (List.concat_map
+         (fun (text : Fragment.function_text) ->
+           text.header :: List.map (fun ({ text; _ } : C_text.segment) -> text) text.body)
+         fragment.functions
       @ [ fragment.definition ])
 end

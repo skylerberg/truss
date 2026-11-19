@@ -17,7 +17,13 @@ type reference =
   | Helper of C_runtime.helper
   | Capability of Path.t
 
-type t = Text of string | Name of reference | Concat of t list
+type t =
+  | Text of string
+  | Name of reference
+  | Concat of t list
+  | Line_control of Lowered.site option
+
+type segment = { site : Lowered.site option; text : string }
 
 let empty = Concat []
 let ( ++ ) first second = Concat [ first; second ]
@@ -46,6 +52,30 @@ let render text ~resolve =
     | Text text -> Buffer.add_string buffer text
     | Name reference -> Buffer.add_string buffer (resolve reference)
     | Concat parts -> List.iter add parts
+    | Line_control _ -> ()
   in
   add text;
   Buffer.contents buffer
+
+let render_segments text ~site ~resolve =
+  let buffer = Buffer.create 256 in
+  let segments = ref [] and current = ref site in
+  let close_segment () =
+    if Buffer.length buffer > 0 then begin
+      segments := { site = !current; text = Buffer.contents buffer } :: !segments;
+      Buffer.clear buffer
+    end
+  in
+  let rec add = function
+    | Text text -> Buffer.add_string buffer text
+    | Name reference -> Buffer.add_string buffer (resolve reference)
+    | Concat parts -> List.iter add parts
+    | Line_control site ->
+        if site <> !current then begin
+          close_segment ();
+          current := site
+        end
+  in
+  add text;
+  close_segment ();
+  List.rev !segments

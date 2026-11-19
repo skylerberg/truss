@@ -1,5 +1,6 @@
 let render_c_file env program =
   Emit_c.render_file env Development
+    ~resolve_position:(fun _ -> failwith "a development unit resolves no site")
     (List.map (fun (program_fragment, linkage) -> (program_fragment env, linkage)) program)
 
 let () =
