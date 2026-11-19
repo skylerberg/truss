@@ -107,7 +107,7 @@ let () =
                         Use (Codegen_support.constant_int32 99) );
                     Assign
                       ( Codegen_support.at 3,
-                        Use (Codegen_support.copy ~projections:[ Field Storage.buffer_field ] 2) );
+                        Use (Copy (Storage.project_buffer (Codegen_support.at 2))) );
                     Drop (Codegen_support.at 0);
                   ])
                 (Return
@@ -181,13 +181,14 @@ let () =
                     Drop (Codegen_support.at 5);
                     Assign
                       ( Codegen_support.at 7,
-                        Use (Codegen_support.copy ~projections:[ Field Storage.buffer_field ] 6) );
+                        Use (Copy (Storage.project_buffer (Codegen_support.at 6))) );
                     Assign
                       ( Codegen_support.at 8,
                         Use
-                          (Codegen_support.copy
-                             ~projections:[ Index (uint64_constant 1); Field Storage.buffer_field ]
-                             7) );
+                          (Copy
+                             (Storage.project_buffer
+                                (Codegen_support.at ~projections:[ Index (uint64_constant 1) ] 7)))
+                      );
                     Assign
                       ( Codegen_support.at 9,
                         Use (Codegen_support.copy ~projections:[ Index (uint64_constant 0) ] 8) );

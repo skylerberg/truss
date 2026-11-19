@@ -150,7 +150,7 @@ let drop context ty =
             Emit_c.Ir_builder.emit builder
               (Drop (Storage.index_element value (Copy (Lowered.make_local_place index)))));
       Emit_c.Ir_builder.emit_when builder
-        (Test (Storage.make_allocated_test value))
+        (Test (Storage.make_owned_block_test value))
         (fun () ->
           Emit_c.Ir_builder.emit builder
             (Call
@@ -336,7 +336,7 @@ let copy context ty =
           (Binary (Multiply, count, Lowered.make_uint64_constant layout.size))
       in
       Emit_c.Ir_builder.emit_if builder
-        (Test (Storage.make_allocated_test self))
+        (Test (Storage.make_owned_block_test self))
         ~yes:(fun () ->
           let bytes = multiply_by_size (Copy (Storage.project_capacity self)) in
           let buffer = Emit_c.Ir_builder.allocate_local builder (Raw (Pointer (Data element))) in

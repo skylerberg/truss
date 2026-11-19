@@ -49,8 +49,12 @@ let rec render_initializer (emission : Emission.t) ty (value : Lowered.static_va
         end
       in
       Some
-        (Printf.sprintf "{ .f_%s = %s, .f_%s = %d, .f_%s = %d }" Storage.buffer_field buffer
-           Storage.length_field count Storage.capacity_field count)
+        ("{ "
+        ^ String.concat ", "
+            (List.map
+               (fun (field, value) -> Printf.sprintf ".f_%s = %s" field value)
+               (Storage.list_borrowed_fields ~buffer ~length:(string_of_int count)))
+        ^ " }")
   | Scalar _, Static_scalar constant -> Some (fst (C_values.render_constant emission constant))
   | Struct fields, Static_record values -> Some ("{ " ^ render_fields fields values "" ^ " }")
   | Array { element; _ }, Static_array values ->
