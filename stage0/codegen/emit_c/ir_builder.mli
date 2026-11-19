@@ -24,6 +24,7 @@ type condition =
 
 val branch : t -> condition -> yes:Lowered.block -> no:Lowered.block -> unit
 val evaluate : t -> condition -> Lowered.rvalue
+val evaluate_test : t -> condition -> Lowered.test
 val emit_when : t -> condition -> (unit -> unit) -> unit
 val emit_if : t -> condition -> yes:(unit -> unit) -> no:(unit -> unit) -> unit
 

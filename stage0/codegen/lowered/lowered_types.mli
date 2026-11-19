@@ -149,7 +149,7 @@ type rvalue =
   | Is_variant of place * string
   | Function_value of { code : function_ref; environment : operand option }
 
-type failure = Panic | Obligation | Assertion | Todo
+type failure = Panic | Assertion | Todo
 type destination = Discarded | Returned of place | Written of place
 
 type statement =
@@ -157,6 +157,14 @@ type statement =
   | Call of { target : target; arguments : operand list; result : destination }
   | Drop of place
   | Echo of { text : operand; length : operand; site : site }
+  | Fail_obligation_when of {
+      test : test;
+      message : operand;
+      length : operand;
+      site : site;
+      reported : operand option;
+      trace : operand option;
+    }
   | Free_block of { place : place; variant : string }
   | Defer_free_block of { lend : operand; place : place; variant : string }
   | Fork of { branches : (int * operand) list }

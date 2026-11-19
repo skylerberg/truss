@@ -15,7 +15,7 @@ let lower (context : Context.t) (runtime : Intrinsic.runtime) =
         | Struct [ only ] -> Lowered.project message (Field only.name)
         | _ -> Context.raise_bug "a StringSlice that is not a record of one field"
       in
-      Context.fail_with_message context Panic
+      Context.panic_with_message context
         ~message:(Copy (Storage.project_buffer bytes))
         ~length:(Copy (Storage.project_length bytes));
       Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder)
