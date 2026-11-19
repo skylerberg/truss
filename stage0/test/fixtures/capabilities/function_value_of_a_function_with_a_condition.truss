@@ -1,0 +1,42 @@
+type Countdown(left: UInt64)
+
+impl Cursor for Countdown {
+  type Element = UInt64
+
+  fn next(mut self) -> Option[UInt64]
+    ensures (result is Some(_)) ==> self.left < old(self.left)
+  {
+    if self.left == 0 {
+      None
+    } else {
+      self.left -= 1
+      Some(self.left)
+    }
+  }
+}
+
+impl FiniteCursor for Countdown {
+  fn remaining(self) -> UInt64
+    ensures result == self.left
+  {
+    self.left
+  }
+}
+
+fn gather[Items: Cursor](items: own Items) -> List[Items.Element]
+  uses Items.Uses, RunForever unless Items: FiniteCursor
+{
+  List.collect(own items)
+}
+
+fn gather_countdown() -> List[UInt64] {
+  let collect = gather[Countdown]
+  collect(Countdown(left: 3))
+}
+
+fn gather_through[Source: Cursor](source: own Source) -> List[Source.Element]
+  uses Source.Uses, RunForever unless Source: FiniteCursor
+{
+  let collect = gather[Source]
+  collect(own source)
+}

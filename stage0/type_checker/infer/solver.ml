@@ -343,7 +343,7 @@ let require_within state subject set ~reason =
   | None -> subject
 
 let has_active_bounds (state : State.state) (goal : State.goal) =
-  Types.implies_condition goal.condition_bounds state.condition_bounds
+  List.for_all (fun bound -> List.mem bound goal.condition_bounds) state.condition_bounds
 
 let solve (state : State.state) ~selects =
   let enclosing = state.unifier.checks_specification in

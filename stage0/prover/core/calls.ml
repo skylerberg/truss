@@ -156,8 +156,7 @@ let add_restated_clauses (context : State.context) ~self_type ~bind trait name r
             clauses with
             bindings = bind subtrait (Path.Method { owner = subtrait.trait; name; receiver });
           })
-        (Contracts.list_restated_clauses context.lookups
-           ~list_bounds:(Operations.compute_bounds_with_self context)
+        (Contracts.list_restated_clauses context.lookups ~list_bounds:context.bounds
            ~packages:(Operations.list_impl_packages context self_type)
            ~self_type trait name receiver);
   }

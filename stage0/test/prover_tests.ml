@@ -225,6 +225,12 @@ let () =
       expect_proven Fixtures.Prover.recursion_measured_under_a_condition;
       expect_not_proven Fixtures.Prover.recursion_that_does_not_end_under_its_condition
         "prover.termination");
+  Harness.test "an adapter's loop ends where its capability set's condition holds" (fun () ->
+      expect_proven Fixtures.Capabilities.adapter_whose_capability_set_has_a_condition;
+      expect_not_proven Fixtures.Prover.adapter_whose_measure_does_not_decrease_under_its_condition
+        "prover.termination");
+  Harness.test "a measure whose condition a supertrait gives is proven under the subtrait"
+    (fun () -> expect_proven Fixtures.Prover.measure_proven_under_a_subtrait);
   Harness.test "a loop that counts up to its bound ends" (fun () ->
       expect_proven Fixtures.Prover.while_loop_counting_up);
   Harness.test "a for loop over a range knows its index is in range" (fun () ->

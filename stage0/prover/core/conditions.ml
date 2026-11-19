@@ -1,21 +1,25 @@
 type decision = Always | In_run of Types.condition | Elsewhere
 
+let implies (lookups : Lookups.t) ~current premise conclusion =
+  Interface.Impls.implies_condition lookups.interface
+    ~list_bounds:(Facts.list_definition_bounds lookups ~current ~condition:[])
+    premise conclusion
+
 let decide (context : State.context) ~substitution (holds_when : Types.condition) =
   match holds_when with
   | [] -> Always
   | _ -> (
-      let bounds =
-        Facts.list_definition_bounds context.lookups ~current:context.current ~condition:[]
-      in
       match
         Interface.Impls.decide_condition context.lookups.interface
-          ~list_bounds:(Operations.compute_bounds_with_self ~bounds context)
+          ~list_bounds:
+            (Facts.list_definition_bounds context.lookups ~current:context.current ~condition:[])
           (Types.substitute_condition substitution holds_when)
       with
       | None -> Elsewhere
       | Some [] -> Always
       | Some undecided ->
-          if Types.implies_condition context.condition undecided then In_run undecided
+          if implies context.lookups ~current:context.current context.condition undecided then
+            In_run undecided
           else begin
             if context.condition = [] && not (List.mem undecided context.skipped_conditions) then
               context.skipped_conditions <- undecided :: context.skipped_conditions;

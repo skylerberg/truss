@@ -1,0 +1,19 @@
+type Evens[Source](source: Source)
+
+impl Cursor for Evens[Source: Cursor[Element = Int64]] {
+  type Element = Int64
+  capability Uses = Source.Uses
+
+  fn next(mut self) -> Option[Int64]
+    uses Self.Uses
+  {
+    while mut self.source.next() is Some(value)
+      decreases self.source.remaining() when Source: FiniteCursor
+    {
+      if value % 2 == 0 {
+        return Some(value)
+      }
+    }
+    None
+  }
+}

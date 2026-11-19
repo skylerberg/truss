@@ -200,7 +200,8 @@ let translate_run ~proof ?inherited ~substitution ~condition (lookups : Lookups.
     | Some (signature : Types.signature) -> signature.uses
     | None -> Types.make_capability_set [ Built_in Run_forever ]
   in
-  let terminates = proof || Types.terminates_when condition uses in
+  let implies = Conditions.implies lookups ~current:path in
+  let terminates = proof || Types.terminates_when ~implies condition uses in
   let keeps_termination =
     condition = [] || Types.find_unless (Built_in Run_forever) uses = Some condition
   in
@@ -231,7 +232,7 @@ let translate_run ~proof ?inherited ~substitution ~condition (lookups : Lookups.
   let home = require_home source in
   let measures =
     List.filter
-      (fun (measure : Mir.formula) -> Types.implies_condition condition measure.holds_when)
+      (fun (measure : Mir.formula) -> implies condition measure.holds_when)
       contract.decreases
   in
   let context =

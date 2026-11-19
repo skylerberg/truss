@@ -1,0 +1,6 @@
+fn count[Items: Cursor](items: own Items) -> UInt64
+  uses Items.Uses
+  ensures result == 0 when Items.Element: Display
+{
+  0
+}

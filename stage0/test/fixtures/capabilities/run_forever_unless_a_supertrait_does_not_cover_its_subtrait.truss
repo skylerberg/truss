@@ -1,0 +1,13 @@
+trait Short: FiniteCursor {}
+
+fn gather_short[Items: Cursor](items: own Items) -> List[Items.Element]
+  uses Items.Uses, RunForever unless Items: Short
+{
+  List.collect(own items)
+}
+
+fn gather[Items: Cursor](items: own Items) -> List[Items.Element]
+  uses Items.Uses, RunForever unless Items: FiniteCursor
+{
+  gather_short(own items)
+}

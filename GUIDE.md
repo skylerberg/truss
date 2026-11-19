@@ -4373,6 +4373,11 @@ test "a cursor's provided methods" {
   `next` uses. A cursor that reads lines from a file has `Uses = FileRead,
   Handles`, and a function that pulls a generic cursor declares `uses
   Source.Uses`.
+- An adapter whose `next` pulls its source in a loop, until a value
+  matches, defines `capability Uses = Source.Uses, RunForever unless
+  Source: FiniteCursor` and measures the loop
+  `decreases self.source.remaining() when Source: FiniteCursor`. Over a
+  list's cursor it then ends, and its callers need no `RunForever`.
 - `items.cursor()` makes a cursor that owns a collection's elements, which
   is what `for item in own items` pulls. It measures itself, as
   `text.characters()` does.
