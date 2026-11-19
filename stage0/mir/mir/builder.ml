@@ -276,7 +276,7 @@ let rec lower_expression builder (node : Core.expression) : Tree.operand option 
     | Not inner ->
         let* inner = lower_expression builder inner in
         hold (Not inner)
-    | And _ | Or _ | Implies _ | Matches _ -> lower_truth builder node
+    | Connective _ | Matches _ -> lower_truth builder node
     | Convert { conversion = Widen; value = converted } when is_function_expression converted ->
         Option.map fst (lower_function_expression builder node ~is_argument:false)
     | Convert { conversion = View_to_owned as conversion; value = view } ->
@@ -476,7 +476,7 @@ and construct_fields builder fields =
                      (compute_core_operand_type field) (compute_operand_origin field)))
           fields))
 
-and lower_yielded builder (mode : Types.mode) (part : Core.operand) : Tree.yielded option =
+and lower_yielded builder (mode : Language.Mode.t) (part : Core.operand) : Tree.yielded option =
   let rec lends : Core.operand -> bool = function
     | Place _ -> true
     | Value { kind = Construct { fields; _ }; _ } ->
@@ -503,7 +503,7 @@ and lower_yielded builder (mode : Types.mode) (part : Core.operand) : Tree.yield
       In_order.run builder (plan_part part)
   | _ -> Option.map (fun value -> Tree.Part value) (lower_operand builder mode part)
 
-and lower_operand builder (mode : Types.mode) (passed : Core.operand) =
+and lower_operand builder (mode : Language.Mode.t) (passed : Core.operand) =
   match passed with
   | Place written ->
       let* passed = lower_place builder written in
@@ -705,15 +705,11 @@ and lower_condition builder ~binds_lent_part (tested : Core.expression) :
          lowered.value))
 
 and lower_truth builder (node : Core.expression) : Tree.operand option =
-  let lower_connective connective (left : Core.expression) (right : Core.expression) =
-    let* left = lower_condition_block builder (fun () -> lower_expression builder left) in
-    let right = Emitter.build_block builder (fun () -> lower_expression builder right) in
-    Emitter.hold_choice builder node.type_ node.origin (Connective { connective; left; right })
-  in
   match node.kind with
-  | And (left, right) -> lower_connective And left right
-  | Or (left, right) -> lower_connective Or left right
-  | Implies (left, right) -> lower_connective Implies left right
+  | Connective { connective; left; right } ->
+      let* left = lower_condition_block builder (fun () -> lower_expression builder left) in
+      let right = Emitter.build_block builder (fun () -> lower_expression builder right) in
+      Emitter.hold_choice builder node.type_ node.origin (Connective { connective; left; right })
   | Matches { value; pattern } ->
       let* scrutinee = lower_scrutinee builder value in
       Emitter.run_binding_to_statement builder (fun () ->
@@ -1100,7 +1096,7 @@ and lower_statement builder (node : Core.statement) =
               | None -> ())
           | None -> ())
       | Compound_assign { target; operand = right; bound; value } -> (
-          let mode : Types.mode = match right with Place _ -> Read | Value _ -> Own in
+          let mode : Language.Mode.t = match right with Place _ -> Read | Value _ -> Own in
           match lower_operand builder mode right with
           | None -> ()
           | Some right_value -> (
@@ -1161,7 +1157,7 @@ and lower_statement builder (node : Core.statement) =
                   bind_part ();
                   ignore (lower_block builder body))
             in
-            if mode = Concurrent_loop then
+            if mode = Concurrent then
               Emitter.run_in_task builder (Tree.Iteration { loop = origin }) lower_iteration
             else lower_iteration ()
           in
@@ -1393,7 +1389,7 @@ and lower_cursor_loop builder ~origin ~pattern ~cursor ~next ~loop ~each =
             ~loop ~each)
         (lower_callee builder next)
 
-and lower_quantifier_loop builder (node : Core.expression) (quantifier : Core.quantifier)
+and lower_quantifier_loop builder (node : Core.expression) (quantifier : Language.Quantifier.t)
     (body : Core.expression) run =
   let origin = node.origin in
   let decides = Emitter.allocate_temporary builder Types.bool origin in
@@ -1411,7 +1407,7 @@ and lower_quantifier_loop builder (node : Core.expression) (quantifier : Core.qu
     | Some (Tree.Immediate { value = Boolean true; _ }) -> lower_expression builder body
     | Some left ->
         let right = Emitter.build_block builder (fun () -> lower_expression builder body) in
-        let connective : Tree.connective =
+        let connective : Language.Connective.t =
           match quantifier with Exists -> And | Forall -> Implies
         in
         Emitter.hold_choice builder Types.bool origin
@@ -1428,7 +1424,7 @@ and lower_quantifier_loop builder (node : Core.expression) (quantifier : Core.qu
             (lower_element_decision ())));
   Some (Use { place = Emitter.make_local_place decides; type_ = Types.bool; origin })
 
-and lower_quantified builder (node : Core.expression) (quantifier : Core.quantifier)
+and lower_quantified builder (node : Core.expression) (quantifier : Language.Quantifier.t)
     (binder : Core.binder) (body : Core.expression) =
   let origin = node.origin in
   let range, value_type =

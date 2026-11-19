@@ -239,7 +239,7 @@ let list_mut_provided_places (provided : Mir.provided list) =
   List.filter_map
     (fun (implementation : Mir.provided) ->
       match (implementation.mode, implementation.value) with
-      | Types.Mut, Borrow { place; _ } -> Some place
+      | Language.Mode.Mut, Borrow { place; _ } -> Some place
       | Mut, (Use _ | Take _ | Immediate _) | (Read | Own), _ -> None)
     provided
 
@@ -269,7 +269,8 @@ let compute_changes ?(also = []) run (frame : State.frame) (blocks : Mir.block l
   let note_passed (call : Mir.call) =
     List.iter
       (function
-        | Mir.Passed { mode = Types.Mut; value = Borrow { place; _ } | Use { place; _ }; _ } ->
+        | Mir.Passed { mode = Language.Mode.Mut; value = Borrow { place; _ } | Use { place; _ }; _ }
+          ->
             note place
         | Passed _ | Default -> ())
       call.arguments
@@ -283,7 +284,9 @@ let compute_changes ?(also = []) run (frame : State.frame) (blocks : Mir.block l
     List.iter
       (fun (statement : Mir.statement) ->
         (match statement.kind with
-        | Basic (Assign { target; value = Operand (Borrow { place; mode = Types.Mut; _ }); _ }) ->
+        | Basic
+            (Assign { target; value = Operand (Borrow { place; mode = Language.Mode.Mut; _ }); _ })
+          ->
             note target;
             note place
         | Basic (Assign { target; _ }) | Choose { target; _ } -> note_assigned target
@@ -296,7 +299,7 @@ let compute_changes ?(also = []) run (frame : State.frame) (blocks : Mir.block l
             note_passed call
         | Basic (Provide { provided; _ }) -> List.iter note (list_mut_provided_places provided)
         | For { iteration = Pull { cursor; _ }; _ } -> note cursor
-        | Yield { mode = Types.Mut; part } -> note_lent part
+        | Yield { mode = Language.Mode.Mut; part } -> note_lent part
         | Jump (Cancel { winner; returned; _ }) ->
             note { root = Local winner; projections = [] };
             Option.iter (fun (_, local) -> note { root = Local local; projections = [] }) returned
@@ -410,14 +413,14 @@ let merge_places context (places : (Logic.term * State.passed_place) list) : Sta
               places);
       }
 
-let find_argument_place context (frame : State.frame) run (mode : Types.mode) (value : Mir.operand)
-    =
+let find_argument_place context (frame : State.frame) run (mode : Language.Mode.t)
+    (value : Mir.operand) =
   let held =
     Option.bind (find_whole_local value) (fun local ->
         Locals.find_opt (Locals.make_key run.infos local) frame.slices)
   in
   match (mode, held) with
-  | Types.Mut, Some (Slices slices) ->
+  | Language.Mode.Mut, Some (Slices slices) ->
       Some
         (merge_places context
            (List.map
@@ -428,7 +431,8 @@ let find_argument_place context (frame : State.frame) run (mode : Types.mode) (v
                     ~owner_type:(fun frame -> compute_place_type context frame run slice.collection)
                     ~low:slice.start ~high:slice.stop ))
               slices))
-  | Types.Mut, Some Unknown_slice when Types.is_well_known Slice (Mir.extract_operand_type value) ->
+  | Language.Mode.Mut, Some Unknown_slice
+    when Types.is_well_known Slice (Mir.extract_operand_type value) ->
       Facts.raise_unsupported
         (Facts.locate context frame.source
            (match find_operand_origin value with
@@ -436,7 +440,7 @@ let find_argument_place context (frame : State.frame) run (mode : Types.mode) (v
            | None -> Facts.raise_bug "a constant is passed `mut`"))
         "a slice passed `mut` whose collection the prover does not know: a loop assigns the slice, \
          a call returns it, or it is a copy of a parameter"
-  | Types.Mut, (Some Unknown_slice | None) -> (
+  | Language.Mode.Mut, (Some Unknown_slice | None) -> (
       match value with
       | Borrow { place; _ } -> Some (make_passed_place context run place)
       | _ -> None)
@@ -513,7 +517,7 @@ let read_call context frame run (call : Mir.call) ~result_type =
         invocation ~through values
 
 let read_lend context (frame : State.frame) run part (call : Mir.call) =
-  let mode = match run.infos.(part).kind with Lent mode -> mode | _ -> Types.Read in
+  let mode = match run.infos.(part).kind with Lent mode -> mode | _ -> Language.Mode.Read in
   let invocation = make_invocation call.callee ~lends:(Some mode) in
   let site : Invocation.site = { origin = call.origin; type_ = run.infos.(part).type_ } in
   let location = Facts.locate context frame.source call.origin in
@@ -533,7 +537,9 @@ let read_lend context (frame : State.frame) run part (call : Mir.call) =
   in
   let lent, write_back =
     match (invocation.lends, invocation.callee, receiver) with
-    | Some Types.Mut, Intrinsic { operation = Lend element_lend; type_arguments }, Some receiver ->
+    | ( Some Language.Mode.Mut,
+        Intrinsic { operation = Lend element_lend; type_arguments },
+        Some receiver ) ->
         let index = make_index_term () in
         ( lend frame,
           Some
@@ -542,8 +548,8 @@ let read_lend context (frame : State.frame) run part (call : Mir.call) =
                 ~receiver:(make_passed_place context run receiver)
                 ~receiver_type:(compute_place_type context frame run receiver)
                 index final) )
-    | Some Types.Mut, Intrinsic _, _ -> Facts.raise_unsupported location "this lend"
-    | Some Types.Mut, _, _ ->
+    | Some Language.Mode.Mut, Intrinsic _, _ -> Facts.raise_unsupported location "this lend"
+    | Some Language.Mode.Mut, _, _ ->
         ( Validity.run_without_costs context (fun () -> lend frame),
           Some
             (fun frame final ->
@@ -666,7 +672,8 @@ let oblige_unreachable context frame location =
     [ Text "This `unreachable` may be reached." ]
     (Logic.Boolean false)
 
-let lend_part context (frame : State.frame) origin (mode : Types.mode) ~handed ~lends ~write_back =
+let lend_part context (frame : State.frame) origin (mode : Language.Mode.t) ~handed ~lends
+    ~write_back =
   let location = Facts.locate context frame.source origin in
   match (context.yielded_part, context.yield_ensures, frame.yielded_so_far) with
   | Some part_type, Some (each, _), Some before ->
@@ -689,7 +696,7 @@ let lend_part context (frame : State.frame) origin (mode : Types.mode) ~handed ~
       Lambdas.check_valid context frame location part_type handed ~deep:true
         ~when_:"for the part lent here";
       let frame, part_after =
-        if mode = Types.Mut && lends then (
+        if mode = Language.Mode.Mut && lends then (
           let part_after = Facts.arrive context frame "lent" part_type in
           context.lent_back <- (part_type, handed, part_after) :: context.lent_back;
           (write_back frame part_after, part_after))
@@ -1239,7 +1246,7 @@ and read_statement context frame run (statement : Mir.statement) =
         }
       in
       let ended = Loops.run_for_loop context frame for_loop in
-      if loop.schedule = Concurrent_loop then Option.map (wait_for_tasks context) ended else ended
+      if loop.schedule = Concurrent then Option.map (wait_for_tasks context) ended else ended
 
 and wait_for_tasks context frame =
   Operations.spend context frame (fun (counter : Costs.counter) ->

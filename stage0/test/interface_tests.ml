@@ -29,7 +29,7 @@ let () =
       let packages =
         Support.setup [ ("app::main", Fixtures.Interface.method_head_with_generics) ]
       in
-      let path : Path.t = Method { owner = app "Box"; name = "get"; receiver = Read } in
+      let path : Path.t = Method { owner = app "Box"; name = "get"; receiver = Instance Read } in
       match Interface.Definition.find_declared_signature (make_interface packages) path with
       | Some { receiver = Some (Read, self); _ } ->
           if Types.show self <> "Box[Value]" then Harness.fail "self: %s" (Types.show self)
@@ -480,7 +480,7 @@ let () =
         feeds
     with
     | Some (From_impl { impl; _ }) ->
-        (interface, Path.Method { owner = impl; name = "feed"; receiver = Read })
+        (interface, Path.Method { owner = impl; name = "feed"; receiver = Instance Read })
     | _ -> failwith "no impl"
   in
   let show_bounds bounds = String.concat " + " (List.map Types.show_trait bounds) in
@@ -763,7 +763,7 @@ let () =
     let owner = read_impl packages type_ wanted in
     match
       Interface.Impls.read_signature (make_interface packages)
-        (Method { owner; name; receiver = Read })
+        (Method { owner; name; receiver = Instance Read })
     with
     | Some signature -> signature
     | None -> failwith "no signature"

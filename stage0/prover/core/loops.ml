@@ -35,7 +35,7 @@ type while_loop = {
   test : State.frame -> (State.frame * Logic.term) option;
   run_body : State.frame -> State.frame list * State.frame list;
   on_failure : State.frame -> State.frame option;
-  measure_operands : (Core.comparison * (State.frame -> Logic.term * Logic.term)) option;
+  measure_operands : (Language.Comparison.t * (State.frame -> Logic.term * Logic.term)) option;
 }
 
 type iterable =
@@ -773,7 +773,7 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
           [
             {
               position = 0;
-              mode = Types.Mut;
+              mode = Language.Mode.Mut;
               shape = Other;
               origin = None;
               passed_place = Some cursor_access;
@@ -966,7 +966,7 @@ let run_while_loop context (frame : State.frame) (loop : while_loop) =
         let left, right = Validity.run_without_costs context (fun () -> read_operands at) in
         let distance from into = Logic.subtract into from in
         let through distance = Logic.add distance (Logic.int 1) in
-        match (comparison : Core.comparison) with
+        match (comparison : Language.Comparison.t) with
         | Less -> Some [ distance left right ]
         | Less_equal -> Some [ through (distance left right) ]
         | Greater -> Some [ distance right left ]

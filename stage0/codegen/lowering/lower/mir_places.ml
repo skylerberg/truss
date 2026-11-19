@@ -68,7 +68,7 @@ let lookup_local_place state local : Lowered.place =
   | Some place -> place
   | None -> locate_local state local
 
-let convert_comparison : Core.comparison -> Lowered.comparison = function
+let convert_comparison : Language.Comparison.t -> Lowered.comparison = function
   | Equal -> Equal
   | Not_equal -> Not_equal
   | Less -> Less
@@ -122,13 +122,10 @@ let list_variants (state : Lowering.state) (ty : Ground.ty) :
       Definitions.raise_bug "the fields of %s, which has none" (Ground.to_string ty)
 
 let make_body_frame (state : Lowering.state) ?owner ?returns_into ?lending
-    ?(passed : Ground.mode list option) ~lambdas (body : Mir.Graph.body) : Lowering.mir_frame =
-  let find_passed_mode local : Types.mode option =
+    ?(passed : Language.Mode.t list option) ~lambdas (body : Mir.Graph.body) : Lowering.mir_frame =
+  let find_passed_mode local : Language.Mode.t option =
     Option.bind passed (fun modes ->
-        Option.map
-          (fun position : Types.mode ->
-            match List.nth modes position with Ground.Read -> Read | Mut -> Mut | Own -> Own)
-          (List.find_index (Int.equal local) body.parameters))
+        Option.map (List.nth modes) (List.find_index (Int.equal local) body.parameters))
   in
   let needs_drop (path : Moves.path) =
     let rec find_path_type ty = function

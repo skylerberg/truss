@@ -2,7 +2,7 @@
  (name infer)
  (modules_without_implementation lookups)
  (libraries
-  metric
+  language
   source
   compiler_bug
   path

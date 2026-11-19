@@ -1,4 +1,4 @@
-val classify_parameter : Memory_layout.env -> Ground.mode -> Ground.ty -> Lowered.ty option
+val classify_parameter : Memory_layout.env -> Language.Mode.t -> Ground.ty -> Lowered.ty option
 
 type result = Nothing | Returned of Lowered.ty | Through_pointer of Lowered.ty
 

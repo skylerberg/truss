@@ -274,9 +274,9 @@ and check_statement checking scope (statement : Core.statement) =
       check_loop_clauses checking clauses;
       check_block checking
         (match mode with
-        | Parallel_loop -> make_parallel_scope ~enclosing:scope "a `parallel for`"
+        | Parallel -> make_parallel_scope ~enclosing:scope "a `parallel for`"
         | Sequential -> scope
-        | Concurrent_loop ->
+        | Concurrent ->
             require_available checking scope statement.origin (Types.make_capability_set [ tasks ]);
             scope)
         body
@@ -316,7 +316,7 @@ and check_provide checking scope implementations body =
       let mutates =
         List.exists
           (fun (_, (interface : Types.impl_interface)) ->
-            List.exists (fun (_, receiver) -> receiver = Path.Mut) interface.impl_methods)
+            List.exists (fun (_, receiver) -> receiver = Path.Instance Mut) interface.impl_methods)
           impls
       in
       let provided_mut = implementation.mode = Mut in

@@ -1,3 +1,10 @@
 (library
  (name types)
- (libraries compiler_bug path well_known intrinsic diagnostic metric zarith))
+ (libraries
+  compiler_bug
+  path
+  well_known
+  intrinsic
+  diagnostic
+  language
+  zarith))

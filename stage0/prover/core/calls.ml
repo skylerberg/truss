@@ -153,7 +153,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
     if is_logic_call then
       List.map
         (fun (passed : State.passed) ->
-          if passed.mode = Types.Mut || Logic.mentions frame.bound passed.term then passed
+          if passed.mode = Language.Mode.Mut || Logic.mentions frame.bound passed.term then passed
           else { passed with term = name_term context passed.type_ passed.term })
         values
     else values
@@ -337,7 +337,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
     List.filter_map
       (fun (passed : State.passed) ->
         match (passed.mode, passed.passed_place) with
-        | Types.Mut, Some place ->
+        | Language.Mode.Mut, Some place ->
             Some
               (passed.position, Facts.read_or_arrive context after "changed" passed.type_ place.read)
         | _ -> None)
@@ -422,7 +422,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   Validity.assume_valid context after result_type result;
   let left_valid =
     match (contract.result_kind, invocation.lends, lent_final) with
-    | `Lends, Some Types.Mut, Some leave ->
+    | `Lends, Some Language.Mode.Mut, Some leave ->
         Some
           ( Validity.make_validity context after ~assuming:false ~deep:true result_type
               (leave result),
@@ -439,7 +439,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   let is_update_step = calls_update_step context invocation in
   List.iter
     (fun (passed : State.passed) ->
-      if passed.mode = Types.Mut && not (is_update_step && passed.position = 0) then
+      if passed.mode = Language.Mode.Mut && not (is_update_step && passed.position = 0) then
         match List.assoc_opt passed.position changed with
         | Some term ->
             let valid = Validity.make_validity context after ~assuming:true passed.type_ term in
@@ -729,7 +729,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       (fun total (passed : State.passed) ->
         let ty = passed.type_ in
         match passed.mode with
-        | Types.Mut -> (
+        | Language.Mode.Mut -> (
             match List.assoc_opt passed.position changed with
             | Some later ->
                 Costs.plus total
@@ -737,8 +737,9 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
                      (Amounts.compute_potential context after ty later)
                      (Amounts.compute_potential context frame ty passed.term))
             | None -> total)
-        | Types.Own -> Costs.minus total (Amounts.compute_potential context frame ty passed.term)
-        | Types.Read -> total)
+        | Language.Mode.Own ->
+            Costs.minus total (Amounts.compute_potential context frame ty passed.term)
+        | Language.Mode.Read -> total)
       (match contract.result_kind with
       | `Lends -> (
           match lent_final with
@@ -775,7 +776,8 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   in
   (after, Option.value !definition ~default:result)
 
-let make_callback_cost (context : State.context) frame (metric : Metric.t) (ty : Types.ty) term =
+let make_callback_cost (context : State.context) frame (metric : Language.Metric.t) (ty : Types.ty)
+    term =
   let stated_by_type =
     match ty with
     | Types.Function { costs; _ } -> Costs.find_stated_operand costs metric
@@ -828,7 +830,7 @@ let compute_function_value_amount context frame ~location (function_type : Types
                    "Only an upper bound is known for the `%s` of this call, which may spend less, \
                     so no `==` bound can count it. State the cost with `<=`, or give the type of \
                     the function called an `==` bound."
-                   (Metric.show metric));
+                   (Language.Metric.show metric));
             ]
             (Logic.equal cost Costs.zero);
         cost
@@ -893,7 +895,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
     List.fold_left
       (fun frame (passed : State.passed) ->
         match (passed.mode, passed.passed_place) with
-        | Types.Mut, Some place ->
+        | Language.Mode.Mut, Some place ->
             if is_update_step && passed.position = 0 then place.note_changed_in_place ();
             place.write frame (Facts.arrive context frame "changed" passed.type_)
         | _ -> frame)
@@ -1072,7 +1074,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
         List.iter
           (fun (passed : State.passed) ->
             match (passed.mode, passed.passed_place) with
-            | Types.Mut, Some place -> (
+            | Language.Mode.Mut, Some place -> (
                 try Validity.assume_valid context frame passed.type_ (place.read frame)
                 with Facts.Unsupported _ -> ())
             | _ -> ())
@@ -1092,7 +1094,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
           List.map
             (fun (passed : State.passed) ->
               match (passed.mode, passed.passed_place) with
-              | Types.Mut, Some place ->
+              | Language.Mode.Mut, Some place ->
                   Facts.read_or_arrive context frame "changed" passed.type_ place.read
               | _ -> passed.term)
             values

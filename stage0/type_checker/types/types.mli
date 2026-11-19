@@ -1,4 +1,3 @@
-type mode = Read | Mut | Own
 type parameter = { owner : Path.t; name : string }
 type literal_kind = Integer_literal | Float_literal
 
@@ -25,13 +24,13 @@ and trait_reference = {
 }
 
 and function_type = {
-  inputs : (mode * ty) list;
+  inputs : (Language.Mode.t * ty) list;
   output : ty;
   uses : capability_set;
   costs : cost list;
 }
 
-and result = Returns of ty | Lends of mode * ty
+and result = Returns of ty | Lends of Language.Mode.t * ty
 
 and capability =
   | Capability of Path.t
@@ -42,7 +41,11 @@ and capability =
 
 and capability_set = private capability list
 and cost = { amortized : bool; resource : resource; bound : cost_bound }
-and resource = Metric of Metric.t | Calls of { capability : Path.t; method_ : string option }
+
+and resource =
+  | Metric of Language.Metric.t
+  | Calls of { capability : Path.t; method_ : string option }
+
 and cost_bound = Order_of | No_more_than of Z.t option | Exactly_cost of Z.t option
 
 val unit : ty
@@ -104,7 +107,6 @@ val map_substitution :
   substitution
 
 val extract_result_type : result -> ty
-val show_mode : mode -> string
 val map : ?map_capabilities:(capability_set -> capability_set) -> (ty -> ty option) -> ty -> ty
 val exists : ?resolve:(ty -> ty) -> (ty -> bool) -> ty -> bool
 val find_specification_only_type : ty -> ty option
@@ -134,7 +136,7 @@ val list_bounds : generic list -> parameter -> trait_reference list
 val make_substitution : generic list -> argument list -> substitution
 val make_capability_substitution : parameter list -> (string * capability_set) list -> substitution
 
-type parameter_info = { name : string; mode : mode; type_ : ty; has_default : bool }
+type parameter_info = { name : string; mode : Language.Mode.t; type_ : ty; has_default : bool }
 
 val list_capture_free_parameters : parameter_info list -> string list
 val mentions_specification_only_type : parameter_info list -> result -> bool
@@ -142,7 +144,7 @@ val mentions_specification_only_type : parameter_info list -> result -> bool
 type signature = {
   generics : generic list;
   capability_parameters : parameter list;
-  receiver : (Path.receiver * ty) option;
+  receiver : (Language.Mode.t * ty) option;
   parameters : parameter_info list;
   output : result;
   uses : capability_set;

@@ -1,8 +1,8 @@
-type t = Amortized | Metric of Metric.t | Calls | O | Potential | By | Bit_vector
+type t = Amortized | Metric of Language.Metric.t | Calls | O | Potential | By | Bit_vector
 
 let spellings =
   ("amortized", Amortized)
-  :: List.map (fun metric -> (Metric.show metric, Metric metric)) Metric.all
+  :: List.map (fun metric -> (Language.Metric.show metric, Metric metric)) Language.Metric.all
   @ [ ("calls", Calls); ("O", O); ("potential", Potential); ("by", By); ("bit_vector", Bit_vector) ]
 
 let spell word = fst (List.find (fun (_, candidate) -> candidate = word) spellings)
@@ -10,7 +10,7 @@ let spell word = fst (List.find (fun (_, candidate) -> candidate = word) spellin
 let of_token (kind : Token.kind) =
   match kind with Lower text | Upper text -> List.assoc_opt text spellings | _ -> None
 
-let resources = List.map (fun metric -> Metric metric) Metric.all @ [ Calls ]
+let resources = List.map (fun metric -> Metric metric) Language.Metric.all @ [ Calls ]
 
 let correct_misspelling cursor (token : Token.t) name ~words ~category =
   let message =

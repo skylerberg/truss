@@ -1,4 +1,4 @@
 (library
  (name core)
  (modules_without_implementation core)
- (libraries path intrinsic types metric zarith))
+ (libraries path intrinsic types language zarith))

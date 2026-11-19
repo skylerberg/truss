@@ -16,7 +16,7 @@ end
 type specification_function = Walk.specification_function =
   | Log
   | Power
-  | Call_cost of Metric.t
+  | Call_cost of Language.Metric.t
   | Calls
 
 type target = Walk.target =

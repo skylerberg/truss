@@ -36,7 +36,7 @@ val find_model : State.context -> Types.ty -> Logic.term -> element:Types.ty -> 
 val quantify_over :
   State.context ->
   State.frame ->
-  Core.quantifier ->
+  Language.Quantifier.t ->
   quantified_range ->
   bind:(State.frame -> Logic.term -> Types.ty -> State.frame) ->
   read:(State.frame -> Logic.term -> State.frame * Logic.term) ->

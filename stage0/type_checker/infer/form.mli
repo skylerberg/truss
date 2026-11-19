@@ -40,12 +40,12 @@ val build_operator :
   State.state -> Syntax.expression -> Intrinsic.scalar -> Syntax.expression list -> Core.kind
 
 val build_built_in_comparison :
-  State.state -> Syntax.comparison -> Syntax.expression -> Syntax.expression -> Core.kind
+  State.state -> Language.Comparison.t -> Syntax.expression -> Syntax.expression -> Core.kind
 
 val build_comparison :
   State.state ->
   Syntax.expression ->
-  Syntax.comparison ->
+  Language.Comparison.t ->
   Syntax.expression ->
   Syntax.expression ->
   Core.kind
@@ -61,15 +61,15 @@ val build_compound_assign :
   Syntax.operation ->
   Core.statement_kind
 
-val lend_statements : State.state -> Types.mode -> Core.expression -> Core.statement list
-val lend_block : State.state -> Types.mode -> Core.block -> Core.block
+val lend_statements : State.state -> Language.Mode.t -> Core.expression -> Core.statement list
+val lend_block : State.state -> Language.Mode.t -> Core.block -> Core.block
 
 val quantify_over_elements :
   State.state ->
   Syntax.expression ->
   count:Tables.call ->
   element:Tables.call ->
-  lends:Types.mode ->
+  lends:Language.Mode.t ->
   origin:Core.origin ->
   (Core.elements -> Core.kind) ->
   Core.kind
@@ -81,7 +81,7 @@ val build_for_loop :
   pattern:Core.pattern ->
   clauses:Core.loop_clause list ->
   body:Core.block ->
-  mode:Core.loop_mode ->
+  mode:Language.Loop_mode.t ->
   Core.statement_kind
 
 val build_cost : State.state -> origin:Core.origin -> Syntax.cost -> Core.cost

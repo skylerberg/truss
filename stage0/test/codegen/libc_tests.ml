@@ -149,9 +149,9 @@ let () =
       in
       if
         list_modes (Runtime (Libc Read))
-        <> [ ("descriptor", Types.Read); ("buffer", Mut); ("count", Read) ]
+        <> [ ("descriptor", Language.Mode.Read); ("buffer", Mut); ("count", Read) ]
         || list_modes (Runtime (Libc Write))
-           <> [ ("descriptor", Types.Read); ("bytes", Read); ("count", Read) ]
+           <> [ ("descriptor", Language.Mode.Read); ("bytes", Read); ("count", Read) ]
       then Codegen_support.fail "read and write take their memory in the wrong modes");
   Codegen_support.test "a row's reads and writes are counted by a number the call is passed"
     (fun () ->

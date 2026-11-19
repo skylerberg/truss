@@ -11,7 +11,7 @@ let make_float_equal left right =
 let make_float_less left right =
   Logic.(not_ (is_nan left) &&& is_nan right ||| Operation (Fp_lt, [ left; right ]))
 
-let compare_terms ty (compared : Core.comparison) left right =
+let compare_terms ty (compared : Language.Comparison.t) left right =
   if Facts.find_float_format ty <> None then
     match compared with
     | Equal -> make_float_equal left right

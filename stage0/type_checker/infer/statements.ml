@@ -100,9 +100,9 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
                  or `unreachable`.")
       | None -> ());
       let mode =
-        if is_var then Types.Own
-        else if Modes.is_borrowed state value then Types.Read
-        else Types.Own
+        if is_var then Language.Mode.Own
+        else if Modes.is_borrowed state value then Language.Mode.Read
+        else Language.Mode.Own
       in
       State.register_statement state written (fun () ->
           let value = Operands.build mode (State.build_expression state value) in
@@ -141,9 +141,13 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
                       {
                         Tables.expression = written_target.id;
                         core_argument_index = 0;
-                        mode = Types.Read;
+                        mode = Language.Mode.Read;
                       };
-                      { Tables.expression = value.id; core_argument_index = 1; mode = Types.Read };
+                      {
+                        Tables.expression = value.id;
+                        core_argument_index = 1;
+                        mode = Language.Mode.Read;
+                      };
                     ]
                   state call_site ~method_ ~output ~left:target_type ~right:(Some right_type)
               in
@@ -169,8 +173,8 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
         match iterable.kind with
         | Mode (mode, inner) when Option.is_none (State.find_keyword_operation state inner) ->
             State.note_mode_keyword state iterable mode inner;
-            ((match mode with Mut -> Types.Mut | Own -> Types.Own), inner)
-        | _ -> (Types.Read, iterable)
+            ((match mode with Mut -> Language.Mode.Mut | Own -> Language.Mode.Own), inner)
+        | _ -> (Language.Mode.Read, iterable)
       in
       let loop_element = ref None in
       State.run_in_statement state env (State.read_span state iterable.id) (fun () ->
@@ -196,7 +200,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
              match state.tables.types.(inner.id) with
              | Some type_ -> State.record state iterable type_
              | None -> ());
-          if mode = Types.Mut then Modes.mutate state env ~by:Passed_mut inner;
+          if mode = Language.Mode.Mut then Modes.mutate state env ~by:Passed_mut inner;
           Pattern_typing.check_binding_pattern state env written_pattern element ~is_var:false
             ~mode:variable_mode);
       List.iter
@@ -207,12 +211,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
           let pattern = State.build_pattern state written_pattern in
           let clauses = List.map (Form.build_loop_clause state) clauses in
           Form.build_for_loop state written inner ~pattern ~clauses
-            ~body:(State.build_block state body)
-            ~mode:
-              (match running with
-              | Sequential -> Sequential
-              | Parallel_loop -> Parallel_loop
-              | Concurrent_loop -> Concurrent_loop));
+            ~body:(State.build_block state body) ~mode:running);
       check_loop_body state env body
   | While { condition = test; clauses; body } ->
       State.reject_in_formula state env (State.read_span state written.id) "A `while` loop";
@@ -353,12 +352,12 @@ and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable :
       | Types.Error _ | Types.Hole -> (type_, mode)
       | _ -> (
           let cursor = State.make_trait_reference ~arguments:[] (Well_known.make_path Cursor) in
-          let by_position : (Tables.loop * Types.ty * Types.mode) Resolve.Names.lookup =
-            if mode = Types.Own then Absent
+          let by_position : (Tables.loop * Types.ty * Language.Mode.t) Resolve.Names.lookup =
+            if mode = Language.Mode.Own then Absent
             else
               Name_lookup.find_elements_calls state (State.read_span state iterable.id) type_ mode
           and consumed : (Tables.loop * Types.ty) Resolve.Names.lookup =
-            if mode = Types.Own then
+            if mode = Language.Mode.Own then
               Name_lookup.find_consuming_cursor state (State.read_span state iterable.id) type_
             else Absent
           in
@@ -368,7 +367,7 @@ and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable :
               (element, lends)
           | _, Visible (loop, element), _ ->
               State.record_loop state ~loop:written.id ~iterable loop;
-              (element, Types.Own)
+              (element, Language.Mode.Own)
           | _, _, Some _ ->
               State.record_loop state ~loop:written.id ~iterable
                 (Pulled
@@ -382,14 +381,14 @@ and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable :
                    });
               ( State.resolve_associated_type state type_ cursor Cursor_element
                   ~at:(State.read_span state iterable.id),
-                Types.Own )
+                Language.Mode.Own )
           | Hidden hidden, _, None | _, Hidden hidden, None ->
               (Members.make_hidden_error state (State.read_span state iterable.id) hidden, mode)
           | Absent, Absent, None ->
               ( State.make_error_type state Not_indexable
                   (State.read_span state iterable.id)
                   (match mode with
-                  | Types.Read ->
+                  | Language.Mode.Read ->
                       Printf.sprintf
                         "A `for` loop cannot go over %s: it is not a `Cursor`, and it has no \
                          `count` and `element` to visit it by position."

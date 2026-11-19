@@ -16,14 +16,14 @@ let check context (mir : Mir.Graph.t) =
           match block.terminator with
           | For
               {
-                loop = { schedule = (Parallel_loop | Concurrent_loop) as schedule; origin; _ };
+                loop = { schedule = (Parallel | Concurrent) as schedule; origin; _ };
                 iteration;
                 part;
                 lent;
                 body = inside;
                 _;
               } -> (
-              let keyword = if schedule = Parallel_loop then "parallel" else "concurrent" in
+              let keyword = if schedule = Parallel then "parallel" else "concurrent" in
               (match lent with
               | Some { element; _ } when body.locals.(element).kind = Lent Mut -> (
                   match find_collection_type body ~inside element with
@@ -43,7 +43,7 @@ let check context (mir : Mir.Graph.t) =
                            | None -> "the collection")))
               | _ -> ());
               match (schedule, iteration) with
-              | Concurrent_loop, Pull _ when Context.is_view context body.locals.(part).type_ ->
+              | Concurrent, Pull _ when Context.is_view context body.locals.(part).type_ ->
                   Context.report context Task_outlives_view
                     (Context.locate_origin context block.terminator_origin)
                     (Printf.sprintf

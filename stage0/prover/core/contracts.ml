@@ -110,7 +110,7 @@ let make_contract ?trait_clauses (lookups : Lookups.t) path callee_clauses =
                     true)
               signature.uses))
         && List.for_all
-             (fun (info : Types.parameter_info) -> info.mode <> Types.Mut)
+             (fun (info : Types.parameter_info) -> info.mode <> Language.Mode.Mut)
              signature.parameters
         && match signature.receiver with Some (Mut, _) -> false | _ -> true)
     | None -> false

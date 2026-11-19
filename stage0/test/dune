@@ -30,7 +30,7 @@
   database_tests
   standard_package_loading_tests)
  (libraries
-  metric
+  language
   process
   lock_file
   harness

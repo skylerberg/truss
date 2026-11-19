@@ -25,7 +25,7 @@ type use = {
   origin : Core.origin;
   moves : bool;
   operand : Mir.operand option;
-  passed : Types.mode option;
+  passed : Language.Mode.t option;
 }
 
 let list_operand_uses ?passed ~is_moving ~by_value (operand : Mir.operand) =
@@ -324,7 +324,7 @@ let make_owner_test ?(find_passed = fun _ -> None) (body : Mir.Graph.body) =
     (not (List.mem local body.captures))
     &&
     match (find_passed local, body.locals.(local).kind) with
-    | Some mode, _ -> mode = Types.Own
+    | Some mode, _ -> mode = Language.Mode.Own
     | None, (Temporary | Source { mode = Own; _ }) -> true
     | None, (Source { mode = Read | Mut; _ } | Lent _) -> false
   in
@@ -334,7 +334,7 @@ let make_owner_test ?(find_passed = fun _ -> None) (body : Mir.Graph.body) =
     && (not (List.mem local body.captures))
     &&
     match (find_passed local, body.locals.(local).kind) with
-    | Some mode, _ -> mode = Types.Mut
+    | Some mode, _ -> mode = Language.Mode.Mut
     | None, (Source { mode = Mut; _ } | Lent Mut) -> true
     | None, (Source { mode = Read | Own; _ } | Lent (Read | Own) | Temporary) -> false
   in

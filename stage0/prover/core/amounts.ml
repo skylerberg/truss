@@ -141,8 +141,8 @@ let make_conditional_amount condition amount =
   | Logic.Boolean false -> Costs.zero
   | condition -> Logic.ite condition amount Costs.zero
 
-let compute_callee_amount ?(method_cost : (Metric.t -> Logic.term) option) (context : State.context)
-    after ~is_recursive ~clauses:(declared_clauses : State.clauses list)
+let compute_callee_amount ?(method_cost : (Language.Metric.t -> Logic.term) option)
+    (context : State.context) after ~is_recursive ~clauses:(declared_clauses : State.clauses list)
     ~(bind_frame : State.clauses -> State.frame) ~uses ~(values : State.passed list) ~change
     (counter : Costs.counter) =
   let is_recursive_call =
@@ -551,7 +551,7 @@ let compute_elements_potential context (ty : Types.ty) term =
   in
   sum_elements ~enclosing:[] ty term
 
-let find_literal_bound (metric : Metric.t) (costs : Mir.cost list) =
+let find_literal_bound (metric : Language.Metric.t) (costs : Mir.cost list) =
   let counter = Costs.make_operand_counter metric in
   List.find_map
     (fun (cost : Mir.cost) ->
@@ -563,8 +563,8 @@ let find_literal_bound (metric : Metric.t) (costs : Mir.cost list) =
         | (Units | At_most | Exactly), (Order_of _ | At_most _ | Exactly _) -> None)
     costs
 
-let find_method_cost_bound context (metric : Metric.t) (method_ : Path.t) ~trait_arguments self_type
-    =
+let find_method_cost_bound context (metric : Language.Metric.t) (method_ : Path.t) ~trait_arguments
+    self_type =
   let holds ty = try has_potential context ty with Facts.Unsupported _ -> true in
   let includes_potential_made = metric = Time in
   match method_ with
@@ -587,7 +587,7 @@ let find_method_cost_bound context (metric : Metric.t) (method_ : Path.t) ~trait
               | Some (signature : Types.signature) -> (
                   List.for_all
                     (fun (parameter : Types.parameter_info) ->
-                      parameter.mode <> Types.Mut || not (holds parameter.type_))
+                      parameter.mode <> Language.Mode.Mut || not (holds parameter.type_))
                     signature.parameters
                   && (match signature.receiver with Some (Mut, ty) -> not (holds ty) | _ -> true)
                   && match signature.output with Returns ty -> not (holds ty) | _ -> false)
@@ -607,8 +607,8 @@ let find_method_cost_bound context (metric : Metric.t) (method_ : Path.t) ~trait
         | None -> None)
   | _ -> None
 
-let declare_method_cost context frame (metric : Metric.t) (method_ : Path.t) ~trait_arguments
-    self_type =
+let declare_method_cost context frame (metric : Language.Metric.t) (method_ : Path.t)
+    ~trait_arguments self_type =
   let symbol = Logic.Symbol.Method_cost { metric; method_; trait_arguments; self_type } in
   Facts.declare context (Logic.Constant (symbol, Logic.Int));
   let least = Costs.least_amount (Metric metric) in
@@ -620,7 +620,7 @@ let declare_method_cost context frame (metric : Metric.t) (method_ : Path.t) ~tr
   | None -> ());
   Logic.Symbol symbol
 
-let compute_method_cost context frame (metric : Metric.t) (callee : Invocation.callee) =
+let compute_method_cost context frame (metric : Language.Metric.t) (callee : Invocation.callee) =
   match callee with
   | Trait_method { trait; name; receiver; self_type; _ } ->
       let substitute_argument : Types.argument -> Types.argument = function
@@ -633,4 +633,4 @@ let compute_method_cost context frame (metric : Metric.t) (callee : Invocation.c
         (Facts.substitute_type context frame self_type)
   | _ ->
       Facts.raise_unsupported Whole_definition "the %s of a function that is not a trait's method"
-        (Metric.show metric)
+        (Language.Metric.show metric)

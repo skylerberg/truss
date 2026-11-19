@@ -48,9 +48,9 @@ let extract_signature_name (signature : Syntax.signature) =
 
 let classify_receiver (parameters : Syntax.parameter list) : Path.receiver =
   match parameters with
-  | { kind = Self_parameter None; _ } :: _ -> Read
-  | { kind = Self_parameter (Some Mut); _ } :: _ -> Mut
-  | { kind = Self_parameter (Some Own); _ } :: _ -> Own
+  | { kind = Self_parameter None; _ } :: _ -> Instance Read
+  | { kind = Self_parameter (Some Mut); _ } :: _ -> Instance Mut
+  | { kind = Self_parameter (Some Own); _ } :: _ -> Instance Own
   | _ -> Static
 
 type entry = { name : string; kind : named; visibility : visibility; generic : bool }

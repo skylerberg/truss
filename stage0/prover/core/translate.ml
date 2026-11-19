@@ -392,12 +392,14 @@ let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_sub
   let returns = List.rev context.returns in
   let mut_parameters =
     List.filter
-      (fun (parameter : Mir.parameter) -> parameter.mode = Types.Mut && parameter.local <> Self)
+      (fun (parameter : Mir.parameter) ->
+        parameter.mode = Language.Mode.Mut && parameter.local <> Self)
       parameters
   in
   let mut_self =
     List.exists
-      (fun (parameter : Mir.parameter) -> parameter.mode = Types.Mut && parameter.local = Self)
+      (fun (parameter : Mir.parameter) ->
+        parameter.mode = Language.Mode.Mut && parameter.local = Self)
       parameters
   in
   List.iter
@@ -470,10 +472,11 @@ let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_sub
                       Facts.find_local_type context frame (Core_local local) )
               in
               match (parameter.mode, entry, ty) with
-              | (Types.Mut | Types.Own), Some entry, Some ty ->
+              | (Language.Mode.Mut | Language.Mode.Own), Some entry, Some ty ->
                   let potential_after =
                     match (parameter.mode, later) with
-                    | Types.Mut, Some later -> Amounts.compute_potential context frame ty later
+                    | Language.Mode.Mut, Some later ->
+                        Amounts.compute_potential context frame ty later
                     | _ -> Costs.zero
                   in
                   Costs.plus total
