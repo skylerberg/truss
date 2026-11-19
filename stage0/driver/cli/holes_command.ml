@@ -10,13 +10,13 @@ type hole = {
   blocks : string list;
 }
 
-let list_holes snapshot packages database (names : Resolve.Names.lookups)
+let list_holes snapshot database (names : Resolve.Names.lookups)
     (declaration : Resolve.Names.declaration) =
   let key = declaration.key in
   match Database.read_resolved database key with
   | Some resolved ->
       let ({ file; base } : Resolve.Names.place) = names.read_place key in
-      let source = Command_packages.read_source snapshot database packages file in
+      let source = Command_packages.read_source snapshot database file in
       List.map
         (fun (hole : Inspect.hole) ->
           let line, column = Source.compute_position source (base + hole.offset) in
@@ -41,9 +41,7 @@ let gather snapshot packages database paths =
     (fun file ->
       List.concat_map
         (fun (declaration : Resolve.Names.declaration) ->
-          if declaration.key.ordinal = 0 then
-            list_holes snapshot packages database names declaration
-          else [])
+          if declaration.key.ordinal = 0 then list_holes snapshot database names declaration else [])
         (names.list_declarations_in file))
     (Command_packages.select_files snapshot packages paths)
 

@@ -504,6 +504,31 @@ let () =
       let root = make_package [ ("main.truss", ""); (".hidden/x.truss", "") ] in
       expect_strings ~expected:[ "demo" ]
         (List.map Path.show_module (list_modules (Cli.Command_packages.load root))));
+  test "a diagnostic and a failed test name a file the same way from any working directory"
+    (fun () ->
+      let root =
+        make_directory
+          [
+            ("truss.toml", "[project]\n");
+            ("app/truss.toml", make_manifest "app");
+            ("app/main.truss", Fixtures.Cli.unused_helper_and_failing_test);
+          ]
+      in
+      let list_named_lines directory =
+        let _, output = run_truss [ "test"; "-C"; directory ] in
+        List.filter
+          (fun line -> String.includes ~affix:"main.truss" line)
+          (String.split_on_char '\n' output)
+      in
+      let from_root = list_named_lines root in
+      expect_strings ~expected:from_root (list_named_lines (Filename.concat root "app"));
+      if
+        not
+          (List.exists (String.includes ~affix:"app/main.truss:1:") from_root
+          && List.exists (String.includes ~affix:"at app/main.truss:10:") from_root)
+      then
+        fail "the warning or the failed assert does not name app/main.truss: %s"
+          (String.concat "\n" from_root));
   test "a path is shown relative to the directory it is read from" (fun () ->
       expect_string ~expected:"../weather/forecast.truss"
         (Cli.Shown_path.make_relative ~from:"/code/app" "/code/weather/forecast.truss"))
@@ -963,6 +988,38 @@ let () =
   test "a method written in an impl is shown through the implementing type" (fun () ->
       let root = make_package [ ("main.truss", Fixtures.Cli.square_area) ] in
       expect_strings ~expected:[ "fn area(self) -> Int64" ] (run_show root "demo::Square.area"));
+  test "a view's method is shown through each type that has the view" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.Cli.point_with_a_sum_method) ] in
+      expect_strings
+        ~expected:[ "public fn Slice[Element: Ordered].sort(mut self)" ]
+        (list_headers (run_show root "List.sort"));
+      expect_strings
+        ~expected:[ "public fn Slice[Element: Ordered].sort(mut self)" ]
+        (list_headers (run_show root "Array.sort"));
+      expect_strings
+        ~expected:[ "public fn StringSlice.trim(self) -> StringSlice" ]
+        (list_headers (run_show root "String.trim")));
+  test "a type's own method hides its view's method of the same name and mode" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.Cli.point_with_a_sum_method) ] in
+      expect_strings
+        ~expected:[ "public fn List[Element].reverse(mut self)" ]
+        (list_headers (run_show root "List.reverse"));
+      expect_strings
+        ~expected:
+          [
+            "public fn List[Element].cursor(own self) -> ListCursor[Element]";
+            "public fn Slice[Element: Plain].cursor(self) -> SliceCursor[Element]";
+          ]
+        (list_headers (run_show root "List.cursor")));
+  test "a type is shown with its view's methods and without its view's impls" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.Cli.point_with_a_sum_method) ] in
+      let headers = list_headers (run_show root "List") in
+      if not (List.mem "public fn Slice[Element: Ordered].sort(mut self)" headers) then
+        fail "`Slice.sort` is missing from %s" (String.concat "; " headers);
+      if List.mem "public fn Slice[Element].reverse(mut self)" headers then
+        fail "the hidden `Slice.reverse` is shown in %s" (String.concat "; " headers);
+      if List.exists (String.starts_with ~prefix:"impl Equal for Slice") headers then
+        fail "an impl for `Slice` is shown in %s" (String.concat "; " headers));
   test "a module is shown without repeating the methods written in its traits and impls" (fun () ->
       let root =
         make_package

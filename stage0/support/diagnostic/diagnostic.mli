@@ -58,6 +58,7 @@ module Code : sig
     | Loop_cost_bound
     | Function_type_names
     | Misplaced_requires
+    | Misplaced_condition
     | Misplaced_function_type
     | Misplaced_associated_type
     | Misplaced_constraint
@@ -160,6 +161,7 @@ module Code : sig
     | Not_a_capability
     | Arity
     | Argument_kind
+    | Wrong_value_parameter_type
     | Unsatisfied_bound
     | Private_in_public
     | Method_outside_package
@@ -174,6 +176,7 @@ module Code : sig
     | Redeclared_method
     | Restated_method_body
     | Restated_method_clause
+    | Decided_condition
     | Trait_cycle
     | Recursion_limit
     | Missing_member

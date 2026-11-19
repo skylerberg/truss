@@ -87,7 +87,7 @@ fn main(arguments: List[String]) -> ExitCode
   }
   let discarded = processes::Command.new("sh")
     .argument("-c")
-    .argument("echo unseen; cat")
+    .argument("echo unseen || exit 2; if read line; then exit 1; fi")
     .input(processes::Redirect.Discard)
     .output(processes::Redirect.Discard)
   if Processes.run(discarded) is Ok(output) {

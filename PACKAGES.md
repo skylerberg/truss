@@ -94,8 +94,7 @@ grants none, so the package can only do pure computation.
   where code names something of a dependency that uses a capability the
   dependency was not granted, and the error names the function and the
   capability.
-- **A missing grant is never added by a tool.** `truss check --fix` never
-  widens a grant.
+- **A missing grant is never added by a tool.**
 - **Running a caller's callback does not count.** A function that runs a
   callback through a capability parameter, as in `uses generic Granted`,
   uses no capability of its own by doing so.
@@ -123,7 +122,6 @@ time_limit = 10
 - Two packages of a project cannot have the same name.
 - A project's package takes the place of the registry's package of the same
   name, for every package of the build.
-- A project's own packages have no versions.
 
 ## Versions
 
@@ -186,9 +184,7 @@ truss::postgres 1.12.0 0d4e8a1b7c3f2e6d5a9b8c7f1e0d3a2b4c6e8f0a1c3e5a7b9d1f3e5c7
   digits too.
 - A lock file that does not match the project's manifests is a compile
   error: a dependency with no line, a line no package uses, or a `holds`
-  that the manifests' grants do not give. `truss check --fix` removes a
-  line that is not used and corrects a `holds`, and `truss add` adds a
-  line.
+  that the manifests' grants do not give.
 - A build fetches any locked package it does not have, and uses nothing
   whose hash differs.
 - Two changes to a lock file merge by taking the higher version of each

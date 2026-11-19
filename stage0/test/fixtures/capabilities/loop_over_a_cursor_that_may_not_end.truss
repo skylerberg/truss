@@ -1,0 +1,9 @@
+fn count_all[Source: Cursor](source: own Source) -> UInt64
+  uses Source.Uses
+{
+  var count: UInt64 = 0
+  for _ in own source {
+    count = count.saturating_add(1)
+  }
+  count
+}

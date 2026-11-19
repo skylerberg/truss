@@ -57,16 +57,19 @@ and capability_reference_kind =
   | Associated_capabilities of name * name
   | Generic_capability of name
 
-and clause = clause_kind node
+and clause = { kind : clause_kind; condition : condition option; id : id }
 
 and clause_kind =
-  | Uses of capability_reference list
+  | Uses of capability_use list
   | Requires of expression
   | Ensures of expression
   | Decreases of expression list
   | Cost of cost
   | Clause_error
 
+and capability_use = { capability : capability_reference; unless : condition option }
+and condition = bound_condition list
+and bound_condition = { subject : type_expression; bounds : path_type list; id : id }
 and cost = { amortized : bool; resource : resource; bound : bound }
 and resource = Metric of Language.Metric.t | Calls of call_target
 
@@ -163,7 +166,7 @@ and statement_kind =
   | Assert of { value : expression; by_bit_vector : bool }
   | Statement_error
 
-and loop_clause = loop_clause_kind node
+and loop_clause = { kind : loop_clause_kind; condition : condition option; id : id }
 
 and loop_clause_kind =
   | Invariant of expression

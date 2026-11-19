@@ -1,0 +1,6 @@
+fn f(small: UInt8) -> Bool {
+  let first = 300
+  let second = 2
+  let same = first == second
+  same && small == second
+}

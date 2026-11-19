@@ -43,8 +43,8 @@ let render_key_name = function
   | Code function_type -> Mangling.make_type_name (Function function_type) ^ "_Code"
   | Environment (item, nested_index) ->
       Printf.sprintf "%s_Environment_%d" (Mangling.make_symbol item) nested_index
-  | Evidence nested_index -> Printf.sprintf "t_Evidence_%d" nested_index
-  | Capabilities count -> Printf.sprintf "t_Capabilities_%d" count
+  | Evidence nested_index -> Printf.sprintf "truss_Evidence_%d" nested_index
+  | Capabilities count -> Printf.sprintf "truss_Capabilities_%d" count
 
 let render text ~resolve =
   let buffer = Buffer.create 256 in

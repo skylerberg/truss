@@ -83,7 +83,7 @@ and kind =
   | Convert of { conversion : conversion; value : expression }
   | To_any of { value : expression; trait : Types.trait_reference; evidence : evidence }
   | If of { condition : expression; then_ : block; else_ : block option; binds_lent_part : bool }
-  | Match of { scrutinees : operand list; arms : arm list }
+  | Match of { scrutinees : operand list; arms : arm list; is_written : bool }
   | Block of block
   | Provide of { implementations : implementation list; body : block }
   | Return of expression option
@@ -131,13 +131,13 @@ and statement_kind =
   | For of {
       pattern : pattern;
       iteration : iteration;
-      clauses : loop_clause list;
+      clauses : loop_clause conditional list;
       body : block;
       mode : Language.Loop_mode.t;
     }
   | While of {
       condition : expression;
-      clauses : loop_clause list;
+      clauses : loop_clause conditional list;
       body : block;
       binds_lent_part : bool;
     }
@@ -154,6 +154,7 @@ and iteration =
 
 and elements = { count : expression; position : pattern; element : place; lends : Language.Mode.t }
 and loop_clause = Invariant of expression | Decreases of expression list | Cost of cost
+and 'clause conditional = { holds_when : Types.condition; clause : 'clause }
 and cost = { origin : origin; amortized : bool; resource : resource; bound : bound }
 and resource = Metric of Language.Metric.t | Calls of calls_target
 
@@ -188,10 +189,10 @@ type parameter = {
 and callback_contract = { inputs : local list; requires : expression list }
 
 type contract = {
-  requires : condition list;
-  ensures : expression list;
-  decreases : expression list;
-  costs : cost list;
+  requires : condition conditional list;
+  ensures : expression conditional list;
+  decreases : expression conditional list;
+  costs : cost conditional list;
 }
 
 type law = { name : string; parameters : parameter list; requires : expression list; body : block }

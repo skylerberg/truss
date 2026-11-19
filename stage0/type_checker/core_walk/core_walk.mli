@@ -11,7 +11,7 @@ val compute_place_type : Core.place -> Types.ty
 val compute_place_origin : Core.place -> Core.origin
 val walk_operand : visit -> Core.operand -> unit
 val walk_block : visit -> Core.block -> unit
-val walk_loop_clause : visit -> Core.loop_clause -> unit
+val walk_loop_clause : visit -> Core.loop_clause Core.conditional -> unit
 val walk_expression_children : visit -> Core.expression -> unit
 val walk_iteration : visit -> Core.iteration -> unit
 val walk_statement_children : visit -> Core.statement -> unit
@@ -20,7 +20,7 @@ val make_deep_visitor : visit -> visit
 val walk_expression : visit -> Core.expression -> unit
 val walk_definition : visit -> Core.definition -> unit
 val is_functional : (visit -> unit) -> bool
-val states_measure : Core.loop_clause list -> bool
+val find_measure_condition : Core.loop_clause Core.conditional list -> Types.condition option
 val has_implicit_measure : Core.expression -> bool
 
 type tasks_use = Uses_tasks | Through_parameter | No_tasks

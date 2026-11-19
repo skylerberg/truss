@@ -1,0 +1,12 @@
+fn first[Source: Cursor](source: mut Source) -> Option[Source.Element]
+  uses Source.Uses
+  requires source.remaining() > 0 when Source: FiniteCursor
+{
+  mut source.next()
+}
+
+fn caller[Items: Cursor](items: mut Items) -> Option[Items.Element]
+  uses Items.Uses
+{
+  first(mut items)
+}

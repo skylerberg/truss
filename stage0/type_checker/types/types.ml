@@ -37,7 +37,10 @@ and capability =
   | Capability_projection of { base : ty; trait : trait_reference; name : string }
   | Capability_variable of int
   | Capability_error of Diagnostic.reported
+  | Capability_unless of { capability : capability; unless : condition }
 
+and condition = bound_condition list
+and bound_condition = { subject : ty; bound : trait_reference }
 and capability_set = capability list
 and cost = { amortized : bool; resource : resource; bound : cost_bound }
 
@@ -47,7 +50,40 @@ and resource =
 
 and cost_bound = Order_of | No_more_than of Z.t option | Exactly_cost of Z.t option
 
-let make_capability_set capabilities : capability_set = List.sort_uniq compare capabilities
+let make_condition (condition : condition) : condition = List.sort_uniq compare condition
+
+let rec make_unless capability unless =
+  match capability with
+  | Capability_unless { capability; unless = inner } -> make_unless capability (inner @ unless)
+  | _ -> (
+      match make_condition unless with
+      | [] -> None
+      | unless -> Some (Capability_unless { capability; unless }))
+
+let find_base = function
+  | Capability_unless { capability; _ } -> capability
+  | capability -> capability
+
+let make_capability_set capabilities : capability_set =
+  let capabilities = List.sort_uniq compare capabilities in
+  let unconditional =
+    List.filter (function Capability_unless _ -> false | _ -> true) capabilities
+  in
+  let conditional =
+    List.fold_left
+      (fun merged capability ->
+        match capability with
+        | Capability_unless { capability; unless } when not (List.mem capability unconditional) -> (
+            match List.assoc_opt capability merged with
+            | Some earlier -> (capability, earlier @ unless) :: List.remove_assoc capability merged
+            | None -> (capability, unless) :: merged)
+        | _ -> merged)
+      [] capabilities
+  in
+  List.sort_uniq compare
+    (unconditional
+    @ List.filter_map (fun (capability, unless) -> make_unless capability unless) conditional)
+
 let no_capabilities : capability_set = []
 
 let union_capabilities (left : capability_set) (right : capability_set) =
@@ -59,15 +95,52 @@ let make_capability path =
   | None -> Capability path
 
 let has_capability capability (set : capability_set) = List.mem capability set
-let exists_capability predicate (set : capability_set) = List.exists predicate set
+
+let may_use capability (set : capability_set) =
+  List.exists (fun used -> find_base used = capability) set
+
+let find_unless capability (set : capability_set) =
+  List.find_map
+    (function
+      | Capability_unless { capability = used; unless } when used = capability -> Some unless
+      | _ -> None)
+    set
+
+let exists_capability predicate (set : capability_set) =
+  List.exists (fun capability -> predicate (find_base capability)) set
+
 let list_capabilities (set : capability_set) : capability list = set
-let terminates set = not (has_capability (Built_in Run_forever) set)
+let terminates set = not (may_use (Built_in Run_forever) set)
+
+let implies_condition (premise : condition) (condition : condition) =
+  List.for_all (fun bound -> List.mem bound premise) condition
+
+let terminates_when (premise : condition) (set : capability_set) =
+  (not (has_capability (Built_in Run_forever) set))
+  &&
+  match find_unless (Built_in Run_forever) set with
+  | Some unless -> implies_condition premise unless
+  | None -> true
 
 let contains_capability_error (capabilities : capability_set) =
-  List.exists (function Capability_error _ -> true | _ -> false) capabilities
+  List.exists
+    (fun capability -> match find_base capability with Capability_error _ -> true | _ -> false)
+    capabilities
+
+let is_covered (available : capability_set) capability =
+  match capability with
+  | Capability_unless { capability = base; unless } ->
+      List.mem base available
+      || List.exists
+           (function
+             | Capability_unless { capability = covering; unless = covering_unless } ->
+                 covering = base && implies_condition covering_unless unless
+             | _ -> false)
+           available
+  | _ -> List.mem capability available
 
 let subtract_capabilities (left : capability_set) (right : capability_set) =
-  List.filter (fun capability -> not (List.mem capability right)) left
+  List.filter (fun capability -> not (is_covered right capability)) left
 
 let is_capability_subset (smaller : capability_set) (larger : capability_set) =
   contains_capability_error smaller || contains_capability_error larger
@@ -76,7 +149,7 @@ let is_capability_subset (smaller : capability_set) (larger : capability_set) =
 let intersect_capabilities (sets : capability_set list) : capability_set =
   make_capability_set
     (List.filter
-       (fun capability -> List.for_all (fun set -> List.mem capability set) sets)
+       (fun capability -> List.for_all (fun set -> is_covered set capability) sets)
        (List.concat sets))
 
 let compute_missing_capabilities ~(required : capability_set) ~(available : capability_set) =
@@ -86,7 +159,21 @@ let compute_missing_capabilities ~(required : capability_set) ~(available : capa
 let replace_capabilities find_replacement (set : capability_set) =
   make_capability_set
     (List.concat_map
-       (fun capability -> Option.value ~default:[ capability ] (find_replacement capability))
+       (fun capability ->
+         match capability with
+         | Capability_unless { capability = base; unless } ->
+             List.filter_map
+               (fun replacement -> make_unless replacement unless)
+               (Option.value ~default:[ base ] (find_replacement base))
+         | _ -> Option.value ~default:[ capability ] (find_replacement capability))
+       set)
+
+let map_conditions transform (set : capability_set) =
+  make_capability_set
+    (List.filter_map
+       (function
+         | Capability_unless { capability; unless } -> make_unless capability (transform unless)
+         | capability -> Some capability)
        set)
 
 let make_builtin ?(arguments = []) builtin =
@@ -112,17 +199,18 @@ let is_builtin wanted type_ = find_builtin type_ = Some wanted
 let is_well_known wanted = function Named { path; _ } -> Well_known.is wanted path | _ -> false
 
 let find_view = function
-  | Named { path; arguments } when Well_known.is List path ->
-      Some (Named { path = Well_known.make_path Slice; arguments })
-  | Named { path; arguments = [] } when Well_known.is String path ->
-      Some (Named { path = Well_known.make_path String_slice; arguments = [] })
-  | Named { arguments = element :: _; _ } as array when is_builtin Array array ->
-      Some (Named { path = Well_known.make_path Slice; arguments = [ element ] })
+  | Named { path; arguments } ->
+      Option.map
+        (fun view -> Named { path = view; arguments = List.take 1 arguments })
+        (Well_known.find_view path)
   | _ -> None
 
 let signed_integer_types : Language.Builtin_type.t list = [ Int8; Int16; Int32; Int64 ]
 let unsigned_integer_types : Language.Builtin_type.t list = [ UInt8; UInt16; UInt32; UInt64 ]
 let integer_types = signed_integer_types @ unsigned_integer_types
+
+let sealed_traits : Well_known.t list =
+  [ Fixed_width_integer; Signed_integer; Unsigned_integer; Floating_point ]
 
 let find_integer_implementors trait =
   if Well_known.is Signed_integer trait then Some signed_integer_types
@@ -140,6 +228,7 @@ let find_bound_integer_implementors bounds =
     None bounds
 
 let float_types : Language.Builtin_type.t list = [ Float32; Float64 ]
+let number_types = integer_types @ float_types @ [ Language.Builtin_type.Integer ]
 
 let find_sealed_implementors trait =
   if Well_known.is Floating_point trait then Some float_types else find_integer_implementors trait
@@ -249,8 +338,19 @@ and substitute_capabilities substitution capabilities =
                   name;
                 };
             ]
-      | Built_in _ | Capability _ | Capability_variable _ | Capability_error _ -> None)
-    capabilities
+      | Built_in _ | Capability _ | Capability_variable _ | Capability_error _ | Capability_unless _
+        ->
+          None)
+    (map_conditions (substitute_condition substitution) capabilities)
+
+and substitute_condition substitution (condition : condition) =
+  List.map
+    (fun (bound : bound_condition) ->
+      {
+        subject = substitute substitution bound.subject;
+        bound = substitute_trait substitution bound.bound;
+      })
+    condition
 
 and substitute_trait substitution (trait : trait_reference) =
   {
@@ -347,7 +447,9 @@ let find_specification_only_type type_ =
   !specification_type
 
 let contains_capability_variable capabilities =
-  List.exists (function Capability_variable _ -> true | _ -> false) capabilities
+  List.exists
+    (fun capability -> match find_base capability with Capability_variable _ -> true | _ -> false)
+    capabilities
 
 let equal left right = left = right
 let is_error : ty -> bool = function Error _ -> true | _ -> false
@@ -371,13 +473,18 @@ and is_unsolved_trait trait =
   List.exists is_unsolved_argument trait.trait_arguments
   || List.exists (fun (_, type_) -> contains_unsolved type_) trait.associated
 
-let has_unsolved_capabilities capabilities =
-  List.exists
-    (function
-      | Capability_variable _ -> true
-      | Capability_projection { base; _ } -> contains_unsolved base
-      | Built_in _ | Capability _ | Capability_parameter _ | Capability_error _ -> false)
-    capabilities
+let rec is_unsolved_capability = function
+  | Capability_variable _ -> true
+  | Capability_projection { base; _ } -> contains_unsolved base
+  | Capability_unless { capability; unless } ->
+      is_unsolved_capability capability
+      || List.exists
+           (fun (bound : bound_condition) ->
+             contains_unsolved bound.subject || is_unsolved_trait bound.bound)
+           unless
+  | Built_in _ | Capability _ | Capability_parameter _ | Capability_error _ -> false
+
+let has_unsolved_capabilities capabilities = List.exists is_unsolved_capability capabilities
 
 let has_same_clauses (left : function_type) (right : function_type) =
   left.uses = right.uses && List.sort_uniq compare left.costs = List.sort_uniq compare right.costs
@@ -413,6 +520,14 @@ let rec show_capability = function
   | Capability_parameter { name; _ } -> "generic " ^ name
   | Capability_projection { base; name; _ } -> show base ^ "." ^ name
   | Capability_variable _ | Capability_error _ -> "_"
+  | Capability_unless { capability; unless } ->
+      show_capability capability ^ " unless " ^ show_condition unless
+
+and show_condition condition =
+  String.concat " && "
+    (List.map
+       (fun (bound : bound_condition) -> show bound.subject ^ ": " ^ show_trait bound.bound)
+       condition)
 
 and show = function
   | Named { path; arguments = [] } -> Path.show_name path

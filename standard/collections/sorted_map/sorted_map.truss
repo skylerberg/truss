@@ -239,7 +239,7 @@ fn merged[Key: Ordered, Value](
 public fn collections::SortedMap[Key: Ordered, Value].collect[Source: Cursor[Element = map::Entry[Key, Value]]](
   source: own Source,
 ) -> collections::SortedMap[Key, Value]
-  uses Source.Uses, RunForever
+  uses Source.Uses, RunForever unless Source: FiniteCursor
 {
   map_of(List.collect(own source))
 }
@@ -606,7 +606,7 @@ public fn collections::SortedMap[Key: Ordered, Value].extend[Source: Cursor[Elem
   mut self,
   entries: own Source,
 )
-  uses Source.Uses, RunForever
+  uses Source.Uses, RunForever unless Source: FiniteCursor
 {
   let added = map_of(List.collect(own entries))
   if self.entries.is_empty() {

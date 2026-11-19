@@ -1,0 +1,25 @@
+trait Shown {
+  fn shown(self) -> String
+}
+
+trait Paired[Other] {
+  fn other(self) -> Other
+}
+
+type Box[Item](item: Item)
+
+impl Paired[Int64] for Box[Item: Shown] {
+  fn other(self) -> Int64 {
+    0
+  }
+}
+
+fn pairs[Left: Paired[Right], Right: FixedWidthInteger](left: Left, right: Right) -> Bool {
+  true
+}
+
+fn f[Item](box: Box[Item]) -> Bool
+  ensures pairs(box, right: 3) when Item: Shown
+{
+  true
+}

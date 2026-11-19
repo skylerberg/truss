@@ -1,0 +1,3 @@
+fn offset[shift: Missing]() -> UInt64 {
+  shift
+}
