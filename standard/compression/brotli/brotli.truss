@@ -593,6 +593,12 @@ theorem every_copy_length_base_is_at_least_two()
 {
 }
 
+theorem every_length_bit_count_is_at_most_24()
+  ensures forall code in 0..insert_length_bits.length() => insert_length_bits[code] <= 24
+  ensures forall code in 0..copy_length_bits.length() => copy_length_bits[code] <= 24
+{
+}
+
 fn decode_compressed(bits: mut Bits, stream: mut Stream, output: mut List[UInt8], length: UInt64) -> Result[Unit, Error] {
   var literal_blocks = read_blocks(bits: mut bits)?
   var command_blocks = read_blocks(bits: mut bits)?
@@ -631,6 +637,9 @@ fn decode_compressed(bits: mut Bits, stream: mut Stream, output: mut List[UInt8]
     let copy_code = copy_code_starts[cell] + (command & 7)
     if insert_code >= insert_length_bases.length() || copy_code >= copy_length_bases.length() {
       return malformed("an insert-and-copy code outside its alphabet")
+    }
+    proof {
+      every_length_bit_count_is_at_most_24()
     }
     let insert_length = insert_length_bases[insert_code].saturating_add(intrinsic::convert[UInt32, UInt64](mut bits.read(insert_length_bits[insert_code])))
     let copy_length = copy_length_bases[copy_code].saturating_add(intrinsic::convert[UInt32, UInt64](mut bits.read(copy_length_bits[copy_code])))
