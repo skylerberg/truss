@@ -65,10 +65,10 @@ val integer_types : Language.Builtin_type.t list
 val float_types : Language.Builtin_type.t list
 val list_scalar_members : ty -> Language.Builtin_type.t list
 val list_fitting_integer_types : Z.t -> Language.Builtin_type.t list
-val sealed_traits : (Well_known.t * Language.Builtin_type.t list) list
-val find_sealed_implementors : Path.t -> Language.Builtin_type.t list option
 val find_integer_implementors : Path.t -> Language.Builtin_type.t list option
 val find_bound_integer_implementors : trait_reference list -> Language.Builtin_type.t list option
+val find_sealed_implementors : Path.t -> Language.Builtin_type.t list option
+val sealed_traits : Well_known.t list
 val is_float_type : ty -> bool
 val make_capability_set : capability list -> capability_set
 val no_capabilities : capability_set

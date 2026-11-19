@@ -238,6 +238,7 @@ let rec unify unifier (left : Types.ty) (right : Types.ty) =
   | _ -> false
 
 and unify_arguments unifier left right =
+  unifier.refused_code_unknown <- None;
   List.length left = List.length right
   && List.for_all2
        (fun left right ->

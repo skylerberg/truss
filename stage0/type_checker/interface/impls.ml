@@ -262,15 +262,20 @@ let list_candidate_impls lookups ~head (wanted : Types.trait_reference) =
 let list_impl_variables (impl : Types.impl_interface) =
   List.map (fun (generic : Types.generic) -> generic.generic) impl.impl_generics
 
-let select_impl lookups ~head (wanted : Types.trait_reference) =
-  List.find_map
-    (fun impl_path ->
-      Option.bind (Definition.find_impl_interface lookups impl_path) (fun impl ->
-          Option.map
-            (fun substitution -> (impl, substitution))
-            (match_arguments ~variables:(list_impl_variables impl) Types.no_substitution
-               impl.implements.trait_arguments wanted.trait_arguments)))
-    (list_candidate_impls lookups ~head wanted)
+let select_impl lookups type_ (wanted : Types.trait_reference) =
+  List.find_opt
+    (fun (impl : Types.impl_interface) ->
+      let variables = list_impl_variables impl in
+      Option.is_some
+        (Option.bind
+           (match_arguments ~variables Types.no_substitution impl.implements.trait_arguments
+              wanted.trait_arguments) (fun substitution ->
+             match_type ~variables substitution impl.for_type type_)))
+    (List.filter_map
+       (Definition.find_impl_interface lookups)
+       (Option.fold ~none:[]
+          ~some:(fun head -> list_candidate_impls lookups ~head wanted)
+          (find_head type_)))
 
 let check_recursion_depth ~depth type_ trait =
   if depth > Properties.recursion_limit then

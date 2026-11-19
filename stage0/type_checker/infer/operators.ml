@@ -136,7 +136,7 @@ and check_operator_call state call ~method_ ~output ~left:(left, left_type) ~rig
         callee_result = result;
       };
   Solver.require state
-    (Operator { call; left; right = Option.map fst right })
+    (Operator (State.read_span state call))
     ~outputs:[ (Well_known.show_associated output, result) ]
     left_type reference;
   result
@@ -242,9 +242,7 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
                   right_type
               | None, None ->
                   if not (State.unify state left_type right_type) then
-                    ignore
-                      (State.add_operand_mismatch state ~call:value.id ~left:left.id ~right:right.id
-                         ~left_type ~right_type);
+                    ignore (add_operand_mismatch state value left right ~left_type ~right_type);
                   left_type
             in
             let method_, result =
@@ -326,10 +324,58 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
             end
             else
               let method_, output = select_arithmetic_method arithmetic in
-              Form.register_call state value;
-              check_operator_call state value.id ~method_ ~output ~left:(left.id, left_type)
-                ~right:(Some (right.id, right_type))
+              if
+                State.is_within state left_type Types.integer_types
+                && State.is_within state right_type Types.integer_types
+                && not
+                     (Types.equal (State.normalize state left_type)
+                        (State.normalize state right_type))
+              then Types.Error (add_operand_mismatch state value left right ~left_type ~right_type)
+              else begin
+                Form.register_call state value;
+                check_operator_call state value.id ~method_ ~output ~left:(left.id, left_type)
+                  ~right:(Some (right.id, right_type))
+              end
             end)
+
+and add_operand_mismatch state (value : Syntax.expression) (left : Syntax.expression)
+    (right : Syntax.expression) ~left_type ~right_type =
+  let sides = [ (left_type, right_type); (right_type, left_type) ] in
+  let left_type = State.normalize state left_type
+  and right_type = State.normalize state right_type in
+  if
+    State.is_within state left_type Types.integer_types
+    && State.is_within state right_type Types.integer_types
+  then begin
+    let is_within narrower wider =
+      match (Types.find_integer_range narrower, Types.find_integer_range wider) with
+      | Some (low, high), Some (wider_low, wider_high) ->
+          Z.geq low wider_low && Z.leq high wider_high
+      | _ -> false
+    in
+    let make_widening_fix side (operand : Syntax.expression) target =
+      State.fix
+        (Printf.sprintf "Convert the %s side to `%s`." side (Types.show target))
+        [
+          State.replace
+            (State.read_span state operand.id)
+            (Printf.sprintf "%s.from_integer(%s)" (Types.show target)
+               (State.quote_span state (State.read_span state operand.id)));
+        ]
+    in
+    let fixes =
+      if is_within right_type left_type then [ make_widening_fix "right" right left_type ]
+      else if is_within left_type right_type then [ make_widening_fix "left" left right_type ]
+      else []
+    in
+    State.add_mismatch_diagnostic state Mismatched_integers (State.read_span state value.id) ~sides
+      ~fixes
+      (Printf.sprintf
+         "Integer types never convert implicitly: this compares or combines `%s` with `%s`."
+         (Types.show left_type) (Types.show right_type))
+  end
+  else
+    State.add_mismatch state (State.read_span state right.id) ~expected:left_type ~actual:right_type
 
 and check_any state env ?expected (value : Syntax.expression) (inner : Syntax.expression) =
   match Option.map (State.normalize state) expected with

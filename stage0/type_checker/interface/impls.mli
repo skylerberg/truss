@@ -65,12 +65,7 @@ val find_evidence :
   evidence option
 
 val check_recursion_depth : depth:int -> Types.ty -> Types.trait_reference -> unit
-
-val select_impl :
-  Lookups.t ->
-  head:Path.t ->
-  Types.trait_reference ->
-  (Types.impl_interface * Types.substitution) option
+val select_impl : Lookups.t -> Types.ty -> Types.trait_reference -> Types.impl_interface option
 
 val decide_property_trait :
   Lookups.t -> list_bounds:bounds -> Path.t -> Types.ty -> Properties.decision option

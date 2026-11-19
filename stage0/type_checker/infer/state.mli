@@ -22,23 +22,21 @@ type subset_constraint = {
 
 type requirement = Implements of Types.trait_reference | Within of Language.Builtin_type.t list
 
+type cause =
+  | Bound of { at : Source.Definition_span.t; of_type : Types.ty option }
+  | Operator of Source.Definition_span.t
+  | Method_call of Source.Definition_span.t
+  | Loop of Source.Definition_span.t
+  | Any_conversion of { at : Source.Definition_span.t; any_type : Types.ty }
+  | Excluded of (Types.ty -> Diagnostic.reported)
+
 type goal = {
   subject : Types.ty;
   requirement : requirement;
   outputs : (string * Types.ty) list;
   cause : cause;
-  depth : int;
   is_specification : bool;
 }
-
-and cause =
-  | Bound of { at : Source.Definition_span.t; of_type : Types.ty option }
-  | Operator of { call : Syntax.id; left : Syntax.id; right : Syntax.id option }
-  | Method_call of Source.Definition_span.t
-  | Loop of Source.Definition_span.t
-  | Any_conversion of { at : Source.Definition_span.t; any_type : Types.ty }
-  | Excluded of (Types.ty -> Diagnostic.reported)
-  | Condition of goal
 
 type frame = {
   first_variable : int;
@@ -167,7 +165,7 @@ val fix :
 
 val replace : Source.Definition_span.t -> string -> Source.Definition_span.t Diagnostic.edit
 val insert : int -> string -> Source.Definition_span.t Diagnostic.edit
-val find_current_frame : state -> frame
+val read_current_frame : state -> frame
 val record : state -> Syntax.expression -> Types.ty -> unit
 val record_loop : state -> loop:Syntax.id -> Tables.loop -> unit
 val note_compiled_expression : state -> env -> Syntax.expression -> unit
@@ -176,10 +174,10 @@ val check_when_final : state -> (unit -> unit) -> unit
 val resolve : state -> Types.ty -> Types.ty
 val zonk : state -> Types.ty -> Types.ty
 val make_fresh_type : state -> Types.ty
-val make_fresh_argument : state -> Types.generic -> Types.argument
 val make_fresh_generic_arguments : state -> Types.generic list -> Types.argument list
 val lookup_bounds : state -> Types.parameter -> Types.trait_reference list
 val normalize : state -> Types.ty -> Types.ty
+val find_domain : state -> Types.ty -> Language.Builtin_type.t list option
 val is_within : state -> Types.ty -> Language.Builtin_type.t list -> bool
 val read_integer_range : state -> Types.ty -> Z.t * Z.t
 
@@ -224,11 +222,10 @@ val make_call :
 
 val make_trait_reference : arguments:Types.argument list -> Path.t -> Types.trait_reference
 val string_type : Types.ty
-val open_frame : state -> env -> Source.Definition_span.t -> frame
-val constrain_capability_equalities : state -> frame -> unit
-val give_defaults : state -> frame -> unit
-val list_unsolved : state -> frame -> Unify.unknown list
-val close_frame : state -> frame -> unit
+
+val run_in_statement :
+  state -> env -> Source.Definition_span.t -> solve:(frame -> unit) -> (unit -> 'a) -> 'a
+
 val diverges : is_never:(Syntax.expression -> bool) -> Syntax.statement -> bool
 val statement_diverges : state -> Syntax.statement -> bool
 val build_block : state -> Syntax.block -> Core.block
@@ -261,15 +258,6 @@ val add_mismatch :
 
 val report_mismatch :
   state -> Source.Definition_span.t -> expected:Types.ty -> actual:Types.ty -> unit
-
-val add_operand_mismatch :
-  state ->
-  call:Syntax.id ->
-  left:Syntax.id ->
-  right:Syntax.id ->
-  left_type:Types.ty ->
-  right_type:Types.ty ->
-  Diagnostic.reported
 
 val is_place : state -> Syntax.expression -> bool
 val find_keyword_operation : state -> Syntax.expression -> (Syntax.id * Syntax.expression) option

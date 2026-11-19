@@ -414,6 +414,27 @@ let () =
       expect_one_diagnostic Fixtures.Infer.requires_multiplies_a_span_by_a_literal "types.no_impl"
         ~says:"`Span` does not implement `Multiply[Integer]`");
   Harness.test
+    "an operand that an earlier local of literals does not fit is reported at its literal"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.sum_of_a_uint8_and_an_earlier_local_beyond_it
+        "types.literal_out_of_range" ~says:"`300` does not fit in `UInt8`";
+      expect_one_diagnostic Fixtures.Infer.sum_of_a_uint64_and_an_earlier_negative_local
+        "types.negated_unsigned" ~says:"`UInt64` is unsigned");
+  Harness.test "a bound whose trait argument is a hole is checked against the subject's impls"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.bound_whose_trait_argument_is_a_hole
+        "types.unsatisfied_bound" ~says:"needs `Bool: Multiply[_]`");
+  Harness.test
+    "a narrowing by an impl's condition reports the condition when a later use excludes it"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.vector_times_an_integer_whose_impl_narrows_its_element
+        "types.unsatisfied_bound" ~says:"needs `Int8: UnsignedInteger`");
+  Harness.test "a bound on an associated type of an unknown waits for the unknown" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.bound_on_an_item_of_an_unknown_source
+        "types.cannot_infer");
+  Harness.test "a bound selects the impl whose header matches the subject's arguments" (fun () ->
+      expect_fine Fixtures.Infer.bound_on_a_type_with_overlapping_impls);
+  Harness.test
     "a goal of a loop invariant keeps the specification's rule when a later statement lets it \
      select an impl" (fun () ->
       expect_one_diagnostic
