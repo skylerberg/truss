@@ -42,7 +42,6 @@ let items : Well_known.t list =
     Sequence;
     Finite_set;
     Finite_map;
-    Multiset;
     Map;
     From_entries;
     Set;

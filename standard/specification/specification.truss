@@ -86,6 +86,15 @@ public fn Sequence[Element].sum(self, measure: fn(Element) -> Integer) -> Intege
   todo
 }
 
+public fn Sequence[Element].is_permutation_of(self, other: Sequence[Element]) -> Bool
+  ensures result == (forall measure: fn(Element) -> Integer => self.sum(measure) == other.sum(measure))
+  ensures result ==> self.length() == other.length()
+  ensures result ==> forall i in 0..self.length() => other.contains(self[i])
+  ensures result ==> forall i in 0..other.length() => self.contains(other[i])
+{
+  todo
+}
+
 impl Index for Sequence[Element] {
   type Key = Integer
   type Output = Element
@@ -178,19 +187,6 @@ public fn FiniteMap[Key, Value].insert(self, key: Key, value: Value) -> FiniteMa
 public fn FiniteMap[Key, Value].keys(self) -> FiniteSet[Key]
   ensures forall key: Key => result.contains(key) == self.contains_key(key)
   ensures result.size() == self.size()
-{
-  todo
-}
-
-public opaque type Multiset[Element] = todo
-
-public fn Multiset[Element].empty() -> Multiset[Element]
-{
-  todo
-}
-
-public fn Multiset[Element].count(self, value: Element) -> Integer
-  ensures result >= 0
 {
   todo
 }

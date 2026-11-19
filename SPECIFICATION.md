@@ -2568,7 +2568,7 @@ an invariant, a law, or a proof.
   value that code holds stores its fields.
 - Float arithmetic in a specification follows IEEE 754.
 
-The prelude types `Sequence`, `FiniteSet`, `FiniteMap`, and `Multiset` exist
+The prelude types `Sequence`, `FiniteSet`, and `FiniteMap` exist
 only in specifications, and their equality is identity. A type gives its
 value in their terms with the prelude trait `Model`, whose `model()` can be
 called only in specifications:
@@ -2671,7 +2671,7 @@ The prelude is in scope in every file, and all its names are
   `Copyable`, `Plain`, `Storable`, `Index`, `IndexMut`, `IndexAssign`,
   `Iterable`, `Cursor`, `FromTemplate`, `FromElements`, `FromEntries`,
   `Model`, and the arithmetic traits
-- `Integer`, `Sequence`, `FiniteSet`, `FiniteMap`, and `Multiset`
+- `Integer`, `Sequence`, `FiniteSet`, and `FiniteMap`
 - the standard capabilities, and `Path`, `Instant`, `Duration`, and
   `SystemError`
 

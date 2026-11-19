@@ -49,7 +49,6 @@ type t =
   | Sequence
   | Finite_set
   | Finite_map
-  | Multiset
   | Instant
   | Duration
   | File_path
