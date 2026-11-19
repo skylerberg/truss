@@ -18,20 +18,16 @@ let check_bit_vector_names state (value : Core.expression) =
 
 let record_integer_range state ~(loop : Syntax.id) ~described ~admits_integer
     (range : Syntax.expression) element ~inclusive =
-  State.defer state (fun () ->
-      let element = State.normalize state element in
-      if Types.contains_unsolved element then false
-      else begin
-        if
-          State.is_integer_type state element
-          || Types.is_builtin Character element
-          || (admits_integer && Types.equal element Types.Integer)
-        then state.tables.loops.(loop) <- Some (Integer_range { element; inclusive })
-        else if not (Types.is_error element) then
-          State.report state Not_indexable (State.read_span state range.id)
-            (Printf.sprintf "%s range is of integers, not `%s`." described (Types.show element));
-        true
-      end)
+  State.check_when_final state (fun () ->
+      let element = State.finalize_type state element in
+      if
+        State.is_integer_type state element
+        || Types.is_builtin Character element
+        || (admits_integer && Types.equal element Types.Integer)
+      then state.tables.loops.(loop) <- Some (Integer_range { element; inclusive })
+      else if not (Types.is_error element) then
+        State.report state Not_indexable (State.read_span state range.id)
+          (Printf.sprintf "%s range is of integers, not `%s`." described (Types.show element)))
 
 let rec check_block_value state env ?expected (written : Syntax.block) =
   let rec infer_statements_value = function
@@ -57,25 +53,22 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
           Evaluate (State.build_expression state value));
       let type_ = Hooks.check_expression state env value in
       if not last then
-        State.defer state (fun () ->
-            match State.normalize state type_ with
-            | Types.Variable _ | Types.Literal _ -> false
-            | resolved ->
-                if
-                  not
-                    (resolved = Types.unit || resolved = Types.Never || Types.is_error resolved
-                   || resolved = Types.Hole)
-                then
-                  State.report state Unused_value (State.read_span state value.id)
-                    ~fixes:
-                      [
-                        State.fix "Discard it on purpose."
-                          [ State.insert (State.read_span state value.id).start "let _ = " ];
-                      ]
-                    (Printf.sprintf
-                       "This value of type `%s` is not used. Use it, or discard it with `let _ =`."
-                       (Types.show resolved));
-                true)
+        State.check_when_final state (fun () ->
+            let final_type = State.finalize_type state type_ in
+            if
+              not
+                (final_type = Types.unit || final_type = Types.Never || Types.is_error final_type
+               || final_type = Types.Hole)
+            then
+              State.report state Unused_value (State.read_span state value.id)
+                ~fixes:
+                  [
+                    State.fix "Discard it on purpose."
+                      [ State.insert (State.read_span state value.id).start "let _ = " ];
+                  ]
+                (Printf.sprintf
+                   "This value of type `%s` is not used. Use it, or discard it with `let _ =`."
+                   (Types.show final_type)))
   | Let { is_var; pattern = written_pattern; annotation; value; else_ } ->
       let type_ =
         match annotation with

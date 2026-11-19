@@ -43,24 +43,20 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
       State.register_expression state value (fun () -> Form.build_numeric_literal state value.id);
       let type_ = Name_lookup.infer_literal_type state ~expected Float_literal in
       let significand = number.significand and exponent = number.exponent in
-      State.defer state (fun () ->
-          match State.resolve state type_ with
-          | Types.Literal _ | Types.Variable _ -> false
-          | resolved ->
-              let rounded =
-                if Types.is_builtin Float32 resolved then
-                  Literals.round_float32 ~significand ~exponent
-                else Literals.round_float64 ~significand ~exponent
-              in
-              (match rounded with
-              | Some rounded_value ->
-                  state.tables.literals.(value.id) <- Some (Float_value rounded_value)
-              | None ->
-                  State.report state Literal_out_of_range (State.read_span state value.id)
-                    (Printf.sprintf
-                       "This literal is too large for `%s`; it would round to infinity."
-                       (Types.show resolved)));
-              true);
+      State.check_when_final state (fun () ->
+          let final_type = State.finalize_type state type_ in
+          let rounded =
+            if Types.is_builtin Float32 final_type then
+              Literals.round_float32 ~significand ~exponent
+            else Literals.round_float64 ~significand ~exponent
+          in
+          match rounded with
+          | Some rounded_value ->
+              state.tables.literals.(value.id) <- Some (Float_value rounded_value)
+          | None ->
+              State.report state Literal_out_of_range (State.read_span state value.id)
+                (Printf.sprintf "This literal is too large for `%s`; it would round to infinity."
+                   (Types.show final_type)));
       type_
   | String literal -> (
       match Pattern_typing.find_character_tag state literal with
