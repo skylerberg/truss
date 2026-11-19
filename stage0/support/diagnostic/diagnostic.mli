@@ -160,6 +160,7 @@ module Code : sig
     | Not_a_capability
     | Arity
     | Argument_kind
+    | Wrong_value_parameter_type
     | Unsatisfied_bound
     | Private_in_public
     | Method_outside_package

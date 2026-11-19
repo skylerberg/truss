@@ -160,6 +160,7 @@ module Code = struct
     | Not_a_capability
     | Arity
     | Argument_kind
+    | Wrong_value_parameter_type
     | Unsatisfied_bound
     | Private_in_public
     | Method_outside_package
@@ -429,6 +430,7 @@ module Code = struct
     | Not_a_capability -> "not_a_capability"
     | Arity -> "arity"
     | Argument_kind -> "argument_kind"
+    | Wrong_value_parameter_type -> "wrong_value_parameter_type"
     | Unsatisfied_bound -> "unsatisfied_bound"
     | Private_in_public -> "private_in_public"
     | Method_outside_package -> "method_outside_package"
