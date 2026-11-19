@@ -145,8 +145,8 @@ let rec parse_type_expression cursor : Syntax.type_expression =
   | Keyword Fn, _, _ ->
       Atoms.make_type_node cursor start (Function_type (parse_function_type cursor ~clauses:false))
   | Punctuation (Open Paren), _, _ -> parse_parenthesized_function_type cursor
-  | Upper text, Punctuation Dot, Upper _ ->
-      let parameter = Atoms.make_name cursor (Cursor.take cursor) text in
+  | Upper _, Punctuation Dot, Upper _ ->
+      let parameter = Atoms.make_name cursor (Cursor.take cursor) in
       Cursor.advance cursor;
       Atoms.make_type_node cursor start
         (Associated (parameter, Atoms.parse_upper_name cursor "an associated type"))
@@ -184,10 +184,10 @@ and parse_type_argument cursor =
   | Integer value, _ ->
       let token = Cursor.take cursor in
       Count (value, Cursor.allocate_id cursor (Cursor.make_definition_span cursor token.span))
-  | Lower text, next when next <> Punctuation Colon_colon ->
-      Count_name (Atoms.make_name cursor (Cursor.take cursor) text)
-  | Upper text, Punctuation Equal ->
-      let name = Atoms.make_name cursor (Cursor.take cursor) text in
+  | Lower _, next when next <> Punctuation Colon_colon ->
+      Count_name (Atoms.make_name cursor (Cursor.take cursor))
+  | Upper _, Punctuation Equal ->
+      let name = Atoms.make_name cursor (Cursor.take cursor) in
       Cursor.advance cursor;
       Constraint (name, parse_type_expression cursor)
   | _ -> Type_argument (parse_type_expression cursor)
@@ -202,8 +202,8 @@ and parse_function_type cursor ~clauses:with_clauses =
       ~parse_item:(fun cursor ->
         let name =
           match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
-          | Lower text, Punctuation Colon ->
-              let name = Atoms.make_name cursor (Cursor.take cursor) text in
+          | Lower _, Punctuation Colon ->
+              let name = Atoms.make_name cursor (Cursor.take cursor) in
               Cursor.advance cursor;
               Some name
           | _ -> None
@@ -303,12 +303,12 @@ and parse_generic_parameter cursor : Syntax.generic_parameter =
   let start = Cursor.index cursor in
   let kind =
     match Cursor.peek_kind cursor with
-    | Upper text ->
-        let name = Atoms.make_name cursor (Cursor.take cursor) text in
+    | Upper _ ->
+        let name = Atoms.make_name cursor (Cursor.take cursor) in
         Syntax.Type_parameter
           (name, if Cursor.accept_punctuation cursor Colon then parse_bounds cursor else [])
-    | Lower text ->
-        let name = Atoms.make_name cursor (Cursor.take cursor) text in
+    | Lower _ ->
+        let name = Atoms.make_name cursor (Cursor.take cursor) in
         Cursor.expect_punctuation cursor Colon;
         Value_parameter (name, parse_type_expression cursor)
     | _ -> Cursor.fail cursor "a generic parameter"
@@ -329,8 +329,8 @@ and parse_capability_reference cursor : Syntax.capability_reference =
              capability";
         Syntax.Self_capabilities
           (Atoms.parse_upper_name cursor "an associated capability set after `Self.`")
-    | Upper text, Punctuation Dot, Upper _ ->
-        let parameter = Atoms.make_name cursor (Cursor.take cursor) text in
+    | Upper _, Punctuation Dot, Upper _ ->
+        let parameter = Atoms.make_name cursor (Cursor.take cursor) in
         Cursor.advance cursor;
         Associated_capabilities
           (parameter, Atoms.parse_upper_name cursor "an associated capability set")
@@ -408,8 +408,8 @@ and parse_call_target cursor =
   Cursor.advance cursor;
   let target =
     match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
-    | Lower text, next when next <> Punctuation Colon_colon ->
-        Syntax.Call_parameter (Atoms.make_name cursor (Cursor.take cursor) text)
+    | Lower _, next when next <> Punctuation Colon_colon ->
+        Syntax.Call_parameter (Atoms.make_name cursor (Cursor.take cursor))
     | _ ->
         let capability = parse_path_type cursor in
         if Cursor.accept_punctuation cursor Dot then
@@ -598,8 +598,8 @@ and parse_quantified cursor =
   let quantifier = if (Cursor.take cursor).kind = Keyword Forall then Syntax.Forall else Exists in
   let binder =
     match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
-    | Lower text, Punctuation Colon ->
-        let name = Atoms.make_name cursor (Cursor.take cursor) text in
+    | Lower _, Punctuation Colon ->
+        let name = Atoms.make_name cursor (Cursor.take cursor) in
         Cursor.advance cursor;
         Syntax.Binder_type (name, parse_type_expression cursor)
     | _ ->
@@ -643,8 +643,8 @@ and parse_postfix cursor : Syntax.expression =
     | Punctuation Dot -> (
         Cursor.advance cursor;
         match Cursor.peek_kind cursor with
-        | Lower text | Upper text ->
-            let name = Atoms.make_name cursor (Cursor.take cursor) text in
+        | Lower _ | Upper _ ->
+            let name = Atoms.make_name cursor (Cursor.take cursor) in
             with_postfixes (Atoms.make_expression_node cursor start (Member (value, name)))
         | Integer _ | Float _ -> Habits.report_tuple_field cursor ~field:(Cursor.peek cursor)
         | _ -> Cursor.fail cursor "a name after `.`")
@@ -720,8 +720,8 @@ and parse_conditional cursor start condition question =
 
 and parse_bracket_item cursor =
   match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
-  | Upper text, Punctuation Equal ->
-      let name = Atoms.make_name cursor (Cursor.take cursor) text in
+  | Upper _, Punctuation Equal ->
+      let name = Atoms.make_name cursor (Cursor.take cursor) in
       Cursor.advance cursor;
       Item_constraint (name, parse_type_expression cursor)
   | _ -> Item (parse_expression cursor ~open_range:true)
@@ -735,8 +735,8 @@ and parse_arguments cursor =
 
 and parse_argument cursor =
   match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
-  | Lower text, Punctuation Colon ->
-      let label = Atoms.make_name cursor (Cursor.take cursor) text in
+  | Lower _, Punctuation Colon ->
+      let label = Atoms.make_name cursor (Cursor.take cursor) in
       Cursor.advance cursor;
       { label = Some label; value = parse_expression cursor }
   | _ -> { label = None; value = parse_expression cursor }
@@ -807,14 +807,14 @@ and parse_primary cursor : Syntax.expression =
 and parse_name_expression cursor start =
   let modules = Atoms.parse_module_prefix cursor in
   match Cursor.peek_kind cursor with
-  | Lower text ->
+  | Lower _ ->
       let token = Cursor.take cursor in
-      let name = Atoms.make_name cursor token text in
+      let name = Atoms.make_name cursor token in
       if modules = [] && macro_follows cursor ~name_stop:token.span.stop then
         parse_macro cursor start name
       else Atoms.make_expression_node cursor start (Name { modules; last = name })
-  | Upper text ->
-      let name = Atoms.make_name cursor (Cursor.take cursor) text in
+  | Upper _ ->
+      let name = Atoms.make_name cursor (Cursor.take cursor) in
       let value =
         parse_path_separators cursor start
           (Atoms.make_expression_node cursor start (Name { modules; last = name }))
@@ -829,10 +829,10 @@ and parse_name_expression cursor start =
 
 and parse_path_separators cursor start (value : Syntax.expression) =
   match (Cursor.peek cursor, Cursor.peek_ahead cursor 1) with
-  | ({ kind = Punctuation Colon_colon; _ } as separator), (Upper text | Lower text) ->
+  | ({ kind = Punctuation Colon_colon; _ } as separator), (Upper _ | Lower _) ->
       Habits.report_path_separator cursor ~separator;
       Cursor.advance cursor;
-      let name = Atoms.make_name cursor (Cursor.take cursor) text in
+      let name = Atoms.make_name cursor (Cursor.take cursor) in
       parse_path_separators cursor start
         (Atoms.make_expression_node cursor start (Member (value, name)))
   | _ -> value
