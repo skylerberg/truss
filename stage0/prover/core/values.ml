@@ -666,9 +666,7 @@ let apply_specification_function context frame ~location (measure : Core.specifi
 let copy_value ?literal (context : State.context) frame ty term =
   if
     context.counters = []
-    || Interface.Impls.is_plain context.lookups.interface
-         ~list_bounds:(Operations.compute_current_bounds context)
-         ty
+    || Interface.Impls.is_plain context.lookups.interface ~list_bounds:context.bounds ty
        && not (try Amounts.has_potential context ty with Facts.Unsupported _ -> true)
   then frame
   else

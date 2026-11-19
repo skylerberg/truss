@@ -58,6 +58,7 @@ module Code : sig
     | Loop_cost_bound
     | Function_type_names
     | Misplaced_requires
+    | Misplaced_condition
     | Misplaced_function_type
     | Misplaced_associated_type
     | Misplaced_constraint
@@ -175,6 +176,7 @@ module Code : sig
     | Redeclared_method
     | Restated_method_body
     | Restated_method_clause
+    | Decided_condition
     | Trait_cycle
     | Recursion_limit
     | Missing_member

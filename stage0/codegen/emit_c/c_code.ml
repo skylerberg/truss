@@ -24,9 +24,9 @@ let render_intrinsic (emission : Emission.t) (intrinsic : Lowered.intrinsic)
   in
   let render_flag call = Text "((uint8_t)" ++ render_runtime_call call all ++ Text ")" in
   match intrinsic with
-  | Allocate -> render_runtime_call "t_runtime_allocate" all
-  | Reallocate -> render_runtime_call "t_runtime_reallocate" all
-  | Free -> render_runtime_call "t_runtime_free" all
+  | Allocate -> render_runtime_call "truss_runtime_allocate" all
+  | Reallocate -> render_runtime_call "truss_runtime_reallocate" all
+  | Free -> render_runtime_call "truss_runtime_free" all
   | Copy_bytes -> render_runtime_call "__builtin_memcpy" all
   | Move_bytes -> render_runtime_call "__builtin_memmove" all
   | Compare_bytes -> render_application (Emission.use_helper emission Compare_bytes) all
@@ -91,14 +91,14 @@ let render_intrinsic (emission : Emission.t) (intrinsic : Lowered.intrinsic)
         (Emission.use_helper emission
            (if compute_width 0 = 32 then Float32_from_bits else Float64_from_bits))
         all
-  | Run_test -> render_runtime_call "t_runtime_run_test" all
+  | Run_test -> render_runtime_call "truss_runtime_run_test" all
   | Coroutine_start ->
-      Text "t_runtime_coroutine_start((void (*)(void *, uint64_t, void *))" ++ render_argument 0
+      Text "truss_runtime_coroutine_start((void (*)(void *, uint64_t, void *))" ++ render_argument 0
       ++ Text ", (void *)" ++ render_argument 1 ++ Text ", " ++ render_argument 2 ++ Text ")"
-  | Coroutine_resume -> render_runtime_call "t_runtime_coroutine_resume" all
-  | Coroutine_suspend -> render_runtime_call "t_runtime_coroutine_suspend" []
+  | Coroutine_resume -> render_runtime_call "truss_runtime_coroutine_resume" all
+  | Coroutine_suspend -> render_runtime_call "truss_runtime_coroutine_suspend" []
   | Tasks_spawn ->
-      Text "t_runtime_tasks_spawn(" ++ render_argument 0
+      Text "truss_runtime_tasks_spawn(" ++ render_argument 0
       ++ Text ", (void (*)(void *, uint64_t, void *))" ++ render_argument 1 ++ Text ", (void *)"
       ++ render_argument 2 ++ Text ", " ++ render_argument 3 ++ Text ")"
   | (Shared_allocate | Shared_retain | Shared_release | Shared_free | Shared_lock | Shared_unlock)
@@ -106,24 +106,25 @@ let render_intrinsic (emission : Emission.t) (intrinsic : Lowered.intrinsic)
       let symbol, result, parameters =
         match shared with
         | Shared_allocate ->
-            ("t_runtime_shared_allocate", "void *", "uint64_t size, uint64_t alignment")
-        | Shared_retain -> ("t_runtime_shared_retain", "void ", "void *value")
-        | Shared_release -> ("t_runtime_shared_release", "uint8_t ", "void *value")
-        | Shared_free -> ("t_runtime_shared_free", "void ", "void *value")
-        | Shared_lock -> ("t_runtime_shared_lock", "void ", "void *value")
-        | _ -> ("t_runtime_shared_unlock", "void ", "void *value")
+            ("truss_runtime_shared_allocate", "void *", "uint64_t size, uint64_t alignment")
+        | Shared_retain -> ("truss_runtime_shared_retain", "void ", "void *value")
+        | Shared_release -> ("truss_runtime_shared_release", "uint8_t ", "void *value")
+        | Shared_free -> ("truss_runtime_shared_free", "void ", "void *value")
+        | Shared_lock -> ("truss_runtime_shared_lock", "void ", "void *value")
+        | _ -> ("truss_runtime_shared_unlock", "void ", "void *value")
       in
       Emission.declare_prototype emission (Text symbol)
         (Text (Printf.sprintf "%s%s(%s);\n" result symbol parameters));
       render_runtime_call symbol all
   | (Blocking_begin | Blocking_end) as blocking ->
       let symbol =
-        if blocking = Blocking_begin then "t_runtime_blocking_begin" else "t_runtime_blocking_end"
+        if blocking = Blocking_begin then "truss_runtime_blocking_begin"
+        else "truss_runtime_blocking_end"
       in
       Emission.declare_prototype emission (Text symbol)
         (Text (Printf.sprintf "void %s(void);\n" symbol));
       render_runtime_call symbol []
-  | Report_tests_to -> render_runtime_call "t_runtime_report_tests_to" all
+  | Report_tests_to -> render_runtime_call "truss_runtime_report_tests_to" all
   | ( Lend_begin | Lend_called | Lend_release | Lend_transfer | Lend_allocate | Lend_defer_drop
     | Lend_defer_write_back ) as lend ->
       let name =
@@ -137,7 +138,7 @@ let render_intrinsic (emission : Emission.t) (intrinsic : Lowered.intrinsic)
         | _ -> "_defer_write_back"
       in
       render_application (Emission.use_helper emission Lend ++ Text name) all
-  | Live_blocks -> render_runtime_call "t_runtime_live_blocks" []
+  | Live_blocks -> render_runtime_call "truss_runtime_live_blocks" []
   | Environment ->
       Emission.declare_prototype emission (Text "environ") (Text "extern char **environ;\n");
       Text "((void *)environ)"
@@ -152,7 +153,7 @@ let render_intrinsic (emission : Emission.t) (intrinsic : Lowered.intrinsic)
            (List.mapi
               (fun position (text, _) ->
                 slot
-                ++ Text (Printf.sprintf "->outer[%d] = (const struct t_evidence *)" position)
+                ++ Text (Printf.sprintf "->outer[%d] = (const struct truss_evidence *)" position)
                 ++ text ++ Text ", ")
               (List.drop 3 arguments))
       ++ slot ++ Text "->evidence.outer = " ++ slot ++ Text "->outer)"
@@ -171,18 +172,18 @@ let render_intrinsic (emission : Emission.t) (intrinsic : Lowered.intrinsic)
       in
       Text "(" ++ C_text.join ", " (fill 0 (List.drop 1 arguments)) ++ Text ")"
   | Capability_find ->
-      Text "t_runtime_find_capability((const struct t_capability *)" ++ render_argument 0
+      Text "truss_runtime_find_capability((const struct truss_capability *)" ++ render_argument 0
       ++ Text ", " ++ render_argument 1 ++ Text ")"
   | Trace_link ->
       Text "(" ++ render_argument 0 ++ Text "->site = " ++ render_argument 1 ++ Text ", "
-      ++ render_argument 0 ++ Text "->caller = (const struct t_trace *)" ++ render_argument 2
+      ++ render_argument 0 ++ Text "->caller = (const struct truss_trace *)" ++ render_argument 2
       ++ Text ")"
   | Evidence_implementation ->
-      Text "((const struct t_evidence *)" ++ render_argument 0 ++ Text ")->implementation"
+      Text "((const struct truss_evidence *)" ++ render_argument 0 ++ Text ")->implementation"
   | Program_argument ->
       Text "((void *)((char **)" ++ render_argument 0 ++ Text ")[" ++ render_argument 1 ++ Text "])"
   | Evidence_outer ->
-      Text "((void *)((const struct t_evidence *)" ++ render_argument 0 ++ Text ")->outer["
+      Text "((void *)((const struct truss_evidence *)" ++ render_argument 0 ++ Text ")->outer["
       ++ render_argument 1 ++ Text "])"
 
 let render_through_table (emission : Emission.t) ~pointer (signature : Lowered.signature) arguments
@@ -259,7 +260,7 @@ let render_call (emission : Emission.t) fc (target : Lowered.target) arguments :
       let evidence = render_required evidence ~description:"evidence" in
       render_through_table emission
         ~pointer:
-          (Text "((const struct t_evidence *)" ++ evidence
+          (Text "((const struct truss_evidence *)" ++ evidence
           ++ Text (Printf.sprintf ")->table[%d]" slot))
         signature (evidence :: texts)
 
@@ -314,7 +315,7 @@ let render_statement (emission : Emission.t) fc (statement : Lowered.statement) 
               let name = C_types.render_key emission.types block in
               render_line (Text "{")
               ++ render_line
-                   (Text "  " ++ name ++ Text " *block = t_runtime_allocate(sizeof(" ++ name
+                   (Text "  " ++ name ++ Text " *block = truss_runtime_allocate(sizeof(" ++ name
                   ++ Text "), _Alignof(" ++ name ++ Text "));")
               ++ render_assignment (Text "  *block") fill
               ++ render_assignment (Text "  " ++ target) (render_value (Text "block"))
@@ -351,7 +352,7 @@ let render_statement (emission : Emission.t) fc (statement : Lowered.statement) 
   | Echo { text; length; site } ->
       Emission.record_failure emission Echo site;
       render_call_statement
-        (render_runtime_call "t_runtime_echo"
+        (render_runtime_call "truss_runtime_echo"
            [
              render_required text ~description:"an echo";
              render_required length ~description:"an echo";
@@ -366,7 +367,7 @@ let render_statement (emission : Emission.t) fc (statement : Lowered.statement) 
       match C_values.render_place emission fc place with
       | Some (text, Value sum) ->
           render_call_statement
-            (render_runtime_call "t_runtime_free"
+            (render_runtime_call "truss_runtime_free"
                [ C_values.render_block_pointer emission text sum variant ])
       | _ -> C_runtime.raise_bug "a block of a place that is not a sum type")
   | Defer_free_block { lend; place; variant } -> (
@@ -385,15 +386,16 @@ let render_statement (emission : Emission.t) fc (statement : Lowered.statement) 
       in
       render_line (Text "{")
       ++ render_line
-           (Text (Printf.sprintf "  const struct t_branch branches[%d] = { " (List.length branches))
+           (Text
+              (Printf.sprintf "  const struct truss_branch branches[%d] = { " (List.length branches))
            ++ C_text.join ", " (List.map render_branch branches)
            ++ Text " };")
       ++ render_line
-           (Text (Printf.sprintf "  t_runtime_parallel(branches, %d);" (List.length branches)))
+           (Text (Printf.sprintf "  truss_runtime_parallel(branches, %d);" (List.length branches)))
       ++ render_line (Text "}")
   | Fork_range { body; environment; first; last } ->
       render_call_statement
-        (render_runtime_call "t_runtime_parallel_range"
+        (render_runtime_call "truss_runtime_parallel_range"
            [
              Text "&" ++ Name (Nested_function body);
              Text "(void *)" ++ render_required environment ~description:"an operand";
@@ -475,9 +477,9 @@ let render_terminator (emission : Emission.t) fc (terminator : Lowered.terminato
       if failure = Lowered.Todo then Emission.record_failure emission Todo site;
       let runtime =
         match failure with
-        | Panic -> "t_runtime_panic"
-        | Assertion -> "t_runtime_assertion_failed"
-        | Todo -> "t_runtime_todo"
+        | Panic -> "truss_runtime_panic"
+        | Assertion -> "truss_runtime_assertion_failed"
+        | Todo -> "truss_runtime_todo"
       in
       let arguments =
         match (failure, trace) with

@@ -1,0 +1,11 @@
+fn helper() -> Int64 {
+  1
+}
+
+fn three() -> Int64 {
+  3
+}
+
+test "three is four" {
+  assert three() == 4
+}

@@ -1,0 +1,7 @@
+fn letters(word: StringSlice) -> List[Character] {
+  List.collect(word.characters())
+}
+
+fn first_three(values: List[Int64]) -> List[Int64] {
+  List.collect(values.cursor().skip(1).take(3))
+}

@@ -1,0 +1,15 @@
+trait Measured {
+  fn size(self) -> UInt64
+}
+
+fn five[Value](value: Value) -> UInt64
+  ensures result == 5 when Value: Measured
+{
+  5
+}
+
+fn caller(value: Int64) -> UInt64
+  ensures result == 5
+{
+  five(value)
+}

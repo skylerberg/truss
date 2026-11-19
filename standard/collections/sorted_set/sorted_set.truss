@@ -316,7 +316,7 @@ fn combined[Element: Ordered + Copyable](
 public fn collections::SortedSet[Element: Ordered].collect[Source: Cursor[Element = Element]](
   source: own Source,
 ) -> collections::SortedSet[Element]
-  uses Source.Uses, RunForever
+  uses Source.Uses, RunForever unless Source: FiniteCursor
 {
   set_of(List.collect(own source))
 }
@@ -511,7 +511,7 @@ public fn collections::SortedSet[Element: Ordered].extend[Source: Cursor[Element
   mut self,
   elements: own Source,
 )
-  uses Source.Uses, RunForever
+  uses Source.Uses, RunForever unless Source: FiniteCursor
 {
   let added = set_of(List.collect(own elements))
   if self.elements.is_empty() {

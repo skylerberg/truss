@@ -1,0 +1,5 @@
+fn f() -> UInt8 {
+  match 3 {
+    count => count
+  }
+}

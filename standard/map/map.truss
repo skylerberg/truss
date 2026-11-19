@@ -281,7 +281,7 @@ public fn Map[Key: Hash + Ordered, Value].seeded() -> Map[Key, Value]
 public fn Map[Key: Hash + Ordered, Value].collect[Source: Cursor[Element = Entry[Key, Value]]](
   source: own Source,
 ) -> Map[Key, Value]
-  uses Source.Uses, RunForever
+  uses Source.Uses, RunForever unless Source: FiniteCursor
 {
   var map: Map[Key, Value] = [:]
   mut map.extend(own source)
@@ -423,12 +423,13 @@ public fn Map[Key: Hash + Ordered, Value].extend[Source: Cursor[Element = Entry[
   mut self,
   entries: own Source,
 )
-  uses Source.Uses, RunForever
+  uses Source.Uses, RunForever unless Source: FiniteCursor
 {
   var cursor = own entries
   while mut cursor.next() is Some(entry)
     invariant forall i in 0..self.entries.length() => forall j in 0..self.entries.length() =>
       i < j ==> !(self.entries.model()[i].key == self.entries.model()[j].key)
+    decreases cursor.remaining() when Source: FiniteCursor
   {
     mut self.insert(own entry.key, value: own entry.value)
   }

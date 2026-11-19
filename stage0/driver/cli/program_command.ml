@@ -11,11 +11,11 @@ let require_main database packages =
          no program."
         (Path.show_package package)
 
-let refuse_unshippable snapshot packages lookups main proofs =
+let refuse_unshippable snapshot lookups main proofs =
   let in_code =
     List.map
       (fun ({ failure; location = { file; line; column }; way } : Backend.unshippable) ->
-        ( Command_packages.show_file snapshot packages file,
+        ( Workspace.locate_file snapshot file,
           line,
           column,
           (failure :> [ `Todo | `Echo | `Proof_hole ]),
@@ -27,7 +27,7 @@ let refuse_unshippable snapshot packages lookups main proofs =
       (fun definition ->
         List.map
           (fun (file, line, column) -> (file, line, column, `Proof_hole, [ definition ]))
-          (Proofs.list_holes snapshot packages proofs definition))
+          (Proofs.list_holes snapshot proofs definition))
       (Backend.list_reached_definitions lookups main)
   in
   match List.sort_uniq compare (in_code @ in_proofs) with
@@ -74,8 +74,8 @@ let build_program ?output snapshot packages (profile : Backend.profile) ~is_kept
   Report.require_no_errors report;
   let main = require_main database packages in
   let lookups = Workspace_backend.require_lowered_lookups database packages in
-  Option.iter (refuse_unshippable snapshot packages lookups main) (Report.force_proofs report);
-  let backend = Workspace_backend.create snapshot packages lookups profile in
+  Option.iter (refuse_unshippable snapshot lookups main) (Report.force_proofs report);
+  let backend = Workspace_backend.create snapshot lookups profile in
   let output = Option.value output ~default:(Backend.make_program_path backend) in
   match Backend.build_program backend ~main ~output ~is_kept with
   | Error message -> Outcome.raise_cannot_run "%s" message

@@ -334,7 +334,7 @@ let () =
       in
       match
         C_compiler.For_testing.compile_objects c_compiler Release
-          [ ("startup", Startup.render_program_start "t_entry") ]
+          [ ("startup", Startup.render_program_start "truss_entry") ]
       with
       | Ok [ path ] ->
           let object_bytes = In_channel.with_open_bin path In_channel.input_all in

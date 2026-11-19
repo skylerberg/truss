@@ -1,6 +1,6 @@
 let run_in_specification state (env : State.env) (value : Syntax.expression) check =
   let env = { env with specification = true } in
-  State.run_in_statement state env (State.read_span state value.id) (fun () -> check env)
+  Solver.run_in_statement state env (State.read_span state value.id) (fun () -> check env)
 
 let check_condition state env value =
   run_in_specification state env value (fun env -> Hooks.check state env value Types.bool)
@@ -8,9 +8,8 @@ let check_condition state env value =
 let check_integer state env (value : Syntax.expression) ~described =
   run_in_specification state env value (fun env ->
       ignore
-        (State.narrow state (Hooks.check_expression state env value)
-           (Types.integer_types @ [ Language.Builtin_type.Integer ])
-           ~report_excluded:(fun excluded ->
+        (Solver.require_within state (Hooks.check_expression state env value)
+           (Types.integer_types @ [ Language.Builtin_type.Integer ]) ~reason:(fun excluded ->
              State.add_diagnostic state Mismatch (State.read_span state value.id)
                (Printf.sprintf "%s is an integer, not %s." described (State.describe state excluded)))))
 
@@ -104,3 +103,20 @@ let check_cost state env (cost : Syntax.cost) =
       List.iter (check_cost_operand state cost)
         (Interface.Elaborator.list_cost_operands state.context bound);
       check_integer state env bound ~described:"A cost bound"
+
+let check_under_condition state ~id (written : Syntax.condition option) check =
+  match (written, State.record_condition state id written) with
+  | _, Some condition -> State.apply_condition_bounds state condition check
+  | Some _, None ->
+      State.report state Decided_condition (State.read_span state id)
+        "This clause's condition never holds where it is written, so the clause would bind \
+         nothing. Remove the clause, or name a type parameter in its condition."
+  | None, None -> State.raise_bug "a clause without a condition never holds"
+
+let build_under_condition state ~id (written : Syntax.condition option) build :
+    'clause Core.conditional option =
+  match (State.find_condition state id, written) with
+  | Some holds_when, _ ->
+      Some { holds_when; clause = State.apply_condition_bounds state holds_when build }
+  | None, None -> Some { holds_when = []; clause = build () }
+  | None, Some _ -> None

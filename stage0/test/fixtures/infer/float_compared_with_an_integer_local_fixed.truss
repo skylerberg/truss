@@ -1,0 +1,4 @@
+fn f(ratio: Float64) -> Bool {
+  let limit = 3.0
+  ratio < limit
+}

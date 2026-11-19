@@ -175,8 +175,10 @@ let find_capability_reach (context : State.context) ~(uses : Types.capability_se
                 | Some _ -> Not_reached
                 | None -> Reached_directly)
                 providers
-          | Capability_error _ -> Facts.raise_bug "the prover reads a capability with an error"))
-      Not_reached (Types.list_capabilities uses)
+          | Capability_error _ -> Facts.raise_bug "the prover reads a capability with an error"
+          | Capability_unless _ -> Facts.raise_bug "a capability's base has a condition"))
+      Not_reached
+      (List.map Types.find_base (Types.list_capabilities uses))
   in
   reach context.enclosing_provides uses
 
@@ -644,9 +646,7 @@ let find_method_cost_bound context (metric : Language.Metric.t) (method_ : Path.
   | Method { owner = trait; name; receiver } -> (
       if Well_known.is Copyable trait then
         if
-          Interface.Impls.is_plain context.lookups.interface
-            ~list_bounds:(Operations.compute_current_bounds context)
-            self_type
+          Interface.Impls.is_plain context.lookups.interface ~list_bounds:context.bounds self_type
           && not (holds self_type)
         then Some (Costs.least_amount (Metric metric))
         else None

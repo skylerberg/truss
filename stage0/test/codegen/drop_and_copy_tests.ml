@@ -80,7 +80,7 @@ let () =
           (Lowering.For_testing.copy drop_and_copy (make_storage_type Codegen_support.int32))
       in
       let count sub = String.find_all ~sub (fun _ matches -> matches + 1) c 0 in
-      if count "t_runtime_allocate(" <> 1 || count "__builtin_memcpy(" <> 1 then
+      if count "truss_runtime_allocate(" <> 1 || count "__builtin_memcpy(" <> 1 then
         Codegen_support.fail "the copy does not allocate and copy once:\n%s" c);
   Codegen_support.test "a copy of storage keeps its values when the original is mutated" (fun () ->
       let ty = make_storage_type Codegen_support.int32 in

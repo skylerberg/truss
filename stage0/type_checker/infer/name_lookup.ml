@@ -16,12 +16,7 @@ let describe_missing_method state type_ name =
         (State.show state type_) name (State.show state view)
   | None -> Printf.sprintf "`%s` has no method `%s`." (State.show state type_) name
 
-let rec coerce state env ?argument ?takes_view_as_owner (value : Syntax.expression) ~actual
-    ~expected =
-  State.convert state env ?argument ?takes_view_as_owner ~expression:value.id
-    (State.read_span state value.id) ~actual ~expected
-
-and check_name (state : State.state) (env : State.env) (value : Syntax.expression)
+let rec check_name (state : State.state) (env : State.env) (value : Syntax.expression)
     ({ name; target; type_arguments } : Resolve.head) =
   let text = name.text in
   match target with
@@ -376,26 +371,6 @@ and list_trait_static_methods (state : State.state) path name receiver =
     (Resolve.Names.list_visible_traits_declaring state.lookups.interface.names
        ~from:state.key.module_ name)
 
-and check_implements ?(code : Diagnostic.Code.types = No_impl) state
-    (span : Source.Definition_span.t) self_type (reference : Types.trait_reference) =
-  State.defer state (fun () ->
-      let self_type = State.zonk state self_type in
-      let reference = State.solve_trait_arguments state self_type reference in
-      if
-        Types.contains_unsolved self_type
-        || List.exists Types.is_unsolved_argument reference.trait_arguments
-      then false
-      else begin
-        if
-          Option.is_none (State.find_evidence state self_type reference)
-          && not (Types.is_error self_type)
-        then
-          State.report state code span
-            (Printf.sprintf "`%s` does not implement `%s`." (Types.show self_type)
-               (Types.show_trait reference));
-        true
-      end)
-
 and list_trait_candidates (state : State.state) receiver_type name =
   let with_method (trait : Types.trait_reference) =
     match
@@ -527,7 +502,7 @@ and find_method_version state (span : Source.Definition_span.t) type_ name
           let instance, callee =
             instantiate_trait_method state span ~self_type:type_ trait method_
           in
-          check_implements ~code:Not_indexable state span type_ trait;
+          Solver.require state (Loop span) type_ trait;
           Visible (callee, (instance : Instantiation.instance).signature)
       | Some (View_overload _) | None -> Absent)
 
@@ -554,10 +529,12 @@ and instantiate_trait_method state span ~self_type (trait : Types.trait_referenc
 and make_argumentless_call callee result : Tables.call =
   { callee; arguments = []; omitted_defaults = []; callee_result = result }
 
-and find_elements_calls state (span : Source.Definition_span.t) type_ (mode : Language.Mode.t) :
+and find_elements_calls state (iterable : Syntax.expression) type_ (mode : Language.Mode.t) :
     (Tables.loop * Types.ty * Language.Mode.t) Resolve.Names.lookup =
-  let receiver = Path.Instance mode in
-  let is_uint64 type_ = Types.is_builtin UInt64 (State.normalize state type_) in
+  let span = State.read_span state iterable.id and receiver = Path.Instance mode in
+  let is_uint64 type_ =
+    Types.is_builtin UInt64 (Conversions.read_actual_head state iterable type_)
+  in
   match
     ( find_method_version state span type_ "count" (Instance Read),
       find_method_version state span type_ "element" receiver )
@@ -580,11 +557,12 @@ and find_elements_calls state (span : Source.Definition_span.t) type_ (mode : La
   | Hidden hidden, (Visible _ | Hidden _) | Visible _, Hidden hidden -> Hidden hidden
   | Absent, _ | _, Absent -> Absent
 
-and find_consuming_cursor state (span : Source.Definition_span.t) type_ :
+and find_consuming_cursor state (iterable : Syntax.expression) type_ :
     (Tables.loop * Types.ty) Resolve.Names.lookup =
+  let span = State.read_span state iterable.id in
   match find_method_version state span type_ "cursor" (Instance Own) with
   | Visible (callee, { parameters = []; output = Returns cursor; _ }) -> (
-      let cursor = State.normalize state cursor in
+      let cursor = Conversions.read_actual_head state iterable cursor in
       let trait = State.make_trait_reference ~arguments:[] (Well_known.make_path Cursor) in
       match State.find_evidence state cursor trait with
       | Some _ ->
@@ -604,12 +582,21 @@ and find_remaining_call state (span : Source.Definition_span.t) cursor =
   let finite_cursor =
     State.make_trait_reference ~arguments:[] (Well_known.make_path Finite_cursor)
   in
+  let make_call () =
+    let { Well_known.name; receiver; _ } = Well_known.locate_method Finite_cursor_remaining in
+    let _, callee =
+      instantiate_trait_method state span ~self_type:cursor finite_cursor
+        { method_name = name; method_receiver = receiver; provided = false }
+    in
+    make_argumentless_call callee (Types.make_builtin UInt64)
+  in
+  let is_on_a_parameter (bound : Types.bound_condition) =
+    match bound.subject with Types.Parameter _ -> true | _ -> false
+  in
   match State.find_evidence state cursor finite_cursor with
-  | Some _ ->
-      let { Well_known.name; receiver; _ } = Well_known.locate_method Finite_cursor_remaining in
-      let _, callee =
-        instantiate_trait_method state span ~self_type:cursor finite_cursor
-          { method_name = name; method_receiver = receiver; provided = false }
-      in
-      Some (make_argumentless_call callee (Types.make_builtin UInt64))
-  | None -> None
+  | Some _ -> Some ([], make_call ())
+  | None -> (
+      match State.reduce_condition state [ { subject = cursor; bound = finite_cursor } ] with
+      | Some (_ :: _ as condition) when List.for_all is_on_a_parameter condition ->
+          Some (condition, State.apply_condition_bounds state condition make_call)
+      | Some _ | None -> None)

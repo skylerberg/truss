@@ -1,0 +1,16 @@
+fn pull[Source: Cursor](source: mut Source) -> Option[Source.Element]
+  uses Source.Uses
+  ensures (result is Some(_)) ==> source.remaining() < old(source.remaining())
+    when Source: FiniteCursor
+{
+  mut source.next()
+}
+
+fn decreased(values: own List[Int64]) -> Bool
+  ensures result
+{
+  var cursor = own values.cursor()
+  let before = cursor.remaining()
+  let first = pull(mut cursor)
+  !(first is Some(_)) || cursor.remaining() < before
+}

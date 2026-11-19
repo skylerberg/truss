@@ -25,7 +25,7 @@ let list_runs database snapshot packages proofs =
   | [] -> []
   | checks ->
       run_template_checks
-        (Workspace_backend.create snapshot packages
+        (Workspace_backend.create snapshot
            (Workspace_backend.require_lowered_lookups database packages)
            Development)
         checks
@@ -46,7 +46,7 @@ let check database snapshot packages files =
 let list_diagnostics checked file = Prover.list_diagnostics (Lazy.force checked.verdicts) file
 let list_states checked file = Prover.list_states (Lazy.force checked.verdicts) file
 
-let list_holes snapshot packages checked definition =
+let list_holes snapshot checked definition =
   List.map
-    (fun (file, line, column) -> (Command_packages.show_file snapshot packages file, line, column))
+    (fun (file, line, column) -> (Workspace.locate_file snapshot file, line, column))
     (Database.list_holes checked.proofs definition)

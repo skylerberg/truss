@@ -1,0 +1,4 @@
+fn pick[Value: Add[Int64] + Add[UInt64]](first: Value, second: Value, wide: UInt64, is_wide: Bool) -> Bool {
+  let _ = if is_wide { first + wide } else { second + 1 }
+  is_wide
+}

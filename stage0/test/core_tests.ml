@@ -322,7 +322,9 @@ let () =
           | Order_of _ -> "of an order"
           | At_most _ -> "at most"
           | Exactly _ -> "exactly")
-        (read_contract form).costs)
+        (List.map
+           (fun (cost : Core.cost Core.conditional) -> cost.clause)
+           (read_contract form).costs))
     [
       "calls through visit exactly";
       "calls of standard::capabilities::Clock.now at most";
@@ -381,7 +383,7 @@ let () =
           | ( Some { definition = Function { contract = { costs = [ cost ]; _ }; _ }; _ },
               spans,
               written ) ->
-              let span = spans.(cost.origin) in
+              let span = spans.(cost.clause.origin) in
               let quoted = String.sub written span.start (span.stop - span.start) in
               if quoted <> "cost time O(items.length())" then Harness.fail "found `%s`" quoted
           | _ -> Harness.fail "no core form with exactly one cost")
