@@ -1,0 +1,5 @@
+let size: UInt64 = 4
+
+fn filled() -> Array[Int64, size] {
+  todo
+}

@@ -197,15 +197,10 @@ and check_type_argument state (value : Syntax.expression) : Types.argument =
   | Integer value, _ -> Types.Value (Known value)
   | _, Some { target = Value_parameter parameter; _ } -> Types.Value (Value_parameter parameter)
   | _, Some { target = Definition (Constant, path); name; _ } -> (
-      match state.lookups.interface.find_constant_value path with
-      | Some value -> Types.Value (Known value)
-      | None ->
-          Types.Type
-            (State.make_error_type state Arity (State.read_span state value.id)
-               (Printf.sprintf
-                  "The value of `%s` cannot be computed: a constant used in a type cannot refer to \
-                   itself, and is made of literals, arithmetic, and other such constants."
-                  name.text)))
+      match Interface.Constants.evaluate_count state.lookups.interface path ~written:name.text with
+      | Ok value -> Types.Value (Known value)
+      | Error message ->
+          Types.Type (State.make_error_type state Arity (State.read_span state value.id) message))
   | _ -> (
       match find_static state value with
       | Some (Static_type type_) -> Types.Type type_

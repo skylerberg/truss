@@ -305,6 +305,7 @@ and check_explicit_type_arguments ?(head = 0) state (value : Syntax.expression) 
                    | Types.Value written, Types.Value own ->
                        ignore (Unify.unify_value state.unifier written own);
                        []
+                   | Types.Type (Types.Error _ as reported), Types.Value _ -> [ reported ]
                    | Types.Type _, Types.Value _ ->
                        [
                          State.make_error_type state Argument_kind (State.read_span state value.id)

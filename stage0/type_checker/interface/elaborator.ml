@@ -116,13 +116,6 @@ let show_path (path : Syntax.path) =
   String.concat "::"
     (List.map (fun (name : Syntax.name) -> name.text) (path.modules @ [ path.last ]))
 
-let is_uint64 (lookups : Lookups.t) path =
-  match Resolve.Names.find_definition lookups.names path with
-  | Some (key, { kind = Constant { type_ = { kind = Path_type written; _ }; _ }; _ }) ->
-      (lookups.read_resolved Interface key).names.(written.path.last.id)
-      = Some (Definition (Type, Well_known.make_builtin_type_path UInt64))
-  | _ -> false
-
 let rec elaborate_type context (written : Syntax.type_expression) : Types.ty =
   match written.kind with
   | Path_type path -> elaborate_path_type context path
@@ -234,21 +227,10 @@ and elaborate_count_name context (name : Syntax.name) : Types.argument =
   match find_target context name with
   | Some (Value_parameter parameter) -> Types.Value (Types.Value_parameter parameter)
   | Some (Definition (Constant, path)) -> (
-      if not (is_uint64 context.lookups path) then
-        Types.Type
-          (report_error_type context Arity context.spans.(name.id)
-             (Printf.sprintf "`%s` in a type argument must be a constant of type `UInt64`."
-                name.text))
-      else
-        match context.lookups.find_constant_value path with
-        | Some value -> Types.Value (Types.Known value)
-        | None ->
-            Types.Type
-              (report_error_type context Arity context.spans.(name.id)
-                 (Printf.sprintf
-                    "The value of `%s` cannot be computed: a constant used in a type cannot refer \
-                     to itself, and is made of literals, arithmetic, and other such constants."
-                    name.text)))
+      match Constants.evaluate_count context.lookups path ~written:name.text with
+      | Ok value -> Types.Value (Types.Known value)
+      | Error message ->
+          Types.Type (report_error_type context Arity context.spans.(name.id) message))
   | Some (Unknown report) -> Types.Type (Types.Error report)
   | _ -> raise_bug "`%s` is not resolved as a type argument" name.text
 

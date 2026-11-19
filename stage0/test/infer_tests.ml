@@ -1149,6 +1149,14 @@ let () =
       expect_one_diagnostic Fixtures.Infer.uint8_accented_literal "types.character_scalar_count");
   Harness.test "a negated literal of an unsigned type is one error" (fun () ->
       expect_one_diagnostic Fixtures.Infer.uint8_let_of_minus_one "types.negated_unsigned");
+  Harness.test "a constant of type UInt64 is a type argument in an expression" (fun () ->
+      expect_fine Fixtures.Infer.width_given_a_uint64_constant);
+  Harness.test "a constant of another type is not a type argument in an expression" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.width_given_an_int64_constant "types.arity"
+        ~says:"`size` in a type argument must be a constant of type `UInt64`.");
+  Harness.test "a constant whose value is not computed is one error as a type argument" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.width_given_an_unevaluated_constant "types.arity"
+        ~says:"The value of `size` cannot be computed");
   Harness.test "explicit type arguments give exactly the function's own" (fun () ->
       expect_one_diagnostic Fixtures.Infer.pick_with_one_type_argument "types.arity");
   Harness.test
