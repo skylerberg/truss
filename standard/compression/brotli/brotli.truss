@@ -588,6 +588,11 @@ fn append_affix(output: mut List[UInt8], affix: UInt64) {
   }
 }
 
+theorem every_copy_length_base_is_at_least_two()
+  ensures forall code in 0..copy_length_bases.length() => copy_length_bases[code] >= 2
+{
+}
+
 fn decode_compressed(bits: mut Bits, stream: mut Stream, output: mut List[UInt8], length: UInt64) -> Result[Unit, Error] {
   var literal_blocks = read_blocks(bits: mut bits)?
   var command_blocks = read_blocks(bits: mut bits)?
@@ -630,6 +635,7 @@ fn decode_compressed(bits: mut Bits, stream: mut Stream, output: mut List[UInt8]
     let insert_length = insert_length_bases[insert_code].saturating_add(intrinsic::convert[UInt32, UInt64](mut bits.read(insert_length_bits[insert_code])))
     let copy_length = copy_length_bases[copy_code].saturating_add(intrinsic::convert[UInt32, UInt64](mut bits.read(copy_length_bits[copy_code])))
     proof {
+      every_copy_length_base_is_at_least_two()
       assert copy_length >= 2
     }
     if insert_length > end - output.length() {
