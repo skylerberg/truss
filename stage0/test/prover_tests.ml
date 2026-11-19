@@ -2178,7 +2178,7 @@ let () =
             Harness.fail "ran the solver again"
       | Error message, _ | _, Error message -> Harness.fail "%s" message);
   Harness.test "a counterexample's values are read back from the cache" (fun () ->
-      let query = make_self_comparison "<" in
+      let query = make_self_comparison Logic.Less in
       let request =
         Solver.make_request
           ~symbols:[ Logic.Symbol.Variable { label = "compared"; numbers = [] } ]
