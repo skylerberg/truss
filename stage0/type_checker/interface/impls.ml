@@ -466,7 +466,6 @@ and project_declared_type lookups ~list_bounds ?defining type_ (trait : Types.tr
                 (any :: Properties.list_bound_closure lookups ~self:type_ any)
           | _ -> None)
       | Some Built_in -> None
-      | Some (Accepted (Types.Variable _)) -> None
       | Some (Accepted unknown) -> Some unknown
       | None -> None)
 
@@ -578,7 +577,7 @@ and normalize lookups ~list_bounds ?defining (type_ : Types.ty) : Types.ty =
           let base = normalize base in
           let trait = read_declaring_type_trait lookups ~base trait name in
           match base with
-          | Types.Variable _ | Types.Hole -> Some (Types.Projection { base; trait; name })
+          | Types.Hole -> Some (Types.Projection { base; trait; name })
           | Types.Error _ -> Some base
           | Types.Parameter _ | Types.Projection _ -> (
               match project_declared_type base trait name with

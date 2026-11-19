@@ -28,10 +28,10 @@ let check_grants_when_final state at subject (trait : Types.trait_reference) =
         Option.iter (check_evidence_grants state at)
           (State.find_evidence state subject { trait with associated = [] }))
 
-let require_bounds state at ?of_type generics substitution =
+let require_bounds state at ?of_type ?projections generics substitution =
   List.iter
     (fun (argument, bound) ->
-      Solver.require state (Bound { at; of_type }) argument bound;
+      Solver.require state (Bound { at; of_type }) ?projections argument bound;
       check_grants_when_final state at argument bound)
     (Interface.Impls.list_required_bounds generics substitution)
 
@@ -150,6 +150,7 @@ type instance = {
   signature : Types.signature;
   substitution : Types.substitution;
   instantiation : Types.instantiation;
+  flatten : Types.ty -> Types.ty;
 }
 
 let instantiate (state : State.state) (span : Source.Definition_span.t)
@@ -167,12 +168,23 @@ let instantiate (state : State.state) (span : Source.Definition_span.t)
   let substitution =
     Types.combine_substitutions (Types.make_signature_substitution signature instantiation) extra
   in
-  require_bounds state span signature.generics substitution;
+  let projections = ref [] in
+  require_bounds state span ~projections signature.generics substitution;
+  let flatten = Solver.flatten state (Bound { at = span; of_type = None }) ~projections in
+  let substituted = Types.substitute_signature substitution signature in
   {
     declared = signature;
-    signature = Types.substitute_signature substitution signature;
+    signature =
+      {
+        substituted with
+        output =
+          (match substituted.output with
+          | Returns output -> Returns (flatten output)
+          | Lends (mode, part) -> Lends (mode, flatten part));
+      };
     substitution;
     instantiation;
+    flatten;
   }
 
 let find_intrinsic_signature path =

@@ -293,7 +293,8 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
               | _ -> ());
               match
                 Calls.check_arguments state env value instance.signature.parameters
-                  ~declared:instance.declared.parameters arguments ~has_receiver:false
+                  ~declared:instance.declared.parameters ~flatten:instance.flatten arguments
+                  ~has_receiver:false
               with
               | Error error -> error
               | Ok (checked, left_out) ->
@@ -443,7 +444,7 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
   in
   match
     Calls.check_arguments state env value instance.signature.parameters
-      ~declared:instance.declared.parameters arguments
+      ~declared:instance.declared.parameters ~flatten:instance.flatten arguments
       ~has_receiver:(Option.is_some instance.signature.receiver)
   with
   | Error error -> error
@@ -520,7 +521,8 @@ and check_capability_call state env (value : Syntax.expression) capability (memb
       in
       match
         Calls.check_arguments state env value instance.signature.parameters
-          ~declared:instance.declared.parameters arguments ~has_receiver:false
+          ~declared:instance.declared.parameters ~flatten:instance.flatten arguments
+          ~has_receiver:false
       with
       | Error error -> error
       | Ok (checked, left_out) ->
@@ -711,7 +713,8 @@ and check_method_with_receiver state env ?expected ?(type_arguments = [])
           | _ -> ());
           match
             Calls.check_arguments state env value instance.signature.parameters
-              ~declared:instance.declared.parameters arguments ~has_receiver:true
+              ~declared:instance.declared.parameters ~flatten:instance.flatten arguments
+              ~has_receiver:true
           with
           | Error error -> error
           | Ok (checked, left_out) ->
@@ -766,7 +769,8 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
       | Ok () -> (
           match
             Calls.check_arguments state env value instance.signature.parameters
-              ~declared:instance.declared.parameters arguments ~has_receiver:true
+              ~declared:instance.declared.parameters ~flatten:instance.flatten arguments
+              ~has_receiver:true
           with
           | Error error -> error
           | Ok (checked, left_out) ->

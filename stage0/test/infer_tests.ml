@@ -628,6 +628,77 @@ let () =
       | reported -> Harness.fail "reported [%s]" (String.concat "; " reported))
 
 let () =
+  Harness.test
+    "a bound that a literal local's default type fails is one error, with a fix to the one type \
+     that meets it" (fun () ->
+      let text = Fixtures.Infer.literal_local_passed_to_a_parameter_bounded_by_add_of_uint8 in
+      expect_one_diagnostic text "types.unsatisfied_bound" ~says:"needs `Int64: Add[UInt8]`"
+        ~fixed:Fixtures.Infer.literal_local_passed_to_a_parameter_bounded_by_add_of_uint8_fixed;
+      expect_fix_titles text [ "Declare `first` as a `UInt8`." ]);
+  Harness.test
+    "a literal for an associated type of another argument waits for that argument, in either order"
+    (fun () -> expect_fine Fixtures.Infer.literal_for_an_associated_type_of_another_argument);
+  Harness.test "an associated type of a literal argument waits for the literal's type" (fun () ->
+      let text = Fixtures.Infer.literal_passed_to_a_function_returning_an_associated_type in
+      expect_fine text;
+      expect_type text "doubled(3)" "UInt8";
+      expect_type text "doubled(3)" ~occurrence:2 "Int64");
+  Harness.test "an associated type of a call's argument converts to the parameter's view" (fun () ->
+      expect_fine Fixtures.Infer.view_of_an_associated_type_argument);
+  Harness.test
+    "a field read from a value of a generic type leaves a literal type argument undecided"
+    (fun () ->
+      let text = Fixtures.Infer.field_of_a_structure_of_a_literal_type in
+      expect_fine text;
+      expect_type text "first" ~occurrence:2 "Int8");
+  Harness.test "an associated type of an earlier statement's literal is decided with the literal"
+    (fun () ->
+      let text = Fixtures.Infer.associated_type_of_an_earlier_literal in
+      expect_fine text;
+      expect_type text "sum" ~occurrence:2 "Int64");
+  Harness.test "an associated type of a literal argument waits for the literal when it is compared"
+    (fun () ->
+      expect_fine
+        Fixtures.Infer.literal_passed_to_a_function_returning_an_associated_type_of_its_bound);
+  Harness.test "a method of an associated type of an earlier statement's literal is found"
+    (fun () -> expect_fine Fixtures.Infer.method_of_an_associated_type_of_an_earlier_literal);
+  Harness.test "an associated type of a literal that a use needs takes the literal's default"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.associated_type_of_a_literal_mismatched_with_its_use
+        "types.mismatch" ~says:"Expected `UInt8`, found `Int64`.");
+  Harness.test
+    "an associated type of a sealed bound on a literal argument is the default type's when compared"
+    (fun () ->
+      let float = Fixtures.Infer.bits_of_a_float_literal_compared_with_a_literal in
+      expect_fine float;
+      expect_type float "bits_of(1.5)" "UInt64";
+      let integer = Fixtures.Infer.unsigned_of_an_integer_literal_compared_with_a_literal in
+      expect_fine integer;
+      expect_type integer "unsigned_of(3)" "UInt64");
+  Harness.test
+    "a literal for an associated type of a literal local's argument leaves the local to a later \
+     statement" (fun () ->
+      let text = Fixtures.Infer.literal_for_an_associated_type_of_a_literal_local_argument in
+      expect_fine text;
+      expect_type text "5" "UInt8";
+      expect_type text "first" ~occurrence:2 "UInt8");
+  Harness.test
+    "a loop over an unknown type whose element takes an associated type as its position cannot be \
+     inferred" (fun () ->
+      match
+        Support.list_codes
+          (check
+             (Support.setup
+                [
+                  ( "app::main",
+                    Fixtures.Infer.loop_over_an_unknown_whose_element_takes_an_associated_type );
+                ])
+             (Support.parse_file "app::main"))
+      with
+      | [ "types.cannot_infer"; "types.not_indexable" ] -> ()
+      | reported -> Harness.fail "reported [%s]" (String.concat "; " reported))
+
+let () =
   Harness.test "comparing integer types that differ is an error with a fix that converts" (fun () ->
       expect_one_diagnostic Fixtures.Infer.comparison_of_uint64_and_uint32
         "types.mismatched_integers" ~fixed:Fixtures.Infer.comparison_of_uint64_and_uint32_fixed);

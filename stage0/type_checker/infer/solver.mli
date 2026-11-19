@@ -1,7 +1,11 @@
+val flatten :
+  State.state -> State.cause -> ?projections:(Types.ty * Types.ty) list ref -> Types.ty -> Types.ty
+
 val require :
   State.state ->
   State.cause ->
   ?outputs:(string * Types.ty) list ->
+  ?projections:(Types.ty * Types.ty) list ref ->
   Types.ty ->
   Types.trait_reference ->
   unit
@@ -11,6 +15,14 @@ val require_within :
   Types.ty ->
   Language.Builtin_type.t list ->
   reason:(Types.ty -> Diagnostic.reported) ->
+  Types.ty
+
+val resolve_associated_type :
+  State.state ->
+  Types.ty ->
+  Types.trait_reference ->
+  Well_known.associated ->
+  at:Source.Definition_span.t ->
   Types.ty
 
 val decide_default :

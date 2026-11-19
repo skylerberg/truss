@@ -210,15 +210,6 @@ val decide_property :
 val is_plain : state -> Types.ty -> bool
 val is_view : state -> Types.ty -> bool
 val decide_binding_mode : state -> Language.Mode.t -> Types.ty -> Language.Mode.t
-
-val resolve_associated_type :
-  state ->
-  Types.ty ->
-  Types.trait_reference ->
-  Well_known.associated ->
-  at:Source.Definition_span.t ->
-  Types.ty
-
 val make_callee : state -> Core.operand Core.target -> Core.callee
 
 val make_call :

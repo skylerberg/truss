@@ -116,6 +116,7 @@ val substitute_condition : substitution -> condition -> condition
 val map_conditions : (condition -> condition) -> capability_set -> capability_set
 val substitute_substitution : substitution -> substitution -> substitution
 val extract_result_type : result -> ty
+val map_trait : (ty -> ty) -> trait_reference -> trait_reference
 val map : ?map_capabilities:(capability_set -> capability_set) -> (ty -> ty option) -> ty -> ty
 val exists : ?resolve:(ty -> ty) -> (ty -> bool) -> ty -> bool
 val find_specification_only_type : ty -> ty option

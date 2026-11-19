@@ -268,13 +268,13 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
           ignore
             (Calls.check_argument state env key
                (make_parameter "key"
-                  (State.resolve_associated_type state base_type index Index_key
+                  (Solver.resolve_associated_type state base_type index Index_key
                      ~at:(State.read_span state key.id)))
                ~has_generic_type:false);
           ignore
             (Calls.check_argument state env value
                (make_parameter "value"
-                  (State.resolve_associated_type state base_type index Index_output
+                  (Solver.resolve_associated_type state base_type index Index_output
                      ~at:(State.read_span state value.id)))
                ~has_generic_type:false);
           let call : Syntax.expression = { kind = Expression_error; id = written.id } in
@@ -369,7 +369,7 @@ and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable :
                        cursor_call = None;
                        remaining = Name_lookup.find_remaining_call state span type_;
                      });
-              ( State.resolve_associated_type state type_ cursor Cursor_element ~at:span,
+              ( Solver.resolve_associated_type state type_ cursor Cursor_element ~at:span,
                 Language.Mode.Own )
           | Hidden hidden, _, None | _, Hidden hidden, None ->
               (Members.make_hidden_error state span hidden, mode)

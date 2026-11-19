@@ -427,8 +427,15 @@ let record_condition state id (written : Syntax.condition option) =
 let find_condition state id = state.tables.conditions.(id)
 
 let normalize state type_ =
-  Interface.Impls.normalize state.lookups.interface ~list_bounds:(lookup_bounds state)
-    (zonk state type_)
+  let zonked = zonk state type_ in
+  if
+    Types.exists
+      (function
+        | Types.Projection _ as projection -> Unify.list_unknowns state.unifier projection <> []
+        | _ -> false)
+      zonked
+  then raise_bug "`%s` holds a projection of an unknown" (Types.show zonked);
+  Interface.Impls.normalize state.lookups.interface ~list_bounds:(lookup_bounds state) zonked
 
 let find_domain state type_ =
   match resolve state type_ with
@@ -539,26 +546,27 @@ let finalize_instantiation state (instantiation : Types.instantiation) : Types.i
   }
 
 let unify state left right =
-  let normalize type_ =
-    Interface.Impls.normalize state.lookups.interface ~list_bounds:(lookup_bounds state)
-      (Unify.zonk state.unifier type_)
-  in
-  Unify.unify state.unifier (normalize left) (normalize right)
+  Unify.unify state.unifier (normalize state left) (normalize state right)
 
 let unify_as_hint state actual expected =
+  let is_output index =
+    List.exists
+      (fun goal ->
+        List.exists (fun (_, output) -> resolve state output = Variable index) goal.outputs)
+      state.goals
+  in
+  let skip_outputs type_ =
+    Types.map
+      (function
+        | Types.Variable index when is_output index -> Some (make_fresh_type state) | _ -> None)
+      (zonk state type_)
+  in
   let deferred_capability_equalities = state.unifier.deferred_capability_equalities in
-  ignore (unify state actual expected);
+  ignore (unify state (skip_outputs actual) (skip_outputs expected));
   state.unifier.deferred_capability_equalities <- deferred_capability_equalities
 
-let normalize_trait state (trait : Types.trait_reference) : Types.trait_reference =
-  {
-    trait with
-    trait_arguments =
-      List.map
-        (function Types.Type type_ -> Types.Type (normalize state type_) | other -> other)
-        (Unify.zonk_trait state.unifier trait).trait_arguments;
-    associated = List.map (fun (name, type_) -> (name, normalize state type_)) trait.associated;
-  }
+let normalize_trait state trait =
+  Types.map_trait (normalize state) (Unify.zonk_trait state.unifier trait)
 
 let find_evidence state type_ trait =
   Interface.Impls.find_evidence state.lookups.interface ~list_bounds:(lookup_bounds state)
@@ -593,20 +601,6 @@ let rec copy_plain_bindings state (pattern : Core.pattern) : Core.pattern =
   | Wildcard | Literal _ | Range _ | Equal_to _ -> pattern
 
 let build_scrutinee_pattern state written = copy_plain_bindings state (build_pattern state written)
-
-let resolve_associated_type state type_ (trait : Types.trait_reference) associated
-    ~(at : Source.Definition_span.t) =
-  let type_ = normalize state type_ and trait = normalize_trait state trait in
-  let name = Well_known.show_associated associated in
-  match
-    Interface.Impls.project_associated_type state.lookups.interface
-      ~list_bounds:(lookup_bounds state) type_ trait name
-  with
-  | Some associated_type -> associated_type
-  | None ->
-      make_error_type state Unknown_associated_type at
-        (Printf.sprintf "`%s` gives no `%s` as a `%s`." (Types.show type_) name
-           (Types.show_trait trait))
 
 let make_callee state (target : Core.operand Core.target) =
   Callee_uses.make_callee state.lookups.interface ~list_bounds:(lookup_bounds state) target

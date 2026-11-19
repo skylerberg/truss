@@ -23,6 +23,7 @@ val check_arguments :
   Syntax.expression ->
   Types.parameter_info list ->
   declared:Types.parameter_info list ->
+  flatten:(Types.ty -> Types.ty) ->
   Syntax.argument list ->
   has_receiver:bool ->
   (Tables.argument list * string list, Types.ty) result

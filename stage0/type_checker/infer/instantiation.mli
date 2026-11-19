@@ -22,6 +22,7 @@ type instance = {
   signature : Types.signature;
   substitution : Types.substitution;
   instantiation : Types.instantiation;
+  flatten : Types.ty -> Types.ty;
 }
 
 val instantiate :

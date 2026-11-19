@@ -306,7 +306,7 @@ and match_arguments state ?constructor (value : Syntax.expression)
   }
 
 and check_arguments state env ?constructor (value : Syntax.expression)
-    (parameters : Types.parameter_info list) ~(declared : Types.parameter_info list)
+    (parameters : Types.parameter_info list) ~(declared : Types.parameter_info list) ~flatten
     (arguments : Syntax.argument list) ~has_receiver =
   if List.length arguments > List.length parameters then
     Error
@@ -325,11 +325,15 @@ and check_arguments state env ?constructor (value : Syntax.expression)
       | Types.Parameter _ | Projection _ -> true
       | _ -> false
     in
-    let takes_view_as_owner pair =
-      has_generic_type pair && (List.nth parameters (snd pair)).mode = Read
+    let is_checked_late (_, index) =
+      match (List.nth declared index).type_ with
+      | Types.Projection _ -> true
+      | Types.Parameter _ -> (List.nth parameters index).mode = Read
+      | _ -> false
     in
     let check ((argument : Syntax.argument), index) =
       let parameter = List.nth parameters index in
+      let parameter = { parameter with type_ = flatten parameter.type_ } in
       let mode =
         check_argument state env argument.value parameter
           ~has_generic_type:(has_generic_type (argument, index))
@@ -341,9 +345,9 @@ and check_arguments state env ?constructor (value : Syntax.expression)
       }
     in
     let values, lambdas = List.partition (fun pair -> not (is_lambda pair)) matched in
-    let owners, others = List.partition takes_view_as_owner values in
+    let late, others = List.partition is_checked_late values in
     let others = List.map check others in
-    let owners = List.map check owners in
+    let late = List.map check late in
     let lambdas = List.map check lambdas in
     match (error, unmatched) with
     | Some error, _ -> Error (check_arguments_alone state env unmatched error)
@@ -355,7 +359,7 @@ and check_arguments state env ?constructor (value : Syntax.expression)
               (fun id ->
                 List.find_opt
                   (fun (checked : Tables.argument) -> checked.expression = id)
-                  (others @ owners @ lambdas))
+                  (others @ late @ lambdas))
               order,
             left_out )
 
@@ -370,7 +374,8 @@ and check_named_call state env ?expected (value : Syntax.expression) path
       | _ -> ());
       match
         check_arguments state env value instance.signature.parameters
-          ~declared:instance.declared.parameters arguments ~has_receiver:false
+          ~declared:instance.declared.parameters ~flatten:instance.flatten arguments
+          ~has_receiver:false
       with
       | Error error -> error
       | Ok (checked, left_out) ->
@@ -434,8 +439,10 @@ and construct state env ?expected ?type_arguments (value : Syntax.expression) ty
         | None -> Types.show (Types.Named { path = type_path; arguments = [] })
       in
       match
-        ( check_arguments state env ~constructor value parameters ~declared:parameters arguments
-            ~has_receiver:false,
+        ( check_arguments state env ~constructor value parameters ~declared:parameters
+            ~flatten:
+              (Solver.flatten state (Bound { at = State.read_span state value.id; of_type = None }))
+            arguments ~has_receiver:false,
           opaque_error )
       with
       | Error error, _ | Ok _, Some error -> error
@@ -532,13 +539,19 @@ and check_updates state env (value : Syntax.expression) ~at record_type
       Option.iter (fun error -> ignore (check_arguments_alone state env unmatched error)) error;
       List.concat_map
         (fun ((argument : Syntax.argument), index) ->
-          let parameter = List.nth parameters index in
+          let declared = List.nth parameters index in
+          let parameter =
+            {
+              declared with
+              type_ = Solver.flatten state (Bound { at; of_type = None }) declared.type_;
+            }
+          in
           match List.assq argument groups with
           | [] ->
               ignore
                 (check_argument state env argument.value parameter
                    ~has_generic_type:
-                     (match parameter.type_ with
+                     (match declared.type_ with
                      | Types.Parameter _ | Projection _ -> true
                      | _ -> false));
               [ (argument.value.id, [ parameter.name ]) ]

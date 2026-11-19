@@ -67,7 +67,7 @@ let rec check_name (state : State.state) (env : State.env) (value : Syntax.expre
           | Ok () ->
               state.tables.resolutions.(value.id) <-
                 Some (Global { path; instantiation = instance.instantiation });
-              check_function_value state value instance.signature)
+              check_function_value state value instance)
       | None -> State.raise_bug "`%s` has no signature" (Path.show path))
   | Definition (Constant, path) ->
       state.tables.resolutions.(value.id) <-
@@ -145,13 +145,15 @@ and check_variant_value state (value : Syntax.expression) type_path variant ~arg
       with
       | Some { fields = None; _ } -> type_
       | Some { fields = Some [ field ]; _ } ->
-          Types.Function
-            {
-              inputs = [ (Language.Mode.Own, field.field_type) ];
-              output = type_;
-              uses = Types.no_capabilities;
-              costs = [ { amortized = false; resource = Metric Time; bound = Order_of } ];
-            }
+          Solver.flatten state
+            (Bound { at = State.read_span state value.id; of_type = None })
+            (Types.Function
+               {
+                 inputs = [ (Language.Mode.Own, field.field_type) ];
+                 output = type_;
+                 uses = Types.no_capabilities;
+                 costs = [ { amortized = false; resource = Metric Time; bound = Order_of } ];
+               })
       | Some { fields = Some fields; _ } ->
           State.make_error_type state Not_a_value (State.read_span state value.id)
             (Printf.sprintf
@@ -194,7 +196,9 @@ and check_field state (value : Syntax.expression) base_type (member : Syntax.nam
               else begin
                 state.tables.resolutions.(value.id) <-
                   Some (Field_access { type_ = base_type; field = member.text });
-                written.field_type
+                Solver.flatten state
+                  (Bound { at = State.read_span state member.id; of_type = None })
+                  written.field_type
               end
           | None ->
               if Members.has_visible_method state path member.text then begin
@@ -212,11 +216,11 @@ and check_field state (value : Syntax.expression) base_type (member : Syntax.nam
           else report_unknown [])
   | _ -> report_unknown []
 
-and check_function_value state (value : Syntax.expression) (signature : Types.signature) =
-  match Types.make_function_type signature with
+and check_function_value state (value : Syntax.expression) (instance : Instantiation.instance) =
+  match Types.make_function_type instance.signature with
   | Some function_type ->
       State.register_expression state value (fun () -> Form.build_function_value state value);
-      Types.Function function_type
+      instance.flatten (Types.Function function_type)
   | None ->
       State.make_error_type state Not_a_value (State.read_span state value.id)
         (Printf.sprintf
@@ -251,7 +255,7 @@ and check_static_member state (value : Syntax.expression) type_ (member : Syntax
                 | None -> ());
                 state.tables.resolutions.(value.id) <-
                   Some (Global { path = method_path; instantiation = instance.instantiation });
-                check_function_value state value instance.signature
+                check_function_value state value instance
             | None -> State.raise_bug "the method `%s` has no signature" (Path.show method_path))
         | Hidden hidden -> Members.make_hidden_error state (State.read_span state member.id) hidden
         | Absent ->
@@ -533,7 +537,9 @@ and find_elements_calls state (iterable : Syntax.expression) type_ (mode : Langu
     (Tables.loop * Types.ty * Language.Mode.t) Resolve.Names.lookup =
   let span = State.read_span state iterable.id and receiver = Path.Instance mode in
   let is_uint64 type_ =
-    Types.is_builtin UInt64 (Conversions.read_actual_head state iterable type_)
+    Types.is_builtin UInt64
+      (Conversions.read_actual_head state iterable
+         (Solver.flatten state (Bound { at = span; of_type = None }) type_))
   in
   match
     ( find_method_version state span type_ "count" (Instance Read),
@@ -573,7 +579,7 @@ and find_consuming_cursor state (iterable : Syntax.expression) type_ :
                   cursor_call = Some (make_argumentless_call callee cursor);
                   remaining = find_remaining_call state span cursor;
                 },
-              State.resolve_associated_type state cursor trait Cursor_element ~at:span )
+              Solver.resolve_associated_type state cursor trait Cursor_element ~at:span )
       | None -> Absent)
   | Hidden hidden -> Hidden hidden
   | Visible _ | Absent -> Absent

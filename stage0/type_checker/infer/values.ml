@@ -143,7 +143,7 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
                           }
                   | None -> ());
                   let part =
-                    State.resolve_associated_type state tag_type template_trait From_template_part
+                    Solver.resolve_associated_type state tag_type template_trait From_template_part
                       ~at:(State.read_span state literal.id)
                   in
                   part_type := Some part;
@@ -210,7 +210,7 @@ and check_list_literal state env ?expected (value : Syntax.expression) items =
       array
   | Some collection when takes_literal state collection from_elements ->
       let element =
-        State.resolve_associated_type state collection from_elements From_elements_element
+        Solver.resolve_associated_type state collection from_elements From_elements_element
           ~at:(State.read_span state value.id)
       in
       check_items element;
@@ -259,9 +259,9 @@ and check_map_literal state env ?expected (value : Syntax.expression) entries =
               [ State.make_fresh_type state; State.make_fresh_type state ]
       in
       let at = State.read_span state value.id in
-      let key = State.resolve_associated_type state map from_entries From_entries_key ~at in
+      let key = Solver.resolve_associated_type state map from_entries From_entries_key ~at in
       let value_type =
-        State.resolve_associated_type state map from_entries From_entries_value ~at
+        Solver.resolve_associated_type state map from_entries From_entries_value ~at
       in
       check_entries key value_type;
       record_conversion state value map from_entries From_entries_from_entries;

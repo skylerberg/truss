@@ -1,0 +1,42 @@
+trait Producer {
+  type Item
+  fn produce(self) -> Self.Item
+}
+
+type Maker(seed: UInt8)
+
+impl Producer for Maker {
+  type Item = UInt8
+
+  fn produce(self) -> UInt8 {
+    self.seed
+  }
+}
+
+type Kept[Source: Producer](source: Source, item: Source.Item)
+
+fn first_item[Source: Producer](source: Source, item: Source.Item) -> Source.Item {
+  item
+}
+
+fn item_then_source[Source: Producer](item: Source.Item, source: Source) -> Source.Item {
+  item
+}
+
+fn source_first(maker: Maker) -> UInt8 {
+  let kept = Kept(source: maker, item: 3)
+  kept.item
+}
+
+fn item_first(maker: Maker) -> UInt8 {
+  let kept = Kept(item: 3, source: maker)
+  kept.item
+}
+
+fn call_source_first(maker: Maker) -> UInt8 {
+  first_item(maker, item: 3)
+}
+
+fn call_item_first(maker: Maker) -> UInt8 {
+  item_then_source(3, source: maker)
+}

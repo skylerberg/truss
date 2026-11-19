@@ -1,0 +1,8 @@
+fn widened_small[Value: Add[UInt8]](value: Value) -> Value.Output {
+  todo
+}
+
+fn f() -> UInt8 {
+  let first = 3
+  widened_small(first)
+}

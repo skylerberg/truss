@@ -1,0 +1,30 @@
+type Text(content: String)
+
+impl Add[Text] for Text {
+  type Output = String
+
+  fn add_is_defined(self, right: Text) -> Bool {
+    true
+  }
+
+  fn add(self, right: Text) -> String {
+    "joined"
+  }
+}
+
+fn joined[Value: Add[Value]](value: Value) -> Value.Output {
+  todo
+}
+
+fn measure(text: StringSlice) -> UInt64 {
+  text.length()
+}
+
+fn f(text: Text) -> UInt64 {
+  measure(joined(text))
+}
+
+fn g(text: Text) -> UInt64 {
+  let whole = joined(text)
+  measure(whole)
+}

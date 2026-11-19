@@ -1,0 +1,11 @@
+type Sample[Value: SignedInteger](value: Value, magnitude: Value.Unsigned)
+
+fn make[Value: SignedInteger](value: Value) -> Sample[Value] {
+  todo
+}
+
+fn f() {
+  let sample = make(3)
+  let first = sample.value
+  let small: Int8 = first
+}

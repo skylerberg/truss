@@ -383,7 +383,7 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
             match State.find_evidence state base_type index_trait with
             | Some _ ->
                 let resolve_associated associated =
-                  State.resolve_associated_type state base_type index_trait associated
+                  Solver.resolve_associated_type state base_type index_trait associated
                     ~at:(State.read_span state value.id)
                 in
                 let key_type = resolve_associated Index_key

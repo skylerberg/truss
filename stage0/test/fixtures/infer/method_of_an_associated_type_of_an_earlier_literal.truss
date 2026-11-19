@@ -1,0 +1,5 @@
+fn f() -> Int64 {
+  let first = 1
+  let sum = Add[Int64].add(first, 2)
+  sum.saturating_add(3)
+}

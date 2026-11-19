@@ -201,6 +201,11 @@ and check_pattern_fields state env (written : Syntax.pattern) (fields : Types.fi
       written_fields
   in
   let rest = List.exists (fun (field : Syntax.pattern_field) -> field.kind = Rest) written_fields in
+  let flatten (inner : Syntax.pattern) (declared : Types.field) =
+    Solver.flatten state
+      (Bound { at = State.read_span state inner.id; of_type = None })
+      declared.field_type
+  in
   let all_matched =
     List.length named
     = List.length
@@ -229,7 +234,7 @@ and check_pattern_fields state env (written : Syntax.pattern) (fields : Types.fi
             List.find_opt (fun (declared : Types.field) -> declared.field_name = name.text) fields
           with
           | Some declared ->
-              check_pattern_with state env inner declared.field_type ~binding ~mode;
+              check_pattern_with state env inner (flatten inner declared) ~binding ~mode;
               Some (declared.field_name, inner)
           | None ->
               check_pattern_with state env inner ~binding ~mode
@@ -247,7 +252,7 @@ and check_pattern_fields state env (written : Syntax.pattern) (fields : Types.fi
           in
           match (named, fields) with
           | Some declared, _ | None, [ declared ] ->
-              check_pattern_with state env inner declared.field_type ~binding ~mode;
+              check_pattern_with state env inner (flatten inner declared) ~binding ~mode;
               Some (declared.field_name, inner)
           | None, _ ->
               let names =
