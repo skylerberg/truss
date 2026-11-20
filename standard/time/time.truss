@@ -2584,8 +2584,11 @@ public fn ManualClock.new(start: Instant) -> ManualClock {
 }
 
 public fn ManualClock.advance(mut self, by: Duration)
-  requires !by.is_negative()
+  uses Panic unless !by.is_negative()
 {
+  if by.is_negative() {
+    Panic.crash("the duration is negative")
+  }
   self.time = self.time + by
   self.elapsed = self.elapsed + by
 }

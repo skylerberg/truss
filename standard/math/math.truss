@@ -725,8 +725,11 @@ public fn BigInteger.to_big_endian_bytes(self) -> List[UInt8]
 }
 
 public fn BigInteger.parse_radix(text: StringSlice, radix: UInt32) -> Result[BigInteger, core::ParseIntegerError]
-  requires 2 <= radix && radix <= 36
+  uses Panic unless 2 <= radix && radix <= 36
 {
+  if radix < 2 || radix > 36 {
+    Panic.crash("the radix is not between 2 and 36")
+  }
   var index: UInt64 = 0
   var negative = false
   if text.length() > 0 && (text.byte(0) == 45 || text.byte(0) == 43) {
@@ -776,8 +779,11 @@ fn digit_group(radix: UInt32) -> DigitGroup
 }
 
 public fn BigInteger.format(self, radix: UInt32 = 10) -> String
-  requires 2 <= radix && radix <= 36
+  uses Panic unless 2 <= radix && radix <= 36
 {
+  if radix < 2 || radix > 36 {
+    Panic.crash("the radix is not between 2 and 36")
+  }
   let group = digit_group(radix)
   let base: UInt64 = intrinsic::convert(radix)
   var limbs = self.magnitude.copy()
@@ -949,9 +955,14 @@ public fn BigInteger.power(self, exponent: UInt32) -> BigInteger
 }
 
 public fn BigInteger.modular_power(self, exponent: BigInteger, modulus: BigInteger) -> BigInteger
-  requires !exponent.is_negative()
-  requires !modulus.is_zero()
+  uses Panic unless !exponent.is_negative() && !modulus.is_zero()
 {
+  if exponent.is_negative() {
+    Panic.crash("the exponent is negative")
+  }
+  if modulus.is_zero() {
+    Panic.crash("division by zero")
+  }
   let size = modulus.absolute()
   if size.is_zero() {
     return BigInteger.zero()

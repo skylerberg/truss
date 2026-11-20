@@ -575,10 +575,13 @@ public fn StringSlice.find_character(
 }
 
 public fn StringSlice.occurrences(self, pattern: StringSlice) -> UInt64
-  requires pattern.length() > 0
+  uses Panic unless pattern.length() > 0
   ensures result <= self.length()
   cost time O(self.length() + pattern.length())
 {
+  if pattern.is_empty() {
+    Panic.crash("the pattern is empty")
+  }
   let table = failure_table(pattern)
   var count: UInt64 = 0
   var matched: UInt64 = 0
@@ -751,10 +754,13 @@ public fn StringSlice.trim_matching(self, predicate: (fn(Character) -> Bool uses
 }
 
 public fn StringSlice.split(self, separator: StringSlice) -> List[StringSlice]
-  requires separator.length() > 0
+  uses Panic unless separator.length() > 0
   ensures result.length() <= self.length() + 1
   cost time O(self.length() + separator.length())
 {
+  if separator.is_empty() {
+    Panic.crash("the separator is empty")
+  }
   var parts: List[StringSlice] = []
   let table = failure_table(separator)
   var start: UInt64 = 0
@@ -786,12 +792,17 @@ public fn StringSlice.split(self, separator: StringSlice) -> List[StringSlice]
 }
 
 public fn StringSlice.split_at_most(self, separator: StringSlice, parts: UInt64) -> List[StringSlice]
-  requires separator.length() > 0
-  requires parts > 0
+  uses Panic unless separator.length() > 0 && parts > 0
   ensures result.length() <= parts
   ensures result.length() <= self.length() + 1
   cost time O(self.length() + separator.length())
 {
+  if separator.is_empty() {
+    Panic.crash("the separator is empty")
+  }
+  if parts == 0 {
+    Panic.crash("the part count is zero")
+  }
   var pieces: List[StringSlice] = []
   let table = failure_table(separator)
   var start: UInt64 = 0
@@ -886,7 +897,6 @@ public fn StringSlice.split_whitespace(self) -> List[StringSlice]
 }
 
 public fn StringSlice.split_once(self, separator: StringSlice) -> Option[core::Pair[StringSlice, StringSlice]]
-  requires separator.length() > 0
   ensures (result is Some(_)) == self.contains(separator)
   cost time O(self.length() + separator.length())
 {
@@ -902,7 +912,6 @@ public fn StringSlice.split_once(self, separator: StringSlice) -> Option[core::P
 }
 
 public fn StringSlice.split_once_last(self, separator: StringSlice) -> Option[core::Pair[StringSlice, StringSlice]]
-  requires separator.length() > 0
   ensures (result is Some(_)) == (self.find_last(separator) is Some(_))
   cost time O(self.length() + separator.length())
 {
@@ -918,9 +927,12 @@ public fn StringSlice.split_once_last(self, separator: StringSlice) -> Option[co
 }
 
 public fn StringSlice.replace(self, pattern: StringSlice, replacement: StringSlice) -> String
-  requires pattern.length() > 0
+  uses Panic unless pattern.length() > 0
   cost time O(self.length() + result.length())
 {
+  if pattern.is_empty() {
+    Panic.crash("the pattern is empty")
+  }
   if pattern.length() > self.length() {
     return self.to_string()
   }
@@ -966,7 +978,6 @@ public fn StringSlice.replace(self, pattern: StringSlice, replacement: StringSli
 }
 
 public fn StringSlice.replace_first(self, pattern: StringSlice, replacement: StringSlice) -> String
-  requires pattern.length() > 0
   cost time O(self.length() + replacement.length())
 {
   if pattern.length() > self.length() {
