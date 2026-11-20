@@ -1443,6 +1443,10 @@ let find_call_successors database calling_package node =
 let update_groups database package =
   match Package_table.find_opt database.graphs package with
   | Some graph when Call_graph.has_changes graph ->
+      if list_stale_parts database package Call_edges <> [] then
+        Compiler_bug.raise_bug ~stage:"Database"
+          "the call graph of %s is updated while some of its call edges are stale"
+          (Path.show_package package);
       let find_successors = find_call_successors database package in
       let { Call_graph.touched; removed } = Call_graph.update graph ~find_successors in
       List.iter
@@ -1863,7 +1867,6 @@ let find_saved_value database (entry : Entry.t) =
   | Claimed claimant -> Option.map marshal (Part_table.find_opt database.claimed_roots claimant)
 
 let list_unsaved database =
-  List.iter (update_groups database) database.project;
   Entry_table.fold
     (fun entry () entries ->
       (Marshal.to_string entry [ No_sharing ], find_saved_value database entry) :: entries)
@@ -1935,7 +1938,15 @@ let restore_namespaces database =
                   (Call_graph.change_successors graph path ~before:[]
                      ~after:(list_call_edges (Some value)))
             | Binding _ -> ())
-          package_database.values
+          package_database.values;
+        forget database
+          (Stored_table.fold
+             (fun part _ groups ->
+               match part with
+               | Part.Any (Recursion_group node) when not (Call_graph.is_node graph node) ->
+                   part :: groups
+               | _ -> groups)
+             package_database.values [])
       end)
     (sort_in_dependency_order database database.project)
 
@@ -1969,7 +1980,6 @@ let restore ?on_bug ~saved ~find_text ~loaded packages entries =
   restore_parts database entries;
   restore_namespaces database;
   restore_references database;
-  List.iter (update_groups database) database.project;
   mark_saved database;
   record_layout database ~loaded packages;
   propagate_checks ?on_bug database;
