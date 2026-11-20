@@ -1,0 +1,17 @@
+use standard::specification
+
+fn keep[Element](items: mut Slice[Element])
+  ensures items.model().is_permutation_of(old(items.model()))
+{
+  todo
+}
+
+fn keep_below[Element: Ordered](items: mut Slice[Element], pivot: Element)
+  requires forall i in 0..items.length() => items[i] < pivot
+  ensures forall i in 0..items.length() => items[i] < pivot
+{
+  keep(mut items)
+  proof {
+    specification::elements_of_a_permutation(items.model(), original: old(items.model()))
+  }
+}

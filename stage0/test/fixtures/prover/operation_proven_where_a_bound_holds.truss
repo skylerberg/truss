@@ -1,0 +1,7 @@
+trait Checked {}
+
+fn increment[Tag](value: UInt8) -> UInt8
+  uses Panic unless Tag: Checked
+{
+  if value < 255 { value + 1 } else { value }
+}

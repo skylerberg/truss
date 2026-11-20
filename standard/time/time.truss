@@ -20,7 +20,7 @@ public fn Duration.nanoseconds(count: Int64) -> Duration
 }
 
 public fn Duration.microseconds(count: Int64) -> Duration
-  requires Int64.minimum <= count * 1000 && count * 1000 <= Int64.maximum
+  uses Panic unless Int64.minimum <= count * 1000 && count * 1000 <= Int64.maximum
   ensures result.total_nanoseconds() == count * 1000
   cost time O(1)
 {
@@ -28,7 +28,7 @@ public fn Duration.microseconds(count: Int64) -> Duration
 }
 
 public fn Duration.milliseconds(count: Int64) -> Duration
-  requires Int64.minimum <= count * 1000000 && count * 1000000 <= Int64.maximum
+  uses Panic unless Int64.minimum <= count * 1000000 && count * 1000000 <= Int64.maximum
   ensures result.total_nanoseconds() == count * 1000000
   cost time O(1)
 {
@@ -36,7 +36,7 @@ public fn Duration.milliseconds(count: Int64) -> Duration
 }
 
 public fn Duration.seconds(count: Int64) -> Duration
-  requires Int64.minimum <= count * 1000000000 && count * 1000000000 <= Int64.maximum
+  uses Panic unless Int64.minimum <= count * 1000000000 && count * 1000000000 <= Int64.maximum
   ensures result.total_nanoseconds() == count * 1000000000
   cost time O(1)
 {
@@ -44,7 +44,7 @@ public fn Duration.seconds(count: Int64) -> Duration
 }
 
 public fn Duration.minutes(count: Int64) -> Duration
-  requires Int64.minimum <= count * 60000000000 && count * 60000000000 <= Int64.maximum
+  uses Panic unless Int64.minimum <= count * 60000000000 && count * 60000000000 <= Int64.maximum
   ensures result.total_nanoseconds() == count * 60000000000
   cost time O(1)
 {
@@ -52,7 +52,7 @@ public fn Duration.minutes(count: Int64) -> Duration
 }
 
 public fn Duration.hours(count: Int64) -> Duration
-  requires Int64.minimum <= count * 3600000000000 && count * 3600000000000 <= Int64.maximum
+  uses Panic unless Int64.minimum <= count * 3600000000000 && count * 3600000000000 <= Int64.maximum
   ensures result.total_nanoseconds() == count * 3600000000000
   cost time O(1)
 {
@@ -60,7 +60,7 @@ public fn Duration.hours(count: Int64) -> Duration
 }
 
 public fn Duration.days(count: Int64) -> Duration
-  requires Int64.minimum <= count * 86400000000000 && count * 86400000000000 <= Int64.maximum
+  uses Panic unless Int64.minimum <= count * 86400000000000 && count * 86400000000000 <= Int64.maximum
   ensures result.total_nanoseconds() == count * 86400000000000
   cost time O(1)
 {

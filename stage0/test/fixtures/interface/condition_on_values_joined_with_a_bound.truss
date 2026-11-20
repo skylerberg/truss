@@ -1,0 +1,4 @@
+fn spin[Tag](count: Int64)
+  uses Panic unless Tag: Display && count < 10
+{
+}

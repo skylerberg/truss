@@ -252,7 +252,7 @@ let parse_impl_member cursor =
       Cursor.advance cursor;
       let name = Atoms.parse_upper_name cursor "the name of an associated capability set" in
       Cursor.expect_punctuation cursor Equal;
-      Capability_definition (name, Parse_expression.parse_capability_list cursor)
+      Capability_definition (name, Parse_expression.parse_capability_uses cursor)
   | _ -> Cursor.fail cursor "`fn`, `type`, or `capability` to start a member of the `impl`"
 
 let parse_capability_member cursor : Syntax.capability_member =

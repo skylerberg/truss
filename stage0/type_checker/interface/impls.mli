@@ -104,6 +104,11 @@ val normalize_capabilities :
 val decide_condition :
   Lookups.t -> list_bounds:bounds -> ?depth:int -> Types.condition -> Types.condition option
 
+val add_condition_bounds : bounds -> Types.condition -> bounds
+
+val implies_condition :
+  Lookups.t -> list_bounds:bounds -> Types.condition -> Types.condition -> bool
+
 val normalize : Lookups.t -> list_bounds:bounds -> ?defining:Path.t list ref -> Types.ty -> Types.ty
 
 module Conformance : sig

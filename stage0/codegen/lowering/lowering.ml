@@ -25,7 +25,8 @@ let make (context : Lower.context) (item : Lowered.Item.t) : lowered =
   let env = Lower.env context in
   let drop_and_copy = Lower.drop_and_copy context in
   match item with
-  | Code { path; instantiation } -> Compiled (Lower.lower_source_code context ~path ~instantiation)
+  | Code { path; instantiation; assumes_condition } ->
+      Compiled (Lower.lower_source_code context ~path ~instantiation ~assumes_condition)
   | Generated generated -> Compiled (Lower.lower_generated context generated)
   | Table table -> Compiled (Emit_c.make_table_fragment env (Lower.lower_table context table))
   | Constant path -> (
@@ -78,7 +79,7 @@ let derive_test_keys ~read_lowered ~read_known_key =
       (hash_fragment lowered, list_references lowered))
 
 let test_runner : Lowered.Item.t =
-  Code { path = Well_known.make_path Run_tests; instantiation = Ground.no_instantiation }
+  Lowered.Item.make_code (Well_known.make_path Run_tests) Ground.no_instantiation
 
 let make_root (path : Path.t) : Lowered.Item.t =
   match path with Test _ -> Generated (Test_main path) | _ -> Generated (Program_main path)

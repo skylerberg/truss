@@ -1,4 +1,5 @@
 use standard::intrinsic
+use standard::specification
 
 public opaque type Generator(state: Array[UInt64, 4])
   derives Plain
@@ -100,10 +101,13 @@ public fn Generator.split(mut self) -> Generator
 }
 
 public fn Generator.below(mut self, bound: UInt64) -> UInt64
-  requires bound > 0
+  uses Panic unless bound > 0
   ensures result < bound
   cost time O(1)
 {
+  if bound == 0 {
+    Panic.crash("division by zero")
+  }
   let rejected = rejection_threshold(bound)
   let attempts: UInt64 = 64
   for _ in 0..attempts {
@@ -116,10 +120,13 @@ public fn Generator.below(mut self, bound: UInt64) -> UInt64
 }
 
 public fn Generator.integer(mut self, range: Range[Int64]) -> Int64
-  requires !range.is_empty()
+  uses Panic unless !range.is_empty()
   ensures range.contains(result)
   cost time O(1)
 {
+  if range.start > range.stop || (range.start == range.stop && !range.inclusive) {
+    Panic.crash("the range is empty")
+  }
   let last = if range.inclusive { range.stop } else { range.stop - 1 }
   let span = range_width(range.start, to: last)
   if span == UInt64.maximum {
@@ -129,7 +136,7 @@ public fn Generator.integer(mut self, range: Range[Int64]) -> Int64
 }
 
 public fn Generator.index(mut self, length: UInt64) -> UInt64
-  requires length > 0
+  uses Panic unless length > 0
   ensures result < length
   cost time O(1)
 {
@@ -184,17 +191,23 @@ public fn Generator.fill(mut self, buffer: mut Slice[UInt8])
 }
 
 public fn Generator.shuffle[Element](mut self, items: mut Slice[Element])
+  ensures items.model().is_permutation_of(old(items.model()))
+  ensures forall i in 0..items.length() => old(items.model()).contains(items[i])
   cost time O(items.length())
 {
   var remaining = items.length()
   while remaining > 1
     invariant items.length() == old(items.length())
+    invariant items.model().is_permutation_of(old(items.model()))
     invariant remaining <= items.length()
     decreases remaining
   {
     let chosen = mut self.index(remaining)
     remaining -= 1
     mut items.swap(chosen, second: remaining)
+  }
+  proof {
+    specification::elements_of_a_permutation(items.model(), original: old(items.model()))
   }
 }
 
@@ -254,10 +267,12 @@ public fn bytes(count: UInt64) -> List[UInt8]
 }
 
 public fn below(bound: UInt64) -> UInt64
-  uses Random
-  requires bound > 0
+  uses Random, Panic unless bound > 0
   ensures result < bound
 {
+  if bound == 0 {
+    Panic.crash("division by zero")
+  }
   let rejected = rejection_threshold(bound)
   let attempts: UInt64 = 64
   for _ in 0..attempts {

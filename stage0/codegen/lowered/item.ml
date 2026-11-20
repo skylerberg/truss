@@ -1,5 +1,5 @@
 type t =
-  | Code of { path : Path.t; instantiation : Ground.instantiation }
+  | Code of { path : Path.t; instantiation : Ground.instantiation; assumes_condition : bool }
   | Constant of Path.t
   | Drop of Ground.ty
   | Copy of Ground.ty
@@ -38,13 +38,11 @@ and impl_method = {
 }
 
 let make_method_path { impl; name; receiver; _ } = Path.Method { owner = impl; name; receiver }
+let make_code path instantiation = Code { path; instantiation; assumes_condition = false }
 
 let make_method_code (impl_method : impl_method) =
-  Code
-    {
-      path = make_method_path impl_method;
-      instantiation = { Ground.no_instantiation with type_arguments = impl_method.type_arguments };
-    }
+  make_code (make_method_path impl_method)
+    { Ground.no_instantiation with type_arguments = impl_method.type_arguments }
 
 module Key = Structural_key.Make (struct
   type nonrec t = t
@@ -55,10 +53,11 @@ let equal = Key.equal
 let hash = Key.hash
 
 let rec to_string = function
-  | Code { path; instantiation } ->
+  | Code { path; instantiation; assumes_condition } ->
       Path.show path
       ^ show_arguments instantiation.type_arguments
       ^ show_capability_arguments instantiation.capability_arguments
+      ^ if assumes_condition then " assuming its condition on values" else ""
   | Constant path -> Path.show path
   | Drop ty -> "drop " ^ Ground.to_string ty
   | Copy ty -> "copy " ^ Ground.to_string ty
@@ -77,7 +76,7 @@ let rec to_string = function
       ^ String.concat ", " (List.map Z.to_string arguments)
       ^ ")"
   | Generated (Adapter { function_; instantiation; _ }) ->
-      "adapter " ^ to_string (Code { path = function_; instantiation })
+      "adapter " ^ to_string (make_code function_ instantiation)
   | Generated (Any_entry impl_method) -> "any entry " ^ to_string (make_method_code impl_method)
   | Generated (Locked_entry { capability; name }) ->
       "locked entry " ^ Path.show capability ^ "." ^ name

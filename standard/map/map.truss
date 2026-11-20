@@ -577,10 +577,13 @@ public fn Map[Key: Hash + Ordered, Value].values(self) -> Values[Key, Value]
 }
 
 public fn Map[Key: Hash + Ordered, Value].value_at(mut self, position: UInt64) lends mut Value
-  requires position < self.length()
+  uses Panic unless position < self.length()
   ensures self.length() == old(self.length())
   cost time O(1)
 {
+  if position >= self.length() {
+    Panic.crash("index out of bounds")
+  }
   mut self.entries[position].value
 }
 

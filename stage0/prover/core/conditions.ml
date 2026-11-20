@@ -1,21 +1,36 @@
 type decision = Always | In_run of Types.condition | Elsewhere
 
+let implies (lookups : Lookups.t) ~current premise conclusion =
+  Interface.Impls.implies_condition lookups.interface
+    ~list_bounds:(Facts.list_definition_bounds lookups ~current ~condition:[])
+    premise conclusion
+
+let may_panic_for_every_value lookups ~current ~condition (uses : Types.capability_set) =
+  Types.has_capability (Built_in Panic) uses
+  ||
+  match Types.find_unless (Built_in Panic) uses with
+  | Some unless -> not (implies lookups ~current condition unless)
+  | None -> false
+
+let may_panic lookups ~current ~condition (uses : Types.capability_set) =
+  may_panic_for_every_value lookups ~current ~condition uses
+  || Types.has_capability (Capability_unless_values (Built_in Panic)) uses
+
 let decide (context : State.context) ~substitution (holds_when : Types.condition) =
   match holds_when with
   | [] -> Always
   | _ -> (
-      let bounds =
-        Facts.list_definition_bounds context.lookups ~current:context.current ~condition:[]
-      in
       match
         Interface.Impls.decide_condition context.lookups.interface
-          ~list_bounds:(Operations.compute_bounds_with_self ~bounds context)
+          ~list_bounds:
+            (Facts.list_definition_bounds context.lookups ~current:context.current ~condition:[])
           (Types.substitute_condition substitution holds_when)
       with
       | None -> Elsewhere
       | Some [] -> Always
       | Some undecided ->
-          if Types.implies_condition context.condition undecided then In_run undecided
+          if implies context.lookups ~current:context.current context.condition undecided then
+            In_run undecided
           else begin
             if context.condition = [] && not (List.mem undecided context.skipped_conditions) then
               context.skipped_conditions <- undecided :: context.skipped_conditions;

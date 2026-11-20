@@ -45,9 +45,7 @@ public fn Match.length(self) -> UInt64
 }
 
 public fn Match.slice(self, text: StringSlice) -> StringSlice
-  requires self.end <= text.length()
-  requires text.is_boundary(self.start)
-  requires text.is_boundary(self.end)
+  uses Panic unless self.end <= text.length() && text.is_boundary(self.start) && text.is_boundary(self.end)
   ensures result.length() == self.length()
   cost time O(1)
 {
@@ -1325,7 +1323,7 @@ fn match_from(slots: Slice[UInt64], text: StringSlice, offset: UInt64) -> Option
 }
 
 public fn Regex.find_from(self, text: StringSlice, offset: UInt64) -> Option[Match]
-  requires offset <= text.length()
+  uses Panic unless offset <= text.length()
   ensures match result {
     Some(matched) => offset <= matched.start && matched.end <= text.length()
     None => true
@@ -1335,6 +1333,9 @@ public fn Regex.find_from(self, text: StringSlice, offset: UInt64) -> Option[Mat
       None => None
     })
 {
+  if offset > text.length() {
+    Panic.crash("slice out of bounds")
+  }
   match self.run(text, from: offset, whole: false) {
     Some(slots) => match_from(slots.slice(), text: text, offset: offset)
     None => None

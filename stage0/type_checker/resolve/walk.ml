@@ -345,15 +345,15 @@ and resolve_clause_condition state scope (condition : Syntax.condition) =
       List.iter (resolve_path_type state scope) bound.bounds)
     condition
 
+and resolve_capability_use state scope (use : Syntax.capability_use) =
+  resolve_capability_reference state scope use.capability;
+  Option.iter (resolve_clause_condition state scope) use.unless;
+  List.iter (resolve_expression state (enter_specification scope)) use.unless_values
+
 and resolve_clause state scope (clause : Syntax.clause) =
   Option.iter (resolve_clause_condition state scope) clause.condition;
   match clause.kind with
-  | Uses uses ->
-      List.iter
-        (fun (use : Syntax.capability_use) ->
-          resolve_capability_reference state scope use.capability;
-          Option.iter (resolve_clause_condition state scope) use.unless)
-        uses
+  | Uses uses -> List.iter (resolve_capability_use state scope) uses
   | Requires value -> resolve_expression state (enter_specification scope) value
   | Ensures value ->
       resolve_expression state
@@ -1135,7 +1135,7 @@ let resolve_definition state ~(path : Path.t) ?(container : (Path.t * Syntax.def
               match line.kind with
               | Associated_definition (_, type_) -> resolve_type_expression state scope type_
               | Capability_definition (_, capabilities) ->
-                  List.iter (resolve_capability_reference state scope) capabilities
+                  List.iter (resolve_capability_use state scope) capabilities
               | Impl_member_error -> ())
           members
       end

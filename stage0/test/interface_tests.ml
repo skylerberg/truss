@@ -293,6 +293,13 @@ let () =
       expect_no_diagnostics [ ("app::main", Fixtures.Interface.subtrait_overloading_element) ]);
   Harness.test "a trait may restate a method of a trait it requires to promise more" (fun () ->
       expect_no_diagnostics [ ("app::main", Fixtures.Interface.subtrait_restating_next) ]);
+  Harness.test "only `Panic` takes a condition on values, apart from bounds and traits" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.condition_on_values_of_run_forever
+        "types.misplaced_value_condition" ~says:"applies only to `Panic`";
+      expect_one_diagnostic Fixtures.Interface.condition_on_values_joined_with_a_bound
+        "types.misplaced_value_condition" ~says:"cannot be joined with a bound";
+      expect_one_diagnostic Fixtures.Interface.condition_on_values_in_a_trait
+        "types.misplaced_value_condition" ~says:"A trait's method takes no condition");
   Harness.test "a restated method has no body" (fun () ->
       expect_one_diagnostic Fixtures.Interface.subtrait_restating_next_with_a_body
         "types.restated_method_body");

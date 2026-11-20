@@ -1,0 +1,3 @@
+fn incremented(values: List[UInt8]) -> List[UInt8] {
+  values.map(fn(value) { value + 1 })
+}

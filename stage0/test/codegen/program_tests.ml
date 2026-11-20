@@ -146,6 +146,47 @@ let () =
         ])
 
 let () =
+  Codegen_support.test
+    "a release build stops an operator that fails in a function that declares `uses Panic`"
+    (fun () ->
+      let program =
+        Codegen_support.build_main ~profile:Release Fixtures.Program.operators_that_stop_the_program
+      in
+      let run operation = Process.run program [ operation ] in
+      List.iter
+        (fun (operation, failure) ->
+          let status, _, errors = run operation in
+          Codegen_support.expect_int ~expected:101 status;
+          if not (String.includes ~affix:("panic: " ^ failure) errors) then
+            Codegen_support.fail "%s stopped with %S" operation errors)
+        [
+          ("overflow", "arithmetic overflow");
+          ("division", "division by zero");
+          ("shift", "shift amount out of range");
+          ("negation", "arithmetic overflow");
+          ("lambda", "arithmetic overflow");
+        ];
+      let status, output, _ = run "none" in
+      Codegen_support.expect_int ~expected:0 status;
+      Codegen_support.expect_string ~expected:"3 4 8 -5 1\n" output)
+
+let () =
+  Codegen_support.test
+    "a release build runs a callee with a condition on values from code with and without `Panic`"
+    (fun () ->
+      let program =
+        Codegen_support.build_main ~profile:Release
+          Fixtures.Program.conditions_on_values_at_run_time
+      in
+      let status, output, _ = Process.run program [ "none" ] in
+      Codegen_support.expect_int ~expected:0 status;
+      Codegen_support.expect_string ~expected:"5000 7\n" output;
+      let status, _, errors = Process.run program [ "overflow" ] in
+      Codegen_support.expect_int ~expected:101 status;
+      if not (String.includes ~affix:"panic: arithmetic overflow" errors) then
+        Codegen_support.fail "stopped with %S" errors)
+
+let () =
   Codegen_support.test "a program prints through the real console and exits with its code"
     (fun () ->
       let status, output, _ =
@@ -693,6 +734,7 @@ let () =
                                {
                                  path = declaration.key.path;
                                  instantiation = Ground.no_instantiation;
+                                 assumes_condition = false;
                                })
                       | _ -> None)
                     ((Database.make_name_lookups checked).list_declarations Codegen_support.example)

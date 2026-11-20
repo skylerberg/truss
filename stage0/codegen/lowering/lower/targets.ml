@@ -42,11 +42,9 @@ let make_trait_method_item context substitution ~(trait : Types.trait_reference)
     ~self_type ~(instantiation : Types.instantiation) ~(evidence : Core.evidence) =
   let impl, impl_arguments = resolve_impl context substitution ~trait ~self_type ~evidence in
   let own = Monomorphic.ground_instantiation context.monomorphic substitution instantiation in
-  Lowered.Item.Code
-    {
-      path = Method { owner = impl; name; receiver };
-      instantiation = { own with type_arguments = impl_arguments @ own.type_arguments };
-    }
+  Lowered.Item.make_code
+    (Method { owner = impl; name; receiver })
+    { own with type_arguments = impl_arguments @ own.type_arguments }
 
 let convert_operand state (mode : Language.Mode.t) ty (place : Lowered.place)
     (passed : Lowered.ty option) =
@@ -368,34 +366,41 @@ let lower_nested_function (state : Lowering.state) ~(function_type : Ground.func
           (List.filter_map (fun ((arrives, _), _, _) -> arrives) parameter_places @ [ capabilities ])
         ())
 
+let is_unreachable_panic (state : Lowering.state) capabilities =
+  state.frame.code.assumes_condition
+  && Option.is_none (Lowering.find_panic_trace state)
+  && List.exists (Path.equal Definitions.panic_path) capabilities
+
 let lower_indirect_call state ~(function_type : Ground.function_type) ~(value : Lowered.place) ~site
     (places : Lowered.place list) destination =
-  let passed =
-    List.concat
-      (List.map2
-         (fun ((mode : Language.Mode.t), ty) place -> Option.to_list (pass state mode ty place))
-         function_type.parameters places)
-    @ [ pass_capabilities state ~site function_type.uses ]
-  in
-  let target =
-    Lowered.Indirect
-      {
-        code = Copy (Builtin_records.Function_value.project_code value);
-        environment = Copy (Builtin_records.Function_value.project_environment value);
-        signature = Convention.make_function_value_signature state.context.env function_type;
-      }
-  in
-  Emit_c.Ir_builder.emit state.builder
-    (Call
-       {
-         target;
-         arguments = passed;
-         result =
-           Convention.make_destination
-             (Convention.classify_result state.context.env function_type.result)
-             destination;
-       });
-  if function_type.result = Never then Lowering.emit_unreachable_block state
+  if is_unreachable_panic state function_type.uses then Lowering.emit_unreachable_block state
+  else
+    let passed =
+      List.concat
+        (List.map2
+           (fun ((mode : Language.Mode.t), ty) place -> Option.to_list (pass state mode ty place))
+           function_type.parameters places)
+      @ [ pass_capabilities state ~site function_type.uses ]
+    in
+    let target =
+      Lowered.Indirect
+        {
+          code = Copy (Builtin_records.Function_value.project_code value);
+          environment = Copy (Builtin_records.Function_value.project_environment value);
+          signature = Convention.make_function_value_signature state.context.env function_type;
+        }
+    in
+    Emit_c.Ir_builder.emit state.builder
+      (Call
+         {
+           target;
+           arguments = passed;
+           result =
+             Convention.make_destination
+               (Convention.classify_result state.context.env function_type.result)
+               destination;
+         });
+    if function_type.result = Never then Lowering.emit_unreachable_block state
 
 let lower_call_through_any (state : Lowering.state) ~(any_type : Types.trait_reference) ~trait ~name
     ~receiver ~(any : Lowered.place)
@@ -524,30 +529,47 @@ let count_passed (signature : Types.signature) =
 let lower_item_call (state : Lowering.state) item ~(signature : Types.signature) ~substitution
     ~(arguments : (Language.Mode.t * Ground.ty * Lowered.place) list) ?mask ?(lending = [])
     ~destination ~site () =
-  let mask = match mask with Some mask -> mask | None -> count_passed signature in
-  let c_signature, result =
-    Definitions.make_c_signature state.context substitution
-      ~parameters:(Definitions.list_interface_parameters signature)
-      ~has_defaults:(Definitions.has_defaults signature)
-      ~uses:signature.uses signature.output
+  let item : Lowered.Item.t =
+    match item with
+    | Lowered.Item.Code { path; instantiation; assumes_condition = false }
+      when Definitions.has_panic_condition signature.uses
+           && Option.is_none (Lowering.find_panic_trace state) ->
+        Lowered.Item.Code { path; instantiation; assumes_condition = true }
+    | item -> item
   in
-  let passed = List.filter_map (fun (mode, ty, place) -> pass state mode ty place) arguments in
-  let mask =
-    (if Definitions.has_defaults signature then
-       [ Lowering.make_int_constant UInt64 (Z.of_int mask) ]
-     else [])
-    @ List.map (pass_evidence state ~site)
-        (Definitions.list_evidence state.context substitution signature.uses)
+  let uses =
+    match item with
+    | Lowered.Item.Code { assumes_condition = true; _ } ->
+        Definitions.remove_panic_condition signature.uses
+    | _ -> signature.uses
   in
-  let target = Lowered.Direct { function_ = Item item; signature = c_signature } in
-  Emit_c.Ir_builder.emit state.builder
-    (Call
-       {
-         target;
-         arguments = passed @ mask @ lending;
-         result = Convention.make_destination result destination;
-       });
-  if not c_signature.returns then Lowering.emit_unreachable_block state
+  if is_unreachable_panic state (Definitions.list_evidence state.context substitution uses) then
+    Lowering.emit_unreachable_block state
+  else
+    let mask = match mask with Some mask -> mask | None -> count_passed signature in
+    let c_signature, result =
+      Definitions.make_c_signature state.context substitution
+        ~parameters:(Definitions.list_interface_parameters signature)
+        ~has_defaults:(Definitions.has_defaults signature)
+        ~uses signature.output
+    in
+    let passed = List.filter_map (fun (mode, ty, place) -> pass state mode ty place) arguments in
+    let mask =
+      (if Definitions.has_defaults signature then
+         [ Lowering.make_int_constant UInt64 (Z.of_int mask) ]
+       else [])
+      @ List.map (pass_evidence state ~site)
+          (Definitions.list_evidence state.context substitution uses)
+    in
+    let target = Lowered.Direct { function_ = Item item; signature = c_signature } in
+    Emit_c.Ir_builder.emit state.builder
+      (Call
+         {
+           target;
+           arguments = passed @ mask @ lending;
+           result = Convention.make_destination result destination;
+         });
+    if not c_signature.returns then Lowering.emit_unreachable_block state
 
 type literal = Integer_value of Z.t | Float_value of float
 

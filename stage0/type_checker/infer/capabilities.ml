@@ -17,10 +17,13 @@ type function_body = { path : Path.t; implementation : Interface.Impls.implement
 
 type scope_kind =
   | Function_body of function_body
-  | Lambda_body of Core.origin
+  | Lambda_body of { origin : Core.origin; enclosing_panic : Types.capability option }
   | Restricted of { description : string; reason : string; enclosing : scope option }
 
 and scope = { allowed : Types.capability_set; provided : Types.capability_set; kind : scope_kind }
+
+let implies (state : State.state) =
+  Interface.Impls.implies_condition state.lookups.interface ~list_bounds:(State.lookup_bounds state)
 
 let make_scope ~allowed kind = { allowed; provided = Types.no_capabilities; kind }
 let compute_available scope = Types.union_capabilities scope.allowed scope.provided
@@ -134,7 +137,7 @@ let rec require_available checking scope (origin : Core.origin) ?(subject = "Thi
       (fun capability ->
         let shown = Types.show_capability capability in
         match scope.kind with
-        | Lambda_body lambda ->
+        | Lambda_body { origin = lambda; _ } ->
             report checking Lambda_uses lambda
               ~notes:
                 (if Option.is_some alternative then
@@ -161,7 +164,8 @@ let rec require_available checking scope (origin : Core.origin) ?(subject = "Thi
               | Capability_variable _ ->
                   false
               | Capability_error _ -> State.raise_bug "a capability with an error is missing"
-              | Capability_unless _ -> State.raise_bug "a capability's base has a condition"
+              | Capability_unless _ | Capability_unless_values _ ->
+                  State.raise_bug "a capability's base has a condition"
             in
             report checking Not_available origin
               (match
@@ -193,23 +197,30 @@ let rec require_available checking scope (origin : Core.origin) ?(subject = "Thi
         require_available checking enclosing origin ~subject ?alternative ~indirect_call
           ~restriction:
             (match restriction with
-            | Some restriction -> Types.intersect_capabilities [ restriction; passed ]
+            | Some restriction ->
+                Types.intersect_capabilities ~implies:(implies state) [ restriction; passed ]
             | None -> passed)
           required
     | None -> ()
   end
 
-let compute_required_uses scope (callee : Core.callee) =
+let compute_required_uses state scope (callee : Core.callee) =
+  let uses =
+    Types.replace_capabilities
+      (function Types.Capability_unless_values _ -> Some Types.no_capabilities | _ -> None)
+      callee.uses
+  in
   match (callee.target, find_implemented_capability scope) with
   | Intrinsic _, Some _ ->
-      Types.subtract_capabilities callee.uses (Types.make_capability_set [ tasks ])
-  | (Function _ | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _), _ -> callee.uses
+      Types.subtract_capabilities ~implies:(implies state) uses
+        (Types.make_capability_set [ tasks ])
+  | (Function _ | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _), _ -> uses
 
 let require_callee_uses checking scope (origin : Core.origin) (callee : Core.callee) =
   check_callee_grants checking origin callee.target;
   require_available checking scope origin
     ~indirect_call:(match callee.target with Indirect _ -> true | _ -> false)
-    (compute_required_uses scope callee)
+    (compute_required_uses checking.state scope callee)
 
 let require_run_forever_of_unmeasured_loop checking scope (origin : Core.origin) ~alternative =
   require_available checking scope origin ~subject:"This loop has no measure, so it" ~alternative
@@ -223,6 +234,35 @@ let require_run_forever_unless checking scope (origin : Core.origin) condition =
     (Types.make_capability_set
        (Option.to_list (Types.make_unless (Built_in Run_forever) condition)))
 
+let find_available_panic scope =
+  List.find_opt
+    (fun capability -> Types.find_base capability = Built_in Panic)
+    (Types.list_capabilities (compute_available scope))
+
+let find_panic_for_lambda scope =
+  match (find_available_panic scope, scope.kind) with
+  | Some panic, _ -> Some panic
+  | None, Lambda_body { enclosing_panic; _ } when Types.contains_capability_variable scope.allowed
+    ->
+      enclosing_panic
+  | None, (Function_body _ | Lambda_body _ | Restricted _) -> None
+
+let can_fail (operation : Intrinsic.scalar) ty =
+  Types.is_integer_type ty
+  &&
+  match operation with
+  | Add | Subtract | Multiply | Divide | Remainder | Negate | Shift_left | Shift_right -> true
+  | _ -> false
+
+let require_panic_of_failing_operation checking scope (origin : Core.origin) =
+  match scope.kind with
+  | Lambda_body { enclosing_panic = Some panic; _ }
+    when Option.is_none (find_available_panic scope)
+         && Types.contains_capability_variable scope.allowed ->
+      require_available checking scope origin ~subject:"This operation may fail, so it"
+        (Types.make_capability_set [ panic ])
+  | Function_body _ | Lambda_body _ | Restricted _ -> ()
+
 let compute_node_origin = function
   | `Expression (inner : Core.expression) -> inner.origin
   | `Statement (inner : Core.statement) -> inner.origin
@@ -234,7 +274,13 @@ let rec check_expression checking scope (node : Core.expression) =
       let allowed =
         match node.type_ with Types.Function { uses; _ } -> uses | _ -> Types.no_capabilities
       in
-      check_block checking (make_scope ~allowed (Lambda_body node.origin)) body
+      check_block checking
+        (make_scope ~allowed
+           (Lambda_body { origin = node.origin; enclosing_panic = find_panic_for_lambda scope }))
+        body
+  | Operator { operation; _ } when can_fail operation node.type_ ->
+      require_panic_of_failing_operation checking scope node.origin;
+      check_children checking scope (`Expression node)
   | Provide { implementations; body } -> check_provide checking scope implementations body
   | Quantified _ ->
       check_children checking (make_quantifier_scope ~enclosing:scope) (`Expression node)
@@ -411,11 +457,12 @@ let solve (state : State.state) =
   in
   let compute_missing (constraint_ : State.subset_constraint) =
     let missing =
-      Types.compute_missing_capabilities ~required:(substitute constraint_.subset)
-        ~available:(substitute constraint_.superset)
+      Types.compute_missing_capabilities ~implies:(implies state)
+        ~required:(substitute constraint_.subset) ~available:(substitute constraint_.superset)
     in
     match constraint_.restriction with
-    | Some restriction -> Types.intersect_capabilities [ missing; substitute restriction ]
+    | Some restriction ->
+        Types.intersect_capabilities ~implies:(implies state) [ missing; substitute restriction ]
     | None -> missing
   in
   let add_to_variables (constraint_ : State.subset_constraint) missing =
@@ -459,7 +506,8 @@ let rec can_call_capability_code (state : State.state) ~list_bounds ?(seen = [])
       | Built_in _ -> false
       | Capability _ | Capability_parameter _ | Capability_variable _ -> true
       | Capability_error _ -> State.raise_bug "a trait's method uses a capability with an error"
-      | Capability_unless _ -> State.raise_bug "a capability's base has a condition"
+      | Capability_unless _ | Capability_unless_values _ ->
+          State.raise_bug "a capability's base has a condition"
     in
     List.exists
       (fun (bound : Types.trait_reference) ->
@@ -488,7 +536,8 @@ let rec can_call_capability_code (state : State.state) ~list_bounds ?(seen = [])
           | Capability _ | Capability_parameter _ | Capability_projection _ | Capability_variable _
           | Capability_error _ ->
               true
-          | Capability_unless _ -> State.raise_bug "a capability's base has a condition")
+          | Capability_unless _ | Capability_unless_values _ ->
+              State.raise_bug "a capability's base has a condition")
         uses
       || List.exists (fun (_, input) -> can_call_inside input) inputs
       || can_call_inside output
@@ -618,6 +667,7 @@ let check (state : State.state) (elaborated : Interface.Environment.elaborated_i
               List.iter check_specification contract.requires)
             parameter.callback_contract)
         parameters;
+      List.iter check_specification contract.panics_unless;
       List.iter
         (fun (requirement : Core.condition Core.conditional) ->
           check_specification requirement.clause.value)

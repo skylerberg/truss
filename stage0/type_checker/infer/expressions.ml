@@ -132,13 +132,25 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
       let element =
         match (start, stop) with
         | Some start, Some stop ->
-            let element = check_expression state env start in
-            let stop_type = check_expression state env ~expected:element stop in
-            Operators.check_literal_operands state ~left:element ~right:stop_type;
-            if not (State.unify state element stop_type) then
-              Failures.report_mismatch state (State.read_span state stop.id) ~expected:element
+            let start_type = check_expression state env start in
+            let stop_type = check_expression state env ~expected:start_type stop in
+            Operators.check_literal_operands state ~left:start_type ~right:stop_type;
+            let is_integer type_ =
+              State.is_within state type_ (Types.integer_types @ [ Language.Builtin_type.Integer ])
+            in
+            if State.unify state start_type stop_type then start_type
+            else if env.specification && is_integer start_type && is_integer stop_type then begin
+              List.iter
+                (fun (bound, actual) ->
+                  Conversions.coerce state env bound ~actual ~expected:Types.Integer)
+                [ (start, start_type); (stop, stop_type) ];
+              Types.Integer
+            end
+            else begin
+              Failures.report_mismatch state (State.read_span state stop.id) ~expected:start_type
                 ~actual:stop_type;
-            element
+              start_type
+            end
         | Some only, None | None, Some only -> check_expression state env only
         | None, None -> State.make_fresh_type state
       in
@@ -244,23 +256,25 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
   in
   match items with
   | [ Item ({ kind = Range { start; stop; _ }; _ } as range) ] -> (
-      Option.iter (fun start -> check state env start (Types.make_builtin UInt64)) start;
-      Option.iter (fun stop -> check state env stop (Types.make_builtin UInt64)) stop;
+      let model_element = Types.find_specification_sequence_element base_type in
+      let bound_type =
+        match model_element with Some _ -> Types.Integer | None -> Types.make_builtin UInt64
+      in
+      Option.iter (fun start -> check state env start bound_type) start;
+      Option.iter (fun stop -> check state env stop bound_type) stop;
       State.record state range
-        (Types.Named
-           {
-             path = Well_known.make_path Range;
-             arguments = [ Types.Type (Types.make_builtin UInt64) ];
-           });
-      match (Types.find_sequence_element base_type, base_type) with
-      | Some element, _ ->
+        (Types.Named { path = Well_known.make_path Range; arguments = [ Types.Type bound_type ] });
+      match (model_element, Types.find_sequence_element base_type, base_type) with
+      | Some element, _, _ ->
+          Types.Named { path = Well_known.make_path Sequence; arguments = [ Types.Type element ] }
+      | None, Some element, _ ->
           Types.Named { path = Well_known.make_path Slice; arguments = [ Types.Type element ] }
-      | None, Types.Named { path; _ }
+      | None, None, Types.Named { path; _ }
         when Well_known.is String path || Well_known.is String_slice path ->
           State.make_error_type state Not_indexable (State.read_span state value.id)
             "Strings cannot be indexed: say which you mean with `bytes()` or `characters()`."
-      | None, (Types.Error _ | Types.Hole) -> base_type
-      | None, _ ->
+      | None, None, (Types.Error _ | Types.Hole) -> base_type
+      | None, None, _ ->
           State.make_error_type state Not_indexable (State.read_span state value.id)
             (Printf.sprintf "%s cannot be sliced."
                (String.capitalize_ascii (State.describe state base_type))))

@@ -95,6 +95,11 @@ let fail_obligation_when context condition message =
          trace = context.trace;
        })
 
+let fail_operation_when context condition message =
+  match context.trace with
+  | Some _ -> panic_when context condition message
+  | None -> fail_obligation_when context condition message
+
 let check_index context index count =
   fail_obligation_when context (Test (Greater_equal, index, count)) "index out of bounds"
 

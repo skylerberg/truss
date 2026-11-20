@@ -238,7 +238,10 @@ and parse_function_type cursor ~clauses:with_clauses =
       let has_unless =
         match clause.kind with
         | Uses uses ->
-            List.exists (fun (use : Syntax.capability_use) -> Option.is_some use.unless) uses
+            List.exists
+              (fun (use : Syntax.capability_use) ->
+                Option.is_some use.unless || use.unless_values <> [])
+              uses
         | Requires _ | Ensures _ | Decreases _ | Cost _ | Clause_error -> false
       in
       if Option.is_some clause.condition || has_unless then
@@ -361,18 +364,65 @@ and parse_capability_list cursor =
 and parse_capability_uses cursor =
   Cursor.parse_separated cursor ~separator:Comma (fun cursor : Syntax.capability_use ->
       let capability = parse_capability_reference cursor in
-      { capability; unless = parse_condition_after cursor Unless })
+      if Cursor.accept_keyword cursor Unless then
+        let atoms = parse_condition_atoms cursor in
+        let bounds =
+          List.filter_map (function `Bound bound -> Some bound | `Value _ -> None) atoms
+        and values =
+          List.filter_map (function `Value value -> Some value | `Bound _ -> None) atoms
+        in
+        {
+          capability;
+          unless = (match bounds with [] -> None | bounds -> Some bounds);
+          unless_values = values;
+        }
+      else { capability; unless = None; unless_values = [] })
 
 and parse_condition_after cursor (keyword : Token.keyword) =
-  if Cursor.accept_keyword cursor keyword then Some (parse_condition cursor) else None
+  if Cursor.accept_keyword cursor keyword then
+    Some
+      (List.filter_map
+         (function
+           | `Bound bound -> Some bound
+           | `Value (value : Syntax.expression) ->
+               Cursor.report cursor Misplaced_condition
+                 (Cursor.read_span cursor value.id |> Cursor.make_file_span cursor)
+                 "A `when` condition names bounds, such as `T: Trait`. A clause that holds where a \
+                  value condition does is written with `==>`, as in `ensures P ==> Q`.";
+               None)
+         (parse_condition_atoms cursor))
+  else None
 
-and parse_condition cursor : Syntax.condition =
-  Cursor.parse_separated cursor ~separator:And_and (fun cursor : Syntax.bound_condition ->
-      let start = Cursor.index cursor in
-      let subject = parse_type_expression cursor in
-      Cursor.expect_punctuation cursor Colon;
-      let bounds = parse_bounds cursor in
-      { subject; bounds; id = Cursor.allocate_id_from cursor start })
+and is_bound_atom cursor =
+  let rec skip_arguments offset depth =
+    match Cursor.peek_ahead cursor offset with
+    | Punctuation (Open Square) -> skip_arguments (offset + 1) (depth + 1)
+    | _ when depth = 0 -> offset
+    | Punctuation (Close Square) when depth = 1 -> offset + 1
+    | Punctuation (Close Square) -> skip_arguments (offset + 1) (depth - 1)
+    | End_of_file -> offset
+    | _ -> skip_arguments (offset + 1) depth
+  in
+  let rec skip_projections offset =
+    match (Cursor.peek_ahead cursor offset, Cursor.peek_ahead cursor (offset + 1)) with
+    | Punctuation Dot, Upper _ -> skip_projections (offset + 2)
+    | _ -> offset
+  in
+  match Cursor.peek_kind cursor with
+  | Upper _ | Keyword Self_type ->
+      Cursor.peek_ahead cursor (skip_projections (skip_arguments 1 0)) = Punctuation Colon
+  | _ -> false
+
+and parse_condition_atoms cursor =
+  Cursor.parse_separated cursor ~separator:And_and (fun cursor ->
+      if is_bound_atom cursor then begin
+        let start = Cursor.index cursor in
+        let subject = parse_type_expression cursor in
+        Cursor.expect_punctuation cursor Colon;
+        let bounds = parse_bounds cursor in
+        `Bound { Syntax.subject; bounds; id = Cursor.allocate_id_from cursor start }
+      end
+      else `Value (parse_binary cursor ~level:(rank_binary (Connective And) + 1) ~open_range:false))
 
 and parse_expression_list cursor =
   Cursor.parse_separated cursor ~separator:Comma (fun cursor -> parse_expression cursor)

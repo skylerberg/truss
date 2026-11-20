@@ -40,12 +40,9 @@ has a body, except a method declared in a trait or a capability.
   character, and is ignored.
 - Tab and space are whitespace. A carriage return followed by a line feed is
   one line break; a carriage return on its own is an error.
-- Each language version names one Unicode version, which every rule here
-  that uses a Unicode property follows.
 
 These characters are an error anywhere in a file, including inside string
-literals, because they can make code display differently from how it
-compiles:
+literals:
 
 - the bidirectional controls: U+061C, U+200E, U+200F, U+202A to U+202E, and
   U+2066 to U+2069
@@ -66,7 +63,7 @@ token = UPPER_NAME | LOWER_NAME | "_" | keyword
 ```
 
 Whitespace and line feeds separate tokens, and a line feed becomes a
-`NEWLINE` only as [Line breaks](#line-breaks) says. Truss has no comments.
+`NEWLINE` only as [Line breaks](#line-breaks) says.
 
 ### Names
 
@@ -152,16 +149,15 @@ octal_digit   = "0" ... "7" ;
 A number literal is never directly followed by a name character, so `3u8`
 is an error.
 
-A literal takes its type from its context, as in `let small: UInt8 = 3`. A
-local declared from literals alone takes its type from its first use that
-decides it: after `let limit = 10`, `count < limit` with a `UInt8` count makes
-`limit` a `UInt8`, and so does `let digit: UInt8 = index` in the body of
-`for index in 0..10`. The use may follow a method call on the local, which
-then computes for the decided type: after `let mask = 255`,
-`mask.count_zeros()` is 0 when a later `let small: UInt8 = mask` makes `mask` a
-`UInt8`, and 56 without it. When nothing decides it, a literal has the first of
-`Int64`, `UInt64`, and `Float64` that its value fits and its uses allow, so
-`9223372036854775808` is a `UInt64`.
+Literal's types are inferred, as in `let small: UInt8 = 3`. A local declared
+from literals alone takes its type from its first use that decides it: after
+`let limit = 10`, `count < limit` with a `UInt8` count makes `limit` a `UInt8`,
+and so does `let digit: UInt8 = index` in the body of `for index in 0..10`. The
+use may follow a method call on the local, which then computes for the decided
+type: after `let mask = 255`, `mask.count_zeros()` is 0 when a later `let small:
+UInt8 = mask` makes `mask` a `UInt8`, and 56 without it. When nothing decides
+it, a literal has the first of `Int64`, `UInt64`, and `Float64` that its value
+fits and its uses allow, so `9223372036854775808` is a `UInt64`.
 
 - A literal operand of an arithmetic operator, a comparison, or a range takes
   the other operand's type when its value fits that type: in `count + 1` with
@@ -171,9 +167,8 @@ then computes for the decided type: after `let mask = 255`,
   of literals waits for the same decision. In a specification, a literal that
   fits neither operand's type is an `Integer`, and `Integer` is its default,
   so `span * 2` there needs a literal with a type.
-- A shift amount is an unsigned integer, and a literal one is a `UInt64` when
-  nothing else decides it.
-- An integer literal is never a float.
+- A shift amount is an unsigned integer, and a literal one is a `UInt64` by
+  default.
 - A literal that does not fit its type is an error. A negated literal is
   checked after the negation, so `-128` fits an `Int8`.
 - A literal whose type is a type parameter bounded by an integer trait fits
@@ -338,9 +333,8 @@ its file or its position in the file.
 - A local or a parameter may shadow a function, a constant, or a theorem of
   its module, so adding a definition to one file breaks no local in another.
 - A generic parameter cannot shadow a type, a trait, or a capability of its
-  module. An `impl`'s head declares the names in its brackets, so
-  `impl Shown for Box[Marker]` would otherwise mean every `Box` where the
-  type `Marker` was meant.
+  module, so `impl Shown for Box[Marker]` is an error where `Marker` is a
+  type of the module.
 - Module names are a namespace of their own, written only before `::`. A
   variable can be named `url` in a file that imports the `url` module.
 - `::` reaches into a module, and `.` into a type or a value.
@@ -431,9 +425,8 @@ type Expression =
 - A variant that is not recursive may be `indirect` too.
 - In its own fields, at any depth, a type does not occur in the input of a
   function type without `RunForever`: `type Knot(run: fn(Knot) -> Bool)` is
-  an error. A function stored in a `Knot` could call itself through it, so
-  it would be proven to terminate without a measure.
-  `type Knot(run: (fn(Knot) -> Bool uses RunForever))` is legal.
+  an error, and `type Knot(run: (fn(Knot) -> Bool uses RunForever))` is
+  legal.
 
 ### Type expressions
 
@@ -643,19 +636,13 @@ it.
 - **A slice's elements are written only through a `mut Slice` parameter or
   a range of a mutable place.** `mut self` of a `Slice` method is such a
   parameter, and `mut items[1..]` such a range. A slice held in a variable,
-  a field, an element, or a pattern's binding is read-only. Write access
-  held in a variable would let `var target = items[1..5]` overwrite
-  elements that `items[0..4]`, passed beside it, still views. Assigning a
+  a field, an element, or a pattern's binding is read-only. Assigning a
   slice held in a variable makes it view other elements and changes none.
 - **A `mut Slice` parameter cannot be assigned,** whole or by field, so its
   length is fixed for the call. A slice is passed `mut` only to a parameter
-  declared as a slice. A callee that took it as a type parameter could
-  assign it another slice, and the caller would read the callee's contract
-  as a write to elements that did not change.
+  declared as a slice.
 - **A slice implements no trait with a `mut self` method,** and so
-  satisfies no bound of one. Generic code could call the method on a copy,
-  and a copy of a slice views the same elements, so the write would reach
-  elements lent read-only.
+  satisfies no bound of one.
 - **A temporary is dropped at the end of its statement,** except where a
   `let` keeps it until the end of the block that holds the `let`. A `let`
   keeps the base of a slice that it binds, directly or through fields. It
@@ -799,7 +786,7 @@ clause               = "uses" capability_use { "," capability_use }
                      | "ensures" expression [ "when" condition ]
                      | "decreases" expression { "," expression } [ "when" condition ]
                      | "cost" cost [ "when" condition ] ;
-capability_use       = capability_reference [ "unless" condition ] ;
+capability_use       = capability_reference [ "unless" unless_condition ] ;
 capability_list      = capability_reference { "," capability_reference } ;
 capability_reference = path_type
                      | "Self" "." UPPER_NAME
@@ -845,8 +832,10 @@ public fn binary_search[Element: Ordered](sorted: Slice[Element], target: Elemen
 ### Conditions
 
 ```ebnf
-condition       = bound_condition { "&&" bound_condition } ;
-bound_condition = ( UPPER_NAME | "Self" ) ":" bound ;
+condition        = bound_condition { "&&" bound_condition } ;
+unless_condition = unless_atom { "&&" unless_atom } ;
+unless_atom      = bound_condition | comparison ;
+bound_condition  = ( UPPER_NAME | "Self" ) ":" bound ;
 ```
 
 ```truss
@@ -862,7 +851,10 @@ condition holds for the instantiations that meet it.
   `T: First + Second` where it implements both. `&&` joins conditions that
   all hold.
 - A condition names a type parameter of its definition or of the
-  definition's type or `impl`, or `Self` in a trait or an `impl`.
+  definition's type or `impl`, or `Self` in a trait or an `impl`, as a bound
+  does. An associated type is named through a type parameter bound to it:
+  `[Element, Items: Cursor[Element = Element]]`, and then
+  `when Element: Display`.
 - A clause holds where its `when` condition holds, and a capability in
   `uses` is used only where its `unless` condition does not hold. Every
   clause of a function and of a loop takes a condition: `requires`,
@@ -891,12 +883,40 @@ condition holds for the instantiations that meet it.
   does, by `impl FiniteCursor for Skip[Source: FiniteCursor]`.
 - A capability that code uses `unless` a condition is available where the
   function's `uses` names it with no condition, or `unless` a condition that
-  implies the code's.
+  implies the code's. A trait implies the traits it requires, so
+  `RunForever unless Items: Short`, where `Short: FiniteCursor`, covers
+  `RunForever unless Items: FiniteCursor`.
 - A written function type takes no condition. The type of a function named
   as a value keeps each condition that its type arguments do not decide.
 - A condition that names neither a type parameter nor `Self` is an error,
   since it is decided where it is written, and so is a clause whose
   condition no instantiation meets.
+
+#### Conditions on values
+
+```truss
+public fn Option[Value].expect(own self, message: StringSlice) -> Value
+  uses Panic unless self is Some(_)
+  ensures self is Some(held) && identical(result, held)
+```
+
+- **`Panic` can be `unless` a condition on the arguments.** The condition
+  is a `&&` of `Bool` expressions over the parameters, read at entry, as a
+  `requires` is. No other capability takes one, and it is not joined with a
+  bound.
+- **A caller without `Panic` proves the condition, as it proves a
+  `requires`.** A caller that has `Panic` proves nothing. A caller that uses
+  `Panic unless C` proves the condition where `C` holds.
+- **The body is proven twice.** It is proven once with `Panic`. It is
+  proven again assuming the condition, without `Panic`: every operation that
+  could fail is proven not to, and every call that uses `Panic` is proven
+  unreachable.
+- **A specification that calls such a function proves its condition,** as
+  it proves a callee's `requires`, since a specification never panics. A
+  function whose only capability is `Panic unless P` can be called in a
+  specification: `forall i in 0..text.length() => text.byte(i) < 128`.
+- A trait's method, a written function type, and a `when` condition take no
+  condition on values. A function named as a value uses `Panic`.
 
 ### Termination
 
@@ -918,9 +938,8 @@ fn serve(listener: mut Listener)
   without it takes only functions that terminate, and a capability
   parameter holds it where a function passed for the parameter may run
   forever (see [Capability parameters](#capability-parameters)).
-- `RunForever` has no methods, and nothing implements it, since a `provide`
-  of it would let a function that does not declare it run forever. A
-  `parallel` branch or a quantifier may run forever where its function may.
+- `RunForever` has no methods, and nothing implements it. A `parallel`
+  branch or a quantifier may run forever where its function may.
 - A function that uses `RunForever` has no `time` clause. One that uses
   `RunForever unless C` states its `time` clause `when` a condition that
   implies `C`.
@@ -992,8 +1011,7 @@ fn serve(listener: mut Listener)
   body is also checked once, for every `impl`. In that check a call on `Self`
   is followed to the method of every `impl` of the trait.
 - **Code that supplies other code to a callee is followed to all of the
-  supplied code.** The callee is checked for every type argument and every
-  function value, so it cannot name the code that it is given:
+  supplied code:**
 
   | The supplier | The supplied code |
   |---|---|
@@ -1008,8 +1026,8 @@ fn serve(listener: mut Listener)
   | The way back to the function | The requirement |
   |---|---|
   | A call of a function, of a method written in an `impl`, or of a trait's method through `any Trait` or on `Self` | The call is on a part of a parameter, or each function in the cycle states `decreases` |
-  | A call of a method that its `impl` derives or inherits | Rejected. The `impl` states no measure for that code, so nothing proves that the recursion through it terminates |
-  | Supplied code | Rejected. A use of supplied code passes no arguments to compare with a measure |
+  | A call of a method that its `impl` derives or inherits | Rejected |
+  | Supplied code | Rejected |
 
   A function that uses `RunForever` is not rejected for any of these. Its
   recursive call is compared only where it and its callee both state
@@ -1227,7 +1245,8 @@ A capability parameter passes on the capabilities a callback uses,
 - A call infers `Granted` from the functions it passes, and writes no type
   argument for it (see [Explicit type arguments](#explicit-type-arguments)).
   Where the function passed may run forever, `Granted` holds `RunForever`,
-  and so does the call.
+  and so does the call. Where it is a lambda that takes `Panic` (see
+  [Failure](#failure)), `Granted` holds `Panic`.
 - A function declares `uses generic Granted` only where it calls a function
   that uses it. One that returns or stores such a function does not, and its
   caller needs the capabilities only where it calls the result:
@@ -1868,6 +1887,7 @@ let pending: Stack[Int64] = [1, 2, 3]
 |---|---|
 | `items[i]` | Element `i`, which is proven in bounds |
 | `items[1..4]` | The range of elements 1 to 3, a `Slice`, whose bounds are proven |
+| `items.model()[1..4]` | In a specification, the `Sequence` of positions 1 to 3 of a `Sequence`, whose bounds are proven |
 | `ports[name]` | The value for `name`, which is proven present |
 | `items[i] = value` | Replaces element `i` |
 | `ports[own name] = 8080` | Inserts or replaces the value for `name` |
@@ -1878,6 +1898,8 @@ let pending: Stack[Int64] = [1, 2, 3]
   `Slice`. Neither calls a method. So `let first = names[0]` binds a view of
   the element, `names[0].count += 1` mutates it in place, and
   `mut names[1..]` passes the range `mut`.
+- A range of a `Sequence` is a value, not a place. Its bounds are `Integer`s,
+  and its elements are the `Sequence`'s from the first bound up to the second.
 - An index and the bounds of a range are evaluated before the element or
   the range is reached, so `items[grow(mut items)]` is checked against the
   length that `grow` leaves. Evaluating an element or a range checks its
@@ -2034,8 +2056,9 @@ public trait Add[Right] {
 ### Integers
 
 - **No integer operation overflows silently.** An operation that could
-  overflow is proven not to, or the code calls the standard library's
-  checked, wrapping, or saturating method.
+  overflow is proven not to, panics in code that has `Panic` (see
+  [Failure](#failure)), or is the standard library's checked, wrapping, or
+  saturating method.
 - `/` rounds toward zero, and `%` has the sign of its left operand.
 - `>>` on a signed integer copies the sign bit, and on an unsigned integer
   shifts in zeros. A shift amount is any unsigned integer type, proven
@@ -2057,9 +2080,10 @@ public trait Add[Right] {
 
 ## Failure
 
-Code panics only where it calls `Panic.crash`, directly or through a
-callee such as `expect`, so only code that has `Panic` panics. Running out
-of memory and overflowing the stack are the exceptions.
+Only code that has `Panic` panics. It panics where it calls `Panic.crash`,
+directly or through a callee such as `expect`, and where an integer
+operation fails. Running out of memory and overflowing the stack are the
+exceptions.
 
 Every operation that can fail is a proof obligation, in every function and
 every test: integer overflow, division by zero, indexing or slicing out of
@@ -2071,11 +2095,22 @@ compile:
 2. Require it with `requires`.
 3. Call a method that returns an `Option` or a `Result`, such as
    `checked_add` or `get`.
+4. For an integer operation, declare `uses Panic`.
 
-`unreachable` admits only the first. Code that crashes when the operation
-would fail calls the third kind of method and `expect` on its result, as in
-`left.checked_add(right).expect("the total fits Int64")`, and declares
-`uses Panic`.
+**In code that has `Panic`, an integer operation that fails panics.** An
+overflow, a division by zero, and a shift that is too large are then not
+proof obligations. Indexing, slicing, and `unreachable` are proven there
+too.
+
+- Code that uses `Panic unless C` proves its integer operations where `C`
+  holds.
+- A lambda has `Panic` where its type uses it. A lambda whose capabilities
+  are inferred, such as one passed to `map`, takes `Panic` for an integer
+  operation where the code it is written in has `Panic`.
+- `unreachable` admits only the first way.
+- `left.checked_add(right).expect("the total fits Int64")` panics with the
+  message given to `expect`. A failing operation panics with a message that
+  names the failure, such as `arithmetic overflow`.
 
 `Panic` is a built-in capability. `Panic.crash(message)` prints its message
 and location to standard error and ends the process with a nonzero exit
@@ -2350,7 +2385,7 @@ impl            = "impl" path_type "for" type_head [ "uses" capability_list ]
                   "{" lines(impl_member) "}" ;
 impl_member     = function_member
                 | "type" UPPER_NAME "=" type
-                | "capability" UPPER_NAME "=" capability_list ;
+                | "capability" UPPER_NAME "=" capability_use { "," capability_use } ;
 function_member = signature body ;
 ```
 
@@ -2474,6 +2509,11 @@ fn count[Source: Cursor](source: own Source) -> UInt64
 - `Self.Uses` and `Source.Uses` name the set in a `uses` clause. A call needs
   the set's capabilities for its type arguments. A function generic over a
   `Cursor` that advances it declares `uses Source.Uses`.
+- A capability in a set takes `unless`, as in `uses`. A cursor whose `next`
+  pulls its source until a value matches defines
+  `capability Uses = Source.Uses, RunForever unless Source: FiniteCursor`,
+  and a call of its `next` uses `RunForever` only where the source is not a
+  `FiniteCursor`.
 - A bound cannot constrain a set, and `calls(...)` cannot count one.
 
 ### Equality
@@ -2662,7 +2702,8 @@ an invariant, a law, or a proof.
   call: `values.map(fn(value) { value + 1 })` is
   such a call, although `map` passes a capability parameter on.
 - Every specification is well defined: each call meets its callee's
-  `requires`, and each index is in bounds. `&&`, `||`, `==>`, and `if` read
+  `requires` and the condition of a callee's `Panic unless`, and each index
+  is in bounds. `&&`, `||`, `==>`, and `if` read
   left to right, so the right side can rely on the left.
 - `==` is the type's `Equal`, and `identical(a, b)` is identity, for any type.
 - A specification is read as a formula, not run: it holds no `return`,
@@ -2689,9 +2730,10 @@ an invariant, a law, or a proof.
 - A quantifier's body runs to the end of the expression.
 - Integer arithmetic in a specification is exact. It is done on `Integer`, a
   prelude type that exists only in specifications, of which every built-in
-  integer type is a subset, so comparisons can mix integer types. An
-  `Integer` can stand where a built-in integer is expected, and the prover
-  shows that it fits.
+  integer type is a subset, so comparisons can mix integer types. A range
+  whose bounds have two integer types, as in `middle + 1..items.length()`,
+  is a range of `Integer`. An `Integer` can stand where a built-in integer
+  is expected, and the prover shows that it fits.
 - A specification never decides a type that code computes with. An integer
   literal or local of the code whose type is undecided is an `Integer` in a
   specification, so `invariant small <= limit` with a `UInt8` `small` leaves
@@ -2712,7 +2754,7 @@ an invariant, a law, or a proof.
   value that code holds stores its fields.
 - Float arithmetic in a specification follows IEEE 754.
 
-The prelude types `Sequence`, `FiniteSet`, `FiniteMap`, and `Multiset` exist
+The prelude types `Sequence`, `FiniteSet`, and `FiniteMap` exist
 only in specifications, and their equality is identity. A type gives its
 value in their terms with the prelude trait `Model`, whose `model()` can be
 called only in specifications:
@@ -2813,7 +2855,7 @@ The prelude is in scope in every file, and all its names are
   `Copyable`, `Plain`, `Storable`, `Index`, `IndexMut`, `IndexAssign`,
   `Iterable`, `Cursor`, `FiniteCursor`, `FromTemplate`, `FromElements`,
   `FromEntries`, `Model`, and the arithmetic traits
-- `Integer`, `Sequence`, `FiniteSet`, `FiniteMap`, and `Multiset`
+- `Integer`, `Sequence`, `FiniteSet`, and `FiniteMap`
 - the standard capabilities, and `Path`, `Instant`, `Duration`, and
   `SystemError`
 

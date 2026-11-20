@@ -97,7 +97,7 @@ let is_external_test lookups path =
           | Capability _ | Capability_parameter _ | Capability_projection _ | Capability_variable _
           | Capability_error _ ->
               true
-          | Capability_unless _ ->
+          | Capability_unless _ | Capability_unless_values _ ->
               Compiler_bug.raise_bug ~stage:"Interface" "a capability's base has a condition")
         signature.uses
   | _ -> Compiler_bug.raise_bug ~stage:"Interface" "%s has no test interface" (Path.show path)

@@ -50,7 +50,6 @@ type t =
   | Sequence
   | Finite_set
   | Finite_map
-  | Multiset
   | Instant
   | Duration
   | File_path
@@ -224,7 +223,6 @@ let items =
     (Sequence, [ "specification" ], "Sequence");
     (Finite_set, [ "specification" ], "FiniteSet");
     (Finite_map, [ "specification" ], "FiniteMap");
-    (Multiset, [ "specification" ], "Multiset");
     (Instant, [ "time" ], "Instant");
     (Duration, [ "time" ], "Duration");
     (File_path, [ "files" ], "Path");

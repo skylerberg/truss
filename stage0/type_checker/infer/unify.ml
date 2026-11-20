@@ -104,7 +104,9 @@ and zonk_capabilities unifier capabilities =
                    { base = zonk unifier base; trait = zonk_trait unifier trait; name };
                ])
       | _ -> None)
-    capabilities
+    (Types.map_conditions
+       (Types.map_condition_types (zonk unifier) (zonk_trait unifier))
+       capabilities)
 
 and zonk_trait unifier (trait : Types.trait_reference) =
   {

@@ -66,8 +66,11 @@ let convert (state : State.state) (env : State.env) ?argument ?(takes_view_as_ow
       | Types.Function actual_function, Types.Function wanted_function, _
         when not (Types.has_same_clauses actual_function wanted_function) ->
           let unlisted =
-            Types.compute_missing_capabilities ~required:actual_function.uses
-              ~available:wanted_function.uses
+            Types.compute_missing_capabilities
+              ~implies:
+                (Interface.Impls.implies_condition state.lookups.interface
+                   ~list_bounds:(State.lookup_bounds state))
+              ~required:actual_function.uses ~available:wanted_function.uses
           in
           let unknown =
             Types.has_unsolved_capabilities actual_function.uses

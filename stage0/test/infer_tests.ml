@@ -1835,6 +1835,10 @@ let () =
   Harness.test "a quantifier over a type in a compiled body" (fun () ->
       expect_one_diagnostic Fixtures.Infer.quantifier_over_int64_in_a_body
         "types.specification_only");
+  Harness.test "a quantifier's range from an Integer to a UInt64 is a range of Integer" (fun () ->
+      let text = Fixtures.Infer.range_in_a_specification_from_an_integer_to_a_uint64 in
+      expect_fine text;
+      expect_type text "middle + 1..items.length()" "Range[Integer]");
   Harness.test "a quantifier's range is of integers or characters, as a `for` loop's is" (fun () ->
       expect_one_diagnostic Fixtures.Infer.quantifier_over_a_float_range "types.not_indexable";
       expect_fine Fixtures.Infer.quantifier_over_a_character_range);
@@ -1847,6 +1851,10 @@ let () =
   Harness.test "a model in a compiled body" (fun () ->
       expect_one_diagnostic Fixtures.Infer.model_of_a_list_in_a_body "types.specification_only"
         ~says:"`Sequence[Int64]`");
+  Harness.test "a range of a model is a Sequence with Integer bounds" (fun () ->
+      let text = Fixtures.Infer.range_of_a_model in
+      expect_fine text;
+      expect_type text "items.model()[1..]" "Sequence[Int64]");
   Harness.test "a field of type Integer" (fun () ->
       expect_one_diagnostic Fixtures.Infer.box_of_an_integer "types.specification_only");
   Harness.test "a variant's field of type Sequence" (fun () ->
@@ -2469,6 +2477,10 @@ let () =
   Harness.test "a condition names a type parameter or Self" (fun () ->
       expect_one_diagnostic Fixtures.Infer.condition_on_a_concrete_type "types.decided_condition"
         ~says:"`Int64` is neither");
+  Harness.test "a condition names an associated type through a type parameter" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.condition_on_an_associated_type "types.decided_condition"
+        ~says:"Give it a type parameter, as in `[Element, Items: Cursor[Element = Element]]`";
+      expect_fine Fixtures.Infer.condition_on_a_parameter_bound_to_an_associated_type);
   Harness.test "a clause whose condition never holds is rejected" (fun () ->
       expect_one_diagnostic Fixtures.Infer.clause_whose_condition_never_holds
         "types.decided_condition" ~says:"never holds");

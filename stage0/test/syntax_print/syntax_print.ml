@@ -125,10 +125,13 @@ and show_conditional shown = function
   | None -> shown
 
 and show_capability_use (use : Syntax.capability_use) =
-  match use.unless with
-  | Some condition ->
-      make_form "unless" [ show_capability_reference use.capability; show_condition condition ]
-  | None -> show_capability_reference use.capability
+  match (use.unless, use.unless_values) with
+  | None, [] -> show_capability_reference use.capability
+  | unless, values ->
+      make_form "unless"
+        (show_capability_reference use.capability
+         :: Option.to_list (Option.map show_condition unless)
+        @ List.map show_expression values)
 
 and show_clause (clause : Syntax.clause) =
   show_conditional
@@ -478,7 +481,7 @@ let show_definition ?(methods = []) (definition : Syntax.definition) =
                     make_form "type" [ name.text; "="; show_type_expression type_ ]
                 | Capability_definition (name, capabilities) ->
                     make_form "capability"
-                      (name.text :: "=" :: list show_capability_reference capabilities)
+                      (name.text :: "=" :: list show_capability_use capabilities)
                 | Impl_member_error -> "error")
               impl_members
           @ methods)

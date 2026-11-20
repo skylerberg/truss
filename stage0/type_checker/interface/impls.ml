@@ -532,6 +532,21 @@ and decide_condition lookups ~list_bounds ?(depth = 0) (condition : Types.condit
     (Some []) condition
   |> Option.map Types.make_condition
 
+and add_condition_bounds (list_bounds : bounds) (condition : Types.condition) : bounds =
+ fun parameter ->
+  list_bounds parameter
+  @ List.filter_map
+      (fun (bound : Types.bound_condition) ->
+        match bound.subject with
+        | Types.Parameter subject when subject = parameter -> Some bound.bound
+        | _ -> None)
+      condition
+
+and implies_condition lookups ~list_bounds (premise : Types.condition)
+    (conclusion : Types.condition) =
+  decide_condition lookups ~list_bounds:(add_condition_bounds list_bounds premise) conclusion
+  = Some []
+
 and decide_bound_condition lookups ~list_bounds ~depth (bound : Types.bound_condition) =
   let subject = normalize lookups ~list_bounds bound.subject in
   let holds () = Option.is_some (find_evidence lookups ~list_bounds ~depth subject bound.bound) in
@@ -750,6 +765,7 @@ let find_capability_declaration lookups (path : Path.t) (capability : Types.capa
       if implemented.implementation.trait.is_capability then Some (Declared_by Impl_uses)
       else if
         Types.is_capability_subset
+          ~implies:(implies_condition lookups ~list_bounds:(Types.list_bounds impl.impl_generics))
           (Types.make_capability_set [ capability ])
           (make_expected_signature lookups implemented).uses
       then Some (Declared_by Own_uses)

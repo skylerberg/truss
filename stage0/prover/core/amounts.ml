@@ -3,15 +3,6 @@ let run_code context frame (code : Mir.t) ~type_ =
   | Some returned -> returned
   | None -> (frame, Facts.arrive context frame "unfinished" type_)
 
-let make_empty_parts context frame element =
-  let parts =
-    Facts.declare_fresh context frame "parts"
-      (Facts.declare_sort context (Models.make_sequence_type element))
-  in
-  Facts.assume context frame
-    (Logic.equal (Models.make_sequence_length context element parts) (Logic.int 0));
-  parts
-
 let holds_specification (formula : Mir.formula) is_one =
   let holds = ref false in
   let visit (statement : Mir.statement) =
@@ -176,7 +167,8 @@ let find_capability_reach (context : State.context) ~(uses : Types.capability_se
                 | None -> Reached_directly)
                 providers
           | Capability_error _ -> Facts.raise_bug "the prover reads a capability with an error"
-          | Capability_unless _ -> Facts.raise_bug "a capability's base has a condition"))
+          | Capability_unless _ | Capability_unless_values _ ->
+              Facts.raise_bug "a capability's base has a condition"))
       Not_reached
       (List.map Types.find_base (Types.list_capabilities uses))
   in

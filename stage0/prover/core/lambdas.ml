@@ -117,10 +117,17 @@ let remove_temporaries locals =
 
 let run_lambda_body ?(enter = Fun.id) (context : State.context) (frame : State.frame)
     ~(lambdas : Mir.body array) (body : Mir.body) ~type_ =
-  let saved_returns = context.returns in
+  let saved_returns = context.returns
+  and saved_panics = context.panics
+  and saved_can_declare_panic = context.can_declare_panic in
   context.returns <- [];
+  context.panics <- false;
+  context.can_declare_panic <- false;
   Fun.protect
-    ~finally:(fun () -> context.returns <- saved_returns)
+    ~finally:(fun () ->
+      context.returns <- saved_returns;
+      context.panics <- saved_panics;
+      context.can_declare_panic <- saved_can_declare_panic)
     (fun () ->
       let inside = enter { frame with locals = remove_temporaries frame.locals } in
       Facts.run_in_source context frame.source (fun () -> context.run_body inside ~lambdas body);
@@ -391,14 +398,23 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
     List.drop (List.length context.facts - facts_mark) (list_facts_since context start_facts)
   in
   let ended = ref [] in
-  let saved_returns = context.returns and saved_terminates = context.terminates in
+  let saved_returns = context.returns
+  and saved_terminates = context.terminates
+  and saved_panics = context.panics
+  and saved_can_declare_panic = context.can_declare_panic in
   context.returns <- [];
   context.terminates <- Types.terminates function_type.uses;
+  context.can_declare_panic <- false;
+  context.panics <-
+    Conditions.may_panic context.lookups ~current:context.current ~condition:context.condition
+      function_type.uses;
   let pending =
     Fun.protect
       ~finally:(fun () ->
         context.returns <- saved_returns;
         context.terminates <- saved_terminates;
+        context.panics <- saved_panics;
+        context.can_declare_panic <- saved_can_declare_panic;
         context.counters <- saved_counters)
       (fun () ->
         let finished =

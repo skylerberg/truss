@@ -1,0 +1,26 @@
+type Evens[Source](source: Source)
+
+impl Cursor for Evens[Source: Cursor[Element = Int64]] {
+  type Element = Int64
+  capability Uses = Source.Uses, RunForever unless Source: FiniteCursor
+
+  fn next(mut self) -> Option[Int64]
+    uses Self.Uses
+  {
+    while mut self.source.next() is Some(value)
+      decreases self.source.remaining() when Source: FiniteCursor
+    {
+      if value % 2 == 0 {
+        return Some(value)
+      }
+    }
+    None
+  }
+}
+
+fn first_even_of[Source: Cursor[Element = Int64]](source: own Source) -> Option[Int64]
+  uses Source.Uses
+{
+  var evens = Evens(source: own source)
+  mut evens.next()
+}

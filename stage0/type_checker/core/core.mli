@@ -189,6 +189,7 @@ type parameter = {
 and callback_contract = { inputs : local list; requires : expression list }
 
 type contract = {
+  panics_unless : expression list;
   requires : condition conditional list;
   ensures : expression conditional list;
   decreases : expression conditional list;

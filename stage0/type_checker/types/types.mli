@@ -38,6 +38,7 @@ and capability =
   | Capability_variable of int
   | Capability_error of Diagnostic.reported
   | Capability_unless of { capability : capability; unless : condition }
+  | Capability_unless_values of capability
 
 and condition = bound_condition list
 and bound_condition = { subject : ty; bound : trait_reference }
@@ -85,17 +86,28 @@ val find_base : capability -> capability
 val has_capability : capability -> capability_set -> bool
 val may_use : capability -> capability_set -> bool
 val find_unless : capability -> capability_set -> condition option
-val implies_condition : condition -> condition -> bool
-val terminates_when : condition -> capability_set -> bool
+
+val terminates_when :
+  implies:(condition -> condition -> bool) -> condition -> capability_set -> bool
+
 val exists_capability : (capability -> bool) -> capability_set -> bool
 val list_capabilities : capability_set -> capability list
 val terminates : capability_set -> bool
-val intersect_capabilities : capability_set list -> capability_set
-val subtract_capabilities : capability_set -> capability_set -> capability_set
-val is_capability_subset : capability_set -> capability_set -> bool
+
+val intersect_capabilities :
+  implies:(condition -> condition -> bool) -> capability_set list -> capability_set
+
+val subtract_capabilities :
+  implies:(condition -> condition -> bool) -> capability_set -> capability_set -> capability_set
+
+val is_capability_subset :
+  implies:(condition -> condition -> bool) -> capability_set -> capability_set -> bool
 
 val compute_missing_capabilities :
-  required:capability_set -> available:capability_set -> capability_set
+  implies:(condition -> condition -> bool) ->
+  required:capability_set ->
+  available:capability_set ->
+  capability_set
 
 val replace_capabilities : (capability -> capability_set option) -> capability_set -> capability_set
 
@@ -113,6 +125,10 @@ val substitute_trait : substitution -> trait_reference -> trait_reference
 val substitute_function : substitution -> function_type -> function_type
 val substitute_capabilities : substitution -> capability_set -> capability_set
 val substitute_condition : substitution -> condition -> condition
+
+val map_condition_types :
+  (ty -> ty) -> (trait_reference -> trait_reference) -> condition -> condition
+
 val map_conditions : (condition -> condition) -> capability_set -> capability_set
 val substitute_substitution : substitution -> substitution -> substitution
 val extract_result_type : result -> ty
@@ -242,6 +258,7 @@ type constant_interface = { constant_type : ty }
 val make_trait_reference : arguments:argument list -> Path.t -> trait_reference
 val string_type : ty
 val find_sequence_element : ty -> ty option
+val find_specification_sequence_element : ty -> ty option
 
 module For_testing : sig
   val list_arguments : substitution -> (parameter * argument) list

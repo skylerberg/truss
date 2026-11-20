@@ -504,6 +504,21 @@ let () =
          {}"
         "(fn f[Source: Cursor] ((source: Source)) (when (ensures true) Source: FiniteCursor && \
          Source: Display) (when (cost time (O 1)) Source: FiniteCursor) (block))");
+  Harness.test "an associated capability set takes a condition after unless" (fun () ->
+      Parse_support.expect_definition
+        "impl Cursor for Evens[Source: Cursor] {\n\
+        \  capability Uses = Source.Uses, RunForever unless Source: FiniteCursor\n\
+         }"
+        "(impl Cursor for Evens[Source: Cursor] (capability Uses = Source.Uses (unless RunForever \
+         Source: FiniteCursor)))");
+  Harness.test "a capability in uses takes a condition on values after unless" (fun () ->
+      Parse_support.expect_definition
+        "fn f(count: Int64)\n  uses Panic unless Int64.minimum <= count && count < 10\n{}"
+        "(fn f ((count: Int64)) (uses (unless Panic (<= (. Int64 minimum) count) (< count 10))) \
+         (block))");
+  Harness.test "a when condition takes no condition on values" (fun () ->
+      Parse_support.expect_error "fn f(count: Int64) -> Int64\n  ensures true when count < 10\n{}"
+        ~code:Misplaced_condition ~at:"count < 10");
   Harness.test "a capability in uses takes a condition after unless" (fun () ->
       Parse_support.expect_definition
         "fn f[Source: Cursor](source: Source)\n\

@@ -156,8 +156,7 @@ let add_restated_clauses (context : State.context) ~self_type ~bind trait name r
             clauses with
             bindings = bind subtrait (Path.Method { owner = subtrait.trait; name; receiver });
           })
-        (Contracts.list_restated_clauses context.lookups
-           ~list_bounds:(Operations.compute_bounds_with_self context)
+        (Contracts.list_restated_clauses context.lookups ~list_bounds:context.bounds
            ~packages:(Operations.list_impl_packages context self_type)
            ~self_type trait name receiver);
   }
@@ -194,7 +193,10 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       restated_clauses = List.map keep_holding_clauses contract.restated_clauses;
     }
   in
-  let is_logic_call = contract.is_logic_function && invocation.uses = Types.no_capabilities in
+  let is_logic_call =
+    contract.is_logic_function
+    && Facts.remove_panic_condition invocation.uses = Types.no_capabilities
+  in
   let values =
     if is_logic_call then
       List.map
@@ -377,6 +379,28 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       precondition_clauses.requires
   in
   let required = Logic.conjunction required in
+  if not context.panics then begin
+    let clauses = contract.callee_clauses in
+    let entry = read_entry_frame clauses in
+    List.iter
+      (fun (requirement : Mir.requirement) ->
+        let _, term = Validity.read_specification context entry requirement.clause in
+        let fixes =
+          list_required_fixes context frame clauses requirement term values
+            ~type_names:(list_type_names (substitution_of clauses))
+        in
+        let cited = Option.map (fun key -> (key, requirement.clause.origin)) clauses.callee.key in
+        Facts.oblige context frame Panic location ?cited ~fixes
+          [
+            Text "`";
+            Facts.quote clauses.callee requirement.clause.origin;
+            Text
+              (Printf.sprintf "` may not hold for this call to `%s`, so the call may panic."
+                 (Facts.show_callee path));
+          ]
+          term)
+      clauses.panics_unless
+  end;
   let compute_required (clauses : State.clauses) =
     if clauses == precondition_clauses then required
     else
@@ -746,7 +770,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
             match contract.result_kind with
             | `Lends when List.exists Amounts.mentions_history clauses.ensures ->
                 let left = match lent_final with Some leave -> leave result | None -> result in
-                let none = Amounts.make_empty_parts context after result_type in
+                let none = Intrinsics.make_empty_parts context after result_type in
                 {
                   ensures_frame with
                   yielded = Some (Intrinsics.append_part context after result_type none left);
@@ -925,6 +949,16 @@ type modelled =
 let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site)
     (invocation : Invocation.t) ~through (values : State.passed list) =
   let location = Facts.locate context frame.source site.origin in
+  (match context.panic_condition with
+  | Some condition
+    when (not context.panics)
+         && Conditions.may_panic_for_every_value context.lookups ~current:context.current
+              ~condition:context.condition invocation.uses ->
+      Facts.oblige context frame Panic location
+        ((Obligation.Text "This call may panic where `" :: condition)
+        @ [ Text "` holds, which the function's `uses Panic unless` rules out." ])
+        (Logic.Boolean false)
+  | Some _ | None -> ());
   List.iter
     (fun (passed : State.passed) ->
       match passed.shape with

@@ -10,7 +10,7 @@ let list_code_supplied_to (interface : Interface.Lookups.t) path instantiation =
 
 let check (interface : Interface.Lookups.t) ~find_call_edges (item : Lowered.Item.t) fragment =
   match item with
-  | Code { path = caller; instantiation } -> (
+  | Code { path = caller; instantiation; _ } -> (
       match find_call_edges caller with
       | None -> ()
       | Some call_edges ->

@@ -9,21 +9,23 @@ type context = {
 }
 
 let list_capabilities context substitution (set : Types.capability_set) : Path.t list =
+  let rec find_path = function
+    | Types.Built_in Panic -> Some (Well_known.make_builtin_capability_path Panic)
+    | Built_in (Run_forever | System) -> None
+    | Capability path -> Some path
+    | Capability_parameter parameter ->
+        raise_bug "the capability parameter %s of %s is not substituted" parameter.name
+          (Path.show parameter.owner)
+    | Capability_projection { name; _ } ->
+        raise_bug "the associated capability set %s is not normalized" name
+    | Capability_variable _ -> raise_bug "a set of capabilities the checker left unsolved"
+    | Capability_error _ -> raise_bug "a capability with an error reached code generation"
+    | Capability_unless { capability; _ } ->
+        raise_bug "the condition of %s is not decided" (Types.show_capability capability)
+    | Capability_unless_values capability -> find_path capability
+  in
   List.sort_uniq Path.compare
-    (List.filter_map
-       (function
-         | Types.Built_in Panic -> Some (Well_known.make_builtin_capability_path Panic)
-         | Built_in (Run_forever | System) -> None
-         | Capability path -> Some path
-         | Capability_parameter parameter ->
-             raise_bug "the capability parameter %s of %s is not substituted" parameter.name
-               (Path.show parameter.owner)
-         | Capability_projection { name; _ } ->
-             raise_bug "the associated capability set %s is not normalized" name
-         | Capability_variable _ -> raise_bug "a set of capabilities the checker left unsolved"
-         | Capability_error _ -> raise_bug "a capability with an error reached code generation"
-         | Capability_unless { capability; _ } ->
-             raise_bug "the condition of %s is not decided" (Types.show_capability capability))
+    (List.filter_map find_path
        (Types.list_capabilities
           (context.normalize_capabilities (Types.substitute_capabilities substitution set))))
 

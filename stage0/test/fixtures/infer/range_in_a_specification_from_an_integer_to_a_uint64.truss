@@ -1,0 +1,5 @@
+fn positive_after(items: Slice[Int64], middle: UInt64) -> Bool
+  requires forall i in middle + 1..items.length() => items[i] > 0
+{
+  true
+}

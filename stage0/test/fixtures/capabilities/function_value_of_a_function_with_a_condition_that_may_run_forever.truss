@@ -1,0 +1,12 @@
+fn gather[Items: Cursor](items: own Items) -> List[Items.Element]
+  uses Items.Uses, RunForever unless Items: FiniteCursor
+{
+  List.collect(own items)
+}
+
+fn gather_through[Source: Cursor](source: own Source) -> List[Source.Element]
+  uses Source.Uses
+{
+  let collect = gather[Source]
+  collect(own source)
+}

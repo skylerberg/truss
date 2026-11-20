@@ -104,6 +104,31 @@ let check_cost state env (cost : Syntax.cost) =
         (Interface.Elaborator.list_cost_operands (State.read_context state) bound);
       check_integer state env bound ~described:"A cost bound"
 
+let check_time_terminates state (clause : Syntax.clause) ~uses =
+  match Types.find_unless (Built_in Run_forever) uses with
+  | Some unless
+    when not
+           (Types.has_capability (Built_in Run_forever) uses
+           || Interface.Impls.decide_condition state.State.lookups.interface
+                ~list_bounds:(State.lookup_bounds state) unless
+              = Some []) ->
+      let shown = Types.show_condition unless in
+      let span = State.read_span state clause.id in
+      let added = (if Option.is_some clause.condition then "&& " else "when ") ^ shown in
+      State.report state Unbounded_time span
+        ~fixes:
+          [
+            Diagnostic.fix
+              (Printf.sprintf "Add `%s`." added)
+              [ Diagnostic.insert (Source.Definition_span.make_zero_width span.stop) (" " ^ added) ];
+          ]
+        (Printf.sprintf
+           "This function uses `RunForever unless %s`, so it may run forever where the condition \
+            does not hold, and a `time` clause bounds it only `when` a condition that implies \
+            `%s`."
+           shown shown)
+  | _ -> ()
+
 let check_under_condition state ~id (written : Syntax.condition option) check =
   match (written, State.record_condition state id written) with
   | _, Some condition -> State.with_added_condition state condition check

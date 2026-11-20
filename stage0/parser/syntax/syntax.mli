@@ -67,7 +67,12 @@ and clause_kind =
   | Cost of cost
   | Clause_error
 
-and capability_use = { capability : capability_reference; unless : condition option }
+and capability_use = {
+  capability : capability_reference;
+  unless : condition option;
+  unless_values : expression list;
+}
+
 and condition = bound_condition list
 and bound_condition = { subject : type_expression; bounds : path_type list; id : id }
 and cost = { amortized : bool; resource : resource; bound : bound }
@@ -254,7 +259,7 @@ type trait_member =
 
 type impl_member =
   | Associated_definition of name * type_expression
-  | Capability_definition of name * capability_reference list
+  | Capability_definition of name * capability_use list
   | Impl_member_error
 
 type capability_member = Capability_member_error

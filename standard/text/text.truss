@@ -167,11 +167,14 @@ public fn StringSlice.length(self) -> UInt64
 }
 
 public fn StringSlice.byte(self, index: UInt64) -> UInt8
-  requires index < self.length()
+  uses Panic unless index < self.length()
   ensures result == self.model()[index]
   cost time O(1)
   cost allocations == 0
 {
+  if index >= self.length() {
+    Panic.crash("index out of bounds")
+  }
   intrinsic::view_at(self.bytes, index: index)
 }
 
@@ -570,11 +573,13 @@ public fn String.pop_character(mut self) -> Option[Character]
 }
 
 public fn String.insert(mut self, offset: UInt64, text: StringSlice)
-  requires offset <= self.length()
-  requires self.is_boundary(offset)
+  uses Panic unless offset <= self.length() && self.is_boundary(offset)
   ensures self.length() == old(self.length()) + text.length()
   cost amortized time O(old(self.length()) + text.length())
 {
+  if offset > self.length() || !self.is_boundary(offset) {
+    Panic.crash("slice out of bounds")
+  }
   let end = self.length() + text.length()
   growth::reserve(mut self.storage, additional: text.length())
   text.copy_onto(mut self.storage)
@@ -584,14 +589,14 @@ public fn String.insert(mut self, offset: UInt64, text: StringSlice)
 }
 
 public fn String.remove_range(mut self, from: UInt64, to: UInt64)
-  requires from <= to
-  requires to <= self.length()
-  requires self.is_boundary(from)
-  requires self.is_boundary(to)
+  uses Panic unless from <= to && to <= self.length() && self.is_boundary(from) && self.is_boundary(to)
   ensures self.length() == old(self.length()) - (to - from)
   cost time O(old(self.length()))
   cost allocations == 0
 {
+  if from > to || to > self.length() || !self.is_boundary(from) || !self.is_boundary(to) {
+    Panic.crash("slice out of bounds")
+  }
   let width = to - from
   if width == 0 {
     return
@@ -611,12 +616,14 @@ public fn String.remove_range(mut self, from: UInt64, to: UInt64)
 }
 
 public fn String.truncate(mut self, length: UInt64)
-  requires length <= self.length()
-  requires self.is_boundary(length)
+  uses Panic unless length <= self.length() && self.is_boundary(length)
   ensures self.length() == length
   cost time O(1)
   cost allocations == 0
 {
+  if length > self.length() || !self.is_boundary(length) {
+    Panic.crash("slice out of bounds")
+  }
   intrinsic::storage_shorten(mut self.storage, length: length)
 }
 

@@ -116,12 +116,15 @@ impl Iterable for Array[Element, count: UInt64] {
 }
 
 public fn Array[Element, count: UInt64].element(mut self, position: UInt64) lends mut Element
-  requires position < self.count()
+  uses Panic unless position < self.count()
   ensures identical(result, old(self.model())[position])
   ensures identical(self.model(), old(self.model()).update(position, value: final(result)))
   cost time O(1)
   cost allocations == 0
 {
+  if position >= self.count() {
+    Panic.crash("index out of bounds")
+  }
   mut self[position]
 }
 
