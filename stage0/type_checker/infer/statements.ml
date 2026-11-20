@@ -1,21 +1,3 @@
-let check_bit_vector_names state (value : Core.expression) =
-  Core_walk.walk_expression
-    (Core_walk.make_deep_visitor
-       {
-         Core_walk.ignore_all with
-         place =
-           (function
-           | Local { type_; origin; _ }
-             when not (Types.is_builtin Bool type_ || Types.find_integer_range type_ <> None) ->
-               State.report state Not_bit_vector (State.read_span state origin)
-                 (Printf.sprintf
-                    "An assertion `by bit_vector` can name only integers and booleans, and this is \
-                     a `%s`."
-                    (Types.show type_))
-           | _ -> ());
-       })
-    value
-
 let record_integer_range state ~(loop : Syntax.id) ~described ~admits_integer
     (range : Syntax.expression) element ~inclusive =
   State.check_when_final state (fun () ->
@@ -56,8 +38,7 @@ let rec check_block_value state env ?expected (written : Syntax.block) =
 and check_statement state env (written : Syntax.statement) ~last : unit =
   match written.kind with
   | Expression value ->
-      State.register_statement state written (fun () ->
-          Evaluate (State.build_expression state value));
+      state.tables.discarded.(written.id) <- true;
       let type_ = Hooks.check_expression state env value in
       if not last then
         State.check_when_final state (fun () ->
@@ -108,13 +89,10 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
       | None -> ());
       let mode =
         if is_var then Language.Mode.Own
-        else if Modes.is_borrowed state value then Language.Mode.Read
+        else if Places.is_borrowed state.State.resolved state.State.tables value then
+          Language.Mode.Read
         else Language.Mode.Own
       in
-      State.register_statement state written (fun () ->
-          let value = Operands.build mode (State.build_expression state value) in
-          let pattern = State.build_scrutinee_pattern state written_pattern in
-          Let { pattern; value; else_ = Option.map (State.build_block state) else_ });
       (match (annotation, written_pattern.kind) with
       | None, Binding name -> Hashtbl.replace state.annotatable name.id ()
       | _ -> ());
@@ -127,16 +105,11 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
       Modes.mutate state env ~by:Assignment written_target;
       match operator with
       | Assign ->
-          State.register_statement state written (fun () ->
-              let target = State.make_place (State.build_expression state written_target) in
-              Assign { target; value = State.build_expression state value });
           Hooks.check state env value target_type;
           Modes.note_owned_value state env value
       | Compound operation -> (
           let right_type = Hooks.check_expression state env ~expected:target_type value in
           Operators.check_literal_operands state ~left:target_type ~right:right_type;
-          State.register_statement state written (fun () ->
-              Form.build_compound_assign state written written_target value operation);
           match operation with
           | Arithmetic arithmetic ->
               let method_, output = Operators.select_arithmetic_method arithmetic in
@@ -161,11 +134,13 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
                 (Operators.infer_bitwise_result state
                    (State.read_span state written_target.id)
                    target_type)))
-  | For { mode = running; pattern = written_pattern; annotation; iterable; clauses; body } ->
+  | For { pattern = written_pattern; annotation; iterable; clauses; body; _ } ->
       State.reject_in_formula state env (State.read_span state written.id) "A `for` loop";
       let mode, inner =
         match iterable.kind with
-        | Mode (mode, inner) when Option.is_none (State.find_keyword_operation state inner) ->
+        | Mode (mode, inner)
+          when Option.is_none
+                 (Places.find_keyword_operation state.State.resolved state.State.tables inner) ->
             State.note_mode_keyword state iterable mode inner;
             ((match mode with Mut -> Language.Mode.Mut | Own -> Language.Mode.Own), inner)
         | _ -> (Language.Mode.Read, iterable)
@@ -201,51 +176,25 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
         (check_loop_clause state
            { env with loop_element = Option.map (State.resolve state) !loop_element })
         clauses;
-      State.register_statement state written (fun () ->
-          let pattern = State.build_pattern state written_pattern in
-          let clauses = build_loop_clauses state clauses in
-          Form.build_for_loop state written inner ~pattern ~clauses
-            ~body:(State.build_block state body) ~mode:running);
       check_loop_body state env body
   | While { condition = test; clauses; body } ->
       State.reject_in_formula state env (State.read_span state written.id) "A `while` loop";
       Solver.run_in_statement state env (State.read_span state test.id) (fun () ->
           Hooks.check state env test Types.bool);
       List.iter (check_loop_clause state env) clauses;
-      State.register_statement state written (fun () ->
-          let condition = State.build_expression state test in
-          let clauses = build_loop_clauses state clauses in
-          While
-            {
-              condition;
-              clauses;
-              body = State.build_block state body;
-              binds_lent_part = Form.binds_lent_part state condition;
-            });
       check_loop_body state env body
   | Parallel body | Concurrent body ->
       let concurrent = match written.kind with Concurrent _ -> true | _ -> false in
       State.reject_in_formula state env
         (State.read_span state written.id)
         (if concurrent then "A `concurrent` block" else "A `parallel` block");
-      State.register_statement state written (fun () ->
-          let branches = List.map (State.build_statement state) body.statements in
-          if concurrent then Concurrent branches else Parallel branches);
       List.iter
         (fun (branch : Syntax.statement) ->
           Solver.run_in_statement state env (State.read_span state branch.id) (fun () ->
               check_statement state env branch ~last:false))
         body.statements
-  | Proof body ->
-      State.register_statement state written (fun () -> Proof (State.build_block state body));
-      check_loop_body state { env with specification = true } body
-  | Assert { value; by_bit_vector } ->
-      State.register_statement state written (fun () ->
-          let value = State.build_expression state value in
-          if by_bit_vector then check_bit_vector_names state value;
-          Assert
-            { condition = { value; executable = Form.is_executable state value }; by_bit_vector });
-      Hooks.check state env value Types.bool
+  | Proof body -> check_loop_body state { env with specification = true } body
+  | Assert { value; _ } -> Hooks.check state env value Types.bool
   | Statement_error -> ()
 
 and assigns_through_index state env (written : Syntax.statement) (target : Syntax.expression)
@@ -255,14 +204,14 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
   | Bracket (base, [ Item key ]), (Some Index | None) -> (
       let base_type = Conversions.read_checked_head state env base in
       let { Well_known.owner; name; receiver } = Well_known.locate_method Index_assign_assign in
-      let trait = State.make_trait_reference ~arguments:[] (Well_known.make_path owner) in
+      let trait = Types.make_trait_reference ~arguments:[] (Well_known.make_path owner) in
       match
         ( State.find_evidence state base_type trait,
           Interface.Definition.find_trait_method state.lookups.interface trait.trait ~name ~receiver
         )
       with
       | Some (Interface.Impls.From_impl _ | From_bound | From_any), Some _ ->
-          let index = State.make_trait_reference ~arguments:[] (Well_known.make_path Index) in
+          let index = Types.make_trait_reference ~arguments:[] (Well_known.make_path Index) in
           let make_parameter parameter_name type_ : Types.parameter_info =
             { name = parameter_name; mode = Own; type_; has_default = false }
           in
@@ -302,9 +251,6 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
                 omitted_defaults = [];
                 callee_result = Types.unit;
               };
-          Form.register_call state call;
-          State.register_statement state written (fun () ->
-              Evaluate (State.build_expression state call));
           true
       | _ -> false)
   | _ -> false
@@ -323,13 +269,6 @@ and check_loop_clause state env (clause : Syntax.loop_clause) =
       | Loop_decreases measures -> Clauses.check_measures state env measures
       | Loop_cost cost -> Clauses.check_cost state env cost)
 
-and build_loop_clauses state (clauses : Syntax.loop_clause list) =
-  List.filter_map
-    (fun (clause : Syntax.loop_clause) ->
-      Clauses.build_under_condition state ~id:clause.id clause.condition (fun () ->
-          Form.build_loop_clause state clause))
-    clauses
-
 and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable : Syntax.expression)
     =
   match iterable.kind with
@@ -347,7 +286,7 @@ and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable :
       match type_ with
       | Types.Error _ | Types.Hole -> (type_, mode)
       | _ -> (
-          let cursor = State.make_trait_reference ~arguments:[] (Well_known.make_path Cursor) in
+          let cursor = Types.make_trait_reference ~arguments:[] (Well_known.make_path Cursor) in
           let by_position : (Tables.loop * Types.ty * Language.Mode.t) Resolve.Names.lookup =
             if mode = Language.Mode.Own then Absent
             else Name_lookup.find_elements_calls state iterable type_ mode

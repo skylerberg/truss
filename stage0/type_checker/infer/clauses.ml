@@ -112,11 +112,3 @@ let check_under_condition state ~id (written : Syntax.condition option) check =
         "This clause's condition never holds where it is written, so the clause would bind \
          nothing. Remove the clause, or name a type parameter in its condition."
   | None, None -> State.raise_bug "a clause without a condition never holds"
-
-let build_under_condition state ~id (written : Syntax.condition option) build :
-    'clause Core.conditional option =
-  match (State.find_condition state id, written) with
-  | Some holds_when, _ ->
-      Some { holds_when; clause = State.with_added_condition state holds_when build }
-  | None, None -> Some { holds_when = []; clause = build () }
-  | None, Some _ -> None

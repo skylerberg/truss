@@ -239,6 +239,10 @@ val find_implementing_receiver :
 
 type constant_interface = { constant_type : ty }
 
+val make_trait_reference : arguments:argument list -> Path.t -> trait_reference
+val string_type : ty
+val find_sequence_element : ty -> ty option
+
 module For_testing : sig
   val list_arguments : substitution -> (parameter * argument) list
 end

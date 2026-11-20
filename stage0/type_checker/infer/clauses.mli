@@ -4,10 +4,3 @@ val check_cost : State.state -> State.env -> Syntax.cost -> unit
 
 val check_under_condition :
   State.state -> id:Syntax.id -> Syntax.condition option -> (unit -> unit) -> unit
-
-val build_under_condition :
-  State.state ->
-  id:Syntax.id ->
-  Syntax.condition option ->
-  (unit -> 'clause) ->
-  'clause Core.conditional option

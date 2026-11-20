@@ -90,7 +90,6 @@ let rec check_function_value_call state env (value : Syntax.expression) (callee 
                 omitted_defaults = [];
                 callee_result = result;
               };
-          Form.register_call ~function_value:callee state value;
           result)
   | Types.Error _ | Types.Hole -> check_arguments_alone state env arguments callee_type
   | _ ->
@@ -103,15 +102,16 @@ and check_argument state env (value : Syntax.expression) (parameter : Types.para
     ~has_generic_type =
   let inner =
     match value.kind with
-    | Mode (mode, inner) when Option.is_none (State.find_keyword_operation state inner) ->
+    | Mode (mode, inner)
+      when Option.is_none
+             (Places.find_keyword_operation state.State.resolved state.State.tables inner) ->
         State.note_mode_keyword state value mode inner;
         inner
     | _ -> value
   in
   let actual = Hooks.check_expression state env ~expected:parameter.type_ inner in
   if inner != value then begin
-    State.record state value actual;
-    State.alias_expression state value inner
+    State.record state value actual
   end;
   let parameter =
     match Modes.find_lent_field_mode state value actual with
@@ -455,7 +455,6 @@ and construct state env ?expected ?type_arguments (value : Syntax.expression) ty
                 omitted_defaults = left_out;
                 callee_result = type_;
               };
-          Form.register_call state value;
           type_)
 
 and find_record_fields state span type_ =
@@ -505,21 +504,8 @@ and check_record_update state env (value : Syntax.expression) (base : Syntax.exp
         match update.kind with Update { path; value } -> Some (path, value) | Update_error -> None)
       updates
   in
-  let paths =
-    check_updates state env value ~at:(State.read_span state value.id) base_type written
-  in
-  State.register_expression state value (fun () ->
-      Record_update
-        {
-          base = State.build_expression state base;
-          updates =
-            List.map
-              (fun (_, (written : Syntax.expression)) ->
-                match List.assoc_opt written.id paths with
-                | Some path -> (path, State.build_expression state written)
-                | None -> State.raise_bug "an update that names no field is built")
-              written;
-        });
+  state.tables.update_paths.(value.id) <-
+    Some (check_updates state env value ~at:(State.read_span state value.id) base_type written);
   base_type
 
 and check_updates state env (value : Syntax.expression) ~at record_type

@@ -1,3 +1,11 @@
+let order_fields (declared : Types.field list) (matched : (string * Syntax.pattern) list) =
+  List.filter_map
+    (fun (field : Types.field) ->
+      Option.map
+        (fun written -> (field.field_name, written))
+        (List.assoc_opt field.field_name matched))
+    declared
+
 let rec check_binding_pattern state env written type_ ~is_var ~mode =
   check_pattern_with state env written type_ ~binding:(if is_var then State.Var else Let) ~mode
 
@@ -16,19 +24,18 @@ and check_pattern_with state env (written : Syntax.pattern) type_ ~(binding : St
   let check_unknown type_ =
     check_unknown_pattern state env written type_ ~binding:part_binding ~mode
   in
-  let binds id (bound : Syntax.name) =
-    State.register_pattern state written (fun () ->
-        Bind { local = Declared { origin = id; name = bound.text }; is_var; mode })
+  let binds local =
+    state.tables.patterns.(written.id) <- Some (Binding_pattern { local; is_var; mode })
   in
   match written.kind with
-  | Wildcard | Pattern_error -> State.register_pattern state written (fun () -> Wildcard)
+  | Wildcard | Pattern_error -> ()
   | Binding bound -> (
       match State.find_target state bound with
       | Some Binding ->
-          binds bound.id bound;
+          binds bound.id;
           State.declare_compiled state env bound type_ ~binding ~mode
       | Some (Local id) -> (
-          binds id bound;
+          binds id;
           match Hashtbl.find_opt state.locals id with
           | Some local ->
               if not (State.unify state local.type_ type_) then
@@ -40,24 +47,12 @@ and check_pattern_with state env (written : Syntax.pattern) type_ ~(binding : St
           | None -> ())
       | _ -> ())
   | Qualified_constant written_constant ->
-      State.register_pattern state written (fun () ->
-          Form.build_constant_pattern state written.id (Form.build_named_constant state written.id));
       check_qualified_constant state written.id
         (State.read_span state written.id)
         written_constant type_
   | Literal literal ->
-      State.register_pattern state written (fun () ->
-          Form.build_constant_pattern state written.id
-            (Form.build_literal_constant state written.id literal));
       check_literal_pattern state written.id (State.read_span state written.id) literal type_
-  | Pattern_range { start; stop; inclusive } -> (
-      State.register_pattern state written (fun () ->
-          Range
-            {
-              start = Form.build_range_bound state start;
-              stop = Form.build_range_bound state stop;
-              inclusive;
-            });
+  | Pattern_range { start; stop; _ } -> (
       match
         Solver.require_within state type_
           (Types.integer_types @ [ Language.Builtin_type.Character; Integer ])
@@ -95,8 +90,6 @@ and check_pattern_with state env (written : Syntax.pattern) type_ ~(binding : St
                   variants
               with
               | Some variant ->
-                  state.tables.patterns.(written.id) <-
-                    Some (Variant_pattern { type_; variant = variant.variant_name });
                   (match (variant.fields, fields) with
                   | Some (_ :: _), None ->
                       State.report state Missing_argument
@@ -115,12 +108,14 @@ and check_pattern_with state env (written : Syntax.pattern) type_ ~(binding : St
                     check_pattern_fields state env written declared
                       (Option.value ~default:[] fields) ~binding:part_binding ~mode
                   in
-                  State.register_pattern state written (fun () ->
-                      Variant
-                        {
-                          variant = variant.variant_name;
-                          fields = Form.build_pattern_fields state declared matched;
-                        })
+                  state.tables.patterns.(written.id) <-
+                    Some
+                      (Variant_pattern
+                         {
+                           type_;
+                           variant = variant.variant_name;
+                           fields = order_fields declared matched;
+                         })
               | None ->
                   check_unknown
                   @@ State.make_error_type state Unknown_variant
@@ -155,13 +150,12 @@ and check_pattern_with state env (written : Syntax.pattern) type_ ~(binding : St
                   (State.read_span state written.id)
                   (Printf.sprintf "`%s` is opaque, so only its own package can match on it."
                      (Types.show type_));
-              state.tables.patterns.(written.id) <- Some (Record_pattern { type_ });
               let matched =
                 check_pattern_fields state env written record_fields fields ~binding:part_binding
                   ~mode
               in
-              State.register_pattern state written (fun () ->
-                  Record (Form.build_pattern_fields state record_fields matched))
+              state.tables.patterns.(written.id) <-
+                Some (Record_pattern { type_; fields = order_fields record_fields matched })
           | None ->
               check_unknown
                 (State.make_error_type state Not_a_record
@@ -176,9 +170,7 @@ and check_pattern_with state env (written : Syntax.pattern) type_ ~(binding : St
                (Printf.sprintf "%s is not a record."
                   (String.capitalize_ascii (State.describe state type_)))))
   | Alternatives alternatives ->
-      List.iter (fun alternative -> recurse alternative type_) alternatives;
-      State.register_pattern state written (fun () ->
-          Alternatives (List.map (State.build_pattern state) alternatives))
+      List.iter (fun alternative -> recurse alternative type_) alternatives
 
 and check_pattern_fields state env (written : Syntax.pattern) (fields : Types.field list)
     (written_fields : Syntax.pattern_field list) ~binding ~mode =

@@ -242,7 +242,7 @@ let list_sealed_closures (state : State.state) subject ~includes =
       let path = Well_known.make_path sealed in
       match Types.find_sealed_implementors path with
       | Some implementors when includes implementors ->
-          let trait = State.make_trait_reference ~arguments:[] path in
+          let trait = Types.make_trait_reference ~arguments:[] path in
           Some
             ( trait,
               Interface.Properties.list_bound_closure state.lookups.interface ~self:subject trait )

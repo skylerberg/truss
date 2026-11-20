@@ -25,7 +25,8 @@ let convert (state : State.state) (env : State.env) ?argument ?(takes_view_as_ow
   let is_argument = Option.is_some argument in
   let record_conversion conversion =
     match (conversion, expression) with
-    | Some conversion, Some id -> State.record_conversion state id conversion ~expected
+    | Some conversion, Some id ->
+        state.tables.conversions.(id) <- state.tables.conversions.(id) @ [ (conversion, expected) ]
     | _ -> ()
   in
   record_conversion
@@ -38,12 +39,12 @@ let convert (state : State.state) (env : State.env) ?argument ?(takes_view_as_ow
   in
   let between_owner_and_view =
     match if is_argument then find_view_as ~owned:actual_type ~view:wanted else None with
-    | Some view -> Some (State.Owned_to_view, wanted, view)
+    | Some view -> Some (Tables.Owned_to_view, wanted, view)
     | None when takes_view_as_owner -> (
         match wanted with
         | Types.Named { path; _ } when Well_known.is List path || Well_known.is String path ->
             Option.map
-              (fun view -> (State.View_to_owned, actual_type, view))
+              (fun view -> (Tables.View_to_owned, actual_type, view))
               (find_view_as ~owned:wanted ~view:actual_type)
         | _ -> None)
     | None -> None
@@ -55,13 +56,13 @@ let convert (state : State.state) (env : State.env) ?argument ?(takes_view_as_ow
       Some conversion
   | None -> (
       match (actual_type, wanted, expression) with
-      | Types.Never, _, _ -> Some State.From_never
+      | Types.Never, _, _ -> Some Tables.From_never
       | Types.Integer, _, Some _
         when is_argument && env.specification && State.is_within state wanted Types.integer_types ->
-          Some State.From_integer
+          Some Tables.From_integer
       | _, Types.Integer, _
         when env.specification && State.is_within state actual_type Types.integer_types ->
-          Some State.To_integer
+          Some Tables.To_integer
       | Types.Function actual_function, Types.Function wanted_function, _
         when not (Types.has_same_clauses actual_function wanted_function) ->
           let unlisted =
@@ -95,7 +96,7 @@ let convert (state : State.state) (env : State.env) ?argument ?(takes_view_as_ow
                         ~actual:(State.finalize_type state actual));
                 }
                 :: state.capability_constraints;
-            Some State.Function_widening
+            Some Tables.Function_widening
           end
           else refuse ()
       | _ -> if Unify.unify state.unifier wanted actual_type then None else refuse ())

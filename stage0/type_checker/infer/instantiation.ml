@@ -41,7 +41,7 @@ let make_fresh_arguments (state : State.state) (path : Path.t) =
   | None -> []
 
 let make_fresh_trait_reference (state : State.state) (trait : Path.t) =
-  State.make_trait_reference trait
+  Types.make_trait_reference trait
     ~arguments:
       (match Interface.Definition.find_trait_interface state.lookups.interface trait with
       | Some interface -> State.make_fresh_generic_arguments state interface.trait_generics
@@ -192,7 +192,7 @@ let instantiate (state : State.state) (span : Source.Definition_span.t)
 let find_intrinsic_signature path =
   Option.map Intrinsic_signatures.make_signature (Intrinsic.find_operation path)
 
-let find_function_signature (state : State.state) (path : Path.t) =
+let find_function_signature (lookups : Lookups.t) (path : Path.t) =
   match find_intrinsic_signature path with
   | Some signature -> Some signature
-  | None -> Interface.Impls.read_signature state.lookups.interface path
+  | None -> Interface.Impls.read_signature lookups.interface path

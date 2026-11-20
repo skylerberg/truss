@@ -76,25 +76,6 @@ type entry =
 
 type logged = { member : int; entry : entry }
 
-type conversion =
-  | From_never
-  | Owned_to_view
-  | View_to_owned
-  | Function_widening
-  | To_integer
-  | From_integer
-
-type form = {
-  expression_builders : (unit -> Core.expression) option array;
-  conversions : (conversion * Types.ty) list array;
-  statement_builders : (unit -> Core.statement) option array;
-  pattern_builders : (unit -> Core.pattern) option array;
-  mutable definition_builder : (holds_body:bool -> Core.definition) option;
-  mutable next_node_id : int;
-  mutable next_synthetic_local : int;
-  mutable tables_with_holes : Tables.t option;
-}
-
 type state = {
   lookups : Lookups.t;
   key : Resolve.Names.key;
@@ -103,7 +84,7 @@ type state = {
   resolved : Resolve.resolved;
   text : string Lazy.t;
   mutable tables : Tables.t;
-  form : form;
+  mutable holes_become_never : bool;
   mutable diagnostics : Diagnostic.in_definition list;
   unifier : Unify.t;
   locals : (Syntax.id, local) Hashtbl.t;
@@ -151,59 +132,6 @@ let make_error_type state ?fixes code span message =
 
 let quote_span state span = Source.Definition_span.quote (Lazy.force state.text) span
 
-let allocate_node_id state =
-  let id = state.form.next_node_id in
-  state.form.next_node_id <- id + 1;
-  id
-
-let make_synthetic_expression state ~origin type_ kind : Core.expression =
-  { id = allocate_node_id state; origin; type_; kind }
-
-let register_expression state (value : Syntax.expression) make_kind =
-  state.form.expression_builders.(value.id) <-
-    Some
-      (fun () ->
-        let id = allocate_node_id state in
-        match state.tables.types.(value.id) with
-        | Some type_ -> { Core.id; origin = value.id; type_; kind = make_kind () }
-        | None ->
-            raise_bug "`%s` has a node and no type" (quote_span state (read_span state value.id)))
-
-let was_hole state (select_table : Tables.t -> Types.ty option array) (id : Syntax.id) =
-  match state.form.tables_with_holes with
-  | Some tables -> (select_table tables).(id) = Some Types.Hole
-  | None -> false
-
-let rec list_operands state (value : Syntax.expression) : Syntax.expression list =
-  let list_checked (part : Syntax.expression) =
-    if Option.is_some state.form.expression_builders.(part.id) then [ part ]
-    else list_operands state part
-  in
-  match value.kind with
-  | Match { scrutinees; _ } -> List.concat_map list_checked scrutinees
-  | Quantified { binder = Binder_in (_, collection); _ } -> list_checked collection
-  | Quantified { binder = Binder_type _; _ } -> []
-  | If _ | Parenthesized _ | Mode _ -> []
-  | _ ->
-      let checked_parts = ref [] in
-      Syntax_walk.visit_expression_parts ~on_statement:ignore value ~on_expression:(fun part ->
-          checked_parts := list_checked part :: !checked_parts);
-      List.concat (List.rev !checked_parts)
-
-let register_statement state (written : Syntax.statement) make_kind =
-  state.form.statement_builders.(written.id) <-
-    Some (fun () -> { Core.id = allocate_node_id state; origin = written.id; kind = make_kind () })
-
-let register_pattern state (written : Syntax.pattern) make_kind =
-  state.form.pattern_builders.(written.id) <-
-    Some
-      (fun () ->
-        let id = allocate_node_id state in
-        match state.tables.scrutinee_types.(written.id) with
-        | Some type_ -> { Core.id; origin = written.id; type_; kind = make_kind () }
-        | None ->
-            raise_bug "`%s` has a node and no type" (quote_span state (read_span state written.id)))
-
 let rec mark_lent_tails state (value : Syntax.expression) =
   match value.kind with
   | Parenthesized inner -> mark_lent_tails state inner
@@ -225,14 +153,6 @@ and mark_lent_block state (body : Syntax.block) =
   match List.rev body.statements with
   | { kind = Expression value; _ } :: _ -> mark_lent_tails state value
   | _ -> ()
-
-let make_place (node : Core.expression) : Core.place =
-  match node.kind with Use place -> place | _ -> Temporary node
-
-let allocate_synthetic_local state : Core.local =
-  let number = state.form.next_synthetic_local in
-  state.form.next_synthetic_local <- number + 1;
-  Synthetic number
 
 let fix title edits = Diagnostic.fix title edits
 let replace = Diagnostic.replace
@@ -428,7 +348,7 @@ let rec finalize_type state type_ =
   Types.map ~map_capabilities:(finalize_capabilities state)
     (function
       | Types.Variable _ -> Some (make_unsolved_type state)
-      | Types.Hole when Option.is_some state.form.tables_with_holes -> Some Types.Never
+      | Types.Hole when state.holes_become_never -> Some Types.Never
       | _ -> None)
     (normalize state type_)
 
@@ -501,34 +421,6 @@ let is_plain state type_ =
 let is_view state type_ =
   Interface.Impls.is_view state.lookups.interface ~list_bounds:(lookup_bounds state)
     (zonk state type_)
-
-let decide_binding_mode state (mode : Language.Mode.t) type_ : Language.Mode.t =
-  match mode with Read when is_plain state type_ -> Own | Read | Mut | Own -> mode
-
-let rec copy_plain_bindings state (pattern : Core.pattern) : Core.pattern =
-  let copy_fields = List.map (fun (field, inner) -> (field, copy_plain_bindings state inner)) in
-  match pattern.kind with
-  | Bind bound ->
-      let mode = decide_binding_mode state bound.mode pattern.type_ in
-      { pattern with kind = Bind { bound with mode } }
-  | Variant { variant; fields } ->
-      { pattern with kind = Variant { variant; fields = copy_fields fields } }
-  | Record fields -> { pattern with kind = Record (copy_fields fields) }
-  | Alternatives alternatives ->
-      { pattern with kind = Alternatives (List.map (copy_plain_bindings state) alternatives) }
-  | Wildcard | Literal _ | Range _ | Equal_to _ -> pattern
-
-let make_callee state (target : Core.operand Core.target) =
-  Callee_uses.make_callee state.lookups.interface ~list_bounds:(lookup_bounds state) target
-
-let make_call state ~callee ~arguments ~lends =
-  Callee_uses.make_call state.lookups.interface ~list_bounds:(lookup_bounds state) ~callee
-    ~arguments ~lends
-
-let make_trait_reference ~arguments trait : Types.trait_reference =
-  { trait; trait_arguments = arguments; associated = [] }
-
-let string_type = Types.Named { path = Well_known.make_path String; arguments = [] }
 
 let holds_class state root type_ =
   List.exists
@@ -756,44 +648,13 @@ let add_operand_mismatch state ~(at : Source.Definition_span.t)
 let report_mismatch state span ~expected ~actual =
   ignore (add_mismatch state span ~expected ~actual)
 
-let is_member_constant state (value : Syntax.expression) =
-  match state.tables.resolutions.(value.id) with
-  | Some (Global { path = Member_constant _; _ }) -> true
-  | _ -> false
-
-let rec is_place state (value : Syntax.expression) =
-  match value.kind with
-  | Name path -> (
-      match find_target state path.last with
-      | Some (Local _ | Law_parameter _ | Field _ | Definition (Constant, _)) -> true
-      | _ -> false)
-  | Self_value -> true
-  | Member (base, _) -> is_place state base || is_member_constant state value
-  | Bracket (base, _) -> (
-      match state.resolved.brackets.(value.id) with
-      | Some Index -> is_place state base
-      | Some Method_bracket -> (
-          match base.kind with Member _ -> is_place state base | _ -> false)
-      | _ -> false)
-  | Parenthesized inner -> is_place state inner
-  | _ -> false
-
-let rec find_keyword_operation state (value : Syntax.expression) =
-  match value.kind with
-  | Call ({ kind = Member (base, _); _ }, _)
-  | Call ({ kind = Bracket ({ kind = Member (base, _); _ }, _); _ }, _)
-  | With (base, _) ->
-      if is_place state base then Some (value.id, base) else find_keyword_operation state base
-  | Member (base, _) | Bracket (base, _) | Try base -> find_keyword_operation state base
-  | _ -> None
-
 let note_mode_keyword state (written : Syntax.expression) (mode : Syntax.mode)
     (operand : Syntax.expression) =
   let rec strip_parentheses (value : Syntax.expression) =
     match value.kind with Parenthesized inner -> strip_parentheses inner | _ -> value
   in
   let place =
-    match find_keyword_operation state operand with
+    match Places.find_keyword_operation state.resolved state.tables operand with
     | Some (_, receiver) -> receiver
     | None -> operand
   in
@@ -813,174 +674,3 @@ let find_local_type state (name : Syntax.name) =
         (fun (local : local) -> resolve state local.type_)
         (Hashtbl.find_opt state.locals id)
   | _ -> None
-
-let find_sequence_element (sequence : Types.ty) =
-  match sequence with
-  | Types.Named { path; arguments = Types.Type element :: _ }
-    when Well_known.is_buffer_sequence path || Well_known.find_builtin_type path = Some Array ->
-      Some element
-  | _ -> None
-
-let make_range state ~origin (base : Core.place) ~start ~stop ~inclusive : Core.kind =
-  let make = make_synthetic_expression state ~origin in
-  let uint64 = Types.make_builtin UInt64 in
-  let element =
-    match Core_walk.compute_place_type base with
-    | Types.Named { arguments = Types.Type element :: _; _ } -> element
-    | type_ -> raise_bug "a range of `%s`" (Types.show type_)
-  in
-  let stop =
-    Option.map
-      (fun stop ->
-        if inclusive then
-          make uint64
-            (Operator { operation = Add; arguments = [ stop; make uint64 (Integer Z.one) ] })
-        else stop)
-      stop
-  in
-  Use
-    (Range
-       {
-         base;
-         start = (match start with Some start -> start | None -> make uint64 (Integer Z.zero));
-         stop;
-         type_ =
-           Types.Named { path = Well_known.make_path Slice; arguments = [ Types.Type element ] };
-         origin;
-       })
-
-let record_conversion state id conversion ~expected =
-  state.form.conversions.(id) <- state.form.conversions.(id) @ [ (conversion, expected) ]
-
-let apply_conversion state (id : Syntax.id) (inner : Core.expression) (conversion, expected) =
-  let expected = finalize_type state expected in
-  let make kind = make_synthetic_expression state ~origin:id expected kind in
-  let convert conversion = make (Convert { conversion; value = inner }) in
-  match conversion with
-  | From_never -> inner
-  | Function_widening -> if Types.equal inner.type_ expected then inner else convert Widen
-  | To_integer -> convert To_integer
-  | From_integer -> convert From_integer
-  | View_to_owned -> convert View_to_owned
-  | Owned_to_view when Types.is_well_known List inner.type_ || Types.is_builtin Array inner.type_ ->
-      let base : Core.place = match inner.kind with Use place -> place | _ -> Temporary inner in
-      make (make_range state ~origin:id base ~start:None ~stop:None ~inclusive:false)
-  | Owned_to_view -> (
-      match inner.type_ with
-      | Types.Named { path; arguments } ->
-          make
-            (Call
-               (make_call state
-                  ~callee:
-                    (Function
-                       {
-                         path = Method { owner = path; name = "slice"; receiver = Instance Read };
-                         instantiation = { Types.no_instantiation with type_arguments = arguments };
-                       })
-                  ~arguments:[ Operands.build_argument Read inner ]
-                  ~lends:None))
-      | other -> raise_bug "`%s` is viewed and has no view" (Types.show other))
-
-let build_expression_by_id state id =
-  match state.form.expression_builders.(id) with
-  | Some build -> List.fold_left (apply_conversion state id) (build ()) state.form.conversions.(id)
-  | None -> raise_bug "`%s` has no node in the core form" (quote_span state (read_span state id))
-
-let rec build_expression state (value : Syntax.expression) : Core.expression =
-  let evaluated =
-    if Option.is_some state.form.tables_with_holes then list_operands state value else []
-  in
-  if
-    List.exists
-      (fun (operand : Syntax.expression) -> was_hole state (fun tables -> tables.types) operand.id)
-      evaluated
-  then begin
-    let evaluate (operand : Syntax.expression) : Core.statement option =
-      match operand.kind with
-      | Lambda _ -> None
-      | _ ->
-          let node = build_expression state operand in
-          Some
-            {
-              id = allocate_node_id state;
-              origin = operand.id;
-              kind =
-                Let
-                  {
-                    pattern =
-                      {
-                        id = allocate_node_id state;
-                        origin = operand.id;
-                        type_ = node.type_;
-                        kind = Wildcard;
-                      };
-                    value = Operands.build Read node;
-                    else_ = None;
-                  };
-            }
-    in
-    let statements = List.filter_map evaluate evaluated in
-    let todo = make_synthetic_expression state ~origin:value.id Types.Never Todo in
-    make_synthetic_expression state ~origin:value.id Types.Never
-      (Block { statements; value = Some todo })
-  end
-  else build_expression_by_id state value.id
-
-let build_statement state (written : Syntax.statement) : Core.statement =
-  let rec strip_mode_keyword (value : Syntax.expression) =
-    match value.kind with
-    | Mode (_, inner) | Parenthesized inner -> strip_mode_keyword inner
-    | _ -> value
-  in
-  let find_hole (value : Syntax.expression) =
-    let value = strip_mode_keyword value in
-    if was_hole state (fun tables -> tables.types) value.id then Some value else None
-  in
-  match
-    match written.kind with
-    | For { iterable; _ } -> find_hole iterable
-    | Assignment { target; _ } -> find_hole target
-    | _ -> None
-  with
-  | Some value ->
-      {
-        id = allocate_node_id state;
-        origin = written.id;
-        kind = Evaluate (build_expression state value);
-      }
-  | None -> (
-      match state.form.statement_builders.(written.id) with
-      | Some build -> build ()
-      | None ->
-          raise_bug "`%s` has no node in the core form"
-            (quote_span state (read_span state written.id)))
-
-let build_pattern state (written : Syntax.pattern) : Core.pattern =
-  if was_hole state (fun tables -> tables.scrutinee_types) written.id then
-    { id = allocate_node_id state; origin = written.id; type_ = Types.Never; kind = Wildcard }
-  else
-    match state.form.pattern_builders.(written.id) with
-    | Some build -> build ()
-    | None ->
-        raise_bug "`%s` has no node in the core form"
-          (quote_span state (read_span state written.id))
-
-let alias_expression state (value : Syntax.expression) (inner : Syntax.expression) =
-  state.form.expression_builders.(value.id) <- Some (fun () -> build_expression state inner)
-
-let build_scrutinee_pattern state written = copy_plain_bindings state (build_pattern state written)
-
-let build_block state (written : Syntax.block) : Core.block =
-  let rec build_statements (statements : Syntax.statement list) =
-    match statements with
-    | [] -> ([], None)
-    | [ ({ kind = Expression value; _ } as last) ]
-      when Option.is_none state.form.statement_builders.(last.id) ->
-        ([], Some (build_expression state value))
-    | first :: rest ->
-        let first = build_statement state first in
-        let rest, value = build_statements rest in
-        (first :: rest, value)
-  in
-  let statements, value = build_statements written.statements in
-  { statements; value }

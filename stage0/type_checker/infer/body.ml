@@ -143,102 +143,6 @@ let check_defaults state env (written : Syntax.parameter list) (signature : Type
       | Self_parameter _ | Parameter_error -> ())
     written
 
-let build_core_contract state (clauses : Syntax.clause list) : Core.contract =
-  let collect_each choose =
-    List.concat_map
-      (fun (clause : Syntax.clause) ->
-        match choose clause with
-        | Some build ->
-            List.concat
-              (Option.to_list
-                 (Option.map
-                    (fun (built : _ Core.conditional) ->
-                      List.map (fun each -> { built with clause = each }) built.clause)
-                    (Clauses.build_under_condition state ~id:clause.id clause.condition build)))
-        | None -> [])
-      clauses
-  in
-  let requires =
-    collect_each (fun clause ->
-        match clause.kind with
-        | Requires value ->
-            Some
-              (fun () ->
-                let value = State.build_expression state value in
-                [ { Core.value; executable = Form.is_executable state value } ])
-        | _ -> None)
-  in
-  let ensures =
-    collect_each (fun clause ->
-        match clause.kind with
-        | Ensures value -> Some (fun () -> [ State.build_expression state value ])
-        | _ -> None)
-  in
-  let decreases =
-    collect_each (fun clause ->
-        match clause.kind with
-        | Decreases measures -> Some (fun () -> List.map (State.build_expression state) measures)
-        | _ -> None)
-  in
-  let costs =
-    collect_each (fun clause ->
-        match clause.kind with
-        | Cost cost -> Some (fun () -> [ Form.build_cost state ~origin:clause.id cost ])
-        | _ -> None)
-  in
-  { requires; ensures; decreases; costs }
-
-let build_core_parameters state (written : Syntax.parameter list) (signature : Types.signature) :
-    Core.parameter list =
-  List.filter_map
-    (fun (parameter : Syntax.parameter) : Core.parameter option ->
-      match parameter.kind with
-      | Self_parameter _ ->
-          Option.map
-            (fun (mode, type_) : Core.parameter ->
-              { local = Self; mode; type_; default = None; callback_contract = None })
-            signature.receiver
-      | Named_parameter { name; default; type_; _ } ->
-          Option.map
-            (fun (info : Types.parameter_info) : Core.parameter ->
-              let default = Option.map (State.build_expression state) default in
-              {
-                local = Declared { origin = name.id; name = name.text };
-                mode = info.mode;
-                type_ = info.type_;
-                default;
-                callback_contract =
-                  (match type_.kind with
-                  | Function_type { inputs = _ :: _ as inputs; clauses; _ }
-                    when List.for_all
-                           (fun (input : Syntax.function_input) -> Option.is_some input.name)
-                           inputs ->
-                      Some
-                        {
-                          inputs =
-                            List.filter_map
-                              (fun (input : Syntax.function_input) ->
-                                Option.map
-                                  (fun (input_name : Syntax.name) : Core.local ->
-                                    Declared { origin = input_name.id; name = input_name.text })
-                                  input.name)
-                              inputs;
-                          requires =
-                            List.filter_map
-                              (fun (clause : Syntax.clause) ->
-                                match clause.kind with
-                                | Requires value -> Some (State.build_expression state value)
-                                | _ -> None)
-                              clauses;
-                        }
-                  | _ -> None);
-              })
-            (List.find_opt
-               (fun (info : Types.parameter_info) -> info.name = name.text)
-               signature.parameters)
-      | Parameter_error -> None)
-    written
-
 let check_function state ~broken_body (written : Syntax.signature)
     (body_block : Syntax.block option) (signature : Types.signature) =
   let env : State.env =
@@ -258,19 +162,37 @@ let check_function state ~broken_body (written : Syntax.signature)
     written.parameters signature;
   check_function_type_requires state env written.parameters signature;
   check_clauses state env written.clauses;
-  state.form.definition_builder <-
-    Some
-      (fun ~holds_body ->
-        let parameters = build_core_parameters state written.parameters signature in
-        let contract = build_core_contract state written.clauses in
-        let body = if holds_body then Option.map (State.build_block state) body_block else None in
-        let body =
-          match signature.output with
-          | Lends (mode, _) -> Option.map (Form.lend_block state mode) body
-          | Returns _ -> body
-        in
-        Function { parameters; contract; body });
   match body_block with Some block when not broken_body -> check_body state env block | _ -> ()
+
+let check_bit_vector_names state (form : Core.t) =
+  let check_names (value : Core.expression) =
+    Core_walk.walk_expression
+      (Core_walk.make_deep_visitor
+         {
+           Core_walk.ignore_all with
+           place =
+             (function
+             | Local { type_; origin; _ }
+               when not (Types.is_builtin Bool type_ || Types.find_integer_range type_ <> None) ->
+                 State.report state Not_bit_vector (State.read_span state origin)
+                   (Printf.sprintf
+                      "An assertion `by bit_vector` can name only integers and booleans, and this \
+                       is a `%s`."
+                      (Types.show type_))
+             | _ -> ());
+         })
+      value
+  in
+  Core_walk.walk_definition
+    (Core_walk.make_deep_visitor
+       {
+         Core_walk.ignore_all with
+         statement =
+           (function
+           | { kind = Assert { condition; by_bit_vector = true }; _ } -> check_names condition.value
+           | _ -> ());
+       })
+    form.definition
 
 let check_deserialized_invariants state (elaborated : Interface.Environment.elaborated_interface)
     (form : Core.t) =
@@ -327,53 +249,6 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                     ignore (Expressions.check_expression state env value))
             | Derives _ -> ())
           clauses;
-        let list_defaulted variant (fields : Syntax.field list) =
-          List.filter_map
-            (fun (field : Syntax.field) ->
-              match field.kind with
-              | Field_declaration { name; default = Some value; _ } ->
-                  Some (variant, name.text, value)
-              | _ -> None)
-            fields
-        in
-        state.form.definition_builder <-
-          Some
-            (fun ~holds_body:_ ->
-              let defaults =
-                List.map
-                  (fun (variant, name, value) ->
-                    (variant, name, State.build_expression state value))
-                  (match type_body with
-                  | Fields fields -> list_defaulted None fields
-                  | Variants variants ->
-                      List.concat_map
-                        (fun (variant : Syntax.variant) ->
-                          list_defaulted (Some variant.name.text)
-                            (Option.value ~default:[] variant.fields))
-                        variants
-                  | Type_todo -> [])
-              in
-              let collect_clause choose =
-                List.filter_map (fun (clause : Syntax.type_clause) -> choose clause.kind) clauses
-              in
-              Type
-                {
-                  defaults;
-                  invariants =
-                    collect_clause (function
-                      | Type_invariant value ->
-                          let value = State.build_expression state value in
-                          Some { Core.value; executable = Form.is_executable state value }
-                      | _ -> None);
-                  potential =
-                    (match
-                       collect_clause (function
-                         | Potential value -> Some (State.build_expression state value)
-                         | _ -> None)
-                     with
-                    | first :: _ -> Some first
-                    | [] -> None);
-                });
         let check_defaults (fields : Syntax.field list) (lowered_fields : Types.field list) =
           List.iter
             (fun (field : Syntax.field) ->
@@ -412,44 +287,6 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
         | _ -> ())
     | Trait { members; _ }, Trait_interface _ ->
         let self = Types.Parameter (Types.make_self_parameter state.key.path) in
-        state.form.definition_builder <-
-          Some
-            (fun ~holds_body:_ ->
-              Trait
-                (List.concat
-                   (List.mapi
-                      (fun index (line : Syntax.trait_member Syntax.node) ->
-                        match line.kind with
-                        | Law law
-                          when not (is_broken (Member_header index) || is_broken (Member_body index))
-                          ->
-                            let parameters =
-                              List.filter_map
-                                (fun (parameter : Syntax.parameter) : Core.parameter option ->
-                                  match parameter.kind with
-                                  | Named_parameter { name; _ } ->
-                                      Some
-                                        {
-                                          local = Declared { origin = name.id; name = name.text };
-                                          mode = Read;
-                                          type_ = Form.read_local_type state name.id;
-                                          default = None;
-                                          callback_contract = None;
-                                        }
-                                  | _ -> None)
-                                law.parameters
-                            in
-                            let requires = List.map (State.build_expression state) law.requires in
-                            [
-                              {
-                                Core.name = law.name.text;
-                                parameters;
-                                requires;
-                                body = State.build_block state law.body;
-                              };
-                            ]
-                        | _ -> [])
-                      members)));
         List.iteri
           (fun index (line : Syntax.trait_member Syntax.node) ->
             if not (is_broken (Member_header index)) then
@@ -475,10 +312,6 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
               | Associated_type _ | Associated_capability _ | Trait_member_error -> ())
           members
     | Constant { value; _ }, Constant_interface constant ->
-        state.form.definition_builder <-
-          Some
-            (fun ~holds_body ->
-              Constant (if holds_body then Some (State.build_expression state value) else None));
         if not (is_broken Body) then begin
           let env =
             {
@@ -492,10 +325,6 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
           Constant.check state ~default:false value
         end
     | Test { body = written; _ }, _ ->
-        state.form.definition_builder <-
-          Some
-            (fun ~holds_body ->
-              Test (if holds_body then Some (State.build_block state written) else None));
         if not (is_broken Body) then
           check_body state { no_output with output = Some (Returns Types.unit) } written
     | Theorem { parameters; clauses; body = written; _ }, Theorem_interface signature ->
@@ -504,17 +333,6 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
           { no_output with specification = true; output = Some (Returns Types.unit) }
         in
         check_clauses state env clauses;
-        state.form.definition_builder <-
-          Some
-            (fun ~holds_body ->
-              let parameters = build_core_parameters state parameters signature in
-              let contract = build_core_contract state clauses in
-              Function
-                {
-                  parameters;
-                  contract;
-                  body = (if holds_body then Some (State.build_block state written) else None);
-                });
         if not (is_broken Body) then check_body state env written
     | Law_proof { body = written; _ }, Law_proof_interface { trait; law; for_type; _ } ->
         (match Interface.Definition.find_trait_interface state.lookups.interface trait.trait with
@@ -527,39 +345,11 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                 (fun (name, type_) -> (name, Types.substitute substitution type_))
                 (Option.value ~default:[] (List.assoc_opt law interface.laws))
         | None -> ());
-        state.form.definition_builder <-
-          Some
-            (fun ~holds_body ->
-              let parameters =
-                List.mapi
-                  (fun index (name, type_) : Core.parameter ->
-                    {
-                      local = Trait_parameter { index; name };
-                      mode = Read;
-                      type_ = State.finalize_type state type_;
-                      default = None;
-                      callback_contract = None;
-                    })
-                  state.law_parameters
-              in
-              Law_proof
-                {
-                  parameters;
-                  body = (if holds_body then Some (State.build_block state written) else None);
-                });
         if not (is_broken Body) then
           check_body state
             { no_output with specification = true; output = Some (Returns Types.unit) }
             written
     | Law_proof { body = written; _ }, _ ->
-        state.form.definition_builder <-
-          Some
-            (fun ~holds_body ->
-              Law_proof
-                {
-                  parameters = [];
-                  body = (if holds_body then Some (State.build_block state written) else None);
-                });
         if not (is_broken Body) then
           check_body state
             { no_output with specification = true; output = Some (Returns Types.unit) }
@@ -639,16 +429,25 @@ let finalize (state : State.state) =
                 remaining;
           });
   update tables.patterns (function
-    | Tables.Variant_pattern { type_; variant } ->
-        Tables.Variant_pattern { type_ = finalize_type type_; variant }
-    | Record_pattern { type_ } -> Record_pattern { type_ = finalize_type type_ }
+    | Tables.Variant_pattern pattern ->
+        Tables.Variant_pattern { pattern with type_ = finalize_type pattern.type_ }
+    | Record_pattern pattern -> Record_pattern { pattern with type_ = finalize_type pattern.type_ }
     | other -> other);
   update tables.templates (fun (template : Tables.template) ->
       {
         template with
         from_template = Option.map finalize_call template.from_template;
         part_conversions = List.map (Option.map finalize_call) template.part_conversions;
-      })
+        part = Option.map finalize_type template.part;
+      });
+  Array.iteri
+    (fun index conversions ->
+      tables.conversions.(index) <-
+        List.map (fun (conversion, expected) -> (conversion, finalize_type expected)) conversions)
+    tables.conversions;
+  update tables.literal_elements (function
+    | Tables.List_element element -> Tables.List_element (finalize_type element)
+    | Map_entry { key; value } -> Map_entry { key = finalize_type key; value = finalize_type value })
 
 let list_used_packages (resolved : Resolve.resolved) ~evidence_packages (form : Core.t) =
   let named =
@@ -704,17 +503,7 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
       resolved;
       text;
       tables = Tables.create (definition.id + 1);
-      form =
-        {
-          expression_builders = Array.make (definition.id + 1) None;
-          conversions = Array.make (definition.id + 1) [];
-          statement_builders = Array.make (definition.id + 1) None;
-          pattern_builders = Array.make (definition.id + 1) None;
-          definition_builder = None;
-          next_node_id = 0;
-          next_synthetic_local = 0;
-          tables_with_holes = None;
-        };
+      holes_become_never = false;
       diagnostics = [];
       unifier =
         Unify.create ~context ~list_rigid_members:(fun context rigid ->
@@ -780,26 +569,28 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
     && not (has_any_type Types.is_error)
   in
   let build () : Core.t =
-    state.form.next_node_id <- 0;
-    state.form.next_synthetic_local <- 0;
     let checked = state.tables in
-    if has_any_type (fun part -> part = Types.Hole) then begin
-      state.form.tables_with_holes <- Some checked;
-      state.tables <- Tables.copy checked;
-      finalize state
-    end;
-    let definition =
-      match state.form.definition_builder with
-      | Some build -> build ~holds_body:checks_body
-      | None -> Core.Empty
+    let holes =
+      if has_any_type (fun part -> part = Types.Hole) then begin
+        state.holes_become_never <- true;
+        state.tables <- Tables.copy checked;
+        finalize state;
+        Some checked
+      end
+      else None
+    in
+    let form =
+      Form.build lookups ~resolved ~tables:state.tables ~holes ~context ~package:state.package ~text
+        ~key ~definition ~elaborated ~checks_body
     in
     state.tables <- checked;
-    state.form.tables_with_holes <- None;
-    { definition }
+    state.holes_become_never <- false;
+    form
   in
   let checked = if is_clean () then Some (build ()) else None in
   (match checked with
   | Some form ->
+      check_bit_vector_names state form;
       Capabilities.check state elaborated form;
       check_deserialized_invariants state elaborated form
   | None -> state.capability_solution <- Some (Hashtbl.create 1));

@@ -21,15 +21,16 @@ and check_lent_part state env (value : Syntax.expression) : Types.ty =
   | Some (Lends (mode, part)) ->
       let inner =
         match value.kind with
-        | Mode (mode, inner) when Option.is_none (State.find_keyword_operation state inner) ->
+        | Mode (mode, inner)
+          when Option.is_none
+                 (Places.find_keyword_operation state.State.resolved state.State.tables inner) ->
             State.note_mode_keyword state value mode inner;
             inner
         | _ -> value
       in
       Hashtbl.replace state.yielded inner.id (match mode with Mut -> Mut | Read | Own -> Read);
       let actual = check_expression state env ~expected:part inner in
-      if inner != value then State.alias_expression state value inner;
-      if mode = Mut then Modes.mutate state env ~by:Passed_mut inner;
+      if inner != value then if mode = Mut then Modes.mutate state env ~by:Passed_mut inner;
       Conversions.coerce state env inner ~actual ~expected:part;
       actual
   | _ -> check_expression_kind state env value
@@ -42,10 +43,8 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
   match value.kind with
   | Integer number ->
       state.tables.literals.(value.id) <- Some (Integer_value number);
-      State.register_expression state value (fun () -> Form.build_numeric_literal state value.id);
       Pattern_typing.check_integer_literal state env ?expected value number
   | Float number ->
-      State.register_expression state value (fun () -> Form.build_numeric_literal state value.id);
       let significand = number.significand and exponent = number.exponent in
       let rounded_float32 = Literals.round_float32 ~significand ~exponent
       and rounded_float64 = Literals.round_float64 ~significand ~exponent in
@@ -72,32 +71,19 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
       type_
   | String literal -> (
       match Pattern_typing.find_character_tag state literal with
-      | Some builtin ->
-          State.register_expression state value (fun () ->
-              Form.build_numeric_literal state value.id);
-          Pattern_typing.check_character_literal state value.id literal builtin
-      | None -> Values.check_string_literal state env ?expected value literal)
-  | True | False ->
-      State.register_expression state value (fun () -> Boolean (value.kind = True));
-      Types.bool
-  | Todo -> (
-      State.register_expression state value (fun () -> Todo);
-      match expected with Some expected -> expected | None -> Types.Hole)
+      | Some builtin -> Pattern_typing.check_character_literal state value.id literal builtin
+      | None -> Values.check_string_literal state env ?expected literal)
+  | True | False -> Types.bool
+  | Todo -> ( match expected with Some expected -> expected | None -> Types.Hole)
   | Unreachable ->
       State.reject_in_formula state env (State.read_span state value.id) "`unreachable`";
-      State.register_expression state value (fun () -> Unreachable);
       Types.Never
   | Break | Continue ->
-      let (kind : Core.kind), word =
-        match value.kind with Break -> (Break, "`break`") | _ -> (Continue, "`continue`")
-      in
-      State.reject_in_formula state env (State.read_span state value.id) word;
-      State.register_expression state value (fun () -> kind);
+      State.reject_in_formula state env (State.read_span state value.id)
+        (match value.kind with Break -> "`break`" | _ -> "`continue`");
       Types.Never
   | Self_value -> (
       state.locals_read <- state.definition.id :: state.locals_read;
-      State.register_expression state value (fun () ->
-          Use (Form.build_self_local state env ~origin:value.id));
       match env.self with
       | Some self -> self
       | None ->
@@ -118,16 +104,18 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
   | Prefix (operator, inner) -> Operators.check_prefix state env ?expected value operator inner
   | Mode (mode, inner) ->
       State.note_mode_keyword state value mode inner;
-      (match State.find_keyword_operation state inner with
+      (match Places.find_keyword_operation state.State.resolved state.State.tables inner with
       | Some (call_id, _) ->
           state.keyword_modes <-
             (call_id, match mode with Mut -> Language.Mode.Mut | Own -> Language.Mode.Own)
             :: state.keyword_modes
       | None -> ());
       let type_ = check_expression state env ?expected inner in
-      if mode = Mut && Option.is_none (State.find_keyword_operation state inner) then
-        Modes.mutate state env ~by:Passed_mut inner;
-      State.alias_expression state value inner;
+      if
+        mode = Mut
+        && Option.is_none
+             (Places.find_keyword_operation state.State.resolved state.State.tables inner)
+      then Modes.mutate state env ~by:Passed_mut inner;
       type_
   | Any inner -> Operators.check_any state env ?expected value inner
   | Binary { operator; left; right; _ } ->
@@ -137,16 +125,10 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
         Solver.run_in_statement state env (State.read_span state tested.id) (fun () ->
             check_expression state env tested)
       in
-      let mode = Modes.classify_scrutinee_mode state tested in
+      let mode = Places.classify_scrutinee_mode state.State.resolved state.State.tables tested in
       Pattern_typing.check_pattern state env written tested_type ~mode;
-      State.register_expression state value (fun () ->
-          Matches
-            {
-              value = Operands.build mode (State.build_expression state tested);
-              pattern = State.build_scrutinee_pattern state written;
-            });
       Types.bool
-  | Range { start; stop; inclusive; _ } ->
+  | Range { start; stop; _ } ->
       let element =
         match (start, stop) with
         | Some start, Some stop ->
@@ -160,10 +142,8 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
         | Some only, None | None, Some only -> check_expression state env only
         | None, None -> State.make_fresh_type state
       in
-      State.register_expression state value (fun () ->
-          Form.build_range_record state value start stop ~inclusive);
       Types.Named { path = Well_known.make_path Range; arguments = [ Types.Type element ] }
-  | Quantified { quantifier; binder; body } ->
+  | Quantified { binder; body; _ } ->
       (match binder with
       | Binder_in (written, collection) ->
           let element = Values.check_collection_element state env ~quantifier:value collection in
@@ -177,57 +157,12 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
             (Interface.Elaborator.elaborate_type (State.read_context state) written)
             ~binding:Let ~mode:Language.Mode.Read);
       check state { env with in_quantifier = true } body Types.bool;
-      State.register_expression state value (fun () ->
-          let make_quantified binder : Core.kind =
-            Quantified { quantifier; binder; body = State.build_expression state body }
-          in
-          match (binder, state.tables.loops.(value.id)) with
-          | Binder_type (bound, _), _ ->
-              make_quantified
-                (Over_type
-                   {
-                     local = Declared { origin = bound.id; name = bound.text };
-                     type_ = Form.read_local_type state bound.id;
-                   })
-          | Binder_in (written, collection), Some (Elements { count; element; lends }) ->
-              let pattern = State.build_pattern state written in
-              Form.quantify_over_elements state collection ~count ~element ~lends ~origin:value.id
-                (fun elements -> make_quantified (Over_elements { pattern; elements }))
-          | ( Binder_in (written, { kind = Range { start = Some start; stop = Some stop; _ }; _ }),
-              Some (Integer_range { inclusive; _ }) ) ->
-              let pattern = State.build_pattern state written in
-              let start = State.build_expression state start in
-              make_quantified
-                (Over_range { pattern; start; stop = State.build_expression state stop; inclusive })
-          | Binder_in _, (None | Some (Integer_range _ | Pulled _)) ->
-              State.raise_bug "the checker recorded no iteration for a quantifier over a collection");
       Types.bool
   | Echo inner ->
       let type_ = check_expression state env ?expected inner in
-      State.register_expression state value (fun () -> Echo (State.build_expression state inner));
       type_
   | Return inner ->
       State.reject_in_formula state env (State.read_span state value.id) "`return`";
-      State.register_expression state value (fun () ->
-          match (inner, env.output) with
-          | Some inner, Some (Lends (mode, _)) ->
-              let returned =
-                State.make_synthetic_expression state ~origin:value.id Types.Never (Return None)
-              in
-              Block
-                {
-                  statements =
-                    Form.lend_statements state mode (State.build_expression state inner)
-                    @ [
-                        {
-                          id = State.allocate_node_id state;
-                          origin = value.id;
-                          kind = Evaluate returned;
-                        };
-                      ];
-                  value = None;
-                }
-          | _ -> Return (Option.map (State.build_expression state) inner));
       (match (inner, env.output) with
       | Some inner, Some (Returns output) -> check state env inner output
       | Some inner, Some (Lends (_, part)) ->
@@ -242,24 +177,18 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
       Types.Never
   | Parenthesized inner ->
       let type_ = check_expression state env ?expected inner in
-      State.alias_expression state value inner;
       type_
   | List items -> Values.check_list_literal state env ?expected value items
   | Map entries -> Values.check_map_literal state env ?expected value entries
   | Lambda { parameters; body } -> Values.check_lambda state env ?expected value parameters body
-  | If { condition = test; then_; else_ } ->
-      Values.check_if state env ?expected value test then_ else_
-  | Match { scrutinees; arms } -> Values.match_ state env ?expected value scrutinees arms
+  | If { condition = test; then_; else_ } -> Values.check_if state env ?expected test then_ else_
+  | Match { scrutinees; arms } -> Values.match_ state env ?expected scrutinees arms
   | Provide { implementations; body } ->
       List.iter
         (fun implementation -> ignore (check_expression state env implementation))
         implementations;
-      State.register_expression state value (fun () ->
-          Form.build_provide state implementations body);
       Statements.check_block_value state env ?expected body
-  | Block body ->
-      State.register_expression state value (fun () -> Block (State.build_block state body));
-      Statements.check_block_value state env ?expected body
+  | Block body -> Statements.check_block_value state env ?expected body
   | Expression_error -> Types.Error Diagnostic.reported_elsewhere
 
 and check_member_value state env (value : Syntax.expression) (base : Syntax.expression)
@@ -273,17 +202,7 @@ and check_member_value state env (value : Syntax.expression) (base : Syntax.expr
       let base_type = Conversions.read_checked_head state env base in
       match base_type with
       | Types.Error _ | Types.Hole -> base_type
-      | _ ->
-          State.register_expression state value (fun () ->
-              Use
-                (Field
-                   {
-                     base = State.make_place (State.build_expression state base);
-                     field = member.text;
-                     type_ = Form.read_type state value;
-                     origin = value.id;
-                   }));
-          Name_lookup.check_field state value base_type member)
+      | _ -> Name_lookup.check_field state value base_type member)
 
 and check_bracket state env ?expected (value : Syntax.expression) (base : Syntax.expression) items =
   match state.resolved.brackets.(value.id) with
@@ -333,13 +252,7 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
              path = Well_known.make_path Range;
              arguments = [ Types.Type (Types.make_builtin UInt64) ];
            });
-      State.register_expression state value (fun () ->
-          let base = State.make_place (State.build_expression state base) in
-          let start = Option.map (State.build_expression state) start in
-          let stop = Option.map (State.build_expression state) stop in
-          State.make_range state ~origin:value.id base ~start ~stop
-            ~inclusive:(match range.kind with Range { inclusive; _ } -> inclusive | _ -> false));
-      match (State.find_sequence_element base_type, base_type) with
+      match (Types.find_sequence_element base_type, base_type) with
       | Some element, _ ->
           Types.Named { path = Well_known.make_path Slice; arguments = [ Types.Type element ] }
       | None, Types.Named { path; _ }
@@ -357,7 +270,7 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
           "Strings cannot be indexed: say which you mean with `bytes()` or `characters()`."
       end
       else
-        match (State.find_sequence_element base_type, base_type) with
+        match (Types.find_sequence_element base_type, base_type) with
         | _, (Types.Error _ | Types.Hole) ->
             ignore (check_expression state env key);
             base_type
@@ -365,20 +278,11 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
             let uint64 = Types.make_builtin UInt64 in
             let actual = check_expression state env ~expected:uint64 key in
             Conversions.coerce state env ~argument:Read key ~actual ~expected:uint64;
-            State.register_expression state value (fun () ->
-                Use
-                  (Element
-                     {
-                       base = State.make_place (State.build_expression state base);
-                       index = State.build_expression state key;
-                       type_ = State.finalize_type state element;
-                       origin = value.id;
-                     }));
             element
         | None, _ -> (
             let { Well_known.owner; name; receiver } = Well_known.locate_method Index_at in
             let index_trait =
-              State.make_trait_reference ~arguments:[] (Well_known.make_path owner)
+              Types.make_trait_reference ~arguments:[] (Well_known.make_path owner)
             in
             match State.find_evidence state base_type index_trait with
             | Some _ ->
@@ -411,7 +315,6 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
                       omitted_defaults = [];
                       callee_result = output;
                     };
-                Form.register_index state value;
                 output
             | None ->
                 ignore (check_expression state env key);

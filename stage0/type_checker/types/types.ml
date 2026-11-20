@@ -856,6 +856,18 @@ let find_implementing_receiver trait (impl : impl_interface) declared =
 
 type constant_interface = { constant_type : ty }
 
+let make_trait_reference ~arguments trait : trait_reference =
+  { trait; trait_arguments = arguments; associated = [] }
+
+let string_type = Named { path = Well_known.make_path String; arguments = [] }
+
+let find_sequence_element (sequence : ty) =
+  match sequence with
+  | Named { path; arguments = Type element :: _ }
+    when Well_known.is_buffer_sequence path || Well_known.find_builtin_type path = Some Array ->
+      Some element
+  | _ -> None
+
 module For_testing = struct
   let list_arguments substitution = substitution.arguments
 end
