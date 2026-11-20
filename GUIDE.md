@@ -1222,6 +1222,32 @@ test "taking a value leaves something behind" {
 }
 ```
 
+A pattern binds views of the scrutinee's fields, so a `match` cannot move a
+field out of its scrutinee. `match own` moves the scrutinee into the `match`
+instead, and each binding owns its field:
+
+```truss
+type Entry =
+  | Empty
+  | Named(name: String, count: UInt64)
+
+fn into_name(entry: own Entry) -> Option[String] {
+  match own entry {
+    Empty => None
+    Named(name, ..) => Some(own name)
+  }
+}
+
+test "a match moves fields out of an owned scrutinee" {
+  assert into_name(Entry.Named(name: "Ada", count: 1)) == Some("Ada")
+  assert into_name(Entry.Empty) == None
+}
+```
+
+Without `own`, `name` is a view of `entry`, and `Some(own name)` is an error.
+`is` and `let ... else` take `own` the same way, as in `if own entry is
+Named(name, ..)`.
+
 ### Temporaries
 
 A temporary is dropped at the end of its statement, unless a `let` keeps
@@ -1920,8 +1946,9 @@ test "reading elements" {
 ```
 
 - `numbers[1]` reads an element, and **the compiler proves the index is in
-  bounds.** In `second`, the `if` above establishes it. Where no fact shows
-  the index is in bounds, `get` returns an `Option` instead.
+  bounds.** In `second`, the `if` above establishes it. When no fact shows
+  that an index is in bounds, check it first with an `if`, or read the
+  element with `get`, which returns `None` for an index out of bounds.
 - `numbers[1..3]` is a slice of the elements at 1 and 2. A slice's bounds are
   proven too. `numbers[..2]` and `numbers[1..]` leave out an end.
 - `truss show List` lists every method of a list, including those of its
@@ -2178,6 +2205,14 @@ fn count_words(text: StringSlice) -> Map[String, UInt64] {
   counts
 }
 
+fn group_by_length(words: Slice[String]) -> Map[UInt64, List[String]] {
+  var groups: Map[UInt64, List[String]] = [:]
+  for word in words {
+    mut groups.get_or_insert(word.length(), default: []).push(word.copy())
+  }
+  groups
+}
+
 test "maps" {
   var ports = ["http": 80, "https": 443]
   assert ports.get("https") == Some(443)
@@ -2195,6 +2230,7 @@ test "maps" {
   assert names == ["https"]
   let counts = count_words("the cat saw the dog")
   assert counts.get("the") == Some(2)
+  assert group_by_length(["a", "bc", "d"]).get(1) == Some(["a", "d"])
 }
 ```
 
@@ -2205,8 +2241,10 @@ test "maps" {
 - `update` changes the value for a key in place, inserting the default
   first when the key is missing. Its lambda takes the value `mut`. Nothing
   bounds how often a word repeats, so the count saturates rather than
-  overflowing. `get_or_insert` lends the value for a key `mut` instead, for
-  the rest of the statement.
+  overflowing.
+- `get_or_insert` also inserts the default when the key is missing, then
+  lends the value `mut` for the rest of the statement. `group_by_length`
+  pushes onto each key's list this way, with no index into a separate list.
 - A `for` loop over a map visits entries, records with the fields `key` and
   `value`, so `(key, value)` takes them apart.
 
