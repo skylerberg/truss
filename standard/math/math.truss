@@ -1593,7 +1593,9 @@ impl Multiply[Decimal] for Decimal {
     intrinsic::fits[Int64, Int32](scale)
   }
 
-  fn multiply(self, right: Decimal) -> Decimal {
+  fn multiply(self, right: Decimal) -> Decimal
+    uses Panic unless self.multiply_is_defined(right)
+  {
     Decimal(coefficient: self.coefficient.times(right.coefficient), scale: self.scale + right.scale)
   }
 }

@@ -569,7 +569,10 @@ arguments only.
 | A function that uses `Panic unless P` is compiled twice. A caller without `Panic` calls the copy that assumes `P`, whose checks are development-only. | A caller that proved `P` runs as fast as with a `requires`. The caller's capabilities pick the copy, so code generation reads no proof. |
 | A specification may call a function whose only capability is `Panic unless P`, and proves `P` there. | Where `P` holds the function is pure, and a specification never panics, so `P` is a precondition there as a `requires` is. `text.byte(i)` stays usable in an `invariant` after `byte` moved from `requires` to `Panic unless`. |
 | `expect` uses `Panic unless self is Some(_)`. | Code that proves its value present calls `expect` without declaring `Panic`. |
-| A trait's method takes no condition on values. | Each `impl` would have to prove that the trait's condition implies its own, as a restated clause is proven, and no caller needs one yet. |
+| A trait's method takes a condition on values. An `impl`'s method states its own, which the trait's implies. | The integer conversions and the operator traits guard overflows, so generic code over them panics where code over a built-in type does. The trait's condition implies the `impl`'s as the trait's `requires` implies the `impl`'s, so a caller that proved the trait's condition can call the copy of the `impl`'s method that assumes the `impl`'s. |
+| An `impl`'s method of a trait method that uses `Panic unless P` uses no `Panic` without a condition. | The `impl`'s method would panic where `P` holds, in a caller without `Panic`. |
+| A call through `any` uses `Panic`. | The `impl` is chosen when the program runs, so the call cannot reach a copy that assumes the condition. |
+| A capability's method takes no condition on values. | `provide` chooses the implementation when the program runs, and the implementation's capabilities are the provider's, so a caller's proof of the condition would not stop it from panicking. |
 | `when` takes no condition on values. | `requires P ==> Q` and `ensures P ==> Q` already say it. |
 | Every clause of a function and of a loop takes a condition. | A clause with a condition is proven through the body's loops and recursion, and their invariants and measures name the methods that the clause names: an `ensures` of `extend` that counts the elements `when Source: FiniteCursor` needs a loop `invariant` that names `remaining()`, and a recursion over a cursor needs `decreases source.remaining() when Source: FiniteCursor`. A call decides the condition of a `requires` by the `impl` lookup that decides every other clause's. |
 | A condition names a type parameter or `Self`, as a bound does. | A generic list bounds no associated type: only the trait that declares one bounds it, and `[Element, Items: Cursor[Element = Element]]` names one through a parameter. A condition on `Items.Element` would be a bound that no generic list can write. |
@@ -842,9 +845,10 @@ laws of `Equal` and `Ordered` relate a type to itself.
 **An operator trait states the domain of its operation.** If `add` promised
 a result for every pair of values, the `impl` for a fixed-width integer
 would have to wrap or panic, and generic code could overflow with nothing in
-its signature to show it. So `add` requires `add_is_defined`, and generic
-code carries the same proof obligation that an operator on a built-in type
-carries.
+its signature to show it. So `add` uses `Panic unless add_is_defined`, and
+generic code carries the same obligation that an operator on a built-in type
+carries: code without `Panic` proves it, and code with `Panic` panics where
+it fails.
 
 ### Integers
 
@@ -856,13 +860,13 @@ generic code over one is proven once for each built-in type, with that
 type's range and bit width. For the same reason, a literal under such a
 bound must fit every type that implements the trait.
 
-**A conversion between built-in scalars is a method of the target type,
-not an `impl` of `From` or `TryFrom`.** `Int64.from_integer(count)` requires
-that `count` fits, and `Int64.try_from_integer(count)` returns a `Result`.
-Each is one method of `FixedWidthInteger`, generic over the source and proven
-for every pair of integer types, with one contract. Impls would need one per
-pair. `From` and `TryFrom` are for conversions that involve a library type,
-as in `BigInteger.from(count)`.
+**A conversion between built-in scalars is a method of the target type, not
+an `impl` of `From` or `TryFrom`.** `Int64.from_integer(count)` uses
+`Panic unless` `count` fits, and `Int64.try_from_integer(count)` returns a
+`Result`. Each is one method of `FixedWidthInteger`, generic over the source
+and proven for every pair of integer types, with one contract. Impls would
+need one per pair. `From` and `TryFrom` are for conversions that involve a
+library type, as in `BigInteger.from(count)`.
 
 ### Floats
 

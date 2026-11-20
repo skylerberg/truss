@@ -1,0 +1,18 @@
+trait Sized {
+  fn size(self) -> Int64
+    uses Panic
+}
+
+fn measured(shape: any Sized, count: Int64) -> Int64
+  uses Panic unless count < 10
+{
+  if count >= 10 {
+    shape.size()
+  } else {
+    count
+  }
+}
+
+fn small(shape: any Sized) -> Int64 {
+  measured(shape, count: 3)
+}

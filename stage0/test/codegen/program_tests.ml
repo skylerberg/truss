@@ -172,6 +172,30 @@ let () =
 
 let () =
   Codegen_support.test
+    "a release build stops a trait method that fails in a function that declares `uses Panic`"
+    (fun () ->
+      let program =
+        Codegen_support.build_main ~profile:Release
+          Fixtures.Program.trait_methods_that_stop_the_program
+      in
+      let run operation = Process.run program [ operation ] in
+      List.iter
+        (fun (operation, failure) ->
+          let status, _, errors = run operation in
+          Codegen_support.expect_int ~expected:101 status;
+          if not (String.includes ~affix:("panic: " ^ failure) errors) then
+            Codegen_support.fail "%s stopped with %S" operation errors)
+        [
+          ("addition", "arithmetic overflow");
+          ("conversion", "conversion out of range");
+          ("absolute", "arithmetic overflow");
+        ];
+      let status, output, _ = run "none" in
+      Codegen_support.expect_int ~expected:0 status;
+      Codegen_support.expect_string ~expected:"1 100 5\n" output)
+
+let () =
+  Codegen_support.test
     "a release build runs a callee with a condition on values from code with and without `Panic`"
     (fun () ->
       let program =

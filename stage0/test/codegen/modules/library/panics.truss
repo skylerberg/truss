@@ -1,5 +1,13 @@
 use standard::tasks
 
+test "conversion out of range" uses Panic {
+  let _ = Int8.from_integer(300)
+}
+
+test "the low bound is greater than the high bound" uses Panic {
+  let _ = 5.clamp(10, high: 1)
+}
+
 test "Task 2 is receiving from an empty channel." uses Panic, RunForever {
   provide tasks::SeededTasks.new(0) {
     let numbers = tasks::Channel[Int64].new()
