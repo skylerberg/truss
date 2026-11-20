@@ -1,5 +1,5 @@
 use app::shapes
 
 fn f(shape: shapes::Shape) -> UInt64 {
-  shape.shared() + shape.open()
+  shape.shared() + shape.open() + shape.side_count()
 }

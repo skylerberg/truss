@@ -1,0 +1,5 @@
+use app::shapes
+
+fn f(shape: shapes::Shape) -> UInt64 {
+  shapes::Shape.measure(shape)
+}
