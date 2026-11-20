@@ -65,7 +65,7 @@ let weights =
     ("standard::serialization", 28);
     ("standard::set", 320);
     ("standard::simulation", 1911);
-    ("standard::specification", 3);
+    ("standard::specification", 23);
     ("standard::streams", 70);
     ("standard::system::calls", 7);
     ("standard::system::clock", 1);
