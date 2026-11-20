@@ -76,6 +76,10 @@ let list_known_bounds lookups ~list_bounds (type_ : Types.ty) =
         (list_associated_bounds lookups ~base trait name)
   | _ -> []
 
+let list_rigid_members lookups ~list_bounds type_ =
+  Option.value ~default:[]
+    (Types.find_bound_integer_implementors (list_known_bounds lookups ~list_bounds type_))
+
 let has_bound lookups ~list_bounds type_ trait =
   List.exists
     (fun (bound : Types.trait_reference) -> Path.equal bound.trait trait)

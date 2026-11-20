@@ -1,0 +1,10 @@
+fn paired[Value: Add[UInt8]](value: Value, other: Value.Output) -> Value {
+  todo
+}
+
+fn f() -> UInt8 {
+  let first = 3
+  let kept = paired(first, other: 5)
+  let small: UInt8 = first
+  kept
+}

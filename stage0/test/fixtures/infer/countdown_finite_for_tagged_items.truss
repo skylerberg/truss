@@ -1,0 +1,21 @@
+type Countdown[Item: Plain](left: UInt64, item: Item)
+
+impl Cursor for Countdown[Item: Plain] {
+  type Element = Item
+
+  fn next(mut self) -> Option[Item] {
+    if self.left == 0 {
+      None
+    } else {
+      self.left = self.left - 1
+      Some(self.item)
+    }
+  }
+}
+
+impl FiniteCursor for Countdown[Item: Plain + Tagged] {
+  fn remaining(self) -> UInt64 {
+    self.left
+  }
+}
+

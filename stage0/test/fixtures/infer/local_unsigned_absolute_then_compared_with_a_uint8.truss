@@ -1,0 +1,5 @@
+fn f(small: UInt8) -> Bool {
+  let offset = 5
+  let magnitude = offset.unsigned_absolute()
+  small == magnitude
+}

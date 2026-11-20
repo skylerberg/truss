@@ -399,24 +399,33 @@ let substitute_substitution outer =
     ~capabilities:(substitute_capabilities outer)
 
 let extract_result_type = function Returns type_ | Lends (_, type_) -> type_
+let map_argument map = function Type type_ -> Type (map type_) | Value _ as value -> value
+
+let map_trait map (reference : trait_reference) =
+  {
+    reference with
+    trait_arguments = List.map (map_argument map) reference.trait_arguments;
+    associated = List.map (fun (name, type_) -> (name, map type_)) reference.associated;
+  }
+
+let map_capability_types map_type map_trait capabilities =
+  replace_capabilities
+    (function
+      | Capability_projection { base; trait; name } ->
+          Some [ Capability_projection { base = map_type base; trait = map_trait trait; name } ]
+      | _ -> None)
+    (map_conditions (map_condition_types map_type map_trait) capabilities)
 
 let rec map ?(map_capabilities = Fun.id) transform type_ =
   match transform type_ with
   | Some replacement -> replacement
   | None -> (
       let map = map ~map_capabilities transform in
-      let map_argument = function Type type_ -> Type (map type_) | Value _ as value -> value in
-      let map_trait (reference : trait_reference) =
-        {
-          reference with
-          trait_arguments = List.map map_argument reference.trait_arguments;
-          associated = List.map (fun (name, type_) -> (name, map type_)) reference.associated;
-        }
-      in
       match type_ with
-      | Named { path; arguments } -> Named { path; arguments = List.map map_argument arguments }
+      | Named { path; arguments } ->
+          Named { path; arguments = List.map (map_argument map) arguments }
       | Projection { base; trait = reference; name } ->
-          Projection { base = map base; trait = map_trait reference; name }
+          Projection { base = map base; trait = map_trait map reference; name }
       | Function function_type ->
           Function
             {
@@ -425,7 +434,7 @@ let rec map ?(map_capabilities = Fun.id) transform type_ =
               output = map function_type.output;
               uses = map_capabilities function_type.uses;
             }
-      | Any reference -> Any (map_trait reference)
+      | Any reference -> Any (map_trait map reference)
       | Parameter _ | Never | Integer | Variable _ | Hole | Error _ -> type_)
 
 let rec exists ?(resolve = Fun.id) transform type_ =
@@ -875,6 +884,23 @@ let find_implementing_receiver trait (impl : impl_interface) declared =
        impl.impl_methods)
 
 type constant_interface = { constant_type : ty }
+
+let make_trait_reference ~arguments trait : trait_reference =
+  { trait; trait_arguments = arguments; associated = [] }
+
+let string_type = Named { path = Well_known.make_path String; arguments = [] }
+
+let find_sequence_element (sequence : ty) =
+  match sequence with
+  | Named { path; arguments = Type element :: _ }
+    when Well_known.is_buffer_sequence path || Well_known.find_builtin_type path = Some Array ->
+      Some element
+  | _ -> None
+
+let find_specification_sequence_element (sequence : ty) =
+  match sequence with
+  | Named { path; arguments = [ Type element ] } when Well_known.is Sequence path -> Some element
+  | _ -> None
 
 module For_testing = struct
   let list_arguments substitution = substitution.arguments

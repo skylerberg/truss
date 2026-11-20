@@ -1,0 +1,20 @@
+trait Small {
+  type Output
+}
+
+impl Small for UInt8 {
+  type Output = UInt8
+}
+
+impl Small for UInt16 {
+  type Output = UInt16
+}
+
+fn widened[Value: Small](value: Value) -> Value.Output {
+  todo
+}
+
+fn f() -> UInt8 {
+  let first = 3
+  widened(first)
+}

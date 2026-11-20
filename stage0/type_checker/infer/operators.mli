@@ -23,8 +23,8 @@ val check_operator_call :
   Syntax.id ->
   method_:Well_known.method_ ->
   output:Well_known.associated ->
-  left:Syntax.id * Types.ty ->
-  right:(Syntax.id * Types.ty) option ->
+  left:Syntax.expression * Types.ty ->
+  right:(Syntax.expression * Types.ty) option ->
   Types.ty
 
 val check_literal_operands : State.state -> left:Types.ty -> right:Types.ty -> unit

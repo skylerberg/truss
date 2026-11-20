@@ -132,6 +132,12 @@ val map_condition_types :
 val map_conditions : (condition -> condition) -> capability_set -> capability_set
 val substitute_substitution : substitution -> substitution -> substitution
 val extract_result_type : result -> ty
+val map_argument : (ty -> ty) -> argument -> argument
+val map_trait : (ty -> ty) -> trait_reference -> trait_reference
+
+val map_capability_types :
+  (ty -> ty) -> (trait_reference -> trait_reference) -> capability_set -> capability_set
+
 val map : ?map_capabilities:(capability_set -> capability_set) -> (ty -> ty option) -> ty -> ty
 val exists : ?resolve:(ty -> ty) -> (ty -> bool) -> ty -> bool
 val find_specification_only_type : ty -> ty option
@@ -253,6 +259,11 @@ val find_implementing_receiver :
   trait_interface -> impl_interface -> trait_method -> Path.receiver option
 
 type constant_interface = { constant_type : ty }
+
+val make_trait_reference : arguments:argument list -> Path.t -> trait_reference
+val string_type : ty
+val find_sequence_element : ty -> ty option
+val find_specification_sequence_element : ty -> ty option
 
 module For_testing : sig
   val list_arguments : substitution -> (parameter * argument) list

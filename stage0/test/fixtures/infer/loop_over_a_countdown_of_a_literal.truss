@@ -1,0 +1,7 @@
+fn f() -> Int64 {
+  var total = 0
+  for value in Countdown(left: 3, item: 7) {
+    total = total + value
+  }
+  total
+}

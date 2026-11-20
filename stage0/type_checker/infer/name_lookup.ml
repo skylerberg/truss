@@ -23,27 +23,15 @@ let rec check_name (state : State.state) (env : State.env) (value : Syntax.expre
   | Local id -> (
       state.locals_read <- id :: state.locals_read;
       state.tables.resolutions.(value.id) <- Some (Local_value id);
-      State.register_expression state value (fun () ->
-          Form.build_local_use state ~origin:value.id id);
       match Hashtbl.find_opt state.locals id with
       | Some local -> local.type_
       | None -> State.raise_bug "the local `%s` has no type" text)
   | Law_parameter index -> (
       match List.nth_opt state.law_parameters index with
-      | Some (name, type_) ->
-          State.register_expression state value (fun () ->
-              Use
-                (Local
-                   {
-                     local = Trait_parameter { index; name };
-                     type_ = State.finalize_type state type_;
-                     origin = value.id;
-                   }));
-          type_
+      | Some (_, type_) -> type_
       | None -> State.raise_bug "the law has no parameter `%s`" text)
   | Value_parameter parameter ->
       state.tables.resolutions.(value.id) <- Some (Value_parameter parameter);
-      State.register_expression state value (fun () -> Value_parameter parameter);
       Types.make_builtin UInt64
   | Type_parameter _ | Capability_parameter _ ->
       State.make_error_type state Not_a_value (State.read_span state value.id)
@@ -53,7 +41,7 @@ let rec check_name (state : State.state) (env : State.env) (value : Syntax.expre
         (Printf.sprintf
            "`%s` is a theorem, so it is not a value. Call it in a proof to use its `ensures`." text)
   | Definition (Function, path) -> (
-      match Instantiation.find_function_signature state path with
+      match Instantiation.find_function_signature state.lookups path with
       | Some signature -> (
           let instance =
             Instantiation.instantiate state (State.read_span state value.id) signature
@@ -67,19 +55,16 @@ let rec check_name (state : State.state) (env : State.env) (value : Syntax.expre
           | Ok () ->
               state.tables.resolutions.(value.id) <-
                 Some (Global { path; instantiation = instance.instantiation });
-              check_function_value state value instance.signature)
+              check_function_value state value instance)
       | None -> State.raise_bug "`%s` has no signature" (Path.show path))
   | Definition (Constant, path) ->
       state.tables.resolutions.(value.id) <-
         Some (Global { path; instantiation = Types.no_instantiation });
-      State.register_expression state value (fun () ->
-          Use (Form.build_constant_place state ~origin:value.id path));
       Interface.Definition.read_constant_type state.lookups.interface path
   | Definition (Type, path) ->
       if Well_known.find_builtin_type path = Some Unit then begin
         state.tables.resolutions.(value.id) <-
           Some (Variant_value { type_ = Types.unit; variant = Language.Builtin_type.show Unit });
-        State.register_expression state value (fun () -> Construct { variant = None; fields = [] });
         Types.unit
       end
       else
@@ -99,23 +84,12 @@ let rec check_name (state : State.state) (env : State.env) (value : Syntax.expre
               match
                 List.find_opt (fun (written : Types.field) -> written.field_name = field) fields
               with
-              | Some written ->
-                  State.register_expression state value (fun () ->
-                      Use
-                        (Field
-                           {
-                             base = Form.build_self_local state env ~origin:value.id;
-                             field;
-                             type_ = Form.read_type state value;
-                             origin = value.id;
-                           }));
-                  written.field_type
+              | Some written -> written.field_type
               | None -> State.raise_bug "the field `%s` is not in its record" field)
           | None -> State.raise_bug "the field `%s` is not in a record" field)
       | _ -> State.raise_bug "the field `%s` is named outside its type" field)
   | Result_value -> (
       state.tables.resolutions.(value.id) <- Some Specification_value;
-      State.register_expression state value (fun () -> Result);
       match env.output with
       | Some output -> Types.extract_result_type output
       | None -> State.raise_bug "`result` is named where nothing is returned")
@@ -125,7 +99,6 @@ let rec check_name (state : State.state) (env : State.env) (value : Syntax.expre
         (Printf.sprintf "`%s` is applied to its subject, as in `%s(...)`." text text)
   | Visited -> (
       state.tables.resolutions.(value.id) <- Some Specification_value;
-      State.register_expression state value (fun () -> Yielded);
       match env.loop_element with
       | Some element ->
           Types.Named { path = Well_known.make_path Sequence; arguments = [ Types.Type element ] }
@@ -136,8 +109,6 @@ let rec check_name (state : State.state) (env : State.env) (value : Syntax.expre
 and check_variant_value state (value : Syntax.expression) type_path variant ~arguments =
   let type_ = Types.Named { path = type_path; arguments } in
   state.tables.resolutions.(value.id) <- Some (Variant_value { type_; variant });
-  State.register_expression state value (fun () ->
-      Form.build_variant_value state value type_path variant);
   match Members.find_variants state.lookups type_path arguments with
   | Some variants -> (
       match
@@ -145,13 +116,15 @@ and check_variant_value state (value : Syntax.expression) type_path variant ~arg
       with
       | Some { fields = None; _ } -> type_
       | Some { fields = Some [ field ]; _ } ->
-          Types.Function
-            {
-              inputs = [ (Language.Mode.Own, field.field_type) ];
-              output = type_;
-              uses = Types.no_capabilities;
-              costs = [ { amortized = false; resource = Metric Time; bound = Order_of } ];
-            }
+          Solver.flatten state
+            (Bound { at = State.read_span state value.id; of_type = None })
+            (Types.Function
+               {
+                 inputs = [ (Language.Mode.Own, field.field_type) ];
+                 output = type_;
+                 uses = Types.no_capabilities;
+                 costs = [ { amortized = false; resource = Metric Time; bound = Order_of } ];
+               })
       | Some { fields = Some fields; _ } ->
           State.make_error_type state Not_a_value (State.read_span state value.id)
             (Printf.sprintf
@@ -194,7 +167,9 @@ and check_field state (value : Syntax.expression) base_type (member : Syntax.nam
               else begin
                 state.tables.resolutions.(value.id) <-
                   Some (Field_access { type_ = base_type; field = member.text });
-                written.field_type
+                Solver.flatten state
+                  (Bound { at = State.read_span state member.id; of_type = None })
+                  written.field_type
               end
           | None ->
               if Members.has_visible_method state path member.text then begin
@@ -212,11 +187,9 @@ and check_field state (value : Syntax.expression) base_type (member : Syntax.nam
           else report_unknown [])
   | _ -> report_unknown []
 
-and check_function_value state (value : Syntax.expression) (signature : Types.signature) =
-  match Types.make_function_type signature with
-  | Some function_type ->
-      State.register_expression state value (fun () -> Form.build_function_value state value);
-      Types.Function function_type
+and check_function_value state (value : Syntax.expression) (instance : Instantiation.instance) =
+  match Types.make_function_type instance.signature with
+  | Some function_type -> instance.flatten (Types.Function function_type)
   | None ->
       State.make_error_type state Not_a_value (State.read_span state value.id)
         (Printf.sprintf
@@ -237,11 +210,9 @@ and check_static_member state (value : Syntax.expression) type_ (member : Syntax
         | Visible (Member_constant _ as constant) ->
             state.tables.resolutions.(value.id) <-
               Some (Global { path = constant; instantiation = Types.no_instantiation });
-            State.register_expression state value (fun () ->
-                Use (Form.build_constant_place state ~origin:value.id constant));
             Interface.Definition.read_constant_type state.lookups.interface constant
         | Visible method_path -> (
-            match Instantiation.find_function_signature state method_path with
+            match Instantiation.find_function_signature state.lookups method_path with
             | Some signature ->
                 let instance =
                   Instantiation.instantiate state (State.read_span state value.id) signature
@@ -251,7 +222,7 @@ and check_static_member state (value : Syntax.expression) type_ (member : Syntax
                 | None -> ());
                 state.tables.resolutions.(value.id) <-
                   Some (Global { path = method_path; instantiation = instance.instantiation });
-                check_function_value state value instance.signature
+                check_function_value state value instance
             | None -> State.raise_bug "the method `%s` has no signature" (Path.show method_path))
         | Hidden hidden -> Members.make_hidden_error state (State.read_span state member.id) hidden
         | Absent ->
@@ -316,7 +287,6 @@ and finish_call (state : State.state) env (value : Syntax.expression) path calle
   state.tables.calls.(value.id) <-
     Some { callee; arguments; omitted_defaults = left_out; callee_result = result };
   Modes.note_lending state value instance.signature.output;
-  Form.register_call state value;
   Option.value (reject_specification_call state env value path instance.signature) ~default:result
 
 and reject_specification_call state (env : State.env) (value : Syntax.expression) (path : Path.t)
@@ -381,18 +351,20 @@ and list_trait_candidates (state : State.state) receiver_type name =
     | [] -> None
     | methods -> Some (trait, methods)
   in
-  match receiver_type with
-  | Types.Parameter parameter ->
+  match (receiver_type, list_meeting_closures state receiver_type) with
+  | Types.Parameter parameter, _ ->
       List.filter_map with_method
         (merge_bounds_by_trait state
            (Interface.Properties.list_known_bounds state.lookups.interface
               ~list_bounds:(State.lookup_bounds state) (Types.Parameter parameter)))
-  | Types.Any trait ->
+  | Types.Any trait, _ ->
       List.filter_map with_method
         (merge_bounds_by_trait state
            (Interface.Properties.list_bound_closure state.lookups.interface ~self:receiver_type
               trait))
-  | _ ->
+  | _, (_ :: _ as closures) ->
+      List.filter_map with_method (merge_bounds_by_trait state (List.concat_map snd closures))
+  | _, [] ->
       List.filter_map
         (fun trait ->
           let reference = Instantiation.make_fresh_trait_reference state trait in
@@ -401,6 +373,31 @@ and list_trait_candidates (state : State.state) receiver_type name =
           else None)
         (Resolve.Names.list_visible_traits_declaring state.lookups.interface.names
            ~from:state.key.module_ name)
+
+and list_meeting_closures (state : State.state) receiver_type =
+  match State.find_domain state receiver_type with
+  | Some domain ->
+      Solver.list_sealed_closures state receiver_type
+        ~includes:(List.exists (fun member -> List.mem member domain))
+  | None -> []
+
+and find_sealed_provider state receiver_type (trait : Types.trait_reference) =
+  List.find_map
+    (fun (sealed, closure) ->
+      if
+        List.exists
+          (fun (bound : Types.trait_reference) -> Path.equal bound.trait trait.trait)
+          closure
+      then Some sealed
+      else None)
+    (list_meeting_closures state receiver_type)
+
+and has_sealed_method state receiver_type name =
+  Option.is_some (State.find_domain state receiver_type)
+  &&
+  match resolve_overloads state receiver_type name with
+  | Ok (Visible _) -> true
+  | Ok (Hidden _ | Absent) | Error _ -> false
 
 and merge_bounds_by_trait state = function
   | [] -> []
@@ -488,7 +485,7 @@ and find_method_version state (span : Source.Definition_span.t) type_ name
   | Ok (Visible overloads) -> (
       match List.assoc_opt receiver overloads with
       | Some (Type_overload method_path) -> (
-          match Instantiation.find_function_signature state method_path with
+          match Instantiation.find_function_signature state.lookups method_path with
           | Some signature ->
               let instance = Instantiation.instantiate state span signature in
               (match instance.signature.receiver with
@@ -533,7 +530,9 @@ and find_elements_calls state (iterable : Syntax.expression) type_ (mode : Langu
     (Tables.loop * Types.ty * Language.Mode.t) Resolve.Names.lookup =
   let span = State.read_span state iterable.id and receiver = Path.Instance mode in
   let is_uint64 type_ =
-    Types.is_builtin UInt64 (Conversions.read_actual_head state iterable type_)
+    Types.is_builtin UInt64
+      (Conversions.read_actual_head state iterable
+         (Solver.flatten state (Bound { at = span; of_type = None }) type_))
   in
   match
     ( find_method_version state span type_ "count" (Instance Read),
@@ -563,7 +562,7 @@ and find_consuming_cursor state (iterable : Syntax.expression) type_ :
   match find_method_version state span type_ "cursor" (Instance Own) with
   | Visible (callee, { parameters = []; output = Returns cursor; _ }) -> (
       let cursor = Conversions.read_actual_head state iterable cursor in
-      let trait = State.make_trait_reference ~arguments:[] (Well_known.make_path Cursor) in
+      let trait = Types.make_trait_reference ~arguments:[] (Well_known.make_path Cursor) in
       match State.find_evidence state cursor trait with
       | Some _ ->
           Visible
@@ -571,16 +570,16 @@ and find_consuming_cursor state (iterable : Syntax.expression) type_ :
                 {
                   cursor;
                   cursor_call = Some (make_argumentless_call callee cursor);
-                  remaining = find_remaining_call state span cursor;
+                  remaining = None;
                 },
-              State.resolve_associated_type state cursor trait Cursor_element ~at:span )
+              Solver.resolve_associated_type state cursor trait Cursor_element ~at:span )
       | None -> Absent)
   | Hidden hidden -> Hidden hidden
   | Visible _ | Absent -> Absent
 
 and find_remaining_call state (span : Source.Definition_span.t) cursor =
   let finite_cursor =
-    State.make_trait_reference ~arguments:[] (Well_known.make_path Finite_cursor)
+    Types.make_trait_reference ~arguments:[] (Well_known.make_path Finite_cursor)
   in
   let make_call () =
     let { Well_known.name; receiver; _ } = Well_known.locate_method Finite_cursor_remaining in
@@ -598,5 +597,5 @@ and find_remaining_call state (span : Source.Definition_span.t) cursor =
   | None -> (
       match State.reduce_condition state [ { subject = cursor; bound = finite_cursor } ] with
       | Some (_ :: _ as condition) when List.for_all is_on_a_parameter condition ->
-          Some (condition, State.apply_condition_bounds state condition make_call)
+          Some (condition, State.with_added_condition state condition make_call)
       | Some _ | None -> None)

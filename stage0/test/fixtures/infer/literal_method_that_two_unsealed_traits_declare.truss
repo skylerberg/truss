@@ -1,0 +1,31 @@
+trait Twice {
+  fn twice(self) -> Self
+}
+
+impl Twice for UInt8 {
+  fn twice(self) -> UInt8 {
+    self
+  }
+}
+
+impl Twice for Int64 {
+  fn twice(self) -> Int64 {
+    self
+  }
+}
+
+trait Other {
+  fn twice(self) -> String
+}
+
+impl Other for UInt16 {
+  fn twice(self) -> String {
+    "other"
+  }
+}
+
+fn f() {
+  let limit = 10
+  let doubled = limit.twice()
+  let _ = doubled
+}

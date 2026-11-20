@@ -1,0 +1,11 @@
+fn doubled[Value: Add[Value]](value: Value) -> Value.Output {
+  todo
+}
+
+fn small() -> UInt8 {
+  doubled(3)
+}
+
+fn large() -> Int64 {
+  doubled(3)
+}

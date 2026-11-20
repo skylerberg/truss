@@ -1,0 +1,8 @@
+fn widened[Value: Add[Int64]](value: Value) -> Value.Output {
+  todo
+}
+
+fn f() -> Int64 {
+  let first = 3
+  widened(first)
+}

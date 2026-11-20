@@ -22,6 +22,7 @@ type instance = {
   signature : Types.signature;
   substitution : Types.substitution;
   instantiation : Types.instantiation;
+  flatten : Types.ty -> Types.ty;
 }
 
 val instantiate :
@@ -31,4 +32,4 @@ val instantiate :
   Types.signature ->
   instance
 
-val find_function_signature : State.state -> Path.t -> Types.signature option
+val find_function_signature : Lookups.t -> Path.t -> Types.signature option

@@ -379,7 +379,10 @@ and check_provide checking scope implementations body =
       Core_walk.walk_operand
         { Core_walk.ignore_all with expression = check_expression checking scope }
         implementation.value;
-      let impls = Form.list_capability_impls state implementation.type_ in
+      let impls =
+        Form.list_capability_impls state.lookups ~list_bounds:(State.lookup_bounds state)
+          ~package:state.package implementation.type_
+      in
       if impls = [] then
         report checking Not_an_implementation implementation.origin
           (Printf.sprintf "`%s` implements no capability, so it provides nothing."
@@ -570,7 +573,8 @@ let check_monitor_lock checking ~(read_solved : int -> Types.capability_set) ava
     List.exists
       (fun ((provided : Core.provided), (_ : Types.impl_interface)) ->
         Path.equal provided.capability (Well_known.make_path Tasks))
-      (Form.list_capability_impls state implementation.type_)
+      (Form.list_capability_impls state.lookups ~list_bounds:(State.lookup_bounds state)
+         ~package:state.package implementation.type_)
   in
   let available =
     Types.replace_capabilities
@@ -631,7 +635,8 @@ let check_monitor_callbacks checking implementations =
                     | None -> ())
                   capability.methods
             | None -> ())
-          (Form.list_capability_impls state implementation.type_))
+          (Form.list_capability_impls state.lookups ~list_bounds:(State.lookup_bounds state)
+             ~package:state.package implementation.type_))
     implementations
 
 let check (state : State.state) (elaborated : Interface.Environment.elaborated_interface)

@@ -6,6 +6,7 @@ type t = {
   lookups : Lookups.t;
   resolved : Resolve.resolved;
   bounds : Types.trait_reference list Parameter_table.t;
+  condition : Types.condition;
   broken_parameters : Diagnostic.reported Parameter_table.t;
   self_type : Types.ty option;
   self_trait : Types.trait_reference option;
@@ -29,6 +30,7 @@ let create lookups resolved ~spans (scope : Environment.scope) =
     lookups;
     resolved;
     bounds;
+    condition = [];
     broken_parameters;
     self_type = scope.self_type;
     self_trait = scope.self_trait;
@@ -42,32 +44,22 @@ let create lookups resolved ~spans (scope : Environment.scope) =
 let read_span context id = context.spans.(id)
 
 let list_bounds context parameter =
-  Option.value ~default:[] (Parameter_table.find_opt context.bounds parameter)
-
-let find_self_type context = context.self_type
-
-let with_added_bounds context (condition : Types.condition) run =
-  let saved =
+  let declared = Option.value ~default:[] (Parameter_table.find_opt context.bounds parameter) in
+  match
     List.filter_map
       (fun (bound : Types.bound_condition) ->
         match bound.subject with
-        | Types.Parameter parameter ->
-            let earlier = Parameter_table.find_opt context.bounds parameter in
-            Parameter_table.replace context.bounds parameter
-              (Option.value ~default:[] earlier @ [ bound.bound ]);
-            Some (parameter, earlier)
+        | Types.Parameter subject when subject = parameter -> Some bound.bound
         | _ -> None)
-      condition
-  in
-  Fun.protect
-    ~finally:(fun () ->
-      List.iter
-        (fun (parameter, earlier) ->
-          match earlier with
-          | Some bounds -> Parameter_table.replace context.bounds parameter bounds
-          | None -> Parameter_table.remove context.bounds parameter)
-        (List.rev saved))
-    run
+      context.condition
+  with
+  | [] -> declared
+  | conditional -> declared @ conditional
+
+let find_self_type context = context.self_type
+
+let add_condition context condition =
+  { context with condition = Types.make_condition (context.condition @ condition) }
 
 let list_diagnostics context = !(context.diagnostics)
 let list_named_types context = !(context.named)
