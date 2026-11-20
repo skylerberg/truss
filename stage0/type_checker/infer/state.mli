@@ -30,8 +30,15 @@ type cause =
     }
   | Method_call of Source.Definition_span.t
   | Loop of Source.Definition_span.t
+  | Quantifier of Source.Definition_span.t
   | Any_conversion of { at : Source.Definition_span.t; any_type : Types.ty }
   | Excluded of (Types.ty -> Diagnostic.reported)
+
+type source =
+  | List_literal of Syntax.id
+  | Map_literal of Syntax.id
+  | Unbounded_range of Syntax.id
+  | Generic_argument of { written : Syntax.id; parameter : string; declared_on : Path.t }
 
 type goal = {
   subject : Types.ty;
@@ -103,6 +110,7 @@ type state = {
   mutable final_type_checks : (unit -> unit) list;
   mutable log : logged list;
   annotatable : (Syntax.id, unit) Hashtbl.t;
+  sources : (Unify.unknown, source) Hashtbl.t;
 }
 
 val add_diagnostic :
@@ -157,8 +165,15 @@ val read_context : state -> Interface.Elaborator.t
 val check_when_final : state -> (unit -> unit) -> unit
 val resolve : state -> Types.ty -> Types.ty
 val zonk : state -> Types.ty -> Types.ty
-val make_fresh_type : state -> Types.ty
-val make_fresh_generic_arguments : state -> Types.generic list -> Types.argument list
+val make_fresh_type : state -> source -> Types.ty
+val make_goal_decided_type : state -> Types.ty
+
+val make_fresh_generic_arguments :
+  state -> Types.generic list -> (Types.generic -> source) -> Types.argument list
+
+val make_goal_decided_arguments : state -> Types.generic list -> Types.argument list
+val find_source : state -> Unify.unknown -> (Unify.unknown * source) option
+val find_variable_source : state -> Types.ty -> (Unify.unknown * source) option
 val lookup_bounds : state -> Types.parameter -> Types.trait_reference list
 val normalize : state -> Types.ty -> Types.ty
 val find_domain : state -> Types.ty -> Language.Builtin_type.t list option

@@ -1378,12 +1378,37 @@ let () =
   Harness.test "the variable of a loop over elements lent `mut` can be passed `mut`" (fun () ->
       expect_fine Fixtures.Infer.mut_loop_over_rows);
   Harness.test "a var can be assigned" (fun () -> expect_fine Fixtures.Infer.assignment_to_a_var);
-  Harness.test "an empty list with nothing to decide its elements is an error" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.empty_list_without_a_type "types.cannot_infer");
-  Harness.test "a function value whose type argument nothing decides is reported at its statement"
+  Harness.test "an empty list bound to a `var` without a type asks for the `var`'s type" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.empty_list_without_a_type "types.cannot_infer"
+        ~at:("names", 1)
+        ~says:
+          "The type of `names` cannot be inferred from this statement alone. Declare `names` with \
+           a type.");
+  Harness.test "a loop over an empty list asks for its binding's type" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.loop_over_an_empty_list "types.cannot_infer"
+        ~at:("value", 1) ~says:"The type of `value` cannot be inferred from this statement alone.");
+  Harness.test "a comparison of empty lists names the first list" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.comparison_of_empty_lists "types.cannot_infer"
+        ~at:("[]", 1)
+        ~says:
+          "Nothing here determines the element type of `[]`. Bind the list with a typed `let`, \
+           such as `let names: List[String] = []`.");
+  Harness.test "a method of an empty list names the list, not the method's type parameter"
     (fun () ->
-      expect_one_diagnostic ~at:("let maker", 1)
-        Fixtures.Infer.let_of_a_function_value_with_an_unused_type_parameter "types.cannot_infer");
+      expect_one_diagnostic Fixtures.Infer.length_of_an_empty_list "types.cannot_infer"
+        ~at:("[]", 1) ~says:"Nothing here determines the element type of `[]`.");
+  Harness.test "a method of an empty map names the map" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.length_of_an_empty_map "types.cannot_infer" ~at:("[:]", 1)
+        ~says:
+          "Nothing here determines the key and value types of `[:]`. Bind the map with a typed \
+           `let`, such as `let ages: Map[String, UInt8] = [:]`.");
+  Harness.test "a function value whose type argument nothing decides is reported at its name"
+    (fun () ->
+      expect_one_diagnostic ~at:("make", 3)
+        Fixtures.Infer.let_of_a_function_value_with_an_unused_type_parameter "types.cannot_infer"
+        ~says:
+          "Nothing here determines `Unused`, a type parameter of `make`. Give `make` its type \
+           arguments in brackets.");
   Harness.test "an empty list takes its elements' type from the annotation" (fun () ->
       expect_fine Fixtures.Infer.empty_list_of_strings);
   Harness.test "a body's value must have the result type" (fun () ->
@@ -1441,7 +1466,12 @@ let () =
 
 let () =
   Harness.test "a lambda with nothing to give its parameter types is an error" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.lambda_bound_without_a_type "types.lambda_needs_type");
+      expect_one_diagnostic Fixtures.Infer.lambda_bound_without_a_type "types.lambda_needs_type"
+        ~says:
+          "Bind it with a typed `let`, such as `let double: fn(Int64) -> Int64 = fn(x) { x * 2 }`.");
+  Harness.test "a lambda passed as a type argument asks for the callee's type arguments" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.lambda_passed_as_a_type_argument
+        "types.lambda_needs_type" ~says:"Give `hold` its type arguments in brackets.");
   Harness.test "a lambda takes its parameter types from the function type it is passed as"
     (fun () -> expect_type Fixtures.Infer.lambda_incrementing_items "item + 1" "Int64");
   Harness.test "concurrent code needs `Tasks`, in a block and in a loop" (fun () ->
@@ -1581,6 +1611,13 @@ let () =
         ~says:
           "This loop does not determine the arguments of `Bag`, whose methods give its elements."
         ~at:("pair {", 1));
+  Harness.test "a quantifier over a generic trait's elements names the quantifier" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.quantifier_over_the_elements_of_a_generic_trait
+        "types.cannot_infer"
+        ~says:
+          "This quantifier does not determine the arguments of `Bag`, whose methods give its \
+           elements."
+        ~at:("pair =>", 1));
   Harness.test
     "an annotated loop over a generic trait's elements is an error at the loop, since nothing \
      gives the arguments of its count" (fun () ->
@@ -1740,8 +1777,12 @@ let () =
       expect_one_diagnostic Fixtures.Infer.let_of_type_display "types.not_a_type");
   Harness.test "an operator's result must be the type expected of it" (fun () ->
       expect_one_diagnostic Fixtures.Infer.product_of_a_span "types.mismatch");
-  Harness.test "an array length nothing decides is an error" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.zeros_without_a_length "types.cannot_infer");
+  Harness.test "an array length nothing decides is an error at its call" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.zeros_without_a_length "types.cannot_infer"
+        ~at:("zeros()", 1)
+        ~says:
+          "Nothing here determines `count`, a value parameter of `zeros`. Give `zeros` its \
+           arguments in brackets.");
   Harness.test "a qualified constant in a pattern must have the matched type" (fun () ->
       expect_one_diagnostic Fixtures.Infer.exit_code_constant_arm_on_an_integer "types.mismatch");
   Harness.test "the alternatives of a pattern bind each name with one type" (fun () ->
@@ -2138,7 +2179,8 @@ let () =
   Harness.test "`old` without its operand is an error" (fun () ->
       expect_one_diagnostic Fixtures.Infer.ensures_comparing_old_alone "types.not_a_value");
   Harness.test "a type argument that nothing decides is an error at its call" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.make_without_a_type_argument "types.cannot_infer");
+      expect_one_diagnostic Fixtures.Infer.make_without_a_type_argument "types.cannot_infer"
+        ~at:("make()", 1) ~says:"Nothing here determines `Value`, a type parameter of `make`.");
   Harness.test "a trait is not called" (fun () ->
       expect_one_diagnostic Fixtures.Infer.trait_called "types.not_callable");
   Harness.test "a generic function given type arguments, as a value, must meet its bounds"

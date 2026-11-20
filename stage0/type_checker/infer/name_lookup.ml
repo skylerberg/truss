@@ -44,7 +44,7 @@ let rec check_name (state : State.state) (env : State.env) (value : Syntax.expre
       match Instantiation.find_function_signature state.lookups path with
       | Some signature -> (
           let instance =
-            Instantiation.instantiate state (State.read_span state value.id) signature
+            Instantiation.instantiate state ~written:value.id ~declared_on:path signature
           in
           match
             match type_arguments with
@@ -75,7 +75,7 @@ let rec check_name (state : State.state) (env : State.env) (value : Syntax.expre
         (Printf.sprintf "`%s` is not a value." text)
   | Variant (type_path, variant) ->
       check_variant_value state value type_path variant
-        ~arguments:(Instantiation.instantiate_type state (State.read_span state value.id) type_path)
+        ~arguments:(Instantiation.instantiate_type state ~written:value.id type_path)
   | Field field -> (
       match env.self with
       | Some (Types.Named { path = self_path; arguments }) -> (
@@ -215,7 +215,8 @@ and check_static_member state (value : Syntax.expression) type_ (member : Syntax
             match Instantiation.find_function_signature state.lookups method_path with
             | Some signature ->
                 let instance =
-                  Instantiation.instantiate state (State.read_span state value.id) signature
+                  Instantiation.instantiate state ~written:value.id ~declared_on:method_path
+                    signature
                 in
                 (match instance.signature.receiver with
                 | Some (_, receiver) -> ignore (State.unify state receiver type_)
@@ -333,7 +334,13 @@ and lookup_trait_static_methods (state : State.state) path name =
     (List.map
        (lookup_trait_method state name Path.Static)
        (list_implemented_trait_lookups state
-          (Types.Named { path; arguments = Instantiation.make_fresh_arguments state path })
+          (Types.Named
+             {
+               path;
+               arguments =
+                 State.make_goal_decided_arguments state
+                   (Instantiation.read_type_generics state path);
+             })
           name))
 
 and list_implemented_trait_lookups (state : State.state) self_type name =
@@ -485,7 +492,7 @@ and resolve_overloads state receiver_type name :
                      ])))
             [ Path.Instance Read; Instance Mut; Instance Own ]))
 
-and find_method_version state (span : Source.Definition_span.t) type_ name
+and find_method_version state ~(cause : State.cause) (iterable : Syntax.expression) type_ name
     (receiver : Path.receiver) : (Tables.callee * Types.signature) Resolve.Names.lookup =
   match resolve_overloads state type_ name with
   | Error _ | Ok Absent -> Absent
@@ -495,7 +502,10 @@ and find_method_version state (span : Source.Definition_span.t) type_ name
       | Some (Type_overload method_path) -> (
           match Instantiation.find_function_signature state.lookups method_path with
           | Some signature ->
-              let instance = Instantiation.instantiate state span signature in
+              let instance =
+                Instantiation.instantiate state ~written:iterable.id ~declared_on:method_path
+                  signature
+              in
               (match instance.signature.receiver with
               | Some (_, self_type) -> ignore (State.unify state self_type type_)
               | None -> ());
@@ -505,16 +515,19 @@ and find_method_version state (span : Source.Definition_span.t) type_ name
           | None -> Absent)
       | Some (Trait_overload (trait, method_)) ->
           let instance, callee =
-            instantiate_trait_method state span ~self_type:type_ trait method_
+            instantiate_trait_method state ~written:iterable.id ~self_type:type_ trait method_
           in
-          Solver.require state (Loop span) type_ trait;
+          Solver.require state cause type_ trait;
           Visible (callee, (instance : Instantiation.instance).signature)
       | Some (View_overload _) | None -> Absent)
 
-and instantiate_trait_method state span ~self_type (trait : Types.trait_reference)
+and instantiate_trait_method state ~written ~self_type (trait : Types.trait_reference)
     (method_ : Types.trait_method) =
   let instance =
-    Instantiation.instantiate state span
+    Instantiation.instantiate state ~written
+      ~declared_on:
+        (Method
+           { owner = trait.trait; name = method_.method_name; receiver = method_.method_receiver })
       ~extra:
         (Types.make_trait_substitution
            (Members.list_trait_generics state.lookups trait.trait)
@@ -534,7 +547,7 @@ and instantiate_trait_method state span ~self_type (trait : Types.trait_referenc
 and make_argumentless_call ?lends callee result : Tables.call =
   { callee; arguments = []; omitted_defaults = []; callee_result = result; lends }
 
-and find_elements_calls state (iterable : Syntax.expression) type_ (mode : Language.Mode.t) :
+and find_elements_calls state ~cause (iterable : Syntax.expression) type_ (mode : Language.Mode.t) :
     (Tables.loop * Types.ty * Language.Mode.t) Resolve.Names.lookup =
   let span = State.read_span state iterable.id and receiver = Path.Instance mode in
   let is_uint64 type_ =
@@ -543,8 +556,8 @@ and find_elements_calls state (iterable : Syntax.expression) type_ (mode : Langu
          (Solver.flatten state (Bound { at = span; of_type = None }) type_))
   in
   match
-    ( find_method_version state span type_ "count" (Instance Read),
-      find_method_version state span type_ "element" receiver )
+    ( find_method_version state ~cause iterable type_ "count" (Instance Read),
+      find_method_version state ~cause iterable type_ "element" receiver )
   with
   | Visible (count, counted), Visible (element, lent) -> (
       match (counted.parameters, counted.output, lent.parameters, lent.output) with
@@ -567,7 +580,7 @@ and find_elements_calls state (iterable : Syntax.expression) type_ (mode : Langu
 and find_consuming_cursor state (iterable : Syntax.expression) type_ :
     (Tables.loop * Types.ty) Resolve.Names.lookup =
   let span = State.read_span state iterable.id in
-  match find_method_version state span type_ "cursor" (Instance Own) with
+  match find_method_version state ~cause:(Loop span) iterable type_ "cursor" (Instance Own) with
   | Visible (callee, { parameters = []; output = Returns cursor; _ }) -> (
       let cursor = Conversions.read_actual_head state iterable cursor in
       let trait = Types.make_trait_reference ~arguments:[] (Well_known.make_path Cursor) in

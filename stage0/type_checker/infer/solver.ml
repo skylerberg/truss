@@ -2,7 +2,13 @@ type failure = Unmet | Unmet_associated of (string * Types.ty * Types.ty) | Refu
 type decision = Holds | Waits | Fails of failure | Becomes of State.goal list
 
 let read_cause_span : State.cause -> Source.Definition_span.t = function
-  | Bound { at; _ } | Operator { at; _ } | Method_call at | Loop at | Any_conversion { at; _ } -> at
+  | Bound { at; _ }
+  | Operator { at; _ }
+  | Method_call at
+  | Loop at
+  | Quantifier at
+  | Any_conversion { at; _ } ->
+      at
   | Excluded _ -> State.raise_bug "a requirement of a set has no span of its own"
 
 let list_goal_arguments (goal : State.goal) =
@@ -48,7 +54,7 @@ let rec flatten_into (state : State.state) cause ~projections ~add type_ =
             | Some output -> output
             | None ->
                 let flatten = flatten_into state cause ~projections ~add in
-                let output = State.make_fresh_type state in
+                let output = State.make_goal_decided_type state in
                 projections := (projection, output) :: !projections;
                 let goal =
                   make_goal state (flatten base)
@@ -187,7 +193,7 @@ let select (state : State.state) (goal : State.goal) trait ~subject
       in
       let substitution =
         Types.combine_substitutions substitution
-          (Types.make_substitution unbound (State.make_fresh_generic_arguments state unbound))
+          (Types.make_substitution unbound (State.make_goal_decided_arguments state unbound))
       in
       if
         not
@@ -468,6 +474,73 @@ let list_frame_unknowns (state : State.state) (frame : State.frame) =
 
 let list_goal_unknowns state goal = list_goal_inputs state goal @ list_output_unknowns state goal
 
+let show_declaration : Path.t -> string = function
+  | Method { owner; name; _ } -> Path.show_name owner ^ "." ^ name
+  | path -> Path.show_name path
+
+let make_bracket_remedy declared_on (unknown : Unify.unknown) =
+  Printf.sprintf "Give `%s` its %s in brackets." (show_declaration declared_on)
+    (match unknown with Unknown_type _ -> "type arguments" | Unknown_value _ -> "arguments")
+
+let report_undetermined (state : State.state) (frame : State.frame) unsolved =
+  let quote id = State.quote_span state (State.read_span state id) in
+  let holds_unsolved id =
+    List.exists (fun unknown -> List.mem unknown unsolved) (list_node_unknowns state id)
+  in
+  let report id message =
+    State.add_diagnostic state Cannot_infer (State.read_span state id) message
+  in
+  match
+    List.find_opt
+      (fun binding -> Hashtbl.mem state.annotatable binding && holds_unsolved binding)
+      (List.rev frame.bindings)
+  with
+  | Some binding ->
+      let name = quote binding in
+      report binding
+        (Printf.sprintf
+           "The type of `%s` cannot be inferred from this statement alone. Declare `%s` with a \
+            type."
+           name name)
+  | None -> (
+      let read_index : Unify.unknown -> int = function
+        | Unknown_type index | Unknown_value index -> index
+      in
+      let sourced =
+        List.sort_uniq
+          (fun (first, _) (second, _) -> compare (read_index first) (read_index second))
+          (List.filter_map (State.find_source state) unsolved)
+      in
+      match sourced with
+      | (unknown, Generic_argument { written; parameter; declared_on }) :: _ ->
+          let kind =
+            match unknown with
+            | Unify.Unknown_type _ -> "a type parameter"
+            | Unknown_value _ -> "a value parameter"
+          in
+          report written
+            (Printf.sprintf "Nothing here determines `%s`, %s of `%s`. %s" parameter kind
+               (show_declaration declared_on)
+               (make_bracket_remedy declared_on unknown))
+      | (_, List_literal literal) :: _ ->
+          report literal
+            (Printf.sprintf
+               "Nothing here determines the element type of `%s`. Bind the list with a typed \
+                `let`, such as `let names: List[String] = []`."
+               (quote literal))
+      | (_, Map_literal literal) :: _ ->
+          report literal
+            (Printf.sprintf
+               "Nothing here determines the key and value types of `%s`. Bind the map with a typed \
+                `let`, such as `let ages: Map[String, UInt8] = [:]`."
+               (quote literal))
+      | (_, Unbounded_range range) :: _ ->
+          report range
+            (Printf.sprintf "Nothing here determines the bound type of `%s`." (quote range))
+      | [] ->
+          State.add_diagnostic state Cannot_infer frame.span
+            "The types here cannot be inferred from this code alone.")
+
 let report_unsolved (state : State.state) (frame : State.frame) =
   let unsolved =
     List.filter (is_owned state frame)
@@ -481,7 +554,7 @@ let report_unsolved (state : State.state) (frame : State.frame) =
       List.filter_map
         (fun (goal : State.goal) ->
           match (goal.cause, goal.requirement) with
-          | ((Method_call at | Loop at) as cause), Implements trait
+          | ((Method_call at | Loop at | Quantifier at) as cause), Implements trait
             when (not (Types.contains_unsolved (State.zonk state goal.subject)))
                  && List.exists
                       (fun unknown -> List.mem unknown unsolved)
@@ -493,6 +566,9 @@ let report_unsolved (state : State.state) (frame : State.frame) =
                        | Loop _ ->
                            "This loop does not determine the arguments of `%s`, whose methods give \
                             its elements."
+                       | Quantifier _ ->
+                           "This quantifier does not determine the arguments of `%s`, whose \
+                            methods give its elements."
                        | _ ->
                            "This call does not determine the arguments of `%s`. Write the call in \
                             full with them.")
@@ -506,10 +582,7 @@ let report_unsolved (state : State.state) (frame : State.frame) =
       match undetermined with
       | (first, _) :: _ when List.for_all (fun unknown -> List.mem unknown explained) unsolved ->
           first
-      | _ ->
-          State.add_diagnostic state Cannot_infer frame.span
-            "The types in this statement cannot be inferred from it alone. Give the `let` a type, \
-             or the call type arguments, such as `var names: List[String] = []`."
+      | _ -> report_undetermined state frame unsolved
     in
     if Option.is_none state.unsolved then state.unsolved <- Some report;
     let reported_goals =

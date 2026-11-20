@@ -36,7 +36,7 @@ val lookup_trait_static_methods :
 
 val instantiate_trait_method :
   State.state ->
-  Source.Definition_span.t ->
+  written:Syntax.id ->
   self_type:Types.ty ->
   Types.trait_reference ->
   Types.trait_method ->
@@ -55,6 +55,7 @@ val resolve_overloads :
 
 val find_elements_calls :
   State.state ->
+  cause:State.cause ->
   Syntax.expression ->
   Types.ty ->
   Language.Mode.t ->

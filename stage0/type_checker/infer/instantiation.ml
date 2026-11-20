@@ -35,16 +35,19 @@ let require_bounds state at ?of_type ?projections generics substitution =
       check_grants_when_final state at argument bound)
     (Interface.Impls.list_required_bounds generics substitution)
 
-let make_fresh_arguments (state : State.state) (path : Path.t) =
+let read_type_generics (state : State.state) (path : Path.t) =
   match Interface.Definition.find_type_interface state.lookups.interface path with
-  | Some interface -> State.make_fresh_generic_arguments state interface.type_generics
+  | Some interface -> interface.type_generics
   | None -> []
+
+let make_generic_source ~written ~declared_on (generic : Types.generic) : State.source =
+  Generic_argument { written; parameter = generic.generic.name; declared_on }
 
 let make_fresh_trait_reference (state : State.state) (trait : Path.t) =
   Types.make_trait_reference trait
     ~arguments:
       (match Interface.Definition.find_trait_interface state.lookups.interface trait with
-      | Some interface -> State.make_fresh_generic_arguments state interface.trait_generics
+      | Some interface -> State.make_goal_decided_arguments state interface.trait_generics
       | None -> [])
 
 let require_type_bounds (state : State.state) span path arguments =
@@ -56,9 +59,12 @@ let require_type_bounds (state : State.state) span path arguments =
         (Types.make_substitution interface.type_generics arguments)
   | None -> ()
 
-let instantiate_type state span path =
-  let arguments = make_fresh_arguments state path in
-  require_type_bounds state span path arguments;
+let instantiate_type state ~written path =
+  let arguments =
+    State.make_fresh_generic_arguments state (read_type_generics state path)
+      (make_generic_source ~written ~declared_on:path)
+  in
+  require_type_bounds state (State.read_span state written) path arguments;
   arguments
 
 let rec find_static state (value : Syntax.expression) : static_ option =
@@ -94,7 +100,7 @@ and check_named_type state (value : Syntax.expression) path type_arguments =
     | _ -> Types.Named { path; arguments }
   in
   match type_arguments with
-  | None -> make_type (instantiate_type state (State.read_span state value.id) path)
+  | None -> make_type (instantiate_type state ~written:value.id path)
   | Some items -> (
       match check_written_arguments state items with
       | Error error -> error
@@ -155,11 +161,14 @@ type instance = {
   flatten : Types.ty -> Types.ty;
 }
 
-let instantiate (state : State.state) (span : Source.Definition_span.t)
-    ?(extra = Types.no_substitution) (signature : Types.signature) =
+let instantiate (state : State.state) ~written ~declared_on ?(extra = Types.no_substitution)
+    (signature : Types.signature) =
+  let span = State.read_span state written in
   let instantiation : Types.instantiation =
     {
-      type_arguments = State.make_fresh_generic_arguments state signature.generics;
+      type_arguments =
+        State.make_fresh_generic_arguments state signature.generics
+          (make_generic_source ~written ~declared_on);
       capability_arguments =
         List.map
           (fun (parameter : Types.parameter) ->
