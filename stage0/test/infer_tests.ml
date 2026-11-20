@@ -2122,6 +2122,11 @@ let () =
         "types.not_callable");
   Harness.test "a method that takes or returns Self cannot be called through any" (fun () ->
       expect_one_diagnostic Fixtures.Infer.join_through_any "types.not_callable");
+  Harness.test
+    "a supertrait's method that takes Self through its trait's argument cannot be called through \
+     any, so a dog is never matched against a cat" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.supertraits_method_that_takes_self_through_its_argument
+        "types.not_callable" ~at:("dog.matches(cat)", 1));
   Harness.test "a method whose result holds Self cannot be called through any" (fun () ->
       expect_one_diagnostic Fixtures.Infer.skip_through_any_cursor "types.not_callable");
   Harness.test "a cursor's own step and its counting can be called through any" (fun () ->

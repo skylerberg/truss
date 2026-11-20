@@ -441,6 +441,14 @@ let build_any_entry context (item : Lowered.Item.t) (impl_method : Lowered.Item.
       :: List.map (fun ((_, place), mode, ty) -> (mode, ty, place)) parameter_places)
     ~lending:(List.map (fun local -> Lowered.Copy (Lowered.make_local_place local)) lending)
     ~destination ~site:None ();
+  if self_mode = Own then
+    Emit_c.Ir_builder.emit builder
+      (Call
+         {
+           target = Intrinsic Free;
+           arguments = [ Copy (Lowered.make_local_place value) ];
+           result = Discarded;
+         });
   Emit_c.Ir_builder.build state.builder
     (Lowering.finish_function state
        ~returns:(method_signature.output <> Returns Never)

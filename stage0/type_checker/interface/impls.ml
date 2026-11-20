@@ -158,8 +158,13 @@ type evidence =
 
 type through_any = Callable | Has_generics | Names_self
 
-let classify_through_any lookups ~(trait : Path.t) (method_ : Types.trait_method) : through_any =
-  let self = Types.make_self_parameter trait in
+type dispatched = {
+  declared_by : Types.trait_reference;
+  trait_method : Types.trait_method;
+  through_any : through_any;
+}
+
+let classify_dispatched_signature ~self (signature : Types.signature) =
   let names_self type_ =
     let mentions_self = ref false in
     ignore
@@ -174,14 +179,65 @@ let classify_through_any lookups ~(trait : Path.t) (method_ : Types.trait_method
          type_);
     !mentions_self
   in
-  let signature = Definition.read_method_signature lookups ~owner:trait method_ in
-  let result = Types.extract_result_type signature.output in
   if signature.generics <> [] || signature.capability_parameters <> [] then Has_generics
   else if
     List.exists (fun (info : Types.parameter_info) -> names_self info.type_) signature.parameters
-    || names_self result
+    || names_self (Types.extract_result_type signature.output)
   then Names_self
   else Callable
+
+let list_dispatched_methods lookups (any : Types.trait_reference) =
+  let self = Types.make_self_parameter any.trait in
+  let traits =
+    List.fold_left
+      (fun traits (bound : Types.trait_reference) ->
+        if
+          List.exists
+            (fun (listed : Types.trait_reference) -> Path.equal listed.trait bound.trait)
+            traits
+        then traits
+        else traits @ [ bound ])
+      []
+      (Properties.list_bound_closure lookups ~self:(Types.Parameter self) any)
+  in
+  List.concat_map
+    (fun (declared_by : Types.trait_reference) ->
+      match Definition.find_trait_interface lookups declared_by.trait with
+      | None -> []
+      | Some interface ->
+          let substitution =
+            Types.make_trait_substitution interface.trait_generics ~self:(Types.Parameter self)
+              declared_by
+          in
+          List.filter_map
+            (fun (trait_method : Types.trait_method) ->
+              if trait_method.method_receiver = Static then None
+              else
+                Some
+                  {
+                    declared_by;
+                    trait_method;
+                    through_any =
+                      classify_dispatched_signature ~self
+                        (Types.substitute_signature substitution
+                           (Definition.read_method_signature lookups ~owner:declared_by.trait
+                              trait_method));
+                  })
+            interface.methods)
+    traits
+
+let classify_through_any lookups ~(any : Types.trait_reference) ~(trait : Path.t)
+    (trait_method : Types.trait_method) =
+  match
+    List.find_opt
+      (fun (dispatched : dispatched) ->
+        Path.equal dispatched.declared_by.trait trait && dispatched.trait_method = trait_method)
+      (list_dispatched_methods lookups any)
+  with
+  | Some dispatched -> dispatched.through_any
+  | None ->
+      raise_bug "`any %s` dispatches no method %s of %s" (Types.show_trait any)
+        trait_method.method_name (Path.show trait)
 
 type bounds = Types.parameter -> Types.trait_reference list
 

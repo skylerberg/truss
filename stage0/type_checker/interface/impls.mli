@@ -46,7 +46,16 @@ type evidence =
 
 type through_any = Callable | Has_generics | Names_self
 
-val classify_through_any : Lookups.t -> trait:Path.t -> Types.trait_method -> through_any
+type dispatched = {
+  declared_by : Types.trait_reference;
+  trait_method : Types.trait_method;
+  through_any : through_any;
+}
+
+val list_dispatched_methods : Lookups.t -> Types.trait_reference -> dispatched list
+
+val classify_through_any :
+  Lookups.t -> any:Types.trait_reference -> trait:Path.t -> Types.trait_method -> through_any
 
 type bounds = Types.parameter -> Types.trait_reference list
 
