@@ -1600,6 +1600,8 @@ let () =
         "prover.ensures");
   Harness.test "a caller reads the postcondition of the function it passes from its body" (fun () ->
       expect_proven Fixtures.Prover.halved_through_a_callback_relation);
+  Harness.test "a named function passed as a measure in a requires and an invariant proves"
+    (fun () -> expect_proven Fixtures.Prover.zero_count_by_a_named_measure);
   Harness.test "a callback's mut input is related at its entry and its exit" (fun () ->
       expect_proven Fixtures.Prover.value_changed_through_a_mut_callback);
   Harness.test "two calls of an effectful callback are not known to agree" (fun () ->
