@@ -70,8 +70,8 @@ and check_prefix state env ?expected (value : Syntax.expression) operator
   | Negate -> (
       match inner.kind with
       | Integer number ->
-          state.tables.literals.(inner.id) <- Some (Integer_value number);
-          state.tables.literals.(value.id) <- Some (Integer_value (Z.neg number));
+          State.elaborate state inner.id (Literal (Integer_value number));
+          State.elaborate state value.id (Literal (Integer_value (Z.neg number)));
           let type_ =
             Pattern_typing.check_integer_literal state env ?expected value (Z.neg number)
           in
@@ -96,34 +96,18 @@ and check_prefix state env ?expected (value : Syntax.expression) operator
 
 and check_operator_call state call ~method_ ~output ~left:((left : Syntax.expression), left_type)
     ~right =
-  let { Well_known.owner; name; receiver } = Well_known.locate_method method_ in
+  let { Well_known.owner; _ } = Well_known.locate_method method_ in
   let reference =
     Types.make_trait_reference
       ~arguments:(List.map (fun (_, right_type) -> Types.Type right_type) (Option.to_list right))
       (Well_known.make_path owner)
   in
   let result = State.make_fresh_type state in
-  let make_operand index expression =
-    { Tables.expression; core_argument_index = index; mode = Language.Mode.Read }
-  in
-  state.tables.calls.(call) <-
-    Some
-      {
-        callee =
-          Trait_method
-            {
-              trait = reference;
-              name;
-              receiver;
-              self_type = left_type;
-              instantiation = Types.no_instantiation;
-            };
-        arguments =
-          make_operand 0 left
-          :: List.map (fun (right, _) -> make_operand 1 right) (Option.to_list right);
-        omitted_defaults = [];
-        callee_result = result;
-      };
+  State.elaborate state call
+    (Call
+       (Tables.make_method_call reference method_ ~self_type:left_type ~result
+          ((left, Read)
+          :: List.map (fun (right, _) -> (right, Language.Mode.Read)) (Option.to_list right))));
   Solver.require state
     (Operator
        {
@@ -220,32 +204,13 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
               | Less | Less_equal | Greater | Greater_equal ->
                   (Ordered_compare, Types.make_named (Well_known.make_path Ordering) [])
             in
-            let { Well_known.owner; name; receiver } = Well_known.locate_method method_ in
-            let trait = Well_known.make_path owner in
-            state.tables.calls.(value.id) <-
-              Some
-                {
-                  callee =
-                    Trait_method
-                      {
-                        trait = Types.make_trait_reference ~arguments:[] trait;
-                        name;
-                        receiver;
-                        self_type = compared_type;
-                        instantiation = Types.no_instantiation;
-                      };
-                  arguments =
-                    [
-                      { expression = left; core_argument_index = 0; mode = Read };
-                      { expression = right; core_argument_index = 1; mode = Read };
-                    ];
-                  omitted_defaults = [];
-                  callee_result = result;
-                };
-            Solver.require state
-              (Method_call (State.read_span state value.id))
-              compared_type
-              (Types.make_trait_reference ~arguments:[] trait);
+            let { Well_known.owner; _ } = Well_known.locate_method method_ in
+            let trait = Types.make_trait_reference ~arguments:[] (Well_known.make_path owner) in
+            State.elaborate state value.id
+              (Call
+                 (Tables.make_method_call trait method_ ~self_type:compared_type ~result
+                    [ (left, Read); (right, Read) ]));
+            Solver.require state (Method_call (State.read_span state value.id)) compared_type trait;
             Types.bool
           end)
   | Operation (Arithmetic arithmetic) -> (

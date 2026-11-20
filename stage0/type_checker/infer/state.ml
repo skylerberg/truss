@@ -385,6 +385,8 @@ let find_evidence state type_ trait =
   Interface.Impls.find_evidence state.lookups.interface ~list_bounds:(lookup_bounds state)
     (normalize state type_) (normalize_trait state trait)
 
+let elaborate state id elaboration = state.tables.elaborations.(id) <- Some elaboration
+
 let decide_property state property type_ =
   Interface.Impls.decide_property property state.lookups.interface
     ~list_bounds:(lookup_bounds state) (zonk state type_)

@@ -48,9 +48,11 @@ let check_clauses (state : State.state) (name : Syntax.name) clauses =
              name.text hidden hidden)
     in
     Array.iteri
-      (fun id (call : Tables.call option) ->
-        match call with Some { callee = Function { path; _ }; _ } -> record_name id path | _ -> ())
-      state.tables.calls;
+      (fun id (elaboration : Tables.elaboration option) ->
+        match elaboration with
+        | Some (Call { callee = Function { path; _ }; _ }) -> record_name id path
+        | _ -> ())
+      state.tables.elaborations;
     Array.iteri
       (fun id (resolution : Tables.resolution option) ->
         match resolution with Some (Global { path; _ }) -> record_name id path | _ -> ())

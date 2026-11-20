@@ -42,7 +42,7 @@ and check state env (value : Syntax.expression) (expected : Types.ty) =
 and check_expression_kind state env ?expected (value : Syntax.expression) : Types.ty =
   match value.kind with
   | Integer number ->
-      state.tables.literals.(value.id) <- Some (Integer_value number);
+      State.elaborate state value.id (Literal (Integer_value number));
       Pattern_typing.check_integer_literal state env ?expected value number
   | Float number ->
       let significand = number.significand and exponent = number.exponent in
@@ -65,14 +65,14 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
       in
       State.check_when_final state (fun () ->
           Option.iter
-            (fun rounded -> state.tables.literals.(value.id) <- Some (Float_value rounded))
+            (fun rounded -> State.elaborate state value.id (Literal (Float_value rounded)))
             (if Types.is_builtin Float32 (State.finalize_type state type_) then rounded_float32
              else rounded_float64));
       type_
   | String literal -> (
       match Pattern_typing.find_character_tag state literal with
       | Some builtin -> Pattern_typing.check_character_literal state value.id literal builtin
-      | None -> Values.check_string_literal state env ?expected literal)
+      | None -> Values.check_string_literal state env ?expected value literal)
   | True | False -> Types.bool
   | Todo -> ( match expected with Some expected -> expected | None -> Types.Hole)
   | Unreachable ->
@@ -294,7 +294,7 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
             Conversions.coerce state env ~argument:Read key ~actual ~expected:uint64;
             element
         | None, _ -> (
-            let { Well_known.owner; name; receiver } = Well_known.locate_method Index_at in
+            let { Well_known.owner; _ } = Well_known.locate_method Index_at in
             let index_trait =
               Types.make_trait_reference ~arguments:[] (Well_known.make_path owner)
             in
@@ -309,26 +309,11 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
                 let actual = check_expression state env ~expected:key_type key in
                 Conversions.coerce state env ~argument:Read ~takes_view_as_owner:true key ~actual
                   ~expected:key_type;
-                state.tables.calls.(value.id) <-
-                  Some
-                    {
-                      callee =
-                        Trait_method
-                          {
-                            trait = index_trait;
-                            name;
-                            receiver;
-                            self_type = base_type;
-                            instantiation = Types.no_instantiation;
-                          };
-                      arguments =
-                        [
-                          { expression = base; core_argument_index = 0; mode = Read };
-                          { expression = key; core_argument_index = 1; mode = Read };
-                        ];
-                      omitted_defaults = [];
-                      callee_result = output;
-                    };
+                State.elaborate state value.id
+                  (Call
+                     (Tables.make_method_call ~lends:Read index_trait Index_at ~self_type:base_type
+                        ~result:output
+                        [ (base, Read); (key, Read) ]));
                 output
             | None ->
                 ignore (check_expression state env key);

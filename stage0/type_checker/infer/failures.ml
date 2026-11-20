@@ -90,11 +90,10 @@ let find_log_report (state : State.state) ~fixes code span message (root, wanted
   | Some (State.Literal { allowed; _ })
     when State.is_within state wanted Types.float_types && not (State.is_float_domain allowed) ->
       let spell_as_float literal =
-        match state.tables.literals.(literal) with
-        | Some (Integer_value number) ->
+        match state.tables.elaborations.(literal) with
+        | Some (Literal (Integer_value number)) ->
             Printf.sprintf "`%s` as `%s.0`" (quote literal) (Z.to_string number)
-        | Some (Float_value _) | None ->
-            State.raise_bug "`%s` is no integer literal" (quote literal)
+        | _ -> State.raise_bug "`%s` is no integer literal" (quote literal)
       in
       Some
         (State.add_diagnostic state Integer_for_float span

@@ -1,8 +1,3 @@
-let note_lending (state : State.state) (value : Syntax.expression) (output : Types.result) =
-  match output with
-  | Lends (mode, _) -> state.tables.lend_modes.(value.id) <- Some mode
-  | Returns _ -> ()
-
 type immutable = Read_only of string | Captured of string | Lent_read_only | Not_a_place
 
 let rec find_immutable state (env : State.env) (value : Syntax.expression) : immutable option =
@@ -43,7 +38,7 @@ let rec find_immutable state (env : State.env) (value : Syntax.expression) : imm
 
 let use_mutable_index (state : State.state) ~(report_with : Diagnostic.Code.types option)
     (value : Syntax.expression) =
-  match state.tables.calls.(value.id) with
+  match Tables.find_call state.tables value.id with
   | Some
       ({ callee = Trait_method ({ trait; name; receiver; self_type; _ } as method_); arguments; _ }
        as call)
@@ -54,26 +49,27 @@ let use_mutable_index (state : State.state) ~(report_with : Diagnostic.Code.type
       in
       match State.find_evidence state self_type index_mut with
       | Some _ ->
-          state.tables.calls.(value.id) <-
-            Some
-              {
-                call with
-                callee =
-                  Trait_method
-                    {
-                      method_ with
-                      trait = index_mut;
-                      name = index_mut_at.name;
-                      receiver = index_mut_at.receiver;
-                    };
-                arguments =
-                  List.map
-                    (fun (argument : Tables.argument) ->
-                      if argument.core_argument_index = 0 then
-                        { argument with mode = Language.Mode.Mut }
-                      else argument)
-                    arguments;
-              }
+          State.elaborate state value.id
+            (Call
+               {
+                 call with
+                 callee =
+                   Trait_method
+                     {
+                       method_ with
+                       trait = index_mut;
+                       name = index_mut_at.name;
+                       receiver = index_mut_at.receiver;
+                     };
+                 arguments =
+                   List.map
+                     (fun (argument : Tables.argument) ->
+                       if argument.core_argument_index = 0 then
+                         { argument with mode = Language.Mode.Mut }
+                       else argument)
+                     arguments;
+                 lends = Some Mut;
+               })
       | None ->
           Option.iter
             (fun code ->

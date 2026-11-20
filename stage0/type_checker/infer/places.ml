@@ -35,7 +35,8 @@ let rec find_keyword_operation resolved tables (value : Syntax.expression) =
 let rec find_lent_mode resolved (tables : Tables.t) (value : Syntax.expression) :
     Language.Mode.t option =
   match value.kind with
-  | Call _ -> tables.lend_modes.(value.id)
+  | Call _ ->
+      Option.bind (Tables.find_call tables value.id) (fun (call : Tables.call) -> call.lends)
   | Member (base, _) | Parenthesized base -> find_lent_mode resolved tables base
   | Bracket (base, _) when resolved.Resolve.brackets.(value.id) <> Some Type_arguments ->
       find_lent_mode resolved tables base

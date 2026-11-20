@@ -25,6 +25,7 @@ type call = {
   arguments : argument list;
   omitted_defaults : string list;
   callee_result : Types.ty;
+  lends : Language.Mode.t option;
 }
 
 type resolution =
@@ -65,15 +66,11 @@ type pattern =
   | Record_pattern of { type_ : Types.ty; fields : (string * Syntax.pattern) list }
   | Binding_pattern of { local : Syntax.id; is_var : bool; mode : Language.Mode.t }
   | Constant_pattern of Path.t
-  | Literal_pattern of literal
-  | Other_pattern
+  | Literal_pattern of Z.t
 
-type template = {
-  from_template : call option;
-  part_conversions : call option list;
-  interpolated : bool;
-  part : Types.ty option;
-}
+type template =
+  | Interpolated of { displays : call list }
+  | Tagged of { from_template : call; part : Types.ty; part_conversions : call option list }
 
 type conversion =
   | From_never
@@ -84,6 +81,9 @@ type conversion =
   | From_integer
 
 type specification_call =
+  | Old
+  | Identical
+  | Final of { part : Types.ty }
   | Specification_function of Core.specification_function
   | Method_cost of {
       metric : Language.Metric.t;
@@ -97,6 +97,17 @@ type literal_elements =
   | List_element of Types.ty
   | Map_entry of { key : Types.ty; value : Types.ty }
 
+type elaboration =
+  | Literal of literal
+  | Template of template
+  | Call of call
+  | Specification_call of specification_call
+  | Converted_literal of { elements : literal_elements; call : call }
+  | Record_update of { paths : (Syntax.id * string list) list }
+  | Lambda of { captures : (Syntax.id * Core.local) list }
+  | Loop of loop
+  | Discarded
+
 type published = {
   types : Types.ty option array;
   local_types : Types.ty option array;
@@ -107,43 +118,43 @@ type published = {
 type t = {
   types : Types.ty option array;
   local_types : Types.ty option array;
-  resolutions : resolution option array;
-  calls : call option array;
-  literals : literal option array;
-  patterns : pattern option array;
   scrutinee_types : Types.ty option array;
-  loops : loop option array;
-  templates : template option array;
-  lend_modes : Language.Mode.t option array;
-  conditions : Types.condition option array;
+  resolutions : resolution option array;
   conversions : (conversion * Types.ty) list array;
-  update_paths : (Syntax.id * string list) list option array;
-  specification_calls : specification_call option array;
-  captures : (Syntax.id * Core.local) list option array;
-  literal_elements : literal_elements option array;
-  discarded : bool array;
+  conditions : Types.condition option array;
+  patterns : pattern option array;
+  elaborations : elaboration option array;
 }
 
 let create size =
   {
     types = Array.make size None;
     local_types = Array.make size None;
-    resolutions = Array.make size None;
-    calls = Array.make size None;
-    literals = Array.make size None;
-    patterns = Array.make size None;
     scrutinee_types = Array.make size None;
-    loops = Array.make size None;
-    templates = Array.make size None;
-    lend_modes = Array.make size None;
-    conditions = Array.make size None;
+    resolutions = Array.make size None;
     conversions = Array.make size [];
-    update_paths = Array.make size None;
-    specification_calls = Array.make size None;
-    captures = Array.make size None;
-    literal_elements = Array.make size None;
-    discarded = Array.make size false;
+    conditions = Array.make size None;
+    patterns = Array.make size None;
+    elaborations = Array.make size None;
   }
+
+let make_method_call ?lends trait (method_ : Well_known.method_) ~self_type ~result arguments : call
+    =
+  let { Well_known.name; receiver; _ } = Well_known.locate_method method_ in
+  {
+    callee =
+      Trait_method { trait; name; receiver; self_type; instantiation = Types.no_instantiation };
+    arguments =
+      List.mapi
+        (fun index (expression, mode) -> { expression; core_argument_index = index; mode })
+        arguments;
+    omitted_defaults = [];
+    callee_result = result;
+    lends;
+  }
+
+let find_call (tables : t) id =
+  match tables.elaborations.(id) with Some (Call call) -> Some call | _ -> None
 
 let map ~map_type ~map_argument ~map_capabilities (tables : t) : t =
   let map_trait (reference : Types.trait_reference) : Types.trait_reference =
@@ -187,17 +198,59 @@ let map ~map_type ~map_argument ~map_capabilities (tables : t) : t =
       callee_result = map_type call.callee_result;
     }
   in
+  let map_loop = function
+    | Integer_range { element; inclusive } ->
+        Integer_range { element = map_type element; inclusive }
+    | Elements { count; element; lends } ->
+        Elements { count = map_call count; element = map_call element; lends }
+    | Pulled { cursor; cursor_call; remaining } ->
+        Pulled
+          {
+            cursor = map_type cursor;
+            cursor_call = Option.map map_call cursor_call;
+            remaining =
+              Option.map
+                (fun (condition, remaining) ->
+                  (Types.map_condition_types map_type map_trait condition, map_call remaining))
+                remaining;
+          }
+  in
+  let map_elaboration = function
+    | Call call -> Call (map_call call)
+    | Converted_literal { elements; call } ->
+        Converted_literal
+          {
+            elements =
+              (match elements with
+              | List_element element -> List_element (map_type element)
+              | Map_entry { key; value } -> Map_entry { key = map_type key; value = map_type value });
+            call = map_call call;
+          }
+    | Template (Interpolated { displays }) ->
+        Template (Interpolated { displays = List.map map_call displays })
+    | Template (Tagged { from_template; part; part_conversions }) ->
+        Template
+          (Tagged
+             {
+               from_template = map_call from_template;
+               part = map_type part;
+               part_conversions = List.map (Option.map map_call) part_conversions;
+             })
+    | Specification_call (Final { part }) -> Specification_call (Final { part = map_type part })
+    | Specification_call (Method_cost cost) ->
+        Specification_call
+          (Method_cost
+             { cost with trait = map_trait cost.trait; self_type = map_type cost.self_type })
+    | Loop loop -> Loop (map_loop loop)
+    | ( Literal _ | Record_update _ | Lambda _ | Discarded
+      | Specification_call (Old | Identical | Specification_function _) ) as elaboration ->
+        elaboration
+  in
   let map_entries table transform = Array.map (Option.map transform) table in
   {
     types = map_entries tables.types map_type;
-    literals = tables.literals;
-    lend_modes = tables.lend_modes;
-    update_paths = tables.update_paths;
-    captures = tables.captures;
-    discarded = tables.discarded;
     local_types = map_entries tables.local_types map_type;
     scrutinee_types = map_entries tables.scrutinee_types map_type;
-    calls = map_entries tables.calls map_call;
     resolutions =
       map_entries tables.resolutions (function
         | Global { path; instantiation } ->
@@ -206,73 +259,29 @@ let map ~map_type ~map_argument ~map_capabilities (tables : t) : t =
         | Variant_value { type_; variant } -> Variant_value { type_ = map_type type_; variant }
         | Type_name type_ -> Type_name (map_type type_)
         | (Local_value _ | Value_parameter _ | Specification_value) as resolution -> resolution);
-    loops =
-      map_entries tables.loops (function
-        | Integer_range { element; inclusive } ->
-            Integer_range { element = map_type element; inclusive }
-        | Elements { count; element; lends } ->
-            Elements { count = map_call count; element = map_call element; lends }
-        | Pulled { cursor; cursor_call; remaining } ->
-            Pulled
-              {
-                cursor = map_type cursor;
-                cursor_call = Option.map map_call cursor_call;
-                remaining =
-                  Option.map
-                    (fun (condition, remaining) ->
-                      (Types.map_condition_types map_type map_trait condition, map_call remaining))
-                    remaining;
-              });
-    patterns =
-      map_entries tables.patterns (function
-        | Variant_pattern pattern -> Variant_pattern { pattern with type_ = map_type pattern.type_ }
-        | Record_pattern pattern -> Record_pattern { pattern with type_ = map_type pattern.type_ }
-        | (Binding_pattern _ | Constant_pattern _ | Literal_pattern _ | Other_pattern) as pattern ->
-            pattern);
-    templates =
-      map_entries tables.templates (fun template ->
-          {
-            template with
-            from_template = Option.map map_call template.from_template;
-            part_conversions = List.map (Option.map map_call) template.part_conversions;
-            part = Option.map map_type template.part;
-          });
-    conditions = map_entries tables.conditions (Types.map_condition_types map_type map_trait);
     conversions =
       Array.map
         (List.map (fun (conversion, expected) -> (conversion, map_type expected)))
         tables.conversions;
-    specification_calls =
-      map_entries tables.specification_calls (function
-        | Method_cost cost ->
-            Method_cost
-              { cost with trait = map_trait cost.trait; self_type = map_type cost.self_type }
-        | Specification_function _ as call -> call);
-    literal_elements =
-      map_entries tables.literal_elements (function
-        | List_element element -> List_element (map_type element)
-        | Map_entry { key; value } -> Map_entry { key = map_type key; value = map_type value });
+    conditions = map_entries tables.conditions (Types.map_condition_types map_type map_trait);
+    patterns =
+      map_entries tables.patterns (function
+        | Variant_pattern pattern -> Variant_pattern { pattern with type_ = map_type pattern.type_ }
+        | Record_pattern pattern -> Record_pattern { pattern with type_ = map_type pattern.type_ }
+        | (Binding_pattern _ | Constant_pattern _ | Literal_pattern _) as pattern -> pattern);
+    elaborations = map_entries tables.elaborations map_elaboration;
   }
 
 let list_arguments_at (tables : t) id =
   let {
     types;
     local_types;
-    resolutions;
-    calls;
-    literals = _;
-    patterns;
     scrutinee_types;
-    loops;
-    templates;
-    lend_modes = _;
-    conditions;
+    resolutions;
     conversions;
-    update_paths = _;
-    specification_calls;
-    captures = _;
-    literal_elements;
-    discarded = _;
+    conditions;
+    patterns;
+    elaborations;
   } =
     tables
   in
@@ -295,6 +304,15 @@ let list_arguments_at (tables : t) id =
       (fun (bound : Types.bound_condition) -> Types.Type bound.subject :: list_trait bound.bound)
       condition
   in
+  let list_loop = function
+    | Integer_range { element; _ } -> [ Types.Type element ]
+    | Elements { count; element; _ } -> list_call count @ list_call element
+    | Pulled { cursor; cursor_call; remaining; _ } ->
+        (Types.Type cursor :: Option.fold ~none:[] ~some:list_call cursor_call)
+        @ Option.fold ~none:[]
+            ~some:(fun (condition, call) -> list_condition condition @ list_call call)
+            remaining
+  in
   of_types
     (List.filter_map (fun table -> table.(id)) [ types; local_types; scrutinee_types ]
     @ List.map snd conversions.(id))
@@ -303,33 +321,30 @@ let list_arguments_at (tables : t) id =
     | Some (Field_access { type_; _ } | Variant_value { type_; _ } | Type_name type_) ->
         [ Types.Type type_ ]
     | Some (Local_value _ | Value_parameter _ | Specification_value) | None -> [])
-  @ Option.fold ~none:[] ~some:list_call calls.(id)
   @ (match patterns.(id) with
     | Some (Variant_pattern { type_; _ } | Record_pattern { type_; _ }) -> [ Types.Type type_ ]
-    | Some (Binding_pattern _ | Constant_pattern _ | Literal_pattern _ | Other_pattern) | None -> [])
-  @ (match loops.(id) with
-    | Some (Integer_range { element; _ }) -> [ Types.Type element ]
-    | Some (Elements { count; element; _ }) -> list_call count @ list_call element
-    | Some (Pulled { cursor; cursor_call; remaining }) ->
-        (Types.Type cursor :: Option.fold ~none:[] ~some:list_call cursor_call)
-        @ Option.fold ~none:[]
-            ~some:(fun (condition, call) -> list_condition condition @ list_call call)
-            remaining
-    | None -> [])
-  @ (match templates.(id) with
-    | Some { from_template; part_conversions; part; _ } ->
-        List.concat_map (Option.fold ~none:[] ~some:list_call) (from_template :: part_conversions)
-        @ of_types (Option.to_list part)
-    | None -> [])
+    | Some (Binding_pattern _ | Constant_pattern _ | Literal_pattern _) | None -> [])
   @ Option.fold ~none:[] ~some:list_condition conditions.(id)
-  @ (match specification_calls.(id) with
-    | Some (Method_cost { trait; self_type; _ }) -> Types.Type self_type :: list_trait trait
-    | Some (Specification_function _) | None -> [])
   @
-  match literal_elements.(id) with
-  | Some (List_element element) -> [ Types.Type element ]
-  | Some (Map_entry { key; value }) -> [ Types.Type key; Types.Type value ]
-  | None -> []
+  match elaborations.(id) with
+  | Some (Call call) -> list_call call
+  | Some (Converted_literal { elements = List_element element; call }) ->
+      Types.Type element :: list_call call
+  | Some (Converted_literal { elements = Map_entry { key; value }; call }) ->
+      Types.Type key :: Types.Type value :: list_call call
+  | Some (Template (Interpolated { displays })) -> List.concat_map list_call displays
+  | Some (Template (Tagged { from_template; part; part_conversions })) ->
+      (Types.Type part :: list_call from_template)
+      @ List.concat_map (Option.fold ~none:[] ~some:list_call) part_conversions
+  | Some (Specification_call (Final { part })) -> [ Types.Type part ]
+  | Some (Specification_call (Method_cost { trait; self_type; _ })) ->
+      Types.Type self_type :: list_trait trait
+  | Some (Loop loop) -> list_loop loop
+  | Some
+      ( Literal _ | Record_update _ | Lambda _ | Discarded
+      | Specification_call (Old | Identical | Specification_function _) )
+  | None ->
+      []
 
 let exists_type predicate (tables : t) =
   let contains table =
@@ -344,6 +359,6 @@ let publish (tables : t) : published =
     resolutions = tables.resolutions;
     callees =
       Array.map
-        (function Some { callee = Function { path; _ }; _ } -> Some path | _ -> None)
-        tables.calls;
+        (function Some (Call { callee = Function { path; _ }; _ }) -> Some path | _ -> None)
+        tables.elaborations;
   }
