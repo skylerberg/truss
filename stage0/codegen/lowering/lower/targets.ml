@@ -94,33 +94,19 @@ let make_entry_signature context (signature : Types.signature) =
   in
   ({ entry with parameters = Convention.evidence :: entry.parameters }, result)
 
-let is_callable_through_any (context : Definitions.context) trait
-    (trait_method : Types.trait_method) =
-  trait_method.method_receiver <> Static
-  && Interface.Impls.classify_through_any context.lookups.interface ~trait trait_method = Callable
-
-let list_any_methods (context : Definitions.context) trait =
-  List.filter
-    (is_callable_through_any context trait)
-    (Definitions.read_trait_interface context trait).methods
-
-let list_any_slots (context : Definitions.context) ~self (reference : Types.trait_reference) =
-  let traits =
-    List.fold_left
-      (fun traits (bound : Types.trait_reference) ->
-        if
-          List.exists
-            (fun (listed : Types.trait_reference) -> Path.equal listed.trait bound.trait)
-            traits
-        then traits
-        else traits @ [ bound ])
-      []
-      (Interface.Properties.list_bound_closure context.lookups.interface ~self reference)
+let list_any_slots (context : Definitions.context) ~self (any : Types.trait_reference) =
+  let substitution =
+    Types.bind_argument
+      (Types.make_self_parameter any.trait)
+      (Types.Type self) Types.no_substitution
   in
-  List.concat_map
-    (fun (bound : Types.trait_reference) ->
-      List.map (fun trait_method -> (bound, trait_method)) (list_any_methods context bound.trait))
-    traits
+  List.filter_map
+    (fun (dispatched : Interface.Impls.dispatched) ->
+      match dispatched.through_any with
+      | Callable ->
+          Some (Types.substitute_trait substitution dispatched.declared_by, dispatched.trait_method)
+      | Has_generics | Names_self -> None)
+    (Interface.Impls.list_dispatched_methods context.lookups.interface any)
 
 let lookup_dynamic_method context ~(any : Types.trait_reference) trait name receiver =
   let slots = list_any_slots context ~self:(Types.Any any) any in
@@ -144,18 +130,15 @@ let is_copyable_any (context : Definitions.context) (any : Types.trait_reference
 let make_any_substitution (context : Definitions.context) ~(any : Types.trait_reference) trait :
     Types.substitution =
   let reference =
-    if Path.equal trait any.trait then any
-    else
-      match
-        List.find_opt
-          (fun (bound : Types.trait_reference) -> Path.equal bound.trait trait)
-          (Interface.Properties.list_bound_closure context.lookups.interface ~self:(Types.Any any)
-             any)
-      with
-      | Some bound -> bound
-      | None ->
-          Definitions.raise_bug "%s is not a trait of %s" (Path.show trait)
-            (Types.show (Types.Any any))
+    match
+      List.find_opt
+        (fun ((bound : Types.trait_reference), _) -> Path.equal bound.trait trait)
+        (list_any_slots context ~self:(Types.Any any) any)
+    with
+    | Some (bound, _) -> bound
+    | None ->
+        Definitions.raise_bug "`%s` dispatches no method of %s" (Types.show (Types.Any any))
+          (Path.show trait)
   in
   Types.make_trait_substitution (Definitions.read_trait_interface context trait).trait_generics
     ~self:(Types.Any any) reference
@@ -414,25 +397,28 @@ let lower_call_through_any (state : Lowering.state) ~(any_type : Types.trait_ref
   let c_signature, result, capabilities =
     make_any_entry_signature state.context ~any:any_type ~trait signature
   in
-  let passed = List.filter_map (fun (mode, ty, place) -> pass state mode ty place) arguments in
-  let evidence = List.map (pass_evidence state ~site) capabilities in
-  let target =
-    Lowered.Table_call
-      {
-        table = Copy (Builtin_records.Any.project_vtable any);
-        value = Copy (Builtin_records.Any.project_value any);
-        slot;
-        signature = c_signature;
-      }
-  in
-  Emit_c.Ir_builder.emit state.builder
-    (Call
-       {
-         target;
-         arguments = passed @ evidence @ lending;
-         result = Convention.make_destination result destination;
-       });
-  if not c_signature.returns then Lowering.emit_unreachable_block state
+  if is_unreachable_panic state capabilities then Lowering.emit_unreachable_block state
+  else
+    let passed = List.filter_map (fun (mode, ty, place) -> pass state mode ty place) arguments in
+    let evidence = List.map (pass_evidence state ~site) capabilities in
+    if receiver = Path.Instance Own then ignore (Lowering.move_place state any);
+    let target =
+      Lowered.Table_call
+        {
+          table = Copy (Builtin_records.Any.project_vtable any);
+          value = Copy (Builtin_records.Any.project_value any);
+          slot;
+          signature = c_signature;
+        }
+    in
+    Emit_c.Ir_builder.emit state.builder
+      (Call
+         {
+           target;
+           arguments = passed @ evidence @ lending;
+           result = Convention.make_destination result destination;
+         });
+    if not c_signature.returns then Lowering.emit_unreachable_block state
 
 let run_in_type_definition (state : Lowering.state) ~(source : Resolve.Names.key) (ty : Ground.ty)
     nested_function =

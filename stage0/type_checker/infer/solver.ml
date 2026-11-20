@@ -458,50 +458,13 @@ let give_definition_defaults (state : State.state) =
   give_goal_inputs_defaults state;
   Hashtbl.iter (fun index _ -> default_quietly state (Types.Variable index)) state.unifier.domains
 
-let list_expression_unknowns (state : State.state) id =
-  let tables = state.tables in
-  let types =
-    Option.to_list tables.types.(id)
-    @ List.map snd tables.conversions.(id)
-    @ (match tables.literal_elements.(id) with
-      | Some (List_element element) -> [ element ]
-      | Some (Map_entry { key; value }) -> [ key; value ]
-      | None -> [])
-    @
-    match tables.resolutions.(id) with
-    | Some (Field_access { type_; _ } | Variant_value { type_; _ } | Type_name type_) -> [ type_ ]
-    | Some (Local_value _ | Global _ | Value_parameter _ | Specification_value) | None -> []
-  in
-  let arguments =
-    (match tables.resolutions.(id) with
-      | Some (Global { instantiation; _ }) -> instantiation.type_arguments
-      | _ -> [])
-    @
-    match tables.calls.(id) with
-    | Some { callee = Trait_method { trait; instantiation; _ }; _ } ->
-        trait.trait_arguments @ instantiation.type_arguments
-    | Some
-        {
-          callee =
-            ( Function { instantiation = { type_arguments; _ }; _ }
-            | Constructor { type_arguments; _ }
-            | Intrinsic { type_arguments; _ } );
-          _;
-        } ->
-        type_arguments
-    | Some { callee = Capability_method _ | Indirect; _ } | None -> []
-  in
-  List.concat_map (Unify.list_unknowns state.unifier) types
-  @ List.concat_map (Unify.list_argument_unknowns state.unifier) arguments
-
-let list_binding_unknowns (state : State.state) id =
-  match state.tables.local_types.(id) with
-  | Some type_ -> Unify.list_unknowns state.unifier type_
-  | None -> []
+let list_node_unknowns (state : State.state) id =
+  List.concat_map
+    (Unify.list_argument_unknowns state.unifier)
+    (Tables.list_arguments_at state.tables id)
 
 let list_frame_unknowns (state : State.state) (frame : State.frame) =
-  List.concat_map (list_expression_unknowns state) frame.recorded_expressions
-  @ List.concat_map (list_binding_unknowns state) frame.bindings
+  List.concat_map (list_node_unknowns state) (frame.recorded_expressions @ frame.bindings)
 
 let list_goal_unknowns state goal = list_goal_inputs state goal @ list_output_unknowns state goal
 
@@ -566,18 +529,17 @@ let report_unsolved (state : State.state) (frame : State.frame) =
 
 let hand_open_parts_to_parent (state : State.state) (frame : State.frame) parent =
   let is_open unknown = not (is_owned state frame unknown) in
-  let hand_up ids list_unknowns keep =
+  let hand_up ids keep =
     Option.iter
       (fun parent ->
         List.iter
-          (fun id -> if List.exists is_open (list_unknowns state id) then keep parent id)
+          (fun id -> if List.exists is_open (list_node_unknowns state id) then keep parent id)
           ids)
       parent
   in
-  hand_up frame.recorded_expressions list_expression_unknowns (fun (parent : State.frame) id ->
+  hand_up frame.recorded_expressions (fun (parent : State.frame) id ->
       parent.recorded_expressions <- id :: parent.recorded_expressions);
-  hand_up frame.bindings list_binding_unknowns (fun (parent : State.frame) id ->
-      parent.bindings <- id :: parent.bindings);
+  hand_up frame.bindings (fun (parent : State.frame) id -> parent.bindings <- id :: parent.bindings);
   let is_settled table id =
     match table.(id) with
     | Some type_ -> not (List.exists is_open (Unify.list_unknowns state.unifier type_))

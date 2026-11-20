@@ -1,0 +1,32 @@
+trait Paired[Other] {
+  fn name(self) -> String
+  fn matches(self, other: Other) -> Bool
+}
+
+trait SelfPaired: Paired[Self] {
+  fn id(self) -> Int64
+}
+
+type Dog(tag: String)
+
+impl Paired[Dog] for Dog {
+  fn name(self) -> String {
+    self.tag.copy()
+  }
+
+  fn matches(self, other: Dog) -> Bool {
+    self.tag == other.tag
+  }
+}
+
+impl SelfPaired for Dog {
+  fn id(self) -> Int64 {
+    1
+  }
+}
+
+test "the methods of a trait and of its supertrait whose argument is Self" {
+  let pet: any SelfPaired = any Dog(tag: "rex")
+  assert pet.name() == "rex"
+  assert pet.id() == 1
+}

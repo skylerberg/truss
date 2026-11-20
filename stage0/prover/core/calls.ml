@@ -387,7 +387,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       precondition_clauses.requires
   in
   let required = Logic.conjunction required in
-  if not context.panics then begin
+  if not (context.panics || Types.has_capability (Built_in Panic) invocation.uses) then begin
     let clauses = contract.callee_clauses in
     let entry = read_entry_frame clauses in
     List.iter
@@ -920,7 +920,7 @@ let compute_function_value_amount context frame ~location (function_type : Types
     in
     match (Costs.list_stated_bounds function_type.costs metric, counter.counting) with
     | Order_of :: _, Units -> Logic.int 1
-    | Exactly_cost (Some amount) :: _, (At_most | Exactly) -> Logic.Integer amount
+    | Exactly_cost amount :: _, (At_most | Exactly) -> Logic.Integer amount
     | _, (Units | At_most) -> Amounts.compute_amount_within context frame counter (make_cost ())
     | _, Exactly ->
         let cost = make_cost () in

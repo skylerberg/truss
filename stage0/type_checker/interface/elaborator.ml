@@ -12,6 +12,7 @@ type t = {
   self_trait : Types.trait_reference option;
   self_associated : (string * Types.ty) list;
   self_capabilities : (string * Types.capability_set) list;
+  is_in_capability : bool;
   diagnostics : Diagnostic.in_definition list ref;
   named : (Syntax.id * Types.ty) list ref;
   spans : Source.Definition_span.t array;
@@ -36,6 +37,7 @@ let create lookups resolved ~spans (scope : Environment.scope) =
     self_trait = scope.self_trait;
     self_associated = scope.self_associated;
     self_capabilities = scope.self_capabilities;
+    is_in_capability = false;
     diagnostics = ref [];
     named = ref [];
     spans;
@@ -131,6 +133,13 @@ let resolve_parameter context (name : Syntax.name) =
 let show_path (path : Syntax.path) =
   String.concat "::"
     (List.map (fun (name : Syntax.name) -> name.text) (path.modules @ [ path.last ]))
+
+let find_literal_bound (bound : Syntax.bound) : Types.cost_bound option =
+  match bound with
+  | Big_o { kind = Integer _; _ } -> Some Order_of
+  | At_most { kind = Integer limit; _ } -> Some (No_more_than limit)
+  | Exactly { kind = Integer amount; _ } -> Some (Exactly_cost amount)
+  | Big_o _ | At_most _ | Exactly _ -> None
 
 let rec elaborate_type context (written : Syntax.type_expression) : Types.ty =
   match written.kind with
@@ -521,11 +530,6 @@ and elaborate_uses context clauses =
        clauses)
 
 and elaborate_capability_uses context uses =
-  let is_in_trait =
-    match context.self_type with
-    | Some (Types.Parameter parameter) -> Types.is_self_parameter parameter
-    | _ -> false
-  in
   List.concat_map
     (fun (use : Syntax.capability_use) ->
       let capabilities = elaborate_capability context use.capability in
@@ -541,10 +545,11 @@ and elaborate_capability_uses context uses =
                  context.spans.(first.id) message);
             capabilities
           in
-          if is_in_trait then
+          if context.is_in_capability then
             report
-              "A trait's method takes no condition on its arguments: each `impl` would have to \
-               prove that the trait's condition implies its own."
+              "A capability's method takes no condition on its arguments: an implementation uses \
+               the capabilities of the code that provides it, so it could panic where the \
+               condition holds."
           else if Option.is_some unless then
             report "A condition on the arguments cannot be joined with a bound with `&&`."
           else if capabilities <> [ Built_in Panic ] then
@@ -601,21 +606,15 @@ and elaborate_costs context clauses : (Types.cost list, Diagnostic.reported) Std
                         counted in a function's own clauses."
                        name.text)
             in
-            let evaluate_constant (value : Syntax.expression) =
-              match value.kind with Integer value -> Some value | _ -> None
+            let bound =
+              match find_literal_bound cost.bound with
+              | Some bound -> bound
+              | None -> raise_bug "a function type's cost bound is not an integer literal"
             in
-            let bound : Types.cost_bound option =
-              match cost.bound with
-              | Big_o _ -> Some Order_of
-              | At_most value -> Some (No_more_than (evaluate_constant value))
-              | Exactly value -> Some (Exactly_cost (evaluate_constant value))
-            in
-            Option.map
-              (fun bound ->
-                Result.map
-                  (fun resource -> { Types.amortized = cost.amortized; resource; bound })
-                  resource)
-              bound
+            Some
+              (Result.map
+                 (fun resource -> { Types.amortized = cost.amortized; resource; bound })
+                 resource)
         | _ -> None)
       clauses
   in
@@ -660,20 +659,10 @@ let list_constant_costs (clauses : Syntax.clause list) : Types.cost list =
   List.filter_map
     (fun (clause : Syntax.clause) ->
       match clause.kind with
-      | Cost { amortized; resource; bound } when Option.is_none clause.condition -> (
-          let resource : Types.resource option =
-            match resource with Metric metric -> Some (Metric metric) | Calls _ -> None
-          in
-          let bound : Types.cost_bound option =
-            match bound with
-            | Big_o { kind = Integer _; _ } -> Some Order_of
-            | At_most { kind = Integer limit; _ } -> Some (No_more_than (Some limit))
-            | Exactly { kind = Integer amount; _ } -> Some (Exactly_cost (Some amount))
-            | Big_o _ | At_most _ | Exactly _ -> None
-          in
-          match (resource, bound) with
-          | Some resource, Some bound -> Some { Types.amortized; resource; bound }
-          | _ -> None)
+      | Cost { amortized; resource = Metric metric; bound } when Option.is_none clause.condition ->
+          Option.map
+            (fun bound -> { Types.amortized; resource = Metric metric; bound })
+            (find_literal_bound bound)
       | _ -> None)
     clauses
 
@@ -1125,15 +1114,45 @@ let elaborate_container (context : t) (path : Path.t) (definition : Syntax.defin
             context ))
   | _ -> (Ok Capability_parts, context)
 
+let has_broken_elaborated_member (lookups : Lookups.t) (key : Resolve.Names.key)
+    (definition : Syntax.definition) =
+  let has_broken_member is_elaborated members =
+    List.exists Fun.id
+      (List.mapi
+         (fun index (member : _ Syntax.node) ->
+           is_elaborated member.kind
+           && Resolve.Names.is_broken lookups.names key (Member_header index))
+         members)
+  in
+  match definition.kind with
+  | Trait { members; _ } ->
+      has_broken_member
+        (function
+          | Syntax.Associated_type _ | Law _ -> true
+          | Associated_capability _ | Trait_member_error -> false)
+        members
+  | Impl { members; _ } ->
+      has_broken_member
+        (function
+          | Syntax.Associated_definition _ | Capability_definition _ -> true
+          | Impl_member_error -> false)
+        members
+  | Capability _ | Function _ | Method_declaration _ | Type_definition _ | Constant _ | Test _
+  | Theorem _ | Law_proof _ | Definition_error _ ->
+      false
+
 let elaborate_header (lookups : Lookups.t) (key : Resolve.Names.key) =
   let resolved = lookups.read_resolved Interface key in
-  if Resolve.Names.is_broken lookups.names key Header then Error []
+  let definition = lookups.names.read_definition key in
+  if
+    Resolve.Names.is_broken lookups.names key Header
+    || has_broken_elaborated_member lookups key definition
+  then Error []
   else
     match
       elaborate_container
         (create lookups resolved ~spans:(lookups.names.read_spans key) empty_scope)
-        key.path
-        (lookups.names.read_definition key)
+        key.path definition
     with
     | _, context when !(context.diagnostics) <> [] -> Error (List.rev !(context.diagnostics))
     | Error _, _ -> Error []
@@ -1259,10 +1278,15 @@ let elaborate_member (lookups : Lookups.t) ~path ~spans resolved (definition : S
   let context = create lookups resolved ~spans header.container_scope in
   match definition.kind with
   | Function { signature; _ } | Method_declaration signature ->
+      let is_in_capability =
+        match header.container with
+        | Capability_parts -> true
+        | Trait_parts _ | Impl_parts _ -> false
+      in
       make_elaborated_interface context
         (Function_interface
            (elaborate_signature
-              { context with self_capabilities = [] }
+              { context with self_capabilities = []; is_in_capability }
               ~owner:path ~head:[] ~self_type:header.container_scope.self_type signature))
   | _ -> make_elaborated_interface context (Error_interface Diagnostic.reported_elsewhere)
 

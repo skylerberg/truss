@@ -19,7 +19,10 @@ let parse text =
 type target = Package of Path.package | Module of Path.module_ | Definition of Path.t
 
 let is_visible packages (module_ : Path.module_) visibility =
-  List.mem module_.package packages || Resolve.Names.is_public visibility
+  Resolve.Names.is_public visibility
+  || List.exists
+       (fun package -> Resolve.Names.is_visible_to_package ~package module_ visibility)
+       packages
 
 let is_shown packages (declaration : Resolve.Names.declaration) =
   is_visible packages declaration.key.module_ declaration.visibility

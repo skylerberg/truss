@@ -19,6 +19,7 @@ val build_storage :
   Lowered.rvalue
 
 val list_borrowed_fields : buffer:'value -> length:'value -> (string * 'value) list
+val list_view_fields : buffer:'value -> length:'value -> (string * 'value) list
 val build_borrowed : Ground.ty -> buffer:Lowered.operand -> length:Lowered.operand -> Lowered.rvalue
 val build_empty : Ground.ty -> Lowered.rvalue
 val build_view : Ground.ty -> buffer:Lowered.operand -> length:Lowered.operand -> Lowered.rvalue

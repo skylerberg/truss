@@ -313,4 +313,66 @@ let () =
       if String.includes ~affix:"truss_runtime_panic" (render assuming) then
         Codegen_support.fail "the copy that assumes the condition panics:\n%s" (render assuming);
       if not (String.includes ~affix:"truss_runtime_panic" (render checking)) then
-        Codegen_support.fail "the copy that checks does not panic:\n%s" (render checking))
+        Codegen_support.fail "the copy that checks does not panic:\n%s" (render checking));
+  Codegen_support.test
+    "a call through a bound reaches the copy of an impl's method that the caller's capabilities \
+     pick" (fun () ->
+      let make_item name =
+        Lowered.Item.make_code
+          (Top { module_ = Codegen_support.example; name })
+          Ground.no_instantiation
+      in
+      let proven = make_item "proven" and panicking = make_item "panicking" in
+      let _, backend =
+        Codegen_support.load ~profile:Release ~roots:[ proven; panicking ]
+          Fixtures.Source.trait_method_with_a_condition_on_values
+      in
+      let called item = Emit_c.references (Backend.For_testing.compile_fragment backend item) in
+      let find_instance name item =
+        List.find_opt
+          (function
+            | Lowered.Item.Code { path = Top { name = callee; _ }; _ } -> callee = name | _ -> false)
+          (called item)
+      in
+      let list_scaled_copies item =
+        List.filter_map
+          (function
+            | Lowered.Item.Code { path = Method { name = "scaled"; _ }; assumes_condition; _ } ->
+                Some assumes_condition
+            | _ -> None)
+          (called item)
+      in
+      (match Option.map list_scaled_copies (find_instance "five_thousand" proven) with
+      | Some [ true ] -> ()
+      | _ -> Codegen_support.fail "five_thousand calls no copy of scaled that assumes its condition");
+      match Option.map list_scaled_copies (find_instance "scaled_or_panic" panicking) with
+      | Some [ false ] -> ()
+      | _ -> Codegen_support.fail "scaled_or_panic calls no copy of scaled that checks");
+  Codegen_support.test "a call through `any` in a copy that assumes its condition is unreachable"
+    (fun () ->
+      let small =
+        Lowered.Item.make_code
+          (Top { module_ = Codegen_support.example; name = "small" })
+          Ground.no_instantiation
+      and measured : Lowered.Item.t =
+        Code
+          {
+            path = Top { module_ = Codegen_support.example; name = "measured" };
+            instantiation = Ground.no_instantiation;
+            assumes_condition = true;
+          }
+      in
+      let _, backend =
+        Codegen_support.load ~profile:Release ~roots:[ small ]
+          Fixtures.Source.call_through_any_in_a_copy_that_assumes_its_condition
+      in
+      if
+        not
+          (List.mem measured
+             (Emit_c.references (Backend.For_testing.compile_fragment backend small)))
+      then Codegen_support.fail "small calls no copy of measured that assumes its condition";
+      let rendered =
+        Emit_c.For_testing.render_c (Backend.For_testing.compile_fragment backend measured)
+      in
+      if String.includes ~affix:"truss_runtime_panic" rendered then
+        Codegen_support.fail "the copy that assumes the condition panics:\n%s" rendered)

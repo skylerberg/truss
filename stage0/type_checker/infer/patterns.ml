@@ -385,17 +385,16 @@ let read_operand_type : Core.operand -> Types.ty = function
   | Value value -> value.type_
 
 let has_error context type_ =
-  let rec contains_error seen = function
+  let visited = ref [] in
+  let rec contains_error = function
     | Types.Error _ | Types.Hole -> true
     | Types.Named { path; arguments } -> (
-        List.exists
-          (function Types.Type type_ -> contains_error seen type_ | _ -> false)
-          arguments
-        || (not (List.exists (Path.equal path) seen))
+        List.exists (function Types.Type type_ -> contains_error type_ | _ -> false) arguments
+        || (not (List.exists (Path.equal path) !visited))
            &&
-           let seen = path :: seen in
+           let () = visited := path :: !visited in
            let fields_have_error fields =
-             List.exists (fun (field : Types.field) -> contains_error seen field.field_type) fields
+             List.exists (fun (field : Types.field) -> contains_error field.field_type) fields
            in
            match read_shape context path with
            | Some (Record _) ->
@@ -411,7 +410,7 @@ let has_error context type_ =
            | _ -> false)
     | _ -> false
   in
-  contains_error [] type_
+  contains_error type_
 
 let read_indentation text (position : int) =
   let line_start = Source.compute_fragment_line_start text position in

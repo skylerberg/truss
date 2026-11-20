@@ -8,7 +8,8 @@ let find_syntax path =
   | _, ".css" -> Some (Markers [ "/*" ])
   | _, (".html" | ".md") -> Some (Markers [ "<!--" ])
   | ("dune" | "dune-project"), _ -> Some (Markers [ ";"; "#|" ])
-  | (".gitignore" | ".ocamlformat" | ".ocamlformat-ignore"), _ | _, (".sh" | ".yml" | ".txt") ->
+  | (".gitignore" | ".ocamlformat" | ".ocamlformat-ignore"), _
+  | _, (".sh" | ".yml" | ".txt" | ".toml" | ".py") ->
       Some Hash_at_word_start
   | _, ".truss" -> Some Truss
   | _, ".opam" -> Some Generated

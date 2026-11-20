@@ -28,12 +28,11 @@ val finish_call :
   string list ->
   Types.ty
 
-val list_trait_static_methods :
+val lookup_trait_static_methods :
   State.state ->
   Path.t ->
   string ->
-  Path.receiver ->
-  (Types.trait_reference * Types.trait_method) list
+  (Types.trait_reference * Types.trait_method) list Resolve.Names.lookup
 
 val instantiate_trait_method :
   State.state ->
@@ -64,5 +63,4 @@ val find_elements_calls :
 val find_consuming_cursor :
   State.state -> Syntax.expression -> Types.ty -> (Tables.loop * Types.ty) Resolve.Names.lookup
 
-val find_remaining_call :
-  State.state -> Source.Definition_span.t -> Types.ty -> (Types.condition * Tables.call) option
+val find_remaining_call : State.state -> Types.ty -> (Types.condition * Tables.call) option

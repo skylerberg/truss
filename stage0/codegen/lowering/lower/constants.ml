@@ -122,15 +122,16 @@ let fold_literal state ty (constant : Mir.constant) =
   | Unit -> None
 
 let fold_literal_value (state : Lowering.state) ty text =
+  let element = Ground.make_builtin UInt8 in
+  let elements =
+    List.init (String.length text) (fun index ->
+        Lowered.Static_scalar (Integer (UInt8, Z.of_int (Char.code text.[index]))))
+  in
   match Monomorphic.compute_shape state.context.monomorphic ty with
   | Record [ (field, Typed storage) ] when Option.is_some (Storage.find_storage_element storage) ->
-      let bytes =
-        List.init (String.length text) (fun index ->
-            Lowered.Static_scalar (Integer (UInt8, Z.of_int (Char.code text.[index]))))
-      in
-      Some
-        (Lowered.Static_record
-           [ (field, Static_storage { element = Ground.make_builtin UInt8; elements = bytes }) ])
+      Some (Lowered.Static_record [ (field, Static_storage { element; elements }) ])
+  | Record [ (field, Typed view) ] when Option.is_some (Storage.find_view_element view) ->
+      Some (Lowered.Static_record [ (field, Static_view { element; elements }) ])
   | _ -> None
 
 let make_constant_state (context : Definitions.context) path =

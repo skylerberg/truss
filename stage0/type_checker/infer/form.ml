@@ -1986,10 +1986,7 @@ let build_trait form ~self ~is_broken (members : Syntax.trait_member Syntax.node
        (List.mapi
           (fun index (line : Syntax.trait_member Syntax.node) ->
             match line.kind with
-            | Law law
-              when not
-                     (is_broken (Resolve.Parts.Member_header index)
-                     || is_broken (Resolve.Parts.Member_body index)) ->
+            | Law law when not (is_broken (Resolve.Parts.Member_body index)) ->
                 let parameters =
                   List.filter_map
                     (fun (parameter : Syntax.parameter) : Core.parameter option ->

@@ -466,6 +466,35 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
              frame)
            (Facts.restrict start trait_requires)
            declared_requires);
+  (if context.inherits_precondition && contract.panics_unless <> [] then
+     match find_trait_frame start ~result:None with
+     | Some (clauses, inside) when clauses.panics_unless <> [] ->
+         let trait_condition =
+           Logic.conjunction
+             (List.map
+                (fun (requirement : Mir.requirement) ->
+                  snd (Validity.read_specification context inside requirement.clause))
+                clauses.panics_unless)
+         in
+         ignore
+           (List.fold_left
+              (fun frame (requirement : Mir.requirement) ->
+                let frame, term = Validity.read_specification context frame requirement.clause in
+                Facts.oblige context frame Requires
+                  (Facts.locate context frame.source requirement.clause.origin)
+                  [
+                    Text "`";
+                    Facts.quote source requirement.clause.origin;
+                    Text
+                      "` may not follow from the trait's condition after `Panic unless`. A caller \
+                       without `Panic` proves only the trait's condition, so this `impl` could \
+                       panic in code that has no `Panic`.";
+                  ]
+                  term;
+                frame)
+              (Facts.restrict (Facts.restrict start trait_requires) trait_condition)
+              contract.panics_unless)
+     | Some _ | None -> ());
   let start =
     List.fold_left
       (fun frame (requirement : Mir.formula) ->

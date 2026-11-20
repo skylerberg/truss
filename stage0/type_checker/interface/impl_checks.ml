@@ -61,6 +61,15 @@ type conformance = {
   missing_associated : Diagnostic.in_definition list;
 }
 
+let panics_beyond_value_condition ~(allowed : Types.capability_set) (written : Types.capability_set)
+    =
+  Types.has_capability (Capability_unless_values (Built_in Panic)) allowed
+  && List.exists
+       (fun capability ->
+         Types.find_base capability = Built_in Panic
+         && capability <> Types.Capability_unless_values (Built_in Panic))
+       (Types.list_capabilities written)
+
 let compiler_implements (impl : Types.impl_interface) =
   Well_known.is Copyable impl.implements.trait
   || Well_known.is Plain impl.implements.trait
@@ -304,4 +313,14 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
                        name.text
                    else
                      Printf.sprintf "`%s` can use only the capabilities `%s` declares for it."
-                       name.text shown_trait))
+                       name.text shown_trait)
+              else if
+                (not trait.is_capability)
+                && panics_beyond_value_condition ~allowed (normalize_capabilities written.uses)
+              then
+                Checking.report state Impl_uses state.spans.(name.id)
+                  (Printf.sprintf
+                     "`%s` declares `%s` with `uses Panic unless` a condition, and this `%s` uses \
+                      `Panic` without one, so it could panic where that condition holds. Declare \
+                      `uses Panic unless` a condition that `%s`'s implies."
+                     shown_trait name.text name.text shown_trait))

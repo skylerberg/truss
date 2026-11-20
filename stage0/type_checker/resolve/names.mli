@@ -29,6 +29,7 @@ val classify_receiver : Syntax.parameter list -> Path.receiver
 type entry = { name : string; kind : named; visibility : visibility; generic : bool }
 
 val is_public : visibility -> bool
+val is_visible_to_package : package:Path.package -> Path.module_ -> visibility -> bool
 
 type law_proof_name = { trait : Path.t; law : string; type_head : Path.t }
 
@@ -115,10 +116,11 @@ module Scope : sig
 end
 
 val lookup_member : lookups -> from:Path.module_ -> Path.t -> Path.t lookup
+val map_visible : ('visible -> 'converted) -> 'visible lookup -> 'converted lookup
 val choose_visible : 'visible lookup list -> 'visible lookup
-val collect_visible : ('key * 'visible lookup) list -> ('key * 'visible) list lookup
+val collect_visible : 'visible lookup list -> 'visible list lookup
 val describe_hidden : Path.t -> visibility -> string
-val list_visible_traits_declaring : lookups -> from:Path.module_ -> string -> Path.t list
+val list_declaring_trait_lookups : lookups -> from:Path.module_ -> string -> Path.t lookup list
 
 val list_members_visible_to_package :
   lookups -> package:Path.package -> Path.t -> string -> key list

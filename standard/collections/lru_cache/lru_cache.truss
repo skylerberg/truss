@@ -4,8 +4,11 @@ use standard::map
 public fn collections::LruCache[Key: Hash + Ordered + Copyable, Value].new(
   capacity: UInt64,
 ) -> collections::LruCache[Key, Value]
-  requires capacity > 0
+  uses Panic unless capacity > 0
 {
+  if capacity == 0 {
+    Panic.crash("the capacity is zero")
+  }
   collections::LruCache(capacity: capacity, entries: [:], recency: [], clock: 0)
 }
 

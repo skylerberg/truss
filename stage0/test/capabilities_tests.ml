@@ -580,7 +580,7 @@ let () =
     (fun () -> expect_fine Fixtures.Capabilities.quick_bound_with_its_time_clause);
   Harness.test "function types inside a type must promise the same costs" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.list_of_actions_gaining_a_cost "types.mismatch"
-        ~says:"Expected `List[(fn() -> Int64 cost time O(...))]`, found `List[fn() -> Int64]`.")
+        ~says:"Expected `List[(fn() -> Int64 cost time O(1))]`, found `List[fn() -> Int64]`.")
 
 let readings = Fixtures.Capabilities.readings
 
@@ -884,6 +884,11 @@ let () =
     (fun () ->
       expect_one_diagnostic
         Fixtures.Capabilities.function_value_of_a_function_that_panics_unless_a_condition_on_values
+        "capabilities.not_available" ~says:"This call uses `Panic`");
+  Harness.test "a call through `any` of a method that panics unless a condition uses `Panic`"
+    (fun () ->
+      expect_one_diagnostic
+        Fixtures.Capabilities.call_through_any_of_a_method_that_panics_unless_a_condition_on_values
         "capabilities.not_available" ~says:"This call uses `Panic`");
   Harness.test "a bound names the time of no callback that may run forever" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.time_of_a_callback_that_runs_forever

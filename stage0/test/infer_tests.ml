@@ -1159,7 +1159,9 @@ let () =
       ( "member constant, in a pattern,",
         Fixtures.Infer.pattern_of_another_modules_private_member_constant );
     ];
-  Harness.test "an internal method and a public method of another module are visible" (fun () ->
+  Harness.test
+    "an internal method, an internal trait's method, and a public method of another module are \
+     visible" (fun () ->
       expect_no_diagnostics
         [
           ("app::main", Fixtures.Infer.calls_of_another_modules_internal_and_public_methods);
@@ -1171,10 +1173,50 @@ let () =
         ~others:[ ("tools::shapes", shapes) ]
         Fixtures.Infer.call_of_another_packages_internal_method "types.member_not_visible"
         ~says:"internal to its package");
-  Harness.test "a call with a dot does not find a method of another module's private trait"
+  List.iter
+    (fun (call, fixture, method_) ->
+      Harness.test
+        (Printf.sprintf "%s of another module's private trait names the method as not visible" call)
+        (fun () ->
+          expect_one_diagnostic ~others fixture "types.member_not_visible"
+            ~says:(Printf.sprintf "`app::shapes::Measured.%s` is private to its module" method_)))
+    [
+      ( "a call with a dot of a method",
+        Fixtures.Infer.call_of_a_method_of_another_modules_private_trait,
+        "measure" );
+      ( "a call in full of a method",
+        Fixtures.Infer.call_in_full_of_a_method_of_another_modules_private_trait,
+        "measure" );
+      ( "a call of a static method",
+        Fixtures.Infer.call_of_a_static_method_of_another_modules_private_trait,
+        "sample" );
+    ];
+  Harness.test
+    "a call with a dot of a method of another package's internal trait names the method as not \
+     visible" (fun () ->
+      expect_one_diagnostic
+        ~setup:(Support.setup ~dependencies:[ ("app", "tools") ])
+        ~others:[ ("tools::shapes", shapes) ]
+        Fixtures.Infer.call_of_a_method_of_another_packages_internal_trait
+        "types.member_not_visible"
+        ~says:"`tools::shapes::Sided.side_count` is internal to its package");
+  Harness.test
+    "a call with a dot does not name a private trait that the receiver's type does not implement"
     (fun () ->
-      expect_one_diagnostic ~others Fixtures.Infer.call_of_a_method_of_another_modules_private_trait
-        "types.unknown_member");
+      expect_one_diagnostic ~others
+        Fixtures.Infer
+        .call_of_a_method_of_another_modules_private_trait_that_the_type_does_not_implement
+        "types.unknown_member" ~says:"`Shape` has no method `weigh`.");
+  Harness.test
+    "a call reaches a visible trait's method where another module's private trait declares a \
+     method of the same name" (fun () ->
+      expect_no_diagnostics
+        [
+          ( "app::main",
+            Fixtures.Infer
+            .call_of_a_visible_trait_method_named_like_another_modules_private_trait_method );
+          ("app::shapes", shapes);
+        ]);
   List.iter
     (fun (construct, fixture) ->
       Harness.test
@@ -1538,6 +1580,47 @@ let () =
         "types.cannot_infer"
         ~says:
           "This loop does not determine the arguments of `Bag`, whose methods give its elements."
+        ~at:("pair {", 1));
+  Harness.test
+    "an annotated loop over a generic trait's elements is an error at the loop, since nothing \
+     gives the arguments of its count" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.annotated_loop_over_the_elements_of_a_generic_trait
+        "types.cannot_infer"
+        ~says:
+          "This loop does not determine the arguments of `Bag`, whose methods give its elements."
+        ~at:("pair {", 1));
+  Harness.test "a loop's annotation chooses the impl whose element gives that type" (fun () ->
+      let text = Fixtures.Infer.loop_annotated_with_one_of_two_element_types in
+      expect_fine text;
+      match
+        List.find_map
+          (fun (node : Core.expression) ->
+            match node.kind with
+            | Call { callee = { target = Trait_method { name = "element"; evidence; _ }; _ }; _ } ->
+                Some evidence
+            | _ -> None)
+          (list_core_at text "pair {" 1)
+      with
+      | Some
+          (Impl
+             {
+               impl =
+                 Impl
+                   {
+                     trait = { arguments = [ Named { path = Top { name = "String"; _ }; _ } ]; _ };
+                     _;
+                   };
+               _;
+             }) ->
+          ()
+      | Some (Impl { impl; _ }) ->
+          Harness.fail "the loop calls the `element` of %s" (Path.show impl)
+      | Some (Bound | Dynamic) -> Harness.fail "the loop calls an `element` of no impl"
+      | None -> Harness.fail "the loop calls no `element`");
+  Harness.test "a loop whose element type has no impl of the trait is an error at the loop"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.loop_annotated_with_an_element_type_without_an_impl
+        "types.not_indexable" ~says:"`Pair` does not implement `Positioned[Float64]`."
         ~at:("pair {", 1));
   Harness.test "a list literal is a type that implements FromElements" (fun () ->
       expect_fine Fixtures.Infer.list_literal_as_a_type_with_from_elements;
@@ -1954,7 +2037,24 @@ let () =
     (fun () ->
       let text = Fixtures.Infer.integer_measures_and_bounds in
       expect_fine text;
-      expect_type text "1" "Integer")
+      expect_type text "1" "Integer");
+  List.iter
+    (fun (amount, fixture, says) ->
+      Harness.test (Printf.sprintf "%s that is not an integer is a type error" amount) (fun () ->
+          expect_one_diagnostic fixture "types.mismatch" ~says ~at:("\"steps\"", 1)))
+    [
+      ( "an argument of log",
+        Fixtures.Infer.log_of_a_string,
+        "An argument of `log` is an integer, not `String`." );
+      ( "an argument of power",
+        Fixtures.Infer.power_of_a_string,
+        "An argument of `power` is an integer, not `String`." );
+      ( "a potential",
+        Fixtures.Infer.potential_of_a_string,
+        "A `potential` is an integer, not `String`." );
+    ];
+  Harness.test "the arguments of log and power and a potential of integers check cleanly" (fun () ->
+      expect_fine Fixtures.Infer.integer_logs_powers_and_potentials)
 
 let identity = Fixtures.Infer.identity
 
@@ -2123,6 +2223,11 @@ let () =
         "types.not_callable");
   Harness.test "a method that takes or returns Self cannot be called through any" (fun () ->
       expect_one_diagnostic Fixtures.Infer.join_through_any "types.not_callable");
+  Harness.test
+    "a supertrait's method that takes Self through its trait's argument cannot be called through \
+     any, so a dog is never matched against a cat" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.supertraits_method_that_takes_self_through_its_argument
+        "types.not_callable" ~at:("dog.matches(cat)", 1));
   Harness.test "a method whose result holds Self cannot be called through any" (fun () ->
       expect_one_diagnostic Fixtures.Infer.skip_through_any_cursor "types.not_callable");
   Harness.test "a cursor's own step and its counting can be called through any" (fun () ->

@@ -5,7 +5,7 @@ let resolve_capability (names : Resolve.Names.lookups) ~package (capability : Gr
     else
       match names.find module_ name with
       | Some { kind = Capability; visibility; _ }
-        when module_.package = package || Resolve.Names.is_public visibility ->
+        when Resolve.Names.is_visible_to_package ~package module_ visibility ->
           Some (Path.Top { module_; name })
       | _ -> None
   in

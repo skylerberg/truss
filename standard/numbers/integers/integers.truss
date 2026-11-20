@@ -36,10 +36,13 @@ public trait FixedWidthInteger:
     cost time O(1)
 
   fn from_integer[Source: FixedWidthInteger](value: Source) -> Self
-    requires Self.minimum_value() <= value && value <= Self.maximum_value()
+    uses Panic unless Self.minimum_value() <= value && value <= Self.maximum_value()
     ensures result == value
     cost time O(1)
   {
+    if !intrinsic::fits[Source, Self](value) {
+      Panic.crash("conversion out of range")
+    }
     intrinsic::convert(value)
   }
 
@@ -388,27 +391,37 @@ public trait FixedWidthInteger:
   }
 
   fn floor_divide(self, divisor: Self) -> Self
-    requires divisor != 0
-    requires self != Self.minimum_value() || divisor + 1 != 0
+    uses Panic unless divisor != 0 && (self != Self.minimum_value() || divisor + 1 != 0)
     ensures divisor > 0 ==> result * divisor <= self && self < (result + 1) * divisor
     ensures divisor < 0 ==> result * divisor >= self && self > (result + 1) * divisor
     ensures result == self / divisor || result == self / divisor - 1
     ensures self >= 0 && divisor > 0 ==> result == self / divisor
     cost time O(1)
   {
+    if divisor == 0 {
+      Panic.crash("division by zero")
+    }
+    if !self.divide_is_defined(divisor) {
+      Panic.crash("arithmetic overflow")
+    }
     let quotient = self / divisor
     if self % divisor != 0 && (self < 0) != (divisor < 0) { quotient - 1 } else { quotient }
   }
 
   fn floor_modulo(self, divisor: Self) -> Self
-    requires divisor != 0
-    requires self != Self.minimum_value() || divisor + 1 != 0
+    uses Panic unless divisor != 0 && (self != Self.minimum_value() || divisor + 1 != 0)
     ensures divisor > 0 ==> 0 <= result && result < divisor
     ensures divisor < 0 ==> divisor < result && result <= 0
     ensures result == self - self.floor_divide(divisor) * divisor
     ensures self >= 0 && divisor > 0 ==> result == self % divisor
     cost time O(1)
   {
+    if divisor == 0 {
+      Panic.crash("division by zero")
+    }
+    if !self.remainder_is_defined(divisor) {
+      Panic.crash("arithmetic overflow")
+    }
     let remainder = self % divisor
     if remainder != 0 && (remainder < 0) != (divisor < 0) { remainder + divisor } else { remainder }
   }
@@ -417,9 +430,12 @@ public trait FixedWidthInteger:
     cost time O(1)
 
   fn parse_radix(text: StringSlice, radix: UInt32) -> Result[Self, core::ParseIntegerError]
-    requires 2 <= radix && radix <= 36
+    uses Panic unless 2 <= radix && radix <= 36
     cost time O(text.length())
   {
+    if radix < 2 || radix > 36 {
+      Panic.crash("the radix is not between 2 and 36")
+    }
     let most: UInt64 = intrinsic::convert(Self.maximum_value())
     if Self.minimum_value() < 0 && text.length() > 0 && text.byte(0) == 45 {
       let magnitude = integer_text::parse_magnitude(text, start: 1, radix: radix, limit: most + 1)?
@@ -437,11 +453,14 @@ public trait FixedWidthInteger:
   }
 
   fn format(self, radix: UInt32 = 10, minimum_digits: UInt64 = 1, uppercase: Bool = false) -> String
-    requires 2 <= radix && radix <= 36
+    uses Panic unless 2 <= radix && radix <= 36
     ensures result.length() >= 1
     ensures result.length() <= minimum_digits + 66
     cost time O(minimum_digits + Self.bit_width())
   {
+    if radix < 2 || radix > 36 {
+      Panic.crash("the radix is not between 2 and 36")
+    }
     let magnitude: UInt64 =
       if self < 0 { intrinsic::convert[Self, UInt64](0 - (self + 1)) + 1 } else { intrinsic::convert(self) }
     integer_text::format_magnitude(
@@ -473,7 +492,7 @@ public trait SignedInteger: FixedWidthInteger + Negate[Output = Self] {
   }
 
   fn absolute(self) -> Self
-    requires self != Self.minimum_value()
+    uses Panic unless self != Self.minimum_value()
     ensures result >= 0
     ensures result == self || result == -self
     cost time O(1)

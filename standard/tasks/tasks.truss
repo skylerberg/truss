@@ -263,8 +263,11 @@ public opaque type Limiter(permits: Channel[Permit])
   derives Copyable
 
 public fn Limiter.new(permits: UInt64) -> Limiter
-  requires permits > 0
+  uses Panic unless permits > 0
 {
+  if permits == 0 {
+    Panic.crash("the permit count is zero")
+  }
   Limiter(permits: Channel[Permit].new(capacity: permits))
 }
 
