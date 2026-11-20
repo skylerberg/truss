@@ -22,7 +22,7 @@ fn fits_in_word(digits: StringSlice, radix: UInt32) -> Bool {
 
 fn parse_digits(digits: StringSlice, radix: UInt32) -> String
   requires radix >= 2 && radix <= 36
-  uses Panic, RunForever
+  uses Panic
 {
   if radix == 10 {
     var start: UInt64 = 0
@@ -48,7 +48,7 @@ fn parse_digits(digits: StringSlice, radix: UInt32) -> String
 }
 
 fn parse_exponent(digits: StringSlice) -> math::BigInteger
-  uses Panic, RunForever
+  uses Panic
 {
   if digits.length() <= 18 {
     var value: UInt64 = 0
@@ -61,7 +61,7 @@ fn parse_exponent(digits: StringSlice) -> math::BigInteger
 }
 
 fn is_name_byte_or_continue(text: StringSlice, position: UInt64) -> UInt64
-  uses Panic, RunForever
+  uses Panic
 {
   let byte = text.byte(position)
   if is_ascii_name_byte(byte) {
@@ -77,7 +77,7 @@ fn is_name_byte_or_continue(text: StringSlice, position: UInt64) -> UInt64
 }
 
 fn compute_name_end(text: StringSlice, position: UInt64) -> UInt64
-  uses Panic, RunForever
+  uses Panic
 {
   var at = position
   while at < text.length() {
@@ -109,7 +109,7 @@ fn is_digits_only(text: StringSlice) -> Bool {
 }
 
 fn numbers_scan_end(text: StringSlice, start: UInt64) -> UInt64
-  uses Panic, RunForever
+  uses Panic
 {
   let length = text.length()
   let first_stop = compute_name_end(text, position: start)
@@ -225,7 +225,7 @@ fn is_base_digit(byte: UInt8, base: UInt32) -> Bool {
 }
 
 fn check_radix(text: StringSlice) -> CheckedNumber
-  uses Panic, RunForever
+  uses Panic
 {
   let length = text.length()
   let marker = text.byte(1)
@@ -278,7 +278,7 @@ fn Group.stop(self) -> UInt64
 }
 
 fn group_from(text: StringSlice, offset: UInt64) -> Group
-  uses Panic, RunForever
+  uses Panic
 {
   var stop = offset
   while stop < text.length() && (is_digit(text.byte(stop)) || text.byte(stop) == 95) {
@@ -298,7 +298,7 @@ fn list_underscore_issues(group: Group, issues: mut List[Issue])
 }
 
 fn check_decimal(text: StringSlice) -> CheckedNumber
-  uses Panic, RunForever
+  uses Panic
 {
   let length = text.length()
   let whole = group_from(text, offset: 0)
@@ -401,7 +401,7 @@ fn check_decimal(text: StringSlice) -> CheckedNumber
 }
 
 fn numbers_check(text: StringSlice) -> CheckedNumber
-  uses Panic, RunForever
+  uses Panic
 {
   if is_radix_prefix(text, start: 0) { check_radix(text) } else { check_decimal(text) }
 }
@@ -467,7 +467,7 @@ fn is_hexadecimal(text: StringSlice) -> Bool
 }
 
 fn skip_hexadecimal_digits(text: StringSlice, position: UInt64) -> UInt64
-  uses Panic, RunForever
+  uses Panic
 {
   var at = position
   while at < text.length() && is_hexadecimal_digit(text.byte(at)) {
@@ -477,7 +477,7 @@ fn skip_hexadecimal_digits(text: StringSlice, position: UInt64) -> UInt64
 }
 
 fn skip_decimal_digits(text: StringSlice, position: UInt64, with_underscores: Bool) -> UInt64
-  uses Panic, RunForever
+  uses Panic
 {
   var at = position
   while at < text.length() && (is_digit(text.byte(at)) || (with_underscores && text.byte(at) == 95)) {
@@ -494,7 +494,7 @@ fn sign_follows(text: StringSlice, stop: UInt64, marker: UInt8) -> Bool
 }
 
 fn number_scan_end(text: StringSlice, start: UInt64) -> UInt64
-  uses Panic, RunForever
+  uses Panic
 {
   let length = text.length()
   var stop = numbers_scan_end(text, start)
@@ -523,7 +523,7 @@ fn number_scan_end(text: StringSlice, start: UInt64) -> UInt64
 }
 
 fn compute_number_end(text: StringSlice) -> UInt64
-  uses Panic, RunForever
+  uses Panic
 {
   let length = text.length()
   if is_radix(text) {

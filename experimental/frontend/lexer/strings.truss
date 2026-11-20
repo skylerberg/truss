@@ -75,7 +75,7 @@ fn opens_raw_string(scanner: Scanner, index: UInt64) -> Bool
 }
 
 fn ends_in_closer(scanner: Scanner, text_start: UInt64, stop: UInt64) -> Bool
-  uses Panic, RunForever
+  uses Panic
 {
   var position = stop
   while position > text_start && is_space(scanner.lookup(position - 1)) {
@@ -681,7 +681,7 @@ fn read_raw_lines(scanner: mut Scanner, dollars: UInt64, quotes: UInt64, line_en
 }
 
 fn take_blank_prefix(text: StringSlice) -> StringSlice
-  uses Panic, RunForever
+  uses Panic
 {
   var stop: UInt64 = 0
   while stop < text.length() && is_space(text.byte(stop)) {
@@ -691,14 +691,14 @@ fn take_blank_prefix(text: StringSlice) -> StringSlice
 }
 
 fn find_leading_whitespace(line: Finished) -> Option[StringSlice]
-  uses Panic, RunForever
+  uses Panic
 {
   let whitespace = take_blank_prefix(line.first.value)
   if whitespace == line.first.value && line.rest.is_empty() { None } else { Some(whitespace) }
 }
 
 fn compute_common_prefix(first: StringSlice, second: StringSlice) -> String
-  uses Panic, RunForever
+  uses Panic
 {
   let length = if first.length() < second.length() { first.length() } else { second.length() }
   var index: UInt64 = 0
@@ -709,7 +709,7 @@ fn compute_common_prefix(first: StringSlice, second: StringSlice) -> String
 }
 
 fn compute_common_indentation(lines: Slice[Finished]) -> String
-  uses Panic, RunForever
+  uses Panic
 {
   var common: Option[String] = None
   for line in lines {
@@ -748,7 +748,7 @@ fn guess_raw_string_end(scanner: Scanner, literal_start: UInt64, line_end: UInt6
 }
 
 fn describe_whitespace(whitespace: StringSlice) -> String
-  uses Panic, RunForever
+  uses Panic
 {
   if whitespace.is_empty() {
     return "no indentation"

@@ -30,7 +30,7 @@ type TokenCursor(
 )
 
 fn compute_group_ends(tables: token::Tables, first: UInt64, stop: UInt64) -> List[UInt64]
-  uses Panic, RunForever
+  uses Panic
 {
   var ends: List[UInt64] = List.with_capacity(stop - first)
   for offset in first..stop {
@@ -75,7 +75,7 @@ fn TokenCursor.create(tables: own token::Tables, file_stop: UInt64) -> TokenCurs
 }
 
 fn start_piece(cursor: mut TokenCursor, base: UInt64, first: UInt64, stop: UInt64)
-  uses Panic, RunForever
+  uses Panic
 {
   cursor.group_ends = compute_group_ends(cursor.tables, first, stop)
   cursor.base = base
@@ -103,7 +103,7 @@ type Saved(
 )
 
 fn enter_interpolation(cursor: mut TokenCursor, inner: token::Interpolation) -> Saved
-  uses Panic, RunForever
+  uses Panic
 {
   let inner_stop = inner.stop - 1
   let group_ends = compute_group_ends(cursor.tables, first: inner.first, stop: inner_stop)
@@ -189,6 +189,8 @@ fn TokenCursor.is_lower_named(self, kind: token::Kind, text: StringSlice) -> Boo
 
 fn record_syntax_error(cursor: mut TokenCursor, index: UInt64, span: source::Span)
   uses Panic
+  ensures cursor.index == old(cursor.index)
+  ensures cursor.stop == old(cursor.stop)
 {
   let recorded = if span.start == span.stop && index > cursor.first {
     let previous_start = cursor.lookup_token(index - 1).span.start
@@ -201,6 +203,9 @@ fn record_syntax_error(cursor: mut TokenCursor, index: UInt64, span: source::Spa
 
 fn advance(cursor: mut TokenCursor)
   uses Panic
+  ensures cursor.stop == old(cursor.stop)
+  ensures cursor.index >= old(cursor.index)
+  ensures old(cursor.index) < cursor.stop ==> cursor.index == old(cursor.index) + 1
 {
   if cursor.index < cursor.stop {
     let current = cursor.tables.token(cursor.index)
@@ -468,19 +473,32 @@ fn TokenCursor.lookup_closer(self, index: UInt64) -> UInt64
 }
 
 fn skip_to(cursor: mut TokenCursor, limit: UInt64)
-  uses Panic, RunForever
+  uses Panic
+  ensures cursor.stop == old(cursor.stop)
+  ensures cursor.index >= old(cursor.index)
+  ensures cursor.index >= limit || cursor.index >= cursor.stop
 {
-  let bound = if limit < cursor.stop { limit } else { cursor.stop }
-  while cursor.index < bound {
+  let stop = cursor.stop
+  let bound = if limit < stop { limit } else { stop }
+  let start = cursor.index
+  while cursor.index < bound
+    invariant cursor.stop == stop
+    invariant cursor.index >= start
+  {
     advance(mut cursor)
   }
 }
 
 fn skip_one(cursor: mut TokenCursor)
-  uses Panic, RunForever
+  uses Panic
+  ensures cursor.stop == old(cursor.stop)
+  ensures old(cursor.index) < cursor.stop ==> cursor.index > old(cursor.index)
 {
   if cursor.index < cursor.stop {
     let closer = cursor.lookup_closer(cursor.index)
+    if closer < cursor.index {
+      Panic.crash("a group closes before it opens")
+    }
     skip_to(mut cursor, limit: closer + 1)
   }
 }
@@ -501,7 +519,7 @@ fn parse_separated[Item](
 }
 
 fn split_stop(tables: token::Tables, limit: UInt64, first: UInt64) -> UInt64
-  uses Panic, RunForever
+  uses Panic
 {
   var index = first
   var depth: UInt64 = 0
@@ -537,7 +555,7 @@ fn split_stop(tables: token::Tables, limit: UInt64, first: UInt64) -> UInt64
 }
 
 fn split_pieces(tables: token::Tables, first: UInt64, stop: UInt64) -> List[Piece]
-  uses Panic, RunForever
+  uses Panic
 {
   var pieces: List[Piece] = []
   var index = first
@@ -557,7 +575,7 @@ fn split_pieces(tables: token::Tables, first: UInt64, stop: UInt64) -> List[Piec
 }
 
 fn skip_piece(cursor: mut TokenCursor) -> Piece
-  uses Panic, RunForever
+  uses Panic
 {
   let piece = Piece(first: cursor.index, stop: split_stop(cursor.tables, limit: cursor.file_stop, first: cursor.index))
   skip_to(mut cursor, limit: piece.stop)
@@ -569,7 +587,7 @@ fn TokenCursor.is_after_inserted_closer(self) -> Bool {
 }
 
 fn skip_line(cursor: mut TokenCursor, closer_index: UInt64)
-  uses Panic, RunForever
+  uses Panic
 {
   while cursor.index < closer_index && cursor.index < cursor.stop && cursor.peek_kind() != token::Kind.Newline {
     skip_one(mut cursor)
