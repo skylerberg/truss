@@ -1,0 +1,19 @@
+fn is_zero(place: UInt64) -> Integer
+  ensures result == (if place == 0 { 1 } else { 0 })
+{
+  if place == 0 { 1 } else { 0 }
+}
+
+fn zero_count(places: Slice[UInt64], count: UInt64) -> UInt64
+  requires places.model().sum(is_zero) <= 10
+  cost time O(1 + count)
+{
+  var total: UInt64 = 0
+  for index in 0..count
+    invariant total <= index
+    invariant places.model().sum(is_zero) <= 10
+  {
+    total += 1
+  }
+  total
+}

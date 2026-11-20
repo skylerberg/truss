@@ -21,7 +21,7 @@ fn retained_set(elements: mut Set[Int64])
 fn retained_map(scores: mut Map[Int64, Int64])
   ensures forall key: Int64 => scores.model().contains_key(key) ==> scores.model().get(key) > 0
 {
-  mut scores.retain(fn(entry) { entry.value > 0 })
+  mut scores.retain(fn(_, value) { value > 0 })
 }
 
 fn retained_sorted_set(elements: mut collections::SortedSet[Int64])
@@ -33,5 +33,5 @@ fn retained_sorted_set(elements: mut collections::SortedSet[Int64])
 fn retained_sorted_map(scores: mut collections::SortedMap[Int64, Int64])
   ensures forall key: Int64 => scores.model().contains_key(key) ==> scores.model().get(key) > 0
 {
-  mut scores.retain(fn(entry) { entry.value > 0 })
+  mut scores.retain(fn(_, value) { value > 0 })
 }

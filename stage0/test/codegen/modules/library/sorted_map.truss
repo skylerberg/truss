@@ -129,9 +129,9 @@ test "a range of keys gives the entries within it, in order" {
 
 test "retain keeps the entries a function accepts, in order" {
   var sorted = squares([6, 5, 4, 3, 2, 1])
-  mut sorted.retain(fn(entry) { entry.key % 2 == 0 })
+  mut sorted.retain(fn(key, _) { key % 2 == 0 })
   assert keys_of(sorted) == [2, 4, 6] && sorted.get(4) == Some(16) && !sorted.contains(5)
-  mut sorted.retain(fn(entry) { entry.value > 100 })
+  mut sorted.retain(fn(_, value) { value > 100 })
   assert sorted.is_empty()
 }
 

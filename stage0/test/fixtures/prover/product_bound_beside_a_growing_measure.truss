@@ -1,0 +1,7 @@
+theorem grows_with_its_factor(measure: fn(Integer) -> Integer, low: Integer, high: Integer, factor: Integer)
+  requires forall n: Integer => measure(n) < measure(n + 1) && measure(2 * n) < measure(2 * n + 3)
+  requires 0 <= low && low + 1 <= high && 0 <= factor
+  requires measure(low) <= factor
+  ensures (1 + low) * (1 + factor) + (1 + factor) <= (1 + high) * (1 + factor)
+{
+}

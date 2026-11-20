@@ -1,5 +1,0 @@
-fn f() -> Map[Int64, Int64]
-  cost allocations == 1
-{
-  [1: 2, 3: 4]
-}

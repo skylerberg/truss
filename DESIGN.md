@@ -264,6 +264,7 @@ call a helper while the list is unsorted.
 | Rule | Reason |
 |---|---|
 | An invariant belongs to the whole type, never to one variant. | It can state a fact about the whole value, such as a tree being balanced, and a clause after the last variant is unambiguous. A condition on one variant is a `match` in the invariant, or a field whose type carries the condition. |
+| An invariant clause that calls a definition private to its type's module is opaque in other modules. | The clause can only be proven where its definition is visible, so other modules gain nothing from the definition, and each obligation that holds a value of the type would carry it: `Map`'s index invariant added about 1 MB of axioms to every obligation of `Set`, `json`, and `toml`, and some ran out of steps. A module that builds the value from its fields cannot prove the clause, so no module can make a value that breaks it. |
 | A type with an invariant can still expose its fields. | An invariant protects facts about the contents of a value. `opaque` does a different job: it controls where a value is constructed and hides the representation ([Visibility](#visibility)). |
 
 ## Values and ownership
@@ -1504,15 +1505,22 @@ different versions build together, as Rust's editions allow.
 
 ### Maps and sets
 
-`Map` and `Set` iterate in insertion order. The order never varies from run
-to run, so tests stay deterministic and their results can be cached.
+`Map` and `Set` iterate in insertion order until an entry is removed: a
+removal moves the last entry into the removed entry's place, so it costs O(1)
+instead of the O(n) of shifting every later entry. The order never varies from
+run to run, so tests stay deterministic and their results can be cached.
 
 **A `Map` resists hash flooding deterministically.** The usual defense is a
 random hash key for each process. That would change timing and allocation
 counts from run to run, and make a test near its time limit flaky. Instead, a
-bucket that fills up becomes a balanced tree, so the worst case is O(log n),
-which a `cost` clause can promise. This is why a key is `Ordered` as well as
-`Hash`.
+key whose 16 probed slots are all full goes into one balanced tree for the
+whole map, ordered by key, so the worst case is O(log n), which a `cost`
+clause can promise. This is why a key is `Ordered` as well as `Hash`.
+
+| Rule | Reason |
+|---|---|
+| A `Map` keeps its keys and its values in two lists. | A value lent `mut`, as by `get_or_insert`, leaves the list of keys unchanged, so the invariant of the index over the keys holds with no new proof. A lookup's comparisons read only the keys. |
+| `retain` on `Map` and on `SortedMap` takes the key and the value as two parameters. | A `Map` holds no `Entry` to lend, and building one would move or copy both. One shape of callback serves both maps. |
 
 ### Conventions
 
