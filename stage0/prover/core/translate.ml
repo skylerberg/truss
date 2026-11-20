@@ -82,7 +82,11 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
   context
 
 let make_outcome (context : State.context) =
-  { Obligation.obligations = List.rev context.obligations; holes = List.rev context.holes }
+  {
+    Obligation.obligations = List.rev context.obligations;
+    holes = List.rev context.holes;
+    warnings = [];
+  }
 
 let make_empty_frame source =
   {
@@ -712,6 +716,7 @@ let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_sub
     holes =
       List.sort_uniq compare
         (List.concat_map (fun (outcome : Obligation.outcome) -> outcome.holes) outcomes);
+    warnings = [];
   }
 
 let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~for_type ~proofs ~at

@@ -3895,7 +3895,7 @@ written for this:
 |---|---|
 | A `for` loop over a range or a collection | The elements left to visit |
 | A `for` loop over a cursor whose type implements `FiniteCursor`, such as `text.characters()` | `remaining()` |
-| A `while` loop whose condition compares two sides with `<`, `<=`, `>`, or `>=` | The distance between the two sides |
+| A `while` loop whose condition compares two sides with `<`, `<=`, `>`, or `>=`, or begins with such a comparison joined by `&&` | The distance between the two sides |
 | A recursive call on a part of a parameter, such as `Expression.evaluate` in [Chapter 5](#recursive-types) | The parameter, which gets smaller |
 | A loop or a function with a `decreases` clause | The clause |
 | A loop or a function with `decreases m when C`, such as `decreases cursor.remaining() when Items: FiniteCursor` | `m` where `C` holds; elsewhere it uses `RunForever unless C` |

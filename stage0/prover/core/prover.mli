@@ -20,6 +20,10 @@ type 'span state = {
 }
 
 type verdicts
+type warnings
+
+val collect_warnings : Lookups.t -> (Resolve.Names.key * proof) list -> warnings
+val list_warnings : warnings -> Path.file -> Diagnostic.t list
 
 val decide :
   runs:(Obligation.template_check * (bool list, string) result) list ->

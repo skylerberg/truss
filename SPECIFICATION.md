@@ -949,6 +949,11 @@ fn serve(listener: mut Listener)
 - A function that uses `RunForever` has no `time` clause. One that uses
   `RunForever unless C` states its `time` clause `when` a condition that
   implies `C`.
+- A `RunForever` that a function declares and does not use is a warning. The
+  function uses it where a call or a loop in it uses `RunForever`, where one
+  of its `while` loops takes its measure from its condition, or where a
+  recursion reaches the function. A method written in a trait or an `impl`
+  is not checked.
 - A call of a capability's method terminates unless the method's `uses`
   names `RunForever`. A method that waits for the world, such as
   `Console.read_line`, returns once the world answers, so waiting is not
@@ -1762,7 +1767,9 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
   `RunForever unless Items: FiniteCursor`.
 - In a function without `RunForever`, a `while` loop that states no measure,
   and whose condition compares two sides that mutate nothing with `<`, `<=`,
-  `>`, or `>=`, has the distance between them as its measure.
+  `>`, or `>=`, has the distance between them as its measure. So does one
+  whose condition is a chain of `&&` that begins with such a comparison, as
+  in `while at < text.length() && text.byte(at) == 32`.
 - **A loop without a measure uses `RunForever`** (see
   [Termination](#termination)). A `for` loop over a range or over a
   collection's elements always terminates.

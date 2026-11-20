@@ -271,7 +271,7 @@ fn expect_contextual(
   expected: StringSlice,
   suggested: Option[List[ContextualKeyword]] = None,
 ) -> Result[ContextualKeyword, Failure]
-  uses Panic, RunForever
+  uses Panic
 {
   let current = cursor.peek()
   if cursor.contextual(current.kind) is Some(word) && accepted.contains(word) {

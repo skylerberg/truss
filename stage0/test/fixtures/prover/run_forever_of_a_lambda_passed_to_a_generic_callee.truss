@@ -1,0 +1,14 @@
+fn apply(visit: (fn() uses generic Granted))
+  uses generic Granted
+{
+  visit()
+}
+
+fn f()
+  uses RunForever
+{
+  apply(fn() {
+    while true {
+    }
+  })
+}

@@ -240,7 +240,7 @@ fn coalescing_follows(cursor: TokenCursor) -> Bool
 }
 
 fn has_comma(cursor: TokenCursor, opener: UInt64) -> Bool
-  uses Panic, RunForever
+  uses Panic
 {
   let closer = cursor.lookup_closer(opener)
   var index = opener + 1
@@ -250,7 +250,11 @@ fn has_comma(cursor: TokenCursor, opener: UInt64) -> Bool
       return true
     }
     if is_open(kind) {
-      index = cursor.lookup_closer(index) + 1
+      let nested_closer = cursor.lookup_closer(index)
+      if nested_closer < index {
+        Panic.crash("a group closes before it opens")
+      }
+      index = nested_closer + 1
     } else {
       index += 1
     }

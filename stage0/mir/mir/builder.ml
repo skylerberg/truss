@@ -161,6 +161,18 @@ let lower_range_bound (pattern : Core.pattern) (bound : Core.range_bound) : Tree
     | Integer_bound value -> Integer_constant value
     | Constant_bound path -> Named_constant path)
 
+let rec find_compared (tested : Core.expression) (statements : Tree.statement list) : Tree.compared
+    =
+  match (tested.kind, List.rev statements) with
+  | Compare _, { kind = Basic (Assign { value = Compare { comparison; left; right }; _ }); _ } :: _
+    ->
+      { statements; comparison; left; right }
+  | ( Connective { connective = And; left = first; _ },
+      { kind = Choose { choice = Connective { connective = And; left = first_block; _ }; _ }; _ }
+      :: earlier ) ->
+      find_compared first (List.rev_append earlier first_block.statements)
+  | _ -> raise_bug "the comparison that measures a `while` loop is missing from its condition"
+
 let lower_condition_block builder build : Tree.block option =
   let block = Emitter.build_block builder build in
   match block.value with
@@ -1188,18 +1200,9 @@ and lower_statement builder (node : Core.statement) =
           begin match lower_condition builder ~binds_lent_part tested with
           | Some (condition, lowered) -> (
               let compared =
-                match (tested.kind, List.rev condition.statements) with
-                | ( Compare _,
-                    {
-                      kind =
-                        Basic
-                          (Assign { value = Compare { comparison; left = low; right = high }; _ });
-                      _;
-                    }
-                    :: _ )
-                  when Core_walk.has_implicit_measure tested ->
-                    Some { Tree.comparison; left = low; right = high }
-                | _ -> None
+                if Core_walk.has_implicit_measure tested then
+                  Some (find_compared tested condition.statements)
+                else None
               in
               let body =
                 Emitter.build_block builder (fun () ->

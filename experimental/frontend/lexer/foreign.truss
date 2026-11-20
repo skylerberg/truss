@@ -62,7 +62,7 @@ fn find_confusable_token(spelling: StringSlice) -> Option[token::Kind] {
 }
 
 fn follows_joining_confusable(scanner: Scanner, start: UInt64, replacement: StringSlice) -> Bool
-  uses Panic, RunForever
+  uses Panic
 {
   if start == 0 {
     return false
@@ -81,7 +81,7 @@ fn follows_joining_confusable(scanner: Scanner, start: UInt64, replacement: Stri
 }
 
 fn report_confusable(scanner: mut Scanner, start: UInt64, length: UInt64, replacement: StringSlice, name: StringSlice)
-  uses Panic, RunForever
+  uses Panic
 {
   let span = source::make_span(start, stop: start + length)
   let fixes = if follows_joining_confusable(scanner, start, replacement) {
@@ -149,7 +149,7 @@ fn read_hexadecimal(scanner: Scanner, position: UInt64, count: UInt64) -> UInt64
 }
 
 fn report_foreign_escape(scanner: mut Scanner, buffer: mut String, start: UInt64, stop: UInt64, value: UInt32) -> Bool
-  uses Panic, RunForever
+  uses Panic
 {
   let replacement = "\\u{${format_hexadecimal(value, minimum_digits: 1)}}"
   let written = scanner.text(start, stop).to_string()
@@ -169,7 +169,7 @@ fn report_foreign_escape(scanner: mut Scanner, buffer: mut String, start: UInt64
 }
 
 fn check_hexadecimal_escape(scanner: mut Scanner, buffer: mut String, start: UInt64, count: UInt64) -> Bool
-  uses Panic, RunForever
+  uses Panic
 {
   if !are_hexadecimal_digits(scanner, position: start + 2, count) {
     return false
@@ -182,7 +182,7 @@ fn check_hexadecimal_escape(scanner: mut Scanner, buffer: mut String, start: UIn
 }
 
 fn scan_foreign_escape(scanner: mut Scanner, buffer: mut String) -> Bool
-  uses Panic, RunForever
+  uses Panic
 {
   let start = scanner.position
   if scanner.is_at_end(start + 1) {
@@ -281,7 +281,7 @@ fn quote_joins_before(scanner: Scanner, index: UInt64) -> Bool
 }
 
 fn is_name_character(scanner: Scanner, position: UInt64) -> Bool
-  uses Panic, RunForever
+  uses Panic
 {
   if scanner.is_at_end(position) {
     return false
@@ -299,7 +299,7 @@ fn is_simple_escape(byte: UInt8) -> Bool {
 }
 
 fn find_character_literal_end(scanner: Scanner, start: UInt64, after_prefix: Bool = false) -> Option[UInt64]
-  uses Panic, RunForever
+  uses Panic
 {
   if !after_prefix && touches_word_before(scanner, index: start) {
     return None
@@ -334,7 +334,7 @@ fn find_character_literal_end(scanner: Scanner, start: UInt64, after_prefix: Boo
 }
 
 fn decode_character_escape(content: StringSlice) -> String
-  uses Panic, RunForever
+  uses Panic
 {
   match content {
     "\\n" => "\n"
@@ -375,7 +375,7 @@ fn decode_character_escape(content: StringSlice) -> String
 }
 
 fn lex_character_literal(scanner: mut Scanner, tag: StringSlice, literal_start: UInt64, stop: UInt64) -> token::Kind
-  uses Panic, RunForever
+  uses Panic
 {
   let start = scanner.position
   let content = scanner.text(start + 1, stop: stop - 1).to_string()

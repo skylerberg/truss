@@ -1133,14 +1133,14 @@ and read_statement context frame run (statement : Mir.statement) =
           on_failure = (fun frame -> read_statements context frame run failed);
           measure_operands =
             Option.map
-              (fun ({ comparison; left; right } : Mir.compared) ->
+              (fun ({ statements; comparison; left; right } : Mir.compared) ->
                 ( comparison,
                   fun at ->
                     let after =
                       List.fold_left
                         (fun frame statement ->
                           Option.value (read_statement context frame run statement) ~default:frame)
-                        at condition.statements
+                        at statements
                     in
                     (read_operand context after run left, read_operand context after run right) ))
               compared;

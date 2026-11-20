@@ -1,0 +1,12 @@
+fn spin()
+  uses RunForever
+{
+  while true {
+  }
+}
+
+fn f()
+  uses RunForever
+{
+  spin()
+}

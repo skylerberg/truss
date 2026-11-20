@@ -12,7 +12,11 @@ let make_solver () =
   | Ok solver -> solver
   | Error message -> Outcome.raise_cannot_run "%s" message
 
-type t = { proofs : Database.proofs; verdicts : Prover.verdicts Lazy.t }
+type t = {
+  proofs : Database.proofs;
+  warnings : Prover.warnings Lazy.t;
+  verdicts : Prover.verdicts Lazy.t;
+}
 
 let run_template_checks backend checks =
   List.map
@@ -32,18 +36,20 @@ let list_runs database snapshot packages proofs =
 
 let check database snapshot packages files =
   let proofs = Database.prove database files in
+  let lookups = Database.make_proof_lookups database in
   {
     proofs;
+    warnings = lazy (Prover.collect_warnings lookups (Database.list_proofs proofs));
     verdicts =
       lazy
         (let solver = make_solver () in
          Prover.decide
            ~runs:(list_runs database snapshot packages proofs)
-           (Database.make_proof_lookups database)
-           solver (Database.list_proofs proofs));
+           lookups solver (Database.list_proofs proofs));
   }
 
 let list_diagnostics checked file = Prover.list_diagnostics (Lazy.force checked.verdicts) file
+let list_warnings checked file = Prover.list_warnings (Lazy.force checked.warnings) file
 let list_states checked file = Prover.list_states (Lazy.force checked.verdicts) file
 
 let list_holes snapshot checked definition =
