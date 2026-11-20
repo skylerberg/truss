@@ -1,0 +1,877 @@
+use frontend::source
+use frontend::syntax
+use frontend::token
+
+fn make_definition_node(
+  cursor: mut TokenCursor,
+  start: UInt64,
+  visibility: Option[syntax::Visibility],
+  kind: own syntax::DefinitionKind,
+) -> syntax::Definition
+  uses Panic
+{
+  syntax::Definition(visibility, kind: own kind, id: allocate_id_from(mut cursor, start_index: start))
+}
+
+type WrittenVisibility(visibility: Option[syntax::Visibility], tokens: List[token::Token], public_token: Option[token::Token], opaque_token: Option[token::Token])
+
+fn parse_visibility(cursor: mut TokenCursor) -> WrittenVisibility
+  uses Panic
+{
+  if cursor.is_keyword(token::Keyword.Public) {
+    let public_keyword = take(mut cursor)
+    if cursor.is_keyword(token::Keyword.Opaque) {
+      let opaque_keyword = take(mut cursor)
+      return WrittenVisibility(
+        visibility: Some(syntax::Visibility.PublicOpaque),
+        tokens: [public_keyword, opaque_keyword],
+        public_token: Some(public_keyword),
+        opaque_token: Some(opaque_keyword),
+      )
+    }
+    return WrittenVisibility(visibility: Some(syntax::Visibility.Public), tokens: [public_keyword], public_token: None, opaque_token: None)
+  }
+  if cursor.is_keyword(token::Keyword.Internal) {
+    let internal_token = take(mut cursor)
+    return WrittenVisibility(visibility: Some(syntax::Visibility.Internal), tokens: [internal_token], public_token: None, opaque_token: None)
+  }
+  WrittenVisibility(visibility: None, tokens: [], public_token: None, opaque_token: None)
+}
+
+fn report_misplaced_visibility(cursor: mut TokenCursor, code: StringSlice, tokens: Slice[token::Token], message: StringSlice)
+  uses Panic
+{
+  let Some(first) = tokens.first() else {
+    return
+  }
+  let first_token = first
+  let last = tokens.last().expect("a last visibility token")
+  let next = cursor.peek()
+  let span = source::make_span(first_token.span.start, stop: last.span.stop)
+  report(
+    mut cursor,
+    code,
+    span,
+    message,
+    fixes: [source::make_fix("Remove it", edits: [source::delete(source::make_span(first_token.span.start, stop: next.span.start))])],
+  )
+}
+
+fn parse_type_head(cursor: mut TokenCursor) -> Result[syntax::TypeHead, Failure]
+  uses Panic, RunForever
+{
+  let start = cursor.index
+  let path = parse_upper_path(mut cursor, expected: "a type name")?
+  let generics = parse_generics(mut cursor)?
+  Ok(syntax::TypeHead(path: own path, generics: own generics, id: allocate_id_from(mut cursor, start_index: start)))
+}
+
+fn parse_definition_name(cursor: mut TokenCursor) -> Result[syntax::DefinitionName, Failure]
+  uses Panic, RunForever
+{
+  let is_member = match cursor.peek_kind() {
+    Upper(_) => true
+    Lower(_) => cursor.peek_ahead(1) == token::Kind.Punctuation(token::Punctuation.ColonColon)
+    _ => false
+  }
+  if is_member {
+    let head = parse_type_head(mut cursor)?
+    expect_punctuation(mut cursor, punctuation: token::Punctuation.Dot)?
+    return Ok(syntax::DefinitionName.MemberName(head: own head, name: lower_name(mut cursor, expected: "a method name after `.`")?))
+  }
+  Ok(syntax::DefinitionName.PlainName(lower_name(mut cursor, expected: "a name")?))
+}
+
+fn parse_parameter(cursor: mut TokenCursor) -> Result[syntax::Parameter, Failure]
+  uses Panic, RunForever
+{
+  let start = cursor.index
+  let first = cursor.peek_kind()
+  let is_self = first == token::Kind.Keyword(token::Keyword.SelfValue)
+    || ((first == token::Kind.Keyword(token::Keyword.Mut) || first == token::Kind.Keyword(token::Keyword.Own))
+      && cursor.peek_ahead(1) == token::Kind.Keyword(token::Keyword.SelfValue))
+  let kind = if is_self {
+    let mode = parse_mode(mut cursor)
+    advance(mut cursor)
+    syntax::ParameterKind.SelfParameter(mode)
+  } else {
+    let name = lower_name(mut cursor, expected: "a parameter name")?
+    expect_punctuation(mut cursor, punctuation: token::Punctuation.Colon)?
+    let mode = parse_mode(mut cursor)
+    let annotation = parse_type_expression(mut cursor)?
+    let default = if accept_punctuation(mut cursor, punctuation: token::Punctuation.Equal) {
+      Some(parse_expression(mut cursor)?)
+    } else {
+      None
+    }
+    syntax::ParameterKind.NamedParameter(name: own name, mode, annotation: own annotation, default: own default)
+  }
+  Ok(syntax::Parameter(kind: own kind, id: allocate_id_from(mut cursor, start_index: start)))
+}
+
+fn recover_parameter(cursor: mut TokenCursor, span: source::Span) -> syntax::Parameter {
+  syntax::Parameter(kind: syntax::ParameterKind.ParameterError, id: allocate_id(mut cursor, span))
+}
+
+fn parse_parameters(cursor: mut TokenCursor, is_method: Bool) -> Result[List[syntax::Parameter], Failure]
+  uses Panic, RunForever
+{
+  if !cursor.is_punctuation(token::Punctuation.Open(token::Bracket.Paren)) {
+    return Err(fail(mut cursor, expected: "`(` to start the parameters"))
+  }
+  let parameters = parse_bracketed(mut cursor, parse_item: parse_parameter, recover: recover_parameter)
+  for entry in parameters.enumerate() {
+    if entry.element.kind is SelfParameter(_) {
+      if !is_method {
+        let span = cursor.read_file_span(entry.element.id)
+        report(
+          mut cursor,
+          code: "parser.misplaced_self",
+          span,
+          message: "Only a method takes `self`: one written `fn Type.name`, or one in a trait or an `impl`.",
+        )
+      } else if entry.index > 0 {
+        let span = cursor.read_file_span(entry.element.id)
+        report(mut cursor, code: "parser.misplaced_self", span, message: "`self` must be the first parameter.")
+      }
+    }
+  }
+  Ok(own parameters)
+}
+
+fn parse_output(cursor: mut TokenCursor) -> Result[Option[syntax::Output], Failure]
+  uses Panic, RunForever
+{
+  if accept_punctuation(mut cursor, punctuation: token::Punctuation.Arrow) {
+    return Ok(Some(syntax::Output.Returns(parse_type_expression(mut cursor)?)))
+  }
+  if !accept_keyword(mut cursor, keyword: token::Keyword.Lends) {
+    return Ok(None)
+  }
+  let own_token = cursor.peek()
+  let mode = parse_mode(mut cursor)
+  if mode == Some(syntax::Mode.Own) {
+    let next_start = cursor.peek().span.start
+    report(
+      mut cursor,
+      code: "parser.lends_own",
+      span: own_token.span,
+      message: "A part a `lends` method lends stays with `self`, so it cannot be `own`. A method that hands over an owned value returns it with `->`.",
+      fixes: [source::make_fix("Remove `own`", edits: [source::delete(source::make_span(own_token.span.start, stop: next_start))])],
+    )
+  }
+  Ok(Some(syntax::Output.Lends(mode, annotation: parse_type_expression(mut cursor)?)))
+}
+
+fn skip_failed_clause(cursor: mut TokenCursor)
+  uses Panic, RunForever
+{
+  while true {
+    let kind = cursor.peek_kind()
+    if is_clause_keyword(kind) || kind == token::Kind.Punctuation(token::Punctuation.Open(token::Bracket.Curly)) || kind == token::Kind.EndOfFile {
+      return
+    }
+    if kind == token::Kind.Newline && cursor.peek_ahead(1) == token::Kind.Punctuation(token::Punctuation.Open(token::Bracket.Curly)) {
+      return
+    }
+    skip_one(mut cursor)
+  }
+}
+
+fn parse_clauses(cursor: mut TokenCursor) -> List[syntax::Clause]
+  uses Panic, RunForever
+{
+  var clauses: List[syntax::Clause] = []
+  while is_clause_keyword(cursor.peek_kind()) {
+    let start = cursor.index
+    let clause = match parse_clause(mut cursor) {
+      Ok(parsed) => parsed
+      Err(_) => {
+        skip_failed_clause(mut cursor)
+        syntax::Clause(kind: syntax::ClauseKind.ClauseError, condition: None, id: allocate_id_from(mut cursor, start_index: start))
+      }
+    }
+    let is_uses = clause.kind is Uses(_)
+    let is_decreases = clause.kind is Decreases(_)
+    if is_uses || is_decreases {
+      var is_repeated = false
+      for earlier in clauses {
+        if (is_uses && earlier.kind is Uses(_)) || (is_decreases && earlier.kind is Decreases(_)) {
+          is_repeated = true
+        }
+      }
+      if is_repeated {
+        let span = cursor.lookup_token(start).span
+        let message = if is_uses {
+          "A signature has at most one `uses` clause; list every capability in one, separated by commas."
+        } else {
+          "A signature has at most one `decreases` clause; list several measures in one, separated by commas."
+        }
+        report(mut cursor, code: "parser.repeated_clause", span, message)
+      }
+    }
+    mut clauses.push(own clause)
+  }
+  clauses
+}
+
+fn parse_optional_body(cursor: mut TokenCursor) -> Result[Option[syntax::Block], Failure]
+  uses Panic, RunForever
+{
+  if opens_body(cursor) {
+    return Ok(Some(parse_body(mut cursor)?))
+  }
+  Ok(None)
+}
+
+fn parse_definition_body(cursor: mut TokenCursor) -> Result[syntax::Block, Failure]
+  uses Panic, RunForever
+{
+  if parse_optional_body(mut cursor)? is Some(body) {
+    return Ok(body.copy())
+  }
+  let stop = cursor.compute_previous_stop()
+  let ends_member = match cursor.peek_kind() {
+    Newline | EndOfFile => true
+    Punctuation(punctuation) => punctuation == token::Punctuation.Close(token::Bracket.Curly)
+    _ => false
+  }
+  if !ends_member || cursor.is_after_inserted_closer() {
+    return Err(fail(mut cursor, expected: "`{` to start the body"))
+  }
+  let has_earlier_error = cursor.has_reported()
+  let fixes = match cursor.find_previous_token() {
+    Some(previous) => if token::can_end(previous.kind) && !has_earlier_error {
+      [source::make_fix("Add `{ todo }`", edits: [source::insert(source::make_zero_width(stop), replacement: " { todo }")])]
+    } else {
+      []
+    }
+    None => []
+  }
+  report(
+    mut cursor,
+    code: "parser.missing_body",
+    span: source::make_zero_width(stop),
+    message: "A function needs a body; write `{ todo }` for one that is not written yet.",
+    fixes: own fixes,
+  )
+  let at = cursor.make_definition_span(source::make_zero_width(stop))
+  let statement_id = allocate_id(mut cursor, span: at)
+  let block_id = allocate_id(mut cursor, span: at)
+  Ok(syntax::Block(statements: [syntax::Statement(kind: syntax::StatementKind.StatementError, id: statement_id)], id: block_id))
+}
+
+fn parse_signature(cursor: mut TokenCursor, name: own syntax::DefinitionName, is_method: Bool) -> Result[syntax::Signature, Failure]
+  uses Panic, RunForever
+{
+  let generics = parse_generics(mut cursor)?
+  let parameters = parse_parameters(mut cursor, is_method)?
+  let output = parse_output(mut cursor)?
+  let clauses = parse_clauses(mut cursor)
+  Ok(syntax::Signature(name: own name, generics: own generics, parameters: own parameters, output: own output, clauses: own clauses))
+}
+
+fn parse_function_signature(cursor: mut TokenCursor, name: own syntax::DefinitionName) -> Result[syntax::Signature, Failure]
+  uses Panic, RunForever
+{
+  let is_method = name is MemberName(..)
+  parse_signature(mut cursor, name: own name, is_method)
+}
+
+type MemberLine[Member] = ParsedMember(member: Member) | SkippedMethod(piece: Piece)
+  derives Equal
+
+type Members[Member](members: List[Member], methods: List[Piece])
+
+fn split_member_lines[Member](lines: own List[MemberLine[Member]]) -> Members[Member] {
+  var members: List[Member] = []
+  var methods: List[Piece] = []
+  for line in own lines {
+    match own line {
+      ParsedMember(member) => mut members.push(own member)
+      SkippedMethod(piece) => mut methods.push(piece)
+    }
+  }
+  Members(members: own members, methods: own methods)
+}
+
+fn parse_trait_line(cursor: mut TokenCursor) -> Result[MemberLine[syntax::TraitMemberNode], Failure]
+  uses Panic, RunForever
+{
+  let start = cursor.index
+  if cursor.is_keyword(token::Keyword.Fn) {
+    return Ok(MemberLine.SkippedMethod(skip_piece(mut cursor)))
+  }
+  let kind = parse_trait_member(mut cursor)?
+  Ok(MemberLine.ParsedMember(syntax::TraitMemberNode(kind: own kind, id: allocate_id_from(mut cursor, start_index: start))))
+}
+
+fn recover_trait_line(cursor: mut TokenCursor, span: source::Span) -> MemberLine[syntax::TraitMemberNode] {
+  MemberLine.ParsedMember(syntax::TraitMemberNode(kind: syntax::TraitMember.TraitMemberError, id: allocate_id(mut cursor, span)))
+}
+
+fn parse_impl_line(cursor: mut TokenCursor) -> Result[MemberLine[syntax::ImplMemberNode], Failure]
+  uses Panic, RunForever
+{
+  let start = cursor.index
+  if cursor.is_keyword(token::Keyword.Fn) {
+    return Ok(MemberLine.SkippedMethod(skip_piece(mut cursor)))
+  }
+  let kind = parse_impl_member(mut cursor)?
+  Ok(MemberLine.ParsedMember(syntax::ImplMemberNode(kind: own kind, id: allocate_id_from(mut cursor, start_index: start))))
+}
+
+fn recover_impl_line(cursor: mut TokenCursor, span: source::Span) -> MemberLine[syntax::ImplMemberNode] {
+  MemberLine.ParsedMember(syntax::ImplMemberNode(kind: syntax::ImplMember.ImplMemberError, id: allocate_id(mut cursor, span)))
+}
+
+fn parse_capability_line(cursor: mut TokenCursor) -> Result[MemberLine[syntax::CapabilityMemberNode], Failure]
+  uses Panic, RunForever
+{
+  if cursor.is_keyword(token::Keyword.Fn) {
+    return Ok(MemberLine.SkippedMethod(skip_piece(mut cursor)))
+  }
+  Err(fail(mut cursor, expected: "`fn` to start a method of the capability"))
+}
+
+fn recover_capability_line(cursor: mut TokenCursor, span: source::Span) -> MemberLine[syntax::CapabilityMemberNode] {
+  MemberLine.ParsedMember(syntax::CapabilityMemberNode(id: allocate_id(mut cursor, span)))
+}
+
+fn parse_trait_member(cursor: mut TokenCursor) -> Result[syntax::TraitMember, Failure]
+  uses Panic, RunForever
+{
+  let kind = cursor.peek_kind()
+  if kind == token::Kind.Keyword(token::Keyword.Type) {
+    advance(mut cursor)
+    let name = parse_upper_name(mut cursor, expected: "the name of an associated type")?
+    let bounds = if accept_punctuation(mut cursor, punctuation: token::Punctuation.Colon) { parse_bounds(mut cursor)? } else { [] }
+    return Ok(syntax::TraitMember.AssociatedType(name: own name, bounds: own bounds))
+  }
+  if kind == token::Kind.Keyword(token::Keyword.Capability) {
+    advance(mut cursor)
+    return Ok(syntax::TraitMember.AssociatedCapability(parse_upper_name(mut cursor, expected: "the name of an associated capability set")?))
+  }
+  if kind == token::Kind.Keyword(token::Keyword.Law) {
+    advance(mut cursor)
+    let name = lower_name(mut cursor, expected: "the name of a law")?
+    let parameters = parse_parameters(mut cursor, is_method: false)?
+    var premises: List[syntax::Expression] = []
+    while accept_keyword(mut cursor, keyword: token::Keyword.Requires) {
+      mut premises.push(parse_expression(mut cursor)?)
+    }
+    let body = parse_body(mut cursor)?
+    return Ok(
+      syntax::TraitMember.Law(syntax::LawDefinition(name: own name, parameters: own parameters, premises: own premises, body: own body)),
+    )
+  }
+  Err(fail(mut cursor, expected: "`fn`, `type`, `capability`, or `law` to start a member of the trait"))
+}
+
+fn parse_impl_member(cursor: mut TokenCursor) -> Result[syntax::ImplMember, Failure]
+  uses Panic, RunForever
+{
+  let kind = cursor.peek_kind()
+  if kind == token::Kind.Keyword(token::Keyword.Type) {
+    advance(mut cursor)
+    let name = parse_upper_name(mut cursor, expected: "the name of an associated type")?
+    expect_punctuation(mut cursor, punctuation: token::Punctuation.Equal)?
+    return Ok(syntax::ImplMember.AssociatedDefinition(name: own name, definition: parse_type_expression(mut cursor)?))
+  }
+  if kind == token::Kind.Keyword(token::Keyword.Capability) {
+    advance(mut cursor)
+    let name = parse_upper_name(mut cursor, expected: "the name of an associated capability set")?
+    expect_punctuation(mut cursor, punctuation: token::Punctuation.Equal)?
+    return Ok(syntax::ImplMember.CapabilityDefinition(name: own name, capabilities: parse_capability_uses(mut cursor)?))
+  }
+  Err(fail(mut cursor, expected: "`fn`, `type`, or `capability` to start a member of the `impl`"))
+}
+
+type Container = InTrait | InImpl | InCapability
+  derives Equal
+
+fn parse_method_kind(cursor: mut TokenCursor, container: Container, name: own syntax::DefinitionName) -> Result[syntax::DefinitionKind, Failure]
+  uses Panic, RunForever
+{
+  let signature = parse_signature(mut cursor, name: own name, is_method: true)?
+  let kind = match container {
+    InTrait => match parse_optional_body(mut cursor)? {
+      Some(body) => syntax::DefinitionKind.Function(syntax::FunctionDefinition(signature: own signature, body: body.copy()))
+      None => syntax::DefinitionKind.MethodDeclaration(own signature)
+    }
+    InImpl => {
+      let body = parse_definition_body(mut cursor)?
+      syntax::DefinitionKind.Function(syntax::FunctionDefinition(signature: own signature, body: own body))
+    }
+    InCapability => {
+      for parameter in signature.parameters {
+        if parameter.kind is SelfParameter(_) {
+          let span = cursor.read_file_span(parameter.id)
+          report(
+            mut cursor,
+            code: "parser.misplaced_self",
+            span,
+            message: "A capability's methods take no `self`; they are called as `Capability.method(...)`, and only an implementation's methods take `self`.",
+          )
+        }
+      }
+      syntax::DefinitionKind.MethodDeclaration(own signature)
+    }
+  }
+  if !cursor.is_at_end() {
+    return Err(fail(mut cursor, expected: "a line break or `}` after the method"))
+  }
+  Ok(own kind)
+}
+
+fn parse_method(cursor: mut TokenCursor, container: Container) -> syntax::Definition
+  uses Panic, RunForever
+{
+  let start = cursor.index
+  advance(mut cursor)
+  let intended = Some(syntax::IntendedKind.IntendedFunction)
+  let kind = match lower_name(mut cursor, expected: "a method name") {
+    Err(_) => syntax::DefinitionKind.DefinitionError(intended, name: None)
+    Ok(name) => {
+      let written = syntax::DefinitionName.PlainName(own name)
+      match parse_method_kind(mut cursor, container, name: written.copy()) {
+        Ok(kind) => kind
+        Err(_) => syntax::DefinitionKind.DefinitionError(intended, name: Some(own written))
+      }
+    }
+  }
+  make_definition_node(mut cursor, start, visibility: None, kind: own kind)
+}
+
+fn parse_field(cursor: mut TokenCursor) -> Result[syntax::Field, Failure]
+  uses Panic, RunForever
+{
+  let start = cursor.index
+  let name = lower_name(mut cursor, expected: "a field name")?
+  expect_punctuation(mut cursor, punctuation: token::Punctuation.Colon)?
+  let annotation = parse_type_expression(mut cursor)?
+  let default = if accept_punctuation(mut cursor, punctuation: token::Punctuation.Equal) { Some(parse_expression(mut cursor)?) } else { None }
+  Ok(
+    syntax::Field(
+      kind: syntax::FieldKind.FieldDeclaration(name: own name, annotation: own annotation, default: own default),
+      id: allocate_id_from(mut cursor, start_index: start),
+    ),
+  )
+}
+
+fn recover_field(cursor: mut TokenCursor, span: source::Span) -> syntax::Field {
+  syntax::Field(kind: syntax::FieldKind.FieldError, id: allocate_id(mut cursor, span))
+}
+
+fn parse_fields(cursor: mut TokenCursor) -> List[syntax::Field]
+  uses Panic, RunForever
+{
+  parse_bracketed(mut cursor, parse_item: parse_field, recover: recover_field)
+}
+
+fn parse_variant(cursor: mut TokenCursor) -> Result[syntax::VariantDeclaration, Failure]
+  uses Panic, RunForever
+{
+  let start = cursor.index
+  let is_indirect = accept_keyword(mut cursor, keyword: token::Keyword.Indirect)
+  let name = parse_upper_name(mut cursor, expected: "the name of a variant")?
+  let fields = if cursor.is_punctuation(token::Punctuation.Open(token::Bracket.Paren)) { Some(parse_fields(mut cursor)) } else { None }
+  Ok(syntax::VariantDeclaration(is_indirect, name: own name, fields: own fields, id: allocate_id_from(mut cursor, start_index: start)))
+}
+
+fn parse_variants(cursor: mut TokenCursor) -> Result[List[syntax::VariantDeclaration], Failure]
+  uses Panic, RunForever
+{
+  let _ = accept_punctuation(mut cursor, punctuation: token::Punctuation.Bar)
+  parse_separated(mut cursor, separator: token::Punctuation.Bar, parse_item: parse_variant)
+}
+
+fn parse_type_clauses(cursor: mut TokenCursor) -> Result[List[syntax::TypeClause], Failure]
+  uses Panic, RunForever
+{
+  var clauses: List[syntax::TypeClause] = []
+  while true {
+    let start = cursor.index
+    let kind = cursor.peek_kind()
+    let clause_kind = if kind == token::Kind.Keyword(token::Keyword.Invariant) {
+      advance(mut cursor)
+      syntax::TypeClauseKind.TypeInvariant(parse_expression(mut cursor)?)
+    } else if kind == token::Kind.Keyword(token::Keyword.Derives) {
+      advance(mut cursor)
+      syntax::TypeClauseKind.Derives(parse_path_type_list(mut cursor)?)
+    } else if kind == token::Kind.Keyword(token::Keyword.Cost) {
+      advance(mut cursor)
+      let _ = expect_contextual(
+        mut cursor,
+        accepted: [ContextualKeyword.Potential],
+        category: "`potential`; a type's only cost clause is `cost potential expression`",
+        expected: "`potential`; a type's only cost clause is `cost potential expression`",
+      )?
+      syntax::TypeClauseKind.Potential(parse_expression(mut cursor)?)
+    } else {
+      break
+    }
+    mut clauses.push(syntax::TypeClause(kind: own clause_kind, id: allocate_id_from(mut cursor, start_index: start)))
+  }
+  Ok(own clauses)
+}
+
+fn parse_type_definition(cursor: mut TokenCursor, name: own syntax::Name) -> Result[syntax::DefinitionKind, Failure]
+  uses Panic, RunForever
+{
+  let generics = parse_generics(mut cursor)?
+  let body = if cursor.is_punctuation(token::Punctuation.Open(token::Bracket.Paren)) {
+    syntax::TypeBody.Fields(parse_fields(mut cursor))
+  } else if accept_punctuation(mut cursor, punctuation: token::Punctuation.Equal) {
+    if accept_keyword(mut cursor, keyword: token::Keyword.Todo) {
+      syntax::TypeBody.TypeTodo
+    } else {
+      syntax::TypeBody.Variants(parse_variants(mut cursor)?)
+    }
+  } else {
+    return Err(fail(mut cursor, expected: "`(` to start the fields, or `=` before the variants"))
+  }
+  let clauses = parse_type_clauses(mut cursor)?
+  Ok(syntax::DefinitionKind.TypeDefinition(name: own name, generics: own generics, body: own body, clauses: own clauses))
+}
+
+type Parsed(kind: syntax::DefinitionKind, methods: List[Piece])
+
+fn parse_trait(cursor: mut TokenCursor, name: own syntax::Name) -> Result[Parsed, Failure]
+  uses Panic, RunForever
+{
+  let generics = parse_generics(mut cursor)?
+  let supertraits = if accept_punctuation(mut cursor, punctuation: token::Punctuation.Colon) { parse_bounds(mut cursor)? } else { [] }
+  expect_body_opening(mut cursor)?
+  let lines = parse_lines(mut cursor, parse_item: parse_trait_line, recover: recover_trait_line)
+  let split = split_member_lines(own lines)
+  Ok(
+    Parsed(
+      kind: syntax::DefinitionKind.Trait(name: own name, generics: own generics, supertraits: own supertraits, members: own split.members),
+      methods: own split.methods,
+    ),
+  )
+}
+
+fn parse_impl(cursor: mut TokenCursor) -> Result[Parsed, Failure]
+  uses Panic, RunForever
+{
+  advance(mut cursor)
+  let closer = if cursor.is_punctuation(token::Punctuation.Less) { find_angle_closer(cursor) } else { None }
+  if closer is Some(closer_index) {
+    let opening = cursor.peek()
+    var has_bounds = false
+    for index in cursor.index + 1..closer_index {
+      match cursor.lookup_token(index).kind {
+        Upper(_) => {}
+        Punctuation(punctuation) => if punctuation != token::Punctuation.Comma {
+          has_bounds = true
+        }
+        _ => has_bounds = true
+      }
+    }
+    let closing = cursor.lookup_token(closer_index)
+    report_impl_parameters(mut cursor, opening, closing, has_bounds)
+    skip_to(mut cursor, limit: closer_index + 1)
+  }
+  let implemented_trait = parse_path_type(mut cursor)?
+  expect_keyword(mut cursor, keyword: token::Keyword.For)?
+  let implementing_type = parse_type_head(mut cursor)?
+  let capabilities = if accept_keyword(mut cursor, keyword: token::Keyword.Uses) { parse_capability_list(mut cursor)? } else { [] }
+  expect_body_opening(mut cursor)?
+  let lines = parse_lines(mut cursor, parse_item: parse_impl_line, recover: recover_impl_line)
+  let split = split_member_lines(own lines)
+  Ok(
+    Parsed(
+      kind: syntax::DefinitionKind.Impl(
+        implemented_trait: own implemented_trait,
+        implementing_type: own implementing_type,
+        capabilities: own capabilities,
+        members: own split.members,
+      ),
+      methods: own split.methods,
+    ),
+  )
+}
+
+fn parse_capability_definition(cursor: mut TokenCursor, name: own syntax::Name) -> Result[Parsed, Failure]
+  uses Panic, RunForever
+{
+  expect_body_opening(mut cursor)?
+  let lines = parse_lines(mut cursor, parse_item: parse_capability_line, recover: recover_capability_line)
+  let split = split_member_lines(own lines)
+  Ok(Parsed(kind: syntax::DefinitionKind.Capability(name: own name, members: own split.members), methods: own split.methods))
+}
+
+fn parse_constant(cursor: mut TokenCursor, name: own syntax::DefinitionName) -> Result[syntax::DefinitionKind, Failure]
+  uses Panic, RunForever
+{
+  expect_punctuation(mut cursor, punctuation: token::Punctuation.Colon)?
+  let annotation = parse_type_expression(mut cursor)?
+  expect_punctuation(mut cursor, punctuation: token::Punctuation.Equal)?
+  Ok(syntax::DefinitionKind.Constant(name: own name, annotation: own annotation, value: parse_expression(mut cursor)?))
+}
+
+fn parse_test(cursor: mut TokenCursor) -> Result[syntax::DefinitionKind, Failure]
+  uses Panic, RunForever
+{
+  advance(mut cursor)
+  let name = match cursor.peek_kind() {
+    String(literal) => {
+      let written = cursor.tables.literal(literal)
+      if written.tag.is_some() {
+        return Err(fail(mut cursor, expected: "a plain string, with no tag, to name the test"))
+      }
+      if !written.rest.is_empty() {
+        let span = cursor.peek().span
+        report(mut cursor, code: "parser.interpolation_not_allowed", span, message: "A test's name cannot have interpolations.")
+        return Err(Failure.Failed)
+      }
+      let start = cursor.index
+      parse_string_literal(mut cursor, start, modules: [], literal)?
+    }
+    _ => return Err(fail(mut cursor, expected: "a string to name the test"))
+  }
+  let capabilities = if accept_keyword(mut cursor, keyword: token::Keyword.Uses) { parse_capability_list(mut cursor)? } else { [] }
+  Ok(syntax::DefinitionKind.Test(name: own name, capabilities: own capabilities, body: parse_body(mut cursor)?))
+}
+
+fn parse_theorem(cursor: mut TokenCursor, name: own syntax::Name) -> Result[syntax::DefinitionKind, Failure]
+  uses Panic, RunForever
+{
+  let generics = parse_generics(mut cursor)?
+  let parameters = parse_parameters(mut cursor, is_method: false)?
+  let clauses = parse_clauses(mut cursor)
+  Ok(
+    syntax::DefinitionKind.Theorem(
+      name: own name,
+      generics: own generics,
+      parameters: own parameters,
+      clauses: own clauses,
+      body: parse_body(mut cursor)?,
+    ),
+  )
+}
+
+fn parse_law_proof(cursor: mut TokenCursor) -> Result[syntax::DefinitionKind, Failure]
+  uses Panic, RunForever
+{
+  advance(mut cursor)
+  let proved_trait = parse_path_type(mut cursor)?
+  expect_punctuation(mut cursor, punctuation: token::Punctuation.Dot)?
+  let law_name = lower_name(mut cursor, expected: "the name of a law")?
+  expect_keyword(mut cursor, keyword: token::Keyword.For)?
+  let implementing_type = parse_type_head(mut cursor)?
+  Ok(
+    syntax::DefinitionKind.LawProof(
+      proved_trait: own proved_trait,
+      law_name: own law_name,
+      implementing_type: own implementing_type,
+      body: parse_body(mut cursor)?,
+    ),
+  )
+}
+
+fn parse_function(cursor: mut TokenCursor, name: own syntax::DefinitionName) -> Result[syntax::DefinitionKind, Failure]
+  uses Panic, RunForever
+{
+  let signature = parse_function_signature(mut cursor, name: own name)?
+  let body = parse_definition_body(mut cursor)?
+  Ok(syntax::DefinitionKind.Function(syntax::FunctionDefinition(signature: own signature, body: own body)))
+}
+
+fn finish_definition(cursor: mut TokenCursor, written: WrittenVisibility, parsed: own Parsed) -> Result[Parsed, Failure]
+  uses Panic
+{
+  if written.opaque_token is Some(opaque_keyword) {
+    let is_allowed = match parsed.kind {
+      TypeDefinition(..) => written.visibility == Some(syntax::Visibility.PublicOpaque)
+      Impl(..) | Test(..) | LawProof(..) => true
+      _ => false
+    }
+    if !is_allowed {
+      let public_keyword = written.public_token.expect("a `public` before `opaque`")
+      report(
+        mut cursor,
+        code: "parser.misplaced_opaque",
+        span: opaque_keyword.span,
+        message: "Only a type can be `opaque`.",
+        fixes: [source::make_fix("Remove `opaque`", edits: [source::delete(source::make_span(public_keyword.span.stop, stop: opaque_keyword.span.stop))])],
+      )
+    }
+  }
+  if !cursor.is_at_end() {
+    return Err(fail(mut cursor, expected: "a line break after the definition"))
+  }
+  Ok(own parsed)
+}
+
+fn make_failure(intended: Option[syntax::IntendedKind], name: own Option[syntax::DefinitionName]) -> Parsed {
+  Parsed(kind: syntax::DefinitionKind.DefinitionError(intended, name: own name), methods: [])
+}
+
+fn without_methods(kind: own syntax::DefinitionKind) -> Parsed {
+  Parsed(kind: own kind, methods: [])
+}
+
+fn parse_top_level_kind(cursor: mut TokenCursor, written: WrittenVisibility) -> Parsed
+  uses Panic, RunForever
+{
+  let kind = cursor.peek_kind()
+  let keyword = match kind {
+    Keyword(word) => Some(word)
+    _ => None
+  }
+  if keyword == Some(token::Keyword.Fn) {
+    advance(mut cursor)
+    let intended = Some(syntax::IntendedKind.IntendedFunction)
+    let Ok(name) = parse_definition_name(mut cursor) else {
+      return make_failure(intended, name: None)
+    }
+    let parsed = match parse_function(mut cursor, name: name.copy()) {
+      Ok(definition) => finish_definition(mut cursor, written, parsed: without_methods(own definition))
+      Err(failure) => Err(failure)
+    }
+    return match own parsed {
+      Ok(definition) => definition
+      Err(_) => make_failure(intended, name: Some(own name))
+    }
+  }
+  if keyword == Some(token::Keyword.Type) || keyword == Some(token::Keyword.Trait) || keyword == Some(token::Keyword.Capability) {
+    advance(mut cursor)
+    let intended = if keyword == Some(token::Keyword.Type) {
+      syntax::IntendedKind.IntendedType
+    } else if keyword == Some(token::Keyword.Trait) {
+      syntax::IntendedKind.IntendedTrait
+    } else {
+      syntax::IntendedKind.IntendedCapability
+    }
+    let expected = if keyword == Some(token::Keyword.Type) {
+      "the name of the type"
+    } else if keyword == Some(token::Keyword.Trait) {
+      "the name of the trait"
+    } else {
+      "the name of the capability"
+    }
+    let Ok(name) = parse_upper_name(mut cursor, expected) else {
+      return make_failure(Some(intended), name: None)
+    }
+    let definition = if keyword == Some(token::Keyword.Type) {
+      match parse_type_definition(mut cursor, name: name.copy()) {
+        Ok(type_kind) => Ok(without_methods(own type_kind))
+        Err(failure) => Err(failure)
+      }
+    } else if keyword == Some(token::Keyword.Trait) {
+      parse_trait(mut cursor, name: name.copy())
+    } else {
+      parse_capability_definition(mut cursor, name: name.copy())
+    }
+    let parsed = match own definition {
+      Ok(parsed_definition) => finish_definition(mut cursor, written, parsed: own parsed_definition)
+      Err(failure) => Err(failure)
+    }
+    return match own parsed {
+      Ok(parsed_definition) => parsed_definition
+      Err(_) => make_failure(Some(intended), name: Some(syntax::DefinitionName.PlainName(own name)))
+    }
+  }
+  if keyword == Some(token::Keyword.Impl) {
+    report_misplaced_visibility(
+      mut cursor,
+      code: "parser.misplaced_visibility",
+      tokens: written.tokens,
+      message: "An `impl` takes no visibility: it applies wherever its trait and the types it names are visible.",
+    )
+    let parsed = match parse_impl(mut cursor) {
+      Ok(parsed_impl) => finish_definition(mut cursor, written, parsed: own parsed_impl)
+      Err(failure) => Err(failure)
+    }
+    return match own parsed {
+      Ok(parsed_impl) => parsed_impl
+      Err(_) => make_failure(None, name: None)
+    }
+  }
+  let reserved_constant = match kind {
+    Reserved(reserved) => reserved == token::Reserved.Const || reserved == token::Reserved.Static
+    _ => false
+  }
+  if keyword == Some(token::Keyword.Let) || reserved_constant {
+    if reserved_constant {
+      let written_token = cursor.peek()
+      report_constant_keyword(mut cursor, written: written_token)
+    }
+    advance(mut cursor)
+    let intended = Some(syntax::IntendedKind.IntendedConstant)
+    let Ok(name) = parse_definition_name(mut cursor) else {
+      return make_failure(intended, name: None)
+    }
+    let parsed = match parse_constant(mut cursor, name: name.copy()) {
+      Ok(constant) => finish_definition(mut cursor, written, parsed: without_methods(own constant))
+      Err(failure) => Err(failure)
+    }
+    return match own parsed {
+      Ok(constant) => constant
+      Err(_) => make_failure(intended, name: Some(own name))
+    }
+  }
+  if keyword == Some(token::Keyword.Test) || keyword == Some(token::Keyword.Proof) {
+    let construct = if keyword == Some(token::Keyword.Test) { "A test" } else { "A law's proof" }
+    report_misplaced_visibility(
+      mut cursor,
+      code: "parser.misplaced_visibility",
+      tokens: written.tokens,
+      message: "${construct} takes no visibility: nothing refers to it by name.",
+    )
+    let definition = if keyword == Some(token::Keyword.Test) { parse_test(mut cursor) } else { parse_law_proof(mut cursor) }
+    let parsed = match own definition {
+      Ok(parsed_kind) => finish_definition(mut cursor, written, parsed: without_methods(own parsed_kind))
+      Err(failure) => Err(failure)
+    }
+    return match own parsed {
+      Ok(parsed_definition) => parsed_definition
+      Err(_) => make_failure(None, name: None)
+    }
+  }
+  if keyword == Some(token::Keyword.Theorem) {
+    advance(mut cursor)
+    let intended = Some(syntax::IntendedKind.IntendedTheorem)
+    let Ok(name) = lower_name(mut cursor, expected: "the name of the theorem") else {
+      return make_failure(intended, name: None)
+    }
+    let parsed = match parse_theorem(mut cursor, name: name.copy()) {
+      Ok(theorem_kind) => finish_definition(mut cursor, written, parsed: without_methods(own theorem_kind))
+      Err(failure) => Err(failure)
+    }
+    return match own parsed {
+      Ok(theorem_definition) => theorem_definition
+      Err(_) => make_failure(intended, name: Some(syntax::DefinitionName.PlainName(own name)))
+    }
+  }
+  if written.visibility.is_none() && begins_statement(kind) {
+    let span = cursor.peek().span
+    report(
+      mut cursor,
+      code: "parser.statement_at_top_level",
+      span,
+      message: "Statements must be inside a function, a test, or another definition with a body.",
+    )
+    return make_failure(None, name: None)
+  }
+  let _ = fail(
+    mut cursor,
+    expected: "a definition: `fn`, `type`, `trait`, `impl`, `capability`, `let`, `test`, `theorem`, or `proof`",
+  )
+  make_failure(None, name: None)
+}
+
+type ParsedDefinition(definition: syntax::Definition, methods: List[Piece])
+
+fn parse_definition(cursor: mut TokenCursor) -> ParsedDefinition
+  uses Panic, RunForever
+{
+  let start = cursor.index
+  let written = parse_visibility(mut cursor)
+  let parsed = parse_top_level_kind(mut cursor, written)
+  let definition = make_definition_node(mut cursor, start, visibility: written.visibility, kind: own parsed.kind)
+  ParsedDefinition(definition: own definition, methods: own parsed.methods)
+}

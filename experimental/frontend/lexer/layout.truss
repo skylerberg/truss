@@ -1,0 +1,482 @@
+use frontend::source
+use frontend::token
+
+type LayoutInput =
+  | Next(
+    kind: token::Kind,
+    span: source::Span,
+    first_line_break: Option[source::Span],
+    blank_line: Bool,
+    unterminated_string: Bool,
+  )
+  | Finish(position: UInt64, first_line_break: Option[source::Span], blank_line: Bool, ends_unterminated: Bool)
+  derives Equal
+
+type LayoutMode = FileMode(recovery: Bool) | InterpolationMode
+  derives Equal
+
+type Opener(bracket: token::Bracket, span: source::Span, index: UInt64)
+  derives Equal
+
+type Run(
+  output: List[token::Token],
+  closers: List[Option[UInt64]],
+  stack: List[Opener],
+  open_paren: UInt64,
+  open_square: UInt64,
+  open_curly: UInt64,
+  previous: Option[token::Kind],
+  open_at_end: Bool,
+  unterminated_strings: List[UInt64],
+)
+
+type TokenRange(first: UInt64, stop: UInt64, open_at_end: Bool)
+  derives Equal
+
+fn spell_opener(bracket: token::Bracket) -> StringSlice {
+  token::spell_punctuation(token::Punctuation.Open(bracket))
+}
+
+fn spell_closer(bracket: token::Bracket) -> StringSlice {
+  token::spell_punctuation(token::Punctuation.Close(bracket))
+}
+
+fn is_layout_name_byte(byte: UInt8) -> Bool {
+  is_ascii_name_byte(byte)
+}
+
+fn starts_definition(source: source::Source, offset: UInt64) -> Bool
+  uses Panic, RunForever
+{
+  if !source.starts_line(offset) {
+    return false
+  }
+  let text = source.text.slice()
+  var stop = offset
+  while stop < text.length() && is_layout_name_byte(text.byte(stop)) {
+    stop += 1
+  }
+  if stop <= offset {
+    return false
+  }
+  match token::find_word(text.substring(offset, to: stop)) {
+    Some(kind) => match kind {
+      Keyword(keyword) => token::is_definition_keyword(keyword)
+      _ => false
+    }
+    None => false
+  }
+}
+
+fn layout_indentation(source: source::Source, offset: UInt64) -> StringSlice
+  uses Panic, RunForever
+{
+  let text = source.text.slice()
+  let start = source.compute_line_start(offset)
+  var stop = start
+  while stop < text.length() && is_space(text.byte(stop)) {
+    stop += 1
+  }
+  text.substring(start, to: stop)
+}
+
+fn token_starts_definition(source: source::Source, first_line_break: Option[source::Span], kind: token::Kind, offset: UInt64) -> Bool
+  uses Panic, RunForever
+{
+  first_line_break.is_some() && layout_indentation(source, offset).is_empty() && match kind {
+    Keyword(keyword) => token::is_definition_keyword(keyword)
+    _ => false
+  }
+}
+
+fn compute_closer_position(first_line_break: Option[source::Span], position: UInt64) -> UInt64 {
+  match first_line_break {
+    Some(line_break) => line_break.start
+    None => position
+  }
+}
+
+fn Run.is_unterminated_string(self, span: source::Span) -> Bool {
+  self.unterminated_strings.contains(span.start)
+}
+
+fn Run.token(self, index: UInt64) -> token::Token
+  uses Panic
+{
+  self.output.get(index).expect("a token of this run")
+}
+
+type ClosingPlace(stop: UInt64, starts_line: Bool)
+  derives Equal
+
+fn find_closing_position(scanner: Scanner, run: Run, opener: Opener) -> Option[ClosingPlace]
+  uses Panic, RunForever
+{
+  let opener_line = scanner.source.compute_line_start(opener.span.start)
+  let indentation = layout_indentation(scanner.source, offset: opener.span.start).length()
+  var last_on_opener_line: Option[UInt64] = Some(opener.span.stop)
+  var last_indented: Option[Option[UInt64]] = None
+  var index = opener.index + 1
+  while index < run.output.length() {
+    let current = run.token(index)
+    var element_start: UInt64 = 0
+    var element_stop: UInt64 = 0
+    var contains_closer = false
+    match current.kind {
+      Newline => {
+        index += 1
+        continue
+      }
+      Punctuation(punctuation) => match punctuation {
+        Open(_) => match run.closers.get(index).expect("a closer slot") {
+          Some(closer) => {
+            element_start = current.span.start
+            element_stop = run.token(closer).span.stop
+            index = closer + 1
+          }
+          None => break
+        }
+        _ => {
+          element_start = current.span.start
+          element_stop = current.span.stop
+          contains_closer = run.is_unterminated_string(current.span)
+          index += 1
+        }
+      }
+      _ => {
+        element_start = current.span.start
+        element_stop = current.span.stop
+        contains_closer = run.is_unterminated_string(current.span)
+        index += 1
+      }
+    }
+    let place = if contains_closer { None } else { Some(element_stop) }
+    let line = scanner.source.compute_line_start(element_start)
+    if line == opener_line {
+      last_on_opener_line = place
+    } else if layout_indentation(scanner.source, offset: element_start).length() > indentation {
+      last_indented = Some(place)
+    }
+  }
+  match last_indented {
+    Some(place) => match place {
+      Some(stop) => Some(ClosingPlace(stop, starts_line: true))
+      None => None
+    }
+    None => match last_on_opener_line {
+      Some(stop) => Some(ClosingPlace(stop, starts_line: false))
+      None => None
+    }
+  }
+}
+
+fn find_closing_edits(scanner: Scanner, run: Run, openers: Slice[Opener]) -> Option[List[source::Edit]]
+  uses Panic, RunForever
+{
+  var earliest: UInt64 = 0
+  var edits: List[source::Edit] = []
+  for opener in openers {
+    let Some(place) = find_closing_position(scanner, run, opener) else {
+      return None
+    }
+    let position = if place.stop > earliest { place.stop } else { earliest }
+    let closer = spell_closer(opener.bracket)
+    let replacement = if place.starts_line && opener.bracket == token::Bracket.Curly {
+      "\n${layout_indentation(scanner.source, offset: opener.span.start)}${closer}"
+    } else {
+      closer.to_string()
+    }
+    mut edits.push(source::insert(source::make_zero_width(position), replacement))
+    earliest = position
+  }
+  Some(own edits)
+}
+
+fn emit(run: mut Run, current: token::Token) {
+  mut run.output.push(current)
+  mut run.closers.push(None)
+  run.previous = Some(current.kind)
+}
+
+fn change_count(run: mut Run, bracket: token::Bracket, is_increase: Bool)
+  uses Panic
+{
+  match bracket {
+    Paren => run.open_paren = if is_increase { run.open_paren + 1 } else { run.open_paren - 1 }
+    Square => run.open_square = if is_increase { run.open_square + 1 } else { run.open_square - 1 }
+    Curly => run.open_curly = if is_increase { run.open_curly + 1 } else { run.open_curly - 1 }
+  }
+}
+
+fn Run.open_count(self, bracket: token::Bracket) -> UInt64 {
+  match bracket {
+    Paren => self.open_paren
+    Square => self.open_square
+    Curly => self.open_curly
+  }
+}
+
+fn push_opener(run: mut Run, bracket: token::Bracket, span: source::Span)
+  uses Panic
+{
+  let index = run.output.length()
+  mut run.stack.push(Opener(bracket, span, index))
+  change_count(mut run, bracket, is_increase: true)
+}
+
+fn pop_opener(run: mut Run, closer: token::Token)
+  uses Panic
+{
+  let Some(opener) = mut run.stack.pop() else {
+    return
+  }
+  change_count(mut run, bracket: opener.bracket, is_increase: false)
+  let closer_index = run.output.length()
+  if opener.index < run.closers.length() {
+    run.closers[opener.index] = Some(closer_index)
+  }
+  emit(mut run, current: closer)
+}
+
+fn insert_closer(run: mut Run, position: UInt64)
+  uses Panic
+{
+  let Some(opener) = run.stack.last() else {
+    return
+  }
+  let bracket = opener.bracket
+  pop_opener(mut run, closer: token::make_token(token::Kind.Punctuation(token::Punctuation.Close(bracket)), span: source::make_zero_width(position)))
+}
+
+fn close_silently(run: mut Run, position: UInt64)
+  uses Panic, RunForever
+{
+  while !run.stack.is_empty() {
+    insert_closer(mut run, position)
+  }
+}
+
+fn innermost_first(run: Run) -> List[Opener] {
+  var openers: List[Opener] = []
+  for opener in run.stack.reversed() {
+    mut openers.push(opener)
+  }
+  openers
+}
+
+fn list_closing_fixes(scanner: Scanner, run: Run, openers: Slice[Opener], title: StringSlice) -> List[source::Fix]
+  uses Panic, RunForever
+{
+  match find_closing_edits(scanner, run, openers) {
+    Some(edits) => [source::make_fix(title, edits: edits.copy())]
+    None => []
+  }
+}
+
+fn close_all(scanner: mut Scanner, run: mut Run, position: UInt64, reason: StringSlice)
+  uses Panic, RunForever
+{
+  let openers = innermost_first(run)
+  let Some(innermost) = openers.get(0) else {
+    return
+  }
+  let innermost_opener = innermost
+  var closers = ""
+  for opener in openers {
+    mut closers.push(spell_closer(opener.bracket))
+  }
+  var notes: List[source::Note] = []
+  for entry in openers.enumerate() {
+    if entry.index > 0 {
+      mut notes.push(
+        source::Note(span: entry.element.span, message: "This `${spell_opener(entry.element.bracket)}` is not closed either."),
+      )
+    }
+  }
+  let fixes = list_closing_fixes(scanner, run, openers, title: "Insert `${closers}`")
+  report(
+    mut scanner,
+    code: "lexer.unclosed_bracket",
+    span: innermost_opener.span,
+    message: "This `${spell_opener(innermost_opener.bracket)}` is never closed${reason}.",
+    notes: own notes,
+    fixes: own fixes,
+  )
+  close_silently(mut run, position)
+}
+
+fn close_bracket(scanner: mut Scanner, run: mut Run, current: token::Token, bracket: token::Bracket)
+  uses Panic, RunForever
+{
+  let span = current.span
+  if run.open_count(bracket) == 0 {
+    report(
+      mut scanner,
+      code: "lexer.unmatched_closing_bracket",
+      span,
+      message: "This `${spell_closer(bracket)}` has no `${spell_opener(bracket)}` to close.",
+    )
+    return
+  }
+  while run.stack.last() is Some(opener) && opener.bracket != bracket {
+    let unclosed = opener
+    let fixes = list_closing_fixes(scanner, run, openers: [unclosed], title: "Insert `${spell_closer(unclosed.bracket)}`")
+    report(
+      mut scanner,
+      code: "lexer.unclosed_bracket",
+      span: unclosed.span,
+      message: "This `${spell_opener(unclosed.bracket)}` is never closed.",
+      notes: [
+        source::Note(span, message: "This `${spell_closer(bracket)}` closes an earlier `${spell_opener(bracket)}` first."),
+      ],
+      fixes: own fixes,
+    )
+    insert_closer(mut run, position: span.start)
+  }
+  pop_opener(mut run, closer: current)
+}
+
+fn finish_run(
+  scanner: mut Scanner,
+  run: mut Run,
+  mode: LayoutMode,
+  position: UInt64,
+  first_line_break: Option[source::Span],
+  blank_line: Bool,
+  ends_unterminated: Bool,
+) -> TokenRange
+  uses Panic, RunForever
+{
+  if !run.stack.is_empty() {
+    run.open_at_end = true
+  }
+  match mode {
+    FileMode(_) => if ends_unterminated {
+      close_silently(mut run, position: compute_closer_position(first_line_break, position))
+    } else {
+      close_all(mut scanner, run: mut run, position: compute_closer_position(first_line_break, position), reason: " before the end of the file")
+    }
+    InterpolationMode => if ends_unterminated {
+      close_silently(mut run, position)
+    } else {
+      close_all(mut scanner, run: mut run, position, reason: " before the end of the interpolation")
+    }
+  }
+  if mode != LayoutMode.InterpolationMode && run.previous is Some(previous_kind) && token::can_end(previous_kind) {
+    let newline_span = match first_line_break {
+      Some(line_break) => line_break
+      None => source::make_zero_width(position)
+    }
+    emit(mut run, current: token::make_token(token::Kind.Newline, span: newline_span))
+  }
+  emit(
+    mut run,
+    current: token::Token(
+      kind: token::Kind.EndOfFile,
+      span: source::make_zero_width(position),
+      line_break_before: first_line_break.is_some(),
+      blank_line_before: blank_line,
+      is_inserted_closer: false,
+    ),
+  )
+  let first = scanner.tables.tokens.length()
+  let output = own run.output
+  run.output = []
+  mut scanner.tables.tokens.append(own output)
+  TokenRange(first, stop: scanner.tables.tokens.length(), open_at_end: run.open_at_end)
+}
+
+fn read_next_input(scanner: mut Scanner, mode: LayoutMode, state: mut InterpolationState) -> LayoutInput
+  uses Panic, RunForever
+{
+  match mode {
+    FileMode(_) => lex_next(mut scanner)
+    InterpolationMode => read_interpolation_input(mut scanner, state: mut state)
+  }
+}
+
+fn run_layout(scanner: mut Scanner, mode: LayoutMode, state: mut InterpolationState) -> TokenRange
+  uses Panic, RunForever
+{
+  var run = Run(
+    output: [],
+    closers: [],
+    stack: [],
+    open_paren: 0,
+    open_square: 0,
+    open_curly: 0,
+    previous: None,
+    open_at_end: false,
+    unterminated_strings: [],
+  )
+  while true {
+    match read_next_input(mut scanner, mode, state: mut state) {
+      Finish(position, first_line_break, blank_line, ends_unterminated) => {
+        return finish_run(mut scanner, run: mut run, mode, position, first_line_break, blank_line, ends_unterminated)
+      }
+      Next(kind, span, first_line_break, blank_line, unterminated_string) => {
+        if mode == LayoutMode.FileMode(recovery: true) && !run.stack.is_empty()
+          && token_starts_definition(scanner.source, first_line_break, kind, offset: span.start)
+        {
+          close_all(
+            mut scanner,
+            run: mut run,
+            position: compute_closer_position(first_line_break, position: span.start),
+            reason: " before the next definition",
+          )
+        }
+        let ignores_line_breaks = match run.stack.last() {
+          Some(opener) => opener.bracket != token::Bracket.Curly
+          None => false
+        }
+        if first_line_break is Some(line_break) && run.previous is Some(previous_kind) && !ignores_line_breaks
+          && token::can_end(previous_kind) && token::can_begin(kind)
+        {
+          emit(mut run, current: token::make_token(token::Kind.Newline, span: line_break))
+        }
+        if unterminated_string {
+          mut run.unterminated_strings.push(span.start)
+        }
+        let current = token::Token(
+          kind,
+          span,
+          line_break_before: first_line_break.is_some(),
+          blank_line_before: blank_line,
+          is_inserted_closer: false,
+        )
+        match kind {
+          Punctuation(punctuation) => match punctuation {
+            Open(bracket) => {
+              push_opener(mut run, bracket, span)
+              emit(mut run, current)
+            }
+            Close(bracket) => close_bracket(mut scanner, run: mut run, current, bracket)
+            _ => emit(mut run, current)
+          }
+          _ => emit(mut run, current)
+        }
+      }
+    }
+  }
+}
+
+fn lex_file(scanner: mut Scanner, recovery: Bool) -> TokenRange
+  uses Panic, RunForever
+{
+  var state = InterpolationState(
+    start: 0,
+    nesting: 0,
+    braces: 0,
+    count: 0,
+    is_finished: false,
+    is_closed: false,
+    ending: Ending.Closed,
+  )
+  run_layout(mut scanner, mode: LayoutMode.FileMode(recovery), state: mut state)
+}
+
+fn lex_interpolation(scanner: mut Scanner, state: mut InterpolationState) -> TokenRange
+  uses Panic, RunForever
+{
+  run_layout(mut scanner, mode: LayoutMode.InterpolationMode, state: mut state)
+}

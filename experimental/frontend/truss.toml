@@ -1,0 +1,3 @@
+[package]
+name = "frontend"
+truss = "0.1"

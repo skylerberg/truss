@@ -1,0 +1,667 @@
+use frontend::source
+use standard::math
+
+internal type Keyword =
+  | Any
+  | Assert
+  | Break
+  | Capability
+  | Concurrent
+  | Continue
+  | Cost
+  | Decreases
+  | Derives
+  | Echo
+  | Else
+  | Ensures
+  | Exists
+  | False
+  | Fn
+  | For
+  | Forall
+  | If
+  | Impl
+  | In
+  | Indirect
+  | Internal
+  | Invariant
+  | Is
+  | Law
+  | Lends
+  | Let
+  | Match
+  | Mut
+  | Opaque
+  | Own
+  | Parallel
+  | Proof
+  | Provide
+  | Public
+  | Requires
+  | Return
+  | SelfValue
+  | SelfType
+  | Test
+  | Theorem
+  | Todo
+  | Trait
+  | True
+  | Type
+  | Unless
+  | Unreachable
+  | Use
+  | Uses
+  | Var
+  | When
+  | While
+  | With
+  derives Equal
+
+internal type Reserved =
+  | As
+  | Async
+  | Await
+  | Const
+  | Defer
+  | Extern
+  | Loop
+  | Macro
+  | Static
+  | Unsafe
+  | Where
+  derives Equal
+
+internal type Bracket = Paren | Square | Curly
+  derives Equal
+
+internal type Punctuation =
+  | Open(bracket: Bracket)
+  | Close(bracket: Bracket)
+  | Comma
+  | Colon
+  | ColonColon
+  | Dot
+  | DotDot
+  | DotDotEqual
+  | Arrow
+  | FatArrow
+  | Question
+  | Bar
+  | Equal
+  | PlusEqual
+  | MinusEqual
+  | StarEqual
+  | SlashEqual
+  | PercentEqual
+  | AmpersandEqual
+  | BarEqual
+  | CaretEqual
+  | ShiftLeftEqual
+  | ShiftRightEqual
+  | Plus
+  | Minus
+  | Star
+  | Slash
+  | Percent
+  | EqualEqual
+  | NotEqual
+  | Less
+  | LessEqual
+  | Greater
+  | GreaterEqual
+  | AndAnd
+  | OrOr
+  | Implies
+  | Bang
+  | Ampersand
+  | Caret
+  | Tilde
+  | ShiftLeft
+  | ShiftRight
+  derives Equal
+
+internal type Foreign = PlusPlus | MinusMinus | StarStar | ColonEqual | PipeGreater
+  derives Equal
+
+internal type Kind =
+  | Upper(name: UInt64)
+  | Lower(name: UInt64)
+  | Underscore
+  | Keyword(keyword: Keyword)
+  | Reserved(reserved: Reserved)
+  | Integer(literal: UInt64)
+  | Float(literal: UInt64)
+  | String(literal: UInt64)
+  | Punctuation(punctuation: Punctuation)
+  | Foreign(foreign: Foreign)
+  | Newline
+  | EndOfFile
+  derives Equal
+
+internal type Token(
+  kind: Kind,
+  span: source::Span,
+  line_break_before: Bool,
+  blank_line_before: Bool,
+  is_inserted_closer: Bool,
+)
+  derives Equal
+
+internal fn make_token(kind: Kind, span: source::Span) -> Token {
+  Token(kind, span, line_break_before: false, blank_line_before: false, is_inserted_closer: false)
+}
+
+internal type Decimal(significand: String, exponent: String)
+  derives Equal
+
+internal fn normalize_decimal(significand: StringSlice, exponent: own math::BigInteger) -> Decimal
+  uses Panic, RunForever
+{
+  if significand == "0" {
+    return Decimal(significand: "0", exponent: "0")
+  }
+  var stop = significand.length()
+  while stop > 1 && significand.byte(stop - 1) == 48 {
+    stop -= 1
+  }
+  let zeros = significand.length() - stop
+  let shifted = exponent + math::BigInteger.from(zeros)
+  Decimal(significand: significand.substring(0, to: stop).to_string(), exponent: "${shifted}")
+}
+
+internal type Tag(name: String, span: source::Span)
+  derives Equal
+
+internal type Form = Ordinary | Raw(quotes: UInt64, dollars: UInt64, multi_line: Bool)
+  derives Equal
+
+internal type Text(value: String, span: source::Span)
+  derives Equal
+
+internal type Interpolation(first: UInt64, stop: UInt64, span: source::Span, is_closed: Bool)
+  derives Equal
+
+internal type Segment(interpolation: Interpolation, text: Text)
+  derives Equal
+
+internal type StringLiteral(tag: Option[Tag], form: Form, first: Text, rest: List[Segment])
+  derives Equal
+
+internal type Tables(
+  tokens: List[Token],
+  names: List[String],
+  literals: List[StringLiteral],
+  integers: List[String],
+  decimals: List[Decimal],
+)
+
+internal fn Tables.empty() -> Tables {
+  Tables(tokens: [], names: [], literals: [], integers: [], decimals: [])
+}
+
+internal fn Tables.name(self, index: UInt64) -> StringSlice
+  uses Panic
+{
+  if index < self.names.length() {
+    self.names[index].slice()
+  } else {
+    Panic.crash("a name index past the table")
+  }
+}
+
+internal fn Tables.literal(self, index: UInt64) -> StringLiteral
+  uses Panic
+{
+  if index < self.literals.length() {
+    self.literals[index].copy()
+  } else {
+    Panic.crash("a literal index past the table")
+  }
+}
+
+internal fn Tables.token(self, index: UInt64) -> Token
+  uses Panic
+{
+  if index < self.tokens.length() {
+    self.tokens[index]
+  } else {
+    Panic.crash("a token index past the pool")
+  }
+}
+
+internal type Lexed(tables: Tables, first: UInt64, stop: UInt64)
+
+internal fn find_word(spelling: StringSlice) -> Option[Kind] {
+  match spelling {
+    "any" => Some(Kind.Keyword(Keyword.Any))
+    "assert" => Some(Kind.Keyword(Keyword.Assert))
+    "break" => Some(Kind.Keyword(Keyword.Break))
+    "capability" => Some(Kind.Keyword(Keyword.Capability))
+    "concurrent" => Some(Kind.Keyword(Keyword.Concurrent))
+    "continue" => Some(Kind.Keyword(Keyword.Continue))
+    "cost" => Some(Kind.Keyword(Keyword.Cost))
+    "decreases" => Some(Kind.Keyword(Keyword.Decreases))
+    "derives" => Some(Kind.Keyword(Keyword.Derives))
+    "echo" => Some(Kind.Keyword(Keyword.Echo))
+    "else" => Some(Kind.Keyword(Keyword.Else))
+    "ensures" => Some(Kind.Keyword(Keyword.Ensures))
+    "exists" => Some(Kind.Keyword(Keyword.Exists))
+    "false" => Some(Kind.Keyword(Keyword.False))
+    "fn" => Some(Kind.Keyword(Keyword.Fn))
+    "for" => Some(Kind.Keyword(Keyword.For))
+    "forall" => Some(Kind.Keyword(Keyword.Forall))
+    "if" => Some(Kind.Keyword(Keyword.If))
+    "impl" => Some(Kind.Keyword(Keyword.Impl))
+    "in" => Some(Kind.Keyword(Keyword.In))
+    "indirect" => Some(Kind.Keyword(Keyword.Indirect))
+    "internal" => Some(Kind.Keyword(Keyword.Internal))
+    "invariant" => Some(Kind.Keyword(Keyword.Invariant))
+    "is" => Some(Kind.Keyword(Keyword.Is))
+    "law" => Some(Kind.Keyword(Keyword.Law))
+    "lends" => Some(Kind.Keyword(Keyword.Lends))
+    "let" => Some(Kind.Keyword(Keyword.Let))
+    "match" => Some(Kind.Keyword(Keyword.Match))
+    "mut" => Some(Kind.Keyword(Keyword.Mut))
+    "opaque" => Some(Kind.Keyword(Keyword.Opaque))
+    "own" => Some(Kind.Keyword(Keyword.Own))
+    "parallel" => Some(Kind.Keyword(Keyword.Parallel))
+    "proof" => Some(Kind.Keyword(Keyword.Proof))
+    "provide" => Some(Kind.Keyword(Keyword.Provide))
+    "public" => Some(Kind.Keyword(Keyword.Public))
+    "requires" => Some(Kind.Keyword(Keyword.Requires))
+    "return" => Some(Kind.Keyword(Keyword.Return))
+    "self" => Some(Kind.Keyword(Keyword.SelfValue))
+    "Self" => Some(Kind.Keyword(Keyword.SelfType))
+    "test" => Some(Kind.Keyword(Keyword.Test))
+    "theorem" => Some(Kind.Keyword(Keyword.Theorem))
+    "todo" => Some(Kind.Keyword(Keyword.Todo))
+    "trait" => Some(Kind.Keyword(Keyword.Trait))
+    "true" => Some(Kind.Keyword(Keyword.True))
+    "type" => Some(Kind.Keyword(Keyword.Type))
+    "unless" => Some(Kind.Keyword(Keyword.Unless))
+    "unreachable" => Some(Kind.Keyword(Keyword.Unreachable))
+    "use" => Some(Kind.Keyword(Keyword.Use))
+    "uses" => Some(Kind.Keyword(Keyword.Uses))
+    "var" => Some(Kind.Keyword(Keyword.Var))
+    "when" => Some(Kind.Keyword(Keyword.When))
+    "while" => Some(Kind.Keyword(Keyword.While))
+    "with" => Some(Kind.Keyword(Keyword.With))
+    "as" => Some(Kind.Reserved(Reserved.As))
+    "async" => Some(Kind.Reserved(Reserved.Async))
+    "await" => Some(Kind.Reserved(Reserved.Await))
+    "const" => Some(Kind.Reserved(Reserved.Const))
+    "defer" => Some(Kind.Reserved(Reserved.Defer))
+    "extern" => Some(Kind.Reserved(Reserved.Extern))
+    "loop" => Some(Kind.Reserved(Reserved.Loop))
+    "macro" => Some(Kind.Reserved(Reserved.Macro))
+    "static" => Some(Kind.Reserved(Reserved.Static))
+    "unsafe" => Some(Kind.Reserved(Reserved.Unsafe))
+    "where" => Some(Kind.Reserved(Reserved.Where))
+    _ => None
+  }
+}
+
+internal fn spell_keyword(keyword: Keyword) -> StringSlice {
+  match keyword {
+    Any => "any"
+    Assert => "assert"
+    Break => "break"
+    Capability => "capability"
+    Concurrent => "concurrent"
+    Continue => "continue"
+    Cost => "cost"
+    Decreases => "decreases"
+    Derives => "derives"
+    Echo => "echo"
+    Else => "else"
+    Ensures => "ensures"
+    Exists => "exists"
+    False => "false"
+    Fn => "fn"
+    For => "for"
+    Forall => "forall"
+    If => "if"
+    Impl => "impl"
+    In => "in"
+    Indirect => "indirect"
+    Internal => "internal"
+    Invariant => "invariant"
+    Is => "is"
+    Law => "law"
+    Lends => "lends"
+    Let => "let"
+    Match => "match"
+    Mut => "mut"
+    Opaque => "opaque"
+    Own => "own"
+    Parallel => "parallel"
+    Proof => "proof"
+    Provide => "provide"
+    Public => "public"
+    Requires => "requires"
+    Return => "return"
+    SelfValue => "self"
+    SelfType => "Self"
+    Test => "test"
+    Theorem => "theorem"
+    Todo => "todo"
+    Trait => "trait"
+    True => "true"
+    Type => "type"
+    Unless => "unless"
+    Unreachable => "unreachable"
+    Use => "use"
+    Uses => "uses"
+    Var => "var"
+    When => "when"
+    While => "while"
+    With => "with"
+  }
+}
+
+internal fn spell_reserved(reserved: Reserved) -> StringSlice {
+  match reserved {
+    As => "as"
+    Async => "async"
+    Await => "await"
+    Const => "const"
+    Defer => "defer"
+    Extern => "extern"
+    Loop => "loop"
+    Macro => "macro"
+    Static => "static"
+    Unsafe => "unsafe"
+    Where => "where"
+  }
+}
+
+internal fn spell_punctuation(punctuation: Punctuation) -> StringSlice {
+  match punctuation {
+    Open(bracket) => match bracket {
+      Paren => "("
+      Square => "["
+      Curly => "{"
+    }
+    Close(bracket) => match bracket {
+      Paren => ")"
+      Square => "]"
+      Curly => "}"
+    }
+    Comma => ","
+    Colon => ":"
+    ColonColon => "::"
+    Dot => "."
+    DotDot => ".."
+    DotDotEqual => "..="
+    Arrow => "->"
+    FatArrow => "=>"
+    Question => "?"
+    Bar => "|"
+    Equal => "="
+    PlusEqual => "+="
+    MinusEqual => "-="
+    StarEqual => "*="
+    SlashEqual => "/="
+    PercentEqual => "%="
+    AmpersandEqual => "&="
+    BarEqual => "|="
+    CaretEqual => "^="
+    ShiftLeftEqual => "<<="
+    ShiftRightEqual => ">>="
+    Plus => "+"
+    Minus => "-"
+    Star => "*"
+    Slash => "/"
+    Percent => "%"
+    EqualEqual => "=="
+    NotEqual => "!="
+    Less => "<"
+    LessEqual => "<="
+    Greater => ">"
+    GreaterEqual => ">="
+    AndAnd => "&&"
+    OrOr => "||"
+    Implies => "==>"
+    Bang => "!"
+    Ampersand => "&"
+    Caret => "^"
+    Tilde => "~"
+    ShiftLeft => "<<"
+    ShiftRight => ">>"
+  }
+}
+
+internal fn spell_foreign(foreign: Foreign) -> StringSlice {
+  match foreign {
+    PlusPlus => "++"
+    MinusMinus => "--"
+    StarStar => "**"
+    ColonEqual => ":="
+    PipeGreater => "|>"
+  }
+}
+
+internal fn is_definition_keyword(keyword: Keyword) -> Bool {
+  match keyword {
+    Fn | Type | Trait | Impl | Capability | Let | Test | Theorem | Proof | Use | Public | Internal => true
+    _ => false
+  }
+}
+
+internal fn can_end(kind: Kind) -> Bool {
+  match kind {
+    Upper(_) | Lower(_) | Underscore | Integer(_) | Float(_) | String(_) => true
+    Punctuation(punctuation) => match punctuation {
+      Close(_) | Question => true
+      _ => false
+    }
+    Keyword(keyword) => match keyword {
+      True | False | SelfValue | SelfType | Todo | Unreachable | Break | Continue | Return => true
+      _ => false
+    }
+    Foreign(foreign) => match foreign {
+      PlusPlus | MinusMinus => true
+      StarStar | ColonEqual | PipeGreater => false
+    }
+    Reserved(_) | Newline | EndOfFile => false
+  }
+}
+
+internal fn can_begin(kind: Kind) -> Bool {
+  match kind {
+    Upper(_) | Lower(_) | Underscore | Integer(_) | Float(_) | String(_) | Reserved(_) => true
+    Foreign(foreign) => match foreign {
+      PlusPlus | MinusMinus => true
+      StarStar | ColonEqual | PipeGreater => false
+    }
+    Punctuation(punctuation) => match punctuation {
+      Open(_) | Minus | Bang | Tilde => true
+      _ => false
+    }
+    Keyword(keyword) => match keyword {
+      Cost | Decreases | Derives | Else | Ensures | In | Indirect | Invariant | Is | Lends | Opaque
+        | Requires | Unless | Uses | When | With => false
+      _ => true
+    }
+    Newline | EndOfFile => false
+  }
+}
+
+fn is_joining_name_byte(byte: UInt8) -> Bool {
+  (byte >= 97 && byte <= 122) || (byte >= 65 && byte <= 90) || (byte >= 48 && byte <= 57) || byte == 95 || byte >= 128
+}
+
+fn is_operator_byte(byte: UInt8) -> Bool {
+  byte == 33 || byte == 37 || byte == 38 || byte == 42 || byte == 43 || byte == 45 || byte == 46 || byte == 47
+    || byte == 58 || byte == 60 || byte == 61 || byte == 62 || byte == 94 || byte == 124
+}
+
+internal fn joins(left: UInt8, right: UInt8) -> Bool {
+  (is_joining_name_byte(left) && (is_joining_name_byte(right) || right == 34 || right == 39))
+    || (is_operator_byte(left) && is_operator_byte(right))
+}
+
+internal fn joins_neighbor(before: Option[UInt8], after: Option[UInt8], code: StringSlice) -> Bool
+  uses Panic
+{
+  if code.is_empty() {
+    return match before, after {
+      Some(left), Some(right) => joins(left, right)
+      _, _ => false
+    }
+  }
+  let joins_before = match before {
+    Some(left) => joins(left, right: code.byte(0))
+    None => false
+  }
+  joins_before || match after {
+    Some(right) => joins(code.byte(code.length() - 1), right)
+    None => false
+  }
+}
+
+internal type Insertion(at: UInt64, text: String)
+  derives Equal
+
+fn escape_spelling(text: StringSlice) -> String
+  uses Panic, RunForever
+{
+  var buffer = String.with_capacity(text.length())
+  let length = text.length()
+  var index: UInt64 = 0
+  while index < length {
+    let byte = text.byte(index)
+    if byte == 34 {
+      mut buffer.push("\\\"")
+    } else if byte == 92 {
+      mut buffer.push("\\\\")
+    } else if byte == 10 {
+      mut buffer.push("\\n")
+    } else if byte == 9 {
+      mut buffer.push("\\t")
+    } else if byte == 13 {
+      mut buffer.push("\\r")
+    } else if byte == 0 {
+      mut buffer.push("\\0")
+    } else if byte == 36 && index + 1 < length && text.byte(index + 1) == 123 {
+      mut buffer.push("\\$")
+    } else if byte < 32 || byte == 127 {
+      mut buffer.push("\\u{${format_lowercase_hexadecimal(byte)}}")
+    } else {
+      var stop = index + 1
+      while stop < length && !text.is_boundary(stop) {
+        stop += 1
+      }
+      mut buffer.push(text.substring(index, to: stop))
+      index = stop
+      continue
+    }
+    index += 1
+  }
+  buffer
+}
+
+fn format_lowercase_hexadecimal(byte: UInt8) -> String
+  uses Panic
+{
+  let digits = "0123456789abcdef"
+  let high = UInt64.from_integer(byte / 16)
+  let low = UInt64.from_integer(byte % 16)
+  if high == 0 {
+    digits.substring(low, to: low + 1).to_string()
+  } else {
+    "${digits.substring(high, to: high + 1)}${digits.substring(low, to: low + 1)}"
+  }
+}
+
+fn spell_inserted(insertions: Slice[Insertion], offset: UInt64, buffer: mut String) {
+  for insertion in insertions {
+    if insertion.at == offset {
+      mut buffer.push(insertion.text)
+    }
+  }
+}
+
+fn spell_kind(tables: Tables, kind: Kind) -> Option[String]
+  uses Panic, RunForever
+{
+  match kind {
+    Upper(name) | Lower(name) => Some(tables.name(name).to_string())
+    Underscore => Some("_")
+    Keyword(keyword) => Some(spell_keyword(keyword).to_string())
+    Reserved(reserved) => Some(spell_reserved(reserved).to_string())
+    Integer(literal) => match tables.integers.get(literal) {
+      Some(value) => Some("${value}")
+      None => None
+    }
+    Float(literal) => match tables.decimals.get(literal) {
+      Some(decimal) => Some("${decimal.significand}e${decimal.exponent}")
+      None => None
+    }
+    String(literal) => spell_string(tables, literal: tables.literal(literal))
+    Punctuation(punctuation) => Some(spell_punctuation(punctuation).to_string())
+    Foreign(foreign) => Some(spell_foreign(foreign).to_string())
+    Newline | EndOfFile => None
+  }
+}
+
+fn spell_string(tables: Tables, literal: StringLiteral) -> Option[String]
+  uses Panic, RunForever
+{
+  var text = ""
+  if literal.tag is Some(tag) {
+    mut text.push(tag.name)
+  }
+  mut text.push("\"")
+  mut text.push(escape_spelling(literal.first.value))
+  for segment in literal.rest {
+    if !segment.interpolation.is_closed {
+      return None
+    }
+    var inner: List[Token] = []
+    for index in segment.interpolation.first..segment.interpolation.stop {
+      mut inner.push(tables.token(index))
+    }
+    let Some(spelled) = spell_tokens(tables, tokens: inner, insertions: []) else {
+      return None
+    }
+    mut text.push("\${")
+    mut text.push(spelled)
+    mut text.push("}")
+    mut text.push(escape_spelling(segment.text.value))
+  }
+  mut text.push("\"")
+  Some(own text)
+}
+
+internal fn spell_tokens(tables: Tables, tokens: Slice[Token], insertions: Slice[Insertion]) -> Option[String]
+  uses Panic, RunForever
+{
+  var buffer = ""
+  var previous_stop: Option[UInt64] = None
+  for current in tokens {
+    if current.kind == Kind.EndOfFile {
+      continue
+    }
+    let spelled = if current.is_inserted_closer { None } else { spell_kind(tables, kind: current.kind) }
+    let Some(text) = own spelled else {
+      return None
+    }
+    match previous_stop {
+      Some(stop) => {
+        spell_inserted(insertions, offset: stop, buffer: mut buffer)
+        if stop < current.span.start {
+          mut buffer.push(" ")
+          spell_inserted(insertions, offset: current.span.start, buffer: mut buffer)
+        }
+      }
+      None => spell_inserted(insertions, offset: current.span.start, buffer: mut buffer)
+    }
+    mut buffer.push(text)
+    previous_stop = Some(current.span.stop)
+  }
+  if previous_stop is Some(stop) {
+    spell_inserted(insertions, offset: stop, buffer: mut buffer)
+  }
+  Some(own buffer)
+}

@@ -1,0 +1,917 @@
+use frontend::syntax
+
+fn make_form(head: StringSlice, parts: Slice[String]) -> String {
+  var pieces: List[StringSlice] = []
+  if !head.is_empty() {
+    mut pieces.push(head)
+  }
+  for part in parts {
+    if !part.is_empty() {
+      mut pieces.push(part)
+    }
+  }
+  "(${pieces.join(" ")})"
+}
+
+fn show_optional_type(value: Option[syntax::TypeExpression], prefix: StringSlice) -> String
+  uses RunForever
+{
+  match value {
+    Some(written) => "${prefix}${show_type_expression(written)}"
+    None => ""
+  }
+}
+
+internal fn show_path(path: syntax::NamePath) -> String {
+  var names: List[StringSlice] = []
+  for name in path.modules {
+    mut names.push(name.text)
+  }
+  mut names.push(path.last.text)
+  names.join("::")
+}
+
+fn show_mode(mode: syntax::Mode) -> StringSlice {
+  match mode {
+    Mut => "mut"
+    Own => "own"
+  }
+}
+
+fn show_intended_keyword(intended: syntax::IntendedKind) -> StringSlice {
+  match intended {
+    IntendedFunction => "fn"
+    IntendedConstant => "let"
+    IntendedType => "type"
+    IntendedTrait => "trait"
+    IntendedCapability => "capability"
+    IntendedTheorem => "theorem"
+  }
+}
+
+fn show_operation(operation: syntax::Operation) -> StringSlice {
+  match operation {
+    Arithmetic(arithmetic) => match arithmetic {
+      Multiply => "*"
+      Divide => "/"
+      Remainder => "%"
+      Add => "+"
+      Subtract => "-"
+    }
+    Shift(shift) => match shift {
+      ShiftLeft => "<<"
+      ShiftRight => ">>"
+    }
+    Bitwise(bitwise) => match bitwise {
+      BitAnd => "&"
+      BitXor => "^"
+      BitOr => "|"
+    }
+  }
+}
+
+fn show_binary(binary: syntax::Binary) -> StringSlice {
+  match binary {
+    Operation(operation) => show_operation(operation)
+    Comparison(comparison) => match comparison {
+      Equal => "=="
+      NotEqual => "!="
+      Less => "<"
+      LessEqual => "<="
+      Greater => ">"
+      GreaterEqual => ">="
+    }
+    Connective(connective) => match connective {
+      And => "&&"
+      Or => "||"
+      Implies => "==>"
+    }
+  }
+}
+
+fn show_assignment(assignment: syntax::Assignment) -> String {
+  match assignment {
+    Assign => "="
+    Compound(operation) => "${show_operation(operation)}="
+  }
+}
+
+fn escape(value: StringSlice) -> String {
+  var buffer = String.with_capacity(value.length())
+  for character in value.characters() {
+    if character == Character"\"" {
+      mut buffer.push("\\\"")
+    } else if character == Character"\\" {
+      mut buffer.push("\\\\")
+    } else if character == Character"\n" {
+      mut buffer.push("\\n")
+    } else {
+      mut buffer.push_character(character)
+    }
+  }
+  buffer
+}
+
+fn show_type_expression(written: syntax::TypeExpression) -> String
+  uses RunForever
+{
+  match written.kind {
+    PathType(path_type) => show_path_type(path_type)
+    SelfType(name) => match name {
+      None => "Self"
+      Some(associated) => "Self.${associated.text}"
+    }
+    Associated(parameter, name) => "${parameter.text}.${name.text}"
+    AnyType(path_type) => make_form("any", parts: [show_path_type(path_type)])
+    FunctionType(function_type) => show_function_type(function_type)
+    TypeError => "error"
+  }
+}
+
+fn show_path_type(path_type: syntax::PathType) -> String
+  uses RunForever
+{
+  if path_type.arguments.is_empty() {
+    return show_path(path_type.path)
+  }
+  var arguments: List[String] = []
+  for argument in path_type.arguments {
+    mut arguments.push(show_type_argument(argument))
+  }
+  "${show_path(path_type.path)}[${arguments.join(", ")}]"
+}
+
+fn show_type_argument(argument: syntax::TypeArgument) -> String
+  uses RunForever
+{
+  match argument {
+    TypeArgument(argument: written) => show_type_expression(written)
+    Count(digits, ..) => digits.copy()
+    CountName(name) => name.text.copy()
+    Constraint(name, value) => "${name.text} = ${show_type_expression(value)}"
+  }
+}
+
+fn show_function_type(function_type: syntax::FunctionType) -> String
+  uses RunForever
+{
+  var inputs: List[String] = []
+  for input in function_type.inputs {
+    var text = ""
+    if input.name is Some(name) {
+      mut text.push("${name.text}: ")
+    }
+    if input.mode is Some(mode) {
+      mut text.push("${show_mode(mode)} ")
+    }
+    mut text.push(show_type_expression(input.annotation))
+    mut inputs.push(own text)
+  }
+  var parts: List[String] = [make_form("", parts: inputs), show_optional_type(function_type.output, prefix: "-> ")]
+  for clause in function_type.clauses {
+    mut parts.push(show_clause(clause))
+  }
+  make_form("fn", parts)
+}
+
+fn show_generic(parameter: syntax::GenericParameter) -> String
+  uses RunForever
+{
+  match parameter.kind {
+    TypeParameter(name, bounds) => if bounds.is_empty() {
+      name.text.copy()
+    } else {
+      "${name.text}: ${show_path_types(bounds, separator: " + ")}"
+    }
+    ValueParameter(name, annotation) => "${name.text}: ${show_type_expression(annotation)}"
+    GenericError => "error"
+  }
+}
+
+fn show_path_types(path_types: Slice[syntax::PathType], separator: StringSlice) -> String
+  uses RunForever
+{
+  var shown: List[String] = []
+  for path_type in path_types {
+    mut shown.push(show_path_type(path_type))
+  }
+  shown.join(separator)
+}
+
+fn show_generics(parameters: Slice[syntax::GenericParameter]) -> String
+  uses RunForever
+{
+  if parameters.is_empty() {
+    return ""
+  }
+  var shown: List[String] = []
+  for parameter in parameters {
+    mut shown.push(show_generic(parameter))
+  }
+  "[${shown.join(", ")}]"
+}
+
+fn show_capability_reference(reference: syntax::CapabilityReference) -> String
+  uses RunForever
+{
+  match reference.kind {
+    CapabilityPath(path_type) => show_path_type(path_type)
+    SelfCapabilities(name) => "Self.${name.text}"
+    AssociatedCapabilities(parameter, name) => "${parameter.text}.${name.text}"
+    GenericCapability(name) => "generic ${name.text}"
+  }
+}
+
+fn show_condition(condition: Slice[syntax::BoundCondition]) -> String
+  uses RunForever
+{
+  var shown: List[String] = []
+  for bound in condition {
+    mut shown.push("${show_type_expression(bound.subject)}: ${show_path_types(bound.bounds, separator: " + ")}")
+  }
+  shown.join(" && ")
+}
+
+fn show_conditional(shown: own String, condition: Option[List[syntax::BoundCondition]]) -> String
+  uses RunForever
+{
+  match condition {
+    Some(bounds) => make_form("when", parts: [own shown, show_condition(bounds)])
+    None => shown
+  }
+}
+
+fn show_capability_use(capability_use: syntax::CapabilityUse) -> String
+  uses RunForever
+{
+  if capability_use.unless_bounds.is_none() && capability_use.unless_values.is_empty() {
+    return show_capability_reference(capability_use.reference)
+  }
+  var parts: List[String] = [show_capability_reference(capability_use.reference)]
+  if capability_use.unless_bounds is Some(bounds) {
+    mut parts.push(show_condition(bounds))
+  }
+  for value in capability_use.unless_values {
+    mut parts.push(show_expression(value))
+  }
+  make_form("unless", parts)
+}
+
+fn show_clause(clause: syntax::Clause) -> String
+  uses RunForever
+{
+  let shown = match clause.kind {
+    Uses(capabilities) => {
+      var parts: List[String] = []
+      for capability_use in capabilities {
+        mut parts.push(show_capability_use(capability_use))
+      }
+      make_form("uses", parts)
+    }
+    Requires(value) => make_form("requires", parts: [show_expression(value)])
+    Ensures(value) => make_form("ensures", parts: [show_expression(value)])
+    Decreases(measures) => make_form("decreases", parts: show_expressions(measures))
+    Cost(clause: cost_clause) => show_cost(cost_clause)
+    ClauseError => "error"
+  }
+  show_conditional(own shown, condition: clause.condition.copy())
+}
+
+fn show_expressions(values: Slice[syntax::Expression]) -> List[String]
+  uses RunForever
+{
+  var shown: List[String] = []
+  for value in values {
+    mut shown.push(show_expression(value))
+  }
+  shown
+}
+
+fn show_metric(metric: syntax::Metric) -> StringSlice {
+  match metric {
+    Time => "time"
+    Allocations => "allocations"
+    AllocatedBytes => "allocated_bytes"
+  }
+}
+
+fn show_cost(cost_clause: syntax::CostClause) -> String
+  uses RunForever
+{
+  let resource = match cost_clause.resource {
+    Metric(metric) => show_metric(metric).to_string()
+    Calls(target) => match target {
+      CallParameter(name) => make_form("calls", parts: [name.text.copy()])
+      CallCapability(path_type) => make_form("calls", parts: [show_path_type(path_type)])
+      CallMethod(path_type, name) => make_form("calls", parts: ["${show_path_type(path_type)}.${name.text}"])
+    }
+  }
+  let bound = match cost_clause.bound {
+    BigO(value) => make_form("O", parts: [show_expression(value)])
+    AtMost(value) => make_form("<=", parts: [show_expression(value)])
+    Exactly(value) => make_form("==", parts: [show_expression(value)])
+  }
+  let amortized = if cost_clause.is_amortized { "amortized" } else { "" }
+  make_form("cost", parts: [amortized.to_string(), own resource, own bound])
+}
+
+fn show_string_literal(literal: syntax::StringLiteral) -> String
+  uses RunForever
+{
+  var text = ""
+  if literal.tag is Some(tag) {
+    mut text.push(show_path(tag))
+  }
+  mut text.push("\"")
+  mut text.push(escape(literal.first.value))
+  for interpolated in literal.rest {
+    mut text.push("\${")
+    mut text.push(show_expression(interpolated.value))
+    mut text.push("}")
+    mut text.push(escape(interpolated.text.value))
+  }
+  mut text.push("\"")
+  text
+}
+
+fn show_expression(value: syntax::Expression) -> String
+  uses RunForever
+{
+  match value.kind {
+    Integer(digits) => digits.copy()
+    Float(decimal) => "${decimal.significand}e${decimal.exponent}"
+    String(literal) => show_string_literal(literal)
+    True => "true"
+    False => "false"
+    Todo => "todo"
+    Unreachable => "unreachable"
+    Break => "break"
+    Continue => "continue"
+    SelfValue => "self"
+    SelfTypeValue => "Self"
+    Name(path) => show_path(path)
+    Member(base, name) => make_form(".", parts: [show_expression(base), name.text.copy()])
+    Bracket(base, items) => {
+      var parts: List[String] = [show_expression(base)]
+      for item in items {
+        mut parts.push(show_bracket_item(item))
+      }
+      make_form("[]", parts)
+    }
+    Call(callee, arguments) => {
+      var parts: List[String] = [show_expression(callee)]
+      for argument in arguments {
+        mut parts.push(show_argument(argument))
+      }
+      make_form("call", parts)
+    }
+    Try(inner) => make_form("?", parts: [show_expression(inner)])
+    With(base, updates) => {
+      var parts: List[String] = [show_expression(base)]
+      for update in updates {
+        mut parts.push(show_update(update))
+      }
+      make_form("with", parts)
+    }
+    Prefix(operator, operand) => {
+      let head = match operator {
+        Negate => "-"
+        Not => "!"
+        Complement => "~"
+      }
+      make_form(head, parts: [show_expression(operand)])
+    }
+    Mode(mode, inner) => make_form(show_mode(mode), parts: [show_expression(inner)])
+    Any(inner) => make_form("any", parts: [show_expression(inner)])
+    Binary(operator, left, right, ..) => make_form(show_binary(operator), parts: [show_expression(left), show_expression(right)])
+    Is(value: inner, pattern, ..) => make_form("is", parts: [show_expression(inner), show_pattern(pattern)])
+    Range(start, stop, is_inclusive, ..) => {
+      let shown_start = match start {
+        Some(start_value) => show_expression(start_value)
+        None => "_"
+      }
+      let shown_stop = match stop {
+        Some(stop_value) => show_expression(stop_value)
+        None => "_"
+      }
+      make_form(if is_inclusive { "..=" } else { ".." }, parts: [own shown_start, own shown_stop])
+    }
+    Quantified(quantifier, binder, body) => {
+      let shown_binder = match binder {
+        BinderIn(pattern, collection) => make_form("in", parts: [show_pattern(pattern), show_expression(collection)])
+        BinderType(name, domain) => "${name.text}: ${show_type_expression(domain)}"
+      }
+      let head = match quantifier {
+        Forall => "forall"
+        Exists => "exists"
+      }
+      make_form(head, parts: [own shown_binder, show_expression(body)])
+    }
+    Echo(inner) => make_form("echo", parts: [show_expression(inner)])
+    Return(value: returned) => match returned {
+      Some(inner) => make_form("return", parts: [show_expression(inner)])
+      None => make_form("return", parts: [])
+    }
+    Parenthesized(inner) => make_form("paren", parts: [show_expression(inner)])
+    List(items) => make_form("list", parts: show_expressions(items))
+    Map(entries) => {
+      var parts: List[String] = []
+      for entry in entries {
+        mut parts.push(make_form("", parts: [show_expression(entry.key), show_expression(entry.value)]))
+      }
+      make_form("map", parts)
+    }
+    Lambda(parameters, body) => {
+      var shown_parameters: List[String] = []
+      for parameter in parameters {
+        mut shown_parameters.push(show_pattern(parameter))
+      }
+      make_form("fn", parts: [make_form("", parts: shown_parameters), show_block(body)])
+    }
+    If(condition, then_block, else_branch) => {
+      let shown_else = match else_branch {
+        Some(branch) => match branch {
+          Else(block) => show_block(block)
+          ElseIf(value: inner) => show_expression(inner)
+        }
+        None => ""
+      }
+      make_form("if", parts: [show_expression(condition), show_block(then_block), own shown_else])
+    }
+    Match(scrutinees, arms) => {
+      var parts: List[String] = [make_form("", parts: show_expressions(scrutinees))]
+      for arm in arms {
+        mut parts.push(show_arm(arm))
+      }
+      make_form("match", parts)
+    }
+    Provide(implementations, body) => make_form("provide", parts: [make_form("", parts: show_expressions(implementations)), show_block(body)])
+    Block(block) => show_block(block)
+    ExpressionError => "error"
+  }
+}
+
+fn show_bracket_item(item: syntax::BracketItem) -> String
+  uses RunForever
+{
+  match item {
+    Item(value) => show_expression(value)
+    ItemConstraint(name, value) => "${name.text} = ${show_type_expression(value)}"
+  }
+}
+
+fn show_argument(argument: syntax::Argument) -> String
+  uses RunForever
+{
+  match argument.label {
+    Some(label) => make_form("${label.text}:", parts: [show_expression(argument.value)])
+    None => show_expression(argument.value)
+  }
+}
+
+fn show_update(update: syntax::Update) -> String
+  uses RunForever
+{
+  match update.kind {
+    FieldUpdate(path, value) => if path.is_empty() {
+      show_expression(value)
+    } else {
+      var names: List[StringSlice] = []
+      for name in path {
+        mut names.push(name.text)
+      }
+      make_form("${names.join(".")}:", parts: [show_expression(value)])
+    }
+    UpdateError => "error"
+  }
+}
+
+fn show_arm(arm: syntax::Arm) -> String
+  uses RunForever
+{
+  var parts: List[String] = []
+  for pattern in arm.patterns {
+    mut parts.push(show_pattern(pattern))
+  }
+  match arm.guard {
+    Some(guard) => mut parts.push(make_form("if", parts: [show_expression(guard)]))
+    None => mut parts.push("")
+  }
+  mut parts.push(show_statement(arm.body))
+  make_form("=>", parts)
+}
+
+fn show_block(block: syntax::Block) -> String
+  uses RunForever
+{
+  var parts: List[String] = []
+  for statement in block.statements {
+    mut parts.push(show_statement(statement))
+  }
+  make_form("block", parts)
+}
+
+fn show_loop_clause(clause: syntax::LoopClause) -> String
+  uses RunForever
+{
+  let shown = match clause.kind {
+    Invariant(value) => make_form("invariant", parts: [show_expression(value)])
+    LoopDecreases(measures) => make_form("decreases", parts: show_expressions(measures))
+    LoopCost(clause: cost_clause) => show_cost(cost_clause)
+  }
+  show_conditional(own shown, condition: clause.condition.copy())
+}
+
+fn show_statement(statement: syntax::Statement) -> String
+  uses RunForever
+{
+  match statement.kind {
+    Let(is_var, pattern, annotation, value, else_block) => {
+      let shown_else = match else_block {
+        Some(block) => make_form("else", parts: [show_block(block)])
+        None => ""
+      }
+      make_form(
+        if is_var { "var" } else { "let" },
+        parts: [show_pattern(pattern), show_optional_type(annotation, prefix: ": "), show_expression(value), own shown_else],
+      )
+    }
+    Expression(value) => show_expression(value)
+    Assignment(target, operator, value) => make_form(show_assignment(operator), parts: [show_expression(target), show_expression(value)])
+    For(mode, pattern, annotation, iterable, clauses, body) => {
+      let head = match mode {
+        Sequential => "for"
+        Parallel => "parallel-for"
+        Concurrent => "concurrent-for"
+      }
+      var parts: List[String] = [show_pattern(pattern), show_optional_type(annotation, prefix: ": "), show_expression(iterable)]
+      for clause in clauses {
+        mut parts.push(show_loop_clause(clause))
+      }
+      mut parts.push(show_block(body))
+      make_form(head, parts)
+    }
+    While(condition, clauses, body) => {
+      var parts: List[String] = [show_expression(condition)]
+      for clause in clauses {
+        mut parts.push(show_loop_clause(clause))
+      }
+      mut parts.push(show_block(body))
+      make_form("while", parts)
+    }
+    Parallel(body) => make_form("parallel", parts: [show_block(body)])
+    Concurrent(body) => make_form("concurrent", parts: [show_block(body)])
+    Proof(body) => make_form("proof", parts: [show_block(body)])
+    Assert(value, by_bit_vector) => if by_bit_vector {
+      make_form("assert", parts: [show_expression(value), "by", "bit_vector"])
+    } else {
+      make_form("assert", parts: [show_expression(value)])
+    }
+    StatementError => "error"
+  }
+}
+
+fn show_constant(constant: syntax::Constant) -> String {
+  match constant {
+    ModuleConstant(path) => show_path(path)
+    TypeConstant(owner, name) => "${show_path(owner)}.${name.text}"
+  }
+}
+
+fn show_literal(literal: syntax::Literal) -> String
+  uses RunForever
+{
+  match literal {
+    LiteralInteger(digits) => digits.copy()
+    LiteralTrue => "true"
+    LiteralFalse => "false"
+    LiteralString(literal: written) => show_string_literal(written)
+  }
+}
+
+fn show_range_end(range_end: syntax::RangeEnd) -> String
+  uses RunForever
+{
+  match range_end.kind {
+    EndLiteral(literal) => show_literal(literal)
+    EndConstant(constant) => show_constant(constant)
+  }
+}
+
+fn show_pattern(written: syntax::Pattern) -> String
+  uses RunForever
+{
+  match written.kind {
+    Wildcard => "_"
+    Binding(name) => name.text.copy()
+    QualifiedConstant(constant) => show_constant(constant)
+    Literal(literal) => show_literal(literal)
+    PatternRange(start, stop, is_inclusive) => make_form(if is_inclusive { "..=" } else { ".." }, parts: [show_range_end(start), show_range_end(stop)])
+    Variant(name, fields) => match fields {
+      None => name.text.copy()
+      Some(written_fields) => make_form(name.text, parts: show_pattern_fields(written_fields))
+    }
+    Record(fields) => make_form("record", parts: show_pattern_fields(fields))
+    Alternatives(alternatives) => {
+      var parts: List[String] = []
+      for alternative in alternatives {
+        mut parts.push(show_pattern(alternative))
+      }
+      make_form("|", parts)
+    }
+    PatternError => "error"
+  }
+}
+
+fn show_pattern_fields(fields: Slice[syntax::PatternField]) -> List[String]
+  uses RunForever
+{
+  var shown: List[String] = []
+  for field in fields {
+    let text = match field.kind {
+      NamedField(name, pattern) => make_form("${name.text}:", parts: [show_pattern(pattern)])
+      Field(pattern) => show_pattern(pattern)
+      Rest => ".."
+    }
+    mut shown.push(own text)
+  }
+  shown
+}
+
+fn show_visibility(visibility: Option[syntax::Visibility]) -> StringSlice {
+  match visibility {
+    None => ""
+    Some(written) => match written {
+      Internal => "internal"
+      Public => "public"
+      PublicOpaque => "public opaque"
+    }
+  }
+}
+
+fn show_type_head(head: syntax::TypeHead) -> String
+  uses RunForever
+{
+  "${show_path(head.path)}${show_generics(head.generics)}"
+}
+
+fn show_definition_name(name: syntax::DefinitionName) -> String
+  uses RunForever
+{
+  match name {
+    PlainName(plain) => plain.text.copy()
+    MemberName(head, name: member) => "${show_type_head(head)}.${member.text}"
+  }
+}
+
+fn show_parameter(parameter: syntax::Parameter) -> String
+  uses RunForever
+{
+  match parameter.kind {
+    SelfParameter(mode) => match mode {
+      None => "self"
+      Some(written) => "${show_mode(written)} self"
+    }
+    NamedParameter(name, mode, annotation, default) => {
+      let shown_mode = match mode {
+        Some(written) => show_mode(written).to_string()
+        None => ""
+      }
+      let shown_default = match default {
+        Some(value) => make_form("=", parts: [show_expression(value)])
+        None => ""
+      }
+      make_form("${name.text}:", parts: [own shown_mode, show_type_expression(annotation), own shown_default])
+    }
+    ParameterError => "error"
+  }
+}
+
+fn show_parameters(parameters: Slice[syntax::Parameter]) -> String
+  uses RunForever
+{
+  var shown: List[String] = []
+  for parameter in parameters {
+    mut shown.push(show_parameter(parameter))
+  }
+  make_form("", parts: shown)
+}
+
+fn show_signature(signature: syntax::Signature) -> List[String]
+  uses RunForever
+{
+  let output = match signature.output {
+    Some(written) => match written {
+      Returns(annotation) => "-> ${show_type_expression(annotation)}"
+      Lends(mode, annotation) => match mode {
+        Some(lent_mode) => "lends ${show_mode(lent_mode)} ${show_type_expression(annotation)}"
+        None => "lends ${show_type_expression(annotation)}"
+      }
+    }
+    None => ""
+  }
+  var parts: List[String] = [
+    "${show_definition_name(signature.name)}${show_generics(signature.generics)}",
+    show_parameters(signature.parameters),
+    own output,
+  ]
+  for clause in signature.clauses {
+    mut parts.push(show_clause(clause))
+  }
+  parts
+}
+
+fn show_law(law_definition: syntax::LawDefinition) -> String
+  uses RunForever
+{
+  var parts: List[String] = [law_definition.name.text.copy(), show_parameters(law_definition.parameters)]
+  for premise in law_definition.premises {
+    mut parts.push(make_form("requires", parts: [show_expression(premise)]))
+  }
+  mut parts.push(show_block(law_definition.body))
+  make_form("law", parts)
+}
+
+fn show_fields(fields: Slice[syntax::Field]) -> String
+  uses RunForever
+{
+  var shown: List[String] = []
+  for field in fields {
+    let text = match field.kind {
+      FieldDeclaration(name, annotation, default) => {
+        let shown_default = match default {
+          Some(value) => make_form("=", parts: [show_expression(value)])
+          None => ""
+        }
+        make_form("${name.text}:", parts: [show_type_expression(annotation), own shown_default])
+      }
+      FieldError => "error"
+    }
+    mut shown.push(own text)
+  }
+  make_form("", parts: shown)
+}
+
+fn show_capability_list(capabilities: Slice[syntax::CapabilityReference]) -> String
+  uses RunForever
+{
+  if capabilities.is_empty() {
+    return ""
+  }
+  var shown: List[String] = []
+  for reference in capabilities {
+    mut shown.push(show_capability_reference(reference))
+  }
+  make_form("uses", parts: shown)
+}
+
+fn show_definition(definition: syntax::Definition, methods: Slice[String]) -> String
+  uses RunForever
+{
+  let body = match definition.kind {
+    Function(definition: function_definition) => {
+      var parts = show_signature(function_definition.signature)
+      mut parts.push(show_block(function_definition.body))
+      make_form("fn", parts)
+    }
+    MethodDeclaration(signature) => make_form("fn", parts: show_signature(signature))
+    TypeDefinition(name, generics, body, clauses) => {
+      let shown_body = match body {
+        Fields(fields) => show_fields(fields)
+        Variants(variants) => {
+          var shown_variants: List[String] = []
+          for variant in variants {
+            let variant_name = if variant.is_indirect { "indirect ${variant.name.text}" } else { variant.name.text.copy() }
+            let text = match variant.fields {
+              Some(fields) => make_form(variant_name, parts: [show_fields(fields)])
+              None => variant_name.copy()
+            }
+            mut shown_variants.push(own text)
+          }
+          make_form("=", parts: shown_variants)
+        }
+        TypeTodo => "= todo"
+      }
+      var parts: List[String] = ["${name.text}${show_generics(generics)}", own shown_body]
+      for clause in clauses {
+        let text = match clause.kind {
+          TypeInvariant(value) => make_form("invariant", parts: [show_expression(value)])
+          Derives(traits) => {
+            var shown_traits: List[String] = []
+            for written_trait in traits {
+              mut shown_traits.push(show_path_type(written_trait))
+            }
+            make_form("derives", parts: shown_traits)
+          }
+          Potential(value) => make_form("cost potential", parts: [show_expression(value)])
+        }
+        mut parts.push(own text)
+      }
+      make_form("type", parts)
+    }
+    Trait(name, generics, supertraits, members) => {
+      let shown_requires = if supertraits.is_empty() { "" } else { ": ${show_path_types(supertraits, separator: " + ")}" }
+      var parts: List[String] = ["${name.text}${show_generics(generics)}", own shown_requires]
+      for member in members {
+        let text = match member.kind {
+          AssociatedType(name: member_name, bounds) => if bounds.is_empty() {
+            make_form("type", parts: [member_name.text.copy()])
+          } else {
+            make_form("type", parts: ["${member_name.text}: ${show_path_types(bounds, separator: " + ")}"])
+          }
+          AssociatedCapability(name: member_name) => make_form("capability", parts: [member_name.text.copy()])
+          Law(definition: law_definition) => show_law(law_definition)
+          TraitMemberError => "error"
+        }
+        mut parts.push(own text)
+      }
+      for method in methods {
+        mut parts.push(method.copy())
+      }
+      make_form("trait", parts)
+    }
+    Impl(implemented_trait, implementing_type, capabilities, members) => {
+      var parts: List[String] = [
+        show_path_type(implemented_trait),
+        "for",
+        show_type_head(implementing_type),
+        show_capability_list(capabilities),
+      ]
+      for member in members {
+        let text = match member.kind {
+          AssociatedDefinition(name, definition: written) => make_form("type", parts: [name.text.copy(), "=", show_type_expression(written)])
+          CapabilityDefinition(name, capabilities: uses_list) => {
+            var shown: List[String] = [name.text.copy(), "="]
+            for capability_use in uses_list {
+              mut shown.push(show_capability_use(capability_use))
+            }
+            make_form("capability", parts: shown)
+          }
+          ImplMemberError => "error"
+        }
+        mut parts.push(own text)
+      }
+      for method in methods {
+        mut parts.push(method.copy())
+      }
+      make_form("impl", parts)
+    }
+    Capability(name, members) => {
+      var parts: List[String] = [name.text.copy()]
+      for _ in members {
+        mut parts.push("error")
+      }
+      for method in methods {
+        mut parts.push(method.copy())
+      }
+      make_form("capability", parts)
+    }
+    Constant(name, annotation, value) => make_form(
+      "let",
+      parts: [show_definition_name(name), ": ${show_type_expression(annotation)}", show_expression(value)],
+    )
+    Test(name, capabilities, body) => make_form("test", parts: [show_string_literal(name), show_capability_list(capabilities), show_block(body)])
+    Theorem(name, generics, parameters, clauses, body) => {
+      var parts: List[String] = ["${name.text}${show_generics(generics)}", show_parameters(parameters)]
+      for clause in clauses {
+        mut parts.push(show_clause(clause))
+      }
+      mut parts.push(show_block(body))
+      make_form("theorem", parts)
+    }
+    LawProof(proved_trait, law_name, implementing_type, body) => make_form(
+      "proof",
+      parts: ["${show_path_type(proved_trait)}.${law_name.text}", "for", show_type_head(implementing_type), show_block(body)],
+    )
+    DefinitionError(intended, name) => {
+      let shown_intended = match intended {
+        Some(kind) => show_intended_keyword(kind).to_string()
+        None => ""
+      }
+      let shown_name = match name {
+        Some(written) => show_definition_name(written)
+        None => ""
+      }
+      make_form("error", parts: [own shown_intended, own shown_name])
+    }
+  }
+  let visibility = show_visibility(definition.visibility)
+  if visibility.is_empty() { body } else { make_form(visibility, parts: [own body]) }
+}
+
+internal fn show_file(file: syntax::File) -> String
+  uses RunForever
+{
+  var lines: List[String] = []
+  for item in file.imports {
+    mut lines.push(make_form("use", parts: [show_path(item.value)]))
+  }
+  for top_level in file.definitions {
+    var methods: List[String] = []
+    for method in top_level.methods {
+      mut methods.push(show_definition(method.value, methods: []))
+    }
+    mut lines.push(show_definition(top_level.definition.value, methods))
+  }
+  lines.join("\n")
+}

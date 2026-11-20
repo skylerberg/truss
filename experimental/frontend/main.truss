@@ -1,0 +1,209 @@
+use frontend::lexer
+use frontend::parser
+use frontend::show
+use frontend::source
+use frontend::token
+
+fn escape(value: StringSlice) -> String {
+  var buffer = String.with_capacity(value.length())
+  for character in value.characters() {
+    if character == Character"\"" {
+      mut buffer.push("\\\"")
+    } else if character == Character"\\" {
+      mut buffer.push("\\\\")
+    } else if character == Character"\n" {
+      mut buffer.push("\\n")
+    } else {
+      mut buffer.push_character(character)
+    }
+  }
+  buffer
+}
+
+fn show_span(span: source::Span) -> String {
+  "${span.start}..${span.stop}"
+}
+
+fn show_diagnostic(diagnostic: source::Diagnostic) -> String {
+  var text = "${diagnostic.code} ${show_span(diagnostic.span)} \"${escape(diagnostic.message)}\""
+  for note in diagnostic.notes {
+    mut text.push("\n  note ${show_span(note.span)} \"${escape(note.message)}\"")
+  }
+  for fix in diagnostic.fixes {
+    mut text.push("\n  fix \"${escape(fix.title)}\"")
+    for edit in fix.edits {
+      mut text.push("\n    edit ${show_span(edit.span)} \"${escape(edit.replacement)}\"")
+    }
+  }
+  text
+}
+
+fn show_form(form: token::Form) -> String {
+  match form {
+    Ordinary => "ordinary"
+    Raw(quotes, dollars, multi_line) => "raw ${quotes} ${dollars} ${multi_line}"
+  }
+}
+
+fn show_text(text: token::Text) -> String {
+  "\"${escape(text.value)}\" ${show_span(text.span)}"
+}
+
+fn show_token(tables: token::Tables, current: token::Token) -> String
+  uses Panic, RunForever
+{
+  let kind = match current.kind {
+    Upper(name) => "upper ${tables.name(name)}"
+    Lower(name) => "lower ${tables.name(name)}"
+    Underscore => "underscore"
+    Keyword(keyword) => "keyword ${token::spell_keyword(keyword)}"
+    Reserved(reserved) => "reserved ${token::spell_reserved(reserved)}"
+    Integer(literal) => "integer ${tables.integers.get(literal).expect("an integer")}"
+    Float(literal) => match tables.decimals.get(literal) {
+      Some(decimal) => "float ${decimal.significand}e${decimal.exponent}"
+      None => "float"
+    }
+    String(literal) => "string ${show_literal(tables, literal: tables.literal(literal))}"
+    Punctuation(punctuation) => "punctuation ${token::spell_punctuation(punctuation)}"
+    Foreign(foreign) => "foreign ${token::spell_foreign(foreign)}"
+    Newline => "newline"
+    EndOfFile => "end"
+  }
+  var text = "${kind} ${show_span(current.span)}"
+  if current.line_break_before {
+    mut text.push(" line")
+  }
+  if current.blank_line_before {
+    mut text.push(" blank")
+  }
+  if current.is_inserted_closer {
+    mut text.push(" inserted")
+  }
+  text
+}
+
+fn show_literal(tables: token::Tables, literal: token::StringLiteral) -> String
+  uses Panic, RunForever
+{
+  var text = ""
+  if literal.tag is Some(tag) {
+    mut text.push("tag ${tag.name} ${show_span(tag.span)} ")
+  }
+  mut text.push("${show_form(literal.form)} ${show_text(literal.first)}")
+  for segment in literal.rest {
+    var inner: List[String] = []
+    for index in segment.interpolation.first..segment.interpolation.stop {
+      mut inner.push(show_token(tables, current: tables.token(index)))
+    }
+    mut text.push(
+      " { ${show_span(segment.interpolation.span)} ${segment.interpolation.is_closed} [ ${inner.join(" ; ")} ] } ${show_text(segment.text)}",
+    )
+  }
+  text
+}
+
+fn print_tokens(path: StringSlice, text: own String)
+  uses Console, Panic, RunForever
+{
+  let result = lexer::lex(source::Source.create(path, text: own text))
+  Console.print_line("== ${path}")
+  let tables = result.lexed.tables
+  for index in result.lexed.first..result.lexed.stop {
+    Console.print_line(show_token(tables, current: tables.token(index)))
+  }
+  for diagnostic in result.diagnostics {
+    Console.print_line(show_diagnostic(diagnostic))
+  }
+}
+
+fn print_file(path: StringSlice, text: own String)
+  uses Console, Panic, RunForever
+{
+  let lexed = lexer::lex(source::Source.create(path, text: own text))
+  let parsed = parser::parse(own lexed.lexed, lexer_diagnostics: lexed.diagnostics)
+  Console.print_line("== ${path}")
+  let tree = show::show_file(parsed.file)
+  if !tree.is_empty() {
+    Console.print_line(tree)
+  }
+  for diagnostic in lexed.diagnostics {
+    Console.print_line(show_diagnostic(diagnostic))
+  }
+  for diagnostic in parsed.diagnostics {
+    Console.print_line(show_diagnostic(diagnostic))
+  }
+}
+
+type Timing(lexing: Int64, parsing: Int64)
+
+fn measure(path: StringSlice, text: StringSlice, rounds: UInt64) -> Timing
+  uses Clock, Panic, RunForever
+{
+  var best_lexing: Int64 = Int64.maximum
+  for _ in 0..rounds {
+    let before = Clock.monotonic()
+    let result = lexer::lex(source::Source.create(path, text: text.to_string()))
+    let elapsed = (Clock.monotonic() - before).total_nanoseconds()
+    if result.lexed.stop < result.lexed.first {
+      Panic.crash("a token range runs backward")
+    }
+    if elapsed < best_lexing {
+      best_lexing = elapsed
+    }
+  }
+  let lexed = lexer::lex(source::Source.create(path, text: text.to_string()))
+  var best_parsing: Int64 = Int64.maximum
+  for _ in 0..rounds {
+    let tables = lexed.lexed.tables.copy()
+    let input = token::Lexed(tables: own tables, first: lexed.lexed.first, stop: lexed.lexed.stop)
+    let before = Clock.monotonic()
+    let parsed = parser::parse(own input, lexer_diagnostics: lexed.diagnostics)
+    let elapsed = (Clock.monotonic() - before).total_nanoseconds()
+    if parsed.file.definitions.length() > text.length() {
+      Panic.crash("more definitions than bytes")
+    }
+    if elapsed < best_parsing {
+      best_parsing = elapsed
+    }
+  }
+  Timing(lexing: best_lexing, parsing: best_parsing)
+}
+
+fn time_files(rounds: UInt64, paths: Slice[String])
+  uses Console, Clock, FileRead, Panic, RunForever
+{
+  var total_lexing: Int64 = 0
+  var total_parsing: Int64 = 0
+  for path in paths {
+    let text = FileRead.read_text(Path.new(path)).expect("a readable UTF-8 file")
+    let timing = measure(path, text, rounds)
+    total_lexing += timing.lexing
+    total_parsing += timing.parsing
+    Console.print_line("${timing.lexing} ${timing.parsing} ${text.length()} ${path}")
+  }
+  Console.print_line("${total_lexing} ${total_parsing} total")
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, Clock, FileRead, Panic, RunForever
+{
+  if arguments.length() < 2 {
+    Console.print_error("frontend print FILE... | frontend tokens FILE... | frontend time ROUNDS FILE...")
+    return ExitCode.failure
+  }
+  let command_name = arguments[1].copy()
+  if command_name == "time" && arguments.length() >= 3 {
+    let rounds = UInt64.parse(arguments[2]).expect("a count of rounds")
+    time_files(rounds, paths: arguments.slice()[3..])
+    return ExitCode.success
+  }
+  for path in arguments.slice()[2..] {
+    let text = FileRead.read_text(Path.new(path)).expect("a readable UTF-8 file")
+    if command_name == "tokens" {
+      print_tokens(path, text: own text)
+    } else if command_name == "print" {
+      print_file(path, text: own text)
+    }
+  }
+  ExitCode.success
+}

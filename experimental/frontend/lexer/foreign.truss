@@ -1,0 +1,815 @@
+use frontend::source
+use frontend::token
+
+type Confusable = SpaceConfusable | Spelled(spelling: StringSlice) | OpeningQuote(closing: StringSlice)
+  derives Equal
+
+fn find_confusable(code: UInt32) -> Option[Confusable] {
+  if code >= 8192 && code <= 8202 {
+    return Some(Confusable.SpaceConfusable)
+  }
+  match code {
+    160 | 5760 | 8239 | 8287 | 12288 => Some(Confusable.SpaceConfusable)
+    8220 => Some(Confusable.OpeningQuote("\u{201D}"))
+    8216 => Some(Confusable.OpeningQuote("\u{2019}"))
+    65288 => Some(Confusable.Spelled("("))
+    65289 => Some(Confusable.Spelled(")"))
+    65339 => Some(Confusable.Spelled("["))
+    65341 => Some(Confusable.Spelled("]"))
+    65371 => Some(Confusable.Spelled("{"))
+    65373 => Some(Confusable.Spelled("}"))
+    65292 => Some(Confusable.Spelled(","))
+    65306 => Some(Confusable.Spelled(":"))
+    65309 => Some(Confusable.Spelled("="))
+    8211 | 8212 => Some(Confusable.Spelled("-"))
+    8804 => Some(Confusable.Spelled("<="))
+    8805 => Some(Confusable.Spelled(">="))
+    8800 => Some(Confusable.Spelled("!="))
+    8594 => Some(Confusable.Spelled("->"))
+    8658 => Some(Confusable.Spelled("=>"))
+    8704 => Some(Confusable.Spelled("forall"))
+    8707 => Some(Confusable.Spelled("exists"))
+    _ => None
+  }
+}
+
+fn find_punctuation(spelling: StringSlice) -> Option[token::Punctuation] {
+  match spelling {
+    "(" => Some(token::Punctuation.Open(token::Bracket.Paren))
+    ")" => Some(token::Punctuation.Close(token::Bracket.Paren))
+    "[" => Some(token::Punctuation.Open(token::Bracket.Square))
+    "]" => Some(token::Punctuation.Close(token::Bracket.Square))
+    "{" => Some(token::Punctuation.Open(token::Bracket.Curly))
+    "}" => Some(token::Punctuation.Close(token::Bracket.Curly))
+    "," => Some(token::Punctuation.Comma)
+    ":" => Some(token::Punctuation.Colon)
+    "=" => Some(token::Punctuation.Equal)
+    "-" => Some(token::Punctuation.Minus)
+    "<=" => Some(token::Punctuation.LessEqual)
+    ">=" => Some(token::Punctuation.GreaterEqual)
+    "!=" => Some(token::Punctuation.NotEqual)
+    "->" => Some(token::Punctuation.Arrow)
+    "=>" => Some(token::Punctuation.FatArrow)
+    _ => None
+  }
+}
+
+fn find_confusable_token(spelling: StringSlice) -> Option[token::Kind] {
+  match find_punctuation(spelling) {
+    Some(punctuation_kind) => Some(token::Kind.Punctuation(punctuation_kind))
+    None => token::find_word(spelling)
+  }
+}
+
+fn follows_joining_confusable(scanner: Scanner, start: UInt64, replacement: StringSlice) -> Bool
+  uses Panic, RunForever
+{
+  if start == 0 {
+    return false
+  }
+  var index = start - 1
+  while index > 0 && (scanner.lookup(index) & 192) == 128 {
+    index -= 1
+  }
+  match find_confusable(scanner.decode(index).code) {
+    Some(confusable) => match confusable {
+      Spelled(spelling) => token::joins(spelling.byte(spelling.length() - 1), right: replacement.byte(0))
+      SpaceConfusable | OpeningQuote(_) => false
+    }
+    None => false
+  }
+}
+
+fn report_confusable(scanner: mut Scanner, start: UInt64, length: UInt64, replacement: StringSlice, name: StringSlice)
+  uses Panic, RunForever
+{
+  let span = source::make_span(start, stop: start + length)
+  let fixes = if follows_joining_confusable(scanner, start, replacement) {
+    []
+  } else {
+    scanner.list_code_fixes(span, codes: [replacement.to_string()])
+  }
+  let shown = scanner.show_character(start)
+  report(
+    mut scanner,
+    code: "lexer.confusable_character",
+    span,
+    message: "${shown} is not ${name}. Truss is written with ASCII punctuation.",
+    fixes: own fixes,
+  )
+  scanner.position = start + length
+  scanner.line_is_blank = false
+}
+
+fn scan_confusable(scanner: mut Scanner, code: UInt32, length: UInt64) -> Option[ConfusableScan]
+  uses Panic, RunForever
+{
+  let start = scanner.position
+  let Some(confusable) = find_confusable(code) else {
+    return None
+  }
+  match confusable {
+    SpaceConfusable => {
+      report_confusable(mut scanner, start, length, replacement: " ", name: "the space character")
+      Some(ConfusableScan.Spaced)
+    }
+    Spelled(spelling) => match find_confusable_token(spelling) {
+      Some(kind) => {
+        report_confusable(mut scanner, start, length, replacement: spelling, name: "`${spelling}`")
+        Some(ConfusableScan.LexedConfusable(kind))
+      }
+      None => None
+    }
+    OpeningQuote(closing) => match lex_curly_quoted_string(mut scanner, opening_length: length, closing) {
+      Some(kind) => Some(ConfusableScan.LexedConfusable(kind))
+      None => None
+    }
+  }
+}
+
+fn are_hexadecimal_digits(scanner: Scanner, position: UInt64, count: UInt64) -> Bool
+  uses Panic
+{
+  for index in 0..count {
+    if !scanner.is_hexadecimal_digit_at(position + index) {
+      return false
+    }
+  }
+  true
+}
+
+fn read_hexadecimal(scanner: Scanner, position: UInt64, count: UInt64) -> UInt64
+  uses Panic
+{
+  var value: UInt64 = 0
+  for index in 0..count {
+    value = value * 16 + UInt64.from_integer(hexadecimal_value(scanner.lookup(position + index)))
+  }
+  value
+}
+
+fn report_foreign_escape(scanner: mut Scanner, buffer: mut String, start: UInt64, stop: UInt64, value: UInt32) -> Bool
+  uses Panic, RunForever
+{
+  let replacement = "\\u{${format_hexadecimal(value, minimum_digits: 1)}}"
+  let written = scanner.text(start, stop).to_string()
+  report(
+    mut scanner,
+    code: "lexer.invalid_escape",
+    span: source::make_span(start, stop),
+    message: "`${written}` is not an escape in Truss. A character is written by its code point: `${replacement}`.",
+    fixes: [source::make_fix("Write `${replacement}`", edits: [source::replace(source::make_span(start, stop), replacement)])],
+  )
+  match Character.try_from_code(value) {
+    Ok(character) => mut buffer.push_character(character)
+    Err(_) => Panic.crash("a foreign escape names a scalar value")
+  }
+  scanner.position = stop
+  true
+}
+
+fn check_hexadecimal_escape(scanner: mut Scanner, buffer: mut String, start: UInt64, count: UInt64) -> Bool
+  uses Panic, RunForever
+{
+  if !are_hexadecimal_digits(scanner, position: start + 2, count) {
+    return false
+  }
+  let value = read_hexadecimal(scanner, position: start + 2, count)
+  if value > 1114111 || (value >= 55296 && value <= 57343) {
+    return false
+  }
+  report_foreign_escape(mut scanner, buffer: mut buffer, start, stop: start + 2 + count, value: UInt32.from_integer(value))
+}
+
+fn scan_foreign_escape(scanner: mut Scanner, buffer: mut String) -> Bool
+  uses Panic, RunForever
+{
+  let start = scanner.position
+  if scanner.is_at_end(start + 1) {
+    return false
+  }
+  let escaped = scanner.lookup(start + 1)
+  if escaped == 117 && !scanner.is_at(start + 2, byte: 123) {
+    return check_hexadecimal_escape(mut scanner, buffer: mut buffer, start, count: 4)
+  }
+  if escaped == 120 {
+    return check_hexadecimal_escape(mut scanner, buffer: mut buffer, start, count: 2)
+  }
+  if escaped == 85 {
+    return check_hexadecimal_escape(mut scanner, buffer: mut buffer, start, count: 8)
+  }
+  let control: Option[UInt32] = if escaped == 97 {
+    Some(7)
+  } else if escaped == 98 {
+    Some(8)
+  } else if escaped == 102 {
+    Some(12)
+  } else if escaped == 118 {
+    Some(11)
+  } else if escaped == 101 {
+    Some(27)
+  } else {
+    None
+  }
+  if control is Some(value) {
+    return report_foreign_escape(mut scanner, buffer: mut buffer, start, stop: start + 2, value)
+  }
+  if escaped == 40 {
+    let content = start + 2
+    var close = content
+    while close < scanner.length && (is_ascii_name_byte(scanner.lookup(close)) || scanner.lookup(close) == 46) {
+      close += 1
+    }
+    if !scanner.is_at(close, byte: 41) || close <= content {
+      return false
+    }
+    report(
+      mut scanner,
+      code: "lexer.invalid_escape",
+      span: source::make_span(start, stop: close + 1),
+      message: "A string interpolates with `\${...}`.",
+      fixes: [
+        source::make_fix(
+          "Write `\${...}`",
+          edits: [
+            source::replace(source::make_span(start, stop: content), replacement: "\${"),
+            source::replace(source::make_span(close, stop: close + 1), replacement: "}"),
+          ],
+        ),
+      ],
+    )
+    mut buffer.push(scanner.text(start, stop: close + 1))
+    scanner.position = close + 1
+    return true
+  }
+  if escaped == 39 {
+    report(
+      mut scanner,
+      code: "lexer.invalid_escape",
+      span: source::make_span(start, stop: start + 2),
+      message: "`'` needs no escape in a string.",
+      fixes: [source::make_fix("Write `'`", edits: [source::replace(source::make_span(start, stop: start + 2), replacement: "'")])],
+    )
+    mut buffer.push("'")
+    scanner.position = start + 2
+    return true
+  }
+  false
+}
+
+fn touches_word_before(scanner: Scanner, index: UInt64) -> Bool
+  uses Panic
+{
+  match scanner.previous {
+    Some(previous) => if previous.stop != index {
+      false
+    } else {
+      match previous.kind {
+        Upper(_) | Lower(_) | Underscore | Keyword(_) | Reserved(_) => true
+        Integer(_) | Float(_) => index > 0 && is_ascii_name_byte(scanner.lookup(index - 1))
+        _ => false
+      }
+    }
+    None => false
+  }
+}
+
+fn quote_joins_before(scanner: Scanner, index: UInt64) -> Bool
+  uses Panic
+{
+  touches_word_before(scanner, index) || (index > 0 && scanner.is_at(index - 1, byte: 34))
+}
+
+fn is_name_character(scanner: Scanner, position: UInt64) -> Bool
+  uses Panic, RunForever
+{
+  if scanner.is_at_end(position) {
+    return false
+  }
+  let decoded = scanner.decode(position)
+  if !decoded.is_valid {
+    return false
+  }
+  let current = scanner.lookup(position)
+  if is_ascii(current) { is_ascii_name_byte(current) } else { is_xid_continue(decoded.code) }
+}
+
+fn is_simple_escape(byte: UInt8) -> Bool {
+  byte == 110 || byte == 116 || byte == 114 || byte == 48 || byte == 92 || byte == 34 || byte == 39
+}
+
+fn find_character_literal_end(scanner: Scanner, start: UInt64, after_prefix: Bool = false) -> Option[UInt64]
+  uses Panic, RunForever
+{
+  if !after_prefix && touches_word_before(scanner, index: start) {
+    return None
+  }
+  let content = start + 1
+  let close: Option[UInt64] = if scanner.is_end_of_line(content) || scanner.is_at(content, byte: 39) {
+    None
+  } else if scanner.is_at(content, byte: 92) {
+    if scanner.is_at(content + 1, byte: 117) && scanner.is_at(content + 2, byte: 123) {
+      var brace = content + 3
+      while brace < scanner.length && brace <= content + 10 && scanner.lookup(brace) != 125 {
+        brace += 1
+      }
+      if scanner.is_at(brace, byte: 125) && brace - content <= 10 { Some(brace + 1) } else { None }
+    } else if content + 1 < scanner.length && is_simple_escape(scanner.lookup(content + 1)) {
+      Some(content + 2)
+    } else {
+      None
+    }
+  } else {
+    let decoded = scanner.decode(content)
+    if !decoded.is_valid || is_forbidden(decoded.code) { None } else { Some(content + decoded.length) }
+  }
+  match close {
+    Some(position) => if scanner.is_at(position, byte: 39) && !is_name_character(scanner, position: position + 1) {
+      Some(position + 1)
+    } else {
+      None
+    }
+    None => None
+  }
+}
+
+fn decode_character_escape(content: StringSlice) -> String
+  uses Panic, RunForever
+{
+  match content {
+    "\\n" => "\n"
+    "\\t" => "\t"
+    "\\r" => "\r"
+    "\\0" => "\0"
+    "\\\\" => "\\"
+    "\\\"" => "\""
+    "\\'" => "'"
+    _ => {
+      if !content.starts_with("\\u{") {
+        return content.to_string()
+      }
+      let digits = content.substring(3, to: content.length() - 1)
+      if digits.is_empty() || digits.length() > 7 {
+        return ""
+      }
+      var value: UInt64 = 0
+      for byte in digits.bytes() {
+        if !is_hexadecimal_digit(byte) {
+          return ""
+        }
+        value = value * 16 + UInt64.from_integer(hexadecimal_value(byte))
+      }
+      if value > 1114111 {
+        return ""
+      }
+      match Character.try_from_code(UInt32.from_integer(value)) {
+        Ok(character) => {
+          var text = ""
+          mut text.push_character(character)
+          text
+        }
+        Err(_) => ""
+      }
+    }
+  }
+}
+
+fn lex_character_literal(scanner: mut Scanner, tag: StringSlice, literal_start: UInt64, stop: UInt64) -> token::Kind
+  uses Panic, RunForever
+{
+  let start = scanner.position
+  let content = scanner.text(start + 1, stop: stop - 1).to_string()
+  let as_ordinary: StringSlice = if content == "\"" { "\\\"" } else if content == "\\'" { "'" } else { content.slice() }
+  let value = decode_character_escape(content)
+  let replacement = "${tag}\"${as_ordinary}\""
+  let noun = if tag == "UInt8" { "byte" } else { "character" }
+  report(
+    mut scanner,
+    code: "lexer.character_literal",
+    span: source::make_span(literal_start, stop),
+    message: "Truss has no ${noun} literals. A single ${noun} is a tagged string: `${replacement}`.",
+    fixes: [source::make_fix("Write `${replacement}`", edits: [source::replace(source::make_span(literal_start, stop), replacement)])],
+  )
+  scanner.position = stop
+  store_literal(
+    mut scanner,
+    literal: token::StringLiteral(
+      tag: Some(token::Tag(name: tag.to_string(), span: source::make_zero_width(literal_start))),
+      form: token::Form.Ordinary,
+      first: token::Text(value: own value, span: source::make_span(start + 1, stop: stop - 1)),
+      rest: [],
+    ),
+  )
+}
+
+fn is_format_plain(byte: UInt8) -> Bool {
+  is_ascii_name_byte(byte) || is_space(byte) || byte == 46 || byte == 44 || byte == 40 || byte == 41 || byte == 91 || byte == 93
+    || byte == 43 || byte == 45 || byte == 42 || byte == 47
+}
+
+fn format_field_edits(scanner: Scanner, start: UInt64, stop: UInt64) -> Option[List[source::Edit]]
+  uses Panic, RunForever
+{
+  var edits: List[source::Edit] = []
+  var position = start
+  while position < stop {
+    let current = scanner.lookup(position)
+    if current == 92 {
+      position += 2
+    } else if (current == 123 || current == 125) && scanner.is_at(position + 1, byte: current) {
+      let single = if current == 123 { "{" } else { "}" }
+      mut edits.push(source::replace(source::make_span(position, stop: position + 2), replacement: single))
+      position += 2
+    } else if current == 123 {
+      var field_end = position + 1
+      var field_close: Option[UInt64] = None
+      while field_end < stop {
+        if scanner.is_at(field_end, byte: 125) {
+          field_close = Some(field_end)
+          break
+        }
+        if !is_format_plain(scanner.lookup(field_end)) {
+          break
+        }
+        field_end += 1
+      }
+      match field_close {
+        Some(close) => if scanner.skip_spaces(position + 1) < close {
+          mut edits.push(source::insert(source::make_zero_width(position), replacement: "$"))
+          position = close + 1
+        } else {
+          return None
+        }
+        None => return None
+      }
+    } else {
+      position += 1
+    }
+  }
+  Some(own edits)
+}
+
+type PrefixKind = FormatPrefix | RawTextPrefix | BytesPrefix
+  derives Equal
+
+fn classify_prefix(prefix: StringSlice) -> PrefixKind {
+  match prefix {
+    "f" | "$" => PrefixKind.FormatPrefix
+    "r" | "@" => PrefixKind.RawTextPrefix
+    _ => PrefixKind.BytesPrefix
+  }
+}
+
+fn lex_prefixed_string(scanner: mut Scanner, prefix: StringSlice, start: UInt64, nesting: UInt64) -> ScannedString
+  uses Panic, RunForever
+{
+  let quote_start = scanner.position
+  let quotes = scanner.run_length(quote_start, byte: 34)
+  let is_empty = quotes == 2
+  let kind_of_prefix = classify_prefix(prefix)
+  let remove_prefix = source::replace(source::make_span(start, stop: quote_start), replacement: "")
+  let scanned = if kind_of_prefix == PrefixKind.RawTextPrefix && quotes == 1 {
+    scanner.position = quote_start + 1
+    scan_one_line_raw(
+      mut scanner,
+      tag: None,
+      form: token::Form.Raw(quotes: 3, dollars: 0, multi_line: false),
+      nesting,
+      literal_start: start,
+      dollars: 0,
+      quotes: 1,
+    )
+  } else {
+    scan_string(mut scanner, tag: None, nesting)
+  }
+  let delimiter = if is_empty { 1 } else { quotes }
+  let text_start = quote_start + delimiter
+  let text_stop = scanner.position - delimiter
+  let is_closed = scanned.ending == Ending.Closed && text_stop >= text_start && scanner.run_length(text_stop, byte: 34) >= delimiter
+  let has_interpolations = match scanned.kind {
+    String(literal) => !scanner.tables.literals.get(literal).expect("a literal").rest.is_empty()
+    _ => false
+  }
+  let closes_on_doubled_quote = scanner.is_at(text_stop - 1, byte: 34)
+  var contains_backslash = false
+  var contains_quote_at_end = false
+  for position in text_start..text_stop {
+    if scanner.is_at(position, byte: 92) {
+      contains_backslash = true
+    }
+  }
+  if text_stop > 0 && scanner.is_at(text_stop - 1, byte: 92) {
+    contains_quote_at_end = true
+  }
+  var message = ""
+  var fixes: List[source::Fix] = []
+  match kind_of_prefix {
+    FormatPrefix => {
+      message = "Truss has no `${prefix}` strings. Every string interpolates with `\${...}`, as in `\"Hello \${name}\"`."
+      if is_closed && !has_interpolations {
+        if is_empty {
+          mut fixes.push(source::make_fix("Remove the prefix", edits: [remove_prefix.copy()]))
+        } else if !(quotes >= 3 && contains_backslash) {
+          if format_field_edits(scanner, start: text_start, stop: text_stop) is Some(edits) {
+            var all_edits = [remove_prefix.copy()]
+            mut all_edits.append(edits.copy())
+            let title = if quotes == 1 { "Write an ordinary string" } else { "Write a raw string" }
+            mut fixes.push(source::make_fix(title, edits: own all_edits))
+          }
+        }
+      }
+    }
+    RawTextPrefix => {
+      message = "Truss has no `${prefix}` strings. A raw string, which has no escapes, is written between `\"\"\"`s, as in `\"\"\"\\d+\"\"\"`."
+      if is_closed && !has_interpolations {
+        if is_empty || quotes >= 3 {
+          mut fixes.push(source::make_fix("Remove the prefix", edits: [remove_prefix.copy()]))
+        } else if !contains_quote_at_end && !closes_on_doubled_quote {
+          mut fixes.push(
+            source::make_fix(
+              "Write a raw string",
+              edits: [
+                source::replace(source::make_span(start, stop: text_start), replacement: "\"\"\""),
+                source::replace(source::make_span(text_stop, stop: text_stop + 1), replacement: "\"\"\""),
+              ],
+            ),
+          )
+        }
+      }
+    }
+    BytesPrefix => {
+      message = "Truss has no byte strings. A string is UTF-8 text, and `text.bytes()` gives its bytes."
+    }
+  }
+  let reported_fixes = if quote_joins_before(scanner, index: start) { [] } else { own fixes }
+  report(
+    mut scanner,
+    code: "lexer.string_prefix",
+    span: source::make_span(start, stop: quote_start),
+    message,
+    fixes: own reported_fixes,
+  )
+  scanned
+}
+
+fn hash_raw_string(scanner: mut Scanner, start: UInt64) -> Option[token::Kind]
+  uses Panic, RunForever
+{
+  let hashes = scanner.run_length(scanner.position, byte: 35)
+  let text_start = scanner.position + hashes + 1
+  let line_end = scanner.compute_end_of_line(text_start)
+  if !scanner.is_at(text_start - 1, byte: 34) {
+    return None
+  }
+  var close: Option[UInt64] = None
+  var position = text_start
+  while position < line_end {
+    if scanner.is_at(position, byte: 34) && scanner.run_length(position + 1, byte: 35) >= hashes {
+      close = Some(position)
+      break
+    }
+    position += 1
+  }
+  let Some(text_stop) = close else {
+    return None
+  }
+  let value = scanner.text(text_start, stop: text_stop).to_string()
+  var longest: UInt64 = 0
+  var at = text_start
+  while at < text_stop {
+    let run = scanner.run_length(at, byte: 34)
+    if run > longest {
+      longest = run
+    }
+    at += if run > 1 { run } else { 1 }
+  }
+  let quotes = if longest + 1 > 3 { longest + 1 } else { 3 }
+  let delimiter = "\"".repeated(quotes)
+  let interpolates = value.contains("\${")
+  let stop = text_stop + 1 + hashes
+  let fixes = if interpolates || quote_joins_before(scanner, index: start) || value.starts_with("\"") || value.ends_with("\"") {
+    []
+  } else {
+    [
+      source::make_fix(
+        "Write a raw string",
+        edits: [
+          source::replace(source::make_span(start, stop: text_start), replacement: delimiter),
+          source::replace(source::make_span(text_stop, stop), replacement: delimiter),
+        ],
+      ),
+    ]
+  }
+  report(
+    mut scanner,
+    code: "lexer.string_prefix",
+    span: source::make_span(start, stop: text_start),
+    message: "Truss has no `r#` strings. A raw string is written between `\"\"\"`s, or between more quotes when its text has `\"\"\"` in it.",
+    fixes: own fixes,
+  )
+  scanner.position = stop
+  Some(
+    store_literal(
+      mut scanner,
+      literal: token::StringLiteral(
+        tag: None,
+        form: token::Form.Raw(quotes, dollars: 0, multi_line: false),
+        first: token::Text(value: own value, span: source::make_span(text_start, stop: text_stop)),
+        rest: [],
+      ),
+    ),
+  )
+}
+
+fn find_closing_delimiter(scanner: Scanner, start: UInt64, delimiter: UInt8) -> Option[UInt64]
+  uses Panic, RunForever
+{
+  var position = start + 1
+  while !scanner.is_end_of_line(position) {
+    if scanner.is_at(position, byte: 92) {
+      position += 2
+    } else if scanner.is_at(position, byte: delimiter) {
+      return Some(position)
+    } else {
+      position += 1
+    }
+  }
+  None
+}
+
+fn lex_quoted_string(scanner: mut Scanner, nesting: UInt64, delimiter: UInt8) -> ScannedString
+  uses Panic, RunForever
+{
+  let start = scanner.position
+  let scanned = scan_ordinary(mut scanner, tag: None, nesting, closing: delimiter)
+  let stop = scanner.position
+  var interpolation_spans: List[source::Span] = []
+  if scanned.kind is String(literal) {
+    for segment in scanner.tables.literals.get(literal).expect("a literal").rest {
+      mut interpolation_spans.push(segment.interpolation.span)
+    }
+  }
+  var edits: List[source::Edit] = [source::replace(source::make_span(start, stop: start + 1), replacement: "\"")]
+  var position = start + 1
+  while position + 1 < stop {
+    if scanner.is_at(position, byte: 92) {
+      position += 2
+      continue
+    }
+    if scanner.is_at(position, byte: 34) {
+      var is_inside = false
+      for span in interpolation_spans {
+        if span.start <= position && position < span.stop {
+          is_inside = true
+        }
+      }
+      if !is_inside {
+        mut edits.push(source::insert(source::make_zero_width(position), replacement: "\\"))
+      }
+    }
+    position += 1
+  }
+  mut edits.push(source::replace(source::make_span(stop - 1, stop), replacement: "\""))
+  let is_template = delimiter == 96
+  let fixes = if scanned.ending == Ending.Closed && !quote_joins_before(scanner, index: start) {
+    [source::make_fix("Write the string between `\"`s", edits: own edits)]
+  } else {
+    []
+  }
+  let message = if is_template {
+    "Truss has no template literals. Every string is written between `\"`s and interpolates with `\${...}`."
+  } else {
+    "A string is written between `\"`s."
+  }
+  report(mut scanner, code: "lexer.string_delimiter", span: source::make_span(start, stop: start + 1), message, fixes: own fixes)
+  scanned
+}
+
+fn lex_curly_quoted_string(scanner: mut Scanner, opening_length: UInt64, closing: StringSlice) -> Option[token::Kind]
+  uses Panic, RunForever
+{
+  let start = scanner.position
+  let text_start = start + opening_length
+  let line_end = scanner.compute_end_of_line(text_start)
+  let rest_of_line = scanner.text(text_start, stop: line_end)
+  let Some(value_length) = rest_of_line.find(closing) else {
+    return None
+  }
+  let value = rest_of_line.substring(0, to: value_length).to_string()
+  let text_stop = text_start + value_length
+  let stop = text_stop + closing.length()
+  let reads_differently = value.contains("\\") || value.contains("$") || value.contains("\"") || quote_joins_before(scanner, index: start)
+  let fixes = if reads_differently {
+    []
+  } else {
+    [
+      source::make_fix(
+        "Write the string between `\"`s",
+        edits: [
+          source::replace(source::make_span(start, stop: text_start), replacement: "\""),
+          source::replace(source::make_span(text_stop, stop), replacement: "\""),
+        ],
+      ),
+    ]
+  }
+  report(
+    mut scanner,
+    code: "lexer.confusable_character",
+    span: source::make_span(start, stop: text_start),
+    message: "A string is written between straight quotes, `\"`. This is a curly quote.",
+    fixes: own fixes,
+  )
+  scanner.position = stop
+  Some(
+    store_literal(
+      mut scanner,
+      literal: token::StringLiteral(
+        tag: None,
+        form: token::Form.Ordinary,
+        first: token::Text(value: own value, span: source::make_span(text_start, stop: text_stop)),
+        rest: [],
+      ),
+    ),
+  )
+}
+
+fn scan_string_form(scanner: mut Scanner, nesting: UInt64) -> Option[StringFormScan]
+  uses Panic, RunForever
+{
+  let start = scanner.position
+  if scanner.is_at(start, byte: 39) {
+    if find_character_literal_end(scanner, start) is Some(stop) {
+      let kind = lex_character_literal(mut scanner, tag: "Character", literal_start: start, stop)
+      return Some(StringFormScan.LexedString(kind, ending: Ending.Closed))
+    }
+    let is_apostrophe = touches_word_before(scanner, index: start)
+    let closes = match find_closing_delimiter(scanner, start, delimiter: 39) {
+      Some(close) => !is_apostrophe && !is_name_character(scanner, position: close + 1)
+      None => false
+    }
+    if closes {
+      let scanned = lex_quoted_string(mut scanner, nesting, delimiter: 39)
+      return Some(StringFormScan.LexedString(kind: scanned.kind, ending: scanned.ending))
+    }
+    let starts_name = start + 1 < scanner.length && (is_ascii_letter(scanner.lookup(start + 1)) || scanner.lookup(start + 1) == 95)
+    if !is_apostrophe && starts_name {
+      var name_end = start + 1
+      while scanner.is_ascii_name_byte_at(name_end) {
+        name_end += 1
+      }
+      reject(
+        mut scanner,
+        length: name_end - start,
+        message: "Truss has no lifetimes. How long a view lasts is checked without annotations.",
+        code: "lexer.lifetime",
+      )
+      return Some(StringFormScan.Skipped)
+    }
+    reject(mut scanner, length: 1, message: "`'` is not used in Truss. Strings are written with `\"`.")
+    return Some(StringFormScan.Skipped)
+  }
+  if scanner.is_at(start, byte: 96) {
+    if find_closing_delimiter(scanner, start, delimiter: 96).is_some() {
+      let scanned = lex_quoted_string(mut scanner, nesting, delimiter: 96)
+      return Some(StringFormScan.LexedString(kind: scanned.kind, ending: scanned.ending))
+    }
+    reject(mut scanner, length: 1, message: "The backtick is not used in Truss.")
+    return Some(StringFormScan.Skipped)
+  }
+  if (scanner.is_at(start, byte: 64) || scanner.is_at(start, byte: 36)) && scanner.is_at(start + 1, byte: 34) {
+    let prefix = if scanner.is_at(start, byte: 64) { "@" } else { "$" }
+    scanner.position = start + 1
+    let scanned = lex_prefixed_string(mut scanner, prefix, start, nesting)
+    return Some(StringFormScan.LexedString(kind: scanned.kind, ending: scanned.ending))
+  }
+  None
+}
+
+fn lex_after_name(scanner: mut Scanner, nesting: UInt64, start: UInt64, name: token::Kind) -> Option[ScannedString]
+  uses Panic, RunForever
+{
+  let Lower(_) = name else {
+    return None
+  }
+  let stop = scanner.position
+  let spelling = scanner.text(start, stop).to_string()
+  if spelling == "r" && scanner.is_at(stop, byte: 35) {
+    return match hash_raw_string(mut scanner, start) {
+      Some(kind) => Some(ScannedString(kind, ending: Ending.Closed))
+      None => None
+    }
+  }
+  let is_prefix = spelling == "f" || spelling == "r" || spelling == "b"
+  if is_prefix && scanner.is_at(stop, byte: 34) && (spelling != "b" || scanner.run_length(stop, byte: 34) <= 2) {
+    return Some(lex_prefixed_string(mut scanner, prefix: spelling, start, nesting))
+  }
+  if spelling == "b" && scanner.is_at(stop, byte: 39) {
+    return match find_character_literal_end(scanner, start: stop, after_prefix: true) {
+      Some(literal_stop) => Some(
+        ScannedString(kind: lex_character_literal(mut scanner, tag: "UInt8", literal_start: start, stop: literal_stop), ending: Ending.Closed),
+      )
+      None => None
+    }
+  }
+  None
+}
