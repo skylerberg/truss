@@ -1,0 +1,7 @@
+fn bits_of[Float: FloatingPoint](value: Float) -> Float.Bits {
+  todo
+}
+
+fn f() -> Bool {
+  bits_of(1.5) == 0
+}

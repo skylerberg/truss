@@ -1,7 +1,4 @@
 val note_lending : State.state -> Syntax.expression -> Types.result -> unit
-val find_lent_mode : State.state -> Syntax.expression -> Language.Mode.t option
-val is_borrowed : State.state -> Syntax.expression -> bool
-val classify_scrutinee_mode : State.state -> Syntax.expression -> Language.Mode.t
 
 type mutation = Assignment | Passed_mut
 

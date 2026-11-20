@@ -6,11 +6,13 @@ type t = {
   lookups : Lookups.t;
   resolved : Resolve.resolved;
   bounds : Types.trait_reference list Parameter_table.t;
+  condition : Types.condition;
   broken_parameters : Diagnostic.reported Parameter_table.t;
   self_type : Types.ty option;
   self_trait : Types.trait_reference option;
   self_associated : (string * Types.ty) list;
   self_capabilities : (string * Types.capability_set) list;
+  is_in_capability : bool;
   diagnostics : Diagnostic.in_definition list ref;
   named : (Syntax.id * Types.ty) list ref;
   spans : Source.Definition_span.t array;
@@ -29,11 +31,13 @@ let create lookups resolved ~spans (scope : Environment.scope) =
     lookups;
     resolved;
     bounds;
+    condition = [];
     broken_parameters;
     self_type = scope.self_type;
     self_trait = scope.self_trait;
     self_associated = scope.self_associated;
     self_capabilities = scope.self_capabilities;
+    is_in_capability = false;
     diagnostics = ref [];
     named = ref [];
     spans;
@@ -42,32 +46,22 @@ let create lookups resolved ~spans (scope : Environment.scope) =
 let read_span context id = context.spans.(id)
 
 let list_bounds context parameter =
-  Option.value ~default:[] (Parameter_table.find_opt context.bounds parameter)
-
-let find_self_type context = context.self_type
-
-let with_added_bounds context (condition : Types.condition) run =
-  let saved =
+  let declared = Option.value ~default:[] (Parameter_table.find_opt context.bounds parameter) in
+  match
     List.filter_map
       (fun (bound : Types.bound_condition) ->
         match bound.subject with
-        | Types.Parameter parameter ->
-            let earlier = Parameter_table.find_opt context.bounds parameter in
-            Parameter_table.replace context.bounds parameter
-              (Option.value ~default:[] earlier @ [ bound.bound ]);
-            Some (parameter, earlier)
+        | Types.Parameter subject when subject = parameter -> Some bound.bound
         | _ -> None)
-      condition
-  in
-  Fun.protect
-    ~finally:(fun () ->
-      List.iter
-        (fun (parameter, earlier) ->
-          match earlier with
-          | Some bounds -> Parameter_table.replace context.bounds parameter bounds
-          | None -> Parameter_table.remove context.bounds parameter)
-        (List.rev saved))
-    run
+      context.condition
+  with
+  | [] -> declared
+  | conditional -> declared @ conditional
+
+let find_self_type context = context.self_type
+
+let add_condition context condition =
+  { context with condition = Types.make_condition (context.condition @ condition) }
 
 let list_diagnostics context = !(context.diagnostics)
 let list_named_types context = !(context.named)
@@ -536,11 +530,6 @@ and elaborate_uses context clauses =
        clauses)
 
 and elaborate_capability_uses context uses =
-  let is_in_trait =
-    match context.self_type with
-    | Some (Types.Parameter parameter) -> Types.is_self_parameter parameter
-    | _ -> false
-  in
   List.concat_map
     (fun (use : Syntax.capability_use) ->
       let capabilities = elaborate_capability context use.capability in
@@ -556,10 +545,11 @@ and elaborate_capability_uses context uses =
                  context.spans.(first.id) message);
             capabilities
           in
-          if is_in_trait then
+          if context.is_in_capability then
             report
-              "A trait's method takes no condition on its arguments: each `impl` would have to \
-               prove that the trait's condition implies its own."
+              "A capability's method takes no condition on its arguments: an implementation uses \
+               the capabilities of the code that provides it, so it could panic where the \
+               condition holds."
           else if Option.is_some unless then
             report "A condition on the arguments cannot be joined with a bound with `&&`."
           else if capabilities <> [ Built_in Panic ] then
@@ -1288,10 +1278,15 @@ let elaborate_member (lookups : Lookups.t) ~path ~spans resolved (definition : S
   let context = create lookups resolved ~spans header.container_scope in
   match definition.kind with
   | Function { signature; _ } | Method_declaration signature ->
+      let is_in_capability =
+        match header.container with
+        | Capability_parts -> true
+        | Trait_parts _ | Impl_parts _ -> false
+      in
       make_elaborated_interface context
         (Function_interface
            (elaborate_signature
-              { context with self_capabilities = [] }
+              { context with self_capabilities = []; is_in_capability }
               ~owner:path ~head:[] ~self_type:header.container_scope.self_type signature))
   | _ -> make_elaborated_interface context (Error_interface Diagnostic.reported_elsewhere)
 

@@ -150,114 +150,6 @@ let check_defaults state env (written : Syntax.parameter list) (signature : Type
       | Self_parameter _ | Parameter_error -> ())
     written
 
-let build_core_contract state (clauses : Syntax.clause list) : Core.contract =
-  let collect_each choose =
-    List.concat_map
-      (fun (clause : Syntax.clause) ->
-        match choose clause with
-        | Some build ->
-            List.concat
-              (Option.to_list
-                 (Option.map
-                    (fun (built : _ Core.conditional) ->
-                      List.map (fun each -> { built with clause = each }) built.clause)
-                    (Clauses.build_under_condition state ~id:clause.id clause.condition build)))
-        | None -> [])
-      clauses
-  in
-  let requires =
-    collect_each (fun clause ->
-        match clause.kind with
-        | Requires value ->
-            Some
-              (fun () ->
-                let value = State.build_expression state value in
-                [ { Core.value; executable = Form.is_executable state value } ])
-        | _ -> None)
-  in
-  let ensures =
-    collect_each (fun clause ->
-        match clause.kind with
-        | Ensures value -> Some (fun () -> [ State.build_expression state value ])
-        | _ -> None)
-  in
-  let decreases =
-    collect_each (fun clause ->
-        match clause.kind with
-        | Decreases measures -> Some (fun () -> List.map (State.build_expression state) measures)
-        | _ -> None)
-  in
-  let costs =
-    collect_each (fun clause ->
-        match clause.kind with
-        | Cost cost -> Some (fun () -> [ Form.build_cost state ~origin:clause.id cost ])
-        | _ -> None)
-  in
-  let panics_unless =
-    List.concat_map
-      (fun (clause : Syntax.clause) ->
-        match clause.kind with
-        | Uses uses ->
-            List.concat_map
-              (fun (use : Syntax.capability_use) ->
-                List.map (State.build_expression state) use.unless_values)
-              uses
-        | Requires _ | Ensures _ | Decreases _ | Cost _ | Clause_error -> [])
-      clauses
-  in
-  { panics_unless; requires; ensures; decreases; costs }
-
-let build_core_parameters state (written : Syntax.parameter list) (signature : Types.signature) :
-    Core.parameter list =
-  List.filter_map
-    (fun (parameter : Syntax.parameter) : Core.parameter option ->
-      match parameter.kind with
-      | Self_parameter _ ->
-          Option.map
-            (fun (mode, type_) : Core.parameter ->
-              { local = Self; mode; type_; default = None; callback_contract = None })
-            signature.receiver
-      | Named_parameter { name; default; type_; _ } ->
-          Option.map
-            (fun (info : Types.parameter_info) : Core.parameter ->
-              let default = Option.map (State.build_expression state) default in
-              {
-                local = Declared { origin = name.id; name = name.text };
-                mode = info.mode;
-                type_ = info.type_;
-                default;
-                callback_contract =
-                  (match type_.kind with
-                  | Function_type { inputs = _ :: _ as inputs; clauses; _ }
-                    when List.for_all
-                           (fun (input : Syntax.function_input) -> Option.is_some input.name)
-                           inputs ->
-                      Some
-                        {
-                          inputs =
-                            List.filter_map
-                              (fun (input : Syntax.function_input) ->
-                                Option.map
-                                  (fun (input_name : Syntax.name) : Core.local ->
-                                    Declared { origin = input_name.id; name = input_name.text })
-                                  input.name)
-                              inputs;
-                          requires =
-                            List.filter_map
-                              (fun (clause : Syntax.clause) ->
-                                match clause.kind with
-                                | Requires value -> Some (State.build_expression state value)
-                                | _ -> None)
-                              clauses;
-                        }
-                  | _ -> None);
-              })
-            (List.find_opt
-               (fun (info : Types.parameter_info) -> info.name = name.text)
-               signature.parameters)
-      | Parameter_error -> None)
-    written
-
 let check_function state ~broken_body (written : Syntax.signature)
     (body_block : Syntax.block option) (signature : Types.signature) =
   let env : State.env =
@@ -277,19 +169,37 @@ let check_function state ~broken_body (written : Syntax.signature)
     written.parameters signature;
   check_function_type_requires state env written.parameters signature;
   check_clauses state env ~uses:signature.uses written.clauses;
-  state.form.definition_builder <-
-    Some
-      (fun ~holds_body ->
-        let parameters = build_core_parameters state written.parameters signature in
-        let contract = build_core_contract state written.clauses in
-        let body = if holds_body then Option.map (State.build_block state) body_block else None in
-        let body =
-          match signature.output with
-          | Lends (mode, _) -> Option.map (Form.lend_block state mode) body
-          | Returns _ -> body
-        in
-        Function { parameters; contract; body });
   match body_block with Some block when not broken_body -> check_body state env block | _ -> ()
+
+let check_bit_vector_names state (form : Core.t) =
+  let check_names (value : Core.expression) =
+    Core_walk.walk_expression
+      (Core_walk.make_deep_visitor
+         {
+           Core_walk.ignore_all with
+           place =
+             (function
+             | Local { type_; origin; _ }
+               when not (Types.is_builtin Bool type_ || Types.find_integer_range type_ <> None) ->
+                 State.report state Not_bit_vector (State.read_span state origin)
+                   (Printf.sprintf
+                      "An assertion `by bit_vector` can name only integers and booleans, and this \
+                       is a `%s`."
+                      (Types.show type_))
+             | _ -> ());
+         })
+      value
+  in
+  Core_walk.walk_definition
+    (Core_walk.make_deep_visitor
+       {
+         Core_walk.ignore_all with
+         statement =
+           (function
+           | { kind = Assert { condition; by_bit_vector = true }; _ } -> check_names condition.value
+           | _ -> ());
+       })
+    form.definition
 
 let check_deserialized_invariants state (elaborated : Interface.Environment.elaborated_interface)
     (form : Core.t) =
@@ -344,53 +254,6 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
             | Potential value -> Clauses.check_integer state env value ~described:"A `potential`"
             | Derives _ -> ())
           clauses;
-        let list_defaulted variant (fields : Syntax.field list) =
-          List.filter_map
-            (fun (field : Syntax.field) ->
-              match field.kind with
-              | Field_declaration { name; default = Some value; _ } ->
-                  Some (variant, name.text, value)
-              | _ -> None)
-            fields
-        in
-        state.form.definition_builder <-
-          Some
-            (fun ~holds_body:_ ->
-              let defaults =
-                List.map
-                  (fun (variant, name, value) ->
-                    (variant, name, State.build_expression state value))
-                  (match type_body with
-                  | Fields fields -> list_defaulted None fields
-                  | Variants variants ->
-                      List.concat_map
-                        (fun (variant : Syntax.variant) ->
-                          list_defaulted (Some variant.name.text)
-                            (Option.value ~default:[] variant.fields))
-                        variants
-                  | Type_todo -> [])
-              in
-              let collect_clause choose =
-                List.filter_map (fun (clause : Syntax.type_clause) -> choose clause.kind) clauses
-              in
-              Type
-                {
-                  defaults;
-                  invariants =
-                    collect_clause (function
-                      | Type_invariant value ->
-                          let value = State.build_expression state value in
-                          Some { Core.value; executable = Form.is_executable state value }
-                      | _ -> None);
-                  potential =
-                    (match
-                       collect_clause (function
-                         | Potential value -> Some (State.build_expression state value)
-                         | _ -> None)
-                     with
-                    | first :: _ -> Some first
-                    | [] -> None);
-                });
         let check_defaults (fields : Syntax.field list) (lowered_fields : Types.field list) =
           List.iter
             (fun (field : Syntax.field) ->
@@ -429,42 +292,6 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
         | _ -> ())
     | Trait { members; _ }, Trait_interface _ ->
         let self = Types.Parameter (Types.make_self_parameter state.key.path) in
-        state.form.definition_builder <-
-          Some
-            (fun ~holds_body:_ ->
-              Trait
-                (List.concat
-                   (List.mapi
-                      (fun index (line : Syntax.trait_member Syntax.node) ->
-                        match line.kind with
-                        | Law law when not (is_broken (Member_body index)) ->
-                            let parameters =
-                              List.filter_map
-                                (fun (parameter : Syntax.parameter) : Core.parameter option ->
-                                  match parameter.kind with
-                                  | Named_parameter { name; _ } ->
-                                      Some
-                                        {
-                                          local = Declared { origin = name.id; name = name.text };
-                                          mode = Read;
-                                          type_ = Form.read_local_type state name.id;
-                                          default = None;
-                                          callback_contract = None;
-                                        }
-                                  | _ -> None)
-                                law.parameters
-                            in
-                            let requires = List.map (State.build_expression state) law.requires in
-                            [
-                              {
-                                Core.name = law.name.text;
-                                parameters;
-                                requires;
-                                body = State.build_block state law.body;
-                              };
-                            ]
-                        | _ -> [])
-                      members)));
         List.iteri
           (fun index (line : Syntax.trait_member Syntax.node) ->
             match line.kind with
@@ -475,7 +302,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                     match parameter.kind with
                     | Named_parameter { name; type_; _ } ->
                         State.declare state name
-                          (Interface.Elaborator.elaborate_type state.context type_)
+                          (Interface.Elaborator.elaborate_type (State.read_context state) type_)
                           ~binding:Let ~mode:Language.Mode.Read
                     | _ -> ())
                   law.parameters;
@@ -489,10 +316,6 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
             | Associated_type _ | Associated_capability _ | Trait_member_error -> ())
           members
     | Constant { value; _ }, Constant_interface constant ->
-        state.form.definition_builder <-
-          Some
-            (fun ~holds_body ->
-              Constant (if holds_body then Some (State.build_expression state value) else None));
         if not (is_broken Body) then begin
           let env =
             {
@@ -506,10 +329,6 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
           Constant.check state ~default:false value
         end
     | Test { body = written; _ }, _ ->
-        state.form.definition_builder <-
-          Some
-            (fun ~holds_body ->
-              Test (if holds_body then Some (State.build_block state written) else None));
         if not (is_broken Body) then
           check_body state { no_output with output = Some (Returns Types.unit) } written
     | Theorem { parameters; clauses; body = written; _ }, Theorem_interface signature ->
@@ -518,151 +337,13 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
           { no_output with specification = true; output = Some (Returns Types.unit) }
         in
         check_clauses state env ~uses:Types.no_capabilities clauses;
-        state.form.definition_builder <-
-          Some
-            (fun ~holds_body ->
-              let parameters = build_core_parameters state parameters signature in
-              let contract = build_core_contract state clauses in
-              Function
-                {
-                  parameters;
-                  contract;
-                  body = (if holds_body then Some (State.build_block state written) else None);
-                });
         if not (is_broken Body) then check_body state env written
-    | Law_proof { body = written; _ }, Law_proof_interface { trait; law; for_type; _ } ->
-        (match Interface.Definition.find_trait_interface state.lookups.interface trait.trait with
-        | Some interface ->
-            let substitution =
-              Types.make_trait_substitution interface.trait_generics ~self:for_type trait
-            in
-            state.law_parameters <-
-              List.map
-                (fun (name, type_) -> (name, Types.substitute substitution type_))
-                (Option.value ~default:[] (List.assoc_opt law interface.laws))
-        | None -> ());
-        state.form.definition_builder <-
-          Some
-            (fun ~holds_body ->
-              let parameters =
-                List.mapi
-                  (fun index (name, type_) : Core.parameter ->
-                    {
-                      local = Trait_parameter { index; name };
-                      mode = Read;
-                      type_ = State.finalize_type state type_;
-                      default = None;
-                      callback_contract = None;
-                    })
-                  state.law_parameters
-              in
-              Law_proof
-                {
-                  parameters;
-                  body = (if holds_body then Some (State.build_block state written) else None);
-                });
-        if not (is_broken Body) then
-          check_body state
-            { no_output with specification = true; output = Some (Returns Types.unit) }
-            written
     | Law_proof { body = written; _ }, _ ->
-        state.form.definition_builder <-
-          Some
-            (fun ~holds_body ->
-              Law_proof
-                {
-                  parameters = [];
-                  body = (if holds_body then Some (State.build_block state written) else None);
-                });
         if not (is_broken Body) then
           check_body state
             { no_output with specification = true; output = Some (Returns Types.unit) }
             written
     | _ -> ()
-
-let finalize (state : State.state) =
-  let finalize_type = State.finalize_type state
-  and finalize_argument = State.finalize_argument state
-  and finalize_instantiation = State.finalize_instantiation state in
-  let finalize_trait (reference : Types.trait_reference) =
-    {
-      reference with
-      trait_arguments = List.map finalize_argument reference.trait_arguments;
-      associated = List.map (fun (name, type_) -> (name, finalize_type type_)) reference.associated;
-    }
-  in
-  let finalize_call (written : Tables.call) : Tables.call =
-    {
-      written with
-      callee =
-        (match written.callee with
-        | Function { path; instantiation } ->
-            Function { path; instantiation = finalize_instantiation instantiation }
-        | Trait_method method_ ->
-            Trait_method
-              {
-                method_ with
-                trait = finalize_trait method_.trait;
-                self_type = finalize_type method_.self_type;
-                instantiation = finalize_instantiation method_.instantiation;
-              }
-        | Constructor constructor ->
-            Constructor
-              {
-                constructor with
-                type_arguments = List.map finalize_argument constructor.type_arguments;
-              }
-        | Intrinsic intrinsic ->
-            Intrinsic
-              {
-                intrinsic with
-                type_arguments = List.map finalize_argument intrinsic.type_arguments;
-              }
-        | other -> other);
-      callee_result = finalize_type written.callee_result;
-    }
-  in
-  let tables = state.tables in
-  let update table transform =
-    Array.iteri (fun index entry -> table.(index) <- Option.map transform entry) table
-  in
-  update tables.types finalize_type;
-  update tables.local_types finalize_type;
-  update tables.scrutinee_types finalize_type;
-  update tables.calls finalize_call;
-  update tables.resolutions (function
-    | Tables.Global { path; instantiation } ->
-        Tables.Global { path; instantiation = finalize_instantiation instantiation }
-    | Field_access { type_; field } -> Field_access { type_ = finalize_type type_; field }
-    | Variant_value { type_; variant } -> Variant_value { type_ = finalize_type type_; variant }
-    | Type_name type_ -> Type_name (finalize_type type_)
-    | other -> other);
-  update tables.loops (function
-    | Tables.Integer_range { element; inclusive } ->
-        Tables.Integer_range { element = finalize_type element; inclusive }
-    | Elements { count; element; lends } ->
-        Elements { count = finalize_call count; element = finalize_call element; lends }
-    | Pulled { cursor; cursor_call; remaining } ->
-        Pulled
-          {
-            cursor = finalize_type cursor;
-            cursor_call = Option.map finalize_call cursor_call;
-            remaining =
-              Option.map
-                (fun (condition, remaining) -> (condition, finalize_call remaining))
-                remaining;
-          });
-  update tables.patterns (function
-    | Tables.Variant_pattern { type_; variant } ->
-        Tables.Variant_pattern { type_ = finalize_type type_; variant }
-    | Record_pattern { type_ } -> Record_pattern { type_ = finalize_type type_ }
-    | other -> other);
-  update tables.templates (fun (template : Tables.template) ->
-      {
-        template with
-        from_template = Option.map finalize_call template.from_template;
-        part_conversions = List.map (Option.map finalize_call) template.part_conversions;
-      })
 
 let list_used_packages (resolved : Resolve.resolved) ~evidence_packages (form : Core.t) =
   let named =
@@ -693,7 +374,21 @@ let list_used_packages (resolved : Resolve.resolved) ~evidence_packages (form : 
     form.definition;
   List.sort_uniq compare (named @ !called)
 
-let infer (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body ~assumed_types =
+let list_law_parameters (lookups : Lookups.t) (interface : Interface.Environment.interface) =
+  match interface with
+  | Law_proof_interface { trait; law; for_type; _ } -> (
+      match Interface.Definition.find_trait_interface lookups.interface trait.trait with
+      | Some trait_interface ->
+          let substitution =
+            Types.make_trait_substitution trait_interface.trait_generics ~self:for_type trait
+          in
+          List.map
+            (fun (name, type_) -> (name, Types.substitute substitution type_))
+            (Option.value ~default:[] (List.assoc_opt law trait_interface.laws))
+      | None -> [])
+  | _ -> []
+
+let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
   let resolved =
     Resolve.merge
       (List.map
@@ -716,29 +411,16 @@ let infer (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body ~assumed_
       package = module_.package;
       definition;
       resolved;
-      context;
       text;
       tables = Tables.create (definition.id + 1);
-      form =
-        {
-          expression_builders = Array.make (definition.id + 1) None;
-          statement_builders = Array.make (definition.id + 1) None;
-          pattern_builders = Array.make (definition.id + 1) None;
-          definition_builder = None;
-          next_node_id = 0;
-          next_synthetic_local = 0;
-          tables_with_holes = None;
-        };
       diagnostics = [];
       unifier =
-        Unify.create ~list_rigid_members:(fun rigid ->
-            Option.value ~default:[]
-              (Types.find_bound_integer_implementors
-                 (Interface.Properties.list_known_bounds lookups.interface
-                    ~list_bounds:(Interface.Elaborator.list_bounds context)
-                    rigid)));
+        Unify.create ~context ~list_rigid_members:(fun context rigid ->
+            Interface.Properties.list_rigid_members lookups.interface
+              ~list_bounds:(Interface.Elaborator.list_bounds context)
+              rigid);
       locals = Hashtbl.create 32;
-      law_parameters = [];
+      law_parameters = list_law_parameters lookups elaborated.interface;
       frames = [];
       locals_read = [];
       keyword_modes = [];
@@ -753,11 +435,8 @@ let infer (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body ~assumed_
       evidence_packages = [];
       final_type_checks = [];
       log = [];
-      condition_bounds = [];
       annotatable = Hashtbl.create 8;
       goals = [];
-      assumed_types;
-      unchecked_fixes = [];
     }
   in
   Solver.run_in_statement state no_output (State.read_span state definition.id) (fun () ->
@@ -769,88 +448,39 @@ let infer (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body ~assumed_
       ~list_bounds:(State.lookup_bounds state) ~spans
       (Interface.Elaborator.list_named_types context)
     @ state.diagnostics;
-  finalize state;
+  let finalize () =
+    Tables.map ~map_type:(State.finalize_type state) ~map_argument:(State.finalize_argument state)
+      ~map_capabilities:(State.finalize_capabilities state)
+      state.tables
+  in
+  let tables = finalize () in
   Exported_parts.check state;
-  (state, elaborated, resolved)
-
-let keep_validated_fixes lookups key ~checks_body (state : State.state) =
-  let is_valid (fixed : Diagnostic.in_definition) assumed_types =
-    match infer lookups key ~checks_body ~assumed_types with
-    | checked_again, _, _ ->
-        List.for_all
-          (fun (diagnostic : Diagnostic.in_definition) ->
-            diagnostic.span <> fixed.span && List.mem diagnostic state.diagnostics)
-          checked_again.diagnostics
-    | exception Interface.Properties.Recursion_limit _ -> false
-  in
-  List.map
-    (fun (diagnostic : Diagnostic.in_definition) ->
-      let is_kept fix =
-        Option.fold ~none:true ~some:(is_valid diagnostic) (List.assq_opt fix state.unchecked_fixes)
-      in
-      { diagnostic with fixes = List.filter is_kept diagnostic.fixes })
-    state.diagnostics
-
-let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
-  let state, elaborated, resolved = infer lookups key ~checks_body ~assumed_types:[] in
-  let has_any_type is_unwanted =
-    let contains table =
-      Seq.exists
-        (function
-          | Some type_ ->
-              let has_unwanted = ref false in
-              ignore
-                (Types.map
-                   (fun part ->
-                     if is_unwanted part then has_unwanted := true;
-                     None)
-                   type_);
-              !has_unwanted
-          | None -> false)
-        (Array.to_seq table)
-    in
-    contains state.tables.types || contains state.tables.local_types
-    || contains state.tables.scrutinee_types
-  in
-  let is_clean () =
+  let is_clean tables =
     state.diagnostics = []
     && (not (Resolve.Names.is_broken lookups.interface.names key Header))
     && (not (checks_body && Resolve.Names.is_broken lookups.interface.names key Body))
-    && not (has_any_type Types.is_error)
+    && not (Tables.exists_type Types.is_error tables)
   in
-  let build () : Core.t =
-    state.form.next_node_id <- 0;
-    state.form.next_synthetic_local <- 0;
-    let checked = state.tables in
-    if has_any_type (fun part -> part = Types.Hole) then begin
-      state.form.tables_with_holes <- Some checked;
-      state.tables <- Tables.copy checked;
-      finalize state
-    end;
-    let definition =
-      match state.form.definition_builder with
-      | Some build -> build ~holds_body:checks_body
-      | None -> Core.Empty
-    in
-    state.tables <- checked;
-    state.form.tables_with_holes <- None;
-    { definition }
+  let build tables =
+    Form.build lookups ~resolved ~tables ~context ~package:state.package ~text ~key ~definition
+      ~elaborated ~law_parameters:state.law_parameters ~checks_body
   in
-  let checked = if is_clean () then Some (build ()) else None in
+  let checked = if is_clean tables then Some (build tables) else None in
   (match checked with
   | Some form ->
+      check_bit_vector_names state form;
       Capabilities.check state elaborated form;
       check_deserialized_invariants state elaborated form
   | None -> state.capability_solution <- Some (Hashtbl.create 1));
   let has_capability_variables = state.unifier.capability_variable_count > 0 in
-  if has_capability_variables then finalize state;
+  let tables = if has_capability_variables then finalize () else tables in
   match checked with
-  | Some form when is_clean () ->
-      let form = if has_capability_variables then build () else form in
+  | Some form when is_clean tables ->
+      let form = if has_capability_variables then build tables else form in
       Ok
         {
           form;
-          tables = Tables.publish state.tables;
+          tables = Tables.publish tables;
           used_packages =
             list_used_packages resolved ~evidence_packages:state.evidence_packages form;
           places_without_keyword = state.places_without_keyword;
@@ -861,4 +491,4 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
         (List.sort_uniq
            (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
              compare (left.span, left.code, left.message) (right.span, right.code, right.message))
-           (keep_validated_fixes lookups key ~checks_body state))
+           state.diagnostics)

@@ -1,0 +1,6 @@
+fn f(flag: Bool) {
+  let level = 1
+  let magnitude = 1
+  let chosen = if flag { level.unsigned_absolute() } else { magnitude }
+  let _ = chosen
+}

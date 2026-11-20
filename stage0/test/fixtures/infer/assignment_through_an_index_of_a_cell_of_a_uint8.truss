@@ -1,0 +1,5 @@
+fn f() -> UInt8 {
+  var cell = Cell(item: 3)
+  cell[0] = 5
+  cell.item
+}

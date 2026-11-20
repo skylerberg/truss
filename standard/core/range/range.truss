@@ -92,9 +92,12 @@ public opaque type Stepped[Value: core::Countable](range: Range[Value], step: UI
   invariant step > 0
 
 public fn Range[Value: core::Countable].step_by(self, step: UInt64) -> Stepped[Value]
-  requires step > 0
+  uses Panic unless step > 0
   cost time O(1)
 {
+  if step == 0 {
+    Panic.crash("the step is zero")
+  }
   Stepped(range: Range(start: self.start, stop: self.stop, inclusive: self.inclusive), step: step)
 }
 

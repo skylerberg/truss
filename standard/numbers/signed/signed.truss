@@ -50,7 +50,7 @@ impl Add[Int8] for Int8 {
   }
 
   fn add(self, right: Int8) -> Int8
-    requires Int8.minimum <= self + right && self + right <= Int8.maximum
+    uses Panic unless Int8.minimum <= self + right && self + right <= Int8.maximum
     ensures result == self + right
     cost time O(1)
   {
@@ -69,7 +69,7 @@ impl Subtract[Int8] for Int8 {
   }
 
   fn subtract(self, right: Int8) -> Int8
-    requires Int8.minimum <= self - right && self - right <= Int8.maximum
+    uses Panic unless Int8.minimum <= self - right && self - right <= Int8.maximum
     ensures result == self - right
     cost time O(1)
   {
@@ -88,7 +88,7 @@ impl Multiply[Int8] for Int8 {
   }
 
   fn multiply(self, right: Int8) -> Int8
-    requires Int8.minimum <= self * right && self * right <= Int8.maximum
+    uses Panic unless Int8.minimum <= self * right && self * right <= Int8.maximum
     ensures result == self * right
     cost time O(1)
   {
@@ -107,7 +107,7 @@ impl Divide[Int8] for Int8 {
   }
 
   fn divide(self, right: Int8) -> Int8
-    requires right != 0 && !(self == Int8.minimum && right == -1)
+    uses Panic unless right != 0 && !(self == Int8.minimum && right == -1)
     ensures result == self / right
     cost time O(1)
   {
@@ -126,7 +126,7 @@ impl Remainder[Int8] for Int8 {
   }
 
   fn remainder(self, right: Int8) -> Int8
-    requires right != 0 && !(self == Int8.minimum && right == -1)
+    uses Panic unless right != 0 && !(self == Int8.minimum && right == -1)
     ensures result == self % right
     cost time O(1)
   {
@@ -145,7 +145,7 @@ impl Negate for Int8 {
   }
 
   fn negate(self) -> Int8
-    requires self != Int8.minimum
+    uses Panic unless self != Int8.minimum
     ensures result == -self
     cost time O(1)
   {
@@ -215,7 +215,7 @@ impl Add[Int16] for Int16 {
   }
 
   fn add(self, right: Int16) -> Int16
-    requires Int16.minimum <= self + right && self + right <= Int16.maximum
+    uses Panic unless Int16.minimum <= self + right && self + right <= Int16.maximum
     ensures result == self + right
     cost time O(1)
   {
@@ -234,7 +234,7 @@ impl Subtract[Int16] for Int16 {
   }
 
   fn subtract(self, right: Int16) -> Int16
-    requires Int16.minimum <= self - right && self - right <= Int16.maximum
+    uses Panic unless Int16.minimum <= self - right && self - right <= Int16.maximum
     ensures result == self - right
     cost time O(1)
   {
@@ -253,7 +253,7 @@ impl Multiply[Int16] for Int16 {
   }
 
   fn multiply(self, right: Int16) -> Int16
-    requires Int16.minimum <= self * right && self * right <= Int16.maximum
+    uses Panic unless Int16.minimum <= self * right && self * right <= Int16.maximum
     ensures result == self * right
     cost time O(1)
   {
@@ -272,7 +272,7 @@ impl Divide[Int16] for Int16 {
   }
 
   fn divide(self, right: Int16) -> Int16
-    requires right != 0 && !(self == Int16.minimum && right == -1)
+    uses Panic unless right != 0 && !(self == Int16.minimum && right == -1)
     ensures result == self / right
     cost time O(1)
   {
@@ -291,7 +291,7 @@ impl Remainder[Int16] for Int16 {
   }
 
   fn remainder(self, right: Int16) -> Int16
-    requires right != 0 && !(self == Int16.minimum && right == -1)
+    uses Panic unless right != 0 && !(self == Int16.minimum && right == -1)
     ensures result == self % right
     cost time O(1)
   {
@@ -310,7 +310,7 @@ impl Negate for Int16 {
   }
 
   fn negate(self) -> Int16
-    requires self != Int16.minimum
+    uses Panic unless self != Int16.minimum
     ensures result == -self
     cost time O(1)
   {
@@ -380,7 +380,7 @@ impl Add[Int32] for Int32 {
   }
 
   fn add(self, right: Int32) -> Int32
-    requires Int32.minimum <= self + right && self + right <= Int32.maximum
+    uses Panic unless Int32.minimum <= self + right && self + right <= Int32.maximum
     ensures result == self + right
     cost time O(1)
   {
@@ -399,7 +399,7 @@ impl Subtract[Int32] for Int32 {
   }
 
   fn subtract(self, right: Int32) -> Int32
-    requires Int32.minimum <= self - right && self - right <= Int32.maximum
+    uses Panic unless Int32.minimum <= self - right && self - right <= Int32.maximum
     ensures result == self - right
     cost time O(1)
   {
@@ -418,7 +418,7 @@ impl Multiply[Int32] for Int32 {
   }
 
   fn multiply(self, right: Int32) -> Int32
-    requires Int32.minimum <= self * right && self * right <= Int32.maximum
+    uses Panic unless Int32.minimum <= self * right && self * right <= Int32.maximum
     ensures result == self * right
     cost time O(1)
   {
@@ -437,7 +437,7 @@ impl Divide[Int32] for Int32 {
   }
 
   fn divide(self, right: Int32) -> Int32
-    requires right != 0 && !(self == Int32.minimum && right == -1)
+    uses Panic unless right != 0 && !(self == Int32.minimum && right == -1)
     ensures result == self / right
     cost time O(1)
   {
@@ -456,7 +456,7 @@ impl Remainder[Int32] for Int32 {
   }
 
   fn remainder(self, right: Int32) -> Int32
-    requires right != 0 && !(self == Int32.minimum && right == -1)
+    uses Panic unless right != 0 && !(self == Int32.minimum && right == -1)
     ensures result == self % right
     cost time O(1)
   {
@@ -475,7 +475,7 @@ impl Negate for Int32 {
   }
 
   fn negate(self) -> Int32
-    requires self != Int32.minimum
+    uses Panic unless self != Int32.minimum
     ensures result == -self
     cost time O(1)
   {
@@ -545,7 +545,7 @@ impl Add[Int64] for Int64 {
   }
 
   fn add(self, right: Int64) -> Int64
-    requires Int64.minimum <= self + right && self + right <= Int64.maximum
+    uses Panic unless Int64.minimum <= self + right && self + right <= Int64.maximum
     ensures result == self + right
     cost time O(1)
   {
@@ -564,7 +564,7 @@ impl Subtract[Int64] for Int64 {
   }
 
   fn subtract(self, right: Int64) -> Int64
-    requires Int64.minimum <= self - right && self - right <= Int64.maximum
+    uses Panic unless Int64.minimum <= self - right && self - right <= Int64.maximum
     ensures result == self - right
     cost time O(1)
   {
@@ -583,7 +583,7 @@ impl Multiply[Int64] for Int64 {
   }
 
   fn multiply(self, right: Int64) -> Int64
-    requires Int64.minimum <= self * right && self * right <= Int64.maximum
+    uses Panic unless Int64.minimum <= self * right && self * right <= Int64.maximum
     ensures result == self * right
     cost time O(1)
   {
@@ -602,7 +602,7 @@ impl Divide[Int64] for Int64 {
   }
 
   fn divide(self, right: Int64) -> Int64
-    requires right != 0 && !(self == Int64.minimum && right == -1)
+    uses Panic unless right != 0 && !(self == Int64.minimum && right == -1)
     ensures result == self / right
     cost time O(1)
   {
@@ -621,7 +621,7 @@ impl Remainder[Int64] for Int64 {
   }
 
   fn remainder(self, right: Int64) -> Int64
-    requires right != 0 && !(self == Int64.minimum && right == -1)
+    uses Panic unless right != 0 && !(self == Int64.minimum && right == -1)
     ensures result == self % right
     cost time O(1)
   {
@@ -640,7 +640,7 @@ impl Negate for Int64 {
   }
 
   fn negate(self) -> Int64
-    requires self != Int64.minimum
+    uses Panic unless self != Int64.minimum
     ensures result == -self
     cost time O(1)
   {

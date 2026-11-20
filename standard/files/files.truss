@@ -507,9 +507,12 @@ public opaque type Permissions(mode: UInt32)
   invariant mode <= 0o7777
 
 public fn Permissions.from_mode(mode: UInt32) -> Permissions
-  requires mode <= 0o7777
+  uses Panic unless mode <= 0o7777
   cost time O(1)
 {
+  if mode > 0o7777 {
+    Panic.crash("the mode has bits outside 0o7777")
+  }
   Permissions(mode: mode)
 }
 

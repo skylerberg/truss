@@ -1,0 +1,38 @@
+trait Scale {
+  fn scaled_by(self, factor: UInt8) -> Int64
+}
+
+impl Scale for Int64 {
+  fn scaled_by(self, factor: UInt8) -> Int64 {
+    self
+  }
+}
+
+trait Describe {
+  fn describe(self) -> String
+}
+
+impl Describe for Int64 {
+  fn describe(self) -> String {
+    "signed"
+  }
+}
+
+fn f() -> Int64 {
+  let factor = 2
+  let base = 10
+  base.scaled_by(factor)
+}
+
+fn g() -> UInt64 {
+  let base = 10
+  let scaled = base.scaled_by(2)
+  scaled.count_ones()
+}
+
+fn h() -> UInt64 {
+  let first = 5
+  let text = first.describe()
+  let gap = first.absolute_difference(3)
+  text.length() + gap.count_ones()
+}

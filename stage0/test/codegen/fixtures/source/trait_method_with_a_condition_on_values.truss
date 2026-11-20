@@ -1,0 +1,34 @@
+trait Scaled {
+  fn scaled(self, count: Int64) -> Int64
+    uses Panic unless Int64.minimum <= count * 1000 && count * 1000 <= Int64.maximum
+}
+
+type Thousand(unit: Int64)
+
+impl Scaled for Thousand {
+  fn scaled(self, count: Int64) -> Int64
+    uses Panic unless Int64.minimum <= count * 1000 && count * 1000 <= Int64.maximum
+  {
+    count * 1000
+  }
+}
+
+fn five_thousand[Scale: Scaled](scale: Scale) -> Int64 {
+  scale.scaled(5)
+}
+
+fn proven() -> Int64 {
+  five_thousand(Thousand(unit: 1))
+}
+
+fn scaled_or_panic[Scale: Scaled](scale: Scale, count: Int64) -> Int64
+  uses Panic
+{
+  scale.scaled(count)
+}
+
+fn panicking(count: Int64) -> Int64
+  uses Panic
+{
+  scaled_or_panic(Thousand(unit: 1), count: count)
+}

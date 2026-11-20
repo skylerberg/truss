@@ -379,7 +379,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       precondition_clauses.requires
   in
   let required = Logic.conjunction required in
-  if not context.panics then begin
+  if not (context.panics || Types.has_capability (Built_in Panic) invocation.uses) then begin
     let clauses = contract.callee_clauses in
     let entry = read_entry_frame clauses in
     List.iter

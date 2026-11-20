@@ -28,10 +28,10 @@ let check_grants_when_final state at subject (trait : Types.trait_reference) =
         Option.iter (check_evidence_grants state at)
           (State.find_evidence state subject { trait with associated = [] }))
 
-let require_bounds state at ?of_type generics substitution =
+let require_bounds state at ?of_type ?projections generics substitution =
   List.iter
     (fun (argument, bound) ->
-      Solver.require state (Bound { at; of_type }) argument bound;
+      Solver.require state (Bound { at; of_type }) ?projections argument bound;
       check_grants_when_final state at argument bound)
     (Interface.Impls.list_required_bounds generics substitution)
 
@@ -41,7 +41,7 @@ let make_fresh_arguments (state : State.state) (path : Path.t) =
   | None -> []
 
 let make_fresh_trait_reference (state : State.state) (trait : Path.t) =
-  State.make_trait_reference trait
+  Types.make_trait_reference trait
     ~arguments:
       (match Interface.Definition.find_trait_interface state.lookups.interface trait with
       | Some interface -> State.make_fresh_generic_arguments state interface.trait_generics
@@ -64,7 +64,9 @@ let instantiate_type state span path =
 let rec find_static state (value : Syntax.expression) : static_ option =
   match (value.kind, State.find_head state value) with
   | Self_type_value, _ ->
-      Option.map (fun self -> Static_type self) (Interface.Elaborator.find_self_type state.context)
+      Option.map
+        (fun self -> Static_type self)
+        (Interface.Elaborator.find_self_type (State.read_context state))
   | _, Some { target = Definition (Type, path); type_arguments; _ } ->
       Some (Static_type (check_named_type state value path type_arguments))
   | _, Some { target = Type_parameter parameter; name; type_arguments } -> (
@@ -150,6 +152,7 @@ type instance = {
   signature : Types.signature;
   substitution : Types.substitution;
   instantiation : Types.instantiation;
+  flatten : Types.ty -> Types.ty;
 }
 
 let instantiate (state : State.state) (span : Source.Definition_span.t)
@@ -167,18 +170,29 @@ let instantiate (state : State.state) (span : Source.Definition_span.t)
   let substitution =
     Types.combine_substitutions (Types.make_signature_substitution signature instantiation) extra
   in
-  require_bounds state span signature.generics substitution;
+  let projections = ref [] in
+  require_bounds state span ~projections signature.generics substitution;
+  let flatten = Solver.flatten state (Bound { at = span; of_type = None }) ~projections in
+  let substituted = Types.substitute_signature substitution signature in
   {
     declared = signature;
-    signature = Types.substitute_signature substitution signature;
+    signature =
+      {
+        substituted with
+        output =
+          (match substituted.output with
+          | Returns output -> Returns (flatten output)
+          | Lends (mode, part) -> Lends (mode, flatten part));
+      };
     substitution;
     instantiation;
+    flatten;
   }
 
 let find_intrinsic_signature path =
   Option.map Intrinsic_signatures.make_signature (Intrinsic.find_operation path)
 
-let find_function_signature (state : State.state) (path : Path.t) =
+let find_function_signature (lookups : Lookups.t) (path : Path.t) =
   match find_intrinsic_signature path with
   | Some signature -> Some signature
-  | None -> Interface.Impls.read_signature state.lookups.interface path
+  | None -> Interface.Impls.read_signature lookups.interface path

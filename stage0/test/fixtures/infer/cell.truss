@@ -1,0 +1,15 @@
+type Cell[Item: Plain](item: Item)
+
+impl Index for Cell[Item: Plain] {
+  type Key = UInt64
+  type Output = Item
+
+  fn contains_key(self, key: UInt64) -> Bool {
+    key == 0
+  }
+
+  fn at(self, key: UInt64) lends Item {
+    self.item
+  }
+}
+

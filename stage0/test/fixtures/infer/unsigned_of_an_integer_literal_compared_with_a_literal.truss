@@ -1,0 +1,7 @@
+fn unsigned_of[Value: SignedInteger](value: Value) -> Value.Unsigned {
+  todo
+}
+
+fn f() -> Bool {
+  unsigned_of(3) == 0
+}

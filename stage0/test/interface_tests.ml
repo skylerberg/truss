@@ -298,8 +298,13 @@ let () =
         "types.misplaced_value_condition" ~says:"applies only to `Panic`";
       expect_one_diagnostic Fixtures.Interface.condition_on_values_joined_with_a_bound
         "types.misplaced_value_condition" ~says:"cannot be joined with a bound";
-      expect_one_diagnostic Fixtures.Interface.condition_on_values_in_a_trait
-        "types.misplaced_value_condition" ~says:"A trait's method takes no condition");
+      expect_one_diagnostic Fixtures.Interface.condition_on_values_in_a_capability
+        "types.misplaced_value_condition" ~says:"A capability's method takes no condition");
+  Harness.test "a trait's method takes a condition on values" (fun () ->
+      expect_no_diagnostics [ ("app::main", Fixtures.Interface.condition_on_values_in_a_trait) ]);
+  Harness.test "an impl's method panics only unless a condition where its trait's does" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.impl_panicking_beyond_its_trait_condition
+        "types.impl_uses" ~says:"could panic where that condition holds");
   Harness.test "a restated method has no body" (fun () ->
       expect_one_diagnostic Fixtures.Interface.subtrait_restating_next_with_a_body
         "types.restated_method_body");

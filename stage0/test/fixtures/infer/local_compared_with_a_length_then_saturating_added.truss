@@ -1,0 +1,6 @@
+fn f(items: Slice[Int64]) -> Bool {
+  var count = 0
+  let is_full = count == items.length()
+  count = count.saturating_add(1)
+  is_full
+}
