@@ -331,7 +331,7 @@ its file or its position in the file.
 - A local, a parameter, or a generic parameter cannot shadow another of an
   enclosing scope, or a prelude name. `let name = name.trim()` is an error.
 - A local or a parameter may shadow a function, a constant, or a theorem of
-  its module, so adding a definition to one file breaks no local in another.
+  its module.
 - A generic parameter cannot shadow a type, a trait, or a capability of its
   module, so `impl Shown for Box[Marker]` is an error where `Marker` is a
   type of the module.
@@ -394,7 +394,7 @@ let answer = Some(3)
 ```
 
 - A record has named fields; a sum type has variants, each with fields or
-  none. Truss has no tuples and no type aliases.
+  none.
 - A value is built the way a function is called (see
   [Calls and arguments](#calls-and-arguments)), and a field can have a
   default, as a parameter can.
@@ -510,7 +510,7 @@ public type Interval =
 ## Values and ownership
 
 Every variable holds its own value, and no two names alias a value that
-either can mutate. There are no stored references and no lifetimes.
+either can mutate.
 
 - **A place** is a variable, `self`, or a constant, followed by any number of
   field accesses and indexes: `config.servers`, `scores[0]`. A constant is a
@@ -1569,9 +1569,8 @@ match status_code {
 - Fields can be written in any order, and `..`, the remaining fields, comes
   last.
 - A bare name binds, in every pattern. A constant is written with its module
-  or its type, `http::ok` or `Status.teapot`, so adding a constant never
-  changes the semantics of a pattern. A constant in a pattern has a type with
-  structural equality (see [Equality](#equality)).
+  or its type, `http::ok` or `Status.teapot`. A constant in a pattern has a
+  type with structural equality (see [Equality](#equality)).
 - Range patterns match integers and characters.
 - Every alternative of an or-pattern binds the same names, with the same
   types.
@@ -2167,7 +2166,6 @@ let rolled = provide LoadedDie(face: 5) {
   type is `Never`, as for `Panic.crash`.
 - A capability's method keeps no view it is given, and returns no view of its
   implementation's state.
-- A capability cannot be declared as a bundle of others.
 
 ### Standard capabilities
 
@@ -2197,15 +2195,13 @@ runtime holds a *real implementation* of every other standard capability.
 A capability that a package declares has no real implementation. An
 intrinsic that reaches the operating system uses `System`, which no
 package but the standard library can name. The runtime grants `System`
-only to the real implementations, so a function without `uses` is pure in
-the standard library too.
+only to the real implementations.
 
 ### Handles
 
 A handle is a value that stands for something the operating system holds,
 such as an open file. It is released when its owner is done with it, on
-every path, and releasing it runs no Truss code and never fails. No type
-defines code that runs when its value is released.
+every path, and releasing it runs no Truss code and never fails.
 
 ### main
 
@@ -2316,8 +2312,8 @@ signatures it calls, including through a capability parameter, the
 implementation's calls are mutually exclusive: each holds the
 implementation's mutex from start to end. Such an implementation has no
 method with a parameter that can hold a function, or an `any` value, that
-uses a capability other than `Panic` and `RunForever`, so its mutexes
-cannot deadlock. An implementation provided without `mut` has no mutex.
+uses a capability other than `Panic` and `RunForever`. An implementation
+provided without `mut` has no mutex.
 
 ## Strings
 
@@ -2632,13 +2628,11 @@ test "config loads with defaults" uses RunForever {
   deterministic.
 - A test's `uses` names only capabilities with a [real
   implementation](#standard-capabilities).
-- A test's standard input is empty.
 - A failed `assert` ends the test as failed, and the rest of the test can
   rely on the asserted fact.
 - A test build checks every primitive operation that could fail when it
   runs, and a failed check fails the test. A `requires` is not run.
 - A panic fails only its test. A test that reaches a `todo` is incomplete.
-- A test that runs past the project's time limit fails.
 
 ## Proofs
 
@@ -2649,7 +2643,6 @@ law_proof = "proof" path_type "." LOWER_NAME "for" type_head block ;
 
 Every promise is proven before a program is built: contracts, invariants,
 laws, loop invariants, and every operation that could fail.
-There is no `assume`.
 
 ```truss
 theorem reverse_twice[Element](items: Sequence[Element])
@@ -2891,19 +2884,12 @@ and the prelude changes only with a language version.
 - The `requires` and `cost` of a public function, of a method of a public
   trait or capability, and of a method of an `impl` that other packages can
   use call no private or `internal` function and name no such constant. An
-  `ensures` may name any function the definition can, so that callers in its
-  package can know its result in terms of private helpers.
+  `ensures` may name any function the definition can.
 - An `internal` function, method, or constant that no definition of its
-  package uses is an error, and a private one is a warning. A warning is
-  reported as an error is, but it does not make `truss check`, a build, a
-  test run, or a publish fail. A method or constant written in a trait, a
-  capability, or an impl is not checked. A use counts when the user is
-  public, is a test, an `impl`, or another definition the rule does not
-  check, or is itself used, so definitions that use only each other are
-  reported together. The `main` of a package's root module is exempt, and
-  so is a definition the compiler calls by name.
-
-## No foreign code
-
-Truss code cannot call code written in other languages. Only the standard
-library reaches the operating system.
+  package uses is an error, and a private one is a warning. A method or
+  constant written in a trait, a capability, or an `impl` is not checked.
+  A use counts when the user is public, is a test, an `impl`, or another
+  definition the rule does not check, or is itself used, so definitions
+  that use only each other are reported together. The `main` of a
+  package's root module is exempt, and so is a definition the compiler
+  calls by name.
