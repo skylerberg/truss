@@ -343,7 +343,7 @@ let write_output (state : Lowering.state) output =
     | Lends _ -> Definitions.raise_bug "write_fully does not return"
   in
   Targets.lower_item_call state
-    (Code { path = write_fully; instantiation = Ground.no_instantiation })
+    (Lowered.Item.make_code write_fully Ground.no_instantiation)
     ~signature ~substitution:Types.no_substitution
     ~arguments:[ (Read, int32, descriptor); (Read, view_ty, view) ]
     ~destination:(Lowering.allocate_temporary state result)

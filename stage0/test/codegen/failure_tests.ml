@@ -113,6 +113,7 @@ let () =
           {
             path = Top { module_ = Codegen_support.example; name = "Point" };
             instantiation = Ground.no_instantiation;
+            assumes_condition = false;
           }
       in
       expect_bug ~saying:"while lowering example::Point" (fun () ->

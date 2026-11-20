@@ -11,7 +11,7 @@ let resolve_callee state (callee : Mir.callee) : (Path.t * Ground.instantiation)
         Targets.make_trait_method_item state.context state.frame.code.substitution ~trait ~name
           ~receiver ~self_type ~instantiation ~evidence
       with
-      | Code { path; instantiation } -> Some (path, instantiation)
+      | Code { path; instantiation; _ } -> Some (path, instantiation)
       | _ -> Definitions.raise_bug "a trait method whose item is not code")
   | Capability_method _ | Intrinsic _ | Indirect _ -> None
 
@@ -23,7 +23,7 @@ let resolve_call_signature state (callee : Mir.callee) =
   match resolve_callee state callee with
   | Some (path, instantiation) ->
       let signature, substitution = read_callee_signature state path instantiation in
-      (path, Lowered.Item.Code { path; instantiation }, signature, substitution)
+      (path, Lowered.Item.make_code path instantiation, signature, substitution)
   | None -> Definitions.raise_bug "a callee that is not a function or a method"
 
 let compute_result_type state (callee : Mir.callee) =

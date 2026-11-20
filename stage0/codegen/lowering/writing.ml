@@ -26,12 +26,7 @@ let emit_write_call env builder ~output (writer : Well_known.t) ty (place : Lowe
            Direct
              {
                function_ =
-                 Item
-                   (Code
-                      {
-                        path = Well_known.make_path writer;
-                        instantiation = Ground.no_instantiation;
-                      });
+                 Item (Lowered.Item.make_code (Well_known.make_path writer) Ground.no_instantiation);
                signature =
                  Convention.make_signature [ make_output_parameter env; parameter ] Nothing;
              };

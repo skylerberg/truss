@@ -655,6 +655,7 @@ arguments only.
 | Only `Panic` takes a condition on values. | It replaces `requires P` with a choice for each caller: prove `P`, or have `Panic`. `RunForever unless P` would also need conditions on values in `cost` clauses. An external capability is provided and granted, so whether a call uses one depends on more than the call. |
 | A call to a function that uses `Panic unless P` is never a type error. | The capability check cannot decide `P`. The prover obliges `P` where the caller has no `Panic`. |
 | The body is proven with `Panic`, and again assuming `P` without `Panic`. | Where `P` holds the function promises not to panic, so that run proves every operation that could fail and rules out every call that uses `Panic`. |
+| A function that uses `Panic unless P` is compiled twice. A caller without `Panic` calls the copy that assumes `P`, whose checks are development-only. | A caller that proved `P` runs as fast as with a `requires`. The caller's capabilities pick the copy, so code generation reads no proof. |
 | `expect` uses `Panic unless self is Some(_)`. | Code that proves its value present calls `expect` without declaring `Panic`. |
 | A trait's method takes no condition on values. | Each `impl` would have to prove that the trait's condition implies its own, as a restated clause is proven, and no caller needs one yet. |
 | `when` takes no condition on values. | `requires P ==> Q` and `ensures P ==> Q` already say it. |

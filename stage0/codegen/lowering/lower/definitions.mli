@@ -22,6 +22,7 @@ type code = {
   substitution : Types.substitution;
   uses : Types.capability_set;
   has_defaults : bool;
+  assumes_condition : bool;
 }
 
 val make_unwritten_code :
@@ -36,6 +37,8 @@ val make_code : context -> Path.t -> Ground.instantiation -> code
 val list_template_clauses : context -> Path.t -> int list -> Mir.Graph.t list
 val panic_path : Path.t
 val list_evidence : context -> Types.substitution -> Types.capability_set -> Path.t list
+val has_panic_condition : Types.capability_set -> bool
+val remove_panic_condition : Types.capability_set -> Types.capability_set
 val classify_result : context -> Types.substitution -> Types.result -> Convention.result * bool
 val list_lending_parameters : context -> Types.substitution -> Types.result -> Lowered.ty list
 

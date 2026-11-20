@@ -416,7 +416,7 @@ and lower_call_into state (call : Mir.call) destination ~origin =
       match signature.output with
       | Returns _ ->
           Targets.lower_item_call state
-            (Code { path; instantiation })
+            (Lowered.Item.make_code path instantiation)
             ~signature ~substitution ~arguments ~mask ~destination
             ~site:(Some (Mir_places.locate_site state origin))
             ()
@@ -449,6 +449,8 @@ and lower_call_into state (call : Mir.call) destination ~origin =
                  ~type_arguments:[] [ Intrinsics.Place message ] ~destination:None
                  ~site:(Mir_places.locate_site state origin)
                  ~trace:(Some trace))
+        | [ _ ], None when state.frame.code.assumes_condition ->
+            Lowering.emit_unreachable_block state
         | [ _ ], None -> Definitions.raise_bug "Panic.crash where Panic has no evidence"
         | _ -> Definitions.raise_bug "Panic.crash takes one message"
       else begin
@@ -648,7 +650,7 @@ and lend ?(forwards = 0) state part (call : Mir.call) ~origin =
             in
             compute_lent_place signature.output substitution (fun ~lending destination ->
                 Targets.lower_item_call state
-                  (Code { path; instantiation })
+                  (Lowered.Item.make_code path instantiation)
                   ~signature ~substitution ~arguments ~mask ~lending ~destination
                   ~site:(Some (Mir_places.locate_site state origin))
                   ())

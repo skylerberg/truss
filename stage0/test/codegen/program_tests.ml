@@ -734,6 +734,7 @@ let () =
                                {
                                  path = declaration.key.path;
                                  instantiation = Ground.no_instantiation;
+                                 assumes_condition = false;
                                })
                       | _ -> None)
                     ((Database.make_name_lookups checked).list_declarations Codegen_support.example)

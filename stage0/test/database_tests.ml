@@ -22,6 +22,7 @@ let make_code_item name : Lowered.Item.t =
     {
       path = make_main_path name;
       instantiation = { type_arguments = []; capability_arguments = [] };
+      assumes_condition = false;
     }
 
 let make_lowered name : Database.Part.any = Any (Lowered (make_code_item name))

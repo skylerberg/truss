@@ -10,7 +10,11 @@ val make_monomorphic_context : Interface.Lookups.t -> Monomorphic.context
 val make_context : env:Memory_layout.env -> Lookups.t -> context
 
 val lower_source_code :
-  context -> path:Path.t -> instantiation:Ground.instantiation -> Emit_c.fragment
+  context ->
+  path:Path.t ->
+  instantiation:Ground.instantiation ->
+  assumes_condition:bool ->
+  Emit_c.fragment
 
 val lower_generated : context -> Lowered.Item.generated -> Emit_c.fragment
 

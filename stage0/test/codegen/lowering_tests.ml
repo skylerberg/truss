@@ -20,6 +20,7 @@ let () =
           {
             path = Top { module_ = probe_module; name = "read_first_book" };
             instantiation = Ground.no_instantiation;
+            assumes_condition = false;
           }
       in
       let _, backend =
