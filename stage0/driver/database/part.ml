@@ -6,6 +6,7 @@ type input =
   | Dependencies of Path.package
 
 type name =
+  | Module of Path.module_
   | Entry of Path.module_ * string
   | Entries of Path.module_
   | Imports of Resolve.Names.key
@@ -151,7 +152,8 @@ module Storage = struct
     | Impls_of_trait (package, _)
     | Law_proofs (package, _) ->
         package
-    | Entry (module_, _) | Entries module_ | Module_declarations module_ -> module_.package
+    | Module module_ | Entry (module_, _) | Entries module_ | Module_declarations module_ ->
+        module_.package
     | Imports key
     | Declaration key
     | Tree key
@@ -173,6 +175,7 @@ let show_input = function
   | Dependencies package -> "dependencies " ^ Path.show_package package
 
 let show_name = function
+  | Module module_ -> "module " ^ Path.show_module module_
   | Entry (module_, name) -> Printf.sprintf "entry %s %s" (Path.show_module module_) name
   | Entries module_ -> "entries " ^ Path.show_module module_
   | Imports declared -> "imports " ^ show_key declared
@@ -252,7 +255,7 @@ let show = function
   | Stored (Any part) -> show_stored part
 
 let find_name_definition = function
-  | Entries _ | Module_declarations _ | File_declarations _ | Package_declarations _
+  | Module _ | Entries _ | Module_declarations _ | File_declarations _ | Package_declarations _
   | Traits_declaring _ | Impl_index _ ->
       None
   | Entry (module_, name) -> Some (Path.Top { module_; name })
@@ -299,6 +302,7 @@ let find_definition = function
   | Stored (Any part) -> find_stored_definition part
 
 let show_name_kind = function
+  | Module _ -> "module"
   | Entry _ -> "namespace entry"
   | Entries _ -> "namespace entries of its module"
   | Imports _ -> "imports"

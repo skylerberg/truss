@@ -517,8 +517,7 @@ let add_recording (names : Resolve.Names.lookups) (note : Part.t -> unit) : Reso
     find = (fun module_ name -> note_name_read (Entry (module_, name)) (names.find module_ name));
     list_entries = (fun module_ -> note_name_read (Entries module_) (names.list_entries module_));
     list_imports = (fun key -> note_name_read (Imports key) (names.list_imports key));
-    module_exists =
-      (fun module_ -> note_input_read (Modules module_.package) (names.module_exists module_));
+    module_exists = (fun module_ -> note_name_read (Module module_) (names.module_exists module_));
     split_module = (fun parts -> note_input_read Packages (names.split_module parts));
     list_dependency_names =
       (fun package -> note_input_read (Dependencies package) (names.list_dependency_names package));
@@ -1051,6 +1050,7 @@ let holds_position database (Part.Any typed as part) =
 let mark_change database package (change : Resolve.Namespace.change) =
   let part : Part.name =
     match change with
+    | Module module_ -> Module module_
     | Entry (module_, name) -> Entry (module_, name)
     | Entries module_ -> Entries module_
     | Imports key -> Imports key

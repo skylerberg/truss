@@ -6,6 +6,7 @@ type input =
   | Dependencies of Path.package
 
 type name =
+  | Module of Path.module_
   | Entry of Path.module_ * string
   | Entries of Path.module_
   | Imports of Resolve.Names.key

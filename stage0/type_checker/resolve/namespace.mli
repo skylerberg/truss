@@ -9,6 +9,7 @@ val build :
 val empty : t
 
 type change =
+  | Module of Path.module_
   | Entry of Path.module_ * string
   | Entries of Path.module_
   | Imports of Names.key
