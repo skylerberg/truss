@@ -81,6 +81,7 @@ type call_argument =
 
 type stated = Tables.stated =
   | In_range of Logic.symbol
+  | Field_in_range of Logic.term
   | Value_of of Logic.symbol
   | Contract_of of Logic.symbol
   | Limited_link of Logic.symbol
@@ -99,7 +100,7 @@ type context = {
   mutable callbacks : (Core.local * string * Mir.callback) list;
   measures : Mir.formula list;
   mutable declarations : Logic.declaration list;
-  declared : unit Tables.Symbol_table.t;
+  declared : Logic.sort list Tables.Symbol_table.t;
   definitions : unit Tables.Symbol_table.t;
   datatypes : unit Tables.Type_table.t;
   stated : unit Tables.Stated_table.t;
