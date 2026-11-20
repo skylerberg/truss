@@ -4,9 +4,16 @@ module Make (Node : Strongly_connected.Node) : sig
   type update = { touched : Node.t list; removed : Node.t list }
 
   val create : tracks_blocked:bool -> t
+
+  val restore :
+    tracks_blocked:bool ->
+    roots:Node.t list ->
+    find_successors:(Node.t -> Node.t list option) ->
+    Node.t list ->
+    t
+
   val copy : t -> t
   val add_root : t -> Node.t -> bool
-  val add_node : t -> Node.t -> bool
   val remove_root : t -> Node.t -> unit
   val change_successors : t -> Node.t -> before:Node.t list -> after:Node.t list -> Node.t list
   val has_changes : t -> bool

@@ -108,8 +108,6 @@ module Make (Node : Strongly_connected.Node) = struct
       Table.replace graph.unreachable_candidates root ()
     end
 
-  let add_node = add_if_new
-
   let change_successors graph node ~before ~after =
     if is_node graph node then begin
       if not (Table.mem graph.reflected node) then Table.replace graph.reflected node before;
@@ -340,6 +338,47 @@ module Make (Node : Strongly_connected.Node) = struct
                 (Table.find_opt graph.components node))
             changed);
     { touched = List.sort Node.compare (List.filter (is_node graph) (list_keys touched)); removed }
+
+  let restore ~tracks_blocked ~roots ~find_successors nodes =
+    let graph = create ~tracks_blocked in
+    List.iter (fun root -> Table.replace graph.roots root ()) roots;
+    let list_successors node =
+      List.sort_uniq Node.compare (list_current_successors find_successors node)
+    in
+    let components =
+      List.map (make_component graph)
+        (Strongly_connected.list_components (module Node) ~list_successors (roots @ nodes))
+    in
+    List.iter
+      (fun (component : component) ->
+        List.iter
+          (fun member ->
+            List.iter
+              (fun successor -> add_predecessor graph successor member)
+              (list_successors member))
+          component.members)
+      components;
+    if tracks_blocked then
+      List.iter
+        (fun (component : component) ->
+          component.is_blocked <- blocks graph find_successors component)
+        components;
+    let reached = Table.create 256 in
+    let rec reach = function
+      | [] -> ()
+      | node :: rest ->
+          if Table.mem reached node then reach rest
+          else begin
+            Table.replace reached node ();
+            reach (list_successors node @ rest)
+          end
+    in
+    reach roots;
+    Table.iter
+      (fun node _ ->
+        if not (Table.mem reached node) then Table.replace graph.unreachable_candidates node ())
+      graph.components;
+    graph
 
   let group graph ~find_successors node =
     match Table.find_opt graph.components node with

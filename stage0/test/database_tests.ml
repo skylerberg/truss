@@ -166,10 +166,8 @@ let expect_cold ?roots database files =
   | [] -> ()
   | parts -> Harness.fail "the reopened database differs from a cold build in %s" (show_parts parts)
 
-let remove_rebuilt_on_reopen recomputed =
-  List.filter
-    (function Database.Part.Any (Namespace _ | Recursion_group _) -> false | _ -> true)
-    recomputed
+let remove_rebuilt_namespaces recomputed =
+  List.filter (function Database.Part.Any (Namespace _) -> false | _ -> true) recomputed
 
 let observe_reopen ?roots log files =
   let database, observed =
@@ -179,7 +177,7 @@ let observe_reopen ?roots log files =
         database)
   in
   expect_cold ?roots database files;
-  { observed with recomputed = remove_rebuilt_on_reopen observed.recomputed }
+  { observed with recomputed = remove_rebuilt_namespaces observed.recomputed }
 
 let tool_user =
   [
@@ -1097,7 +1095,7 @@ let () =
       in
       let log = commit [] (list_saved (build before)) in
       expect_recomputed (observe_reopen log after).recomputed
-        ~exactly:(remove_rebuilt_on_reopen (list_propagated ~before ~after)));
+        ~exactly:(remove_rebuilt_namespaces (list_propagated ~before ~after)));
   Harness.test "a database reopened without a file it saved removes the file's definitions"
     (fun () ->
       let log = commit [] (list_saved (build with_helper)) in
@@ -1121,7 +1119,7 @@ let () =
         Database.For_testing.observe (fun () -> Database.For_testing.propagate hot)
       in
       expect_recomputed (observe_reopen log after).recomputed
-        ~exactly:(remove_rebuilt_on_reopen propagated.recomputed));
+        ~exactly:(remove_rebuilt_namespaces propagated.recomputed));
   Harness.test "a database saved after a package is removed reopens without the package" (fun () ->
       let with_lib = Support.setup ~dependencies:[ ("app", "lib") ] tool_user in
       let alone = [ ("app::main", "fn caller() -> Int64 { 1 }\n") ] in
@@ -1158,7 +1156,7 @@ let settle_on_disk root =
   | [] -> ()
   | parts ->
       Harness.fail "the database in .truss differs from a cold build in %s" (show_parts parts));
-  remove_rebuilt_on_reopen observed.recomputed
+  remove_rebuilt_namespaces observed.recomputed
 
 let edited_body =
   "fn callee(x: Int64) -> Int64 { x + 2 }\npublic fn caller() -> Int64 { callee(1) }\n"

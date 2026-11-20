@@ -69,7 +69,7 @@ type t = {
   implied : Part.any list Package_table.t;
   graphs : Call_graph.t Package_table.t;
   item_values : binding Stored_table.t;
-  references : References.t;
+  mutable references : References.t;
   claimants : Part.t list Item_table.t;
   claimed_roots : Lowered.Item.t list Part_table.t;
   unsaved : unit Entry_table.t;
@@ -1921,20 +1921,19 @@ let restore_namespaces database =
         let package_database = Package_table.find database.package_databases name in
         let namespace, implied = compute_namespace_and_implied database package_database in
         (make_value_slot database (Namespace name)).replace (Value namespace);
-        let graph = obtain_call_graph database name in
-        List.iter
-          (function
-            | Part.Any (Call_edges (root, _)) -> ignore (Call_graph.add_root graph root) | _ -> ())
-          implied;
-        Stored_table.iter
-          (fun _ -> function
-            | Binding (Call_edges (path, _), value) ->
-                ignore (Call_graph.add_node graph path);
-                ignore
-                  (Call_graph.change_successors graph path ~before:[]
-                     ~after:(list_call_edges (Some value)))
-            | Binding _ -> ())
-          package_database.values
+        Package_table.replace database.graphs name
+          (Call_graph.restore ~tracks_blocked:true
+             ~roots:
+               (List.filter_map
+                  (function Part.Any (Call_edges (root, _)) -> Some root | _ -> None)
+                  implied)
+             ~find_successors:(find_call_successors database name)
+             (Stored_table.fold
+                (fun _ binding nodes ->
+                  match binding with
+                  | Binding (Call_edges (path, _), _) -> path :: nodes
+                  | Binding _ -> nodes)
+                package_database.values []))
       end)
     (sort_in_dependency_order database database.project)
 
@@ -1944,19 +1943,17 @@ let restore_references database =
       List.iter
         (fun root ->
           Item_table.replace database.claimants root
-            (claimant :: Option.value (Item_table.find_opt database.claimants root) ~default:[]);
-          ignore (References.add_root database.references root))
+            (claimant :: Option.value (Item_table.find_opt database.claimants root) ~default:[]))
         roots)
     database.claimed_roots;
-  Stored_table.iter
-    (fun _ -> function
-      | Binding (Lowered key, value) ->
-          ignore (References.add_node database.references key);
-          ignore
-            (References.change_successors database.references key ~before:[]
-               ~after:(list_lowered_references (Some value)))
-      | Binding _ -> ())
-    database.item_values;
+  database.references <-
+    References.restore ~tracks_blocked:false
+      ~roots:(Item_table.fold (fun root _ roots -> root :: roots) database.claimants [])
+      ~find_successors:(fun item -> Some (list_item_edges database item))
+      (Stored_table.fold
+         (fun _ binding items ->
+           match binding with Binding (Lowered key, _) -> key :: items | Binding _ -> items)
+         database.item_values []);
   settle_references database
 
 let restore ?on_bug ~saved ~find_text ~loaded packages entries =
