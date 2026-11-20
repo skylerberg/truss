@@ -2486,6 +2486,11 @@ $ echo $?
 - **`expect` declares `uses Panic unless self is Some(_)`.** A function that
   proves the value present calls `expect` without `uses Panic`. One that
   cannot declares `uses Panic`, as `third` does.
+- **The standard library's other checked functions do the same.**
+  `List.remove_at` declares `uses Panic unless index < self.length()`, and
+  `Duration.seconds` that the count of nanoseconds fits an `Int64`. Code
+  without `Panic` proves the condition, and code with `Panic` calls them
+  as they are.
 - **`Panic.crash(message)`** stops the program on purpose. The panic's
   message goes to standard error with where it happened and the chain of
   calls that led there, and the program exits with status 101.

@@ -391,6 +391,11 @@ and make_obligation ?template_clause (context : State.context) (frame : State.fr
     template_clause;
   }
 
+let remove_panic_condition (uses : Types.capability_set) =
+  Types.replace_capabilities
+    (function Types.Capability_unless_values _ -> Some Types.no_capabilities | _ -> None)
+    uses
+
 let is_panic_obligation : Diagnostic.Code.prover -> bool = function
   | Overflow | Division | Shift | Panic -> true
   | _ -> false

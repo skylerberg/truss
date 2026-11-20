@@ -877,20 +877,20 @@ fn BigInteger.division(self, divisor: BigInteger) -> Division[BigInteger]
 }
 
 public fn BigInteger.quotient_and_remainder(self, divisor: BigInteger) -> Division[BigInteger]
-  requires !divisor.is_zero()
+  uses Panic unless !divisor.is_zero()
 {
   self.division(divisor)
 }
 
 public fn BigInteger.quotient(self, divisor: BigInteger) -> BigInteger
-  requires !divisor.is_zero()
+  uses Panic unless !divisor.is_zero()
 {
   var division = self.quotient_and_remainder(divisor)
   own division.quotient
 }
 
 public fn BigInteger.remainder(self, divisor: BigInteger) -> BigInteger
-  requires !divisor.is_zero()
+  uses Panic unless !divisor.is_zero()
 {
   var division = self.quotient_and_remainder(divisor)
   own division.remainder
@@ -910,15 +910,21 @@ fn BigInteger.floor_division(self, divisor: BigInteger) -> Division[BigInteger]
 }
 
 public fn BigInteger.floor_divide(self, divisor: BigInteger) -> BigInteger
-  requires !divisor.is_zero()
+  uses Panic unless !divisor.is_zero()
 {
+  if divisor.is_zero() {
+    Panic.crash("division by zero")
+  }
   var division = self.floor_division(divisor)
   own division.quotient
 }
 
 public fn BigInteger.floor_modulo(self, divisor: BigInteger) -> BigInteger
-  requires !divisor.is_zero()
+  uses Panic unless !divisor.is_zero()
 {
+  if divisor.is_zero() {
+    Panic.crash("division by zero")
+  }
   var division = self.floor_division(divisor)
   own division.remainder
 }
@@ -1450,7 +1456,7 @@ public fn Decimal.quotient(
   decimals: Int32,
   rounding: Rounding = Rounding.HalfToEven,
 ) -> Decimal
-  requires !divisor.is_zero()
+  uses Panic unless !divisor.is_zero()
 {
   let wanted: Int64 = intrinsic::convert[Int32, Int64](decimals) + intrinsic::convert[Int32, Int64](divisor.scale)
   let shift = wanted - intrinsic::convert[Int32, Int64](self.scale)

@@ -898,6 +898,10 @@ public fn Option[Value].expect(own self, message: StringSlice) -> Value
   proven again assuming the condition, without `Panic`: every operation that
   could fail is proven not to, and every call that uses `Panic` is proven
   unreachable.
+- **A specification that calls such a function proves its condition,** as
+  it proves a callee's `requires`, since a specification never panics. A
+  function whose only capability is `Panic unless P` can be called in a
+  specification: `forall i in 0..text.length() => text.byte(i) < 128`.
 - A trait's method, a written function type, and a `when` condition take no
   condition on values. A function named as a value uses `Panic`.
 
@@ -2685,7 +2689,8 @@ an invariant, a law, or a proof.
   call: `values.map(fn(value) { value + 1 })` is
   such a call, although `map` passes a capability parameter on.
 - Every specification is well defined: each call meets its callee's
-  `requires`, and each index is in bounds. `&&`, `||`, `==>`, and `if` read
+  `requires` and the condition of a callee's `Panic unless`, and each index
+  is in bounds. `&&`, `||`, `==>`, and `if` read
   left to right, so the right side can rely on the left.
 - `==` is the type's `Equal`, and `identical(a, b)` is identity, for any type.
 - A specification is read as a formula, not run: it holds no `return`,

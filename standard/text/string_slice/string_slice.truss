@@ -184,6 +184,7 @@ public fn StringSlice.is_ascii(self) -> Bool
 public fn StringSlice.is_boundary(self, offset: UInt64) -> Bool
   ensures result == (offset == self.length() || (offset < self.length() && (self.byte(offset) & 0xC0) != 0x80))
   cost time O(1)
+  cost allocations == 0
 {
   offset == self.length() || (offset < self.length() && (self.byte(offset) & 0xC0) != 0x80)
 }
@@ -366,13 +367,13 @@ public fn StringSlice.lines(self) -> List[StringSlice]
 }
 
 public fn StringSlice.substring(self, from: UInt64, to: UInt64) -> StringSlice
-  requires from <= to
-  requires to <= self.length()
-  requires self.is_boundary(from)
-  requires self.is_boundary(to)
+  uses Panic unless from <= to && to <= self.length() && self.is_boundary(from) && self.is_boundary(to)
   ensures result.length() == to - from
   cost time O(1)
 {
+  if from > to || to > self.length() || !self.is_boundary(from) || !self.is_boundary(to) {
+    Panic.crash("slice out of bounds")
+  }
   self.part(from, to: to)
 }
 
@@ -389,12 +390,14 @@ public fn StringSlice.get_substring(self, from: UInt64, to: UInt64) -> Option[St
 }
 
 public fn StringSlice.split_at(self, offset: UInt64) -> core::Pair[StringSlice, StringSlice]
-  requires offset <= self.length()
-  requires self.is_boundary(offset)
+  uses Panic unless offset <= self.length() && self.is_boundary(offset)
   ensures result.first.length() == offset
   ensures result.second.length() == self.length() - offset
   cost time O(1)
 {
+  if offset > self.length() || !self.is_boundary(offset) {
+    Panic.crash("slice out of bounds")
+  }
   core::Pair(first: self.part(0, to: offset), second: self.part(offset, to: self.length()))
 }
 

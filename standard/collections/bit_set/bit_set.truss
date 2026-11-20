@@ -178,6 +178,7 @@ public fn collections::BitSet.new(length: UInt64) -> collections::BitSet
 public fn collections::BitSet.length(self) -> UInt64
   ensures result == (self.length)
   cost time O(1)
+  cost allocations == 0
 {
   self.length
 }
@@ -217,11 +218,14 @@ public fn collections::BitSet.get(self, index: UInt64) -> Option[Bool]
 }
 
 public fn collections::BitSet.flip(mut self, index: UInt64)
-  requires index < self.length()
+  uses Panic unless index < self.length()
   ensures self.length() == old(self.length())
   cost time O(1)
   cost allocations == 0
 {
+  if index >= self.length() {
+    Panic.crash("index out of bounds")
+  }
   let one: UInt64 = 1
   self.words[index / 64] = self.words[index / 64] ^ (one << (index % 64))
 }
@@ -408,29 +412,38 @@ internal fn collections::BitSet.combine(mut self, other: collections::BitSet, ho
 }
 
 public fn collections::BitSet.union_with(mut self, other: collections::BitSet)
-  requires other.length() == self.length()
+  uses Panic unless other.length() == self.length()
   ensures self.length() == old(self.length())
   cost time O(self.length())
   cost allocations == 0
 {
+  if other.length() != self.length() {
+    Panic.crash("bit sets of different lengths")
+  }
   mut self.combine(other, how: Combination.Union)
 }
 
 public fn collections::BitSet.intersect_with(mut self, other: collections::BitSet)
-  requires other.length() == self.length()
+  uses Panic unless other.length() == self.length()
   ensures self.length() == old(self.length())
   cost time O(self.length())
   cost allocations == 0
 {
+  if other.length() != self.length() {
+    Panic.crash("bit sets of different lengths")
+  }
   mut self.combine(other, how: Combination.Intersection)
 }
 
 public fn collections::BitSet.difference_with(mut self, other: collections::BitSet)
-  requires other.length() == self.length()
+  uses Panic unless other.length() == self.length()
   ensures self.length() == old(self.length())
   cost time O(self.length())
   cost allocations == 0
 {
+  if other.length() != self.length() {
+    Panic.crash("bit sets of different lengths")
+  }
   mut self.combine(other, how: Combination.Difference)
 }
 

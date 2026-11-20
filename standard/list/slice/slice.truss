@@ -74,11 +74,14 @@ public fn Slice[Element].split_last(self) lends Option[list::SplitLast[Element]]
 }
 
 public fn Slice[Element].split_at(self, index: UInt64) -> core::Pair[Slice[Element], Slice[Element]]
-  requires index <= self.length()
+  uses Panic unless index <= self.length()
   ensures result.first.length() == index
   ensures result.second.length() == self.length() - index
   cost time O(1)
 {
+  if index > self.length() {
+    Panic.crash("slice out of bounds")
+  }
   core::Pair(
     first: self[..index],
     second: self[index..],
@@ -647,8 +650,7 @@ public fn Slice[Element].zip[Other](self, other: Slice[Other]) -> list::Zipped[E
 }
 
 public fn Slice[Element].swap(mut self, first: UInt64, second: UInt64)
-  requires first < self.length()
-  requires second < self.length()
+  uses Panic unless first < self.length() && second < self.length()
   ensures identical(self.model()[first], old(self.model())[second])
   ensures identical(self.model()[second], old(self.model())[first])
   ensures forall i in 0..self.length() =>
@@ -656,6 +658,9 @@ public fn Slice[Element].swap(mut self, first: UInt64, second: UInt64)
   ensures self.model().is_permutation_of(old(self.model()))
   cost time O(1)
 {
+  if first >= self.length() || second >= self.length() {
+    Panic.crash("index out of bounds")
+  }
   intrinsic::view_swap(mut self.elements, first: first, second: second)
 }
 
@@ -701,7 +706,7 @@ public fn Slice[Element].reverse(mut self)
 }
 
 public fn Slice[Element].rotate_left(mut self, by: UInt64)
-  requires by <= self.length()
+  uses Panic unless by <= self.length()
   ensures forall i: Integer =>
     0 <= i && i < self.length() - by ==> identical(self.model()[i], old(self.model())[i + by])
   ensures forall i: Integer =>
@@ -710,18 +715,24 @@ public fn Slice[Element].rotate_left(mut self, by: UInt64)
   ensures self.model().is_permutation_of(old(self.model()))
   cost time O(self.length())
 {
+  if by > self.length() {
+    Panic.crash("slice out of bounds")
+  }
   mut self.reverse_between(0, stop: by)
   mut self.reverse_between(by, stop: self.length())
   mut self.reverse_between(0, stop: self.length())
 }
 
 public fn Slice[Element].rotate_right(mut self, by: UInt64)
-  requires by <= self.length()
+  uses Panic unless by <= self.length()
   ensures forall i in by..self.length() => identical(self.model()[i], old(self.model())[i - by])
   ensures forall i in 0..by => identical(self.model()[i], old(self.model())[i + self.length() - by])
   ensures self.model().is_permutation_of(old(self.model()))
   cost time O(self.length())
 {
+  if by > self.length() {
+    Panic.crash("slice out of bounds")
+  }
   mut self.rotate_left(self.length() - by)
 }
 
@@ -738,10 +749,13 @@ public fn Slice[Element: Copyable].fill(mut self, value: Element)
 }
 
 public fn Slice[Element: Copyable].copy_from(mut self, source: Slice[Element])
-  requires source.length() == self.length()
+  uses Panic unless source.length() == self.length()
   ensures forall i in 0..self.length() => identical(self.model()[i], source.model()[i])
   cost time O(self.length() * time(Element.copy))
 {
+  if source.length() != self.length() {
+    Panic.crash("slices of different lengths")
+  }
   for index in 0..self.length()
     invariant self.length() == old(self.length())
     invariant forall i in 0..index => identical(self.model()[i], source.model()[i])

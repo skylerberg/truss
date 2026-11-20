@@ -1,0 +1,6 @@
+fn starts_with_zero(text: StringSlice) -> Bool
+  uses Panic
+  ensures text.byte(0) == 48 ==> result
+{
+  text.byte(0) == 48
+}

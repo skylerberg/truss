@@ -286,6 +286,11 @@ let () =
       match list_codes Fixtures.Prover.condition_passed_on_to_a_callee with
       | [ "prover.panic" ] -> ()
       | codes -> Harness.fail "%s" (String.concat ", " codes));
+  Harness.test "a specification proves the condition of a function it calls" (fun () ->
+      expect_proven Fixtures.Prover.function_with_a_condition_on_values_in_a_specification;
+      expect_not_proven
+        Fixtures.Prover.function_with_a_condition_on_values_in_a_specification_outside_it
+        "prover.panic");
   Harness.test "expect needs no `Panic` where its value is proven present" (fun () ->
       expect_proven Fixtures.Prover.expect_of_a_value_proven_present;
       expect_not_proven Fixtures.Prover.expect_of_a_value_that_may_be_absent "prover.panic");

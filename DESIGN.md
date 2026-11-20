@@ -571,6 +571,7 @@ arguments only.
 | A call to a function that uses `Panic unless P` is never a type error. | The capability check cannot decide `P`. The prover obliges `P` where the caller has no `Panic`. |
 | The body is proven with `Panic`, and again assuming `P` without `Panic`. | Where `P` holds the function promises not to panic, so that run proves every operation that could fail and rules out every call that uses `Panic`. |
 | A function that uses `Panic unless P` is compiled twice. A caller without `Panic` calls the copy that assumes `P`, whose checks are development-only. | A caller that proved `P` runs as fast as with a `requires`. The caller's capabilities pick the copy, so code generation reads no proof. |
+| A specification may call a function whose only capability is `Panic unless P`, and proves `P` there. | Where `P` holds the function is pure, and a specification never panics, so `P` is a precondition there as a `requires` is. `text.byte(i)` stays usable in an `invariant` after `byte` moved from `requires` to `Panic unless`. |
 | `expect` uses `Panic unless self is Some(_)`. | Code that proves its value present calls `expect` without declaring `Panic`. |
 | A trait's method takes no condition on values. | Each `impl` would have to prove that the trait's condition implies its own, as a restated clause is proven, and no caller needs one yet. |
 | `when` takes no condition on values. | `requires P ==> Q` and `ensures P ==> Q` already say it. |
@@ -1328,7 +1329,7 @@ Rules: [Writing specifications](SPECIFICATION.md#writing-specifications).
 
 | Rule | Reason |
 |---|---|
-| A function called in a specification is pure: it uses no capability, not even `Panic` or `RunForever`. | A function that might not return, or might end the program, has no value to reason about, and a definition that is not well founded would make the logic unsound. |
+| A function called in a specification is pure: it uses no capability, not even `Panic` or `RunForever`, except `Panic unless` a condition that the specification proves. | A function that might not return, or might end the program, has no value to reason about, and a definition that is not well founded would make the logic unsound. |
 | A specification is read left to right. | `index < items.length() && items[index] > 0` is well defined. |
 | `==>` exists, and only in specifications. | "If this holds, then that holds" is the commonest form of a specification, and `!a \|\| b` hides it. `==>` binds more loosely than `&&` and `\|\|`, as in Dafny. Code already has `if`. |
 | Integer arithmetic in a specification is exact. | A specification cannot have an overflow bug, and `decreases high - low` can be negative, which is the case that the prover must rule out. |
