@@ -1,5 +1,7 @@
 module Local_table : Hashtbl.S with type key = Core.local
 
+type owned_scrutinee = { scrutinee : Core.local; written : Core.origin; is_part : bool }
+
 type context = {
   lookups : Lookups.t;
   list_bounds : Types.parameter -> Types.trait_reference list;
@@ -11,6 +13,7 @@ type context = {
   origins : Core.origin Local_table.t;
   binding_modes : Language.Mode.t Local_table.t;
   literal_views : unit Local_table.t;
+  owned_scrutinees : owned_scrutinee Local_table.t;
   types : Types.ty Local_table.t;
   mutable parameters : Core.local list;
   implements_capability : bool;
@@ -38,6 +41,7 @@ val report :
 val classify_binding_mode : context -> Place.root -> Language.Mode.t
 val views_literal : context -> Place.root -> bool
 val show_root : context -> Place.root -> string
+val find_owned_scrutinee : context -> Place.root -> owned_scrutinee option
 val show : context -> Place.t -> string
 val collect : context -> Mir.Graph.t -> mode_keywords:Core.mode_keyword list -> unit
 
