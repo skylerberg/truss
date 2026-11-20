@@ -164,4 +164,5 @@ val is_copyable : Lookups.t -> list_bounds:bounds -> Types.ty -> bool
 val is_plain : Lookups.t -> list_bounds:bounds -> Types.ty -> bool
 val is_view : Lookups.t -> list_bounds:bounds -> Types.ty -> bool
 val holds_function : Lookups.t -> list_bounds:bounds -> Types.ty -> bool
+val binding_may_alias : Lookups.t -> list_bounds:bounds -> Language.Mode.t -> Types.ty -> bool
 val collect_contents : Lookups.t -> list_bounds:bounds -> Types.ty -> Properties.contents

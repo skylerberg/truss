@@ -976,6 +976,8 @@ let () =
     (fun () -> expect_fine Fixtures.Ownership.is_binding_before_a_failing_and);
   Harness.test "the else-block may mutate the lender" (fun () ->
       expect_fine Fixtures.Ownership.else_block_mutating_the_lender);
+  Harness.test "a lambda's parameter in the condition does not alias the lent part" (fun () ->
+      expect_fine Fixtures.Ownership.then_block_mutating_the_lender_after_a_lambda_in_the_condition);
   Harness.test
     "the then-block cannot mutate the lender while a name the condition binds aliases the lent part"
     (fun () ->
@@ -996,6 +998,29 @@ let () =
     "the then-block of the function's result cannot mutate the lender while a name the condition \
      binds aliases the lent part" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.then_block_of_the_result_mutating_the_lender
+        "ownership.mutated_while_viewed")
+
+let () =
+  Harness.test "a `match` arm may mutate the lender when it binds only copies" (fun () ->
+      expect_fine Fixtures.Ownership.arm_mutating_the_lender_when_it_binds_only_copies);
+  Harness.test "a `match` arm that binds no name may mutate the lender" (fun () ->
+      expect_fine Fixtures.Ownership.arm_binding_nothing_mutating_the_lender);
+  Harness.test "a `match` arm cannot mutate the lender while a name it binds aliases the lent part"
+    (fun () ->
+      expect_one_diagnostic
+        Fixtures.Ownership.arm_mutating_the_lender_while_a_name_aliases_the_lent_part
+        "ownership.mutated_while_viewed");
+  Harness.test "an arm may mutate the lender when its guard binds only copies" (fun () ->
+      expect_fine Fixtures.Ownership.arm_mutating_the_lender_when_its_guard_binds_only_copies);
+  Harness.test "the arm after a failed guard may mutate the guard's lender" (fun () ->
+      expect_fine Fixtures.Ownership.arm_after_a_failed_guard_mutating_the_guards_lender);
+  Harness.test "a name that a guard binds may alias the lent part until the arm ends" (fun () ->
+      expect_fine Fixtures.Ownership.guard_binding_a_name_that_aliases_the_lent_part);
+  Harness.test "an arm cannot mutate the lender while a name its guard binds aliases the lent part"
+    (fun () ->
+      expect_one_diagnostic
+        Fixtures.Ownership
+        .arm_mutating_the_lender_while_a_name_its_guard_binds_aliases_the_lent_part
         "ownership.mutated_while_viewed")
 
 let () =

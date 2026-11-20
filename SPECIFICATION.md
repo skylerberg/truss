@@ -1424,6 +1424,22 @@ mut grid.cell(position).visit()
   `if counts.get(word) is Some(count) { counts[word] = count + 1 }`. A name
   that is not a copy aliases the part, which stays lent until the then-block
   or the body ends. It is never lent into the `else` block.
+- **A `match` arm lends as an `if` does,** with the scrutinees, the arm's
+  patterns, and its guard as the condition, and the arm's body as the
+  then-block. Each arm decides for itself, so an arm whose names are copies
+  can mutate the receiver. A part that a scrutinee lends stays lent while the
+  arms are tested. A guard that fails ends its lends before the next arm is
+  tested.
+
+  ```truss
+  fn tally(counts: mut Map[String, UInt64], word: String) {
+    match counts.get(word) {
+      Some(count) => counts[word.copy()] = count.saturating_add(1)
+      None => counts[word.copy()] = 1
+    }
+  }
+  ```
+
 - **For that long, the receiver is lent whole:** the statement makes no other
   use of a receiver lent `mut`, and does not mutate one lent read-only. A
   receiver that is a view lends its original too, so `names[..].first()`

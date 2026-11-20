@@ -1,0 +1,63 @@
+type Holder(id: Int64)
+
+fn Holder.label(self) lends Option[String] {
+  let text = "label ${self.id}"
+  Some(text)
+}
+
+type Ledger(counts: Map[String, UInt64], names: List[String])
+
+fn Ledger.name_for(self, word: String) lends String {
+  match self.counts.get(word) {
+    Some(count) if count < self.names.length() => self.names[count]
+    _ => self.names[0]
+  }
+}
+
+fn count_word(counts: mut Map[String, UInt64], word: String) {
+  match counts.get(word) {
+    Some(count) => counts[word.copy()] = count.saturating_add(1)
+    None => counts[word.copy()] = 1
+  }
+}
+
+test "an arm that binds only copies mutates the lender" {
+  var counts: Map[String, UInt64] = [:]
+  for word in ["fig", "pear", "fig"] {
+    count_word(mut counts, word)
+  }
+  assert counts.get("fig") == Some(2)
+  assert counts.get("pear") == Some(1)
+}
+
+test "a name that an arm binds from a value the lending method made lives until the arm ends" {
+  let holder = Holder(id: 1)
+  var length: UInt64 = 0
+  match holder.label() {
+    Some(text) => {
+      assert text == "label 1"
+      length = text.length()
+    }
+    None => {}
+  }
+  assert length == 7
+}
+
+test "a name that a guard binds from a value the lending method made lives until the arm ends" {
+  let holder = Holder(id: 2)
+  var length: UInt64 = 0
+  match holder.id {
+    2 if holder.label() is Some(text) => {
+      assert text == "label 2"
+      length = text.length()
+    }
+    _ => {}
+  }
+  assert length == 7
+}
+
+test "a lending method lends a part of its receiver from an arm after the scrutinee's lend ends" {
+  let ledger = Ledger(counts: ["fig": 1], names: ["first", "second"])
+  assert ledger.name_for("fig") == "second"
+  assert ledger.name_for("pear") == "first"
+}
