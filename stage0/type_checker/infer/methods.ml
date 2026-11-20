@@ -248,17 +248,17 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
                     instance checked left_out)
           | None -> State.raise_bug "the method `%s` has no signature" (Path.show method_path))
       | Hidden _ | Absent -> (
-          match Name_lookup.list_trait_static_methods state path member.text Static with
-          | [ (trait, method_) ] ->
+          match Name_lookup.lookup_trait_static_methods state path member.text with
+          | Visible [ (trait, method_) ] ->
               check_trait_method_through_type state env ?expected value type_ trait method_
                 arguments
-          | _ :: _ :: _ as several -> report_ambiguous (List.map fst several)
-          | [] -> (
+          | Visible several -> report_ambiguous (List.map fst several)
+          | (Hidden _ | Absent) as trait_static_method -> (
               match Name_lookup.resolve_overloads state type_ member.text with
               | Error traits -> report_ambiguous traits
               | Ok ((Hidden _ | Absent) as overloads) -> (
-                  match (static_method, overloads) with
-                  | Hidden hidden, _ | _, Hidden hidden ->
+                  match (static_method, trait_static_method, overloads) with
+                  | Hidden hidden, _, _ | _, Hidden hidden, _ | _, _, Hidden hidden ->
                       Calls.check_arguments_alone state env arguments
                         (Members.make_hidden_error state (State.read_span state member.id) hidden)
                   | _ ->

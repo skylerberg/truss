@@ -2879,12 +2879,14 @@ and the prelude changes only with a language version.
 - A method or constant written in a trait, a capability, or an `impl` takes
   no visibility, and is as visible as the definition it is written in.
 - A method or member constant defined on its own, such as `fn Shape.area`,
-  has its own visibility. A use that reaches a member through its type
-  finds it only where it is visible: `Shape.unit`, `shape.area()`, a
-  constant in a pattern, and the `count`, `element`, and `cursor` of a `for`
-  loop or a quantifier. A member that the use cannot see is skipped, as if
-  it did not exist. A use that finds no member except one it cannot see is
-  an error that names that member.
+  has its own visibility.
+- A use that reaches a member through its type finds it only where it is
+  visible: `Shape.unit`, `shape.area()`, `Shape.area(shape)`, a constant in
+  a pattern, and the `count`, `element`, and `cursor` of a `for` loop or a
+  quantifier. A member that the use cannot see is skipped, as if it did not
+  exist. A use that finds no member except one it cannot see is an error
+  that names that member, whether the member is defined on its own or
+  written in a trait that the type implements.
 - `opaque` appears only before `public type`. Outside its package, an opaque
   type's fields cannot be read, built, updated, or matched on. Visibility is
   set for a type as a whole.

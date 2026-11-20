@@ -28,10 +28,29 @@ fn Shape.element(self, position: UInt64) lends UInt64 {
 
 trait Measured {
   fn measure(self) -> UInt64
+  fn sample() -> Self
 }
 
 impl Measured for Shape {
   fn measure(self) -> UInt64 {
     self.sides
   }
+
+  fn sample() -> Shape {
+    Shape(sides: 4)
+  }
+}
+
+internal trait Sided {
+  fn side_count(self) -> UInt64
+}
+
+impl Sided for Shape {
+  fn side_count(self) -> UInt64 {
+    self.sides
+  }
+}
+
+trait Weighed {
+  fn weigh(self) -> UInt64
 }
