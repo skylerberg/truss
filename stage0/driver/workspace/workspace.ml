@@ -732,9 +732,16 @@ let close_all () =
       close worktree)
     (Hashtbl.fold (fun _ worktree worktrees -> worktree :: worktrees) worktrees [])
 
-let flush () =
-  if !is_serving then Hashtbl.iter (fun _ worktree -> commit worktree) worktrees else close_all ();
+let save () =
+  Hashtbl.iter (fun _ worktree -> commit worktree) worktrees;
   flush_cache ()
+
+let flush () =
+  if !is_serving then save ()
+  else begin
+    close_all ();
+    flush_cache ()
+  end
 
 let serve ~key ~handle =
   is_serving := true;
@@ -773,6 +780,7 @@ module For_testing = struct
 
   let build_cold_database = build_cold_database
   let collect_cache = collect
+  let save = save
   let listen = Server.listen
   let call_starting = Server.For_testing.call_starting
   let remove_ended_servers = Server.For_testing.remove_ended_servers
