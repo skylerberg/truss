@@ -488,11 +488,12 @@ impl Ordered for Path {
 }
 
 impl Hash for Path {
-  fn hash(self, hasher: mut Hasher)
+  fn hash(self, hasher: Hasher) -> Hasher
+    ensures identical(result, self.text.hash(hasher))
     cost time O(self.text.length())
     cost allocations == 0
   {
-    self.text.hash(mut hasher)
+    self.text.hash(hasher)
   }
 }
 

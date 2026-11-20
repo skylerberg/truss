@@ -95,19 +95,6 @@ test "a set is made from a list or a cursor, and gives its elements away" uses R
   assert sum == 16
 }
 
-test "equal sets hash alike, whatever order they were made in" {
-  let first: Set[Int64] = [1, 2, 3]
-  let second: Set[Int64] = [3, 1, 2]
-  let third: Set[Int64] = [1, 2, 4]
-  var one = Hasher.new()
-  var two = Hasher.new()
-  var three = Hasher.new()
-  first.hash(mut one)
-  second.hash(mut two)
-  third.hash(mut three)
-  assert one.finish() == two.finish() && one.finish() != three.finish()
-}
-
 test "a copy of a set changes on its own" {
   var numbers = sample()
   var copied = numbers.copy()

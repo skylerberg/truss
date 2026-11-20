@@ -692,11 +692,12 @@ impl Equal for collections::SortedSet[Element: Ordered] {
 }
 
 impl Hash for collections::SortedSet[Element: Ordered + Hash] {
-  fn hash(self, hasher: mut Hasher)
+  fn hash(self, hasher: Hasher) -> Hasher
+    ensures identical(result, self.elements.hash(hasher))
     cost time O(self.length() * time(Element.hash))
     cost allocations <= self.length() * allocations(Element.hash)
   {
-    self.elements.hash(mut hasher)
+    self.elements.hash(hasher)
   }
 }
 

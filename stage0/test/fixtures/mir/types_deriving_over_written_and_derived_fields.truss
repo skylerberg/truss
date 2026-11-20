@@ -7,8 +7,8 @@ impl Equal for Meters {
 }
 
 impl Hash for Meters {
-  fn hash(self, hasher: mut Hasher) {
-    self.length.hash(mut hasher)
+  fn hash(self, hasher: Hasher) -> Hasher {
+    self.length.hash(hasher)
   }
 }
 

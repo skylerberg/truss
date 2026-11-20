@@ -1899,18 +1899,61 @@ proof Ordered.transitive for Slice[Element: Ordered] {
   lexicographic_is_transitive(first.model(), second: second.model(), third: third.model(), from: 0)
 }
 
+internal fn hash_elements[Element: Hash](hasher: Hasher, items: Sequence[Element], count: Integer) -> Hasher
+  requires 0 <= count
+  requires count <= items.length()
+  ensures identical(result, if count == 0 {
+      hasher
+    } else {
+      items[count - 1].hash(hash_elements(hasher, items: items, count: count - 1))
+    })
+  decreases count
+{
+  if count == 0 {
+    hasher
+  } else {
+    items[count - 1].hash(hash_elements(hasher, items: items, count: count - 1))
+  }
+}
+
+internal theorem elements_hash_alike[Element: Hash](
+  hasher: Hasher,
+  first: Sequence[Element],
+  second: Sequence[Element],
+  count: Integer,
+)
+  requires 0 <= count
+  requires count <= first.length()
+  requires count <= second.length()
+  requires forall i in 0..count => first[i] == second[i]
+  ensures identical(hash_elements(hasher, items: first, count: count), hash_elements(hasher, items: second, count: count))
+  decreases count
+{
+  if count > 0 {
+    elements_hash_alike(hasher, first: first, second: second, count: count - 1)
+  }
+}
+
 impl Hash for Slice[Element: Hash] {
-  fn hash(self, hasher: mut Hasher)
+  fn hash(self, hasher: Hasher) -> Hasher
+    ensures identical(result, hash_elements(hasher.write(self.length()), items: self.model(), count: self.length()))
     cost time O(self.length() * time(Element.hash))
     cost allocations <= self.length() * allocations(Element.hash)
   {
-    mut hasher.write(self.length())
+    let start = hasher.write(self.length())
+    var state = start
     for index in 0..self.length()
+      invariant identical(state, hash_elements(start, items: self.model(), count: index))
       cost time O(index * time(Element.hash))
     {
-      self[index].hash(mut hasher)
+      state = self[index].hash(state)
     }
+    state
   }
+}
+
+proof Hash.agrees_with_equal for Slice[Element: Hash] {
+  elements_hash_alike(hasher.write(first.length()), first: first.model(), second: second.model(), count: first.length())
 }
 
 impl Display for Slice[Element: Display] {

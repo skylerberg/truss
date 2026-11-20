@@ -194,9 +194,7 @@ test "starts_with and ends_with compare a run of elements" {
 }
 
 fn hash_of(items: Slice[Int64]) -> UInt64 {
-  var hasher = Hasher.new()
-  items.hash(mut hasher)
-  hasher.finish()
+  items.hash(Hasher.new()).finish()
 }
 
 test "partition_point finds where a sorted list stops satisfying a test" {

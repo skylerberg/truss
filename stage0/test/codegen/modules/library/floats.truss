@@ -661,9 +661,7 @@ test "text is read as the nearest Float32, rounding once" {
 }
 
 fn hashed[Value: Hash](value: Value) -> UInt64 {
-  var hasher = Hasher.new()
-  value.hash(mut hasher)
-  hasher.finish()
+  value.hash(Hasher.new()).finish()
 }
 
 test "equal floats hash equally, the two zeros and every NaN included" {

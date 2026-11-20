@@ -14,9 +14,5 @@ impl Keyed for Dog {
 test "a derived method through any hashes as the value does" {
   let pet: any Keyed = any Dog(tag: "rex")
   assert pet.key() == "rex"
-  var through_any = Hasher.new()
-  pet.hash(mut through_any)
-  var direct = Hasher.new()
-  Dog(tag: "rex").hash(mut direct)
-  assert through_any.finish() == direct.finish()
+  assert pet.hash(Hasher.new()).finish() == Dog(tag: "rex").hash(Hasher.new()).finish()
 }
