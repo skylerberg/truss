@@ -112,7 +112,7 @@ let make_contract ?trait_clauses (lookups : Lookups.t) path callee_clauses =
                     true
                 | Types.Capability_unless _ | Types.Capability_unless_values _ ->
                     Compiler_bug.raise_bug ~stage:"Prover" "a capability's base has a condition")
-              signature.uses))
+              (Facts.remove_panic_condition signature.uses)))
         && List.for_all
              (fun (info : Types.parameter_info) -> info.mode <> Language.Mode.Mut)
              signature.parameters

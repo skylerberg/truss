@@ -193,7 +193,10 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       restated_clauses = List.map keep_holding_clauses contract.restated_clauses;
     }
   in
-  let is_logic_call = contract.is_logic_function && invocation.uses = Types.no_capabilities in
+  let is_logic_call =
+    contract.is_logic_function
+    && Facts.remove_panic_condition invocation.uses = Types.no_capabilities
+  in
   let values =
     if is_logic_call then
       List.map
@@ -386,7 +389,8 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
           list_required_fixes context frame clauses requirement term values
             ~type_names:(list_type_names (substitution_of clauses))
         in
-        Facts.oblige context frame Panic location ~fixes
+        let cited = Option.map (fun key -> (key, requirement.clause.origin)) clauses.callee.key in
+        Facts.oblige context frame Panic location ?cited ~fixes
           [
             Text "`";
             Facts.quote clauses.callee requirement.clause.origin;

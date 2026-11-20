@@ -210,7 +210,7 @@ public fn List[Element].pop(mut self) -> Option[Element]
 }
 
 public fn List[Element].insert_at(mut self, position: UInt64, item: own Element)
-  requires position <= self.length()
+  uses Panic unless position <= self.length()
   ensures self.model().length() == old(self.model()).length() + 1
   ensures forall i in 0..position => identical(self.model()[i], old(self.model())[i])
   ensures identical(self.model()[position], item)
@@ -221,6 +221,9 @@ public fn List[Element].insert_at(mut self, position: UInt64, item: own Element)
     position < i && i < self.model().length() ==> identical(self.model()[i], old(self.model())[i - 1])
   cost time O(self.length())
 {
+  if position > self.length() {
+    Panic.crash("index out of bounds")
+  }
   growth::reserve(mut self.storage, additional: 1)
   intrinsic::storage_insert(mut self.storage, index: position, value: own item)
 }
@@ -255,7 +258,7 @@ impl Iterable for List[Element] {
 }
 
 public fn List[Element].element(mut self, position: UInt64) lends mut Element
-  requires position < self.count()
+  uses Panic unless position < self.count()
   ensures identical(result, old(self.model())[position])
   ensures identical(self.model(), old(self.model()).update(position, value: final(result)))
   ensures self.length() == old(self.length())
@@ -263,12 +266,14 @@ public fn List[Element].element(mut self, position: UInt64) lends mut Element
   cost amortized time O(1)
   cost allocations == 0
 {
+  if position >= self.count() {
+    Panic.crash("index out of bounds")
+  }
   mut self[position]
 }
 
 public fn List[Element].swap(mut self, first: UInt64, second: UInt64)
-  requires first < self.length()
-  requires second < self.length()
+  uses Panic unless first < self.length() && second < self.length()
   ensures self.length() == old(self.length())
   ensures identical(self.model()[first], old(self.model())[second])
   ensures identical(self.model()[second], old(self.model())[first])
@@ -279,6 +284,9 @@ public fn List[Element].swap(mut self, first: UInt64, second: UInt64)
   cost amortized time O(1)
   cost allocations == 0
 {
+  if first >= self.length() || second >= self.length() {
+    Panic.crash("index out of bounds")
+  }
   intrinsic::storage_swap(mut self.storage, first: first, second: second)
 }
 
@@ -449,13 +457,16 @@ impl Iterable for Slice[Element] {
 }
 
 public fn Slice[Element].element(mut self, position: UInt64) lends mut Element
-  requires position < self.count()
+  uses Panic unless position < self.count()
   ensures identical(result, old(self.model())[position])
   ensures identical(self.model(), old(self.model()).update(position, value: final(result)))
   cost time O(1)
   cost amortized time O(1)
   cost allocations == 0
 {
+  if position >= self.count() {
+    Panic.crash("index out of bounds")
+  }
   mut self[position]
 }
 
@@ -638,7 +649,7 @@ public fn List[Element].truncate(mut self, length: UInt64)
 }
 
 public fn List[Element].remove_at(mut self, index: UInt64) -> Element
-  requires index < self.length()
+  uses Panic unless index < self.length()
   ensures self.length() == old(self.length()) - 1
   ensures identical(result, old(self.model())[index])
   ensures forall i in 0..index => identical(self.model()[i], old(self.model())[i])
@@ -646,28 +657,35 @@ public fn List[Element].remove_at(mut self, index: UInt64) -> Element
   cost time O(old(self.length()))
   cost allocations == 0
 {
+  if index >= self.length() {
+    Panic.crash("index out of bounds")
+  }
   intrinsic::storage_remove(mut self.storage, index: index)
 }
 
 public fn List[Element].swap_remove(mut self, index: UInt64) -> Element
-  requires index < self.length()
+  uses Panic unless index < self.length()
   ensures self.length() == old(self.length()) - 1
   ensures identical(result, old(self.model())[index])
   cost time O(1)
   cost allocations == 0
 {
+  if index >= self.length() {
+    Panic.crash("index out of bounds")
+  }
   intrinsic::storage_swap(mut self.storage, first: index, second: self.length() - 1)
   intrinsic::storage_pop(mut self.storage)
 }
 
 public fn List[Element].remove_range(mut self, range: Range[UInt64])
-  requires range.start <= range.stop
-  requires range.stop <= self.length()
-  requires !range.inclusive
+  uses Panic unless range.start <= range.stop && range.stop <= self.length() && !range.inclusive
   ensures self.length() == old(self.length()) - (range.stop - range.start)
   cost time O(old(self.length()))
   cost allocations == 0
 {
+  if range.start > range.stop || range.stop > self.length() || range.inclusive {
+    Panic.crash("slice out of bounds")
+  }
   let width = range.stop - range.start
   if width == 0 {
     return
@@ -696,7 +714,7 @@ public fn List[Element].remove_range(mut self, range: Range[UInt64])
 }
 
 public fn List[Element].split_off(mut self, at: UInt64) -> List[Element]
-  requires at <= self.length()
+  uses Panic unless at <= self.length()
   ensures self.length() == at
   ensures result.length() == old(self.length()) - at
   cost time O(result.length())
