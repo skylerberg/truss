@@ -51,21 +51,13 @@ val run_in_block_scope : t -> scope -> Core.origin -> (unit -> 'a) -> 'a
 val run_in_scope : t -> Core.origin -> (unit -> 'a) -> 'a
 val run_in_statement : t -> Core.origin -> (unit -> 'a) -> 'a
 val run_in_value_scope : t -> Core.origin -> (unit -> Tree.operand option) -> Tree.operand option
+val run_in_condition : t -> scope -> (unit -> 'a) -> 'a
 val run_in_scrutinee_frame : t -> (unit -> 'a) -> 'a * scope
-val run_in_arm_scope : t -> scrutinee:scope -> (scope -> 'a) -> 'a
+val make_arm_scope : scrutinee:scope -> scope
+val run_in_guarded_block : t -> scope -> Core.origin -> (unit -> 'a) -> 'a
 val end_scope : t -> scope -> Core.origin -> unit
-val enter_guarded_block : t -> scope -> Core.origin -> unit
+val list_scope_ends : scope -> Core.origin -> Tree.statement list
 val list_unmatched_ends : scope -> scrutinee:scope -> Core.origin -> Tree.statement list
-
-type lowered_condition = {
-  value : Tree.operand option;
-  ended_if_true : scope;
-  ended_if_false : scope;
-  block_scope_if_true : scope;
-}
-
-val run_in_condition_scope : t -> (unit -> Tree.operand option) -> lowered_condition
-val run_in_guard_scope : t -> Core.origin -> (unit -> Tree.operand option) -> Tree.operand option
 val run_in_old : t -> (unit -> 'a) -> 'a
 val reads_entry : t -> Core.local -> bool
 val run_binding_to_statement : t -> (unit -> 'a) -> 'a
