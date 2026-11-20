@@ -472,18 +472,6 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
     if Hashtbl.mem seen id then report "the node id %d is used twice" id;
     Hashtbl.replace seen id ()
   in
-  let task_origins = Hashtbl.create 4 in
-  let check_unique_task_origin (node : Core.statement) =
-    match node.kind with
-    | Concurrent _ | For { mode = Concurrent; _ } ->
-        if Hashtbl.mem task_origins node.origin then
-          report
-            "two `concurrent` statements have the origin of node %d, so an early exit of a task of \
-             one would end the tasks of the other"
-            (Core_walk.locate_origin node.origin);
-        Hashtbl.replace task_origins node.origin ()
-    | _ -> ()
-  in
   let check_instantiation subject (instantiation : Types.instantiation) =
     List.iter (check_argument (subject ^ "'s type argument")) instantiation.type_arguments;
     List.iter
@@ -736,7 +724,6 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
          statement =
            (fun (node : Core.statement) ->
              check_unique node.id;
-             check_unique_task_origin node;
              match node.kind with
              | Assign { target; _ } -> check_mutable_place "an assignment" target
              | Compound_assign { target; value; _ } -> (
@@ -797,7 +784,10 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
            (fun callee ->
              check_target callee.target;
              check_capabilities "a callee's `uses`" callee.uses);
-         place = ignore;
+         place =
+           (function
+           | Element { id; _ } | Range { id; _ } -> check_unique id
+           | Local _ | Constant _ | Field _ | Lent _ | Temporary _ -> ());
        })
     form.definition;
   at := None;

@@ -1,14 +1,14 @@
 type root = Local of Core.local | Temporary of Mir.local | Constant of Path.t | Environment
-type step = Field of string | Element of Core.origin | Range of Core.origin
+type step = Field of string | Element of Core.id | Range of Core.id
 type t = { root : root; steps : step list }
-type overlap = Disjoint | Overlapping | Maybe_disjoint of Core.origin list * Core.origin list
+type overlap = Disjoint | Overlapping | Maybe_disjoint of Core.id list * Core.id list
 
 let rec split_selection steps =
   match steps with
-  | Range origin :: rest ->
-      let origins, rest = split_selection rest in
-      (origin :: origins, rest)
-  | Element origin :: rest -> ([ origin ], rest)
+  | Range node :: rest ->
+      let nodes, rest = split_selection rest in
+      (node :: nodes, rest)
+  | Element node :: rest -> ([ node ], rest)
   | Field _ :: _ | [] -> ([], steps)
 
 let classify_overlap left right =

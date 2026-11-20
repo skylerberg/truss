@@ -156,10 +156,7 @@ let spawn_iteration (state : Lowering.state) (loop : Lowering.spawn_loop)
   Emit_c.Ir_builder.emit state.builder
     (Assign
        ( Lowered.make_local_place function_value,
-         lower_task_body state
-           ~id:(Iteration { loop = loop.origin })
-           ~group:loop.group ~parts:[ loop.item ]
-           (fun task ->
+         lower_task_body state ~id:loop.task ~group:loop.group ~parts:[ loop.item ] (fun task ->
              Lowering.run_in_loop state ~continue_:task.end_block ~break_:task.end_block
                ~depth:task.scope_depth f) ));
   let spawned =

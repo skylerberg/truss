@@ -2,7 +2,7 @@ module Lookups = Lookups
 
 type result = {
   diagnostics : Diagnostic.in_definition list;
-  must_be_disjoint : (Core.origin list * Core.origin list) list;
+  must_be_disjoint : (Core.id list * Core.id list) list;
 }
 
 let implements_capability (lookups : Lookups.t) key =

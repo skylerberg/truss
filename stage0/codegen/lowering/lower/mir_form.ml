@@ -120,7 +120,7 @@ and lower_concurrent_block state (region : Mir_drops.region) ~fork
         List.mapi
           (fun index (branch : Mir.Graph.branch) ->
             Mir_tasks.lower_task_body state
-              ~id:(Branch { block = fork; index })
+              ~id:(Branch { fork; index })
               ~group ~parts:[ item ]
               (fun task ->
                 let inner =
@@ -869,7 +869,7 @@ and lower_terminator state (region : Mir_drops.region) (ending : Mir.Graph.termi
         (fun target ->
           let rec locate_branch_region (around : Mir_drops.region) =
             match (around.ending, task, around.enclosing) with
-            | Some (fork, _), Branch { block; _ }, _ when fork = block -> around
+            | Some (ending, _), Branch { fork; _ }, _ when ending = fork -> around
             | _, _, Some enclosing -> locate_branch_region enclosing
             | _, _, None -> Definitions.raise_bug "an early exit from a branch outside its block"
           in
@@ -953,13 +953,14 @@ and lower_loop_body (state : Lowering.state) (region : Mir_drops.region) ~part ~
 and lower_for_loop state (region : Mir_drops.region) ~(iteration : Mir.iteration) ~part ~body
     ~(loop : Mir.loop) =
   let origin = loop.origin in
+  let task : Mir.task = Iteration { loop = loop.node } in
   let each = lower_loop_body state region ~part ~body in
   match loop.schedule with
   | Concurrent ->
       Mir_tasks.with_group state (fun group ->
           let spawning =
             {
-              Lowering.origin;
+              Lowering.task;
               group;
               item =
                 Emit_c.Ir_builder.allocate_local state.builder (Value (Ground.make_builtin UInt64));

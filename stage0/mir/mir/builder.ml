@@ -542,13 +542,14 @@ and lower_place builder (written : Core.place) : Tree.place option =
     | Field { base; field; _ } ->
         let* base = lower_place builder base in
         Some (project base (Field field))
-    | Element { base = sequence_place; index; origin; _ } ->
+    | Element { id; base = sequence_place; index; origin; _ } ->
         let* base = lower_place builder sequence_place in
         let* index = lower_held_expression builder index in
         Some
           (project base
-             (Element { index; sequence = Core_walk.compute_place_type sequence_place; origin }))
-    | Range { base = sequence_place; start; stop; origin; _ } ->
+             (Element
+                { node = id; index; sequence = Core_walk.compute_place_type sequence_place; origin }))
+    | Range { id; base = sequence_place; start; stop; origin; _ } ->
         let* base = lower_place builder sequence_place in
         let* start = lower_held_expression builder start in
         let* stop =
@@ -558,7 +559,14 @@ and lower_place builder (written : Core.place) : Tree.place option =
         in
         Some
           (project base
-             (Range { start; stop; sequence = Core_walk.compute_place_type sequence_place; origin }))
+             (Range
+                {
+                  node = id;
+                  start;
+                  stop;
+                  sequence = Core_walk.compute_place_type sequence_place;
+                  origin;
+                }))
     | Lent lending -> lower_lent builder lending ~duration:Tree.Rest_of_statement
     | Temporary { kind = String text; type_; _ } -> Some (make_literal_place text type_)
     | Temporary written ->
@@ -1176,7 +1184,8 @@ and lower_statement builder (node : Core.statement) =
       | For { pattern; iteration; clauses; body; mode } -> (
           let loop =
             {
-              Tree.clauses = lower_loop_clauses builder clauses;
+              Tree.node = node.id;
+              clauses = lower_loop_clauses builder clauses;
               schedule = mode;
               origin;
               quantified = None;
@@ -1189,7 +1198,7 @@ and lower_statement builder (node : Core.statement) =
                   ignore (lower_block builder body))
             in
             if mode = Concurrent then
-              Emitter.run_in_task builder (Tree.Iteration { loop = origin }) lower_iteration
+              Emitter.run_in_task builder (Tree.Iteration { loop = node.id }) lower_iteration
             else lower_iteration ()
           in
           match iteration with
@@ -1208,7 +1217,8 @@ and lower_statement builder (node : Core.statement) =
       | While { condition = tested; clauses; body; binds_lent_part } ->
           let loop =
             {
-              Tree.clauses = lower_loop_clauses builder clauses;
+              Tree.node = node.id;
+              clauses = lower_loop_clauses builder clauses;
               schedule = Sequential;
               origin;
               quantified = None;
@@ -1252,15 +1262,15 @@ and lower_statement builder (node : Core.statement) =
                 Emitter.build_block builder (fun () ->
                     if concurrent then
                       Emitter.run_in_task builder
-                        (Tree.Branch { block = origin; index })
+                        (Tree.Branch { fork = node.id; index })
                         (fun () -> lower_statement builder branch)
                     else lower_statement builder branch;
                     if Emitter.reaches builder then Some Emitter.unit_value else None))
               branches
           in
-          Emitter.start_group builder origin origin;
-          Emitter.emit builder (Fork { fork = origin; concurrent; branches }) origin;
-          Emitter.resume_group builder origin origin;
+          Emitter.start_group builder node.id origin;
+          Emitter.emit builder (Fork { fork = node.id; concurrent; branches }) origin;
+          Emitter.resume_group builder node.id origin;
           if List.exists (fun (branch : Tree.block) -> branch.value = None) branches then
             Emitter.jump builder Unreachable origin
       | Proof proof ->
@@ -1338,11 +1348,10 @@ and lower_for_loop ?cursor_type ?(elements = ref None) ?matched builder ~origin
     | Some bindings -> bindings
     | None -> raise_bug "a loop whose iterations bind no part"
   in
-  Emitter.start_group builder origin origin;
-  Emitter.emit builder
-    (For { loop = loop (); iteration; part; elements = !elements; bindings; body })
-    origin;
-  Emitter.resume_group builder origin origin
+  let (loop : Tree.loop) = loop () in
+  Emitter.start_group builder loop.node origin;
+  Emitter.emit builder (For { loop; iteration; part; elements = !elements; bindings; body }) origin;
+  Emitter.resume_group builder loop.node origin
 
 and lower_range_loop ?matched builder ~origin ~pattern ~start:low ~stop:high ~inclusive ~loop ~each
     =
@@ -1392,12 +1401,13 @@ and lower_loop_element builder (element : Core.place) ~lends ~count :
           | Some collection -> Some (part, { Tree.element = Lent_by_call local; collection; count })
           | None -> raise_bug "a loop over elements whose collection no call borrows")
       | Constant _ | Literal _ -> raise_bug "a loop over elements that a constant lends")
-  | Element { base; index = position; origin; _ } ->
+  | Element { id; base; index = position; origin; _ } ->
       let* sequence = lower_place builder base in
       let* index = lower_expression builder position in
       ignore (Emitter.start_loan builder (make_borrow base sequence lends) lends Loop_body origin);
       let place =
-        project sequence (Element { index; sequence = Core_walk.compute_place_type base; origin })
+        project sequence
+          (Element { node = id; index; sequence = Core_walk.compute_place_type base; origin })
       in
       Some
         ( place,
@@ -1448,7 +1458,7 @@ and lower_quantifier_loop builder (node : Core.expression) (quantifier : Languag
     (Operand (Immediate { value = Boolean (quantifier = Forall); type_ = Types.bool }))
     origin;
   let make_loop () =
-    { Tree.clauses = []; schedule = Sequential; origin; quantified = !quantified }
+    { Tree.node = node.id; clauses = []; schedule = Sequential; origin; quantified = !quantified }
   in
   let matched = ref None in
   let lower_element_decision () =

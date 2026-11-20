@@ -20,8 +20,14 @@ and root = Local of local | Constant of Path.t | Literal of { text : string; typ
 and projection =
   | Field of string
   | Variant_field of { variant : string; field : string }
-  | Element of { index : operand; sequence : Types.ty; origin : Core.origin }
-  | Range of { start : operand; stop : operand option; sequence : Types.ty; origin : Core.origin }
+  | Element of { node : Core.id; index : operand; sequence : Types.ty; origin : Core.origin }
+  | Range of {
+      node : Core.id;
+      start : operand;
+      stop : operand option;
+      sequence : Types.ty;
+      origin : Core.origin;
+    }
 
 and operand =
   | Use of { place : place; type_ : Types.ty; origin : Core.origin }
@@ -55,7 +61,7 @@ type provided = {
 }
 
 type loan_duration = Loop_body | Provide_body | Rest_of_statement | Operand_evaluation
-type task = Branch of { block : Core.origin; index : int } | Iteration of { loop : Core.origin }
+type task = Branch of { fork : Core.id; index : int } | Iteration of { loop : Core.id }
 
 type iteration =
   | Range of { start : operand; stop : operand; inclusive : bool }
@@ -152,6 +158,7 @@ and loop_clause = Invariant of formula | Decreases of formula list | Cost of cos
 and quantified = { quantifier : Language.Quantifier.t; decides : local }
 
 and loop = {
+  node : Core.id;
   clauses : loop_clause list;
   schedule : Language.Loop_mode.t;
   origin : Core.origin;
@@ -213,7 +220,7 @@ and statement_kind =
       bindings : block;
       body : block;
     }
-  | Fork of { fork : Core.origin; concurrent : bool; branches : block list }
+  | Fork of { fork : Core.id; concurrent : bool; branches : block list }
   | Provide of { target : place; provided : provided list; can_use_tasks : bool; body : block }
   | Resume of { winner : local; exits : early_exit list }
   | Yield of { mode : Language.Mode.t; part : yielded }

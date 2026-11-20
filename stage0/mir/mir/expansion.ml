@@ -141,7 +141,7 @@ let expand_body (body : Tree.body) : Graph.body =
                 task_provides =
                   (match loop.schedule with
                   | Concurrent ->
-                      (Tree.Iteration { loop = loop.origin }, targets.provides)
+                      (Tree.Iteration { loop = loop.node }, targets.provides)
                       :: targets.task_provides
                   | Sequential | Parallel -> targets.task_provides);
               }
@@ -202,11 +202,9 @@ let expand_body (body : Tree.body) : Graph.body =
                     | Some branch_end ->
                         {
                           targets with
-                          task_ends =
-                            (Tree.Branch { block = fork; index }, branch_end) :: targets.task_ends;
+                          task_ends = (Tree.Branch { fork; index }, branch_end) :: targets.task_ends;
                           task_provides =
-                            (Tree.Branch { block = fork; index }, targets.provides)
-                            :: targets.task_provides;
+                            (Tree.Branch { fork; index }, targets.provides) :: targets.task_provides;
                         }
                     | None -> targets
                   in

@@ -11,7 +11,7 @@ type region = {
   depth : int;
   start : entry;
   enclosing : region option;
-  ending : (Core.origin * Lowered.block) option;
+  ending : (Core.id * Lowered.block) option;
 }
 
 let save (state : Lowering.state) =

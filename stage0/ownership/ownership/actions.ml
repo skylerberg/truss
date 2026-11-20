@@ -160,8 +160,8 @@ let track_place builder (place : Mir.place) : Place.t option =
           match projection with
           | Field field -> { place with steps = place.steps @ [ Field field ] }
           | Variant_field _ -> place
-          | Element { origin; _ } -> { place with steps = place.steps @ [ Element origin ] }
-          | Range { origin; _ } -> { place with steps = place.steps @ [ Range origin ] })
+          | Element { node; _ } -> { place with steps = place.steps @ [ Element node ] }
+          | Range { node; _ } -> { place with steps = place.steps @ [ Range node ] })
         base place.projections)
     base
 

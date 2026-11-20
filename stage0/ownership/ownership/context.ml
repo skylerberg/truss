@@ -18,7 +18,7 @@ type context = {
   implements_capability : bool;
   mutable mutable_locals : Core.local list;
   mutable diagnostics : Diagnostic.in_definition list;
-  mutable must_be_disjoint : (Core.origin list * Core.origin list) list;
+  mutable must_be_disjoint : (Core.id list * Core.id list) list;
 }
 
 let is_plain context type_ =

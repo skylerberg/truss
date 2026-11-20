@@ -11,12 +11,10 @@ type region = {
   depth : int;
   start : entry;
   enclosing : region option;
-  ending : (Core.origin * Lowered.block) option;
+  ending : (Core.id * Lowered.block) option;
 }
 
-val make_region :
-  ?ending:Core.origin * Lowered.block -> ?enclosing:region -> Lowering.state -> region
-
+val make_region : ?ending:Core.id * Lowered.block -> ?enclosing:region -> Lowering.state -> region
 val restore : Lowering.state -> entry -> unit
 val resolve_jump : ?entry:entry -> Lowering.state -> region -> Mir.Graph.block -> Lowered.block
 val claim : Lowering.state -> region -> Mir.Graph.block -> unit

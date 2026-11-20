@@ -51,8 +51,9 @@ and place =
   | Local of { local : local; type_ : Types.ty; origin : origin }
   | Constant of { path : Path.t; type_ : Types.ty; origin : origin }
   | Field of { base : place; field : string; type_ : Types.ty; origin : origin }
-  | Element of { base : place; index : expression; type_ : Types.ty; origin : origin }
+  | Element of { id : id; base : place; index : expression; type_ : Types.ty; origin : origin }
   | Range of {
+      id : id;
       base : place;
       start : expression;
       stop : expression option;

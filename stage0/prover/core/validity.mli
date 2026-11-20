@@ -1,4 +1,6 @@
-val note_place : State.context -> State.frame -> Core.origin -> State.place_value -> unit
+val note_place :
+  State.context -> State.frame -> node:Core.id -> origin:Core.origin -> State.place_value -> unit
+
 val run_without_costs : State.context -> (unit -> 'a) -> 'a
 val read_specification : State.context -> State.frame -> Mir.formula -> State.frame * Logic.term
 val select_field : State.context -> Types.ty -> string option -> string -> Logic.term -> Logic.term

@@ -154,6 +154,7 @@ let make_range form ~origin (base : Core.place) ~start ~stop ~inclusive : Core.k
   Use
     (Range
        {
+         id = allocate_node_id form;
          base;
          start = (match start with Some start -> start | None -> make bound_type (Integer Z.zero));
          stop;
@@ -951,6 +952,7 @@ and build_index form env (value : Syntax.expression) base items : Core.kind =
           Use
             (Element
                {
+                 id = allocate_node_id form;
                  base = make_place (build_expression form env base);
                  index = build_expression form env key;
                  type_ = element;
@@ -1481,7 +1483,14 @@ and build_elements form ~origin (collection : Core.place) ~(count : Tables.call)
     element =
       (match Types.find_sequence_element (Core_walk.compute_place_type collection) with
       | Some element_type ->
-          Element { base = collection; index = position; type_ = element_type; origin }
+          Element
+            {
+              id = allocate_node_id form;
+              base = collection;
+              index = position;
+              type_ = element_type;
+              origin;
+            }
       | None ->
           Lent
             (make_synthetic_expression form ~origin element.callee_result
