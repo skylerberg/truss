@@ -616,7 +616,8 @@ let run_in_statement (state : State.state) (env : State.env) span body =
   in
   state.frames <- frame :: state.frames;
   let result =
-    State.with_specification state env.specification (fun () ->
+    State.with_mode state { state.unifier.mode with checks_specification = env.specification }
+      (fun () ->
         let result = body () in
         settle state frame;
         result)

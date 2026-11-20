@@ -232,9 +232,6 @@ let with_added_condition (state : state) condition run =
     { mode with context = Interface.Elaborator.add_condition mode.context condition }
     run
 
-let with_specification (state : state) checks_specification run =
-  with_mode state { state.unifier.mode with checks_specification } run
-
 let keep_mode (state : state) run =
   let mode = state.unifier.mode in
   fun argument -> with_mode state mode (fun () -> run argument)
@@ -269,8 +266,6 @@ let record_condition state id (written : Syntax.condition option) =
   in
   state.tables.conditions.(id) <- condition;
   condition
-
-let find_condition state id = state.tables.conditions.(id)
 
 let normalize state type_ =
   let zonked = zonk state type_ in
@@ -413,14 +408,6 @@ let find_evidence state type_ trait =
 let decide_property state property type_ =
   Interface.Impls.decide_property property state.lookups.interface
     ~list_bounds:(lookup_bounds state) (zonk state type_)
-
-let is_plain state type_ =
-  Interface.Impls.is_plain state.lookups.interface ~list_bounds:(lookup_bounds state)
-    (zonk state type_)
-
-let is_view state type_ =
-  Interface.Impls.is_view state.lookups.interface ~list_bounds:(lookup_bounds state)
-    (zonk state type_)
 
 let rec diverges ~is_never (written : Syntax.statement) =
   match written.kind with

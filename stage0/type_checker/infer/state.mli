@@ -152,10 +152,8 @@ val check_compiled_binding : state -> Syntax.id -> unit
 val check_compiled_expression : state -> Syntax.id -> unit
 val reduce_condition : state -> Types.condition -> Types.condition option
 val record_condition : state -> Syntax.id -> Syntax.condition option -> Types.condition option
-val find_condition : state -> Syntax.id -> Types.condition option
 val with_mode : state -> Unify.mode -> (unit -> 'a) -> 'a
 val with_added_condition : state -> Types.condition -> (unit -> 'a) -> 'a
-val with_specification : state -> bool -> (unit -> 'a) -> 'a
 val read_context : state -> Interface.Elaborator.t
 val check_when_final : state -> (unit -> unit) -> unit
 val resolve : state -> Types.ty -> Types.ty
@@ -199,8 +197,6 @@ val find_evidence : state -> Types.ty -> Types.trait_reference -> Interface.Impl
 val decide_property :
   state -> Interface.Properties.property -> Types.ty -> Interface.Properties.decision
 
-val is_plain : state -> Types.ty -> bool
-val is_view : state -> Types.ty -> bool
 val diverges : is_never:(Syntax.expression -> bool) -> Syntax.statement -> bool
 val declare : state -> Syntax.name -> Types.ty -> binding:binding -> mode:Language.Mode.t -> unit
 
