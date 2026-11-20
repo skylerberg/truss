@@ -66,8 +66,8 @@ type t =
   | Writing_append
   | Writing_signed
   | Writing_unsigned
-  | Writing_float32
-  | Writing_float64
+  | Float_text_write_shortest_float32
+  | Float_text_write_shortest_float64
   | Writing_boolean
   | Writing_quoted_character
   | Writing_quoted_text
@@ -239,8 +239,8 @@ let items =
     (Writing_append, [ "writing" ], "append");
     (Writing_signed, [ "writing" ], "signed");
     (Writing_unsigned, [ "writing" ], "unsigned");
-    (Writing_float32, [ "writing" ], "float32");
-    (Writing_float64, [ "writing" ], "float64");
+    (Float_text_write_shortest_float32, [ "numbers"; "float_text" ], "write_shortest_float32");
+    (Float_text_write_shortest_float64, [ "numbers"; "float_text" ], "write_shortest_float64");
     (Writing_boolean, [ "writing" ], "boolean");
     (Writing_quoted_character, [ "writing" ], "quoted_character");
     (Writing_quoted_text, [ "writing" ], "quoted_text");

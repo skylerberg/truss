@@ -1625,7 +1625,11 @@ let () =
   Harness.test "a comparator that keeps its laws gives max_by's conclusion" (fun () ->
       expect_proven Fixtures.Prover.largest_by_a_comparing_lambda);
   Harness.test "a comparator that breaks its laws gives max_by's conclusion nothing" (fun () ->
-      expect_not_proven Fixtures.Prover.largest_by_a_comparator_breaking_its_laws "prover.ensures")
+      expect_not_proven Fixtures.Prover.largest_by_a_comparator_breaking_its_laws "prover.ensures");
+  Harness.test "a comparator that compares a field of its arguments gives max_by's conclusion"
+    (fun () -> expect_proven Fixtures.Prover.highest_score_by_a_keyed_comparator);
+  Harness.test "an element's range holds in a quantifier that is a match arm's value" (fun () ->
+      expect_proven Fixtures.Prover.element_compared_in_a_match_arm)
 
 let () =
   Harness.test "provided methods that call each other are recursion" (fun () ->
