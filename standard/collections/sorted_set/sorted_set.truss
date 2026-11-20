@@ -1,7 +1,6 @@
 use standard::collections
 use standard::intrinsic
 use standard::list
-use standard::list::slice
 use standard::map
 
 fn strictly_ascending[Element: Ordered](elements: Sequence[Element]) -> Bool
@@ -26,7 +25,6 @@ theorem ascending_below[Element: Ordered](
 {
   if bound > 0 {
     ascending_below(elements, element: element, last: last, bound: bound - 1)
-    slice::less_then_at_most(elements[bound - 1], second: elements[last], third: element)
   }
 }
 
@@ -46,7 +44,6 @@ theorem ascending_above[Element: Ordered](
 {
   if bound < elements.length() {
     ascending_above(elements, element: element, first: first, bound: bound + 1)
-    slice::at_most_then_less(element, second: elements[first], third: elements[bound])
   }
 }
 
@@ -84,16 +81,11 @@ fn collections::SortedSet[Element: Ordered].search(self, element: Element) -> Re
       }
       Greater => {
         proof {
-          slice::greater_is_less_reversed(self.elements[middle], second: element)
           ascending_above(self.elements.model(), element: element, first: middle, bound: middle + 1)
         }
         high = middle
       }
       Equal => {
-        proof {
-          slice::equal_by_compare(self.elements[middle], second: element)
-          slice::equal_is_at_most_reversed(self.elements[middle], second: element)
-        }
         return Ok(middle)
       }
     }
@@ -106,16 +98,6 @@ theorem present_where_equal[Element: Ordered](set: collections::SortedSet[Elemen
   requires set.elements.model()[position] == element
   ensures set.search(element) is Ok(_)
 {
-  match set.search(element) {
-    Ok(_) => {}
-    Err(after) => {
-      if position < after {
-        slice::less_is_not_equal(set.elements.model()[position], second: element)
-      } else {
-        slice::less_is_not_equal(element, second: set.elements.model()[position])
-      }
-    }
-  }
 }
 
 theorem absent_where_split[Element: Ordered](set: collections::SortedSet[Element], element: Element, split: UInt64)
@@ -124,16 +106,6 @@ theorem absent_where_split[Element: Ordered](set: collections::SortedSet[Element
   requires forall i in split..set.elements.length() => element < set.elements.model()[i]
   ensures set.search(element) is Err(_)
 {
-  match set.search(element) {
-    Ok(index) => {
-      if index < split {
-        slice::less_is_not_equal(set.elements.model()[index], second: element)
-      } else {
-        slice::less_is_not_equal(element, second: set.elements.model()[index])
-      }
-    }
-    Err(_) => {}
-  }
 }
 
 fn collections::SortedSet[Element: Ordered].index_at_or_after(self, element: Element) -> UInt64
@@ -227,14 +199,12 @@ fn merged[Element: Ordered](first: own List[Element], second: own List[Element])
         }
         Greater => {
           proof {
-            slice::greater_is_less_reversed(left[last_left], second: right[last_right])
             ascending_below(right.model(), element: left.model()[last_left], last: last_right, bound: last_right)
           }
           from_left = true
         }
         Equal => {
           proof {
-            slice::equal_is_at_most_reversed(left[last_left], second: right[last_right])
             ascending_below(right.model(), element: left.model()[last_left], last: last_right, bound: last_right)
           }
           let _ = mut right.pop()
@@ -308,7 +278,6 @@ fn combined[Element: Ordered + Copyable](
             Greater => {
               if keeps_second_only {
                 proof {
-                  slice::greater_is_less_reversed(first[index], second: second[other_index])
                   ascending_above(first.model(), element: second.model()[other_index], first: index, bound: index + 1)
                 }
                 intrinsic::storage_push(mut output, value: second[other_index].copy())
@@ -482,9 +451,6 @@ public fn collections::SortedSet[Element: Ordered].at_or_before(self, element: E
 {
   let position = self.index_after(element)
   if position > 0 {
-    proof {
-      slice::at_most_is_not_less_reversed(self.elements.model()[position - 1], second: element)
-    }
     Some(self.elements[position - 1])
   } else {
     None
@@ -497,9 +463,6 @@ public fn collections::SortedSet[Element: Ordered].at_or_after(self, element: El
 {
   let position = self.index_at_or_after(element)
   if position < self.elements.length() {
-    proof {
-      slice::at_most_is_not_less_reversed(element, second: self.elements.model()[position])
-    }
     Some(self.elements[position])
   } else {
     None
