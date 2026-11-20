@@ -808,7 +808,7 @@ let index_written_nodes (definition : Syntax.definition) =
     Hashtbl.replace nodes pattern.id Written_pattern;
     match pattern.kind with
     | Variant { fields = Some fields; _ } | Record fields -> List.iter visit_field fields
-    | Alternatives alternatives -> List.iter visit_pattern alternatives
+    | Tuple patterns | Alternatives patterns -> List.iter visit_pattern patterns
     | Wildcard | Binding _ | Qualified_constant _ | Literal _ | Pattern_range _
     | Variant { fields = None; _ }
     | Pattern_error ->

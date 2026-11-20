@@ -1754,9 +1754,10 @@ and build_pattern_kind form type_ (written : Syntax.pattern) : Core.pattern_kind
       Range { start = build_range_bound form start; stop = build_range_bound form stop; inclusive }
   | Variant _, Some (Variant_pattern { variant; fields; _ }) ->
       Variant { variant; fields = build_pattern_fields form fields }
-  | Record _, Some (Record_pattern { fields; _ }) -> Record (build_pattern_fields form fields)
+  | (Record _ | Tuple _), Some (Record_pattern { fields; _ }) ->
+      Record (build_pattern_fields form fields)
   | Alternatives alternatives, _ -> Alternatives (List.map (build_pattern form) alternatives)
-  | (Binding _ | Qualified_constant _ | Variant _ | Record _), _ ->
+  | (Binding _ | Qualified_constant _ | Variant _ | Record _ | Tuple _), _ ->
       raise_bug "`%s` is a pattern the checker did not record" (quote form written.id)
 
 and build_pattern_fields form (fields : (string * Syntax.pattern) list) =

@@ -778,9 +778,8 @@ test "arrays" {
 Most collections are `List`s, which grow; [Chapter 7](#7-collections)
 covers both.
 
-Truss has no tuples. Where another language returns a tuple, a Truss
-function returns a record with named fields, which [Chapter
-5](#5-records-and-sum-types) introduces.
+Where another language returns a tuple, a Truss function returns a record
+with named fields, which [Chapter 5](#5-records-and-sum-types) introduces.
 
 ### Functions
 
@@ -1342,6 +1341,32 @@ test "a record pattern" {
   assert sum(Point(x: 1, y: 2)) == 3
 }
 ```
+
+A *tuple type* is a record whose field order is part of the type. A list of
+patterns without parentheses, after `let`, `var`, or `for`, matches its
+fields by position, so each binding takes the name you choose:
+
+```truss
+tuple type Span(start: UInt64, end: UInt64)
+
+fn width(span: Span) -> UInt64
+  requires span.start <= span.end
+{
+  let low, high = span
+  high - low
+}
+
+test "a tuple pattern" {
+  assert width(Span(start: 2, end: 7)) == 5
+}
+```
+
+- In parentheses, fields match by name in every record, so
+  `let (start, end) = span` works and `let (low, high) = span` is an error.
+- A name that belongs to another field is an error: `let end, start = span`
+  would bind `end` to the field `start`.
+- A map's entries, `enumerate`, and `zip` give tuple types, so a loop over
+  them names the parts by position ([Chapter 7](#7-collections)).
 
 ### Methods
 
@@ -1985,7 +2010,7 @@ test "changing elements" {
 | `for item in items` | Reads an element, as a view |
 | `for item in mut items` | Changes an element in place |
 | `for item in own items` | Takes an element, moving it out of the list |
-| `for entry in items.enumerate()` | Reads `entry.index` and `entry.element` |
+| `for index, item in items.enumerate()` | Reads each element with its position |
 | `for item in items.reversed()` | Reads the elements from the last to the first |
 
 ```truss
@@ -2002,8 +2027,8 @@ fn longest(names: own List[String]) -> String {
 test "iterating" {
   let numbers = [7, 8, 9]
   var positions: List[UInt64] = []
-  for entry in numbers.enumerate() {
-    mut positions.push(entry.index)
+  for index, _ in numbers.enumerate() {
+    mut positions.push(index)
   }
   assert positions == [0, 1, 2]
   var backwards: List[Int64] = []
@@ -2227,9 +2252,9 @@ test "maps" {
   mut ports.remove("http")
   assert ports.length() == 2
   var names: List[String] = []
-  for (key, value) in ports {
-    if value > 100 {
-      mut names.push(key.copy())
+  for name, port in ports {
+    if port > 100 {
+      mut names.push(name.copy())
     }
   }
   assert names == ["https"]
@@ -2253,8 +2278,9 @@ test "maps" {
   The key is stored in the map, so `key`, a place, is passed `own`; a
   temporary such as `word.to_lowercase()` written in the call would need no
   `own`.
-- A `for` loop over a map visits entries, records with the fields `key` and
-  `value`, so `(key, value)` takes them apart.
+- A `for` loop over a map visits its entries. Their type, `map::Entry`, is a
+  tuple type, so `name, port` binds each key and value. `ports.keys()` and
+  `ports.values()` visit one of the two.
 
 A key type implements `Hash` and `Ordered`, which a record or sum type
 derives. A type without them cannot be a key:
@@ -4455,8 +4481,8 @@ test "a cursor's provided methods" {
   assert Countdown(left: 5).skip(3).to_list() == [1, 0]
   assert Countdown(left: 4).count() == 4
   var sums: List[UInt64] = []
-  for pair in Countdown(left: 2).zip(Countdown(left: 2)) {
-    mut sums.push(pair.first.saturating_add(pair.second))
+  for left, right in Countdown(left: 2).zip(Countdown(left: 2)) {
+    mut sums.push(left.saturating_add(right))
   }
   assert sums == [2, 0]
 }

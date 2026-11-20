@@ -12,3 +12,4 @@ val read_method_signature : Lookups.t -> Path.t -> Types.trait_method -> Types.s
 val find_fields : Lookups.t -> Path.t -> Types.argument list -> Types.field list option
 val find_variants : Lookups.t -> Path.t -> Types.argument list -> Types.variant list option
 val are_fields_visible : Lookups.t -> package:Path.package -> Path.t -> bool
+val is_tuple_type : Lookups.t -> Path.t -> bool

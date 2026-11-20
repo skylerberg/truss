@@ -38,6 +38,11 @@ let are_fields_visible (lookups : Lookups.t) ~package (path : Path.t) =
   | Some { opaque = true; _ } -> Path.locate_package path = package
   | _ -> true
 
+let is_tuple_type (lookups : Lookups.t) (path : Path.t) =
+  match Interface.Definition.find_type_interface lookups.interface path with
+  | Some { is_tuple; _ } -> is_tuple
+  | None -> false
+
 let list_trait_generics (lookups : Lookups.t) trait =
   match Interface.Definition.find_trait_interface lookups.interface trait with
   | Some interface -> interface.trait_generics

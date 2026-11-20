@@ -593,10 +593,10 @@ public trait Countable: Ordered + Plain {
 
 public type Range[Value](start: Value, stop: Value, inclusive: Bool)
 
-public type Indexed[Element](index: UInt64, element: Element)
+public tuple type Indexed[Element](index: UInt64, element: Element)
   derives Equal
 
-public type Pair[First, Second](first: First, second: Second)
+public tuple type Pair[First, Second](first: First, second: Second)
   derives Equal, Hash, Ordered
 
 public type ExitCode(code: UInt8)

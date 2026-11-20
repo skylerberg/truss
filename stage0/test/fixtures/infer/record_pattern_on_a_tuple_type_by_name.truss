@@ -1,0 +1,6 @@
+tuple type Span(low: Int64, high: Int64)
+
+fn width(span: Span) -> Int64 {
+  let (high, low) = span
+  high.saturating_subtract(low)
+}
