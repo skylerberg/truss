@@ -222,6 +222,43 @@ let list_type_candidates state scope =
       (state.lookups.list_entries state.key.module_)
   @ List.map fst Prelude.types
 
+let list_types_with_variant state text =
+  let declared_types =
+    List.filter_map
+      (fun (declaration : Names.declaration) ->
+        match declaration.kind with
+        | Type -> (
+            match (state.lookups.read_definition declaration.key).kind with
+            | Type_definition { name; body = Variants variants; _ }
+              when List.exists (fun (variant : Syntax.variant) -> variant.name.text = text) variants
+              ->
+                Some (state.lookups.read_place declaration.key, name.text)
+            | _ -> None)
+        | _ -> None)
+      (state.lookups.list_declarations state.key.module_)
+  in
+  List.map snd (List.sort (fun (first, _) (second, _) -> compare first second) declared_types)
+
+let report_bare_variant state (name : Syntax.name) owners =
+  let span = read_span state name.id in
+  let written owner = owner ^ "." ^ name.text in
+  set_target state name
+    (Unknown
+       (add_diagnostic state Unknown_name span
+          ~fixes:
+            (List.map
+               (fun owner ->
+                 Diagnostic.fix
+                   (Printf.sprintf "Write `%s`." (written owner))
+                   [ Diagnostic.replace span (written owner) ])
+               owners)
+          (Printf.sprintf
+             "`%s` is a variant of %s, and in an expression a variant is written under its type, \
+              as in `%s`."
+             name.text
+             (String.concat " and " (List.map (fun owner -> "`" ^ owner ^ "`") owners))
+             (written (List.hd owners)))))
+
 let resolve_type_name state scope ?(variants = false) (path : Syntax.path) =
   match path.modules with
   | first :: rest -> (
@@ -238,6 +275,8 @@ let resolve_type_name state scope ?(variants = false) (path : Syntax.path) =
           | None -> (
               match if variants then Prelude.find_variant text else None with
               | Some (type_, variant) -> set_target state path.last (Variant (type_, variant))
+              | None when variants && list_types_with_variant state text <> [] ->
+                  report_bare_variant state path.last (list_types_with_variant state text)
               | None ->
                   report_unknown state path.last ~expected:"a type here"
                     (list_type_candidates state scope
