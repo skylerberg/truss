@@ -11,6 +11,12 @@ exception Unsupported of unsupported
 let is_home (context : State.context) (source : State.source) =
   source.key = context.home && Path.equal source.definition context.home.path
 
+let is_in_home_package (context : State.context) (source : State.source) =
+  Path.compare_package
+    (Path.locate_package source.definition)
+    (Path.locate_package context.home.path)
+  = 0
+
 let raise_unsupported location format =
   Printf.ksprintf
     (fun construct -> raise (Unsupported { location; construct; foreign_definition = None }))
@@ -376,6 +382,9 @@ and make_obligation ?template_clause (context : State.context) (frame : State.fr
     query;
     values = context.values;
     path_notes = List.rev context.path_notes;
+    has_untriggered_written_fact =
+      Logic.has_untriggered_fact query
+        ~is_counted:(Tables.Term_table.mem context.written_quantifiers);
     locals =
       (let is_parameter = function
          | Logic.Symbol symbol -> List.mem_assoc symbol context.values

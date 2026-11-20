@@ -27,6 +27,7 @@ type t = {
   locals : (Logic.term * string) list;
   template_clause : template_clause option;
   path_notes : (string * Logic.term) list;
+  has_untriggered_written_fact : bool;
 }
 
 type outcome = {

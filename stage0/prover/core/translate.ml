@@ -31,6 +31,7 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       facts = [];
       scopes = [];
       quantifier_facts = Tables.Term_table.create 16;
+      written_quantifiers = Tables.Term_table.create 4;
       quantifier_symbols = [];
       obligations = [];
       fresh = 0;

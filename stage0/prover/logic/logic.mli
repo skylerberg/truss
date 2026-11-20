@@ -150,7 +150,7 @@ val has_quantifier : term -> bool
 val forall : ?trigger:term list -> (symbol * sort) list * term -> term
 val substitute : (symbol * term) list -> term -> term
 val replace : from:term -> into:term -> term -> term
-val has_untriggered_fact : query -> bool
+val has_untriggered_fact : ?is_counted:(term -> bool) -> query -> bool
 val prune : query -> query
 val show_query : ?cardinality_bound:int -> query -> string
 val has_uninterpreted_sort : query -> bool

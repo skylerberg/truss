@@ -2766,7 +2766,12 @@ let () =
       if
         has_untriggered_fact
           (make_query (forall ([ (variable "i", Int) ], positive (applied_f i_term))))
-      then Harness.fail "a fact on f(i) has one");
+      then Harness.fail "a fact on f(i) has one";
+      if
+        has_untriggered_fact
+          ~is_counted:(fun _ -> false)
+          (make_query (forall ([ (variable "i", Int) ], positive (applied_f (add i_term (int 1))))))
+      then Harness.fail "a fact that is not counted is told apart");
   Harness.test "variables named by no one application share a trigger" (fun () ->
       expect
         (forall
@@ -3114,3 +3119,40 @@ let () =
       expect_proven (ticker ^ Fixtures.Prover.movement_ticked_twice_bounded_by_the_time_of_its_tick));
   Harness.test "the time of a bound's method is the time that the type argument's impl states"
     (fun () -> expect_proven (ticker ^ Fixtures.Prover.tick_twice_of_a_countdown_in_constant_time))
+
+let () =
+  let list_obligations text =
+    let packages = Support.setup [ ("app::main", text) ] in
+    let key = List.hd (Support.list_declarations packages (Support.parse_module "app::main")) in
+    match
+      Support.read_proofs (Support.make_database packages) (Support.parse_file "app::main") key.key
+    with
+    | Obligations { obligations; _ } -> obligations
+    | _ ->
+        Harness.fail "no obligations";
+        []
+  in
+  Harness.test "an untriggered fact that the program writes is named when the solver gives up"
+    (fun () ->
+      let obligations =
+        list_obligations Fixtures.Prover.index_after_a_push_under_an_untriggered_requires
+      in
+      if
+        not
+          (List.exists
+             (fun (obligation : Prover.Obligation.t) -> obligation.has_untriggered_written_fact)
+             obligations)
+      then Harness.fail "no obligation names the fact");
+  Harness.test "an untriggered fact of the standard library is not named" (fun () ->
+      let obligations = list_obligations Fixtures.Prover.list_index_from_a_map in
+      if
+        not
+          (List.exists
+             (fun (obligation : Prover.Obligation.t) -> Logic.has_untriggered_fact obligation.query)
+             obligations)
+      then Harness.fail "no query has an untriggered fact";
+      if
+        List.exists
+          (fun (obligation : Prover.Obligation.t) -> obligation.has_untriggered_written_fact)
+          obligations
+      then Harness.fail "an obligation names a fact the program does not write")

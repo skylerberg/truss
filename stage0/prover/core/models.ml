@@ -259,6 +259,8 @@ let quantify_over (context : State.context) (frame : State.frame)
       | Forall -> Logic.forall (bound, Logic.( ==> ) premise body_value)
       | Exists -> Logic.Exists (bound, Logic.( &&& ) premise body_value)
     in
+    if Facts.is_in_home_package context frame.source then
+      Tables.Term_table.replace context.written_quantifiers term ();
     (frame, with_facts term)
   in
   let symbol = Facts.make_fresh_name context "bound" in

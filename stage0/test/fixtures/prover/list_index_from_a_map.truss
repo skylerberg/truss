@@ -1,0 +1,13 @@
+fn group(words: Slice[String]) -> List[List[String]] {
+  var groups: List[List[String]] = []
+  var positions: Map[String, UInt64] = [:]
+  for word in words {
+    if positions.get(word) is Some(position) {
+      mut groups[position].push(word.copy())
+    } else {
+      positions[word.copy()] = groups.length()
+      mut groups.push([word.copy()])
+    }
+  }
+  groups
+}
