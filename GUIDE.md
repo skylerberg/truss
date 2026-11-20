@@ -2205,10 +2205,11 @@ fn count_words(text: StringSlice) -> Map[String, UInt64] {
   counts
 }
 
-fn group_by_length(words: Slice[String]) -> Map[UInt64, List[String]] {
-  var groups: Map[UInt64, List[String]] = [:]
+fn group_by_lowercase(words: Slice[String]) -> Map[String, List[String]] {
+  var groups: Map[String, List[String]] = [:]
   for word in words {
-    mut groups.get_or_insert(word.length(), default: []).push(word.copy())
+    let key = word.to_lowercase()
+    mut groups.get_or_insert(own key, default: []).push(word.copy())
   }
   groups
 }
@@ -2230,7 +2231,7 @@ test "maps" {
   assert names == ["https"]
   let counts = count_words("the cat saw the dog")
   assert counts.get("the") == Some(2)
-  assert group_by_length(["a", "bc", "d"]).get(1) == Some(["a", "d"])
+  assert group_by_lowercase(["Ab", "ab", "c"]).get("ab") == Some(["Ab", "ab"])
 }
 ```
 
@@ -2243,8 +2244,11 @@ test "maps" {
   bounds how often a word repeats, so the count saturates rather than
   overflowing.
 - `get_or_insert` also inserts the default when the key is missing, then
-  lends the value `mut` for the rest of the statement. `group_by_length`
+  lends the value `mut` for the rest of the statement. `group_by_lowercase`
   pushes onto each key's list this way, with no index into a separate list.
+  The key is stored in the map, so `key`, a place, is passed `own`; a
+  temporary such as `word.to_lowercase()` written in the call would need no
+  `own`.
 - A `for` loop over a map visits entries, records with the fields `key` and
   `value`, so `(key, value)` takes them apart.
 
