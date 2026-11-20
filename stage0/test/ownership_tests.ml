@@ -982,12 +982,18 @@ let () =
     "the then-block cannot mutate the lender while a name the condition binds aliases the lent part"
     (fun () ->
       expect_one_diagnostic Fixtures.Ownership.then_block_mutating_the_lender
-        "ownership.mutated_while_viewed");
+        "ownership.mutated_while_viewed"
+        ~says:
+          "`names` cannot be passed `mut` while it is lent to a lending call until `name` goes out \
+           of scope.");
   Harness.test
     "a `while` body cannot mutate the lender while a name the condition binds aliases the lent part"
     (fun () ->
       expect_one_diagnostic Fixtures.Ownership.while_body_mutating_the_lender
-        "ownership.mutated_while_viewed");
+        "ownership.mutated_while_viewed"
+        ~says:
+          "`names` cannot be passed `mut` while it is lent to a lending call until `name` goes out \
+           of scope.");
   Harness.test
     "a name an `if` condition binds may alias the lent part when the `if` is the function's result"
     (fun () -> expect_fine Fixtures.Ownership.if_as_the_result_aliasing_the_lent_part);
@@ -1009,7 +1015,10 @@ let () =
     (fun () ->
       expect_one_diagnostic
         Fixtures.Ownership.arm_mutating_the_lender_while_a_name_aliases_the_lent_part
-        "ownership.mutated_while_viewed");
+        "ownership.mutated_while_viewed"
+        ~says:
+          "`names` cannot be passed `mut` while it is lent to a lending call until `name` goes out \
+           of scope.");
   Harness.test "an arm may mutate the lender when its guard binds only copies" (fun () ->
       expect_fine Fixtures.Ownership.arm_mutating_the_lender_when_its_guard_binds_only_copies);
   Harness.test "the arm after a failed guard may mutate the guard's lender" (fun () ->
@@ -1021,7 +1030,10 @@ let () =
       expect_one_diagnostic
         Fixtures.Ownership
         .arm_mutating_the_lender_while_a_name_its_guard_binds_aliases_the_lent_part
-        "ownership.mutated_while_viewed")
+        "ownership.mutated_while_viewed"
+        ~says:
+          "`names` cannot be passed `mut` while it is lent to a lending call until `name` goes out \
+           of scope.")
 
 let () =
   List.iter
@@ -1174,7 +1186,10 @@ let () =
     (fun () ->
       expect_one_diagnostic
         (tally ^ Fixtures.Ownership.tally_element_assigned_from_another)
-        "ownership.mutated_while_viewed");
+        "ownership.mutated_while_viewed"
+        ~says:
+          "`tally` cannot be passed `mut` while it is lent to a lending call until this statement \
+           ends.");
   Harness.test "two parts of a place are lent read-only in one statement" (fun () ->
       expect_fine (tally ^ Fixtures.Ownership.sum_of_two_tally_indexes));
   Harness.test "a lending call's loan ends with its statement" (fun () ->
