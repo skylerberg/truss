@@ -496,6 +496,8 @@ let make_state (lookups : Lookups.t) ({ site; obligation; _ } : posed) answer =
     match site.code with
     | Overflow | Division | Shift ->
         " It can also be checked first with an `if`, or done with the checked operation."
+    | Out_of_bounds ->
+        " It can also be checked first with an `if`, or, for one element, read with `get`."
     | _ -> ""
   in
   let find_failure explained =
