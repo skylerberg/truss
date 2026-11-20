@@ -1,5 +1,9 @@
-fn large(items: Slice[UInt8]) -> List[UInt8]
+fn kept(item: UInt8, keep: fn(UInt8) -> Bool) -> Bool {
+  keep(item)
+}
+
+fn large(item: UInt8) -> Bool
   uses Panic
 {
-  items.filter(fn(item) { item + 1 > 3 })
+  kept(item, keep: fn(value) { value + 1 > 3 })
 }

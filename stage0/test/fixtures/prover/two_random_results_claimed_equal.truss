@@ -1,0 +1,17 @@
+type Pair(first: UInt64, second: UInt64)
+
+fn twice(make: (fn() -> UInt64 uses generic Granted)) -> Pair
+  uses generic Granted
+  ensures make.ensures(result.first) && make.ensures(result.second)
+{
+  let first = make()
+  let second = make()
+  Pair(first, second)
+}
+
+fn two_rolls() -> Pair
+  uses Random
+  ensures result.first == result.second
+{
+  twice(make: fn() { Random.next() })
+}

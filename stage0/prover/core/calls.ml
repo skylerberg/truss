@@ -981,7 +981,11 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
           | None -> ())
       | Forwarded local ->
           Validity.check_forwarded_callback context frame site invocation passed local values
-      | Other -> ())
+      | Other ->
+          Validity.check_callback_promises context frame ~location invocation passed
+            ~described:"and nothing promises it of the function passed here."
+            ~assume:Validity.assume_nothing values
+      | Lambda -> ())
     values;
   let result_type = Facts.substitute_type context frame site.type_ in
   let is_update_step = calls_update_step context invocation in
@@ -1185,6 +1189,26 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
           | _ -> Facts.arrive context frame "result" result_type
         in
         Validity.assume_valid context frame result_type result;
+        (match through with
+        | Some (Types.Function function_type, callee_term, shape)
+          when List.length function_type.inputs = List.length values -> (
+            let entries = List.map (fun (passed : State.passed) -> passed.term) values in
+            let exits =
+              List.map
+                (fun (passed : State.passed) ->
+                  match (passed.mode, passed.passed_place) with
+                  | Language.Mode.Mut, Some place -> place.read frame
+                  | _ -> passed.term)
+                values
+            in
+            Facts.assume context frame
+              (Lambdas.make_callback_ensures context function_type callee_term ~entries ~exits
+                 ~result);
+            match shape with
+            | Invocation.Forwarded local ->
+                Validity.assume_own_callback_ensures context frame local ~entries ~exits ~result
+            | Named_function _ | Lambda | Other -> ())
+        | _ -> ());
         List.iter
           (fun (passed : State.passed) ->
             match (passed.mode, passed.passed_place) with

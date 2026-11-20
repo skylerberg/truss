@@ -304,7 +304,8 @@ public trait Iterable {
   fn fold[Total](
     self,
     initial: own Total,
-    combine: (fn(own Total, Self.Element) -> Total uses generic Granted),
+    combine: (fn(total: own Total, element: Self.Element) -> Total uses generic Granted
+      requires exists position in 0..self.count() => identical(element, self.element(position))),
   ) -> Total
     uses generic Granted
     cost time O(time(Self.count) + self.count() * (time(Self.element) + time(combine)))
@@ -317,14 +318,20 @@ public trait Iterable {
     total
   }
 
-  fn map[Output](self, transform: (fn(Self.Element) -> Output uses generic Granted)) -> List[Output]
+  fn map[Output](
+    self,
+    transform: (fn(element: Self.Element) -> Output uses generic Granted
+      requires exists position in 0..self.count() => identical(element, self.element(position))),
+  ) -> List[Output]
     uses generic Granted
     ensures result.length() == self.count()
+    ensures forall i in 0..result.length() => transform.ensures(self.element(i), result.model()[i])
     cost time O(time(Self.count) + self.count() * (time(Self.element) + time(transform)))
   {
     var outputs: List[Output] = List.with_capacity(self.count())
     for item in self
       invariant outputs.length() == visited.length()
+      invariant forall i in 0..visited.length() => transform.ensures(visited[i], outputs.model()[i])
     {
       mut outputs.push(transform(item))
     }
@@ -333,13 +340,19 @@ public trait Iterable {
 
   fn filter_map[Output](
     self,
-    transform: (fn(Self.Element) -> Option[Output] uses generic Granted),
+    transform: (fn(element: Self.Element) -> Option[Output] uses generic Granted
+      requires exists position in 0..self.count() => identical(element, self.element(position))),
   ) -> List[Output]
     uses generic Granted
+    ensures forall i in 0..result.length() =>
+      exists position in 0..self.count() => transform.ensures(self.element(position), Some(result.model()[i]))
     cost time O(time(Self.count) + self.count() * (time(Self.element) + time(transform)))
   {
     var outputs: List[Output] = []
-    for item in self {
+    for item in self
+      invariant forall i in 0..outputs.length() =>
+        exists position in 0..visited.length() => transform.ensures(visited[position], Some(outputs.model()[i]))
+    {
       match transform(item) {
         Some(output) => mut outputs.push(own output)
         None => {}
@@ -350,7 +363,8 @@ public trait Iterable {
 
   fn flat_map[Output](
     self,
-    transform: (fn(Self.Element) -> List[Output] uses generic Granted),
+    transform: (fn(element: Self.Element) -> List[Output] uses generic Granted
+      requires exists position in 0..self.count() => identical(element, self.element(position))),
   ) -> List[Output]
     uses generic Granted
     cost time O(time(Self.count) + self.count() * (time(Self.element) + time(transform)) + result.length())
@@ -364,7 +378,11 @@ public trait Iterable {
     results
   }
 
-  fn count_where(self, predicate: (fn(Self.Element) -> Bool uses generic Granted)) -> UInt64
+  fn count_where(
+    self,
+    predicate: (fn(element: Self.Element) -> Bool uses generic Granted
+      requires exists position in 0..self.count() => identical(element, self.element(position))),
+  ) -> UInt64
     uses generic Granted
     cost time O(time(Self.count) + self.count() * (time(Self.element) + time(predicate)))
   {
@@ -377,12 +395,22 @@ public trait Iterable {
     count
   }
 
-  fn find(self, predicate: (fn(Self.Element) -> Bool uses generic Granted)) lends Option[Self.Element]
+  fn find(
+    self,
+    predicate: (fn(element: Self.Element) -> Bool uses generic Granted
+      requires exists position in 0..self.count() => identical(element, self.element(position))),
+  ) lends Option[Self.Element]
     uses generic Granted
+    ensures match result {
+      Some(found) => predicate.ensures(found, true)
+      None => forall i in 0..self.count() => predicate.ensures(self.element(i), false)
+    }
     cost time O(time(Self.count) + self.count() * (time(Self.element) + time(predicate)))
     cost allocations <= allocations(Self.count) + self.count() * (allocations(Self.element) + allocations(predicate))
   {
-    for item in self {
+    for item in self
+      invariant forall i in 0..visited.length() => predicate.ensures(visited[i], false)
+    {
       if predicate(item) {
         return Some(item)
       }

@@ -30,6 +30,7 @@ let make_name cursor (token : Token.t) : Syntax.name =
     match token.kind with
     | Upper text -> (text, Upper)
     | Lower text -> (text, Lower)
+    | Keyword Ensures -> ("ensures", Lower)
     | _ -> Compiler_bug.raise_bug ~stage:"Parser" "a name is made from a token that is not a name"
   in
   { text; case; id = Cursor.allocate_id cursor (Cursor.make_definition_span cursor token.span) }

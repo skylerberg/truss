@@ -58,7 +58,7 @@ module Code : sig
     | Loop_cost_bound
     | Function_type_cost_bound
     | Function_type_names
-    | Misplaced_requires
+    | Misplaced_callback_contract
     | Misplaced_condition
     | Misplaced_function_type
     | Misplaced_associated_type

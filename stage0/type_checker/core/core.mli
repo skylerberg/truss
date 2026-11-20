@@ -113,7 +113,14 @@ and kind =
   | Method_cost of { metric : Language.Metric.t; method_ : operand target }
 
 and capture = { local : local; type_ : Types.ty }
-and specification_function = Log | Power | Callback_cost of Language.Metric.t | Calls
+
+and specification_function =
+  | Log
+  | Power
+  | Callback_cost of Language.Metric.t
+  | Callback_ensures
+  | Calls
+
 and construction = Array | Specification_only
 and conversion = Widen | To_integer | From_integer | View_to_owned
 
@@ -197,7 +204,11 @@ type parameter = {
   callback_contract : callback_contract option;
 }
 
-and callback_contract = { inputs : local list; requires : expression list }
+and callback_contract = {
+  inputs : local list;
+  requires : expression list;
+  ensures : expression list;
+}
 
 type contract = {
   panics_unless : expression list;

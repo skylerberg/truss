@@ -1,0 +1,19 @@
+trait Chooses {
+  fn choose(self, count: UInt64, pick: (fn(limit: UInt64) -> UInt64 ensures result < limit)) -> UInt64
+    requires count > 0
+    ensures result < count
+}
+
+type Picker()
+
+impl Chooses for Picker {
+  fn choose(self, count: UInt64, pick: (fn(limit: UInt64) -> UInt64 ensures result < limit)) -> UInt64 {
+    pick(count)
+  }
+}
+
+fn past_the_end(count: UInt64) -> UInt64
+  requires count > 0
+{
+  Picker().choose(count, pick: fn(limit) { limit })
+}

@@ -6,9 +6,57 @@ let apply_function context (function_type : Types.function_type) callee argument
   Facts.declare context (Logic.Function (symbol, value_sort :: inputs, output));
   Logic.Apply (symbol, callee :: arguments)
 
-let add_lambda_facts (context : State.context) (frame : State.frame) ~capture_free
-    (function_type : Types.function_type) term ~called ~arguments ~start_fresh ~end_fresh
-    ~start_declarations ~premises ~shown ~ended =
+let returns_value (function_type : Types.function_type) =
+  not (Types.equal function_type.output Types.unit)
+
+let make_callback_ensures context (function_type : Types.function_type) callee ~entries ~exits
+    ~result =
+  let sorts =
+    Facts.declare_sort context (Types.Function function_type)
+    :: List.concat_map
+         (fun ((mode : Language.Mode.t), input) ->
+           let sort = Facts.declare_sort context input in
+           match mode with Mut -> [ sort; sort ] | Read | Own -> [ sort ])
+         function_type.inputs
+    @
+    if returns_value function_type then [ Facts.declare_sort context function_type.output ] else []
+  in
+  let arguments =
+    List.concat
+      (List.map2
+         (fun ((mode : Language.Mode.t), _) (entry, exit_) ->
+           match mode with Mut -> [ entry; exit_ ] | Read | Own -> [ entry ])
+         function_type.inputs (List.combine entries exits))
+    @ if returns_value function_type then [ result ] else []
+  in
+  let symbol = Logic.Symbol.Callback_ensures sorts in
+  Facts.declare context (Logic.Function (symbol, sorts, Logic.Bool));
+  Logic.Apply (symbol, callee :: arguments)
+
+let apply_callback_ensures context (function_type : Types.function_type) values =
+  let rec split inputs arguments ~entries ~exits =
+    match (inputs, arguments) with
+    | [], rest -> (List.rev entries, List.rev exits, rest)
+    | (Language.Mode.Mut, _) :: inputs, entry :: exit_ :: rest ->
+        split inputs rest ~entries:(entry :: entries) ~exits:(exit_ :: exits)
+    | ((Language.Mode.Read | Own), _) :: inputs, value :: rest ->
+        split inputs rest ~entries:(value :: entries) ~exits:(value :: exits)
+    | _ :: _, _ ->
+        Facts.raise_bug "`.ensures` with fewer arguments than its function type has inputs"
+  in
+  match values with
+  | callee :: arguments -> (
+      let entries, exits, rest = split function_type.inputs arguments ~entries:[] ~exits:[] in
+      match rest with
+      | [ result ] -> make_callback_ensures context function_type callee ~entries ~exits ~result
+      | [] when not (returns_value function_type) ->
+          make_callback_ensures context function_type callee ~entries ~exits
+            ~result:(Logic.Apply (Logic.Symbol.Unit, []))
+      | _ -> Facts.raise_bug "`.ensures` with arguments that do not match its function type")
+  | [] -> Facts.raise_bug "`.ensures` without the function it describes"
+
+let make_lifting (context : State.context) (frame : State.frame) ~called ~arguments ~start_fresh
+    ~end_fresh ~start_declarations parameters =
   let declared_here =
     List.take (List.length context.declarations - start_declarations) context.declarations
   in
@@ -19,83 +67,192 @@ let add_lambda_facts (context : State.context) (frame : State.frame) ~capture_fr
         | None -> false)
     | _ -> false
   in
-  begin
-    let parameters =
-      List.mapi
-        (fun index (_, input) ->
-          ( Facts.make_variable "lambda.argument" ~numbers:[ index ],
-            Facts.declare_sort context input ))
-        function_type.inputs
-    in
-    let variables = List.map (fun (name, _) -> Logic.Symbol name) parameters in
-    let renamed = Tables.Symbol_table.create 16 in
-    (match called with
-    | Logic.Symbol name -> Tables.Symbol_table.replace renamed name (Logic.Boolean true)
-    | _ -> ());
-    List.iter2
-      (fun argument variable ->
-        match argument with
-        | Logic.Symbol name -> Tables.Symbol_table.replace renamed name variable
-        | _ -> ())
-      arguments variables;
-    let functions = Tables.Symbol_table.create 8 in
-    List.iter
-      (function
-        | Logic.Constant (name, sort) when not (Tables.Symbol_table.mem renamed name) ->
-            let is_fresh_in_body =
-              match Tables.Symbol_table.find_opt context.fresh_order name with
-              | Some order -> order > start_fresh && order <= end_fresh
-              | None -> captures_fresh name
-            in
-            if is_fresh_in_body then begin
-              let lifted = Logic.Symbol.Lifted name in
-              Facts.declare context (Logic.Function (lifted, List.map snd parameters, sort));
-              Tables.Symbol_table.replace renamed name (Logic.Apply (lifted, variables))
-            end
-        | Logic.Function (name, inputs, sort) when frame.binders <> [] -> (
+  let variables = List.map (fun (name, _) -> Logic.Symbol name) parameters in
+  let renamed = Tables.Symbol_table.create 16 in
+  (match called with
+  | Logic.Symbol name -> Tables.Symbol_table.replace renamed name (Logic.Boolean true)
+  | _ -> ());
+  List.iteri
+    (fun index argument ->
+      match argument with
+      | Logic.Symbol name -> Tables.Symbol_table.replace renamed name (List.nth variables index)
+      | _ -> ())
+    arguments;
+  let functions = Tables.Symbol_table.create 8 in
+  List.iter
+    (function
+      | Logic.Constant (name, sort) when not (Tables.Symbol_table.mem renamed name) ->
+          let is_fresh_in_body =
             match Tables.Symbol_table.find_opt context.fresh_order name with
-            | Some order when order > start_fresh && order <= end_fresh ->
-                let lifted = Logic.Symbol.Lifted name in
-                Facts.declare context
-                  (Logic.Function (lifted, inputs @ List.map snd parameters, sort));
-                Tables.Symbol_table.replace functions name lifted
-            | _ -> ())
-        | _ -> ())
-      declared_here;
-    let rec lift = function
-      | Logic.Symbol name as symbol ->
-          Option.value (Tables.Symbol_table.find_opt renamed name) ~default:symbol
-      | (Logic.Integer _ | Logic.Boolean _ | Logic.Bits _) as term -> term
-      | Logic.Apply (name, _)
-        when match called with Logic.Apply (called_name, _) -> called_name = name | _ -> false ->
-          Logic.Boolean true
-      | Logic.Apply (name, arguments) when Tables.Symbol_table.mem functions name ->
-          Logic.Apply (Tables.Symbol_table.find functions name, List.map lift arguments @ variables)
-      | (Logic.Apply _ | Logic.Operation _ | Logic.Is _) as term -> Logic.map_arguments lift term
-      | Logic.Forall (bound, trigger, body) -> Logic.Forall (bound, List.map lift trigger, lift body)
-      | Logic.Exists (bound, body) -> Logic.Exists (bound, lift body)
+            | Some order -> order > start_fresh && order <= end_fresh
+            | None -> captures_fresh name
+          in
+          if is_fresh_in_body then begin
+            let lifted = Logic.Symbol.Lifted name in
+            Facts.declare context (Logic.Function (lifted, List.map snd parameters, sort));
+            Tables.Symbol_table.replace renamed name (Logic.Apply (lifted, variables))
+          end
+      | Logic.Function (name, inputs, sort) when frame.binders <> [] -> (
+          match Tables.Symbol_table.find_opt context.fresh_order name with
+          | Some order when order > start_fresh && order <= end_fresh ->
+              let lifted = Logic.Symbol.Lifted name in
+              Facts.declare context
+                (Logic.Function (lifted, inputs @ List.map snd parameters, sort));
+              Tables.Symbol_table.replace functions name lifted
+          | _ -> ())
+      | _ -> ())
+    declared_here;
+  let rec lift = function
+    | Logic.Symbol name as symbol ->
+        Option.value (Tables.Symbol_table.find_opt renamed name) ~default:symbol
+    | (Logic.Integer _ | Logic.Boolean _ | Logic.Bits _) as term -> term
+    | Logic.Apply (name, _)
+      when match called with Logic.Apply (called_name, _) -> called_name = name | _ -> false ->
+        Logic.Boolean true
+    | Logic.Apply (name, arguments) when Tables.Symbol_table.mem functions name ->
+        Logic.Apply (Tables.Symbol_table.find functions name, List.map lift arguments @ variables)
+    | (Logic.Apply _ | Logic.Operation _ | Logic.Is _) as term -> Logic.map_arguments lift term
+    | Logic.Forall (bound, trigger, body) -> Logic.Forall (bound, List.map lift trigger, lift body)
+    | Logic.Exists (bound, body) -> Logic.Exists (bound, lift body)
+  in
+  lift
+
+let add_quantified_fact (context : State.context) (frame : State.frame) ~capture_free stated =
+  if frame.bound = [] || capture_free then Facts.add_fact context stated
+  else
+    match Facts.close_over_binders frame stated with
+    | Some closed -> Facts.add_fact context closed
+    | None -> ()
+
+let make_input_variables context label (function_type : Types.function_type) =
+  List.mapi
+    (fun index (_, input) ->
+      (Facts.make_variable label ~numbers:[ index ], Facts.declare_sort context input))
+    function_type.inputs
+
+let add_lambda_facts (context : State.context) (frame : State.frame) ~capture_free
+    (function_type : Types.function_type) term ~called ~arguments ~start_fresh ~end_fresh
+    ~start_declarations ~premises ~shown ~ended =
+  let parameters = make_input_variables context "lambda.argument" function_type in
+  let lift =
+    make_lifting context frame ~called ~arguments ~start_fresh ~end_fresh ~start_declarations
+      parameters
+  in
+  let premise = lift (Logic.conjunction premises) in
+  let applied_here =
+    apply_function context function_type term
+      (List.map (fun (name, _) -> Logic.Symbol name) parameters)
+  in
+  let statements =
+    List.map lift shown
+    @ List.filter_map
+        (fun ((exit_ : State.frame), value) ->
+          Option.map
+            (fun value ->
+              Logic.( ==> ) (lift exit_.condition) (Logic.equal applied_here (lift value)))
+            value)
+        ended
+  in
+  List.iter
+    (fun statement ->
+      add_quantified_fact context frame ~capture_free
+        (Logic.forall (parameters, Logic.( ==> ) premise statement)))
+    statements
+
+let add_lambda_relation (context : State.context) (frame : State.frame) ~capture_free
+    (function_type : Types.function_type) term ~called ~arguments ~start_fresh ~end_fresh
+    ~start_declarations ~premises ~shown ~ended ~read_exits =
+  let inputs = make_input_variables context "lambda.argument" function_type in
+  let changed =
+    List.filter_map
+      (fun (index, ((mode : Language.Mode.t), input)) ->
+        match mode with
+        | Mut ->
+            Some
+              ( index,
+                ( Facts.make_variable "lambda.changed" ~numbers:[ index ],
+                  Facts.declare_sort context input ) )
+        | Read | Own -> None)
+      (List.mapi (fun index input -> (index, input)) function_type.inputs)
+  in
+  let returned =
+    if returns_value function_type then
+      [
+        ( Facts.make_variable "lambda.result" ~numbers:[],
+          Facts.declare_sort context function_type.output );
+      ]
+    else []
+  in
+  let parameters = inputs @ List.map snd changed @ returned in
+  let lift =
+    make_lifting context frame ~called ~arguments ~start_fresh ~end_fresh ~start_declarations
+      parameters
+  in
+  let entries = List.map (fun (name, _) -> Logic.Symbol name) inputs in
+  let exits =
+    List.mapi
+      (fun index entry ->
+        match List.assoc_opt index changed with
+        | Some (name, _) -> Logic.Symbol name
+        | None -> entry)
+      entries
+  in
+  let result =
+    match returned with
+    | [ (name, _) ] -> Logic.Symbol name
+    | _ -> Logic.Apply (Logic.Symbol.Unit, [])
+  in
+  let holds = make_callback_ensures context function_type term ~entries ~exits ~result in
+  let premise = lift (Logic.conjunction premises) in
+  let exited =
+    List.map
+      (fun ((exit_ : State.frame), value) ->
+        let finals = read_exits exit_ in
+        let changed_values =
+          List.filter_map
+            (fun (index, (name, _)) ->
+              Option.map
+                (fun final -> Logic.equal (Logic.Symbol name) (lift final))
+                (List.assoc_opt index finals))
+            changed
+        in
+        let result_value =
+          match (returned, value) with
+          | [ (name, _) ], Some value -> [ Logic.equal (Logic.Symbol name) (lift value) ]
+          | _ -> []
+        in
+        Logic.( ==> ) (lift exit_.condition) (Logic.conjunction (changed_values @ result_value)))
+      ended
+  in
+  let statements =
+    List.map lift shown @ exited
+    @ [
+        Logic.disjunction (List.map (fun ((exit_ : State.frame), _) -> lift exit_.condition) ended);
+      ]
+  in
+  List.iter
+    (fun statement ->
+      add_quantified_fact context frame ~capture_free
+        (Logic.forall ~trigger:[ holds ]
+           (parameters, Logic.( ==> ) holds (Logic.( ==> ) premise statement))))
+    statements
+
+let add_logic_relation (context : State.context) (frame : State.frame) ~capture_free
+    (function_type : Types.function_type) term =
+  if returns_value function_type then begin
+    let inputs = make_input_variables context "lambda.argument" function_type in
+    let returned = Facts.make_variable "lambda.result" ~numbers:[] in
+    let entries = List.map (fun (name, _) -> Logic.Symbol name) inputs in
+    let holds =
+      make_callback_ensures context function_type term ~entries ~exits:entries
+        ~result:(Logic.Symbol returned)
     in
-    let premise = lift (Logic.conjunction premises) in
-    let applied_here = apply_function context function_type term variables in
-    let statements =
-      List.map lift shown
-      @ List.filter_map
-          (fun ((exit_ : State.frame), value) ->
-            Option.map
-              (fun value ->
-                Logic.( ==> ) (lift exit_.condition) (Logic.equal applied_here (lift value)))
-              value)
-          ended
-    in
-    List.iter
-      (fun statement ->
-        let stated = Logic.forall (parameters, Logic.( ==> ) premise statement) in
-        if frame.bound = [] || capture_free then Facts.add_fact context stated
-        else
-          match Facts.close_over_binders frame stated with
-          | Some closed -> Facts.add_fact context closed
-          | None -> ())
-      statements
+    add_quantified_fact context frame ~capture_free
+      (Logic.forall ~trigger:[ holds ]
+         ( inputs @ [ (returned, Facts.declare_sort context function_type.output) ],
+           Logic.equal holds
+             (Logic.equal (Logic.Symbol returned)
+                (apply_function context function_type term entries)) ))
   end
 
 let is_in_the_logic (function_type : Types.function_type) =
@@ -326,7 +483,7 @@ let list_facts_since (context : State.context) count =
   take (List.length context.facts - count) context.facts
 
 let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : Invocation.site)
-    (written : State.lambda_code) ~list_facts =
+    (written : State.lambda_code) ~list_facts ~list_promises =
   let location = Facts.locate context frame.source site.origin in
   let ty = Facts.substitute_type context frame site.type_ in
   let function_type =
@@ -390,6 +547,17 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
       @ list_loop_counters inside.locals written.code);
   let inside =
     { inside with spent = List.map (fun counter -> (counter, Costs.zero)) context.counters }
+  in
+  let read_exits (exit_ : State.frame) =
+    List.filter_map
+      (fun (index, (parameter, ((mode : Language.Mode.t), _))) ->
+        match (mode, written.code.locals.(parameter).kind) with
+        | Mut, Source { local; _ } ->
+            Option.map (fun term -> (index, term)) (Locals.find_opt (Core_local local) exit_.locals)
+        | _ -> None)
+      (List.mapi
+         (fun index pair -> (index, pair))
+         (List.combine written.code.parameters function_type.inputs))
   in
   let mark = context.fresh and facts_mark = List.length context.facts in
   let premises =
@@ -458,6 +626,37 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
                 | _ -> ())
               written.code.parameters function_type.inputs)
           !ended;
+        List.iter
+          (fun ((exit_ : State.frame), returned) ->
+            let finals = read_exits exit_ in
+            let exits =
+              List.mapi
+                (fun index argument -> Option.value (List.assoc_opt index finals) ~default:argument)
+                arguments
+            in
+            let result =
+              match returned with
+              | Some result -> Some result
+              | None when not (returns_value function_type) ->
+                  Some (Logic.Apply (Logic.Symbol.Unit, []))
+              | None -> None
+            in
+            Option.iter
+              (fun result ->
+                List.iter
+                  (fun (quoted, promise) ->
+                    Facts.oblige context exit_ Ensures location
+                      [
+                        Text "`";
+                        quoted;
+                        Text
+                          "` may not hold of a result of this lambda, and the type of the \
+                           parameter it is passed for promises it.";
+                      ]
+                      promise)
+                  (list_promises ~entries:arguments ~exits ~result))
+              result)
+          !ended;
         let compute_spent (exit_ : State.frame) counter =
           match List.assoc_opt counter exit_.spent with Some term -> term | None -> Costs.zero
         in
@@ -521,6 +720,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
           operand_counters)
   in
   let end_fresh = context.fresh in
+  let shown = list_facts_since context facts_mark in
   let term =
     match find_lambda_definition context frame function_type written with
     | Some term -> term
@@ -528,11 +728,14 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
         let term = Facts.arrive context frame "lambda" ty in
         if is_in_the_logic function_type then
           add_lambda_facts context frame ~capture_free function_type term ~called ~arguments
-            ~start_fresh ~end_fresh ~start_declarations ~premises
-            ~shown:(list_facts_since context facts_mark)
-            ~ended:!ended;
+            ~start_fresh ~end_fresh ~start_declarations ~premises ~shown ~ended:!ended;
         term
   in
+  if is_in_the_logic function_type then
+    add_logic_relation context frame ~capture_free function_type term
+  else
+    add_lambda_relation context frame ~capture_free function_type term ~called ~arguments
+      ~start_fresh ~end_fresh ~start_declarations ~premises ~shown ~ended:!ended ~read_exits;
   context.lambda_captures <- (term, list_captured_locals written) :: context.lambda_captures;
   context.lambda_costs <-
     List.map (fun (metric, pending_cost) -> ((term, metric), pending_cost)) pending
@@ -540,7 +743,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
   (frame, term)
 
 let translate_lambda context (frame : State.frame) ~(site : Invocation.site)
-    (written : State.lambda_code) ~list_facts =
+    (written : State.lambda_code) ~list_facts ~list_promises =
   let find_captured (local : Core.local) =
     match local with Self -> frame.self | local -> Locals.find_opt (Core_local local) frame.locals
   in
@@ -556,10 +759,10 @@ let translate_lambda context (frame : State.frame) ~(site : Invocation.site)
     let _, term =
       read_lambda ~capture_free:true context
         { frame with binders = []; condition = Logic.Boolean true }
-        ~site written ~list_facts
+        ~site written ~list_facts ~list_promises
     in
     (frame, term)
-  else read_lambda context frame ~site written ~list_facts
+  else read_lambda context frame ~site written ~list_facts ~list_promises
 
 let make_passed_values context frame (invocation : Invocation.t)
     (arguments : State.call_argument list) =
@@ -577,11 +780,13 @@ let make_passed_values context frame (invocation : Invocation.t)
           let _, term =
             translate_lambda context frame ~site written
               ~list_facts:(Validity.list_callback_facts context frame invocation position known)
+              ~list_promises:
+                (Validity.list_callback_promises context frame invocation position known)
           in
           {
             position;
             mode;
-            shape = Other;
+            shape = Lambda;
             origin = Some site.origin;
             passed_place = None;
             type_ = Facts.substitute_type context frame site.type_;

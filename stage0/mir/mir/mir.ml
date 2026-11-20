@@ -101,12 +101,16 @@ let find_contract (definition : Core.definition) =
                (List.mapi
                   (fun position (parameter : Core.parameter) ->
                     match parameter.callback_contract with
-                    | Some { inputs; requires } ->
+                    | Some { inputs; requires; ensures } ->
                         [
                           ( position,
                             {
                               inputs;
                               requires = List.map (Builder.of_specification ~entry_locals) requires;
+                              ensures =
+                                List.map
+                                  (Builder.of_specification ~entry_locals:(entry_locals @ inputs))
+                                  ensures;
                             } );
                         ]
                     | None -> [])

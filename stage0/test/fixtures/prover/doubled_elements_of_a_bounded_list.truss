@@ -1,0 +1,12 @@
+fn doubled(numbers: List[Int64]) -> List[Int64]
+  requires forall i in 0..numbers.length() => -1000 < numbers[i] && numbers[i] < 1000
+  ensures result.length() == numbers.length()
+{
+  numbers.map(fn(number) { number * 2 })
+}
+
+fn kept(numbers: List[Int64]) -> List[Int64]
+  requires forall i in 0..numbers.length() => -1000 < numbers[i] && numbers[i] < 1000
+{
+  numbers.filter(fn(number) { number * 2 > 10 })
+}

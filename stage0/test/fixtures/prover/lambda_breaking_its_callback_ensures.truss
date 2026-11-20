@@ -1,0 +1,15 @@
+fn pick(
+  items: Slice[UInt8],
+  choose: (fn(count: UInt64) -> UInt64 uses generic Granted requires count > 0 ensures result < count),
+) -> UInt8
+  uses generic Granted
+  requires items.length() > 0
+{
+  items[choose(items.length())]
+}
+
+fn last(deck: Slice[UInt8]) -> UInt8
+  requires deck.length() > 0
+{
+  pick(deck, choose: fn(count) { count })
+}

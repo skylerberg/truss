@@ -17,6 +17,7 @@ module Symbol = struct
     | Field of { type_ : Types.ty; variant : string option; field : string }
     | Unit
     | Apply of sort list
+    | Callback_ensures of sort list
     | Equal of Types.ty
     | Valid of Types.ty
     | Rank of Types.ty
@@ -235,6 +236,7 @@ let rec show_symbol : symbol -> string = function
       "field." ^ Types.show type_ ^ "." ^ show_variant variant ^ "." ^ field
   | Unit -> "Unit.unit"
   | Apply sorts -> String.concat "." ("apply" :: List.map show_sort sorts)
+  | Callback_ensures sorts -> String.concat "." ("ensures" :: List.map show_sort sorts)
   | Equal ty -> "equal." ^ Types.show ty
   | Valid ty -> "valid." ^ Types.show ty
   | Rank ty -> "rank." ^ Types.show ty

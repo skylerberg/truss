@@ -9,6 +9,7 @@ let report_unmatched_receiver_mode state env arguments (member : Syntax.name) =
 let rec check_call state env ?expected (value : Syntax.expression) (callee : Syntax.expression)
     (arguments : Syntax.argument list) : Types.ty =
   match callee.kind with
+  | Member (base, { text = "ensures"; _ }) -> check_callback_ensures state env value base arguments
   | Member (base, member) -> (
       match Instantiation.find_static state base with
       | Some (Static_type type_) ->
@@ -114,9 +115,84 @@ and check_specification_function state env (value : Syntax.expression)
       | Log -> Clauses.require_integer state env argument.value ~described:"An argument of `log`"
       | Power ->
           Clauses.require_integer state env argument.value ~described:"An argument of `power`"
-      | Callback_cost _ | Calls -> ignore (Hooks.check_expression state env argument.value))
+      | Callback_cost _ | Calls -> ignore (Hooks.check_expression state env argument.value)
+      | Callback_ensures -> State.raise_bug "`.ensures` checked as an integer function")
     arguments;
   Types.Integer
+
+and check_callback_ensures state env (value : Syntax.expression) (base : Syntax.expression)
+    (arguments : Syntax.argument list) =
+  let span = State.read_span state value.id in
+  let reject code message =
+    Calls.check_arguments_alone state env arguments (State.make_error_type state code span message)
+  in
+  let base_type = Conversions.read_actual_head state base (Hooks.check_expression state env base) in
+  match (base.kind, base_type) with
+  | Name { modules = []; last }, Types.Function function_type
+    when match State.find_local state last with
+         | Some { binding = Parameter; _ } -> true
+         | _ -> false -> (
+      let expected =
+        List.concat_map
+          (fun ((mode : Language.Mode.t), input) ->
+            match mode with Mut -> [ input; input ] | Read | Own -> [ input ])
+          function_type.inputs
+        @ if Types.equal function_type.output Types.unit then [] else [ function_type.output ]
+      in
+      let shape =
+        String.concat ", "
+          (List.concat_map
+             (fun ((mode : Language.Mode.t), _) ->
+               match mode with
+               | Mut -> [ "its value at entry"; "its value at exit" ]
+               | Read | Own -> [ "an input" ])
+             function_type.inputs
+          @ if Types.equal function_type.output Types.unit then [] else [ "the result" ])
+      in
+      match List.find_map (fun (argument : Syntax.argument) -> argument.label) arguments with
+      | _ when not env.specification ->
+          Calls.check_arguments_alone state env arguments
+            (Types.Error
+               (State.report_specification_only state span
+                  (Printf.sprintf
+                     "`%s.ensures` names the postcondition of the function passed for `%s`, so it \
+                      appears only in specifications."
+                     last.text last.text)))
+      | Some label ->
+          Calls.check_arguments_alone state env arguments
+            (State.make_error_type state Unknown_label (State.read_span state label.id)
+               (Printf.sprintf
+                  "`%s.ensures` takes its arguments by position, as a call through `%s` does."
+                  last.text last.text))
+      | None when List.length expected <> List.length arguments ->
+          reject
+            (if List.length arguments < List.length expected then Missing_argument
+             else Too_many_arguments)
+            (Printf.sprintf "`%s.ensures` takes %d %s: %s." last.text (List.length expected)
+               (if List.length expected = 1 then "argument" else "arguments")
+               (if shape = "" then "none" else shape))
+      | None ->
+          List.iter2
+            (fun (argument : Syntax.argument) expected_type ->
+              Hooks.check state env argument.value expected_type)
+            arguments expected;
+          State.elaborate state value.id
+            (Specification_call (Specification_function Callback_ensures));
+          Types.bool)
+  | Name { modules = []; last }, Types.Function _ ->
+      reject Not_callable
+        (Printf.sprintf
+           "`%s` is not a parameter of this definition, and `.ensures` names the postcondition of \
+            the function passed for a function parameter, as in `transform.ensures(value, \
+            output)`."
+           last.text)
+  | _, (Types.Error _ as error) -> Calls.check_arguments_alone state env arguments error
+  | _ ->
+      reject Not_callable
+        (Printf.sprintf
+           "`.ensures` follows a function parameter, as in `transform.ensures(value, output)`, and \
+            this is %s."
+           (State.describe state base_type))
 
 and check_callee_cost state env (value : Syntax.expression) (metric : Language.Metric.t)
     (arguments : Syntax.argument list) =

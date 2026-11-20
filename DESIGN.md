@@ -443,13 +443,13 @@ State that is updated from one call to the next goes in a `for` loop or a
 method such as `fold`, and behavior with state is a record that implements
 a trait.
 
-A lambda's parameters have no annotations, so its body can prove a fact
-about an argument only if the callee states one. The function type of a
-parameter can therefore carry a `requires`, as in
-`make: (fn(index: UInt64) -> Element requires index < count)`, and a lambda
-passed for `make` may rely on `index < count`. A `requires` is allowed only
-on the type of a parameter, so no type that values are stored in or compared
-by carries one.
+A lambda has no annotations, so what it knows of its arguments comes from
+the callee. A parameter's function type states that fact in a `requires`,
+as in `make: (fn(index: UInt64) -> Element requires index < count)`, and a
+lambda passed for `make` may rely on `index < count`. The callee's contract
+names the lambda's results as `make.ensures(index, element)`, which the
+caller reads from the lambda's body
+([Callback contracts](#callback-contracts)).
 
 | Rule | Reason |
 |---|---|
@@ -459,6 +459,7 @@ by carries one.
 | `return` exits the lambda. | Kotlin's non-local `return` from an inline lambda is a known source of confusion. |
 | A lambda has one form, `fn(x) { ... }`, passed inside the call's parentheses. | *One spelling.* A block's value is its last expression, so `x => x * 2` would be a second form, and a trailing lambda a second way to pass an argument. |
 | A lambda names its parameters. | An implicit parameter such as `it` or `$0` is not a descriptive name ([Names](#names)). |
+| A lambda has no `requires` or `ensures` of its own: its body is its contract. | A caller reads `visit.ensures` from the lambda's body, so an `ensures` on the lambda would restate the body. A lambda's own `requires` would bind no one, since the callee that calls it cannot see it. A callback that needs a contract of its own, to be reused or to hide its body, is a named function. |
 
 ### Handles
 
@@ -669,6 +670,18 @@ order they have in a definition, and the parentheses mark where they end.
 | Rule | Reason |
 |---|---|
 | A bound in a function type is an integer literal. | Type checking compares a function value's clauses with its expected type's without the prover, and two literals compare as numbers. A bound that named a value would need a proof at each comparison, and a field's type or a type argument has no value in scope to name. |
+
+### Callback contracts
+
+Rules: [Callback contracts](SPECIFICATION.md#callback-contracts).
+
+| Rule | Reason |
+|---|---|
+| A `requires` or an `ensures` in a function type appears only on the type of a definition's parameter. | Type checking compares function types without the prover, so no type that values are stored in or compared by carries a clause that would need a proof. |
+| A callee names the postcondition of the function passed as `visit.ensures(...)`, a relation. | A callback that reads `Random` returns different results for one argument. Two occurrences of `transform(value)` in a formula are equal, so a contract that called the callback would promise what it does not keep. The relation holds of each call alone, so the prover still models no capability's state between calls ([What proofs do not model](#what-proofs-do-not-model)). |
+| Every term of a callback contract takes its value from the function passed by one rule: a lambda's body, a named function's contract, or the caller's own term. | `time(visit)`, `allocations(visit)`, and `visit.ensures` come from the same three places. One rule covers every term, so a new term needs no rule of its own. |
+| An `impl`'s method states the callback contracts of its trait's method, clause for clause. | A call through the trait proves its callback contracts of the function passed, and the method's body assumes its own. Contracts that differed would let the body assume what no caller proved. |
+| A law over a callback's answers is stated over `visit.ensures`, and a contract that needs it is an implication. | A comparator that logs, or panics only on bad input, but answers consistently keeps the conclusion. No condition on a capability parameter is needed, and a callback that breaks the law loses only the conclusion. |
 
 ## Methods
 
@@ -946,7 +959,7 @@ narrowing limits the reach of one capability.
 
 | Rule | Reason |
 |---|---|
-| A callback uses capabilities only through a capability parameter. | One rule stays true: no `uses` means pure. A callback is pure by default, which is the safe default for a comparator and for code that runs in parallel. |
+| A callback uses capabilities only through a capability parameter. | One rule stays true: no `uses` means pure. A callback is pure by default, which is the safe default for code that runs in parallel. |
 | An intrinsic that reaches the operating system uses `System`, a capability that only the standard library names and that the runtime grants to the real implementations. | No `uses` means pure inside the standard library too. A helper that called `read` without declaring it would be a function in the logic, so the prover could prove that two reads return the same bytes. Nothing implements `System`, so no `provide` grants it to code that does not declare it. |
 | Providing a type provides every capability that the type implements. | A type that narrows both reading and writing cannot leave one of them unnarrowed by mistake. |
 | An `impl` of a capability can declare `uses`, and a `provide` of it requires those capabilities. | Capabilities layer instead of inheriting. `ReadDatabase` is implemented with `NetworkClient`, which is required where the implementation is provided. A dependency that is granted `ReadDatabase` alone never reaches the network. |
@@ -1316,7 +1329,7 @@ only, to state the definition.
 | A clause applies only where every name it mentions is visible. | An `ensures` that reads the fields of an opaque type is a fact inside the type's package and no fact elsewhere, so `opaque` hides the representation from proofs too. |
 | A public `requires` or `cost` names only public definitions, and an `ensures` may name a private function. | The proofs of callers in other packages read a `requires` and a `cost`, and a clause applies only where every name it mentions is visible. The `ensures` lets callers inside the package know a result in terms of private helpers. |
 | A bit-level fact is requested with `assert ... by bit_vector`. | Bit-blasting is slow on most queries, so only the assertion that asks for it is proven that way, as with Verus's `by (bit_vector)`. |
-| A quantifier over a range or a collection is also an expression in code. | The binder carries its range, so the body may rely on it. A lambda passed to a method would know nothing about its argument. The standard library therefore has no `all` or `any` methods, and a test of every element has *one spelling*. |
+| A quantifier over a range or a collection is also an expression in code. | The binder carries its range, so the body may rely on it. The standard library therefore has no `all` or `any` methods, and a test of every element has *one spelling*. |
 
 ### Writing specifications
 
@@ -1490,6 +1503,7 @@ which a `cost` clause can promise. This is why a key is `Ordered` as well as
 | A method that every integer type has, or both float types have, is declared once, in a sealed trait. | Generic code over the trait can call the method, and the method's contract in the trait holds for every type. A method declared on each type is a separate function per type, which generic code cannot call. |
 | `FloatingPoint` is sealed: only `Float32` and `Float64` implement it. | The trait describes their IEEE 754 formats, which its `Bits` and methods such as `is_nan` expose. In generic code over the trait, `is_nan` and the `ieee_` comparisons then mean what IEEE 754 defines, for every instantiation. |
 | A capability declares only primitive operations. | A narrowing implementation or a fake has few methods to write. |
+| A callback that receives an element of the receiver states so in its function type's `requires`. | A lambda knows a fact about its argument only where the callee states it, so a caller's fact about every element reaches the lambda only through that `requires`. |
 | Every failure of the operating system is a `SystemError`. | Code that reads a file and sends it over a connection handles one error type. |
 | Text in an embedded language is a tagged template, and a `processes::Command` is a program and a list of arguments. | Neither is a string that is passed to an interpreter, so neither allows an injection. |
 

@@ -444,10 +444,10 @@ let note_mode_keyword state (written : Syntax.expression) (mode : Syntax.mode)
     }
     :: state.mode_keywords
 
-let find_local_type state (name : Syntax.name) =
+let find_local state (name : Syntax.name) =
   match find_target state name with
-  | Some (Local id) ->
-      Option.map
-        (fun (local : local) -> resolve state local.type_)
-        (Hashtbl.find_opt state.locals id)
+  | Some (Local id) -> Hashtbl.find_opt state.locals id
   | _ -> None
+
+let find_local_type state (name : Syntax.name) =
+  Option.map (fun (local : local) -> resolve state local.type_) (find_local state name)

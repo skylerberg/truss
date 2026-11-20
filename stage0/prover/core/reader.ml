@@ -9,6 +9,7 @@ type loop_exits = {
 type run = {
   infos : Mir.local_info array;
   changed_in_place : (Mir.local, unit) Hashtbl.t;
+  held_callbacks : (Mir.local, Core.local) Hashtbl.t;
   lambdas : Mir.body array;
   mutable loops : loop_exits list;
   mutable cancelled : (Mir.task * State.frame list ref) list;
@@ -123,10 +124,13 @@ let read_root context frame run (root : Mir.root) =
           | Some self -> self
           | None -> Facts.raise_bug "`%s` reads `self` outside a method" frame.source.name)
       | key -> (
-          (match key with
-          | Core_local core when frame.makes_obligations && not context.reading_callback ->
-              Validity.check_escaping_callback context frame core
-          | Core_local _ | Mir_local _ -> ());
+          (if frame.makes_obligations && not context.reading_callback then
+             match key with
+             | Core_local core -> Validity.check_escaping_callback context frame core
+             | Mir_local _ -> (
+                 match Hashtbl.find_opt run.held_callbacks local with
+                 | Some core -> Validity.check_escaping_callback context frame core
+                 | None -> ()));
           match Locals.find_opt key frame.locals with
           | Some term -> term
           | None ->
@@ -438,13 +442,30 @@ let make_passed_place context run place =
         | Constant _ | Literal _ -> ());
   }
 
+let find_held_callback context run held (value : Mir.rvalue) =
+  let read_whole (operand : Mir.operand) =
+    match operand with
+    | Use { place = { root = Local local; projections = [] }; _ }
+    | Borrow { place = { root = Local local; projections = [] }; _ } -> (
+        match run.infos.(local).kind with
+        | Source { local = core; _ } when Option.is_some (Validity.find_own_callback context core)
+          ->
+            Some core
+        | Source _ | Temporary | Lent _ -> Hashtbl.find_opt run.held_callbacks local)
+    | Use _ | Borrow _ | Take _ | Immediate _ -> None
+  in
+  match (run.infos.(held).kind, value) with
+  | (Temporary | Lent _), (Operand operand | Convert { conversion = Widen; value = operand; _ }) ->
+      read_whole operand
+  | _ -> None
+
 let classify_shape run ?function_ (value : Mir.operand) : Invocation.shape =
   match (function_, find_whole_local value) with
   | Some (Mir.Function_reference { path; origin }), _ -> Named_function { origin; path }
   | (Some (Lambda_expression _) | None), Some local -> (
-      match run.infos.(local).kind with
-      | Source { local = core; _ } -> Forwarded core
-      | Temporary | Lent _ -> Other)
+      match (run.infos.(local).kind, Hashtbl.find_opt run.held_callbacks local) with
+      | Source { local = core; _ }, _ | (Temporary | Lent _), Some core -> Forwarded core
+      | (Temporary | Lent _), None -> Other)
   | (Some (Lambda_expression _) | None), None -> Other
 
 let find_argument_place context run (mode : Language.Mode.t) (value : Mir.operand) =
@@ -769,6 +790,7 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
       Lambdas.translate_lambda context frame ~site
         { code = run.lambdas.(body); lambdas = run.lambdas }
         ~list_facts:(fun _ -> [])
+        ~list_promises:(fun ~entries:_ ~exits:_ ~result:_ -> [])
   | Specification Result -> (
       match frame.result with
       | Some result -> (frame, result)
@@ -1357,13 +1379,21 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
       Some
         (write_place context frame run target
            (Facts.arrive context frame "lambda" (compute_place_type context frame run target)))
-  | Assign { target; value } ->
-      write_assignment context run target
-        ~copied:(match value with Operand copied -> [ copied ] | _ -> [])
-        (Some
-           (read_rvalue context frame run value
-              ~site:
-                { origin = statement.origin; type_ = compute_target_type context frame run target }))
+  | Assign { target; value } -> (
+      let read () =
+        read_rvalue context frame run value
+          ~site:{ origin = statement.origin; type_ = compute_target_type context frame run target }
+      in
+      let copied = match value with Operand copied -> [ copied ] | _ -> [] in
+      match target with
+      | { root = Local held; projections = [] } -> (
+          match find_held_callback context run held value with
+          | Some core ->
+              Hashtbl.replace run.held_callbacks held core;
+              write_assignment context run target ~copied
+                (Some (Validity.run_reading_callback context read))
+          | None -> write_assignment context run target ~copied (Some (read ())))
+      | _ -> write_assignment context run target ~copied (Some (read ())))
   | Call { destination; call } -> (
       let result_type =
         match destination with
@@ -1507,7 +1537,14 @@ and write_assignment context run (target : Mir.place) ~(copied : Mir.operand lis
   Some (write_place context frame run target term)
 
 let make_run ~locals ~lambdas =
-  { infos = locals; changed_in_place = Hashtbl.create 4; lambdas; loops = []; cancelled = [] }
+  {
+    infos = locals;
+    changed_in_place = Hashtbl.create 4;
+    held_callbacks = Hashtbl.create 4;
+    lambdas;
+    loops = [];
+    cancelled = [];
+  }
 
 let read_formula context (frame : State.frame) (formula : Mir.formula) ~arguments =
   let run = make_run ~locals:formula.locals ~lambdas:formula.lambdas in

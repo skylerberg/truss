@@ -118,7 +118,10 @@ says, and is an ordinary name elsewhere:
 | `generic` | In a `uses` list, before the name of a capability parameter |
 
 A parameter cannot be named `result`, a parameter of a lending method cannot
-be named `final`, and no function can be named `old` or `identical`. In
+be named `final`, and no function can be named `old` or `identical`. The
+reserved word `ensures` also follows a `.`, where `visit.ensures(...)` names
+the postcondition of a function passed (see
+[Callback contracts](#callback-contracts)). In
 `fn wait(time: Duration) cost time O(time.seconds())`, the second `time` is
 the resource and the third the parameter.
 
@@ -1119,19 +1122,7 @@ is one number for the function: it cannot depend on the arguments of a call.
   `time(Element.compare)`. If a name has several overloads, the term means
   the read-only one.
 - At a call, the cost of a callback has the value that the function passed
-  gives it:
-
-  | The function passed | The value of the term |
-  |---|---|
-  | A lambda | A bound on its body for every argument |
-  | A named function | For `time`, a constant where its clause is `O(n)` for a literal `n`. For `allocations` and `allocated_bytes`, `n` where its clause is `<= n` or `== n` for a literal `n`. |
-  | A parameter of the caller | The caller's own term for that parameter |
-
-  A function that states no bound on the resource has no value for the
-  term, and neither has one whose bound is `amortized`, which bounds a call
-  together with the potential it changes. A bound that names the term is
-  then unbounded, so the caller proves no bound on that resource through the
-  call.
+  gives it (see [Callback contracts](#callback-contracts)).
 - At a call, the cost of a bound's method has the value the type argument
   gives it: `time(Element.equal)` is a constant for `Int64`, whose
   `impl Equal` promises `cost time O(1)`, and `allocations(Element.equal)`
@@ -1149,20 +1140,6 @@ is one number for the function: it cannot depend on the arguments of a call.
 fn Slice[Element: Equal].contains(self, item: Element) -> Bool
   cost time O(self.length() * time(Element.equal))
   cost allocations <= self.length() * allocations(Element.equal)
-
-fn Option[Value].map[Output](
-  own self,
-  transform: (fn(own Value) -> Output uses generic Granted),
-) -> Option[Output]
-  uses generic Granted
-  cost time O(time(transform))
-  cost allocations <= allocations(transform)
-
-fn halved(value: Option[Int64]) -> Option[Int64]
-  cost allocations <= 0
-{
-  value.map(fn(inner) { inner / 2 })
-}
 ```
 
 #### Amortized costs
@@ -1191,7 +1168,8 @@ fn List[Element].push(mut self, item: own Element)
 
 ```ebnf
 function_type        = "fn" "(" list([ LOWER_NAME ":" ] [ mode ] type) ")" [ "->" type ] ;
-function_type_clause = "uses" capability_list | "cost" cost | "requires" expression ;
+function_type_clause = "uses" capability_list | "cost" cost
+                     | "requires" expression | "ensures" expression ;
 ```
 
 ```truss
@@ -1210,24 +1188,8 @@ fn serve(handle: (fn(Request) -> Response uses Database, Log))
   names,** so one without `RunForever` takes only functions that terminate
   (see [Termination](#termination)).
 - Clauses after a definition's result type belong to the definition.
-- A function type names its inputs exactly when it has a `requires`. Only
-  the type of a definition's parameter may have one, at the top level of
-  that type. The `requires` can mention the inputs and the parameters before
-  that parameter. The definition proves the `requires` at every call through
-  the parameter. A lambda passed for the parameter may rely on the
-  `requires`, and a named function passed for the parameter accepts every
-  argument that the `requires` allows:
-
-  ```truss
-  fn List[Element].generate(
-    count: UInt64,
-    make: (fn(index: UInt64) -> Element requires index < count),
-  ) -> List[Element]
-    ensures result.length() == count
-
-  let reversed = List.generate(values.length(), make: fn(index) { values[values.length() - 1 - index] })
-  ```
-
+- A function type's `requires` and `ensures` are a callback's contract (see
+  [Callback contracts](#callback-contracts)).
 - A function-typed parameter can be called but not stored. One declared
   `own` can be stored, and accepts only functions that capture no local
   variables.
@@ -1283,6 +1245,117 @@ A capability parameter passes on the capabilities a callback uses,
   forever, so the bound holds for every `Granted`. A bound that does not name
   `time(visit)` is proven only where the type of `visit` bounds its time.
 - A type that holds a function writes the capabilities in the field's type.
+
+### Callback contracts
+
+```truss
+type Card(rank: UInt8, suit: UInt8)
+
+fn pick[Item: Copyable](
+  items: Slice[Item],
+  choose: (fn(count: UInt64) -> UInt64 uses generic Granted requires count > 0 ensures result < count),
+) -> Item
+  uses generic Granted
+  requires items.length() > 0
+{
+  items[choose(items.length())].copy()
+}
+
+fn deal(deck: Slice[Card]) -> Card
+  uses Random
+  requires deck.length() > 0
+{
+  pick(deck, choose: fn(count) { Random.next() % count })
+}
+
+fn Option[Value].map[Output](
+  own self,
+  transform: (fn(own Value) -> Output uses generic Granted),
+) -> Option[Output]
+  uses generic Granted
+  ensures match self {
+    Some(value) => result is Some(output) && transform.ensures(value, output)
+    None => result is None
+  }
+  cost time O(time(transform))
+  cost allocations <= allocations(transform)
+
+fn halved(value: Option[Int64]) -> Option[Int64]
+  ensures match value {
+    Some(inner) => result is Some(half) && half == inner / 2
+    None => result is None
+  }
+  cost allocations <= 0
+{
+  value.map(fn(inner) { inner / 2 })
+}
+```
+
+A *callback contract* is what a function knows of the function passed for
+one of its parameters: the `requires` and `ensures` of the parameter's
+type, and the terms `time(visit)`, `allocations(visit)`,
+`allocated_bytes(visit)`, and `visit.ensures(...)`.
+
+- **A `requires` or an `ensures` in a function type appears only on the type
+  of a definition's parameter,** at the top level of that type, and the type
+  then names its inputs. Each can mention the inputs and the parameters
+  before that parameter. In the `ensures`, `result` is the callback's result,
+  and `old(input)` is a `mut` input's value when the callback was called.
+- **The definition proves the `requires` at every call through the
+  parameter, and each such call meets the `ensures`.**
+- **At a call of the definition, the function passed is proven against both
+  clauses.** A lambda's body may rely on the `requires`, and proves the
+  `ensures`, as `deal`'s lambda relies on `count > 0` and proves
+  `result < count`. A named function accepts every argument that the
+  `requires` allows, and its own `ensures` implies the type's there. A
+  parameter of the caller is accepted where its type's clauses imply the
+  callee's. Any other function value promises nothing of its results.
+- **An `impl`'s method states the callback contracts of its trait's method,**
+  clause for clause, since a call through the trait proves and assumes those.
+- **`visit.ensures(...)` holds where the function passed for `visit` may
+  return the given result for the given arguments.** Its operand is a
+  function parameter of the enclosing definition. Its arguments are the
+  callback's inputs in order, a `mut` input giving its value at entry and
+  then at exit, followed by the callback's result if it has one, as in
+  `transform.ensures(value, output)`. It appears only in specifications.
+- **`visit.ensures` is a relation, not a call.** A callback may return
+  different results for one argument, as one that reads `Random` does. Each
+  call through the parameter makes `visit.ensures` hold of that call's
+  arguments and result, and the definition knows nothing else of it. A
+  function that uses no capability and has no `mut` input returns one
+  result, so for it `visit.ensures(value, output)` holds exactly where
+  `output` is that result.
+- **At a call, each term of a callback contract takes its value from the
+  function passed:**
+
+  | The function passed | `time(visit)`, `allocations(visit)`, `allocated_bytes(visit)` | `visit.ensures(...)` |
+  |---|---|---|
+  | A lambda | A bound on its body for every argument | Where its body may return that result for those arguments |
+  | A named function | For `time`, a constant where its clause is `O(n)` for a literal `n`. For `allocations` and `allocated_bytes`, `n` where its clause is `<= n` or `== n` for a literal `n`. | Where its `ensures` holds |
+  | A parameter of the caller | The caller's own term | The caller's own `visit.ensures` |
+
+  A function that states no bound on a resource has no value for that term,
+  and neither has one whose bound is `amortized`, which bounds a call
+  together with the potential it changes. A bound that names the term is
+  then unbounded, so the caller proves no bound on that resource through the
+  call.
+- **A law over a callback's answers is stated over `visit.ensures`.** A
+  contract that needs the law makes it the premise of an implication, so the
+  conclusion holds for every callback that keeps the law, and a callback
+  that breaks it loses only the conclusion:
+
+  ```truss
+  fn Slice[Element].max_by(
+    self,
+    compare: (fn(Element, Element) -> Ordering uses generic Granted),
+  ) lends Option[Element]
+    uses generic Granted
+    ensures (result is Some(_)) == (self.length() > 0)
+    ensures self.model().is_totally_ordered_by(compare) ==> match result {
+      Some(largest) => forall i in 0..self.length() => !compare.ensures(self[i], largest, Ordering.Greater)
+      None => true
+    }
+  ```
 
 ## Methods
 
@@ -2760,6 +2833,7 @@ an invariant, a law, or a proof.
 | `exists item in items => item == target` | True for at least one value |
 | `a ==> b` | When `a` holds, so does `b` |
 | `old(self.items)` | A value as it was when the function was called |
+| `transform.ensures(value, output)` | The function passed for `transform` may return `output` for `value` |
 
 - A quantifier over a range or a collection is also an expression in code,
   which runs as a loop that stops when the answer is known. Its body may rely

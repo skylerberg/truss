@@ -55,6 +55,66 @@ val list_callback_facts :
 
 val find_parameter_type : State.context -> State.frame -> Invocation.t -> int -> Types.ty option
 
+val make_callback_ensures_frame :
+  State.frame ->
+  Core.local list ->
+  entries:Logic.term list ->
+  exits:Logic.term list ->
+  result:Logic.term ->
+  State.frame
+
+val list_callback_promises :
+  State.context ->
+  State.frame ->
+  Invocation.t ->
+  int ->
+  (int * Logic.term) list ->
+  entries:Logic.term list ->
+  exits:Logic.term list ->
+  result:Logic.term ->
+  (Obligation.piece * Logic.term) list
+
+val assume_own_callback_ensures :
+  State.context ->
+  State.frame ->
+  Core.local ->
+  entries:Logic.term list ->
+  exits:Logic.term list ->
+  result:Logic.term ->
+  unit
+
+val declare_callback_results :
+  State.context ->
+  State.frame ->
+  Types.function_type ->
+  Logic.term list ->
+  Logic.term list * Logic.term
+
+val check_callback_promises :
+  State.context ->
+  State.frame ->
+  location:Obligation.location ->
+  Invocation.t ->
+  State.passed ->
+  described:string ->
+  assume:
+    (State.frame ->
+    Types.function_type ->
+    entries:Logic.term list ->
+    exits:Logic.term list ->
+    result:Logic.term ->
+    unit) ->
+  State.passed list ->
+  unit
+
+val assume_nothing :
+  State.frame ->
+  Types.function_type ->
+  entries:Logic.term list ->
+  exits:Logic.term list ->
+  result:Logic.term ->
+  unit
+
 val check_forwarded_callback :
   State.context ->
   State.frame ->
