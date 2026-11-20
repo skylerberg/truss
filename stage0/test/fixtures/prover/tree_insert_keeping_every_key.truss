@@ -1,0 +1,29 @@
+type Tree =
+  | Leaf
+  | indirect Node(left: Tree, key: Int64, right: Tree)
+
+fn holds(tree: Tree, key: Int64) -> Bool
+  ensures result == match tree {
+    Leaf => false
+    Node(left, key: node_key, right) => node_key == key || holds(left, key: key) || holds(right, key: key)
+  }
+{
+  match tree {
+    Leaf => false
+    Node(left, key: node_key, right) => node_key == key || holds(left, key: key) || holds(right, key: key)
+  }
+}
+
+fn inserted(tree: Tree, key: Int64) -> Tree
+  ensures holds(result, key: key)
+  ensures forall other: Int64 => holds(tree, key: other) ==> holds(result, key: other)
+{
+  match tree {
+    Leaf => Tree.Node(left: Tree.Leaf, key: key, right: Tree.Leaf)
+    Node(left, key: node_key, right) => if key < node_key {
+      Tree.Node(left: inserted(left, key: key), key: node_key, right: right.copy())
+    } else {
+      Tree.Node(left: left.copy(), key: node_key, right: inserted(right, key: key))
+    }
+  }
+}

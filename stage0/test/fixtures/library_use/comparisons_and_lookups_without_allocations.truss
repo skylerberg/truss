@@ -46,7 +46,8 @@ fn has_sorted_key(ports: collections::SortedMap[String, Int64], name: String) ->
 }
 
 fn has_member[Element: Hash + Ordered](members: Set[Element], member: Element) -> Bool
-  cost allocations <= members.length() * allocations(Element.equal)
+  cost allocations <= allocations(Element.hash) + 16 * allocations(Element.equal)
+    + (2 * log(members.length()) + 2) * allocations(Element.compare)
 {
   members.contains(member)
 }

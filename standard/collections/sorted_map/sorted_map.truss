@@ -541,11 +541,10 @@ public fn collections::SortedMap[Key: Ordered, Value].in_range(self, range: Rang
 
 public fn collections::SortedMap[Key: Ordered, Value].retain(
   mut self,
-  keep: fn(map::Entry[Key, Value]) -> Bool,
+  keep: fn(Key, Value) -> Bool,
 )
   ensures self.length() <= old(self.length())
-  ensures forall key: Key =>
-    self.model().contains_key(key) ==> keep(map::Entry(key: key, value: self.model().get(key)))
+  ensures forall key: Key => self.model().contains_key(key) ==> keep(key, self.model().get(key))
   cost time O(old(self.length()) * time(keep))
 {
   var entries = map::exchange(mut self.entries, value: [])
@@ -560,9 +559,9 @@ public fn collections::SortedMap[Key: Ordered, Value].retain(
       entries.model()[i].key < entries.model()[j].key
     invariant forall i in index..count => forall j in index..count =>
       i < j ==> entries.model()[i].key < entries.model()[j].key
-    invariant forall i in 0..retained => keep(entries.model()[i])
+    invariant forall i in 0..retained => keep(entries.model()[i].key, entries.model()[i].value)
   {
-    if keep(entries[index]) {
+    if keep(entries[index].key, entries[index].value) {
       mut entries.swap(retained, second: index)
       retained += 1
     }
@@ -694,18 +693,18 @@ public fn collections::SortedMap[Key: Ordered, Value].reversed(self) -> list::Re
   self.entries.slice().reversed()
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].keys(self) -> map::Keys[Key, Value]
+public fn collections::SortedMap[Key: Ordered, Value].keys(self) -> collections::SortedMapKeys[Key, Value]
   ensures result.count() == self.length()
   cost time O(1)
 {
-  map::Keys(entries: self.entries.slice())
+  collections::SortedMapKeys(entries: self.entries.slice())
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].values(self) -> map::Values[Key, Value]
+public fn collections::SortedMap[Key: Ordered, Value].values(self) -> collections::SortedMapValues[Key, Value]
   ensures result.count() == self.length()
   cost time O(1)
 {
-  map::Values(entries: self.entries.slice())
+  collections::SortedMapValues(entries: self.entries.slice())
 }
 
 public fn collections::SortedMap[Key: Ordered, Value].value_at(mut self, position: UInt64) lends mut Value
@@ -732,6 +731,44 @@ public fn collections::SortedMap[Key: Ordered, Value].update_values(
     invariant self.length() == old(self.length())
   {
     change(mut self.value_at(position))
+  }
+}
+
+impl Iterable for collections::SortedMapKeys[Key, Value] {
+  type Element = Key
+
+  fn count(self) -> UInt64
+    ensures result == self.entries.length()
+    cost time O(1)
+  {
+    self.entries.length()
+  }
+
+  fn element(self, position: UInt64) lends Key
+    requires position < self.count()
+    ensures identical(result, self.entries.model()[position].key)
+    cost time O(1)
+  {
+    self.entries[position].key
+  }
+}
+
+impl Iterable for collections::SortedMapValues[Key, Value] {
+  type Element = Value
+
+  fn count(self) -> UInt64
+    ensures result == self.entries.length()
+    cost time O(1)
+  {
+    self.entries.length()
+  }
+
+  fn element(self, position: UInt64) lends Value
+    requires position < self.count()
+    ensures identical(result, self.entries.model()[position].value)
+    cost time O(1)
+  {
+    self.entries[position].value
   }
 }
 

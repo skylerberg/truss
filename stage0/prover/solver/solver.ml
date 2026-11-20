@@ -47,8 +47,9 @@ let header =
 
 let compute_key text =
   Logic.hash
-    (Printf.sprintf "z3 %s\nentry format %d\ncardinality bounds %s\n%s%s" version
-       entry_format_version
+    (Printf.sprintf
+       "z3 %s\nentry format %d\ncardinality bounds %s\nretried without quantified facts\n%s%s"
+       version entry_format_version
        (String.concat ", " (List.map string_of_int cardinality_bounds))
        header text)
 
@@ -283,8 +284,20 @@ let run_check solver request ?cardinality_bound text =
 let run_bounded_check solver request query cardinality_bound =
   run_check solver request ~cardinality_bound (Logic.show_query ~cardinality_bound query)
 
+let is_proven_from_ground_facts solver request (query : Logic.query) =
+  List.exists Logic.has_quantifier query.facts
+  &&
+  match
+    run_check solver
+      { request with requested = []; value_arguments = [] }
+      (Logic.show_query (Logic.remove_quantified_facts query))
+  with
+  | Unsatisfiable, _ -> true
+  | (Satisfiable _ | Undecided _), _ -> false
+
 let search_model solver request query text =
   match run_check solver request text with
+  | Undecided _, _ when is_proven_from_ground_facts solver request query -> (Unsatisfiable, [])
   | (Undecided _, _) as undecided when Logic.has_uninterpreted_sort query ->
       let rec search_from = function
         | [] -> undecided

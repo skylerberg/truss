@@ -1480,15 +1480,22 @@ different versions build together, as Rust's editions allow.
 
 ### Maps and sets
 
-`Map` and `Set` iterate in insertion order. The order never varies from run
-to run, so tests stay deterministic and their results can be cached.
+`Map` and `Set` iterate in insertion order until an entry is removed: a
+removal moves the last entry into the removed entry's place, so it costs O(1)
+instead of the O(n) of shifting every later entry. The order never varies from
+run to run, so tests stay deterministic and their results can be cached.
 
 **A `Map` resists hash flooding deterministically.** The usual defense is a
 random hash key for each process. That would change timing and allocation
 counts from run to run, and make a test near its time limit flaky. Instead, a
-bucket that fills up becomes a balanced tree, so the worst case is O(log n),
-which a `cost` clause can promise. This is why a key is `Ordered` as well as
-`Hash`.
+key whose 16 probed slots are all full goes into one balanced tree for the
+whole map, ordered by key, so the worst case is O(log n), which a `cost`
+clause can promise. This is why a key is `Ordered` as well as `Hash`.
+
+| Rule | Reason |
+|---|---|
+| A `Map` keeps its keys and its values in two lists. | A value lent `mut`, as by `get_or_insert`, leaves the list of keys unchanged, so the invariant of the index over the keys holds with no new proof. A lookup's comparisons read only the keys. |
+| `retain` on `Map` and on `SortedMap` takes the key and the value as two parameters. | A `Map` holds no `Entry` to lend, and building one would move or copy both. One shape of callback serves both maps. |
 
 ### Conventions
 

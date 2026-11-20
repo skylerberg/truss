@@ -400,6 +400,14 @@ let rec has_quantifier = function
   | Apply (_, arguments) | Operation (_, arguments) -> List.exists has_quantifier arguments
   | Is (_, argument) -> has_quantifier argument
 
+let remove_quantified_facts query =
+  let rec list_ground_parts = function
+    | Operation (And, parts) -> List.concat_map list_ground_parts parts
+    | fact when has_quantifier fact -> []
+    | fact -> [ fact ]
+  in
+  { query with facts = List.concat_map list_ground_parts query.facts }
+
 let rec replace ~from ~into term =
   if term = from then into
   else

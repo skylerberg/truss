@@ -262,6 +262,7 @@ public fn List[Element].element(mut self, position: UInt64) lends mut Element
   ensures identical(result, old(self.model())[position])
   ensures identical(self.model(), old(self.model()).update(position, value: final(result)))
   ensures self.length() == old(self.length())
+  ensures self.capacity() == old(self.capacity())
   cost time O(1)
   cost amortized time O(1)
   cost allocations == 0
@@ -497,6 +498,7 @@ impl IndexMut for List[Element] {
     requires key < self.length()
     ensures identical(result, old(self.model())[key])
     ensures identical(self.model(), old(self.model()).update(key, value: final(result)))
+    ensures self.capacity() == old(self.capacity())
     cost time O(1)
     cost amortized time O(1)
     cost allocations == 0
@@ -655,6 +657,10 @@ public fn List[Element].swap_remove(mut self, index: UInt64) -> Element
   uses Panic unless index < self.length()
   ensures self.length() == old(self.length()) - 1
   ensures identical(result, old(self.model())[index])
+  ensures forall i in 0..self.length() => identical(
+    self.model()[i],
+    if i == index { old(self.model())[old(self.length()) - 1] } else { old(self.model())[i] },
+  )
   cost time O(1)
   cost allocations == 0
 {

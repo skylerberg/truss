@@ -15,6 +15,10 @@ public opaque type SortedMap[Key: Ordered, Value](entries: List[map::Entry[Key, 
     i < j ==> entries.model()[i].key < entries.model()[j].key
   derives Copyable
 
+public type SortedMapKeys[Key, Value](entries: Slice[map::Entry[Key, Value]])
+
+public type SortedMapValues[Key, Value](entries: Slice[map::Entry[Key, Value]])
+
 public opaque type SortedSet[Element: Ordered](elements: List[Element])
   invariant forall i in 0..elements.length() => forall j in 0..elements.length() =>
     i < j ==> elements.model()[i] < elements.model()[j]

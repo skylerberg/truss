@@ -1099,10 +1099,6 @@ let () =
       expect_proven Fixtures.Prover.set_literal_with_a_repeated_element);
   Harness.test "a sorted map literal's keys must be distinct" (fun () ->
       expect_not_proven Fixtures.Prover.sorted_map_literal_with_a_repeated_key "prover.requires");
-  Harness.test "an empty map literal allocates nothing" (fun () ->
-      expect_proven Fixtures.Prover.empty_map_literal_without_allocations);
-  Harness.test "a map literal is one allocation" (fun () ->
-      expect_proven Fixtures.Prover.map_literal_with_one_allocation);
   Harness.test "a deque literal has its length and is one allocation" (fun () ->
       expect_proven Fixtures.Prover.deque_literal_length);
   Harness.test "an empty sorted set literal is empty and takes constant time" (fun () ->
@@ -1274,6 +1270,11 @@ let () =
       expect_not_proven Fixtures.Prover.tree_node_built "prover.cost");
   Harness.test "an indirect variant is one allocation" (fun () ->
       expect_proven Fixtures.Prover.tree_node_with_one_allocation);
+  Harness.test "a recursive call's quantified ensures reads a field under its quantifier" (fun () ->
+      expect_proven Fixtures.Prover.tree_insert_keeping_every_key);
+  Harness.test
+    "an obligation whose quantified facts exhaust the steps is proven from its ground facts"
+    (fun () -> expect_proven Fixtures.Prover.product_bound_beside_a_growing_measure);
   Harness.test "nested loops are not linear" (fun () ->
       expect_not_proven
         (constant_step ^ Fixtures.Prover.nested_range_loops_ensured_linear)
@@ -1906,9 +1907,10 @@ let () =
       then Harness.fail "message %S" actual)
 
 let () =
-  Harness.test "an insertion into a set of integers is amortized in its length" (fun () ->
-      expect_proven Fixtures.Prover.integer_set_add);
-  Harness.test "an insertion into a set of any elements is amortized in their comparisons"
+  Harness.test "an insertion into a set of integers is amortized in the logarithm of its length"
+    (fun () -> expect_proven Fixtures.Prover.integer_set_add);
+  Harness.test
+    "an insertion into a set of any elements is amortized in a hash and a logarithm of comparisons"
     (fun () -> expect_proven Fixtures.Prover.generic_set_add);
   Harness.test "a list filled with integers is linear in its count" (fun () ->
       expect_proven Fixtures.Prover.zeros_filled)

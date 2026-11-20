@@ -1,0 +1,987 @@
+use standard::core
+
+type Tree =
+  | Leaf
+  | indirect Node(left: Tree, position: UInt64, right: Tree, height: UInt64)
+
+fn Tree.holds(self, position: UInt64) -> Bool
+  ensures result == match self {
+    Leaf => false
+    Node(left, position: node, right, height: _) =>
+      node == position || left.holds(position) || right.holds(position)
+  }
+{
+  match self {
+    Leaf => false
+    Node(left, position: node, right, height: _) =>
+      node == position || left.holds(position) || right.holds(position)
+  }
+}
+
+fn Tree.below[Key: Ordered](self, keys: Sequence[Key], bound: Key) -> Bool
+  ensures result == match self {
+    Leaf => true
+    Node(left, position, right, height: _) => position < keys.length() && keys[position] < bound
+      && left.below(keys, bound: bound) && right.below(keys, bound: bound)
+  }
+{
+  match self {
+    Leaf => true
+    Node(left, position, right, height: _) => position < keys.length() && keys[position] < bound
+      && left.below(keys, bound: bound) && right.below(keys, bound: bound)
+  }
+}
+
+fn Tree.above[Key: Ordered](self, keys: Sequence[Key], bound: Key) -> Bool
+  ensures result == match self {
+    Leaf => true
+    Node(left, position, right, height: _) => position < keys.length() && bound < keys[position]
+      && left.above(keys, bound: bound) && right.above(keys, bound: bound)
+  }
+{
+  match self {
+    Leaf => true
+    Node(left, position, right, height: _) => position < keys.length() && bound < keys[position]
+      && left.above(keys, bound: bound) && right.above(keys, bound: bound)
+  }
+}
+
+fn Tree.sorted[Key: Ordered](self, keys: Sequence[Key]) -> Bool
+  ensures result == match self {
+    Leaf => true
+    Node(left, position, right, height: _) => position < keys.length()
+      && left.sorted(keys) && right.sorted(keys)
+      && left.below(keys, bound: keys[position]) && right.above(keys, bound: keys[position])
+  }
+{
+  match self {
+    Leaf => true
+    Node(left, position, right, height: _) => position < keys.length()
+      && left.sorted(keys) && right.sorted(keys)
+      && left.below(keys, bound: keys[position]) && right.above(keys, bound: keys[position])
+  }
+}
+
+fn sorted_around[Key: Ordered](
+  left: Tree,
+  position: UInt64,
+  right: Tree,
+  keys: Sequence[Key],
+) -> Bool
+  ensures result == (position < keys.length() && left.sorted(keys) && right.sorted(keys)
+    && left.below(keys, bound: keys[position]) && right.above(keys, bound: keys[position]))
+{
+  position < keys.length() && left.sorted(keys) && right.sorted(keys)
+    && left.below(keys, bound: keys[position]) && right.above(keys, bound: keys[position])
+}
+
+theorem below_raised[Key: Ordered](
+  tree: Tree,
+  keys: Sequence[Key],
+  bound: Key,
+  higher: Key,
+)
+  requires tree.below(keys, bound: bound)
+  requires bound < higher
+  ensures tree.below(keys, bound: higher)
+{
+  match tree {
+    Leaf => {}
+    Node(left, position, right, height: _) => {
+      core::less_is_transitive(keys[position], second: bound, third: higher)
+      below_raised(left, keys: keys, bound: bound, higher: higher)
+      below_raised(right, keys: keys, bound: bound, higher: higher)
+    }
+  }
+}
+
+theorem above_lowered[Key: Ordered](
+  tree: Tree,
+  keys: Sequence[Key],
+  bound: Key,
+  lower: Key,
+)
+  requires tree.above(keys, bound: bound)
+  requires lower < bound
+  ensures tree.above(keys, bound: lower)
+{
+  match tree {
+    Leaf => {}
+    Node(left, position, right, height: _) => {
+      core::less_is_transitive(lower, second: bound, third: keys[position])
+      above_lowered(left, keys: keys, bound: bound, lower: lower)
+      above_lowered(right, keys: keys, bound: bound, lower: lower)
+    }
+  }
+}
+
+fn Tree.height(self) -> UInt64
+  ensures result == match self {
+    Leaf => 0
+    Node(left: _, position: _, right: _, height) => height
+  }
+  cost time O(1)
+{
+  match self {
+    Leaf => 0
+    Node(left: _, position: _, right: _, height) => height
+  }
+}
+
+fn Tree.balanced(self) -> Bool
+  ensures result == match self {
+    Leaf => true
+    Node(left, position: _, right, height) => left.balanced() && right.balanced()
+      && left.height() <= right.height() + 1 && right.height() <= left.height() + 1
+      && height == 1 + (if left.height() < right.height() { right.height() } else { left.height() })
+  }
+{
+  match self {
+    Leaf => true
+    Node(left, position: _, right, height) => {
+      let larger = if left.height() < right.height() { right.height() } else { left.height() }
+      let smaller = if left.height() < right.height() { left.height() } else { right.height() }
+      left.balanced() && right.balanced() && larger - smaller <= 1 && height >= 1 && height - 1 == larger
+    }
+  }
+}
+
+fn Tree.rearranges[Key: Ordered](
+  self,
+  left: Tree,
+  position: UInt64,
+  right: Tree,
+  keys: Sequence[Key],
+) -> Bool
+  ensures result == (
+    (forall other: UInt64 => self.holds(other) == (other == position || left.holds(other) || right.holds(other)))
+      && self.size() == left.size() + 1 + right.size()
+      && (sorted_around(left, position: position, right: right, keys: keys) ==> self.sorted(keys))
+  )
+{
+  (forall other: UInt64 => self.holds(other) == (other == position || left.holds(other) || right.holds(other)))
+    && self.size() == left.size() + 1 + right.size()
+    && (sorted_around(left, position: position, right: right, keys: keys) ==> self.sorted(keys))
+}
+
+fn join[Key: Ordered](
+  left: own Tree,
+  position: UInt64,
+  right: own Tree,
+  keys: Slice[Key],
+) -> Tree
+  requires left.height() < UInt64.maximum && right.height() < UInt64.maximum
+  ensures match result {
+    Leaf => false
+    Node(left: joined_left, position: joined_position, right: joined_right, height: _) =>
+      identical(joined_left, left) && joined_position == position && identical(joined_right, right)
+  }
+  ensures result.rearranges(left, position: position, right: right, keys: keys.model())
+  ensures result.height() == 1 + (if left.height() < right.height() { right.height() } else { left.height() })
+  ensures left.balanced() && right.balanced()
+    && left.height() <= right.height() + 1 && right.height() <= left.height() + 1
+    ==> result.balanced()
+  cost time O(1)
+{
+  let left_height = left.height()
+  let right_height = right.height()
+  let height = 1 + (if left_height < right_height { right_height } else { left_height })
+  Tree.Node(left: own left, position: position, right: own right, height: height)
+}
+
+fn rotate_left[Key: Ordered](
+  left: own Tree,
+  position: UInt64,
+  right: own Tree,
+  keys: Slice[Key],
+) -> Tree
+  requires left.balanced() && right.balanced()
+  requires right.height() == left.height() + 2
+  requires match right {
+    Leaf => false
+    Node(left: inner, position: _, right: outer, height: _) => inner.height() <= outer.height()
+  }
+  requires right.height() < UInt64.maximum
+  ensures result.balanced()
+  ensures result.rearranges(left, position: position, right: right, keys: keys.model())
+  ensures result.height() == right.height() || result.height() == right.height() + 1
+  cost time O(1)
+{
+  match own right {
+    Leaf => unreachable
+    Node(left: inner, position: upper, right: outer, height: _) => {
+      proof {
+        if sorted_around(left, position: position, right: right, keys: keys.model()) {
+          below_raised(
+            left,
+            keys: keys.model(),
+            bound: keys.model()[position],
+            higher: keys.model()[upper],
+          )
+        }
+      }
+      let lower = join(own left, position: position, right: own inner, keys: keys)
+      join(own lower, position: upper, right: own outer, keys: keys)
+    }
+  }
+}
+
+fn rotate_right[Key: Ordered](
+  left: own Tree,
+  position: UInt64,
+  right: own Tree,
+  keys: Slice[Key],
+) -> Tree
+  requires left.balanced() && right.balanced()
+  requires left.height() == right.height() + 2
+  requires match left {
+    Leaf => false
+    Node(left: outer, position: _, right: inner, height: _) => inner.height() <= outer.height()
+  }
+  requires left.height() < UInt64.maximum
+  ensures result.balanced()
+  ensures result.rearranges(left, position: position, right: right, keys: keys.model())
+  ensures result.height() == left.height() || result.height() == left.height() + 1
+  cost time O(1)
+{
+  match own left {
+    Leaf => unreachable
+    Node(left: outer, position: lower_position, right: inner, height: _) => {
+      proof {
+        if sorted_around(left, position: position, right: right, keys: keys.model()) {
+          above_lowered(
+            right,
+            keys: keys.model(),
+            bound: keys.model()[position],
+            lower: keys.model()[lower_position],
+          )
+        }
+      }
+      let higher = join(own inner, position: position, right: own right, keys: keys)
+      join(own outer, position: lower_position, right: own higher, keys: keys)
+    }
+  }
+}
+
+theorem holds_twice_rearranged[Key: Ordered](
+  rotated: Tree,
+  lower: Tree,
+  higher: Tree,
+  first: Tree,
+  first_position: UInt64,
+  second: Tree,
+  middle: UInt64,
+  third: Tree,
+  last_position: UInt64,
+  fourth: Tree,
+  keys: Sequence[Key],
+)
+  requires lower.rearranges(first, position: first_position, right: second, keys: keys)
+  requires higher.rearranges(third, position: last_position, right: fourth, keys: keys)
+  requires rotated.rearranges(lower, position: middle, right: higher, keys: keys)
+  ensures forall other: UInt64 => rotated.holds(other) == (other == first_position || other == middle
+    || other == last_position || first.holds(other) || second.holds(other) || third.holds(other) || fourth.holds(other))
+  ensures rotated.size() == first.size() + second.size() + third.size() + fourth.size() + 3
+{
+}
+
+fn rotate_right_left[Key: Ordered](
+  left: own Tree,
+  position: UInt64,
+  right: own Tree,
+  keys: Slice[Key],
+) -> Tree
+  requires left.balanced() && right.balanced()
+  requires right.height() == left.height() + 2
+  requires match right {
+    Leaf => false
+    Node(left: inner, position: _, right: outer, height: _) => outer.height() < inner.height()
+  }
+  requires right.height() < UInt64.maximum
+  ensures result.balanced()
+  ensures result.rearranges(left, position: position, right: right, keys: keys.model())
+  ensures result.height() == right.height()
+  cost time O(1)
+{
+  match own right {
+    Leaf => unreachable
+    Node(left: inner, position: upper, right: outer, height: _) => match own inner {
+      Leaf => unreachable
+      Node(left: inner_left, position: middle, right: inner_right, height: _) => {
+        proof {
+          assert inner.balanced() && inner_left.height() < inner.height() && inner_right.height() < inner.height()
+          if sorted_around(left, position: position, right: right, keys: keys.model()) {
+            assert inner.sorted(keys.model()) && inner.above(keys.model(), bound: keys.model()[position])
+            assert inner.below(keys.model(), bound: keys.model()[upper])
+            below_raised(
+              left,
+              keys: keys.model(),
+              bound: keys.model()[position],
+              higher: keys.model()[middle],
+            )
+            above_lowered(
+              outer,
+              keys: keys.model(),
+              bound: keys.model()[upper],
+              lower: keys.model()[middle],
+            )
+          }
+        }
+        let lower = join(own left, position: position, right: own inner_left, keys: keys)
+        let higher = join(own inner_right, position: upper, right: own outer, keys: keys)
+        let rotated = join(own lower, position: middle, right: own higher, keys: keys)
+        proof {
+          holds_twice_rearranged(
+            rotated,
+            lower: lower,
+            higher: higher,
+            first: left,
+            first_position: position,
+            second: inner_left,
+            middle: middle,
+            third: inner_right,
+            last_position: upper,
+            fourth: outer,
+            keys: keys.model(),
+          )
+          assert forall other: UInt64 =>
+            right.holds(other) == (other == upper || inner.holds(other) || outer.holds(other))
+          assert forall other: UInt64 =>
+            inner.holds(other) == (other == middle || inner_left.holds(other) || inner_right.holds(other))
+          assert right.size() == inner.size() + 1 + outer.size()
+          assert inner.size() == inner_left.size() + 1 + inner_right.size()
+          assert forall other: UInt64 =>
+            rotated.holds(other) == (other == position || left.holds(other) || right.holds(other))
+          assert rotated.size() == left.size() + 1 + right.size()
+          if sorted_around(left, position: position, right: right, keys: keys.model()) {
+            assert sorted_around(lower, position: middle, right: higher, keys: keys.model())
+            assert rotated.sorted(keys.model())
+          }
+        }
+        rotated
+      }
+    }
+  }
+}
+
+fn rotate_left_right[Key: Ordered](
+  left: own Tree,
+  position: UInt64,
+  right: own Tree,
+  keys: Slice[Key],
+) -> Tree
+  requires left.balanced() && right.balanced()
+  requires left.height() == right.height() + 2
+  requires match left {
+    Leaf => false
+    Node(left: outer, position: _, right: inner, height: _) => outer.height() < inner.height()
+  }
+  requires left.height() < UInt64.maximum
+  ensures result.balanced()
+  ensures result.rearranges(left, position: position, right: right, keys: keys.model())
+  ensures result.height() == left.height()
+  cost time O(1)
+{
+  match own left {
+    Leaf => unreachable
+    Node(left: outer, position: lower_position, right: inner, height: _) => match own inner {
+      Leaf => unreachable
+      Node(left: inner_left, position: middle, right: inner_right, height: _) => {
+        proof {
+          assert inner.balanced() && inner_left.height() < inner.height() && inner_right.height() < inner.height()
+          if sorted_around(left, position: position, right: right, keys: keys.model()) {
+            assert inner.sorted(keys.model()) && inner.below(keys.model(), bound: keys.model()[position])
+            assert inner.above(keys.model(), bound: keys.model()[lower_position])
+            below_raised(
+              outer,
+              keys: keys.model(),
+              bound: keys.model()[lower_position],
+              higher: keys.model()[middle],
+            )
+            above_lowered(
+              right,
+              keys: keys.model(),
+              bound: keys.model()[position],
+              lower: keys.model()[middle],
+            )
+          }
+        }
+        let lower = join(own outer, position: lower_position, right: own inner_left, keys: keys)
+        let higher = join(own inner_right, position: position, right: own right, keys: keys)
+        let rotated = join(own lower, position: middle, right: own higher, keys: keys)
+        proof {
+          holds_twice_rearranged(
+            rotated,
+            lower: lower,
+            higher: higher,
+            first: outer,
+            first_position: lower_position,
+            second: inner_left,
+            middle: middle,
+            third: inner_right,
+            last_position: position,
+            fourth: right,
+            keys: keys.model(),
+          )
+          assert forall other: UInt64 =>
+            left.holds(other) == (other == lower_position || inner.holds(other) || outer.holds(other))
+          assert forall other: UInt64 =>
+            inner.holds(other) == (other == middle || inner_left.holds(other) || inner_right.holds(other))
+          assert left.size() == inner.size() + 1 + outer.size()
+          assert inner.size() == inner_left.size() + 1 + inner_right.size()
+          assert forall other: UInt64 =>
+            rotated.holds(other) == (other == position || left.holds(other) || right.holds(other))
+          assert rotated.size() == left.size() + 1 + right.size()
+          if sorted_around(left, position: position, right: right, keys: keys.model()) {
+            assert sorted_around(lower, position: middle, right: higher, keys: keys.model())
+            assert rotated.sorted(keys.model())
+          }
+        }
+        rotated
+      }
+    }
+  }
+}
+
+fn balance_right_heavy[Key: Ordered](
+  left: own Tree,
+  position: UInt64,
+  right: own Tree,
+  keys: Slice[Key],
+) -> Tree
+  requires left.balanced() && right.balanced()
+  requires right.height() == left.height() + 2
+  requires right.height() < UInt64.maximum
+  ensures result.balanced()
+  ensures result.rearranges(left, position: position, right: right, keys: keys.model())
+  ensures result.height() == right.height() || result.height() == right.height() + 1
+  cost time O(1)
+{
+  let is_outer_taller = match right {
+    Leaf => true
+    Node(left: inner, position: _, right: outer, height: _) => inner.height() <= outer.height()
+  }
+  if is_outer_taller {
+    rotate_left(own left, position: position, right: own right, keys: keys)
+  } else {
+    rotate_right_left(own left, position: position, right: own right, keys: keys)
+  }
+}
+
+fn balance_left_heavy[Key: Ordered](
+  left: own Tree,
+  position: UInt64,
+  right: own Tree,
+  keys: Slice[Key],
+) -> Tree
+  requires left.balanced() && right.balanced()
+  requires left.height() == right.height() + 2
+  requires left.height() < UInt64.maximum
+  ensures result.balanced()
+  ensures result.rearranges(left, position: position, right: right, keys: keys.model())
+  ensures result.height() == left.height() || result.height() == left.height() + 1
+  cost time O(1)
+{
+  let is_outer_taller = match left {
+    Leaf => true
+    Node(left: outer, position: _, right: inner, height: _) => inner.height() <= outer.height()
+  }
+  if is_outer_taller {
+    rotate_right(own left, position: position, right: own right, keys: keys)
+  } else {
+    rotate_left_right(own left, position: position, right: own right, keys: keys)
+  }
+}
+
+fn balance[Key: Ordered](
+  left: own Tree,
+  position: UInt64,
+  right: own Tree,
+  keys: Slice[Key],
+) -> Tree
+  requires left.balanced() && right.balanced()
+  requires left.height() <= right.height() + 2 && right.height() <= left.height() + 2
+  requires left.height() < UInt64.maximum - 1 && right.height() < UInt64.maximum - 1
+  ensures result.balanced()
+  ensures result.rearranges(left, position: position, right: right, keys: keys.model())
+  ensures left.height() <= right.height() + 1 && right.height() <= left.height() + 1 ==>
+    result.height() == 1 + (if left.height() < right.height() { right.height() } else { left.height() })
+  ensures right.height() == left.height() + 2 ==>
+    result.height() == right.height() || result.height() == right.height() + 1
+  ensures left.height() == right.height() + 2 ==>
+    result.height() == left.height() || result.height() == left.height() + 1
+  cost time O(1)
+{
+  let left_height = left.height()
+  let right_height = right.height()
+  if right_height > left_height + 1 {
+    let balanced = balance_right_heavy(own left, position: position, right: own right, keys: keys)
+    proof {
+      assert balanced.balanced() && balanced.rearranges(left, position: position, right: right, keys: keys.model())
+    }
+    balanced
+  } else if left_height > right_height + 1 {
+    let balanced = balance_left_heavy(own left, position: position, right: own right, keys: keys)
+    proof {
+      assert balanced.balanced() && balanced.rearranges(left, position: position, right: right, keys: keys.model())
+    }
+    balanced
+  } else {
+    let joined = join(own left, position: position, right: own right, keys: keys)
+    proof {
+      assert joined.balanced() && joined.rearranges(left, position: position, right: right, keys: keys.model())
+    }
+    joined
+  }
+}
+
+theorem members_below[Key: Ordered](tree: Tree, keys: Sequence[Key], bound: Key)
+  requires tree.below(keys, bound: bound)
+  ensures forall other: UInt64 => tree.holds(other) ==> other < keys.length() && keys[other] < bound
+{
+  match tree {
+    Leaf => {}
+    Node(left, position: _, right, height: _) => {
+      members_below(left, keys: keys, bound: bound)
+      members_below(right, keys: keys, bound: bound)
+    }
+  }
+}
+
+theorem members_above[Key: Ordered](tree: Tree, keys: Sequence[Key], bound: Key)
+  requires tree.above(keys, bound: bound)
+  ensures forall other: UInt64 => tree.holds(other) ==> other < keys.length() && bound < keys[other]
+{
+  match tree {
+    Leaf => {}
+    Node(left, position: _, right, height: _) => {
+      members_above(left, keys: keys, bound: bound)
+      members_above(right, keys: keys, bound: bound)
+    }
+  }
+}
+
+theorem below_members[Key: Ordered](tree: Tree, keys: Sequence[Key], bound: Key)
+  requires forall other: UInt64 => tree.holds(other) ==> other < keys.length() && keys[other] < bound
+  ensures tree.below(keys, bound: bound)
+{
+  match tree {
+    Leaf => {}
+    Node(left, position: _, right, height: _) => {
+      assert forall other: UInt64 => left.holds(other) ==> tree.holds(other)
+      below_members(left, keys: keys, bound: bound)
+      assert forall other: UInt64 => right.holds(other) ==> tree.holds(other)
+      below_members(right, keys: keys, bound: bound)
+    }
+  }
+}
+
+theorem above_members[Key: Ordered](tree: Tree, keys: Sequence[Key], bound: Key)
+  requires forall other: UInt64 => tree.holds(other) ==> other < keys.length() && bound < keys[other]
+  ensures tree.above(keys, bound: bound)
+{
+  match tree {
+    Leaf => {}
+    Node(left, position: _, right, height: _) => {
+      assert forall other: UInt64 => left.holds(other) ==> tree.holds(other)
+      above_members(left, keys: keys, bound: bound)
+      assert forall other: UInt64 => right.holds(other) ==> tree.holds(other)
+      above_members(right, keys: keys, bound: bound)
+    }
+  }
+}
+
+fn Tree.find[Key: Ordered](self, keys: Slice[Key], key: Key) -> UInt64
+  requires self.balanced() && self.sorted(keys.model())
+  ensures result <= keys.length()
+  ensures result < keys.length() ==> self.holds(result) && keys.model()[result] == key
+  ensures result == keys.length() ==> forall other: UInt64 =>
+    self.holds(other) && other < keys.length() ==> !(keys.model()[other] == key)
+  cost time O((1 + self.height()) * (1 + time(Key.compare)))
+  cost allocations <= (1 + self.height()) * allocations(Key.compare)
+{
+  match self {
+    Leaf => keys.length()
+    Node(left, position, right, height: _) => match key.compare(keys[position]) {
+      Less => {
+        proof {
+          assert position < keys.length()
+          members_above(right, keys: keys.model(), bound: keys.model()[position])
+          assert forall other: UInt64 => right.holds(other) ==> {
+            core::less_is_transitive(key, second: keys.model()[position], third: keys.model()[other])
+            !(keys.model()[other] == key)
+          }
+        }
+        left.find(keys, key: key)
+      }
+      Greater => {
+        proof {
+          assert position < keys.length()
+          members_below(left, keys: keys.model(), bound: keys.model()[position])
+          assert forall other: UInt64 => left.holds(other) ==> {
+            core::less_is_transitive(keys.model()[other], second: keys.model()[position], third: key)
+            !(keys.model()[other] == key)
+          }
+        }
+        right.find(keys, key: key)
+      }
+      Equal => position
+    }
+  }
+}
+
+fn balance_after_insertion[Key: Ordered](
+  left: own Tree,
+  position: UInt64,
+  right: own Tree,
+  height: UInt64,
+  keys: Slice[Key],
+) -> Tree
+  requires left.balanced() && right.balanced()
+  requires left.height() <= height && right.height() <= height
+  requires height <= left.height() + 2 && height <= right.height() + 2
+  requires height <= left.height() + 1 || height <= right.height() + 1
+  requires height < UInt64.maximum - 1
+  ensures result.balanced()
+  ensures result.rearranges(left, position: position, right: right, keys: keys.model())
+  ensures height <= result.height() && result.height() <= height + 1
+  cost time O(1)
+{
+  balance(own left, position: position, right: own right, keys: keys)
+}
+
+fn Tree.inserted[Key: Ordered](
+  own self,
+  position: UInt64,
+  keys: Slice[Key],
+) -> Tree
+  requires self.balanced() && self.sorted(keys.model())
+  requires position < keys.length()
+  requires forall other: UInt64 => self.holds(other) && other < keys.length() ==>
+    !(keys.model()[other] == keys.model()[position])
+  requires self.height() < UInt64.maximum - 2
+  ensures result.balanced() && result.sorted(keys.model())
+  ensures forall other: UInt64 => result.holds(other) == (other == position || self.holds(other))
+  ensures result.size() == self.size() + 1
+  ensures self.height() <= result.height() && result.height() <= self.height() + 1
+  cost time O((1 + self.height()) * (1 + time(Key.compare)))
+{
+  match own self {
+    Leaf => Tree.Node(left: Tree.Leaf, position: position, right: Tree.Leaf, height: 1)
+    Node(left, position: node, right, height) => {
+      proof {
+        assert left.height() < height && right.height() < height && height == self.height()
+      }
+      if keys[position] < keys[node] {
+        let grown = own left.inserted(position, keys: keys)
+        proof {
+          members_below(left, keys: keys.model(), bound: keys.model()[node])
+          below_members(grown, keys: keys.model(), bound: keys.model()[node])
+        }
+        let regrown = balance_after_insertion(own grown, position: node, right: own right, height: height, keys: keys)
+        proof {
+          assert regrown.balanced() && regrown.sorted(keys.model())
+          assert forall other: UInt64 => regrown.holds(other) == (other == position || self.holds(other))
+          assert regrown.size() == self.size() + 1
+          assert self.height() <= regrown.height() && regrown.height() <= self.height() + 1
+        }
+        regrown
+      } else {
+        let grown = own right.inserted(position, keys: keys)
+        proof {
+          assert !(keys.model()[node] == keys.model()[position])
+          assert keys.model()[node] < keys.model()[position]
+          members_above(right, keys: keys.model(), bound: keys.model()[node])
+          above_members(grown, keys: keys.model(), bound: keys.model()[node])
+        }
+        let regrown = balance_after_insertion(own left, position: node, right: own grown, height: height, keys: keys)
+        proof {
+          assert regrown.balanced() && regrown.sorted(keys.model())
+          assert forall other: UInt64 => regrown.holds(other) == (other == position || self.holds(other))
+          assert regrown.size() == self.size() + 1
+          assert self.height() <= regrown.height() && regrown.height() <= self.height() + 1
+        }
+        regrown
+      }
+    }
+  }
+}
+
+fn balance_after_removal[Key: Ordered](
+  left: own Tree,
+  position: UInt64,
+  right: own Tree,
+  height: UInt64,
+  keys: Slice[Key],
+) -> Tree
+  requires left.balanced() && right.balanced()
+  requires left.height() + 1 <= height && right.height() + 1 <= height
+  requires height <= left.height() + 3 && height <= right.height() + 3
+  requires left.height() <= right.height() + 2 && right.height() <= left.height() + 2
+  requires height <= left.height() + 2 || height <= right.height() + 2
+  requires height < UInt64.maximum
+  ensures result.balanced()
+  ensures result.rearranges(left, position: position, right: right, keys: keys.model())
+  ensures result.height() + 1 >= height && result.height() <= height
+  cost time O(1)
+{
+  balance(own left, position: position, right: own right, keys: keys)
+}
+
+type Split(rest: Tree, position: UInt64)
+
+fn Tree.without_last[Key: Ordered](own self, keys: Slice[Key]) -> Split
+  requires self.balanced() && self.sorted(keys.model())
+  requires self.height() > 0 && self.height() < UInt64.maximum
+  ensures result.rest.balanced() && result.rest.sorted(keys.model())
+  ensures self.holds(result.position) && result.position < keys.length()
+  ensures forall other: UInt64 =>
+    result.rest.holds(other) == (self.holds(other) && other != result.position)
+  ensures result.rest.size() + 1 == self.size()
+  ensures result.rest.below(keys.model(), bound: keys.model()[result.position])
+  ensures result.rest.height() + 1 >= self.height() && result.rest.height() <= self.height()
+  cost time O(1 + self.height())
+{
+  match own self {
+    Leaf => unreachable
+    Node(left, position, right, height) => {
+      proof {
+        assert left.height() < height && right.height() < height && height == self.height()
+        members_below(left, keys: keys.model(), bound: keys.model()[position])
+        members_above(right, keys: keys.model(), bound: keys.model()[position])
+      }
+      if right is Leaf {
+        return Split(rest: own left, position: position)
+      }
+      let split = own right.without_last(keys)
+      proof {
+        below_raised(
+          left,
+          keys: keys.model(),
+          bound: keys.model()[position],
+          higher: keys.model()[split.position],
+        )
+        above_members(split.rest, keys: keys.model(), bound: keys.model()[position])
+      }
+      let rest = balance_after_removal(own left, position: position, right: own split.rest, height: height, keys: keys)
+      proof {
+        members_below(split.rest, keys: keys.model(), bound: keys.model()[split.position])
+        below_members(rest, keys: keys.model(), bound: keys.model()[split.position])
+      }
+      Split(rest: own rest, position: split.position)
+    }
+  }
+}
+
+fn without_root[Key: Ordered](
+  left: own Tree,
+  root: UInt64,
+  right: own Tree,
+  height: UInt64,
+  keys: Slice[Key],
+) -> Tree
+  requires left.balanced() && right.balanced()
+  requires sorted_around(left, position: root, right: right, keys: keys.model())
+  requires left.height() <= right.height() + 1 && right.height() <= left.height() + 1
+  requires height == 1 + (if left.height() < right.height() { right.height() } else { left.height() })
+  requires height < UInt64.maximum
+  ensures result.balanced() && result.sorted(keys.model())
+  ensures forall other: UInt64 => result.holds(other) == (left.holds(other) || right.holds(other))
+  ensures result.size() == left.size() + right.size()
+  ensures result.height() + 1 >= height && result.height() <= height
+  cost time O(1 + height)
+{
+  if left is Leaf {
+    return own right
+  }
+  if right is Leaf {
+    return own left
+  }
+  let split = own left.without_last(keys)
+  proof {
+    members_below(left, keys: keys.model(), bound: keys.model()[root])
+    above_lowered(
+      right,
+      keys: keys.model(),
+      bound: keys.model()[root],
+      lower: keys.model()[split.position],
+    )
+  }
+  balance_after_removal(own split.rest, position: split.position, right: own right, height: height, keys: keys)
+}
+
+fn Tree.without[Key: Ordered](
+  own self,
+  position: UInt64,
+  keys: Slice[Key],
+) -> Tree
+  requires self.balanced() && self.sorted(keys.model())
+  requires self.holds(position) && position < keys.length()
+  requires self.height() < UInt64.maximum
+  ensures result.balanced() && result.sorted(keys.model())
+  ensures forall other: UInt64 => result.holds(other) == (self.holds(other) && other != position)
+  ensures result.size() + 1 == self.size()
+  ensures result.height() + 1 >= self.height() && result.height() <= self.height()
+  cost time O((1 + self.height()) * (1 + time(Key.compare)))
+{
+  match own self {
+    Leaf => unreachable
+    Node(left, position: node, right, height) => {
+      proof {
+        assert left.height() < height && right.height() < height && height == self.height()
+        members_below(left, keys: keys.model(), bound: keys.model()[node])
+        members_above(right, keys: keys.model(), bound: keys.model()[node])
+      }
+      if node == position {
+        return without_root(own left, root: node, right: own right, height: height, keys: keys)
+      }
+      if keys[position] < keys[node] {
+        let shrunk = own left.without(position, keys: keys)
+        proof {
+          below_members(shrunk, keys: keys.model(), bound: keys.model()[node])
+        }
+        balance_after_removal(own shrunk, position: node, right: own right, height: height, keys: keys)
+      } else {
+        let shrunk = own right.without(position, keys: keys)
+        proof {
+          above_members(shrunk, keys: keys.model(), bound: keys.model()[node])
+        }
+        balance_after_removal(own left, position: node, right: own shrunk, height: height, keys: keys)
+      }
+    }
+  }
+}
+
+theorem below_transferred[Key: Ordered](
+  tree: Tree,
+  first: Sequence[Key],
+  second: Sequence[Key],
+  bound: Key,
+)
+  requires tree.below(first, bound: bound)
+  requires forall other: UInt64 => tree.holds(other) && other < first.length() ==>
+    other < second.length() && identical(second[other], first[other])
+  ensures tree.below(second, bound: bound)
+{
+  match tree {
+    Leaf => {}
+    Node(left, position: _, right, height: _) => {
+      assert forall other: UInt64 => left.holds(other) ==> tree.holds(other)
+      below_transferred(left, first: first, second: second, bound: bound)
+      assert forall other: UInt64 => right.holds(other) ==> tree.holds(other)
+      below_transferred(right, first: first, second: second, bound: bound)
+    }
+  }
+}
+
+theorem above_transferred[Key: Ordered](
+  tree: Tree,
+  first: Sequence[Key],
+  second: Sequence[Key],
+  bound: Key,
+)
+  requires tree.above(first, bound: bound)
+  requires forall other: UInt64 => tree.holds(other) && other < first.length() ==>
+    other < second.length() && identical(second[other], first[other])
+  ensures tree.above(second, bound: bound)
+{
+  match tree {
+    Leaf => {}
+    Node(left, position: _, right, height: _) => {
+      assert forall other: UInt64 => left.holds(other) ==> tree.holds(other)
+      above_transferred(left, first: first, second: second, bound: bound)
+      assert forall other: UInt64 => right.holds(other) ==> tree.holds(other)
+      above_transferred(right, first: first, second: second, bound: bound)
+    }
+  }
+}
+
+theorem sorted_transferred[Key: Ordered](
+  tree: Tree,
+  first: Sequence[Key],
+  second: Sequence[Key],
+)
+  requires tree.sorted(first)
+  requires forall other: UInt64 => tree.holds(other) && other < first.length() ==>
+    other < second.length() && identical(second[other], first[other])
+  ensures tree.sorted(second)
+{
+  match tree {
+    Leaf => {}
+    Node(left, position, right, height: _) => {
+      assert forall other: UInt64 => left.holds(other) ==> tree.holds(other)
+      assert forall other: UInt64 => right.holds(other) ==> tree.holds(other)
+      sorted_transferred(left, first: first, second: second)
+      sorted_transferred(right, first: first, second: second)
+      below_transferred(left, first: first, second: second, bound: first[position])
+      above_transferred(right, first: first, second: second, bound: first[position])
+    }
+  }
+}
+
+fn Tree.size(self) -> Integer
+  ensures result == match self {
+    Leaf => 0
+    Node(left, position: _, right, height: _) => left.size() + 1 + right.size()
+  }
+  ensures result >= 0
+{
+  match self {
+    Leaf => 0
+    Node(left, position: _, right, height: _) => left.size() + 1 + right.size()
+  }
+}
+
+theorem size_bounds_height(tree: Tree)
+  requires tree.balanced()
+  ensures power(2, tree.height() / 2) <= tree.size() + 1
+{
+  match tree {
+    Leaf => {}
+    Node(left, position: _, right, height) => {
+      size_bounds_height(left)
+      size_bounds_height(right)
+      if height >= 2 {
+        assert power(2, height / 2) == 2 * power(2, height / 2 - 1)
+        assert power(2, height / 2 - 1) <= power(2, left.height() / 2)
+        assert power(2, height / 2 - 1) <= power(2, right.height() / 2)
+      }
+    }
+  }
+}
+
+theorem log_at_least(number: Integer, exponent: Integer)
+  requires 0 <= exponent
+  requires power(2, exponent) <= number + 1
+  ensures exponent <= log(number)
+  decreases exponent
+{
+  if exponent > 0 {
+    assert power(2, exponent) == 2 * power(2, exponent - 1)
+    log_at_least(number / 2, exponent: exponent - 1)
+    assert log(number) == log(number / 2) + 1
+  }
+}
+
+theorem height_within_log(tree: Tree, count: Integer)
+  requires tree.balanced()
+  requires tree.size() <= count
+  ensures tree.height() <= 2 * log(count) + 1
+{
+  size_bounds_height(tree)
+  assert power(2, tree.height() / 2) <= count + 1
+  log_at_least(count, exponent: tree.height() / 2)
+}
+
+theorem height_at_most_size(tree: Tree)
+  requires tree.balanced()
+  ensures tree.height() <= tree.size()
+{
+  match tree {
+    Leaf => {}
+    Node(left, position: _, right, height: _) => {
+      height_at_most_size(left)
+      height_at_most_size(right)
+    }
+  }
+}

@@ -896,13 +896,13 @@ fn write_value(value: Value, output: mut String)
     }
     Object(members) => {
       mut output.push("{")
-      for index in 0..members.entries.length() {
+      for index in 0..members.length() {
         if index > 0 {
           mut output.push(",")
         }
-        mut output.push(quote(members.entries[index].key))
+        mut output.push(quote(members.keys[index]))
         mut output.push(":")
-        write_value(members.entries[index].value, output: mut output)
+        write_value(members.values[index], output: mut output)
       }
       mut output.push("}")
     }
@@ -929,20 +929,20 @@ fn write_pretty_value(value: Value, output: mut String, indent: UInt64, level: U
       mut output.push("]")
     }
     Object(members) => {
-      if members.entries.length() == 0 {
+      if members.length() == 0 {
         mut output.push("{}")
         return
       }
       mut output.push("{")
-      for index in 0..members.entries.length() {
+      for index in 0..members.length() {
         if index > 0 {
           mut output.push(",")
         }
         push_newline(mut output, indent: indent, level: level.saturating_add(1))
-        mut output.push(quote(members.entries[index].key))
+        mut output.push(quote(members.keys[index]))
         mut output.push(": ")
         write_pretty_value(
-          members.entries[index].value,
+          members.values[index],
           output: mut output,
           indent: indent,
           level: level.saturating_add(1),
@@ -1296,9 +1296,9 @@ impl serialization::Serialize for Value {
       }
       Object(members) => {
         mut sink.begin_map(members.length())
-        for index in 0..members.entries.length() {
-          mut sink.key(members.entries[index].key)
-          members.entries[index].value.serialize(mut sink)
+        for index in 0..members.length() {
+          mut sink.key(members.keys[index])
+          members.values[index].serialize(mut sink)
         }
         mut sink.end_map()
       }
@@ -1338,18 +1338,19 @@ impl serialization::Deserialize for Value {
         mut source.end_list()
         Ok(Value.Array(items: own items))
       }
-      Record => {
-        mut source.begin_map()?
-        var members: Map[String, Value] = [:]
-        while true {
-          match mut source.next_key() {
-            Some(key) => mut members.insert(own key, value: Value.deserialize(mut source)?)
-            None => break
-          }
-        }
-        mut source.end_map()
-        Ok(Value.Object(members: own members))
-      }
+      Record => Ok(Value.Object(members: read_members(mut source)?))
     }
   }
+}
+
+fn read_members[Source: serialization::Deserializer](source: mut Source) -> Result[Map[String, Value], serialization::Error]
+  uses RunForever
+{
+  mut source.begin_map()?
+  var members: Map[String, Value] = [:]
+  while mut source.next_key() is Some(key) {
+    mut members.insert(own key, value: Value.deserialize(mut source)?)
+  }
+  mut source.end_map()
+  Ok(own members)
 }
