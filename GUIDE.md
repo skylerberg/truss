@@ -205,7 +205,11 @@ A diagnostic gives the file, line, and column; a code, such as
 `capabilities.not_available`, that names the kind of error; and a message
 that says how to fix it. Many diagnostics also carry a `fix:`, an edit that
 makes the code compile. `truss check --fix` applies every fix that is its
-diagnostic's only fix, then reports what is left.
+diagnostic's only fix, then reports what is left. When a check reports
+errors, run it first, then read what it changed: a missing label or a
+misplaced `own` is gone, and a diagnostic with a choice of fixes is left for
+you to decide. A fix can add a `.copy()`, which allocates, so keep only the
+copies you want.
 
 ## 2. Programming a Guessing Game
 
