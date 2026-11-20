@@ -1,5 +1,4 @@
 val run_code : State.context -> State.frame -> Mir.t -> type_:Types.ty -> State.frame * Logic.term
-val make_empty_parts : State.context -> State.frame -> Types.ty -> Logic.term
 val mentions_result : Mir.formula -> bool
 val mentions_history : Mir.formula -> bool
 val assume_typed : State.context -> State.frame -> Logic.term -> unit

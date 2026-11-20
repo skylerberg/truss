@@ -354,7 +354,7 @@ let translate_run ~proof ?inherited ~substitution ~condition (lookups : Lookups.
           Some
             ( List.filter Amounts.mentions_result declared_ensures,
               List.filter (fun clause -> not (Amounts.mentions_result clause)) declared_ensures );
-        { start with yielded_so_far = Some (Amounts.make_empty_parts context start part) }
+        { start with yielded_so_far = Some (Intrinsics.make_empty_parts context start part) }
     | _ -> start
   in
   let list_values (at : State.frame) =

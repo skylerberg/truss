@@ -2723,6 +2723,20 @@ let () =
   Harness.test "a loop's bound that leaves out its iterations' sum does not hold" (fun () ->
       expect_not_proven Fixtures.Prover.count_cells_in_rows_time "prover.cost")
 
+let () =
+  Harness.test "a permutation of a range argument is a permutation of the whole slice" (fun () ->
+      expect_proven Fixtures.Prover.permutation_through_a_range_argument);
+  Harness.test "a permutation keeps every bound of its elements" (fun () ->
+      expect_proven Fixtures.Prover.bound_kept_through_a_permutation);
+  Harness.test "a permutation does not strengthen a bound of its elements" (fun () ->
+      expect_not_proven Fixtures.Prover.bound_strengthened_through_a_permutation "prover.ensures");
+  Harness.test "sorting both parts around a pivot sorts the slice" (fun () ->
+      expect_proven Fixtures.Prover.sorted_parts_around_a_pivot);
+  Harness.test "a range of a sequence holds its elements from the range's start" (fun () ->
+      expect_proven Fixtures.Prover.range_of_a_sequence);
+  Harness.test "a range of a sequence is proven within the sequence" (fun () ->
+      expect_not_proven Fixtures.Prover.range_of_a_sequence_past_its_end "prover.requires")
+
 let check_in_standard text =
   check_file
     (Database.create

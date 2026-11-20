@@ -1846,6 +1846,7 @@ let pending: Stack[Int64] = [1, 2, 3]
 |---|---|
 | `items[i]` | Element `i`, which is proven in bounds |
 | `items[1..4]` | The range of elements 1 to 3, a `Slice`, whose bounds are proven |
+| `items.model()[1..4]` | In a specification, the `Sequence` of positions 1 to 3 of a `Sequence`, whose bounds are proven |
 | `ports[name]` | The value for `name`, which is proven present |
 | `items[i] = value` | Replaces element `i` |
 | `ports[own name] = 8080` | Inserts or replaces the value for `name` |
@@ -1856,6 +1857,8 @@ let pending: Stack[Int64] = [1, 2, 3]
   `Slice`. Neither calls a method. So `let first = names[0]` binds a view of
   the element, `names[0].count += 1` mutates it in place, and
   `mut names[1..]` passes the range `mut`.
+- A range of a `Sequence` is a value, not a place. Its bounds are `Integer`s,
+  and its elements are the `Sequence`'s from the first bound up to the second.
 - An index and the bounds of a range are evaluated before the element or
   the range is reached, so `items[grow(mut items)]` is checked against the
   length that `grow` leaves. Evaluating an element or a range checks its
@@ -2709,7 +2712,7 @@ an invariant, a law, or a proof.
   value that code holds stores its fields.
 - Float arithmetic in a specification follows IEEE 754.
 
-The prelude types `Sequence`, `FiniteSet`, `FiniteMap`, and `Multiset` exist
+The prelude types `Sequence`, `FiniteSet`, and `FiniteMap` exist
 only in specifications, and their equality is identity. A type gives its
 value in their terms with the prelude trait `Model`, whose `model()` can be
 called only in specifications:
@@ -2810,7 +2813,7 @@ The prelude is in scope in every file, and all its names are
   `Copyable`, `Plain`, `Storable`, `Index`, `IndexMut`, `IndexAssign`,
   `Iterable`, `Cursor`, `FiniteCursor`, `FromTemplate`, `FromElements`,
   `FromEntries`, `Model`, and the arithmetic traits
-- `Integer`, `Sequence`, `FiniteSet`, `FiniteMap`, and `Multiset`
+- `Integer`, `Sequence`, `FiniteSet`, and `FiniteMap`
 - the standard capabilities, and `Path`, `Instant`, `Duration`, and
   `SystemError`
 

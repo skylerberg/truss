@@ -1,0 +1,13 @@
+fn keep[Element](items: mut Slice[Element])
+  ensures items.model().is_permutation_of(old(items.model()))
+{
+  todo
+}
+
+fn keep_range[Element](items: mut Slice[Element], start: UInt64, stop: UInt64)
+  requires start <= stop
+  requires stop <= items.length()
+  ensures items.model().is_permutation_of(old(items.model()))
+{
+  keep(mut items[start..stop])
+}

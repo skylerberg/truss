@@ -745,7 +745,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
             match contract.result_kind with
             | `Lends when List.exists Amounts.mentions_history clauses.ensures ->
                 let left = match lent_final with Some leave -> leave result | None -> result in
-                let none = Amounts.make_empty_parts context after result_type in
+                let none = Intrinsics.make_empty_parts context after result_type in
                 {
                   ensures_frame with
                   yielded = Some (Intrinsics.append_part context after result_type none left);

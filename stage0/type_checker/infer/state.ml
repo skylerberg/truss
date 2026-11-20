@@ -951,20 +951,31 @@ let find_sequence_element (sequence : Types.ty) =
       Some element
   | _ -> None
 
+let find_specification_sequence_element (sequence : Types.ty) =
+  match sequence with
+  | Types.Named { path; arguments = [ Types.Type element ] } when Well_known.is Sequence path ->
+      Some element
+  | _ -> None
+
 let make_range state ~origin (base : Core.place) ~start ~stop ~inclusive : Core.kind =
   let make = make_synthetic_expression state ~origin in
-  let uint64 = Types.make_builtin UInt64 in
+  let base_type = Core_walk.compute_place_type base in
   let element =
-    match Core_walk.compute_place_type base with
+    match base_type with
     | Types.Named { arguments = Types.Type element :: _; _ } -> element
     | type_ -> raise_bug "a range of `%s`" (Types.show type_)
+  in
+  let bound_type, path =
+    match find_specification_sequence_element base_type with
+    | Some _ -> (Types.Integer, Well_known.make_path Sequence)
+    | None -> (Types.make_builtin UInt64, Well_known.make_path Slice)
   in
   let stop =
     Option.map
       (fun stop ->
         if inclusive then
-          make uint64
-            (Operator { operation = Add; arguments = [ stop; make uint64 (Integer Z.one) ] })
+          make bound_type
+            (Operator { operation = Add; arguments = [ stop; make bound_type (Integer Z.one) ] })
         else stop)
       stop
   in
@@ -972,9 +983,8 @@ let make_range state ~origin (base : Core.place) ~start ~stop ~inclusive : Core.
     (Range
        {
          base;
-         start = (match start with Some start -> start | None -> make uint64 (Integer Z.zero));
+         start = (match start with Some start -> start | None -> make bound_type (Integer Z.zero));
          stop;
-         type_ =
-           Types.Named { path = Well_known.make_path Slice; arguments = [ Types.Type element ] };
+         type_ = Types.Named { path; arguments = [ Types.Type element ] };
          origin;
        })

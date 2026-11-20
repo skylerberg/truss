@@ -22,20 +22,78 @@ public fn Sequence[Element].append(self, value: Element) -> Sequence[Element]
   todo
 }
 
+public fn Sequence[Element].sum(self, measure: fn(Element) -> Integer) -> Integer
+  ensures self.length() == 0 ==> result == 0
+  ensures (forall i in 0..self.length() => measure(self[i]) >= 0) ==> result >= 0
+  decreases self.length()
+{
+  if self.length() == 0 {
+    0
+  } else {
+    self[..self.length() - 1].sum(measure) + measure(self[self.length() - 1])
+  }
+}
+
+theorem sum_of_no_elements[Element](items: Sequence[Element])
+  requires items.length() == 0
+  ensures forall measure: fn(Element) -> Integer => items.sum(measure) == 0
+{
+}
+
+public theorem sum_is_at_most_zero[Element](items: Sequence[Element], measure: fn(Element) -> Integer)
+  requires forall i in 0..items.length() => measure(items[i]) <= 0
+  ensures items.sum(measure) <= 0
+  decreases items.length()
+{
+  if items.length() > 0 {
+    assert identical(items, items[..items.length() - 1].append(items[items.length() - 1]))
+    sum_is_at_most_zero(items[..items.length() - 1], measure: measure)
+  }
+}
+
+public theorem sum_is_positive[Element](items: Sequence[Element], measure: fn(Element) -> Integer, index: Integer)
+  requires forall i in 0..items.length() => measure(items[i]) >= 0
+  requires 0 <= index && index < items.length()
+  requires measure(items[index]) > 0
+  ensures items.sum(measure) > 0
+  decreases items.length()
+{
+  assert identical(items, items[..items.length() - 1].append(items[items.length() - 1]))
+  if index < items.length() - 1 {
+    sum_is_positive(items[..items.length() - 1], measure: measure, index: index)
+  } else {
+    assert items[..items.length() - 1].sum(measure) >= 0
+  }
+}
+
 public fn Sequence[Element].concatenate(self, other: Sequence[Element]) -> Sequence[Element]
   ensures result.length() == self.length() + other.length()
   ensures forall i in 0..self.length() => identical(result[i], self[i])
   ensures forall i in 0..other.length() => identical(result[self.length() + i], other[i])
   ensures forall measure: fn(Element) -> Integer => result.sum(measure) == self.sum(measure) + other.sum(measure)
+  decreases other.length()
 {
-  todo
+  if other.length() == 0 {
+    self
+  } else {
+    let last = other.length() - 1
+    proof {
+      assert identical(other, other[..last].append(other[last]))
+    }
+    self.concatenate(other[..last]).append(other[last])
+  }
 }
 
 public fn Sequence[Element].reversed(self) -> Sequence[Element]
   ensures result.length() == self.length()
   ensures forall i in 0..self.length() => identical(result[i], self[self.length() - 1 - i])
+  decreases self.length()
 {
-  todo
+  if self.length() == 0 {
+    self
+  } else {
+    self[1..].reversed().append(self[0])
+  }
 }
 
 public fn Sequence[Element].update(self, index: Integer, value: Element) -> Sequence[Element]
@@ -46,13 +104,16 @@ public fn Sequence[Element].update(self, index: Integer, value: Element) -> Sequ
   ensures forall measure: fn(Element) -> Integer =>
     result.sum(measure) == self.sum(measure) - measure(self[index]) + measure(value)
 {
-  todo
+  proof {
+    assert identical(self, self[..index].append(self[index]).concatenate(self[index + 1..]))
+  }
+  self[..index].append(value).concatenate(self[index + 1..])
 }
 
 public fn Sequence[Element].contains(self, value: Element) -> Bool
   ensures result == (exists i in 0..self.length() => identical(self[i], value))
 {
-  todo
+  self.elements().contains(value)
 }
 
 public fn Sequence[Element].elements(self) -> FiniteSet[Element]
@@ -60,8 +121,13 @@ public fn Sequence[Element].elements(self) -> FiniteSet[Element]
     result.contains(value) == (exists i in 0..self.length() => identical(self[i], value))
   ensures (forall i in 0..self.length() => forall j in 0..self.length() =>
     i == j || !identical(self[i], self[j])) ==> result.size() == self.length()
+  decreases self.length()
 {
-  todo
+  if self.length() == 0 {
+    FiniteSet[Element].empty()
+  } else {
+    self[..self.length() - 1].elements().insert(self[self.length() - 1])
+  }
 }
 
 public fn Sequence[Element].to_map[Key, Value](
@@ -75,15 +141,56 @@ public fn Sequence[Element].to_map[Key, Value](
     i == j || !identical(key(self[i]), key(self[j]))) ==>
       result.size() == self.length()
       && forall i in 0..self.length() => identical(result.get(key(self[i])), value(self[i]))
+  decreases self.length()
 {
-  todo
+  if self.length() == 0 {
+    FiniteMap[Key, Value].empty()
+  } else {
+    let last = self.length() - 1
+    self[..last].to_map(key: key, value: value).insert(key(self[last]), value: value(self[last]))
+  }
 }
 
-public fn Sequence[Element].sum(self, measure: fn(Element) -> Integer) -> Integer
-  ensures self.length() == 0 ==> result == 0
-  ensures (forall i in 0..self.length() => measure(self[i]) >= 0) ==> result >= 0
+public fn Sequence[Element].is_permutation_of(self, other: Sequence[Element]) -> Bool
+  ensures result == (forall measure: fn(Element) -> Integer => self.sum(measure) == other.sum(measure))
 {
-  todo
+  forall measure: fn(Element) -> Integer => self.sum(measure) == other.sum(measure)
+}
+
+theorem element_of_a_permutation[Element](permuted: Sequence[Element], original: Sequence[Element], index: Integer)
+  requires permuted.is_permutation_of(original)
+  requires 0 <= index && index < permuted.length()
+  ensures original.contains(permuted[index])
+{
+  let occurrences: fn(Element) -> Integer = fn(value) { if identical(value, permuted[index]) { 1 } else { 0 } }
+  sum_is_positive(permuted, measure: occurrences, index: index)
+  assert original.sum(occurrences) > 0
+  if !original.contains(permuted[index]) {
+    sum_is_at_most_zero(original, measure: occurrences)
+  }
+}
+
+theorem elements_of_a_permutation_below[Element](
+  permuted: Sequence[Element],
+  original: Sequence[Element],
+  bound: Integer,
+)
+  requires permuted.is_permutation_of(original)
+  requires 0 <= bound && bound <= permuted.length()
+  ensures forall i in 0..bound => original.contains(permuted[i])
+  decreases bound
+{
+  if bound > 0 {
+    elements_of_a_permutation_below(permuted, original: original, bound: bound - 1)
+    element_of_a_permutation(permuted, original: original, index: bound - 1)
+  }
+}
+
+public theorem elements_of_a_permutation[Element](permuted: Sequence[Element], original: Sequence[Element])
+  requires permuted.is_permutation_of(original)
+  ensures forall i in 0..permuted.length() => original.contains(permuted[i])
+{
+  elements_of_a_permutation_below(permuted, original: original, bound: permuted.length())
 }
 
 impl Index for Sequence[Element] {
@@ -178,19 +285,6 @@ public fn FiniteMap[Key, Value].insert(self, key: Key, value: Value) -> FiniteMa
 public fn FiniteMap[Key, Value].keys(self) -> FiniteSet[Key]
   ensures forall key: Key => result.contains(key) == self.contains_key(key)
   ensures result.size() == self.size()
-{
-  todo
-}
-
-public opaque type Multiset[Element] = todo
-
-public fn Multiset[Element].empty() -> Multiset[Element]
-{
-  todo
-}
-
-public fn Multiset[Element].count(self, value: Element) -> Integer
-  ensures result >= 0
 {
   todo
 }

@@ -1,3 +1,58 @@
+let make_sequence_range context element sequence ~start ~stop =
+  let sequence_sort = Facts.declare_sort context (Models.make_sequence_type element) in
+  let symbol = Logic.Symbol.Sequence_range element in
+  Facts.declare context
+    (Logic.Function (symbol, [ sequence_sort; Logic.Int; Logic.Int ], sequence_sort));
+  let range_of whole low high = Logic.Apply (symbol, [ whole; low; high ]) in
+  Facts.run_once context (Range_elements element) (fun () ->
+      let variable label = Logic.Symbol.Variable { label; numbers = [] } in
+      let whole = variable "range.whole"
+      and low = variable "range.start"
+      and high = variable "range.stop"
+      and position = variable "range.position" in
+      let bound = [ (whole, sequence_sort); (low, Logic.Int); (high, Logic.Int) ] in
+      let whole_term = Logic.Symbol whole
+      and low_term = Logic.Symbol low
+      and high_term = Logic.Symbol high
+      and position_term = Logic.Symbol position in
+      let range = range_of whole_term low_term high_term in
+      let length = Models.make_sequence_length context element in
+      let count = Logic.subtract high_term low_term in
+      let is_within =
+        Logic.(
+          less_equal (int 0) low_term
+          &&& less_equal low_term high_term
+          &&& less_equal high_term (length whole_term))
+      in
+      Facts.add_fact context
+        (Logic.forall ~trigger:[ range ] (bound, Logic.(is_within ==> equal (length range) count)));
+      (match
+         ( Models.index_sequence context element range position_term,
+           Models.index_sequence context element whole_term (Logic.add low_term position_term) )
+       with
+      | Some inside, Some outside ->
+          Facts.add_fact context
+            (Logic.forall ~trigger:[ inside ]
+               ( bound @ [ (position, Logic.Int) ],
+                 Logic.(
+                   is_within
+                   &&& less_equal (int 0) position_term
+                   &&& less position_term count ==> equal inside outside) ))
+      | _ -> ());
+      match
+        ( Models.index_sequence context element whole_term position_term,
+          Models.index_sequence context element range (Logic.subtract position_term low_term) )
+      with
+      | Some outside, Some inside ->
+          Facts.add_fact context
+            (Logic.forall ~trigger:[ range; outside ]
+               ( bound @ [ (position, Logic.Int) ],
+                 Logic.(
+                   is_within &&& less_equal low_term position_term &&& less position_term high_term
+                   ==> equal outside inside) ))
+      | _ -> ());
+  range_of sequence start stop
+
 let apply_slice context (frame : State.frame) (site : Invocation.site) ~(base_type : Types.ty)
     ~collection ~low ~high =
   let location = Facts.locate context frame.source site.origin in
@@ -6,10 +61,17 @@ let apply_slice context (frame : State.frame) (site : Invocation.site) ~(base_ty
     | Types.Named { arguments = Types.Type element :: _; _ } -> element
     | _ -> Facts.raise_unsupported location "a slice of `%s`" (Types.show base_type)
   in
+  let is_sequence =
+    match base_type with
+    | Types.Named { path; _ } -> Path.equal path Models.sequence_path
+    | _ -> false
+  in
   let model =
-    match Models.find_model context base_type collection ~element with
-    | Some model -> model
-    | None -> Facts.raise_unsupported location "a slice of `%s`" (Types.show base_type)
+    if is_sequence then collection
+    else
+      match Models.find_model context base_type collection ~element with
+      | Some model -> model
+      | None -> Facts.raise_unsupported location "a slice of `%s`" (Types.show base_type)
   in
   let length = Models.make_sequence_length context element model in
   let high =
@@ -22,29 +84,17 @@ let apply_slice context (frame : State.frame) (site : Invocation.site) ~(base_ty
   Facts.oblige context frame Requires location
     [ Text "`"; Facts.quote frame.source site.origin; Text "` may not be within the collection." ]
     Logic.(less_equal (int 0) low &&& less_equal low high &&& less_equal high length);
-  Validity.note_place context frame site.origin (Run (low, high));
-  let slice_type = Facts.substitute_type context frame site.type_ in
-  let viewed = Facts.arrive context frame "slice" slice_type in
-  (match Models.find_model context slice_type viewed ~element with
-  | Some viewed_model -> (
-      let count = Costs.minus high low in
-      Facts.assume context frame
-        (Logic.equal (Models.make_sequence_length context element viewed_model) count);
-      let position = Facts.make_fresh_name context "index" in
-      match
-        ( Models.index_sequence context element viewed_model (Logic.Symbol position),
-          Models.index_sequence context element model (Costs.plus low (Logic.Symbol position)) )
-      with
-      | Some inside, Some outside ->
-          Facts.assume context frame
-            (Logic.forall
-               ( [ (position, Logic.Int) ],
-                 Logic.(
-                   less_equal (int 0) (Symbol position)
-                   &&& less (Symbol position) count ==> equal inside outside) ))
-      | _ -> ())
-  | None -> ());
-  (frame, viewed, low, high)
+  let range = make_sequence_range context element model ~start:low ~stop:high in
+  if is_sequence then (frame, range, low, high)
+  else begin
+    Validity.note_place context frame site.origin (Run (low, high));
+    let slice_type = Facts.substitute_type context frame site.type_ in
+    let viewed = Facts.arrive context frame "slice" slice_type in
+    (match Models.find_model context slice_type viewed ~element with
+    | Some viewed_model -> Facts.assume context frame (Logic.equal viewed_model range)
+    | None -> ());
+    (frame, viewed, low, high)
+  end
 
 let index_element context element term index =
   match Models.index_sequence context element term index with
@@ -211,6 +261,26 @@ let make_sequence_sum context element term measure =
          Logic.Int ));
   Logic.Apply (symbol, [ term; measure ])
 
+let make_each_sum context element relation =
+  let measure = Facts.make_fresh_name context "measure" in
+  Logic.forall
+    ( [ (measure, Facts.declare_sort context (Types.Function (measure_type element))) ],
+      relation
+        (fun sequence -> make_sequence_sum context element sequence (Logic.Symbol measure))
+        (fun value ->
+          Lambdas.apply_function context (measure_type element) (Logic.Symbol measure) [ value ]) )
+
+let make_empty_parts context frame element =
+  let parts =
+    Facts.declare_fresh context frame "parts"
+      (Facts.declare_sort context (Models.make_sequence_type element))
+  in
+  Facts.assume context frame
+    (Logic.equal (Models.make_sequence_length context element parts) (Logic.int 0));
+  Facts.assume context frame
+    (make_each_sum context element (fun sum _ -> Logic.equal (sum parts) Costs.zero));
+  parts
+
 let append_part context frame element parts part =
   let longer =
     Facts.declare_fresh context frame "parts"
@@ -371,16 +441,7 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
     Logic.forall ([ (name, Logic.Int) ], Logic.(in_interval (Symbol name) low high ==> body))
   in
   let in_bounds index sequence = in_interval index (Logic.int 0) (length sequence) in
-  let each_sum relation =
-    let measure = Facts.make_fresh_name context "measure" in
-    Logic.forall
-      ( [ (measure, Facts.declare_sort context (Types.Function (measure_type element))) ],
-        relation
-          (fun sequence -> make_sequence_sum context element sequence (Logic.Symbol measure))
-          (fun value ->
-            Lambdas.apply_function context (measure_type element) (Logic.Symbol measure) [ value ])
-      )
-  in
+  let each_sum = make_each_sum context element in
   let read_changed_storage () = storage (List.hd changed) in
   let assume_swapped before after =
     let first = read_operand 1 and second = read_operand 2 in
@@ -829,16 +890,14 @@ let write_sequence_range context frame (sequence : Types.ty) before ~start ~stop
   in
   write_sequence context frame sequence before ~write_model:(fun ~before ~after ->
       assume_unchanged_outside context frame element ~before ~after ~start ~stop;
-      let position = Facts.make_fresh_name context "index" in
       Facts.assume context frame
-        (Logic.forall
-           ( [ (position, Logic.Int) ],
-             Logic.(
-               less_equal (int 0) (Symbol position)
-               &&& less (Symbol position) (Costs.minus stop start)
-               ==> equal
-                     (index_element context element after (Costs.plus start (Symbol position)))
-                     (index_element context element slice_model (Symbol position))) )))
+        (Logic.equal (make_sequence_range context element after ~start ~stop) slice_model);
+      let replaced = make_sequence_range context element before ~start ~stop in
+      Facts.assume context frame
+        (make_each_sum context element (fun sum _ ->
+             Logic.equal
+               (Logic.add (sum after) (sum replaced))
+               (Logic.add (sum before) (sum slice_model)))))
 
 let assume_same_length context frame (sequence : Types.ty) ~before ~after =
   let element = find_sequence_element context frame sequence in

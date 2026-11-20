@@ -4706,7 +4706,7 @@ Every module is used as `use standard::name`, then `name::Item`.
 | `regex` | The `Regex` template and matching |
 | `serialization` | The `Serialize` and `Deserialize` traits that every format shares |
 | `simulation` | `World`, a deterministic simulated machine for tests |
-| `specification` | `Sequence`, `FiniteSet`, `FiniteMap`, and `Multiset`, the types of specifications |
+| `specification` | `Sequence`, `FiniteSet`, and `FiniteMap`, the types of specifications |
 | `streams` | Buffered readers and writers over handles |
 | `tasks` | `Channel`, `Cell`, `Counter`, `Limiter`, `Pool`, `SeededTasks`, and `with_timeout` |
 | `text` | `String`, `StringSlice`, `Parse`, and `FromTemplate` |
