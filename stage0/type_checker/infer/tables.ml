@@ -254,6 +254,83 @@ let map ~map_type ~map_argument ~map_capabilities (tables : t) : t =
         | Map_entry { key; value } -> Map_entry { key = map_type key; value = map_type value });
   }
 
+let list_arguments_at (tables : t) id =
+  let {
+    types;
+    local_types;
+    resolutions;
+    calls;
+    literals = _;
+    patterns;
+    scrutinee_types;
+    loops;
+    templates;
+    lend_modes = _;
+    conditions;
+    conversions;
+    update_paths = _;
+    specification_calls;
+    captures = _;
+    literal_elements;
+    discarded = _;
+  } =
+    tables
+  in
+  let of_types = List.map (fun type_ -> Types.Type type_) in
+  let list_trait (trait : Types.trait_reference) =
+    trait.trait_arguments @ of_types (List.map snd trait.associated)
+  in
+  let list_call (call : call) =
+    Types.Type call.callee_result
+    ::
+    (match call.callee with
+    | Function { instantiation; _ } -> instantiation.type_arguments
+    | Trait_method { trait; self_type; instantiation; _ } ->
+        (Types.Type self_type :: list_trait trait) @ instantiation.type_arguments
+    | Constructor { type_arguments; _ } | Intrinsic { type_arguments; _ } -> type_arguments
+    | Capability_method _ | Indirect -> [])
+  in
+  let list_condition (condition : Types.condition) =
+    List.concat_map
+      (fun (bound : Types.bound_condition) -> Types.Type bound.subject :: list_trait bound.bound)
+      condition
+  in
+  of_types
+    (List.filter_map (fun table -> table.(id)) [ types; local_types; scrutinee_types ]
+    @ List.map snd conversions.(id))
+  @ (match resolutions.(id) with
+    | Some (Global { instantiation; _ }) -> instantiation.type_arguments
+    | Some (Field_access { type_; _ } | Variant_value { type_; _ } | Type_name type_) ->
+        [ Types.Type type_ ]
+    | Some (Local_value _ | Value_parameter _ | Specification_value) | None -> [])
+  @ Option.fold ~none:[] ~some:list_call calls.(id)
+  @ (match patterns.(id) with
+    | Some (Variant_pattern { type_; _ } | Record_pattern { type_; _ }) -> [ Types.Type type_ ]
+    | Some (Binding_pattern _ | Constant_pattern _ | Literal_pattern _ | Other_pattern) | None -> [])
+  @ (match loops.(id) with
+    | Some (Integer_range { element; _ }) -> [ Types.Type element ]
+    | Some (Elements { count; element; _ }) -> list_call count @ list_call element
+    | Some (Pulled { cursor; cursor_call; remaining }) ->
+        (Types.Type cursor :: Option.fold ~none:[] ~some:list_call cursor_call)
+        @ Option.fold ~none:[]
+            ~some:(fun (condition, call) -> list_condition condition @ list_call call)
+            remaining
+    | None -> [])
+  @ (match templates.(id) with
+    | Some { from_template; part_conversions; part; _ } ->
+        List.concat_map (Option.fold ~none:[] ~some:list_call) (from_template :: part_conversions)
+        @ of_types (Option.to_list part)
+    | None -> [])
+  @ Option.fold ~none:[] ~some:list_condition conditions.(id)
+  @ (match specification_calls.(id) with
+    | Some (Method_cost { trait; self_type; _ }) -> Types.Type self_type :: list_trait trait
+    | Some (Specification_function _) | None -> [])
+  @
+  match literal_elements.(id) with
+  | Some (List_element element) -> [ Types.Type element ]
+  | Some (Map_entry { key; value }) -> [ Types.Type key; Types.Type value ]
+  | None -> []
+
 let exists_type predicate (tables : t) =
   let contains table =
     Array.exists (function Some type_ -> Types.exists predicate type_ | None -> false) table
