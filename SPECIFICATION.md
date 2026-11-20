@@ -2685,9 +2685,10 @@ an invariant, a law, or a proof.
 - A quantifier's body runs to the end of the expression.
 - Integer arithmetic in a specification is exact. It is done on `Integer`, a
   prelude type that exists only in specifications, of which every built-in
-  integer type is a subset, so comparisons can mix integer types. An
-  `Integer` can stand where a built-in integer is expected, and the prover
-  shows that it fits.
+  integer type is a subset, so comparisons can mix integer types. A range
+  whose bounds have two integer types, as in `middle + 1..items.length()`,
+  is a range of `Integer`. An `Integer` can stand where a built-in integer
+  is expected, and the prover shows that it fits.
 - A specification never decides a type that code computes with. An integer
   literal or local of the code whose type is undecided is an `Integer` in a
   specification, so `invariant small <= limit` with a `UInt8` `small` leaves
