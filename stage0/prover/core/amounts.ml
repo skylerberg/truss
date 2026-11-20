@@ -167,7 +167,8 @@ let find_capability_reach (context : State.context) ~(uses : Types.capability_se
                 | None -> Reached_directly)
                 providers
           | Capability_error _ -> Facts.raise_bug "the prover reads a capability with an error"
-          | Capability_unless _ -> Facts.raise_bug "a capability's base has a condition"))
+          | Capability_unless _ | Capability_unless_values _ ->
+              Facts.raise_bug "a capability's base has a condition"))
       Not_reached
       (List.map Types.find_base (Types.list_capabilities uses))
   in

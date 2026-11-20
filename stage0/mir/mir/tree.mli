@@ -260,6 +260,7 @@ type parameter = {
 
 type contract = {
   parameters : parameter list;
+  panics_unless : requirement list;
   requires : requirement list;
   ensures : formula list;
   decreases : formula list;

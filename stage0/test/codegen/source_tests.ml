@@ -44,6 +44,7 @@ let () =
                        trait = Well_known.make_path Equal;
                      });
             instantiation = Ground.no_instantiation;
+            assumes_condition = false;
           }
       in
       let _, backend =
@@ -81,6 +82,7 @@ let () =
           {
             path = Top { module_ = Codegen_support.example; name };
             instantiation = Ground.no_instantiation;
+            assumes_condition = false;
           }
       in
       let _, backend =
@@ -138,6 +140,7 @@ let () =
           {
             path = Top { module_ = Codegen_support.example; name = "sum" };
             instantiation = Ground.no_instantiation;
+            assumes_condition = false;
           }
       in
       let _, backend =
@@ -169,6 +172,7 @@ let make_example_item name : Lowered.Item.t =
     {
       path = Top { module_ = Codegen_support.example; name };
       instantiation = Ground.no_instantiation;
+      assumes_condition = false;
     }
 
 type presumed_line = { text : string; file : string; line : int }
@@ -279,3 +283,34 @@ let () =
         ~expected:(render ~profile:Development Fixtures.Source.calls_on_two_lines)
         (render ~profile:Development moved);
       expect_presumed_at (render ~profile:Release moved) ~affix:(calls "multiply") ~line:4)
+
+let () =
+  Codegen_support.test
+    "a caller without `Panic` calls a copy of a callee with a condition on values that panics \
+     nowhere" (fun () ->
+      let make_item ?(assumes_condition = false) name : Lowered.Item.t =
+        Code
+          {
+            path = Top { module_ = Codegen_support.example; name };
+            instantiation = Ground.no_instantiation;
+            assumes_condition;
+          }
+      in
+      let proven = make_item "five_thousand" and panicking = make_item "scaled_or_panic" in
+      let _, backend =
+        Codegen_support.load ~profile:Release ~roots:[ proven; panicking ]
+          Fixtures.Source.callee_with_a_condition_on_values
+      in
+      let called item = Emit_c.references (Backend.For_testing.compile_fragment backend item) in
+      let render item =
+        Emit_c.For_testing.render_c (Backend.For_testing.compile_fragment backend item)
+      in
+      let assuming = make_item ~assumes_condition:true "scaled" and checking = make_item "scaled" in
+      if not (List.mem assuming (called proven)) then
+        Codegen_support.fail "five_thousand calls no copy of scaled that assumes its condition";
+      if not (List.mem checking (called panicking)) then
+        Codegen_support.fail "scaled_or_panic calls no copy of scaled that checks";
+      if String.includes ~affix:"truss_runtime_panic" (render assuming) then
+        Codegen_support.fail "the copy that assumes the condition panics:\n%s" (render assuming);
+      if not (String.includes ~affix:"truss_runtime_panic" (render checking)) then
+        Codegen_support.fail "the copy that checks does not panic:\n%s" (render checking))

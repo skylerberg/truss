@@ -877,6 +877,14 @@ let () =
         "types.unbounded_time" ~says:"`when` a condition that implies `Source: FiniteCursor`"
         ~fixed:Fixtures.Capabilities.time_when_an_unrelated_condition_fixed;
       expect_fine Fixtures.Capabilities.time_when_an_unrelated_condition_fixed);
+  Harness.test "a call of a function that panics unless a condition on values needs no `Panic`"
+    (fun () ->
+      expect_fine Fixtures.Capabilities.call_of_a_function_that_panics_unless_a_condition_on_values);
+  Harness.test "a function value of a function that panics unless a condition uses `Panic`"
+    (fun () ->
+      expect_one_diagnostic
+        Fixtures.Capabilities.function_value_of_a_function_that_panics_unless_a_condition_on_values
+        "capabilities.not_available" ~says:"This call uses `Panic`");
   Harness.test "a bound names the time of no callback that may run forever" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.time_of_a_callback_that_runs_forever
         "types.unbounded_time"

@@ -164,7 +164,8 @@ let rec require_available checking scope (origin : Core.origin) ?(subject = "Thi
               | Capability_variable _ ->
                   false
               | Capability_error _ -> State.raise_bug "a capability with an error is missing"
-              | Capability_unless _ -> State.raise_bug "a capability's base has a condition"
+              | Capability_unless _ | Capability_unless_values _ ->
+                  State.raise_bug "a capability's base has a condition"
             in
             report checking Not_available origin
               (match
@@ -204,11 +205,16 @@ let rec require_available checking scope (origin : Core.origin) ?(subject = "Thi
   end
 
 let compute_required_uses state scope (callee : Core.callee) =
+  let uses =
+    Types.replace_capabilities
+      (function Types.Capability_unless_values _ -> Some Types.no_capabilities | _ -> None)
+      callee.uses
+  in
   match (callee.target, find_implemented_capability scope) with
   | Intrinsic _, Some _ ->
-      Types.subtract_capabilities ~implies:(implies state) callee.uses
+      Types.subtract_capabilities ~implies:(implies state) uses
         (Types.make_capability_set [ tasks ])
-  | (Function _ | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _), _ -> callee.uses
+  | (Function _ | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _), _ -> uses
 
 let require_callee_uses checking scope (origin : Core.origin) (callee : Core.callee) =
   check_callee_grants checking origin callee.target;
@@ -497,7 +503,8 @@ let rec can_call_capability_code (state : State.state) ~list_bounds ?(seen = [])
       | Built_in _ -> false
       | Capability _ | Capability_parameter _ | Capability_variable _ -> true
       | Capability_error _ -> State.raise_bug "a trait's method uses a capability with an error"
-      | Capability_unless _ -> State.raise_bug "a capability's base has a condition"
+      | Capability_unless _ | Capability_unless_values _ ->
+          State.raise_bug "a capability's base has a condition"
     in
     List.exists
       (fun (bound : Types.trait_reference) ->
@@ -526,7 +533,8 @@ let rec can_call_capability_code (state : State.state) ~list_bounds ?(seen = [])
           | Capability _ | Capability_parameter _ | Capability_projection _ | Capability_variable _
           | Capability_error _ ->
               true
-          | Capability_unless _ -> State.raise_bug "a capability's base has a condition")
+          | Capability_unless _ | Capability_unless_values _ ->
+              State.raise_bug "a capability's base has a condition")
         uses
       || List.exists (fun (_, input) -> can_call_inside input) inputs
       || can_call_inside output
@@ -654,6 +662,7 @@ let check (state : State.state) (elaborated : Interface.Environment.elaborated_i
               List.iter check_specification contract.requires)
             parameter.callback_contract)
         parameters;
+      List.iter check_specification contract.panics_unless;
       List.iter
         (fun (requirement : Core.condition Core.conditional) ->
           check_specification requirement.clause.value)

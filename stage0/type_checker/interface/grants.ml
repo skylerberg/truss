@@ -60,7 +60,7 @@ let list_missing (lookups : Lookups.t) ~package ~of_ (uses : Types.capability_se
            | Capability_parameter _ | Capability_projection _ | Capability_variable _
            | Capability_error _ ->
                None
-           | Capability_unless _ ->
+           | Capability_unless _ | Capability_unless_values _ ->
                Compiler_bug.raise_bug ~stage:"Interface" "a capability's base has a condition")
          (List.map Types.find_base (Types.list_capabilities uses)))
 

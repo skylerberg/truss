@@ -1,0 +1,5 @@
+fn raised(count: UInt8) -> UInt8
+  uses Panic unless count < 200
+{
+  count + 100
+}

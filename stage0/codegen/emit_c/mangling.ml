@@ -117,10 +117,11 @@ let mangle_capability_arguments arguments =
        arguments)
 
 let rec mangle : Lowered.Item.t -> string = function
-  | Code { path; instantiation } ->
+  | Code { path; instantiation; assumes_condition } ->
       mangle_path path
       ^ mangle_arguments instantiation.type_arguments
       ^ mangle_capability_arguments instantiation.capability_arguments
+      ^ if assumes_condition then render_marker "Assuming" else ""
   | Constant path -> render_marker "Constant" ^ mangle_path path
   | Drop ty -> render_marker "Drop" ^ mangle_ty ty
   | Copy ty -> render_marker "Copy" ^ mangle_ty ty
@@ -147,7 +148,7 @@ let rec mangle : Lowered.Item.t -> string = function
       ^ render_marker "End"
   | Generated (Adapter { function_; instantiation; ty }) ->
       render_marker "Adapter"
-      ^ mangle (Code { path = function_; instantiation })
+      ^ mangle (Lowered.Item.make_code function_ instantiation)
       ^ render_marker "As" ^ mangle_ty (Function ty)
   | Generated (Any_entry impl_method) ->
       render_marker "Dynamic" ^ mangle (Lowered.Item.make_method_code impl_method)

@@ -1,0 +1,32 @@
+fn scaled(count: Int64) -> Int64
+  uses Panic unless Int64.minimum <= count * 1000 && count * 1000 <= Int64.maximum
+  ensures result == count * 1000
+{
+  count * 1000
+}
+
+fn five_thousand() -> Int64 {
+  scaled(5)
+}
+
+fn first(values: List[Int64]) -> Int64
+  requires values.length() > 0
+{
+  values.first().expect("the list is not empty")
+}
+
+fn scaled_or_panic(count: Int64) -> Int64
+  uses Panic
+{
+  scaled(count)
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, Panic
+{
+  match arguments[1].slice() {
+    "overflow" => Console.print_line("${scaled_or_panic(Int64.maximum)}")
+    _ => Console.print_line("${five_thousand()} ${first([7, 8])}")
+  }
+  ExitCode.success
+}

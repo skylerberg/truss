@@ -566,7 +566,14 @@ arguments only.
 
 | Rule | Reason |
 |---|---|
-| A condition is a conjunction of bounds. | A bound is decided by the `impl` lookup that a call's bounds already use, so the capability check decides a condition without the prover. A condition on values, as in a planned `uses Panic unless index < self.length()`, extends the same syntax. |
+| A condition is a conjunction of bounds, or, for `Panic`, of expressions over the arguments. | A bound is decided by the `impl` lookup that a call's bounds already use, so the capability check decides a bound without the prover. The prover decides a condition on values. |
+| Only `Panic` takes a condition on values. | It replaces `requires P` with a choice for each caller: prove `P`, or have `Panic`. `RunForever unless P` would also need conditions on values in `cost` clauses. An external capability is provided and granted, so whether a call uses one depends on more than the call. |
+| A call to a function that uses `Panic unless P` is never a type error. | The capability check cannot decide `P`. The prover obliges `P` where the caller has no `Panic`. |
+| The body is proven with `Panic`, and again assuming `P` without `Panic`. | Where `P` holds the function promises not to panic, so that run proves every operation that could fail and rules out every call that uses `Panic`. |
+| A function that uses `Panic unless P` is compiled twice. A caller without `Panic` calls the copy that assumes `P`, whose checks are development-only. | A caller that proved `P` runs as fast as with a `requires`. The caller's capabilities pick the copy, so code generation reads no proof. |
+| `expect` uses `Panic unless self is Some(_)`. | Code that proves its value present calls `expect` without declaring `Panic`. |
+| A trait's method takes no condition on values. | Each `impl` would have to prove that the trait's condition implies its own, as a restated clause is proven, and no caller needs one yet. |
+| `when` takes no condition on values. | `requires P ==> Q` and `ensures P ==> Q` already say it. |
 | Every clause of a function and of a loop takes a condition. | A clause with a condition is proven through the body's loops and recursion, and their invariants and measures name the methods that the clause names: an `ensures` of `extend` that counts the elements `when Source: FiniteCursor` needs a loop `invariant` that names `remaining()`, and a recursion over a cursor needs `decreases source.remaining() when Source: FiniteCursor`. A call decides the condition of a `requires` by the `impl` lookup that decides every other clause's. |
 | A condition names a type parameter or `Self`, as a bound does. | A generic list bounds no associated type: only the trait that declares one bounds it, and `[Element, Items: Cursor[Element = Element]]` names one through a parameter. A condition on `Items.Element` would be a bound that no generic list can write. |
 | An associated capability set takes conditions, as `uses` does. | An adapter's `next` that pulls its source in a loop terminates where the source is a `FiniteCursor`. Without a condition the set says `RunForever`, and every caller of the adapter needs it. |

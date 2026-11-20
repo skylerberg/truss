@@ -87,7 +87,8 @@ let function_ ?(parameters = []) ?result ?(environment = []) locals blocks =
   { parameters; result; returns = true; environment; locals; blocks }
 
 let code_item name =
-  Lowered.Item.Code { path = definition name; instantiation = Ground.no_instantiation }
+  Lowered.Item.Code
+    { path = definition name; instantiation = Ground.no_instantiation; assumes_condition = false }
 
 let write builder (function_ : function_) =
   List.iter

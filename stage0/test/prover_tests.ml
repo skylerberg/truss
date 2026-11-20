@@ -270,6 +270,25 @@ let () =
         "prover.termination");
   Harness.test "a measure whose condition a supertrait gives is proven under the subtrait"
     (fun () -> expect_proven Fixtures.Prover.measure_proven_under_a_subtrait);
+  Harness.test "a caller without `Panic` proves a callee's condition on values" (fun () ->
+      expect_proven Fixtures.Prover.scaled_under_a_condition_on_its_argument;
+      Support.expect_error ~list_diagnostics Fixtures.Prover.scaled_without_a_proof_of_its_condition
+        ~code:(Prover Panic) ~at:"scaled(value)"
+        ~fixed:Fixtures.Prover.scaled_without_a_proof_of_its_condition_fixed
+        ~alternatives:[ Fixtures.Prover.scaled_without_a_proof_of_its_condition_panicking ]);
+  Harness.test "a function rules out every panic where its condition on values holds" (fun () ->
+      expect_not_proven Fixtures.Prover.crash_where_the_condition_holds "prover.panic";
+      expect_proven Fixtures.Prover.crash_where_the_condition_fails;
+      expect_not_proven Fixtures.Prover.operation_that_fails_where_the_condition_holds
+        "prover.overflow");
+  Harness.test "a caller that panics unless a condition proves its callee's where it holds"
+    (fun () ->
+      match list_codes Fixtures.Prover.condition_passed_on_to_a_callee with
+      | [ "prover.panic" ] -> ()
+      | codes -> Harness.fail "%s" (String.concat ", " codes));
+  Harness.test "expect needs no `Panic` where its value is proven present" (fun () ->
+      expect_proven Fixtures.Prover.expect_of_a_value_proven_present;
+      expect_not_proven Fixtures.Prover.expect_of_a_value_that_may_be_absent "prover.panic");
   Harness.test "a loop that counts up to its bound ends" (fun () ->
       expect_proven Fixtures.Prover.while_loop_counting_up);
   Harness.test "a for loop over a range knows its index is in range" (fun () ->

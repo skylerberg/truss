@@ -135,7 +135,12 @@ clause:
 
 capability_use:
   | capability_reference { () }
-  | capability_reference UNLESS condition { () }
+  | capability_reference UNLESS separated_nonempty_list(ANDAND, unless_atom) { () }
+
+unless_atom:
+  | UPPER COLON bound_list { () }
+  | SELF_TYPE COLON bound_list { () }
+  | comparison { () }
 
 when_opt:
   | { () }

@@ -27,6 +27,7 @@ let find_clauses (lookups : Lookups.t) path callee =
       {
         State.callee;
         parameters = contract.parameters;
+        panics_unless = contract.panics_unless;
         requires = contract.requires;
         ensures = contract.ensures;
         decreases = contract.decreases;
@@ -109,7 +110,7 @@ let make_contract ?trait_clauses (lookups : Lookups.t) path callee_clauses =
                 | Types.Built_in _ | Types.Capability _ | Types.Capability_projection _
                 | Types.Capability_variable _ | Types.Capability_error _ ->
                     true
-                | Types.Capability_unless _ ->
+                | Types.Capability_unless _ | Types.Capability_unless_values _ ->
                     Compiler_bug.raise_bug ~stage:"Prover" "a capability's base has a condition")
               signature.uses))
         && List.for_all

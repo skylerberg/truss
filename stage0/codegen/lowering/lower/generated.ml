@@ -70,7 +70,7 @@ let build_entry context (item : Lowered.Item.t) (impl_method : Lowered.Item.impl
       (Types.extract_result_type capability_signature.output)
   in
   Targets.lower_item_call state
-    (Code { path; instantiation = { Ground.no_instantiation with type_arguments } })
+    (Lowered.Item.make_code path { Ground.no_instantiation with type_arguments })
     ~signature:method_signature ~substitution
     ~arguments:
       ((self_mode, self_ty, { Lowered.root = Local implementation; projections = [ Deref ] })
@@ -224,7 +224,7 @@ let build_real_implementation (state : Lowering.state) ~user capability =
               (Types.show for_type) (Path.show capability)
       in
       Targets.lower_item_call state
-        (Code { path = default; instantiation = Ground.no_instantiation })
+        (Lowered.Item.make_code default Ground.no_instantiation)
         ~signature:(Definitions.read_signature state.context default)
         ~substitution:Types.no_substitution ~arguments:[] ~destination:value ~site:None ();
       Address { place = value; writable = true }
@@ -303,7 +303,7 @@ let build_program_main context (item : Lowered.Item.t) main_path : Emit_c.fragme
                ~length:(Copy (Lowered.make_local_place length)) ));
       let text = Lowering.allocate_temporary state string_ty in
       Targets.lower_item_call state
-        (Code { path = text_copied_from; instantiation = Ground.no_instantiation })
+        (Lowered.Item.make_code text_copied_from Ground.no_instantiation)
         ~signature:(Definitions.read_signature context text_copied_from)
         ~substitution:Types.no_substitution
         ~arguments:[ (Read, view_ty, view) ]
@@ -323,7 +323,7 @@ let build_program_main context (item : Lowered.Item.t) main_path : Emit_c.fragme
   in
   let exit = Lowering.allocate_temporary state exit_ty in
   Targets.lower_item_call state
-    (Code { path = main_path; instantiation = Ground.no_instantiation })
+    (Lowered.Item.make_code main_path Ground.no_instantiation)
     ~signature ~substitution:Types.no_substitution
     ~arguments:[ (list_mode, list_ty, list) ]
     ~destination:exit ~site:None ();
@@ -347,7 +347,7 @@ let build_test_main context (item : Lowered.Item.t) test_path : Emit_c.fragment 
     list_real_implementations state ~user:(Path.show test_path)
       (Definitions.list_evidence state.context Types.no_substitution signature.uses);
   Targets.lower_item_call state
-    (Code { path = test_path; instantiation = Ground.no_instantiation })
+    (Lowered.Item.make_code test_path Ground.no_instantiation)
     ~signature ~substitution:Types.no_substitution ~arguments:[]
     ~destination:
       (choose_result_place state
@@ -373,7 +373,7 @@ let build_adapter context (item : Lowered.Item.t) ~(function_ : Path.t) ~instant
   Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
   Lowering.look_up_capabilities state ~table:(Copy (Lowered.make_local_place capabilities)) ty.uses;
   Targets.lower_item_call state
-    (Code { path = function_; instantiation })
+    (Lowered.Item.make_code function_ instantiation)
     ~signature ~substitution
     ~arguments:(List.map (fun ((_, place), mode, ty) -> (mode, ty, place)) parameter_places)
     ~destination:(choose_result_place state ty.result)
@@ -434,7 +434,7 @@ let build_any_entry context (item : Lowered.Item.t) (impl_method : Lowered.Item.
     | Lends _, None -> Lowering.allocate_temporary state (Ground.make_builtin Unit)
   in
   Targets.lower_item_call state
-    (Code { path; instantiation = { Ground.no_instantiation with type_arguments } })
+    (Lowered.Item.make_code path { Ground.no_instantiation with type_arguments })
     ~signature:method_signature ~substitution
     ~arguments:
       ((self_mode, self_ty, { Lowered.root = Local typed; projections = [ Deref ] })

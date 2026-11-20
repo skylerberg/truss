@@ -177,6 +177,7 @@ module Code : sig
     | Restated_method_body
     | Restated_method_clause
     | Decided_condition
+    | Misplaced_value_condition
     | Trait_cycle
     | Recursion_limit
     | Missing_member
@@ -235,6 +236,7 @@ module Code : sig
     | Ensures
     | Invariant
     | Termination
+    | Panic
     | Assertion
     | Law
     | Cost

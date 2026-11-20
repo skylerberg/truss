@@ -86,7 +86,12 @@ let check_clauses state env ~uses (clauses : Syntax.clause list) =
           | Cost cost ->
               Clauses.check_cost state env cost;
               if cost.resource = Metric Time then Clauses.check_time_terminates state clause ~uses
-          | Uses _ | Clause_error -> ()))
+          | Uses uses ->
+              List.iter
+                (fun (use : Syntax.capability_use) ->
+                  List.iter (Clauses.check_condition state env) use.unless_values)
+                uses
+          | Clause_error -> ()))
     clauses
 
 let check_function_type_requires state env (written : Syntax.parameter list)
@@ -188,7 +193,19 @@ let build_core_contract state (clauses : Syntax.clause list) : Core.contract =
         | Cost cost -> Some (fun () -> [ Form.build_cost state ~origin:clause.id cost ])
         | _ -> None)
   in
-  { requires; ensures; decreases; costs }
+  let panics_unless =
+    List.concat_map
+      (fun (clause : Syntax.clause) ->
+        match clause.kind with
+        | Uses uses ->
+            List.concat_map
+              (fun (use : Syntax.capability_use) ->
+                List.map (State.build_expression state) use.unless_values)
+              uses
+        | Requires _ | Ensures _ | Decreases _ | Cost _ | Clause_error -> [])
+      clauses
+  in
+  { panics_unless; requires; ensures; decreases; costs }
 
 let build_core_parameters state (written : Syntax.parameter list) (signature : Types.signature) :
     Core.parameter list =

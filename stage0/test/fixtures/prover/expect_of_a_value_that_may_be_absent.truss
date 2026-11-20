@@ -1,0 +1,3 @@
+fn first(values: List[Int64]) -> Int64 {
+  values.first().expect("the list is not empty")
+}

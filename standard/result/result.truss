@@ -122,7 +122,7 @@ public fn Result[Value, Error].unwrap_or_else(
 }
 
 public fn Result[Value, Error].expect(own self, message: StringSlice) -> Value
-  uses Panic
+  uses Panic unless self is Ok(_)
   ensures self is Ok(held) && identical(result, held)
   cost time O(1)
 {

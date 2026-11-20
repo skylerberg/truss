@@ -1,0 +1,16 @@
+fn scaled(count: Int64) -> Int64
+  uses Panic unless Int64.minimum <= count * 1000 && count * 1000 <= Int64.maximum
+  ensures result == count * 1000
+{
+  count * 1000
+}
+
+fn five_thousand() -> Int64 {
+  scaled(5)
+}
+
+fn scaled_or_panic(count: Int64) -> Int64
+  uses Panic
+{
+  scaled(count)
+}

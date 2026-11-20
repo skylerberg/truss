@@ -125,7 +125,7 @@ let lower_call_evaluation context ~function_ ~arguments : Emit_c.fragment =
       in
       let result = Lowering.allocate_temporary state result_ty in
       Targets.lower_item_call state
-        (Code { path = function_; instantiation = Ground.no_instantiation })
+        (Lowered.Item.make_code function_ Ground.no_instantiation)
         ~signature ~substitution:Types.no_substitution ~arguments:passed ~destination:result
         ~site:None ();
       let output = Targets.begin_output state in
@@ -135,9 +135,14 @@ let lower_call_evaluation context ~function_ ~arguments : Emit_c.fragment =
       Constants.write_output state output);
   Lowering.finish_item state ~rest:[] ()
 
-let lower_source_code context ~path ~instantiation : Emit_c.fragment =
-  let item = Lowered.Item.Code { path; instantiation } in
+let lower_source_code context ~path ~instantiation ~assumes_condition : Emit_c.fragment =
+  let item = Lowered.Item.Code { path; instantiation; assumes_condition } in
   let code = Definitions.make_code context path instantiation in
+  let code =
+    if assumes_condition then
+      { code with uses = Definitions.remove_panic_condition code.uses; assumes_condition }
+    else code
+  in
   let body = (Mir_places.read_mir_graph context path).body in
   let state = Lowering.enter_item context ~item code in
   let convention, returns = Definitions.classify_result context code.substitution code.result in
