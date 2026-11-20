@@ -744,6 +744,10 @@ let () =
         ^ Fixtures.Prover.pair_first_kept_through_a_lent_constructor));
   Harness.test "a caller's mutation of a part lent `mut` is its `final(result)`" (fun () ->
       expect_proven Fixtures.Prover.cell_part_lent_mut);
+  Harness.test
+    "a part lent `mut` to a `match` is written back before an arm that binds no name assigns the \
+     lender" (fun () ->
+      expect_proven Fixtures.Prover.cell_assigned_by_an_arm_after_lending_its_part_mut);
   Harness.test "a lending method that lends a part it does not promise" (fun () ->
       expect_not_proven Fixtures.Prover.couple_larger_lending_first "prover.ensures");
   Harness.test "a loop over a user's collection gets the facts of its `count` and its `element`"

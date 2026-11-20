@@ -1,0 +1,8 @@
+fn show(text: String) {}
+
+fn f(names: Map[Int64, String], id: Int64) {
+  match id {
+    0 if names.get(id) is Some(name) => show(name)
+    _ => show("other")
+  }
+}

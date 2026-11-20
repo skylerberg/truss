@@ -1,0 +1,6 @@
+fn f(counts: mut Map[String, Int64], word: String) {
+  match counts.get(word) {
+    Some(count) => counts[word.copy()] = count.saturating_add(1)
+    None => counts[word.copy()] = 1
+  }
+}

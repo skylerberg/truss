@@ -76,6 +76,17 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
           in
           let self_type = interface.for_type in
           let list_bounds = Types.list_bounds interface.impl_generics in
+          let make_binding type_ ~is_var ~mode local =
+            pattern type_
+              (Bind
+                 {
+                   local;
+                   is_var;
+                   mode;
+                   may_alias =
+                     Interface.Impls.binding_may_alias lookups.interface ~list_bounds mode type_;
+                 })
+          in
           let result =
             match signature.output with
             | Returns type_ -> type_
@@ -204,7 +215,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                      List.map
                        (fun ((field : Types.field), local) ->
                          ( field.field_name,
-                           pattern field.field_type (Bind { local; is_var = false; mode = Read }) ))
+                           make_binding field.field_type ~is_var:false ~mode:Read local ))
                        bound;
                  })
           in
@@ -363,8 +374,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                              }))
                                        (make_giving_block (compare_in_turn rest rest_of_theirs));
                                      arm
-                                       (pattern result
-                                          (Bind { local = decided; is_var = false; mode = Own }))
+                                       (make_binding result ~is_var:false ~mode:Own decided)
                                        (make_giving_block
                                           (node result
                                              (Use
@@ -413,7 +423,6 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                     });
                              then_ = make_giving_block (make_ordering Ordering_less);
                              else_ = Some (make_giving_block (make_ordering Ordering_greater));
-                             binds_lent_part = false;
                            })
                     in
                     let compared =
@@ -432,9 +441,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                           statement
                             (Let
                                {
-                                 pattern =
-                                   pattern number
-                                     (Bind { local = theirs; is_var = false; mode = Own });
+                                 pattern = make_binding number ~is_var:false ~mode:Own theirs;
                                  value = Operands.build Own numbered;
                                  else_ = None;
                                });
@@ -545,9 +552,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                        fields =
                                          [
                                            ( Well_known.show_field Result_ok_value,
-                                             pattern ok
-                                               (Bind { local = value; is_var = false; mode = Own })
-                                           );
+                                             make_binding ok ~is_var:false ~mode:Own value );
                                          ];
                                      }))
                                (make_giving_block
@@ -560,8 +565,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                        fields =
                                          [
                                            ( Well_known.show_field Result_err_error,
-                                             pattern error_type
-                                               (Bind { local = error; is_var = false; mode = Own })
+                                             make_binding error_type ~is_var:false ~mode:Own error
                                            );
                                          ];
                                      }))
@@ -686,14 +690,13 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                then_ =
                                  { statements = [ statement (Evaluate refused) ]; value = None };
                                else_ = None;
-                               binds_lent_part = false;
                              })))
                 in
                 let bind_local local type_ ~is_var value =
                   statement
                     (Let
                        {
-                         pattern = pattern type_ (Bind { local; is_var; mode = Own });
+                         pattern = make_binding type_ ~is_var ~mode:Own local;
                          value = Operands.build Own value;
                          else_ = None;
                        })
@@ -768,13 +771,8 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                                    fields =
                                                      [
                                                        ( Well_known.show_field Option_some_value,
-                                                         pattern field.field_type
-                                                           (Bind
-                                                              {
-                                                                local = present;
-                                                                is_var = false;
-                                                                mode = Own;
-                                                              }) );
+                                                         make_binding field.field_type ~is_var:false
+                                                           ~mode:Own present );
                                                      ];
                                                  }))
                                            {

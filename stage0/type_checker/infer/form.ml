@@ -35,9 +35,6 @@ let make_synthetic_expression form ~origin type_ kind : Core.expression =
 let make_pattern form ~origin type_ kind : Core.pattern =
   { id = allocate_node_id form; origin; type_; kind }
 
-let make_binding form ~origin ~is_var ~mode type_ local =
-  make_pattern form ~origin type_ (Bind { local; is_var; mode })
-
 let make_statement form ~origin kind : Core.statement = { id = allocate_node_id form; origin; kind }
 
 let make_local_use form ~origin type_ local =
@@ -99,8 +96,13 @@ let make_call form ~callee ~arguments ~lends =
 let is_plain form type_ =
   Interface.Impls.is_plain form.lookups.interface ~list_bounds:(list_bounds form) type_
 
-let is_view form type_ =
-  Interface.Impls.is_view form.lookups.interface ~list_bounds:(list_bounds form) type_
+let binding_may_alias form mode type_ =
+  Interface.Impls.binding_may_alias form.lookups.interface ~list_bounds:(list_bounds form) mode
+    type_
+
+let make_binding form ~origin ~is_var ~mode type_ local =
+  make_pattern form ~origin type_
+    (Bind { local; is_var; mode; may_alias = binding_may_alias form mode type_ })
 
 let is_within form type_ set =
   match
@@ -427,25 +429,6 @@ let convert_to_operation : Syntax.operation -> Intrinsic.scalar = function
   | Shift Shift_left -> Shift_left
   | Shift Shift_right -> Shift_right
 
-let binds_lent_part form (condition : Core.expression) =
-  let may_alias (pattern : Core.pattern) =
-    match pattern.kind with
-    | Bind { mode = Mut; _ } -> true
-    | Bind { mode = Read | Own; _ } ->
-        is_view form pattern.type_ || not (is_plain form pattern.type_)
-    | Wildcard | Variant _ | Record _ | Alternatives _ | Literal _ | Range _ | Equal_to _ -> false
-  in
-  let is_lent (place : Core.place) = match place with Lent _ -> true | _ -> false in
-  let found_lend = ref false and found_alias = ref false in
-  Core_walk.walk_expression
-    {
-      Core_walk.ignore_all with
-      place = (fun place -> if is_lent place then found_lend := true);
-      pattern = (fun pattern -> if may_alias pattern then found_alias := true);
-    }
-    condition;
-  !found_lend && !found_alias
-
 let is_executable form (condition : Core.expression) =
   let executable = ref true in
   let is_specification_only (callee : Core.callee) =
@@ -487,14 +470,13 @@ let rec lend_statements form (mode : Language.Mode.t) (value : Core.expression) 
     make_statements (Evaluate { value with type_; kind })
   in
   match value.kind with
-  | If { condition; then_; else_ = Some else_; binds_lent_part } ->
+  | If { condition; then_; else_ = Some else_ } ->
       make_branching
         (If
            {
              condition;
              then_ = lend_block form mode then_;
              else_ = Some (lend_block form mode else_);
-             binds_lent_part;
            })
   | Match { scrutinees; arms } ->
       make_branching
@@ -831,7 +813,6 @@ and build_kind form env (value : Syntax.expression) : Core.kind =
                     let branch = build_expression form env branch in
                     { Core.statements = []; value = Some branch })
               else_;
-          binds_lent_part = binds_lent_part form condition;
         }
   | Match { scrutinees; arms } ->
       let scrutinees =
@@ -1704,13 +1685,7 @@ and build_statement_kind form env (written : Syntax.statement) : Core.statement_
   | While { condition = test; clauses; body } ->
       let condition = build_expression form env test in
       let clauses = build_loop_clauses form env clauses in
-      While
-        {
-          condition;
-          clauses;
-          body = build_block form env body;
-          binds_lent_part = binds_lent_part form condition;
-        }
+      While { condition; clauses; body = build_block form env body }
   | Parallel body ->
       let branches = List.map (build_statement form env) body.statements in
       Parallel branches
@@ -1745,14 +1720,25 @@ and build_pattern form (written : Syntax.pattern) : Core.pattern =
     let id = allocate_node_id form in
     match form.tables.scrutinee_types.(written.id) with
     | Some type_ ->
-        { Core.id; origin = Written written.id; type_; kind = build_pattern_kind form written }
+        {
+          Core.id;
+          origin = Written written.id;
+          type_;
+          kind = build_pattern_kind form type_ written;
+        }
     | None -> raise_bug "`%s` has a node and no type" (quote form written.id)
 
-and build_pattern_kind form (written : Syntax.pattern) : Core.pattern_kind =
+and build_pattern_kind form type_ (written : Syntax.pattern) : Core.pattern_kind =
   match (written.kind, form.tables.patterns.(written.id)) with
   | (Wildcard | Pattern_error), _ -> Wildcard
   | Binding bound, Some (Binding_pattern { local; is_var; mode }) ->
-      Bind { local = Declared { origin = local; name = bound.text }; is_var; mode }
+      Bind
+        {
+          local = Declared { origin = local; name = bound.text };
+          is_var;
+          mode;
+          may_alias = binding_may_alias form mode type_;
+        }
   | Qualified_constant _, Some (Constant_pattern constant) ->
       build_constant_pattern form written.id (Named_constant constant)
   | Literal literal, _ ->

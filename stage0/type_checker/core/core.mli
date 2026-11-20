@@ -93,7 +93,7 @@ and kind =
   | Matches of { value : operand; pattern : pattern }
   | Convert of { conversion : conversion; value : expression }
   | To_any of { value : expression; trait : Types.trait_reference; evidence : evidence }
-  | If of { condition : expression; then_ : block; else_ : block option; binds_lent_part : bool }
+  | If of { condition : expression; then_ : block; else_ : block option }
   | Match of { scrutinees : operand list; arms : arm list }
   | Block of block
   | Provide of { implementations : implementation list; body : block }
@@ -146,12 +146,7 @@ and statement_kind =
       body : block;
       mode : Language.Loop_mode.t;
     }
-  | While of {
-      condition : expression;
-      clauses : loop_clause conditional list;
-      body : block;
-      binds_lent_part : bool;
-    }
+  | While of { condition : expression; clauses : loop_clause conditional list; body : block }
   | Parallel of statement list
   | Concurrent of statement list
   | Proof of block
@@ -181,7 +176,7 @@ and pattern = { id : id; origin : origin; type_ : Types.ty; kind : pattern_kind 
 
 and pattern_kind =
   | Wildcard
-  | Bind of { local : local; is_var : bool; mode : Language.Mode.t }
+  | Bind of { local : local; is_var : bool; mode : Language.Mode.t; may_alias : bool }
   | Variant of { variant : string; fields : (string * pattern) list }
   | Record of (string * pattern) list
   | Literal of pattern_constant
