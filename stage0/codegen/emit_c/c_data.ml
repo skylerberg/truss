@@ -35,29 +35,35 @@ let rec render_initializer (emission : Emission.t) ty (value : Lowered.static_va
     in
     Text "((" ++ key ++ Text " *)&" ++ name ++ Text ")"
   in
+  let render_buffer element elements =
+    let element_c = C_types.render_value_type emission.types element in
+    let count = List.length elements in
+    if count = 0 || Memory_layout.has_zero_size emission.types.env element then
+      fst (C_values.render_constant emission Storage.empty_buffer)
+    else begin
+      let values = List.filter_map (render_initializer emission element) elements in
+      let name =
+        Emission.add_static emission (fun name ->
+            render_static ~c_type:element_c ~name ~dimension:(Printf.sprintf "[%d]" count)
+              (C_text.render_braces values))
+      in
+      C_values.render_cast (element_c ++ Text " *") name
+    end
+  in
+  let render_sequence list_fields element elements =
+    Some
+      (C_text.render_braces
+         (List.map
+            (fun (field, value) -> Text (".f_" ^ field ^ " = ") ++ value)
+            (list_fields ~buffer:(render_buffer element elements)
+               ~length:(C_text.Text (string_of_int (List.length elements))))))
+  in
   match (layout.form, value) with
   | Zero_size, _ -> None
   | _, Static_storage { element; elements } ->
-      let element_c = C_types.render_value_type emission.types element in
-      let count = List.length elements in
-      let buffer =
-        if count = 0 || Memory_layout.has_zero_size emission.types.env element then
-          fst (C_values.render_constant emission Storage.empty_buffer)
-        else begin
-          let values = List.filter_map (render_initializer emission element) elements in
-          let name =
-            Emission.add_static emission (fun name ->
-                render_static ~c_type:element_c ~name ~dimension:(Printf.sprintf "[%d]" count)
-                  (C_text.render_braces values))
-          in
-          C_values.render_cast (element_c ++ Text " *") name
-        end
-      in
-      Some
-        (C_text.render_braces
-           (List.map
-              (fun (field, value) -> Text (".f_" ^ field ^ " = ") ++ value)
-              (Storage.list_borrowed_fields ~buffer ~length:(Text (string_of_int count)))))
+      render_sequence Storage.list_borrowed_fields element elements
+  | _, Static_view { element; elements } ->
+      render_sequence Storage.list_view_fields element elements
   | Scalar _, Static_scalar constant -> Some (fst (C_values.render_constant emission constant))
   | Struct fields, Static_record values ->
       Some (C_text.render_braces (render_fields fields values ""))
