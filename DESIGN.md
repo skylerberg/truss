@@ -1,21 +1,17 @@
-# Truss Design Decisions
+# Truss Current Design
 
 Truss is a language for a time when LLMs write code faster than tools can
 build, test, and verify it. Development time then goes to builds, test
 suites, bugs, conflicts between agents, and security problems. Truss is
 designed to make each of those cheap ([GOALS.md](GOALS.md)).
 
-This document gives the reasons for the design.
-[SPECIFICATION.md](SPECIFICATION.md) states the rules of the language, and
-[PACKAGES.md](PACKAGES.md) the rules of packages.
-
 ## Overview
 
 Three decisions shape the rest of the design.
 
-**Every definition is checked alone, against the signatures it names.** A
-signature carries the types, the capabilities, the contract, and the cost of
-a function, and the compiler proves that the body meets them:
+**The signature is enough to meaningfully review the code.** A signature carries
+the types, the capabilities, the contract, and the cost of a function, and the
+compiler proves that the body meets them:
 
 ```truss
 public fn binary_search(sorted: Slice[Int64], target: Int64) -> Option[UInt64]
@@ -28,13 +24,11 @@ public fn binary_search(sorted: Slice[Int64], target: Int64) -> Option[UInt64]
   cost allocations == 0
 ```
 
-This signature has no `uses` clause, so the function is pure. A caller's
-types and proofs depend on the signature and never on the body. A reviewer
-therefore reads signatures instead of bodies, and an edit to a body
-invalidates no caller. The cost is that a signature must state every effect
-and every failure of a call: an operation that can fail is a proof
-obligation or a declared `Panic`, and there is no `assume`. See
-[Proofs](#proofs).
+This signature has no `uses` clause, so the function is pure. A caller's types
+and proofs depend on the signature and never on the body. A reviewer therefore
+reads signatures instead of bodies. The cost is that a signature must state
+every effect and every failure of a call: an operation that can fail is a proof
+obligation or a declared `Panic`. See [Proofs](#proofs).
 
 **No two names alias a value that either can mutate.** This is mutable value
 semantics. A call can then mutate only its `mut` arguments and the state behind
@@ -43,12 +37,10 @@ value is freed when its owner's scope ends. The cost is that a reference cannot
 be stored. Views, lending methods, and cursors do the jobs of stored references.
 See [Values and ownership](#values-and-ownership).
 
-**Effects are capabilities.** A function that acts outside pure computation
-lists the capabilities it `uses`, and its caller provides their
-implementations. A test provides fakes, so its result is deterministic and
-is cached until the code it runs changes. A dependency has only the effects
-that its signatures and its grant allow. The cost is a `uses` clause on
-every function that has an effect. See [Capabilities](#capabilities).
+**Effects are capabilities.** A non-pure function must list the capabilities it
+`uses`. Its caller provides the capability implementations. A test provides
+fakes, so its result is deterministic and is cached until the code it runs
+changes. See [Capabilities](#capabilities).
 
 These reasons recur. A later section cites one by name instead of restating
 it:
@@ -627,9 +619,10 @@ not.
 | Structural recursion needs no annotation, and other recursion states `decreases`. | Lean accepts structural recursion in the same way. Dafny infers a measure. A structural check with an explicit clause is more predictable than an inference that may fail. |
 | A recursion through supplied code is rejected. | A generic callee is checked once, for every type argument, so it cannot know the code that it is given, and a call through a bound passes the supplier no arguments to compare with a measure. |
 | A recursion through a method that an `impl` derives or inherits is rejected. | A derived method is generated, and an inherited method is the trait's provided body, which is checked once for every `impl`. Neither states a measure for the `impl`, so a caller on the cycle has nothing to compare, and accepting the call would assume that the cycle ends. A method written in the `impl` states the measure. The alternative is to check each provided body again for each `impl` that inherits it, which proves the same code once per `impl` and gives a trait's author errors in code that the author did not write. |
-| A `while` loop whose condition compares two sides with `<`, `<=`, `>`, or `>=` has the distance between them as its default measure, and a `for` loop over a `FiniteCursor` has the cursor's `remaining()`. | Most loops count toward a bound that their condition names, so `decreases high - low` would only repeat the condition. The default is one measure read from the loop's own code, never chosen by a search among candidates, so a reader knows the measure that the proof uses. Dafny takes the same default for a loop. A cursor's `remaining()` states its measure once, in its `impl` of `FiniteCursor`, for every loop over it. |
+| A `while` loop whose condition compares two sides with `<`, `<=`, `>`, or `>=`, or begins a chain of `&&` with such a comparison, has the distance between them as its default measure, and a `for` loop over a `FiniteCursor` has the cursor's `remaining()`. | Most loops count toward a bound that their condition names, so `decreases high - low` would only repeat the condition. The comparison that begins a chain of `&&` is the bounds check that guards the rest, as in `at < text.length() && text.byte(at) == 32`. Dafny takes the same default for a loop. A cursor's `remaining()` states its measure once, in its `impl` of `FiniteCursor`, for every loop over it. |
 | A written measure holds in every function, including one that uses `RunForever`. | A reader takes a written `decreases` as a fact. If `RunForever` switched measures off, a function that declares it for one loop would leave the measures of its other loops unchecked. A cursor's `remaining()` is written too, in its `impl` of `FiniteCursor`, and no loop body can change the cursor. |
 | A `while` loop's default measure and structural recursion are checked only in a function without `RunForever`. | Both are inferred from code that may not be meant to end. A loop that draws samples until it has accepted enough, as `sample_ntt` does, compares toward a bound that an iteration may not approach. |
+| A declared `RunForever` is a warning only where removing it leaves nothing new to prove: no loop in the function takes its default measure, and no recursion reaches it. | Removing it would check that measure or that recursion, and either may not hold, as in `sample_ntt`. A warning cannot be silenced, so a warning whose fix fails the proof would stay. |
 | A loop without a measure uses `RunForever`. | The capability check then covers the loop in every body, as it covers a call. A lambda's loop needs no rule of its own: the lambda's capabilities are inferred from its body. |
 | Nothing implements `RunForever`. | A `provide` of it would let a function that does not declare `RunForever` run forever. |
 | A function that uses `RunForever` has no `time` clause, and one that uses `RunForever unless C` states its `time` clause `when` a condition that implies `C`. | A written clause holds, and the time of a function that may run forever has no bound. Where `C` holds, the function terminates, and its time has a bound. |
@@ -1156,7 +1149,7 @@ added clauses are between an `impl` and its trait.
 | Each `impl` proves a restated method's added clauses from the contract of its type's method, not from the method's body. | Laws are proven the same way, and proofs stay modular. A release may change a body within its contract ([Versions](#versions)), so a proof that read another package's body could break with a compatible release. A generic `impl` whose method promises more under a stronger bound says so with a condition: `Skip`'s `next` ensures that `remaining()` decreases `when Source: FiniteCursor`. |
 | A restated method adds only `ensures` and `cost`, and has no body. | A caller through the required trait keeps every obligation it had. A weaker `requires` cannot be proven from a contract, which states the `impl`'s own `requires`, and a body would give one method two implementations. |
 | A trait can require other traits. | A law can then span traits. `Ordered` requires `Equal`, so its law `agrees_with_equal` states that `compare` returns `Ordering.Equal` exactly when `==` holds. |
-| `Hash` has no law relating it to `Equal`. | A law is a specification, and a specification cannot call `hash`, which mutates its `Hasher`. Stating the law would take a `hash` that returns its hash, which gives up a keyed hasher provided through a capability, or a specification form for the state a mutating call leaves. A derived `Hash` agrees with a derived `Equal` by construction. |
+| `Hash.hash` returns the `Hasher` it is given, updated. | A specification cannot call a function with a `mut` parameter, so only a `hash` that returns its result can appear in the law `agrees_with_equal`: equal values hash alike. A hash map proves from that law that a lookup finds an equal key. A derived `Hash` satisfies the law by construction. |
 | A type has one `impl` of each trait. | Two traits that both require `Equal` share that `impl`, so there is no diamond problem. |
 | An `impl`'s method has its trait's signature, which the `impl` restates. | The body of the method and every call of it are checked against the same types. A method with a signature of its own would have a body checked against types that no call is checked against. |
 

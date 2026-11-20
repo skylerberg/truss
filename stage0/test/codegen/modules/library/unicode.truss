@@ -71,6 +71,11 @@ test "normalize orders combining marks by their class" {
   assert unicode::normalize("\u{301}a") == "\u{301}a"
 }
 
+test "normalize keeps the order of marks of one class" {
+  assert unicode::normalize("a\u{301}\u{323}\u{300}", form: unicode::Form.Decomposed) == "a\u{323}\u{301}\u{300}"
+  assert unicode::normalize("a\u{300}\u{323}\u{301}", form: unicode::Form.Decomposed) == "a\u{323}\u{300}\u{301}"
+}
+
 test "normalize leaves a character that composition excludes decomposed" {
   assert unicode::normalize("\u{958}") == "\u{915}\u{93C}"
   assert unicode::normalize("\u{958}", form: unicode::Form.Decomposed) == "\u{915}\u{93C}"

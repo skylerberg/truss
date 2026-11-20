@@ -82,14 +82,15 @@ let rec check_function_value_call state env (value : Syntax.expression) (callee 
       | error :: _ -> error
       | [] ->
           let result = function_type.output in
-          state.tables.calls.(value.id) <-
-            Some
-              {
-                callee = Indirect;
-                arguments = checked;
-                omitted_defaults = [];
-                callee_result = result;
-              };
+          State.elaborate state value.id
+            (Call
+               {
+                 callee = Indirect;
+                 arguments = checked;
+                 omitted_defaults = [];
+                 callee_result = result;
+                 lends = None;
+               });
           result)
   | Types.Error _ | Types.Hole -> check_arguments_alone state env arguments callee_type
   | _ ->
@@ -447,14 +448,15 @@ and construct state env ?expected ?type_arguments (value : Syntax.expression) ty
       with
       | Error error, _ | Ok _, Some error -> error
       | Ok (checked, left_out), None ->
-          state.tables.calls.(value.id) <-
-            Some
-              {
-                callee = Constructor { type_ = type_path; variant; type_arguments };
-                arguments = checked;
-                omitted_defaults = left_out;
-                callee_result = type_;
-              };
+          State.elaborate state value.id
+            (Call
+               {
+                 callee = Constructor { type_ = type_path; variant; type_arguments };
+                 arguments = checked;
+                 omitted_defaults = left_out;
+                 callee_result = type_;
+                 lends = None;
+               });
           type_)
 
 and find_record_fields state span type_ =
@@ -504,8 +506,12 @@ and check_record_update state env (value : Syntax.expression) (base : Syntax.exp
         match update.kind with Update { path; value } -> Some (path, value) | Update_error -> None)
       updates
   in
-  state.tables.update_paths.(value.id) <-
-    Some (check_updates state env value ~at:(State.read_span state value.id) base_type written);
+  State.elaborate state value.id
+    (Record_update
+       {
+         paths =
+           check_updates state env value ~at:(State.read_span state value.id) base_type written;
+       });
   base_type
 
 and check_updates state env (value : Syntax.expression) ~at record_type

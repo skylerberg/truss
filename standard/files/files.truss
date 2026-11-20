@@ -470,6 +470,7 @@ public fn Path.relative_to(self, base: Path) -> Option[Path]
 impl Equal for Path {
   fn equal(self, other: Path) -> Bool
     ensures result == (self.text == other.text)
+    cost time O(other.text.length())
     cost allocations == 0
   {
     self.text == other.text
@@ -479,6 +480,7 @@ impl Equal for Path {
 impl Ordered for Path {
   fn compare(self, other: Path) -> Ordering
     ensures result == (self.text.compare(other.text))
+    cost time O(self.text.length())
     cost allocations == 0
   {
     self.text.compare(other.text)
@@ -486,10 +488,12 @@ impl Ordered for Path {
 }
 
 impl Hash for Path {
-  fn hash(self, hasher: mut Hasher)
+  fn hash(self, hasher: Hasher) -> Hasher
+    ensures identical(result, self.text.hash(hasher))
+    cost time O(self.text.length())
     cost allocations == 0
   {
-    self.text.hash(mut hasher)
+    self.text.hash(hasher)
   }
 }
 

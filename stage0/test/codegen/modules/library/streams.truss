@@ -143,6 +143,35 @@ test "a buffered reader reads up to a byte, peeks at the next bytes, and returns
   }
 }
 
+test "a byte queue gives its bytes back in the order they arrived" {
+  var queue: streams::ByteQueue = []
+  assert queue.is_empty()
+  mut queue.append("abcdef".bytes())
+  assert mut queue.take(2) == "ab".bytes()
+  mut queue.skip(1)
+  assert queue.bytes() == "def".bytes()
+  mut queue.append("gh".bytes())
+  assert queue.bytes() == "defgh".bytes()
+  mut queue.append_list("ij".to_bytes())
+  assert mut queue.take_all() == "defghij".bytes()
+  assert queue.is_empty()
+  mut queue.append_list("kl".to_bytes())
+  assert queue.length() == 2
+  mut queue.clear()
+  assert queue.is_empty()
+}
+
+test "a byte queue reads from a reader after the bytes it still holds" uses RunForever {
+  provide streams::NoHandles() {
+    var source = drip("0123456789", step: 4)
+    var queue: streams::ByteQueue = []
+    assert mut queue.read_from(mut source, limit: 3) == Ok(3)
+    mut queue.skip(2)
+    assert mut queue.read_from(mut source, limit: 10) == Ok(4)
+    assert queue.bytes() == "23456".bytes()
+  }
+}
+
 test "a buffered writer holds bytes until it has no more room, or is flushed" {
   provide streams::NoHandles() {
     var writer = streams::BufferedWriter.new(Trickle(received: [], step: 100), capacity: 4)

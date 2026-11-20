@@ -735,6 +735,24 @@ let () =
       let status = run_quietly [ "check"; "-C"; root; "--fix" ] in
       if status <> 0 then fail "status %d" status;
       if not (String.includes ~affix:"let _ = value" (read root "main.truss")) then
+        fail "wrote %s" (read root "main.truss"));
+  test "check's summary counts the diagnostics that --fix fixes" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.Cli.twice_with_one_fix) ] in
+      let _, output = run_truss [ "check"; "-C"; root ] in
+      if not (String.includes ~affix:"1 error. `truss check --fix` fixes it." output) then
+        fail "%s" output);
+  test "check's summary does not count a prover error's fix, which --fix does not apply" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.Cli.next_count) ] in
+      let _, output = run_truss [ "check"; "-C"; root ] in
+      if String.includes ~affix:"`truss check --fix`" output then fail "%s" output);
+  test "check --fix removes each RunForever that nothing uses, a callee before its caller"
+    (fun () ->
+      let root =
+        make_package [ ("main.truss", Fixtures.Cli.run_forever_through_a_chain_of_calls) ]
+      in
+      let status = run_quietly [ "check"; "-C"; root; "--fix" ] in
+      if status <> 0 then fail "status %d" status;
+      if String.includes ~affix:"RunForever" (read root "main.truss") then
         fail "wrote %s" (read root "main.truss"))
 
 let () =

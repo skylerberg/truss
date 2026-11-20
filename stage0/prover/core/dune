@@ -11,9 +11,10 @@
   path
   well_known
   types
-  core
-  resolve
   syntax
+  core
+  core_walk
+  resolve
   interface
   diagnostic
   mir

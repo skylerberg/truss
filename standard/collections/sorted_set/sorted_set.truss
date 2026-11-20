@@ -1,4 +1,5 @@
 use standard::collections
+use standard::core
 use standard::intrinsic
 use standard::list
 use standard::map
@@ -124,26 +125,48 @@ fn collections::SortedSet[Element: Ordered].index_after(self, element: Element) 
   }
 }
 
-type Numbered[Element](element: Element, ordinal: UInt64)
-
-fn set_of[Element: Ordered](elements: own List[Element]) -> collections::SortedSet[Element]
+theorem ascending_after_larger[Element: Ordered](elements: Sequence[Element], element: Element)
+  requires strictly_ascending(elements)
+  requires elements.length() == 0 || elements[elements.length() - 1] < element
+  ensures strictly_ascending(elements.append(element))
 {
-  var numbered: List[Numbered[Element]] = List.with_capacity(elements.length())
-  for element in own elements {
-    let ordinal = numbered.length()
-    mut numbered.push(Numbered(element: own element, ordinal: ordinal))
+  assert forall i in 0..elements.length() => {
+    if i + 1 < elements.length() {
+      core::less_is_transitive(elements[i], second: elements[elements.length() - 1], third: element)
+    }
+    elements[i] < element
   }
-  mut numbered.sort_by(fn(first, second) {
-    let order = first.element.compare(second.element)
-    if order == Ordering.Equal { first.ordinal.compare(second.ordinal) } else { order }
-  })
-  var set: collections::SortedSet[Element] = []
-  for item in own numbered
-    invariant strictly_ascending(set.elements.model())
+}
+
+fn ordered_elements[Element: Ordered](elements: own List[Element]) -> List[Element]
+  ensures strictly_ascending(result.model())
+  ensures result.length() <= elements.length()
+  cost time O(elements.length() * (1 + log(elements.length())) * (1 + time(Element.compare)))
+{
+  let count = elements.length()
+  var numbered: List[collections::Numbered[Element, Unit]] = List.with_capacity(count)
+  for element in own elements
+    invariant numbered.length() == visited.length()
+    cost time O(visited.length())
   {
-    mut set.insert(own item.element)
+    let ordinal = numbered.length()
+    mut numbered.push(collections::Numbered(key: own element, ordinal: ordinal, value: Unit))
   }
-  set
+  let sorted = collections::sorted_by_key(own numbered)
+  var ascending: List[Element] = List.with_capacity(count)
+  for item in own sorted
+    invariant strictly_ascending(ascending.model())
+    invariant ascending.length() <= visited.length()
+    cost time O(visited.length() * (1 + time(Element.compare)))
+  {
+    if ascending.length() == 0 || ascending[ascending.length() - 1] < item.key {
+      proof {
+        ascending_after_larger(ascending.model(), element: item.key)
+      }
+      mut ascending.push(own item.key)
+    }
+  }
+  ascending
 }
 
 fn merged[Element: Ordered](first: own List[Element], second: own List[Element]) -> List[Element]
@@ -298,7 +321,7 @@ public fn collections::SortedSet[Element: Ordered].collect[Source: Cursor[Elemen
 ) -> collections::SortedSet[Element]
   uses Source.Uses, RunForever unless Source: FiniteCursor
 {
-  set_of(List.collect(own source))
+  collections::SortedSet(elements: ordered_elements(List.collect(own source)))
 }
 
 public fn collections::SortedSet[Element: Ordered].length(self) -> UInt64
@@ -451,7 +474,7 @@ public fn collections::SortedSet[Element: Ordered].at_or_after(self, element: El
 
 public fn collections::SortedSet[Element: Ordered].in_range(self, range: Range[Element]) -> Slice[Element]
   ensures forall i in 0..result.length() => range.contains(result.model()[i])
-  cost time O(self.length() + log(self.length()) * time(Element.compare))
+  cost time O(1 + log(self.length()) * time(Element.compare))
 {
   let first = self.index_at_or_after(range.start)
   let end = if range.inclusive { self.index_after(range.stop) } else { self.index_at_or_after(range.stop) }
@@ -493,12 +516,12 @@ public fn collections::SortedSet[Element: Ordered].extend[Source: Cursor[Element
 )
   uses Source.Uses, RunForever unless Source: FiniteCursor
 {
-  let added = set_of(List.collect(own elements))
+  let added = ordered_elements(List.collect(own elements))
   if self.elements.is_empty() {
-    self.elements = own added.elements
-  } else if !added.elements.is_empty() {
+    self.elements = own added
+  } else if !added.is_empty() {
     let current = map::exchange(mut self.elements, value: [])
-    self.elements = merged(own current, second: own added.elements)
+    self.elements = merged(own current, second: own added)
   }
 }
 
@@ -661,6 +684,7 @@ public fn collections::SortedSet[Element: Ordered].reversed(self) -> list::Rever
 impl Equal for collections::SortedSet[Element: Ordered] {
   fn equal(self, other: collections::SortedSet[Element]) -> Bool
     ensures result == (self.elements == other.elements)
+    cost time O(self.length() * time(Element.equal))
     cost allocations <= self.length() * allocations(Element.equal)
   {
     self.elements == other.elements
@@ -668,10 +692,12 @@ impl Equal for collections::SortedSet[Element: Ordered] {
 }
 
 impl Hash for collections::SortedSet[Element: Ordered + Hash] {
-  fn hash(self, hasher: mut Hasher)
+  fn hash(self, hasher: Hasher) -> Hasher
+    ensures identical(result, self.elements.hash(hasher))
+    cost time O(self.length() * time(Element.hash))
     cost allocations <= self.length() * allocations(Element.hash)
   {
-    self.elements.hash(mut hasher)
+    self.elements.hash(hasher)
   }
 }
 
@@ -686,17 +712,8 @@ impl FromElements for collections::SortedSet[Element: Ordered] {
 
   fn from_elements(elements: own List[Element]) -> collections::SortedSet[Element]
     ensures result.length() <= elements.length()
-    cost time O(elements.length() * (elements.length() + time(Element.compare)))
+    cost time O(elements.length() * (1 + log(elements.length())) * (1 + time(Element.compare)))
   {
-    let count = elements.length()
-    var set: collections::SortedSet[Element] = collections::SortedSet(elements: [])
-    for element in own elements
-      invariant strictly_ascending(set.elements.model())
-      invariant set.length() <= visited.length()
-      cost time O(visited.length() * (count + time(Element.compare)))
-    {
-      mut set.insert(own element)
-    }
-    set
+    collections::SortedSet(elements: ordered_elements(own elements))
   }
 }

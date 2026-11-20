@@ -326,7 +326,7 @@ fn recover_impl_line(cursor: mut TokenCursor, span: source::Span) -> MemberLine[
 }
 
 fn parse_capability_line(cursor: mut TokenCursor) -> Result[MemberLine[syntax::CapabilityMemberNode], Failure]
-  uses Panic, RunForever
+  uses Panic
 {
   if cursor.is_keyword(token::Keyword.Fn) {
     return Ok(MemberLine.SkippedMethod(skip_piece(mut cursor)))

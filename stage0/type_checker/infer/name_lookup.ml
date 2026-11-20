@@ -284,9 +284,15 @@ and check_explicit_type_arguments ?(head = 0) state (value : Syntax.expression) 
 and finish_call (state : State.state) env (value : Syntax.expression) path callee
     (instance : Instantiation.instance) arguments left_out =
   let result = Types.extract_result_type instance.signature.output in
-  state.tables.calls.(value.id) <-
-    Some { callee; arguments; omitted_defaults = left_out; callee_result = result };
-  Modes.note_lending state value instance.signature.output;
+  State.elaborate state value.id
+    (Call
+       {
+         callee;
+         arguments;
+         omitted_defaults = left_out;
+         callee_result = result;
+         lends = Types.find_lent_mode instance.signature.output;
+       });
   Option.value (reject_specification_call state env value path instance.signature) ~default:result
 
 and reject_specification_call state (env : State.env) (value : Syntax.expression) (path : Path.t)
@@ -525,8 +531,8 @@ and instantiate_trait_method state span ~self_type (trait : Types.trait_referenc
         instantiation = instance.instantiation;
       } )
 
-and make_argumentless_call callee result : Tables.call =
-  { callee; arguments = []; omitted_defaults = []; callee_result = result }
+and make_argumentless_call ?lends callee result : Tables.call =
+  { callee; arguments = []; omitted_defaults = []; callee_result = result; lends }
 
 and find_elements_calls state (iterable : Syntax.expression) type_ (mode : Language.Mode.t) :
     (Tables.loop * Types.ty * Language.Mode.t) Resolve.Names.lookup =
@@ -549,7 +555,7 @@ and find_elements_calls state (iterable : Syntax.expression) type_ (mode : Langu
             ( Tables.Elements
                 {
                   count = make_argumentless_call count (Types.make_builtin UInt64);
-                  element = make_argumentless_call element part;
+                  element = make_argumentless_call ~lends element part;
                   lends;
                 },
               part,
@@ -583,18 +589,9 @@ and find_remaining_call state cursor =
   let finite_cursor =
     Types.make_trait_reference ~arguments:[] (Well_known.make_path Finite_cursor)
   in
-  let { Well_known.name; receiver; _ } = Well_known.locate_method Finite_cursor_remaining in
   let call =
-    make_argumentless_call
-      (Tables.Trait_method
-         {
-           trait = finite_cursor;
-           name;
-           receiver;
-           self_type = cursor;
-           instantiation = Types.no_instantiation;
-         })
-      (Types.make_builtin UInt64)
+    Tables.make_method_call finite_cursor Finite_cursor_remaining ~self_type:cursor
+      ~result:(Types.make_builtin UInt64) []
   in
   let is_on_a_parameter (bound : Types.bound_condition) =
     match bound.subject with Types.Parameter _ -> true | _ -> false

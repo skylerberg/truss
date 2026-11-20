@@ -27,8 +27,11 @@ let () =
     "  var part = items.slice()\n  take(mut items, view: part)\n" "ownership.conflicting_loan";
   expect_rejected "a view cannot be passed before the place that it views is passed `mut`"
     "  var part = items.slice()\n  give(part, items: mut items)\n" "ownership.conflicting_loan";
-  expect_rejected "a slice of a place cannot be passed beside the place passed `mut`"
-    "  take(mut items, view: items[..1])\n" "ownership.conflicting_loan";
+  Harness.test "a slice of a place cannot be passed beside the place passed `mut`" (fun () ->
+      expect_one_diagnostic
+        (functions ^ "fn f(items: mut List[Int64]) {\n  take(mut items, view: items[..1])\n}\n")
+        "ownership.conflicting_loan"
+        ~says:"`items` is passed `mut` to this call, so the call cannot also use `items[...]`.");
   Harness.test
     "a view of another place, and a value copied out of the place, can be passed beside the place \
      passed `mut`" (fun () ->
@@ -605,8 +608,12 @@ let () =
      Fixtures.Ownership.field_moved_out_of_mut_self "ownership.not_reinitialized";
    expect_accepted "a place lent `mut` can be moved out whole and reinitialized"
      Fixtures.Ownership.mut_slot_moved_out_and_reset;
-   expect_rejected "a place lent `mut` that is moved out whole must be reinitialized"
-     Fixtures.Ownership.mut_holder_moved_out_whole "ownership.not_reinitialized";
+   Harness.test
+     "a place lent `mut` that is moved out whole must be reinitialized by the body's last \
+      expression" (fun () ->
+       expect_one_diagnostic
+         (holder ^ Fixtures.Ownership.mut_holder_moved_out_whole)
+         "ownership.not_reinitialized" ~at:("moved", 2));
    expect_rejected "a place lent `mut` must be reinitialized on every path"
      Fixtures.Ownership.mut_holder_reinitialized_on_one_path "ownership.not_reinitialized";
    expect_rejected "a place lent `mut` cannot be used while it is moved out"

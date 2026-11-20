@@ -354,7 +354,6 @@ public fn RowReader[Source: streams::Reader].next_row(mut self) -> Result[Option
   var more = true
   var has_line = false
   while more
-    invariant self.source.start <= self.source.pending.length()
     invariant self.source.capacity > 0
   {
     match mut self.source.read_line() {

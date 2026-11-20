@@ -39,7 +39,7 @@ let check_widened location ~is_written actual expected =
 
 let find_parameter_spelling (context : State.context) (frame : State.frame) term =
   if
-    frame.source.key = Some context.home
+    Facts.is_home context frame.source
     && (not (Logic.has_quantifier term))
     &&
     match Logic.list_free_constants term with
@@ -685,15 +685,24 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
       | To_bits, [ source; bits ] when Facts.find_bounds bits <> None -> (
           match (operands, Facts.find_float_format source, find_width bits) with
           | [ value ], Some (exponent, significand), Some width ->
+              let symbol =
+                Logic.Symbol.Opaque_operation
+                  { operation = To_bits; type_ = bits; integer = Some (width, false) }
+              in
+              Facts.declare context
+                (Logic.Function
+                   (symbol, [ Facts.declare_sort context source ], Facts.declare_sort context bits));
+              let term = Logic.Apply (symbol, [ value ]) in
+              Facts.assume context frame (Facts.make_in_range bits term);
               Facts.assume context frame
                 Logic.(
                   not_ (is_nan value)
                   ==> equal
                         (Operation
                            ( To_fp { exponent; significand; rounding_mode = None },
-                             [ Operation (Int2bv { width }, [ fallback () ]) ] ))
+                             [ Operation (Int2bv { width }, [ term ]) ] ))
                         value);
-              fallback ()
+              term
           | _ -> fallback ())
       | Multiply_high, ty :: _ when Facts.find_bounds ty <> None -> (
           match (operands, find_width ty) with

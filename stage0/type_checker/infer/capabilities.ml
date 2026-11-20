@@ -3,10 +3,11 @@ let tasks : Types.capability = Capability (Well_known.make_path Tasks)
 type checking = {
   state : State.state;
   mutable provides : (Types.capability_set * Core.implementation list * Core.block) list;
+  mutable body_requirements : Types.capability_set list;
 }
 
 let report checking ?(fixes = []) ?(notes = []) code (origin : Core.origin) message =
-  let read_span = State.read_span checking.state in
+  let read_span origin = State.read_span checking.state (Core_walk.locate_origin origin) in
   checking.state.diagnostics <-
     Diagnostic.make ~fixes
       ~notes:(List.map (fun (cited, note) -> (read_span cited, note)) notes)
@@ -122,8 +123,8 @@ let add_alternative ~sentence_start alternative =
   | Some alternative -> ", or " ^ alternative
   | None -> ""
 
-let rec require_available checking scope (origin : Core.origin) ?(subject = "This call")
-    ?alternative ?(indirect_call = false) ?restriction (required : Types.capability_set) =
+let rec require_available checking scope (origin : Core.origin) ~subject ?alternative
+    ?(indirect_call = false) ?restriction (required : Types.capability_set) =
   let state = checking.state in
   let available = compute_available scope in
   let superset =
@@ -190,6 +191,9 @@ let rec require_available checking scope (origin : Core.origin) ?(subject = "Thi
       (Types.list_capabilities missing)
   in
   if required <> Types.no_capabilities then begin
+    (match scope.kind with
+    | Function_body _ -> checking.body_requirements <- required :: checking.body_requirements
+    | Lambda_body _ | Restricted _ -> ());
     state.capability_constraints <-
       { subset = required; restriction; superset; report_missing } :: state.capability_constraints;
     match find_enclosing_restriction scope with
@@ -218,7 +222,14 @@ let compute_required_uses state scope (callee : Core.callee) =
 
 let require_callee_uses checking scope (origin : Core.origin) (callee : Core.callee) =
   check_callee_grants checking origin callee.target;
+  let state = checking.state in
   require_available checking scope origin
+    ~subject:
+      (String.capitalize_ascii
+         (Core_walk.describe_call origin
+            ~quote:(fun () ->
+              State.quote_span state (State.read_span state (Core_walk.locate_origin origin)))
+            ()))
     ~indirect_call:(match callee.target with Indirect _ -> true | _ -> false)
     (compute_required_uses checking.state scope callee)
 
@@ -316,7 +327,8 @@ and check_statement checking scope (statement : Core.statement) =
         (check_statement checking (make_parallel_scope ~enclosing:scope "a `parallel` branch"))
         branches
   | Concurrent branches ->
-      require_available checking scope statement.origin (Types.make_capability_set [ tasks ]);
+      require_available checking scope statement.origin ~subject:"This `concurrent` block"
+        (Types.make_capability_set [ tasks ]);
       List.iter (check_statement checking scope) branches
   | For { mode; pattern; iteration; clauses; body } ->
       Core_walk.walk_iteration (make_visitor checking scope (`Statement statement)) iteration;
@@ -343,7 +355,8 @@ and check_statement checking scope (statement : Core.statement) =
         | Parallel -> make_parallel_scope ~enclosing:scope "a `parallel for`"
         | Sequential -> scope
         | Concurrent ->
-            require_available checking scope statement.origin (Types.make_capability_set [ tasks ]);
+            require_available checking scope statement.origin ~subject:"This `concurrent for` loop"
+              (Types.make_capability_set [ tasks ]);
             scope)
         body
   | While { condition; clauses; body; _ } ->
@@ -395,7 +408,9 @@ and check_provide checking scope implementations body =
       in
       let provided_mut = implementation.mode = Mut in
       let is_place = match implementation.value with Place _ -> true | Value _ -> false in
-      let start = (State.read_span checking.state implementation.origin).start in
+      let start =
+        (State.read_span checking.state (Core_walk.locate_origin implementation.origin)).start
+      in
       if is_place && mutates && not provided_mut then
         report checking Provide_mode implementation.origin
           ~fixes:
@@ -641,7 +656,7 @@ let check_monitor_callbacks checking implementations =
 
 let check (state : State.state) (elaborated : Interface.Environment.elaborated_interface)
     (form : Core.t) =
-  let checking = { state; provides = [] } in
+  let checking = { state; provides = []; body_requirements = [] } in
   let make_function_body_scope allowed =
     let path = state.key.path in
     make_scope ~allowed
@@ -724,4 +739,14 @@ let check (state : State.state) (elaborated : Interface.Environment.elaborated_i
       | Uses_tasks ->
           check_monitor_callbacks checking implementations;
           check_monitor_lock checking ~read_solved available implementations)
-    (List.rev checking.provides)
+    (List.rev checking.provides);
+  List.exists
+    (fun required ->
+      List.exists
+        (fun capability -> Types.find_base capability = Built_in Run_forever)
+        (Types.list_capabilities
+           (Types.replace_capabilities
+              (function
+                | Types.Capability_variable variable -> Some (read_solved variable) | _ -> None)
+              (State.finalize_capabilities state required))))
+    checking.body_requirements

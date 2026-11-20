@@ -294,7 +294,7 @@ type Source =
   | Channel(chunks: tasks::Channel[flow::Chunk], is_ended: Bool, credit: Option[Credit])
   | Remote(link: Link, framing: Framing, stream: UInt32, is_reusable: Bool, is_ended: Bool)
 
-public opaque type Body(source: Source, pending: List[UInt8], limit: UInt64, received: UInt64)
+public opaque type Body(source: Source, pending: streams::ByteQueue, limit: UInt64, received: UInt64)
 
 public fn Body.empty() -> Body {
   Body(source: Source.Memory(bytes: [], position: 0), pending: [], limit: 0, received: 0)
@@ -382,6 +382,21 @@ fn next_chunk(source: mut Source) -> Result[Option[List[UInt8]], Error]
   }
 }
 
+fn received_piece(body: mut Body) -> Result[Option[List[UInt8]], Error]
+  uses Handles, Tasks, RunForever
+{
+  match next_chunk(mut body.source)? {
+    Some(piece) => {
+      body.received = body.received.saturating_add(piece.length())
+      if body.received > body.limit {
+        return Err(Error.BodyTooLarge)
+      }
+      Ok(Some(own piece))
+    }
+    None => Ok(None)
+  }
+}
+
 public fn Body.read(mut self, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, Error]
   uses Handles, Tasks, RunForever
   ensures !(result is Ok(count) && (count > limit || buffer.length() != old(buffer.length()) + count))
@@ -390,37 +405,45 @@ public fn Body.read(mut self, buffer: mut List[UInt8], limit: UInt64) -> Result[
     return Ok(0)
   }
   if self.pending.is_empty() {
-    match next_chunk(mut self.source)? {
-      Some(piece) => {
-        self.received = self.received.saturating_add(piece.length())
-        if self.received > self.limit {
-          return Err(Error.BodyTooLarge)
-        }
-        self.pending = own piece
-      }
+    match received_piece(mut self)? {
+      Some(piece) => mut self.pending.append_list(own piece)
       None => return Ok(0)
     }
   }
   let count = if self.pending.length() < limit { self.pending.length() } else { limit }
-  let rest = mut self.pending.split_off(count)
-  let chunk = map::exchange(mut self.pending, value: own rest)
-  mut buffer.append(own chunk)
+  let unread = self.pending.bytes()
+  mut buffer.append_slice(unread[..count])
+  mut self.pending.skip(count)
   Ok(count)
+}
+
+public fn Body.read_into(mut self, queue: mut streams::ByteQueue) -> Result[UInt64, Error]
+  uses Handles, Tasks, RunForever
+  ensures !(result is Ok(count) && queue.length() != old(queue.length()) + count)
+{
+  if !self.pending.is_empty() {
+    let count = self.pending.length()
+    mut queue.append(self.pending.bytes())
+    mut self.pending.skip(count)
+    return Ok(count)
+  }
+  match received_piece(mut self)? {
+    Some(piece) => {
+      let count = piece.length()
+      mut queue.append_list(own piece)
+      Ok(count)
+    }
+    None => Ok(0)
+  }
 }
 
 public fn Body.read_all(mut self) -> Result[List[UInt8], Error]
   uses Handles, Tasks, RunForever
 {
-  var bytes = map::exchange(mut self.pending, value: [])
+  var bytes = mut self.pending.take_all()
   while true {
-    match next_chunk(mut self.source)? {
-      Some(piece) => {
-        self.received = self.received.saturating_add(piece.length())
-        if self.received > self.limit {
-          return Err(Error.BodyTooLarge)
-        }
-        mut bytes.append(own piece)
-      }
+    match received_piece(mut self)? {
+      Some(piece) => mut bytes.append(own piece)
       None => return Ok(own bytes)
     }
   }
@@ -429,16 +452,12 @@ public fn Body.read_all(mut self) -> Result[List[UInt8], Error]
 public fn Body.copy_to[Sink: streams::Writer](mut self, sink: mut Sink) -> Result[UInt64, Error]
   uses Handles, Tasks, RunForever
 {
-  let first = map::exchange(mut self.pending, value: [])
+  let first = mut self.pending.take_all()
   system(mut sink.write_all(first.slice()))?
   var copied: UInt64 = first.length()
   while true {
-    match next_chunk(mut self.source)? {
+    match received_piece(mut self)? {
       Some(piece) => {
-        self.received = self.received.saturating_add(piece.length())
-        if self.received > self.limit {
-          return Err(Error.BodyTooLarge)
-        }
         system(mut sink.write_all(piece.slice()))?
         copied = copied.saturating_add(piece.length())
       }
@@ -787,22 +806,15 @@ fn line_text(bytes: own List[UInt8]) -> Result[String, Error] {
   }
 }
 
-fn fill[Stream: streams::Duplex](connection: Stream, inbox: mut two::Inbox) -> Result[UInt64, Error]
+fn fill[Stream: streams::Duplex](connection: Stream, inbox: mut streams::ByteQueue) -> Result[UInt64, Error]
   uses Handles, Tasks, RunForever
 {
-  system(connection.receive(mut inbox.bytes, limit: 16384))
-}
-
-fn take_front(inbox: mut two::Inbox, count: UInt64) -> List[UInt8]
-  requires count <= inbox.bytes.length()
-{
-  let rest = mut inbox.bytes.split_off(count)
-  map::exchange(mut inbox.bytes, value: own rest)
+  system(mut inbox.receive_from(connection, limit: 16384))
 }
 
 fn read_line[Stream: streams::Duplex](
   connection: Stream,
-  inbox: mut two::Inbox,
+  inbox: mut streams::ByteQueue,
   budget: mut UInt64,
 ) -> Result[Option[String], Error]
   uses Handles, Tasks, RunForever
@@ -810,23 +822,26 @@ fn read_line[Stream: streams::Duplex](
   var searched: UInt64 = 0
   while true {
     var index = searched
-    while index < inbox.bytes.length() {
-      if inbox.bytes[index] == 10 {
+    let unread = inbox.bytes()
+    while index < unread.length()
+      invariant unread.length() == inbox.length()
+    {
+      if unread[index] == 10 {
         if index + 1 > budget {
           return Err(Error.HeadTooLarge)
         }
         budget -= index + 1
-        let line = take_front(mut inbox, count: index + 1)
+        let line = mut inbox.take(index + 1)
         return Ok(Some(line_text(own line)?))
       }
       index += 1
     }
-    searched = inbox.bytes.length()
+    searched = inbox.length()
     if searched >= budget {
       return Err(Error.HeadTooLarge)
     }
     if fill(connection, inbox: mut inbox)? == 0 {
-      return if inbox.bytes.is_empty() { Ok(None) } else { Err(Error.Closed) }
+      return if inbox.is_empty() { Ok(None) } else { Err(Error.Closed) }
     }
   }
 }
@@ -851,7 +866,7 @@ fn is_token(text: StringSlice) -> Bool {
 
 fn read_headers[Stream: streams::Duplex](
   connection: Stream,
-  inbox: mut two::Inbox,
+  inbox: mut streams::ByteQueue,
   budget: mut UInt64,
 ) -> Result[Headers, Error]
   uses Handles, Tasks, RunForever
@@ -886,7 +901,7 @@ fn read_headers[Stream: streams::Duplex](
 
 fn read_head[Stream: streams::Duplex](
   connection: Stream,
-  inbox: mut two::Inbox,
+  inbox: mut streams::ByteQueue,
   limits: Limits,
 ) -> Result[Option[Head], Error]
   uses Handles, Tasks, RunForever
@@ -979,21 +994,21 @@ fn framing_of(headers: Headers, is_response: Bool) -> Result[Framing, Error] {
   }
 }
 
-fn take_some[Stream: streams::Duplex](connection: Stream, inbox: mut two::Inbox, limit: UInt64) -> Result[List[UInt8], Error]
+fn take_some[Stream: streams::Duplex](connection: Stream, inbox: mut streams::ByteQueue, limit: UInt64) -> Result[List[UInt8], Error]
   uses Handles, Tasks, RunForever
 {
-  if inbox.bytes.is_empty() {
+  if inbox.is_empty() {
     if fill(connection, inbox: mut inbox)? == 0 {
       return Ok([])
     }
   }
-  let count = if inbox.bytes.length() < limit { inbox.bytes.length() } else { limit }
-  Ok(take_front(mut inbox, count: count))
+  let count = if inbox.length() < limit { inbox.length() } else { limit }
+  Ok(mut inbox.take(count))
 }
 
 fn next_piece[Stream: streams::Duplex](
   connection: Stream,
-  inbox: mut two::Inbox,
+  inbox: mut streams::ByteQueue,
   framing: mut Framing,
 ) -> Result[Option[List[UInt8]], Error]
   uses Handles, Tasks, RunForever
@@ -1069,7 +1084,7 @@ fn next_piece[Stream: streams::Duplex](
 
 fn pump_body[Stream: streams::Duplex](
   connection: Stream,
-  inbox: mut two::Inbox,
+  inbox: mut streams::ByteQueue,
   framing: own Framing,
   chunks: tasks::Channel[flow::Chunk],
   limit: UInt64,
@@ -1366,7 +1381,7 @@ fn client_of(peer: Option[network::SocketAddress], headers: Headers, trusted: Sl
   Some(client)
 }
 
-fn read_head_within[Stream: streams::Duplex](connection: Stream, inbox: mut two::Inbox, limits: Limits, seconds: Int64) -> Result[Option[Head], Error]
+fn read_head_within[Stream: streams::Duplex](connection: Stream, inbox: mut streams::ByteQueue, limits: Limits, seconds: Int64) -> Result[Option[Head], Error]
   uses Handles, Tasks, Clock, RunForever
 {
   let limit = match timeout_of(seconds) {
@@ -1415,7 +1430,7 @@ fn run_handler(
   }
 }
 
-fn watch_for_disconnect[Stream: streams::Duplex](connection: Stream, inbox: mut two::Inbox, gone: tasks::Channel[Unit], handled: tasks::Channel[Unit])
+fn watch_for_disconnect[Stream: streams::Duplex](connection: Stream, inbox: mut streams::ByteQueue, gone: tasks::Channel[Unit], handled: tasks::Channel[Unit])
   uses Handles, Tasks, RunForever
 {
   concurrent {
@@ -1498,7 +1513,7 @@ fn refuse[Stream: streams::Duplex](connection: Stream, error: Error)
   let _ = connection.send_all(bytes.slice())
 }
 
-fn await_request[Stream: streams::Duplex](connection: Stream, inbox: mut two::Inbox, stopping: tasks::Channel[Unit]) -> Bool
+fn await_request[Stream: streams::Duplex](connection: Stream, inbox: mut streams::ByteQueue, stopping: tasks::Channel[Unit]) -> Bool
   uses Handles, Tasks, RunForever
 {
   concurrent {
@@ -1517,7 +1532,7 @@ fn await_request[Stream: streams::Duplex](connection: Stream, inbox: mut two::In
 
 fn serve_one[Stream: streams::Duplex](
   connection: Stream,
-  inbox: own two::Inbox,
+  inbox: own streams::ByteQueue,
   handler: (fn(own Request, mut Responder) uses generic Granted),
   options: ServerOptions,
   stopping: tasks::Channel[Unit],
@@ -1528,7 +1543,7 @@ fn serve_one[Stream: streams::Duplex](
 {
   var unread = own inbox
   while true {
-    if stopping.is_closed() || (unread.bytes.is_empty() && !await_request(connection, inbox: mut unread, stopping: stopping)) {
+    if stopping.is_closed() || (unread.is_empty() && !await_request(connection, inbox: mut unread, stopping: stopping)) {
       return
     }
     let head = match read_head_within(connection, inbox: mut unread, limits: options.limits, seconds: options.head_timeout_seconds) {
@@ -1574,7 +1589,7 @@ fn serve_one[Stream: streams::Duplex](
     concurrent {
       {
         is_reusable = pump_body(connection, inbox: mut unread, framing: framing, chunks: chunks, limit: body_limit)
-        if is_reusable && !is_upgrade && unread.bytes.is_empty() {
+        if is_reusable && !is_upgrade && unread.is_empty() {
           watch_for_disconnect(connection, inbox: mut unread, gone: gone, handled: handled)
         }
       }
@@ -1752,15 +1767,16 @@ fn serve_connection(
   var opened = own connection
   prepare(mut opened, options: options)
   let peer = Some(opened.peer_address())
-  var inbox = two::Inbox(bytes: [])
-  while inbox.bytes.length() < 3 {
+  var inbox: streams::ByteQueue = []
+  while inbox.length() < 3 {
     match fill(opened, inbox: mut inbox) {
       Ok(0) => return
       Ok(_) => {}
       Err(_) => return
     }
   }
-  if inbox.bytes[0..3] == "PRI".bytes() {
+  let opening = inbox.bytes()
+  if opening[0..3] == "PRI".bytes() {
     two::serve(opened, inbox: own inbox, header_limit: options.limits.head_bytes, stopping: stopping, respond: fn(arrival) {
       answer_arrival(own arrival, handler: handler, options: options, peer: peer, certificates: [])
     })
@@ -1803,11 +1819,11 @@ fn serve_secured(
     None => return
   }
   if secured.protocol() == Some("h2".slice()) {
-    two::serve(secured, inbox: two::Inbox(bytes: []), header_limit: options.limits.head_bytes, stopping: stopping, respond: fn(arrival) {
+    two::serve(secured, inbox: [], header_limit: options.limits.head_bytes, stopping: stopping, respond: fn(arrival) {
       answer_arrival(own arrival, handler: handler, options: options, peer: peer, certificates: secured.peer_certificates())
     })
   } else {
-    serve_one(secured, inbox: two::Inbox(bytes: []), handler: handler, options: options, stopping: stopping, peer: peer, certificates: secured.peer_certificates())
+    serve_one(secured, inbox: [], handler: handler, options: options, stopping: stopping, peer: peer, certificates: secured.peer_certificates())
   }
   let _ = secured.close_sending()
 }
@@ -2260,12 +2276,12 @@ fn tunnel(connection: mut network::Connection, host: StringSlice, port: UInt16, 
   }
   mut request.push("\r\n")
   system(connection.send_all(request.slice().bytes()))?
-  var inbox = two::Inbox(bytes: [])
+  var inbox: streams::ByteQueue = []
   let opening = read_status(connection, inbox: mut inbox, limits: limits)?
   if opening.status.code < 200 || opening.status.code > 299 {
     return Err(Error.Unsupported(message: "a proxy that refused the tunnel with status ${opening.status.code}"))
   }
-  if !inbox.bytes.is_empty() {
+  if !inbox.is_empty() {
     return Err(malformed("a proxy that sent bytes after accepting the tunnel"))
   }
   Ok(Unit)
@@ -2449,8 +2465,8 @@ fn multiplexing_error(failure: two::Failure) -> Error {
 }
 
 type Link =
-  | Plain(connection: network::Connection, inbox: two::Inbox, forwarding: Option[Forwarding])
-  | Secure(connection: tls::Connection[network::Connection], inbox: two::Inbox)
+  | Plain(connection: network::Connection, inbox: streams::ByteQueue, forwarding: Option[Forwarding])
+  | Secure(connection: tls::Connection[network::Connection], inbox: streams::ByteQueue)
   | Multiplexed(session: two::Session[tls::Connection[network::Connection]])
 
 type Pooled(origin: String, link: Link)
@@ -2473,7 +2489,7 @@ type Opening(status: Status, headers: Headers, is_reusable: Bool)
 
 fn read_status[Stream: streams::Duplex](
   connection: Stream,
-  inbox: mut two::Inbox,
+  inbox: mut streams::ByteQueue,
   limits: Limits,
 ) -> Result[Opening, Error]
   uses Handles, Tasks, RunForever
@@ -2630,7 +2646,7 @@ fn open_link(
   }
   if !is_secure {
     let forwarding = if route is Some(_) { Some(Forwarding(authorization: own authorization)) } else { None }
-    return Ok(Link.Plain(connection: own connection, inbox: two::Inbox(bytes: []), forwarding: own forwarding))
+    return Ok(Link.Plain(connection: own connection, inbox: [], forwarding: own forwarding))
   }
   if route is Some(_) {
     tunnel(mut connection, host: host, port: port, authorization: authorization, limits: options.limits)?
@@ -2645,7 +2661,7 @@ fn open_link(
     Err(error) => return Err(Error.Tls(error: own error))
   }
   if secured.protocol() != Some("h2".slice()) {
-    return Ok(Link.Secure(connection: own secured, inbox: two::Inbox(bytes: [])))
+    return Ok(Link.Secure(connection: own secured, inbox: []))
   }
   match two::connect(own secured, header_limit: options.limits.head_bytes) {
     Ok(session) => Ok(Link.Multiplexed(session: own session))
@@ -3016,7 +3032,7 @@ fn send_frame(sending: mut Sending, opcode: UInt8, payload: Slice[UInt8], is_fin
 
 public opaque type WebSocketReader(
   body: Body,
-  buffer: List[UInt8],
+  buffer: streams::ByteQueue,
   fragments: List[UInt8],
   fragment_opcode: UInt8,
   is_fragment_compressed: Bool,
@@ -3064,9 +3080,9 @@ public fn WebSocketReader.receive(mut self) -> Result[Option[Message], Error]
     return Ok(None)
   }
   while true {
-    match websocket::parse(self.buffer.slice(), is_server: self.is_server, limit: self.limit, is_deflate: self.is_deflate) {
+    match websocket::parse(self.buffer.bytes(), is_server: self.is_server, limit: self.limit, is_deflate: self.is_deflate) {
       Incomplete => {
-        let count = mut self.body.read(mut self.buffer, limit: 65536)?
+        let count = mut self.body.read_into(mut self.buffer)?
         if count == 0 {
           self.close_code = Some(1006)
           return Ok(None)
@@ -3075,8 +3091,7 @@ public fn WebSocketReader.receive(mut self) -> Result[Option[Message], Error]
       Invalid(code, reason) => return Err(fail_socket(mut self, code: code, reason: own reason))
       Complete(frame, length) => {
         if length <= self.buffer.length() {
-          let rest = mut self.buffer.split_off(length)
-          self.buffer = own rest
+          mut self.buffer.skip(length)
         }
         let opcode = frame.opcode
         if opcode == websocket::ping_opcode {
@@ -3371,7 +3386,7 @@ public fn Responder.send_comment(mut self, comment: StringSlice) -> Result[Unit,
 }
 
 public opaque type EventParser(
-  pending: List[UInt8],
+  pending: streams::ByteQueue,
   data: String,
   has_data: Bool,
   name: Option[String],
@@ -3445,23 +3460,28 @@ fn parse_field(parser: mut EventParser, line: StringSlice) {
 public fn EventParser.next(mut self, body: mut Body) -> Result[Option[Event], Error]
   uses Handles, Tasks, RunForever
 {
-  while true {
-    match line_end(self.pending.slice()) {
-      Some(end) => {
-        var skip = end + 1
-        if self.pending[end] == 13 && end + 1 < self.pending.length() && self.pending[end + 1] == 10 {
-          skip = end + 2
-        }
-        if self.pending[end] == 13 && end + 1 >= self.pending.length() {
-          let count = mut body.read(mut self.pending, limit: 65536)?
+  var searched: UInt64 = 0
+  while true
+    invariant searched <= self.pending.length()
+  {
+    let unread = self.pending.bytes()
+    match line_end(unread[searched..]) {
+      Some(offset) => {
+        let end = searched + offset
+        let is_return = unread[end] == 13
+        let has_next = end + 1 < unread.length()
+        let skip = if is_return && has_next && unread[end + 1] == 10 { end + 2 } else { end + 1 }
+        if is_return && !has_next {
+          let count = mut body.read_into(mut self.pending)?
           if count > 0 {
+            searched = end
             continue
           }
         }
-        let rest = if skip <= self.pending.length() { mut self.pending.split_off(skip) } else { [] }
-        var line_bytes = map::exchange(mut self.pending, value: own rest)
-        mut line_bytes.truncate(end)
-        var line = String.from_utf8_lossy(line_bytes.slice())
+        let current = self.pending.bytes()
+        var line = String.from_utf8_lossy(current[..end])
+        mut self.pending.skip(skip)
+        searched = 0
         if !self.is_started {
           self.is_started = true
           if line.slice().starts_with("\u{feff}") {
@@ -3478,7 +3498,8 @@ public fn EventParser.next(mut self, body: mut Body) -> Result[Option[Event], Er
         }
       }
       None => {
-        let count = mut body.read(mut self.pending, limit: 65536)?
+        searched = unread.length()
+        let count = mut body.read_into(mut self.pending)?
         if count == 0 {
           return Ok(None)
         }
@@ -3506,7 +3527,7 @@ fn write_raw[Stream: streams::Duplex](connection: Stream, outbound: tasks::Chann
 
 fn run_websocket[Stream: streams::Duplex, Output](
   connection: Stream,
-  inbox: own two::Inbox,
+  inbox: own streams::ByteQueue,
   request: Slice[UInt8],
   key: StringSlice,
   protocols: Slice[String],

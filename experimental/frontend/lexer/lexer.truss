@@ -111,7 +111,7 @@ type Accepted(start: UInt64, stop: UInt64, has_insertion: Bool)
   derives Equal
 
 fn count_starts_at_most(accepted: Slice[Accepted], position: UInt64) -> UInt64
-  uses Panic, RunForever
+  uses Panic
 {
   var low: UInt64 = 0
   var high = accepted.length()
@@ -127,7 +127,7 @@ fn count_starts_at_most(accepted: Slice[Accepted], position: UInt64) -> UInt64
 }
 
 fn overlaps(accepted: Slice[Accepted], edit: source::Edit) -> Bool
-  uses Panic, RunForever
+  uses Panic
 {
   let start = edit.span.start
   let stop = edit.span.stop
@@ -146,7 +146,7 @@ fn overlaps(accepted: Slice[Accepted], edit: source::Edit) -> Bool
 }
 
 fn accept(accepted: mut List[Accepted], edit: source::Edit)
-  uses Panic, RunForever
+  uses Panic
 {
   let start = edit.span.start
   let stop = edit.span.stop
@@ -163,7 +163,7 @@ fn accept(accepted: mut List[Accepted], edit: source::Edit)
 }
 
 fn list_machine_applicable_edits(diagnostics: Slice[source::Diagnostic]) -> List[source::Edit]
-  uses Panic, RunForever
+  uses Panic
 {
   var accepted: List[Accepted] = []
   var edits: List[source::Edit] = []
@@ -243,7 +243,7 @@ fn place_edits(sorted: Slice[source::Edit]) -> List[Placed]
 }
 
 fn map_original_offset(placed: Slice[Placed], is_stop: Bool, offset: UInt64) -> UInt64
-  uses Panic, RunForever
+  uses Panic
 {
   var low: UInt64 = 0
   var high = placed.length()
@@ -271,7 +271,7 @@ fn map_original_offset(placed: Slice[Placed], is_stop: Bool, offset: UInt64) -> 
 }
 
 fn shift_span(placed: Slice[Placed], span: source::Span) -> source::Span
-  uses Panic, RunForever
+  uses Panic
 {
   let stop = map_original_offset(placed, is_stop: true, offset: span.stop)
   if span.start == span.stop {
@@ -281,7 +281,7 @@ fn shift_span(placed: Slice[Placed], span: source::Span) -> source::Span
 }
 
 fn map_to_original(tables: mut token::Tables, placed: Slice[Placed])
-  uses Panic, RunForever
+  uses Panic
 {
   for current in mut tables.tokens {
     current.span = shift_span(placed, span: current.span)

@@ -21,7 +21,7 @@ let read_innermost selection =
 
 let note_place (context : State.context) (frame : State.frame) origin place =
   let mentions (first, second) = List.mem origin first || List.mem origin second in
-  if frame.source.key = Some context.home && List.exists mentions context.disjoint then begin
+  if Facts.is_home context frame.source && List.exists mentions context.disjoint then begin
     context.indexes <- (origin, place) :: context.indexes;
     let outside index start stop = Logic.(less index start ||| less_equal stop index) in
     List.iter

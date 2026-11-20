@@ -7,4 +7,6 @@ fn f(count: UInt32)
   {
     i = i
   }
+  while true {
+  }
 }

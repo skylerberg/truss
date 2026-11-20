@@ -605,7 +605,7 @@ main.truss:2:3: error[types.mismatched_integers]: Integer types never convert im
   |   ^^^^^^^^^^^^^
   fix: Convert the left side to `UInt64`.
     replace "small" with "UInt64.from_integer(small)" at main.truss:2:3
-1 error
+1 error. `truss check --fix` fixes it.
 ```
 
 A conversion between built-in number types is a method of the target type.
@@ -1018,7 +1018,7 @@ main.truss:3:22: error[ownership.use_after_move]: `name` is used after it was mo
   fix: Pass a copy at the move instead.
     delete "own " at main.truss:2:18
     insert ".copy()" at main.truss:2:26
-1 error
+1 error. `truss check --fix` fixes it.
 ```
 
 Leaving out `own` is an error too, because a move or a copy is always
@@ -1168,7 +1168,7 @@ main.truss:2:7: error[ownership.lent_part_escapes]: This part is lent only until
   |       ^^^^^
   fix: Copy the scrutinee.
     insert ".copy()" at main.truss:2:27
-1 error
+1 error. `truss check --fix` fixes it.
 ```
 
 Use the part within the statement, or copy it:
@@ -1221,6 +1221,32 @@ test "taking a value leaves something behind" {
   assert names == ["Grace"]
 }
 ```
+
+A pattern binds views of the scrutinee's fields, so a `match` cannot move a
+field out of its scrutinee. `match own` moves the scrutinee into the `match`
+instead, and each binding owns its field:
+
+```truss
+type Entry =
+  | Empty
+  | Named(name: String, count: UInt64)
+
+fn into_name(entry: own Entry) -> Option[String] {
+  match own entry {
+    Empty => None
+    Named(name, ..) => Some(own name)
+  }
+}
+
+test "a match moves fields out of an owned scrutinee" {
+  assert into_name(Entry.Named(name: "Ada", count: 1)) == Some("Ada")
+  assert into_name(Entry.Empty) == None
+}
+```
+
+Without `own`, `name` is a view of `entry`, and `Some(own name)` is an error.
+`is` and `let ... else` take `own` the same way, as in `if own entry is
+Named(name, ..)`.
 
 ### Temporaries
 
@@ -1527,7 +1553,7 @@ main.truss:6:5: error[patterns.unreachable_arm]: Earlier arms already match ever
   |     ^^^^^^^^^^^^
   fix: Write `lottery::lucky`.
     replace "lucky" with "lottery::lucky" at main.truss:5:5
-2 errors and 1 warning
+2 errors and 1 warning. `truss check --fix` fixes 1 of them.
 ```
 
 A constant of a type, such as `Config.quiet`, is written with its type, as
@@ -1542,7 +1568,7 @@ main.truss:7:3: error[patterns.not_covered]: This `match` does not cover every c
   |   ^^^^^^^^^^^^^
   fix: Add an arm for each missing case.
     insert "\n    Empty => todo" at main.truss:9:32
-1 error
+1 error. `truss check --fix` fixes it.
 ```
 
 ```text
@@ -1551,7 +1577,7 @@ main.truss:4:5: error[patterns.unreachable_arm]: Earlier arms already match ever
   |     ^^^^^^^^^^^
   fix: Delete the arm.
     delete "\n    0 => \"none\"" at main.truss:3:15
-1 error
+1 error. `truss check --fix` fixes it.
 ```
 
 #### is
@@ -1920,8 +1946,9 @@ test "reading elements" {
 ```
 
 - `numbers[1]` reads an element, and **the compiler proves the index is in
-  bounds.** In `second`, the `if` above establishes it. Where no fact shows
-  the index is in bounds, `get` returns an `Option` instead.
+  bounds.** In `second`, the `if` above establishes it. When no fact shows
+  that an index is in bounds, check it first with an `if`, or read the
+  element with `get`, which returns `None` for an index out of bounds.
 - `numbers[1..3]` is a slice of the elements at 1 and 2. A slice's bounds are
   proven too. `numbers[..2]` and `numbers[1..]` leave out an end.
 - `truss show List` lists every method of a list, including those of its
@@ -2080,7 +2107,7 @@ main.truss:7:19: error[ownership.not_owned]: `name` views a string literal, so i
   fix: Copy it.
     delete "own " at main.truss:7:15
     insert ".copy()" at main.truss:7:23
-1 error
+1 error. `truss check --fix` fixes it.
 ```
 
 #### Building text
@@ -2178,6 +2205,15 @@ fn count_words(text: StringSlice) -> Map[String, UInt64] {
   counts
 }
 
+fn group_by_lowercase(words: Slice[String]) -> Map[String, List[String]] {
+  var groups: Map[String, List[String]] = [:]
+  for word in words {
+    let key = word.to_lowercase()
+    mut groups.get_or_insert(own key, default: []).push(word.copy())
+  }
+  groups
+}
+
 test "maps" {
   var ports = ["http": 80, "https": 443]
   assert ports.get("https") == Some(443)
@@ -2195,6 +2231,7 @@ test "maps" {
   assert names == ["https"]
   let counts = count_words("the cat saw the dog")
   assert counts.get("the") == Some(2)
+  assert group_by_lowercase(["Ab", "ab", "c"]).get("ab") == Some(["Ab", "ab"])
 }
 ```
 
@@ -2205,8 +2242,13 @@ test "maps" {
 - `update` changes the value for a key in place, inserting the default
   first when the key is missing. Its lambda takes the value `mut`. Nothing
   bounds how often a word repeats, so the count saturates rather than
-  overflowing. `get_or_insert` lends the value for a key `mut` instead, for
-  the rest of the statement.
+  overflowing.
+- `get_or_insert` also inserts the default when the key is missing, then
+  lends the value `mut` for the rest of the statement. `group_by_lowercase`
+  pushes onto each key's list this way, with no index into a separate list.
+  The key is stored in the map, so `key`, a place, is passed `own`; a
+  temporary such as `word.to_lowercase()` written in the call would need no
+  `own`.
 - A `for` loop over a map visits entries, records with the fields `key` and
   `value`, so `(key, value)` takes them apart.
 
@@ -3895,7 +3937,7 @@ written for this:
 |---|---|
 | A `for` loop over a range or a collection | The elements left to visit |
 | A `for` loop over a cursor whose type implements `FiniteCursor`, such as `text.characters()` | `remaining()` |
-| A `while` loop whose condition compares two sides with `<`, `<=`, `>`, or `>=` | The distance between the two sides |
+| A `while` loop whose condition compares two sides with `<`, `<=`, `>`, or `>=`, or begins with such a comparison joined by `&&` | The distance between the two sides |
 | A recursive call on a part of a parameter, such as `Expression.evaluate` in [Chapter 5](#recursive-types) | The parameter, which gets smaller |
 | A loop or a function with a `decreases` clause | The clause |
 | A loop or a function with `decreases m when C`, such as `decreases cursor.remaining() when Items: FiniteCursor` | `m` where `C` holds; elsewhere it uses `RunForever unless C` |

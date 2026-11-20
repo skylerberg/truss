@@ -1,1 +1,1 @@
-val check : State.state -> Interface.Environment.elaborated_interface -> Core.t -> unit
+val check : State.state -> Interface.Environment.elaborated_interface -> Core.t -> bool

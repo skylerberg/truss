@@ -366,7 +366,7 @@ let compute_changes ?(also = []) run (frame : State.frame) (blocks : Mir.block l
             Option.iter (fun (_, local) -> note { root = Local local; projections = [] }) returned
         | Basic
             ( Live _ | Dead _ | Assert _ | Echo _ | Loan_start _ | Loan_end _ | Ghost_assert _
-            | Matched _ | Proof _ )
+            | Path_note _ | Proof _ )
         | Assert_by_bit_vector _ | While _ | Fork _ | Resume _
         | For { iteration = Range _; _ }
         | Yield { mode = Read | Own; _ }
@@ -627,15 +627,19 @@ let bind_parts context (frame : State.frame) run =
       | _ -> frame)
     frame.aliases frame
 
-let note_decision (context : State.context) (frame : State.frame) origin test =
-  if frame.makes_obligations && frame.source.key = Some context.home then begin
-    let text = Facts.quote_origin context frame origin in
-    context.decisions <-
-      ( Printf.sprintf "`%s` is true" text,
-        Some (Printf.sprintf "`%s` is false" text),
-        frame.condition,
-        test )
-      :: context.decisions
+let note_path (context : State.context) (frame : State.frame) (note : Mir.path_note) =
+  if frame.makes_obligations && Facts.is_home context frame.source then begin
+    let quote = Facts.quote_origin context frame in
+    let text =
+      match note with
+      | Arm_taken patterns ->
+          Printf.sprintf "the arm `%s` is taken" (String.concat ", " (List.map quote patterns))
+      | Condition_holds { condition; holds } -> Printf.sprintf "`%s` is %b" (quote condition) holds
+      | Else_runs pattern ->
+          Printf.sprintf "`%s` does not match, so the `else` runs" (quote pattern)
+      | Returns_early tried -> Printf.sprintf "`%s` returns early" (quote tried)
+    in
+    context.path_notes <- (text, frame.condition) :: context.path_notes
   end
 
 let refresh_place context frame ty (place : State.passed_place) =
@@ -785,8 +789,7 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
   | Specification Yielded -> (
       match (frame.yielded, frame.yielded_so_far) with
       | Some yielded, _ -> (frame, yielded)
-      | None, Some yielded_so_far when frame.source.key = Some context.home ->
-          (frame, yielded_so_far)
+      | None, Some yielded_so_far when Facts.is_home context frame.source -> (frame, yielded_so_far)
       | _ -> Facts.raise_bug "`%s` reads `yielded` outside a lending method" frame.source.name)
   | Specification (Identical (first, second)) ->
       let first_value = translate_operand first and second_value = translate_operand second in
@@ -885,13 +888,10 @@ and merge_alternatives context ~outer ~condition (entered, read) (entered_otherw
 
 and read_choice context frame run (choice : Mir.choice) =
   match choice with
-  | Conditional { condition; then_; else_; if_condition } -> (
+  | Conditional { condition; then_; else_ } -> (
       match read_block context frame run condition with
       | None -> None
       | Some (frame, test) ->
-          (match if_condition with
-          | Some origin -> note_decision context frame origin test
-          | None -> ());
           let entered_then = Facts.restrict frame test
           and entered_else = Facts.restrict frame (Logic.not_ test) in
           merge_alternatives context ~outer:frame ~condition:test
@@ -1133,14 +1133,14 @@ and read_statement context frame run (statement : Mir.statement) =
           on_failure = (fun frame -> read_statements context frame run failed);
           measure_operands =
             Option.map
-              (fun ({ comparison; left; right } : Mir.compared) ->
+              (fun ({ statements; comparison; left; right } : Mir.compared) ->
                 ( comparison,
                   fun at ->
                     let after =
                       List.fold_left
                         (fun frame statement ->
                           Option.value (read_statement context frame run statement) ~default:frame)
-                        at condition.statements
+                        at statements
                     in
                     (read_operand context after run left, read_operand context after run right) ))
               compared;
@@ -1262,12 +1262,13 @@ and read_statement context frame run (statement : Mir.statement) =
         | Range { start; stop; inclusive } ->
             Loops.Over_range
               { low = translate_operand start; high = translate_operand stop; inclusive }
-        | Pull { cursor; next } ->
+        | Pull { cursor; next; next_origin } ->
             Over_cursor
               {
                 cursor = make_passed_place context run cursor;
                 cursor_type = compute_place_type context frame run cursor;
                 next = make_invocation next ~lends:None;
+                next_origin;
               }
       in
       let for_loop =
@@ -1463,15 +1464,8 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
       Some frame
   | Proof code ->
       Some (Facts.restrict frame (Logic.not_ (Values.run_ghost_code context frame code)))
-  | Matched { patterns } ->
-      if frame.makes_obligations then
-        context.decisions <-
-          ( Printf.sprintf "the arm `%s` is taken"
-              (String.concat ", " (List.map (Facts.quote_origin context frame) patterns)),
-            None,
-            frame.condition,
-            Logic.Boolean true )
-          :: context.decisions;
+  | Path_note note ->
+      note_path context frame note;
       Some frame
   | Template { destination; literals; call } -> (
       match (call.callee.target, call.arguments) with
@@ -1502,9 +1496,9 @@ and write_assignment context run (target : Mir.place) ~(copied : Mir.operand lis
   | Local local -> (
       match run.infos.(local).kind with
       | Source { local = (Declared { name; _ } | Trait_parameter { name; _ }) as core; _ }
-        when frame.source.key = Some context.home ->
+        when Facts.is_home context frame.source ->
           Tables.Local_table.replace context.local_names (Core_local core) name
-      | Source { local = Synthetic _ as core; _ } when frame.source.key = Some context.home ->
+      | Source { local = Synthetic _ as core; _ } when Facts.is_home context frame.source ->
           Tables.Local_table.replace context.local_origins (Core_local core)
             run.infos.(local).origin
       | Source _ | Temporary | Lent _ -> ())

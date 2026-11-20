@@ -819,6 +819,7 @@ let make_recording_proof_lookups database note : Prover.Lookups.t =
     mir = make_recording_mir_lookups database note;
     list_must_be_disjoint = (fun key -> read_value database note (Ownership key));
     list_recursion_group = read_recursion_group database note;
+    requires_run_forever = (fun key -> (read_checked database note key).requires_run_forever);
   }
 
 let make_recording_lowering_lookups database note : Lowering.Lookups.t =

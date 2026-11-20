@@ -155,7 +155,7 @@ internal type Decimal(significand: String, exponent: String)
   derives Equal
 
 internal fn normalize_decimal(significand: StringSlice, exponent: own math::BigInteger) -> Decimal
-  uses Panic, RunForever
+  uses Panic
 {
   if significand == "0" {
     return Decimal(significand: "0", exponent: "0")
@@ -524,7 +524,7 @@ internal type Insertion(at: UInt64, text: String)
   derives Equal
 
 fn escape_spelling(text: StringSlice) -> String
-  uses Panic, RunForever
+  uses Panic
 {
   var buffer = String.with_capacity(text.length())
   let length = text.length()

@@ -59,7 +59,7 @@ type task = Branch of { block : Core.origin; index : int } | Iteration of { loop
 
 type iteration =
   | Range of { start : operand; stop : operand; inclusive : bool }
-  | Pull of { cursor : place; next : callee }
+  | Pull of { cursor : place; next : callee; next_origin : Core.origin }
 
 type rvalue =
   | Operand of operand
@@ -89,13 +89,14 @@ type rvalue =
   | Value_parameter of Types.parameter
   | Specification of specification
 
+and path_note =
+  | Arm_taken of Core.origin list
+  | Condition_holds of { condition : Core.origin; holds : bool }
+  | Else_runs of Core.origin
+  | Returns_early of Core.origin
+
 and choice =
-  | Conditional of {
-      condition : block;
-      then_ : block;
-      else_ : block;
-      if_condition : Core.origin option;
-    }
+  | Conditional of { condition : block; then_ : block; else_ : block }
   | Cases of case list
   | Connective of { connective : Language.Connective.t; left : block; right : block }
 
@@ -163,7 +164,13 @@ and loop_element =
   | Lent_by_call of local
   | Sequence_element of { place : place; mode : Language.Mode.t }
 
-and compared = { comparison : Language.Comparison.t; left : operand; right : operand }
+and compared = {
+  statements : statement list;
+  comparison : Language.Comparison.t;
+  left : operand;
+  right : operand;
+}
+
 and early_exit = { resumed : block; returned : local option }
 and statement = { kind : statement_kind; origin : Core.origin }
 
@@ -184,7 +191,7 @@ and basic =
     }
   | Loan_end of int list
   | Ghost_assert of { condition : formula; by_bit_vector : bool }
-  | Matched of { patterns : Core.origin list }
+  | Path_note of path_note
   | Proof of t
 
 and statement_kind =

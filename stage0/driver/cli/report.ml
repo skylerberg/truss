@@ -69,6 +69,22 @@ let count_warnings report =
 
 let has_errors report = count_errors report > 0
 
+let count_fixable report =
+  let count diagnostics = List.length (Diagnostic.list_machine_applicable diagnostics) in
+  let count_warnings_of file =
+    count (List.filter (fun diagnostic -> not (Diagnostic.is_error diagnostic)) file.diagnostics)
+  in
+  List.fold_left (fun total file -> total + count file.diagnostics) 0 report.checked
+  + List.fold_left (fun total file -> total + count_warnings_of file) 0 (Lazy.force report.proven)
+
+let describe_fixable report =
+  match count_fixable report with
+  | 0 -> ""
+  | fixable when fixable = count_errors report + count_warnings report ->
+      if fixable = 1 then ". `truss check --fix` fixes it."
+      else ". `truss check --fix` fixes all of them."
+  | fixable -> Printf.sprintf ". `truss check --fix` fixes %d of them." fixable
+
 let to_json report =
   List.concat_map
     (fun file ->
@@ -84,7 +100,7 @@ let make_document report fields =
          (List.map (fun problem -> Json.String (Project.show_problem problem)) report.problems) )
     :: fields)
 
-let print report =
+let print ?(offers_fix = true) report =
   let print_files =
     List.iter (fun file ->
         List.iter
@@ -95,12 +111,13 @@ let print report =
   print_files report.checked;
   print_files (Lazy.force report.proven);
   let errors = Diagnostic.show_count (count_errors report) "error" "errors"
-  and warnings = Diagnostic.show_count (count_warnings report) "warning" "warnings" in
+  and warnings = Diagnostic.show_count (count_warnings report) "warning" "warnings"
+  and fixable = if offers_fix then describe_fixable report else "" in
   match (count_errors report, count_warnings report) with
   | 0, 0 -> ()
-  | _, 0 -> Output.eprintf "%s\n" errors
-  | 0, _ -> Output.eprintf "%s\n" warnings
-  | _ -> Output.eprintf "%s and %s\n" errors warnings
+  | _, 0 -> Output.eprintf "%s%s\n" errors fixable
+  | 0, _ -> Output.eprintf "%s%s\n" warnings fixable
+  | _ -> Output.eprintf "%s and %s%s\n" errors warnings fixable
 
 exception Errors of t
 

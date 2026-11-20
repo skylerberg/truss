@@ -17,7 +17,7 @@ fn TokenCursor.piece_stop(self, piece: Piece) -> UInt64
 }
 
 fn begin_piece(cursor: mut TokenCursor, piece: Piece)
-  uses Panic, RunForever
+  uses Panic
 {
   let base = cursor.piece_start(piece)
   start_piece(mut cursor, base, first: piece.first, stop: piece.stop)

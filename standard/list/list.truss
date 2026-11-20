@@ -531,23 +531,10 @@ impl Equal for List[Element: Equal] {
   fn equal(self, other: List[Element]) -> Bool
     ensures result == (self.length() == other.length()
       && forall i in 0..self.length() => self.model()[i] == other.model()[i])
+    cost time O(self.length() * time(Element.equal))
     cost allocations <= self.length() * allocations(Element.equal)
   {
-    if self.length() != other.length() {
-      return false
-    }
-    var index: UInt64 = 0
-    while index < self.length()
-      invariant index <= self.length()
-      invariant forall i in 0..index => self.model()[i] == other.model()[i]
-      decreases self.length() - index
-    {
-      if self[index] != other[index] {
-        return false
-      }
-      index += 1
-    }
-    true
+    self.slice() == other.slice()
   }
 }
 
@@ -614,6 +601,7 @@ public fn List[Element].reserve(mut self, additional: UInt64)
 
 public fn List[Element].shrink_to_fit(mut self)
   ensures identical(self.model(), old(self.model()))
+  cost time O(self.length())
 {
   intrinsic::storage_set_capacity(mut self.storage, capacity: self.length())
 }
@@ -864,6 +852,7 @@ impl FromElements for List[Element] {
 impl Ordered for List[Element: Ordered] {
   fn compare(self, other: List[Element]) -> Ordering
     ensures result == slice::lexicographic(self.model(), second: other.model(), from: 0)
+    cost time O(self.length() * time(Element.compare))
     cost allocations <= self.length() * allocations(Element.compare)
   {
     self.slice().compare(other.slice())
@@ -883,11 +872,17 @@ proof Ordered.transitive for List[Element: Ordered] {
 }
 
 impl Hash for List[Element: Hash] {
-  fn hash(self, hasher: mut Hasher)
+  fn hash(self, hasher: Hasher) -> Hasher
+    ensures identical(result, slice::hash_elements(hasher.write(self.length()), items: self.model(), count: self.length()))
+    cost time O(self.length() * time(Element.hash))
     cost allocations <= self.length() * allocations(Element.hash)
   {
-    self.slice().hash(mut hasher)
+    self.slice().hash(hasher)
   }
+}
+
+proof Hash.agrees_with_equal for List[Element: Hash] {
+  slice::elements_hash_alike(hasher.write(first.length()), first: first.model(), second: second.model(), count: first.length())
 }
 
 impl Display for List[Element: Display] {

@@ -1,4 +1,3 @@
-use standard::map
 use standard::streams
 use standard::url
 
@@ -98,7 +97,7 @@ type Section = Preamble | Between | Body | Finished
 public opaque type Multipart(
   body: Body,
   delimiter: List[UInt8],
-  buffer: List[UInt8],
+  buffer: streams::ByteQueue,
   section: Section,
   header_limit: UInt64,
 )
@@ -145,36 +144,34 @@ fn index_of(haystack: Slice[UInt8], needle: Slice[UInt8]) -> Option[UInt64]
 
 fn fill_buffer(multipart: mut Multipart) -> Result[UInt64, Error]
   uses Handles, Tasks, RunForever
+  ensures !(result is Ok(count) && multipart.buffer.length() != old(multipart.buffer.length()) + count)
 {
-  mut multipart.body.read(mut multipart.buffer, limit: 65536)
-}
-
-fn drop_front(bytes: mut List[UInt8], count: UInt64) -> List[UInt8] {
-  let kept = if count < bytes.length() { count } else { bytes.length() }
-  let rest = mut bytes.split_off(kept)
-  map::exchange(mut bytes, value: own rest)
+  mut multipart.body.read_into(mut multipart.buffer)
 }
 
 fn content_piece(multipart: mut Multipart, limit: UInt64) -> Result[Option[List[UInt8]], Error]
   uses Handles, Tasks, RunForever
 {
   while true {
-    match index_of(multipart.buffer.slice(), needle: multipart.delimiter.slice()) {
+    match index_of(multipart.buffer.bytes(), needle: multipart.delimiter.slice()) {
       Some(at) => {
         if at > 0 {
-          return Ok(Some(drop_front(mut multipart.buffer, count: if at < limit { at } else { limit })))
+          return Ok(Some(mut multipart.buffer.take(if at < limit { at } else { limit })))
         }
         while multipart.buffer.length() < multipart.delimiter.length() + 2 {
           if fill_buffer(mut multipart)? == 0 {
             return Err(Error.Closed)
           }
         }
-        let _ = drop_front(mut multipart.buffer, count: multipart.delimiter.length())
-        let suffix = drop_front(mut multipart.buffer, count: 2)
-        if suffix == [45, 45] {
+        mut multipart.buffer.skip(multipart.delimiter.length())
+        let suffix = multipart.buffer.bytes()
+        let is_last = suffix[0] == 45 && suffix[1] == 45
+        let is_line_end = suffix[0] == 13 && suffix[1] == 10
+        mut multipart.buffer.skip(2)
+        if is_last {
           multipart.section = Section.Finished
           mut multipart.buffer.clear()
-        } else if suffix == [13, 10] {
+        } else if is_line_end {
           multipart.section = Section.Between
         } else {
           return Err(malformed("a multipart boundary followed by neither a line break nor --"))
@@ -185,7 +182,7 @@ fn content_piece(multipart: mut Multipart, limit: UInt64) -> Result[Option[List[
         let reserve = multipart.delimiter.length().saturating_subtract(1)
         if multipart.buffer.length() > reserve {
           let safe = multipart.buffer.length() - reserve
-          return Ok(Some(drop_front(mut multipart.buffer, count: if safe < limit { safe } else { limit })))
+          return Ok(Some(mut multipart.buffer.take(if safe < limit { safe } else { limit })))
         }
         if fill_buffer(mut multipart)? == 0 {
           return Err(Error.Closed)
@@ -199,15 +196,19 @@ fn read_part_headers(multipart: mut Multipart) -> Result[Headers, Error]
   uses Handles, Tasks, RunForever
 {
   let ending: List[UInt8] = [13, 10, 13, 10]
-  while true {
-    if multipart.buffer.length() >= 2 && multipart.buffer[0] == 13 && multipart.buffer[1] == 10 {
-      let _ = drop_front(mut multipart.buffer, count: 2)
+  var searched: UInt64 = 0
+  while true
+    invariant searched <= multipart.buffer.length()
+  {
+    let unread = multipart.buffer.bytes()
+    if unread.length() >= 2 && unread[0] == 13 && unread[1] == 10 {
+      mut multipart.buffer.skip(2)
       return Ok(Headers.new())
     }
-    match index_of(multipart.buffer.slice(), needle: ending.slice()) {
-      Some(at) => {
-        let block = drop_front(mut multipart.buffer, count: at)
-        let _ = drop_front(mut multipart.buffer, count: 4)
+    match index_of(unread[searched..], needle: ending.slice()) {
+      Some(offset) => {
+        let block = mut multipart.buffer.take(searched + offset)
+        mut multipart.buffer.skip(4)
         let text = match String.from_utf8(own block) {
           Ok(text) => own text
           Err(_) => return Err(malformed("part headers that are not UTF-8"))
@@ -222,6 +223,7 @@ fn read_part_headers(multipart: mut Multipart) -> Result[Headers, Error]
         return Ok(own headers)
       }
       None => {
+        searched = if unread.length() > 3 { unread.length() - 3 } else { 0 }
         if multipart.buffer.length() > multipart.header_limit {
           return Err(Error.HeadTooLarge)
         }

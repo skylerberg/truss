@@ -162,7 +162,7 @@ fn find_case_problem(name: StringSlice) -> Option[String]
 }
 
 fn check_name(name: StringSlice) -> NameCheck
-  uses Panic, RunForever
+  uses Panic
 {
   let is_upper_name = classify_is_upper(name)
   for index in 0..name.length() {

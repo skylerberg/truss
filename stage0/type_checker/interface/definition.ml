@@ -158,3 +158,17 @@ let is_specification = function
   | Type_interface _ | Trait_interface _ | Impl_interface _ | Constant_interface _
   | Error_interface _ ->
       false
+
+let list_derives_entries (resolved : Resolve.resolved) (clauses : Syntax.type_clause list) =
+  List.concat_map
+    (fun (clause : Syntax.type_clause) ->
+      match clause.kind with
+      | Derives traits ->
+          List.filter_map
+            (fun (written : Syntax.path_type) ->
+              match resolved.names.(written.path.last.id) with
+              | Some (Resolve.Definition (_, trait)) -> Some (clause, written, trait)
+              | _ -> None)
+            traits
+      | Type_invariant _ | Potential _ -> [])
+    clauses

@@ -49,7 +49,6 @@ module Symbol = struct
     | Cost_log
     | Cost_power
     | Reached of int
-    | Condition of int
 end
 
 type rounding_mode = Nearest_ties_to_even | Toward_positive | Toward_negative | Toward_zero
@@ -266,7 +265,6 @@ let rec show_symbol : symbol -> string = function
   | Cost_log -> "cost.log"
   | Cost_power -> "cost.power"
   | Reached index -> Printf.sprintf "reached.%d" index
-  | Condition index -> Printf.sprintf "condition.%d" index
 
 and show_term term =
   let rec show = function
@@ -573,12 +571,12 @@ let make_triggering_test declarations =
     declarations;
   Symbol_table.mem functions
 
-let has_untriggered_fact query =
+let has_untriggered_fact ?(is_counted = fun _ -> true) query =
   let is_triggering = make_triggering_test query.declarations in
   let rec is_untriggered = function
     | Operation (Implies, [ _; inner ]) -> is_untriggered inner
-    | Forall (variables, trigger, body) ->
-        choose_triggers ~is_triggering variables trigger body = []
+    | Forall (variables, trigger, body) as quantifier ->
+        is_counted quantifier && choose_triggers ~is_triggering variables trigger body = []
     | _ -> false
   in
   List.exists is_untriggered query.facts

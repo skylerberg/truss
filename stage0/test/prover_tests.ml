@@ -209,6 +209,43 @@ let () =
       expect_not_proven Fixtures.Prover.touch_without_an_ensures "prover.ensures")
 
 let () =
+  let expect_removed text fixed =
+    Support.expect_one_diagnostic ~check ~fixed text "usage.unused_run_forever"
+  in
+  Harness.test "a RunForever that nothing uses is reported, and removing it joins the brace"
+    (fun () ->
+      expect_removed Fixtures.Prover.run_forever_that_nothing_uses
+        "fn f(values: Slice[UInt64]) -> UInt64 {\n\
+        \  var total: UInt64 = 0\n\
+        \  for value in values {\n\
+        \    total = value\n\
+        \  }\n\
+        \  total\n\
+         }\n");
+  Harness.test "removing a RunForever listed after another capability keeps that capability"
+    (fun () ->
+      expect_removed Fixtures.Prover.run_forever_listed_after_another_capability
+        "fn f(values: Slice[UInt64]) -> UInt64\n  uses Panic\n{\n  values.length() + 1\n}\n");
+  Harness.test "removing a RunForever listed before another capability keeps that capability"
+    (fun () ->
+      expect_removed Fixtures.Prover.run_forever_listed_before_another_capability
+        "fn f(values: Slice[UInt64]) -> UInt64\n  uses Panic\n{\n  values.length() + 1\n}\n");
+  Harness.test "removing a RunForever before another clause keeps the brace on its own line"
+    (fun () ->
+      expect_removed Fixtures.Prover.run_forever_before_an_ensures
+        "fn f(values: Slice[UInt64]) -> UInt64\n\
+        \  ensures result == values.length()\n\
+         {\n\
+        \  values.length()\n\
+         }\n");
+  Harness.test "a RunForever is used by a recursion, which it leaves unchecked" (fun () ->
+      expect_proven Fixtures.Prover.run_forever_of_a_recursion);
+  Harness.test "a RunForever is used by a lambda passed to a generic callee that may run forever"
+    (fun () -> expect_proven Fixtures.Prover.run_forever_of_a_lambda_passed_to_a_generic_callee);
+  Harness.test "a RunForever is used by a call of a function that may run forever" (fun () ->
+      expect_proven Fixtures.Prover.run_forever_of_a_callee_that_runs_forever)
+
+let () =
   Harness.test "a loop with an invariant" (fun () ->
       expect_proven Fixtures.Prover.loop_with_an_invariant);
   Harness.test "a loop invariant that an iteration breaks" (fun () ->
@@ -223,6 +260,14 @@ let () =
   Harness.test "a loop's written measure holds where the function may run forever" (fun () ->
       expect_not_proven
         Fixtures.Prover.while_loop_whose_measure_does_not_decrease_where_it_may_run_forever
+        "prover.termination");
+  Harness.test "a while loop whose condition begins with a comparison is measured by its distance"
+    (fun () ->
+      expect_proven Fixtures.Prover.while_loop_measured_by_the_comparison_that_begins_its_condition);
+  Harness.test "the comparison that begins a condition measures a loop that must terminate"
+    (fun () ->
+      expect_not_proven
+        Fixtures.Prover.while_loop_toward_the_bound_of_the_comparison_that_begins_its_condition
         "prover.termination");
   Harness.test "an impl of FiniteCursor whose next does not decrease remaining is rejected"
     (fun () ->
@@ -828,6 +873,11 @@ let () =
       expect_proven (span ^ Fixtures.Prover.span_built_within_its_invariant));
   Harness.test "a derived Default must meet the invariant" (fun () ->
       expect_not_proven Fixtures.Prover.positive_default "prover.invariant");
+  Harness.test "a derived Default's failure points at its `derives` entry" (fun () ->
+      let text = Fixtures.Prover.positive_default in
+      match list_diagnostics text with
+      | [ { span; _ } ] when String.sub text span.start (span.stop - span.start) = "Default" -> ()
+      | actual -> Harness.fail "%s" (String.concat "; " (Support.list_codes actual)));
   Harness.test "a derived Default built from field defaults meets the invariant" (fun () ->
       expect_proven Fixtures.Prover.positive_default_from_field_defaults);
   Harness.test "a field's default must meet its type's invariant" (fun () ->
@@ -1557,6 +1607,15 @@ let () =
           "This recursive call may not end: give the function a `decreases` clause for the prover \
            to show that the recursion ends."
         Fixtures.Prover.from_calling_itself_through_its_type "prover.termination");
+  Harness.test "an operator that calls its own method is recursion named by the operator" (fun () ->
+      Support.expect_one_diagnostic ~check
+        ~says:"The call to `Money.add` that `self + right` makes may not"
+        Fixtures.Prover.money_adding_itself "prover.termination");
+  Harness.test "a cursor's `next` that its own `for` loop calls is recursion named by the loop"
+    (fun () ->
+      Support.expect_one_diagnostic ~check ~at:("inner", 2)
+        ~says:"The call to `Countdown.next` that this `for` loop makes may not"
+        Fixtures.Prover.countdown_pulling_itself "prover.termination");
   Harness.test "an impl's method that calls itself through its receiver is recursion" (fun () ->
       expect_not_proven Fixtures.Prover.grow_calling_itself_through_its_receiver
         "prover.termination");
@@ -1664,8 +1723,9 @@ let () =
     (fun () ->
       expect_one_termination_failure
         ~says:
-          "This call uses `app::main::impl standard::core::Equal for app::main::Tree` where a \
-           bound needs it, and its methods reach back here."
+          "The call that `self.children == other.children` makes uses `app::main::impl \
+           standard::core::Equal for app::main::Tree` where a bound needs it, and its methods \
+           reach back here."
         Fixtures.Prover.tree_equal_comparing_its_lists_of_children);
   Harness.test "an equal that compares each child in a loop recurses on parts" (fun () ->
       match list_termination_failures Fixtures.Prover.tree_equal_comparing_each_child with
@@ -2104,7 +2164,26 @@ let () =
   Harness.test "a counterexample names no arm for a `for` loop that moves each element out"
     (fun () -> expect_overflow_naming_no_path Fixtures.Prover.sum_over_an_owned_list);
   Harness.test "a counterexample names no arm for a `?`" (fun () ->
-      expect_overflow_naming_no_path Fixtures.Prover.question_mark_on_an_option)
+      expect_overflow_naming_no_path Fixtures.Prover.question_mark_on_an_option);
+  let expect_message_saying text says =
+    let actual = read_message text in
+    if not (String.includes ~affix:says actual) then Harness.fail "message %S" actual
+  in
+  Harness.test "a counterexample names the `?` that returns early" (fun () ->
+      expect_message_saying Fixtures.Prover.checked_through_two_tries
+        "On that path, `check_even(low)?` returns early.");
+  Harness.test "a counterexample says when a `let ... else` runs its `else`" (fun () ->
+      expect_message_saying Fixtures.Prover.found_or_zero
+        "On that path, `Some(found)` does not match, so the `else` runs.");
+  Harness.test "a precondition of a `for` loop's call names the loop" (fun () ->
+      expect_message_saying Fixtures.Prover.sum_over_a_short_bag
+        "may not hold for the call to `Bag.element` that this `for` loop makes.");
+  Harness.test "a precondition of a quantifier's call names the quantifier" (fun () ->
+      expect_message_saying Fixtures.Prover.all_small_in_a_short_bag
+        "may not hold for the call to `Bag.element` that this quantifier makes.");
+  Harness.test "a panic condition of an operator's call names the operator" (fun () ->
+      expect_message_saying Fixtures.Prover.sum_of_capped_money
+        "may not hold for the call to `Money.add` that `left + right` makes, so the call may panic.")
 
 let () =
   Harness.test "a pure call's result is in its type's range for every bound value" (fun () ->
@@ -2691,7 +2770,12 @@ let () =
       if
         has_untriggered_fact
           (make_query (forall ([ (variable "i", Int) ], positive (applied_f i_term))))
-      then Harness.fail "a fact on f(i) has one");
+      then Harness.fail "a fact on f(i) has one";
+      if
+        has_untriggered_fact
+          ~is_counted:(fun _ -> false)
+          (make_query (forall ([ (variable "i", Int) ], positive (applied_f (add i_term (int 1))))))
+      then Harness.fail "a fact that is not counted is told apart");
   Harness.test "variables named by no one application share a trigger" (fun () ->
       expect
         (forall
@@ -3039,3 +3123,40 @@ let () =
       expect_proven (ticker ^ Fixtures.Prover.movement_ticked_twice_bounded_by_the_time_of_its_tick));
   Harness.test "the time of a bound's method is the time that the type argument's impl states"
     (fun () -> expect_proven (ticker ^ Fixtures.Prover.tick_twice_of_a_countdown_in_constant_time))
+
+let () =
+  let list_obligations text =
+    let packages = Support.setup [ ("app::main", text) ] in
+    let key = List.hd (Support.list_declarations packages (Support.parse_module "app::main")) in
+    match
+      Support.read_proofs (Support.make_database packages) (Support.parse_file "app::main") key.key
+    with
+    | Obligations { obligations; _ } -> obligations
+    | _ ->
+        Harness.fail "no obligations";
+        []
+  in
+  Harness.test "an untriggered fact that the program writes is named when the solver gives up"
+    (fun () ->
+      let obligations =
+        list_obligations Fixtures.Prover.index_after_a_push_under_an_untriggered_requires
+      in
+      if
+        not
+          (List.exists
+             (fun (obligation : Prover.Obligation.t) -> obligation.has_untriggered_written_fact)
+             obligations)
+      then Harness.fail "no obligation names the fact");
+  Harness.test "an untriggered fact of the standard library is not named" (fun () ->
+      let obligations = list_obligations Fixtures.Prover.list_index_from_a_map in
+      if
+        not
+          (List.exists
+             (fun (obligation : Prover.Obligation.t) -> Logic.has_untriggered_fact obligation.query)
+             obligations)
+      then Harness.fail "no query has an untriggered fact";
+      if
+        List.exists
+          (fun (obligation : Prover.Obligation.t) -> obligation.has_untriggered_written_fact)
+          obligations
+      then Harness.fail "an obligation names a fact the program does not write")

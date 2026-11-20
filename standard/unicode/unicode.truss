@@ -1,3 +1,4 @@
+use standard::core
 use standard::text::string_slice
 use standard::text::unicode_tables
 
@@ -99,22 +100,38 @@ fn with_combining_classes(codes: Slice[UInt32]) -> List[UInt32]
 fn reorder(entries: mut List[UInt32])
   ensures entries.length() == old(entries.length())
 {
-  var position: UInt64 = 1
-  while position < entries.length()
+  var run: List[core::Pair[core::Pair[UInt32, UInt64], UInt32]] = []
+  var start: UInt64 = 0
+  while start < entries.length()
     invariant entries.length() == old(entries.length())
-    decreases entries.length() - position
+    decreases entries.length() - start
   {
-    var at = position
-    while at > 0 && entries[at] >= 2097152 && entries[at - 1] / 2097152 > entries[at] / 2097152
-      invariant at <= position
-      invariant position < entries.length()
+    var stop = start
+    while stop < entries.length() && entries[stop] >= 2097152
+      invariant start <= stop
+      invariant stop <= entries.length()
       invariant entries.length() == old(entries.length())
-      decreases at
+      decreases entries.length() - stop
     {
-      mut entries.swap(at - 1, second: at)
-      at -= 1
+      stop += 1
     }
-    position += 1
+    if stop - start > 1 {
+      mut run.clear()
+      for index in start..stop
+        invariant run.length() == index - start
+        invariant entries.length() == old(entries.length())
+      {
+        mut run.push(core::Pair(first: core::Pair(first: entries[index] / 2097152, second: index - start), second: entries[index]))
+      }
+      mut run.sort()
+      for offset in 0..stop - start
+        invariant run.length() == stop - start
+        invariant entries.length() == old(entries.length())
+      {
+        entries[start + offset] = run[offset].second
+      }
+    }
+    start = if stop > start { stop } else { start + 1 }
   }
 }
 

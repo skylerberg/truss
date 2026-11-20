@@ -2,8 +2,9 @@ type checked = {
   form : Core.t;
   tables : Tables.published;
   used_packages : Path.package list;
-  places_without_keyword : (Core.origin * Language.Mode.t) list;
+  places_without_keyword : (Syntax.id * Language.Mode.t) list;
   mode_keywords : Core.mode_keyword list;
+  requires_run_forever : bool;
 }
 
 let no_output : State.env =
@@ -181,7 +182,8 @@ let check_bit_vector_names state (form : Core.t) =
              (function
              | Local { type_; origin; _ }
                when not (Types.is_builtin Bool type_ || Types.find_integer_range type_ <> None) ->
-                 State.report state Not_bit_vector (State.read_span state origin)
+                 State.report state Not_bit_vector
+                   (State.read_span state (Core_walk.locate_origin origin))
                    (Printf.sprintf
                       "An assertion `by bit_vector` can name only integers and booleans, and this \
                        is a `%s`."
@@ -210,7 +212,7 @@ let check_deserialized_invariants state (elaborated : Interface.Environment.elab
         (fun (invariant : Core.condition) ->
           if not invariant.executable then
             State.report state Cannot_derive
-              (State.read_span state invariant.value.origin)
+              (State.read_span state (Core_walk.locate_origin invariant.value.origin))
               "This invariant cannot be checked at run time, so `serialization::Deserialize` \
                cannot be derived: a value read from data might break it. Write the `impl`, which \
                checks the value another way.")
@@ -466,16 +468,21 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
       ~elaborated ~law_parameters:state.law_parameters ~checks_body
   in
   let checked = if is_clean tables then Some (build tables) else None in
-  (match checked with
-  | Some form ->
-      check_bit_vector_names state form;
-      Capabilities.check state elaborated form;
-      check_deserialized_invariants state elaborated form
-  | None -> state.capability_solution <- Some (Hashtbl.create 1));
+  let requires_run_forever =
+    match checked with
+    | Some form ->
+        check_bit_vector_names state form;
+        let requires_run_forever = Capabilities.check state elaborated form in
+        check_deserialized_invariants state elaborated form;
+        Some requires_run_forever
+    | None ->
+        state.capability_solution <- Some (Hashtbl.create 1);
+        None
+  in
   let has_capability_variables = state.unifier.capability_variable_count > 0 in
   let tables = if has_capability_variables then finalize () else tables in
-  match checked with
-  | Some form when is_clean tables ->
+  match (checked, requires_run_forever) with
+  | Some form, Some requires_run_forever when is_clean tables ->
       let form = if has_capability_variables then build tables else form in
       Ok
         {
@@ -485,6 +492,7 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
             list_used_packages resolved ~evidence_packages:state.evidence_packages form;
           places_without_keyword = state.places_without_keyword;
           mode_keywords = state.mode_keywords;
+          requires_run_forever;
         }
   | _ ->
       Error

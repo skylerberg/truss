@@ -46,30 +46,29 @@ let list_required_fixes (context : State.context) (frame : State.frame) (clauses
               (Facts.show_truss_value context passed.term)))
       (List.mapi (fun index parameter -> (index, parameter)) clauses.parameters)
   in
-  match clauses.callee.key with
-  | Some key
-    when frame.source.key = Some context.home
-         && List.for_all is_fixed (Logic.list_free_constants term) ->
-      let written = list_written () in
-      let replacements =
-        List.map
-          (fun (local, origin) ->
-            Option.map (fun text -> (origin, text)) (List.assoc_opt local written))
-          requirement.names
-      in
-      if List.for_all Option.is_some replacements then
-        Facts.add_requires context frame
-          [
-            Substituted
-              {
-                key;
-                clause = clause.origin;
-                replacements = List.filter_map Fun.id replacements;
-                type_names;
-              };
-          ]
-      else []
-  | Some _ | None -> []
+  if Facts.is_home context frame.source && List.for_all is_fixed (Logic.list_free_constants term)
+  then begin
+    let written = list_written () in
+    let replacements =
+      List.map
+        (fun (local, origin) ->
+          Option.map (fun text -> (origin, text)) (List.assoc_opt local written))
+        requirement.names
+    in
+    if List.for_all Option.is_some replacements then
+      Facts.add_requires context frame
+        [
+          Substituted
+            {
+              key = clauses.callee.key;
+              clause = clause.origin;
+              replacements = List.filter_map Fun.id replacements;
+              type_names;
+            };
+        ]
+    else []
+  end
+  else []
 
 let name_term context ty term =
   let rec holds_call = function
@@ -87,10 +86,7 @@ let name_term context ty term =
     named
 
 let evaluate_default_value (context : State.context) frame (clauses : State.clauses) position =
-  match
-    Option.bind clauses.callee.key (fun (key : Resolve.Names.key) ->
-        Mir.read_defaults context.lookups.mir key.path)
-  with
+  match Mir.read_defaults context.lookups.mir clauses.callee.definition with
   | Some { form = Parameter_defaults defaults; _ } -> (
       match (List.assoc_opt position defaults, List.nth_opt clauses.parameters position) with
       | Some default, Some parameter ->
@@ -160,6 +156,12 @@ let add_restated_clauses (context : State.context) ~self_type ~bind trait name r
            ~packages:(Operations.list_impl_packages context self_type)
            ~self_type trait name receiver);
   }
+
+let describe_recursive_call context (location : Obligation.location) ~callee =
+  match location with
+  | Node (Written _) -> "This recursive call"
+  | Node (Desugared _) | Whole_definition ->
+      String.capitalize_ascii (Facts.describe_call context location ~callee ())
 
 let call_contract context (frame : State.frame) (site : Invocation.site) (invocation : Invocation.t)
     path (contract : State.contract) (values : State.passed list) ~recursive_callee ~lent_final
@@ -299,8 +301,8 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
           [
             Text
               (Printf.sprintf
-                 "This recursive call may not be on a part of %s: give the function a `decreases` \
-                  clause."
+                 "%s may not be on a part of %s: give the function a `decreases` clause."
+                 (describe_recursive_call context location ~callee:(Facts.show_callee path))
                  compared);
           ]
           (Amounts.compare_lexicographically before after)
@@ -309,13 +311,16 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
           [
             Text
               (if is_self_call then
-                 "This recursive call may not end: give the function a `decreases` clause for the \
-                  prover to show that the recursion ends."
+                 Printf.sprintf
+                   "%s may not end: give the function a `decreases` clause for the prover to show \
+                    that the recursion ends."
+                   (describe_recursive_call context location ~callee:(Facts.show_callee path))
                else
                  Printf.sprintf
-                   "This call to `%s` may not end: it calls back here, and both need a `decreases` \
-                    clause for the prover to show that the recursion ends."
-                   (Facts.show_callee path));
+                   "%s may not end: it calls back here, and both need a `decreases` clause for the \
+                    prover to show that the recursion ends."
+                   (String.capitalize_ascii
+                      (Facts.describe_call context location ~callee:(Facts.show_callee path) ())));
           ]
           (Logic.Boolean false)
     | (_ :: _ as measures), (_ :: _ as callee_measures) ->
@@ -342,7 +347,9 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
         in
         let before, after = split_prefix before after in
         Facts.oblige context frame Termination location
-          (Obligation.Text "This call may not decrease `"
+          (Obligation.Text
+             (String.capitalize_ascii (Facts.describe_call context location ())
+             ^ " may not decrease `")
            :: List.concat
                 (List.mapi
                    (fun index (measure : Mir.formula) ->
@@ -360,7 +367,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       (fun (requirement : Mir.requirement) ->
         let clause = requirement.clause in
         let _, term = Validity.read_specification context entry clause in
-        let cited = Option.map (fun key -> (key, clause.origin)) precondition_clauses.callee.key in
+        let cited = Some (precondition_clauses.callee.key, clause.origin) in
         let fixes =
           list_required_fixes context frame precondition_clauses requirement term values
             ~type_names:(list_type_names (substitution_of precondition_clauses))
@@ -369,7 +376,9 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
           [
             Text "`";
             Facts.quote precondition_clauses.callee clause.origin;
-            Text (Printf.sprintf "` may not hold for this call to `%s`." (Facts.show_callee path));
+            Text
+              (Printf.sprintf "` may not hold for %s."
+                 (Facts.describe_call context location ~callee:(Facts.show_callee path) ()));
           ]
         in
         Facts.oblige context frame Requires location ?cited ~fixes
@@ -389,14 +398,14 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
           list_required_fixes context frame clauses requirement term values
             ~type_names:(list_type_names (substitution_of clauses))
         in
-        let cited = Option.map (fun key -> (key, requirement.clause.origin)) clauses.callee.key in
+        let cited = Some (clauses.callee.key, requirement.clause.origin) in
         Facts.oblige context frame Panic location ?cited ~fixes
           [
             Text "`";
             Facts.quote clauses.callee requirement.clause.origin;
             Text
-              (Printf.sprintf "` may not hold for this call to `%s`, so the call may panic."
-                 (Facts.show_callee path));
+              (Printf.sprintf "` may not hold for %s, so the call may panic."
+                 (Facts.describe_call context location ~callee:(Facts.show_callee path) ()));
           ]
           term)
       clauses.panics_unless
@@ -921,10 +930,11 @@ let compute_function_value_amount context frame ~location (function_type : Types
             [
               Text
                 (Printf.sprintf
-                   "Only an upper bound is known for the `%s` of this call, which may spend less, \
-                    so no `==` bound can count it. State the cost with `<=`, or give the type of \
-                    the function called an `==` bound."
-                   (Language.Metric.show metric));
+                   "Only an upper bound is known for the `%s` of %s, which may spend less, so no \
+                    `==` bound can count it. State the cost with `<=`, or give the type of the \
+                    function called an `==` bound."
+                   (Language.Metric.show metric)
+                   (Facts.describe_call context location ()));
             ]
             (Logic.equal cost Costs.zero);
         cost
@@ -955,7 +965,9 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
          && Conditions.may_panic_for_every_value context.lookups ~current:context.current
               ~condition:context.condition invocation.uses ->
       Facts.oblige context frame Panic location
-        ((Obligation.Text "This call may panic where `" :: condition)
+        (Obligation.Text
+           (String.capitalize_ascii (Facts.describe_call context location ()) ^ " may panic where `")
+         :: condition
         @ [ Text "` holds, which the function's `uses Panic unless` rules out." ])
         (Logic.Boolean false)
   | Some _ | None -> ());
@@ -983,7 +995,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
         (fun (passed : State.passed) ->
           if not (is_update_step && passed.position = 0) then
             Lambdas.check_valid context frame location passed.type_ passed.term ~deep:true
-              ~when_:"when it is passed to this call")
+              ~when_:("when it is passed to " ^ Facts.describe_call context location ()))
         values);
   let havoc_mut frame =
     List.fold_left
@@ -1223,8 +1235,8 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
   | By_contract (frame, result) -> Some (frame, result)
   | Without_contract result ->
       Facts.reject_uncompared_recursion context frame location recursive_callee
-        ~describe:
-          (Printf.sprintf
-             "This call to `%s` may not end: it calls back here, and the prover reads this call \
-              without the callee's `decreases` clause.");
+        ~describe:(fun callee ->
+          String.capitalize_ascii (Facts.describe_call context location ~callee ())
+          ^ " may not end: it calls back here, and the prover reads the call without the callee's \
+             `decreases` clause.");
       result

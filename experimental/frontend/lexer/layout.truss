@@ -46,7 +46,7 @@ fn is_layout_name_byte(byte: UInt8) -> Bool {
 }
 
 fn starts_definition(source: source::Source, offset: UInt64) -> Bool
-  uses Panic, RunForever
+  uses Panic
 {
   if !source.starts_line(offset) {
     return false
@@ -69,7 +69,7 @@ fn starts_definition(source: source::Source, offset: UInt64) -> Bool
 }
 
 fn layout_indentation(source: source::Source, offset: UInt64) -> StringSlice
-  uses Panic, RunForever
+  uses Panic
 {
   let text = source.text.slice()
   let start = source.compute_line_start(offset)
@@ -81,7 +81,7 @@ fn layout_indentation(source: source::Source, offset: UInt64) -> StringSlice
 }
 
 fn token_starts_definition(source: source::Source, first_line_break: Option[source::Span], kind: token::Kind, offset: UInt64) -> Bool
-  uses Panic, RunForever
+  uses Panic
 {
   first_line_break.is_some() && layout_indentation(source, offset).is_empty() && match kind {
     Keyword(keyword) => token::is_definition_keyword(keyword)
@@ -110,7 +110,7 @@ type ClosingPlace(stop: UInt64, starts_line: Bool)
   derives Equal
 
 fn find_closing_position(scanner: Scanner, run: Run, opener: Opener) -> Option[ClosingPlace]
-  uses Panic, RunForever
+  uses Panic
 {
   let opener_line = scanner.source.compute_line_start(opener.span.start)
   let indentation = layout_indentation(scanner.source, offset: opener.span.start).length()
@@ -130,6 +130,9 @@ fn find_closing_position(scanner: Scanner, run: Run, opener: Opener) -> Option[C
       Punctuation(punctuation) => match punctuation {
         Open(_) => match run.closers.get(index).expect("a closer slot") {
           Some(closer) => {
+            if closer < index {
+              Panic.crash("a group closes before it opens")
+            }
             element_start = current.span.start
             element_stop = run.token(closer).span.stop
             index = closer + 1
@@ -171,7 +174,7 @@ fn find_closing_position(scanner: Scanner, run: Run, opener: Opener) -> Option[C
 }
 
 fn find_closing_edits(scanner: Scanner, run: Run, openers: Slice[Opener]) -> Option[List[source::Edit]]
-  uses Panic, RunForever
+  uses Panic
 {
   var earliest: UInt64 = 0
   var edits: List[source::Edit] = []
@@ -265,7 +268,7 @@ fn innermost_first(run: Run) -> List[Opener] {
 }
 
 fn list_closing_fixes(scanner: Scanner, run: Run, openers: Slice[Opener], title: StringSlice) -> List[source::Fix]
-  uses Panic, RunForever
+  uses Panic
 {
   match find_closing_edits(scanner, run, openers) {
     Some(edits) => [source::make_fix(title, edits: edits.copy())]

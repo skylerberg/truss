@@ -81,7 +81,8 @@ let check =
       & info [ "fix" ]
           ~doc:
             "Apply every fix that is its diagnostic's only fix, check again, and repeat until no \
-             such fix remains, then report the remaining diagnostics.")
+             such fix remains, then report the remaining diagnostics. A fix for an obligation that \
+             the prover could not prove is never applied, since it changes the contract.")
   in
   let no_proofs =
     Cmdliner.Arg.(

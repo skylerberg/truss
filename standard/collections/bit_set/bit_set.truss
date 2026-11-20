@@ -517,6 +517,7 @@ impl Iterable for collections::BitSet {
 impl Equal for collections::BitSet {
   fn equal(self, other: collections::BitSet) -> Bool
     ensures result == (self.length == other.length && self.words == other.words)
+    cost time O(self.words.length())
     cost allocations == 0
   {
     self.length == other.length && self.words == other.words
@@ -524,10 +525,11 @@ impl Equal for collections::BitSet {
 }
 
 impl Hash for collections::BitSet {
-  fn hash(self, hasher: mut Hasher)
+  fn hash(self, hasher: Hasher) -> Hasher
+    ensures identical(result, self.words.hash(self.length.hash(hasher)))
+    cost time O(self.words.length())
     cost allocations == 0
   {
-    self.length.hash(mut hasher)
-    self.words.hash(mut hasher)
+    self.words.hash(self.length.hash(hasher))
   }
 }

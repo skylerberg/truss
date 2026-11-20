@@ -257,6 +257,31 @@ let () =
     [ "first: (fn() uses Console)"; "second: (fn() uses Clock)" ]
 
 let () =
+  Harness.test "a call is named by the construct that makes it" (fun () ->
+      let describe ?callee origin =
+        Core_walk.describe_call origin ?callee ~quote:(fun () -> "x") ()
+      in
+      let desugared desugaring : Core.origin = Desugared { construct = 1; desugaring } in
+      Harness.expect_strings
+        ~expected:
+          [
+            "this call";
+            "this call to `f`";
+            "the call to `f` that this `for` loop makes";
+            "the call to `f` that this quantifier makes";
+            "the call to `f` that the derived `x` makes";
+            "the call to `f` that `x` makes";
+            "the call that `x` makes";
+          ]
+        [
+          describe (Written 1);
+          describe ~callee:"f" (Written 1);
+          describe ~callee:"f" (desugared For_loop);
+          describe ~callee:"f" (desugared Quantifier);
+          describe ~callee:"f" (desugared Derived);
+          describe ~callee:"f" (desugared Rewrite);
+          describe (desugared Try);
+        ]);
   Harness.test "a node's origin gives its source span" (fun () ->
       let text = Fixtures.Core.loop_summing_a_list in
       let packages = Support.setup [ ("app::main", text) ] in
@@ -277,7 +302,7 @@ let () =
                     (fun (node : Core.statement) ->
                       match node.kind with
                       | Compound_assign _ ->
-                          let span = spans.(node.origin) in
+                          let span = spans.(Core_walk.locate_origin node.origin) in
                           actual :=
                             String.sub written span.start (span.stop - span.start) :: !actual
                       | _ -> ());
@@ -383,7 +408,7 @@ let () =
           | ( Some { definition = Function { contract = { costs = [ cost ]; _ }; _ }; _ },
               spans,
               written ) ->
-              let span = spans.(cost.clause.origin) in
+              let span = spans.(Core_walk.locate_origin cost.clause.origin) in
               let quoted = String.sub written span.start (span.stop - span.start) in
               if quoted <> "cost time O(items.length())" then Harness.fail "found `%s`" quoted
           | _ -> Harness.fail "no core form with exactly one cost")

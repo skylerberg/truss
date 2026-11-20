@@ -485,7 +485,7 @@ fn lex_trailing_point(scanner: Scanner, start: UInt64, stop: UInt64, checked: Ch
 }
 
 fn report_trailing_point(scanner: mut Scanner, start: UInt64, point: UInt64)
-  uses Panic, RunForever
+  uses Panic
 {
   let written = scanner.text(start, stop: point + 1).to_string()
   let fixes = scanner.list_code_fixes(source::make_span(start, stop: point + 1), codes: ["${written}0"])
@@ -573,7 +573,7 @@ fn opens_literal_at(scanner: Scanner, stop: UInt64) -> Bool
 }
 
 fn check_cached_name(scanner: mut Scanner, spelling: StringSlice) -> UInt64
-  uses Panic, RunForever
+  uses Panic
 {
   if scanner.name_indices.get(spelling) is Some(interned_index) {
     return interned_index

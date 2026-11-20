@@ -25,6 +25,7 @@ type call = {
   arguments : argument list;
   omitted_defaults : string list;
   callee_result : Types.ty;
+  lends : Language.Mode.t option;
 }
 
 type resolution =
@@ -58,15 +59,11 @@ type pattern =
   | Record_pattern of { type_ : Types.ty; fields : (string * Syntax.pattern) list }
   | Binding_pattern of { local : Syntax.id; is_var : bool; mode : Language.Mode.t }
   | Constant_pattern of Path.t
-  | Literal_pattern of literal
-  | Other_pattern
+  | Literal_pattern of Z.t
 
-type template = {
-  from_template : call option;
-  part_conversions : call option list;
-  interpolated : bool;
-  part : Types.ty option;
-}
+type template =
+  | Interpolated of { displays : call list }
+  | Tagged of { from_template : call; part : Types.ty; part_conversions : call option list }
 
 type conversion =
   | From_never
@@ -77,6 +74,9 @@ type conversion =
   | From_integer
 
 type specification_call =
+  | Old
+  | Identical
+  | Final of { part : Types.ty }
   | Specification_function of Core.specification_function
   | Method_cost of {
       metric : Language.Metric.t;
@@ -90,6 +90,17 @@ type literal_elements =
   | List_element of Types.ty
   | Map_entry of { key : Types.ty; value : Types.ty }
 
+type elaboration =
+  | Literal of literal
+  | Template of template
+  | Call of call
+  | Specification_call of specification_call
+  | Converted_literal of { elements : literal_elements; call : call }
+  | Record_update of { paths : (Syntax.id * string list) list }
+  | Lambda of { captures : (Syntax.id * Core.local) list }
+  | Loop of loop
+  | Discarded
+
 type published = {
   types : Types.ty option array;
   local_types : Types.ty option array;
@@ -100,24 +111,26 @@ type published = {
 type t = {
   types : Types.ty option array;
   local_types : Types.ty option array;
-  resolutions : resolution option array;
-  calls : call option array;
-  literals : literal option array;
-  patterns : pattern option array;
   scrutinee_types : Types.ty option array;
-  loops : loop option array;
-  templates : template option array;
-  lend_modes : Language.Mode.t option array;
-  conditions : Types.condition option array;
+  resolutions : resolution option array;
   conversions : (conversion * Types.ty) list array;
-  update_paths : (Syntax.id * string list) list option array;
-  specification_calls : specification_call option array;
-  captures : (Syntax.id * Core.local) list option array;
-  literal_elements : literal_elements option array;
-  discarded : bool array;
+  conditions : Types.condition option array;
+  patterns : pattern option array;
+  elaborations : elaboration option array;
 }
 
 val create : int -> t
+
+val make_method_call :
+  ?lends:Language.Mode.t ->
+  Types.trait_reference ->
+  Well_known.method_ ->
+  self_type:Types.ty ->
+  result:Types.ty ->
+  (Syntax.expression * Language.Mode.t) list ->
+  call
+
+val find_call : t -> Syntax.id -> call option
 
 val map :
   map_type:(Types.ty -> Types.ty) ->

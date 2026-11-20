@@ -470,9 +470,5 @@ test "decimals are equal and ordered by their value, whatever their scale" {
   mut values.sort()
   assert "${values[0]}" == "-1.5" && "${values[1]}" == "-1" && "${values[2]}" == "0"
     && "${values[3]}" == "2.05" && values[4] == decimal("2.5") && values[5] == decimal("2.5")
-  var first = Hasher.new()
-  var second = Hasher.new()
-  decimal("1.50").hash(mut first)
-  decimal("15e-1").hash(mut second)
-  assert first.finish() == second.finish()
+  assert decimal("1.50").hash(Hasher.new()).finish() == decimal("15e-1").hash(Hasher.new()).finish()
 }
