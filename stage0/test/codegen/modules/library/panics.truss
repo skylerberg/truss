@@ -26,3 +26,19 @@ test "Task 0 is sending to a full channel." uses Panic, RunForever {
     let _ = numbers.send(2)
   }
 }
+
+test "the separator is empty" uses Panic {
+  let _ = "a,b".split("")
+}
+
+test "the radix is not between 2 and 36" uses Panic {
+  let _ = Character.from_digit(1, radix: 37)
+}
+
+test "the code is not a Unicode scalar value" uses Panic {
+  let _ = Character.from_code(55296)
+}
+
+test "the step is zero" uses Panic {
+  let _ = (0..10).step_by(0)
+}

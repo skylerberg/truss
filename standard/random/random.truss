@@ -152,16 +152,22 @@ public fn Generator.unit(mut self) -> Float64
 }
 
 public fn Generator.uniform(mut self, low: Float64, high: Float64) -> Float64
-  requires low < high
+  uses Panic unless low < high
   cost time O(1)
 {
+  if low >= high {
+    Panic.crash("the range is empty")
+  }
   low + (high - low) * mut self.unit()
 }
 
 public fn Generator.normal(mut self, mean: Float64 = 0.0, standard_deviation: Float64 = 1.0) -> Float64
-  requires standard_deviation >= 0.0
+  uses Panic unless standard_deviation >= 0.0
   cost time O(1)
 {
+  if standard_deviation < 0.0 {
+    Panic.crash("the standard deviation is negative")
+  }
   let first = 1.0 - mut self.unit()
   let second = mut self.unit()
   let radius = (-2.0 * first.logarithm()).square_root()
@@ -169,9 +175,12 @@ public fn Generator.normal(mut self, mean: Float64 = 0.0, standard_deviation: Fl
 }
 
 public fn Generator.chance(mut self, probability: Float64) -> Bool
-  requires 0.0 <= probability && probability <= 1.0
+  uses Panic unless 0.0 <= probability && probability <= 1.0
   cost time O(1)
 {
+  if probability < 0.0 || probability > 1.0 {
+    Panic.crash("the probability is not between 0 and 1")
+  }
   mut self.unit() < probability
 }
 
@@ -222,10 +231,13 @@ public fn Generator.choose_index[Element](mut self, items: Slice[Element]) -> Op
 }
 
 public fn Generator.sample(mut self, population: UInt64, count: UInt64) -> List[UInt64]
-  requires count <= population
+  uses Panic unless count <= population
   ensures result.length() == count
   ensures forall i in 0..result.length() => result.model()[i] < population
 {
+  if count > population {
+    Panic.crash("the count exceeds the population")
+  }
   var chosen: List[UInt64] = List.with_capacity(count)
   let start = population - count
   var position = start

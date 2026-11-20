@@ -601,20 +601,26 @@ public fn Slice[Element].reversed(self) -> list::Reversed[Element]
 }
 
 public fn Slice[Element].windows(self, size: UInt64) -> list::Windows[Element]
-  requires size > 0
+  uses Panic unless size > 0
   ensures result.count() <= self.length()
   cost time O(1)
   cost allocations == 0
 {
+  if size == 0 {
+    Panic.crash("the size is zero")
+  }
   list::Windows(elements: self, size: size)
 }
 
 public fn Slice[Element].chunks(self, size: UInt64) -> list::Chunks[Element]
-  requires size > 0
+  uses Panic unless size > 0
   ensures result.count() <= self.length()
   cost time O(1)
   cost allocations == 0
 {
+  if size == 0 {
+    Panic.crash("the size is zero")
+  }
   list::Chunks(elements: self, size: size)
 }
 
