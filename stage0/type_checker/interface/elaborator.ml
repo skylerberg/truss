@@ -11,6 +11,7 @@ type t = {
   self_trait : Types.trait_reference option;
   self_associated : (string * Types.ty) list;
   self_capabilities : (string * Types.capability_set) list;
+  is_in_capability : bool;
   diagnostics : Diagnostic.in_definition list ref;
   named : (Syntax.id * Types.ty) list ref;
   spans : Source.Definition_span.t array;
@@ -34,6 +35,7 @@ let create lookups resolved ~spans (scope : Environment.scope) =
     self_trait = scope.self_trait;
     self_associated = scope.self_associated;
     self_capabilities = scope.self_capabilities;
+    is_in_capability = false;
     diagnostics = ref [];
     named = ref [];
     spans;
@@ -529,11 +531,6 @@ and elaborate_uses context clauses =
        clauses)
 
 and elaborate_capability_uses context uses =
-  let is_in_trait =
-    match context.self_type with
-    | Some (Types.Parameter parameter) -> Types.is_self_parameter parameter
-    | _ -> false
-  in
   List.concat_map
     (fun (use : Syntax.capability_use) ->
       let capabilities = elaborate_capability context use.capability in
@@ -549,10 +546,11 @@ and elaborate_capability_uses context uses =
                  context.spans.(first.id) message);
             capabilities
           in
-          if is_in_trait then
+          if context.is_in_capability then
             report
-              "A trait's method takes no condition on its arguments: each `impl` would have to \
-               prove that the trait's condition implies its own."
+              "A capability's method takes no condition on its arguments: an implementation uses \
+               the capabilities of the code that provides it, so it could panic where the \
+               condition holds."
           else if Option.is_some unless then
             report "A condition on the arguments cannot be joined with a bound with `&&`."
           else if capabilities <> [ Built_in Panic ] then
@@ -1267,10 +1265,15 @@ let elaborate_member (lookups : Lookups.t) ~path ~spans resolved (definition : S
   let context = create lookups resolved ~spans header.container_scope in
   match definition.kind with
   | Function { signature; _ } | Method_declaration signature ->
+      let is_in_capability =
+        match header.container with
+        | Capability_parts -> true
+        | Trait_parts _ | Impl_parts _ -> false
+      in
       make_elaborated_interface context
         (Function_interface
            (elaborate_signature
-              { context with self_capabilities = [] }
+              { context with self_capabilities = []; is_in_capability }
               ~owner:path ~head:[] ~self_type:header.container_scope.self_type signature))
   | _ -> make_elaborated_interface context (Error_interface Diagnostic.reported_elsewhere)
 

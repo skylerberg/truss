@@ -1,0 +1,25 @@
+trait Sized {
+  fn size(self, count: Int64) -> Int64
+    uses Panic unless count < 10
+}
+
+type Box(width: Int64)
+
+impl Sized for Box {
+  fn size(self, count: Int64) -> Int64
+    uses Panic unless count < 20
+  {
+    if count >= 20 {
+      Panic.crash("too many")
+    }
+    count
+  }
+}
+
+fn small[Shape: Sized](shape: Shape) -> Int64 {
+  shape.size(3)
+}
+
+fn boxed() -> Int64 {
+  Box(width: 1).size(15)
+}

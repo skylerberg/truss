@@ -902,8 +902,14 @@ public fn Option[Value].expect(own self, message: StringSlice) -> Value
   it proves a callee's `requires`, since a specification never panics. A
   function whose only capability is `Panic unless P` can be called in a
   specification: `forall i in 0..text.length() => text.byte(i) < 128`.
-- A trait's method, a written function type, and a `when` condition take no
-  condition on values. A function named as a value uses `Panic`.
+- **A trait's method can take one.** An `impl`'s method of it states its
+  own `uses Panic unless` a condition, which the trait's must imply, or uses
+  no `Panic`. A call known to reach an `impl` proves that `impl`'s
+  condition, and a call through a bound proves the trait's.
+- A call through `any` and a function named as a value use `Panic`, since
+  the code they reach is chosen when the program runs. A capability's
+  method, a written function type, and a `when` condition take no condition
+  on values.
 
 ### Termination
 
@@ -2009,14 +2015,16 @@ public trait Add[Right] {
   fn add_is_defined(self, right: Right) -> Bool
 
   fn add(self, right: Right) -> Self.Output
-    requires self.add_is_defined(right)
+    uses Panic unless self.add_is_defined(right)
 }
 ```
 
-- Each operation terminates, and requires its `_is_defined` method. For a
-  fixed-width integer, an operation is defined where its result fits the
-  type and, for `/` and `%`, where the divisor is not 0 and the operation is
-  not `minimum / -1`. A float operation is defined everywhere.
+- Each operation terminates, and uses `Panic unless` its `_is_defined`
+  method holds: code without `Panic` proves it, and code with `Panic` panics
+  where it fails, as with a built-in integer. For a fixed-width integer, an
+  operation is defined where its result fits the type and, for `/` and `%`,
+  where the divisor is not 0 and the operation is not `minimum / -1`. A
+  float operation is defined everywhere.
 - The built-in number types implement these traits only with themselves on
   both sides. The bitwise operators and shifts work only on the built-in
   integer types.
@@ -2412,7 +2420,8 @@ trait Ordered: Equal {
 - **An `impl`'s method may promise more than its trait.** Its contract is
   the trait method's, with the method's own `ensures` and `cost` clauses
   added, and its own `requires`, if it has any, in place of the trait's.
-  The trait's `requires` must imply the method's. A call known to reach
+  The trait's `requires` must imply the method's, and the condition after
+  the trait's `Panic unless` must imply the method's. A call known to reach
   that `impl` is proven against the `impl`'s contract, and a call through a
   bound or `any` against the trait's.
 - An `impl`'s method without a `time` clause has its trait's.
