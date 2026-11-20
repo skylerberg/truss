@@ -38,8 +38,9 @@ type goal = {
   requirement : requirement;
   outputs : (string * Types.ty) list;
   cause : cause;
-  is_specification : bool;
-  condition_bounds : Types.condition;
+  mode : Unify.mode;
+  depth : int;
+  needed_by : goal option;
 }
 
 type frame = {
@@ -54,17 +55,25 @@ type frame = {
 }
 
 type decision_site = Use | Statement_end | Actual_head | Method_call
-type logged
 
-type form = {
-  expression_builders : (unit -> Core.expression) option array;
-  statement_builders : (unit -> Core.statement) option array;
-  pattern_builders : (unit -> Core.pattern) option array;
-  mutable definition_builder : (holds_body:bool -> Core.definition) option;
-  mutable next_node_id : int;
-  mutable next_synthetic_local : int;
-  mutable tables_with_holes : Tables.t option;
-}
+type entry =
+  | Literal of {
+      allowed : Language.Builtin_type.t list;
+      report_excluded : Types.ty -> Diagnostic.reported;
+      literal : Syntax.id;
+    }
+  | Narrowing of {
+      allowed : Language.Builtin_type.t list;
+      report_excluded : Types.ty -> Diagnostic.reported;
+    }
+  | Local of Syntax.id
+  | Decided of {
+      site : decision_site;
+      decided_type : Types.ty;
+      decided_at : Source.Definition_span.t;
+    }
+
+type logged = { member : int; entry : entry }
 
 type state = {
   lookups : Lookups.t;
@@ -72,14 +81,12 @@ type state = {
   package : Path.package;
   definition : Syntax.definition;
   resolved : Resolve.resolved;
-  context : Interface.Elaborator.t;
   text : string Lazy.t;
-  mutable tables : Tables.t;
-  form : form;
+  tables : Tables.t;
   mutable diagnostics : Diagnostic.in_definition list;
   unifier : Unify.t;
   locals : (Syntax.id, local) Hashtbl.t;
-  mutable law_parameters : (string * Types.ty) list;
+  law_parameters : (string * Types.ty) list;
   mutable frames : frame list;
   mutable goals : goal list;
   mutable locals_read : Syntax.id list;
@@ -95,11 +102,7 @@ type state = {
   mutable evidence_packages : Path.package list;
   mutable final_type_checks : (unit -> unit) list;
   mutable log : logged list;
-  mutable condition_bounds : Types.condition;
   annotatable : (Syntax.id, unit) Hashtbl.t;
-  assumed_types : (Syntax.id * Types.ty) list;
-  mutable unchecked_fixes :
-    (Source.Definition_span.t Diagnostic.fix * (Syntax.id * Types.ty) list) list;
 }
 
 val add_diagnostic :
@@ -133,23 +136,7 @@ val make_error_type :
   Types.ty
 
 val quote_span : state -> Source.Definition_span.t -> string
-val allocate_node_id : state -> int
-
-val make_synthetic_expression :
-  state -> origin:Core.origin -> Types.ty -> Core.kind -> Core.expression
-
-val register_expression : state -> Syntax.expression -> (unit -> Core.kind) -> unit
-val was_hole : state -> (Tables.t -> Types.ty option array) -> Syntax.id -> bool
-val build_expression : state -> Syntax.expression -> Core.expression
-val register_statement : state -> Syntax.statement -> (unit -> Core.statement_kind) -> unit
-val build_statement : state -> Syntax.statement -> Core.statement
-val register_pattern : state -> Syntax.pattern -> (unit -> Core.pattern_kind) -> unit
-val build_pattern : state -> Syntax.pattern -> Core.pattern
-val build_scrutinee_pattern : state -> Syntax.pattern -> Core.pattern
-val alias_expression : state -> Syntax.expression -> Syntax.expression -> unit
 val mark_lent_tails : state -> Syntax.expression -> unit
-val make_place : Core.expression -> Core.place
-val allocate_synthetic_local : state -> Core.local
 
 val fix :
   string -> Source.Definition_span.t Diagnostic.edit list -> Source.Definition_span.t Diagnostic.fix
@@ -164,8 +151,9 @@ val check_compiled_binding : state -> Syntax.id -> unit
 val check_compiled_expression : state -> Syntax.id -> unit
 val reduce_condition : state -> Types.condition -> Types.condition option
 val record_condition : state -> Syntax.id -> Syntax.condition option -> Types.condition option
-val find_condition : state -> Syntax.id -> Types.condition option
-val apply_condition_bounds : state -> Types.condition -> (unit -> 'a) -> 'a
+val with_mode : state -> Unify.mode -> (unit -> 'a) -> 'a
+val with_added_condition : state -> Types.condition -> (unit -> 'a) -> 'a
+val read_context : state -> Interface.Elaborator.t
 val check_when_final : state -> (unit -> unit) -> unit
 val resolve : state -> Types.ty -> Types.ty
 val zonk : state -> Types.ty -> Types.ty
@@ -174,6 +162,7 @@ val make_fresh_generic_arguments : state -> Types.generic list -> Types.argument
 val lookup_bounds : state -> Types.parameter -> Types.trait_reference list
 val normalize : state -> Types.ty -> Types.ty
 val find_domain : state -> Types.ty -> Language.Builtin_type.t list option
+val is_float_domain : Language.Builtin_type.t list -> bool
 val is_within : state -> Types.ty -> Language.Builtin_type.t list -> bool
 val read_integer_range : state -> Types.ty -> Z.t * Z.t
 
@@ -198,7 +187,6 @@ val resolve_capabilities : state -> Types.capability_set -> Types.capability_set
 val finalize_type : state -> Types.ty -> Types.ty
 val finalize_capabilities : state -> Types.capability_set -> Types.capability_set
 val finalize_argument : state -> Types.argument -> Types.argument
-val finalize_instantiation : state -> Types.instantiation -> Types.instantiation
 val unify : state -> Types.ty -> Types.ty -> bool
 val unify_as_hint : state -> Types.ty -> Types.ty -> unit
 val normalize_trait : state -> Types.trait_reference -> Types.trait_reference
@@ -207,36 +195,7 @@ val find_evidence : state -> Types.ty -> Types.trait_reference -> Interface.Impl
 val decide_property :
   state -> Interface.Properties.property -> Types.ty -> Interface.Properties.decision
 
-val is_plain : state -> Types.ty -> bool
-val is_view : state -> Types.ty -> bool
-val decide_binding_mode : state -> Language.Mode.t -> Types.ty -> Language.Mode.t
-
-val resolve_associated_type :
-  state ->
-  Types.ty ->
-  Types.trait_reference ->
-  Well_known.associated ->
-  at:Source.Definition_span.t ->
-  Types.ty
-
-val make_callee : state -> Core.operand Core.target -> Core.callee
-
-val make_call :
-  state ->
-  callee:Core.operand Core.target ->
-  arguments:Core.argument list ->
-  lends:Language.Mode.t option ->
-  Core.call
-
-val make_trait_reference : arguments:Types.argument list -> Path.t -> Types.trait_reference
-val string_type : Types.ty
-val find_refused_class : state -> sides:(Types.ty * Types.ty) list -> int option
-
-val report_decided_in_specification :
-  state -> Source.Definition_span.t -> int -> Diagnostic.reported
-
 val diverges : is_never:(Syntax.expression -> bool) -> Syntax.statement -> bool
-val build_block : state -> Syntax.block -> Core.block
 val declare : state -> Syntax.name -> Types.ty -> binding:binding -> mode:Language.Mode.t -> unit
 
 val declare_compiled :
@@ -246,39 +205,5 @@ val find_target : state -> Syntax.name -> Resolve.target option
 val find_head : state -> Syntax.expression -> Resolve.head option
 val show : state -> Types.ty -> string
 val describe : state -> Types.ty -> string
-val list_class_pairs : state -> Types.ty * Types.ty -> (int * Types.ty) list
-
-val add_mismatch_diagnostic :
-  state ->
-  ?fixes:Source.Definition_span.t Diagnostic.fix list ->
-  Diagnostic.Code.types ->
-  Source.Definition_span.t ->
-  sides:(Types.ty * Types.ty) list ->
-  string ->
-  Diagnostic.reported
-
-val add_operand_mismatch :
-  state ->
-  at:Source.Definition_span.t ->
-  left:Source.Definition_span.t * Types.ty ->
-  right:Source.Definition_span.t * Types.ty ->
-  Diagnostic.reported
-
-val report_mismatch :
-  state -> Source.Definition_span.t -> expected:Types.ty -> actual:Types.ty -> unit
-
-val is_place : state -> Syntax.expression -> bool
-val find_keyword_operation : state -> Syntax.expression -> (Syntax.id * Syntax.expression) option
 val note_mode_keyword : state -> Syntax.expression -> Syntax.mode -> Syntax.expression -> unit
 val find_local_type : state -> Syntax.name -> Types.ty option
-val find_sequence_element : Types.ty -> Types.ty option
-val find_specification_sequence_element : Types.ty -> Types.ty option
-
-val make_range :
-  state ->
-  origin:Core.origin ->
-  Core.place ->
-  start:Core.expression option ->
-  stop:Core.expression option ->
-  inclusive:bool ->
-  Core.kind

@@ -1,0 +1,6 @@
+fn f() {
+  for index in 0..10 {
+    let gap = index.absolute_difference(1)
+    let byte: UInt8 = index
+  }
+}

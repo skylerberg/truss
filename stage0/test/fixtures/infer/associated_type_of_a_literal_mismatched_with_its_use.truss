@@ -1,0 +1,7 @@
+fn widened[Value: Add[Int64]](value: Value) -> Value.Output {
+  todo
+}
+
+fn f() -> UInt8 {
+  widened(3)
+}

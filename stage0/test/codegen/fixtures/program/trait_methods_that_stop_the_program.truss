@@ -1,0 +1,29 @@
+fn total[Value: Add[Value, Output = Value]](first: Value, second: Value) -> Value
+  uses Panic
+{
+  first + second
+}
+
+fn narrowed(value: Int64) -> Int8
+  uses Panic
+{
+  Int8.from_integer(value)
+}
+
+fn magnitude(value: Int64) -> Int64
+  uses Panic
+{
+  value.absolute()
+}
+
+fn main(arguments: List[String]) -> ExitCode
+  uses Console, Panic
+{
+  match arguments[1].slice() {
+    "addition" => Console.print_line("${total(UInt8.maximum, second: 1)}")
+    "conversion" => Console.print_line("${narrowed(300)}")
+    "absolute" => Console.print_line("${magnitude(Int64.minimum)}")
+    _ => Console.print_line("${total(UInt8.minimum, second: 1)} ${narrowed(100)} ${magnitude(-5)}")
+  }
+  ExitCode.success
+}

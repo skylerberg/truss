@@ -1,0 +1,4 @@
+fn f(items: Slice[Int64]) -> UInt64 {
+  let limit = 10
+  limit.min(items.length())
+}

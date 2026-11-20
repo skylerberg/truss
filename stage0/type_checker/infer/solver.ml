@@ -1,103 +1,9 @@
 type failure = Unmet | Unmet_associated of (string * Types.ty * Types.ty) | Refused of int
-type decision = Holds | Waits | Fails of failure
+type decision = Holds | Waits | Fails of failure | Becomes of State.goal list
 
 let read_cause_span : State.cause -> Source.Definition_span.t = function
   | Bound { at; _ } | Operator { at; _ } | Method_call at | Loop at | Any_conversion { at; _ } -> at
   | Excluded _ -> State.raise_bug "a requirement of a set has no span of its own"
-
-let describe_associated state type_ =
-  match State.zonk state type_ with
-  | Types.Projection { base; trait; name } ->
-      Printf.sprintf "the `%s` of `%s` under `%s`" name (Types.show base)
-        (Types.show_trait { trait with associated = [] })
-  | zonked -> Printf.sprintf "`%s`" (Types.show zonked)
-
-let report_unmet_bound (state : State.state) ~at ~of_type subject (bound : Types.trait_reference)
-    ~associated =
-  let needs =
-    Printf.sprintf "%s needs `%s: %s`"
-      (match of_type with
-      | Some type_ -> Printf.sprintf "`%s`" (State.show state type_)
-      | None -> "This")
-      (Types.show subject) (Types.show_trait bound)
-  in
-  let frame = State.read_current_frame state in
-  let is_slice = Types.is_well_known Slice subject || Types.is_well_known String_slice subject in
-  let has_mut_self_method =
-    match Interface.Definition.find_trait_interface state.lookups.interface bound.trait with
-    | Some trait ->
-        List.exists
-          (fun (method_ : Types.trait_method) -> method_.method_receiver = Instance Mut)
-          trait.methods
-    | None -> false
-  in
-  match
-    List.find_opt
-      (fun (reported, reported_bound, _) -> Types.equal reported subject && reported_bound = bound)
-      frame.reported_unmet_bounds
-  with
-  | Some (_, _, report) -> report
-  | None ->
-      let report =
-        State.add_diagnostic state Unsatisfied_bound at
-          (match associated with
-          | None when is_slice && has_mut_self_method ->
-              needs
-              ^ ", which does not hold: a slice implements no trait with a `mut self` method. \
-                 Generic code could call the method on a copy of the slice, and a copy views the \
-                 same elements."
-          | None -> needs ^ ", which does not hold."
-          | Some (name, found, _) ->
-              Printf.sprintf "%s, and its `%s` is `%s`." needs name (State.show state found))
-      in
-      frame.reported_unmet_bounds <- (subject, bound, report) :: frame.reported_unmet_bounds;
-      report
-
-let report_failure (state : State.state) (goal : State.goal) ?associated subject =
-  let shown = State.normalize state subject in
-  let does_not_implement trait =
-    Printf.sprintf "`%s` does not implement `%s`" (Types.show shown)
-      (Types.show_trait (Unify.zonk_trait state.unifier trait))
-  in
-  match (goal.cause, goal.requirement) with
-  | Excluded reason, _ -> reason shown
-  | Bound { at; of_type }, Implements bound ->
-      report_unmet_bound state ~at ~of_type shown (Unify.zonk_trait state.unifier bound) ~associated
-  | ( Operator { at; operands = Some (left, right) },
-      Implements { trait_arguments = [ Types.Type argument ]; _ } )
-    when Option.is_none associated
-         && State.is_within state goal.subject Types.number_types
-         && State.is_within state argument Types.number_types ->
-      State.add_operand_mismatch state ~at ~left:(left, goal.subject) ~right:(right, argument)
-  | Operator { at; _ }, Implements trait ->
-      State.add_diagnostic state
-        (if Option.is_some associated then Mismatch else No_impl)
-        at
-        (match associated with
-        | Some (_, found, wanted) -> (
-            match State.zonk state found with
-            | Types.Projection _ ->
-                Printf.sprintf "%s may differ from %s."
-                  (String.capitalize_ascii (describe_associated state found))
-                  (describe_associated state wanted)
-            | found ->
-                Printf.sprintf "This operator gives `%s`, and %s is expected." (Types.show found)
-                  (describe_associated state wanted))
-        | None -> does_not_implement trait ^ ", so the operator does not apply.")
-  | (Method_call at | Loop at), Implements trait ->
-      State.add_diagnostic state
-        (match goal.cause with Loop _ -> Not_indexable | _ -> No_impl)
-        at
-        (does_not_implement trait ^ ".")
-  | Any_conversion { at; any_type }, Implements trait ->
-      State.add_diagnostic state No_impl at
-        (match associated with
-        | None -> does_not_implement trait ^ "."
-        | Some (name, found, _) ->
-            Printf.sprintf "`%s` is expected, and the `%s` of `%s` is `%s`." (Types.show any_type)
-              name (Types.show shown) (State.show state found))
-  | (Bound _ | Operator _ | Method_call _ | Loop _ | Any_conversion _), Within _ ->
-      State.raise_bug "a goal's cause does not fit its requirement"
 
 let list_goal_arguments (goal : State.goal) =
   match goal.requirement with
@@ -107,16 +13,17 @@ let list_goal_arguments (goal : State.goal) =
 let fail (state : State.state) (goal : State.goal) failure =
   let report =
     match failure with
-    | Unmet -> report_failure state goal goal.subject
-    | Unmet_associated associated -> report_failure state goal ~associated goal.subject
-    | Refused root -> State.report_decided_in_specification state (read_cause_span goal.cause) root
+    | Unmet -> Failures.report_failure state goal goal.subject
+    | Unmet_associated associated -> Failures.report_failure state goal ~associated goal.subject
+    | Refused root ->
+        Failures.report_decided_in_specification state (read_cause_span goal.cause) root
   in
   List.iter (fun (_, output) -> ignore (State.unify state output (Types.Error report))) goal.outputs;
   List.iter
-    (fun (root, _) -> Hashtbl.replace state.unifier.type_solutions root (Types.Error report))
+    (fun (root, _) -> Unify.poison state.unifier root report)
     (List.concat_map
        (function
-         | Types.Type type_ -> State.list_class_pairs state (type_, type_) | Types.Value _ -> [])
+         | Types.Type type_ -> Failures.list_class_pairs state (type_, type_) | Types.Value _ -> [])
        (list_goal_arguments goal));
   report
 
@@ -126,17 +33,33 @@ let fail_unification (state : State.state) =
   | None -> Fails Unmet
 
 let make_goal (state : State.state) subject requirement ~outputs ~cause : State.goal =
-  {
-    subject;
-    requirement;
-    outputs;
-    cause;
-    is_specification = state.unifier.checks_specification;
-    condition_bounds = state.condition_bounds;
-  }
+  { subject; requirement; outputs; cause; mode = state.unifier.mode; depth = 0; needed_by = None }
 
 let has_unknowns (state : State.state) arguments =
   List.exists (fun argument -> Unify.list_argument_unknowns state.unifier argument <> []) arguments
+
+let rec flatten_into (state : State.state) cause ~projections ~add type_ =
+  Types.map
+    (function
+      | Types.Projection { base; trait; name } as projection
+        when has_unknowns state [ Types.Type projection ] ->
+          Some
+            (match List.assoc_opt projection !projections with
+            | Some output -> output
+            | None ->
+                let flatten = flatten_into state cause ~projections ~add in
+                let output = State.make_fresh_type state in
+                projections := (projection, output) :: !projections;
+                let goal =
+                  make_goal state (flatten base)
+                    (Implements (Types.map_trait flatten trait))
+                    ~outputs:[ (name, output) ]
+                    ~cause
+                in
+                add goal;
+                output)
+      | _ -> None)
+    type_
 
 let unify_associated_types (state : State.state) (goal : State.goal) (trait : Types.trait_reference)
     find =
@@ -162,7 +85,7 @@ let narrow (state : State.state) goal variable set =
   | Types.Variable member
     when Unify.unify state.unifier variable (Unify.make_fresh_number state.unifier set) ->
       State.record_narrowing state member ~allowed:set ~report_excluded:(fun excluded ->
-          report_failure state goal excluded);
+          Failures.report_requirement state goal ~unmet:"" excluded);
       Holds
   | _ -> Fails Unmet
 
@@ -193,6 +116,19 @@ let decide_by_bounds (state : State.state) goal trait ~subject ~(wanted : Types.
   else if matching <> [] then decide_outputs ()
   else Fails Unmet
 
+let list_sealed_closures (state : State.state) subject ~includes =
+  List.filter_map
+    (fun sealed ->
+      let path = Well_known.make_path sealed in
+      match Types.find_sealed_implementors path with
+      | Some implementors when includes implementors ->
+          let trait = Types.make_trait_reference ~arguments:[] path in
+          Some
+            ( trait,
+              Interface.Properties.list_bound_closure state.lookups.interface ~self:subject trait )
+      | _ -> None)
+    Types.sealed_traits
+
 let decide_number (state : State.state) (goal : State.goal) (trait : Types.trait_reference) ~subject
     ~(wanted : Types.trait_reference) domain =
   let covers domain implementors =
@@ -221,17 +157,9 @@ let decide_number (state : State.state) (goal : State.goal) (trait : Types.trait
   in
   let covering_bounds =
     List.sort_uniq compare
-      (List.concat_map
-         (fun sealed ->
-           let path = Well_known.make_path sealed in
-           match Types.find_sealed_implementors path with
-           | Some implementors when covers domain implementors ->
-               List.filter
-                 (fun (bound : Types.trait_reference) -> Path.equal bound.trait wanted.trait)
-                 (Interface.Properties.list_bound_closure state.lookups.interface ~self:subject
-                    (State.make_trait_reference ~arguments:[] path))
-           | _ -> [])
-         Types.sealed_traits)
+      (List.filter
+         (fun (bound : Types.trait_reference) -> Path.equal bound.trait wanted.trait)
+         (List.concat_map snd (list_sealed_closures state subject ~includes:(covers domain))))
   in
   match (narrowing, covering_bounds) with
   | (Fails _ as failed), _ -> failed
@@ -245,12 +173,59 @@ let decide_number (state : State.state) (goal : State.goal) (trait : Types.trait
       else fail_unification state
   | _ -> Waits
 
-let rec decide (state : State.state) ~depth (goal : State.goal) =
-  match goal.requirement with
-  | Within set -> decide_within state goal set
-  | Implements trait -> decide_implements state ~depth goal trait
+let select (state : State.state) (goal : State.goal) trait ~subject
+    ~(wanted : Types.trait_reference) =
+  Interface.Impls.check_recursion_depth ~depth:goal.depth subject wanted;
+  match Interface.Impls.list_matching_impls state.lookups.interface subject wanted with
+  | [] -> Fails Unmet
+  | { impl; substitution; _ } :: _ -> (
+      let unbound =
+        List.filter
+          (fun (generic : Types.generic) ->
+            Option.is_none (Types.find_argument generic.generic substitution))
+          impl.impl_generics
+      in
+      let substitution =
+        Types.combine_substitutions substitution
+          (Types.make_substitution unbound (State.make_fresh_generic_arguments state unbound))
+      in
+      if
+        not
+          (Unify.unify_arguments state.unifier
+             (Types.substitute_trait substitution impl.implements).trait_arguments
+             wanted.trait_arguments
+          && State.unify state (Types.substitute substitution impl.for_type) subject)
+      then fail_unification state
+      else
+        let conditions = ref [] in
+        let add (condition : State.goal) =
+          conditions :=
+            {
+              condition with
+              depth = goal.depth + 1;
+              needed_by = Some (Option.value goal.needed_by ~default:goal);
+            }
+            :: !conditions
+        in
+        let cause : State.cause = Bound { at = read_cause_span goal.cause; of_type = None } in
+        let flatten = flatten_into state cause ~projections:(ref []) ~add in
+        List.iter
+          (fun (argument, bound) ->
+            add
+              (make_goal state (flatten argument)
+                 (Implements (Types.map_trait flatten bound))
+                 ~outputs:[] ~cause))
+          (Interface.Impls.list_required_bounds impl.impl_generics substitution);
+        match
+          unify_associated_types state goal trait (fun name ->
+              match List.assoc_opt name impl.implements.associated with
+              | Some chosen -> Some (flatten (Types.substitute substitution chosen))
+              | None -> project state subject wanted name)
+        with
+        | Holds -> Becomes (List.rev !conditions)
+        | decision -> decision)
 
-and decide_implements state ~depth goal trait =
+let decide_implements state (goal : State.goal) trait =
   let subject = State.normalize state goal.subject in
   let wanted = State.normalize_trait state { trait with associated = [] } in
   let error =
@@ -280,60 +255,50 @@ and decide_implements state ~depth goal trait =
       | Some domain -> decide_number state goal trait ~subject ~wanted domain)
   | Types.Named _, None, _, None ->
       if has_unknowns state wanted.trait_arguments then Waits
-      else select state ~depth goal trait ~subject ~wanted
-  | Types.Projection { base = Types.Variable _; _ }, None, _, None -> Waits
+      else select state goal trait ~subject ~wanted
   | (Types.Parameter _ | Projection _ | Any _), None, _, None ->
       decide_by_bounds state goal trait ~subject ~wanted
   | (Types.Function _ | Never | Integer | Error _), None, _, None -> Fails Unmet
 
-and select state ~depth goal trait ~subject ~wanted =
-  Interface.Impls.check_recursion_depth ~depth subject wanted;
-  match Interface.Impls.select_impl state.lookups.interface subject wanted with
-  | None -> Fails Unmet
-  | Some impl -> (
-      let substitution =
-        Types.make_substitution impl.impl_generics
-          (State.make_fresh_generic_arguments state impl.impl_generics)
-      in
-      if
-        not
-          (Unify.unify_arguments state.unifier
-             (Types.substitute_trait substitution impl.implements).trait_arguments
-             wanted.trait_arguments
-          && State.unify state (Types.substitute substitution impl.for_type) subject)
-      then fail_unification state
-      else
-        let at = read_cause_span goal.cause in
-        match
-          List.find_map
-            (fun (argument, bound) ->
-              match
-                decide state ~depth:(depth + 1)
-                  (make_goal state argument (Implements bound) ~outputs:[]
-                     ~cause:(Bound { at; of_type = None }))
-              with
-              | Holds -> None
-              | decision -> Some decision)
-            (Interface.Impls.list_required_bounds impl.impl_generics substitution)
-        with
-        | Some Waits -> Waits
-        | Some (Fails _) -> Fails Unmet
-        | Some Holds | None ->
-            unify_associated_types state goal trait (fun name ->
-                match List.assoc_opt name impl.implements.associated with
-                | Some chosen -> Some (Types.substitute substitution chosen)
-                | None -> project state subject wanted name))
+let decide (state : State.state) (goal : State.goal) =
+  match goal.requirement with
+  | Within set -> decide_within state goal set
+  | Implements trait -> decide_implements state goal trait
 
-let add_goal (state : State.state) goal =
-  match decide state ~depth:0 goal with
+let rec add_goal (state : State.state) goal =
+  match decide state goal with
   | Holds -> None
   | Waits ->
       state.goals <- goal :: state.goals;
       None
   | Fails failure -> Some (fail state goal failure)
+  | Becomes conditions ->
+      List.iter (fun condition -> ignore (add_goal state condition)) conditions;
+      None
 
-let require state cause ?(outputs = []) subject trait =
-  ignore (add_goal state (make_goal state subject (Implements trait) ~outputs ~cause))
+let flatten state cause ?(projections = ref []) type_ =
+  flatten_into state cause ~projections ~add:(fun goal -> ignore (add_goal state goal)) type_
+
+let require state cause ?(outputs = []) ?projections subject trait =
+  let flatten = flatten state cause ?projections in
+  let subject = flatten subject in
+  ignore
+    (add_goal state
+       (make_goal state subject (Implements (Types.map_trait flatten trait)) ~outputs ~cause))
+
+let resolve_associated_type state type_ (trait : Types.trait_reference) associated ~at =
+  let name = Well_known.show_associated associated in
+  match
+    State.normalize state
+      (flatten state
+         (Bound { at; of_type = None })
+         (Types.Projection { base = type_; trait; name }))
+  with
+  | Types.Projection { base = Types.Parameter _ | Types.Projection _; _ } as rigid -> rigid
+  | Types.Projection { base; _ } ->
+      State.raise_bug "`%s` gives no `%s` as a `%s`, and its evidence was found" (Types.show base)
+        name (Types.show_trait trait)
+  | resolved -> resolved
 
 let require_within state subject set ~reason =
   match
@@ -342,36 +307,31 @@ let require_within state subject set ~reason =
   | Some report -> Types.Error report
   | None -> subject
 
-let has_active_bounds (state : State.state) (goal : State.goal) =
-  List.for_all (fun bound -> List.mem bound goal.condition_bounds) state.condition_bounds
-
 let solve (state : State.state) ~selects =
-  let enclosing = state.unifier.checks_specification in
   let rec loop () =
-    let pending = state.goals and through = state.unifier.next in
-    let count = Unify.count_solutions state.unifier ~through in
-    state.goals <-
+    let pending = state.goals and count = Unify.count_solutions state.unifier in
+    state.goals <- [];
+    let retained =
       List.filter
         (fun (goal : State.goal) ->
-          (not (selects goal && has_active_bounds state goal))
-          || begin
-            state.unifier.checks_specification <- goal.is_specification;
-            State.apply_condition_bounds state goal.condition_bounds (fun () ->
-                match decide state ~depth:0 goal with
-                | Waits -> true
-                | Holds -> false
-                | Fails failure ->
-                    ignore (fail state goal failure);
-                    false)
-          end)
-        pending;
-    if
-      List.compare_lengths state.goals pending < 0
-      || Unify.count_solutions state.unifier ~through <> count
+          (not (selects goal))
+          || State.with_mode state goal.mode (fun () ->
+              match decide state goal with
+              | Waits -> true
+              | Holds -> false
+              | Fails failure ->
+                  ignore (fail state goal failure);
+                  false
+              | Becomes conditions ->
+                  List.iter (fun condition -> ignore (add_goal state condition)) conditions;
+                  false))
+        pending
+    in
+    state.goals <- retained @ state.goals;
+    if List.compare_lengths retained pending < 0 || Unify.count_solutions state.unifier <> count
     then loop ()
   in
-  loop ();
-  state.unifier.checks_specification <- enclosing
+  loop ()
 
 let solve_all state = solve state ~selects:(fun _ -> true)
 
@@ -426,8 +386,8 @@ let decide_default (state : State.state) ~site ~at type_ =
       record_decisions state ~at:(State.read_current_frame state).span;
       ignore (Unify.unify state.unifier type_ default);
       state.unifier.decided_numbers <- [];
-      match State.find_refused_class state ~sides:[ (type_, default) ] with
-      | Some refused -> Types.Error (State.report_decided_in_specification state at refused)
+      match Failures.find_refused_class state ~sides:[ (type_, default) ] with
+      | Some refused -> Types.Error (Failures.report_decided_in_specification state at refused)
       | None ->
           State.record_decided state root ~site ~decided_type:default ~at;
           default)
@@ -442,10 +402,9 @@ let solve_head (state : State.state) ?default_at index =
   solve_givers ();
   match (default_at, walk_givers state ([], []) [ Unify.Unknown_type index ]) with
   | Some at, (_ :: _, waited) ->
-      let through = state.unifier.next in
-      let count = Unify.count_solutions state.unifier ~through in
+      let count = Unify.count_solutions state.unifier in
       List.iter (fun input -> ignore (decide_default state ~site:Actual_head ~at input)) waited;
-      if Unify.count_solutions state.unifier ~through <> count then solve_givers ()
+      if Unify.count_solutions state.unifier <> count then solve_givers ()
   | _ -> ()
 
 let compare_in_source_order state left right =
@@ -453,7 +412,7 @@ let compare_in_source_order state left right =
   and right : Source.Definition_span.t = State.read_span state right in
   compare (left.start, -left.stop) (right.start, -right.stop)
 
-let settle (state : State.state) (frame : State.frame) =
+let constrain_capability_equalities (state : State.state) (frame : State.frame) =
   List.iter
     (fun (left, right) ->
       let report_missing _ =
@@ -469,69 +428,51 @@ let settle (state : State.state) (frame : State.frame) =
         :: { subset = right; restriction = None; superset = left; report_missing }
         :: state.capability_constraints)
     state.unifier.deferred_capability_equalities;
-  state.unifier.deferred_capability_equalities <- [];
-  solve_all state;
-  let parent = match state.frames with _ :: parent :: _ -> Some parent | _ -> None in
-  let is_owned = function
-    | Unify.Unknown_type index | Unknown_value index ->
-        index >= frame.first_variable && Option.is_none (Unify.find_domain state.unifier index)
+  state.unifier.deferred_capability_equalities <- []
+
+let is_owned (state : State.state) (frame : State.frame) = function
+  | Unify.Unknown_type index | Unknown_value index ->
+      index >= frame.first_variable && Option.is_none (Unify.find_domain state.unifier index)
+
+let list_output_unknowns (state : State.state) (goal : State.goal) =
+  List.concat_map (fun (_, output) -> Unify.list_unknowns state.unifier output) goal.outputs
+
+let force_statement_inputs (state : State.state) (frame : State.frame) =
+  List.iter
+    (fun input -> ignore (decide_default state ~site:Statement_end ~at:frame.span input))
+    (snd
+       (walk_givers state ([], [])
+          (List.filter (is_owned state frame)
+             (List.concat_map (list_output_unknowns state) state.goals))))
+
+let rec give_goal_inputs_defaults (state : State.state) =
+  let count = Unify.count_solutions state.unifier in
+  List.iter (default_quietly state)
+    (snd (walk_givers state ([], []) (List.concat_map (list_goal_inputs state) state.goals)));
+  if Unify.count_solutions state.unifier <> count then begin
+    solve_all state;
+    give_goal_inputs_defaults state
+  end
+
+let give_definition_defaults (state : State.state) =
+  give_goal_inputs_defaults state;
+  Hashtbl.iter (fun index _ -> default_quietly state (Types.Variable index)) state.unifier.domains
+
+let list_node_unknowns (state : State.state) id =
+  List.concat_map
+    (Unify.list_argument_unknowns state.unifier)
+    (Tables.list_arguments_at state.tables id)
+
+let list_frame_unknowns (state : State.state) (frame : State.frame) =
+  List.concat_map (list_node_unknowns state) (frame.recorded_expressions @ frame.bindings)
+
+let list_goal_unknowns state goal = list_goal_inputs state goal @ list_output_unknowns state goal
+
+let report_unsolved (state : State.state) (frame : State.frame) =
+  let unsolved =
+    List.filter (is_owned state frame)
+      (list_frame_unknowns state frame @ List.concat_map (list_goal_unknowns state) state.goals)
   in
-  let list_output_unknowns (goal : State.goal) =
-    List.concat_map (fun (_, output) -> Unify.list_unknowns state.unifier output) goal.outputs
-  in
-  (match parent with
-  | Some _ ->
-      List.iter
-        (fun input -> ignore (decide_default state ~site:Statement_end ~at:frame.span input))
-        (snd
-           (walk_givers state ([], [])
-              (List.filter is_owned (List.concat_map list_output_unknowns state.goals))))
-  | None ->
-      let rec default_goal_inputs () =
-        let through = state.unifier.next in
-        let count = Unify.count_solutions state.unifier ~through in
-        List.iter (default_quietly state)
-          (snd (walk_givers state ([], []) (List.concat_map (list_goal_inputs state) state.goals)));
-        if Unify.count_solutions state.unifier ~through <> count then begin
-          solve_all state;
-          default_goal_inputs ()
-        end
-      in
-      default_goal_inputs ();
-      Hashtbl.iter
-        (fun index _ -> default_quietly state (Types.Variable index))
-        state.unifier.domains);
-  solve_all state;
-  let list_types ids table = List.filter_map (fun id -> table.(id)) ids in
-  let list_all_types () =
-    list_types frame.recorded_expressions state.tables.types
-    @ list_types frame.bindings state.tables.local_types
-  in
-  let list_call_arguments () =
-    List.concat_map
-      (fun id ->
-        match state.tables.calls.(id) with
-        | Some { callee = Trait_method { trait; instantiation; _ }; _ } ->
-            trait.trait_arguments @ instantiation.type_arguments
-        | Some
-            {
-              callee =
-                ( Function { instantiation = { type_arguments; _ }; _ }
-                | Constructor { type_arguments; _ }
-                | Intrinsic { type_arguments; _ } );
-              _;
-            } ->
-            type_arguments
-        | _ -> [])
-      frame.recorded_expressions
-  in
-  let list_goal_unknowns goal = list_goal_inputs state goal @ list_output_unknowns goal in
-  let list_unknowns () =
-    List.concat_map (Unify.list_unknowns state.unifier) (list_all_types ())
-    @ List.concat_map (Unify.list_argument_unknowns state.unifier) (list_call_arguments ())
-    @ List.concat_map list_goal_unknowns state.goals
-  in
-  let unsolved = List.filter is_owned (list_unknowns ()) in
   if unsolved <> [] then begin
     let list_trait_unknowns (trait : Types.trait_reference) =
       List.concat_map (Unify.list_argument_unknowns state.unifier) trait.trait_arguments
@@ -574,38 +515,31 @@ let settle (state : State.state) (frame : State.frame) =
     let reported_goals =
       List.filter
         (fun goal ->
-          List.exists (fun unknown -> List.mem unknown unsolved) (list_goal_unknowns goal))
+          List.exists (fun unknown -> List.mem unknown unsolved) (list_goal_unknowns state goal))
         state.goals
     in
     List.iter
       (function
-        | Unify.Unknown_type index ->
-            Hashtbl.replace state.unifier.type_solutions index (Types.Error report)
+        | Unify.Unknown_type index -> Unify.poison state.unifier index report
         | Unknown_value _ -> ())
       unsolved;
     solve_all state;
     state.goals <- List.filter (fun goal -> not (List.memq goal reported_goals)) state.goals
-  end;
-  (match parent with
-  | Some _ -> record_decisions state ~at:frame.span
-  | None -> state.unifier.decided_numbers <- []);
-  let is_open unknown = not (is_owned unknown) in
-  let finish table ids keep =
-    List.iter
-      (fun id ->
-        match table.(id) with
-        | Some type_ -> (
-            let type_ = State.normalize state type_ in
-            table.(id) <- Some type_;
-            if List.exists is_open (Unify.list_unknowns state.unifier type_) then
-              match parent with Some parent -> keep parent id | None -> ())
-        | None -> ())
-      ids
+  end
+
+let hand_open_parts_to_parent (state : State.state) (frame : State.frame) parent =
+  let is_open unknown = not (is_owned state frame unknown) in
+  let hand_up ids keep =
+    Option.iter
+      (fun parent ->
+        List.iter
+          (fun id -> if List.exists is_open (list_node_unknowns state id) then keep parent id)
+          ids)
+      parent
   in
-  finish state.tables.types frame.recorded_expressions (fun (parent : State.frame) id ->
+  hand_up frame.recorded_expressions (fun (parent : State.frame) id ->
       parent.recorded_expressions <- id :: parent.recorded_expressions);
-  finish state.tables.local_types frame.bindings (fun (parent : State.frame) id ->
-      parent.bindings <- id :: parent.bindings);
+  hand_up frame.bindings (fun (parent : State.frame) id -> parent.bindings <- id :: parent.bindings);
   let is_settled table id =
     match table.(id) with
     | Some type_ -> not (List.exists is_open (Unify.list_unknowns state.unifier type_))
@@ -625,7 +559,21 @@ let settle (state : State.state) (frame : State.frame) =
   List.iter (State.check_compiled_binding state) settled_bindings;
   List.iter
     (State.check_compiled_expression state)
-    (List.sort (compare_in_source_order state) settled_expressions);
+    (List.sort (compare_in_source_order state) settled_expressions)
+
+let settle (state : State.state) (frame : State.frame) =
+  let parent = match state.frames with _ :: parent :: _ -> Some parent | _ -> None in
+  constrain_capability_equalities state frame;
+  solve_all state;
+  (match parent with
+  | Some _ -> force_statement_inputs state frame
+  | None -> give_definition_defaults state);
+  solve_all state;
+  report_unsolved state frame;
+  (match parent with
+  | Some _ -> record_decisions state ~at:frame.span
+  | None -> state.unifier.decided_numbers <- []);
+  hand_open_parts_to_parent state frame parent;
   if Option.is_none parent && state.goals <> [] then
     State.raise_bug "a goal is pending at the end of the definition"
 
@@ -642,11 +590,13 @@ let run_in_statement (state : State.state) (env : State.env) span body =
       span;
     }
   in
-  let enclosing_checks_specification = state.unifier.checks_specification in
   state.frames <- frame :: state.frames;
-  state.unifier.checks_specification <- env.specification;
-  let result = body () in
-  settle state frame;
+  let result =
+    State.with_mode state { state.unifier.mode with checks_specification = env.specification }
+      (fun () ->
+        let result = body () in
+        settle state frame;
+        result)
+  in
   state.frames <- List.tl state.frames;
-  state.unifier.checks_specification <- enclosing_checks_specification;
   result

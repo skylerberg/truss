@@ -71,12 +71,15 @@ public trait Ordered: Equal {
   }
 
   fn clamp(own self, low: own Self, high: own Self) -> Self
-    requires low <= high
+    uses Panic unless low <= high
     ensures low <= result && result <= high
     ensures low <= self && self <= high ==> identical(result, self)
     ensures self < low ==> identical(result, low)
     ensures self > high ==> identical(result, high)
   {
+    if low > high {
+      Panic.crash("the low bound is greater than the high bound")
+    }
     if self.compare(low) == Ordering.Less {
       low
     } else if self.compare(high) == Ordering.Greater {
@@ -170,7 +173,7 @@ public trait Add[Right] {
   fn add_is_defined(self, right: Right) -> Bool
 
   fn add(self, right: Right) -> Self.Output
-    requires self.add_is_defined(right)
+    uses Panic unless self.add_is_defined(right)
 }
 
 public trait Subtract[Right] {
@@ -179,7 +182,7 @@ public trait Subtract[Right] {
   fn subtract_is_defined(self, right: Right) -> Bool
 
   fn subtract(self, right: Right) -> Self.Output
-    requires self.subtract_is_defined(right)
+    uses Panic unless self.subtract_is_defined(right)
 }
 
 public trait Multiply[Right] {
@@ -188,7 +191,7 @@ public trait Multiply[Right] {
   fn multiply_is_defined(self, right: Right) -> Bool
 
   fn multiply(self, right: Right) -> Self.Output
-    requires self.multiply_is_defined(right)
+    uses Panic unless self.multiply_is_defined(right)
 }
 
 public trait Divide[Right] {
@@ -197,7 +200,7 @@ public trait Divide[Right] {
   fn divide_is_defined(self, right: Right) -> Bool
 
   fn divide(self, right: Right) -> Self.Output
-    requires self.divide_is_defined(right)
+    uses Panic unless self.divide_is_defined(right)
 }
 
 public trait Remainder[Right] {
@@ -206,7 +209,7 @@ public trait Remainder[Right] {
   fn remainder_is_defined(self, right: Right) -> Bool
 
   fn remainder(self, right: Right) -> Self.Output
-    requires self.remainder_is_defined(right)
+    uses Panic unless self.remainder_is_defined(right)
 }
 
 public trait Negate {
@@ -215,7 +218,7 @@ public trait Negate {
   fn negate_is_defined(self) -> Bool
 
   fn negate(self) -> Self.Output
-    requires self.negate_is_defined()
+    uses Panic unless self.negate_is_defined()
 }
 
 public trait Model {
@@ -433,9 +436,12 @@ public trait Cursor {
   }
 
   fn step_by(own self, step: UInt64) -> cursors::StepBy[Self]
-    requires step > 0
+    uses Panic unless step > 0
     cost time O(1)
   {
+    if step == 0 {
+      Panic.crash("the step is zero")
+    }
     cursors::StepBy(source: own self, step: step, started: false)
   }
 

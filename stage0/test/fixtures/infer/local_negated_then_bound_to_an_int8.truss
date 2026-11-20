@@ -1,0 +1,5 @@
+fn f() {
+  let level = 5
+  let negated = level.negate()
+  let small: Int8 = level
+}

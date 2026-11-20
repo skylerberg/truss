@@ -1,0 +1,5 @@
+fn f(ratio: Float64) -> Bool {
+  let limit = 3
+  let next = limit + 1
+  ratio < next
+}

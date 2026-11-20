@@ -17,10 +17,13 @@ public fn Character.code(self) -> UInt32
 }
 
 public fn Character.from_code(code: UInt32) -> Character
-  requires code <= 1114111 && (code < 55296 || code > 57343)
+  uses Panic unless code <= 1114111 && (code < 55296 || code > 57343)
   ensures result.code() == code
   cost time O(1)
 {
+  if code > 1114111 || (code >= 55296 && code <= 57343) {
+    Panic.crash("the code is not a Unicode scalar value")
+  }
   intrinsic::convert(code)
 }
 
@@ -228,13 +231,16 @@ public fn Character.to_ascii_lowercase(self) -> Character
 }
 
 public fn Character.to_digit(self, radix: UInt32 = 10) -> Option[UInt32]
-  requires 2 <= radix && radix <= 36
+  uses Panic unless 2 <= radix && radix <= 36
   ensures match result {
     Some(value) => value < radix
     None => true
   }
   cost time O(1)
 {
+  if radix < 2 || radix > 36 {
+    Panic.crash("the radix is not between 2 and 36")
+  }
   let code = self.code()
   let value: UInt32 = if code < 128 {
     let byte: UInt8 = intrinsic::convert(code)
@@ -246,10 +252,13 @@ public fn Character.to_digit(self, radix: UInt32 = 10) -> Option[UInt32]
 }
 
 public fn Character.from_digit(value: UInt32, radix: UInt32 = 10) -> Option[Character]
-  requires 2 <= radix && radix <= 36
+  uses Panic unless 2 <= radix && radix <= 36
   ensures (result is Some(_)) == (value < radix)
   cost time O(1)
 {
+  if radix < 2 || radix > 36 {
+    Panic.crash("the radix is not between 2 and 36")
+  }
   if value >= radix {
     None
   } else {

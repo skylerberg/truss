@@ -1,3 +1,5 @@
+type mode = { context : Interface.Elaborator.t; checks_specification : bool }
+
 type t = {
   mutable next : int;
   type_solutions : (int, Types.ty) Hashtbl.t;
@@ -5,14 +7,14 @@ type t = {
   mutable capability_variable_count : int;
   mutable deferred_capability_equalities : (Types.capability_set * Types.capability_set) list;
   domains : (int, Language.Builtin_type.t list) Hashtbl.t;
-  list_rigid_members : Types.ty -> Language.Builtin_type.t list;
+  list_rigid_members : Interface.Elaborator.t -> Types.ty -> Language.Builtin_type.t list;
+  mutable mode : mode;
   specification_unknowns : (int, unit) Hashtbl.t;
-  mutable checks_specification : bool;
   mutable refused_code_unknown : int option;
   mutable decided_numbers : int list;
 }
 
-let create ~list_rigid_members =
+let create ~context ~list_rigid_members =
   {
     next = 0;
     type_solutions = Hashtbl.create 16;
@@ -21,15 +23,15 @@ let create ~list_rigid_members =
     deferred_capability_equalities = [];
     domains = Hashtbl.create 8;
     list_rigid_members;
+    mode = { context; checks_specification = false };
     specification_unknowns = Hashtbl.create 8;
-    checks_specification = false;
     refused_code_unknown = None;
     decided_numbers = [];
   }
 
 let allocate_unknown unifier =
   unifier.next <- unifier.next + 1;
-  if unifier.checks_specification then
+  if unifier.mode.checks_specification then
     Hashtbl.replace unifier.specification_unknowns unifier.next ();
   unifier.next
 
@@ -129,7 +131,7 @@ let find_domain unifier index = Hashtbl.find_opt unifier.domains index
 let list_possible_members unifier type_ =
   match resolve unifier type_ with
   | Types.Variable index -> Option.value ~default:[] (find_domain unifier index)
-  | (Parameter _ | Projection _) as rigid -> unifier.list_rigid_members rigid
+  | (Parameter _ | Projection _) as rigid -> unifier.list_rigid_members unifier.mode.context rigid
   | type_ -> Types.list_scalar_members type_
 
 let is_within unifier type_ set =
@@ -138,7 +140,7 @@ let is_within unifier type_ set =
   | members -> List.for_all (fun member -> List.mem member set) members
 
 let may_decide unifier index =
-  (not unifier.checks_specification) || Hashtbl.mem unifier.specification_unknowns index
+  (not unifier.mode.checks_specification) || Hashtbl.mem unifier.specification_unknowns index
 
 let refuses_to_decide unifier index =
   (not (may_decide unifier index))
@@ -156,12 +158,10 @@ let bind unifier index type_ =
     true
   end
 
-let count_solutions unifier ~through =
-  Hashtbl.length unifier.type_solutions
-  - List.length
-      (List.filter
-         (Hashtbl.mem unifier.type_solutions)
-         (List.init (unifier.next - through) (fun offset -> through + 1 + offset)))
+let count_solutions unifier = Hashtbl.length unifier.type_solutions
+
+let poison unifier index report =
+  Hashtbl.replace unifier.type_solutions (read_root unifier index) (Types.Error report)
 
 let join unifier left right =
   let older = min left right and younger = max left right in

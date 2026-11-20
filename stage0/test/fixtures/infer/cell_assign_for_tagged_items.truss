@@ -1,0 +1,10 @@
+impl IndexAssign for Cell[Item: Plain + Tagged] {
+  fn accepts_key(self, key: UInt64) -> Bool {
+    key == 0
+  }
+
+  fn assign(mut self, key: own UInt64, value: own Item) {
+    self.item = value
+  }
+}
+

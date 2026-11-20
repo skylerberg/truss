@@ -40,8 +40,11 @@ fn truncated(code: Slice[UInt8]) -> UInt32 {
 let powers_of_ten: Array[UInt32, 10] = [1, 10, 100, 1000, 10000, 100000, 1000000, 10000000, 100000000, 1000000000]
 
 public fn hotp(secret: Slice[UInt8], counter: UInt64, digits: UInt32 = 6, algorithm: Algorithm = Algorithm.Sha1) -> String
-  requires digits >= 6 && digits <= 9
+  uses Panic unless digits >= 6 && digits <= 9
 {
+  if digits < 6 || digits > 9 {
+    Panic.crash("the digit count is not between 6 and 9")
+  }
   var message: List[UInt8] = []
   let width: UInt64 = 8
   for index in 0..width {
@@ -74,36 +77,40 @@ public fn Totp.is_valid(self) -> Bool {
 }
 
 public fn Totp.step_at(self, unix_seconds: Int64) -> Int64
-  requires self.period_seconds >= 1
+  uses Panic unless self.period_seconds >= 1
   ensures result >= 0
 {
+  if self.period_seconds < 1 {
+    Panic.crash("the period is shorter than one second")
+  }
   if unix_seconds < 0 { 0 } else { unix_seconds / self.period_seconds }
 }
 
 public fn Totp.code_at(self, unix_seconds: Int64) -> String
-  requires self.digits >= 6 && self.digits <= 9 && self.period_seconds >= 1
+  uses Panic unless self.digits >= 6 && self.digits <= 9 && self.period_seconds >= 1
 {
   self.code_for_step(self.step_at(unix_seconds))
 }
 
 fn Totp.code_for_step(self, step: Int64) -> String
-  requires self.digits >= 6 && self.digits <= 9
+  uses Panic unless self.digits >= 6 && self.digits <= 9
   requires step >= 0
 {
   hotp(self.secret.slice(), counter: intrinsic::convert(step), digits: self.digits, algorithm: self.algorithm)
 }
 
 public fn Totp.code(self) -> String
-  uses Clock
-  requires self.digits >= 6 && self.digits <= 9 && self.period_seconds >= 1
+  uses Clock, Panic unless self.digits >= 6 && self.digits <= 9 && self.period_seconds >= 1
 {
   self.code_at(Clock.now().unix_seconds())
 }
 
 public fn Totp.verify_at(self, code: StringSlice, unix_seconds: Int64, last_step: Option[Int64] = None, window: Int64 = 1) -> Option[Int64]
-  requires self.digits >= 6 && self.digits <= 9 && self.period_seconds >= 1
-  requires window >= 0 && window <= 10
+  uses Panic unless self.digits >= 6 && self.digits <= 9 && self.period_seconds >= 1 && window >= 0 && window <= 10
 {
+  if window < 0 || window > 10 {
+    Panic.crash("the window is not between 0 and 10")
+  }
   let current = self.step_at(unix_seconds)
   let earliest = if current > window { current - window } else { 0 }
   let latest = if current < Int64.maximum - window { current + window } else { current }
@@ -130,9 +137,7 @@ public fn Totp.verify_at(self, code: StringSlice, unix_seconds: Int64, last_step
 }
 
 public fn Totp.verify(self, code: StringSlice, last_step: Option[Int64] = None, window: Int64 = 1) -> Option[Int64]
-  uses Clock
-  requires self.digits >= 6 && self.digits <= 9 && self.period_seconds >= 1
-  requires window >= 0 && window <= 10
+  uses Clock, Panic unless self.digits >= 6 && self.digits <= 9 && self.period_seconds >= 1 && window >= 0 && window <= 10
 {
   self.verify_at(code, unix_seconds: Clock.now().unix_seconds(), last_step: last_step, window: window)
 }

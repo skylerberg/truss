@@ -15,20 +15,31 @@ let instantiate (interface : Interface.Lookups.t) (target : Core.operand Core.ta
             (Types.make_signature_substitution signature instantiation)
             signature.uses
       | None -> raise_bug "the callee `%s` has no signature" (Path.show path))
-  | Trait_method { trait; name; receiver; self_type; instantiation; evidence = _ } -> (
+  | Trait_method { trait; name; receiver; self_type; instantiation; evidence } -> (
       match
         ( Interface.Definition.find_trait_method interface trait.trait ~name ~receiver,
           Interface.Definition.find_trait_interface interface trait.trait )
       with
-      | Some method_, Some trait_interface ->
+      | Some method_, Some trait_interface -> (
           let signature =
             Interface.Definition.read_method_signature interface ~owner:trait.trait method_
           in
-          Types.substitute_capabilities
-            (Types.combine_substitutions
-               (Types.make_trait_substitution trait_interface.trait_generics ~self:self_type trait)
-               (Types.make_signature_substitution signature instantiation))
-            signature.uses
+          let uses =
+            Types.substitute_capabilities
+              (Types.combine_substitutions
+                 (Types.make_trait_substitution trait_interface.trait_generics ~self:self_type trait)
+                 (Types.make_signature_substitution signature instantiation))
+              signature.uses
+          in
+          match evidence with
+          | Dynamic ->
+              Types.replace_capabilities
+                (function
+                  | Types.Capability_unless_values capability ->
+                      Some (Types.make_capability_set [ capability ])
+                  | _ -> None)
+                uses
+          | Impl _ | Bound -> uses)
       | _ -> raise_bug "`%s` has no method `%s`" (Path.show trait.trait) name)
   | Capability_method { capability; name } -> (
       match Interface.Definition.find_trait_method interface capability ~name ~receiver:Static with

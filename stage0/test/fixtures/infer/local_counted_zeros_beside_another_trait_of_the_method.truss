@@ -1,0 +1,10 @@
+trait Zeros {
+  fn count_zeros(self) -> UInt64
+}
+
+fn f() -> UInt64 {
+  let mask = 255
+  let zeros = mask.count_zeros()
+  let small: UInt8 = mask
+  zeros
+}

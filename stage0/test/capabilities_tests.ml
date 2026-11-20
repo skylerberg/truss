@@ -885,6 +885,11 @@ let () =
       expect_one_diagnostic
         Fixtures.Capabilities.function_value_of_a_function_that_panics_unless_a_condition_on_values
         "capabilities.not_available" ~says:"This call uses `Panic`");
+  Harness.test "a call through `any` of a method that panics unless a condition uses `Panic`"
+    (fun () ->
+      expect_one_diagnostic
+        Fixtures.Capabilities.call_through_any_of_a_method_that_panics_unless_a_condition_on_values
+        "capabilities.not_available" ~says:"This call uses `Panic`");
   Harness.test "a bound names the time of no callback that may run forever" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.time_of_a_callback_that_runs_forever
         "types.unbounded_time"

@@ -1,0 +1,4 @@
+capability Meter {
+  fn record(amount: UInt64)
+    uses Panic unless amount < 100
+}

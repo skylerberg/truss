@@ -42,6 +42,11 @@ val instantiate_trait_method :
   Types.trait_method ->
   Instantiation.instance * Tables.callee
 
+val has_sealed_method : State.state -> Types.ty -> string -> bool
+
+val find_sealed_provider :
+  State.state -> Types.ty -> Types.trait_reference -> Types.trait_reference option
+
 val resolve_overloads :
   State.state ->
   Types.ty ->
@@ -58,5 +63,4 @@ val find_elements_calls :
 val find_consuming_cursor :
   State.state -> Syntax.expression -> Types.ty -> (Tables.loop * Types.ty) Resolve.Names.lookup
 
-val find_remaining_call :
-  State.state -> Source.Definition_span.t -> Types.ty -> (Types.condition * Tables.call) option
+val find_remaining_call : State.state -> Types.ty -> (Types.condition * Tables.call) option

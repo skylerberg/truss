@@ -1534,10 +1534,13 @@ public fn hkdf_sha256(
   information: Slice[UInt8],
   length: UInt64,
 ) -> List[UInt8]
-  requires length <= 8160
+  uses Panic unless length <= 8160
   ensures result.length() == length
   cost time O(secret.length() + salt.length() + information.length() + length)
 {
+  if length > 8160 {
+    Panic.crash("the length exceeds 8160 bytes")
+  }
   let key = hmac_sha256(salt, message: secret)
   var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(length)
   var previous: Array[UInt8, 32] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
@@ -1561,10 +1564,13 @@ public fn hkdf_sha384(
   information: Slice[UInt8],
   length: UInt64,
 ) -> List[UInt8]
-  requires length <= 12240
+  uses Panic unless length <= 12240
   ensures result.length() == length
   cost time O(secret.length() + salt.length() + information.length() + length)
 {
+  if length > 12240 {
+    Panic.crash("the length exceeds 12240 bytes")
+  }
   let key = hmac_sha384(salt, message: secret)
   var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(length)
   var previous: Array[UInt8, 48] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
@@ -1588,9 +1594,12 @@ public fn pbkdf2_hmac_sha256(
   iterations: UInt32,
   length: UInt64,
 ) -> List[UInt8]
-  requires iterations > 0
+  uses Panic unless iterations > 0
   ensures result.length() == length
 {
+  if iterations == 0 {
+    Panic.crash("the iteration count is zero")
+  }
   let keyed = HmacSha256.new(password)
   var output: List[UInt8] = []
   var block: UInt32 = 1
@@ -1641,6 +1650,17 @@ public fn pbkdf2_hmac_sha256(
 
 public type PasswordCost(memory_kibibytes: UInt32 = 19456, iterations: UInt32 = 2, parallelism: UInt32 = 1)
   derives Equal
+
+public fn PasswordCost.is_usable(self) -> Bool
+  ensures result == (
+    self.parallelism >= 1 && self.parallelism <= 16777215 && self.iterations >= 1
+      && self.memory_kibibytes >= 8 * self.parallelism
+  )
+  cost time O(1)
+{
+  self.parallelism >= 1 && self.parallelism <= 16777215 && self.iterations >= 1
+    && self.memory_kibibytes >= 8 * self.parallelism
+}
 
 let blake2b_initial: Array[UInt64, 8] = [
   0x6a09e667f3bcc908, 0xbb67ae8584caa73b, 0x3c6ef372fe94f82b, 0xa54ff53a5f1d36f1, 0x510e527fade682d1,
@@ -2050,11 +2070,14 @@ public fn hash_password(
   salt: Slice[UInt8],
   password_cost: PasswordCost = PasswordCost(),
 ) -> Array[UInt8, 32]
-  requires salt.length() >= 8
-  requires password_cost.parallelism >= 1 && password_cost.parallelism <= 16777215
-  requires password_cost.iterations >= 1
-  requires password_cost.memory_kibibytes >= 8 * password_cost.parallelism
+  uses Panic unless salt.length() >= 8 && password_cost.is_usable()
 {
+  if salt.length() < 8 {
+    Panic.crash("the salt is shorter than 8 bytes")
+  }
+  if !password_cost.is_usable() {
+    Panic.crash("the cost is one that Argon2 does not allow")
+  }
   let tag = argon2id(password, salt: salt, password_cost: password_cost, length: 32)
   var hash: Array[UInt8, 32] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,

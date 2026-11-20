@@ -1,0 +1,14 @@
+trait Sized {
+  fn size(self, count: Int64) -> Int64
+    uses Panic unless count < 10
+}
+
+type Box(width: Int64)
+
+impl Sized for Box {
+  fn size(self, count: Int64) -> Int64
+    uses Panic
+  {
+    Panic.crash("never sized")
+  }
+}

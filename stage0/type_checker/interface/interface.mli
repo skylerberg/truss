@@ -15,7 +15,7 @@ module Elaborator : sig
   val show_path : Syntax.path -> string
   val elaborate_type : t -> Syntax.type_expression -> Types.ty
   val elaborate_condition : t -> Syntax.condition -> Types.condition
-  val with_added_bounds : t -> Types.condition -> (unit -> 'a) -> 'a
+  val add_condition : t -> Types.condition -> t
   val find_bounded_type : t -> Syntax.expression -> Types.ty option
 
   type bound_method = Elaborator.bound_method = {
@@ -62,6 +62,12 @@ module Properties : sig
     list_bounds:(Types.parameter -> Types.trait_reference list) ->
     Types.ty ->
     Types.trait_reference list
+
+  val list_rigid_members :
+    Lookups.t ->
+    list_bounds:(Types.parameter -> Types.trait_reference list) ->
+    Types.ty ->
+    Language.Builtin_type.t list
 
   type property = Properties.property = Copyable | Plain | View | Holds_function
   type decision = Properties.decision = Holds | Fails | Depends_on of Types.ty
