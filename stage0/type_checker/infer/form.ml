@@ -84,10 +84,8 @@ let is_within form type_ set =
   match
     match type_ with
     | Types.Parameter _ | Projection _ ->
-        Option.value ~default:[]
-          (Types.find_bound_integer_implementors
-             (Interface.Properties.list_known_bounds form.lookups.interface
-                ~list_bounds:(list_bounds form) type_))
+        Interface.Properties.list_rigid_members form.lookups.interface
+          ~list_bounds:(list_bounds form) type_
     | _ -> Types.list_scalar_members type_
   with
   | [] -> false

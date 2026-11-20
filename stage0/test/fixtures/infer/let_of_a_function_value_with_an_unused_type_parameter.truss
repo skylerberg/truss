@@ -1,0 +1,8 @@
+fn make[Unused]() -> Int64 {
+  0
+}
+
+fn f() -> Int64 {
+  let maker = make
+  maker()
+}

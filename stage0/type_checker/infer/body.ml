@@ -419,11 +419,9 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
       diagnostics = [];
       unifier =
         Unify.create ~context ~list_rigid_members:(fun context rigid ->
-            Option.value ~default:[]
-              (Types.find_bound_integer_implementors
-                 (Interface.Properties.list_known_bounds lookups.interface
-                    ~list_bounds:(Interface.Elaborator.list_bounds context)
-                    rigid)));
+            Interface.Properties.list_rigid_members lookups.interface
+              ~list_bounds:(Interface.Elaborator.list_bounds context)
+              rigid);
       locals = Hashtbl.create 32;
       law_parameters = list_law_parameters lookups elaborated.interface;
       frames = [];

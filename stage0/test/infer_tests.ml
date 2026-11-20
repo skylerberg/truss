@@ -1337,6 +1337,10 @@ let () =
   Harness.test "a var can be assigned" (fun () -> expect_fine Fixtures.Infer.assignment_to_a_var);
   Harness.test "an empty list with nothing to decide its elements is an error" (fun () ->
       expect_one_diagnostic Fixtures.Infer.empty_list_without_a_type "types.cannot_infer");
+  Harness.test "a function value whose type argument nothing decides is reported at its statement"
+    (fun () ->
+      expect_one_diagnostic ~at:("let maker", 1)
+        Fixtures.Infer.let_of_a_function_value_with_an_unused_type_parameter "types.cannot_infer");
   Harness.test "an empty list takes its elements' type from the annotation" (fun () ->
       expect_fine Fixtures.Infer.empty_list_of_strings);
   Harness.test "a body's value must have the result type" (fun () ->
@@ -1455,6 +1459,28 @@ let () =
        expect_one_diagnostic ~says:"Assign the whole element with `=`."
          (readings ^ assign ^ Fixtures.Infer.compound_assignment_through_an_index_of_readings)
          "types.not_assignable"));
+  (let tagged = Fixtures.Infer.tagged in
+   let cell = tagged ^ Fixtures.Infer.cell in
+   Harness.test "an assignment through an index checks the conditions of the `IndexAssign` impl"
+     (fun () ->
+       let assign = cell ^ Fixtures.Infer.cell_assign_for_tagged_items in
+       expect_one_diagnostic ~says:"Its impl needs `Int64: Tagged`."
+         (assign ^ Fixtures.Infer.assignment_through_an_index_of_a_cell_of_a_literal)
+         "types.no_impl";
+       expect_fine (assign ^ Fixtures.Infer.assignment_through_an_index_of_a_cell_of_a_uint8));
+   Harness.test "an element passed `mut` needs `IndexMut` for the element's final type" (fun () ->
+       let index_mut = cell ^ Fixtures.Infer.cell_mut_for_tagged_items in
+       expect_one_diagnostic ~says:"and not `IndexMut`"
+         (index_mut ^ Fixtures.Infer.element_of_a_cell_of_a_literal_passed_mut)
+         "types.wrong_mode";
+       expect_fine (index_mut ^ Fixtures.Infer.element_of_a_cell_of_a_uint8_passed_mut));
+   Harness.test "a loop over a cursor is measured by `FiniteCursor` of the cursor's final type"
+     (fun () ->
+       let countdown = tagged ^ Fixtures.Infer.countdown_finite_for_tagged_items in
+       expect_one_diagnostic ~says:"implement `FiniteCursor` for `Countdown[Int64]`"
+         (countdown ^ Fixtures.Infer.loop_over_a_countdown_of_a_literal)
+         "capabilities.not_available";
+       expect_fine (countdown ^ Fixtures.Infer.loop_over_a_countdown_of_a_uint8)));
   (let keep = Fixtures.Infer.keep in
    Harness.test "a type that holds no view is Storable" (fun () ->
        expect_fine (keep ^ Fixtures.Infer.values_without_views_kept));

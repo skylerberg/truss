@@ -23,7 +23,7 @@ let report_decided_in_specification (state : State.state) span root =
          arguments."
   in
   let report = State.add_diagnostic state Decided_in_specification span message in
-  Hashtbl.replace state.unifier.type_solutions root (Types.Error report);
+  Unify.poison state.unifier root report;
   report
 
 let rec list_class_pairs (state : State.state) (side, wanted) =
@@ -133,7 +133,7 @@ let find_log_report (state : State.state) ~fixes code span message (root, wanted
           ~fixes:(match site with Use -> fixes | Statement_end | Actual_head | Method_call -> [])
           (String.concat " " (message :: explanation :: remedy))
       in
-      Hashtbl.replace state.unifier.type_solutions root (Types.Error report);
+      Unify.poison state.unifier root report;
       Some report
   | Some (State.Literal _ | State.Local _) | None -> None
 

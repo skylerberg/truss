@@ -1,0 +1,9 @@
+impl IndexMut for Cell[Item: Plain + Tagged] {
+  fn at(mut self, key: UInt64) lends mut Item {
+    mut self.item
+  }
+}
+
+fn touch[Value](value: mut Value) {
+}
+

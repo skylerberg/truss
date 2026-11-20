@@ -1,0 +1,5 @@
+fn f() -> UInt8 {
+  var cell = Cell(item: 3)
+  touch(mut cell[0])
+  cell.item
+}

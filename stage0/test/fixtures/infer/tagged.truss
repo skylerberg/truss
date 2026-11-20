@@ -1,0 +1,10 @@
+trait Tagged {
+  fn tag(self) -> Int64
+}
+
+impl Tagged for UInt8 {
+  fn tag(self) -> Int64 {
+    8
+  }
+}
+

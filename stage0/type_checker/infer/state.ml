@@ -196,30 +196,6 @@ let reject_specification_only_type state ~subject span type_ =
              (Types.show specification_type)))
     (Types.find_specification_only_type type_)
 
-let check_compiled_binding state (id : Syntax.id) =
-  match state.tables.local_types.(id) with
-  | Some type_ -> (
-      let span = read_span state id in
-      match
-        reject_specification_only_type state
-          ~subject:(Printf.sprintf "`%s`" (quote_span state span))
-          span (Unify.zonk state.unifier type_)
-      with
-      | Some report ->
-          let poisoned = Types.Error report in
-          state.tables.local_types.(id) <- Some poisoned;
-          Option.iter
-            (fun local -> Hashtbl.replace state.locals id { local with type_ = poisoned })
-            (Hashtbl.find_opt state.locals id)
-      | None -> ())
-  | None -> ()
-
-let check_compiled_expression state (id : Syntax.id) =
-  Option.iter
-    (fun type_ ->
-      ignore (reject_specification_only_type state ~subject:"This value" (read_span state id) type_))
-    state.tables.types.(id)
-
 let with_mode (state : state) mode run =
   let enclosing = state.unifier.mode in
   state.unifier.mode <- mode;
@@ -277,6 +253,32 @@ let normalize state type_ =
   then raise_bug "`%s` holds a projection of an unknown" (Types.show zonked);
   Interface.Impls.normalize state.lookups.interface ~list_bounds:(lookup_bounds state) zonked
 
+let check_compiled_binding state (id : Syntax.id) =
+  match state.tables.local_types.(id) with
+  | Some type_ -> (
+      let span = read_span state id in
+      match
+        reject_specification_only_type state
+          ~subject:(Printf.sprintf "`%s`" (quote_span state span))
+          span (normalize state type_)
+      with
+      | Some report ->
+          let poisoned = Types.Error report in
+          state.tables.local_types.(id) <- Some poisoned;
+          Option.iter
+            (fun local -> Hashtbl.replace state.locals id { local with type_ = poisoned })
+            (Hashtbl.find_opt state.locals id)
+      | None -> ())
+  | None -> ()
+
+let check_compiled_expression state (id : Syntax.id) =
+  Option.iter
+    (fun type_ ->
+      ignore
+        (reject_specification_only_type state ~subject:"This value" (read_span state id)
+           (normalize state type_)))
+    state.tables.types.(id)
+
 let find_domain state type_ =
   match resolve state type_ with
   | Types.Variable index -> Unify.find_domain state.unifier index
@@ -312,19 +314,10 @@ let record_narrowing state member ~allowed ~report_excluded =
 let record_decided state member ~site ~decided_type ~at =
   record_in_log state member (Decided { site; decided_type; decided_at = at })
 
-let make_unsolved_type state =
+let read_unsolved_report state =
   match state.unsolved with
-  | Some report -> Types.Error report
-  | None ->
-      let report =
-        add_diagnostic state Cannot_infer
-          (Source.Definition_span.make (read_span state state.definition.id).start
-             (read_span state state.definition.id).start)
-          "A type in this definition cannot be inferred. Give the `let` a type, or the call type \
-           arguments."
-      in
-      state.unsolved <- Some report;
-      Types.Error report
+  | Some report -> report
+  | None -> raise_bug "an unknown value outlived its statement, and no statement reported it"
 
 let resolve_capabilities state (capabilities : Types.capability_set) =
   match state.capability_solution with
@@ -340,7 +333,9 @@ let resolve_capabilities state (capabilities : Types.capability_set) =
 
 let rec finalize_type state type_ =
   Types.map ~map_capabilities:(finalize_capabilities state)
-    (function Types.Variable _ -> Some (make_unsolved_type state) | _ -> None)
+    (function
+      | Types.Variable _ -> raise_bug "an unknown type outlived the statement that reported it"
+      | _ -> None)
     (normalize state type_)
 
 and finalize_capabilities state capabilities =
@@ -360,7 +355,7 @@ and finalize_argument state = function
   | Types.Type type_ -> Types.Type (finalize_type state type_)
   | Types.Value value -> (
       match Unify.resolve_value state.unifier value with
-      | Types.Value_variable _ -> Types.Type (make_unsolved_type state)
+      | Types.Value_variable _ -> Types.Type (Types.Error (read_unsolved_report state))
       | value -> Types.Value value)
 
 let unify state left right =

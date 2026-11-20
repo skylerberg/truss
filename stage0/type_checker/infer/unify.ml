@@ -160,6 +160,9 @@ let bind unifier index type_ =
 
 let count_solutions unifier = Hashtbl.length unifier.type_solutions
 
+let poison unifier index report =
+  Hashtbl.replace unifier.type_solutions (read_root unifier index) (Types.Error report)
+
 let join unifier left right =
   let older = min left right and younger = max left right in
   let domain =

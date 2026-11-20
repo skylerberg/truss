@@ -20,7 +20,7 @@ let fail (state : State.state) (goal : State.goal) failure =
   in
   List.iter (fun (_, output) -> ignore (State.unify state output (Types.Error report))) goal.outputs;
   List.iter
-    (fun (root, _) -> Hashtbl.replace state.unifier.type_solutions root (Types.Error report))
+    (fun (root, _) -> Unify.poison state.unifier root report)
     (List.concat_map
        (function
          | Types.Type type_ -> Failures.list_class_pairs state (type_, type_) | Types.Value _ -> [])
@@ -458,31 +458,50 @@ let give_definition_defaults (state : State.state) =
   give_goal_inputs_defaults state;
   Hashtbl.iter (fun index _ -> default_quietly state (Types.Variable index)) state.unifier.domains
 
-let list_frame_unknowns (state : State.state) (frame : State.frame) =
-  let list_types ids table = List.filter_map (fun id -> table.(id)) ids in
-  let list_call_arguments () =
-    List.concat_map
-      (fun id ->
-        match state.tables.calls.(id) with
-        | Some { callee = Trait_method { trait; instantiation; _ }; _ } ->
-            trait.trait_arguments @ instantiation.type_arguments
-        | Some
-            {
-              callee =
-                ( Function { instantiation = { type_arguments; _ }; _ }
-                | Constructor { type_arguments; _ }
-                | Intrinsic { type_arguments; _ } );
-              _;
-            } ->
-            type_arguments
-        | _ -> [])
-      frame.recorded_expressions
+let list_expression_unknowns (state : State.state) id =
+  let tables = state.tables in
+  let types =
+    Option.to_list tables.types.(id)
+    @ List.map snd tables.conversions.(id)
+    @ (match tables.literal_elements.(id) with
+      | Some (List_element element) -> [ element ]
+      | Some (Map_entry { key; value }) -> [ key; value ]
+      | None -> [])
+    @
+    match tables.resolutions.(id) with
+    | Some (Field_access { type_; _ } | Variant_value { type_; _ } | Type_name type_) -> [ type_ ]
+    | Some (Local_value _ | Global _ | Value_parameter _ | Specification_value) | None -> []
   in
-  List.concat_map
-    (Unify.list_unknowns state.unifier)
-    (list_types frame.recorded_expressions state.tables.types
-    @ list_types frame.bindings state.tables.local_types)
-  @ List.concat_map (Unify.list_argument_unknowns state.unifier) (list_call_arguments ())
+  let arguments =
+    (match tables.resolutions.(id) with
+      | Some (Global { instantiation; _ }) -> instantiation.type_arguments
+      | _ -> [])
+    @
+    match tables.calls.(id) with
+    | Some { callee = Trait_method { trait; instantiation; _ }; _ } ->
+        trait.trait_arguments @ instantiation.type_arguments
+    | Some
+        {
+          callee =
+            ( Function { instantiation = { type_arguments; _ }; _ }
+            | Constructor { type_arguments; _ }
+            | Intrinsic { type_arguments; _ } );
+          _;
+        } ->
+        type_arguments
+    | Some { callee = Capability_method _ | Indirect; _ } | None -> []
+  in
+  List.concat_map (Unify.list_unknowns state.unifier) types
+  @ List.concat_map (Unify.list_argument_unknowns state.unifier) arguments
+
+let list_binding_unknowns (state : State.state) id =
+  match state.tables.local_types.(id) with
+  | Some type_ -> Unify.list_unknowns state.unifier type_
+  | None -> []
+
+let list_frame_unknowns (state : State.state) (frame : State.frame) =
+  List.concat_map (list_expression_unknowns state) frame.recorded_expressions
+  @ List.concat_map (list_binding_unknowns state) frame.bindings
 
 let list_goal_unknowns state goal = list_goal_inputs state goal @ list_output_unknowns state goal
 
@@ -538,8 +557,7 @@ let report_unsolved (state : State.state) (frame : State.frame) =
     in
     List.iter
       (function
-        | Unify.Unknown_type index ->
-            Hashtbl.replace state.unifier.type_solutions index (Types.Error report)
+        | Unify.Unknown_type index -> Unify.poison state.unifier index report
         | Unknown_value _ -> ())
       unsolved;
     solve_all state;
@@ -548,21 +566,17 @@ let report_unsolved (state : State.state) (frame : State.frame) =
 
 let hand_open_parts_to_parent (state : State.state) (frame : State.frame) parent =
   let is_open unknown = not (is_owned state frame unknown) in
-  let finish table ids keep =
-    List.iter
-      (fun id ->
-        match table.(id) with
-        | Some type_ -> (
-            let type_ = State.normalize state type_ in
-            table.(id) <- Some type_;
-            if List.exists is_open (Unify.list_unknowns state.unifier type_) then
-              match parent with Some parent -> keep parent id | None -> ())
-        | None -> ())
-      ids
+  let hand_up ids list_unknowns keep =
+    Option.iter
+      (fun parent ->
+        List.iter
+          (fun id -> if List.exists is_open (list_unknowns state id) then keep parent id)
+          ids)
+      parent
   in
-  finish state.tables.types frame.recorded_expressions (fun (parent : State.frame) id ->
+  hand_up frame.recorded_expressions list_expression_unknowns (fun (parent : State.frame) id ->
       parent.recorded_expressions <- id :: parent.recorded_expressions);
-  finish state.tables.local_types frame.bindings (fun (parent : State.frame) id ->
+  hand_up frame.bindings list_binding_unknowns (fun (parent : State.frame) id ->
       parent.bindings <- id :: parent.bindings);
   let is_settled table id =
     match table.(id) with

@@ -249,6 +249,7 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
                 omitted_defaults = [];
                 callee_result = Types.unit;
               };
+          Solver.require state (Method_call (State.read_span state written.id)) base_type trait;
           true
       | _ -> false)
   | _ -> false
@@ -266,6 +267,20 @@ and check_loop_clause state env (clause : Syntax.loop_clause) =
       | Invariant value -> Clauses.check_condition state env value
       | Loop_decreases measures -> Clauses.check_measures state env measures
       | Loop_cost cost -> Clauses.check_cost state env cost)
+
+and record_loop (state : State.state) (written : Syntax.statement) span (loop : Tables.loop) =
+  state.tables.loops.(written.id) <- Some loop;
+  match loop with
+  | Pulled pulled ->
+      State.check_when_final state (fun () ->
+          state.tables.loops.(written.id) <-
+            Some
+              (Pulled
+                 {
+                   pulled with
+                   remaining = Name_lookup.find_remaining_call state span pulled.cursor;
+                 }))
+  | Integer_range _ | Elements _ -> ()
 
 and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable : Syntax.expression)
     =
@@ -294,20 +309,14 @@ and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable :
           in
           match (by_position, consumed, State.find_evidence state type_ cursor) with
           | Visible (loop, element, lends), _, _ ->
-              state.tables.loops.(written.id) <- Some loop;
+              record_loop state written span loop;
               (element, lends)
           | _, Visible (loop, element), _ ->
-              state.tables.loops.(written.id) <- Some loop;
+              record_loop state written span loop;
               (element, Language.Mode.Own)
           | _, _, Some _ ->
-              state.tables.loops.(written.id) <-
-                Some
-                  (Pulled
-                     {
-                       cursor = type_;
-                       cursor_call = None;
-                       remaining = Name_lookup.find_remaining_call state span type_;
-                     });
+              record_loop state written span
+                (Pulled { cursor = type_; cursor_call = None; remaining = None });
               ( Solver.resolve_associated_type state type_ cursor Cursor_element ~at:span,
                 Language.Mode.Own )
           | Hidden hidden, _, None | _, Hidden hidden, None ->

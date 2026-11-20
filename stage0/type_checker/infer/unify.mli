@@ -33,6 +33,7 @@ val list_possible_members : t -> Types.ty -> Language.Builtin_type.t list
 val is_within : t -> Types.ty -> Language.Builtin_type.t list -> bool
 val may_decide : t -> int -> bool
 val count_solutions : t -> int
+val poison : t -> int -> Diagnostic.reported -> unit
 
 type unknown = Unknown_type of int | Unknown_value of int
 

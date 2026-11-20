@@ -189,8 +189,12 @@ let map ~map_type ~map_argument ~map_capabilities (tables : t) : t =
   in
   let map_entries table transform = Array.map (Option.map transform) table in
   {
-    tables with
     types = map_entries tables.types map_type;
+    literals = tables.literals;
+    lend_modes = tables.lend_modes;
+    update_paths = tables.update_paths;
+    captures = tables.captures;
+    discarded = tables.discarded;
     local_types = map_entries tables.local_types map_type;
     scrutinee_types = map_entries tables.scrutinee_types map_type;
     calls = map_entries tables.calls map_call;

@@ -570,7 +570,7 @@ and find_consuming_cursor state (iterable : Syntax.expression) type_ :
                 {
                   cursor;
                   cursor_call = Some (make_argumentless_call callee cursor);
-                  remaining = find_remaining_call state span cursor;
+                  remaining = None;
                 },
               Solver.resolve_associated_type state cursor trait Cursor_element ~at:span )
       | None -> Absent)

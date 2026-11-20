@@ -41,63 +41,63 @@ let rec find_immutable state (env : State.env) (value : Syntax.expression) : imm
       | None -> Some Not_a_place)
   | _ -> Some Not_a_place
 
+let use_mutable_index (state : State.state) ~(report_with : Diagnostic.Code.types option)
+    (value : Syntax.expression) =
+  match state.tables.calls.(value.id) with
+  | Some
+      ({ callee = Trait_method ({ trait; name; receiver; self_type; _ } as method_); arguments; _ }
+       as call)
+    when Well_known.is_method Index_at (Method { owner = trait.trait; name; receiver }) -> (
+      let index_mut_at = Well_known.locate_method Index_mut_at in
+      let index_mut =
+        Types.make_trait_reference ~arguments:[] (Well_known.make_path index_mut_at.owner)
+      in
+      match State.find_evidence state self_type index_mut with
+      | Some _ ->
+          state.tables.calls.(value.id) <-
+            Some
+              {
+                call with
+                callee =
+                  Trait_method
+                    {
+                      method_ with
+                      trait = index_mut;
+                      name = index_mut_at.name;
+                      receiver = index_mut_at.receiver;
+                    };
+                arguments =
+                  List.map
+                    (fun (argument : Tables.argument) ->
+                      if argument.core_argument_index = 0 then
+                        { argument with mode = Language.Mode.Mut }
+                      else argument)
+                    arguments;
+              }
+      | None ->
+          Option.iter
+            (fun code ->
+              let assigns =
+                Option.is_some
+                  (State.find_evidence state self_type
+                     (Types.make_trait_reference ~arguments:[] (Well_known.make_path Index_assign)))
+              in
+              State.report state code (State.read_span state value.id)
+                (Printf.sprintf
+                   "An element of `%s` cannot be mutated in place: `%s` implements `Index`, which \
+                    lends an element read-only, and not `IndexMut`.%s"
+                   (State.show state self_type) (State.show state self_type)
+                   (if assigns then " Assign the whole element with `=`." else "")))
+            report_with)
+  | _ -> ()
+
 let rec use_mutable_indexes (state : State.state) ~(report_with : Diagnostic.Code.types option)
     (value : Syntax.expression) =
   match value.kind with
   | Member (base, _) | Parenthesized base | Mode (_, base) ->
       use_mutable_indexes state ~report_with base
   | Bracket (base, _) ->
-      (match state.tables.calls.(value.id) with
-      | Some
-          ({
-             callee = Trait_method ({ trait; name; receiver; self_type; _ } as method_);
-             arguments;
-             _;
-           } as call)
-        when Well_known.is_method Index_at (Method { owner = trait.trait; name; receiver }) -> (
-          let index_mut_at = Well_known.locate_method Index_mut_at in
-          let index_mut =
-            Types.make_trait_reference ~arguments:[] (Well_known.make_path index_mut_at.owner)
-          in
-          match State.find_evidence state self_type index_mut with
-          | Some _ ->
-              state.tables.calls.(value.id) <-
-                Some
-                  {
-                    call with
-                    callee =
-                      Trait_method
-                        {
-                          method_ with
-                          trait = index_mut;
-                          name = index_mut_at.name;
-                          receiver = index_mut_at.receiver;
-                        };
-                    arguments =
-                      List.map
-                        (fun (argument : Tables.argument) ->
-                          if argument.core_argument_index = 0 then
-                            { argument with mode = Language.Mode.Mut }
-                          else argument)
-                        arguments;
-                  }
-          | None ->
-              Option.iter
-                (fun code ->
-                  let assigns =
-                    Option.is_some
-                      (State.find_evidence state self_type
-                         (Types.make_trait_reference ~arguments:[]
-                            (Well_known.make_path Index_assign)))
-                  in
-                  State.report state code (State.read_span state value.id)
-                    (Printf.sprintf
-                       "An element of `%s` cannot be mutated in place: `%s` implements `Index`, \
-                        which lends an element read-only, and not `IndexMut`.%s"
-                       (State.show state self_type) (State.show state self_type)
-                       (if assigns then " Assign the whole element with `=`." else "")))
-                report_with)
-      | _ -> ());
+      State.check_when_final state (fun () -> use_mutable_index state ~report_with value);
       use_mutable_indexes state ~report_with base
   | _ -> ()
 

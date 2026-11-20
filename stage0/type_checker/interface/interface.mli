@@ -63,6 +63,12 @@ module Properties : sig
     Types.ty ->
     Types.trait_reference list
 
+  val list_rigid_members :
+    Lookups.t ->
+    list_bounds:(Types.parameter -> Types.trait_reference list) ->
+    Types.ty ->
+    Language.Builtin_type.t list
+
   type property = Properties.property = Copyable | Plain | View | Holds_function
   type decision = Properties.decision = Holds | Fails | Depends_on of Types.ty
   type occurrence = Environment.occurrence = In_place | Indirect | Function_input
