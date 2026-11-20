@@ -596,6 +596,41 @@ test "sort orders a list, and binary_search then finds its elements" {
   assert part == [9, 6, 7, 8, 5]
 }
 
+test "sort orders ascending, descending, equal, nearly sorted, and patterned lists" {
+  var ascending: List[Int64] = []
+  var descending: List[Int64] = []
+  var equal: List[Int64] = []
+  var nearly: List[Int64] = []
+  var sawtooth: List[Int64] = []
+  var scattered: List[Int64] = []
+  var state: Int64 = 7
+  for value in 0..1000 {
+    mut ascending.push(value)
+    mut descending.push(999 - value)
+    mut equal.push(4)
+    mut nearly.push(value)
+    mut sawtooth.push(value % 37)
+    state = (state * 1103 + 12345) % 65536
+    mut scattered.push(state)
+  }
+  mut nearly.swap(100, second: 900)
+  mut nearly.swap(400, second: 401)
+  mut ascending.sort()
+  mut descending.sort()
+  mut equal.sort()
+  mut nearly.sort()
+  mut sawtooth.sort()
+  mut scattered.sort()
+  var expected: Int64 = 0
+  for index in 0..ascending.length() {
+    assert ascending[index] == expected && descending[index] == expected && nearly[index] == expected
+    assert equal[index] == 4
+    expected += 1
+  }
+  assert sawtooth.is_sorted() && sawtooth[0] == 0 && sawtooth[999] == 36
+  assert scattered.is_sorted() && scattered.length() == 1000
+}
+
 test "sorted returns a sorted copy and leaves the list as it was" {
   let numbers: List[Int64] = [3, 1, 2]
   assert numbers.sorted() == [1, 2, 3]

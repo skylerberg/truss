@@ -1023,17 +1023,541 @@ fn drain_heap[Element: Ordered](items: mut Slice[Element])
   }
 }
 
+fn heap_sort[Element: Ordered](items: mut Slice[Element])
+  ensures items.is_sorted()
+  ensures items.model().is_permutation_of(old(items.model()))
+  cost time O(items.length() * log(items.length()) * time(Element.compare))
+{
+  build_heap(mut items)
+  drain_heap(mut items)
+}
+
+let insertion_sort_threshold: UInt64 = 12
+
+let partial_sort_steps: UInt64 = 5
+
+let shortest_to_shift: UInt64 = 50
+
+let shortest_for_median: UInt64 = 8
+
+let shortest_for_ninther: UInt64 = 50
+
+let descending_sample_swaps: UInt64 = 12
+
+let shortest_to_break_patterns: UInt64 = 8
+
+let balance_divisor: UInt64 = 8
+
+fn insert_last[Element: Ordered](items: mut Slice[Element], last: UInt64)
+  requires last < items.length()
+  requires forall i in 1..last => items[i - 1] <= items[i]
+  ensures items.length() == old(items.length())
+  ensures forall i in 1..last + 1 => items[i - 1] <= items[i]
+  ensures forall i in last + 1..items.length() => identical(items.model()[i], old(items.model())[i])
+  ensures items.model().is_permutation_of(old(items.model()))
+  cost time O(last * time(Element.compare))
+{
+  var index = last
+  while index > 0 && items[index] < items[index - 1]
+    invariant items.length() == old(items.length())
+    invariant index <= last
+    invariant forall i in 1..index => items[i - 1] <= items[i]
+    invariant forall i in index + 2..last + 1 => items[i - 1] <= items[i]
+    invariant index < last ==> items[index] < items[index + 1]
+    invariant 0 < index && index < last ==> items[index - 1] <= items[index + 1]
+    invariant forall i in last + 1..items.length() => identical(items.model()[i], old(items.model())[i])
+    invariant items.model().is_permutation_of(old(items.model()))
+    decreases index
+    cost time O((last - index) * time(Element.compare))
+  {
+    mut items.swap(index - 1, second: index)
+    index -= 1
+  }
+}
+
+fn insertion_sort[Element: Ordered](items: mut Slice[Element])
+  ensures items.is_sorted()
+  ensures items.model().is_permutation_of(old(items.model()))
+  cost time O(items.length() * items.length() * time(Element.compare))
+{
+  for last in 1..items.length()
+    invariant items.length() == old(items.length())
+    invariant forall i in 1..last => items[i - 1] <= items[i]
+    invariant items.model().is_permutation_of(old(items.model()))
+    cost time O(last * items.length() * time(Element.compare))
+  {
+    insert_last(mut items, last: last)
+  }
+}
+
+fn shift_right[Element: Ordered](items: mut Slice[Element], start: UInt64)
+  requires start < items.length()
+  ensures items.length() == old(items.length())
+  ensures forall i in 0..start => identical(items.model()[i], old(items.model())[i])
+  ensures items.model().is_permutation_of(old(items.model()))
+  cost time O((items.length() - start) * time(Element.compare))
+{
+  var index = start + 1
+  while index < items.length() && items[index] < items[index - 1]
+    invariant items.length() == old(items.length())
+    invariant start < index
+    invariant index <= items.length()
+    invariant forall i in 0..start => identical(items.model()[i], old(items.model())[i])
+    invariant items.model().is_permutation_of(old(items.model()))
+    decreases items.length() - index
+    cost time O((index - start) * time(Element.compare))
+  {
+    mut items.swap(index - 1, second: index)
+    index += 1
+  }
+}
+
+fn try_insertion_sort[Element: Ordered](items: mut Slice[Element]) -> Bool
+  requires 1 <= items.length()
+  ensures result ==> items.is_sorted()
+  ensures items.model().is_permutation_of(old(items.model()))
+  cost time O(items.length() * time(Element.compare))
+{
+  var sorted_length: UInt64 = 1
+  var is_settled = false
+  for step in 0..partial_sort_steps
+    invariant items.length() == old(items.length())
+    invariant 1 <= sorted_length && sorted_length <= items.length()
+    invariant forall i in 1..sorted_length => items[i - 1] <= items[i]
+    invariant items.model().is_permutation_of(old(items.model()))
+    cost time O(step * items.length() * time(Element.compare))
+  {
+    if !is_settled {
+      while sorted_length < items.length() && !(items[sorted_length] < items[sorted_length - 1])
+        invariant items.length() == old(items.length())
+        invariant 1 <= sorted_length && sorted_length <= items.length()
+        invariant forall i in 1..sorted_length => items[i - 1] <= items[i]
+        decreases items.length() - sorted_length
+        cost time O(sorted_length * time(Element.compare))
+      {
+        sorted_length += 1
+      }
+      if sorted_length == items.length() || items.length() < shortest_to_shift {
+        is_settled = true
+      } else {
+        mut items.swap(sorted_length - 1, second: sorted_length)
+        insert_last(mut items, last: sorted_length - 1)
+        shift_right(mut items, start: sorted_length)
+      }
+    }
+  }
+  sorted_length == items.length()
+}
+
+type Partition(pivot: UInt64, was_partitioned: Bool)
+
+fn partition[Element: Ordered](items: mut Slice[Element], pivot: UInt64) -> Partition
+  requires pivot < items.length()
+  requires 2 <= items.length()
+  ensures items.length() == old(items.length())
+  ensures result.pivot < items.length()
+  ensures identical(items.model()[result.pivot], old(items.model())[pivot])
+  ensures forall i in 0..result.pivot => items[i] < items[result.pivot]
+  ensures forall i in result.pivot..items.length() => items[result.pivot] <= items[i]
+  ensures items.model().is_permutation_of(old(items.model()))
+  cost time O(items.length() * time(Element.compare))
+{
+  mut items.swap(0, second: pivot)
+  var low: UInt64 = 1
+  var high = items.length() - 1
+  var has_swapped = false
+  while low <= high
+    invariant items.length() == old(items.length())
+    invariant 1 <= low && low <= high + 1 && high < items.length()
+    invariant identical(items.model()[0], old(items.model())[pivot])
+    invariant forall i in 1..low => items[i] < items[0]
+    invariant forall i in high + 1..items.length() => items[0] <= items[i]
+    invariant items.model().is_permutation_of(old(items.model()))
+    decreases high + 1 - low
+    cost time O((low + items.length() - high) * time(Element.compare))
+  {
+    let scan_start = low
+    while low <= high && items[low] < items[0]
+      invariant items.length() == old(items.length())
+      invariant 1 <= low && low <= high + 1 && high < items.length()
+      invariant identical(items.model()[0], old(items.model())[pivot])
+      invariant forall i in 1..low => items[i] < items[0]
+      invariant forall i in high + 1..items.length() => items[0] <= items[i]
+      invariant items.model().is_permutation_of(old(items.model()))
+      invariant scan_start <= low
+      decreases high + 1 - low
+      cost time O((low - scan_start) * time(Element.compare))
+    {
+      low += 1
+    }
+    let scan_end = high
+    while low <= high && !(items[high] < items[0])
+      invariant items.length() == old(items.length())
+      invariant 1 <= low && low <= high + 1 && high < items.length()
+      invariant identical(items.model()[0], old(items.model())[pivot])
+      invariant forall i in 1..low => items[i] < items[0]
+      invariant forall i in high + 1..items.length() => items[0] <= items[i]
+      invariant items.model().is_permutation_of(old(items.model()))
+      invariant high <= scan_end
+      decreases high + 1 - low
+      cost time O((scan_end - high) * time(Element.compare))
+    {
+      high -= 1
+    }
+    if low <= high {
+      mut items.swap(low, second: high)
+      has_swapped = true
+      low += 1
+      high -= 1
+    }
+  }
+  mut items.swap(0, second: high)
+  Partition(pivot: high, was_partitioned: !has_swapped)
+}
+
+fn partition_equal[Element: Ordered](items: mut Slice[Element]) -> UInt64
+  requires 1 <= items.length()
+  requires forall i in 0..items.length() => items[0] <= items[i]
+  ensures items.length() == old(items.length())
+  ensures 1 <= result && result <= items.length()
+  ensures identical(items.model()[0], old(items.model())[0])
+  ensures forall i in 0..result => items[i] <= items[0]
+  ensures forall i in result..items.length() => items[0] < items[i]
+  ensures forall i in 0..items.length() => items[0] <= items[i]
+  ensures items.model().is_permutation_of(old(items.model()))
+  cost time O(items.length() * time(Element.compare))
+{
+  var low: UInt64 = 1
+  var high = items.length() - 1
+  while low <= high
+    invariant items.length() == old(items.length())
+    invariant 1 <= low && low <= high + 1 && high < items.length()
+    invariant identical(items.model()[0], old(items.model())[0])
+    invariant forall i in 0..low => items[i] <= items[0]
+    invariant forall i in high + 1..items.length() => items[0] < items[i]
+    invariant forall i in 0..items.length() => items[0] <= items[i]
+    invariant items.model().is_permutation_of(old(items.model()))
+    decreases high + 1 - low
+    cost time O((low + items.length() - high) * time(Element.compare))
+  {
+    let scan_start = low
+    while low <= high && !(items[0] < items[low])
+      invariant items.length() == old(items.length())
+      invariant 1 <= low && low <= high + 1 && high < items.length()
+      invariant identical(items.model()[0], old(items.model())[0])
+      invariant forall i in 0..low => items[i] <= items[0]
+      invariant forall i in high + 1..items.length() => items[0] < items[i]
+      invariant forall i in 0..items.length() => items[0] <= items[i]
+      invariant items.model().is_permutation_of(old(items.model()))
+      invariant scan_start <= low
+      decreases high + 1 - low
+      cost time O((low - scan_start) * time(Element.compare))
+    {
+      low += 1
+    }
+    let scan_end = high
+    while low <= high && items[0] < items[high]
+      invariant items.length() == old(items.length())
+      invariant 1 <= low && low <= high + 1 && high < items.length()
+      invariant identical(items.model()[0], old(items.model())[0])
+      invariant forall i in 0..low => items[i] <= items[0]
+      invariant forall i in high + 1..items.length() => items[0] < items[i]
+      invariant forall i in 0..items.length() => items[0] <= items[i]
+      invariant items.model().is_permutation_of(old(items.model()))
+      invariant high <= scan_end
+      decreases high + 1 - low
+      cost time O((scan_end - high) * time(Element.compare))
+    {
+      high -= 1
+    }
+    if low <= high {
+      mut items.swap(low, second: high)
+      low += 1
+      high -= 1
+    }
+  }
+  low
+}
+
+type SampleOrder = Ascending | Descending | Mixed
+
+type PivotChoice(index: UInt64, order: SampleOrder)
+
+type Median(index: UInt64, swaps: UInt64)
+
+fn select_median[Element: Ordered](items: Slice[Element], first: UInt64, second: UInt64, third: UInt64) -> Median
+  requires first < items.length()
+  requires second < items.length()
+  requires third < items.length()
+  ensures result.index == first || result.index == second || result.index == third
+  ensures result.swaps <= 3
+  cost time O(time(Element.compare))
+{
+  var low = first
+  var middle = second
+  var high = third
+  var swaps: UInt64 = 0
+  if items[middle] < items[low] {
+    let former_low = low
+    low = middle
+    middle = former_low
+    swaps += 1
+  }
+  if items[high] < items[middle] {
+    let former_middle = middle
+    middle = high
+    high = former_middle
+    swaps += 1
+  }
+  if items[middle] < items[low] {
+    middle = low
+    swaps += 1
+  }
+  Median(index: middle, swaps: swaps)
+}
+
+fn choose_pivot[Element: Ordered](items: Slice[Element]) -> PivotChoice
+  requires 1 <= items.length()
+  ensures result.index < items.length()
+  cost time O(time(Element.compare))
+{
+  let length = items.length()
+  let quarter = length / 4
+  var first = quarter
+  var second = quarter * 2
+  var third = quarter * 3
+  var swaps: UInt64 = 0
+  if length >= shortest_for_median {
+    if length >= shortest_for_ninther {
+      let near_first = select_median(items, first: first - 1, second: first, third: first + 1)
+      let near_second = select_median(items, first: second - 1, second: second, third: second + 1)
+      let near_third = select_median(items, first: third - 1, second: third, third: third + 1)
+      first = near_first.index
+      second = near_second.index
+      third = near_third.index
+      swaps = near_first.swaps + near_second.swaps + near_third.swaps
+    }
+    let median = select_median(items, first: first, second: second, third: third)
+    second = median.index
+    swaps += median.swaps
+  }
+  if swaps == 0 {
+    PivotChoice(index: second, order: SampleOrder.Ascending)
+  } else if swaps == descending_sample_swaps {
+    PivotChoice(index: second, order: SampleOrder.Descending)
+  } else {
+    PivotChoice(index: second, order: SampleOrder.Mixed)
+  }
+}
+
+fn break_patterns[Element](items: mut Slice[Element])
+  ensures items.length() == old(items.length())
+  ensures items.model().is_permutation_of(old(items.model()))
+  cost time O(1)
+{
+  let length = items.length()
+  if length >= shortest_to_break_patterns {
+    var state = length
+    let middle = length / 4 * 2
+    for index in middle - 1..middle + 2
+      invariant items.length() == length
+      invariant items.model().is_permutation_of(old(items.model()))
+      cost time O(index + 1 - middle)
+    {
+      state = state ^ (state << 13)
+      state = state ^ (state >> 7)
+      state = state ^ (state << 17)
+      mut items.swap(index, second: state % length)
+    }
+  }
+}
+
+fn compute_depth_limit(count: UInt64) -> UInt64
+  ensures result == 2 * log(count)
+  cost time O(log(count))
+{
+  var width = count
+  var limit: UInt64 = 0
+  while width > 0
+    invariant width <= count
+    invariant limit + 2 * log(width) == 2 * log(count)
+    decreases width
+    cost time O(log(count) - log(width))
+  {
+    width = width / 2
+    limit += 2
+  }
+  limit
+}
+
+fn quicksort[Element: Ordered](
+  items: mut Slice[Element],
+  limit: UInt64,
+  was_balanced: Bool,
+  was_partitioned: Bool,
+)
+  ensures items.is_sorted()
+  ensures items.model().is_permutation_of(old(items.model()))
+  ensures forall i in 0..items.length() => old(items.model()).contains(items[i])
+  decreases items.length(), 2
+  cost time O(items.length() * (limit + log(items.length())) * time(Element.compare))
+{
+  let length = items.length()
+  if length <= insertion_sort_threshold {
+    insertion_sort(mut items)
+    proof {
+      specification::elements_of_a_permutation(items.model(), original: old(items.model()))
+    }
+    return
+  }
+  if limit == 0 {
+    heap_sort(mut items)
+    proof {
+      specification::elements_of_a_permutation(items.model(), original: old(items.model()))
+    }
+    return
+  }
+  if !was_balanced {
+    break_patterns(mut items)
+  }
+  let choice = choose_pivot(items)
+  var pivot = choice.index
+  var is_ascending = choice.order is Ascending
+  if choice.order is Descending {
+    mut items.reverse()
+    pivot = length - 1 - pivot
+    is_ascending = true
+  }
+  if was_balanced && was_partitioned && is_ascending {
+    if try_insertion_sort(mut items) {
+      proof {
+        specification::elements_of_a_permutation(items.model(), original: old(items.model()))
+      }
+      return
+    }
+  }
+  let parts = partition(mut items, pivot: pivot)
+  if parts.pivot == 0 {
+    let equal_count = partition_equal(mut items)
+    sort_after_equal_run(
+      mut items,
+      equal_count: equal_count,
+      limit: limit - 1,
+      was_balanced: was_balanced,
+      was_partitioned: was_partitioned,
+    )
+  } else {
+    let smallest_balanced_side = length / balance_divisor
+    sort_sides(
+      mut items,
+      pivot: parts.pivot,
+      limit: limit - 1,
+      was_balanced: parts.pivot >= smallest_balanced_side && length - 1 - parts.pivot >= smallest_balanced_side,
+      was_partitioned: parts.was_partitioned,
+    )
+  }
+  proof {
+    specification::elements_of_a_permutation(items.model(), original: old(items.model()))
+  }
+}
+
+fn sort_after_equal_run[Element: Ordered](
+  items: mut Slice[Element],
+  equal_count: UInt64,
+  limit: UInt64,
+  was_balanced: Bool,
+  was_partitioned: Bool,
+)
+  requires 1 <= equal_count && equal_count <= items.length()
+  requires forall i in 0..equal_count => items[i] <= items[0]
+  requires forall i in equal_count..items.length() => items[0] < items[i]
+  requires forall i in 0..items.length() => items[0] <= items[i]
+  ensures items.is_sorted()
+  ensures items.model().is_permutation_of(old(items.model()))
+  decreases items.length(), 0
+  cost time O(((items.length() - 1) * (limit + log(items.length())) + 1) * time(Element.compare))
+{
+  quicksort(mut items[equal_count..], limit: limit, was_balanced: was_balanced, was_partitioned: was_partitioned)
+}
+
+fn sort_sides[Element: Ordered](
+  items: mut Slice[Element],
+  pivot: UInt64,
+  limit: UInt64,
+  was_balanced: Bool,
+  was_partitioned: Bool,
+)
+  requires pivot < items.length()
+  requires forall i in 0..pivot => items[i] < items[pivot]
+  requires forall i in pivot..items.length() => items[pivot] <= items[i]
+  ensures items.is_sorted()
+  ensures items.model().is_permutation_of(old(items.model()))
+  decreases items.length(), 1
+  cost time O(((items.length() - 1) * (limit + log(items.length())) + 3) * time(Element.compare))
+{
+  let is_left_smaller = pivot < items.length() - 1 - pivot
+  sort_prefix(
+    mut items,
+    stop: pivot,
+    limit: limit,
+    was_balanced: is_left_smaller || was_balanced,
+    was_partitioned: is_left_smaller || was_partitioned,
+  )
+  sort_suffix(
+    mut items,
+    start: pivot + 1,
+    limit: limit,
+    was_balanced: !is_left_smaller || was_balanced,
+    was_partitioned: !is_left_smaller || was_partitioned,
+  )
+}
+
+fn sort_prefix[Element: Ordered](
+  items: mut Slice[Element],
+  stop: UInt64,
+  limit: UInt64,
+  was_balanced: Bool,
+  was_partitioned: Bool,
+)
+  requires stop < items.length()
+  ensures items.length() == old(items.length())
+  ensures forall i in 1..stop => items[i - 1] <= items[i]
+  ensures forall i in stop..items.length() => identical(items.model()[i], old(items.model())[i])
+  ensures forall i in 0..stop => exists j in 0..stop => identical(items.model()[i], old(items.model())[j])
+  ensures items.model().is_permutation_of(old(items.model()))
+  decreases items.length(), 0
+  cost time O((stop * (limit + log(items.length())) + 1) * time(Element.compare))
+{
+  quicksort(mut items[..stop], limit: limit, was_balanced: was_balanced, was_partitioned: was_partitioned)
+}
+
+fn sort_suffix[Element: Ordered](
+  items: mut Slice[Element],
+  start: UInt64,
+  limit: UInt64,
+  was_balanced: Bool,
+  was_partitioned: Bool,
+)
+  requires 1 <= start && start <= items.length()
+  ensures items.length() == old(items.length())
+  ensures forall i in start + 1..items.length() => items[i - 1] <= items[i]
+  ensures forall i in 0..start => identical(items.model()[i], old(items.model())[i])
+  ensures forall i in start..items.length() =>
+    exists j in start..items.length() => identical(items.model()[i], old(items.model())[j])
+  ensures items.model().is_permutation_of(old(items.model()))
+  decreases items.length(), 0
+  cost time O(((items.length() - start) * (limit + log(items.length())) + 1) * time(Element.compare))
+{
+  quicksort(mut items[start..], limit: limit, was_balanced: was_balanced, was_partitioned: was_partitioned)
+}
+
 public fn Slice[Element: Ordered].sort(mut self)
   ensures self.is_sorted()
   ensures self.model().is_permutation_of(old(self.model()))
   ensures forall i in 0..self.length() => old(self.model()).contains(self[i])
   cost time O(self.length() * log(self.length()) * time(Element.compare))
 {
-  build_heap(mut self)
-  drain_heap(mut self)
-  proof {
-    specification::elements_of_a_permutation(self.model(), original: old(self.model()))
-  }
+  quicksort(mut self, limit: compute_depth_limit(self.length()), was_balanced: true, was_partitioned: true)
 }
 
 fn sift_down_by[Element](
