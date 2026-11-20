@@ -50,6 +50,7 @@ type changed = {
 }
 
 type place_value = One of Logic.term | Run of Logic.term * Logic.term
+type noted_place = { origin : Core.origin; value : place_value }
 
 type passed_place = {
   read : frame -> Logic.term;
@@ -116,8 +117,8 @@ type context = {
   axiom_clauses : unit Tables.Axiom_clause_table.t;
   mutable open_axioms : open_axiom list;
   axioms_of : open_axiom Tables.Symbol_table.t;
-  disjoint : (Core.origin list * Core.origin list) list;
-  mutable indexes : (Core.origin * place_value) list;
+  disjoint : (Core.id list * Core.id list) list;
+  mutable indexes : (Core.id * noted_place) list;
   mutable yielded_part : Types.ty option;
   mutable yield_ensures : (Mir.formula list * Mir.formula list) option;
   home : Resolve.Names.key;

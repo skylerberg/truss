@@ -44,7 +44,7 @@ type t = {
   mutable extended : Core.id list;
   mutable binds_to_statement : bool;
   mutable tasks : (Tree.task * int) list;
-  groups : (Core.origin, group) Hashtbl.t;
+  groups : (Core.id, group) Hashtbl.t;
   held_places : (Tree.local, Tree.place) Hashtbl.t;
   bound_to_places : (Tree.local, unit) Hashtbl.t;
   is_specification : bool;
@@ -250,8 +250,8 @@ let return_from_scopes builder value origin =
 
 let unit_value = Tree.Immediate { value = Unit; type_ = Types.unit }
 
-let group_key : Tree.task -> Core.origin = function
-  | Branch { block; _ } -> block
+let group_key : Tree.task -> Core.id = function
+  | Branch { fork; _ } -> fork
   | Iteration { loop } -> loop
 
 let hold_operand builder (value : Tree.operand) type_ origin =

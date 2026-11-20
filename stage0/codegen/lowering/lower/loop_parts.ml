@@ -65,9 +65,8 @@ let list_tasks blocks (body : Mir.Graph.block list) : Mir.task list =
   List.concat_map
     (fun block ->
       match (lookup_block blocks block).terminator with
-      | For { loop; _ } -> [ Mir.Iteration { loop = loop.origin } ]
-      | Fork { fork; branches; _ } ->
-          List.mapi (fun index _ -> Mir.Branch { block = fork; index }) branches
+      | For { loop; _ } -> [ Mir.Iteration { loop = loop.node } ]
+      | Fork { fork; branches; _ } -> List.mapi (fun index _ -> Mir.Branch { fork; index }) branches
       | Goto _ | Branch _ | Join _ | Iteration_end _ | Yield _ | Return _ | Cancel _ | Resume _
       | Unreachable | Written_unreachable | Todo ->
           [])

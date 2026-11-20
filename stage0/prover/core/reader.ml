@@ -1,7 +1,7 @@
 let ( let* ) = Option.bind
 
 type loop_exits = {
-  loop : Core.origin;
+  loop : Core.id;
   mutable breaks : State.frame list;
   mutable ends : State.frame list;
 }
@@ -153,13 +153,13 @@ let rec read_resolved context frame run (place : Mir.place) =
           match projection with
           | Field field -> project_field None field
           | Variant_field { variant; field } -> project_field (Some variant) field
-          | Element { index; origin; _ } ->
+          | Element { node; index; origin; _ } ->
               Intrinsics.read_sequence_element context frame base_type term
                 (read_index context frame run index)
-                ~origin
-          | Range { start; stop; origin; _ } ->
+                ~node ~origin
+          | Range { node; start; stop; origin; _ } ->
               let _, viewed, _, _ =
-                Intrinsics.apply_slice context frame
+                Intrinsics.apply_slice context frame ~node
                   { origin; type_ = compute_place_type context frame run projected }
                   ~base_type ~collection:term
                   ~low:(read_index context frame run start)
@@ -226,10 +226,10 @@ let write_resolved context frame run (place : Mir.place) new_value =
         match projection with
         | Field field -> replace_part None field
         | Variant_field { variant; field } -> replace_part (Some variant) field
-        | Element { index; origin; _ } ->
+        | Element { node; index; origin; _ } ->
             let index = read_index context frame run index in
             let replaced =
-              Intrinsics.read_sequence_element context frame base_type whole index ~origin
+              Intrinsics.read_sequence_element context frame base_type whole index ~node ~origin
             in
             let element = rebuilt replaced in
             (match rest with
@@ -244,9 +244,9 @@ let write_resolved context frame run (place : Mir.place) new_value =
             Amounts.assume_element_potential_change context frame base_type ~before:whole ~after
               ~replaced ~written:element;
             after
-        | Range { start; stop; origin; _ } ->
+        | Range { node; start; stop; origin; _ } ->
             let _, viewed, start, stop =
-              Intrinsics.apply_slice context frame { origin; type_ = part_type } ~base_type
+              Intrinsics.apply_slice context frame ~node { origin; type_ = part_type } ~base_type
                 ~collection:whole
                 ~low:(read_index context frame run start)
                 ~high:(Option.map (read_index context frame run) stop)
@@ -1077,7 +1077,7 @@ and read_statement context frame run (statement : Mir.statement) =
             | None -> (None, exits)
             | Some frame ->
                 let cancelled = ref [] in
-                run.cancelled <- (Mir.Branch { block = fork; index }, cancelled) :: run.cancelled;
+                run.cancelled <- (Mir.Branch { fork; index }, cancelled) :: run.cancelled;
                 let ended = read_statements context frame run branch.statements in
                 run.cancelled <- List.tl run.cancelled;
                 (ended, exits @ List.map (fun exited -> (index, exited)) (List.rev !cancelled)))
@@ -1125,7 +1125,7 @@ and read_statement context frame run (statement : Mir.statement) =
           test = (fun head -> read_block context head run condition);
           run_body =
             (fun entered ->
-              let exits = { loop = loop.origin; breaks = []; ends = [] } in
+              let exits = { loop = loop.node; breaks = []; ends = [] } in
               run.loops <- exits :: run.loops;
               let ended = read_statements context entered run body.statements in
               run.loops <- List.tl run.loops;
@@ -1219,7 +1219,7 @@ and read_statement context frame run (statement : Mir.statement) =
             (Facts.substitute_type context inside run.infos.(part).type_)
             element
         in
-        let exits = { loop = loop.origin; breaks = []; ends = [] } in
+        let exits = { loop = loop.node; breaks = []; ends = [] } in
         run.loops <- exits :: run.loops;
         let ended =
           read_statements context inside run (loop_bindings.statements @ body.statements)

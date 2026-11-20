@@ -11,6 +11,7 @@ val read_sequence_element :
   Types.ty ->
   Logic.term ->
   Logic.term ->
+  node:Core.id ->
   origin:Core.origin ->
   Logic.term
 
@@ -30,6 +31,7 @@ val write_sequence_range :
 val apply_slice :
   State.context ->
   State.frame ->
+  node:Core.id ->
   Invocation.site ->
   base_type:Types.ty ->
   collection:Logic.term ->

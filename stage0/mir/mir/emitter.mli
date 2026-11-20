@@ -73,8 +73,8 @@ val with_compound_target : t -> Tree.place -> (unit -> 'a) -> 'a
 val compound_target : t -> Tree.place option
 val run_in_loop : t -> (unit -> unit) -> unit
 val run_in_task : t -> Tree.task -> (unit -> 'a) -> 'a
-val start_group : t -> Core.origin -> Core.origin -> unit
-val resume_group : t -> Core.origin -> Core.origin -> unit
+val start_group : t -> Core.id -> Core.origin -> unit
+val resume_group : t -> Core.id -> Core.origin -> unit
 val return_ : t -> Tree.operand option -> Core.origin -> unit
 val break_ : t -> Core.origin -> unit
 val continue_ : t -> Core.origin -> unit

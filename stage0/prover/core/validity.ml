@@ -5,11 +5,14 @@ let find_selected_place (context : State.context) selection =
   in
   let rec find_from offset = function
     | [] -> Facts.raise_bug "a selection of no range or element"
-    | [ innermost ] -> Option.map (shift offset) (List.assoc_opt innermost context.indexes)
+    | [ innermost ] ->
+        Option.map
+          (fun (noted : State.noted_place) -> shift offset noted.value)
+          (List.assoc_opt innermost context.indexes)
     | range :: inner -> (
         match List.assoc_opt range context.indexes with
-        | Some (Run (start, _)) -> find_from (Costs.plus offset start) inner
-        | Some (One _) -> Facts.raise_bug "a selection that selects inside an element"
+        | Some { value = Run (start, _); _ } -> find_from (Costs.plus offset start) inner
+        | Some { value = One _; _ } -> Facts.raise_bug "a selection that selects inside an element"
         | None -> None)
   in
   find_from (Logic.int 0) selection
@@ -19,14 +22,17 @@ let read_innermost selection =
   | innermost :: _ -> innermost
   | [] -> Facts.raise_bug "a selection of no range or element"
 
-let note_place (context : State.context) (frame : State.frame) origin place =
-  let mentions (first, second) = List.mem origin first || List.mem origin second in
+let note_place (context : State.context) (frame : State.frame) ~node ~origin value =
+  let mentions (first, second) = List.mem node first || List.mem node second in
   if Facts.is_home context frame.source && List.exists mentions context.disjoint then begin
-    context.indexes <- (origin, place) :: context.indexes;
+    context.indexes <- (node, { State.origin; value }) :: context.indexes;
+    let quote selection =
+      Facts.quote frame.source (List.assoc (read_innermost selection) context.indexes).origin
+    in
     let outside index start stop = Logic.(less index start ||| less_equal stop index) in
     List.iter
       (fun (first, second) ->
-        if read_innermost first = origin || read_innermost second = origin then
+        if read_innermost first = node || read_innermost second = node then
           match (find_selected_place context first, find_selected_place context second) with
           | Some left, Some right ->
               let apart =
@@ -47,9 +53,9 @@ let note_place (context : State.context) (frame : State.frame) origin place =
                 (Facts.locate context frame.source origin)
                 [
                   Text "`";
-                  Facts.quote frame.source (read_innermost first);
+                  quote first;
                   Text "` and `";
-                  Facts.quote frame.source (read_innermost second);
+                  quote second;
                   Text "` may reach the same elements, which are used together.";
                 ]
                 apart

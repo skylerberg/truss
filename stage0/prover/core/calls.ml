@@ -983,9 +983,6 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
           Validity.check_forwarded_callback context frame site invocation passed local values
       | Other -> ())
     values;
-  (match (invocation.lends, values) with
-  | Some _, _ :: index :: _ -> Validity.note_place context frame site.origin (One index.term)
-  | _ -> ());
   let result_type = Facts.substitute_type context frame site.type_ in
   let is_update_step = calls_update_step context invocation in
   (match invocation.callee with
