@@ -42,6 +42,7 @@ type t = {
   bound_to_places : (Tree.local, unit) Hashtbl.t;
   lent_parts : (Tree.local, unit) Hashtbl.t;
   aliasing_names : (Tree.local, unit) Hashtbl.t;
+  loan_starts : (int, Tree.operand * Language.Mode.t) Hashtbl.t;
   is_specification : bool;
   entry_locals : Core.local list;
   mutable in_old : bool;
@@ -75,6 +76,7 @@ let create ?(is_specification = false) ~entry_locals ?(takes_free_locals = false
     bound_to_places = Hashtbl.create 8;
     lent_parts = Hashtbl.create 8;
     aliasing_names = Hashtbl.create 8;
+    loan_starts = Hashtbl.create 8;
   }
 
 let allocate_local builder kind type_ origin =
@@ -183,6 +185,7 @@ let start_loan builder borrowed mode duration origin =
   let loan = builder.loan_count in
   if not builder.is_specification then begin
     builder.loan_count <- loan + 1;
+    Hashtbl.replace builder.loan_starts loan (borrowed, mode);
     emit builder (Basic (Loan_start { loan; borrowed; mode; duration })) origin;
     match builder.scopes with scope :: _ -> scope.loans <- loan :: scope.loans | [] -> ()
   end;
@@ -315,17 +318,25 @@ let make_arm_scope ~scrutinee =
 
 let run_in_guarded_block builder scope origin build =
   let lent_parts, others = partition_lent_parts builder scope.temporaries in
-  let block_scope =
-    if lent_parts <> [] && List.exists (Hashtbl.mem builder.aliasing_names) scope.bound then begin
-      end_scope builder { scope with bound = []; loans = []; temporaries = others } origin;
-      { scope with temporaries = lent_parts }
-    end
-    else begin
+  match (lent_parts, List.find_opt (Hashtbl.mem builder.aliasing_names) (List.rev scope.bound)) with
+  | _ :: _, Some alias ->
+      let name =
+        match (Hashtbl.find builder.infos alias).kind with
+        | Source { local; _ } -> local
+        | Temporary | Lent _ -> raise_bug "a name that may alias a lent part and is no source local"
+      in
+      run_in_block_scope builder { scope with loans = []; temporaries = lent_parts } origin
+        (fun () ->
+          List.iter
+            (fun loan ->
+              let borrowed, mode = Hashtbl.find builder.loan_starts loan in
+              ignore (start_loan builder borrowed mode (Alias_scope name) origin))
+            (List.rev scope.loans);
+          end_scope builder { scope with bound = []; temporaries = others } origin;
+          build ())
+  | _ ->
       end_scope builder { scope with bound = [] } origin;
-      { scope with loans = []; temporaries = [] }
-    end
-  in
-  run_in_block_scope builder block_scope origin build
+      run_in_block_scope builder { scope with loans = []; temporaries = [] } origin build
 
 let run_in_value_scope builder origin (build : unit -> Tree.operand option) =
   run_in_scope builder origin (fun () ->
