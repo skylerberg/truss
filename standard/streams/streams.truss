@@ -1,6 +1,7 @@
 use standard::console
 use standard::files
 use standard::intrinsic
+use standard::map
 use standard::network
 use standard::processes
 
@@ -251,23 +252,161 @@ impl Writer for ByteWriter {
   }
 }
 
-public opaque type BufferedReader[Source: Reader](source: Source, pending: List[UInt8], start: UInt64, capacity: UInt64)
-  invariant start <= pending.length()
+public opaque type ByteQueue(storage: List[UInt8], start: UInt64)
+  invariant start <= storage.length()
+  cost potential 4 * start
+
+public fn ByteQueue.length(self) -> UInt64
+  ensures result == self.storage.length() - self.start
+  cost time O(1)
+  cost allocations == 0
+{
+  self.storage.length() - self.start
+}
+
+public fn ByteQueue.is_empty(self) -> Bool
+  ensures result == (self.length() == 0)
+  cost time O(1)
+  cost allocations == 0
+{
+  self.length() == 0
+}
+
+public fn ByteQueue.bytes(self) -> Slice[UInt8]
+  ensures result.length() == self.length()
+  cost time O(1)
+  cost allocations == 0
+{
+  self.storage[self.start..]
+}
+
+public fn ByteQueue.take(mut self, count: UInt64) -> List[UInt8]
+  uses Panic unless count <= self.length()
+  ensures result.length() == count
+  ensures self.length() == old(self.length()) - count
+  cost time O(count)
+  cost amortized time O(count)
+  cost allocations <= 1
+{
+  if count > self.length() {
+    Panic.crash("the queue holds fewer bytes")
+  }
+  let taken = self.storage[self.start..self.start + count].to_list()
+  self.start += count
+  taken
+}
+
+public fn ByteQueue.take_all(mut self) -> List[UInt8]
+  ensures result.length() == old(self.length())
+  ensures self.length() == 0
+  cost time O(old(self.length()))
+  cost amortized time O(old(self.length()))
+  cost allocations <= 1
+{
+  if self.start == 0 {
+    return map::exchange(mut self.storage, value: [])
+  }
+  let taken = self.storage[self.start..].to_list()
+  self.start = self.storage.length()
+  taken
+}
+
+public fn ByteQueue.skip(mut self, count: UInt64)
+  uses Panic unless count <= self.length()
+  ensures self.length() == old(self.length()) - count
+  cost time O(1)
+  cost amortized time O(count)
+  cost allocations == 0
+{
+  if count > self.length() {
+    Panic.crash("the queue holds fewer bytes")
+  }
+  self.start += count
+}
+
+public fn ByteQueue.clear(mut self)
+  ensures self.length() == 0
+  cost time O(old(self.storage.length()))
+  cost allocations == 0
+{
+  mut self.storage.clear()
+  self.start = 0
+}
+
+fn compact(queue: mut ByteQueue)
+  ensures queue.length() == old(queue.length())
+  cost time O(old(queue.storage.length()))
+  cost amortized time O(1)
+  cost allocations == 0
+{
+  if queue.start > 0 && queue.start >= queue.storage.length() - queue.start {
+    mut queue.storage.remove_range(0..queue.start)
+    queue.start = 0
+  }
+}
+
+public fn ByteQueue.append(mut self, bytes: Slice[UInt8])
+  ensures self.length() == old(self.length()) + bytes.length()
+  cost amortized time O(bytes.length())
+{
+  compact(mut self)
+  mut self.storage.append_slice(bytes)
+}
+
+public fn ByteQueue.append_list(mut self, bytes: own List[UInt8])
+  ensures self.length() == old(self.length()) + bytes.length()
+  cost amortized time O(bytes.length())
+{
+  if self.is_empty() {
+    self.storage = own bytes
+    self.start = 0
+  } else {
+    mut self.append(bytes.slice())
+  }
+}
+
+public fn ByteQueue.receive_from[Stream: Duplex](mut self, stream: Stream, limit: UInt64) -> Result[UInt64, SystemError]
+  uses Handles, Tasks, RunForever
+  ensures !(result is Ok(count) && (count > limit || self.length() != old(self.length()) + count))
+  ensures !(result is Err(_) && self.length() != old(self.length()))
+{
+  compact(mut self)
+  stream.receive(mut self.storage, limit: limit)
+}
+
+public fn ByteQueue.read_from[Source: Reader](mut self, source: mut Source, limit: UInt64) -> Result[UInt64, SystemError]
+  uses Handles
+  ensures !(result is Ok(count) && (count > limit || self.length() != old(self.length()) + count))
+  ensures !(result is Err(_) && self.length() != old(self.length()))
+{
+  compact(mut self)
+  mut source.read(mut self.storage, limit: limit)
+}
+
+impl FromElements for ByteQueue {
+  type Element = UInt8
+
+  fn from_elements(elements: own List[UInt8]) -> ByteQueue
+    ensures result.length() == elements.length()
+    cost time O(1)
+    cost allocations == 0
+  {
+    ByteQueue(storage: own elements, start: 0)
+  }
+}
+
+public opaque type BufferedReader[Source: Reader](source: Source, pending: ByteQueue, capacity: UInt64)
   invariant capacity > 0
 
 public fn BufferedReader[Source: Reader].new(source: own Source, capacity: UInt64 = 65536) -> BufferedReader[Source] {
-  BufferedReader(source: own source, pending: [], start: 0, capacity: if capacity == 0 { 1 } else { capacity })
+  BufferedReader(source: own source, pending: [], capacity: if capacity == 0 { 1 } else { capacity })
 }
 
 internal fn BufferedReader[Source: Reader].fill(mut self) -> Result[UInt64, SystemError]
   uses Handles
-  ensures !(result is Ok(count) && self.pending.length() - self.start != old(self.pending.length() - self.start) + count)
+  ensures !(result is Ok(count) && self.pending.length() != old(self.pending.length()) + count)
 {
-  if self.start > 0 {
-    mut self.pending.remove_range(0..self.start)
-    self.start = 0
-  }
-  mut self.source.read(mut self.pending, limit: self.capacity)
+  mut self.pending.read_from(mut self.source, limit: self.capacity)
 }
 
 public fn BufferedReader[Source: Reader].read_until(
@@ -282,25 +421,24 @@ public fn BufferedReader[Source: Reader].read_until(
   var consumed: UInt64 = 0
   var more = true
   while more
-    invariant self.start <= self.pending.length()
     invariant self.capacity > 0
     invariant consumed <= limit
   {
-    var index = self.start
+    let unread = self.pending.bytes()
+    var index: UInt64 = 0
     var at_delimiter = false
     let room = limit - consumed
-    while index < self.pending.length() && !at_delimiter && index - self.start < room
-      invariant self.start <= index
-      invariant index <= self.pending.length()
-      invariant index - self.start <= room
-      decreases self.pending.length() - index + (if at_delimiter { 0 } else { 1 })
+    while index < unread.length() && !at_delimiter && index < room
+      invariant index <= unread.length()
+      invariant index <= room
+      decreases unread.length() - index + (if at_delimiter { 0 } else { 1 })
     {
-      at_delimiter = self.pending[index] == delimiter
+      at_delimiter = unread[index] == delimiter
       index += 1
     }
-    mut buffer.append_slice(self.pending[self.start..index])
-    consumed += index - self.start
-    self.start = index
+    mut buffer.append_slice(unread[..index])
+    mut self.pending.skip(index)
+    consumed += index
     if at_delimiter || consumed == limit {
       more = false
     } else {
@@ -336,20 +474,20 @@ public fn BufferedReader[Source: Reader].peek(mut self, count: UInt64) -> Result
   ensures !(result is Ok(seen) && seen.length() > count)
 {
   var more = true
-  while more && self.pending.length() - self.start < count
-    invariant self.start <= self.pending.length()
+  while more && self.pending.length() < count
     invariant self.capacity > 0
   {
     let got = mut self.fill()?
     more = got > 0
   }
-  let available = self.pending.length() - self.start
+  let available = self.pending.length()
   let shown = if available < count { available } else { count }
-  Ok(self.pending[self.start..self.start + shown])
+  let unread = self.pending.bytes()
+  Ok(unread[..shown])
 }
 
 public fn BufferedReader[Source: Reader].buffered(self) -> UInt64 {
-  self.pending.length() - self.start
+  self.pending.length()
 }
 
 public fn BufferedReader[Source: Reader].finish(own self) -> Source {
@@ -368,16 +506,16 @@ impl Reader for BufferedReader[Source: Reader] {
   fn read(mut self, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError]
     uses Handles
   {
-    if self.start == self.pending.length() {
+    if self.pending.is_empty() {
       if limit >= self.capacity {
         return mut self.source.read(mut buffer, limit: limit)
       }
       let _ = mut self.fill()?
     }
-    let available = self.pending.length() - self.start
+    let available = self.pending.length()
     let count = if limit < available { limit } else { available }
-    mut buffer.append_slice(self.pending[self.start..self.start + count])
-    self.start += count
+    mut buffer.append_slice(self.pending.bytes()[..count])
+    mut self.pending.skip(count)
     Ok(count)
   }
 }
@@ -386,9 +524,8 @@ impl Seek for BufferedReader[Source: Reader + Seek] {
   fn seek(mut self, to: Position) -> Result[UInt64, SystemError]
     uses Handles
   {
-    let unread: UInt64 = self.pending.length() - self.start
+    let unread = self.pending.length()
     mut self.pending.clear()
-    self.start = 0
     match to {
       FromCurrent(offset) => {
         let position = mut self.source.seek(Position.FromCurrent(offset: 0))?

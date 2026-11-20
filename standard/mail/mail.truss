@@ -1,6 +1,5 @@
 use standard::base64
 use standard::http::date
-use standard::map
 use standard::network
 use standard::streams
 use standard::tls
@@ -330,24 +329,28 @@ public type SmtpOptions(
 
 type Reply(code: UInt16, lines: List[String])
 
-type Inbox(bytes: List[UInt8])
-
-fn read_line[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox) -> Result[String, Error]
+fn read_line[Stream: streams::Duplex](stream: Stream, inbox: mut streams::ByteQueue) -> Result[String, Error]
   uses Handles, Tasks, RunForever
 {
-  while true {
-    match line_end(inbox.bytes.slice()) {
-      Some(end) => {
-        let rest = mut inbox.bytes.split_off(end + 2)
-        let line = map::exchange(mut inbox.bytes, value: own rest)
-        return Ok(String.from_utf8_lossy(line[..end]))
+  var searched: UInt64 = 0
+  while true
+    invariant searched <= inbox.length()
+  {
+    let unread = inbox.bytes()
+    match line_end(unread[searched..]) {
+      Some(offset) => {
+        let end = searched + offset
+        let line = String.from_utf8_lossy(unread[..end])
+        mut inbox.skip(end + 2)
+        return Ok(own line)
       }
       None => {}
     }
-    if inbox.bytes.length() > 65536 {
+    searched = if unread.length() > 0 { unread.length() - 1 } else { 0 }
+    if inbox.length() > 65536 {
       return Err(malformed("a reply line longer than 64 KiB"))
     }
-    match system(stream.receive(mut inbox.bytes, limit: 4096))? {
+    match system(mut inbox.receive_from(stream, limit: 4096))? {
       0 => return Err(Error.System(error: SystemError.ConnectionReset))
       _ => {}
     }
@@ -368,7 +371,7 @@ fn line_end(bytes: Slice[UInt8]) -> Option[UInt64]
   None
 }
 
-fn read_reply[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox) -> Result[Reply, Error]
+fn read_reply[Stream: streams::Duplex](stream: Stream, inbox: mut streams::ByteQueue) -> Result[Reply, Error]
   uses Handles, Tasks, RunForever
 {
   var lines: List[String] = []
@@ -389,7 +392,7 @@ fn read_reply[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox) -> Resu
   }
 }
 
-fn expect[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox, lowest: UInt16, highest: UInt16) -> Result[Reply, Error]
+fn expect[Stream: streams::Duplex](stream: Stream, inbox: mut streams::ByteQueue, lowest: UInt16, highest: UInt16) -> Result[Reply, Error]
   uses Handles, Tasks, RunForever
 {
   let reply = read_reply(stream, inbox: mut inbox)?
@@ -400,7 +403,7 @@ fn expect[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox, lowest: UIn
   Ok(own reply)
 }
 
-fn command[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox, line: StringSlice, lowest: UInt16, highest: UInt16) -> Result[Reply, Error]
+fn command[Stream: streams::Duplex](stream: Stream, inbox: mut streams::ByteQueue, line: StringSlice, lowest: UInt16, highest: UInt16) -> Result[Reply, Error]
   uses Handles, Tasks, RunForever
 {
   system(stream.send_all("${line}\r\n".slice().bytes()))?
@@ -450,7 +453,7 @@ fn dot_stuffed(body: StringSlice) -> String {
   output
 }
 
-fn authenticate[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox, features: Reply, options: SmtpOptions) -> Result[Unit, Error]
+fn authenticate[Stream: streams::Duplex](stream: Stream, inbox: mut streams::ByteQueue, features: Reply, options: SmtpOptions) -> Result[Unit, Error]
   uses Handles, Tasks, RunForever
 {
   let username = match options.username {
@@ -475,7 +478,7 @@ fn authenticate[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox, featu
   Err(Error.Unsupported(message: "a mail server that offers neither AUTH PLAIN nor AUTH LOGIN"))
 }
 
-fn deliver[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox, features: Reply, message: Message, encoded: StringSlice, options: SmtpOptions) -> Result[Unit, Error]
+fn deliver[Stream: streams::Duplex](stream: Stream, inbox: mut streams::ByteQueue, features: Reply, message: Message, encoded: StringSlice, options: SmtpOptions) -> Result[Unit, Error]
   uses Handles, Tasks, RunForever
 {
   authenticate(stream, inbox: mut inbox, features: features, options: options)?
@@ -523,7 +526,7 @@ public fn send(message: Message, options: SmtpOptions) -> Result[Unit, Error]
   let greeting = "EHLO ${options.client_name}"
   match options.security {
     Plain => {
-      var inbox = Inbox(bytes: [])
+      var inbox: streams::ByteQueue = []
       let _ = expect(connection, inbox: mut inbox, lowest: 220, highest: 220)?
       let features = quit_after(connection, outcome: command(connection, inbox: mut inbox, line: greeting, lowest: 250, highest: 250))?
       quit_after(connection, outcome: deliver(connection, inbox: mut inbox, features: features, message: message, encoded: encoded, options: options))
@@ -533,27 +536,27 @@ public fn send(message: Message, options: SmtpOptions) -> Result[Unit, Error]
         Ok(secured) => own secured
         Err(error) => return Err(Error.Tls(error: own error))
       }
-      var inbox = Inbox(bytes: [])
+      var inbox: streams::ByteQueue = []
       let _ = expect(secured, inbox: mut inbox, lowest: 220, highest: 220)?
       let features = quit_after(secured, outcome: command(secured, inbox: mut inbox, line: greeting, lowest: 250, highest: 250))?
       quit_after(secured, outcome: deliver(secured, inbox: mut inbox, features: features, message: message, encoded: encoded, options: options))
     }
     StartTls => {
-      var inbox = Inbox(bytes: [])
+      var inbox: streams::ByteQueue = []
       let _ = expect(connection, inbox: mut inbox, lowest: 220, highest: 220)?
       let offered = quit_after(connection, outcome: command(connection, inbox: mut inbox, line: greeting, lowest: 250, highest: 250))?
       if !has_extension(offered, name: "STARTTLS") {
         return quit_after(connection, outcome: Err(Error.Unsupported(message: "a mail server that does not offer STARTTLS")))
       }
       let _ = quit_after(connection, outcome: command(connection, inbox: mut inbox, line: "STARTTLS", lowest: 220, highest: 220))?
-      if !inbox.bytes.is_empty() {
+      if !inbox.is_empty() {
         return Err(malformed("a mail server that sent bytes before the TLS handshake"))
       }
       let secured = match tls::connect(own connection, host: options.host, config: client_config(options)?) {
         Ok(secured) => own secured
         Err(error) => return Err(Error.Tls(error: own error))
       }
-      var secured_inbox = Inbox(bytes: [])
+      var secured_inbox: streams::ByteQueue = []
       let features = quit_after(secured, outcome: command(secured, inbox: mut secured_inbox, line: greeting, lowest: 250, highest: 250))?
       quit_after(secured, outcome: deliver(secured, inbox: mut secured_inbox, features: features, message: message, encoded: encoded, options: options))
     }

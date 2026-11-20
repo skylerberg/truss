@@ -1,3 +1,4 @@
+use standard::collections
 use standard::console
 use standard::environment
 use standard::files
@@ -91,13 +92,19 @@ public fn Setup.with_time(own self, now: Instant) -> Setup {
   changed
 }
 
-type Listener(local: network::SocketAddress, path: Option[Path], waiting: List[UInt64], timeout: Option[Duration], open: Bool)
+type Listener(
+  local: network::SocketAddress,
+  path: Option[Path],
+  waiting: collections::Deque[UInt64],
+  timeout: Option[Duration],
+  open: Bool,
+)
 
 type Stream(
   local: network::SocketAddress,
   peer: network::SocketAddress,
   other_end: UInt64,
-  unread: List[UInt8],
+  unread: streams::ByteQueue,
   ended: Bool,
   receives: Bool,
   sends: Bool,
@@ -106,7 +113,7 @@ type Stream(
 
 type Packet(bytes: List[UInt8], from: network::SocketAddress)
 
-type Socket(local: network::SocketAddress, packets: List[Packet], timeout: Option[Duration], open: Bool)
+type Socket(local: network::SocketAddress, packets: collections::Deque[Packet], timeout: Option[Duration], open: Bool)
 
 type Endpoint =
   | Closed
@@ -153,8 +160,8 @@ type State(
   listeners: List[Listener],
   streams: List[Stream],
   sockets: List[Socket],
-  pipes: List[List[UInt8]],
-  unread_input: List[UInt8],
+  pipes: List[streams::ByteQueue],
+  unread_input: streams::ByteQueue,
   raw_mode: Bool,
   ports_made: UInt16,
   processes_made: UInt32,
@@ -185,10 +192,22 @@ fn same_host(first: network::IpAddress, second: network::IpAddress) -> Bool
   first == second || first.is_unspecified() || second.is_unspecified()
 }
 
-fn take_first_bytes(bytes: mut List[UInt8], limit: UInt64) -> List[UInt8] {
-  let count = if bytes.length() < limit { bytes.length() } else { limit }
-  let rest = mut bytes.split_off(count)
-  map::exchange(mut bytes, value: own rest)
+fn take_first_bytes(queue: mut streams::ByteQueue, limit: UInt64) -> List[UInt8] {
+  let count = if queue.length() < limit { queue.length() } else { limit }
+  mut queue.take(count)
+}
+
+fn take_unread(stream: mut Stream, limit: UInt64) -> List[UInt8] {
+  take_first_bytes(mut stream.unread, limit: limit)
+}
+
+fn deliver(stream: mut Stream, bytes: Slice[UInt8]) {
+  mut stream.unread.append(bytes)
+}
+
+fn stop_receiving(stream: mut Stream) {
+  stream.receives = false
+  mut stream.unread.clear()
 }
 
 internal fn State.endpoint(self, index: UInt64) -> Endpoint {
@@ -338,7 +357,7 @@ internal fn State.connect_to(
   )
   let far_endpoint = mut self.add_endpoint(Endpoint.Connected(stream: near + 1))
   if listener < self.listeners.length() {
-    mut self.listeners[listener].waiting.push(far_endpoint)
+    mut self.listeners[listener].waiting.push_back(far_endpoint)
   }
   mut self.add_endpoint(Endpoint.Connected(stream: near))
 }
@@ -355,8 +374,7 @@ internal fn State.end_sending(mut self, stream: UInt64) {
 
 internal fn State.end_receiving(mut self, stream: UInt64) {
   if stream < self.streams.length() {
-    self.streams[stream].receives = false
-    self.streams[stream].unread = []
+    stop_receiving(mut self.streams[stream])
   }
 }
 
@@ -473,7 +491,7 @@ internal fn State.send(mut self, endpoint: UInt64, bytes: Slice[UInt8]) -> Resul
       if other_end >= self.streams.length() || !self.streams[other_end].receives {
         return Err(SystemError.BrokenPipe)
       }
-      mut self.streams[other_end].unread.append_slice(bytes)
+      deliver(mut self.streams[other_end], bytes: bytes)
       Ok(bytes.length())
     }
     Console(errors) => {
@@ -511,7 +529,7 @@ internal fn State.send_to(
         other.open && other.local.port == address.port && same_host(other.local.address, second: address.address)
       })
       match receiver {
-        Some(index) => mut self.sockets[index].packets.push(Packet(bytes: bytes.to_list(), from: from))
+        Some(index) => mut self.sockets[index].packets.push_back(Packet(bytes: bytes.to_list(), from: from))
         None => {}
       }
       Ok(bytes.length())
@@ -530,8 +548,9 @@ internal fn State.fill_unread_input(mut self) -> Bool {
   }
   match line {
     Some(text) => {
-      self.unread_input = text.to_bytes()
-      mut self.unread_input.push(10)
+      var bytes = text.to_bytes()
+      mut bytes.push(10)
+      mut self.unread_input.append_list(own bytes)
       true
     }
     None => false
@@ -542,7 +561,7 @@ internal fn State.read_line(mut self) -> Option[String] {
   if !mut self.fill_unread_input() {
     return None
   }
-  var line = map::exchange(mut self.unread_input, value: [])
+  var line = mut self.unread_input.take_all()
   let _ = mut line.pop()
   Some(String.from_utf8_lossy(line.slice()))
 }
@@ -558,17 +577,19 @@ internal fn State.attempt(mut self, blocking: Blocking, cancelled: Bool) -> Atte
         if listener >= self.listeners.length() || !self.listeners[listener].open {
           return Attempt.Finished(Err(SystemError.Closed))
         }
-        if self.listeners[listener].waiting.length() > 0 {
-          let accepted = mut self.listeners[listener].waiting.remove_at(0)
-          match self.endpoint(accepted) {
-            Connected(stream) => {
-              if stream < self.streams.length() {
-                return Attempt.Finished(Ok(Completion.Arrival(endpoint: accepted, peer: self.streams[stream].peer)))
+        match mut self.listeners[listener].waiting.pop_front() {
+          Some(accepted) => {
+            match self.endpoint(accepted) {
+              Connected(stream) => {
+                if stream < self.streams.length() {
+                  return Attempt.Finished(Ok(Completion.Arrival(endpoint: accepted, peer: self.streams[stream].peer)))
+                }
               }
+              _ => {}
             }
-            _ => {}
+            return Attempt.Finished(Err(SystemError.ConnectionAborted))
           }
-          return Attempt.Finished(Err(SystemError.ConnectionAborted))
+          None => {}
         }
       }
       Closed => return Attempt.Finished(Err(SystemError.Closed))
@@ -588,7 +609,7 @@ internal fn State.attempt(mut self, blocking: Blocking, cancelled: Bool) -> Atte
           || self.streams[stream].unread.length() > 0
           || self.streams[stream].ended
         {
-          return Attempt.Finished(Ok(Completion.Bytes(take_first_bytes(mut self.streams[stream].unread, limit: limit))))
+          return Attempt.Finished(Ok(Completion.Bytes(take_unread(mut self.streams[stream], limit: limit))))
         }
       }
       Console(_) => {
@@ -615,9 +636,13 @@ internal fn State.attempt(mut self, blocking: Blocking, cancelled: Bool) -> Atte
         if socket >= self.sockets.length() || !self.sockets[socket].open {
           return Attempt.Finished(Err(SystemError.Closed))
         }
-        if self.sockets[socket].packets.length() > 0 {
-          var packet = mut self.sockets[socket].packets.remove_at(0)
-          return Attempt.Finished(Ok(Completion.Datagram(bytes: take_first_bytes(mut packet.bytes, limit: limit), from: packet.from)))
+        match mut self.sockets[socket].packets.pop_front() {
+          Some(packet) => {
+            var bytes = own packet.bytes
+            mut bytes.truncate(limit)
+            return Attempt.Finished(Ok(Completion.Datagram(bytes: own bytes, from: packet.from)))
+          }
+          None => {}
         }
       }
       Closed => return Attempt.Finished(Err(SystemError.Closed))
@@ -702,13 +727,13 @@ internal fn State.spawn(mut self, command: processes::Command) -> Result[process
   }
   var output: Option[processes::ChildOutput] = None
   if command.output is Pipe || command.output is Capture {
-    mut self.pipes.push(own started.output)
+    mut self.pipes.push(streams::ByteQueue.from_elements(own started.output))
     let pipe = self.pipes.length() - 1
     output = Some(processes::ChildOutput(handle: handle_of(mut self.add_endpoint(Endpoint.ChildOutput(pipe: pipe)))))
   }
   var error_output: Option[processes::ChildOutput] = None
   if command.error_output is Pipe || command.error_output is Capture {
-    mut self.pipes.push(own started.error_output)
+    mut self.pipes.push(streams::ByteQueue.from_elements(own started.error_output))
     let pipe = self.pipes.length() - 1
     error_output = Some(
       processes::ChildOutput(handle: handle_of(mut self.add_endpoint(Endpoint.ChildOutput(pipe: pipe)))),
