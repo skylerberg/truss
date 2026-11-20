@@ -3,6 +3,7 @@ let tasks : Types.capability = Capability (Well_known.make_path Tasks)
 type checking = {
   state : State.state;
   mutable provides : (Types.capability_set * Core.implementation list * Core.block) list;
+  mutable body_requirements : Types.capability_set list;
 }
 
 let report checking ?(fixes = []) ?(notes = []) code (origin : Core.origin) message =
@@ -190,6 +191,9 @@ let rec require_available checking scope (origin : Core.origin) ?(subject = "Thi
       (Types.list_capabilities missing)
   in
   if required <> Types.no_capabilities then begin
+    (match scope.kind with
+    | Function_body _ -> checking.body_requirements <- required :: checking.body_requirements
+    | Lambda_body _ | Restricted _ -> ());
     state.capability_constraints <-
       { subset = required; restriction; superset; report_missing } :: state.capability_constraints;
     match find_enclosing_restriction scope with
@@ -641,7 +645,7 @@ let check_monitor_callbacks checking implementations =
 
 let check (state : State.state) (elaborated : Interface.Environment.elaborated_interface)
     (form : Core.t) =
-  let checking = { state; provides = [] } in
+  let checking = { state; provides = []; body_requirements = [] } in
   let make_function_body_scope allowed =
     let path = state.key.path in
     make_scope ~allowed
@@ -724,4 +728,14 @@ let check (state : State.state) (elaborated : Interface.Environment.elaborated_i
       | Uses_tasks ->
           check_monitor_callbacks checking implementations;
           check_monitor_lock checking ~read_solved available implementations)
-    (List.rev checking.provides)
+    (List.rev checking.provides);
+  List.exists
+    (fun required ->
+      List.exists
+        (fun capability -> Types.find_base capability = Built_in Run_forever)
+        (Types.list_capabilities
+           (Types.replace_capabilities
+              (function
+                | Types.Capability_variable variable -> Some (read_solved variable) | _ -> None)
+              (State.finalize_capabilities state required))))
+    checking.body_requirements

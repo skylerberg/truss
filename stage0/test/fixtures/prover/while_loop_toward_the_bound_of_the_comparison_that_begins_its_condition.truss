@@ -1,0 +1,7 @@
+fn f(text: StringSlice) -> UInt64 {
+  var at: UInt64 = 0
+  while at < text.length() && text.byte(at) == 32 {
+    at = at
+  }
+  at
+}

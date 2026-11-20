@@ -126,8 +126,9 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
             ?inherited:(find_inherited_clauses lookups key.path)
             ~substitution lookups source ~path:key.path
         in
+        let warnings = Option.to_list (Unused_run_forever.find lookups key) in
         match list_integer_instances lookups key.path with
-        | [] -> Obligations (prove_with Types.no_substitution)
+        | [] -> Obligations { (prove_with Types.no_substitution) with warnings }
         | instances ->
             let outcomes =
               List.map
@@ -153,6 +154,7 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
                 holes =
                   List.sort_uniq compare
                     (List.concat_map (fun (outcome : Obligation.outcome) -> outcome.holes) outcomes);
+                warnings;
               })
     | Constant -> Obligations (Translate.translate_constant lookups source ~path:key.path)
     | Impl ->
@@ -162,6 +164,7 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
             obligations =
               List.concat_map (fun (outcome : Obligation.outcome) -> outcome.obligations) outcomes;
             holes = List.concat_map (fun (outcome : Obligation.outcome) -> outcome.holes) outcomes;
+            warnings = [];
           }
     | Type -> (
         let has_defaults () =
@@ -531,7 +534,23 @@ let make_state (lookups : Lookups.t) ({ site; obligation; _ } : posed) answer =
     },
     obligation.cited )
 
-type verdicts = { lookups : Lookups.t; verdicts : verdict Key_table.t }
+type warnings = {
+  lookups : Lookups.t;
+  table : Source.Definition_span.t Diagnostic.diagnostic list Key_table.t;
+}
+
+let collect_warnings lookups proofs =
+  let table = Key_table.create (List.length proofs) in
+  List.iter
+    (fun (key, proof) ->
+      match proof with
+      | Obligations outcome when outcome.Obligation.warnings <> [] ->
+          Key_table.replace table key outcome.warnings
+      | Obligations _ | Unsupported _ | Not_proven_here -> ())
+    proofs;
+  { lookups; table }
+
+type verdicts = { lookups : Lookups.t; verdicts : verdict Key_table.t; warnings : warnings }
 
 let decide ~runs lookups solver proofs =
   let posed_proofs = pose_proofs ~runs lookups proofs in
@@ -544,6 +563,7 @@ let decide ~runs lookups solver proofs =
                posed_proofs)))
   in
   let verdicts = Key_table.create (List.length proofs) in
+  let warnings = collect_warnings lookups proofs in
   List.iter
     (fun (key, posed_proof) ->
       Key_table.replace verdicts key
@@ -566,7 +586,7 @@ let decide ~runs lookups solver proofs =
                   | Asked _ -> Solved (Queue.pop solved)))
               posed))
     posed_proofs;
-  { lookups; verdicts }
+  { lookups; verdicts; warnings }
 
 let list_file_definitions (lookups : Lookups.t) table file =
   List.filter_map
@@ -579,7 +599,7 @@ let list_file_definitions (lookups : Lookups.t) table file =
 
 let locate_site ~base site = { site with span = Source.Definition_span.to_file ~base site.span }
 
-let list_file_states { lookups; verdicts } file =
+let list_file_states { lookups; verdicts; _ } file =
   List.map
     (fun (base, verdict) ->
       List.map
@@ -633,6 +653,12 @@ let list_states verdicts file =
   |> List.sort (fun (left : Source.span state) (right : Source.span state) ->
       compare_sites left.site right.site)
 
+let list_warnings { lookups; table } file =
+  List.concat_map
+    (fun (base, warnings) ->
+      List.map (Diagnostic.map_spans (Source.Definition_span.to_file ~base)) warnings)
+    (list_file_definitions lookups table file)
+
 let list_diagnostics verdicts file =
   List.concat_map
     (fun states ->
@@ -645,6 +671,7 @@ let list_diagnostics verdicts file =
         ([], []) states
       |> snd)
     (list_file_states verdicts file)
+  |> List.append (list_warnings verdicts.warnings file)
   |> sort_diagnostics
 
 module For_testing = struct

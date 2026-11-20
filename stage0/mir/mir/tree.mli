@@ -163,7 +163,13 @@ and loop_element =
   | Lent_by_call of local
   | Sequence_element of { place : place; mode : Language.Mode.t }
 
-and compared = { comparison : Language.Comparison.t; left : operand; right : operand }
+and compared = {
+  statements : statement list;
+  comparison : Language.Comparison.t;
+  left : operand;
+  right : operand;
+}
+
 and early_exit = { resumed : block; returned : local option }
 and statement = { kind : statement_kind; origin : Core.origin }
 

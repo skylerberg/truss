@@ -19,9 +19,7 @@ impl Cursor for Stuck {
   }
 }
 
-fn f(start: UInt64)
-  uses RunForever
-{
+fn f(start: UInt64) {
   for value in Stuck(left: start) {
     let _ = value
   }

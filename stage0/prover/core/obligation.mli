@@ -29,4 +29,8 @@ type t = {
   decisions : (string * string option * Logic.term * Logic.term) list;
 }
 
-type outcome = { obligations : t list; holes : (Resolve.Names.key * location) list }
+type outcome = {
+  obligations : t list;
+  holes : (Resolve.Names.key * location) list;
+  warnings : Source.Definition_span.t Diagnostic.diagnostic list;
+}

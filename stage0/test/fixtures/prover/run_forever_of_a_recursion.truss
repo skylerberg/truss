@@ -1,0 +1,5 @@
+fn count_down(count: UInt64) -> UInt64
+  uses RunForever
+{
+  if count == 0 { 0 } else { count_down(count - 1) }
+}

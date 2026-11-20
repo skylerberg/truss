@@ -198,6 +198,7 @@ module Code = struct
     | Unused_variable
     | Unused_function
     | Unused_constant
+    | Unused_run_forever
     | Unreachable_code
     | Self_comparison
 
@@ -479,6 +480,7 @@ module Code = struct
     | Unused_variable -> "unused_variable"
     | Unused_function -> "unused_function"
     | Unused_constant -> "unused_constant"
+    | Unused_run_forever -> "unused_run_forever"
     | Unreachable_code -> "unreachable_code"
     | Self_comparison -> "self_comparison"
 

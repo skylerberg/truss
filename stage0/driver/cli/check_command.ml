@@ -35,30 +35,39 @@ let lock_file snapshot =
              ]);
       ]
 
-let fix snapshot packages =
+let apply_fixes snapshot database files list_diagnostics =
+  List.concat_map
+    (fun file ->
+      match Diagnostic.list_machine_applicable (list_diagnostics file) with
+      | [] -> []
+      | chosen ->
+          let source = Command_packages.read_source snapshot database file in
+          let edits =
+            List.concat_map
+              (fun (diagnostic : Diagnostic.t) ->
+                match diagnostic.fixes with [ fix ] -> fix.edits | _ -> [])
+              chosen
+          in
+          Command_packages.write_file
+            (Command_packages.locate_file snapshot file)
+            (Diagnostic.apply_edits (Source.text source) edits);
+          List.map (fun diagnostic -> Diagnostic.to_json_object source diagnostic) chosen)
+    files
+
+let fix snapshot packages ~proofs =
   let rec run_round snapshot number fixed =
     let database = Workspace.open_database snapshot in
+    let files = Command_packages.list_files snapshot packages in
     let applied =
-      List.concat_map
-        (fun file ->
-          let diagnostics = Database.list_file_diagnostics database file in
-          match Diagnostic.list_machine_applicable diagnostics with
-          | [] -> []
-          | chosen ->
-              let source = Command_packages.read_source snapshot database file in
-              let edits =
-                List.concat_map
-                  (fun (diagnostic : Diagnostic.t) ->
-                    match diagnostic.fixes with [ fix ] -> fix.edits | _ -> [])
-                  chosen
-              in
-              Command_packages.write_file
-                (Command_packages.locate_file snapshot file)
-                (Diagnostic.apply_edits (Source.text source) edits);
-              List.map (fun diagnostic -> Diagnostic.to_json_object source diagnostic) chosen)
-        (Command_packages.list_files snapshot packages)
-      @ remove_unused_dependencies snapshot database packages
-      @ lock_file snapshot
+      match
+        apply_fixes snapshot database files (Database.list_file_diagnostics database)
+        @ remove_unused_dependencies snapshot database packages
+        @ lock_file snapshot
+      with
+      | [] when proofs ->
+          apply_fixes snapshot database files
+            (Proofs.list_warnings (Proofs.check database snapshot packages files))
+      | applied -> applied
     in
     if applied = [] || number = rounds then (snapshot, List.rev fixed)
     else run_round (Command_packages.retake snapshot) (number + 1) (List.rev_append applied fixed)
@@ -67,7 +76,7 @@ let fix snapshot packages =
 
 let run ~fix:fixing ~proofs =
   let snapshot, packages = Command_packages.load_current () in
-  let snapshot, fixed = if fixing then fix snapshot packages else (snapshot, []) in
+  let snapshot, fixed = if fixing then fix snapshot packages ~proofs else (snapshot, []) in
   let database = Workspace.open_database snapshot in
   let report = Report.gather ~proofs database snapshot packages in
   if Output.json () then
@@ -78,7 +87,8 @@ let run ~fix:fixing ~proofs =
           else []))
   else begin
     if fixed <> [] then
-      Output.eprintf "Fixed %s.\n" (Diagnostic.show_count (List.length fixed) "error" "errors");
+      Output.eprintf "Fixed %s.\n"
+        (Diagnostic.show_count (List.length fixed) "diagnostic" "diagnostics");
     Report.print report
   end;
   if Report.has_errors report then 1 else 0

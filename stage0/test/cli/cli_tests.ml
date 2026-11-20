@@ -735,6 +735,15 @@ let () =
       let status = run_quietly [ "check"; "-C"; root; "--fix" ] in
       if status <> 0 then fail "status %d" status;
       if not (String.includes ~affix:"let _ = value" (read root "main.truss")) then
+        fail "wrote %s" (read root "main.truss"));
+  test "check --fix removes each RunForever that nothing uses, a callee before its caller"
+    (fun () ->
+      let root =
+        make_package [ ("main.truss", Fixtures.Cli.run_forever_through_a_chain_of_calls) ]
+      in
+      let status = run_quietly [ "check"; "-C"; root; "--fix" ] in
+      if status <> 0 then fail "status %d" status;
+      if String.includes ~affix:"RunForever" (read root "main.truss") then
         fail "wrote %s" (read root "main.truss"))
 
 let () =
