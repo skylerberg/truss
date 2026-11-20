@@ -1,5 +1,6 @@
 type stated =
   | In_range of Logic.symbol
+  | Field_in_range of Logic.term
   | Value_of of Logic.symbol
   | Contract_of of Logic.symbol
   | Limited_link of Logic.symbol

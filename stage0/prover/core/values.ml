@@ -349,9 +349,48 @@ let make_owner_of_view context frame ~(view : Types.ty) ~(owner : Types.ty) view
         (Types.show view));
   converted
 
-let project_field context frame ty variant field field_type term =
+let rec find_abstracted_selection context term =
+  match term with
+  | Logic.Apply ((Logic.Symbol.Field _ as selector), [ whole ]) ->
+      Option.map
+        (fun (parameters, abstracted) -> (parameters, Logic.Apply (selector, [ abstracted ])))
+        (find_abstracted_selection context whole)
+  | Logic.Apply ((Logic.Symbol.Function _ as callee), _) ->
+      Option.map
+        (fun sorts ->
+          let parameters =
+            List.mapi
+              (fun index sort ->
+                (Logic.Symbol.Variable { label = "ranged"; numbers = [ index ] }, sort))
+              sorts
+          in
+          ( parameters,
+            Logic.Apply (callee, List.map (fun (name, _) -> Logic.Symbol name) parameters) ))
+        (Facts.find_argument_sorts context callee)
+  | _ -> None
+
+let assume_field_range_of_every_result context ty variant field field_type term =
+  match find_abstracted_selection context term with
+  | Some (parameters, abstracted) -> (
+      let selection = Validity.select_field context ty variant field abstracted in
+      match Facts.make_in_range field_type selection with
+      | Logic.Boolean true -> ()
+      | range ->
+          Facts.run_once context (Field_in_range selection) (fun () ->
+              let range =
+                match variant with
+                | Some name ->
+                    Logic.(Is (Facts.make_constructor_symbol ty (Some name), abstracted) ==> range)
+                | None -> range
+              in
+              Facts.add_fact context (Logic.forall ~trigger:[ selection ] (parameters, range))))
+  | None -> ()
+
+let project_field context (frame : State.frame) ty variant field field_type term =
   let part = Validity.select_field context ty variant field term in
   Amounts.assume_typed context frame (Facts.make_in_range field_type part);
+  if Logic.mentions (List.map (fun (name, _, _) -> name) frame.binders) term then
+    assume_field_range_of_every_result context ty variant field field_type term;
   if context.ranking then begin
     Facts.assume context frame
       (Logic.less (Models.rank context field_type part) (Models.rank context ty term))

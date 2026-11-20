@@ -15,6 +15,7 @@ val list_method_type_arguments : self_type:Types.ty -> Types.argument list -> Ty
 val read_parameter_name : Mir.parameter -> string
 val list_clauses : Mir.requirement list -> Mir.formula list
 val declare : State.context -> Logic.declaration -> unit
+val find_argument_sorts : State.context -> Logic.symbol -> Logic.sort list option
 val add_fact : State.context -> Logic.term -> unit
 val declare_value_symbol : State.context -> State.frame -> Logic.symbol -> Logic.sort -> Logic.term
 val make_fresh_name : State.context -> string -> 'a Logic.Symbol.t

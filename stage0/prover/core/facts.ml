@@ -66,18 +66,24 @@ let list_clauses (requires : Mir.requirement list) =
   List.map (fun (requirement : Mir.requirement) -> requirement.clause) requires
 
 let declare (context : State.context) (declaration : Logic.declaration) =
+  let declare_symbol name arguments =
+    if not (Tables.Symbol_table.mem context.declared name) then begin
+      Tables.Symbol_table.replace context.declared name arguments;
+      context.declarations <- declaration :: context.declarations
+    end
+  in
   match declaration with
-  | Constant (name, _) | Function (name, _, _) ->
-      if not (Tables.Symbol_table.mem context.declared name) then begin
-        Tables.Symbol_table.replace context.declared name ();
-        context.declarations <- declaration :: context.declarations
-      end
+  | Constant (name, _) -> declare_symbol name []
+  | Function (name, arguments, _) -> declare_symbol name arguments
   | Definition { symbol; _ } ->
       if not (Tables.Symbol_table.mem context.definitions symbol) then begin
         Tables.Symbol_table.replace context.definitions symbol ();
         context.declarations <- declaration :: context.declarations
       end
   | Datatype _ -> invalid_arg "Translate.declare: a datatype is declared by its sort"
+
+let find_argument_sorts (context : State.context) symbol =
+  Tables.Symbol_table.find_opt context.declared symbol
 
 let add_fact (context : State.context) fact = context.facts <- fact :: context.facts
 
@@ -173,6 +179,8 @@ let add_quantifier_facts ~binders (context : State.context) term =
     | Logic.Operation (Implies, [ premise; conclusion ]) ->
         Logic.Operation
           (Implies, [ walk (not positive) bound premise; walk positive bound conclusion ])
+    | Logic.Operation (Ite, [ condition; then_; else_ ]) ->
+        Logic.Operation (Ite, [ condition; walk positive bound then_; walk positive bound else_ ])
     | Logic.Operation (Not, [ inner ]) -> Logic.Operation (Not, [ walk (not positive) bound inner ])
     | term -> term
   in
