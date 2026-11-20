@@ -36,3 +36,4 @@ val decide_default :
 
 val solve_head : State.state -> ?default_at:Source.Definition_span.t -> int -> unit
 val run_in_statement : State.state -> State.env -> Source.Definition_span.t -> (unit -> 'a) -> 'a
+val make_bracket_remedy : Path.t -> Unify.unknown -> string

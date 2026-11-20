@@ -31,8 +31,15 @@ type cause =
     }
   | Method_call of Source.Definition_span.t
   | Loop of Source.Definition_span.t
+  | Quantifier of Source.Definition_span.t
   | Any_conversion of { at : Source.Definition_span.t; any_type : Types.ty }
   | Excluded of (Types.ty -> Diagnostic.reported)
+
+type source =
+  | List_literal of Syntax.id
+  | Map_literal of Syntax.id
+  | Unbounded_range of Syntax.id
+  | Generic_argument of { written : Syntax.id; parameter : string; declared_on : Path.t }
 
 type goal = {
   subject : Types.ty;
@@ -104,6 +111,7 @@ type state = {
   mutable final_type_checks : (unit -> unit) list;
   mutable log : logged list;
   annotatable : (Syntax.id, unit) Hashtbl.t;
+  sources : (Unify.unknown, source) Hashtbl.t;
 }
 
 let add_diagnostic state ?notes ?(fixes = []) code (span : Source.Definition_span.t) message =
@@ -216,15 +224,57 @@ let check_when_final state check =
 
 let resolve state type_ = Unify.resolve state.unifier type_
 let zonk state type_ = Unify.zonk state.unifier type_
-let make_fresh_type state = Unify.make_fresh_type state.unifier
+let make_goal_decided_type state = Unify.make_fresh_type state.unifier
 
-let make_fresh_generic_arguments state (generics : Types.generic list) =
+let make_fresh_type state source =
+  let fresh = make_goal_decided_type state in
+  Hashtbl.replace state.sources (Unify.Unknown_type state.unifier.next) source;
+  fresh
+
+let make_fresh_value state source =
+  let fresh = Unify.make_fresh_value state.unifier in
+  Hashtbl.replace state.sources (Unify.Unknown_value state.unifier.next) source;
+  fresh
+
+let make_fresh_generic_arguments state (generics : Types.generic list)
+    (source_of : Types.generic -> source) =
+  List.map
+    (fun (generic : Types.generic) ->
+      match generic.kind with
+      | Value_generic -> Types.Value (make_fresh_value state (source_of generic))
+      | Type_generic _ -> Types.Type (make_fresh_type state (source_of generic)))
+    generics
+
+let make_goal_decided_arguments state (generics : Types.generic list) =
   List.map
     (fun (generic : Types.generic) ->
       match generic.kind with
       | Value_generic -> Types.Value (Unify.make_fresh_value state.unifier)
-      | Type_generic _ -> Types.Type (make_fresh_type state))
+      | Type_generic _ -> Types.Type (make_goal_decided_type state))
     generics
+
+let find_source state (unknown : Unify.unknown) =
+  let read_root : Unify.unknown -> Unify.unknown = function
+    | Unknown_type index -> Unknown_type (Unify.read_root state.unifier index)
+    | Unknown_value index -> (
+        match Unify.resolve_value state.unifier (Value_variable index) with
+        | Value_variable root -> Unknown_value root
+        | _ -> Unknown_value index)
+  in
+  let root = read_root unknown in
+  Hashtbl.fold
+    (fun recorded source earliest ->
+      if read_root recorded <> root then earliest
+      else
+        match earliest with
+        | Some (first, _) when compare first recorded < 0 -> earliest
+        | Some _ | None -> Some (recorded, source))
+    state.sources None
+
+let find_variable_source state (type_ : Types.ty) =
+  match resolve state type_ with
+  | Types.Variable index -> find_source state (Unknown_type index)
+  | _ -> None
 
 let lookup_bounds state parameter = Interface.Elaborator.list_bounds (read_context state) parameter
 
@@ -371,7 +421,8 @@ let unify_as_hint state actual expected =
   let skip_outputs type_ =
     Types.map
       (function
-        | Types.Variable index when is_output index -> Some (make_fresh_type state) | _ -> None)
+        | Types.Variable index when is_output index -> Some (make_goal_decided_type state)
+        | _ -> None)
       (zonk state type_)
   in
   let deferred_capability_equalities = state.unifier.deferred_capability_equalities in

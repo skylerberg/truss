@@ -366,7 +366,7 @@ and check_arguments state env ?constructor (value : Syntax.expression)
 
 and check_named_call state env ?expected (value : Syntax.expression) path
     (signature : Types.signature) ~type_arguments arguments =
-  let instance = Instantiation.instantiate state (State.read_span state value.id) signature in
+  let instance = Instantiation.instantiate state ~written:value.id ~declared_on:path signature in
   match Name_lookup.check_explicit_type_arguments state value instance type_arguments with
   | Error error -> check_arguments_alone state env arguments error
   | Ok () -> (
@@ -394,7 +394,7 @@ and construct state env ?expected ?type_arguments (value : Syntax.expression) ty
   let type_arguments =
     match type_arguments with
     | Some written -> written
-    | None -> Instantiation.instantiate_type state (State.read_span state value.id) type_path
+    | None -> Instantiation.instantiate_type state ~written:value.id type_path
   in
   let type_ = Types.Named { path = type_path; arguments = type_arguments } in
   (match expected with Some expected -> State.unify_as_hint state type_ expected | None -> ());
