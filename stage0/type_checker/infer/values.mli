@@ -1,5 +1,10 @@
 val check_string_literal :
-  State.state -> State.env -> ?expected:Types.ty -> Syntax.string_literal -> Types.ty
+  State.state ->
+  State.env ->
+  ?expected:Types.ty ->
+  Syntax.expression ->
+  Syntax.string_literal ->
+  Types.ty
 
 val check_list_literal :
   State.state ->

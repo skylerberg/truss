@@ -7,7 +7,7 @@ let record_integer_range state ~(loop : Syntax.id) ~described ~admits_integer
           (Types.integer_types
           @ Language.Builtin_type.Character
             :: (if admits_integer then [ Language.Builtin_type.Integer ] else []))
-      then state.tables.loops.(loop) <- Some (Integer_range { element; inclusive })
+      then State.elaborate state loop (Loop (Integer_range { element; inclusive }))
       else if not (Types.is_error element) then
         State.report state Not_indexable (State.read_span state range.id)
           (Printf.sprintf "%s range is of integers, not `%s`." described (Types.show element)))
@@ -38,7 +38,7 @@ let rec check_block_value state env ?expected (written : Syntax.block) =
 and check_statement state env (written : Syntax.statement) ~last : unit =
   match written.kind with
   | Expression value ->
-      state.tables.discarded.(written.id) <- true;
+      State.elaborate state written.id Discarded;
       let type_ = Hooks.check_expression state env value in
       if not last then
         State.check_when_final state (fun () ->
@@ -228,27 +228,11 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
                   (Solver.resolve_associated_type state base_type index Index_output
                      ~at:(State.read_span state value.id)))
                ~has_generic_type:false);
-          let make_argument (argument_expression : Syntax.expression) position mode :
-              Tables.argument =
-            { expression = argument_expression; core_argument_index = position; mode }
-          in
-          state.tables.calls.(written.id) <-
-            Some
-              {
-                callee =
-                  Trait_method
-                    {
-                      trait;
-                      name;
-                      receiver;
-                      self_type = base_type;
-                      instantiation = Types.no_instantiation;
-                    };
-                arguments =
-                  [ make_argument base 0 Mut; make_argument key 1 Own; make_argument value 2 Own ];
-                omitted_defaults = [];
-                callee_result = Types.unit;
-              };
+          State.elaborate state written.id
+            (Call
+               (Tables.make_method_call trait Index_assign_assign ~self_type:base_type
+                  ~result:Types.unit
+                  [ (base, Mut); (key, Own); (value, Own) ]));
           Solver.require state (Method_call (State.read_span state written.id)) base_type trait;
           true
       | _ -> false)
@@ -269,14 +253,14 @@ and check_loop_clause state env (clause : Syntax.loop_clause) =
       | Loop_cost cost -> Clauses.check_cost state env cost)
 
 and record_loop (state : State.state) (written : Syntax.statement) (loop : Tables.loop) =
-  state.tables.loops.(written.id) <- Some loop;
+  State.elaborate state written.id (Loop loop);
   match loop with
   | Pulled pulled ->
       State.check_when_final state (fun () ->
-          state.tables.loops.(written.id) <-
-            Some
-              (Pulled
-                 { pulled with remaining = Name_lookup.find_remaining_call state pulled.cursor }))
+          State.elaborate state written.id
+            (Loop
+               (Pulled
+                  { pulled with remaining = Name_lookup.find_remaining_call state pulled.cursor })))
   | Integer_range _ | Elements _ -> ()
 
 and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable : Syntax.expression)
