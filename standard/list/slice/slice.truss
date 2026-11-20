@@ -349,8 +349,22 @@ public fn Slice[Element: Equal].find_slice(self, needle: Slice[Element]) -> Opti
 
 public fn Slice[Element: Ordered].is_sorted(self) -> Bool
   ensures result == (forall index in 1..self.length() => self[index - 1] <= self[index])
+  cost time O(1 + self.length() * time(Element.compare))
 {
-  forall i in 1..self.length() => self[i - 1] <= self[i]
+  var index: UInt64 = 1
+  while index < self.length()
+    invariant 1 <= index
+    invariant index - 1 <= self.length()
+    invariant forall i in 1..index => i < self.length() ==> self[i - 1] <= self[i]
+    decreases self.length() - index
+    cost time O((index - 1) * time(Element.compare))
+  {
+    if !(self[index - 1] <= self[index]) {
+      return false
+    }
+    index += 1
+  }
+  true
 }
 
 theorem sorted_between[Element: Ordered](items: Slice[Element], first: UInt64, second: UInt64)
@@ -1727,9 +1741,10 @@ impl Equal for Slice[Element: Equal] {
   fn equal(self, other: Slice[Element]) -> Bool
     ensures result == (self.length() == other.length()
       && forall i in 0..self.length() => self.model()[i] == other.model()[i])
+    cost time O(self.length() * time(Element.equal))
     cost allocations <= self.length() * allocations(Element.equal)
   {
-    if self.length() != other.length() {
+    if !(self.length() == other.length()) {
       return false
     }
     var index: UInt64 = 0
@@ -1737,8 +1752,9 @@ impl Equal for Slice[Element: Equal] {
       invariant index <= self.length()
       invariant forall i in 0..index => self.model()[i] == other.model()[i]
       decreases self.length() - index
+      cost time O(index * time(Element.equal))
     {
-      if self[index] != other[index] {
+      if !(self[index] == other[index]) {
         return false
       }
       index += 1
@@ -1846,6 +1862,7 @@ internal theorem lexicographic_is_transitive[Element: Ordered](
 impl Ordered for Slice[Element: Ordered] {
   fn compare(self, other: Slice[Element]) -> Ordering
     ensures result == lexicographic(self.model(), second: other.model(), from: 0)
+    cost time O(self.length() * time(Element.compare))
     cost allocations <= self.length() * allocations(Element.compare)
   {
     var index: UInt64 = 0
@@ -1855,10 +1872,11 @@ impl Ordered for Slice[Element: Ordered] {
       invariant lexicographic(self.model(), second: other.model(), from: 0)
         == lexicographic(self.model(), second: other.model(), from: index)
       decreases self.length() - index
+      cost time O(index * time(Element.compare))
       cost allocations <= index * allocations(Element.compare)
     {
       let order = self[index].compare(other[index])
-      if order != Ordering.Equal {
+      if !(order == Ordering.Equal) {
         return order
       }
       index += 1
@@ -1881,10 +1899,13 @@ proof Ordered.transitive for Slice[Element: Ordered] {
 
 impl Hash for Slice[Element: Hash] {
   fn hash(self, hasher: mut Hasher)
+    cost time O(self.length() * time(Element.hash))
     cost allocations <= self.length() * allocations(Element.hash)
   {
     mut hasher.write(self.length())
-    for index in 0..self.length() {
+    for index in 0..self.length()
+      cost time O(index * time(Element.hash))
+    {
       self[index].hash(mut hasher)
     }
   }

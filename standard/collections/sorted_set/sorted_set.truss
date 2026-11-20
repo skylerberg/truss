@@ -451,7 +451,7 @@ public fn collections::SortedSet[Element: Ordered].at_or_after(self, element: El
 
 public fn collections::SortedSet[Element: Ordered].in_range(self, range: Range[Element]) -> Slice[Element]
   ensures forall i in 0..result.length() => range.contains(result.model()[i])
-  cost time O(self.length() + log(self.length()) * time(Element.compare))
+  cost time O(1 + log(self.length()) * time(Element.compare))
 {
   let first = self.index_at_or_after(range.start)
   let end = if range.inclusive { self.index_after(range.stop) } else { self.index_at_or_after(range.stop) }
@@ -661,6 +661,7 @@ public fn collections::SortedSet[Element: Ordered].reversed(self) -> list::Rever
 impl Equal for collections::SortedSet[Element: Ordered] {
   fn equal(self, other: collections::SortedSet[Element]) -> Bool
     ensures result == (self.elements == other.elements)
+    cost time O(self.length() * time(Element.equal))
     cost allocations <= self.length() * allocations(Element.equal)
   {
     self.elements == other.elements
@@ -669,6 +670,7 @@ impl Equal for collections::SortedSet[Element: Ordered] {
 
 impl Hash for collections::SortedSet[Element: Ordered + Hash] {
   fn hash(self, hasher: mut Hasher)
+    cost time O(self.length() * time(Element.hash))
     cost allocations <= self.length() * allocations(Element.hash)
   {
     self.elements.hash(mut hasher)

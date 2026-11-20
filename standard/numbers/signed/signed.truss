@@ -155,6 +155,7 @@ impl Negate for Int8 {
 
 impl Hash for Int8 {
   fn hash(self, hasher: mut Hasher)
+    cost time O(1)
     cost allocations == 0
   {
     mut hasher.write(intrinsic::convert(self))
@@ -320,6 +321,7 @@ impl Negate for Int16 {
 
 impl Hash for Int16 {
   fn hash(self, hasher: mut Hasher)
+    cost time O(1)
     cost allocations == 0
   {
     mut hasher.write(intrinsic::convert(self))
@@ -485,6 +487,7 @@ impl Negate for Int32 {
 
 impl Hash for Int32 {
   fn hash(self, hasher: mut Hasher)
+    cost time O(1)
     cost allocations == 0
   {
     mut hasher.write(intrinsic::convert(self))
@@ -650,6 +653,7 @@ impl Negate for Int64 {
 
 impl Hash for Int64 {
   fn hash(self, hasher: mut Hasher)
+    cost time O(1)
     cost allocations == 0
   {
     mut hasher.write(intrinsic::convert(self))

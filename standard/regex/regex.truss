@@ -1549,6 +1549,7 @@ public fn Regex.split(self, text: StringSlice) -> List[StringSlice]
 impl Equal for Regex {
   fn equal(self, other: Regex) -> Bool
     ensures result == (self.pattern == other.pattern)
+    cost time O(other.pattern.length())
     cost allocations == 0
   {
     self.pattern == other.pattern

@@ -286,9 +286,10 @@ impl Equal for collections::Deque[Element: Equal] {
   fn equal(self, other: collections::Deque[Element]) -> Bool
     ensures result == (self.length() == other.length()
       && forall i in 0..self.length() => self[i] == other[i])
+    cost time O(self.length() * time(Element.equal))
     cost allocations <= self.length() * allocations(Element.equal)
   {
-    if self.length() != other.length() {
+    if !(self.length() == other.length()) {
       return false
     }
     var index: UInt64 = 0
@@ -296,9 +297,10 @@ impl Equal for collections::Deque[Element: Equal] {
       invariant index <= self.length()
       invariant forall i in 0..index => self[i] == other[i]
       decreases self.length() - index
+      cost time O(index * time(Element.equal))
       cost allocations <= index * allocations(Element.equal)
     {
-      if self[index] != other[index] {
+      if !(self[index] == other[index]) {
         return false
       }
       index += 1
@@ -309,10 +311,13 @@ impl Equal for collections::Deque[Element: Equal] {
 
 impl Hash for collections::Deque[Element: Hash] {
   fn hash(self, hasher: mut Hasher)
+    cost time O(self.length() * time(Element.hash))
     cost allocations <= self.length() * allocations(Element.hash)
   {
     self.length().hash(mut hasher)
-    for index in 0..self.length() {
+    for index in 0..self.length()
+      cost time O(index * time(Element.hash))
+    {
       self[index].hash(mut hasher)
     }
   }
