@@ -294,6 +294,20 @@ let () =
   Harness.test "expect needs no `Panic` where its value is proven present" (fun () ->
       expect_proven Fixtures.Prover.expect_of_a_value_proven_present;
       expect_not_proven Fixtures.Prover.expect_of_a_value_that_may_be_absent "prover.panic");
+  Harness.test "an impl's condition on values follows from its trait's" (fun () ->
+      Support.expect_one_diagnostic ~check Fixtures.Prover.impl_condition_beyond_its_trait
+        "prover.requires" ~says:"may not follow from the trait's condition after `Panic unless`";
+      expect_proven Fixtures.Prover.impl_condition_within_its_trait);
+  Harness.test "a call through `any` is ruled out once where the caller's condition holds"
+    (fun () ->
+      Support.expect_one_diagnostic ~check
+        Fixtures.Prover.call_through_any_where_the_condition_holds "prover.panic"
+        ~says:"This call may panic where `count < 50` holds");
+  Harness.test "a call through a bound without `Panic` proves the trait's condition on values"
+    (fun () ->
+      Support.expect_one_diagnostic ~check
+        Fixtures.Prover.call_through_a_bound_beyond_the_trait_condition "prover.panic"
+        ~says:"may not hold for this call to `Sized.size`, so the call may panic");
   Harness.test "a loop that counts up to its bound ends" (fun () ->
       expect_proven Fixtures.Prover.while_loop_counting_up);
   Harness.test "a for loop over a range knows its index is in range" (fun () ->
@@ -1682,9 +1696,9 @@ let () =
       expect_proven "let shifted: UInt8 = 1 << 7\n")
 
 let () =
-  Harness.test "generic negation needs the trait method's precondition" (fun () ->
-      expect_not_proven Fixtures.Prover.generic_negation "prover.requires");
-  Harness.test "generic negation proves where the trait method's precondition holds" (fun () ->
+  Harness.test "generic negation without `Panic` proves the trait method's condition" (fun () ->
+      expect_not_proven Fixtures.Prover.generic_negation "prover.panic");
+  Harness.test "generic negation proves where the trait method's condition holds" (fun () ->
       expect_proven Fixtures.Prover.generic_negation_with_its_precondition);
   Harness.test
     "a function with a time clause converts, makes a default, and indexes through a bound"
@@ -1925,16 +1939,22 @@ let () =
           Fixtures.Prover.increment_in_a_greeter_impl;
           Fixtures.Prover.decrement_in_a_countdown_cursor;
         ]);
-  Harness.test "a narrowing conversion names its callee and offers its requires at the target"
+  Harness.test "a narrowing conversion names its callee and offers each bound at the target"
     (fun () ->
       let packages =
         Support.setup [ ("app::main", Fixtures.Prover.integer_narrowed_without_a_check) ]
       in
+      let describe (diagnostic : Diagnostic.t) =
+        ( String.includes ~affix:"for this call to `Int8.from_integer`" diagnostic.message,
+          List.map (fun (fix : _ Diagnostic.fix) -> fix.title) diagnostic.fixes )
+      in
       match check packages (Support.parse_file "app::main") with
-      | [ { message; fixes = [ { title; _ } ]; _ } ]
-        when String.includes ~affix:"for this call to `Int8.from_integer`" message
-             && title
-                = "Add `requires Int8.minimum_value() <= value && value <= Int8.maximum_value()`" ->
+      | actual
+        when List.sort compare (List.map describe actual)
+             = [
+                 (true, [ "Add `requires Int8.minimum_value() <= value`"; "Add `uses Panic`" ]);
+                 (true, [ "Add `requires value <= Int8.maximum_value()`"; "Add `uses Panic`" ]);
+               ] ->
           ()
       | actual ->
           Harness.fail "%s"

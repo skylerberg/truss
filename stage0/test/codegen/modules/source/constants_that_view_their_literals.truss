@@ -1,0 +1,26 @@
+type Label(name: StringSlice, rank: UInt64)
+
+let greeting: StringSlice = "hello"
+let nothing: StringSlice = ""
+let words: List[StringSlice] = ["one", "two"]
+let alias: StringSlice = greeting
+let label: Label = Label(name: "first", rank: 1)
+let ranks: Map[StringSlice, UInt64] = ["one": 1, "two": 2]
+
+test "a StringSlice constant reads its literal's bytes" {
+  assert greeting == "hello"
+  assert greeting.length() == 5
+  assert nothing.is_empty()
+}
+
+test "a constant that holds views reads each literal's bytes" {
+  assert words.length() == 2
+  assert words[1] == "two"
+  assert alias == "hello"
+  assert label.name == "first"
+}
+
+test "a constant of views computed by running reads each literal's bytes" {
+  assert ranks.get("two") == Some(2)
+  assert ranks.length() == 2
+}

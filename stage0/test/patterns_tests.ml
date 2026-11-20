@@ -148,3 +148,26 @@ let () =
   Harness.test "character literals and ranges cover their values" (fun () ->
       expect_one_diagnostic Fixtures.Patterns.character_range_and_literal_arms
         "patterns.unreachable_arm")
+
+let mutually_recursive_types count =
+  let name index = Printf.sprintf "Node%d" index in
+  let declare index =
+    let fields =
+      List.filter_map
+        (fun other ->
+          if other = index then None
+          else Some (Printf.sprintf "child%d: List[%s]" other (name other)))
+        (List.init count Fun.id)
+    in
+    Printf.sprintf "type %s(%s)\n" (name index) (String.concat ", " fields)
+  in
+  String.concat "" (List.init count declare)
+  ^ "fn count(node: Node0) -> UInt64 {\n\
+    \  match node {\n\
+    \    (child1, ..) => child1.length()\n\
+    \  }\n\
+     }\n"
+
+let () =
+  Harness.test "a match over many mutually recursive types visits each type once" (fun () ->
+      expect_fine (mutually_recursive_types 12))

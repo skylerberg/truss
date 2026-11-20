@@ -849,9 +849,11 @@ public fn World.now(self) -> Instant
 }
 
 public fn World.advance(self, by: Duration)
-  requires !by.is_negative()
-  uses Tasks
+  uses Tasks, Panic unless !by.is_negative()
 {
+  if by.is_negative() {
+    Panic.crash("the duration is negative")
+  }
   self.tasks.advance(by)
 }
 

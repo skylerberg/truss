@@ -610,8 +610,9 @@ main.truss:2:3: error[types.mismatched_integers]: Integer types never convert im
 
 A conversion between built-in number types is a method of the target type.
 `from_integer` converts a value that the prover can show fits, which a value
-of a narrower type always does, and `try_from_integer` returns a `Result` for
-a value that may not:
+of a narrower type always does. In code that has `Panic`, it also converts a
+value that may not fit, and panics if the value does not. `try_from_integer`
+returns a `Result` for a value that may not fit:
 
 ```truss
 test "conversions" {
@@ -2753,9 +2754,9 @@ type. Every type also has *debug output*, which needs no trait:
 
 #### Operators
 
-The arithmetic operators call traits. `a + b` calls `Add.add`, which
-requires `add_is_defined`, so a type of your own states where its operation
-is defined, just as the integers do:
+The arithmetic operators call traits. `a + b` calls `Add.add`, which uses
+`Panic unless add_is_defined`, so a type of your own states where its
+operation is defined, just as the integers do:
 
 ```truss
 type Cents(amount: Int64)
@@ -2772,7 +2773,7 @@ impl Add[Cents] for Cents {
   }
 
   fn add(self, right: Cents) -> Cents
-    requires self.add_is_defined(right)
+    uses Panic unless self.add_is_defined(right)
   {
     Cents(self.amount + right.amount)
   }
@@ -2787,10 +2788,13 @@ test "an operator of your own" {
 - `type Output = Cents` chooses the trait's *associated type*: each `impl`
   of `Add` picks the type its sums have.
 - The `ensures` on `add_is_defined` tells callers exactly when the addition
-  is defined, so the prover can show that `Cents(250) + Cents(100)` is. In
-  `add`, the `requires` lets the prover show `self.amount + right.amount`
-  fits. Arithmetic inside a contract is exact, so `self.amount +
-  right.amount` there cannot overflow.
+  is defined, so the prover can show that `Cents(250) + Cents(100)` is. Code
+  without `Panic` proves it, and code with `Panic` adds without a proof.
+- `add` repeats the condition after its own `Panic unless`. Where the
+  condition holds, the prover shows `self.amount + right.amount` fits.
+  Where it fails, the `Int64` addition panics, since `add` has `Panic`.
+  Arithmetic inside a contract is exact, so `self.amount + right.amount`
+  there cannot overflow.
 - `derives Ordered` gives `Cents` its comparisons.
 
 ### Associated types

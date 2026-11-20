@@ -397,26 +397,28 @@ let lower_call_through_any (state : Lowering.state) ~(any_type : Types.trait_ref
   let c_signature, result, capabilities =
     make_any_entry_signature state.context ~any:any_type ~trait signature
   in
-  let passed = List.filter_map (fun (mode, ty, place) -> pass state mode ty place) arguments in
-  let evidence = List.map (pass_evidence state ~site) capabilities in
-  if receiver = Path.Instance Own then ignore (Lowering.move_place state any);
-  let target =
-    Lowered.Table_call
-      {
-        table = Copy (Builtin_records.Any.project_vtable any);
-        value = Copy (Builtin_records.Any.project_value any);
-        slot;
-        signature = c_signature;
-      }
-  in
-  Emit_c.Ir_builder.emit state.builder
-    (Call
-       {
-         target;
-         arguments = passed @ evidence @ lending;
-         result = Convention.make_destination result destination;
-       });
-  if not c_signature.returns then Lowering.emit_unreachable_block state
+  if is_unreachable_panic state capabilities then Lowering.emit_unreachable_block state
+  else
+    let passed = List.filter_map (fun (mode, ty, place) -> pass state mode ty place) arguments in
+    let evidence = List.map (pass_evidence state ~site) capabilities in
+    if receiver = Path.Instance Own then ignore (Lowering.move_place state any);
+    let target =
+      Lowered.Table_call
+        {
+          table = Copy (Builtin_records.Any.project_vtable any);
+          value = Copy (Builtin_records.Any.project_value any);
+          slot;
+          signature = c_signature;
+        }
+    in
+    Emit_c.Ir_builder.emit state.builder
+      (Call
+         {
+           target;
+           arguments = passed @ evidence @ lending;
+           result = Convention.make_destination result destination;
+         });
+    if not c_signature.returns then Lowering.emit_unreachable_block state
 
 let run_in_type_definition (state : Lowering.state) ~(source : Resolve.Names.key) (ty : Ground.ty)
     nested_function =
