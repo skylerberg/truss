@@ -28,8 +28,7 @@ let list_uses : Intrinsic.operation -> Types.capability list = function
       | Environment_entry | Live_blocks | Run_test | Report_tests_to | Tasks_spawn ) ->
       [ Built_in System ]
   | Runtime
-      ( Libc (Snprintf | Strtod | Strtof)
-      | Crash | Handle_from | Handle_descriptor | Handle_release | Coroutine_start
+      ( Crash | Handle_from | Handle_descriptor | Handle_release | Coroutine_start
       | Coroutine_resume | Coroutine_suspend | Shared_new | Holds_invariant | System_is_os _
       | System_is_architecture _ | Libc_number _ )
   | Scalar _ | Buffer _ | Lend _ ->
