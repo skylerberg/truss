@@ -170,27 +170,14 @@ theorem element_of_a_permutation[Element](permuted: Sequence[Element], original:
   }
 }
 
-theorem elements_of_a_permutation_below[Element](
-  permuted: Sequence[Element],
-  original: Sequence[Element],
-  bound: Integer,
-)
-  requires permuted.is_permutation_of(original)
-  requires 0 <= bound && bound <= permuted.length()
-  ensures forall i in 0..bound => original.contains(permuted[i])
-  decreases bound
-{
-  if bound > 0 {
-    elements_of_a_permutation_below(permuted, original: original, bound: bound - 1)
-    element_of_a_permutation(permuted, original: original, index: bound - 1)
-  }
-}
-
 public theorem elements_of_a_permutation[Element](permuted: Sequence[Element], original: Sequence[Element])
   requires permuted.is_permutation_of(original)
   ensures forall i in 0..permuted.length() => original.contains(permuted[i])
 {
-  elements_of_a_permutation_below(permuted, original: original, bound: permuted.length())
+  assert forall i in 0..permuted.length() => {
+    element_of_a_permutation(permuted, original: original, index: i)
+    original.contains(permuted[i])
+  }
 }
 
 impl Index for Sequence[Element] {
