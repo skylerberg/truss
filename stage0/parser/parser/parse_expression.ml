@@ -250,6 +250,21 @@ and parse_function_type cursor ~clauses:with_clauses =
           "A function type's clauses take no condition: a call through a function value has no \
            type arguments to decide one.")
     clauses;
+  List.iter
+    (fun (clause : Syntax.clause) ->
+      match clause.kind with
+      | Cost { bound = Big_o amount | At_most amount | Exactly amount; _ } -> (
+          match amount.kind with
+          | Integer _ -> ()
+          | _ ->
+              Cursor.report cursor Function_type_cost_bound
+                (Cursor.read_file_span cursor amount.id)
+                "An `O(...)`, `<=`, or `==` bound in a function type is an integer literal, as in \
+                 `O(1)` or `<= 2`, since the type holds a number and not an expression. State a \
+                 bound that depends on a value in the enclosing function's own `cost` clause, \
+                 which names the callback's cost as `time(visit)`.")
+      | Requires _ | Ensures _ | Decreases _ | Uses _ | Clause_error -> ())
+    clauses;
   let is_named (input : Syntax.function_input) = Option.is_some input.name in
   let has_requires =
     List.exists (fun (clause : Syntax.clause) ->

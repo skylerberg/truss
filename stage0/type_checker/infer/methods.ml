@@ -149,7 +149,12 @@ and check_specification_function state env (value : Syntax.expression)
               arguments;
         });
   List.iter
-    (fun (argument : Syntax.argument) -> ignore (Hooks.check_expression state env argument.value))
+    (fun (argument : Syntax.argument) ->
+      match function_ with
+      | Log -> Clauses.require_integer state env argument.value ~described:"An argument of `log`"
+      | Power ->
+          Clauses.require_integer state env argument.value ~described:"An argument of `power`"
+      | Callback_cost _ | Calls -> ignore (Hooks.check_expression state env argument.value))
     arguments;
   Types.Integer
 

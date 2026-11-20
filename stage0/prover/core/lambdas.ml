@@ -354,21 +354,19 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
   let promised =
     List.filter_map
       (fun (cost : Types.cost) ->
-        let counting : Costs.counting option =
+        let counting : Costs.counting =
           match cost.bound with
-          | Order_of -> Some Units
-          | No_more_than (Some _) -> Some At_most
-          | Exactly_cost (Some _) -> Some Exactly
-          | No_more_than None | Exactly_cost None -> None
+          | Order_of -> Units
+          | No_more_than _ -> At_most
+          | Exactly_cost _ -> Exactly
         in
-        let resource : Costs.resource option =
-          match cost.resource with Metric metric -> Some (Metric metric) | Calls _ -> None
-        in
-        match (resource, counting) with
-        | Some resource, Some counting ->
-            let counter = { Costs.resource; counting; amortized = cost.amortized } in
+        match cost.resource with
+        | Metric metric ->
+            let counter =
+              { Costs.resource = Metric metric; counting; amortized = cost.amortized }
+            in
             Some (counter, cost.bound)
-        | _ -> None)
+        | Calls _ -> None)
       function_type.costs
   in
   let operand_counters =
@@ -471,9 +469,8 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
                 let goal =
                   match bound with
                   | Order_of -> Logic.less_equal spent (Costs.bound (Logic.int 1))
-                  | No_more_than (Some limit) -> Logic.less_equal spent (Logic.Integer limit)
-                  | Exactly_cost (Some limit) -> Logic.equal spent (Logic.Integer limit)
-                  | _ -> Logic.Boolean true
+                  | No_more_than limit -> Logic.less_equal spent (Logic.Integer limit)
+                  | Exactly_cost limit -> Logic.equal spent (Logic.Integer limit)
                 in
                 let difference, verb =
                   match counter.counting with

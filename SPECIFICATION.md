@@ -1175,8 +1175,13 @@ fn sort_by(items: mut List[Item], compare: fn(Item, Item) -> Ordering)
 fn serve(handle: (fn(Request) -> Response uses Database, Log))
 ```
 
-- A function type without `uses` uses no capability. Its `uses` and `cost`
-  clauses cannot mention its inputs.
+- A function type without `uses` uses no capability. Its `uses` clause
+  cannot mention its inputs.
+- An `O(...)`, `<=`, or `==` bound in a function type is an integer
+  literal, as in `(fn(Item) cost time O(1) cost allocations <= 2)`. A bound
+  that depends on a value, such as a parameter of the enclosing function,
+  goes in that function's own `cost` clause, which names the callback's cost
+  as `time(visit)`.
 - **A function type takes only functions whose capabilities its `uses`
   names,** so one without `RunForever` takes only functions that terminate
   (see [Termination](#termination)).

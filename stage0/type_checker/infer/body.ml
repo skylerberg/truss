@@ -341,9 +341,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
             | Type_invariant value ->
                 Solver.run_in_statement state env (State.read_span state value.id) (fun () ->
                     Expressions.check state env value Types.bool)
-            | Potential value ->
-                Solver.run_in_statement state env (State.read_span state value.id) (fun () ->
-                    ignore (Expressions.check_expression state env value))
+            | Potential value -> Clauses.check_integer state env value ~described:"A `potential`"
             | Derives _ -> ())
           clauses;
         let list_defaulted variant (fields : Syntax.field list) =
@@ -439,9 +437,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                    (List.mapi
                       (fun index (line : Syntax.trait_member Syntax.node) ->
                         match line.kind with
-                        | Law law
-                          when not (is_broken (Member_header index) || is_broken (Member_body index))
-                          ->
+                        | Law law when not (is_broken (Member_body index)) ->
                             let parameters =
                               List.filter_map
                                 (fun (parameter : Syntax.parameter) : Core.parameter option ->
@@ -471,27 +467,26 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                       members)));
         List.iteri
           (fun index (line : Syntax.trait_member Syntax.node) ->
-            if not (is_broken (Member_header index)) then
-              match line.kind with
-              | Law law ->
-                  let env : State.env = { no_output with specification = true; self = Some self } in
-                  List.iter
-                    (fun (parameter : Syntax.parameter) ->
-                      match parameter.kind with
-                      | Named_parameter { name; type_; _ } ->
-                          State.declare state name
-                            (Interface.Elaborator.elaborate_type state.context type_)
-                            ~binding:Let ~mode:Language.Mode.Read
-                      | _ -> ())
-                    law.parameters;
-                  List.iter
-                    (fun (requirement : Syntax.expression) ->
-                      Solver.run_in_statement state env (State.read_span state requirement.id)
-                        (fun () -> Expressions.check state env requirement Types.bool))
-                    law.requires;
-                  if not (is_broken (Member_body index)) then
-                    check_body state { env with output = Some (Returns Types.bool) } law.body
-              | Associated_type _ | Associated_capability _ | Trait_member_error -> ())
+            match line.kind with
+            | Law law ->
+                let env : State.env = { no_output with specification = true; self = Some self } in
+                List.iter
+                  (fun (parameter : Syntax.parameter) ->
+                    match parameter.kind with
+                    | Named_parameter { name; type_; _ } ->
+                        State.declare state name
+                          (Interface.Elaborator.elaborate_type state.context type_)
+                          ~binding:Let ~mode:Language.Mode.Read
+                    | _ -> ())
+                  law.parameters;
+                List.iter
+                  (fun (requirement : Syntax.expression) ->
+                    Solver.run_in_statement state env (State.read_span state requirement.id)
+                      (fun () -> Expressions.check state env requirement Types.bool))
+                  law.requires;
+                if not (is_broken (Member_body index)) then
+                  check_body state { env with output = Some (Returns Types.bool) } law.body
+            | Associated_type _ | Associated_capability _ | Trait_member_error -> ())
           members
     | Constant { value; _ }, Constant_interface constant ->
         state.form.definition_builder <-

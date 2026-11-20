@@ -49,7 +49,7 @@ and resource =
   | Metric of Language.Metric.t
   | Calls of { capability : Path.t; method_ : string option }
 
-and cost_bound = Order_of | No_more_than of Z.t option | Exactly_cost of Z.t option
+and cost_bound = Order_of | No_more_than of Z.t | Exactly_cost of Z.t
 
 let make_condition (condition : condition) : condition = List.sort_uniq compare condition
 
@@ -508,10 +508,10 @@ let has_same_clauses (left : function_type) (right : function_type) =
 let bound_implies (provided : cost_bound) (required : cost_bound) =
   match (provided, required) with
   | (Order_of | No_more_than _ | Exactly_cost _), Order_of -> true
-  | (No_more_than (Some provided) | Exactly_cost (Some provided)), No_more_than (Some required) ->
+  | (No_more_than provided | Exactly_cost provided), No_more_than required ->
       Z.leq provided required
-  | Exactly_cost (Some provided), Exactly_cost (Some required) -> Z.equal provided required
-  | _ -> false
+  | Exactly_cost provided, Exactly_cost required -> Z.equal provided required
+  | Order_of, (No_more_than _ | Exactly_cost _) | No_more_than _, Exactly_cost _ -> false
 
 let costs_imply ~(provided : cost list) ~(required : cost list) =
   List.for_all
@@ -601,11 +601,9 @@ and show_function (function_type : function_type) =
       (fun (cost : cost) ->
         let bound =
           match cost.bound with
-          | Order_of -> "O(...)"
-          | No_more_than (Some value) -> "<= " ^ Z.to_string value
-          | No_more_than None -> "<= ..."
-          | Exactly_cost (Some value) -> "== " ^ Z.to_string value
-          | Exactly_cost None -> "== ..."
+          | Order_of -> "O(1)"
+          | No_more_than value -> "<= " ^ Z.to_string value
+          | Exactly_cost value -> "== " ^ Z.to_string value
         in
         Printf.sprintf "cost %s%s %s"
           (if cost.amortized then "amortized " else "")
