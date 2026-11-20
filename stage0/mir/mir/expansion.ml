@@ -10,9 +10,9 @@ type jump_targets = {
 }
 
 let expand_body (body : Tree.body) : Graph.body =
-  let blocks : Graph.basic_block Dynarray.t = Dynarray.create () in
+  let blocks : Graph.basic_block option Dynarray.t = Dynarray.create () in
   let take_fresh_number () =
-    Dynarray.add_last blocks { statements = []; terminator = Unreachable; terminator_origin = 0 };
+    Dynarray.add_last blocks None;
     Dynarray.length blocks - 1
   in
   let list_blocks_since first =
@@ -20,7 +20,7 @@ let expand_body (body : Tree.body) : Graph.body =
   in
   let close (index, emitted) terminator origin =
     Dynarray.set blocks index
-      { statements = List.rev emitted; terminator; terminator_origin = origin }
+      (Some { Graph.statements = List.rev emitted; terminator; terminator_origin = origin })
   in
   let make_assignment target value origin : Graph.statement =
     { kind = Basic (Assign { target; value = Operand value }); origin }

@@ -8,7 +8,7 @@ val convert :
   State.env ->
   ?argument:Language.Mode.t ->
   ?takes_view_as_owner:bool ->
-  ?expression:Core.origin ->
+  ?expression:Syntax.id ->
   Source.Definition_span.t ->
   actual:Types.ty ->
   expected:Types.ty ->

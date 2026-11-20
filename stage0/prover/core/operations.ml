@@ -39,7 +39,7 @@ let check_widened location ~is_written actual expected =
 
 let find_parameter_spelling (context : State.context) (frame : State.frame) term =
   if
-    frame.source.key = Some context.home
+    frame.source.key = context.home
     && (not (Logic.has_quantifier term))
     &&
     match Logic.list_free_constants term with

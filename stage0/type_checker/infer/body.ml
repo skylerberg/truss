@@ -2,7 +2,7 @@ type checked = {
   form : Core.t;
   tables : Tables.published;
   used_packages : Path.package list;
-  places_without_keyword : (Core.origin * Language.Mode.t) list;
+  places_without_keyword : (Syntax.id * Language.Mode.t) list;
   mode_keywords : Core.mode_keyword list;
 }
 
@@ -181,7 +181,8 @@ let check_bit_vector_names state (form : Core.t) =
              (function
              | Local { type_; origin; _ }
                when not (Types.is_builtin Bool type_ || Types.find_integer_range type_ <> None) ->
-                 State.report state Not_bit_vector (State.read_span state origin)
+                 State.report state Not_bit_vector
+                   (State.read_span state (Core_walk.locate_origin origin))
                    (Printf.sprintf
                       "An assertion `by bit_vector` can name only integers and booleans, and this \
                        is a `%s`."
@@ -210,7 +211,7 @@ let check_deserialized_invariants state (elaborated : Interface.Environment.elab
         (fun (invariant : Core.condition) ->
           if not invariant.executable then
             State.report state Cannot_derive
-              (State.read_span state invariant.value.origin)
+              (State.read_span state (Core_walk.locate_origin invariant.value.origin))
               "This invariant cannot be checked at run time, so `serialization::Deserialize` \
                cannot be derived: a value read from data might break it. Write the `impl`, which \
                checks the value another way.")

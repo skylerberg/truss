@@ -9,8 +9,11 @@
   types
   resolve
   interface
+  syntax
+  syntax_walk
   core
   core_walk
+  infer
   intrinsic
   intrinsic_signatures
   well_known))

@@ -46,10 +46,37 @@ let make_local_use form ~origin type_ local =
 let make_binding_match ~origin scrutinee pattern body : Core.kind =
   Match
     {
-      is_written = false;
       scrutinees = [ scrutinee ];
       arms = [ { patterns = [ pattern ]; guard = None; body; origin } ];
     }
+
+let is_written_expression (written : Syntax.expression) (kind : Core.kind) =
+  match (kind, written.kind) with
+  | Match _, Match _ | Call _, Call _ | Lambda _, Lambda _ | If _, If _ | Return _, Return _ -> true
+  | (Match _ | Call _ | Lambda _ | If _ | Return _), _ -> false
+  | _ -> true
+
+let is_written_statement (written : Syntax.statement) (kind : Core.statement_kind) =
+  match (kind, written.kind) with
+  | For _, For _ | While _, While _ | Let _, Let _ -> true
+  | (For _ | While _ | Let _), _ -> false
+  | _ -> true
+
+let compute_expression_origin (written : Syntax.expression) kind : Core.origin =
+  if is_written_expression written kind then Written written.id
+  else
+    Desugared
+      {
+        construct = written.id;
+        desugaring =
+          (match written.kind with Try _ -> Try | Quantified _ -> Quantifier | _ -> Rewrite);
+      }
+
+let compute_statement_origin (written : Syntax.statement) kind : Core.origin =
+  if is_written_statement written kind then Written written.id
+  else Desugared { construct = written.id; desugaring = Rewrite }
+
+let rewrite_at (construct : Syntax.id) : Core.origin = Desugared { construct; desugaring = Rewrite }
 
 let make_place (node : Core.expression) : Core.place =
   match node.kind with Use place -> place | _ -> Temporary node
@@ -240,6 +267,7 @@ let build_function_value form (value : Syntax.expression) : Core.kind =
 let build_variant_value form (value : Syntax.expression) type_path variant : Core.kind =
   match read_type form value with
   | Types.Function { output = Types.Named { arguments; _ } as variant_type; _ } ->
+      let origin = rewrite_at value.id in
       let fields =
         List.map
           (fun (field : Types.field) -> (field, allocate_synthetic_local form))
@@ -250,7 +278,7 @@ let build_variant_value form (value : Syntax.expression) type_path variant : Cor
           parameters =
             List.map
               (fun ((field : Types.field), local) ->
-                make_binding form ~origin:value.id ~is_var:false ~mode:Own field.field_type local)
+                make_binding form ~origin ~is_var:false ~mode:Own field.field_type local)
               fields;
           captures = [];
           body =
@@ -258,7 +286,7 @@ let build_variant_value form (value : Syntax.expression) type_path variant : Cor
               statements = [];
               value =
                 Some
-                  (make_synthetic_expression form ~origin:value.id variant_type
+                  (make_synthetic_expression form ~origin variant_type
                      (Construct
                         {
                           variant = Some variant;
@@ -267,8 +295,7 @@ let build_variant_value form (value : Syntax.expression) type_path variant : Cor
                               (fun ((field : Types.field), local) ->
                                 ( field.field_name,
                                   Some
-                                    (Core.Value
-                                       (make_local_use form ~origin:value.id field.field_type local))
+                                    (Core.Value (make_local_use form ~origin field.field_type local))
                                 ))
                               fields;
                         }));
@@ -412,7 +439,9 @@ let build_range_bound form (bound : Syntax.range_end) : Core.range_bound =
 let convert_to_integer form (node : Core.expression) : Core.expression =
   if not (is_within form node.type_ Types.integer_types) then node
   else
-    make_synthetic_expression form ~origin:node.origin Types.Integer
+    make_synthetic_expression form
+      ~origin:(Core_walk.rewrite_origin node.origin)
+      Types.Integer
       (Convert { conversion = To_integer; value = node })
 
 let convert_to_operation : Syntax.operation -> Intrinsic.scalar = function
@@ -481,7 +510,9 @@ let is_executable form (condition : Core.expression) =
 
 let rec lend_statements form (mode : Language.Mode.t) (value : Core.expression) :
     Core.statement list =
-  let make_statements kind = [ make_statement form ~origin:value.origin kind ] in
+  let make_statements kind =
+    [ make_statement form ~origin:(Core_walk.rewrite_origin value.origin) kind ]
+  in
   let make_branching kind =
     let type_ = if value.type_ = Types.Never then Types.Never else Types.unit in
     make_statements (Evaluate { value with type_; kind })
@@ -496,11 +527,10 @@ let rec lend_statements form (mode : Language.Mode.t) (value : Core.expression) 
              else_ = Some (lend_block form mode else_);
              binds_lent_part;
            })
-  | Match { scrutinees; arms; is_written } ->
+  | Match { scrutinees; arms } ->
       make_branching
         (Match
            {
-             is_written;
              scrutinees;
              arms =
                List.map
@@ -559,7 +589,8 @@ let build_under_condition form ~id (written : Syntax.condition option) build :
   | None, Some _ -> None
 
 let apply_conversion form (id : Syntax.id) (inner : Core.expression) (conversion, expected) =
-  let make kind = make_synthetic_expression form ~origin:id expected kind in
+  let origin = rewrite_at id in
+  let make kind = make_synthetic_expression form ~origin expected kind in
   let convert conversion = make (Convert { conversion; value = inner }) in
   match (conversion : Tables.conversion) with
   | From_never -> inner
@@ -569,7 +600,7 @@ let apply_conversion form (id : Syntax.id) (inner : Core.expression) (conversion
   | View_to_owned -> convert View_to_owned
   | Owned_to_view when Types.is_well_known List inner.type_ || Types.is_builtin Array inner.type_ ->
       let base : Core.place = match inner.kind with Use place -> place | _ -> Temporary inner in
-      make (make_range form ~origin:id base ~start:None ~stop:None ~inclusive:false)
+      make (make_range form ~origin base ~start:None ~stop:None ~inclusive:false)
   | Owned_to_view -> (
       match inner.type_ with
       | Types.Named { path; arguments } ->
@@ -617,19 +648,20 @@ let rec build_expression form env (value : Syntax.expression) : Core.expression 
       | Lambda _ -> None
       | _ ->
           let node = build_expression form env operand in
+          let origin = rewrite_at operand.id in
           Some
-            (make_statement form ~origin:operand.id
+            (make_statement form ~origin
                (Let
                   {
-                    pattern = make_pattern form ~origin:operand.id node.type_ Wildcard;
+                    pattern = make_pattern form ~origin node.type_ Wildcard;
                     value = Operands.build Read node;
                     else_ = None;
                   }))
     in
     let statements = List.filter_map evaluate evaluated in
-    let todo = make_synthetic_expression form ~origin:value.id Types.Never Todo in
-    make_synthetic_expression form ~origin:value.id Types.Never
-      (Block { statements; value = Some todo })
+    let origin = rewrite_at value.id in
+    let todo = make_synthetic_expression form ~origin Types.Never Todo in
+    make_synthetic_expression form ~origin Types.Never (Block { statements; value = Some todo })
   end
   else
     let built =
@@ -638,7 +670,9 @@ let rec build_expression form env (value : Syntax.expression) : Core.expression 
       | _ -> (
           let id = allocate_node_id form in
           match form.tables.types.(value.id) with
-          | Some type_ -> { Core.id; origin = value.id; type_; kind = build_kind form env value }
+          | Some type_ ->
+              let kind = build_kind form env value in
+              { Core.id; origin = compute_expression_origin value kind; type_; kind }
           | None -> raise_bug "`%s` has a node and no type" (quote form value.id))
     in
     List.fold_left (apply_conversion form value.id) built form.tables.conversions.(value.id)
@@ -649,7 +683,7 @@ and build_kind form env (value : Syntax.expression) : Core.kind =
   | String literal -> (
       match (form.tables.literals.(value.id), literal.tag) with
       | Some _, _ -> build_numeric_literal form value.id
-      | None, None -> build_untagged_string form env ~origin:value.id literal
+      | None, None -> build_untagged_string form env ~origin:(rewrite_at value.id) literal
       | None, Some _ -> (
           match (read_template form literal).part with
           | Some part -> build_tagged_string form env value literal ~part
@@ -659,7 +693,7 @@ and build_kind form env (value : Syntax.expression) : Core.kind =
   | Unreachable -> Unreachable
   | Break -> Break
   | Continue -> Continue
-  | Self_value -> Use (build_self_local env ~origin:value.id)
+  | Self_value -> Use (build_self_local env ~origin:(Written value.id))
   | Name _ -> build_name form env value
   | Member (base, member) -> build_member form env value base member
   | Bracket (base, items) -> (
@@ -743,8 +777,8 @@ and build_kind form env (value : Syntax.expression) : Core.kind =
                })
       | Binder_in (written, collection), Some (Elements { count; element; lends }) ->
           let pattern = build_pattern form written in
-          quantify_over_elements form env collection ~count ~element ~lends ~origin:value.id
-            (fun elements -> make_quantified (Over_elements { pattern; elements }))
+          quantify_over_elements form env value collection ~count ~element ~lends (fun elements ->
+              make_quantified (Over_elements { pattern; elements }))
       | ( Binder_in (written, { kind = Range { start = Some start; stop = Some stop; _ }; _ }),
           Some (Integer_range { inclusive; _ }) ) ->
           let pattern = build_pattern form written in
@@ -757,14 +791,13 @@ and build_kind form env (value : Syntax.expression) : Core.kind =
   | Return inner -> (
       match (inner, env.output) with
       | Some inner, Some (Lends (mode, _)) ->
-          let returned =
-            make_synthetic_expression form ~origin:value.id Types.Never (Return None)
-          in
+          let origin = rewrite_at value.id in
+          let returned = make_synthetic_expression form ~origin Types.Never (Return None) in
           Block
             {
               statements =
                 lend_statements form mode (build_expression form env inner)
-                @ [ make_statement form ~origin:value.id (Evaluate returned) ];
+                @ [ make_statement form ~origin (Evaluate returned) ];
               value = None;
             }
       | _ -> Return (Option.map (build_expression form env) inner))
@@ -834,7 +867,6 @@ and build_kind form env (value : Syntax.expression) : Core.kind =
       in
       Match
         {
-          is_written = true;
           scrutinees;
           arms =
             List.map
@@ -845,7 +877,7 @@ and build_kind form env (value : Syntax.expression) : Core.kind =
                   patterns;
                   guard;
                   body = build_block form env { statements = [ arm.body ]; id = arm.body.id };
-                  origin = arm.id;
+                  origin = Written arm.id;
                 })
               arms;
         }
@@ -865,17 +897,17 @@ and build_name form env (value : Syntax.expression) : Core.kind =
              {
                local = Declared { origin = id; name = name.text };
                type_ = read_local_type form id;
-               origin = value.id;
+               origin = Written value.id;
              })
   | Some { target = Law_parameter index; _ } -> (
       match List.nth_opt form.law_parameters index with
       | Some (name, type_) ->
-          Use (Local { local = Trait_parameter { index; name }; type_; origin = value.id })
+          Use (Local { local = Trait_parameter { index; name }; type_; origin = Written value.id })
       | None -> raise_bug "the law has no parameter `%s`" (quote form value.id))
   | Some { target = Value_parameter parameter; _ } -> Value_parameter parameter
   | Some { target = Definition (Function, _); _ } -> build_function_value form value
   | Some { target = Definition (Constant, path); _ } ->
-      Use (build_constant_place form ~origin:value.id path)
+      Use (build_constant_place form ~origin:(Written value.id) path)
   | Some { target = Definition (Type, _); _ } -> Construct { variant = None; fields = [] }
   | Some { target = Variant (type_path, variant); _ } ->
       build_variant_value form value type_path variant
@@ -883,10 +915,10 @@ and build_name form env (value : Syntax.expression) : Core.kind =
       Use
         (Field
            {
-             base = build_self_local env ~origin:value.id;
+             base = build_self_local env ~origin:(Written value.id);
              field;
              type_ = read_type form value;
-             origin = value.id;
+             origin = Written value.id;
            })
   | Some { target = Result_value; _ } -> Result
   | Some { target = Visited; _ } -> Yielded
@@ -901,10 +933,10 @@ and build_member form env (value : Syntax.expression) base (member : Syntax.name
              base = make_place (build_expression form env base);
              field = member.text;
              type_ = read_type form value;
-             origin = value.id;
+             origin = Written value.id;
            })
   | Some (Global { path = Member_constant _ as constant; _ }) ->
-      Use (build_constant_place form ~origin:value.id constant)
+      Use (build_constant_place form ~origin:(Written value.id) constant)
   | Some (Variant_value { type_ = Types.Named { path; _ }; variant }) ->
       build_variant_value form value path variant
   | Some (Global _) -> build_function_value form value
@@ -916,7 +948,7 @@ and build_index form env (value : Syntax.expression) base items : Core.kind =
       let base = make_place (build_expression form env base) in
       let start = Option.map (build_expression form env) start in
       let stop = Option.map (build_expression form env) stop in
-      make_range form ~origin:value.id base ~start ~stop ~inclusive
+      make_range form ~origin:(Written value.id) base ~start ~stop ~inclusive
   | [ Item _ ] when is_call form value.id -> (
       match (read_call form value.id).callee with
       | Trait_method { receiver = Instance Mut; _ } ->
@@ -931,7 +963,7 @@ and build_index form env (value : Syntax.expression) base items : Core.kind =
                  base = make_place (build_expression form env base);
                  index = build_expression form env key;
                  type_ = element;
-                 origin = value.id;
+                 origin = Written value.id;
                })
       | None -> raise_bug "`%s` is indexed and has no elements" (quote form value.id))
   | _ -> raise_bug "`%s` is indexed with other than one item" (quote form value.id)
@@ -985,7 +1017,7 @@ and build_final form env (value : Syntax.expression) : Core.kind =
       in
       let { Well_known.owner; name; receiver } = Well_known.locate_method Index_at in
       let index = Types.make_trait_reference ~arguments:[] (Well_known.make_path owner) in
-      let make = make_synthetic_expression form ~origin:value.id in
+      let make = make_synthetic_expression form ~origin:(rewrite_at value.id) in
       let build_read_argument = Operands.build_argument Read in
       let first =
         make part
@@ -1088,7 +1120,11 @@ and build_call_kind ?lends ?function_value form env (value : Syntax.expression) 
       let call = Core.Call (build_call form env ~lends ?function_value recorded) in
       match lends with
       | Some _ ->
-          Use (Lent (make_synthetic_expression form ~origin:value.id recorded.callee_result call))
+          Use
+            (Lent
+               (make_synthetic_expression form
+                  ~origin:(compute_expression_origin value call)
+                  recorded.callee_result call))
       | None -> call)
 
 and build_operator form env (value : Syntax.expression) operation
@@ -1119,8 +1155,9 @@ and build_comparison form env (value : Syntax.expression) comparison (left : Syn
   | Trait_method { self_type; _ } when is_built_in_scalar self_type ->
       build_built_in_comparison form env comparison left right
   | _ -> (
+      let origin = rewrite_at value.id in
       let call =
-        make_synthetic_expression form ~origin:value.id recorded.callee_result
+        make_synthetic_expression form ~origin recorded.callee_result
           (Call (build_call form env ~lends:None recorded))
       in
       let make_matches_variant variant : Core.kind =
@@ -1128,12 +1165,12 @@ and build_comparison form env (value : Syntax.expression) comparison (left : Syn
           {
             value = Operands.build Own call;
             pattern =
-              make_pattern form ~origin:value.id recorded.callee_result
+              make_pattern form ~origin recorded.callee_result
                 (Variant { variant = Well_known.show_variant variant; fields = [] });
           }
       in
       let make_not kind : Core.kind =
-        Not (make_synthetic_expression form ~origin:value.id Types.bool kind)
+        Not (make_synthetic_expression form ~origin Types.bool kind)
       in
       match comparison with
       | Equal -> call.kind
@@ -1149,7 +1186,8 @@ and build_range_record form env (value : Syntax.expression) start stop ~inclusiv
       let start = build_expression form env start in
       let stop = build_expression form env stop in
       let inclusive =
-        make_synthetic_expression form ~origin:value.id Types.bool (Core.Boolean inclusive)
+        make_synthetic_expression form ~origin:(rewrite_at value.id) Types.bool
+          (Core.Boolean inclusive)
       in
       build_record [ (Range_start, start); (Range_stop, stop); (Range_inclusive, inclusive) ]
   | _ -> raise_bug "a range without both bounds is valid only inside a slice"
@@ -1255,11 +1293,12 @@ and build_tagged_string form env (value : Syntax.expression) (literal : Syntax.s
     | Some call -> call
     | None -> raise_bug "a tagged string has no `from_template`"
   in
-  let make = make_synthetic_expression form ~origin:value.id in
+  let origin = rewrite_at value.id in
+  let make = make_synthetic_expression form ~origin in
   let make_list element elements =
     make
       (Types.make_named (Well_known.make_path List) [ element ])
-      (build_list_literal form ~origin:value.id element elements)
+      (build_list_literal form ~origin element elements)
   in
   let literal_type = Types.make_named (Well_known.make_path Literal) [] in
   let texts =
@@ -1280,7 +1319,7 @@ and build_tagged_string form env (value : Syntax.expression) (literal : Syntax.s
       (fun ((written : Syntax.expression), _) (conversion : Tables.call option) ->
         match conversion with
         | Some call ->
-            make_synthetic_expression form ~origin:written.id call.callee_result
+            make_synthetic_expression form ~origin:(rewrite_at written.id) call.callee_result
               (Call (build_call form env ~lends:None call))
         | None -> build_expression form env written)
       literal.rest recorded.part_conversions
@@ -1310,7 +1349,7 @@ and build_collection_literal form (value : Syntax.expression) (elements : Core.e
     Core.kind =
   match read_type form value with
   | Types.Named { path; arguments = [ Types.Type element ] } when Well_known.is List path ->
-      build_list_literal form ~origin:value.id element elements
+      build_list_literal form ~origin:(rewrite_at value.id) element elements
   | Types.Named { path; _ } when Well_known.find_builtin_type path = Some Array ->
       Collection_literal { elements; construction = Array }
   | Types.Named { path; _ } when Well_known.is Sequence path || Well_known.is Finite_set path ->
@@ -1319,11 +1358,12 @@ and build_collection_literal form (value : Syntax.expression) (elements : Core.e
 
 and build_converted_literal form (value : Syntax.expression) ~(element : Types.ty)
     (elements : Core.expression list) : Core.kind =
+  let origin = rewrite_at value.id in
   let recorded = read_call form value.id in
   let list =
-    make_synthetic_expression form ~origin:value.id
+    make_synthetic_expression form ~origin
       (Types.make_named (Well_known.make_path List) [ element ])
-      (build_list_literal form ~origin:value.id element elements)
+      (build_list_literal form ~origin element elements)
   in
   Call
     (make_call form
@@ -1337,12 +1377,13 @@ and build_converted_map_literal form (value : Syntax.expression) ~(key : Types.t
   build_converted_literal form value ~element:entry
     (List.map
        (fun (entry_key, entry_value) ->
-         make_synthetic_expression form ~origin:value.id entry
+         make_synthetic_expression form ~origin:(rewrite_at value.id) entry
            (build_record [ (Entry_key, entry_key); (Entry_value, entry_value) ]))
        entries)
 
 and build_try form env (value : Syntax.expression) (inner : Syntax.expression) ~(output : Types.ty)
     : Core.kind =
+  let origin : Core.origin = Desugared { construct = value.id; desugaring = Try } in
   let scrutinee = build_expression form env inner in
   let read_variants (type_ : Types.ty) =
     match type_ with
@@ -1354,14 +1395,14 @@ and build_try form env (value : Syntax.expression) (inner : Syntax.expression) ~
   in
   let success, failure = read_variants scrutinee.type_ in
   let _, returned_failure = read_variants output in
-  let make = make_synthetic_expression form ~origin:value.id in
+  let make = make_synthetic_expression form ~origin in
   let bind_fields (variant : Types.variant) : Core.pattern * (string * Core.expression) list =
     let fields =
       List.map
         (fun (field : Types.field) -> (field, allocate_synthetic_local form))
         (Option.value ~default:[] variant.fields)
     in
-    ( make_pattern form ~origin:value.id scrutinee.type_
+    ( make_pattern form ~origin scrutinee.type_
         (Variant
            {
              variant = variant.variant_name;
@@ -1369,21 +1410,19 @@ and build_try form env (value : Syntax.expression) (inner : Syntax.expression) ~
                List.map
                  (fun ((field : Types.field), local) ->
                    ( field.field_name,
-                     make_binding form ~origin:value.id ~is_var:false ~mode:Own field.field_type
-                       local ))
+                     make_binding form ~origin ~is_var:false ~mode:Own field.field_type local ))
                  fields;
            }),
       List.map
         (fun ((field : Types.field), local) ->
-          (field.field_name, make_local_use form ~origin:value.id field.field_type local))
+          (field.field_name, make_local_use form ~origin field.field_type local))
         fields )
   in
   let success_pattern, success_fields = bind_fields success in
   let failure_pattern, failure_fields = bind_fields failure in
-  let make_arm patterns body : Core.arm = { patterns; guard = None; body; origin = value.id } in
+  let make_arm patterns body : Core.arm = { patterns; guard = None; body; origin } in
   Match
     {
-      is_written = false;
       scrutinees = [ Operands.build Own scrutinee ];
       arms =
         [
@@ -1415,13 +1454,14 @@ and build_try form env (value : Syntax.expression) (inner : Syntax.expression) ~
         ];
     }
 
-and build_collection_place form env (iterable : Syntax.expression) (mode : Language.Mode.t) :
-    Core.place * (Core.block -> Core.kind) option =
+and build_collection_place form env (iterable : Syntax.expression) (mode : Language.Mode.t)
+    ~(desugaring : Core.desugaring) : Core.place * (Core.block -> Core.kind) option =
   let collection = build_expression form env iterable in
   match collection.kind with
   | Use place when is_fixed_place place -> (place, None)
   | _ ->
-      let local = allocate_synthetic_local form and origin = iterable.id in
+      let local = allocate_synthetic_local form in
+      let origin : Core.origin = Desugared { construct = iterable.id; desugaring } in
       let scrutinee = Operands.build mode collection in
       let pattern =
         make_binding form ~origin ~is_var:false
@@ -1465,36 +1505,52 @@ and build_elements form ~origin (collection : Core.place) ~(count : Tables.call)
     lends;
   }
 
-and quantify_over_elements form env (collection : Syntax.expression) ~count ~element ~lends ~origin
-    make_quantified : Core.kind =
-  let place, bind_collection = build_collection_place form env collection lends in
+and quantify_over_elements form env (quantified : Syntax.expression)
+    (collection : Syntax.expression) ~count ~element ~lends make_quantified : Core.kind =
+  let place, bind_collection =
+    build_collection_place form env collection lends ~desugaring:Quantifier
+  in
   let kind =
-    make_quantified (build_elements form ~origin:collection.id place ~count ~element ~lends)
+    make_quantified
+      (build_elements form
+         ~origin:(Desugared { construct = collection.id; desugaring = Quantifier })
+         place ~count ~element ~lends)
   in
   match bind_collection with
   | None -> kind
   | Some bind_collection ->
       bind_collection
-        { statements = []; value = Some (make_synthetic_expression form ~origin Types.bool kind) }
+        {
+          statements = [];
+          value =
+            Some (make_synthetic_expression form ~origin:(Written quantified.id) Types.bool kind);
+        }
 
 and build_for_loop form env (written : Syntax.statement) (iterable : Syntax.expression) ~pattern
     ~clauses ~body ~mode : Core.statement_kind =
   let make_loop iteration : Core.statement_kind = For { pattern; iteration; clauses; body; mode } in
+  let loop_origin : Core.origin = Desugared { construct = written.id; desugaring = For_loop } in
+  let iterable_origin : Core.origin =
+    Desugared { construct = iterable.id; desugaring = For_loop }
+  in
   match (form.tables.loops.(written.id), iterable.kind) with
   | Some (Integer_range { inclusive; _ }), Range { start = Some start; stop = Some stop; _ } ->
       let start = build_expression form env start in
       make_loop (Integer_range { start; stop = build_expression form env stop; inclusive })
   | Some (Elements { count; element; lends }), _ -> (
-      let place, bind_collection = build_collection_place form env iterable lends in
+      let place, bind_collection =
+        build_collection_place form env iterable lends ~desugaring:For_loop
+      in
       let elements_loop =
-        make_loop (Elements (build_elements form ~origin:iterable.id place ~count ~element ~lends))
+        make_loop
+          (Elements (build_elements form ~origin:iterable_origin place ~count ~element ~lends))
       in
       match bind_collection with
       | None -> elements_loop
       | Some bind_collection ->
-          let statement = make_statement form ~origin:written.id elements_loop in
+          let statement = make_statement form ~origin:(Written written.id) elements_loop in
           Evaluate
-            (make_synthetic_expression form ~origin:written.id Types.unit
+            (make_synthetic_expression form ~origin:loop_origin Types.unit
                (bind_collection { statements = [ statement ]; value = None })))
   | Some (Pulled { cursor; cursor_call; remaining }), _ -> (
       let collection = build_expression form env iterable in
@@ -1502,7 +1558,7 @@ and build_for_loop form env (written : Syntax.statement) (iterable : Syntax.expr
         match cursor_call with
         | None -> collection
         | Some cursor_call ->
-            make_synthetic_expression form ~origin:iterable.id cursor
+            make_synthetic_expression form ~origin:iterable_origin cursor
               (Call
                  (make_call form
                     ~callee:(convert_callee form cursor_call.callee)
@@ -1520,7 +1576,8 @@ and build_for_loop form env (written : Syntax.statement) (iterable : Syntax.expr
                 clause =
                   Core.Decreases
                     [
-                      make_synthetic_expression form ~origin:iterable.id (Types.make_builtin UInt64)
+                      make_synthetic_expression form ~origin:iterable_origin
+                        (Types.make_builtin UInt64)
                         (Call
                            (make_call form
                               ~callee:(convert_callee form remaining.callee)
@@ -1546,14 +1603,14 @@ and build_for_loop form env (written : Syntax.statement) (iterable : Syntax.expr
       | Use place, remaining when is_fixed_place place -> make_cursor_loop ?remaining place
       | _, None -> make_cursor_loop (make_place pulled)
       | _, Some remaining ->
-          let local = allocate_synthetic_local form and origin = iterable.id in
+          let local = allocate_synthetic_local form and origin = iterable_origin in
           let binding = make_binding form ~origin ~is_var:true ~mode:Own pulled.type_ local in
           let statement =
-            make_statement form ~origin:written.id
+            make_statement form ~origin:(Written written.id)
               (make_cursor_loop ~remaining (Local { local; type_ = pulled.type_; origin }))
           in
           Evaluate
-            (make_synthetic_expression form ~origin:written.id Types.unit
+            (make_synthetic_expression form ~origin:loop_origin Types.unit
                (make_binding_match ~origin (Operands.build Own pulled) binding
                   { statements = [ statement ]; value = None })))
   | _ -> raise_bug "the checker recorded no iteration for a `for` loop"
@@ -1585,10 +1642,11 @@ and build_compound_assign form env (written : Syntax.statement) (target : Syntax
     (value : Syntax.expression) operation : Core.statement_kind =
   let place = make_place (build_expression form env target) in
   let target_type = read_type form target in
-  let current = make_synthetic_expression form ~origin:written.id target_type Core.Current_target in
+  let origin = rewrite_at written.id in
+  let current = make_synthetic_expression form ~origin target_type Core.Current_target in
   let right = build_expression form env value in
   let bound = allocate_synthetic_local form in
-  let bound_value = make_local_use form ~origin:value.id right.type_ bound in
+  let bound_value = make_local_use form ~origin:(rewrite_at value.id) right.type_ bound in
   let make_built_in operation : Core.kind * Core.operand =
     (Operator { operation; arguments = [ current; bound_value ] }, Operands.build Own right)
   in
@@ -1625,7 +1683,7 @@ and build_compound_assign form env (written : Syntax.statement) (target : Syntax
       target = place;
       operand = right_operand;
       bound;
-      value = make_synthetic_expression form ~origin:written.id target_type kind;
+      value = make_synthetic_expression form ~origin target_type kind;
     }
 
 and build_statement form env (written : Syntax.statement) : Core.statement =
@@ -1645,8 +1703,11 @@ and build_statement form env (written : Syntax.statement) : Core.statement =
     | _ -> None
   with
   | Some value ->
-      make_statement form ~origin:written.id (Evaluate (build_expression form env value))
-  | None -> make_statement form ~origin:written.id (build_statement_kind form env written)
+      make_statement form ~origin:(rewrite_at written.id)
+        (Evaluate (build_expression form env value))
+  | None ->
+      let kind = build_statement_kind form env written in
+      make_statement form ~origin:(compute_statement_origin written kind) kind
 
 and build_statement_kind form env (written : Syntax.statement) : Core.statement_kind =
   match written.kind with
@@ -1663,7 +1724,7 @@ and build_statement_kind form env (written : Syntax.statement) : Core.statement_
   | Assignment { operator = Assign; _ } when is_call form written.id ->
       let id = allocate_node_id form in
       let call = build_call form env ~lends:None (read_call form written.id) in
-      Evaluate { id; origin = written.id; type_ = Types.unit; kind = Call call }
+      Evaluate { id; origin = rewrite_at written.id; type_ = Types.unit; kind = Call call }
   | Assignment { target = written_target; operator = Assign; value } ->
       let target = make_place (build_expression form env written_target) in
       Assign { target; value = build_expression form env value }
@@ -1719,11 +1780,12 @@ and build_block form env (written : Syntax.block) : Core.block =
 
 and build_pattern form (written : Syntax.pattern) : Core.pattern =
   if was_hole form (fun tables -> tables.scrutinee_types) written.id then
-    make_pattern form ~origin:written.id Types.Never Wildcard
+    make_pattern form ~origin:(rewrite_at written.id) Types.Never Wildcard
   else
     let id = allocate_node_id form in
     match form.tables.scrutinee_types.(written.id) with
-    | Some type_ -> { Core.id; origin = written.id; type_; kind = build_pattern_kind form written }
+    | Some type_ ->
+        { Core.id; origin = Written written.id; type_; kind = build_pattern_kind form written }
     | None -> raise_bug "`%s` has a node and no type" (quote form written.id)
 
 and build_pattern_kind form (written : Syntax.pattern) : Core.pattern_kind =
@@ -1951,6 +2013,7 @@ let build_trait form ~self ~is_broken (members : Syntax.trait_member Syntax.node
                     parameters;
                     requires;
                     body = build_block form { env with output = Some (Returns Types.bool) } law.body;
+                    origin = line.id;
                   };
                 ]
             | _ -> [])
@@ -2061,4 +2124,12 @@ let build lookups ~resolved ~tables ~context ~package ~text ~key ~definition ~el
       counters = { next_node_id = 0; next_synthetic_local = 0 };
     }
   in
-  { definition = build_definition form ~key ~definition ~elaborated ~checks_body }
+  {
+    definition = build_definition form ~key ~definition ~elaborated ~checks_body;
+    origin = Written definition.id;
+  }
+
+module For_testing = struct
+  let is_written_expression = is_written_expression
+  let is_written_statement = is_written_statement
+end

@@ -288,7 +288,8 @@ and fold_body ~visiting ~depth ~steps state (mir : Mir.Graph.t)
     | Basic (Call { destination; call = called }) -> fold_call destination called
     | Basic (Assert condition) -> (
         match fold_operand condition with Some (Static_scalar (Bool true)) -> Some () | _ -> None)
-    | Basic (Live _ | Dead _ | Loan_start _ | Loan_end _ | Matched _ | Ghost_assert _ | Proof _) ->
+    | Basic (Live _ | Dead _ | Loan_start _ | Loan_end _ | Path_note _ | Ghost_assert _ | Proof _)
+      ->
         Some ()
     | Basic (Assign _ | Lend _ | Template _ | Echo _) | Provide_start _ | Provide_end -> None
   in

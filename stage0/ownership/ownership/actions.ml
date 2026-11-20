@@ -662,7 +662,7 @@ let emit_statement builder (statement : Mir.Graph.statement) =
             Hashtbl.replace builder.loop_body_starts builder.position.block
               (builder.position.index + 1)
       | Loan_end loans -> emit builder (End_loans loans) origin
-      | Ghost_assert _ | Matched _ | Proof _ -> ())
+      | Ghost_assert _ | Path_note _ | Proof _ -> ())
 
 let pull builder (iteration : Mir.iteration) origin =
   match iteration with

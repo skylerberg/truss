@@ -23,7 +23,8 @@ let extract_parameter (body : Mir.Graph.body) local =
 let read_spans state = (Lowering.require_written state).spans
 
 let locate_site state (origin : Core.origin) =
-  Lowering.make_site state (Source.Definition_span.locate (read_spans state) origin)
+  Lowering.make_site state
+    (Source.Definition_span.locate (read_spans state) (Core_walk.locate_origin origin))
 
 let find_reported_site (state : Lowering.state) : Lowered.operand option =
   match state.frame.mir with

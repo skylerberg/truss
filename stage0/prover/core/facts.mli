@@ -81,7 +81,8 @@ val make_obligation :
   Obligation.t
 
 val locate : State.context -> State.source -> Core.origin -> Obligation.location
-val quote : State.source -> int -> Obligation.piece
+val quote : State.source -> Core.origin -> Obligation.piece
+val describe_call : State.context -> Obligation.location -> ?callee:string -> unit -> string
 val quote_span : string -> Source.Definition_span.t -> string
 val quote_origin : State.context -> State.frame -> Core.origin -> string
 val find_bounds : Types.ty -> (Z.t * Z.t) option

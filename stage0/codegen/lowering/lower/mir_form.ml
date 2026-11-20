@@ -175,7 +175,7 @@ and lower_basic state (basic : Mir.basic) ~origin =
   | Lend { part; call } -> lend state part call ~origin
   | Template { destination; call; _ } ->
       lower_call_into state call (Mir_places.lower_place state destination) ~origin
-  | Live _ | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ -> ()
+  | Live _ | Loan_start _ | Loan_end _ | Ghost_assert _ | Path_note _ | Proof _ -> ()
   | Dead locals -> List.iter (Mir_drops.end_local state) locals
   | Assert condition ->
       let holds = Mir_places.lower_operand state condition in
@@ -183,7 +183,10 @@ and lower_basic state (basic : Mir.basic) ~origin =
       and after = Emit_c.Ir_builder.allocate_block state.builder in
       Emit_c.Ir_builder.branch state.builder (Holds holds) ~yes:after ~no:failed;
       Emit_c.Ir_builder.start state.builder failed;
-      let message = "assert " ^ Lowering.quote_span state (Mir_places.read_spans state).(origin) in
+      let message =
+        "assert "
+        ^ Lowering.quote_span state (Mir_places.read_spans state).(Core_walk.locate_origin origin)
+      in
       Emit_c.Ir_builder.finish state.builder
         (Fail
            {

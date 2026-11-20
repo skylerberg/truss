@@ -16,9 +16,7 @@ let raise_unsupported location format =
 let run_in_source (context : State.context) (source : State.source) read =
   try read ()
   with
-  | Unsupported ({ foreign_definition = None; _ } as unsupported)
-  when source.key <> Some context.home
-  ->
+  | Unsupported ({ foreign_definition = None; _ } as unsupported) when source.key <> context.home ->
     raise (Unsupported { unsupported with foreign_definition = Some source.name })
 
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Prover" format
@@ -183,7 +181,7 @@ let assume context (frame : State.frame) term =
       else add_scoped_fact context frame guarded
 
 let locate (context : State.context) (source : State.source) origin =
-  if source.key = Some context.home then Obligation.Node origin else Whole_definition
+  if source.key = context.home then Obligation.Node origin else Whole_definition
 
 let insert_line_before_body (context : State.context) (line : Obligation.message) =
   let names = context.lookups.interface.names in
@@ -419,7 +417,7 @@ let oblige ?template_clause ?cited ?(fixes = []) ?holds_when (context : State.co
            context goal)
     with
     | Some obligation ->
-        let is_home_body = frame.source.key = Some context.home && frame.makes_obligations in
+        let is_home_body = frame.source.key = context.home && frame.makes_obligations in
         let fixes =
           match fixes with
           | [] when is_home_body -> (
@@ -436,6 +434,19 @@ let oblige ?template_clause ?cited ?(fixes = []) ?holds_when (context : State.co
         context.obligations <- { obligation with cited; fixes } :: context.obligations;
         assume context frame goal
     | None -> ()
+
+let describe_call (context : State.context) (at : Obligation.location) ?callee () =
+  match at with
+  | Whole_definition -> (
+      match callee with Some callee -> Printf.sprintf "a call to `%s`" callee | None -> "a call")
+  | Node origin ->
+      let names = context.lookups.interface.names in
+      Core_walk.describe_call origin ?callee
+        ~quote:(fun () ->
+          Source.Definition_span.quote (names.read_text context.home)
+            (Source.Definition_span.locate (names.read_spans context.home)
+               (Core_walk.locate_origin origin)))
+        ()
 
 let reject_recursion_through_supplied_code (context : State.context) (frame : State.frame) location
     (statement : Mir.statement) =
@@ -458,9 +469,10 @@ let reject_recursion_through_supplied_code (context : State.context) (frame : St
           (match supplier with
           | Call ->
               Printf.sprintf
-                "This call uses `%s` where a bound needs it, and its methods reach back here. Such \
-                 a use passes no arguments the prover can compare, so the recursion cannot be \
-                 shown to end: write it as a direct call on a part."
+                "%s uses `%s` where a bound needs it, and its methods reach back here. Such a use \
+                 passes no arguments the prover can compare, so the recursion cannot be shown to \
+                 end: write it as a direct call on a part."
+                (String.capitalize_ascii (describe_call context location ()))
                 owner
           | Named_function path ->
               Printf.sprintf
@@ -498,9 +510,11 @@ let find_recursive_callee (context : State.context) (frame : State.frame) locati
       [
         Text
           (Printf.sprintf
-             "This call to `%s` reaches back here through code that its `impl` %s. No measure can \
-              be stated for that code, so the recursion cannot be shown to end."
-             (show_callee target) origin);
+             "%s reaches back here through code that its `impl` %s. No measure can be stated for \
+              that code, so the recursion cannot be shown to end."
+             (String.capitalize_ascii
+                (describe_call context location ~callee:(show_callee target) ()))
+             origin);
       ]
       (Logic.Boolean false);
     None
@@ -526,20 +540,18 @@ let reject_uncompared_recursion (context : State.context) frame location recursi
           (Logic.Boolean false))
       recursive_callee
 
-let quote (source : State.source) origin =
-  match source.key with
-  | Some key -> Obligation.Quote (key, origin)
-  | None -> Text "this expression"
+let quote (source : State.source) origin = Obligation.Quote (source.key, origin)
 
 let quote_span text (span : Source.Definition_span.t) =
-  if span.stop = span.start then "this expression" else Source.Definition_span.quote text span
+  if span.stop = span.start then raise_bug "a quote of an empty span at %d" span.start
+  else Source.Definition_span.quote text span
 
 let quote_origin (context : State.context) (frame : State.frame) origin =
-  if frame.source.key <> Some context.home then
+  if frame.source.key <> context.home then
     raise_bug "a quote of %s, outside the definition being proven" frame.source.name;
   let names = context.lookups.interface.names in
   quote_span (names.read_text context.home)
-    (Source.Definition_span.locate (names.read_spans context.home) origin)
+    (Source.Definition_span.locate (names.read_spans context.home) (Core_walk.locate_origin origin))
 
 let find_bounds (ty : Types.ty) =
   if Types.is_builtin Character ty then Some (Z.zero, Z.of_int 0x10FFFF)

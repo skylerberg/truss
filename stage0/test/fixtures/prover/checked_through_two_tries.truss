@@ -1,0 +1,19 @@
+fn check_low(key: UInt8) -> Result[UInt8, String]
+  requires key < 100
+  ensures result.is_ok()
+{
+  Ok(key)
+}
+
+fn check_even(key: UInt8) -> Result[UInt8, String] {
+  if key % 2 == 0 { Ok(key) } else { Err("odd") }
+}
+
+fn checked(key: UInt8) -> Result[UInt8, String]
+  requires key < 100
+  ensures result.is_ok()
+{
+  let low = check_low(key)?
+  let even = check_even(low)?
+  Ok(even)
+}

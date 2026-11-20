@@ -26,7 +26,7 @@ type t = {
   values : (Logic.symbol * string) list;
   locals : (Logic.term * string) list;
   template_clause : template_clause option;
-  decisions : (string * string option * Logic.term * Logic.term) list;
+  decisions : (string * Logic.term) list;
 }
 
 type outcome = { obligations : t list; holes : (Resolve.Names.key * location) list }

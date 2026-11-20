@@ -1,5 +1,4 @@
-let make_source (key : Resolve.Names.key) =
-  { State.key = Some key; name = Resolve.Names.show_key key }
+let make_source (key : Resolve.Names.key) = { State.key; name = Resolve.Names.show_key key }
 
 let read_source_at_key (lookups : Lookups.t) key =
   ignore (lookups.mir.read_body_part key);
@@ -11,7 +10,7 @@ let find_source (lookups : Lookups.t) (path : Path.t) =
       let source =
         match origin with
         | Written key | Inherited key -> make_source key
-        | Derived _ -> { key = None; name = Path.show path }
+        | Derived type_key -> { key = type_key; name = Path.show path }
       in
       (source, substitution, origin))
     (lookups.mir.find_form_origin path)
@@ -93,8 +92,7 @@ let is_law_unshown (lookups : Lookups.t) (impl : Path.t) (trait : Types.trait_re
   | Some key ->
       is_impl_unfinished lookups key
       || List.exists
-           (fun (law, ((proof : State.source), _)) ->
-             law = name && Option.fold ~none:false ~some:(holds_todo lookups) proof.key)
+           (fun (law, ((proof : State.source), _)) -> law = name && holds_todo lookups proof.key)
            (list_law_proofs lookups (Path.locate_package impl) trait for_type)
   | None -> false
 

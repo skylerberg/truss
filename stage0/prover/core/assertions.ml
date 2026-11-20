@@ -137,11 +137,7 @@ let assert_bit_vector (context : State.context) frame ~named ~origin
       ]
       term
   in
-  let cited =
-    match frame.source.key with
-    | Some key when key <> context.home -> Some (key, origin)
-    | Some _ | None -> None
-  in
+  let cited = if frame.source.key <> context.home then Some (frame.source.key, origin) else None in
   context.obligations <-
     { obligation with query = add_bitwise_definitions obligation.query; cited }
     :: context.obligations;

@@ -20,7 +20,7 @@ let decide_move context (place : Place.t) ~origin ~type_ ~is_returned ~is_captur
     if is_captured then Read else Context.classify_binding_mode context place.root
   in
   let views_literal = (not is_captured) && Context.views_literal context place.root in
-  if Hashtbl.find_opt context.places_without_keyword origin = Some Mut then
+  if Context.find_place_without_keyword context origin = Some Mut then
     Refused
       (fun context at type_ ->
         Context.report context Needs_lent_mut at
@@ -67,7 +67,7 @@ let decide_move context (place : Place.t) ~origin ~type_ ~is_returned ~is_captur
         refuse
           (Printf.sprintf "`%s` is %s, so it cannot be moved. Copy it instead." shown
              (if place.steps = [] then "a view" else "part of a view"))
-    | (Own | Mut), _ when Hashtbl.find_opt context.places_without_keyword origin = Some Own ->
+    | (Own | Mut), _ when Context.find_place_without_keyword context origin = Some Own ->
         Refused
           (fun context at type_ ->
             Context.report context Needs_owned at

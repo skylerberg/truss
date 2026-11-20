@@ -277,7 +277,7 @@ let () =
                     (fun (node : Core.statement) ->
                       match node.kind with
                       | Compound_assign _ ->
-                          let span = spans.(node.origin) in
+                          let span = spans.(Core_walk.locate_origin node.origin) in
                           actual :=
                             String.sub written span.start (span.stop - span.start) :: !actual
                       | _ -> ());

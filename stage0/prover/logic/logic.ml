@@ -49,7 +49,6 @@ module Symbol = struct
     | Cost_log
     | Cost_power
     | Reached of int
-    | Condition of int
 end
 
 type rounding_mode = Nearest_ties_to_even | Toward_positive | Toward_negative | Toward_zero
@@ -266,7 +265,6 @@ let rec show_symbol : symbol -> string = function
   | Cost_log -> "cost.log"
   | Cost_power -> "cost.power"
   | Reached index -> Printf.sprintf "reached.%d" index
-  | Condition index -> Printf.sprintf "condition.%d" index
 
 and show_term term =
   let rec show = function

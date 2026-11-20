@@ -1,0 +1,19 @@
+type Bag(items: List[UInt8])
+
+fn Bag.count(self) -> UInt64 {
+  self.items.length()
+}
+
+fn Bag.element(self, position: UInt64) lends UInt8
+  requires position < 3 && position < self.items.length()
+{
+  self.items[position]
+}
+
+fn total(bag: Bag) -> UInt8 {
+  var sum: UInt8 = 0
+  for value in bag {
+    sum = sum.wrapping_add(value)
+  }
+  sum
+}

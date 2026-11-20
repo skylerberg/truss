@@ -32,7 +32,7 @@ val check_named_callback :
   State.frame ->
   Invocation.t ->
   State.passed ->
-  origin:int ->
+  origin:Core.origin ->
   Path.t ->
   State.contract ->
   State.passed list ->
