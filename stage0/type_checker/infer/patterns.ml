@@ -19,7 +19,7 @@ type context = {
 }
 
 let read_span context (origin : Core.origin) : Source.Definition_span.t =
-  Source.Definition_span.locate (Lazy.force context.spans) origin
+  Source.Definition_span.locate (Lazy.force context.spans) (Core_walk.locate_origin origin)
 
 let report context ?(fixes = []) code (span : Source.Definition_span.t) message =
   context.diagnostics <-

@@ -111,7 +111,7 @@ and collect_effects : Mir.basic -> Mir.local list * Mir.local list * Mir.local l
   | Dead locals -> ([], [], locals)
   | Assert value | Echo value -> (list_operand_locals value, [], [])
   | Loan_start { borrowed; _ } -> (list_operand_locals borrowed, [], [])
-  | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ -> ([], [], [])
+  | Loan_end _ | Ghost_assert _ | Path_note _ | Proof _ -> ([], [], [])
 
 let collect_graph_effects :
     Mir.Graph.statement_kind -> Mir.local list * Mir.local list * Mir.local list = function
@@ -524,6 +524,17 @@ let list_terminators (body : Mir.Graph.body) =
     (Array.to_list body.blocks)
 
 let () =
+  Harness.test "a `?` notes its early return and none of its arms" (fun () ->
+      let mir = lower_graph Fixtures.Mir.try_returning_early in
+      let notes =
+        List.filter_map
+          (fun (statement : Mir.Graph.statement) ->
+            match statement.kind with Basic (Path_note note) -> Some note | _ -> None)
+          (list_statements mir.body)
+      in
+      match notes with
+      | [ Returns_early (Desugared { desugaring = Try; _ }) ] -> ()
+      | notes -> Harness.fail "%d path notes" (List.length notes));
   Harness.test "an assignment evaluates its value, then its target" (fun () ->
       let mir = lower_graph Fixtures.Mir.indexed_assignments_with_calls_on_both_sides in
       let order =
@@ -1149,9 +1160,17 @@ let () =
                 Harness.fail "the right operand of `&&` is not computed in its block"
           | values -> Harness.fail "the clause of comparisons holds %d values" (List.length values));
           (match list_choices chosen.clause with
-          | [ Conditional { then_; else_; if_condition = Some _; _ } ] ->
+          | [ Conditional { then_; else_; _ } ] ->
               if not (computes_a_comparison then_ && computes_a_comparison else_) then
-                Harness.fail "a case of the `if` is not computed in its block"
+                Harness.fail "a case of the `if` is not computed in its block";
+              let starts_with_note (block : Mir.block) holds =
+                match block.statements with
+                | { kind = Basic (Path_note (Condition_holds { holds = noted; _ })); _ } :: _ ->
+                    noted = holds
+                | _ -> false
+              in
+              if not (starts_with_note then_ true && starts_with_note else_ false) then
+                Harness.fail "the cases of a written `if` do not start with its path notes"
           | values -> Harness.fail "the clause with an `if` holds %d values" (List.length values));
           if quantified.clause.lambdas <> [||] then
             Harness.fail "the quantifier's body is a body of its own";

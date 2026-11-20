@@ -1,0 +1,21 @@
+type Countdown(left: UInt8)
+
+impl Cursor for Countdown {
+  type Element = UInt8
+
+  fn next(mut self) -> Option[UInt8]
+    ensures result != None ==> self.left < old(self.left)
+  {
+    if self.left == 0 { None } else {
+      self.left -= 1
+      var total: UInt8 = 0
+      var inner = Countdown(left: self.left)
+      for value in inner
+        decreases inner.left
+      {
+        total = total.wrapping_add(value)
+      }
+      Some(total)
+    }
+  }
+}

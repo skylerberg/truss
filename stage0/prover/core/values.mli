@@ -23,7 +23,7 @@ val apply_map_literal :
   State.frame ->
   ty:Types.ty ->
   location:Obligation.location ->
-  (int option * Logic.term * Logic.term) list ->
+  (Core.origin option * Logic.term * Logic.term) list ->
   State.frame * Logic.term
 
 val make_text_value : State.context -> State.frame -> Types.ty -> string -> Logic.term

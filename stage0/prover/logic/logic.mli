@@ -49,7 +49,6 @@ module Symbol : sig
     | Cost_log
     | Cost_power
     | Reached of int
-    | Condition of int
 end
 
 type rounding_mode = Nearest_ties_to_even | Toward_positive | Toward_negative | Toward_zero

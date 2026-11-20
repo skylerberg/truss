@@ -1,9 +1,19 @@
 type id = int
-type origin = int
-type mode_keyword = { mode : Language.Mode.t; written : origin; operand : origin; place : origin }
+type desugaring = Rewrite | For_loop | Quantifier | Try | Derived
+
+type origin =
+  | Written of Syntax.id
+  | Desugared of { construct : Syntax.id; desugaring : desugaring }
+
+type mode_keyword = {
+  mode : Language.Mode.t;
+  written : Syntax.id;
+  operand : Syntax.id;
+  place : Syntax.id;
+}
 
 type local =
-  | Declared of { origin : origin; name : string }
+  | Declared of { origin : Syntax.id; name : string }
   | Trait_parameter of { index : int; name : string }
   | Self
   | Synthetic of int
@@ -83,7 +93,7 @@ and kind =
   | Convert of { conversion : conversion; value : expression }
   | To_any of { value : expression; trait : Types.trait_reference; evidence : evidence }
   | If of { condition : expression; then_ : block; else_ : block option; binds_lent_part : bool }
-  | Match of { scrutinees : operand list; arms : arm list; is_written : bool }
+  | Match of { scrutinees : operand list; arms : arm list }
   | Block of block
   | Provide of { implementations : implementation list; body : block }
   | Return of expression option
@@ -150,7 +160,7 @@ and statement_kind =
 and iteration =
   | Integer_range of { start : expression; stop : expression; inclusive : bool }
   | Elements of elements
-  | Cursor of { cursor : place; next : callee }
+  | Cursor of { cursor : place; next : callee; next_origin : origin }
 
 and elements = { count : expression; position : pattern; element : place; lends : Language.Mode.t }
 and loop_clause = Invariant of expression | Decreases of expression list | Cost of cost
@@ -196,7 +206,13 @@ type contract = {
   costs : cost conditional list;
 }
 
-type law = { name : string; parameters : parameter list; requires : expression list; body : block }
+type law = {
+  name : string;
+  parameters : parameter list;
+  requires : expression list;
+  body : block;
+  origin : origin;
+}
 
 type definition =
   | Function of { parameters : parameter list; contract : contract; body : block option }
@@ -211,4 +227,4 @@ type definition =
   | Law_proof of { parameters : parameter list; body : block option }
   | Empty
 
-type t = { definition : definition }
+type t = { definition : definition; origin : origin }

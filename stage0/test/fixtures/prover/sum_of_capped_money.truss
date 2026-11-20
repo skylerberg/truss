@@ -1,0 +1,19 @@
+type Money(cents: UInt8)
+
+impl Add[Money] for Money {
+  type Output = Money
+
+  fn add_is_defined(self, right: Money) -> Bool {
+    self.cents <= 100 && right.cents <= 100
+  }
+
+  fn add(self, right: Money) -> Money
+    uses Panic unless self.add_is_defined(right)
+  {
+    Money(cents: self.cents.wrapping_add(right.cents))
+  }
+}
+
+fn combine(left: Money, right: Money) -> Money {
+  left + right
+}

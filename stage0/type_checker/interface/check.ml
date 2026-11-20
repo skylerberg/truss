@@ -212,105 +212,93 @@ let check_derives state (interface : Types.type_interface) (clauses : Syntax.typ
     else Checking.list_bounds state parameter
   in
   List.iter
-    (fun (clause : Syntax.type_clause) ->
-      match clause.kind with
-      | Derives traits ->
-          List.iter
-            (fun (written : Syntax.path_type) ->
-              match (resolved : Resolve.resolved).names.(written.path.last.id) with
-              | Some (Definition (_, trait)) ->
-                  let shown = Elaborator.show_path written.path in
-                  if
-                    not
-                      (Resolve.Names.is_derivable trait || Well_known.is Copyable trait
-                     || Well_known.is Plain trait)
-                  then
-                    Checking.report state Not_derivable state.spans.(written.id)
-                      (Printf.sprintf
-                         "Only `Equal`, `Hash`, `Ordered`, `Default`, `Copyable`, `Plain`, \
-                          `serialization::Serialize`, and `serialization::Deserialize` can be \
-                          derived, not `%s`."
-                         shown)
-                  else if Well_known.is Copyable trait || Well_known.is Plain trait then
-                    begin if not interface.opaque then
-                      Checking.report state Derives_inferred state.spans.(written.id)
-                        ~fixes:
-                          [
-                            Diagnostic.fix "Remove the declaration."
-                              [
-                                make_element_removal state.spans ~clause:state.spans.(clause.id)
-                                  (List.map (fun (trait : Syntax.path_type) -> trait.id) traits)
-                                  written.id;
-                              ];
-                          ]
-                        (Printf.sprintf
-                           "Whether `%s` holds for this type is derived from its fields, which are \
-                            visible. Only an opaque type declares it."
-                           shown)
-                    else
-                      let self : Types.ty =
-                        Named
-                          {
-                            path = state.key.path;
-                            arguments = Types.list_generic_arguments interface.type_generics;
-                          }
-                      in
-                      let list_bounds = list_derived_bounds trait in
-                      let holds =
-                        if Well_known.is Plain trait then
-                          Impls.is_plain state.lookups ~list_bounds self
-                        else Impls.is_copyable state.lookups ~list_bounds self
-                      in
-                      if not holds then
-                        Checking.report state Cannot_derive state.spans.(written.id)
-                          (Printf.sprintf "A field of this type is not `%s`, so the type cannot be."
-                             shown)
-                    end
-                  else begin
-                    (if Well_known.is Default trait then
-                       match interface.shape with
-                       | Sum _ ->
-                           Checking.report state Cannot_derive state.spans.(written.id)
-                             "`Default` is derived as each field's default, so only a record can \
-                              derive it: no variant of this type is its default. Write the `impl`, \
-                              which says which variant is."
-                       | Record _ | Todo_type | Builtin_type _ -> ());
-                    if Well_known.is Ordered trait || Well_known.is Hash trait then
-                      if not (List.exists (Well_known.is Equal) interface.derives) then
-                        Checking.report state Cannot_derive state.spans.(written.id)
-                          (Printf.sprintf
-                             "Deriving `%s` needs `Equal` to be derived too, so that the two agree."
-                             shown);
-                    let needed =
-                      match interface.shape with
-                      | Record fields when Well_known.is Default trait ->
-                          List.filter_map
-                            (fun (field : Types.field) ->
-                              if field.field_has_default then None else Some field.field_type)
-                            fields
-                      | _ -> field_types
-                    in
-                    List.iter
-                      (fun type_ ->
-                        let wanted : Types.trait_reference =
-                          { trait; trait_arguments = []; associated = [] }
-                        in
-                        if
-                          Option.is_none
-                            (Impls.find_evidence state.lookups
-                               ~list_bounds:(list_derived_bounds trait) type_ wanted)
-                        then
-                          Checking.report state Cannot_derive state.spans.(written.id)
-                            (Printf.sprintf
-                               "A field of type `%s` does not implement `%s`, so `%s` cannot be \
-                                derived."
-                               (Types.show type_) shown shown))
-                      needed
-                  end
-              | _ -> ())
-            traits
-      | _ -> ())
-    clauses
+    (fun ((clause : Syntax.type_clause), (written : Syntax.path_type), trait) ->
+      let shown = Elaborator.show_path written.path in
+      if
+        not
+          (Resolve.Names.is_derivable trait || Well_known.is Copyable trait
+         || Well_known.is Plain trait)
+      then
+        Checking.report state Not_derivable state.spans.(written.id)
+          (Printf.sprintf
+             "Only `Equal`, `Hash`, `Ordered`, `Default`, `Copyable`, `Plain`, \
+              `serialization::Serialize`, and `serialization::Deserialize` can be derived, not \
+              `%s`."
+             shown)
+      else if Well_known.is Copyable trait || Well_known.is Plain trait then
+        begin if not interface.opaque then
+          Checking.report state Derives_inferred state.spans.(written.id)
+            ~fixes:
+              [
+                Diagnostic.fix "Remove the declaration."
+                  [
+                    make_element_removal state.spans ~clause:state.spans.(clause.id)
+                      (match clause.kind with
+                      | Derives traits ->
+                          List.map (fun (trait : Syntax.path_type) -> trait.id) traits
+                      | Type_invariant _ | Potential _ -> [])
+                      written.id;
+                  ];
+              ]
+            (Printf.sprintf
+               "Whether `%s` holds for this type is derived from its fields, which are visible. \
+                Only an opaque type declares it."
+               shown)
+        else
+          let self : Types.ty =
+            Named
+              {
+                path = state.key.path;
+                arguments = Types.list_generic_arguments interface.type_generics;
+              }
+          in
+          let list_bounds = list_derived_bounds trait in
+          let holds =
+            if Well_known.is Plain trait then Impls.is_plain state.lookups ~list_bounds self
+            else Impls.is_copyable state.lookups ~list_bounds self
+          in
+          if not holds then
+            Checking.report state Cannot_derive state.spans.(written.id)
+              (Printf.sprintf "A field of this type is not `%s`, so the type cannot be." shown)
+        end
+      else begin
+        (if Well_known.is Default trait then
+           match interface.shape with
+           | Sum _ ->
+               Checking.report state Cannot_derive state.spans.(written.id)
+                 "`Default` is derived as each field's default, so only a record can derive it: no \
+                  variant of this type is its default. Write the `impl`, which says which variant \
+                  is."
+           | Record _ | Todo_type | Builtin_type _ -> ());
+        if Well_known.is Ordered trait || Well_known.is Hash trait then
+          if not (List.exists (Well_known.is Equal) interface.derives) then
+            Checking.report state Cannot_derive state.spans.(written.id)
+              (Printf.sprintf
+                 "Deriving `%s` needs `Equal` to be derived too, so that the two agree." shown);
+        let needed =
+          match interface.shape with
+          | Record fields when Well_known.is Default trait ->
+              List.filter_map
+                (fun (field : Types.field) ->
+                  if field.field_has_default then None else Some field.field_type)
+                fields
+          | _ -> field_types
+        in
+        List.iter
+          (fun type_ ->
+            let wanted : Types.trait_reference = { trait; trait_arguments = []; associated = [] } in
+            if
+              Option.is_none
+                (Impls.find_evidence state.lookups ~list_bounds:(list_derived_bounds trait) type_
+                   wanted)
+            then
+              Checking.report state Cannot_derive state.spans.(written.id)
+                (Printf.sprintf
+                   "A field of type `%s` does not implement `%s`, so `%s` cannot be derived."
+                   (Types.show type_) shown shown))
+          needed
+      end)
+    (Definition.list_derives_entries resolved clauses)
 
 let check_trait_cycle (state : Checking.state) (requires : Syntax.path_type list) =
   let is_required_by required =

@@ -5,8 +5,8 @@ type context = {
   list_bounds : Types.parameter -> Types.trait_reference list;
   spans : Source.Definition_span.t array Lazy.t;
   text : string Lazy.t;
-  mode_keywords : (Core.origin, Core.mode_keyword) Hashtbl.t;
-  places_without_keyword : (Core.origin, Language.Mode.t) Hashtbl.t;
+  mode_keywords : (Syntax.id, Core.mode_keyword) Hashtbl.t;
+  places_without_keyword : (Syntax.id, Language.Mode.t) Hashtbl.t;
   names : string Local_table.t;
   origins : Core.origin Local_table.t;
   binding_modes : Language.Mode.t Local_table.t;
@@ -25,6 +25,8 @@ val holds_function : context -> Types.ty -> bool
 val lends_nothing : context -> Types.ty -> bool
 val stores_function : context -> Mir.callee -> int -> bool
 val locate_origin : context -> Core.origin -> Source.Definition_span.t
+val describe_call : context -> Core.origin -> string
+val find_place_without_keyword : context -> Core.origin -> Language.Mode.t option
 
 val report :
   context ->

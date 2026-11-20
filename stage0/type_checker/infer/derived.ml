@@ -19,6 +19,30 @@ let collapse_spaces text =
     text;
   Buffer.contents buffer
 
+let read_derives_entry (lookups : Lookups.t) ~(type_ : Path.t) ~(trait : Path.t) : Syntax.id =
+  let key =
+    match lookups.interface.names.find_key type_ with
+    | Some key -> key
+    | None ->
+        raise_bug "`%s` derives `%s` and has no declaration" (Path.show type_) (Path.show trait)
+  in
+  let clauses =
+    match (lookups.interface.names.read_definition key).kind with
+    | Type_definition { clauses; _ } -> clauses
+    | _ -> raise_bug "`%s` derives `%s` and is not a type" (Path.show type_) (Path.show trait)
+  in
+  match
+    List.find_opt
+      (fun (_, _, derived) -> Path.equal derived trait)
+      (Interface.Definition.list_derives_entries
+         (lookups.interface.read_resolved Interface key)
+         clauses)
+  with
+  | Some (_, (written : Syntax.path_type), _) -> written.id
+  | None ->
+      raise_bug "`%s` derives `%s` and no `derives` entry names it" (Path.show type_)
+        (Path.show trait)
+
 let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
   match (path, find_derived_method path) with
   | Method { owner = Derived { type_; trait } as impl; _ }, Some derived_method -> (
@@ -40,7 +64,9 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
             incr locals;
             Synthetic local
           in
-          let origin = 0 in
+          let origin : Core.origin =
+            Desugared { construct = read_derives_entry lookups ~type_ ~trait; desugaring = Derived }
+          in
           let node type_ kind : Core.expression = { id = take_id (); origin; type_; kind } in
           let pattern type_ kind : Core.pattern = { id = take_id (); origin; type_; kind } in
           let statement kind : Core.statement = { id = take_id (); origin; kind } in
@@ -201,7 +227,6 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   (node type_
                      (Match
                         {
-                          is_written = false;
                           scrutinees = [ Place self_place ];
                           arms =
                             List.mapi
@@ -221,7 +246,6 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                 node type_
                   (Match
                      {
-                       is_written = false;
                        scrutinees = [ Place other ];
                        arms =
                          arm (binding variant theirs)
@@ -327,7 +351,6 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                           node result
                             (Match
                                {
-                                 is_written = false;
                                  scrutinees = [ Operands.build Own compared ];
                                  arms =
                                    [
@@ -365,7 +388,6 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                       node number
                         (Match
                            {
-                             is_written = false;
                              scrutinees = [ Place other ];
                              arms =
                                List.mapi
@@ -512,7 +534,6 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   node ok
                     (Match
                        {
-                         is_written = false;
                          scrutinees = [ Operands.build Own call ];
                          arms =
                            [
@@ -595,13 +616,14 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   | None -> []
                   | Some key -> (
                       match lookups.read_contract key with
-                      | { definition = Type { invariants; _ } } ->
+                      | { definition = Type { invariants; _ }; _ } ->
                           let spans = lookups.interface.names.read_spans key in
                           let text = lookups.interface.names.read_text key in
                           let quote_origin (origin : Core.origin) =
                             collapse_spaces
                               (Source.Definition_span.quote text
-                                 (Source.Definition_span.locate spans origin))
+                                 (Source.Definition_span.locate spans
+                                    (Core_walk.locate_origin origin)))
                           in
                           List.mapi
                             (fun index (invariant : Core.condition) ->
@@ -731,7 +753,6 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                              (node unit
                                 (Match
                                    {
-                                     is_written = false;
                                      scrutinees =
                                        [
                                          Operands.build Own
@@ -916,7 +937,6 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                           (node result
                              (Match
                                 {
-                                  is_written = false;
                                   scrutinees = [ Place name_place ];
                                   arms =
                                     List.map
@@ -964,6 +984,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                       };
                     body = Some body;
                   };
+              origin;
             }
       | _ -> None)
   | _ -> None

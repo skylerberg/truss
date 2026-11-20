@@ -40,7 +40,12 @@ type while_loop = {
 
 type iterable =
   | Over_range of { low : Logic.term; high : Logic.term; inclusive : bool }
-  | Over_cursor of { cursor : State.passed_place; cursor_type : Types.ty; next : Invocation.t }
+  | Over_cursor of {
+      cursor : State.passed_place;
+      cursor_type : Types.ty;
+      next : Invocation.t;
+      next_origin : Core.origin;
+    }
 
 type for_loop = {
   for_at : Core.origin;
@@ -669,7 +674,7 @@ let oblige_next_gives_the_model context (after : State.frame) location ~element 
   | _ -> ()
 
 let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
-    (cursor_access : State.passed_place) (next : Invocation.t) ~cursor_type =
+    (cursor_access : State.passed_place) (next : Invocation.t) ~cursor_type ~next_origin =
   let location = Facts.locate context frame.source for_loop.for_at in
   let clauses = for_loop.for_clauses in
   ignore (cursor_access.read frame);
@@ -720,7 +725,7 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
   let option_type =
     Types.Named { path = Well_known.make_path Option; arguments = [ Types.Type element_type ] }
   in
-  let pulling : Invocation.site = { origin = for_loop.for_at; type_ = option_type } in
+  let pulling : Invocation.site = { origin = next_origin; type_ = option_type } in
   let measures = find_measures clauses in
   if context.terminates && measures = None then
     Facts.raise_bug "a loop over a cursor has no measure in a body that terminates";
@@ -939,8 +944,8 @@ let run_for_loop context frame (for_loop : for_loop) =
         (List.map
            (fun (exit_frame : State.frame) -> { exit_frame with yielded = outer_yielded })
            (exit_ :: left))
-  | Over_cursor { cursor; cursor_type; next } ->
-      prove_cursor_loop ~for_loop context frame cursor next ~cursor_type
+  | Over_cursor { cursor; cursor_type; next; next_origin } ->
+      prove_cursor_loop ~for_loop context frame cursor next ~cursor_type ~next_origin
 
 let run_while_loop context (frame : State.frame) (loop : while_loop) =
   let clauses = loop.while_clauses in

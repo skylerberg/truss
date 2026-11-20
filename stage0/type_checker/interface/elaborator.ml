@@ -1358,18 +1358,9 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
                 | Type_todo -> Types.Todo_type
               in
               let derives =
-                List.concat_map
-                  (fun (clause : Syntax.type_clause) ->
-                    match clause.kind with
-                    | Derives traits ->
-                        List.filter_map
-                          (fun (trait : Syntax.path_type) ->
-                            match find_target context trait.path.last with
-                            | Some (Definition (_, trait)) -> Some trait
-                            | _ -> None)
-                          traits
-                    | Type_invariant _ | Potential _ -> [])
-                  clauses
+                List.map
+                  (fun (_, _, trait) -> trait)
+                  (Definition.list_derives_entries context.resolved clauses)
               in
               make_elaborated_interface context
                 (Type_interface

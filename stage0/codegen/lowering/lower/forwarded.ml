@@ -1,6 +1,6 @@
 let is_bookkeeping (statement : Mir.Graph.statement) =
   match statement.kind with
-  | Basic (Live _ | Dead _ | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _) ->
+  | Basic (Live _ | Dead _ | Loan_start _ | Loan_end _ | Ghost_assert _ | Path_note _ | Proof _) ->
       true
   | Basic (Assign _ | Call _ | Lend _ | Template _ | Assert _ | Echo _)
   | Provide_start _ | Provide_end ->

@@ -871,6 +871,11 @@ let () =
       expect_proven (span ^ Fixtures.Prover.span_built_within_its_invariant));
   Harness.test "a derived Default must meet the invariant" (fun () ->
       expect_not_proven Fixtures.Prover.positive_default "prover.invariant");
+  Harness.test "a derived Default's failure points at its `derives` entry" (fun () ->
+      let text = Fixtures.Prover.positive_default in
+      match list_diagnostics text with
+      | [ { span; _ } ] when String.sub text span.start (span.stop - span.start) = "Default" -> ()
+      | actual -> Harness.fail "%s" (String.concat "; " (Support.list_codes actual)));
   Harness.test "a derived Default built from field defaults meets the invariant" (fun () ->
       expect_proven Fixtures.Prover.positive_default_from_field_defaults);
   Harness.test "a field's default must meet its type's invariant" (fun () ->
@@ -1599,6 +1604,15 @@ let () =
           "This recursive call may not end: give the function a `decreases` clause for the prover \
            to show that the recursion ends."
         Fixtures.Prover.from_calling_itself_through_its_type "prover.termination");
+  Harness.test "an operator that calls its own method is recursion named by the operator" (fun () ->
+      Support.expect_one_diagnostic ~check
+        ~says:"The call to `Money.add` that `self + right` makes may not"
+        Fixtures.Prover.money_adding_itself "prover.termination");
+  Harness.test "a cursor's `next` that its own `for` loop calls is recursion named by the loop"
+    (fun () ->
+      Support.expect_one_diagnostic ~check ~at:("inner", 2)
+        ~says:"The call to `Countdown.next` that this `for` loop makes may not"
+        Fixtures.Prover.countdown_pulling_itself "prover.termination");
   Harness.test "an impl's method that calls itself through its receiver is recursion" (fun () ->
       expect_not_proven Fixtures.Prover.grow_calling_itself_through_its_receiver
         "prover.termination");
@@ -1706,8 +1720,9 @@ let () =
     (fun () ->
       expect_one_termination_failure
         ~says:
-          "This call uses `app::main::impl standard::core::Equal for app::main::Tree` where a \
-           bound needs it, and its methods reach back here."
+          "The call that `self.children == other.children` makes uses `app::main::impl \
+           standard::core::Equal for app::main::Tree` where a bound needs it, and its methods \
+           reach back here."
         Fixtures.Prover.tree_equal_comparing_its_lists_of_children);
   Harness.test "an equal that compares each child in a loop recurses on parts" (fun () ->
       match list_termination_failures Fixtures.Prover.tree_equal_comparing_each_child with
@@ -2146,7 +2161,26 @@ let () =
   Harness.test "a counterexample names no arm for a `for` loop that moves each element out"
     (fun () -> expect_overflow_naming_no_path Fixtures.Prover.sum_over_an_owned_list);
   Harness.test "a counterexample names no arm for a `?`" (fun () ->
-      expect_overflow_naming_no_path Fixtures.Prover.question_mark_on_an_option)
+      expect_overflow_naming_no_path Fixtures.Prover.question_mark_on_an_option);
+  let expect_message_saying text says =
+    let actual = read_message text in
+    if not (String.includes ~affix:says actual) then Harness.fail "message %S" actual
+  in
+  Harness.test "a counterexample names the `?` that returns early" (fun () ->
+      expect_message_saying Fixtures.Prover.checked_through_two_tries
+        "On that path, `check_even(low)?` returns early.");
+  Harness.test "a counterexample says when a `let ... else` runs its `else`" (fun () ->
+      expect_message_saying Fixtures.Prover.found_or_zero
+        "On that path, `Some(found)` does not match, so the `else` runs.");
+  Harness.test "a precondition of a `for` loop's call names the loop" (fun () ->
+      expect_message_saying Fixtures.Prover.sum_over_a_short_bag
+        "may not hold for the call to `Bag.element` that this `for` loop makes.");
+  Harness.test "a precondition of a quantifier's call names the quantifier" (fun () ->
+      expect_message_saying Fixtures.Prover.all_small_in_a_short_bag
+        "may not hold for the call to `Bag.element` that this quantifier makes.");
+  Harness.test "a panic condition of an operator's call names the operator" (fun () ->
+      expect_message_saying Fixtures.Prover.sum_of_capped_money
+        "may not hold for the call to `Money.add` that `left + right` makes, so the call may panic.")
 
 let () =
   Harness.test "a pure call's result is in its type's range for every bound value" (fun () ->

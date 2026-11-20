@@ -15,7 +15,12 @@ let check_callback_requires context frame (site : Invocation.site) through
                 [
                   Text "`";
                   Facts.quote frame.source clause.origin;
-                  Text (Printf.sprintf "` may not hold for this call through `%s`." name);
+                  Text
+                    (Printf.sprintf "` may not hold for %s through `%s`."
+                       (Facts.describe_call context
+                          (Facts.locate context frame.source site.origin)
+                          ())
+                       name);
                 ]
                 (snd (Validity.read_specification context inside clause)))
             requires
