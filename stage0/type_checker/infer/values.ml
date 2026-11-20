@@ -325,7 +325,7 @@ and check_if state env ?expected (test : Syntax.expression) then_ else_ =
       | Types.Never -> ()
       | _ ->
           if not (State.unify state then_type Types.unit) then
-            State.report_mismatch state (State.read_span state then_.id) ~expected:Types.unit
+            Failures.report_mismatch state (State.read_span state then_.id) ~expected:Types.unit
               ~actual:then_type);
       Types.unit
   | Some branch ->
@@ -370,7 +370,7 @@ and join state env ~expected branches =
       List.iter
         (fun (type_, span, _) ->
           if not (State.unify state first type_) then
-            State.report_mismatch state span ~expected:first ~actual:type_)
+            Failures.report_mismatch state span ~expected:first ~actual:type_)
         rest;
       first
 

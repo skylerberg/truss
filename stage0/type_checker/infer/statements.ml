@@ -119,8 +119,8 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
                   ~right:(Some (value.id, right_type))
               in
               if not (State.unify state result target_type) then
-                State.report_mismatch state (State.read_span state value.id) ~expected:target_type
-                  ~actual:result
+                Failures.report_mismatch state (State.read_span state value.id)
+                  ~expected:target_type ~actual:result
           | Shift _ ->
               ignore
                 (Operators.infer_shift_result state
@@ -128,8 +128,8 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
                    ~right:(State.read_span state value.id, right_type))
           | Bitwise _ ->
               if not (State.unify state target_type right_type) then
-                State.report_mismatch state (State.read_span state value.id) ~expected:target_type
-                  ~actual:right_type;
+                Failures.report_mismatch state (State.read_span state value.id)
+                  ~expected:target_type ~actual:right_type;
               ignore
                 (Operators.infer_bitwise_result state
                    (State.read_span state written_target.id)
@@ -155,7 +155,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
               in
               if not (State.unify state element annotated) then
                 ignore
-                  (State.add_mismatch_diagnostic state Mismatch
+                  (Failures.add_mismatch_diagnostic state Mismatch
                      (State.read_span state written_annotation.id)
                      ~sides:[ (element, annotated) ]
                      (Printf.sprintf "Each element of this loop is %s, not %s."

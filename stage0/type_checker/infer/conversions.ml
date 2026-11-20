@@ -34,7 +34,7 @@ let convert (state : State.state) (env : State.env) ?argument ?(takes_view_as_ow
   let actual_type = read_head state ~default_at:span actual in
   let wanted = read_expected_head state expected in
   let refuse () =
-    State.report_mismatch state span ~expected ~actual;
+    Failures.report_mismatch state span ~expected ~actual;
     None
   in
   let between_owner_and_view =
@@ -52,7 +52,7 @@ let convert (state : State.state) (env : State.env) ?argument ?(takes_view_as_ow
   match between_owner_and_view with
   | Some (conversion, written_view, view) ->
       if not (Unify.unify state.unifier written_view view) then
-        State.report_mismatch state span ~expected ~actual;
+        Failures.report_mismatch state span ~expected ~actual;
       Some conversion
   | None -> (
       match (actual_type, wanted, expression) with
@@ -91,7 +91,7 @@ let convert (state : State.state) (env : State.env) ?argument ?(takes_view_as_ow
                   superset = wanted_function.uses;
                   report_missing =
                     (fun _ ->
-                      State.report_mismatch state span
+                      Failures.report_mismatch state span
                         ~expected:(State.finalize_type state expected)
                         ~actual:(State.finalize_type state actual));
                 }

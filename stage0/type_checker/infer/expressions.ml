@@ -136,7 +136,7 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
             let stop_type = check_expression state env ~expected:element stop in
             Operators.check_literal_operands state ~left:element ~right:stop_type;
             if not (State.unify state element stop_type) then
-              State.report_mismatch state (State.read_span state stop.id) ~expected:element
+              Failures.report_mismatch state (State.read_span state stop.id) ~expected:element
                 ~actual:stop_type;
             element
         | Some only, None | None, Some only -> check_expression state env only
@@ -170,7 +170,7 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
           check state env inner part
       | None, Some (Returns output) ->
           if not (State.unify state output Types.unit) then
-            State.report_mismatch state (State.read_span state value.id) ~expected:output
+            Failures.report_mismatch state (State.read_span state value.id) ~expected:output
               ~actual:Types.unit
       | Some inner, _ -> ignore (check_expression state env inner)
       | None, _ -> ());

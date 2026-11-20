@@ -55,7 +55,25 @@ type frame = {
 }
 
 type decision_site = Use | Statement_end | Actual_head | Method_call
-type logged
+
+type entry =
+  | Literal of {
+      allowed : Language.Builtin_type.t list;
+      report_excluded : Types.ty -> Diagnostic.reported;
+      literal : Syntax.id;
+    }
+  | Narrowing of {
+      allowed : Language.Builtin_type.t list;
+      report_excluded : Types.ty -> Diagnostic.reported;
+    }
+  | Local of Syntax.id
+  | Decided of {
+      site : decision_site;
+      decided_type : Types.ty;
+      decided_at : Source.Definition_span.t;
+    }
+
+type logged = { member : int; entry : entry }
 
 type state = {
   lookups : Lookups.t;
@@ -147,6 +165,7 @@ val make_fresh_generic_arguments : state -> Types.generic list -> Types.argument
 val lookup_bounds : state -> Types.parameter -> Types.trait_reference list
 val normalize : state -> Types.ty -> Types.ty
 val find_domain : state -> Types.ty -> Language.Builtin_type.t list option
+val is_float_domain : Language.Builtin_type.t list -> bool
 val is_within : state -> Types.ty -> Language.Builtin_type.t list -> bool
 val read_integer_range : state -> Types.ty -> Z.t * Z.t
 
@@ -182,11 +201,6 @@ val decide_property :
 
 val is_plain : state -> Types.ty -> bool
 val is_view : state -> Types.ty -> bool
-val find_refused_class : state -> sides:(Types.ty * Types.ty) list -> int option
-
-val report_decided_in_specification :
-  state -> Source.Definition_span.t -> int -> Diagnostic.reported
-
 val diverges : is_never:(Syntax.expression -> bool) -> Syntax.statement -> bool
 val declare : state -> Syntax.name -> Types.ty -> binding:binding -> mode:Language.Mode.t -> unit
 
@@ -197,26 +211,5 @@ val find_target : state -> Syntax.name -> Resolve.target option
 val find_head : state -> Syntax.expression -> Resolve.head option
 val show : state -> Types.ty -> string
 val describe : state -> Types.ty -> string
-val list_class_pairs : state -> Types.ty * Types.ty -> (int * Types.ty) list
-
-val add_mismatch_diagnostic :
-  state ->
-  ?fixes:Source.Definition_span.t Diagnostic.fix list ->
-  Diagnostic.Code.types ->
-  Source.Definition_span.t ->
-  sides:(Types.ty * Types.ty) list ->
-  string ->
-  Diagnostic.reported
-
-val add_operand_mismatch :
-  state ->
-  at:Source.Definition_span.t ->
-  left:Source.Definition_span.t * Types.ty ->
-  right:Source.Definition_span.t * Types.ty ->
-  Diagnostic.reported
-
-val report_mismatch :
-  state -> Source.Definition_span.t -> expected:Types.ty -> actual:Types.ty -> unit
-
 val note_mode_keyword : state -> Syntax.expression -> Syntax.mode -> Syntax.expression -> unit
 val find_local_type : state -> Syntax.name -> Types.ty option

@@ -62,7 +62,7 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
           let first_type = Hooks.check_expression state env first.value in
           let second_type = Hooks.check_expression state env ~expected:first_type second.value in
           if not (State.unify state first_type second_type) then
-            State.report_mismatch state
+            Failures.report_mismatch state
               (State.read_span state second.value.id)
               ~expected:first_type ~actual:second_type;
           Types.bool
@@ -287,8 +287,8 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
                                 (Conversions.find_view_as ~owned:receiver_head ~view:type_))
                              type_)
                       then
-                        State.report_mismatch state (State.read_span state inner.id) ~expected:type_
-                          ~actual:receiver_type;
+                        Failures.report_mismatch state (State.read_span state inner.id)
+                          ~expected:type_ ~actual:receiver_type;
                       Modes.check_mode state env receiver.value
                         { name = "self"; mode = wanted_mode; type_; has_default = false }
                         receiver_type ~has_generic_type:false;
@@ -651,7 +651,7 @@ and check_method_with_receiver state env ?expected ?(type_arguments = [])
                     ~expected:self_type
               | None ->
                   if not (State.unify state self_type receiver_type) then
-                    State.report_mismatch state
+                    Failures.report_mismatch state
                       (State.read_span state receiver.id)
                       ~expected:self_type ~actual:receiver_type)
           | None -> ());

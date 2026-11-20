@@ -280,7 +280,7 @@ and check_constant_pattern (state : State.state) id span path type_ =
   match Interface.Definition.find_constant_type state.lookups.interface path with
   | Some constant_type ->
       if not (State.unify state constant_type type_) then
-        State.report_mismatch state span ~expected:type_ ~actual:constant_type
+        Failures.report_mismatch state span ~expected:type_ ~actual:constant_type
       else if not (is_structural state (State.resolve state constant_type)) then
         State.report state Not_structural span
           (Printf.sprintf
@@ -441,13 +441,13 @@ and check_literal_pattern state id (span : Source.Definition_span.t) literal typ
                     (State.describe state excluded))))
   | Literal_true | Literal_false ->
       if not (State.unify state type_ Types.bool) then
-        State.report_mismatch state span ~expected:type_ ~actual:Types.bool
+        Failures.report_mismatch state span ~expected:type_ ~actual:Types.bool
   | Literal_string tagged -> (
       match find_character_tag state tagged with
       | Some builtin ->
           check_character_value state id tagged builtin;
           if not (State.unify state type_ (Types.make_builtin builtin)) then
-            State.report_mismatch state span ~expected:type_ ~actual:(Types.make_builtin builtin)
+            Failures.report_mismatch state span ~expected:type_ ~actual:(Types.make_builtin builtin)
       | None -> check_string_pattern state span type_)
 
 and check_string_pattern state span type_ =

@@ -557,11 +557,12 @@ let () =
       expect_fine Fixtures.Infer.generic_result_passed_as_a_view)
 
 let () =
-  Harness.test "a later statement does not change the structured type of an earlier local"
-    (fun () ->
+  Harness.test
+    "a later statement does not change the structured type of an earlier local, and the mismatch \
+     with its default offers no conversion" (fun () ->
       let text = Fixtures.Infer.later_statement_keeps_an_earlier_structured_type in
       expect_one_diagnostic text "types.mismatched_integers" ~at:("small == count", 1);
-      expect_fix_titles text [ "Convert the left side to `Int64`." ]);
+      expect_fix_titles text []);
   Harness.test "a local of literals for a bound's trait argument takes its default at the statement"
     (fun () ->
       let text = Fixtures.Infer.local_of_literals_for_a_trait_argument_of_a_bound in

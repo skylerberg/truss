@@ -186,7 +186,7 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
       check_built_in_operator state value [ left; right ] left_type;
       check_literal_operands state ~left:left_type ~right:right_type;
       if not (State.unify state left_type right_type) then
-        State.report_mismatch state (State.read_span state right.id) ~expected:left_type
+        Failures.report_mismatch state (State.read_span state right.id) ~expected:left_type
           ~actual:right_type;
       infer_bitwise_result state (State.read_span state value.id) left_type
   | Operation (Shift _) ->
@@ -227,7 +227,7 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
               | None, None ->
                   if not (State.unify state left_type right_type) then
                     ignore
-                      (State.add_operand_mismatch state ~at:(State.read_span state value.id)
+                      (Failures.add_operand_mismatch state ~at:(State.read_span state value.id)
                          ~left:(State.read_span state left.id, left_type)
                          ~right:(State.read_span state right.id, right_type));
                   left_type
