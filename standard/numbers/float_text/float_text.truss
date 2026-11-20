@@ -871,7 +871,7 @@ fn write_shortest_of(output: mut intrinsic::Storage[UInt8], bits: UInt64, precis
   }
 }
 
-internal fn write_shortest(output: mut intrinsic::Storage[UInt8], value: Float64) {
+internal fn write_shortest_float64(output: mut intrinsic::Storage[UInt8], value: Float64) {
   write_shortest_of(mut output, bits: intrinsic::to_bits(value), precision: Precision.Double)
 }
 

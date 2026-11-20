@@ -210,7 +210,7 @@ internal fn String.push_float32(mut self, value: Float32)
 
 internal fn String.push_float64(mut self, value: Float64)
 {
-  float_text::write_shortest(mut self.storage, value: value)
+  float_text::write_shortest_float64(mut self.storage, value: value)
 }
 
 internal fn String.push_unsigned(mut self, value: UInt64)
