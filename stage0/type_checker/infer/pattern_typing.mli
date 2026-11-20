@@ -4,6 +4,7 @@ val check_binding_pattern :
   Syntax.pattern ->
   Types.ty ->
   is_var:bool ->
+  accepts_tuple_pattern:bool ->
   mode:Language.Mode.t ->
   unit
 

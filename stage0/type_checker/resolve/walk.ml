@@ -703,6 +703,7 @@ and resolve_pattern state scope bound (pattern_ : Syntax.pattern) =
   | Variant { fields; _ } ->
       Option.iter (List.iter (resolve_pattern_field state scope bound)) fields
   | Record fields -> List.iter (resolve_pattern_field state scope bound) fields
+  | Tuple patterns -> List.iter (resolve_pattern state scope bound) patterns
   | Alternatives alternatives -> (
       let each =
         List.map

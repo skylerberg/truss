@@ -67,6 +67,10 @@ let () =
       expect_one_diagnostic Fixtures.Usage.record_pattern_with_unused_field "usage.unused_variable"
         ~says:"`second` is never used. Match its field with `second: _`."
         ~fixed:Fixtures.Usage.record_pattern_with_unused_field_fixed);
+  Harness.test "an unused name in a tuple pattern is replaced with _" (fun () ->
+      expect_one_diagnostic Fixtures.Usage.tuple_pattern_with_an_unused_name "usage.unused_variable"
+        ~says:"`name` is never used. Replace it with `_`."
+        ~fixed:Fixtures.Usage.tuple_pattern_with_an_unused_name_fixed);
   Harness.test "a binding of the only field of a variant is replaced with _" (fun () ->
       expect_one_diagnostic Fixtures.Usage.match_arm_with_unused_binding "usage.unused_variable"
         ~says:"`value` is never used. Replace it with `_`."

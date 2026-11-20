@@ -1,0 +1,6 @@
+type Point(x: Int64, y: Int64)
+
+fn sum(point: Point) -> Int64 {
+  let x, y = point
+  x.saturating_add(y)
+}

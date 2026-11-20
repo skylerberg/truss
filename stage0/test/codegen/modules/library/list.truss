@@ -299,9 +299,9 @@ test "split_first and split_last lend one element and view the rest" {
 test "enumerate gives each element with its index" {
   let words: List[String] = ["a${1}", "b${2}"]
   var seen: UInt64 = 0
-  for entry in words.enumerate() {
-    assert entry.index == seen
-    assert entry.element.length() == 2
+  for index, word in words.enumerate() {
+    assert index == seen
+    assert word.length() == 2
     seen += 1
   }
   assert seen == 2
@@ -312,8 +312,8 @@ test "zip gives pairs up to the shorter length" {
   let more: List[Int64] = [10, 20]
   var total = 0
   var count = 0
-  for pair in numbers.zip(more) {
-    total += pair.first * pair.second
+  for number, factor in numbers.zip(more) {
+    total += number * factor
     count += 1
   }
   assert count == 2

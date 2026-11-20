@@ -116,6 +116,7 @@ says, and is an ordinary name elsewhere:
 | `final(result)` | In a lending method's `ensures`, the lent part as the caller left it |
 | `by`, `bit_vector` | After an `assert`'s condition: `assert condition by bit_vector` |
 | `generic` | In a `uses` list, before the name of a capability parameter |
+| `tuple` | Before `type`: a tuple type (see [Tuple types](#tuple-types)) |
 
 A parameter cannot be named `result`, a parameter of a lending method cannot
 be named `final`, and no function can be named `old` or `identical`. The
@@ -363,7 +364,7 @@ Integer types never convert implicitly.
 ### Type definitions
 
 ```ebnf
-type_definition = "type" UPPER_NAME [ generics ]
+type_definition = [ "tuple" ] "type" UPPER_NAME [ generics ]
                   ( fields | "=" variants | "=" "todo" )
                   { type_clause } ;
 fields          = "(" list(field) ")" ;
@@ -406,10 +407,30 @@ let answer = Some(3)
   `geometry::Shape.Circle`. The prelude's `Some`, `None`, `Ok`, and `Err`
   are written bare.
 - A `type_clause` after the last variant belongs to the whole type.
-- The order of a record's fields has no meaning, except to a derived
-  `Ordered`.
+- The order of a record's fields has no meaning, except in a tuple type and
+  to a derived `Ordered`.
 - A record with one field has none of its field's methods or operators:
   `type UserId(number: UInt64)` is a type of its own.
+
+### Tuple types
+
+```truss
+public tuple type Span(start: UInt64, end: UInt64)
+
+fn length(span: Span) -> UInt64
+  requires span.start <= span.end
+{
+  let start, end = span
+  end - start
+}
+```
+
+- A tuple type is a record whose fields are in the order they are declared,
+  and a tuple pattern matches them by position (see [Patterns](#patterns)).
+- A tuple type has two or more fields. It is built, read, and matched in
+  parentheses by name, as any record is.
+- `map::Entry`, `core::Indexed`, and `core::Pair` are tuple types, so
+  `for name, port in ports` binds each entry's key and value.
 
 ### Recursive types
 
@@ -1576,18 +1597,19 @@ impl FiniteCursor for Countdown {
 ```ebnf
 block     = "{" lines(statement) "}" ;
 
-statement = "let" pattern [ ":" type ] "=" expression [ "else" block ]
-          | "var" pattern [ ":" type ] "=" expression [ "else" block ]
+statement = "let" binding_pattern "=" expression [ "else" block ]
+          | "var" binding_pattern "=" expression [ "else" block ]
           | expression [ assignment_operator expression ]
-          | "for" pattern [ ":" type ] "in" expression { loop_clause } block
+          | "for" binding_pattern "in" expression { loop_clause } block
           | "while" expression { loop_clause } block
           | "parallel" block
-          | "parallel" "for" pattern [ ":" type ] "in" expression { loop_clause } block
+          | "parallel" "for" binding_pattern "in" expression { loop_clause } block
           | "concurrent" block
-          | "concurrent" "for" pattern [ ":" type ] "in" expression { loop_clause } block
+          | "concurrent" "for" binding_pattern "in" expression { loop_clause } block
           | "proof" block
           | "assert" expression [ "by" "bit_vector" ] ;
 
+binding_pattern = pattern [ ":" type ] | tuple_pattern ;
 assignment_operator = "=" | "+=" | "-=" | "*=" | "/=" | "%="
                     | "&=" | "|=" | "^=" | "<<=" | ">>=" ;
 loop_clause = ( "invariant" expression | "decreases" expression { "," expression }
@@ -1647,6 +1669,7 @@ constant        = module_path "::" LOWER_NAME
                 | [ module_path "::" ] UPPER_NAME "." LOWER_NAME ;
 pattern_fields  = "(" list(pattern_field) ")" ;
 pattern_field   = LOWER_NAME ":" pattern | pattern | ".." ;
+tuple_pattern   = pattern "," pattern { "," pattern } ;
 ```
 
 ```truss
@@ -1677,6 +1700,12 @@ match status_code {
   or its type, `http::ok` or `Status.teapot`. A constant in a pattern has a
   type with structural equality (see [Equality](#equality)).
 - Range patterns match integers and characters.
+- A tuple pattern matches a tuple type, one pattern for each field, in the
+  order of the fields. It is written without parentheses, and only as the
+  whole pattern of a `let`, a `var`, or a `for`.
+- In a tuple pattern, a bare name that names another field of the type is
+  an error. Matched by position, `for value, key in ports` would bind each
+  key under the name `value`.
 - Every alternative of an or-pattern binds the same names, with the same
   types.
 - A pattern in `let`, `var`, `for`, or a lambda's parameters matches every

@@ -1,0 +1,7 @@
+fn total(names: Map[String, String]) -> UInt64 {
+  var sum: UInt64 = 0
+  for value, key in names {
+    sum = sum.saturating_add(value.length()).saturating_add(key.length())
+  }
+  sum
+}

@@ -33,20 +33,32 @@ let is_name_byte character =
   || (character >= '0' && character <= '9')
   || character = '_'
 
-let starts_definition source offset =
-  Source.starts_line source offset
-  &&
+let read_word source offset =
   let text = Source.text source in
   let rec locate_word_end index =
     if index < String.length text && is_name_byte text.[index] then locate_word_end (index + 1)
     else index
   in
   let stop = locate_word_end offset in
-  stop > offset
+  (String.sub text offset (stop - offset), stop)
+
+let is_tuple_type_at source offset =
+  let word, stop = read_word source offset in
+  word = "tuple"
   &&
-  match Token.find_word (String.sub text offset (stop - offset)) with
+  let text = Source.text source in
+  let next =
+    Option.value ~default:(String.length text)
+      (String.find_first_index (Fun.negate Char.Ascii.is_blank) ~start:stop text)
+  in
+  next > stop && fst (read_word source next) = "type"
+
+let starts_definition source offset =
+  Source.starts_line source offset
+  &&
+  match Token.find_word (fst (read_word source offset)) with
   | Some (Keyword keyword) -> List.mem keyword Token.definition_keywords
-  | _ -> false
+  | _ -> is_tuple_type_at source offset
 
 let extract_indentation source offset =
   let text = Source.text source in
@@ -60,7 +72,11 @@ let extract_indentation source offset =
 let token_starts_definition source ~first_line_break (kind : Token.kind) offset =
   first_line_break <> None
   && extract_indentation source offset = ""
-  && match kind with Keyword keyword -> List.mem keyword Token.definition_keywords | _ -> false
+  &&
+  match kind with
+  | Keyword keyword -> List.mem keyword Token.definition_keywords
+  | Lower _ -> is_tuple_type_at source offset
+  | _ -> false
 
 let compute_closer_position first_line_break position =
   match first_line_break with

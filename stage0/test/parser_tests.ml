@@ -772,6 +772,14 @@ let () =
         "(for index : UInt8 (.. 0 10) (block))";
       Parse_support.expect_statement "for (index, element): Indexed[UInt8] in data.enumerate() {}"
         "(for (record index element) : Indexed[UInt8] (call (. data enumerate)) (block))");
+  Harness.test "a tuple pattern is a list of patterns after let, var, and for" (fun () ->
+      Parse_support.expect_statement "for name, count in counts {}"
+        "(for (tuple name count) counts (block))";
+      Parse_support.expect_statement "parallel for _, player in mut players {}"
+        "(parallel-for (tuple _ player) (mut players) (block))";
+      Parse_support.expect_statement "let low, high = span" "(let (tuple low high) span)";
+      Parse_support.expect_statement "var low, Some(high) = span else { return }"
+        "(var (tuple low (Some high)) span (else (block (return))))");
   Harness.test "a loop clause takes a condition after when" (fun () ->
       Parse_support.expect_statement
         "while mut cursor.next() is Some(item)\n\

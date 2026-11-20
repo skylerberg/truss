@@ -1,0 +1,3 @@
+fn total(counts: Map[String, UInt64]) {
+  for name, count, extra in counts {}
+}

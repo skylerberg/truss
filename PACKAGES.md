@@ -136,8 +136,9 @@ A release is compatible with the one before when:
 - a function, method, or theorem has the same parameters and result, no
   capability more in its `uses`, a `requires` that the old one implies, an
   `ensures` that implies the old one, and no cost greater than before
-- a type that shows its fields has the same fields, variants, and invariant;
-  an opaque type may change everything inside it
+- a type that shows its fields has the same fields, variants, and invariant,
+  and a tuple type stays one, with its fields in the same order; an opaque
+  type may change everything inside it
 - a trait or capability has the same methods, associated types, required
   traits, and laws, and gains at most methods that have bodies
 - every `impl` is still there, and its associated capability sets gain no

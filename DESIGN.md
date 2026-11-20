@@ -206,6 +206,25 @@ Rules: [Built-in types](SPECIFICATION.md#built-in-types).
 | A size, a length, and an index are `UInt64`, and an offset is `Int64`. | A length is never negative, and a bounds check is one comparison. A subtraction that may go below zero is a compile error, so an unsigned index does not wrap. |
 | A `Character` is a Unicode scalar value. | It has a fixed size, so it is `Plain`, and its definition does not change between Unicode versions. A grapheme cluster has no fixed size, and its boundaries change as Unicode adds rules, so a grapheme is a slice of its string. |
 
+### Tuple types
+
+Rules: [Tuple types](SPECIFICATION.md#tuple-types).
+
+A loop over a map, an `enumerate`, or a `zip` yields records whose field
+names stand for positions: `key` and `value`, `index` and `element`, `first`
+and `second`. Matched by name, they bind those placeholder names, and a
+descriptive name costs a label, as in `(key: word, value: count)`. A tuple
+type declares that its field order is part of its API, so a tuple pattern
+binds each field by position to a name the reader chooses:
+`for word, count in counts`.
+
+| Rule | Reason |
+|---|---|
+| A record matches by position only where it is declared a tuple type. | Reordering two fields of one type would otherwise silently swap the bindings of every positional pattern. Only a type whose field names stand for positions commits to an order. |
+| A tuple pattern has no parentheses. | Parentheses match fields by name in every type, so the semantics of a pattern never depends on whether its type is a tuple type. `for (_, group) in groups`, a habit from Rust and Swift, is an error whose fix removes the parentheses (*LLM habits*). |
+| A tuple pattern is the whole pattern of a `let`, a `var`, or a `for`. | Without parentheses it cannot nest, and in a `match` arm or a lambda's parameters a comma already separates values. |
+| In a tuple pattern, a bare name that names another field is an error. | `for value, key in ports` would bind each key as `value`. The same rule reports `copy(destination, source)`. |
+
 ### Recursive types
 
 Rules: [Recursive types](SPECIFICATION.md#recursive-types).
@@ -1559,7 +1578,7 @@ Rules: [The registry](PACKAGES.md#the-registry).
 |---|---|
 | Comments | [Comments](#comments) |
 | Numeric literal suffixes | [Number literals](#number-literals) |
-| Tuples | Naming by position lets users mix up which is which. Destructuring a record suffices. |
+| Tuples without a name, such as `(Int64, String)` | Naming by position lets users mix up which is which. A [tuple type](#tuple-types) has a name and named fields, and matches by position only in a tuple pattern. |
 | Type aliases | A type name always means one type. |
 | A garbage collector, lifetimes, stored references, and mutable global state | [Values and ownership](#values-and-ownership) |
 | Destructors | [Handles](#handles) |

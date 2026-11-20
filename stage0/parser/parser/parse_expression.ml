@@ -1343,11 +1343,19 @@ and parse_statement cursor : Syntax.statement =
             (Assignment { target; operator = Assign; value = parse_expression cursor })
       | None, _ -> make_statement_node (Expression target))
 
+and parse_binding_annotation cursor (pattern : Syntax.pattern) =
+  match (pattern.kind, Cursor.peek cursor) with
+  | Tuple _, ({ kind = Punctuation Colon; _ } as colon) ->
+      Cursor.report cursor Unexpected_token colon.span
+        "A tuple pattern takes no type annotation: the value's tuple type gives each pattern the \
+         type of its field.";
+      raise Cursor.Failed
+  | _ ->
+      if Cursor.accept_punctuation cursor Colon then Some (parse_type_expression cursor) else None
+
 and parse_binding cursor ~is_var =
-  let pattern = Parse_pattern.parse_pattern cursor in
-  let annotation =
-    if Cursor.accept_punctuation cursor Colon then Some (parse_type_expression cursor) else None
-  in
+  let pattern = Parse_pattern.parse_binding_pattern cursor in
+  let annotation = parse_binding_annotation cursor pattern in
   Cursor.expect_punctuation cursor Equal;
   let value = parse_expression cursor in
   let else_ =
@@ -1375,10 +1383,8 @@ and parse_binding cursor ~is_var =
   Let { is_var; pattern; annotation; value; else_ }
 
 and parse_for_loop cursor ~mode =
-  let pattern = Parse_pattern.parse_pattern cursor in
-  let annotation =
-    if Cursor.accept_punctuation cursor Colon then Some (parse_type_expression cursor) else None
-  in
+  let pattern = Parse_pattern.parse_binding_pattern cursor in
+  let annotation = parse_binding_annotation cursor pattern in
   Cursor.expect_keyword cursor In;
   let iterable = parse_expression cursor in
   (match iterable.kind with

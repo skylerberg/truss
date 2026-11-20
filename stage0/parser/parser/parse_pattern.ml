@@ -179,3 +179,9 @@ and parse_alternatives cursor : Syntax.pattern =
   match Cursor.parse_separated cursor ~separator:Bar parse_primary with
   | [ single ] -> single
   | alternatives -> make_pattern_node cursor start (Alternatives alternatives)
+
+let parse_binding_pattern cursor : Syntax.pattern =
+  let start = Cursor.index cursor in
+  match Cursor.parse_separated cursor ~separator:Comma parse_pattern with
+  | [ single ] -> single
+  | patterns -> make_pattern_node cursor start (Tuple patterns)
