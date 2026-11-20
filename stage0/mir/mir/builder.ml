@@ -173,14 +173,17 @@ let rec find_compared (tested : Core.expression) (statements : Tree.statement li
       find_compared first (List.rev_append earlier first_block.statements)
   | _ -> raise_bug "the comparison that measures a `while` loop is missing from its condition"
 
+let emit_statements builder (statements : Tree.statement list) =
+  List.iter
+    (fun (statement : Tree.statement) -> Emitter.emit builder statement.kind statement.origin)
+    statements
+
 let lower_condition_block builder build : Tree.block option =
   let block = Emitter.build_block builder build in
   match block.value with
   | Some _ -> Some block
   | None ->
-      List.iter
-        (fun (statement : Tree.statement) -> Emitter.emit builder statement.kind statement.origin)
-        block.statements;
+      emit_statements builder block.statements;
       Emitter.mark_unreachable builder;
       None
 
@@ -280,17 +283,16 @@ let rec lower_expression builder (node : Core.expression) : Tree.operand option 
         let* value = lower_expression builder value in
         hold (To_any { value; trait; evidence })
     | If { condition = tested; then_; else_ } ->
-        let* condition, lowered = lower_condition builder tested in
+        let scope = Emitter.make_block_scope () in
+        let* condition = lower_condition builder scope tested in
         let result = allocate_value_local builder node in
-        let lower_arm ~holds ended block_scope (body : Core.block option) =
+        let lower_branch ~holds run (body : Core.block option) =
           Emitter.build_block builder (fun () ->
               if is_written node.origin then
                 emit_path_note builder
                   (Condition_holds { condition = tested.origin; holds })
                   tested.origin;
-              Emitter.end_scope builder ended tested.origin;
-              Emitter.run_in_block_scope builder block_scope origin (fun () ->
-                  Emitter.enter_guarded_block builder block_scope tested.origin;
+              run (fun () ->
                   match (Option.map (lower_block builder) body, result) with
                   | Some (Some value), Some local ->
                       Emitter.assign builder (Emitter.make_local_place local) (Operand value) origin;
@@ -301,10 +303,16 @@ let rec lower_expression builder (node : Core.expression) : Tree.operand option 
                   | (Some (Some _) | None), _ -> Some Emitter.unit_value))
         in
         let then_ =
-          lower_arm ~holds:true lowered.ended_if_true lowered.block_scope_if_true (Some then_)
+          lower_branch ~holds:true
+            (Emitter.run_in_guarded_block builder scope tested.origin)
+            (Some then_)
         in
         let else_ =
-          lower_arm ~holds:false lowered.ended_if_false (Emitter.make_block_scope ()) else_
+          lower_branch ~holds:false
+            (fun lower ->
+              emit_statements builder (Emitter.list_scope_ends scope tested.origin);
+              Emitter.run_in_scope builder origin lower)
+            else_
         in
         lower_choice builder node [ then_; else_ ] (Tree.Conditional { condition; then_; else_ })
     | Match { scrutinees; arms } -> match_ builder node scrutinees arms
@@ -721,17 +729,9 @@ and lower_choice builder (node : Core.expression) (blocks : Tree.block list) cho
     None
   end
 
-and lower_condition builder (tested : Core.expression) :
-    (Tree.block * Emitter.lowered_condition) option =
-  let lowered_condition = ref None in
-  Option.map
-    (fun condition -> (condition, Option.get !lowered_condition))
-    (lower_condition_block builder (fun () ->
-         let lowered =
-           Emitter.run_in_condition_scope builder (fun () -> lower_expression builder tested)
-         in
-         lowered_condition := Some lowered;
-         lowered.value))
+and lower_condition builder scope (tested : Core.expression) : Tree.block option =
+  Emitter.run_in_condition builder scope (fun () ->
+      lower_condition_block builder (fun () -> lower_expression builder tested))
 
 and lower_truth builder (node : Core.expression) : Tree.operand option =
   match node.kind with
@@ -831,34 +831,34 @@ and match_ builder (node : Core.expression) scrutinees (arms : Core.arm list) : 
   let result = allocate_value_local builder node in
   let unmatched_ends = ref [] in
   let lower_case (arm : Core.arm) : Tree.case =
-    Emitter.run_in_arm_scope builder ~scrutinee:scrutinee_lends @@ fun scope ->
-    let tests =
-      Emitter.build_block builder (fun () ->
-          List.iter
-            (fun (ended : Tree.statement) -> Emitter.emit builder ended.kind ended.origin)
-            !unmatched_ends;
-          match_patterns builder arm.patterns scrutinee_places arm.origin)
-    in
-    let guard =
-      Option.map
-        (fun (guard : Core.expression) ->
-          Emitter.build_block builder (fun () ->
-              let loans =
-                List.filter_map
-                  (fun value ->
-                    match value with
-                    | Tree.Immediate _ -> None
-                    | _ ->
-                        Some (Emitter.start_loan builder value Read Operand_evaluation arm.origin))
-                  evaluated
-              in
-              let holds =
-                Emitter.run_in_guard_scope builder guard.origin (fun () ->
-                    lower_expression builder guard)
-              in
-              Emitter.end_loans builder loans arm.origin;
-              holds))
-        arm.guard
+    let scope = Emitter.make_arm_scope ~scrutinee:scrutinee_lends in
+    let tests, guard =
+      Emitter.run_in_condition builder scope (fun () ->
+          let tests =
+            Emitter.build_block builder (fun () ->
+                emit_statements builder !unmatched_ends;
+                match_patterns builder arm.patterns scrutinee_places arm.origin)
+          in
+          let guard =
+            Option.map
+              (fun (guard : Core.expression) ->
+                Emitter.build_block builder (fun () ->
+                    let loans =
+                      List.filter_map
+                        (fun value ->
+                          match value with
+                          | Tree.Immediate _ -> None
+                          | _ ->
+                              Some
+                                (Emitter.start_loan builder value Read Operand_evaluation arm.origin))
+                        evaluated
+                    in
+                    let holds = lower_expression builder guard in
+                    Emitter.end_loans builder loans arm.origin;
+                    holds))
+              arm.guard
+          in
+          (tests, guard))
     in
     unmatched_ends := Emitter.list_unmatched_ends scope ~scrutinee:scrutinee_lends arm.origin;
     let value =
@@ -867,18 +867,14 @@ and match_ builder (node : Core.expression) scrutinees (arms : Core.arm list) : 
             emit_path_note builder
               (Arm_taken (List.map (fun (pattern : Core.pattern) -> pattern.origin) arm.patterns))
               arm.origin;
-          Emitter.enter_guarded_block builder scope arm.origin;
-          let value =
-            match (lower_block builder arm.body, result) with
-            | Some value, Some local ->
-                Emitter.assign builder (Emitter.make_local_place local) (Operand value) arm.origin;
-                Some
-                  (Tree.Use { place = Emitter.make_local_place local; type_ = node.type_; origin })
-            | Some _, None -> Some Emitter.unit_value
-            | None, _ -> None
-          in
-          Emitter.end_scope builder scope arm.origin;
-          value)
+          Emitter.run_in_guarded_block builder scope arm.origin (fun () ->
+              match (lower_block builder arm.body, result) with
+              | Some value, Some local ->
+                  Emitter.assign builder (Emitter.make_local_place local) (Operand value) arm.origin;
+                  Some
+                    (Tree.Use { place = Emitter.make_local_place local; type_ = node.type_; origin })
+              | Some _, None -> Some Emitter.unit_value
+              | None, _ -> None))
     in
     { Tree.tests; guard; value }
   in
@@ -1234,8 +1230,9 @@ and lower_statement builder (node : Core.statement) =
               quantified = None;
             }
           in
-          begin match lower_condition builder tested with
-          | Some (condition, lowered) -> (
+          let scope = Emitter.make_block_scope () in
+          begin match lower_condition builder scope tested with
+          | Some condition -> (
               let compared =
                 if Core_walk.has_implicit_measure tested then
                   Some (find_compared tested condition.statements)
@@ -1243,19 +1240,15 @@ and lower_statement builder (node : Core.statement) =
               in
               let body =
                 Emitter.build_block builder (fun () ->
-                    Emitter.end_scope builder lowered.ended_if_true tested.origin;
                     Emitter.run_in_loop builder (fun () ->
                         ignore
-                          (Emitter.run_in_block_scope builder lowered.block_scope_if_true origin
-                             (fun () ->
-                               Emitter.enter_guarded_block builder lowered.block_scope_if_true
-                                 tested.origin;
+                          (Emitter.run_in_guarded_block builder scope tested.origin (fun () ->
                                lower_block builder body)));
                     if Emitter.reaches builder then Some Emitter.unit_value else None)
               in
               let failed =
                 Emitter.build_block builder (fun () ->
-                    Emitter.end_scope builder lowered.ended_if_false tested.origin;
+                    emit_statements builder (Emitter.list_scope_ends scope tested.origin);
                     Some Emitter.unit_value)
               in
               Emitter.emit builder

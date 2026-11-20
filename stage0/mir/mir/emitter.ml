@@ -4,20 +4,13 @@ end))
 
 let raise_bug format = Compiler_bug.raise_bug ~stage:"MIR" format
 
-type frame = Bindings | Statement | Condition
+type frame = Bindings | Statement
 
 type scope = {
   frame : frame;
   mutable bound : Tree.local list;
   mutable loans : int list;
   mutable temporaries : Tree.local list;
-}
-
-type lowered_condition = {
-  value : Tree.operand option;
-  ended_if_true : scope;
-  ended_if_false : scope;
-  block_scope_if_true : scope;
 }
 
 type task_exit = Exit_return of Tree.operand option | Exit_break | Exit_continue
@@ -294,63 +287,45 @@ let rec borrow_place builder (place : Tree.place) =
 let partition_lent_parts builder temporaries =
   List.partition (Hashtbl.mem builder.lent_parts) temporaries
 
-let run_in_condition_frame builder evaluate =
-  let scope = { frame = Condition; bound = []; loans = []; temporaries = [] } in
-  builder.scopes <- scope :: builder.scopes;
-  let value = evaluate () in
-  builder.scopes <- List.tl builder.scopes;
-  (value, scope)
-
-let run_taking_statement_bindings builder evaluate =
+let run_in_condition builder scope evaluate =
   let statement_scope = find_statement_scope builder in
   let bound_before = statement_scope.bound in
-  let value = evaluate () in
+  builder.scopes <- scope :: builder.scopes;
+  let value = Fun.protect ~finally:(fun () -> builder.scopes <- List.tl builder.scopes) evaluate in
   let names = List.filter (fun local -> not (List.mem local bound_before)) statement_scope.bound in
   statement_scope.bound <- bound_before;
-  (value, names)
-
-let run_in_condition_scope builder evaluate =
-  let (value, frame), names =
-    run_taking_statement_bindings builder (fun () -> run_in_condition_frame builder evaluate)
-  in
-  let lent_parts, others = partition_lent_parts builder frame.temporaries in
-  {
-    value;
-    ended_if_true = { frame with temporaries = others; loans = [] };
-    ended_if_false = { frame with bound = names };
-    block_scope_if_true =
-      { (make_block_scope ()) with bound = names; loans = frame.loans; temporaries = lent_parts };
-  }
+  scope.bound <- names @ scope.bound;
+  value
 
 let run_in_scrutinee_frame builder evaluate =
-  let (value, frame), names =
-    run_taking_statement_bindings builder (fun () -> run_in_condition_frame builder evaluate)
-  in
-  let lent_parts, others = partition_lent_parts builder frame.temporaries in
-  List.iter (add_temporary builder) (List.rev others);
-  (value, { frame with bound = names; temporaries = lent_parts })
-
-let run_in_guard_scope builder origin evaluate =
-  let (value, scope), names =
-    run_taking_statement_bindings builder (fun () -> run_in_condition_frame builder evaluate)
-  in
+  let scope = make_block_scope () in
+  let value = run_in_condition builder scope evaluate in
   let lent_parts, others = partition_lent_parts builder scope.temporaries in
-  List.iter (add_temporary builder) (List.rev lent_parts);
-  (match builder.scopes with
-  | arm :: _ ->
-      arm.loans <- scope.loans @ arm.loans;
-      arm.bound <- names @ arm.bound
-  | [] -> raise_bug "a guard outside an arm");
-  let holds =
-    Option.map
-      (fun value ->
-        let local = allocate_temporary builder Types.bool origin in
-        assign builder (make_local_place local) (Operand value) origin;
-        Tree.Use { place = make_local_place local; type_ = Types.bool; origin })
-      value
+  List.iter (add_temporary builder) (List.rev others);
+  scope.temporaries <- lent_parts;
+  (value, scope)
+
+let make_arm_scope ~scrutinee =
+  {
+    frame = Bindings;
+    bound = scrutinee.bound;
+    loans = scrutinee.loans;
+    temporaries = scrutinee.temporaries;
+  }
+
+let run_in_guarded_block builder scope origin build =
+  let lent_parts, others = partition_lent_parts builder scope.temporaries in
+  let block_scope =
+    if lent_parts <> [] && List.exists (Hashtbl.mem builder.aliasing_names) scope.bound then begin
+      end_scope builder { scope with bound = []; loans = []; temporaries = others } origin;
+      { scope with temporaries = lent_parts }
+    end
+    else begin
+      end_scope builder { scope with bound = [] } origin;
+      { scope with loans = []; temporaries = [] }
+    end
   in
-  end_scope builder { scope with temporaries = others; loans = [] } origin;
-  holds
+  run_in_block_scope builder block_scope origin build
 
 let run_in_value_scope builder origin (build : unit -> Tree.operand option) =
   run_in_scope builder origin (fun () ->
@@ -571,18 +546,6 @@ let resume_block builder (enclosing : suspended) =
   builder.statements <- enclosing;
   statements
 
-let run_in_arm_scope builder ~scrutinee build =
-  let scope =
-    {
-      frame = Bindings;
-      bound = scrutinee.bound;
-      loans = scrutinee.loans;
-      temporaries = scrutinee.temporaries;
-    }
-  in
-  builder.scopes <- scope :: builder.scopes;
-  Fun.protect ~finally:(fun () -> builder.scopes <- List.tl builder.scopes) (fun () -> build scope)
-
 let list_unmatched_ends scope ~scrutinee origin =
   list_scope_ends
     {
@@ -593,14 +556,6 @@ let list_unmatched_ends scope ~scrutinee origin =
         List.filter (fun local -> not (List.mem local scrutinee.temporaries)) scope.temporaries;
     }
     origin
-
-let enter_guarded_block builder scope origin =
-  let lent_parts, others = partition_lent_parts builder scope.temporaries in
-  if lent_parts <> [] && not (List.exists (Hashtbl.mem builder.aliasing_names) scope.bound) then begin
-    end_scope builder { scope with bound = []; temporaries = lent_parts } origin;
-    scope.loans <- [];
-    scope.temporaries <- others
-  end
 
 let run_in_task builder task build =
   builder.tasks <- (task, List.length builder.scopes) :: builder.tasks;
