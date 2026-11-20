@@ -82,12 +82,11 @@ type state = {
   definition : Syntax.definition;
   resolved : Resolve.resolved;
   text : string Lazy.t;
-  mutable tables : Tables.t;
-  mutable holes_become_never : bool;
+  tables : Tables.t;
   mutable diagnostics : Diagnostic.in_definition list;
   unifier : Unify.t;
   locals : (Syntax.id, local) Hashtbl.t;
-  mutable law_parameters : (string * Types.ty) list;
+  law_parameters : (string * Types.ty) list;
   mutable frames : frame list;
   mutable goals : goal list;
   mutable locals_read : Syntax.id list;
@@ -188,7 +187,6 @@ val resolve_capabilities : state -> Types.capability_set -> Types.capability_set
 val finalize_type : state -> Types.ty -> Types.ty
 val finalize_capabilities : state -> Types.capability_set -> Types.capability_set
 val finalize_argument : state -> Types.argument -> Types.argument
-val finalize_instantiation : state -> Types.instantiation -> Types.instantiation
 val unify : state -> Types.ty -> Types.ty -> bool
 val unify_as_hint : state -> Types.ty -> Types.ty -> unit
 val normalize_trait : state -> Types.trait_reference -> Types.trait_reference

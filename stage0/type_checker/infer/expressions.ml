@@ -323,8 +323,8 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
                           };
                       arguments =
                         [
-                          { expression = base.id; core_argument_index = 0; mode = Read };
-                          { expression = key.id; core_argument_index = 1; mode = Read };
+                          { expression = base; core_argument_index = 0; mode = Read };
+                          { expression = key; core_argument_index = 1; mode = Read };
                         ];
                       omitted_defaults = [];
                       callee_result = output;

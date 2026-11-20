@@ -6,8 +6,7 @@ type t = {
   lookups : Lookups.t;
   resolved : Resolve.resolved;
   tables : Tables.t;
-  holes : Tables.t option;
-  expressions : Syntax.expression option array;
+  tables_with_holes : Tables.t option;
   context : Interface.Elaborator.t;
   law_parameters : (string * Types.ty) list;
   package : Path.package;
@@ -32,6 +31,25 @@ let allocate_synthetic_local form : Core.local =
 
 let make_synthetic_expression form ~origin type_ kind : Core.expression =
   { id = allocate_node_id form; origin; type_; kind }
+
+let make_pattern form ~origin type_ kind : Core.pattern =
+  { id = allocate_node_id form; origin; type_; kind }
+
+let make_binding form ~origin ~is_var ~mode type_ local =
+  make_pattern form ~origin type_ (Bind { local; is_var; mode })
+
+let make_statement form ~origin kind : Core.statement = { id = allocate_node_id form; origin; kind }
+
+let make_local_use form ~origin type_ local =
+  make_synthetic_expression form ~origin type_ (Use (Local { local; type_; origin }))
+
+let make_binding_match ~origin scrutinee pattern body : Core.kind =
+  Match
+    {
+      is_written = false;
+      scrutinees = [ scrutinee ];
+      arms = [ { patterns = [ pattern ]; guard = None; body; origin } ];
+    }
 
 let make_place (node : Core.expression) : Core.place =
   match node.kind with Use place -> place | _ -> Temporary node
@@ -124,14 +142,11 @@ let make_range form ~origin (base : Core.place) ~start ~stop ~inclusive : Core.k
        })
 
 let was_hole form (select_table : Tables.t -> Types.ty option array) (id : Syntax.id) =
-  match form.holes with
+  match form.tables_with_holes with
   | Some tables -> (select_table tables).(id) = Some Types.Hole
   | None -> false
 
-let is_call form (id : Syntax.id) =
-  match form.tables.calls.(id) with
-  | Some { callee = Built_in_operator; _ } | None -> false
-  | Some _ -> true
+let is_call form (id : Syntax.id) = Option.is_some form.tables.calls.(id)
 
 let read_call form (id : Syntax.id) : Tables.call =
   match form.tables.calls.(id) with
@@ -155,7 +170,7 @@ let convert_callee form (callee : Tables.callee) : Core.operand Core.target =
       Trait_method { trait; name; receiver; self_type; instantiation; evidence }
   | Capability_method { capability; name } -> Capability_method { capability; name }
   | Intrinsic { operation; type_arguments } -> Intrinsic { operation; type_arguments }
-  | Constructor _ | Indirect | Built_in_operator -> raise_bug "this callee has no core callee"
+  | Constructor _ | Indirect -> raise_bug "this callee has no core callee"
 
 let arithmetic_methods : (Well_known.method_ * Intrinsic.scalar) list =
   [
@@ -236,13 +251,8 @@ let build_variant_value form (value : Syntax.expression) type_path variant : Cor
         {
           parameters =
             List.map
-              (fun ((field : Types.field), local) : Core.pattern ->
-                {
-                  id = allocate_node_id form;
-                  origin = value.id;
-                  type_ = field.field_type;
-                  kind = Bind { local; is_var = false; mode = Own };
-                })
+              (fun ((field : Types.field), local) ->
+                make_binding form ~origin:value.id ~is_var:false ~mode:Own field.field_type local)
               fields;
           captures = [];
           body =
@@ -260,15 +270,8 @@ let build_variant_value form (value : Syntax.expression) type_path variant : Cor
                                 ( field.field_name,
                                   Some
                                     (Core.Value
-                                       (make_synthetic_expression form ~origin:value.id
-                                          field.field_type
-                                          (Core.Use
-                                             (Local
-                                                {
-                                                  local;
-                                                  type_ = field.field_type;
-                                                  origin = value.id;
-                                                })))) ))
+                                       (make_local_use form ~origin:value.id field.field_type local))
+                                ))
                               fields;
                         }));
             };
@@ -480,12 +483,10 @@ let is_executable form (condition : Core.expression) =
 
 let rec lend_statements form (mode : Language.Mode.t) (value : Core.expression) :
     Core.statement list =
-  let make_statement kind : Core.statement list =
-    [ { id = allocate_node_id form; origin = value.origin; kind } ]
-  in
+  let make_statements kind = [ make_statement form ~origin:value.origin kind ] in
   let make_branching kind =
     let type_ = if value.type_ = Types.Never then Types.Never else Types.unit in
-    make_statement (Evaluate { value with type_; kind })
+    make_statements (Evaluate { value with type_; kind })
   in
   match value.kind with
   | If { condition; then_; else_ = Some else_; binds_lent_part } ->
@@ -509,8 +510,8 @@ let rec lend_statements form (mode : Language.Mode.t) (value : Core.expression) 
                  arms;
            })
   | Block body -> make_branching (Block (lend_block form mode body))
-  | _ when value.type_ = Types.Never -> make_statement (Evaluate value)
-  | _ -> make_statement (Yield { mode; part = Operands.build mode value })
+  | _ when value.type_ = Types.Never -> make_statements (Evaluate value)
+  | _ -> make_statements (Yield { mode; part = Operands.build mode value })
 
 and lend_block form mode (body : Core.block) : Core.block =
   match body.value with
@@ -587,8 +588,7 @@ let apply_conversion form (id : Syntax.id) (inner : Core.expression) (conversion
                   ~lends:None))
       | other -> raise_bug "`%s` is viewed and has no view" (Types.show other))
 
-let has_node form (value : Syntax.expression) =
-  Option.is_some (Option.value ~default:form.tables form.holes).types.(value.id)
+let has_node form (value : Syntax.expression) = Option.is_some form.tables.types.(value.id)
 
 let rec list_operands form (value : Syntax.expression) : Syntax.expression list =
   let list_checked (part : Syntax.expression) =
@@ -607,13 +607,8 @@ let rec list_operands form (value : Syntax.expression) : Syntax.expression list 
           checked_parts := list_checked part :: !checked_parts);
       List.concat (List.rev !checked_parts)
 
-let read_expression form (id : Syntax.id) : Syntax.expression =
-  match form.expressions.(id) with
-  | Some expression -> expression
-  | None -> raise_bug "a call's argument has no core node"
-
 let rec build_expression form env (value : Syntax.expression) : Core.expression =
-  let evaluated = if Option.is_some form.holes then list_operands form value else [] in
+  let evaluated = if Option.is_some form.tables_with_holes then list_operands form value else [] in
   if
     List.exists
       (fun (operand : Syntax.expression) -> was_hole form (fun tables -> tables.types) operand.id)
@@ -625,23 +620,13 @@ let rec build_expression form env (value : Syntax.expression) : Core.expression 
       | _ ->
           let node = build_expression form env operand in
           Some
-            {
-              id = allocate_node_id form;
-              origin = operand.id;
-              kind =
-                Let
+            (make_statement form ~origin:operand.id
+               (Let
                   {
-                    pattern =
-                      {
-                        id = allocate_node_id form;
-                        origin = operand.id;
-                        type_ = node.type_;
-                        kind = Wildcard;
-                      };
+                    pattern = make_pattern form ~origin:operand.id node.type_ Wildcard;
                     value = Operands.build Read node;
                     else_ = None;
-                  };
-            }
+                  }))
     in
     let statements = List.filter_map evaluate evaluated in
     let todo = make_synthetic_expression form ~origin:value.id Types.Never Todo in
@@ -659,9 +644,6 @@ let rec build_expression form env (value : Syntax.expression) : Core.expression 
           | None -> raise_bug "`%s` has a node and no type" (quote form value.id))
     in
     List.fold_left (apply_conversion form value.id) built form.tables.conversions.(value.id)
-
-and build_expression_by_id form env (id : Syntax.id) =
-  build_expression form env (read_expression form id)
 
 and build_kind form env (value : Syntax.expression) : Core.kind =
   match value.kind with
@@ -784,7 +766,7 @@ and build_kind form env (value : Syntax.expression) : Core.kind =
             {
               statements =
                 lend_statements form mode (build_expression form env inner)
-                @ [ { id = allocate_node_id form; origin = value.id; kind = Evaluate returned } ];
+                @ [ make_statement form ~origin:value.id (Evaluate returned) ];
               value = None;
             }
       | _ -> Return (Option.map (build_expression form env) inner))
@@ -871,7 +853,6 @@ and build_kind form env (value : Syntax.expression) : Core.kind =
         }
   | Provide { implementations; body } -> build_provide form env implementations body
   | Block body -> Block (build_block form env body)
-  | Expression_error when is_call form value.id -> build_call_kind form env value
   | Parenthesized _ | Mode _ -> raise_bug "a wrapper has no node of its own"
   | Self_type_value | Expression_error ->
       raise_bug "`%s` is not a value and has no core node" (quote form value.id)
@@ -1045,8 +1026,7 @@ and build_arguments form env (call : Tables.call) : Core.argument list =
           Core.Passed
             {
               mode = argument.mode;
-              value =
-                Operands.build argument.mode (build_expression_by_id form env argument.expression);
+              value = Operands.build argument.mode (build_expression form env argument.expression);
             }
       | None -> Default)
 
@@ -1060,7 +1040,7 @@ and build_call form env ~lends ?function_value (call : Tables.call) : Core.call 
 
 and build_argument_expressions form env (call : Tables.call) =
   List.map
-    (fun (argument : Tables.argument) -> build_expression_by_id form env argument.expression)
+    (fun (argument : Tables.argument) -> build_expression form env argument.expression)
     (List.sort
        (fun (left : Tables.argument) (right : Tables.argument) ->
          compare left.core_argument_index right.core_argument_index)
@@ -1074,8 +1054,7 @@ and build_call_kind ?lends ?function_value form env (value : Syntax.expression) 
   match recorded.callee with
   | Trait_method { trait; _ } when Well_known.is Copyable trait.trait -> (
       match recorded.arguments with
-      | [ receiver ] ->
-          Copy (Operands.build Read (build_expression_by_id form env receiver.expression))
+      | [ receiver ] -> Copy (Operands.build Read (build_expression form env receiver.expression))
       | _ -> raise_bug "`copy` does not have exactly one argument")
   | Trait_method { trait; name; receiver; self_type; _ }
     when Option.is_some (find_built_in_operation trait name receiver self_type) ->
@@ -1096,9 +1075,7 @@ and build_call_kind ?lends ?function_value form env (value : Syntax.expression) 
         List.map
           (fun (argument : Tables.argument) ->
             ( (List.nth declared argument.core_argument_index).field_name,
-              Some
-                (Operands.build argument.mode (build_expression_by_id form env argument.expression))
-            ))
+              Some (Operands.build argument.mode (build_expression form env argument.expression)) ))
           recorded.arguments
       in
       let defaulted =
@@ -1108,7 +1085,6 @@ and build_call_kind ?lends ?function_value form env (value : Syntax.expression) 
           declared
       in
       Construct { variant; fields = written @ defaulted }
-  | Built_in_operator -> raise_bug "an operator is recorded as a call"
   | Indirect | Function _ | Trait_method _ | Capability_method _ | Intrinsic _ -> (
       let function_value = Option.map (build_expression form env) function_value in
       let call = Core.Call (build_call form env ~lends ?function_value recorded) in
@@ -1154,12 +1130,8 @@ and build_comparison form env (value : Syntax.expression) comparison (left : Syn
           {
             value = Operands.build Own call;
             pattern =
-              {
-                id = allocate_node_id form;
-                origin = value.id;
-                type_ = recorded.callee_result;
-                kind = Variant { variant = Well_known.show_variant variant; fields = [] };
-              };
+              make_pattern form ~origin:value.id recorded.callee_result
+                (Variant { variant = Well_known.show_variant variant; fields = [] });
           }
       in
       let make_not kind : Core.kind =
@@ -1212,20 +1184,14 @@ and build_untagged_string form env ~origin (literal : Syntax.string_literal) : C
   | [] -> String literal.first.value
   | rest ->
       let make = make_synthetic_expression form ~origin in
-      let make_statement kind : Core.statement = { id = allocate_node_id form; origin; kind } in
+      let make_statement = make_statement form ~origin in
       let text = allocate_synthetic_local form in
       let text_place : Core.place = Local { local = text; type_ = Types.string_type; origin } in
       let let_text =
         make_statement
           (Let
              {
-               pattern =
-                 {
-                   id = allocate_node_id form;
-                   origin;
-                   type_ = Types.string_type;
-                   kind = Bind { local = text; is_var = true; mode = Own };
-                 };
+               pattern = make_binding form ~origin ~is_var:true ~mode:Own Types.string_type text;
                value = Operands.build Own (make Types.string_type (String literal.first.value));
                else_ = None;
              })
@@ -1397,32 +1363,21 @@ and build_try form env (value : Syntax.expression) (inner : Syntax.expression) ~
         (fun (field : Types.field) -> (field, allocate_synthetic_local form))
         (Option.value ~default:[] variant.fields)
     in
-    ( {
-        id = allocate_node_id form;
-        origin = value.id;
-        type_ = scrutinee.type_;
-        kind =
-          Variant
-            {
-              variant = variant.variant_name;
-              fields =
-                List.map
-                  (fun ((field : Types.field), local) : (string * Core.pattern) ->
-                    ( field.field_name,
-                      {
-                        id = allocate_node_id form;
-                        origin = value.id;
-                        type_ = field.field_type;
-                        kind = Bind { local; is_var = false; mode = Own };
-                      } ))
-                  fields;
-            };
-      },
+    ( make_pattern form ~origin:value.id scrutinee.type_
+        (Variant
+           {
+             variant = variant.variant_name;
+             fields =
+               List.map
+                 (fun ((field : Types.field), local) ->
+                   ( field.field_name,
+                     make_binding form ~origin:value.id ~is_var:false ~mode:Own field.field_type
+                       local ))
+                 fields;
+           }),
       List.map
         (fun ((field : Types.field), local) ->
-          ( field.field_name,
-            make field.field_type
-              (Core.Use (Local { local; type_ = field.field_type; origin = value.id })) ))
+          (field.field_name, make_local_use form ~origin:value.id field.field_type local))
         fields )
   in
   let success_pattern, success_fields = bind_fields success in
@@ -1463,45 +1418,27 @@ and build_try form env (value : Syntax.expression) (inner : Syntax.expression) ~
     }
 
 and build_collection_place form env (iterable : Syntax.expression) (mode : Language.Mode.t) :
-    Core.place * (type_:Types.ty -> Core.block -> Core.kind) option =
+    Core.place * (Core.block -> Core.kind) option =
   let collection = build_expression form env iterable in
   match collection.kind with
   | Use place when is_fixed_place place -> (place, None)
   | _ ->
       let local = allocate_synthetic_local form and origin = iterable.id in
       let scrutinee = Operands.build mode collection in
-      let pattern : Core.pattern =
-        {
-          id = allocate_node_id form;
-          origin;
-          type_ = collection.type_;
-          kind =
-            Bind
-              {
-                local;
-                is_var = false;
-                mode = (match scrutinee with Place _ -> mode | Value _ -> Own);
-              };
-        }
+      let pattern =
+        make_binding form ~origin ~is_var:false
+          ~mode:(match scrutinee with Place _ -> mode | Value _ -> Own)
+          collection.type_ local
       in
       ( Local { local; type_ = collection.type_; origin },
-        Some
-          (fun ~type_:_ body ->
-            Match
-              {
-                is_written = false;
-                scrutinees = [ scrutinee ];
-                arms = [ { patterns = [ pattern ]; guard = None; body; origin } ];
-              }) )
+        Some (make_binding_match ~origin scrutinee pattern) )
 
 and build_elements form ~origin (collection : Core.place) ~(count : Tables.call)
     ~(element : Tables.call) ~(lends : Language.Mode.t) : Core.elements =
   let uint64 = Types.make_builtin UInt64 in
   let local = allocate_synthetic_local form in
   let make_receiver mode : Core.argument = Passed { mode; value = Place collection } in
-  let position =
-    make_synthetic_expression form ~origin uint64 (Use (Local { local; type_ = uint64; origin }))
-  in
+  let position = make_local_use form ~origin uint64 local in
   {
     count =
       make_synthetic_expression form ~origin uint64
@@ -1510,13 +1447,7 @@ and build_elements form ~origin (collection : Core.place) ~(count : Tables.call)
               ~callee:(convert_callee form count.callee)
               ~arguments:[ make_receiver Read ]
               ~lends:None));
-    position =
-      {
-        id = allocate_node_id form;
-        origin;
-        type_ = uint64;
-        kind = Bind { local; is_var = false; mode = Own };
-      };
+    position = make_binding form ~origin ~is_var:false ~mode:Own uint64 local;
     element =
       (match Types.find_sequence_element (Core_walk.compute_place_type collection) with
       | Some element_type ->
@@ -1538,14 +1469,14 @@ and build_elements form ~origin (collection : Core.place) ~(count : Tables.call)
 
 and quantify_over_elements form env (collection : Syntax.expression) ~count ~element ~lends ~origin
     make_quantified : Core.kind =
-  let place, wrap = build_collection_place form env collection lends in
+  let place, bind_collection = build_collection_place form env collection lends in
   let kind =
     make_quantified (build_elements form ~origin:collection.id place ~count ~element ~lends)
   in
-  match wrap with
+  match bind_collection with
   | None -> kind
-  | Some wrap ->
-      wrap ~type_:Types.bool
+  | Some bind_collection ->
+      bind_collection
         { statements = []; value = Some (make_synthetic_expression form ~origin Types.bool kind) }
 
 and build_for_loop form env (written : Syntax.statement) (iterable : Syntax.expression) ~pattern
@@ -1556,19 +1487,17 @@ and build_for_loop form env (written : Syntax.statement) (iterable : Syntax.expr
       let start = build_expression form env start in
       make_loop (Integer_range { start; stop = build_expression form env stop; inclusive })
   | Some (Elements { count; element; lends }), _ -> (
-      let place, wrap = build_collection_place form env iterable lends in
+      let place, bind_collection = build_collection_place form env iterable lends in
       let elements_loop =
         make_loop (Elements (build_elements form ~origin:iterable.id place ~count ~element ~lends))
       in
-      match wrap with
+      match bind_collection with
       | None -> elements_loop
-      | Some wrap ->
-          let statement : Core.statement =
-            { id = allocate_node_id form; origin = written.id; kind = elements_loop }
-          in
+      | Some bind_collection ->
+          let statement = make_statement form ~origin:written.id elements_loop in
           Evaluate
             (make_synthetic_expression form ~origin:written.id Types.unit
-               (wrap ~type_:Types.unit { statements = [ statement ]; value = None })))
+               (bind_collection { statements = [ statement ]; value = None })))
   | Some (Pulled { cursor; cursor_call; remaining }), _ -> (
       let collection = build_expression form env iterable in
       let pulled =
@@ -1620,37 +1549,15 @@ and build_for_loop form env (written : Syntax.statement) (iterable : Syntax.expr
       | _, None -> make_cursor_loop (make_place pulled)
       | _, Some remaining ->
           let local = allocate_synthetic_local form and origin = iterable.id in
-          let binding : Core.pattern =
-            {
-              id = allocate_node_id form;
-              origin;
-              type_ = pulled.type_;
-              kind = Bind { local; is_var = true; mode = Own };
-            }
-          in
-          let statement : Core.statement =
-            {
-              id = allocate_node_id form;
-              origin = written.id;
-              kind = make_cursor_loop ~remaining (Local { local; type_ = pulled.type_; origin });
-            }
+          let binding = make_binding form ~origin ~is_var:true ~mode:Own pulled.type_ local in
+          let statement =
+            make_statement form ~origin:written.id
+              (make_cursor_loop ~remaining (Local { local; type_ = pulled.type_; origin }))
           in
           Evaluate
             (make_synthetic_expression form ~origin:written.id Types.unit
-               (Match
-                  {
-                    is_written = false;
-                    scrutinees = [ Operands.build Own pulled ];
-                    arms =
-                      [
-                        {
-                          patterns = [ binding ];
-                          guard = None;
-                          body = { statements = [ statement ]; value = None };
-                          origin;
-                        };
-                      ];
-                  })))
+               (make_binding_match ~origin (Operands.build Own pulled) binding
+                  { statements = [ statement ]; value = None })))
   | _ -> raise_bug "the checker recorded no iteration for a `for` loop"
 
 and build_cost form env ~origin ({ amortized; resource = written; bound } : Syntax.cost) : Core.cost
@@ -1683,10 +1590,7 @@ and build_compound_assign form env (written : Syntax.statement) (target : Syntax
   let current = make_synthetic_expression form ~origin:written.id target_type Core.Current_target in
   let right = build_expression form env value in
   let bound = allocate_synthetic_local form in
-  let bound_value =
-    make_synthetic_expression form ~origin:value.id right.type_
-      (Use (Local { local = bound; type_ = right.type_; origin = value.id }))
-  in
+  let bound_value = make_local_use form ~origin:value.id right.type_ bound in
   let make_built_in operation : Core.kind * Core.operand =
     (Operator { operation; arguments = [ current; bound_value ] }, Operands.build Own right)
   in
@@ -1743,17 +1647,8 @@ and build_statement form env (written : Syntax.statement) : Core.statement =
     | _ -> None
   with
   | Some value ->
-      {
-        id = allocate_node_id form;
-        origin = written.id;
-        kind = Evaluate (build_expression form env value);
-      }
-  | None ->
-      {
-        Core.id = allocate_node_id form;
-        origin = written.id;
-        kind = build_statement_kind form env written;
-      }
+      make_statement form ~origin:written.id (Evaluate (build_expression form env value))
+  | None -> make_statement form ~origin:written.id (build_statement_kind form env written)
 
 and build_statement_kind form env (written : Syntax.statement) : Core.statement_kind =
   match written.kind with
@@ -1768,7 +1663,9 @@ and build_statement_kind form env (written : Syntax.statement) : Core.statement_
       let pattern = build_scrutinee_pattern form written_pattern in
       Let { pattern; value; else_ = Option.map (build_block form env) else_ }
   | Assignment { operator = Assign; _ } when is_call form written.id ->
-      Evaluate (build_expression form env { kind = Expression_error; id = written.id })
+      let id = allocate_node_id form in
+      let call = build_call form env ~lends:None (read_call form written.id) in
+      Evaluate { id; origin = written.id; type_ = Types.unit; kind = Call call }
   | Assignment { target = written_target; operator = Assign; value } ->
       let target = make_place (build_expression form env written_target) in
       Assign { target; value = build_expression form env value }
@@ -1824,7 +1721,7 @@ and build_block form env (written : Syntax.block) : Core.block =
 
 and build_pattern form (written : Syntax.pattern) : Core.pattern =
   if was_hole form (fun tables -> tables.scrutinee_types) written.id then
-    { id = allocate_node_id form; origin = written.id; type_ = Types.Never; kind = Wildcard }
+    make_pattern form ~origin:written.id Types.Never Wildcard
   else
     let id = allocate_node_id form in
     match form.tables.scrutinee_types.(written.id) with
@@ -2083,20 +1980,6 @@ let build_law_proof form ~holds_body (written : Syntax.block) : Core.definition 
          else None);
     }
 
-let list_law_parameters (lookups : Lookups.t) (interface : Interface.Environment.interface) =
-  match interface with
-  | Law_proof_interface { trait; law; for_type; _ } -> (
-      match Interface.Definition.find_trait_interface lookups.interface trait.trait with
-      | Some trait_interface ->
-          let substitution =
-            Types.make_trait_substitution trait_interface.trait_generics ~self:for_type trait
-          in
-          List.map
-            (fun (name, type_) -> (name, Types.substitute substitution type_))
-            (Option.value ~default:[] (List.assoc_opt law trait_interface.laws))
-      | None -> [])
-  | _ -> []
-
 let build_definition form ~(key : Resolve.Names.key) ~(definition : Syntax.definition)
     ~(elaborated : Interface.Environment.elaborated_interface) ~checks_body : Core.definition =
   let is_broken (part : Resolve.Parts.part) =
@@ -2147,26 +2030,34 @@ let build_definition form ~(key : Resolve.Names.key) ~(definition : Syntax.defin
     | Law_proof { body = written; _ }, _ -> build_law_proof form ~holds_body written
     | _ -> Empty
 
-let index_expressions (definition : Syntax.definition) =
-  let expressions = Array.make (definition.id + 1) None in
-  let rec record (expression : Syntax.expression) =
-    expressions.(expression.id) <- Some expression;
-    Syntax_walk.visit_children record expression
-  in
-  Syntax_walk.visit_definition record definition;
-  expressions
+let rec replace_holes type_ =
+  Types.map ~map_capabilities:replace_capability_holes
+    (function Types.Hole -> Some Types.Never | _ -> None)
+    type_
 
-let build lookups ~resolved ~tables ~holes ~context ~package ~text ~key ~definition ~elaborated
-    ~checks_body : Core.t =
+and replace_capability_holes capabilities =
+  Types.map_capability_types replace_holes (Types.map_trait replace_holes) capabilities
+
+let build lookups ~resolved ~tables ~context ~package ~text ~key ~definition ~elaborated
+    ~law_parameters ~checks_body : Core.t =
+  let tables_with_holes =
+    if Tables.exists_type (function Types.Hole -> true | _ -> false) tables then Some tables
+    else None
+  in
   let form =
     {
       lookups;
       resolved;
-      tables;
-      holes;
-      expressions = index_expressions definition;
+      tables =
+        (match tables_with_holes with
+        | Some _ ->
+            Tables.map ~map_type:replace_holes
+              ~map_argument:(Types.map_argument replace_holes)
+              ~map_capabilities:replace_capability_holes tables
+        | None -> tables);
+      tables_with_holes;
       context;
-      law_parameters = list_law_parameters lookups elaborated.Interface.Environment.interface;
+      law_parameters;
       package;
       text;
       counters = { next_node_id = 0; next_synthetic_local = 0 };

@@ -408,6 +408,14 @@ let map_trait map (reference : trait_reference) =
     associated = List.map (fun (name, type_) -> (name, map type_)) reference.associated;
   }
 
+let map_capability_types map_type map_trait capabilities =
+  replace_capabilities
+    (function
+      | Capability_projection { base; trait; name } ->
+          Some [ Capability_projection { base = map_type base; trait = map_trait trait; name } ]
+      | _ -> None)
+    (map_conditions (map_condition_types map_type map_trait) capabilities)
+
 let rec map ?(map_capabilities = Fun.id) transform type_ =
   match transform type_ with
   | Some replacement -> replacement

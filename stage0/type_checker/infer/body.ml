@@ -341,120 +341,12 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
         in
         check_clauses state env ~uses:Types.no_capabilities clauses;
         if not (is_broken Body) then check_body state env written
-    | Law_proof { body = written; _ }, Law_proof_interface { trait; law; for_type; _ } ->
-        (match Interface.Definition.find_trait_interface state.lookups.interface trait.trait with
-        | Some interface ->
-            let substitution =
-              Types.make_trait_substitution interface.trait_generics ~self:for_type trait
-            in
-            state.law_parameters <-
-              List.map
-                (fun (name, type_) -> (name, Types.substitute substitution type_))
-                (Option.value ~default:[] (List.assoc_opt law interface.laws))
-        | None -> ());
-        if not (is_broken Body) then
-          check_body state
-            { no_output with specification = true; output = Some (Returns Types.unit) }
-            written
     | Law_proof { body = written; _ }, _ ->
         if not (is_broken Body) then
           check_body state
             { no_output with specification = true; output = Some (Returns Types.unit) }
             written
     | _ -> ()
-
-let finalize (state : State.state) =
-  let finalize_type = State.finalize_type state
-  and finalize_argument = State.finalize_argument state
-  and finalize_instantiation = State.finalize_instantiation state in
-  let finalize_trait (reference : Types.trait_reference) =
-    {
-      reference with
-      trait_arguments = List.map finalize_argument reference.trait_arguments;
-      associated = List.map (fun (name, type_) -> (name, finalize_type type_)) reference.associated;
-    }
-  in
-  let finalize_call (written : Tables.call) : Tables.call =
-    {
-      written with
-      callee =
-        (match written.callee with
-        | Function { path; instantiation } ->
-            Function { path; instantiation = finalize_instantiation instantiation }
-        | Trait_method method_ ->
-            Trait_method
-              {
-                method_ with
-                trait = finalize_trait method_.trait;
-                self_type = finalize_type method_.self_type;
-                instantiation = finalize_instantiation method_.instantiation;
-              }
-        | Constructor constructor ->
-            Constructor
-              {
-                constructor with
-                type_arguments = List.map finalize_argument constructor.type_arguments;
-              }
-        | Intrinsic intrinsic ->
-            Intrinsic
-              {
-                intrinsic with
-                type_arguments = List.map finalize_argument intrinsic.type_arguments;
-              }
-        | other -> other);
-      callee_result = finalize_type written.callee_result;
-    }
-  in
-  let tables = state.tables in
-  let update table transform =
-    Array.iteri (fun index entry -> table.(index) <- Option.map transform entry) table
-  in
-  update tables.types finalize_type;
-  update tables.local_types finalize_type;
-  update tables.scrutinee_types finalize_type;
-  update tables.calls finalize_call;
-  update tables.resolutions (function
-    | Tables.Global { path; instantiation } ->
-        Tables.Global { path; instantiation = finalize_instantiation instantiation }
-    | Field_access { type_; field } -> Field_access { type_ = finalize_type type_; field }
-    | Variant_value { type_; variant } -> Variant_value { type_ = finalize_type type_; variant }
-    | Type_name type_ -> Type_name (finalize_type type_)
-    | other -> other);
-  update tables.loops (function
-    | Tables.Integer_range { element; inclusive } ->
-        Tables.Integer_range { element = finalize_type element; inclusive }
-    | Elements { count; element; lends } ->
-        Elements { count = finalize_call count; element = finalize_call element; lends }
-    | Pulled { cursor; cursor_call; remaining } ->
-        Pulled
-          {
-            cursor = finalize_type cursor;
-            cursor_call = Option.map finalize_call cursor_call;
-            remaining =
-              Option.map
-                (fun (condition, remaining) -> (condition, finalize_call remaining))
-                remaining;
-          });
-  update tables.patterns (function
-    | Tables.Variant_pattern pattern ->
-        Tables.Variant_pattern { pattern with type_ = finalize_type pattern.type_ }
-    | Record_pattern pattern -> Record_pattern { pattern with type_ = finalize_type pattern.type_ }
-    | other -> other);
-  update tables.templates (fun (template : Tables.template) ->
-      {
-        template with
-        from_template = Option.map finalize_call template.from_template;
-        part_conversions = List.map (Option.map finalize_call) template.part_conversions;
-        part = Option.map finalize_type template.part;
-      });
-  Array.iteri
-    (fun index conversions ->
-      tables.conversions.(index) <-
-        List.map (fun (conversion, expected) -> (conversion, finalize_type expected)) conversions)
-    tables.conversions;
-  update tables.literal_elements (function
-    | Tables.List_element element -> Tables.List_element (finalize_type element)
-    | Map_entry { key; value } -> Map_entry { key = finalize_type key; value = finalize_type value })
 
 let list_used_packages (resolved : Resolve.resolved) ~evidence_packages (form : Core.t) =
   let named =
@@ -485,6 +377,20 @@ let list_used_packages (resolved : Resolve.resolved) ~evidence_packages (form : 
     form.definition;
   List.sort_uniq compare (named @ !called)
 
+let list_law_parameters (lookups : Lookups.t) (interface : Interface.Environment.interface) =
+  match interface with
+  | Law_proof_interface { trait; law; for_type; _ } -> (
+      match Interface.Definition.find_trait_interface lookups.interface trait.trait with
+      | Some trait_interface ->
+          let substitution =
+            Types.make_trait_substitution trait_interface.trait_generics ~self:for_type trait
+          in
+          List.map
+            (fun (name, type_) -> (name, Types.substitute substitution type_))
+            (Option.value ~default:[] (List.assoc_opt law trait_interface.laws))
+      | None -> [])
+  | _ -> []
+
 let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
   let resolved =
     Resolve.merge
@@ -510,7 +416,6 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
       resolved;
       text;
       tables = Tables.create (definition.id + 1);
-      holes_become_never = false;
       diagnostics = [];
       unifier =
         Unify.create ~context ~list_rigid_members:(fun context rigid ->
@@ -520,7 +425,7 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
                     ~list_bounds:(Interface.Elaborator.list_bounds context)
                     rigid)));
       locals = Hashtbl.create 32;
-      law_parameters = [];
+      law_parameters = list_law_parameters lookups elaborated.interface;
       frames = [];
       locals_read = [];
       keyword_modes = [];
@@ -548,53 +453,24 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
       ~list_bounds:(State.lookup_bounds state) ~spans
       (Interface.Elaborator.list_named_types context)
     @ state.diagnostics;
-  finalize state;
-  Exported_parts.check state;
-  let has_any_type is_unwanted =
-    let contains table =
-      Seq.exists
-        (function
-          | Some type_ ->
-              let has_unwanted = ref false in
-              ignore
-                (Types.map
-                   (fun part ->
-                     if is_unwanted part then has_unwanted := true;
-                     None)
-                   type_);
-              !has_unwanted
-          | None -> false)
-        (Array.to_seq table)
-    in
-    contains state.tables.types || contains state.tables.local_types
-    || contains state.tables.scrutinee_types
+  let finalize () =
+    Tables.map ~map_type:(State.finalize_type state) ~map_argument:(State.finalize_argument state)
+      ~map_capabilities:(State.finalize_capabilities state)
+      state.tables
   in
-  let is_clean () =
+  let tables = finalize () in
+  Exported_parts.check state;
+  let is_clean tables =
     state.diagnostics = []
     && (not (Resolve.Names.is_broken lookups.interface.names key Header))
     && (not (checks_body && Resolve.Names.is_broken lookups.interface.names key Body))
-    && not (has_any_type Types.is_error)
+    && not (Tables.exists_type Types.is_error tables)
   in
-  let build () : Core.t =
-    let checked = state.tables in
-    let holes =
-      if has_any_type (fun part -> part = Types.Hole) then begin
-        state.holes_become_never <- true;
-        state.tables <- Tables.copy checked;
-        finalize state;
-        Some checked
-      end
-      else None
-    in
-    let form =
-      Form.build lookups ~resolved ~tables:state.tables ~holes ~context ~package:state.package ~text
-        ~key ~definition ~elaborated ~checks_body
-    in
-    state.tables <- checked;
-    state.holes_become_never <- false;
-    form
+  let build tables =
+    Form.build lookups ~resolved ~tables ~context ~package:state.package ~text ~key ~definition
+      ~elaborated ~law_parameters:state.law_parameters ~checks_body
   in
-  let checked = if is_clean () then Some (build ()) else None in
+  let checked = if is_clean tables then Some (build tables) else None in
   (match checked with
   | Some form ->
       check_bit_vector_names state form;
@@ -602,14 +478,14 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
       check_deserialized_invariants state elaborated form
   | None -> state.capability_solution <- Some (Hashtbl.create 1));
   let has_capability_variables = state.unifier.capability_variable_count > 0 in
-  if has_capability_variables then finalize state;
+  let tables = if has_capability_variables then finalize () else tables in
   match checked with
-  | Some form when is_clean () ->
-      let form = if has_capability_variables then build () else form in
+  | Some form when is_clean tables ->
+      let form = if has_capability_variables then build tables else form in
       Ok
         {
           form;
-          tables = Tables.publish state.tables;
+          tables = Tables.publish tables;
           used_packages =
             list_used_packages resolved ~evidence_packages:state.evidence_packages form;
           places_without_keyword = state.places_without_keyword;

@@ -115,8 +115,8 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
               let method_, output = Operators.select_arithmetic_method arithmetic in
               let result =
                 Operators.check_operator_call state written.id ~method_ ~output
-                  ~left:(written_target.id, target_type)
-                  ~right:(Some (value.id, right_type))
+                  ~left:(written_target, target_type)
+                  ~right:(Some (value, right_type))
               in
               if not (State.unify state result target_type) then
                 Failures.report_mismatch state (State.read_span state value.id)
@@ -228,11 +228,9 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
                   (Solver.resolve_associated_type state base_type index Index_output
                      ~at:(State.read_span state value.id)))
                ~has_generic_type:false);
-          let call : Syntax.expression = { kind = Expression_error; id = written.id } in
-          State.record state call Types.unit;
           let make_argument (argument_expression : Syntax.expression) position mode :
               Tables.argument =
-            { expression = argument_expression.id; core_argument_index = position; mode }
+            { expression = argument_expression; core_argument_index = position; mode }
           in
           state.tables.calls.(written.id) <-
             Some

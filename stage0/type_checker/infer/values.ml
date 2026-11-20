@@ -66,7 +66,7 @@ let rec check_string_literal state env ?expected (literal : Syntax.string_litera
       arguments =
         List.mapi
           (fun index (written : Syntax.expression) ->
-            { Tables.expression = written.id; core_argument_index = index; mode })
+            { Tables.expression = written; core_argument_index = index; mode })
           arguments;
       omitted_defaults = [];
       callee_result = result;

@@ -2,13 +2,13 @@ val build :
   Lookups.t ->
   resolved:Resolve.resolved ->
   tables:Tables.t ->
-  holes:Tables.t option ->
   context:Interface.Elaborator.t ->
   package:Path.package ->
   text:string Lazy.t ->
   key:Resolve.Names.key ->
   definition:Syntax.definition ->
   elaborated:Interface.Environment.elaborated_interface ->
+  law_parameters:(string * Types.ty) list ->
   checks_body:bool ->
   Core.t
 

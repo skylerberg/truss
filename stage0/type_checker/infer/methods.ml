@@ -379,7 +379,7 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
             let mode =
               Calls.check_argument state env first.value parameter ~has_generic_type:false
             in
-            ([ { Tables.expression = first.value.id; core_argument_index = 0; mode } ], rest)
+            ([ { Tables.expression = first.value; core_argument_index = 0; mode } ], rest)
         | [] -> ([], []))
     | None -> ([], arguments)
   in
@@ -667,7 +667,7 @@ and check_method_with_receiver state env ?expected ?(type_arguments = [])
           | Ok (checked, left_out) ->
               let receiver_argument =
                 {
-                  Tables.expression = receiver.id;
+                  Tables.expression = receiver;
                   core_argument_index = 0;
                   mode = (match signature.receiver with Some (mode, _) -> mode | None -> Read);
                 }
@@ -725,7 +725,7 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
               Modes.note_lending state value instance.signature.output;
               let receiver_argument =
                 {
-                  Tables.expression = receiver.id;
+                  Tables.expression = receiver;
                   core_argument_index = 0;
                   mode =
                     (match method_.method_receiver with Instance mode -> mode | Static -> Read);

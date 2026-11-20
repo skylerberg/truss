@@ -62,11 +62,9 @@ and check_prefix state env ?expected (value : Syntax.expression) operator
   match operator with
   | Syntax.Not ->
       Hooks.check state env inner Types.bool;
-      check_built_in_operator state value [ inner ] Types.bool;
       Types.bool
   | Complement ->
       let type_ = Hooks.check_expression state env ?expected inner in
-      check_built_in_operator state value [ inner ] type_;
       infer_integer_result state (State.read_span state value.id) type_
         ~describe:(Printf.sprintf "`~` works on built-in integers, not %s.")
   | Negate -> (
@@ -94,9 +92,10 @@ and check_prefix state env ?expected (value : Syntax.expression) operator
           | _ when env.specification && is_integer_operand state inner resolved -> Types.Integer
           | _ ->
               check_operator_call state value.id ~method_:Well_known.Negate_negate
-                ~output:Well_known.Negate_output ~left:(inner.id, type_) ~right:None))
+                ~output:Well_known.Negate_output ~left:(inner, type_) ~right:None))
 
-and check_operator_call state call ~method_ ~output ~left:(left, left_type) ~right =
+and check_operator_call state call ~method_ ~output ~left:((left : Syntax.expression), left_type)
+    ~right =
   let { Well_known.owner; name; receiver } = Well_known.locate_method method_ in
   let reference =
     Types.make_trait_reference
@@ -131,7 +130,8 @@ and check_operator_call state call ~method_ ~output ~left:(left, left_type) ~rig
          at = State.read_span state call;
          operands =
            Option.map
-             (fun (right, _) -> (State.read_span state left, State.read_span state right))
+             (fun ((right : Syntax.expression), _) ->
+               (State.read_span state left.id, State.read_span state right.id))
              right;
        })
     ~outputs:[ (Well_known.show_associated output, result) ]
@@ -141,21 +141,6 @@ and check_operator_call state call ~method_ ~output ~left:(left, left_type) ~rig
 and check_literal_operands state ~left ~right =
   if State.is_within state left Types.number_types && State.is_within state right Types.number_types
   then ignore (State.unify state left right)
-
-and check_built_in_operator state (value : Syntax.expression) (operands : Syntax.expression list)
-    result =
-  state.tables.calls.(value.id) <-
-    Some
-      {
-        callee = Built_in_operator;
-        arguments =
-          List.mapi
-            (fun index (operand : Syntax.expression) ->
-              { Tables.expression = operand.id; core_argument_index = index; mode = Read })
-            operands;
-        omitted_defaults = [];
-        callee_result = result;
-      }
 
 and is_hole state type_ = State.resolve state type_ = Types.Hole
 
@@ -178,12 +163,10 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
            in code, write `!a || b`.";
       Hooks.check state env left Types.bool;
       Hooks.check state env right Types.bool;
-      check_built_in_operator state value [ left; right ] Types.bool;
       Types.bool
   | Operation (Bitwise _) ->
       let left_type = Hooks.check_expression state env ?expected left in
       let right_type = Hooks.check_expression state env ~expected:left_type right in
-      check_built_in_operator state value [ left; right ] left_type;
       check_literal_operands state ~left:left_type ~right:right_type;
       if not (State.unify state left_type right_type) then
         Failures.report_mismatch state (State.read_span state right.id) ~expected:left_type
@@ -192,7 +175,6 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
   | Operation (Shift _) ->
       let left_type = Hooks.check_expression state env ?expected left in
       let right_type = Hooks.check_expression state env right in
-      check_built_in_operator state value [ left; right ] left_type;
       infer_shift_result state
         ~left:(State.read_span state left.id, left_type)
         ~right:(State.read_span state right.id, right_type)
@@ -254,8 +236,8 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
                       };
                   arguments =
                     [
-                      { expression = left.id; core_argument_index = 0; mode = Read };
-                      { expression = right.id; core_argument_index = 1; mode = Read };
+                      { expression = left; core_argument_index = 0; mode = Read };
+                      { expression = right; core_argument_index = 1; mode = Read };
                     ];
                   omitted_defaults = [];
                   callee_result = result;
@@ -305,8 +287,8 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
             end
             else
               let method_, output = select_arithmetic_method arithmetic in
-              check_operator_call state value.id ~method_ ~output ~left:(left.id, left_type)
-                ~right:(Some (right.id, right_type))
+              check_operator_call state value.id ~method_ ~output ~left:(left, left_type)
+                ~right:(Some (right, right_type))
             end)
 
 and check_any state env ?expected (value : Syntax.expression) (inner : Syntax.expression) =

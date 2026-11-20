@@ -13,9 +13,12 @@ type callee =
   | Constructor of { type_ : Path.t; variant : string option; type_arguments : Types.argument list }
   | Indirect
   | Intrinsic of { operation : Intrinsic.operation; type_arguments : Types.argument list }
-  | Built_in_operator
 
-type argument = { expression : Syntax.id; core_argument_index : int; mode : Language.Mode.t }
+type argument = {
+  expression : Syntax.expression;
+  core_argument_index : int;
+  mode : Language.Mode.t;
+}
 
 type call = {
   callee : callee;
@@ -115,5 +118,13 @@ type t = {
 }
 
 val create : int -> t
-val copy : t -> t
+
+val map :
+  map_type:(Types.ty -> Types.ty) ->
+  map_argument:(Types.argument -> Types.argument) ->
+  map_capabilities:(Types.capability_set -> Types.capability_set) ->
+  t ->
+  t
+
+val exists_type : (Types.ty -> bool) -> t -> bool
 val publish : t -> published

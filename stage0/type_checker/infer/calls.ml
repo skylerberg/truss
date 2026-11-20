@@ -75,7 +75,7 @@ let rec check_function_value_call state env (value : Syntax.expression) (callee 
               { name = "the function value"; mode; type_ = input; has_default = false }
             in
             let mode = check_argument state env argument.value parameter ~has_generic_type:false in
-            { Tables.expression = argument.value.id; core_argument_index = index; mode })
+            { Tables.expression = argument.value; core_argument_index = index; mode })
           arguments
       in
       match label_errors with
@@ -339,7 +339,7 @@ and check_arguments state env ?constructor (value : Syntax.expression)
           ~has_generic_type:(has_generic_type (argument, index))
       in
       {
-        Tables.expression = argument.value.id;
+        Tables.expression = argument.value;
         core_argument_index = (if has_receiver then index + 1 else index);
         mode;
       }
@@ -358,7 +358,7 @@ and check_arguments state env ?constructor (value : Syntax.expression)
           ( List.filter_map
               (fun id ->
                 List.find_opt
-                  (fun (checked : Tables.argument) -> checked.expression = id)
+                  (fun (checked : Tables.argument) -> checked.expression.id = id)
                   (others @ late @ lambdas))
               order,
             left_out )

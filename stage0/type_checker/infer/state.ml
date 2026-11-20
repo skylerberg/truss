@@ -83,12 +83,11 @@ type state = {
   definition : Syntax.definition;
   resolved : Resolve.resolved;
   text : string Lazy.t;
-  mutable tables : Tables.t;
-  mutable holes_become_never : bool;
+  tables : Tables.t;
   mutable diagnostics : Diagnostic.in_definition list;
   unifier : Unify.t;
   locals : (Syntax.id, local) Hashtbl.t;
-  mutable law_parameters : (string * Types.ty) list;
+  law_parameters : (string * Types.ty) list;
   mutable frames : frame list;
   mutable goals : goal list;
   mutable locals_read : Syntax.id list;
@@ -341,28 +340,14 @@ let resolve_capabilities state (capabilities : Types.capability_set) =
 
 let rec finalize_type state type_ =
   Types.map ~map_capabilities:(finalize_capabilities state)
-    (function
-      | Types.Variable _ -> Some (make_unsolved_type state)
-      | Types.Hole when state.holes_become_never -> Some Types.Never
-      | _ -> None)
+    (function Types.Variable _ -> Some (make_unsolved_type state) | _ -> None)
     (normalize state type_)
 
 and finalize_capabilities state capabilities =
   resolve_capabilities state
     (Interface.Impls.normalize_capabilities state.lookups.interface
        ~list_bounds:(lookup_bounds state)
-       (Types.replace_capabilities
-          (function
-            | Types.Capability_projection { base; trait; name } ->
-                Some
-                  (Types.make_capability_set
-                     [
-                       Types.Capability_projection { base = finalize_type state base; trait; name };
-                     ])
-            | _ -> None)
-          (Types.map_conditions
-             (Types.map_condition_types (finalize_type state) (finalize_trait state))
-             capabilities)))
+       (Types.map_capability_types (finalize_type state) (finalize_trait state) capabilities))
 
 and finalize_trait state (trait : Types.trait_reference) : Types.trait_reference =
   {
@@ -377,15 +362,6 @@ and finalize_argument state = function
       match Unify.resolve_value state.unifier value with
       | Types.Value_variable _ -> Types.Type (make_unsolved_type state)
       | value -> Types.Value value)
-
-let finalize_instantiation state (instantiation : Types.instantiation) : Types.instantiation =
-  {
-    type_arguments = List.map (finalize_argument state) instantiation.type_arguments;
-    capability_arguments =
-      List.map
-        (fun (name, argument) -> (name, finalize_capabilities state argument))
-        instantiation.capability_arguments;
-  }
 
 let unify state left right =
   Unify.unify state.unifier (normalize state left) (normalize state right)
