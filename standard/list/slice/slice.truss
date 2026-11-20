@@ -1,6 +1,7 @@
 use standard::intrinsic
 use standard::core
 use standard::list
+use standard::specification
 
 public fn Slice[Element].is_empty(self) -> Bool
   ensures result == (self.length() == 0)
@@ -652,6 +653,7 @@ public fn Slice[Element].swap(mut self, first: UInt64, second: UInt64)
   ensures identical(self.model()[second], old(self.model())[first])
   ensures forall i in 0..self.length() =>
     i == first || i == second || identical(self.model()[i], old(self.model())[i])
+  ensures self.model().is_permutation_of(old(self.model()))
   cost time O(1)
 {
   intrinsic::view_swap(mut self.elements, first: first, second: second)
@@ -663,6 +665,7 @@ internal fn Slice[Element].reverse_between(mut self, start: UInt64, stop: UInt64
   ensures forall i in start..stop => identical(self.model()[i], old(self.model())[start + stop - 1 - i])
   ensures forall i in 0..start => identical(self.model()[i], old(self.model())[i])
   ensures forall i in stop..self.length() => identical(self.model()[i], old(self.model())[i])
+  ensures self.model().is_permutation_of(old(self.model()))
   cost time O(stop - start)
 {
   var low = start
@@ -678,6 +681,7 @@ internal fn Slice[Element].reverse_between(mut self, start: UInt64, stop: UInt64
     invariant forall i in low..high => identical(self.model()[i], old(self.model())[i])
     invariant forall i in 0..start => identical(self.model()[i], old(self.model())[i])
     invariant forall i in stop..self.length() => identical(self.model()[i], old(self.model())[i])
+    invariant self.model().is_permutation_of(old(self.model()))
     decreases high - low
     cost time O(low - start)
   {
@@ -690,6 +694,7 @@ internal fn Slice[Element].reverse_between(mut self, start: UInt64, stop: UInt64
 public fn Slice[Element].reverse(mut self)
   ensures forall i in 0..self.length() =>
     identical(self.model()[i], old(self.model())[self.length() - 1 - i])
+  ensures self.model().is_permutation_of(old(self.model()))
   cost time O(self.length())
 {
   mut self.reverse_between(0, stop: self.length())
@@ -702,6 +707,7 @@ public fn Slice[Element].rotate_left(mut self, by: UInt64)
   ensures forall i: Integer =>
     self.length() - by <= i && i < self.length() ==>
       identical(self.model()[i], old(self.model())[i + by - self.length()])
+  ensures self.model().is_permutation_of(old(self.model()))
   cost time O(self.length())
 {
   mut self.reverse_between(0, stop: by)
@@ -713,6 +719,7 @@ public fn Slice[Element].rotate_right(mut self, by: UInt64)
   requires by <= self.length()
   ensures forall i in by..self.length() => identical(self.model()[i], old(self.model())[i - by])
   ensures forall i in 0..by => identical(self.model()[i], old(self.model())[i + self.length() - by])
+  ensures self.model().is_permutation_of(old(self.model()))
   cost time O(self.length())
 {
   mut self.rotate_left(self.length() - by)
@@ -842,6 +849,7 @@ fn sink_once[Element: Ordered](
   ensures result != hole ==> children_are_at_most(items.model(), limit: limit, hole: result, above: hole)
   ensures forall i in limit..items.length() => identical(items.model()[i], old(items.model())[i])
   ensures top < items.length() ==> forall i in 0..limit => items[i] <= items[top]
+  ensures items.model().is_permutation_of(old(items.model()))
   cost time O(time(Element.compare))
 {
   let left = 2 * hole + 1
@@ -875,6 +883,7 @@ fn settle[Element: Ordered](items: mut Slice[Element], start: UInt64, limit: UIn
   ensures is_heap_from(items.model(), limit: limit, floor: start)
   ensures forall i in limit..items.length() => identical(items.model()[i], old(items.model())[i])
   ensures top < items.length() ==> forall i in 0..limit => items[i] <= items[top]
+  ensures items.model().is_permutation_of(old(items.model()))
   cost time O(log(items.length()) * time(Element.compare))
 {
   if start >= limit / 2 {
@@ -885,6 +894,7 @@ fn settle[Element: Ordered](items: mut Slice[Element], start: UInt64, limit: UIn
   var settled = false
   while !settled && hole < limit / 2
     invariant items.length() == old(items.length())
+    invariant items.model().is_permutation_of(old(items.model()))
     invariant start <= hole
     invariant hole < limit
     invariant 1 <= width
@@ -937,12 +947,14 @@ theorem heap_root_is_largest[Element: Ordered](items: Slice[Element], limit: UIn
 
 fn build_heap[Element: Ordered](items: mut Slice[Element])
   ensures is_heap_from(items.model(), limit: items.length(), floor: 0)
+  ensures items.model().is_permutation_of(old(items.model()))
   cost time O(items.length() * log(items.length()) * time(Element.compare))
 {
   let count = items.length()
   var start = count / 2
   while start > 0
     invariant items.length() == count
+    invariant items.model().is_permutation_of(old(items.model()))
     invariant start <= count / 2
     invariant is_heap_from(items.model(), limit: count, floor: start)
     decreases start
@@ -963,6 +975,7 @@ fn put_largest_last[Element: Ordered](items: mut Slice[Element], unsorted: UInt6
   ensures identical(items.model()[unsorted - 1], old(items.model())[0])
   ensures forall i in unsorted..items.length() => identical(items.model()[i], old(items.model())[i])
   ensures unsorted >= items.length() || items[unsorted - 1] <= items[unsorted]
+  ensures items.model().is_permutation_of(old(items.model()))
   cost time O(1)
 {
   proof {
@@ -980,6 +993,7 @@ fn move_largest_to_end[Element: Ordered](items: mut Slice[Element], unsorted: UI
   ensures is_heap_from(items.model(), limit: unsorted - 1, floor: 0)
   ensures forall i in 1..items.length() => i > unsorted - 1 ==> items[i - 1] <= items[i]
   ensures forall i in 0..unsorted - 1 => items[i] <= items[unsorted - 1]
+  ensures items.model().is_permutation_of(old(items.model()))
   cost time O(log(items.length()) * time(Element.compare))
 {
   put_largest_last(mut items, unsorted: unsorted)
@@ -989,12 +1003,14 @@ fn move_largest_to_end[Element: Ordered](items: mut Slice[Element], unsorted: UI
 fn drain_heap[Element: Ordered](items: mut Slice[Element])
   requires is_heap_from(items.model(), limit: items.length(), floor: 0)
   ensures items.is_sorted()
+  ensures items.model().is_permutation_of(old(items.model()))
   cost time O(items.length() * log(items.length()) * time(Element.compare))
 {
   let count = items.length()
   var unsorted = count
   while unsorted >= 2
     invariant items.length() == count
+    invariant items.model().is_permutation_of(old(items.model()))
     invariant unsorted <= count
     invariant is_heap_from(items.model(), limit: unsorted, floor: 0)
     invariant forall i in 1..count => i > unsorted ==> items[i - 1] <= items[i]
@@ -1009,10 +1025,15 @@ fn drain_heap[Element: Ordered](items: mut Slice[Element])
 
 public fn Slice[Element: Ordered].sort(mut self)
   ensures self.is_sorted()
+  ensures self.model().is_permutation_of(old(self.model()))
+  ensures forall i in 0..self.length() => old(self.model()).contains(self[i])
   cost time O(self.length() * log(self.length()) * time(Element.compare))
 {
   build_heap(mut self)
   drain_heap(mut self)
+  proof {
+    specification::elements_of_a_permutation(self.model(), original: old(self.model()))
+  }
 }
 
 fn sift_down_by[Element](
@@ -1027,6 +1048,7 @@ fn sift_down_by[Element](
   requires limit <= items.length()
   ensures items.length() == old(items.length())
   decreases room
+  ensures items.model().is_permutation_of(old(items.model()))
   cost time O(log(room) * time(compare))
 {
   if room >= 2 && position <= limit / 2 {
@@ -1043,12 +1065,14 @@ fn sift_down_by[Element](
 
 fn build_heap_by[Element](items: mut Slice[Element], compare: (fn(Element, Element) -> Ordering uses generic Granted))
   uses generic Granted
+  ensures items.model().is_permutation_of(old(items.model()))
   cost time O(items.length() * log(items.length()) * time(compare))
 {
   let count = items.length()
   var position = count / 2
   while position >= 1
     invariant items.length() == count
+    invariant items.model().is_permutation_of(old(items.model()))
     invariant position <= count / 2
     decreases position
     cost time O((count / 2 - position) * log(count) * time(compare))
@@ -1060,12 +1084,14 @@ fn build_heap_by[Element](items: mut Slice[Element], compare: (fn(Element, Eleme
 
 fn drain_heap_by[Element](items: mut Slice[Element], compare: (fn(Element, Element) -> Ordering uses generic Granted))
   uses generic Granted
+  ensures items.model().is_permutation_of(old(items.model()))
   cost time O(items.length() * log(items.length()) * time(compare))
 {
   let count = items.length()
   var unsorted = count
   while unsorted >= 2
     invariant items.length() == count
+    invariant items.model().is_permutation_of(old(items.model()))
     invariant unsorted <= count
     decreases unsorted
     cost time O((count - unsorted) * log(count) * time(compare))
@@ -1078,14 +1104,21 @@ fn drain_heap_by[Element](items: mut Slice[Element], compare: (fn(Element, Eleme
 
 public fn Slice[Element].sort_by(mut self, compare: (fn(Element, Element) -> Ordering uses generic Granted))
   uses generic Granted
+  ensures self.model().is_permutation_of(old(self.model()))
+  ensures forall i in 0..self.length() => old(self.model()).contains(self[i])
   cost time O(self.length() * log(self.length()) * time(compare))
 {
   build_heap_by(mut self, compare: compare)
   drain_heap_by(mut self, compare: compare)
+  proof {
+    specification::elements_of_a_permutation(self.model(), original: old(self.model()))
+  }
 }
 
 public fn Slice[Element].sort_by_key[Key: Ordered](mut self, key: (fn(Element) -> Key uses generic Granted))
   uses generic Granted
+  ensures self.model().is_permutation_of(old(self.model()))
+  ensures forall i in 0..self.length() => old(self.model()).contains(self[i])
   cost time O(self.length() * log(self.length()) * (time(key) + time(Key.compare)))
 {
   mut self.sort_by(fn(first, second) { key(first).compare(key(second)) })
