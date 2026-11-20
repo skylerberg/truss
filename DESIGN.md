@@ -1295,6 +1295,7 @@ the start.
 |---|---|
 | Each obligation goes to an automated solver, as in Dafny. | A programmer writes a proof only where the solver fails. |
 | A proof is written in the language's own syntax: calls, `match`, `if`, and `assert`. | Programmers and LLMs already know that syntax. |
+| Universal introduction is a theorem call in a quantifier's body, not a statement of its own. | The prover already reads a call in a quantifier's body for each value of the binder. The quantifier states the conclusion where a reader sees it, and a statement form would be a second spelling of the same proof. |
 | A proof is a result of its own. | An edit to a proof re-checks proofs, with no rebuild of the program and no rerun of tests. A reviewer trusts a checked proof without reading it, and reads only signatures. |
 | There is no `assume`. | A missing proof that an addition cannot overflow would allow a failure that the signature does not show. A claim that is not ready is left out of the signature. |
 

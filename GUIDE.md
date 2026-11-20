@@ -4051,6 +4051,16 @@ theorem doubling_is_even(value: Int64)
 {
 }
 
+theorem doubles_are_even(values: List[Int64])
+  requires forall i in 0..values.length() => values[i] >= -1000 && values[i] <= 1000
+  ensures forall i in 0..values.length() => double(values[i]) % 2 == 0
+{
+  assert forall i in 0..values.length() => {
+    doubling_is_even(values[i])
+    double(values[i]) % 2 == 0
+  }
+}
+
 fn half_of_double(value: Int64) -> Int64
   requires value >= -1000 && value <= 1000
   ensures result == value
@@ -4079,6 +4089,9 @@ test "proofs" {
 ```
 
 - A theorem that calls itself on smaller input is a proof by induction.
+- A theorem called in a quantifier's body proves its fact for every value,
+  as in `doubles_are_even`. The prover proves the theorem's `requires` for
+  each value, and the quantifier's body states the fact.
 - `assert condition by bit_vector` proves a fact about bitwise operations,
   treating the integers it names as bits. It names only integers and
   booleans, and states as a hypothesis any fact it needs from around it.
@@ -4093,6 +4106,7 @@ test "proofs" {
 | "a value the prover knows nothing more about" | A callee's result or a loop variable is unconstrained: add an `ensures` to the callee, or an `invariant` to the loop |
 | "The solver ran out of steps, so it may hold but needs help" | Break the step into smaller ones: an `assert` in a `proof` block, or a theorem |
 | A `requires` of a callee "may not hold" | Find which fact the caller lacks; the note points at the clause |
+| A `forall` "may not hold", though a theorem proves its body for one value | Call the theorem in the quantifier's body, then state the body, as `doubles_are_even` does |
 
 The prover never guesses. It knows the facts in scope: the `requires` of
 the function, the conditions of the `if`s around the code, the `ensures` of

@@ -1906,7 +1906,13 @@ let () =
 
 let () =
   Harness.test "a callee's ensures under its requires holds for every bound value" (fun () ->
-      expect_proven Fixtures.Prover.counted_up_under_a_quantifier)
+      expect_proven Fixtures.Prover.counted_up_under_a_quantifier);
+  Harness.test "a theorem called in a quantifier's body proves its fact for every bound value"
+    (fun () -> expect_proven Fixtures.Prover.sorted_prefix_through_a_theorem);
+  Harness.test "a theorem called in a quantifier's body needs its requires for every bound value"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.theorem_under_a_quantifier_without_its_requires
+        "prover.requires")
 
 let () =
   Harness.test "a concurrent for may return early, with a value known by its type" (fun () ->

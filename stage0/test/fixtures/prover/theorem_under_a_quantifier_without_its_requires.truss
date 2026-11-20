@@ -1,0 +1,22 @@
+theorem sorted_between(items: Slice[Int64], first: UInt64, second: UInt64)
+  requires items.is_sorted()
+  requires first <= second
+  requires second < items.length()
+  ensures items[first] <= items[second]
+  decreases second - first
+{
+  if first < second {
+    sorted_between(items, first: first, second: second - 1)
+  }
+}
+
+theorem sorted_past(items: Slice[Int64], last: UInt64)
+  requires items.is_sorted()
+  requires last < items.length()
+  ensures forall i in 0..items.length() => items[i] <= items[last]
+{
+  assert forall i in 0..items.length() => {
+    sorted_between(items, first: i, second: last)
+    items[i] <= items[last]
+  }
+}

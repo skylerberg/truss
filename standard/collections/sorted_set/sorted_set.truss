@@ -9,42 +9,22 @@ fn strictly_ascending[Element: Ordered](elements: Sequence[Element]) -> Bool
   forall i in 0..elements.length() => forall j in 0..elements.length() => i < j ==> elements[i] < elements[j]
 }
 
-theorem ascending_below[Element: Ordered](
-  elements: Sequence[Element],
-  element: Element,
-  last: Integer,
-  bound: Integer,
-)
+theorem ascending_below[Element: Ordered](elements: Sequence[Element], element: Element, last: Integer)
   requires strictly_ascending(elements)
-  requires 0 <= bound
-  requires bound <= last
+  requires 0 <= last
   requires last < elements.length()
   requires elements[last] <= element
-  ensures forall i in 0..bound => elements[i] < element
-  decreases bound
+  ensures forall i in 0..last => elements[i] < element
 {
-  if bound > 0 {
-    ascending_below(elements, element: element, last: last, bound: bound - 1)
-  }
 }
 
-theorem ascending_above[Element: Ordered](
-  elements: Sequence[Element],
-  element: Element,
-  first: Integer,
-  bound: Integer,
-)
+theorem ascending_above[Element: Ordered](elements: Sequence[Element], element: Element, first: Integer)
   requires strictly_ascending(elements)
   requires 0 <= first
-  requires first < bound
-  requires bound <= elements.length()
+  requires first < elements.length()
   requires element <= elements[first]
-  ensures forall i in bound..elements.length() => element < elements[i]
-  decreases elements.length() - bound
+  ensures forall i in first + 1..elements.length() => element < elements[i]
 {
-  if bound < elements.length() {
-    ascending_above(elements, element: element, first: first, bound: bound + 1)
-  }
 }
 
 fn collections::SortedSet[Element: Ordered].search(self, element: Element) -> Result[UInt64, UInt64]
@@ -75,13 +55,13 @@ fn collections::SortedSet[Element: Ordered].search(self, element: Element) -> Re
     match self.elements[middle].compare(element) {
       Less => {
         proof {
-          ascending_below(self.elements.model(), element: element, last: middle, bound: middle)
+          ascending_below(self.elements.model(), element: element, last: middle)
         }
         low = middle + 1
       }
       Greater => {
         proof {
-          ascending_above(self.elements.model(), element: element, first: middle, bound: middle + 1)
+          ascending_above(self.elements.model(), element: element, first: middle)
         }
         high = middle
       }
@@ -117,8 +97,8 @@ fn collections::SortedSet[Element: Ordered].index_at_or_after(self, element: Ele
   match self.search(element) {
     Ok(index) => {
       proof {
-        ascending_below(self.elements.model(), element: element, last: index, bound: index)
-        ascending_above(self.elements.model(), element: element, first: index, bound: index + 1)
+        ascending_below(self.elements.model(), element: element, last: index)
+        ascending_above(self.elements.model(), element: element, first: index)
       }
       index
     }
@@ -135,8 +115,8 @@ fn collections::SortedSet[Element: Ordered].index_after(self, element: Element) 
   match self.search(element) {
     Ok(index) => {
       proof {
-        ascending_below(self.elements.model(), element: element, last: index, bound: index)
-        ascending_above(self.elements.model(), element: element, first: index, bound: index + 1)
+        ascending_below(self.elements.model(), element: element, last: index)
+        ascending_above(self.elements.model(), element: element, first: index)
       }
       index + 1
     }
@@ -193,19 +173,19 @@ fn merged[Element: Ordered](first: own List[Element], second: own List[Element])
       match left[last_left].compare(right[last_right]) {
         Less => {
           proof {
-            ascending_below(left.model(), element: right.model()[last_right], last: last_left, bound: last_left)
+            ascending_below(left.model(), element: right.model()[last_right], last: last_left)
           }
           from_right = true
         }
         Greater => {
           proof {
-            ascending_below(right.model(), element: left.model()[last_left], last: last_right, bound: last_right)
+            ascending_below(right.model(), element: left.model()[last_left], last: last_right)
           }
           from_left = true
         }
         Equal => {
           proof {
-            ascending_below(right.model(), element: left.model()[last_left], last: last_right, bound: last_right)
+            ascending_below(right.model(), element: left.model()[last_left], last: last_right)
           }
           let _ = mut right.pop()
           from_left = true
@@ -269,7 +249,7 @@ fn combined[Element: Ordered + Copyable](
             Less => {
               if keeps_first_only {
                 proof {
-                  ascending_above(second.model(), element: first.model()[index], first: other_index, bound: other_index + 1)
+                  ascending_above(second.model(), element: first.model()[index], first: other_index)
                 }
                 intrinsic::storage_push(mut output, value: first[index].copy())
               }
@@ -278,7 +258,7 @@ fn combined[Element: Ordered + Copyable](
             Greater => {
               if keeps_second_only {
                 proof {
-                  ascending_above(first.model(), element: second.model()[other_index], first: index, bound: index + 1)
+                  ascending_above(first.model(), element: second.model()[other_index], first: index)
                 }
                 intrinsic::storage_push(mut output, value: second[other_index].copy())
               }
@@ -287,7 +267,7 @@ fn combined[Element: Ordered + Copyable](
             Equal => {
               if keeps_shared {
                 proof {
-                  ascending_above(second.model(), element: first.model()[index], first: other_index, bound: other_index + 1)
+                  ascending_above(second.model(), element: first.model()[index], first: other_index)
                 }
                 intrinsic::storage_push(mut output, value: first[index].copy())
               }
@@ -386,8 +366,8 @@ public fn collections::SortedSet[Element: Ordered].take(mut self, element: Eleme
   match self.search(element) {
     Ok(index) => {
       proof {
-        ascending_below(self.elements.model(), element: element, last: index, bound: index)
-        ascending_above(self.elements.model(), element: element, first: index, bound: index + 1)
+        ascending_below(self.elements.model(), element: element, last: index)
+        ascending_above(self.elements.model(), element: element, first: index)
       }
       let removed = mut self.elements.remove_at(index)
       proof {

@@ -365,33 +365,27 @@ theorem sorted_between[Element: Ordered](items: Slice[Element], first: UInt64, s
   }
 }
 
-theorem sorted_below[Element: Ordered](items: Slice[Element], target: Element, last: UInt64, bound: UInt64)
+theorem sorted_below[Element: Ordered](items: Slice[Element], target: Element, last: UInt64)
   requires items.is_sorted()
   requires last < items.length()
-  requires bound <= last + 1
-  requires bound <= items.length()
   requires items[last] < target
-  ensures forall i in 0..bound => items[i] < target
-  decreases bound
+  ensures forall i in 0..last + 1 => items[i] < target
 {
-  if bound > 0 {
-    sorted_below(items, target: target, last: last, bound: bound - 1)
-    sorted_between(items, first: bound - 1, second: last)
+  assert forall i in 0..last + 1 => {
+    sorted_between(items, first: i, second: last)
+    items[i] < target
   }
 }
 
-theorem sorted_above[Element: Ordered](items: Slice[Element], target: Element, first: UInt64, bound: UInt64)
+theorem sorted_above[Element: Ordered](items: Slice[Element], target: Element, first: UInt64)
   requires items.is_sorted()
-  requires first <= bound
-  requires bound <= items.length()
   requires first < items.length()
   requires target < items[first]
-  ensures forall i in bound..items.length() => target < items[i]
-  decreases items.length() - bound
+  ensures forall i in first..items.length() => target < items[i]
 {
-  if bound < items.length() {
-    sorted_above(items, target: target, first: first, bound: bound + 1)
-    sorted_between(items, first: first, second: bound)
+  assert forall i in first..items.length() => {
+    sorted_between(items, first: first, second: i)
+    target < items[i]
   }
 }
 
@@ -417,13 +411,13 @@ public fn Slice[Element: Ordered].binary_search(self, target: Element) -> Option
     match self[middle].compare(target) {
       Less => {
         proof {
-          sorted_below(self, target: target, last: middle, bound: middle + 1)
+          sorted_below(self, target: target, last: middle)
         }
         low = middle + 1
       }
       Greater => {
         proof {
-          sorted_above(self, target: target, first: middle, bound: middle)
+          sorted_above(self, target: target, first: middle)
         }
         high = middle
       }
@@ -952,16 +946,14 @@ theorem heap_item_is_at_most_root[Element: Ordered](items: Slice[Element], limit
   }
 }
 
-theorem heap_root_is_largest[Element: Ordered](items: Slice[Element], limit: UInt64, bound: UInt64)
+theorem heap_root_is_largest[Element: Ordered](items: Slice[Element], limit: UInt64)
   requires limit <= items.length()
   requires is_heap_from(items.model(), limit: limit, floor: 0)
-  requires bound <= limit
-  ensures forall i in 0..bound => items[i] <= items[0]
-  decreases bound
+  ensures forall i in 0..limit => items[i] <= items[0]
 {
-  if bound > 0 {
-    heap_root_is_largest(items, limit: limit, bound: bound - 1)
-    heap_item_is_at_most_root(items, limit: limit, index: bound - 1)
+  assert forall i in 0..limit => {
+    heap_item_is_at_most_root(items, limit: limit, index: i)
+    items[i] <= items[0]
   }
 }
 
@@ -999,7 +991,7 @@ fn put_largest_last[Element: Ordered](items: mut Slice[Element], unsorted: UInt6
   cost time O(1)
 {
   proof {
-    heap_root_is_largest(items, limit: unsorted, bound: unsorted)
+    heap_root_is_largest(items, limit: unsorted)
   }
   mut items.swap(0, second: unsorted - 1)
 }
