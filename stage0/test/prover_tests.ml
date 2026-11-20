@@ -1932,6 +1932,11 @@ let () =
       with
       | [] -> ()
       | actual -> Harness.fail "%s" (String.concat "; " (Support.list_codes actual)));
+  Harness.test "an invariant may call a function of its type with the value it describes" (fun () ->
+      expect_proven Fixtures.Prover.public_counter_with_an_invariant_over_its_value);
+  Harness.test "an invariant does not prove the contract of a function that it calls" (fun () ->
+      expect_not_proven Fixtures.Prover.invariant_that_a_method_of_the_type_would_prove_from_itself
+        "prover.ensures");
   Harness.test "another package does not assume an opaque type's invariant that reads a field"
     (fun () ->
       match

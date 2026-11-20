@@ -670,7 +670,8 @@ let read_invariant context (frame : State.frame) (values : State.passed list) re
                 Validity.make_type_frame context frame source subject.type_
                   ~self:(Some subject.term)
               in
-              snd (Validity.read_specification context inner invariant.Mir.requirement.clause)
+              Validity.run_validating context subject.type_ (fun () ->
+                  snd (Validity.read_specification context inner invariant.Mir.requirement.clause))
           | None -> Facts.arrive context frame "holds" result_type)
       | _ -> Facts.arrive context frame "holds" result_type)
   | _ -> Facts.arrive context frame "holds" result_type

@@ -246,6 +246,7 @@ call a helper while the list is unsorted.
 |---|---|
 | An invariant belongs to the whole type, never to one variant. | It can state a fact about the whole value, such as a tree being balanced, and a clause after the last variant is unambiguous. A condition on one variant is a `match` in the invariant, or a field whose type carries the condition. |
 | A type with an invariant can still expose its fields. | An invariant protects facts about the contents of a value. `opaque` does a different job: it controls where a value is constructed and hides the representation ([Visibility](#visibility)). |
+| An invariant's call of a function with `self` needs no invariant of `self`. | The invariant states it, so requiring it would make every such invariant unprovable. The function's contract still assumes the invariant, and the invariant cannot prove that contract: inside the function's own proof, the call is not its result, and a cycle through other functions is a recursion, which the termination check rejects. |
 | An opaque type's invariant that reads no field holds in other packages, and one that reads a field holds only in the type's package. | Other packages cannot see the fields, so an invariant over them states nothing there. One stated through the type's public functions is a promise about every value, as a public function's `ensures` is about every result, and it needs no keyword: what it reads decides where it holds. |
 
 ## Values and ownership

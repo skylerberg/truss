@@ -1076,13 +1076,14 @@ let translate_type (lookups : Lookups.t) (source : State.source) ~path =
       Facts.assume context start
         (Validity.make_validity context start ~assuming:true ~includes_invariants:false ty value_);
       let at_value = { start with self = Some value_; old_self = Some value_ } in
-      List.iter
-        (fun (invariant : Mir.invariant) ->
-          let after, holds =
-            Validity.read_specification context at_value invariant.requirement.clause
-          in
-          Facts.assume context after holds)
-        invariants;
+      Validity.run_validating context ty (fun () ->
+          List.iter
+            (fun (invariant : Mir.invariant) ->
+              let after, holds =
+                Validity.read_specification context at_value invariant.requirement.clause
+              in
+              Facts.assume context after holds)
+            invariants);
       Option.iter
         (fun (written : Mir.formula) ->
           let _, potential_term = Validity.read_specification context at_value written in

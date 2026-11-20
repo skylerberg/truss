@@ -28,6 +28,7 @@ val find_parts_in_range :
   State.context -> ?seen:Types.ty list -> Types.ty -> Logic.term -> Logic.term option
 
 val assume_valid : State.context -> State.frame -> Types.ty -> Logic.term -> unit
+val run_validating : State.context -> Types.ty -> (unit -> 'a) -> 'a
 
 val declare_callback_arguments :
   State.context -> State.frame -> ('a * Types.ty) list -> Logic.term list

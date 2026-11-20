@@ -130,14 +130,17 @@ let find_invariants context (ty : Types.ty) =
   | Some (source, { invariants = _ :: _ as invariants; _ }) -> Some (source, invariants)
   | _ -> None
 
+let run_validating (context : State.context) ty run =
+  let validating = context.validating in
+  context.validating <- ty :: validating;
+  Fun.protect ~finally:(fun () -> context.validating <- validating) run
+
 let rec make_validity (context : State.context) frame ~assuming ?(deep = true)
     ?(includes_invariants = true) ?(seen = []) ty term =
   if List.exists (Types.equal ty) seen || List.exists (Types.equal ty) context.validating then
     Logic.Boolean true
   else
-    let validating = context.validating in
-    context.validating <- ty :: validating;
-    Fun.protect ~finally:(fun () -> context.validating <- validating) @@ fun () ->
+    run_validating context ty @@ fun () ->
     let read_invariants source (written : Mir.invariant list) =
       let inner = make_type_frame context frame source ty ~self:(Some term) in
       try

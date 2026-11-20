@@ -1,0 +1,12 @@
+public opaque type Flag(is_up: Bool)
+  invariant self.is_set()
+
+public fn Flag.is_set(self) -> Bool
+  ensures result
+{
+  self.is_up
+}
+
+public fn Flag.down() -> Flag {
+  Flag(is_up: false)
+}

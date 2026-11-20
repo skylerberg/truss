@@ -484,6 +484,8 @@ public type Interval =
 
 - `self` names the value, and a record's fields can be named directly.
 - Repeated invariants all hold, and each may rely on the ones before it.
+- An invariant may pass `self` to a function, as `invariant self.value() <= 10`
+  does. The call needs no invariant of `self`, which the invariant states.
 - Invariants are proven, never checked when the program runs. An invariant
   holds wherever other code can observe the value: when it is built,
   directly or with `with`, passed to a call, or returned, and when its
