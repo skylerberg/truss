@@ -1,21 +1,17 @@
-# Truss Design Decisions
+# Truss Current Design
 
 Truss is a language for a time when LLMs write code faster than tools can
 build, test, and verify it. Development time then goes to builds, test
 suites, bugs, conflicts between agents, and security problems. Truss is
 designed to make each of those cheap ([GOALS.md](GOALS.md)).
 
-This document gives the reasons for the design.
-[SPECIFICATION.md](SPECIFICATION.md) states the rules of the language, and
-[PACKAGES.md](PACKAGES.md) the rules of packages.
-
 ## Overview
 
 Three decisions shape the rest of the design.
 
-**Every definition is checked alone, against the signatures it names.** A
-signature carries the types, the capabilities, the contract, and the cost of
-a function, and the compiler proves that the body meets them:
+**The signature is enough to meaningfully review the code.** A signature carries
+the types, the capabilities, the contract, and the cost of a function, and the
+compiler proves that the body meets them:
 
 ```truss
 public fn binary_search(sorted: Slice[Int64], target: Int64) -> Option[UInt64]
@@ -28,13 +24,11 @@ public fn binary_search(sorted: Slice[Int64], target: Int64) -> Option[UInt64]
   cost allocations == 0
 ```
 
-This signature has no `uses` clause, so the function is pure. A caller's
-types and proofs depend on the signature and never on the body. A reviewer
-therefore reads signatures instead of bodies, and an edit to a body
-invalidates no caller. The cost is that a signature must state every effect
-and every failure of a call: an operation that can fail is a proof
-obligation or a declared `Panic`, and there is no `assume`. See
-[Proofs](#proofs).
+This signature has no `uses` clause, so the function is pure. A caller's types
+and proofs depend on the signature and never on the body. A reviewer therefore
+reads signatures instead of bodies. The cost is that a signature must state
+every effect and every failure of a call: an operation that can fail is a proof
+obligation or a declared `Panic`. See [Proofs](#proofs).
 
 **No two names alias a value that either can mutate.** This is mutable value
 semantics. A call can then mutate only its `mut` arguments and the state behind
@@ -43,12 +37,10 @@ value is freed when its owner's scope ends. The cost is that a reference cannot
 be stored. Views, lending methods, and cursors do the jobs of stored references.
 See [Values and ownership](#values-and-ownership).
 
-**Effects are capabilities.** A function that acts outside pure computation
-lists the capabilities it `uses`, and its caller provides their
-implementations. A test provides fakes, so its result is deterministic and
-is cached until the code it runs changes. A dependency has only the effects
-that its signatures and its grant allow. The cost is a `uses` clause on
-every function that has an effect. See [Capabilities](#capabilities).
+**Effects are capabilities.** A non-pure function must list the capabilities it
+`uses`. Its caller provides the capability implementations. A test provides
+fakes, so its result is deterministic and is cached until the code it runs
+changes. See [Capabilities](#capabilities).
 
 These reasons recur. A later section cites one by name instead of restating
 it:
