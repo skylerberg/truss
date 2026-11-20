@@ -24,6 +24,7 @@ val walk_definition : visit -> Core.definition -> unit
 val is_functional : (visit -> unit) -> bool
 val find_measure_condition : Core.loop_clause Core.conditional list -> Types.condition option
 val has_implicit_measure : Core.expression -> bool
+val reads_fields : owner:Path.t -> Core.expression -> bool
 
 type tasks_use = Uses_tasks | Through_parameter | No_tasks
 

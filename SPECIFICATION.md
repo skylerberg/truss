@@ -3022,6 +3022,11 @@ and the prelude changes only with a language version.
 - `opaque` appears only before `public type`. Outside its package, an opaque
   type's fields cannot be read, built, updated, or matched on. Visibility is
   set for a type as a whole.
+- An opaque type's invariant that reads none of its fields, such as
+  `invariant self.value() <= 10`, holds in other packages too: their proofs
+  assume it of every value of the type. It names only functions and
+  constants those packages can see. An invariant that reads a field holds
+  only in the type's package.
 - A public signature cannot mention a private or `internal` type, and
   neither can a public type's fields unless the type is opaque.
 - The `requires` and `cost` of a public function, of a method of a public

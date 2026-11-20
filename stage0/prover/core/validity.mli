@@ -11,7 +11,7 @@ val make_type_frame :
 val find_type_source : State.context -> Types.ty -> State.source option
 val find_type_clauses : State.context -> Types.ty -> (State.source * Mir.type_clauses) option
 val list_invariants : Mir.loop_clause list -> Mir.formula list
-val find_invariants : State.context -> Types.ty -> (State.source * Mir.formula list) option
+val find_invariants : State.context -> Types.ty -> (State.source * Mir.invariant list) option
 
 val make_validity :
   State.context ->

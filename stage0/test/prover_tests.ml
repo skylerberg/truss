@@ -1925,6 +1925,23 @@ let public_doubling =
    }\n"
 
 let () =
+  Harness.test "another package assumes an opaque type's invariant that reads no field" (fun () ->
+      match
+        check_across Fixtures.Prover.public_counter_with_an_invariant_over_its_value
+          Fixtures.Prover.value_bounded_by_another_packages_invariant
+      with
+      | [] -> ()
+      | actual -> Harness.fail "%s" (String.concat "; " (Support.list_codes actual)));
+  Harness.test "another package does not assume an opaque type's invariant that reads a field"
+    (fun () ->
+      match
+        check_across Fixtures.Prover.public_counter_with_an_invariant_over_its_field
+          Fixtures.Prover.value_bounded_by_another_packages_invariant
+      with
+      | [ { code; _ } ] when Diagnostic.Code.name code = "prover.ensures" -> ()
+      | actual -> Harness.fail "%s" (String.concat "; " (Support.list_codes actual)))
+
+let () =
   Harness.test "a caller in another package reads its callee's contract" (fun () ->
       match check_across public_doubling Fixtures.Prover.twice_through_another_packages_double with
       | [] -> ()

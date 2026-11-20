@@ -300,7 +300,8 @@ let list_edges (lookups : lookups) instance (code : Tree.t) =
         with
         | Some type_, Some { form = clauses; _ } -> (
             match List.nth_opt clauses.invariants (Z.to_int index) with
-            | Some { clause; is_executable = true; _ } when enters (`Invariant (type_, index)) ->
+            | Some { requirement = { clause; is_executable = true; _ }; _ }
+              when enters (`Invariant (type_, index)) ->
                 Walk.iter_formula visit_statement clause
             | Some _ | None -> ())
         | _ -> ())

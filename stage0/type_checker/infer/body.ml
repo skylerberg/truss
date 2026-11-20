@@ -480,6 +480,7 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
     | Some form ->
         check_bit_vector_names state form;
         let requires_run_forever = Capabilities.check state elaborated form in
+        Exported_parts.check_invariants state form;
         check_deserialized_invariants state elaborated form;
         Some requires_run_forever
     | None ->

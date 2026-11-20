@@ -170,11 +170,15 @@ let find_type_clauses ~find_type_interface path (definition : Core.definition) =
               List.map
                 (fun (invariant : Core.condition) ->
                   {
-                    clause =
-                      Builder.of_clause ~is_executable:invariant.executable ~parameters:[ self ]
-                        invariant.value;
-                    is_executable = invariant.executable;
-                    names = Builder.list_names invariant.value;
+                    Tree.requirement =
+                      {
+                        clause =
+                          Builder.of_clause ~is_executable:invariant.executable ~parameters:[ self ]
+                            invariant.value;
+                        is_executable = invariant.executable;
+                        names = Builder.list_names invariant.value;
+                      };
+                    reads_fields = Core_walk.reads_fields ~owner:path invariant.value;
                   })
                 invariants;
             potential = Option.map (Builder.of_specification ~entry_locals:[]) potential;
