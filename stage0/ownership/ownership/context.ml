@@ -2,6 +2,8 @@ module Local_table = Hashtbl.Make (Structural_key.Make (struct
   type t = Core.local
 end))
 
+type owned_scrutinee = { scrutinee : Core.local; written : Core.origin; is_part : bool }
+
 type context = {
   lookups : Lookups.t;
   list_bounds : Types.parameter -> Types.trait_reference list;
@@ -13,6 +15,7 @@ type context = {
   origins : Core.origin Local_table.t;
   binding_modes : Language.Mode.t Local_table.t;
   literal_views : unit Local_table.t;
+  owned_scrutinees : owned_scrutinee Local_table.t;
   types : Types.ty Local_table.t;
   mutable parameters : Core.local list;
   implements_capability : bool;
@@ -145,6 +148,33 @@ let show context (place : Place.t) =
          (function Place.Field name -> "." ^ name | Element _ | Range _ -> "[...]")
          place.steps)
 
+let note_owned_scrutinee context (body : Mir.Graph.body) ~bound ~(viewed : Mir.place) ~written =
+  match (body.locals.(bound).kind, viewed.root) with
+  | Source { local = binding; mode = Read; is_binding = true; _ }, Local scrutinee_local
+    when not (List.mem scrutinee_local body.captures) -> (
+      match body.locals.(scrutinee_local).kind with
+      | Source { local = scrutinee; _ }
+        when classify_binding_mode context (Local scrutinee) = Own
+             && List.for_all
+                  (function Mir.Field _ | Variant_field _ -> true | Element _ | Range _ -> false)
+                  viewed.projections ->
+          Local_table.replace context.owned_scrutinees binding
+            { scrutinee; written; is_part = viewed.projections <> [] }
+      | Source _ | Temporary | Lent _ -> ())
+  | _ -> ()
+
+let find_owned_scrutinee context (root : Place.root) =
+  match root with
+  | Local local -> (
+      match Local_table.find_opt context.owned_scrutinees local with
+      | Some owned
+        when Source.Definition_span.quote (Lazy.force context.text)
+               (locate_origin context owned.written)
+             = show_root context (Local owned.scrutinee) ->
+          Some owned
+      | Some _ | None -> None)
+  | Temporary _ | Constant _ | Environment -> None
+
 let collect context (mir : Mir.Graph.t) ~mode_keywords =
   List.iter
     (fun (keyword : Core.mode_keyword) ->
@@ -182,6 +212,13 @@ let collect context (mir : Mir.Graph.t) ~mode_keywords =
                 | Source { local = core; is_binding = true; _ } ->
                     Local_table.replace context.literal_views core ()
                 | Source { is_binding = false; _ } | Temporary | Lent _ -> ())
+            | Basic
+                (Assign
+                   {
+                     target = { root = Local bound; projections = [] };
+                     value = Operand (Borrow { place = viewed; mode = Read; origin; _ });
+                   }) ->
+                note_owned_scrutinee context body ~bound ~viewed ~written:origin
             | Basic _ | Provide_start _ | Provide_end -> ())
           basic.statements)
       body.blocks

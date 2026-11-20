@@ -1,0 +1,6 @@
+fn keep(text: own String) {}
+
+fn f(name: own String) {
+  let other = name
+  keep(own other)
+}

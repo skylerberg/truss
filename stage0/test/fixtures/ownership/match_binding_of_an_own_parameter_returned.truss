@@ -1,0 +1,6 @@
+fn f(present: own Option[String]) -> String {
+  match present {
+    Some(text) => own text
+    None => ""
+  }
+}

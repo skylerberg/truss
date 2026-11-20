@@ -234,6 +234,7 @@ module Code : sig
     | Division
     | Shift
     | Out_of_range
+    | Out_of_bounds
     | Requires
     | Ensures
     | Invariant

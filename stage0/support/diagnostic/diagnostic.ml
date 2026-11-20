@@ -234,6 +234,7 @@ module Code = struct
     | Division
     | Shift
     | Out_of_range
+    | Out_of_bounds
     | Requires
     | Ensures
     | Invariant
@@ -532,6 +533,7 @@ module Code = struct
     | Division -> "division"
     | Shift -> "shift"
     | Out_of_range -> "out_of_range"
+    | Out_of_bounds -> "out_of_bounds"
     | Requires -> "requires"
     | Ensures -> "ensures"
     | Invariant -> "invariant"

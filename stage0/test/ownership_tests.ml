@@ -876,6 +876,33 @@ let () =
       expect_one_diagnostic Fixtures.Ownership.is_on_a_parameter_kept "ownership.not_owned")
 
 let () =
+  Harness.test "a part moved out of a match on an owned parameter is fixed with `match own`"
+    (fun () ->
+      expect_one_diagnostic ~says:"`name` views part of `entry`, so it cannot be moved"
+        Fixtures.Ownership.match_on_an_own_parameter_moved_out "ownership.not_owned"
+        ~fixed:Fixtures.Ownership.match_on_an_own_parameter_moved_out_fixed);
+  Harness.test "a part moved out of an is on an owned parameter is fixed with `own`" (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.is_on_an_own_parameter_moved_out
+        "ownership.not_owned" ~fixed:Fixtures.Ownership.is_on_an_own_parameter_moved_out_fixed);
+  Harness.test "a part returned from a match on an owned parameter is fixed with `match own`"
+    (fun () ->
+      expect_one_diagnostic ~says:"`text` views part of `present`"
+        Fixtures.Ownership.match_binding_of_an_own_parameter_returned "ownership.needs_owned"
+        ~fixed:Fixtures.Ownership.match_binding_of_an_own_parameter_returned_fixed);
+  Harness.test "a `let` of an owned parameter that is moved on is fixed with `own`" (fun () ->
+      expect_one_diagnostic ~says:"`other` views `name`, so it cannot be moved"
+        Fixtures.Ownership.let_of_an_own_parameter_moved_out "ownership.not_owned"
+        ~fixed:Fixtures.Ownership.let_of_an_own_parameter_moved_out_fixed);
+  Harness.test "a part moved out of a match on a read-only parameter is fixed with a copy"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.is_on_a_parameter_kept "ownership.not_owned"
+        ~fixed:Fixtures.Ownership.is_on_a_parameter_kept_fixed);
+  Harness.test "a part of a scrutinee that a lambda captures is fixed with a copy" (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.match_on_a_captured_own_parameter_returned
+        "ownership.needs_owned"
+        ~fixed:Fixtures.Ownership.match_on_a_captured_own_parameter_returned_fixed)
+
+let () =
   Harness.test "a `String` cannot be mutated while a view that its view's method returned is live"
     (fun () ->
       expect_one_diagnostic Fixtures.Ownership.string_mutated_while_its_trimmed_view_is_live

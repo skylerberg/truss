@@ -81,7 +81,7 @@ let apply_slice context (frame : State.frame) ~node (site : Invocation.site) ~(b
         Facts.assume context frame (Logic.less_equal (Logic.int 0) length);
         length
   in
-  Facts.oblige context frame Requires location
+  Facts.oblige context frame Out_of_bounds location
     [ Text "`"; Facts.quote frame.source site.origin; Text "` may not be within the collection." ]
     Logic.(less_equal (int 0) low &&& less_equal low high &&& less_equal high length);
   let range = make_sequence_range context element model ~start:low ~stop:high in
@@ -809,7 +809,7 @@ let find_sequence_model context frame (sequence : Types.ty) term =
           Facts.raise_unsupported Whole_definition "the elements of `%s`" (Types.show sequence))
 
 let oblige_in_bounds context (frame : State.frame) ~origin condition =
-  Facts.oblige context frame Requires
+  Facts.oblige context frame Out_of_bounds
     (Facts.locate context frame.source origin)
     [ Text "`"; Facts.quote frame.source origin; Text "` may not be within the collection." ]
     condition
