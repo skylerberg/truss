@@ -96,26 +96,50 @@ theorem absent_where_split[Key: Ordered, Value](
 {
 }
 
-type Numbered[Key, Value](entry: map::Entry[Key, Value], ordinal: UInt64)
-
-fn map_of[Key: Ordered, Value](entries: own List[map::Entry[Key, Value]]) -> collections::SortedMap[Key, Value]
+theorem ascending_after_larger[Key: Ordered, Value](entries: Sequence[map::Entry[Key, Value]], entry: map::Entry[Key, Value])
+  requires strictly_ascending(entries)
+  requires entries.length() == 0 || entries[entries.length() - 1].key < entry.key
+  ensures strictly_ascending(entries.append(entry))
 {
-  var numbered: List[Numbered[Key, Value]] = List.with_capacity(entries.length())
-  for entry in own entries {
-    let ordinal = numbered.length()
-    mut numbered.push(Numbered(entry: own entry, ordinal: ordinal))
+  assert forall i in 0..entries.length() => {
+    if i + 1 < entries.length() {
+      core::less_is_transitive(entries[i].key, second: entries[entries.length() - 1].key, third: entry.key)
+    }
+    entries[i].key < entry.key
   }
-  mut numbered.sort_by(fn(first, second) {
-    let order = first.entry.key.compare(second.entry.key)
-    if order == Ordering.Equal { first.ordinal.compare(second.ordinal) } else { order }
-  })
-  var map: collections::SortedMap[Key, Value] = [:]
-  for item in own numbered
-    invariant strictly_ascending(map.entries.model())
+}
+
+fn ordered_entries[Key: Ordered, Value](entries: own List[map::Entry[Key, Value]]) -> List[map::Entry[Key, Value]]
+  ensures strictly_ascending(result.model())
+  ensures result.length() <= entries.length()
+  cost time O(entries.length() * (1 + log(entries.length())) * (1 + time(Key.compare)))
+{
+  let count = entries.length()
+  var numbered: List[collections::Numbered[Key, Value]] = List.with_capacity(count)
+  for entry in own entries
+    invariant numbered.length() == visited.length()
+    invariant numbered.length() <= count
+    cost time O(visited.length())
   {
-    mut map.insert(own item.entry.key, value: own item.entry.value)
+    let ordinal = count - numbered.length()
+    mut numbered.push(collections::Numbered(key: own entry.key, ordinal: ordinal, value: own entry.value))
   }
-  map
+  let sorted = collections::sorted_by_key(own numbered)
+  var ascending: List[map::Entry[Key, Value]] = List.with_capacity(count)
+  for item in own sorted
+    invariant strictly_ascending(ascending.model())
+    invariant ascending.length() <= visited.length()
+    cost time O(visited.length() * (1 + time(Key.compare)))
+  {
+    if ascending.length() == 0 || ascending[ascending.length() - 1].key < item.key {
+      let entry = map::Entry(key: own item.key, value: own item.value)
+      proof {
+        ascending_after_larger(ascending.model(), entry: entry)
+      }
+      mut ascending.push(own entry)
+    }
+  }
+  ascending
 }
 
 fn merged[Key: Ordered, Value](
@@ -192,7 +216,7 @@ public fn collections::SortedMap[Key: Ordered, Value].collect[Source: Cursor[Ele
 ) -> collections::SortedMap[Key, Value]
   uses Source.Uses, RunForever unless Source: FiniteCursor
 {
-  map_of(List.collect(own source))
+  collections::SortedMap(entries: ordered_entries(List.collect(own source)))
 }
 
 public fn collections::SortedMap[Key: Ordered, Value].length(self) -> UInt64
@@ -553,12 +577,12 @@ public fn collections::SortedMap[Key: Ordered, Value].extend[Source: Cursor[Elem
 )
   uses Source.Uses, RunForever unless Source: FiniteCursor
 {
-  let added = map_of(List.collect(own entries))
+  let added = ordered_entries(List.collect(own entries))
   if self.entries.is_empty() {
-    self.entries = own added.entries
-  } else if !added.entries.is_empty() {
+    self.entries = own added
+  } else if !added.is_empty() {
     let current = map::exchange(mut self.entries, value: [])
-    self.entries = merged(own current, second: own added.entries)
+    self.entries = merged(own current, second: own added)
   }
 }
 
@@ -754,17 +778,8 @@ impl FromEntries for collections::SortedMap[Key: Ordered, Value] {
     requires forall i in 0..entries.length() => forall j in 0..entries.length() =>
       i < j ==> !(entries.model()[i].key == entries.model()[j].key)
     ensures result.length() <= entries.length()
-    cost time O(entries.length() * (entries.length() + time(Key.compare)))
+    cost time O(entries.length() * (1 + log(entries.length())) * (1 + time(Key.compare)))
   {
-    let count = entries.length()
-    var map: collections::SortedMap[Key, Value] = collections::SortedMap(entries: [])
-    for entry in own entries
-      invariant strictly_ascending(map.entries.model())
-      invariant map.length() <= visited.length()
-      cost time O(visited.length() * (count + time(Key.compare)))
-    {
-      mut map.insert(own entry.key, value: own entry.value)
-    }
-    map
+    collections::SortedMap(entries: ordered_entries(own entries))
   }
 }

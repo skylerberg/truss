@@ -105,6 +105,13 @@ public trait Ordered: Equal {
   }
 }
 
+internal theorem less_is_transitive[Element: Ordered](first: Element, second: Element, third: Element)
+  requires first < second
+  requires second < third
+  ensures first < third
+{
+}
+
 public trait Hash: Equal {
   fn hash(self, hasher: mut Hasher)
 }
