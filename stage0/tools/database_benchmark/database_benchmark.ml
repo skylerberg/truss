@@ -1,5 +1,3 @@
-module Names = Resolve.Names
-
 let functions = 25
 let last = functions - 1
 let default_sizes = [ 50; 200; 800 ]
@@ -206,7 +204,7 @@ let list_tests snapshot database =
   List.concat_map
     (fun package ->
       List.filter_map
-        (fun (declaration : Names.declaration) ->
+        (fun (declaration : Resolve.Names.declaration) ->
           match declaration.key.path with
           | Test _ when declaration.key.ordinal = 0 -> Some declaration.key.path
           | _ -> None)
