@@ -513,6 +513,11 @@ public type Interval =
   its updates. An element of a `List`, a `Slice`, or an `Array` meets it
   when a write to a part of the element ends, as in `spans[0].low = 1` or
   `bump(mut spans[0].low)`, since the next read of the element assumes it.
+- An invariant clause that calls a definition private to its type's
+  module is known only in that module. Another module assumes the clause of
+  every value of the type and proves it only of a value it was given or a
+  call returned, so it cannot build a value of the type from its fields when
+  the clause must hold.
 - A private method that takes `mut self` is a step of an update: the
   invariant of its `self` is neither assumed when it is called nor required
   when it returns. A method written in a trait, a capability, or an `impl`

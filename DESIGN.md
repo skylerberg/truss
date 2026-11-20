@@ -264,6 +264,7 @@ call a helper while the list is unsorted.
 | Rule | Reason |
 |---|---|
 | An invariant belongs to the whole type, never to one variant. | It can state a fact about the whole value, such as a tree being balanced, and a clause after the last variant is unambiguous. A condition on one variant is a `match` in the invariant, or a field whose type carries the condition. |
+| An invariant clause that calls a definition private to its type's module is opaque in other modules. | The clause can only be proven where its definition is visible, so other modules gain nothing from the definition, and each obligation that holds a value of the type would carry it: `Map`'s index invariant added about 1 MB of axioms to every obligation of `Set`, `json`, and `toml`, and some ran out of steps. A module that builds the value from its fields cannot prove the clause, so no module can make a value that breaks it. |
 | A type with an invariant can still expose its fields. | An invariant protects facts about the contents of a value. `opaque` does a different job: it controls where a value is constructed and hides the representation ([Visibility](#visibility)). |
 
 ## Values and ownership

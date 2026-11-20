@@ -1,0 +1,11 @@
+use app::counter
+
+fn kept(value: own counter::Counter) -> counter::Counter
+  ensures result.count >= 0
+{
+  value
+}
+
+fn fresh() -> counter::Counter {
+  counter::Counter.new()
+}

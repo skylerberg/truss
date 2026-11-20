@@ -871,6 +871,20 @@ let () =
 let span = "type Span(low: Int64, high: Int64)\n  invariant low <= high\n\n"
 
 let () =
+  (let counter = ("app::counter", Fixtures.Prover.counter_with_a_private_invariant) in
+   Harness.test
+     "another module assumes and passes on an invariant clause that names a private definition"
+     (fun () ->
+       Support.expect_no_diagnostics ~check
+         [ ("app::main", Fixtures.Prover.counter_passed_through_another_module); counter ]);
+   Harness.test "another module does not know an invariant clause that names a private definition"
+     (fun () ->
+       Support.expect_one_diagnostic ~check ~others:[ counter ]
+         Fixtures.Prover.counter_read_by_another_module "prover.ensures");
+   Harness.test "another module cannot prove an invariant clause that names a private definition"
+     (fun () ->
+       Support.expect_one_diagnostic ~check ~others:[ counter ]
+         Fixtures.Prover.counter_built_by_another_module "prover.invariant"));
   Harness.test "building a value must meet its invariant" (fun () ->
       expect_not_proven (span ^ Fixtures.Prover.span_built_without_its_invariant) "prover.invariant");
   Harness.test "building a value that meets its invariant" (fun () ->

@@ -1338,19 +1338,15 @@ impl serialization::Deserialize for Value {
         mut source.end_list()
         Ok(Value.Array(items: own items))
       }
-      Record => Ok(Value.Object(members: read_members(mut source)?))
+      Record => {
+        mut source.begin_map()?
+        var members: Map[String, Value] = [:]
+        while mut source.next_key() is Some(key) {
+          mut members.insert(own key, value: Value.deserialize(mut source)?)
+        }
+        mut source.end_map()
+        Ok(Value.Object(members: own members))
+      }
     }
   }
-}
-
-fn read_members[Source: serialization::Deserializer](source: mut Source) -> Result[Map[String, Value], serialization::Error]
-  uses RunForever
-{
-  mut source.begin_map()?
-  var members: Map[String, Value] = [:]
-  while mut source.next_key() is Some(key) {
-    mut members.insert(own key, value: Value.deserialize(mut source)?)
-  }
-  mut source.end_map()
-  Ok(own members)
 }
