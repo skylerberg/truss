@@ -232,6 +232,9 @@ theorem model_after_push[Key: Hash + Ordered, Value](
   assert forall other: Key =>
     (exists i in 0..after.keys.length() => identical(after.keys.model()[i], other))
       == ((exists i in 0..before.keys.length() => identical(before.keys.model()[i], other)) || identical(key, other))
+  assert after.model().contains_key(key) && identical(after.model().get(key), value)
+  assert forall other: Key =>
+    after.model().contains_key(other) && other == key ==> identical(other, key)
 }
 
 internal fn Map[Key: Hash + Ordered, Value].push_entry(mut self, key: own Key, value: own Value)
@@ -467,11 +470,17 @@ public fn Map[Key: Hash + Ordered, Value].replace(mut self, key: own Key, value:
   }
   let position = self.index_of(key)
   if position < self.keys.length() {
-    Some(mut self.replace_value_at(position, value: own value))
+    let previous = mut self.replace_value_at(position, value: own value)
+    proof {
+      assert contains_equal_key(old(self.model()), key: key)
+      assert contains_equal_key(self.model(), key: key)
+    }
+    Some(own previous)
   } else {
     mut self.push_entry(own key, value: own value)
     proof {
       model_after_push(old(self), after: self, key: key, value: value)
+      assert contains_equal_key(self.model(), key: key)
     }
     None
   }

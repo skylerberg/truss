@@ -704,6 +704,34 @@ theorem fills_kept_target(
 {
 }
 
+theorem slot_stays_moved(
+  slots: Sequence[Slot],
+  before: Sequence[Slot],
+  after: Sequence[Slot],
+  before_places: Sequence[UInt64],
+  after_places: Sequence[UInt64],
+  moved: Integer,
+  slot: Integer,
+  target: Integer,
+)
+  requires 0 <= slot && slot < slots.length() && 0 <= moved && moved < slots.length() && slot != moved
+  requires before.length() == 2 * slots.length() && after.length() == before.length()
+  requires after_places.length() == before_places.length()
+  requires slots[moved].occupant != 0 && slots[moved].occupant <= before_places.length()
+  requires before_places[slots[moved].occupant - 1] == moved + 1
+  requires moves_slot(slots, grown: before, places: before_places, moved: moved, slot: slot)
+  requires forall position in 0..before_places.length() => position != slots[moved].occupant - 1 ==>
+    after_places[position] == before_places[position]
+  requires 0 <= target && target < before.length() && before[target].occupant == 0
+  requires forall other in 0..before.length() => other != target ==> after[other].occupant == before[other].occupant
+  ensures moves_slot(slots, grown: after, places: after_places, moved: moved + 1, slot: slot)
+{
+  if slots[slot].occupant != 0 && slots[slot].occupant <= before_places.length() {
+    assert slots[slot].occupant != slots[moved].occupant
+    assert after_places[slots[slot].occupant - 1] == before_places[slots[slot].occupant - 1]
+  }
+}
+
 theorem regrown_after_occupied_move(
   slots: Sequence[Slot],
   overflow: Tree,
@@ -773,8 +801,21 @@ theorem regrown_after_occupied_move(
   fills_moved_target(slots, after: after, places: after_places, moved: moved, step: step, target: target, target_home: target_home)
   assert forall slot in 0..slots.length() => slot != moved ==> {
     assert moves_slot(slots, grown: before, places: before_places, moved: moved, slot: slot)
+    slot_stays_moved(
+      slots,
+      before: before,
+      after: after,
+      before_places: before_places,
+      after_places: after_places,
+      moved: moved,
+      slot: slot,
+      target: target,
+    )
     moves_slot(slots, grown: after, places: after_places, moved: moved + 1, slot: slot)
   }
+  assert 0 < after_places[slots[moved].occupant - 1] && after_places[slots[moved].occupant - 1] <= after.length()
+  assert folded(after_places[slots[moved].occupant - 1] - 1, capacity: slots.length()) == moved
+  assert after[after_places[slots[moved].occupant - 1] - 1].occupant == slots[moved].occupant
   assert moves_slot(slots, grown: after, places: after_places, moved: moved + 1, slot: moved)
 }
 
