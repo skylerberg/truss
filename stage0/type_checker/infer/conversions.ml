@@ -1,11 +1,3 @@
-type conversion =
-  | From_never
-  | Owned_to_view
-  | View_to_owned
-  | Function_widening
-  | To_integer
-  | From_integer
-
 let read_head (state : State.state) ?default_at type_ =
   match State.normalize state type_ with
   | Types.Variable root ->
@@ -31,52 +23,9 @@ let find_view_as ~owned ~view =
 let convert (state : State.state) (env : State.env) ?argument ?(takes_view_as_owner = false)
     ?expression (span : Source.Definition_span.t) ~actual ~expected =
   let is_argument = Option.is_some argument in
-  let record_conversion (conversion : conversion option) =
+  let record_conversion conversion =
     match (conversion, expression) with
-    | Some conversion, Some id ->
-        let before = state.form.expression_builders.(id) in
-        state.form.expression_builders.(id) <-
-          Option.map
-            (fun build () ->
-              let inner : Core.expression = build () in
-              let expected = State.finalize_type state expected in
-              let convert conversion =
-                State.make_synthetic_expression state ~origin:id expected
-                  (Convert { conversion; value = inner })
-              in
-              match conversion with
-              | From_never -> inner
-              | Function_widening ->
-                  if Types.equal inner.type_ expected then inner else convert Widen
-              | To_integer -> convert To_integer
-              | From_integer -> convert From_integer
-              | View_to_owned -> convert View_to_owned
-              | Owned_to_view
-                when Types.is_well_known List inner.type_ || Types.is_builtin Array inner.type_ ->
-                  let base : Core.place =
-                    match inner.kind with Use place -> place | _ -> Temporary inner
-                  in
-                  State.make_synthetic_expression state ~origin:id expected
-                    (State.make_range state ~origin:id base ~start:None ~stop:None ~inclusive:false)
-              | Owned_to_view -> (
-                  match inner.type_ with
-                  | Types.Named { path; arguments } ->
-                      State.make_synthetic_expression state ~origin:id expected
-                        (Call
-                           (State.make_call state
-                              ~callee:
-                                (Function
-                                   {
-                                     path =
-                                       Method
-                                         { owner = path; name = "slice"; receiver = Instance Read };
-                                     instantiation =
-                                       { Types.no_instantiation with type_arguments = arguments };
-                                   })
-                              ~arguments:[ Operands.build_argument Read inner ]
-                              ~lends:None))
-                  | other -> State.raise_bug "`%s` is viewed and has no view" (Types.show other)))
-            before
+    | Some conversion, Some id -> State.record_conversion state id conversion ~expected
     | _ -> ()
   in
   record_conversion
@@ -89,12 +38,12 @@ let convert (state : State.state) (env : State.env) ?argument ?(takes_view_as_ow
   in
   let between_owner_and_view =
     match if is_argument then find_view_as ~owned:actual_type ~view:wanted else None with
-    | Some view -> Some (Owned_to_view, wanted, view)
+    | Some view -> Some (State.Owned_to_view, wanted, view)
     | None when takes_view_as_owner -> (
         match wanted with
         | Types.Named { path; _ } when Well_known.is List path || Well_known.is String path ->
             Option.map
-              (fun view -> (View_to_owned, actual_type, view))
+              (fun view -> (State.View_to_owned, actual_type, view))
               (find_view_as ~owned:wanted ~view:actual_type)
         | _ -> None)
     | None -> None
@@ -106,13 +55,13 @@ let convert (state : State.state) (env : State.env) ?argument ?(takes_view_as_ow
       Some conversion
   | None -> (
       match (actual_type, wanted, expression) with
-      | Types.Never, _, _ -> Some From_never
+      | Types.Never, _, _ -> Some State.From_never
       | Types.Integer, _, Some _
         when is_argument && env.specification && State.is_within state wanted Types.integer_types ->
-          Some From_integer
+          Some State.From_integer
       | _, Types.Integer, _
         when env.specification && State.is_within state actual_type Types.integer_types ->
-          Some To_integer
+          Some State.To_integer
       | Types.Function actual_function, Types.Function wanted_function, _
         when not (Types.has_same_clauses actual_function wanted_function) ->
           let unlisted =
@@ -146,7 +95,7 @@ let convert (state : State.state) (env : State.env) ?argument ?(takes_view_as_ow
                         ~actual:(State.finalize_type state actual));
                 }
                 :: state.capability_constraints;
-            Some Function_widening
+            Some State.Function_widening
           end
           else refuse ()
       | _ -> if Unify.unify state.unifier wanted actual_type then None else refuse ())

@@ -707,6 +707,7 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
       form =
         {
           expression_builders = Array.make (definition.id + 1) None;
+          conversions = Array.make (definition.id + 1) [];
           statement_builders = Array.make (definition.id + 1) None;
           pattern_builders = Array.make (definition.id + 1) None;
           definition_builder = None;

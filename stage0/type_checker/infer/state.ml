@@ -76,8 +76,17 @@ type entry =
 
 type logged = { member : int; entry : entry }
 
+type conversion =
+  | From_never
+  | Owned_to_view
+  | View_to_owned
+  | Function_widening
+  | To_integer
+  | From_integer
+
 type form = {
   expression_builders : (unit -> Core.expression) option array;
+  conversions : (conversion * Types.ty) list array;
   statement_builders : (unit -> Core.statement) option array;
   pattern_builders : (unit -> Core.pattern) option array;
   mutable definition_builder : (holds_body:bool -> Core.definition) option;
@@ -181,82 +190,9 @@ let rec list_operands state (value : Syntax.expression) : Syntax.expression list
           checked_parts := list_checked part :: !checked_parts);
       List.concat (List.rev !checked_parts)
 
-let rec build_expression state (value : Syntax.expression) : Core.expression =
-  let evaluated =
-    if Option.is_some state.form.tables_with_holes then list_operands state value else []
-  in
-  if
-    List.exists
-      (fun (operand : Syntax.expression) -> was_hole state (fun tables -> tables.types) operand.id)
-      evaluated
-  then begin
-    let evaluate (operand : Syntax.expression) : Core.statement option =
-      match operand.kind with
-      | Lambda _ -> None
-      | _ ->
-          let node = build_expression state operand in
-          Some
-            {
-              id = allocate_node_id state;
-              origin = operand.id;
-              kind =
-                Let
-                  {
-                    pattern =
-                      {
-                        id = allocate_node_id state;
-                        origin = operand.id;
-                        type_ = node.type_;
-                        kind = Wildcard;
-                      };
-                    value = Operands.build Read node;
-                    else_ = None;
-                  };
-            }
-    in
-    let statements = List.filter_map evaluate evaluated in
-    let todo = make_synthetic_expression state ~origin:value.id Types.Never Todo in
-    make_synthetic_expression state ~origin:value.id Types.Never
-      (Block { statements; value = Some todo })
-  end
-  else
-    match state.form.expression_builders.(value.id) with
-    | Some build -> build ()
-    | None ->
-        raise_bug "`%s` has no node in the core form" (quote_span state (read_span state value.id))
-
 let register_statement state (written : Syntax.statement) make_kind =
   state.form.statement_builders.(written.id) <-
     Some (fun () -> { Core.id = allocate_node_id state; origin = written.id; kind = make_kind () })
-
-let build_statement state (written : Syntax.statement) : Core.statement =
-  let rec strip_mode_keyword (value : Syntax.expression) =
-    match value.kind with
-    | Mode (_, inner) | Parenthesized inner -> strip_mode_keyword inner
-    | _ -> value
-  in
-  let find_hole (value : Syntax.expression) =
-    let value = strip_mode_keyword value in
-    if was_hole state (fun tables -> tables.types) value.id then Some value else None
-  in
-  match
-    match written.kind with
-    | For { iterable; _ } -> find_hole iterable
-    | Assignment { target; _ } -> find_hole target
-    | _ -> None
-  with
-  | Some value ->
-      {
-        id = allocate_node_id state;
-        origin = written.id;
-        kind = Evaluate (build_expression state value);
-      }
-  | None -> (
-      match state.form.statement_builders.(written.id) with
-      | Some build -> build ()
-      | None ->
-          raise_bug "`%s` has no node in the core form"
-            (quote_span state (read_span state written.id)))
 
 let register_pattern state (written : Syntax.pattern) make_kind =
   state.form.pattern_builders.(written.id) <-
@@ -267,19 +203,6 @@ let register_pattern state (written : Syntax.pattern) make_kind =
         | Some type_ -> { Core.id; origin = written.id; type_; kind = make_kind () }
         | None ->
             raise_bug "`%s` has a node and no type" (quote_span state (read_span state written.id)))
-
-let build_pattern state (written : Syntax.pattern) : Core.pattern =
-  if was_hole state (fun tables -> tables.scrutinee_types) written.id then
-    { id = allocate_node_id state; origin = written.id; type_ = Types.Never; kind = Wildcard }
-  else
-    match state.form.pattern_builders.(written.id) with
-    | Some build -> build ()
-    | None ->
-        raise_bug "`%s` has no node in the core form"
-          (quote_span state (read_span state written.id))
-
-let alias_expression state (value : Syntax.expression) (inner : Syntax.expression) =
-  state.form.expression_builders.(value.id) <- Some (fun () -> build_expression state inner)
 
 let rec mark_lent_tails state (value : Syntax.expression) =
   match value.kind with
@@ -595,8 +518,6 @@ let rec copy_plain_bindings state (pattern : Core.pattern) : Core.pattern =
       { pattern with kind = Alternatives (List.map (copy_plain_bindings state) alternatives) }
   | Wildcard | Literal _ | Range _ | Equal_to _ -> pattern
 
-let build_scrutinee_pattern state written = copy_plain_bindings state (build_pattern state written)
-
 let make_callee state (target : Core.operand Core.target) =
   Callee_uses.make_callee state.lookups.interface ~list_bounds:(lookup_bounds state) target
 
@@ -643,21 +564,6 @@ let rec diverges ~is_never (written : Syntax.statement) =
   | While { condition = { kind = True; _ }; body; _ } -> not (Syntax_walk.contains_break body)
   | Parallel body | Concurrent body -> List.exists (diverges ~is_never) body.statements
   | _ -> false
-
-let build_block state (written : Syntax.block) : Core.block =
-  let rec build_statements (statements : Syntax.statement list) =
-    match statements with
-    | [] -> ([], None)
-    | [ ({ kind = Expression value; _ } as last) ]
-      when Option.is_none state.form.statement_builders.(last.id) ->
-        ([], Some (build_expression state value))
-    | first :: rest ->
-        let first = build_statement state first in
-        let rest, value = build_statements rest in
-        (first :: rest, value)
-  in
-  let statements, value = build_statements written.statements in
-  { statements; value }
 
 let declare state (name : Syntax.name) type_ ~binding ~mode =
   Hashtbl.replace state.locals name.id { name = name.text; type_; binding; mode };
@@ -942,3 +848,139 @@ let make_range state ~origin (base : Core.place) ~start ~stop ~inclusive : Core.
            Types.Named { path = Well_known.make_path Slice; arguments = [ Types.Type element ] };
          origin;
        })
+
+let record_conversion state id conversion ~expected =
+  state.form.conversions.(id) <- state.form.conversions.(id) @ [ (conversion, expected) ]
+
+let apply_conversion state (id : Syntax.id) (inner : Core.expression) (conversion, expected) =
+  let expected = finalize_type state expected in
+  let make kind = make_synthetic_expression state ~origin:id expected kind in
+  let convert conversion = make (Convert { conversion; value = inner }) in
+  match conversion with
+  | From_never -> inner
+  | Function_widening -> if Types.equal inner.type_ expected then inner else convert Widen
+  | To_integer -> convert To_integer
+  | From_integer -> convert From_integer
+  | View_to_owned -> convert View_to_owned
+  | Owned_to_view when Types.is_well_known List inner.type_ || Types.is_builtin Array inner.type_ ->
+      let base : Core.place = match inner.kind with Use place -> place | _ -> Temporary inner in
+      make (make_range state ~origin:id base ~start:None ~stop:None ~inclusive:false)
+  | Owned_to_view -> (
+      match inner.type_ with
+      | Types.Named { path; arguments } ->
+          make
+            (Call
+               (make_call state
+                  ~callee:
+                    (Function
+                       {
+                         path = Method { owner = path; name = "slice"; receiver = Instance Read };
+                         instantiation = { Types.no_instantiation with type_arguments = arguments };
+                       })
+                  ~arguments:[ Operands.build_argument Read inner ]
+                  ~lends:None))
+      | other -> raise_bug "`%s` is viewed and has no view" (Types.show other))
+
+let build_expression_by_id state id =
+  match state.form.expression_builders.(id) with
+  | Some build -> List.fold_left (apply_conversion state id) (build ()) state.form.conversions.(id)
+  | None -> raise_bug "`%s` has no node in the core form" (quote_span state (read_span state id))
+
+let rec build_expression state (value : Syntax.expression) : Core.expression =
+  let evaluated =
+    if Option.is_some state.form.tables_with_holes then list_operands state value else []
+  in
+  if
+    List.exists
+      (fun (operand : Syntax.expression) -> was_hole state (fun tables -> tables.types) operand.id)
+      evaluated
+  then begin
+    let evaluate (operand : Syntax.expression) : Core.statement option =
+      match operand.kind with
+      | Lambda _ -> None
+      | _ ->
+          let node = build_expression state operand in
+          Some
+            {
+              id = allocate_node_id state;
+              origin = operand.id;
+              kind =
+                Let
+                  {
+                    pattern =
+                      {
+                        id = allocate_node_id state;
+                        origin = operand.id;
+                        type_ = node.type_;
+                        kind = Wildcard;
+                      };
+                    value = Operands.build Read node;
+                    else_ = None;
+                  };
+            }
+    in
+    let statements = List.filter_map evaluate evaluated in
+    let todo = make_synthetic_expression state ~origin:value.id Types.Never Todo in
+    make_synthetic_expression state ~origin:value.id Types.Never
+      (Block { statements; value = Some todo })
+  end
+  else build_expression_by_id state value.id
+
+let build_statement state (written : Syntax.statement) : Core.statement =
+  let rec strip_mode_keyword (value : Syntax.expression) =
+    match value.kind with
+    | Mode (_, inner) | Parenthesized inner -> strip_mode_keyword inner
+    | _ -> value
+  in
+  let find_hole (value : Syntax.expression) =
+    let value = strip_mode_keyword value in
+    if was_hole state (fun tables -> tables.types) value.id then Some value else None
+  in
+  match
+    match written.kind with
+    | For { iterable; _ } -> find_hole iterable
+    | Assignment { target; _ } -> find_hole target
+    | _ -> None
+  with
+  | Some value ->
+      {
+        id = allocate_node_id state;
+        origin = written.id;
+        kind = Evaluate (build_expression state value);
+      }
+  | None -> (
+      match state.form.statement_builders.(written.id) with
+      | Some build -> build ()
+      | None ->
+          raise_bug "`%s` has no node in the core form"
+            (quote_span state (read_span state written.id)))
+
+let build_pattern state (written : Syntax.pattern) : Core.pattern =
+  if was_hole state (fun tables -> tables.scrutinee_types) written.id then
+    { id = allocate_node_id state; origin = written.id; type_ = Types.Never; kind = Wildcard }
+  else
+    match state.form.pattern_builders.(written.id) with
+    | Some build -> build ()
+    | None ->
+        raise_bug "`%s` has no node in the core form"
+          (quote_span state (read_span state written.id))
+
+let alias_expression state (value : Syntax.expression) (inner : Syntax.expression) =
+  state.form.expression_builders.(value.id) <- Some (fun () -> build_expression state inner)
+
+let build_scrutinee_pattern state written = copy_plain_bindings state (build_pattern state written)
+
+let build_block state (written : Syntax.block) : Core.block =
+  let rec build_statements (statements : Syntax.statement list) =
+    match statements with
+    | [] -> ([], None)
+    | [ ({ kind = Expression value; _ } as last) ]
+      when Option.is_none state.form.statement_builders.(last.id) ->
+        ([], Some (build_expression state value))
+    | first :: rest ->
+        let first = build_statement state first in
+        let rest, value = build_statements rest in
+        (first :: rest, value)
+  in
+  let statements, value = build_statements written.statements in
+  { statements; value }

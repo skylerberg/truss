@@ -1,8 +1,3 @@
-let build_expression_by_id (state : State.state) (id : Syntax.id) : Core.expression =
-  match state.form.expression_builders.(id) with
-  | Some build -> build ()
-  | None -> State.raise_bug "a call's argument has no core node"
-
 let read_call (state : State.state) (id : Syntax.id) : Tables.call =
   match state.tables.calls.(id) with
   | Some call -> call
@@ -41,7 +36,8 @@ let build_arguments state (call : Tables.call) : Core.argument list =
             {
               mode = argument.mode;
               value =
-                Operands.build argument.mode (build_expression_by_id state argument.expression);
+                Operands.build argument.mode
+                  (State.build_expression_by_id state argument.expression);
             }
       | None -> Default)
 
@@ -80,7 +76,7 @@ let find_built_in_operation (trait : Types.trait_reference) name receiver self_t
 
 let build_argument_expressions state (call : Tables.call) =
   List.map
-    (fun (argument : Tables.argument) -> build_expression_by_id state argument.expression)
+    (fun (argument : Tables.argument) -> State.build_expression_by_id state argument.expression)
     (List.sort
        (fun (left : Tables.argument) (right : Tables.argument) ->
          compare left.core_argument_index right.core_argument_index)
@@ -111,7 +107,7 @@ let build_call_kind ?lends ?function_value state (value : Syntax.expression) : C
   | Trait_method { trait; _ } when Well_known.is Copyable trait.trait -> (
       match recorded.arguments with
       | [ receiver ] ->
-          Copy (Operands.build Read (build_expression_by_id state receiver.expression))
+          Copy (Operands.build Read (State.build_expression_by_id state receiver.expression))
       | _ -> State.raise_bug "`copy` does not have exactly one argument")
   | Trait_method { trait; name; receiver; self_type; _ }
     when Option.is_some (find_built_in_operation trait name receiver self_type) ->
@@ -132,8 +128,9 @@ let build_call_kind ?lends ?function_value state (value : Syntax.expression) : C
         List.map
           (fun (argument : Tables.argument) ->
             ( (List.nth declared argument.core_argument_index).field_name,
-              Some (Operands.build argument.mode (build_expression_by_id state argument.expression))
-            ))
+              Some
+                (Operands.build argument.mode
+                   (State.build_expression_by_id state argument.expression)) ))
           recorded.arguments
       in
       let defaulted =

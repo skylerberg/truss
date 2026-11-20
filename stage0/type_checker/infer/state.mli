@@ -57,8 +57,17 @@ type frame = {
 type decision_site = Use | Statement_end | Actual_head | Method_call
 type logged
 
+type conversion =
+  | From_never
+  | Owned_to_view
+  | View_to_owned
+  | Function_widening
+  | To_integer
+  | From_integer
+
 type form = {
   expression_builders : (unit -> Core.expression) option array;
+  conversions : (conversion * Types.ty) list array;
   statement_builders : (unit -> Core.statement) option array;
   pattern_builders : (unit -> Core.pattern) option array;
   mutable definition_builder : (holds_body:bool -> Core.definition) option;
@@ -137,6 +146,8 @@ val make_synthetic_expression :
 val register_expression : state -> Syntax.expression -> (unit -> Core.kind) -> unit
 val was_hole : state -> (Tables.t -> Types.ty option array) -> Syntax.id -> bool
 val build_expression : state -> Syntax.expression -> Core.expression
+val build_expression_by_id : state -> Syntax.id -> Core.expression
+val record_conversion : state -> Syntax.id -> conversion -> expected:Types.ty -> unit
 val register_statement : state -> Syntax.statement -> (unit -> Core.statement_kind) -> unit
 val build_statement : state -> Syntax.statement -> Core.statement
 val register_pattern : state -> Syntax.pattern -> (unit -> Core.pattern_kind) -> unit
