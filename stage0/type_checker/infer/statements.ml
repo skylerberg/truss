@@ -268,7 +268,7 @@ and check_loop_clause state env (clause : Syntax.loop_clause) =
       | Loop_decreases measures -> Clauses.check_measures state env measures
       | Loop_cost cost -> Clauses.check_cost state env cost)
 
-and record_loop (state : State.state) (written : Syntax.statement) span (loop : Tables.loop) =
+and record_loop (state : State.state) (written : Syntax.statement) (loop : Tables.loop) =
   state.tables.loops.(written.id) <- Some loop;
   match loop with
   | Pulled pulled ->
@@ -276,10 +276,7 @@ and record_loop (state : State.state) (written : Syntax.statement) span (loop : 
           state.tables.loops.(written.id) <-
             Some
               (Pulled
-                 {
-                   pulled with
-                   remaining = Name_lookup.find_remaining_call state span pulled.cursor;
-                 }))
+                 { pulled with remaining = Name_lookup.find_remaining_call state pulled.cursor }))
   | Integer_range _ | Elements _ -> ()
 
 and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable : Syntax.expression)
@@ -309,13 +306,13 @@ and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable :
           in
           match (by_position, consumed, State.find_evidence state type_ cursor) with
           | Visible (loop, element, lends), _, _ ->
-              record_loop state written span loop;
+              record_loop state written loop;
               (element, lends)
           | _, Visible (loop, element), _ ->
-              record_loop state written span loop;
+              record_loop state written loop;
               (element, Language.Mode.Own)
           | _, _, Some _ ->
-              record_loop state written span
+              record_loop state written
                 (Pulled { cursor = type_; cursor_call = None; remaining = None });
               ( Solver.resolve_associated_type state type_ cursor Cursor_element ~at:span,
                 Language.Mode.Own )

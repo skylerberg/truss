@@ -126,5 +126,6 @@ val map :
   t ->
   t
 
+val list_arguments_at : t -> Syntax.id -> Types.argument list
 val exists_type : (Types.ty -> bool) -> t -> bool
 val publish : t -> published
