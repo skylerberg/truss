@@ -2671,11 +2671,41 @@ proof Ordered.transitive for Box[Item: Ordered] {
 }
 ```
 
+```truss
+theorem sorted_between(items: Slice[Int64], first: UInt64, second: UInt64)
+  requires items.is_sorted()
+  requires first <= second
+  requires second < items.length()
+  ensures items[first] <= items[second]
+  decreases second - first
+{
+  if first < second {
+    sorted_between(items, first: first, second: second - 1)
+  }
+}
+
+theorem sorted_up_to(items: Slice[Int64], last: UInt64)
+  requires items.is_sorted()
+  requires last < items.length()
+  ensures forall i in 0..last + 1 => items[i] <= items[last]
+{
+  assert forall i in 0..last + 1 => {
+    sorted_between(items, first: i, second: last)
+    items[i] <= items[last]
+  }
+}
+```
+
 - A theorem's `requires` are its assumptions, its `ensures` its conclusions,
   and its body the proof, using calls, `let`, `match`, `if`, and `assert`. An
   empty body asks the prover to prove it alone.
 - Calling a theorem makes its `ensures` available. A theorem that calls
-  itself on smaller input is a proof by induction.
+  itself on smaller input is a proof by induction, as `sorted_between` is.
+- **A call in a quantifier's body is made for each value of the binder.**
+  The prover proves its `requires` for every value, and its `ensures` holds
+  for that value within the body. So a quantifier's body that calls a theorem
+  and then states a fact proves the fact for every value. This is universal
+  introduction, as in `sorted_up_to`.
 - **A theorem is called only in specifications and proofs, and is not a
   value.** Its body is a proof and never runs.
 - A `proof { }` block in a function body holds the statements that a

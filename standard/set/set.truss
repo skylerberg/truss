@@ -472,21 +472,6 @@ impl Equal for Set[Element: Hash + Ordered] {
   }
 }
 
-impl Hash for Set[Element: Hash + Ordered] {
-  fn hash(self, hasher: mut Hasher)
-    cost allocations <= self.length() * allocations(Element.hash)
-  {
-    var combined: UInt64 = 0
-    for index in 0..self.elements.length() {
-      var one = Hasher.new()
-      self.elements[index].hash(mut one)
-      combined = combined.wrapping_add(one.finish())
-    }
-    mut hasher.write(combined)
-    mut hasher.write(self.elements.length())
-  }
-}
-
 impl Default for Set[Element: Hash + Ordered] {
   fn default() -> Set[Element] {
     []

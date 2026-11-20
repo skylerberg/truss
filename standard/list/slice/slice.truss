@@ -349,8 +349,22 @@ public fn Slice[Element: Equal].find_slice(self, needle: Slice[Element]) -> Opti
 
 public fn Slice[Element: Ordered].is_sorted(self) -> Bool
   ensures result == (forall index in 1..self.length() => self[index - 1] <= self[index])
+  cost time O(1 + self.length() * time(Element.compare))
 {
-  forall i in 1..self.length() => self[i - 1] <= self[i]
+  var index: UInt64 = 1
+  while index < self.length()
+    invariant 1 <= index
+    invariant index - 1 <= self.length()
+    invariant forall i in 1..index => i < self.length() ==> self[i - 1] <= self[i]
+    decreases self.length() - index
+    cost time O((index - 1) * time(Element.compare))
+  {
+    if !(self[index - 1] <= self[index]) {
+      return false
+    }
+    index += 1
+  }
+  true
 }
 
 theorem sorted_between[Element: Ordered](items: Slice[Element], first: UInt64, second: UInt64)
@@ -365,33 +379,27 @@ theorem sorted_between[Element: Ordered](items: Slice[Element], first: UInt64, s
   }
 }
 
-theorem sorted_below[Element: Ordered](items: Slice[Element], target: Element, last: UInt64, bound: UInt64)
+theorem sorted_below[Element: Ordered](items: Slice[Element], target: Element, last: UInt64)
   requires items.is_sorted()
   requires last < items.length()
-  requires bound <= last + 1
-  requires bound <= items.length()
   requires items[last] < target
-  ensures forall i in 0..bound => items[i] < target
-  decreases bound
+  ensures forall i in 0..last + 1 => items[i] < target
 {
-  if bound > 0 {
-    sorted_below(items, target: target, last: last, bound: bound - 1)
-    sorted_between(items, first: bound - 1, second: last)
+  assert forall i in 0..last + 1 => {
+    sorted_between(items, first: i, second: last)
+    items[i] < target
   }
 }
 
-theorem sorted_above[Element: Ordered](items: Slice[Element], target: Element, first: UInt64, bound: UInt64)
+theorem sorted_above[Element: Ordered](items: Slice[Element], target: Element, first: UInt64)
   requires items.is_sorted()
-  requires first <= bound
-  requires bound <= items.length()
   requires first < items.length()
   requires target < items[first]
-  ensures forall i in bound..items.length() => target < items[i]
-  decreases items.length() - bound
+  ensures forall i in first..items.length() => target < items[i]
 {
-  if bound < items.length() {
-    sorted_above(items, target: target, first: first, bound: bound + 1)
-    sorted_between(items, first: first, second: bound)
+  assert forall i in first..items.length() => {
+    sorted_between(items, first: first, second: i)
+    target < items[i]
   }
 }
 
@@ -417,13 +425,13 @@ public fn Slice[Element: Ordered].binary_search(self, target: Element) -> Option
     match self[middle].compare(target) {
       Less => {
         proof {
-          sorted_below(self, target: target, last: middle, bound: middle + 1)
+          sorted_below(self, target: target, last: middle)
         }
         low = middle + 1
       }
       Greater => {
         proof {
-          sorted_above(self, target: target, first: middle, bound: middle)
+          sorted_above(self, target: target, first: middle)
         }
         high = middle
       }
@@ -504,6 +512,7 @@ public fn Slice[Element: Ordered].maximum(self) lends Option[Element]
 public fn Slice[Element: Copyable].to_list(self) -> List[Element]
   ensures identical(result.model(), self.model())
   cost time O(self.length() * time(Element.copy))
+  cost allocations <= 1 + self.length() * allocations(Element.copy)
 {
   var copy: intrinsic::Storage[Element] = intrinsic::storage_with_capacity(self.length())
   for index in 0..self.length()
@@ -511,6 +520,7 @@ public fn Slice[Element: Copyable].to_list(self) -> List[Element]
     invariant intrinsic::storage_capacity(copy) == self.length()
     invariant forall i in 0..index =>
       identical(intrinsic::storage_model(copy)[i], self.model()[i])
+    cost allocations <= index * allocations(Element.copy)
   {
     intrinsic::storage_push(mut copy, value: self[index].copy())
   }
@@ -952,16 +962,14 @@ theorem heap_item_is_at_most_root[Element: Ordered](items: Slice[Element], limit
   }
 }
 
-theorem heap_root_is_largest[Element: Ordered](items: Slice[Element], limit: UInt64, bound: UInt64)
+theorem heap_root_is_largest[Element: Ordered](items: Slice[Element], limit: UInt64)
   requires limit <= items.length()
   requires is_heap_from(items.model(), limit: limit, floor: 0)
-  requires bound <= limit
-  ensures forall i in 0..bound => items[i] <= items[0]
-  decreases bound
+  ensures forall i in 0..limit => items[i] <= items[0]
 {
-  if bound > 0 {
-    heap_root_is_largest(items, limit: limit, bound: bound - 1)
-    heap_item_is_at_most_root(items, limit: limit, index: bound - 1)
+  assert forall i in 0..limit => {
+    heap_item_is_at_most_root(items, limit: limit, index: i)
+    items[i] <= items[0]
   }
 }
 
@@ -999,7 +1007,7 @@ fn put_largest_last[Element: Ordered](items: mut Slice[Element], unsorted: UInt6
   cost time O(1)
 {
   proof {
-    heap_root_is_largest(items, limit: unsorted, bound: unsorted)
+    heap_root_is_largest(items, limit: unsorted)
   }
   mut items.swap(0, second: unsorted - 1)
 }
@@ -1735,9 +1743,10 @@ impl Equal for Slice[Element: Equal] {
   fn equal(self, other: Slice[Element]) -> Bool
     ensures result == (self.length() == other.length()
       && forall i in 0..self.length() => self.model()[i] == other.model()[i])
+    cost time O(self.length() * time(Element.equal))
     cost allocations <= self.length() * allocations(Element.equal)
   {
-    if self.length() != other.length() {
+    if !(self.length() == other.length()) {
       return false
     }
     var index: UInt64 = 0
@@ -1745,8 +1754,9 @@ impl Equal for Slice[Element: Equal] {
       invariant index <= self.length()
       invariant forall i in 0..index => self.model()[i] == other.model()[i]
       decreases self.length() - index
+      cost time O(index * time(Element.equal))
     {
-      if self[index] != other[index] {
+      if !(self[index] == other[index]) {
         return false
       }
       index += 1
@@ -1854,6 +1864,7 @@ internal theorem lexicographic_is_transitive[Element: Ordered](
 impl Ordered for Slice[Element: Ordered] {
   fn compare(self, other: Slice[Element]) -> Ordering
     ensures result == lexicographic(self.model(), second: other.model(), from: 0)
+    cost time O(self.length() * time(Element.compare))
     cost allocations <= self.length() * allocations(Element.compare)
   {
     var index: UInt64 = 0
@@ -1863,10 +1874,11 @@ impl Ordered for Slice[Element: Ordered] {
       invariant lexicographic(self.model(), second: other.model(), from: 0)
         == lexicographic(self.model(), second: other.model(), from: index)
       decreases self.length() - index
+      cost time O(index * time(Element.compare))
       cost allocations <= index * allocations(Element.compare)
     {
       let order = self[index].compare(other[index])
-      if order != Ordering.Equal {
+      if !(order == Ordering.Equal) {
         return order
       }
       index += 1
@@ -1887,15 +1899,61 @@ proof Ordered.transitive for Slice[Element: Ordered] {
   lexicographic_is_transitive(first.model(), second: second.model(), third: third.model(), from: 0)
 }
 
+internal fn hash_elements[Element: Hash](hasher: Hasher, items: Sequence[Element], count: Integer) -> Hasher
+  requires 0 <= count
+  requires count <= items.length()
+  ensures identical(result, if count == 0 {
+      hasher
+    } else {
+      items[count - 1].hash(hash_elements(hasher, items: items, count: count - 1))
+    })
+  decreases count
+{
+  if count == 0 {
+    hasher
+  } else {
+    items[count - 1].hash(hash_elements(hasher, items: items, count: count - 1))
+  }
+}
+
+internal theorem elements_hash_alike[Element: Hash](
+  hasher: Hasher,
+  first: Sequence[Element],
+  second: Sequence[Element],
+  count: Integer,
+)
+  requires 0 <= count
+  requires count <= first.length()
+  requires count <= second.length()
+  requires forall i in 0..count => first[i] == second[i]
+  ensures identical(hash_elements(hasher, items: first, count: count), hash_elements(hasher, items: second, count: count))
+  decreases count
+{
+  if count > 0 {
+    elements_hash_alike(hasher, first: first, second: second, count: count - 1)
+  }
+}
+
 impl Hash for Slice[Element: Hash] {
-  fn hash(self, hasher: mut Hasher)
+  fn hash(self, hasher: Hasher) -> Hasher
+    ensures identical(result, hash_elements(hasher.write(self.length()), items: self.model(), count: self.length()))
+    cost time O(self.length() * time(Element.hash))
     cost allocations <= self.length() * allocations(Element.hash)
   {
-    mut hasher.write(self.length())
-    for index in 0..self.length() {
-      self[index].hash(mut hasher)
+    let start = hasher.write(self.length())
+    var state = start
+    for index in 0..self.length()
+      invariant identical(state, hash_elements(start, items: self.model(), count: index))
+      cost time O(index * time(Element.hash))
+    {
+      state = self[index].hash(state)
     }
+    state
   }
+}
+
+proof Hash.agrees_with_equal for Slice[Element: Hash] {
+  elements_hash_alike(hasher.write(first.length()), first: first.model(), second: second.model(), count: first.length())
 }
 
 impl Display for Slice[Element: Display] {

@@ -40,8 +40,6 @@ let translate_impl (lookups : Lookups.t) (key : Resolve.Names.key) source =
         ]
     | _ -> [])
 
-let is_specification_module (key : Resolve.Names.key) = key.module_ = Well_known.specification
-
 let list_integer_instances (lookups : Lookups.t) (path : Path.t) =
   let generics =
     match Interface.Impls.read_signature lookups.interface path with
@@ -115,55 +113,37 @@ let translate_derived_default (lookups : Lookups.t) (key : Resolve.Names.key)
   else []
 
 let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
-  match
-    (lookups.interface.names.read_declaration key, Contracts.read_source_at_key lookups key)
-  with
-  | _ when is_specification_module key -> Not_proven_here
-  | declaration, source -> (
-      try
-        match declaration.kind with
-        | (Function | Method | Test) when Mir.find_code (lookups.mir.read_body_part key) = None ->
-            Not_proven_here
-        | Theorem -> Obligations (Translate.translate_theorem lookups source ~path:key.path)
-        | Function | Method | Test -> (
-            let prove_with substitution =
-              Translate.translate_function
-                ?inherited:(find_inherited_clauses lookups key.path)
-                ~substitution lookups source ~path:key.path
-            in
-            match list_integer_instances lookups key.path with
-            | [] -> Obligations (prove_with Types.no_substitution)
-            | instances ->
-                let outcomes =
-                  List.map
-                    (fun (shown, substitution) ->
-                      let outcome = prove_with substitution in
-                      let prefix = "Where " ^ String.concat " and " shown ^ ": " in
-                      {
-                        outcome with
-                        Obligation.obligations =
-                          List.map
-                            (fun (obligation : Obligation.t) ->
-                              { obligation with message = Text prefix :: obligation.message })
-                            outcome.obligations;
-                      })
-                    instances
-                in
-                Obligations
+  let declaration = lookups.interface.names.read_declaration key
+  and source = Contracts.read_source_at_key lookups key in
+  try
+    match declaration.kind with
+    | (Function | Method | Test) when Mir.find_code (lookups.mir.read_body_part key) = None ->
+        Not_proven_here
+    | Theorem -> Obligations (Translate.translate_theorem lookups source ~path:key.path)
+    | Function | Method | Test -> (
+        let prove_with substitution =
+          Translate.translate_function
+            ?inherited:(find_inherited_clauses lookups key.path)
+            ~substitution lookups source ~path:key.path
+        in
+        match list_integer_instances lookups key.path with
+        | [] -> Obligations (prove_with Types.no_substitution)
+        | instances ->
+            let outcomes =
+              List.map
+                (fun (shown, substitution) ->
+                  let outcome = prove_with substitution in
+                  let prefix = "Where " ^ String.concat " and " shown ^ ": " in
                   {
-                    obligations =
-                      List.concat_map
-                        (fun (outcome : Obligation.outcome) -> outcome.obligations)
-                        outcomes;
-                    holes =
-                      List.sort_uniq compare
-                        (List.concat_map
-                           (fun (outcome : Obligation.outcome) -> outcome.holes)
-                           outcomes);
+                    outcome with
+                    Obligation.obligations =
+                      List.map
+                        (fun (obligation : Obligation.t) ->
+                          { obligation with message = Text prefix :: obligation.message })
+                        outcome.obligations;
                   })
-        | Constant -> Obligations (Translate.translate_constant lookups source ~path:key.path)
-        | Impl ->
-            let outcomes = translate_impl lookups key source in
+                instances
+            in
             Obligations
               {
                 obligations =
@@ -171,33 +151,42 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
                     (fun (outcome : Obligation.outcome) -> outcome.obligations)
                     outcomes;
                 holes =
-                  List.concat_map (fun (outcome : Obligation.outcome) -> outcome.holes) outcomes;
+                  List.sort_uniq compare
+                    (List.concat_map (fun (outcome : Obligation.outcome) -> outcome.holes) outcomes);
+              })
+    | Constant -> Obligations (Translate.translate_constant lookups source ~path:key.path)
+    | Impl ->
+        let outcomes = translate_impl lookups key source in
+        Obligations
+          {
+            obligations =
+              List.concat_map (fun (outcome : Obligation.outcome) -> outcome.obligations) outcomes;
+            holes = List.concat_map (fun (outcome : Obligation.outcome) -> outcome.holes) outcomes;
+          }
+    | Type -> (
+        let has_defaults () =
+          match Mir.read_defaults lookups.mir key.path with
+          | Some { form = Field_defaults (_ :: _); _ } -> true
+          | Some { form = Field_defaults [] | Parameter_defaults _; _ } | None -> false
+        in
+        match Mir.read_type_clauses lookups.mir key.path with
+        | Some { form = { invariants = _ :: _; _ }; _ } ->
+            let outcome = Translate.translate_type lookups source ~path:key.path in
+            Obligations
+              {
+                outcome with
+                obligations = outcome.obligations @ translate_derived_default lookups key source;
               }
-        | Type -> (
-            let has_defaults () =
-              match Mir.read_defaults lookups.mir key.path with
-              | Some { form = Field_defaults (_ :: _); _ } -> true
-              | Some { form = Field_defaults [] | Parameter_defaults _; _ } | None -> false
-            in
-            match Mir.read_type_clauses lookups.mir key.path with
-            | Some { form = { invariants = _ :: _; _ }; _ } ->
-                let outcome = Translate.translate_type lookups source ~path:key.path in
-                Obligations
-                  {
-                    outcome with
-                    obligations = outcome.obligations @ translate_derived_default lookups key source;
-                  }
-            | Some { form = { potential; _ }; _ } when Option.is_some potential || has_defaults ()
-              ->
-                Obligations (Translate.translate_type lookups source ~path:key.path)
-            | Some _ | None -> Not_proven_here)
-        | Trait | Capability | Member_constant | Law_proof -> Not_proven_here
-      with Facts.Unsupported { location; construct; foreign_definition } ->
-        Unsupported
-          ( location,
-            match foreign_definition with
-            | Some name -> Printf.sprintf "%s, in `%s`" construct name
-            | None -> construct ))
+        | Some { form = { potential; _ }; _ } when Option.is_some potential || has_defaults () ->
+            Obligations (Translate.translate_type lookups source ~path:key.path)
+        | Some _ | None -> Not_proven_here)
+    | Trait | Capability | Member_constant | Law_proof -> Not_proven_here
+  with Facts.Unsupported { location; construct; foreign_definition } ->
+    Unsupported
+      ( location,
+        match foreign_definition with
+        | Some name -> Printf.sprintf "%s, in `%s`" construct name
+        | None -> construct )
 
 let show_float bits =
   let spell_shortest ~most ~is_same value =

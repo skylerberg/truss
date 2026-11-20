@@ -1,4 +1,5 @@
 use standard::intrinsic
+use standard::map
 use standard::serialization
 use standard::time
 
@@ -657,8 +658,7 @@ type Kind = Branch | Tables | Leaf
 
 type Document(
   kinds: List[Kind],
-  children: Map[String, UInt64],
-  names: List[List[String]],
+  children: List[Map[String, UInt64]],
   items: List[List[UInt64]],
   values: List[Option[Value]],
   headers: List[Bool],
@@ -666,7 +666,7 @@ type Document(
 )
 
 fn Document.new() -> Document {
-  var document = Document(kinds: [], children: [:], names: [], items: [], values: [], headers: [], dotted: [])
+  var document = Document(kinds: [], children: [], items: [], values: [], headers: [], dotted: [])
   let _ = add_node(mut document, kind: Kind.Branch, value: None, header: false, dotted: false)
   document
 }
@@ -674,7 +674,7 @@ fn Document.new() -> Document {
 fn add_node(document: mut Document, kind: Kind, value: own Option[Value], header: Bool, dotted: Bool) -> UInt64 {
   let index = document.kinds.length()
   mut document.kinds.push(kind)
-  mut document.names.push([])
+  mut document.children.push([:])
   mut document.items.push([])
   mut document.values.push(own value)
   mut document.headers.push(header)
@@ -694,26 +694,17 @@ fn Document.is_dotted(self, index: UInt64) -> Bool {
   index < self.dotted.length() && self.dotted[index]
 }
 
-fn child_key(parent: UInt64, key: StringSlice) -> String {
-  var joined = parent.format()
-  mut joined.push(":")
-  mut joined.push(key)
-  joined
-}
-
 fn Document.child(self, parent: UInt64, key: StringSlice) -> Option[UInt64] {
-  let joined = child_key(parent, key: key)
-  if self.children.contains(joined) {
-    return Some(self.children[joined])
+  if parent < self.children.length() && self.children[parent].contains(key) {
+    return Some(self.children[parent][key])
   }
   None
 }
 
 fn add_child(document: mut Document, parent: UInt64, key: StringSlice, kind: Kind, value: own Option[Value], header: Bool, dotted: Bool) -> UInt64 {
   let index = add_node(mut document, kind: kind, value: own value, header: header, dotted: dotted)
-  let _ = mut document.children.replace(child_key(parent, key: key), value: index)
-  if parent < document.names.length() {
-    mut document.names[parent].push(key.to_string())
+  if parent < document.children.length() {
+    let _ = mut document.children[parent].replace(key.to_string(), value: index)
   }
   index
 }
@@ -815,33 +806,33 @@ fn open_header(document: mut Document, keys: Slice[String], array: Bool, at: UIn
   }
 }
 
-fn build(document: Document, leaves: mut Map[UInt64, Value], index: UInt64) -> Value
+fn build(document: mut Document, index: UInt64) -> Value
   uses RunForever
 {
   match document.kind(index) {
-    Some(Leaf) => match mut leaves.take(index) {
-      Some(value) => own value
-      None => Value.Table(entries: [:])
+    Some(Leaf) => {
+      if index < document.values.length() {
+        match map::exchange(mut document.values[index], value: None) {
+          Some(value) => return own value
+          None => {}
+        }
+      }
+      Value.Table(entries: [:])
     }
     Some(Tables) => {
-      let items = if index < document.items.length() { document.items[index].copy() } else { [] }
+      let items = if index < document.items.length() { map::exchange(mut document.items[index], value: []) } else { [] }
       var built: List[Value] = List.with_capacity(items.length())
       for item in items {
-        mut built.push(build(document, leaves: mut leaves, index: item))
+        mut built.push(build(mut document, index: item))
       }
       Value.Array(items: own built)
     }
     _ => {
-      let names = if index < document.names.length() { document.names[index].copy() } else { [] }
-      var entries: Map[String, Value] = Map.with_capacity(names.length())
-      for name in own names {
-        match document.child(index, key: name) {
-          Some(child) => {
-            let built = build(document, leaves: mut leaves, index: child)
-            let _ = mut entries.replace(own name, value: own built)
-          }
-          None => {}
-        }
+      let children = if index < document.children.length() { map::exchange(mut document.children[index], value: [:]) } else { [:] }
+      var entries: Map[String, Value] = Map.with_capacity(children.length())
+      for child in own children {
+        let built = build(mut document, index: child.value)
+        let _ = mut entries.replace(own child.key, value: own built)
       }
       Value.Table(entries: own entries)
     }
@@ -852,19 +843,7 @@ fn Document.finish(own self) -> Map[String, Value]
   uses RunForever
 {
   var document = own self
-  var leaves: Map[UInt64, Value] = [:]
-  var index: UInt64 = 0
-  for value in own document.values {
-    match own value {
-      Some(leaf) => {
-        let _ = mut leaves.replace(index, value: own leaf)
-      }
-      None => {}
-    }
-    index = index.saturating_add(1)
-  }
-  document.values = []
-  match build(document, leaves: mut leaves, index: 0) {
+  match build(mut document, index: 0) {
     Table(entries) => own entries
     _ => [:]
   }

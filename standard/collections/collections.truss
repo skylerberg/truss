@@ -36,3 +36,17 @@ public opaque type BitSet(words: List[UInt64], length: UInt64)
   invariant words.length() == length / 64 + (if length % 64 == 0 { 0 } else { 1 })
   invariant length % 64 == 0 || words[words.length() - 1] < power(2, length % 64)
   derives Copyable
+
+internal type Numbered[Key, Value](key: Key, ordinal: UInt64, value: Value)
+
+internal fn sorted_by_key[Key: Ordered, Value](items: own List[Numbered[Key, Value]]) -> List[Numbered[Key, Value]]
+  ensures result.length() == items.length()
+  cost time O(items.length() * log(items.length()) * (1 + time(Key.compare)))
+{
+  var sorted = own items
+  mut sorted.sort_by(fn(first, second) {
+    let order = first.key.compare(second.key)
+    if order == Ordering.Equal { first.ordinal.compare(second.ordinal) } else { order }
+  })
+  sorted
+}

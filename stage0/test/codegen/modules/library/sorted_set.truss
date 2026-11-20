@@ -139,11 +139,7 @@ test "sorted sets are equal when their elements are, hash alike, and copy apart"
   let first = set_of([1, 2, 3])
   var second = set_of([3, 1, 2])
   assert first == second
-  var first_hasher = Hasher.new()
-  var second_hasher = Hasher.new()
-  first.hash(mut first_hasher)
-  second.hash(mut second_hasher)
-  assert first_hasher.finish() == second_hasher.finish()
+  assert first.hash(Hasher.new()).finish() == second.hash(Hasher.new()).finish()
   mut second.insert(4)
   assert first != second
   var copied = first.copy()

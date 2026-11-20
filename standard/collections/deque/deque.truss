@@ -286,9 +286,10 @@ impl Equal for collections::Deque[Element: Equal] {
   fn equal(self, other: collections::Deque[Element]) -> Bool
     ensures result == (self.length() == other.length()
       && forall i in 0..self.length() => self[i] == other[i])
+    cost time O(self.length() * time(Element.equal))
     cost allocations <= self.length() * allocations(Element.equal)
   {
-    if self.length() != other.length() {
+    if !(self.length() == other.length()) {
       return false
     }
     var index: UInt64 = 0
@@ -296,9 +297,10 @@ impl Equal for collections::Deque[Element: Equal] {
       invariant index <= self.length()
       invariant forall i in 0..index => self[i] == other[i]
       decreases self.length() - index
+      cost time O(index * time(Element.equal))
       cost allocations <= index * allocations(Element.equal)
     {
-      if self[index] != other[index] {
+      if !(self[index] == other[index]) {
         return false
       }
       index += 1
@@ -307,15 +309,59 @@ impl Equal for collections::Deque[Element: Equal] {
   }
 }
 
+fn hash_positions[Element: Hash](hasher: Hasher, deque: collections::Deque[Element], count: UInt64) -> Hasher
+  requires count <= deque.length()
+  ensures identical(result, if count == 0 {
+      hasher
+    } else {
+      deque[count - 1].hash(hash_positions(hasher, deque: deque, count: count - 1))
+    })
+  decreases count
+{
+  if count == 0 {
+    hasher
+  } else {
+    deque[count - 1].hash(hash_positions(hasher, deque: deque, count: count - 1))
+  }
+}
+
+theorem positions_hash_alike[Element: Hash](
+  hasher: Hasher,
+  first: collections::Deque[Element],
+  second: collections::Deque[Element],
+  count: UInt64,
+)
+  requires count <= first.length()
+  requires count <= second.length()
+  requires forall i in 0..count => first[i] == second[i]
+  ensures identical(hash_positions(hasher, deque: first, count: count), hash_positions(hasher, deque: second, count: count))
+  decreases count
+{
+  if count > 0 {
+    positions_hash_alike(hasher, first: first, second: second, count: count - 1)
+  }
+}
+
 impl Hash for collections::Deque[Element: Hash] {
-  fn hash(self, hasher: mut Hasher)
+  fn hash(self, hasher: Hasher) -> Hasher
+    ensures identical(result, hash_positions(self.length().hash(hasher), deque: self, count: self.length()))
+    cost time O(self.length() * time(Element.hash))
     cost allocations <= self.length() * allocations(Element.hash)
   {
-    self.length().hash(mut hasher)
-    for index in 0..self.length() {
-      self[index].hash(mut hasher)
+    let start = self.length().hash(hasher)
+    var state = start
+    for index in 0..self.length()
+      invariant identical(state, hash_positions(start, deque: self, count: index))
+      cost time O(index * time(Element.hash))
+    {
+      state = self[index].hash(state)
     }
+    state
   }
+}
+
+proof Hash.agrees_with_equal for collections::Deque[Element: Hash] {
+  positions_hash_alike(first.length().hash(hasher), first: first, second: second, count: first.length())
 }
 
 impl Default for collections::Deque[Element] {

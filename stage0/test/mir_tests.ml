@@ -1436,7 +1436,7 @@ let () =
         ~expected:
           [
             "app::main::impl standard::core::Hash for app::main::Meters.hash";
-            "standard::core::Hasher.write(mut self)";
+            "standard::core::Hasher.write";
           ]);
   Harness.test "a derived method of a type that holds itself calls itself" (fun () ->
       expect_edges (equal_of "Tree")
