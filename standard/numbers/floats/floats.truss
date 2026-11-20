@@ -142,6 +142,7 @@ impl Negate for Float32 {
 
 impl Hash for Float32 {
   fn hash(self, hasher: mut Hasher)
+    cost time O(1)
     cost allocations == 0
   {
     mut hasher.write(if self == 0.0 { 0 } else { intrinsic::convert(intrinsic::to_bits[Float32, UInt32](self)) })
@@ -334,6 +335,7 @@ impl Negate for Float64 {
 
 impl Hash for Float64 {
   fn hash(self, hasher: mut Hasher)
+    cost time O(1)
     cost allocations == 0
   {
     mut hasher.write(if self == 0.0 { 0 } else { intrinsic::to_bits[Float64, UInt64](self) })

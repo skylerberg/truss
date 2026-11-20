@@ -532,7 +532,7 @@ public fn collections::SortedMap[Key: Ordered, Value].after(self, key: Key) lend
 
 public fn collections::SortedMap[Key: Ordered, Value].in_range(self, range: Range[Key]) -> Slice[map::Entry[Key, Value]]
   ensures forall i in 0..result.length() => range.contains(result.model()[i].key)
-  cost time O(self.length() + log(self.length()) * time(Key.compare))
+  cost time O(1 + log(self.length()) * time(Key.compare))
 {
   let first = self.index_at_or_after(range.start)
   let end = if range.inclusive { self.index_after(range.stop) } else { self.index_at_or_after(range.stop) }
@@ -741,9 +741,10 @@ impl Equal for collections::SortedMap[Key: Ordered, Value: Equal] {
       && forall i in 0..self.entries.length() =>
         self.entries.model()[i].key == other.entries.model()[i].key
           && self.entries.model()[i].value == other.entries.model()[i].value)
+    cost time O(self.length() * (time(Key.equal) + time(Value.equal)))
     cost allocations <= self.length() * (allocations(Key.equal) + allocations(Value.equal))
   {
-    if self.entries.length() != other.entries.length() {
+    if !(self.entries.length() == other.entries.length()) {
       return false
     }
     var index: UInt64 = 0
@@ -753,9 +754,10 @@ impl Equal for collections::SortedMap[Key: Ordered, Value: Equal] {
         self.entries.model()[i].key == other.entries.model()[i].key
           && self.entries.model()[i].value == other.entries.model()[i].value
       decreases self.entries.length() - index
+      cost time O(index * (time(Key.equal) + time(Value.equal)))
       cost allocations <= index * (allocations(Key.equal) + allocations(Value.equal))
     {
-      if self.entries[index].key != other.entries[index].key || self.entries[index].value != other.entries[index].value {
+      if !(self.entries[index].key == other.entries[index].key) || !(self.entries[index].value == other.entries[index].value) {
         return false
       }
       index += 1
