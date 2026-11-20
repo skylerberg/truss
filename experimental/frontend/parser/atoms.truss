@@ -1,0 +1,319 @@
+use frontend::source
+use frontend::syntax
+use frontend::token
+
+fn make_expression_node(cursor: mut TokenCursor, start: UInt64, kind: own syntax::ExpressionKind) -> syntax::Expression
+  uses Panic
+{
+  syntax::Expression(kind: own kind, id: allocate_id_from(mut cursor, start_index: start))
+}
+
+fn make_type_node(cursor: mut TokenCursor, start: UInt64, kind: own syntax::TypeKind) -> syntax::TypeExpression
+  uses Panic
+{
+  syntax::TypeExpression(kind: own kind, id: allocate_id_from(mut cursor, start_index: start))
+}
+
+fn make_error_expression(cursor: mut TokenCursor, start: UInt64) -> syntax::Expression
+  uses Panic
+{
+  make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.ExpressionError)
+}
+
+fn begins_expression(kind: token::Kind) -> Bool {
+  match kind {
+    Upper(_) | Lower(_) | Integer(_) | Float(_) | String(_) => true
+    Punctuation(punctuation) => match punctuation {
+      Open(_) | Minus | Bang | Tilde | DotDot | DotDotEqual => true
+      _ => false
+    }
+    Keyword(keyword) => match keyword {
+      True | False | Todo | Unreachable | Break | Continue | SelfValue | SelfType | Fn | If | Match | Provide | Mut
+        | Own | Any | Echo | Return | Forall | Exists => true
+      _ => false
+    }
+    _ => false
+  }
+}
+
+fn begins_statement(kind: token::Kind) -> Bool {
+  match kind {
+    Keyword(keyword) => match keyword {
+      Let | Var | For | While | Parallel | Concurrent | Proof | Assert => true
+      _ => begins_expression(kind)
+    }
+    _ => begins_expression(kind)
+  }
+}
+
+fn parse_mode(cursor: mut TokenCursor) -> Option[syntax::Mode]
+  uses Panic
+{
+  if accept_keyword(mut cursor, keyword: token::Keyword.Mut) {
+    return Some(syntax::Mode.Mut)
+  }
+  if accept_keyword(mut cursor, keyword: token::Keyword.Own) {
+    return Some(syntax::Mode.Own)
+  }
+  None
+}
+
+fn make_name(cursor: mut TokenCursor, written: token::Token) -> syntax::Name
+  uses Panic
+{
+  let case = match written.kind {
+    Upper(_) => syntax::Case.Upper
+    Lower(_) => syntax::Case.Lower
+    _ => Panic.crash("Parser: a name is made from a token that is not a name")
+  }
+  let text = cursor.name(written.kind).to_string()
+  syntax::Name(text: own text, case, id: allocate_token_id(mut cursor, span: written.span))
+}
+
+fn take_name(cursor: mut TokenCursor) -> syntax::Name
+  uses Panic
+{
+  let written = take(mut cursor)
+  make_name(mut cursor, written)
+}
+
+fn lower_name(cursor: mut TokenCursor, expected: StringSlice) -> Result[syntax::Name, Failure]
+  uses Panic
+{
+  match cursor.peek_kind() {
+    Lower(_) => Ok(take_name(mut cursor))
+    _ => Err(fail(mut cursor, expected))
+  }
+}
+
+fn parse_upper_name(cursor: mut TokenCursor, expected: StringSlice) -> Result[syntax::Name, Failure]
+  uses Panic
+{
+  match cursor.peek_kind() {
+    Upper(_) => Ok(take_name(mut cursor))
+    _ => Err(fail(mut cursor, expected))
+  }
+}
+
+fn parse_module_prefix(cursor: mut TokenCursor) -> List[syntax::Name]
+  uses Panic, RunForever
+{
+  var modules: List[syntax::Name] = []
+  while cursor.peek_kind() is Lower(_) && cursor.peek_ahead(1) == token::Kind.Punctuation(token::Punctuation.ColonColon) {
+    mut modules.push(take_name(mut cursor))
+    advance(mut cursor)
+  }
+  modules
+}
+
+fn parse_upper_path(cursor: mut TokenCursor, expected: StringSlice) -> Result[syntax::NamePath, Failure]
+  uses Panic, RunForever
+{
+  let modules = parse_module_prefix(mut cursor)
+  Ok(syntax::NamePath(modules: own modules, last: parse_upper_name(mut cursor, expected)?))
+}
+
+fn make_text(cursor: mut TokenCursor, text: token::Text) -> syntax::Text
+  uses Panic
+{
+  syntax::Text(value: text.value.copy(), id: allocate_token_id(mut cursor, span: text.span))
+}
+
+type InterpolationMode = ParseInterpolations | RejectInterpolations
+  derives Equal
+
+fn make_string_literal(
+  cursor: mut TokenCursor,
+  start: UInt64,
+  modules: own List[syntax::Name],
+  literal_index: UInt64,
+  mode: InterpolationMode,
+) -> Result[syntax::StringLiteral, Failure]
+  uses Panic, RunForever
+{
+  let string_token = cursor.peek()
+  advance(mut cursor)
+  let literal = cursor.tables.literal(literal_index)
+  let tag = match literal.tag {
+    Some(written) => Some(
+      syntax::NamePath(
+        modules: own modules,
+        last: syntax::Name(text: written.name.copy(), case: syntax::Case.Upper, id: allocate_token_id(mut cursor, span: written.span)),
+      ),
+    )
+    None => None
+  }
+  let first = make_text(mut cursor, text: literal.first)
+  var rest: List[syntax::Interpolated] = []
+  for segment in literal.rest {
+    let value = match mode {
+      ParseInterpolations => parse_interpolation(mut cursor, inner: segment.interpolation)
+      RejectInterpolations => {
+        report(
+          mut cursor,
+          code: "parser.interpolation_not_allowed",
+          span: string_token.span,
+          message: "A string in a pattern cannot have interpolations.",
+        )
+        return Err(Failure.Failed)
+      }
+    }
+    mut rest.push(syntax::Interpolated(value: own value, text: make_text(mut cursor, text: segment.text)))
+  }
+  Ok(
+    syntax::StringLiteral(
+      tag: own tag,
+      form: literal.form,
+      first: own first,
+      rest: own rest,
+      id: allocate_id_from(mut cursor, start_index: start),
+    ),
+  )
+}
+
+type ContextualKeyword =
+  | Amortized
+  | Metric(metric: syntax::Metric)
+  | Calls
+  | BigO
+  | Potential
+  | By
+  | BitVector
+  derives Equal
+
+fn spell_contextual(word: ContextualKeyword) -> StringSlice {
+  match word {
+    Amortized => "amortized"
+    Metric(metric) => spell_metric(metric)
+    Calls => "calls"
+    BigO => "O"
+    Potential => "potential"
+    By => "by"
+    BitVector => "bit_vector"
+  }
+}
+
+fn spell_metric(metric: syntax::Metric) -> StringSlice {
+  match metric {
+    Time => "time"
+    Allocations => "allocations"
+    AllocatedBytes => "allocated_bytes"
+  }
+}
+
+fn find_contextual(text: StringSlice) -> Option[ContextualKeyword] {
+  match text {
+    "amortized" => Some(ContextualKeyword.Amortized)
+    "time" => Some(ContextualKeyword.Metric(syntax::Metric.Time))
+    "allocations" => Some(ContextualKeyword.Metric(syntax::Metric.Allocations))
+    "allocated_bytes" => Some(ContextualKeyword.Metric(syntax::Metric.AllocatedBytes))
+    "calls" => Some(ContextualKeyword.Calls)
+    "O" => Some(ContextualKeyword.BigO)
+    "potential" => Some(ContextualKeyword.Potential)
+    "by" => Some(ContextualKeyword.By)
+    "bit_vector" => Some(ContextualKeyword.BitVector)
+    _ => None
+  }
+}
+
+fn TokenCursor.contextual(self, kind: token::Kind) -> Option[ContextualKeyword]
+  uses Panic
+{
+  match kind {
+    Upper(_) | Lower(_) => find_contextual(self.name(kind))
+    _ => None
+  }
+}
+
+fn resources() -> List[ContextualKeyword] {
+  [
+    ContextualKeyword.Metric(syntax::Metric.Time),
+    ContextualKeyword.Metric(syntax::Metric.Allocations),
+    ContextualKeyword.Metric(syntax::Metric.AllocatedBytes),
+    ContextualKeyword.Calls,
+  ]
+}
+
+fn edit_distance(first: StringSlice, second: StringSlice) -> UInt64
+  uses Panic
+{
+  let first_bytes = first.bytes()
+  let second_bytes = second.bytes()
+  var previous: List[UInt64] = []
+  for index in 0..=second_bytes.length() {
+    mut previous.push(index)
+  }
+  for row in 1..=first_bytes.length() {
+    var current: List[UInt64] = [row]
+    for column in 1..=second_bytes.length() {
+      let substitution = if first_bytes.get(row - 1) == second_bytes.get(column - 1) { 0 } else { 1 }
+      let deletion = previous.get(column).expect("a previous cell") + 1
+      let insertion = current.get(column - 1).expect("a current cell") + 1
+      let replacement = previous.get(column - 1).expect("a diagonal cell") + substitution
+      var best = deletion
+      if insertion < best {
+        best = insertion
+      }
+      if replacement < best {
+        best = replacement
+      }
+      mut current.push(best)
+    }
+    previous = own current
+  }
+  previous.get(second_bytes.length()).expect("the last cell")
+}
+
+fn expect_contextual(
+  cursor: mut TokenCursor,
+  accepted: Slice[ContextualKeyword],
+  category: StringSlice,
+  expected: StringSlice,
+  suggested: Option[List[ContextualKeyword]] = None,
+) -> Result[ContextualKeyword, Failure]
+  uses Panic, RunForever
+{
+  let current = cursor.peek()
+  if cursor.contextual(current.kind) is Some(word) && accepted.contains(word) {
+    advance(mut cursor)
+    return Ok(word)
+  }
+  let is_name = match current.kind {
+    Upper(_) | Lower(_) => true
+    _ => false
+  }
+  if !is_name {
+    return Err(fail(mut cursor, expected))
+  }
+  let name = cursor.name(current.kind).to_string()
+  let words = match suggested {
+    Some(list) => list.copy()
+    None => accepted.to_list()
+  }
+  var spelled: List[String] = []
+  for word in words {
+    mut spelled.push("`${spell_contextual(word)}`")
+  }
+  let message = "Expected ${category}, one of ${spelled.join(", ")}, found `${name}`."
+  var close: List[ContextualKeyword] = []
+  for word in words {
+    if edit_distance(name, second: spell_contextual(word)) <= 2 {
+      mut close.push(word)
+    }
+  }
+  if close.length() == 1 {
+    let word = close.get(0).expect("one close word")
+    let spelling = spell_contextual(word)
+    report(
+      mut cursor,
+      code: "parser.cost_word",
+      span: current.span,
+      message,
+      fixes: [source::make_fix("Write `${spelling}`", edits: [source::replace(current.span, replacement: spelling)])],
+    )
+    advance(mut cursor)
+    return Ok(word)
+  }
+  report(mut cursor, code: "parser.cost_word", span: current.span, message)
+  Err(Failure.Failed)
+}

@@ -1,0 +1,3 @@
+(executable
+ (name compare)
+ (libraries source diagnostic token lexer parser syntax_print unix zarith))

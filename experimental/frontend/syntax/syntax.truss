@@ -1,0 +1,395 @@
+use frontend::source
+use frontend::token
+
+internal type Case = Upper | Lower
+  derives Equal
+
+internal type Name(text: String, case: Case, id: UInt64)
+  derives Equal
+
+internal type NamePath(modules: List[Name], last: Name)
+  derives Equal
+
+internal type Mode = Mut | Own
+  derives Equal
+
+internal type PrefixOperator = Negate | Not | Complement
+  derives Equal
+
+internal type Arithmetic = Multiply | Divide | Remainder | Add | Subtract
+  derives Equal
+
+internal type Bitwise = BitAnd | BitXor | BitOr
+  derives Equal
+
+internal type Shift = ShiftLeft | ShiftRight
+  derives Equal
+
+internal type Operation = Arithmetic(arithmetic: Arithmetic) | Bitwise(bitwise: Bitwise) | Shift(shift: Shift)
+  derives Equal
+
+internal type Comparison = Equal | NotEqual | Less | LessEqual | Greater | GreaterEqual
+  derives Equal
+
+internal type Connective = And | Or | Implies
+  derives Equal
+
+internal type Binary = Operation(operation: Operation) | Comparison(comparison: Comparison) | Connective(connective: Connective)
+  derives Equal
+
+internal type Assignment = Assign | Compound(operation: Operation)
+  derives Equal
+
+internal type Metric = Time | Allocations | AllocatedBytes
+  derives Equal
+
+internal type Quantifier = Forall | Exists
+  derives Equal
+
+internal type LoopMode = Sequential | Parallel | Concurrent
+  derives Equal
+
+internal type TypeExpression(kind: TypeKind, id: UInt64)
+  derives Equal
+
+internal type TypeKind =
+  | PathType(path_type: PathType)
+  | SelfType(name: Option[Name])
+  | Associated(parameter: Name, name: Name)
+  | AnyType(path_type: PathType)
+  | indirect FunctionType(function_type: FunctionType)
+  | TypeError
+  derives Equal
+
+internal type PathType(path: NamePath, arguments: List[TypeArgument], id: UInt64)
+  derives Equal
+
+internal type TypeArgument =
+  | TypeArgument(argument: TypeExpression)
+  | Count(digits: String, id: UInt64)
+  | CountName(name: Name)
+  | Constraint(name: Name, value: TypeExpression)
+  derives Equal
+
+internal type FunctionType(inputs: List[FunctionInput], output: Option[TypeExpression], clauses: List[Clause])
+  derives Equal
+
+internal type FunctionInput(name: Option[Name], mode: Option[Mode], annotation: TypeExpression)
+  derives Equal
+
+internal type GenericParameter(kind: GenericKind, id: UInt64)
+  derives Equal
+
+internal type GenericKind =
+  | TypeParameter(name: Name, bounds: List[PathType])
+  | ValueParameter(name: Name, annotation: TypeExpression)
+  | GenericError
+  derives Equal
+
+internal type CapabilityReference(kind: CapabilityReferenceKind, id: UInt64)
+  derives Equal
+
+internal type CapabilityReferenceKind =
+  | CapabilityPath(path_type: PathType)
+  | SelfCapabilities(name: Name)
+  | AssociatedCapabilities(parameter: Name, name: Name)
+  | GenericCapability(name: Name)
+  derives Equal
+
+internal type Clause(kind: ClauseKind, condition: Option[List[BoundCondition]], id: UInt64)
+  derives Equal
+
+internal type ClauseKind =
+  | Uses(capabilities: List[CapabilityUse])
+  | Requires(value: Expression)
+  | Ensures(value: Expression)
+  | Decreases(measures: List[Expression])
+  | Cost(clause: CostClause)
+  | ClauseError
+  derives Equal
+
+internal type CapabilityUse(reference: CapabilityReference, unless_bounds: Option[List[BoundCondition]], unless_values: List[Expression])
+  derives Equal
+
+internal type BoundCondition(subject: TypeExpression, bounds: List[PathType], id: UInt64)
+  derives Equal
+
+internal type CostClause(is_amortized: Bool, resource: Resource, bound: Bound)
+  derives Equal
+
+internal type Resource = Metric(metric: Metric) | Calls(target: CallTarget)
+  derives Equal
+
+internal type CallTarget =
+  | CallParameter(name: Name)
+  | CallCapability(path_type: PathType)
+  | CallMethod(path_type: PathType, name: Name)
+  derives Equal
+
+internal type Bound = BigO(value: Expression) | AtMost(value: Expression) | Exactly(value: Expression)
+  derives Equal
+
+internal type Expression(kind: ExpressionKind, id: UInt64)
+  derives Equal
+
+internal type ExpressionKind =
+  | Integer(digits: String)
+  | Float(value: token::Decimal)
+  | String(literal: StringLiteral)
+  | True
+  | False
+  | Todo
+  | Unreachable
+  | Break
+  | Continue
+  | SelfValue
+  | SelfTypeValue
+  | Name(path: NamePath)
+  | indirect Member(base: Expression, name: Name)
+  | indirect Bracket(base: Expression, items: List[BracketItem])
+  | indirect Call(callee: Expression, arguments: List[Argument])
+  | indirect Try(inner: Expression)
+  | indirect With(base: Expression, updates: List[Update])
+  | indirect Prefix(operator: PrefixOperator, operand: Expression)
+  | indirect Mode(mode: Mode, inner: Expression)
+  | indirect Any(inner: Expression)
+  | indirect Binary(operator: Binary, operator_id: UInt64, left: Expression, right: Expression)
+  | indirect Is(value: Expression, operator_id: UInt64, pattern: Pattern)
+  | indirect Range(start: Option[Expression], operator_id: UInt64, stop: Option[Expression], is_inclusive: Bool)
+  | indirect Quantified(quantifier: Quantifier, binder: Binder, body: Expression)
+  | indirect Echo(inner: Expression)
+  | indirect Return(value: Option[Expression])
+  | indirect Parenthesized(inner: Expression)
+  | List(items: List[Expression])
+  | Map(entries: List[Entry])
+  | Lambda(parameters: List[Pattern], body: Block)
+  | indirect If(condition: Expression, then_block: Block, else_branch: Option[ElseBranch])
+  | Match(scrutinees: List[Expression], arms: List[Arm])
+  | Provide(implementations: List[Expression], body: Block)
+  | Block(block: Block)
+  | ExpressionError
+  derives Equal
+
+internal type Entry(key: Expression, value: Expression)
+  derives Equal
+
+internal type StringLiteral(tag: Option[NamePath], form: token::Form, first: Text, rest: List[Interpolated], id: UInt64)
+  derives Equal
+
+internal type Interpolated(value: Expression, text: Text)
+  derives Equal
+
+internal type Text(value: String, id: UInt64)
+  derives Equal
+
+internal type Argument(label: Option[Name], value: Expression)
+  derives Equal
+
+internal type BracketItem = Item(value: Expression) | ItemConstraint(name: Name, value: TypeExpression)
+  derives Equal
+
+internal type Update(kind: UpdateKind, id: UInt64)
+  derives Equal
+
+internal type UpdateKind = FieldUpdate(path: List[Name], value: Expression) | UpdateError
+  derives Equal
+
+internal type Binder = BinderIn(pattern: Pattern, collection: Expression) | BinderType(name: Name, domain: TypeExpression)
+  derives Equal
+
+internal type ElseBranch = Else(block: Block) | ElseIf(value: Expression)
+  derives Equal
+
+internal type Block(statements: List[Statement], id: UInt64)
+  derives Equal
+
+internal type Statement(kind: StatementKind, id: UInt64)
+  derives Equal
+
+internal type StatementKind =
+  | Let(is_var: Bool, pattern: Pattern, annotation: Option[TypeExpression], value: Expression, else_block: Option[Block])
+  | Expression(value: Expression)
+  | Assignment(target: Expression, operator: Assignment, value: Expression)
+  | For(
+    mode: LoopMode,
+    pattern: Pattern,
+    annotation: Option[TypeExpression],
+    iterable: Expression,
+    clauses: List[LoopClause],
+    body: Block,
+  )
+  | While(condition: Expression, clauses: List[LoopClause], body: Block)
+  | Parallel(body: Block)
+  | Concurrent(body: Block)
+  | Proof(body: Block)
+  | Assert(value: Expression, by_bit_vector: Bool)
+  | StatementError
+  derives Equal
+
+internal type LoopClause(kind: LoopClauseKind, condition: Option[List[BoundCondition]], id: UInt64)
+  derives Equal
+
+internal type LoopClauseKind = Invariant(value: Expression) | LoopDecreases(measures: List[Expression]) | LoopCost(clause: CostClause)
+  derives Equal
+
+internal type Arm(patterns: List[Pattern], guard: Option[Expression], body: Statement, id: UInt64)
+  derives Equal
+
+internal type Pattern(kind: PatternKind, id: UInt64)
+  derives Equal
+
+internal type PatternKind =
+  | Wildcard
+  | Binding(name: Name)
+  | QualifiedConstant(constant: Constant)
+  | Literal(literal: Literal)
+  | PatternRange(start: RangeEnd, stop: RangeEnd, is_inclusive: Bool)
+  | Variant(name: Name, fields: Option[List[PatternField]])
+  | Record(fields: List[PatternField])
+  | Alternatives(alternatives: List[Pattern])
+  | PatternError
+  derives Equal
+
+internal type Constant = ModuleConstant(path: NamePath) | TypeConstant(owner: NamePath, name: Name)
+  derives Equal
+
+internal type Literal =
+  | LiteralInteger(digits: String)
+  | LiteralTrue
+  | LiteralFalse
+  | LiteralString(literal: StringLiteral)
+  derives Equal
+
+internal type RangeEnd(kind: RangeEndKind, id: UInt64)
+  derives Equal
+
+internal type RangeEndKind = EndLiteral(literal: Literal) | EndConstant(constant: Constant)
+  derives Equal
+
+internal type PatternField(kind: PatternFieldKind, id: UInt64)
+  derives Equal
+
+internal type PatternFieldKind = NamedField(name: Name, pattern: Pattern) | Field(pattern: Pattern) | Rest
+  derives Equal
+
+internal type Visibility = Internal | Public | PublicOpaque
+  derives Equal
+
+internal type TypeHead(path: NamePath, generics: List[GenericParameter], id: UInt64)
+  derives Equal
+
+internal type DefinitionName = PlainName(name: Name) | MemberName(head: TypeHead, name: Name)
+  derives Equal
+
+internal type Parameter(kind: ParameterKind, id: UInt64)
+  derives Equal
+
+internal type ParameterKind =
+  | SelfParameter(mode: Option[Mode])
+  | NamedParameter(name: Name, mode: Option[Mode], annotation: TypeExpression, default: Option[Expression])
+  | ParameterError
+  derives Equal
+
+internal type Output = Returns(annotation: TypeExpression) | Lends(mode: Option[Mode], annotation: TypeExpression)
+  derives Equal
+
+internal type Signature(
+  name: DefinitionName,
+  generics: List[GenericParameter],
+  parameters: List[Parameter],
+  output: Option[Output],
+  clauses: List[Clause],
+)
+  derives Equal
+
+internal type FunctionDefinition(signature: Signature, body: Block)
+  derives Equal
+
+internal type Field(kind: FieldKind, id: UInt64)
+  derives Equal
+
+internal type FieldKind = FieldDeclaration(name: Name, annotation: TypeExpression, default: Option[Expression]) | FieldError
+  derives Equal
+
+internal type VariantDeclaration(is_indirect: Bool, name: Name, fields: Option[List[Field]], id: UInt64)
+  derives Equal
+
+internal type TypeBody = Fields(fields: List[Field]) | Variants(variants: List[VariantDeclaration]) | TypeTodo
+  derives Equal
+
+internal type TypeClause(kind: TypeClauseKind, id: UInt64)
+  derives Equal
+
+internal type TypeClauseKind = TypeInvariant(value: Expression) | Derives(traits: List[PathType]) | Potential(value: Expression)
+  derives Equal
+
+internal type LawDefinition(name: Name, parameters: List[Parameter], premises: List[Expression], body: Block)
+  derives Equal
+
+internal type TraitMember =
+  | AssociatedType(name: Name, bounds: List[PathType])
+  | AssociatedCapability(name: Name)
+  | Law(definition: LawDefinition)
+  | TraitMemberError
+  derives Equal
+
+internal type TraitMemberNode(kind: TraitMember, id: UInt64)
+  derives Equal
+
+internal type ImplMember =
+  | AssociatedDefinition(name: Name, definition: TypeExpression)
+  | CapabilityDefinition(name: Name, capabilities: List[CapabilityUse])
+  | ImplMemberError
+  derives Equal
+
+internal type ImplMemberNode(kind: ImplMember, id: UInt64)
+  derives Equal
+
+internal type CapabilityMemberNode(id: UInt64)
+  derives Equal
+
+internal type IntendedKind =
+  | IntendedFunction
+  | IntendedConstant
+  | IntendedType
+  | IntendedTrait
+  | IntendedCapability
+  | IntendedTheorem
+  derives Equal
+
+internal type DefinitionKind =
+  | Function(definition: FunctionDefinition)
+  | MethodDeclaration(signature: Signature)
+  | TypeDefinition(name: Name, generics: List[GenericParameter], body: TypeBody, clauses: List[TypeClause])
+  | Trait(name: Name, generics: List[GenericParameter], supertraits: List[PathType], members: List[TraitMemberNode])
+  | Impl(
+    implemented_trait: PathType,
+    implementing_type: TypeHead,
+    capabilities: List[CapabilityReference],
+    members: List[ImplMemberNode],
+  )
+  | Capability(name: Name, members: List[CapabilityMemberNode])
+  | Constant(name: DefinitionName, annotation: TypeExpression, value: Expression)
+  | Test(name: StringLiteral, capabilities: List[CapabilityReference], body: Block)
+  | Theorem(
+    name: Name,
+    generics: List[GenericParameter],
+    parameters: List[Parameter],
+    clauses: List[Clause],
+    body: Block,
+  )
+  | LawProof(proved_trait: PathType, law_name: Name, implementing_type: TypeHead, body: Block)
+  | DefinitionError(intended: Option[IntendedKind], name: Option[DefinitionName])
+  derives Equal
+
+internal type Definition(visibility: Option[Visibility], kind: DefinitionKind, id: UInt64)
+  derives Equal
+
+internal type Positions(spans: List[source::Span], syntax_errors: List[source::Span])
+  derives Equal
+
+internal type Item[Value](base: UInt64, stop: UInt64, value: Value, positions: Positions)
+
+internal type TopLevel(definition: Item[Definition], methods: List[Item[Definition]])
+
+internal type File(imports: List[Item[NamePath]], definitions: List[TopLevel])

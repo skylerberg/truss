@@ -1,0 +1,256 @@
+use frontend::source
+use frontend::token
+
+let comment_message: StringSlice = "Truss has no comments. Say this with a name, a contract, or a test instead."
+
+type ConfusableScan = LexedConfusable(kind: token::Kind) | Spaced
+  derives Equal
+
+type OperatorScan = LexedOperator(kind: token::Kind) | Ellipsis
+  derives Equal
+
+type StringFormScan = LexedString(kind: token::Kind, ending: Ending) | Skipped
+  derives Equal
+
+fn lex_line_comment(scanner: mut Scanner)
+  uses Panic, RunForever
+{
+  let start = scanner.position
+  let stop = scanner.compute_end_of_line(start)
+  scanner.position = stop
+  scanner.line_is_blank = false
+  report(mut scanner, code: "lexer.comment", span: source::make_span(start, stop), message: comment_message)
+}
+
+fn lex_block_comment(scanner: mut Scanner)
+  uses Panic, RunForever
+{
+  let start = scanner.position
+  var first_line_break: Option[source::Span] = None
+  var depth: UInt64 = 1
+  var position = start + 2
+  var is_closed = false
+  while !scanner.is_at_end(position) {
+    if scanner.is_at(position, byte: 42) && scanner.is_at(position + 1, byte: 47) {
+      position += 2
+      if depth == 1 {
+        is_closed = true
+        break
+      }
+      depth -= 1
+    } else if scanner.is_at(position, byte: 47) && scanner.is_at(position + 1, byte: 42) {
+      depth += 1
+      position += 2
+    } else {
+      if is_line_break(scanner.lookup(position)) && first_line_break.is_none() {
+        first_line_break = Some(source::make_span(position, stop: position + scanner.measure_line_break(position)))
+      }
+      position += 1
+    }
+  }
+  scanner.position = position
+  if !is_closed {
+    scanner.unterminated_at_end = true
+  }
+  scanner.line_is_blank = false
+  if first_line_break is Some(line_break) && scanner.first_line_break.is_none() {
+    scanner.first_line_break = Some(line_break)
+  }
+  let message = if is_closed {
+    comment_message.to_string()
+  } else {
+    "${comment_message} This comment is never closed, so it runs to the end of the file."
+  }
+  report(mut scanner, code: "lexer.comment", span: source::make_span(start, stop: position), message)
+}
+
+fn record_semicolon(scanner: mut Scanner)
+  uses Panic
+{
+  mut scanner.semicolons.push(scanner.position)
+  scanner.position += 1
+  scanner.line_is_blank = false
+}
+
+fn report_semicolons(scanner: mut Scanner, line_break: Bool)
+  uses Panic, RunForever
+{
+  if scanner.semicolons.is_empty() {
+    return
+  }
+  let semicolons = own scanner.semicolons
+  scanner.semicolons = []
+  let first = semicolons.get(0).expect("a semicolon")
+  if line_break && scanner.first_line_break.is_none() {
+    scanner.first_line_break = Some(source::make_span(first, stop: first + 1))
+  }
+  for start in semicolons {
+    let title = if line_break { "Replace the `;` with a line break" } else { "Remove the `;`" }
+    let fix = source::make_fix(title, edits: [scanner.remove_trivia(start, stop: start + 1, line_break)])
+    report(
+      mut scanner,
+      code: "lexer.semicolon",
+      span: source::make_span(start, stop: start + 1),
+      message: "Statements end at a line break. Truss has no `;`.",
+      fixes: [own fix],
+    )
+  }
+}
+
+fn lex_attribute(scanner: mut Scanner)
+  uses Panic, RunForever
+{
+  let start = scanner.position
+  let stop = scanner.compute_end_of_line(start)
+  scanner.position = stop
+  scanner.line_is_blank = false
+  report(
+    mut scanner,
+    code: "lexer.attribute",
+    span: source::make_span(start, stop),
+    message: "Truss has no attributes. A type lists the traits it derives in a `derives` clause, and a test is a `test` definition.",
+  )
+}
+
+fn scan_comment(scanner: mut Scanner, inline: Bool) -> Bool
+  uses Panic, RunForever
+{
+  let start = scanner.position
+  if scanner.is_at(start, byte: 47) && (scanner.is_at(start + 1, byte: 47) || scanner.is_at(start + 1, byte: 42)) {
+    if inline {
+      reject(mut scanner, length: 2, message: comment_message, code: "lexer.comment")
+    } else if scanner.is_at(start + 1, byte: 47) {
+      lex_line_comment(mut scanner)
+    } else {
+      lex_block_comment(mut scanner)
+    }
+    return true
+  }
+  if scanner.is_at(start, byte: 35) && (scanner.is_at(start + 1, byte: 91) || (scanner.is_at(start + 1, byte: 33) && scanner.is_at(start + 2, byte: 91))) {
+    if inline {
+      reject(mut scanner, length: 1, message: "Truss has no attributes.", code: "lexer.attribute")
+    } else {
+      lex_attribute(mut scanner)
+    }
+    return true
+  }
+  if scanner.is_at(start, byte: 35) {
+    if inline {
+      reject(mut scanner, length: 1, message: comment_message, code: "lexer.comment")
+    } else {
+      lex_line_comment(mut scanner)
+    }
+    return true
+  }
+  if scanner.is_at(start, byte: 59) {
+    if inline {
+      reject(mut scanner, length: 1, message: "Truss has no `;`.", code: "lexer.semicolon")
+    } else {
+      record_semicolon(mut scanner)
+    }
+    return true
+  }
+  false
+}
+
+fn replace_operator(scanner: mut Scanner, start: UInt64, length: UInt64, replacements: Slice[String], code: StringSlice, message: StringSlice)
+  uses Panic
+{
+  let span = source::make_span(start, stop: start + length)
+  let fixes = scanner.list_code_fixes(span, codes: replacements)
+  report(mut scanner, code, span, message, fixes: own fixes)
+}
+
+fn scan_operator(scanner: mut Scanner) -> Option[OperatorScan]
+  uses Panic
+{
+  let start = scanner.position
+  let first = scanner.byte_after(start)
+  let second = scanner.byte_after(start + 1)
+  let third = scanner.byte_after(start + 2)
+  let fourth = scanner.byte_after(start + 3)
+  let foreign: Option[token::Foreign] = if first == Some(58) && second == Some(61) {
+    Some(token::Foreign.ColonEqual)
+  } else if first == Some(45) && second == Some(45) {
+    Some(token::Foreign.MinusMinus)
+  } else if first == Some(43) && second == Some(43) {
+    Some(token::Foreign.PlusPlus)
+  } else if first == Some(42) && second == Some(42) {
+    Some(token::Foreign.StarStar)
+  } else if first == Some(124) && second == Some(62) {
+    Some(token::Foreign.PipeGreater)
+  } else {
+    None
+  }
+  if foreign is Some(kind) {
+    scanner.position = start + 2
+    return Some(OperatorScan.LexedOperator(token::Kind.Foreign(kind)))
+  }
+  if first == Some(46) && second == Some(46) && third == Some(60) {
+    replace_operator(mut scanner, start, length: 3, replacements: [".."], code: "lexer.foreign_operator", message: "Truss has no `..<`; write `..`.")
+    scanner.position = start + 3
+    return Some(OperatorScan.LexedOperator(token::Kind.Punctuation(token::Punctuation.DotDot)))
+  }
+  if first == Some(60) && second == Some(62) {
+    replace_operator(mut scanner, start, length: 2, replacements: ["!="], code: "lexer.foreign_operator", message: "Truss has no `<>`; write `!=`.")
+    scanner.position = start + 2
+    return Some(OperatorScan.LexedOperator(token::Kind.Punctuation(token::Punctuation.NotEqual)))
+  }
+  if (first == Some(61) || first == Some(33)) && second == Some(61) && third == Some(61) && fourth != Some(61) {
+    let is_equal = first == Some(61)
+    let written = if is_equal { "===" } else { "!==" }
+    let replacement = if is_equal { "==" } else { "!=" }
+    let kind = if is_equal { token::Punctuation.EqualEqual } else { token::Punctuation.NotEqual }
+    replace_operator(
+      mut scanner,
+      start,
+      length: 3,
+      replacements: [replacement.to_string()],
+      code: "lexer.strict_equality",
+      message: "Truss has no `${written}`. `${replacement}` already compares values of the same type.",
+    )
+    scanner.position = start + 3
+    return Some(OperatorScan.LexedOperator(token::Kind.Punctuation(kind)))
+  }
+  if first == Some(46) && second == Some(46) && third == Some(46) {
+    scanner.position = start + 3
+    scanner.line_is_blank = false
+    return Some(OperatorScan.Ellipsis)
+  }
+  None
+}
+
+fn report_ellipsis(scanner: mut Scanner, start: UInt64, follows_operand: Bool, operand_follows: Bool) -> Option[token::Kind]
+  uses Panic
+{
+  if follows_operand && operand_follows {
+    replace_operator(
+      mut scanner,
+      start,
+      length: 3,
+      replacements: ["..", "..="],
+      code: "lexer.foreign_operator",
+      message: "Truss has no `...`. A range that leaves out its end is written `..`, and one that includes its end is written `..=`.",
+    )
+    return Some(token::Kind.Punctuation(token::Punctuation.DotDotEqual))
+  }
+  if !follows_operand && !operand_follows {
+    replace_operator(
+      mut scanner,
+      start,
+      length: 3,
+      replacements: ["todo"],
+      code: "lexer.foreign_operator",
+      message: "Truss has no `...`; code that is not written yet is `todo`.",
+    )
+    return Some(token::Kind.Keyword(token::Keyword.Todo))
+  }
+  report(
+    mut scanner,
+    code: "lexer.foreign_operator",
+    span: source::make_span(start, stop: start + 3),
+    message: "Truss has no `...`: it has no spread or rest operator, and a function takes a list where it takes any number of values.",
+  )
+  None
+}
+

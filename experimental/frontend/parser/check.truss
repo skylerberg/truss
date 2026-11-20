@@ -1,0 +1,484 @@
+use frontend::source
+use frontend::syntax
+
+type EnclosingLoop = NoLoop | InLoop | AcrossLambda | AcrossParallelBranch | InParallelFor
+  derives Equal
+
+type CheckContext(
+  is_specification: Bool,
+  allows_assert: Bool,
+  is_function_body: Bool,
+  enclosing_loop: EnclosingLoop,
+  is_in_parallel: Bool,
+)
+  derives Equal
+
+fn plain_context() -> CheckContext {
+  CheckContext(
+    is_specification: false,
+    allows_assert: false,
+    is_function_body: false,
+    enclosing_loop: EnclosingLoop.NoLoop,
+    is_in_parallel: false,
+  )
+}
+
+fn enter_specification(context: CheckContext) -> CheckContext {
+  context with (is_specification: true)
+}
+
+fn enter_proof(context: CheckContext) -> CheckContext {
+  context with (is_specification: true, allows_assert: true)
+}
+
+fn may_be_specification(context: CheckContext) -> Bool {
+  context.is_specification || context.is_function_body
+}
+
+fn show_quantifier(quantifier: syntax::Quantifier) -> StringSlice {
+  match quantifier {
+    Forall => "forall"
+    Exists => "exists"
+  }
+}
+
+fn report_at(cursor: mut TokenCursor, code: StringSlice, id: UInt64, message: StringSlice)
+  uses Panic
+{
+  let span = cursor.read_file_span(id)
+  report(mut cursor, code, span, message)
+}
+
+fn try_operator_span(cursor: TokenCursor, id: UInt64) -> source::Span
+  uses Panic
+{
+  let span = cursor.read_span(id)
+  let start = if span.stop > 0 && span.stop - 1 > span.start { span.stop - 1 } else { span.start }
+  cursor.make_file_span(source::make_span(start, stop: span.stop))
+}
+
+fn check_expression(cursor: mut TokenCursor, context: CheckContext, value: syntax::Expression)
+  uses Panic, RunForever
+{
+  match value.kind {
+    Quantified(quantifier, binder, ..) => if binder is BinderType(..) && !may_be_specification(context) {
+      let word = show_quantifier(quantifier)
+      report_at(
+        mut cursor,
+        code: "parser.specification_only",
+        id: value.id,
+        message: "`${word}` over a whole type cannot run, so it is only for specifications and the bodies of functions for specifications only. Quantify over a range or a collection, as in `${word} i in 0..count => ...`.",
+      )
+    }
+    Binary(operator, operator_id, ..) => if operator == syntax::Binary.Connective(syntax::Connective.Implies) && !may_be_specification(context) {
+      report_at(
+        mut cursor,
+        code: "parser.specification_only",
+        id: operator_id,
+        message: "`==>` is only for specifications and the bodies of functions for specifications only; in code, write `!a || b`.",
+      )
+    }
+    Echo(_) => if context.is_specification {
+      report_at(mut cursor, code: "parser.echo_in_specification", id: value.id, message: "`echo` is not allowed in specifications, which never run.")
+    }
+    Try(_) => if context.is_in_parallel {
+      let span = try_operator_span(cursor, id: value.id)
+      report(
+        mut cursor,
+        code: "parser.exits_parallel",
+        span,
+        message: "`?` cannot exit a `parallel` block or a `parallel for`; return a `Result` from the branch and use `?` after it.",
+      )
+    }
+    Return(_) => if context.is_in_parallel {
+      report_at(mut cursor, code: "parser.exits_parallel", id: value.id, message: "`return` cannot exit a `parallel` block or a `parallel for`.")
+    }
+    Break | Continue => check_loop_exit(mut cursor, context, value)
+    _ => {}
+  }
+  match value.kind {
+    Lambda(body, ..) => {
+      let enclosing_loop = if context.enclosing_loop == EnclosingLoop.NoLoop { EnclosingLoop.NoLoop } else { EnclosingLoop.AcrossLambda }
+      check_block(mut cursor, context: context with (allows_assert: false, is_in_parallel: false, enclosing_loop), block: body)
+    }
+    _ => walk_expression_parts(mut cursor, visitor: Visitor.CheckVisitor(context), value)
+  }
+}
+
+fn check_loop_exit(cursor: mut TokenCursor, context: CheckContext, value: syntax::Expression)
+  uses Panic
+{
+  let is_break = value.kind == syntax::ExpressionKind.Break
+  let word = if is_break { "break" } else { "continue" }
+  match context.enclosing_loop {
+    InLoop => {}
+    InParallelFor => if is_break {
+      report_at(mut cursor, code: "parser.exits_parallel", id: value.id, message: "`break` cannot exit a `parallel for`; `continue` can.")
+    }
+    NoLoop => report_at(mut cursor, code: "parser.misplaced_loop_exit", id: value.id, message: "`${word}` is only allowed in a loop.")
+    AcrossLambda => report_at(
+      mut cursor,
+      code: "parser.misplaced_loop_exit",
+      id: value.id,
+      message: "`${word}` cannot reach a loop outside the lambda it is in.",
+    )
+    AcrossParallelBranch => report_at(
+      mut cursor,
+      code: "parser.exits_parallel",
+      id: value.id,
+      message: "`${word}` cannot leave a branch of a `parallel` block.",
+    )
+  }
+}
+
+fn check_block(cursor: mut TokenCursor, context: CheckContext, block: syntax::Block)
+  uses Panic, RunForever
+{
+  for statement in block.statements {
+    check_statement(mut cursor, context, statement)
+  }
+}
+
+fn check_types(cursor: mut TokenCursor, context: CheckContext, written: syntax::TypeExpression, is_parameter: Bool = false)
+  uses Panic, RunForever
+{
+  check_placement(mut cursor, written, is_top: is_parameter)
+  walk_type_expression(mut cursor, visitor: Visitor.CheckVisitor(enter_specification(context)), written)
+}
+
+fn check_placement(cursor: mut TokenCursor, written: syntax::TypeExpression, is_top: Bool)
+  uses Panic, RunForever
+{
+  match written.kind {
+    FunctionType(function_type) => {
+      if !is_top {
+        for clause in function_type.clauses {
+          if clause.kind is Requires(_) {
+            report_at(
+              mut cursor,
+              code: "parser.misplaced_requires",
+              id: clause.id,
+              message: "A function type has a `requires` only as the type of a parameter, where it constrains the arguments the callee passes its callback.",
+            )
+          }
+        }
+      }
+      for input in function_type.inputs {
+        check_placement(mut cursor, written: input.annotation, is_top: false)
+      }
+      if function_type.output is Some(output) {
+        check_placement(mut cursor, written: output, is_top: false)
+      }
+    }
+    PathType(path_type) | AnyType(path_type) => check_path_placement(mut cursor, path_type)
+    SelfType(_) | Associated(..) | TypeError => {}
+  }
+}
+
+fn check_path_placement(cursor: mut TokenCursor, path_type: syntax::PathType)
+  uses Panic, RunForever
+{
+  for argument in path_type.arguments {
+    match argument {
+      TypeArgument(argument: written) | Constraint(value: written, ..) => check_placement(mut cursor, written, is_top: false)
+      Count(..) | CountName(_) => {}
+    }
+  }
+}
+
+fn check_loop_clauses(cursor: mut TokenCursor, context: CheckContext, clauses: Slice[syntax::LoopClause])
+  uses Panic, RunForever
+{
+  for clause in clauses {
+    walk_loop_clause(mut cursor, visitor: Visitor.CheckVisitor(enter_specification(context)), clause)
+  }
+}
+
+fn check_statement(cursor: mut TokenCursor, context: CheckContext, statement: syntax::Statement)
+  uses Panic, RunForever
+{
+  match statement.kind {
+    Let(annotation, value, else_block, ..) => {
+      if annotation is Some(written) {
+        check_types(mut cursor, context, written)
+      }
+      check_expression(mut cursor, context, value)
+      if else_block is Some(block) {
+        check_block(mut cursor, context, block)
+      }
+    }
+    For(mode, annotation, iterable, clauses, body, ..) => {
+      if annotation is Some(written) {
+        check_types(mut cursor, context, written)
+      }
+      check_expression(mut cursor, context, value: iterable)
+      check_loop_clauses(mut cursor, context, clauses)
+      let body_context = match mode {
+        Parallel => context with (enclosing_loop: EnclosingLoop.InParallelFor, is_in_parallel: true)
+        Sequential | Concurrent => context with (enclosing_loop: EnclosingLoop.InLoop)
+      }
+      check_block(mut cursor, context: body_context, block: body)
+    }
+    While(condition, clauses, body) => {
+      check_expression(mut cursor, context, value: condition)
+      check_loop_clauses(mut cursor, context, clauses)
+      check_block(mut cursor, context: context with (enclosing_loop: EnclosingLoop.InLoop), block: body)
+    }
+    Parallel(body) => {
+      let enclosing_loop = if context.enclosing_loop == EnclosingLoop.NoLoop { EnclosingLoop.NoLoop } else { EnclosingLoop.AcrossParallelBranch }
+      check_block(mut cursor, context: context with (is_in_parallel: true, enclosing_loop), block: body)
+    }
+    Concurrent(body) => check_block(mut cursor, context, block: body)
+    Proof(body) => {
+      if !context.is_function_body {
+        report_at(mut cursor, code: "parser.misplaced_proof", id: statement.id, message: "A `proof` block is only allowed in a function's body.")
+      }
+      check_block(mut cursor, context: enter_proof(context), block: body)
+    }
+    Assert(..) => {
+      if !context.allows_assert {
+        report_at(mut cursor, code: "parser.misplaced_assert", id: statement.id, message: "`assert` is only allowed in tests, theorems, and proofs.")
+      }
+      walk_statement_parts(mut cursor, visitor: Visitor.CheckVisitor(context), statement)
+    }
+    Expression(_) | Assignment(..) | StatementError => walk_statement_parts(mut cursor, visitor: Visitor.CheckVisitor(context), statement)
+  }
+}
+
+fn check_parameters(cursor: mut TokenCursor, parameters: Slice[syntax::Parameter], is_lending: Bool = false)
+  uses Panic, RunForever
+{
+  for parameter in parameters {
+    if parameter.kind is NamedParameter(name, annotation, default, ..) {
+      if name.text == "result" {
+        report_at(
+          mut cursor,
+          code: "parser.reserved_specification_name",
+          id: name.id,
+          message: "A parameter cannot be named `result`, which names the return value in `ensures` and `cost`.",
+        )
+      }
+      if is_lending && name.text == "final" {
+        report_at(
+          mut cursor,
+          code: "parser.reserved_specification_name",
+          id: name.id,
+          message: "A parameter of a lending method cannot be named `final`: in the method's `ensures`, `final(result)` is the part as the caller left it.",
+        )
+      }
+      check_types(mut cursor, context: plain_context(), written: annotation, is_parameter: true)
+      if default is Some(value) {
+        check_expression(mut cursor, context: plain_context(), value)
+      }
+    }
+  }
+}
+
+fn check_trait_arguments(cursor: mut TokenCursor, implemented_trait: syntax::PathType, is_law_proof: Bool)
+  uses Panic, RunForever
+{
+  for argument in implemented_trait.arguments {
+    match argument {
+      TypeArgument(argument: written) | Constraint(value: written, ..) => check_trait_argument(mut cursor, written, is_law_proof)
+      Count(..) | CountName(_) => {}
+    }
+  }
+}
+
+fn report_associated_type(cursor: mut TokenCursor, id: UInt64, written: StringSlice, is_law_proof: Bool)
+  uses Panic
+{
+  let message = if is_law_proof {
+    "`${written}` cannot be a trait argument of a law proof, since no `impl` can have one."
+  } else {
+    "`${written}` cannot be a trait argument of an `impl`: an associated type may stand for any type, so the `impl` could overlap every other `impl` of the trait for its type."
+  }
+  report_at(mut cursor, code: "parser.misplaced_associated_type", id, message)
+}
+
+fn check_trait_argument(cursor: mut TokenCursor, written: syntax::TypeExpression, is_law_proof: Bool)
+  uses Panic, RunForever
+{
+  match written.kind {
+    PathType(path_type) | AnyType(path_type) => check_trait_arguments(mut cursor, implemented_trait: path_type, is_law_proof)
+    FunctionType(_) => {
+      let message = if is_law_proof {
+        "A function type cannot be a trait argument of a law proof, since no `impl` can have one."
+      } else {
+        "A function type cannot be a trait argument of an `impl`. Use a record that holds the function, such as `type Callback(run: fn(Int64) -> Int64)`, as the argument."
+      }
+      report_at(mut cursor, code: "parser.misplaced_function_type", id: written.id, message)
+    }
+    Associated(parameter, name) => report_associated_type(mut cursor, id: written.id, written: "${parameter.text}.${name.text}", is_law_proof)
+    SelfType(name) => if name is Some(associated) {
+      report_associated_type(mut cursor, id: written.id, written: "Self.${associated.text}", is_law_proof)
+    }
+    TypeError => {}
+  }
+}
+
+fn check_header_trait(cursor: mut TokenCursor, implemented_trait: syntax::PathType, is_law_proof: Bool)
+  uses Panic, RunForever
+{
+  for argument in implemented_trait.arguments {
+    if argument is Constraint(name, value) {
+      let span = cursor.make_file_span(source::make_span(cursor.read_span(name.id).start, stop: cursor.read_span(value.id).stop))
+      let written = match cursor.spell(span) {
+        Some(spelled) => spelled
+        None => name.text.copy()
+      }
+      let message = if is_law_proof {
+        "A law proof's trait takes no constraint such as `${written}`: the `impl` it proves chooses `${name.text}` in its body."
+      } else {
+        let value_spelling = match cursor.spell(cursor.read_file_span(value.id)) {
+          Some(spelled) => spelled
+          None => "..."
+        }
+        "An `impl` chooses its associated types in its body, so `${written}` on its trait would have no effect. Write `type ${name.text} = ${value_spelling}` in the `impl` instead."
+      }
+      report(mut cursor, code: "parser.misplaced_constraint", span, message)
+    }
+  }
+  check_trait_arguments(mut cursor, implemented_trait, is_law_proof)
+}
+
+fn check_clauses(cursor: mut TokenCursor, clauses: Slice[syntax::Clause])
+  uses Panic, RunForever
+{
+  for clause in clauses {
+    walk_clause(mut cursor, visitor: Visitor.CheckVisitor(enter_specification(plain_context())), clause)
+  }
+}
+
+fn check_generic_parameters(cursor: mut TokenCursor, generics: Slice[syntax::GenericParameter])
+  uses Panic, RunForever
+{
+  for parameter in generics {
+    walk_generic_parameter(mut cursor, visitor: Visitor.CheckVisitor(enter_specification(plain_context())), parameter)
+  }
+}
+
+fn check_function_name(cursor: mut TokenCursor, name: syntax::DefinitionName)
+  uses Panic
+{
+  let written = match name {
+    PlainName(plain) => plain.copy()
+    MemberName(name: member, ..) => member.copy()
+  }
+  if written.text == "old" {
+    report_at(
+      mut cursor,
+      code: "parser.reserved_specification_name",
+      id: written.id,
+      message: "A function cannot be named `old`, which names a value as it was when a function was called, in specifications.",
+    )
+  } else if written.text == "identical" {
+    report_at(
+      mut cursor,
+      code: "parser.reserved_specification_name",
+      id: written.id,
+      message: "A function cannot be named `identical`, which tests whether two values are the same value, in specifications.",
+    )
+  }
+}
+
+fn check_signature(cursor: mut TokenCursor, signature: syntax::Signature)
+  uses Panic, RunForever
+{
+  check_function_name(mut cursor, name: signature.name)
+  walk_definition_name(mut cursor, visitor: Visitor.CheckVisitor(enter_specification(plain_context())), name: signature.name)
+  check_generic_parameters(mut cursor, generics: signature.generics)
+  let is_lending = match signature.output {
+    Some(output) => output is Lends(..)
+    None => false
+  }
+  check_parameters(mut cursor, parameters: signature.parameters, is_lending)
+  if signature.output is Some(output) {
+    match output {
+      Returns(annotation) | Lends(annotation, ..) => check_types(mut cursor, context: plain_context(), written: annotation)
+    }
+  }
+  check_clauses(mut cursor, clauses: signature.clauses)
+}
+
+fn check_fields(cursor: mut TokenCursor, fields: Slice[syntax::Field])
+  uses Panic, RunForever
+{
+  for field in fields {
+    if field.kind is FieldDeclaration(annotation, default, ..) {
+      check_types(mut cursor, context: plain_context(), written: annotation)
+      if default is Some(value) {
+        check_expression(mut cursor, context: plain_context(), value)
+      }
+    }
+  }
+}
+
+fn check_definition(cursor: mut TokenCursor, definition: syntax::Definition)
+  uses Panic, RunForever
+{
+  match definition.kind {
+    Function(definition: function_definition) => {
+      check_signature(mut cursor, signature: function_definition.signature)
+      check_block(mut cursor, context: plain_context() with (is_function_body: true), block: function_definition.body)
+    }
+    MethodDeclaration(signature) => check_signature(mut cursor, signature)
+    TypeDefinition(generics, body, clauses, ..) => {
+      check_generic_parameters(mut cursor, generics)
+      match body {
+        Fields(fields) => check_fields(mut cursor, fields)
+        Variants(variants) => for variant in variants {
+          if variant.fields is Some(fields) {
+            check_fields(mut cursor, fields)
+          }
+        }
+        TypeTodo => {}
+      }
+      for clause in clauses {
+        match clause.kind {
+          TypeInvariant(value) | Potential(value) => check_expression(mut cursor, context: enter_specification(plain_context()), value)
+          Derives(_) => {}
+        }
+      }
+    }
+    Trait(generics, members, ..) => {
+      check_generic_parameters(mut cursor, generics)
+      for member in members {
+        if member.kind is Law(definition: law_definition) {
+          check_parameters(mut cursor, parameters: law_definition.parameters)
+          for premise in law_definition.premises {
+            check_expression(mut cursor, context: enter_specification(plain_context()), value: premise)
+          }
+          check_block(mut cursor, context: enter_specification(plain_context()), block: law_definition.body)
+        }
+      }
+    }
+    Impl(implemented_trait, implementing_type, members, ..) => {
+      check_header_trait(mut cursor, implemented_trait, is_law_proof: false)
+      check_generic_parameters(mut cursor, generics: implementing_type.generics)
+      for member in members {
+        if member.kind is AssociatedDefinition(definition: written, ..) {
+          check_types(mut cursor, context: plain_context(), written)
+        }
+      }
+    }
+    Capability(..) => {}
+    Constant(annotation, value, ..) => {
+      check_types(mut cursor, context: plain_context(), written: annotation)
+      check_expression(mut cursor, context: plain_context(), value)
+    }
+    Test(body, ..) => check_block(mut cursor, context: plain_context() with (allows_assert: true), block: body)
+    Theorem(generics, parameters, clauses, body, ..) => {
+      check_generic_parameters(mut cursor, generics)
+      check_parameters(mut cursor, parameters)
+      check_clauses(mut cursor, clauses)
+      check_block(mut cursor, context: enter_proof(plain_context()), block: body)
+    }
+    LawProof(proved_trait, implementing_type, body, ..) => {
+      check_header_trait(mut cursor, implemented_trait: proved_trait, is_law_proof: true)
+      check_generic_parameters(mut cursor, generics: implementing_type.generics)
+      check_block(mut cursor, context: enter_proof(plain_context()), block: body)
+    }
+    DefinitionError(..) => {}
+  }
+}

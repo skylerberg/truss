@@ -1,0 +1,197 @@
+use frontend::token
+
+fn is_upper(byte: UInt8) -> Bool {
+  byte >= 65 && byte <= 90
+}
+
+fn is_lower(byte: UInt8) -> Bool {
+  byte >= 97 && byte <= 122
+}
+
+fn classify_is_upper(name: StringSlice) -> Bool
+  uses Panic
+{
+  for byte in name.bytes() {
+    if byte != 95 {
+      return is_upper(byte)
+    }
+  }
+  false
+}
+
+fn split_name(name: StringSlice) -> List[StringSlice]
+  uses Panic
+{
+  var parts: List[StringSlice] = []
+  for part in name.split("_") {
+    if !part.is_empty() {
+      mut parts.push(part)
+    }
+  }
+  parts
+}
+
+fn has_upper(name: StringSlice) -> Bool {
+  for byte in name.bytes() {
+    if is_upper(byte) {
+      return true
+    }
+  }
+  false
+}
+
+fn has_lower(name: StringSlice) -> Bool {
+  for byte in name.bytes() {
+    if is_lower(byte) {
+      return true
+    }
+  }
+  false
+}
+
+fn lowercase_byte(byte: UInt8) -> StringSlice
+  uses Panic
+{
+  let index = UInt64.from_integer(byte - 65)
+  "abcdefghijklmnopqrstuvwxyz".substring(index, to: index + 1)
+}
+
+fn uppercase_byte(byte: UInt8) -> StringSlice
+  uses Panic
+{
+  let index = UInt64.from_integer(byte - 97)
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZ".substring(index, to: index + 1)
+}
+
+fn to_snake(name: StringSlice) -> String
+  uses Panic
+{
+  let length = name.length()
+  var buffer = ""
+  for index in 0..length {
+    let byte = name.byte(index)
+    if is_upper(byte) {
+      let starts_word = index > 0 && {
+        let previous = name.byte(index - 1)
+        previous != 95 && (!is_upper(previous) || (index + 1 < length && is_lower(name.byte(index + 1))))
+      }
+      if starts_word {
+        mut buffer.push("_")
+      }
+      mut buffer.push(lowercase_byte(byte))
+    } else {
+      mut buffer.push(name.substring(index, to: index + 1))
+    }
+  }
+  split_name(buffer).join("_")
+}
+
+fn capitalize(part: StringSlice) -> String
+  uses Panic
+{
+  if part.is_empty() {
+    return ""
+  }
+  let first = part.byte(0)
+  if is_lower(first) {
+    "${uppercase_byte(first)}${part.substring(1, to: part.length())}"
+  } else {
+    part.to_string()
+  }
+}
+
+fn to_camel(name: StringSlice) -> String
+  uses Panic
+{
+  var text = ""
+  for entry in split_name(name).enumerate() {
+    if entry.index == 0 {
+      mut text.push(entry.element)
+    } else {
+      mut text.push(capitalize(entry.element))
+    }
+  }
+  text
+}
+
+fn correct_case(name: StringSlice) -> String
+  uses Panic
+{
+  let parts = split_name(name)
+  let Some(first) = parts.get(0) else {
+    return name.to_string()
+  }
+  if is_upper(first.byte(0)) {
+    if !name.contains("_") {
+      name.to_string()
+    } else if !has_lower(name) {
+      parts.join("_").to_ascii_lowercase()
+    } else {
+      to_camel(name)
+    }
+  } else {
+    to_snake(name)
+  }
+}
+
+fn find_case_problem(name: StringSlice) -> Option[String]
+  uses Panic
+{
+  if name.starts_with("_") {
+    return Some("Names cannot start with `_`.")
+  }
+  if classify_is_upper(name) {
+    if !name.contains("_") {
+      return None
+    }
+    if !has_lower(name) {
+      return Some("`${name}` is written like a constant from another language. Constants are values, so their names are lower_snake_case.")
+    }
+    return Some("A name that starts with an uppercase letter is UpperCamelCase, with no `_`.")
+  }
+  if has_upper(name) {
+    return Some("A name that starts with a lowercase letter is lower_snake_case, with no uppercase letters.")
+  }
+  if name.ends_with("_") {
+    return Some("Names cannot end with `_`.")
+  }
+  if name.contains("__") {
+    return Some("`_` appears only singly, between the parts of a name.")
+  }
+  None
+}
+
+fn check_name(name: StringSlice) -> NameCheck
+  uses Panic, RunForever
+{
+  let is_upper_name = classify_is_upper(name)
+  for index in 0..name.length() {
+    if !is_ascii(name.byte(index)) {
+      let decoded = decode_text(name, index)
+      let character = "`${name.substring(index, to: index + decoded.length)}` (U+${format_hexadecimal(decoded.code, minimum_digits: 4)})"
+      return NameCheck(
+        is_upper: is_upper_name,
+        problem: Some(
+          NameProblem(
+            code: "lexer.name_not_ascii",
+            message: "Names use only ASCII letters, digits, and `_`, and ${character} is not ASCII. Text in any language goes in strings.",
+          ),
+        ),
+        fix: None,
+      )
+    }
+  }
+  let Some(message) = find_case_problem(name) else {
+    return NameCheck(is_upper: is_upper_name, problem: None, fix: None)
+  }
+  let corrected = correct_case(name)
+  let is_fixable = corrected != name && !corrected.is_empty()
+    && (is_upper(corrected.byte(0)) || is_lower(corrected.byte(0)))
+    && find_case_problem(corrected).is_none()
+    && token::find_word(corrected).is_none()
+  NameCheck(
+    is_upper: is_upper_name,
+    problem: Some(NameProblem(code: "lexer.name_case", message: own message)),
+    fix: if is_fixable { Some(own corrected) } else { None },
+  )
+}

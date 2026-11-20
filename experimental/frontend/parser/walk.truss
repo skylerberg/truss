@@ -1,0 +1,456 @@
+use frontend::syntax
+
+type Visitor = PrecedenceVisitor | CheckVisitor(context: CheckContext)
+  derives Equal
+
+fn on_expression(cursor: mut TokenCursor, visitor: Visitor, value: syntax::Expression)
+  uses Panic, RunForever
+{
+  match visitor {
+    PrecedenceVisitor => check_precedence(mut cursor, value, context: None)
+    CheckVisitor(context) => check_expression(mut cursor, context, value)
+  }
+}
+
+fn on_statement(cursor: mut TokenCursor, visitor: Visitor, statement: syntax::Statement)
+  uses Panic, RunForever
+{
+  match visitor {
+    PrecedenceVisitor => walk_statement_parts(mut cursor, visitor, statement)
+    CheckVisitor(context) => check_statement(mut cursor, context, statement)
+  }
+}
+
+fn walk_block(cursor: mut TokenCursor, visitor: Visitor, block: syntax::Block)
+  uses Panic, RunForever
+{
+  for statement in block.statements {
+    on_statement(mut cursor, visitor, statement)
+  }
+}
+
+fn walk_type_expression(cursor: mut TokenCursor, visitor: Visitor, written: syntax::TypeExpression)
+  uses Panic, RunForever
+{
+  match written.kind {
+    PathType(path_type) | AnyType(path_type) => walk_path_type(mut cursor, visitor, path_type)
+    FunctionType(function_type) => {
+      for input in function_type.inputs {
+        walk_type_expression(mut cursor, visitor, written: input.annotation)
+      }
+      if function_type.output is Some(output) {
+        walk_type_expression(mut cursor, visitor, written: output)
+      }
+      for clause in function_type.clauses {
+        walk_clause(mut cursor, visitor, clause)
+      }
+    }
+    SelfType(_) | Associated(..) | TypeError => {}
+  }
+}
+
+fn walk_path_type(cursor: mut TokenCursor, visitor: Visitor, path_type: syntax::PathType)
+  uses Panic, RunForever
+{
+  for argument in path_type.arguments {
+    match argument {
+      TypeArgument(argument: written) | Constraint(value: written, ..) => walk_type_expression(mut cursor, visitor, written)
+      Count(..) | CountName(_) => {}
+    }
+  }
+}
+
+fn walk_capability_reference(cursor: mut TokenCursor, visitor: Visitor, reference: syntax::CapabilityReference)
+  uses Panic, RunForever
+{
+  if reference.kind is CapabilityPath(path_type) {
+    walk_path_type(mut cursor, visitor, path_type)
+  }
+}
+
+fn walk_condition(cursor: mut TokenCursor, visitor: Visitor, condition: Slice[syntax::BoundCondition])
+  uses Panic, RunForever
+{
+  for bound in condition {
+    walk_type_expression(mut cursor, visitor, written: bound.subject)
+    for path_type in bound.bounds {
+      walk_path_type(mut cursor, visitor, path_type)
+    }
+  }
+}
+
+fn walk_capability_use(cursor: mut TokenCursor, visitor: Visitor, capability_use: syntax::CapabilityUse)
+  uses Panic, RunForever
+{
+  walk_capability_reference(mut cursor, visitor, reference: capability_use.reference)
+  if capability_use.unless_bounds is Some(bounds) {
+    walk_condition(mut cursor, visitor, condition: bounds)
+  }
+  for value in capability_use.unless_values {
+    on_expression(mut cursor, visitor, value)
+  }
+}
+
+fn walk_bound(cursor: mut TokenCursor, visitor: Visitor, bound: syntax::Bound)
+  uses Panic, RunForever
+{
+  match bound {
+    BigO(value) | AtMost(value) | Exactly(value) => on_expression(mut cursor, visitor, value)
+  }
+}
+
+fn walk_clause(cursor: mut TokenCursor, visitor: Visitor, clause: syntax::Clause)
+  uses Panic, RunForever
+{
+  if clause.condition is Some(condition) {
+    walk_condition(mut cursor, visitor, condition)
+  }
+  match clause.kind {
+    Uses(capabilities) => for capability_use in capabilities {
+      walk_capability_use(mut cursor, visitor, capability_use)
+    }
+    Requires(value) | Ensures(value) => on_expression(mut cursor, visitor, value)
+    Decreases(measures) => for measure in measures {
+      on_expression(mut cursor, visitor, value: measure)
+    }
+    Cost(clause: cost_clause) => walk_bound(mut cursor, visitor, bound: cost_clause.bound)
+    ClauseError => {}
+  }
+}
+
+fn walk_loop_clause(cursor: mut TokenCursor, visitor: Visitor, clause: syntax::LoopClause)
+  uses Panic, RunForever
+{
+  if clause.condition is Some(condition) {
+    walk_condition(mut cursor, visitor, condition)
+  }
+  match clause.kind {
+    Invariant(value) => on_expression(mut cursor, visitor, value)
+    LoopDecreases(measures) => for measure in measures {
+      on_expression(mut cursor, visitor, value: measure)
+    }
+    LoopCost(clause: cost_clause) => walk_bound(mut cursor, visitor, bound: cost_clause.bound)
+  }
+}
+
+fn walk_string_literal(cursor: mut TokenCursor, visitor: Visitor, literal: syntax::StringLiteral)
+  uses Panic, RunForever
+{
+  for interpolated in literal.rest {
+    on_expression(mut cursor, visitor, value: interpolated.value)
+  }
+}
+
+fn walk_expression_parts(cursor: mut TokenCursor, visitor: Visitor, value: syntax::Expression)
+  uses Panic, RunForever
+{
+  match value.kind {
+    Integer(_) | Float(_) | True | False | Todo | Unreachable | Break | Continue | SelfValue | SelfTypeValue | Name(_)
+      | ExpressionError => {}
+    String(literal) => walk_string_literal(mut cursor, visitor, literal)
+    Member(base: inner, ..) | Try(inner) | Prefix(operand: inner, ..) | Mode(inner, ..) | Any(inner) | Echo(inner) | Parenthesized(inner) => {
+      on_expression(mut cursor, visitor, value: inner)
+    }
+    Is(value: inner, ..) => on_expression(mut cursor, visitor, value: inner)
+    Bracket(base: inner, items) => {
+      on_expression(mut cursor, visitor, value: inner)
+      for item in items {
+        match item {
+          Item(element) => on_expression(mut cursor, visitor, value: element)
+          ItemConstraint(value: written, ..) => walk_type_expression(mut cursor, visitor, written)
+        }
+      }
+    }
+    Call(callee, arguments) => {
+      on_expression(mut cursor, visitor, value: callee)
+      for argument in arguments {
+        on_expression(mut cursor, visitor, value: argument.value)
+      }
+    }
+    With(base, updates) => {
+      on_expression(mut cursor, visitor, value: base)
+      for update in updates {
+        if update.kind is FieldUpdate(value: updated, ..) {
+          on_expression(mut cursor, visitor, value: updated)
+        }
+      }
+    }
+    Binary(left, right, ..) => {
+      on_expression(mut cursor, visitor, value: left)
+      on_expression(mut cursor, visitor, value: right)
+    }
+    Range(start, stop, ..) => {
+      if start is Some(start_value) {
+        on_expression(mut cursor, visitor, value: start_value)
+      }
+      if stop is Some(stop_value) {
+        on_expression(mut cursor, visitor, value: stop_value)
+      }
+    }
+    Quantified(binder, body, ..) => {
+      match binder {
+        BinderIn(collection, ..) => on_expression(mut cursor, visitor, value: collection)
+        BinderType(domain, ..) => walk_type_expression(mut cursor, visitor, written: domain)
+      }
+      on_expression(mut cursor, visitor, value: body)
+    }
+    Return(value: returned) => if returned is Some(inner) {
+      on_expression(mut cursor, visitor, value: inner)
+    }
+    List(items) => for item in items {
+      on_expression(mut cursor, visitor, value: item)
+    }
+    Map(entries) => for entry in entries {
+      on_expression(mut cursor, visitor, value: entry.key)
+      on_expression(mut cursor, visitor, value: entry.value)
+    }
+    Lambda(body, ..) => walk_block(mut cursor, visitor, block: body)
+    If(condition, then_block, else_branch) => {
+      on_expression(mut cursor, visitor, value: condition)
+      walk_block(mut cursor, visitor, block: then_block)
+      if else_branch is Some(branch) {
+        match branch {
+          Else(block) => walk_block(mut cursor, visitor, block)
+          ElseIf(value: inner) => on_expression(mut cursor, visitor, value: inner)
+        }
+      }
+    }
+    Match(scrutinees, arms) => {
+      for scrutinee in scrutinees {
+        on_expression(mut cursor, visitor, value: scrutinee)
+      }
+      for arm in arms {
+        if arm.guard is Some(guard) {
+          on_expression(mut cursor, visitor, value: guard)
+        }
+        on_statement(mut cursor, visitor, statement: arm.body)
+      }
+    }
+    Provide(implementations, body) => {
+      for implementation in implementations {
+        on_expression(mut cursor, visitor, value: implementation)
+      }
+      walk_block(mut cursor, visitor, block: body)
+    }
+    Block(block) => walk_block(mut cursor, visitor, block)
+  }
+}
+
+fn walk_statement_parts(cursor: mut TokenCursor, visitor: Visitor, statement: syntax::Statement)
+  uses Panic, RunForever
+{
+  match statement.kind {
+    Let(annotation, value, else_block, ..) => {
+      if annotation is Some(written) {
+        walk_type_expression(mut cursor, visitor, written)
+      }
+      on_expression(mut cursor, visitor, value)
+      if else_block is Some(block) {
+        walk_block(mut cursor, visitor, block)
+      }
+    }
+    Expression(value) | Assert(value, ..) => on_expression(mut cursor, visitor, value)
+    Assignment(target, value, ..) => {
+      on_expression(mut cursor, visitor, value: target)
+      on_expression(mut cursor, visitor, value)
+    }
+    For(annotation, iterable, clauses, body, ..) => {
+      if annotation is Some(written) {
+        walk_type_expression(mut cursor, visitor, written)
+      }
+      on_expression(mut cursor, visitor, value: iterable)
+      for clause in clauses {
+        walk_loop_clause(mut cursor, visitor, clause)
+      }
+      walk_block(mut cursor, visitor, block: body)
+    }
+    While(condition, clauses, body) => {
+      on_expression(mut cursor, visitor, value: condition)
+      for clause in clauses {
+        walk_loop_clause(mut cursor, visitor, clause)
+      }
+      walk_block(mut cursor, visitor, block: body)
+    }
+    Parallel(body) | Concurrent(body) | Proof(body) => walk_block(mut cursor, visitor, block: body)
+    StatementError => {}
+  }
+}
+
+fn walk_generic_parameter(cursor: mut TokenCursor, visitor: Visitor, parameter: syntax::GenericParameter)
+  uses Panic, RunForever
+{
+  match parameter.kind {
+    TypeParameter(bounds, ..) => for bound in bounds {
+      walk_path_type(mut cursor, visitor, path_type: bound)
+    }
+    ValueParameter(annotation, ..) => walk_type_expression(mut cursor, visitor, written: annotation)
+    GenericError => {}
+  }
+}
+
+fn walk_type_head(cursor: mut TokenCursor, visitor: Visitor, head: syntax::TypeHead)
+  uses Panic, RunForever
+{
+  for parameter in head.generics {
+    walk_generic_parameter(mut cursor, visitor, parameter)
+  }
+}
+
+fn walk_definition_name(cursor: mut TokenCursor, visitor: Visitor, name: syntax::DefinitionName)
+  uses Panic, RunForever
+{
+  if name is MemberName(head, ..) {
+    walk_type_head(mut cursor, visitor, head)
+  }
+}
+
+fn walk_parameter(cursor: mut TokenCursor, visitor: Visitor, parameter: syntax::Parameter)
+  uses Panic, RunForever
+{
+  if parameter.kind is NamedParameter(annotation, default, ..) {
+    walk_type_expression(mut cursor, visitor, written: annotation)
+    if default is Some(value) {
+      on_expression(mut cursor, visitor, value)
+    }
+  }
+}
+
+fn walk_signature(cursor: mut TokenCursor, visitor: Visitor, signature: syntax::Signature)
+  uses Panic, RunForever
+{
+  walk_definition_name(mut cursor, visitor, name: signature.name)
+  for parameter in signature.generics {
+    walk_generic_parameter(mut cursor, visitor, parameter)
+  }
+  for parameter in signature.parameters {
+    walk_parameter(mut cursor, visitor, parameter)
+  }
+  if signature.output is Some(output) {
+    match output {
+      Returns(annotation) | Lends(annotation, ..) => walk_type_expression(mut cursor, visitor, written: annotation)
+    }
+  }
+  for clause in signature.clauses {
+    walk_clause(mut cursor, visitor, clause)
+  }
+}
+
+fn walk_field(cursor: mut TokenCursor, visitor: Visitor, field: syntax::Field)
+  uses Panic, RunForever
+{
+  if field.kind is FieldDeclaration(annotation, default, ..) {
+    walk_type_expression(mut cursor, visitor, written: annotation)
+    if default is Some(value) {
+      on_expression(mut cursor, visitor, value)
+    }
+  }
+}
+
+fn walk_definition(cursor: mut TokenCursor, visitor: Visitor, definition: syntax::Definition)
+  uses Panic, RunForever
+{
+  match definition.kind {
+    Function(definition: function_definition) => {
+      walk_signature(mut cursor, visitor, signature: function_definition.signature)
+      walk_block(mut cursor, visitor, block: function_definition.body)
+    }
+    MethodDeclaration(signature) => walk_signature(mut cursor, visitor, signature)
+    TypeDefinition(generics, body, clauses, ..) => {
+      for parameter in generics {
+        walk_generic_parameter(mut cursor, visitor, parameter)
+      }
+      match body {
+        Fields(fields) => for field in fields {
+          walk_field(mut cursor, visitor, field)
+        }
+        Variants(variants) => for variant in variants {
+          if variant.fields is Some(fields) {
+            for field in fields {
+              walk_field(mut cursor, visitor, field)
+            }
+          }
+        }
+        TypeTodo => {}
+      }
+      for clause in clauses {
+        match clause.kind {
+          TypeInvariant(value) | Potential(value) => on_expression(mut cursor, visitor, value)
+          Derives(traits) => for written_trait in traits {
+            walk_path_type(mut cursor, visitor, path_type: written_trait)
+          }
+        }
+      }
+    }
+    Trait(generics, supertraits, members, ..) => {
+      for parameter in generics {
+        walk_generic_parameter(mut cursor, visitor, parameter)
+      }
+      for supertrait in supertraits {
+        walk_path_type(mut cursor, visitor, path_type: supertrait)
+      }
+      for member in members {
+        match member.kind {
+          AssociatedType(bounds, ..) => for bound in bounds {
+            walk_path_type(mut cursor, visitor, path_type: bound)
+          }
+          Law(definition: law_definition) => {
+            for parameter in law_definition.parameters {
+              walk_parameter(mut cursor, visitor, parameter)
+            }
+            for premise in law_definition.premises {
+              on_expression(mut cursor, visitor, value: premise)
+            }
+            walk_block(mut cursor, visitor, block: law_definition.body)
+          }
+          AssociatedCapability(_) | TraitMemberError => {}
+        }
+      }
+    }
+    Impl(implemented_trait, implementing_type, capabilities, members) => {
+      walk_path_type(mut cursor, visitor, path_type: implemented_trait)
+      walk_type_head(mut cursor, visitor, head: implementing_type)
+      for reference in capabilities {
+        walk_capability_reference(mut cursor, visitor, reference)
+      }
+      for member in members {
+        match member.kind {
+          AssociatedDefinition(definition: written, ..) => walk_type_expression(mut cursor, visitor, written)
+          CapabilityDefinition(capabilities: uses_list, ..) => for capability_use in uses_list {
+            walk_capability_use(mut cursor, visitor, capability_use)
+          }
+          ImplMemberError => {}
+        }
+      }
+    }
+    Capability(..) => {}
+    Constant(name, annotation, value) => {
+      walk_definition_name(mut cursor, visitor, name)
+      walk_type_expression(mut cursor, visitor, written: annotation)
+      on_expression(mut cursor, visitor, value)
+    }
+    Test(capabilities, body, ..) => {
+      for reference in capabilities {
+        walk_capability_reference(mut cursor, visitor, reference)
+      }
+      walk_block(mut cursor, visitor, block: body)
+    }
+    Theorem(generics, parameters, clauses, body, ..) => {
+      for parameter in generics {
+        walk_generic_parameter(mut cursor, visitor, parameter)
+      }
+      for parameter in parameters {
+        walk_parameter(mut cursor, visitor, parameter)
+      }
+      for clause in clauses {
+        walk_clause(mut cursor, visitor, clause)
+      }
+      walk_block(mut cursor, visitor, block: body)
+    }
+    LawProof(proved_trait, implementing_type, body, ..) => {
+      walk_path_type(mut cursor, visitor, path_type: proved_trait)
+      walk_type_head(mut cursor, visitor, head: implementing_type)
+      walk_block(mut cursor, visitor, block: body)
+    }
+    DefinitionError(..) => {}
+  }
+}

@@ -1,4 +1,4 @@
-(dirs stage0 grammar standard)
+(dirs stage0 grammar standard experimental)
 
 (env
  (dev
