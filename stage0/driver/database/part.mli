@@ -47,6 +47,7 @@ type _ stored =
   | Generated_mir : Path.t -> (Mir.body_part * Mir.contract_part) stored
   | Mir_call_edges : Path.t -> Path.t list stored
   | Usage : Resolve.Names.key -> unit stored
+  | Mentions : Resolve.Names.key -> Package_checks.Lookups.mentions stored
   | Ownership : Resolve.Names.key -> (Core.id list * Core.id list) list stored
   | Import_check : Path.file -> Diagnostic.t list stored
   | Package_check : Path.package * Package_checks.check -> Package_checks.outcome stored

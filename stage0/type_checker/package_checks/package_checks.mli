@@ -2,6 +2,7 @@ module Lookups = Lookups
 
 type placed = { key : Resolve.Names.key; diagnostic : Diagnostic.in_definition }
 
+val make_mentions : Resolve.Names.key -> Core.t -> packages:Path.package list -> Lookups.mentions
 val describe_unused_dependency : package:Path.package -> Path.package -> string
 
 type check =

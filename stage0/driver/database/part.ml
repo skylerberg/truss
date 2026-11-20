@@ -47,6 +47,7 @@ type _ stored =
   | Generated_mir : Path.t -> (Mir.body_part * Mir.contract_part) stored
   | Mir_call_edges : Path.t -> Path.t list stored
   | Usage : Resolve.Names.key -> unit stored
+  | Mentions : Resolve.Names.key -> Package_checks.Lookups.mentions stored
   | Ownership : Resolve.Names.key -> (Core.id list * Core.id list) list stored
   | Import_check : Path.file -> Diagnostic.t list stored
   | Package_check : Path.package * Package_checks.check -> Package_checks.outcome stored
@@ -103,6 +104,7 @@ module Storage = struct
     | Generated_mir _, Generated_mir _ -> Some Equal
     | Mir_call_edges _, Mir_call_edges _ -> Some Equal
     | Usage _, Usage _ -> Some Equal
+    | Mentions _, Mentions _ -> Some Equal
     | Ownership _, Ownership _ -> Some Equal
     | Import_check _, Import_check _ -> Some Equal
     | Package_check _, Package_check _ -> Some Equal
@@ -128,6 +130,7 @@ module Storage = struct
     | Body_mir key
     | Contract_mir key
     | Usage key
+    | Mentions key
     | Ownership key
     | Proof key ->
         key.module_.package
@@ -229,6 +232,7 @@ let show_stored : type a. a stored -> string =
   | Generated_mir path -> "generated mir " ^ Path.show path
   | Mir_call_edges path -> "MIR call edges " ^ Path.show path
   | Usage declared -> "usage " ^ show_key declared
+  | Mentions declared -> "mentions " ^ show_key declared
   | Ownership declared -> "ownership " ^ show_key declared
   | Import_check file -> "import check " ^ Path.show_file file
   | Package_check (package, check) ->
@@ -282,6 +286,7 @@ let find_stored_definition : type a. a stored -> Path.t option = function
   | Body_mir key
   | Contract_mir key
   | Usage key
+  | Mentions key
   | Ownership key
   | Proof key
   | Package_check (_, (Sealed key | Impl key | Type key | Constant key)) ->
@@ -344,6 +349,7 @@ let show_stored_kind : type a. a stored -> string = function
   | Contract_mir _ -> "MIR of the contract"
   | Mir_call_edges _ -> "MIR call edges"
   | Usage _ -> "usage check"
+  | Mentions _ -> "mentions"
   | Ownership _ -> "ownership check"
   | Import_check _ -> "import check"
   | Package_check _ -> "package check"

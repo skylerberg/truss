@@ -896,6 +896,25 @@ let () =
             Any (Namespace app);
             Any (Parsed (Support.parse_file "app::main"));
           ]);
+  let make_generic_counter body =
+    "fn count[Item](items: List[Item]) -> UInt64 { " ^ body
+    ^ " }\npublic fn caller() -> UInt64 { count([1, 2]) }\nfn helper() -> UInt64 { 1 }\n"
+  in
+  Harness.test
+    "an edit to a body that mentions the same definitions and packages recomputes no package check"
+    (fun () ->
+      expect_untouched
+        (list_propagated
+           ~before:[ ("app::main", make_generic_counter "helper() + items.length()") ]
+           ~after:[ ("app::main", make_generic_counter "items.length() + helper()") ])
+        ~is_excluded:(function Database.Part.Any (Package_check _) -> true | _ -> false));
+  Harness.test "an edit that mentions another definition recomputes the check of unused definitions"
+    (fun () ->
+      expect_included
+        (list_propagated
+           ~before:[ ("app::main", make_generic_counter "items.length()") ]
+           ~after:[ ("app::main", make_generic_counter "helper() + items.length()") ])
+        ~parts:[ Any (Package_check (app, Unexported)) ]);
   Harness.test "an edit to a callee's body recomputes its lowered code and not its caller's"
     (fun () ->
       let recomputed =

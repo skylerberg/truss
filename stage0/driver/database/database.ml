@@ -669,6 +669,7 @@ let list_package_parts database (names : Resolve.Names.lookups) package : Part.a
         Any (Body_mir key);
         Any (Contract_mir key);
         Any (Usage key);
+        Any (Mentions key);
         Any (Ownership key);
         Any (Proof key);
       ]
@@ -758,7 +759,7 @@ let make_recording_package_checks_lookups database note : Package_checks.Lookups
   {
     interface = make_recording_interface_lookups database note ~is_checked:true;
     read_core = read_checked_form database note;
-    list_used_packages = (fun key -> (read_checked database note key).used_packages);
+    read_mentions = (fun key -> read_value database note (Mentions key));
   }
 
 let find_used_imports database note file =
@@ -1318,6 +1319,13 @@ let compute_part database (Part.Any typed as part) =
       compute_value (Usage key) (fun note ->
           make_checked_part
             (fun key -> (Usage.check (make_recording_usage_lookups database note) key, ()))
+            key)
+  | Mentions key ->
+      compute_value (Mentions key) (fun note ->
+          make_part
+            (fun key ->
+              let checked = read_checked database note key in
+              Package_checks.make_mentions key checked.form ~packages:checked.used_packages)
             key)
   | Ownership key ->
       compute_value (Ownership key) (fun note ->

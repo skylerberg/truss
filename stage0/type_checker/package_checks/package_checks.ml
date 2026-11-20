@@ -488,8 +488,7 @@ let check_associated_types (lookups : Lookups.t) ~list_contained
               (Interface.Impls.collect_contents lookups.interface ~list_bounds type_).recursions)))
     impl.implements.associated
 
-let list_instantiation_edges (lookups : Lookups.t) (key : Resolve.Names.key) =
-  let form = lookups.read_core key in
+let list_instantiations (key : Resolve.Names.key) (form : Core.t) : Lookups.instantiation list =
   let grows = function
     | Types.Type (Types.Named { arguments; _ }) ->
         let mentions =
@@ -509,11 +508,13 @@ let list_instantiation_edges (lookups : Lookups.t) (key : Resolve.Names.key) =
           match callee.target with
           | Function { path; instantiation = { type_arguments; _ } }
             when Path.locate_package path = key.module_.package && type_arguments <> [] ->
-              edges := (path, List.exists grows type_arguments) :: !edges
+              edges :=
+                { Lookups.callee = path; has_growing_arguments = List.exists grows type_arguments }
+                :: !edges
           | _ -> ());
     }
     form.definition;
-  List.rev !edges
+  !edges
 
 let check_instantiation (lookups : Lookups.t) (package : Path.package) =
   let generic =
@@ -527,7 +528,7 @@ let check_instantiation (lookups : Lookups.t) (package : Path.package) =
   List.iter
     (fun (declaration : Resolve.Names.declaration) ->
       Path_table.replace edges declaration.key.path
-        (list_instantiation_edges lookups declaration.key))
+        (lookups.read_mentions declaration.key).instantiations)
     generic;
   let list_outgoing path = Option.value ~default:[] (Path_table.find_opt edges path) in
   let component_index = Path_table.create 64 in
@@ -536,10 +537,14 @@ let check_instantiation (lookups : Lookups.t) (package : Path.package) =
       List.iter (fun path -> Path_table.replace component_index path index) members)
     (Strongly_connected.list_components
        (module Path)
-       ~list_successors:(fun path -> List.map fst (list_outgoing path))
+       ~list_successors:(fun path ->
+         List.map
+           (fun (instantiation : Lookups.instantiation) -> instantiation.callee)
+           (list_outgoing path))
        (List.map (fun (declaration : Resolve.Names.declaration) -> declaration.key.path) generic));
-  let grows_on_cycle path (callee, grows) =
-    grows && Path_table.find component_index callee = Path_table.find component_index path
+  let grows_on_cycle path ({ callee; has_growing_arguments } : Lookups.instantiation) =
+    has_growing_arguments
+    && Path_table.find component_index callee = Path_table.find component_index path
   in
   List.filter_map
     (fun (declaration : Resolve.Names.declaration) ->
@@ -760,7 +765,7 @@ let must_be_used (lookups : Lookups.t) (declaration : Resolve.Names.declaration)
   | Function | Method | Constant | Member_constant -> true
   | Type | Trait | Capability | Theorem | Impl | Test | Law_proof -> false
 
-let list_used_paths (lookups : Lookups.t) key =
+let list_mentioned_paths (form : Core.t) =
   let used = ref [] in
   let use path = used := path :: !used in
   let use_constant : Core.pattern_constant -> unit = function
@@ -796,8 +801,20 @@ let list_used_paths (lookups : Lookups.t) key =
               use_bound stop
           | Wildcard | Bind _ | Variant _ | Record _ | Alternatives _ -> ());
     }
-    (lookups.read_core key).definition;
+    form.definition;
   !used
+
+let make_mentions key form ~packages : Lookups.mentions =
+  let compare_instantiations (left : Lookups.instantiation) (right : Lookups.instantiation) =
+    match Path.compare left.callee right.callee with
+    | 0 -> Bool.compare left.has_growing_arguments right.has_growing_arguments
+    | order -> order
+  in
+  {
+    paths = List.sort_uniq Path.compare (list_mentioned_paths form);
+    packages = List.sort_uniq Path.compare_package packages;
+    instantiations = List.sort_uniq compare_instantiations (list_instantiations key form);
+  }
 
 let locate_name (spans : Source.Definition_span.t array) (definition : Syntax.definition) =
   match definition.kind with
@@ -837,7 +854,9 @@ let check_unexported (lookups : Lookups.t) package =
   let uses =
     List.map
       (fun declaration ->
-        (declaration, must_be_used lookups declaration, list_used_paths lookups declaration.key))
+        ( declaration,
+          must_be_used lookups declaration,
+          (lookups.read_mentions declaration.key).paths ))
       (lookups.interface.names.list_package_declarations package)
   in
   let uses_of_unexported = Path_table.create 64 in
@@ -901,7 +920,8 @@ let describe_unused_dependency ~package dependency =
 let list_unused_dependencies (lookups : Lookups.t) package =
   let used =
     List.concat_map
-      (fun (declaration : Resolve.Names.declaration) -> lookups.list_used_packages declaration.key)
+      (fun (declaration : Resolve.Names.declaration) ->
+        (lookups.read_mentions declaration.key).packages)
       (lookups.interface.names.list_package_declarations package)
   in
   List.filter
