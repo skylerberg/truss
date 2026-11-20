@@ -156,12 +156,7 @@ let bind unifier index type_ =
     true
   end
 
-let count_solutions unifier ~through =
-  Hashtbl.length unifier.type_solutions
-  - List.length
-      (List.filter
-         (Hashtbl.mem unifier.type_solutions)
-         (List.init (unifier.next - through) (fun offset -> through + 1 + offset)))
+let count_solutions unifier = Hashtbl.length unifier.type_solutions
 
 let join unifier left right =
   let older = min left right and younger = max left right in

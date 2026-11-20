@@ -40,6 +40,8 @@ type goal = {
   outputs : (string * Types.ty) list;
   cause : cause;
   mode : Unify.mode;
+  depth : int;
+  needed_by : goal option;
 }
 
 type frame = {

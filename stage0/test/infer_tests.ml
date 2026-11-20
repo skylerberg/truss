@@ -1523,7 +1523,8 @@ let () =
       expect_type Fixtures.Infer.list_literal_of_set_literals "[1, 2]" "Set[Int64]");
   Harness.test "a list literal needs the conditions of the collection's impl" (fun () ->
       expect_one_diagnostic Fixtures.Infer.list_literal_as_a_type_whose_impl_needs_more
-        "types.no_impl" ~says:"`Ranked[Point]` does not implement `FromElements`.");
+        "types.no_impl"
+        ~says:"`Ranked[Point]` does not implement `FromElements`. Its impl needs `Point: Ordered`.");
   Harness.test "a list literal is not a type that implements no literal trait" (fun () ->
       expect_one_diagnostic Fixtures.Infer.list_literal_as_a_heap "types.mismatch");
   Harness.test "new on a type that takes a list literal names the literal" (fun () ->
