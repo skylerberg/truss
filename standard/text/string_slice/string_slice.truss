@@ -12,6 +12,7 @@ public fn StringSlice.is_empty(self) -> Bool
 
 public fn StringSlice.bytes(self) -> Slice[UInt8]
   ensures result.length() == self.length()
+  ensures identical(result.model(), self.model())
   cost time O(1)
   cost allocations == 0
 {
@@ -1330,10 +1331,11 @@ impl Ordered for StringSlice {
 }
 
 impl Hash for StringSlice {
-  fn hash(self, hasher: mut Hasher)
+  fn hash(self, hasher: Hasher) -> Hasher
+    ensures identical(result, hasher.after_bytes(self.model(), count: self.length()).write(self.length()))
     cost time O(self.length())
     cost allocations == 0
   {
-    mut hasher.write_bytes(self.bytes())
+    hasher.write_bytes(self.bytes())
   }
 }

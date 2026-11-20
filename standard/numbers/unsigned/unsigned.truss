@@ -136,11 +136,11 @@ impl Remainder[UInt8] for UInt8 {
 }
 
 impl Hash for UInt8 {
-  fn hash(self, hasher: mut Hasher)
+  fn hash(self, hasher: Hasher) -> Hasher
     cost time O(1)
     cost allocations == 0
   {
-    mut hasher.write(intrinsic::convert(self))
+    hasher.write(intrinsic::convert(self))
   }
 }
 
@@ -283,11 +283,11 @@ impl Remainder[UInt16] for UInt16 {
 }
 
 impl Hash for UInt16 {
-  fn hash(self, hasher: mut Hasher)
+  fn hash(self, hasher: Hasher) -> Hasher
     cost time O(1)
     cost allocations == 0
   {
-    mut hasher.write(intrinsic::convert(self))
+    hasher.write(intrinsic::convert(self))
   }
 }
 
@@ -430,11 +430,11 @@ impl Remainder[UInt32] for UInt32 {
 }
 
 impl Hash for UInt32 {
-  fn hash(self, hasher: mut Hasher)
+  fn hash(self, hasher: Hasher) -> Hasher
     cost time O(1)
     cost allocations == 0
   {
-    mut hasher.write(intrinsic::convert(self))
+    hasher.write(intrinsic::convert(self))
   }
 }
 
@@ -577,11 +577,11 @@ impl Remainder[UInt64] for UInt64 {
 }
 
 impl Hash for UInt64 {
-  fn hash(self, hasher: mut Hasher)
+  fn hash(self, hasher: Hasher) -> Hasher
     cost time O(1)
     cost allocations == 0
   {
-    mut hasher.write(self)
+    hasher.write(self)
   }
 }
 

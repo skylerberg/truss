@@ -269,53 +269,37 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                           of_other other bool variant mine ~build_same:(make_each_equal mine)
                             ~build_different:(fun () -> node bool (Boolean false))))
             | Hash_hash ->
+                let hasher_type = Types.make_named (Well_known.make_path Hasher) [] in
                 let hasher =
                   match List.rev parameters with
                   | ({ local; type_; _ } : Core.parameter) :: _ ->
                       Core.Local { local; type_; origin }
                   | [] -> raise_bug "`hash` takes a hasher"
                 in
-                let changed : Core.argument = Passed { mode = Mut; value = Place hasher } in
-                let write number =
-                  statement
-                    (Evaluate
-                       (node unit
-                          (Call
-                             (Callee_uses.make_call lookups.interface ~list_bounds
-                                ~callee:
-                                  (Function
-                                     {
-                                       path = Well_known.make_method_path Hasher_write;
-                                       instantiation = Types.no_instantiation;
-                                     })
-                                ~arguments:
-                                  [
-                                    changed;
-                                    Passed
-                                      {
-                                        mode = Read;
-                                        value =
-                                          Value
-                                            (node (Types.make_builtin UInt64)
-                                               (Integer (Z.of_int number)));
-                                      };
-                                  ]
-                                ~lends:None))))
+                let passed state : Core.argument = Passed { mode = Read; value = Value state } in
+                let write state number =
+                  node hasher_type
+                    (Call
+                       (Callee_uses.make_call lookups.interface ~list_bounds
+                          ~callee:
+                            (Function
+                               {
+                                 path = Well_known.make_method_path Hasher_write;
+                                 instantiation = Types.no_instantiation;
+                               })
+                          ~arguments:[ passed state; count_argument number ]
+                          ~lends:None))
                 in
-                of_self unit (fun variant index mine ->
-                    {
-                      statements =
-                        (if variant = None then [] else [ write index ])
-                        @ List.map
-                            (fun ((field : Types.field), mine) ->
-                              statement
-                                (Evaluate
-                                   (make_method_call Hash_hash field.field_type
-                                      [ read mine; changed ]
-                                      unit)))
-                            mine;
-                      value = None;
-                    })
+                of_self hasher_type (fun variant index mine ->
+                    let given = node hasher_type (Copy (Place hasher)) in
+                    let start = if variant = None then given else write given index in
+                    make_giving_block
+                      (List.fold_left
+                         (fun state ((field : Types.field), mine) ->
+                           make_method_call Hash_hash field.field_type
+                             [ read mine; passed state ]
+                             hasher_type)
+                         start mine))
             | Ordered_compare -> (
                 let other = make_other_place () in
                 let make_ordering variant =

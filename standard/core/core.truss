@@ -106,7 +106,13 @@ public trait Ordered: Equal {
 }
 
 public trait Hash: Equal {
-  fn hash(self, hasher: mut Hasher)
+  fn hash(self, hasher: Hasher) -> Hasher
+
+  law agrees_with_equal(first: Self, second: Self, hasher: Hasher)
+    requires first == second
+  {
+    identical(first.hash(hasher), second.hash(hasher))
+  }
 }
 
 public opaque type Hasher(state: UInt64)
@@ -116,29 +122,60 @@ public fn Hasher.new() -> Hasher
   cost time O(1)
   cost allocations == 0
 {
-  Hasher(state: 14695981039346656037)
+  Hasher(state: 0x243f_6a88_85a3_08d3)
 }
 
-public fn Hasher.write(mut self, value: UInt64)
+fn folded_multiply(first: UInt64, second: UInt64) -> UInt64
   cost time O(1)
   cost allocations == 0
 {
-  self.state = intrinsic::wrapping_multiply(intrinsic::bit_xor(self.state, right: value), right: 1099511628211)
+  intrinsic::bit_xor(intrinsic::wrapping_multiply(first, right: second), right: intrinsic::multiply_high(first, right: second))
 }
 
-public fn Hasher.write_bytes(mut self, bytes: Slice[UInt8])
-  cost time O(bytes.length())
+public fn Hasher.write(self, value: UInt64) -> Hasher
+  cost time O(1)
   cost allocations == 0
 {
-  for index in 0..bytes.length() {
-    mut self.write(intrinsic::convert(bytes[index]))
+  Hasher(state: folded_multiply(intrinsic::bit_xor(self.state, right: value), second: 0x9e37_79b9_7f4a_7c15))
+}
+
+public fn Hasher.after_bytes(self, bytes: Sequence[UInt8], count: Integer) -> Hasher
+  requires 0 <= count
+  requires count <= bytes.length()
+  ensures identical(result, if count == 0 {
+      self
+    } else {
+      self.after_bytes(bytes, count: count - 1).write(intrinsic::convert(bytes[count - 1]))
+    })
+  decreases count
+{
+  if count == 0 {
+    self
+  } else {
+    self.after_bytes(bytes, count: count - 1).write(intrinsic::convert(bytes[count - 1]))
   }
 }
 
-public fn Hasher.finish(self) -> UInt64
+public fn Hasher.write_bytes(self, bytes: Slice[UInt8]) -> Hasher
+  ensures identical(result, self.after_bytes(bytes.model(), count: bytes.length()).write(bytes.length()))
+  cost time O(bytes.length())
   cost allocations == 0
 {
-  self.state
+  var hasher = self
+  for index in 0..bytes.length()
+    invariant identical(hasher, self.after_bytes(bytes.model(), count: index))
+    cost time O(index)
+  {
+    hasher = hasher.write(intrinsic::convert(bytes[index]))
+  }
+  hasher.write(bytes.length())
+}
+
+public fn Hasher.finish(self) -> UInt64
+  cost time O(1)
+  cost allocations == 0
+{
+  folded_multiply(self.state, second: 0xc2b2_ae3d_27d4_eb4f)
 }
 
 public trait Default {
@@ -544,11 +581,11 @@ impl Equal for Bool {
 }
 
 impl Hash for Bool {
-  fn hash(self, hasher: mut Hasher)
+  fn hash(self, hasher: Hasher) -> Hasher
     cost time O(1)
     cost allocations == 0
   {
-    mut hasher.write(if self { 1 } else { 0 })
+    hasher.write(if self { 1 } else { 0 })
   }
 }
 
@@ -579,11 +616,11 @@ impl Ordered for Character {
 }
 
 impl Hash for Character {
-  fn hash(self, hasher: mut Hasher)
+  fn hash(self, hasher: Hasher) -> Hasher
     cost time O(1)
     cost allocations == 0
   {
-    mut hasher.write(intrinsic::convert(self))
+    hasher.write(intrinsic::convert(self))
   }
 }
 

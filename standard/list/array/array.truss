@@ -183,12 +183,17 @@ proof Ordered.transitive for Array[Element: Ordered, count: UInt64] {
 }
 
 impl Hash for Array[Element: Hash, count: UInt64] {
-  fn hash(self, hasher: mut Hasher)
+  fn hash(self, hasher: Hasher) -> Hasher
+    ensures identical(result, slice::hash_elements(hasher.write(count), items: self.model(), count: count))
     cost time O(count * time(Element.hash))
     cost allocations <= count * allocations(Element.hash)
   {
-    self.slice().hash(mut hasher)
+    self.slice().hash(hasher)
   }
+}
+
+proof Hash.agrees_with_equal for Array[Element: Hash, count: UInt64] {
+  slice::elements_hash_alike(hasher.write(count), first: first.model(), second: second.model(), count: count)
 }
 
 impl Display for Array[Element: Display, count: UInt64] {

@@ -18,10 +18,10 @@ fn same_numbers(first: List[Int64], second: List[Int64]) -> Bool
   first == second
 }
 
-fn hashed(text: String, hasher: mut Hasher)
+fn hashed(text: String, hasher: Hasher) -> Hasher
   cost allocations == 0
 {
-  text.hash(mut hasher)
+  text.hash(hasher)
 }
 
 fn has_name(names: Set[String], name: String) -> Bool

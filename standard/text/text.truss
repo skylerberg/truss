@@ -245,16 +245,12 @@ impl Ordered for String {
 }
 
 impl Hash for String {
-  fn hash(self, hasher: mut Hasher)
+  fn hash(self, hasher: Hasher) -> Hasher
+    ensures identical(result, hasher.after_bytes(self.model(), count: self.length()).write(self.length()))
     cost time O(self.length())
     cost allocations == 0
   {
-    let bytes = intrinsic::storage_view(self.storage)
-    for index in 0..intrinsic::view_length(bytes)
-      cost time O(index)
-    {
-      mut hasher.write(intrinsic::convert(intrinsic::view_at(bytes, index: index)))
-    }
+    hasher.write_bytes(self.slice().bytes())
   }
 }
 

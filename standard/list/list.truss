@@ -872,12 +872,17 @@ proof Ordered.transitive for List[Element: Ordered] {
 }
 
 impl Hash for List[Element: Hash] {
-  fn hash(self, hasher: mut Hasher)
+  fn hash(self, hasher: Hasher) -> Hasher
+    ensures identical(result, slice::hash_elements(hasher.write(self.length()), items: self.model(), count: self.length()))
     cost time O(self.length() * time(Element.hash))
     cost allocations <= self.length() * allocations(Element.hash)
   {
-    self.slice().hash(mut hasher)
+    self.slice().hash(hasher)
   }
+}
+
+proof Hash.agrees_with_equal for List[Element: Hash] {
+  slice::elements_hash_alike(hasher.write(first.length()), first: first.model(), second: second.model(), count: first.length())
 }
 
 impl Display for List[Element: Display] {

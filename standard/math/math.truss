@@ -1751,12 +1751,21 @@ proof Ordered.transitive for Decimal {
 }
 
 impl Hash for Decimal {
-  fn hash(self, hasher: mut Hasher) {
+  fn hash(self, hasher: Hasher) -> Hasher
+    ensures identical(result, self.key().digits.hash(self.key().exponent.hash(self.key().sign.hash(hasher))))
+  {
     let key = self.key()
-    key.sign.hash(mut hasher)
-    key.exponent.hash(mut hasher)
-    key.digits.hash(mut hasher)
+    key.digits.hash(key.exponent.hash(key.sign.hash(hasher)))
   }
+}
+
+proof Hash.agrees_with_equal for Decimal {
+  let first_key = first.key()
+  let second_key = second.key()
+  assert first_key == second_key
+  assert first_key.sign == second_key.sign
+  assert first_key.exponent == second_key.exponent
+  assert first_key.digits == second_key.digits
 }
 
 impl Default for Decimal {

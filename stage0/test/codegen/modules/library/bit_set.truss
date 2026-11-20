@@ -109,9 +109,5 @@ test "a bit set gives each bit in order and is equal to a set with the same bits
   var shrunk = with_ones(70, ones: [1, 4, 69].slice())
   mut shrunk.resize(5)
   assert shrunk == bits
-  var first = Hasher.new()
-  var second = Hasher.new()
-  bits.hash(mut first)
-  shrunk.hash(mut second)
-  assert first.finish() == second.finish()
+  assert bits.hash(Hasher.new()).finish() == shrunk.hash(Hasher.new()).finish()
 }

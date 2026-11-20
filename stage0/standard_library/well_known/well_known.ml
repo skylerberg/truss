@@ -259,7 +259,7 @@ let methods =
     (Equal_equal, Equal, "equal", Instance Read);
     (Ordered_compare, Ordered, "compare", Instance Read);
     (Hash_hash, Hash, "hash", Instance Read);
-    (Hasher_write, Hasher, "write", Instance Mut);
+    (Hasher_write, Hasher, "write", Instance Read);
     (Default_default, Default, "default", Static);
     (Display_display, Display, "display", Instance Read);
     (Copyable_copy, Copyable, "copy", Instance Read);
