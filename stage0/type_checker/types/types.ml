@@ -399,6 +399,7 @@ let substitute_substitution outer =
     ~capabilities:(substitute_capabilities outer)
 
 let extract_result_type = function Returns type_ | Lends (_, type_) -> type_
+let find_lent_mode = function Lends (mode, _) -> Some mode | Returns _ -> None
 let map_argument map = function Type type_ -> Type (map type_) | Value _ as value -> value
 
 let map_trait map (reference : trait_reference) =

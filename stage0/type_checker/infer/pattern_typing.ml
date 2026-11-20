@@ -393,7 +393,7 @@ and find_character_tag state (literal : Syntax.string_literal) =
       | _ -> None)
   | None -> None
 
-and check_character_value (state : State.state) id (literal : Syntax.string_literal)
+and check_character_value (state : State.state) (literal : Syntax.string_literal)
     (builtin : Language.Builtin_type.t) =
   let text = literal.first.value in
   let scalars =
@@ -412,23 +412,27 @@ and check_character_value (state : State.state) id (literal : Syntax.string_lite
     | _ -> None
   in
   match value with
-  | Some value -> state.tables.literals.(id) <- Some (Integer_value (Z.of_int value))
+  | Some value -> Some (Z.of_int value)
   | None ->
       State.report state Character_scalar_count
         (State.read_span state literal.id)
         (match builtin with
         | Character ->
             "`Character\"...\"` holds exactly one Unicode scalar value, with no `${...}`."
-        | _ -> "`UInt8\"...\"` holds exactly one ASCII character, with no `${...}`.")
+        | _ -> "`UInt8\"...\"` holds exactly one ASCII character, with no `${...}`.");
+      None
 
 and check_character_literal state id literal builtin =
-  check_character_value state id literal builtin;
+  Option.iter
+    (fun value -> State.elaborate state id (Literal (Integer_value value)))
+    (check_character_value state literal builtin);
   Types.make_builtin builtin
 
 and check_literal_pattern state id (span : Source.Definition_span.t) literal type_ =
+  let record_integer integer = state.tables.patterns.(id) <- Some (Literal_pattern integer) in
   match literal with
   | Literal_integer number ->
-      state.tables.literals.(id) <- Some (Integer_value number);
+      record_integer number;
       ignore
         (Solver.require_within state type_
            (Types.list_fitting_integer_types number @ [ Language.Builtin_type.Integer ])
@@ -445,7 +449,7 @@ and check_literal_pattern state id (span : Source.Definition_span.t) literal typ
   | Literal_string tagged -> (
       match find_character_tag state tagged with
       | Some builtin ->
-          check_character_value state id tagged builtin;
+          Option.iter record_integer (check_character_value state tagged builtin);
           if not (State.unify state type_ (Types.make_builtin builtin)) then
             Failures.report_mismatch state span ~expected:type_ ~actual:(Types.make_builtin builtin)
       | None -> check_string_pattern state span type_)

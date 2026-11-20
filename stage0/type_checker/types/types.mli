@@ -132,6 +132,7 @@ val map_condition_types :
 val map_conditions : (condition -> condition) -> capability_set -> capability_set
 val substitute_substitution : substitution -> substitution -> substitution
 val extract_result_type : result -> ty
+val find_lent_mode : result -> Language.Mode.t option
 val map_argument : (ty -> ty) -> argument -> argument
 val map_trait : (ty -> ty) -> trait_reference -> trait_reference
 

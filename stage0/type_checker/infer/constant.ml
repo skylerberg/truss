@@ -30,7 +30,7 @@ let rec find_offending_expression (state : State.state) (value : Syntax.expressi
       | Some (Field_access _), Member (base, _) -> find_offending_expression state base
       | _ -> Some value)
   | Call (_, arguments) -> (
-      match state.tables.calls.(value.id) with
+      match Tables.find_call state.tables value.id with
       | Some { callee = Constructor _; _ } ->
           find_first (List.map (fun (argument : Syntax.argument) -> argument.value) arguments)
       | _ -> Some value)

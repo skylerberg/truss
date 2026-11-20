@@ -33,7 +33,9 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
   match target with
   | Old -> (
       match arguments with
-      | [ argument ] -> Hooks.check_expression state env ?expected argument.value
+      | [ argument ] ->
+          State.elaborate state value.id (Specification_call Old);
+          Hooks.check_expression state env ?expected argument.value
       | _ ->
           Calls.check_arguments_alone state env arguments
             (State.make_error_type state
@@ -50,6 +52,7 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
           ignore (Hooks.check_expression state env argument.value);
           let part = State.normalize state part in
           state.tables.resolutions.(value.id) <- Some Specification_value;
+          State.elaborate state value.id (Specification_call (Final { part }));
           part
       | _ ->
           Calls.check_arguments_alone state env arguments
@@ -59,6 +62,7 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
   | Identical -> (
       match arguments with
       | [ first; second ] ->
+          State.elaborate state value.id (Specification_call Identical);
           let first_type = Hooks.check_expression state env first.value in
           let second_type = Hooks.check_expression state env ~expected:first_type second.value in
           if not (State.unify state first_type second_type) then
@@ -103,7 +107,7 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
 
 and check_specification_function state env (value : Syntax.expression)
     (function_ : Core.specification_function) (arguments : Syntax.argument list) =
-  state.tables.specification_calls.(value.id) <- Some (Specification_function function_);
+  State.elaborate state value.id (Specification_call (Specification_function function_));
   List.iter
     (fun (argument : Syntax.argument) ->
       match function_ with
@@ -151,8 +155,8 @@ and check_method_cost state (value : Syntax.expression) (metric : Language.Metri
   in
   match (Interface.Elaborator.find_operand_method overloads, overloads) with
   | Some { self_type; trait; name; receiver }, _ ->
-      state.tables.specification_calls.(value.id) <-
-        Some (Method_cost { metric; trait; name; receiver; self_type });
+      State.elaborate state value.id
+        (Specification_call (Method_cost { metric; trait; name; receiver; self_type }));
       Types.Integer
   | None, [] ->
       State.make_error_type state Unknown_member (State.read_span state member.id)
@@ -396,15 +400,15 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
   | Error error -> error
   | Ok (checked, left_out) ->
       let result = Types.extract_result_type instance.signature.output in
-      Modes.note_lending state value instance.signature.output;
-      state.tables.calls.(value.id) <-
-        Some
-          {
-            callee;
-            arguments = receiver_argument @ checked;
-            omitted_defaults = left_out;
-            callee_result = result;
-          };
+      State.elaborate state value.id
+        (Call
+           {
+             callee;
+             arguments = receiver_argument @ checked;
+             omitted_defaults = left_out;
+             callee_result = result;
+             lends = Types.find_lent_mode instance.signature.output;
+           });
       Solver.require state (Method_call (State.read_span state value.id)) self_type reference;
       State.normalize state result
 
@@ -472,14 +476,15 @@ and check_capability_call state env (value : Syntax.expression) capability (memb
       | Error error -> error
       | Ok (checked, left_out) ->
           let result = Types.extract_result_type instance.signature.output in
-          state.tables.calls.(value.id) <-
-            Some
-              {
-                callee = Capability_method { capability; name = member.text };
-                arguments = checked;
-                omitted_defaults = left_out;
-                callee_result = result;
-              };
+          State.elaborate state value.id
+            (Call
+               {
+                 callee = Capability_method { capability; name = member.text };
+                 arguments = checked;
+                 omitted_defaults = left_out;
+                 callee_result = result;
+                 lends = None;
+               });
           result)
   | None ->
       Calls.check_arguments_alone state env arguments
@@ -728,7 +733,6 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
           | Error error -> error
           | Ok (checked, left_out) ->
               let result = Types.extract_result_type instance.signature.output in
-              Modes.note_lending state value instance.signature.output;
               let receiver_argument =
                 {
                   Tables.expression = receiver;
@@ -737,14 +741,15 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
                     (match method_.method_receiver with Instance mode -> mode | Static -> Read);
                 }
               in
-              state.tables.calls.(value.id) <-
-                Some
-                  {
-                    callee;
-                    arguments = receiver_argument :: checked;
-                    omitted_defaults = left_out;
-                    callee_result = result;
-                  };
+              State.elaborate state value.id
+                (Call
+                   {
+                     callee;
+                     arguments = receiver_argument :: checked;
+                     omitted_defaults = left_out;
+                     callee_result = result;
+                     lends = Types.find_lent_mode instance.signature.output;
+                   });
               List.iter
                 (Solver.require state (Method_call (State.read_span state value.id)) receiver_type)
                 (Option.to_list (Name_lookup.find_sealed_provider state receiver_type trait)

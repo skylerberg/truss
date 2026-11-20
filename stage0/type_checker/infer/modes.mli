@@ -1,5 +1,3 @@
-val note_lending : State.state -> Syntax.expression -> Types.result -> unit
-
 type mutation = Assignment | Passed_mut
 
 val mutate : State.state -> State.env -> by:mutation -> Syntax.expression -> unit
