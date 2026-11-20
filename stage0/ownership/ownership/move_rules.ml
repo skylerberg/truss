@@ -7,6 +7,20 @@ type verdict =
   | Reads
   | Refused of (Context.context -> Source.Definition_span.t -> Types.ty -> unit)
 
+let make_scrutinee_fix context (owned : Context.owned_scrutinee) =
+  let scrutinee = Context.show_root context (Local owned.scrutinee) in
+  let fix =
+    Diagnostic.fix
+      (Printf.sprintf "Move `%s` with `own`." scrutinee)
+      [
+        Diagnostic.insert
+          (Source.Definition_span.make_zero_width
+             (Context.locate_origin context owned.written).start)
+          "own ";
+      ]
+  in
+  (Printf.sprintf "%s`%s`" (if owned.is_part then "part of " else "") scrutinee, scrutinee, fix)
+
 let decide_move context (place : Place.t) ~origin ~type_ ~is_returned ~is_captured : verdict =
   let shown = Context.show context place in
   let refuse message =
@@ -20,7 +34,7 @@ let decide_move context (place : Place.t) ~origin ~type_ ~is_returned ~is_captur
     if is_captured then Read else Context.classify_binding_mode context place.root
   in
   let views_literal = (not is_captured) && Context.views_literal context place.root in
-  if Hashtbl.find_opt context.places_without_keyword origin = Some Mut then
+  if Context.find_place_without_keyword context origin = Some Mut then
     Refused
       (fun context at type_ ->
         Context.report context Needs_lent_mut at
@@ -37,10 +51,21 @@ let decide_move context (place : Place.t) ~origin ~type_ ~is_returned ~is_captur
     else
       Refused
         (fun context at type_ ->
-          Context.report context Needs_owned at
-            ~fixes:(Context.copy_fix context "Return a copy." type_ origin)
-            (Printf.sprintf "A returned value must be owned, and `%s` %s. Return a copy." shown
-               (if views_literal then "views a string literal" else "is not owned here")))
+          match Context.find_owned_scrutinee context place.root with
+          | Some owned ->
+              let viewed, scrutinee, fix = make_scrutinee_fix context owned in
+              Context.report context Needs_owned at
+                ~fixes:(fix :: Context.copy_fix context "Return a copy." type_ origin)
+                (Printf.sprintf
+                   "A returned value must be owned, and `%s` views %s. Move `%s` with `own` where \
+                    `%s` is bound, or return a copy."
+                   shown viewed scrutinee
+                   (Context.show_root context place.root))
+          | None ->
+              Context.report context Needs_owned at
+                ~fixes:(Context.copy_fix context "Return a copy." type_ origin)
+                (Printf.sprintf "A returned value must be owned, and `%s` %s. Return a copy." shown
+                   (if views_literal then "views a string literal" else "is not owned here")))
   else if List.exists (function Place.Element _ | Range _ -> true | Field _ -> false) place.steps
   then
     refuse
@@ -64,10 +89,25 @@ let decide_move context (place : Place.t) ~origin ~type_ ~is_returned ~is_captur
               literal's static buffer. Copy it instead."
              shown)
     | Read, _ ->
-        refuse
-          (Printf.sprintf "`%s` is %s, so it cannot be moved. Copy it instead." shown
-             (if place.steps = [] then "a view" else "part of a view"))
-    | (Own | Mut), _ when Hashtbl.find_opt context.places_without_keyword origin = Some Own ->
+        Refused
+          (fun context at type_ ->
+            match Context.find_owned_scrutinee context place.root with
+            | Some owned ->
+                let viewed, scrutinee, fix = make_scrutinee_fix context owned in
+                Context.report context Not_owned at
+                  ~fixes:(fix :: Context.copy_fix context "Copy it." type_ origin)
+                  (Printf.sprintf
+                     "`%s` views %s, so it cannot be moved. Move `%s` with `own` where `%s` is \
+                      bound, or copy `%s`."
+                     shown viewed scrutinee
+                     (Context.show_root context place.root)
+                     shown)
+            | None ->
+                Context.report context Not_owned at
+                  ~fixes:(Context.copy_fix context "Copy it." type_ origin)
+                  (Printf.sprintf "`%s` is %s, so it cannot be moved. Copy it instead." shown
+                     (if place.steps = [] then "a view" else "part of a view")))
+    | (Own | Mut), _ when Context.find_place_without_keyword context origin = Some Own ->
         Refused
           (fun context at type_ ->
             Context.report context Needs_owned at

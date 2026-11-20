@@ -9,87 +9,51 @@ let takes_literal (state : State.state) (collection : Types.ty) (trait : Types.t
       | Some (From_any | Built_in | Accepted _) | None -> false)
   | _ -> false
 
-let record_conversion (state : State.state) (value : Syntax.expression) (collection : Types.ty)
-    (trait : Types.trait_reference) method_ =
-  let { Well_known.name; receiver; _ } = Well_known.locate_method method_ in
-  state.tables.calls.(value.id) <-
-    Some
-      {
-        callee =
-          Trait_method
-            {
-              trait;
-              name;
-              receiver;
-              self_type = collection;
-              instantiation = Types.no_instantiation;
-            };
-        arguments = [];
-        omitted_defaults = [];
-        callee_result = collection;
-      };
+let record_conversion (state : State.state) (value : Syntax.expression) elements
+    (collection : Types.ty) (trait : Types.trait_reference) method_ =
+  State.elaborate state value.id
+    (Converted_literal
+       {
+         elements;
+         call = Tables.make_method_call trait method_ ~self_type:collection ~result:collection [];
+       });
   Solver.require state (Method_call (State.read_span state value.id)) collection trait
 
-let rec check_string_literal state env ?expected (literal : Syntax.string_literal) =
+let find_all options =
+  List.fold_right
+    (fun option all -> Option.bind option (fun each -> Option.map (List.cons each) all))
+    options (Some [])
+
+let rec check_string_literal state env ?expected (value : Syntax.expression)
+    (literal : Syntax.string_literal) =
   let parts =
     List.map (fun (part, _) -> (part, Hooks.check_expression state env part)) literal.rest
   in
-  let template : Tables.template =
-    {
-      from_template = None;
-      part_conversions = List.map (fun _ -> None) parts;
-      interpolated = parts <> [];
-      part = None;
-    }
-  in
-  state.tables.templates.(literal.id) <- Some template;
-  let set_part index call =
-    match state.tables.templates.(literal.id) with
-    | Some template ->
-        state.tables.templates.(literal.id) <-
-          Some
-            {
-              template with
-              part_conversions =
-                List.mapi
-                  (fun other existing -> if other = index then Some call else existing)
-                  template.part_conversions;
-            }
-    | None -> ()
-  in
-  let trait_call ?(mode = Language.Mode.Read) trait method_ self_type arguments result : Tables.call
-      =
-    let { Well_known.name; receiver; _ } = Well_known.locate_method method_ in
-    {
-      callee =
-        Trait_method { trait; name; receiver; self_type; instantiation = Types.no_instantiation };
-      arguments =
-        List.mapi
-          (fun index (written : Syntax.expression) ->
-            { Tables.expression = written; core_argument_index = index; mode })
-          arguments;
-      omitted_defaults = [];
-      callee_result = result;
-    }
-  in
   match literal.tag with
   | None ->
-      List.iteri
-        (fun index ((part : Syntax.expression), part_type) ->
-          State.check_when_final state (fun () ->
-              let part_type = State.finalize_type state part_type in
-              let display =
-                Types.make_trait_reference ~arguments:[] (Well_known.make_path Display)
-              in
-              match State.find_evidence state part_type display with
-              | Some _ ->
-                  set_part index (trait_call display Display_display part_type [ part ] Types.unit)
-              | None ->
-                  State.report state No_impl (State.read_span state part.id)
-                    (Printf.sprintf
-                       "`%s` does not implement `Display`, so it cannot be interpolated."
-                       (Types.show part_type))))
-        parts;
+      if parts <> [] then
+        State.check_when_final state (fun () ->
+            let display = Types.make_trait_reference ~arguments:[] (Well_known.make_path Display) in
+            Option.iter
+              (fun displays ->
+                State.elaborate state value.id (Template (Interpolated { displays })))
+              (find_all
+                 (List.map
+                    (fun ((part : Syntax.expression), part_type) ->
+                      let part_type = State.finalize_type state part_type in
+                      match State.find_evidence state part_type display with
+                      | Some _ ->
+                          Some
+                            (Tables.make_method_call display Display_display ~self_type:part_type
+                               ~result:Types.unit
+                               [ (part, Read) ])
+                      | None ->
+                          State.report state No_impl (State.read_span state part.id)
+                            (Printf.sprintf
+                               "`%s` does not implement `Display`, so it cannot be interpolated."
+                               (Types.show part_type));
+                          None)
+                    parts)));
       let is_view_expected =
         parts = []
         &&
@@ -121,44 +85,44 @@ let rec check_string_literal state env ?expected (literal : Syntax.string_litera
               let tag_type = State.finalize_type state tag_type in
               match State.find_evidence state tag_type template_trait with
               | Some _ ->
-                  (match state.tables.templates.(literal.id) with
-                  | Some template ->
-                      state.tables.templates.(literal.id) <-
-                        Some
-                          {
-                            template with
-                            from_template =
-                              Some
-                                (trait_call template_trait From_template_from_template tag_type []
-                                   tag_type);
-                          }
-                  | None -> ());
+                  let from_template =
+                    Tables.make_method_call template_trait From_template_from_template
+                      ~self_type:tag_type ~result:tag_type []
+                  in
                   let part =
                     Solver.resolve_associated_type state tag_type template_trait From_template_part
                       ~at:(State.read_span state literal.id)
                   in
-                  (match state.tables.templates.(literal.id) with
-                  | Some template ->
-                      state.tables.templates.(literal.id) <- Some { template with part = Some part }
-                  | None -> ());
-                  List.iteri
-                    (fun index ((part_expression : Syntax.expression), part_type) ->
-                      let part_type = State.finalize_type state part_type in
-                      if not (Types.equal part_type part) then
-                        let from =
-                          Types.make_trait_reference ~arguments:[ Types.Type part_type ]
-                            (Well_known.make_path From)
-                        in
-                        match State.find_evidence state part from with
-                        | Some _ ->
-                            set_part index
-                              (trait_call ~mode:Own from From_from part [ part_expression ] part)
-                        | None ->
-                            State.report state No_impl
-                              (State.read_span state part_expression.id)
-                              (Printf.sprintf "`%s` cannot become a `%s`, the part type of `%s`."
-                                 (Types.show part_type) (Types.show part) (Types.show tag_type)))
-                    parts
+                  Option.iter
+                    (fun part_conversions ->
+                      State.elaborate state value.id
+                        (Template (Tagged { from_template; part; part_conversions })))
+                    (find_all
+                       (List.map
+                          (fun ((part_expression : Syntax.expression), part_type) ->
+                            let part_type = State.finalize_type state part_type in
+                            if Types.equal part_type part then Some None
+                            else
+                              let from =
+                                Types.make_trait_reference ~arguments:[ Types.Type part_type ]
+                                  (Well_known.make_path From)
+                              in
+                              match State.find_evidence state part from with
+                              | Some _ ->
+                                  Some
+                                    (Some
+                                       (Tables.make_method_call from From_from ~self_type:part
+                                          ~result:part
+                                          [ (part_expression, Own) ]))
+                              | None ->
+                                  State.report state No_impl
+                                    (State.read_span state part_expression.id)
+                                    (Printf.sprintf
+                                       "`%s` cannot become a `%s`, the part type of `%s`."
+                                       (Types.show part_type) (Types.show part)
+                                       (Types.show tag_type));
+                                  None)
+                          parts))
               | None ->
                   if not (Types.is_error tag_type) then
                     State.report state No_impl
@@ -202,8 +166,8 @@ and check_list_literal state env ?expected (value : Syntax.expression) items =
           ~at:(State.read_span state value.id)
       in
       check_items element;
-      state.tables.literal_elements.(value.id) <- Some (List_element element);
-      record_conversion state value collection from_elements From_elements_from_elements;
+      record_conversion state value (List_element element) collection from_elements
+        From_elements_from_elements;
       collection
   | _ ->
       let element = State.make_fresh_type state in
@@ -240,8 +204,9 @@ and check_map_literal state env ?expected (value : Syntax.expression) entries =
         Solver.resolve_associated_type state map from_entries From_entries_value ~at
       in
       check_entries key value_type;
-      state.tables.literal_elements.(value.id) <- Some (Map_entry { key; value = value_type });
-      record_conversion state value map from_entries From_entries_from_entries;
+      record_conversion state value
+        (Map_entry { key; value = value_type })
+        map from_entries From_entries_from_entries;
       map
 
 and check_lambda (state : State.state) env ?expected (value : Syntax.expression) parameters body =
@@ -300,16 +265,19 @@ and check_lambda (state : State.state) env ?expected (value : Syntax.expression)
       (fun acc id -> if is_outer id && not (List.mem id acc) then acc @ [ id ] else acc)
       [] read
   in
-  state.tables.captures.(value.id) <-
-    Some
-      (List.map
-         (fun id : (Syntax.id * Core.local) ->
-           if id = state.definition.id then (id, Self)
-           else
-             match Hashtbl.find_opt state.locals id with
-             | Some local -> (id, Declared { origin = id; name = local.name })
-             | None -> State.raise_bug "a lambda captures a local that nothing declares")
-         captures);
+  State.elaborate state value.id
+    (Lambda
+       {
+         captures =
+           List.map
+             (fun id : (Syntax.id * Core.local) ->
+               if id = state.definition.id then (id, Self)
+               else
+                 match Hashtbl.find_opt state.locals id with
+                 | Some local -> (id, Declared { origin = id; name = local.name })
+                 | None -> State.raise_bug "a lambda captures a local that nothing declares")
+             captures;
+       });
   result
 
 and check_if state env ?expected (test : Syntax.expression) then_ else_ =
@@ -432,7 +400,7 @@ and check_collection_element state env ~(quantifier : Syntax.expression)
   | _ -> (
       match Name_lookup.find_elements_calls state collection collection_type Language.Mode.Read with
       | Visible (loop, element, _) ->
-          state.tables.loops.(quantifier.id) <- Some loop;
+          State.elaborate state quantifier.id (Loop loop);
           element
       | Hidden hidden ->
           Members.make_hidden_error state (State.read_span state collection.id) hidden

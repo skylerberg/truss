@@ -116,9 +116,13 @@ says, and is an ordinary name elsewhere:
 | `final(result)` | In a lending method's `ensures`, the lent part as the caller left it |
 | `by`, `bit_vector` | After an `assert`'s condition: `assert condition by bit_vector` |
 | `generic` | In a `uses` list, before the name of a capability parameter |
+| `tuple` | Before `type`: a tuple type (see [Tuple types](#tuple-types)) |
 
 A parameter cannot be named `result`, a parameter of a lending method cannot
-be named `final`, and no function can be named `old` or `identical`. In
+be named `final`, and no function can be named `old` or `identical`. The
+reserved word `ensures` also follows a `.`, where `visit.ensures(...)` names
+the postcondition of a function passed (see
+[Callback contracts](#callback-contracts)). In
 `fn wait(time: Duration) cost time O(time.seconds())`, the second `time` is
 the resource and the third the parameter.
 
@@ -360,7 +364,7 @@ Integer types never convert implicitly.
 ### Type definitions
 
 ```ebnf
-type_definition = "type" UPPER_NAME [ generics ]
+type_definition = [ "tuple" ] "type" UPPER_NAME [ generics ]
                   ( fields | "=" variants | "=" "todo" )
                   { type_clause } ;
 fields          = "(" list(field) ")" ;
@@ -403,10 +407,30 @@ let answer = Some(3)
   `geometry::Shape.Circle`. The prelude's `Some`, `None`, `Ok`, and `Err`
   are written bare.
 - A `type_clause` after the last variant belongs to the whole type.
-- The order of a record's fields has no meaning, except to a derived
-  `Ordered`.
+- The order of a record's fields has no meaning, except in a tuple type and
+  to a derived `Ordered`.
 - A record with one field has none of its field's methods or operators:
   `type UserId(number: UInt64)` is a type of its own.
+
+### Tuple types
+
+```truss
+public tuple type Span(start: UInt64, end: UInt64)
+
+fn length(span: Span) -> UInt64
+  requires span.start <= span.end
+{
+  let start, end = span
+  end - start
+}
+```
+
+- A tuple type is a record whose fields are in the order they are declared,
+  and a tuple pattern matches them by position (see [Patterns](#patterns)).
+- A tuple type has two or more fields. It is built, read, and matched in
+  parentheses by name, as any record is.
+- `map::Entry`, `core::Indexed`, and `core::Pair` are tuple types, so
+  `for name, port in ports` binds each entry's key and value.
 
 ### Recursive types
 
@@ -1119,19 +1143,7 @@ is one number for the function: it cannot depend on the arguments of a call.
   `time(Element.compare)`. If a name has several overloads, the term means
   the read-only one.
 - At a call, the cost of a callback has the value that the function passed
-  gives it:
-
-  | The function passed | The value of the term |
-  |---|---|
-  | A lambda | A bound on its body for every argument |
-  | A named function | For `time`, a constant where its clause is `O(n)` for a literal `n`. For `allocations` and `allocated_bytes`, `n` where its clause is `<= n` or `== n` for a literal `n`. |
-  | A parameter of the caller | The caller's own term for that parameter |
-
-  A function that states no bound on the resource has no value for the
-  term, and neither has one whose bound is `amortized`, which bounds a call
-  together with the potential it changes. A bound that names the term is
-  then unbounded, so the caller proves no bound on that resource through the
-  call.
+  gives it (see [Callback contracts](#callback-contracts)).
 - At a call, the cost of a bound's method has the value the type argument
   gives it: `time(Element.equal)` is a constant for `Int64`, whose
   `impl Equal` promises `cost time O(1)`, and `allocations(Element.equal)`
@@ -1149,20 +1161,6 @@ is one number for the function: it cannot depend on the arguments of a call.
 fn Slice[Element: Equal].contains(self, item: Element) -> Bool
   cost time O(self.length() * time(Element.equal))
   cost allocations <= self.length() * allocations(Element.equal)
-
-fn Option[Value].map[Output](
-  own self,
-  transform: (fn(own Value) -> Output uses generic Granted),
-) -> Option[Output]
-  uses generic Granted
-  cost time O(time(transform))
-  cost allocations <= allocations(transform)
-
-fn halved(value: Option[Int64]) -> Option[Int64]
-  cost allocations <= 0
-{
-  value.map(fn(inner) { inner / 2 })
-}
 ```
 
 #### Amortized costs
@@ -1191,7 +1189,8 @@ fn List[Element].push(mut self, item: own Element)
 
 ```ebnf
 function_type        = "fn" "(" list([ LOWER_NAME ":" ] [ mode ] type) ")" [ "->" type ] ;
-function_type_clause = "uses" capability_list | "cost" cost | "requires" expression ;
+function_type_clause = "uses" capability_list | "cost" cost
+                     | "requires" expression | "ensures" expression ;
 ```
 
 ```truss
@@ -1210,24 +1209,8 @@ fn serve(handle: (fn(Request) -> Response uses Database, Log))
   names,** so one without `RunForever` takes only functions that terminate
   (see [Termination](#termination)).
 - Clauses after a definition's result type belong to the definition.
-- A function type names its inputs exactly when it has a `requires`. Only
-  the type of a definition's parameter may have one, at the top level of
-  that type. The `requires` can mention the inputs and the parameters before
-  that parameter. The definition proves the `requires` at every call through
-  the parameter. A lambda passed for the parameter may rely on the
-  `requires`, and a named function passed for the parameter accepts every
-  argument that the `requires` allows:
-
-  ```truss
-  fn List[Element].generate(
-    count: UInt64,
-    make: (fn(index: UInt64) -> Element requires index < count),
-  ) -> List[Element]
-    ensures result.length() == count
-
-  let reversed = List.generate(values.length(), make: fn(index) { values[values.length() - 1 - index] })
-  ```
-
+- A function type's `requires` and `ensures` are a callback's contract (see
+  [Callback contracts](#callback-contracts)).
 - A function-typed parameter can be called but not stored. One declared
   `own` can be stored, and accepts only functions that capture no local
   variables.
@@ -1283,6 +1266,117 @@ A capability parameter passes on the capabilities a callback uses,
   forever, so the bound holds for every `Granted`. A bound that does not name
   `time(visit)` is proven only where the type of `visit` bounds its time.
 - A type that holds a function writes the capabilities in the field's type.
+
+### Callback contracts
+
+```truss
+type Card(rank: UInt8, suit: UInt8)
+
+fn pick[Item: Copyable](
+  items: Slice[Item],
+  choose: (fn(count: UInt64) -> UInt64 uses generic Granted requires count > 0 ensures result < count),
+) -> Item
+  uses generic Granted
+  requires items.length() > 0
+{
+  items[choose(items.length())].copy()
+}
+
+fn deal(deck: Slice[Card]) -> Card
+  uses Random
+  requires deck.length() > 0
+{
+  pick(deck, choose: fn(count) { Random.next() % count })
+}
+
+fn Option[Value].map[Output](
+  own self,
+  transform: (fn(own Value) -> Output uses generic Granted),
+) -> Option[Output]
+  uses generic Granted
+  ensures match self {
+    Some(value) => result is Some(output) && transform.ensures(value, output)
+    None => result is None
+  }
+  cost time O(time(transform))
+  cost allocations <= allocations(transform)
+
+fn halved(value: Option[Int64]) -> Option[Int64]
+  ensures match value {
+    Some(inner) => result is Some(half) && half == inner / 2
+    None => result is None
+  }
+  cost allocations <= 0
+{
+  value.map(fn(inner) { inner / 2 })
+}
+```
+
+A *callback contract* is what a function knows of the function passed for
+one of its parameters: the `requires` and `ensures` of the parameter's
+type, and the terms `time(visit)`, `allocations(visit)`,
+`allocated_bytes(visit)`, and `visit.ensures(...)`.
+
+- **A `requires` or an `ensures` in a function type appears only on the type
+  of a definition's parameter,** at the top level of that type, and the type
+  then names its inputs. Each can mention the inputs and the parameters
+  before that parameter. In the `ensures`, `result` is the callback's result,
+  and `old(input)` is a `mut` input's value when the callback was called.
+- **The definition proves the `requires` at every call through the
+  parameter, and each such call meets the `ensures`.**
+- **At a call of the definition, the function passed is proven against both
+  clauses.** A lambda's body may rely on the `requires`, and proves the
+  `ensures`, as `deal`'s lambda relies on `count > 0` and proves
+  `result < count`. A named function accepts every argument that the
+  `requires` allows, and its own `ensures` implies the type's there. A
+  parameter of the caller is accepted where its type's clauses imply the
+  callee's. Any other function value promises nothing of its results.
+- **An `impl`'s method states the callback contracts of its trait's method,**
+  clause for clause, since a call through the trait proves and assumes those.
+- **`visit.ensures(...)` holds where the function passed for `visit` may
+  return the given result for the given arguments.** Its operand is a
+  function parameter of the enclosing definition. Its arguments are the
+  callback's inputs in order, a `mut` input giving its value at entry and
+  then at exit, followed by the callback's result if it has one, as in
+  `transform.ensures(value, output)`. It appears only in specifications.
+- **`visit.ensures` is a relation, not a call.** A callback may return
+  different results for one argument, as one that reads `Random` does. Each
+  call through the parameter makes `visit.ensures` hold of that call's
+  arguments and result, and the definition knows nothing else of it. A
+  function that uses no capability and has no `mut` input returns one
+  result, so for it `visit.ensures(value, output)` holds exactly where
+  `output` is that result.
+- **At a call, each term of a callback contract takes its value from the
+  function passed:**
+
+  | The function passed | `time(visit)`, `allocations(visit)`, `allocated_bytes(visit)` | `visit.ensures(...)` |
+  |---|---|---|
+  | A lambda | A bound on its body for every argument | Where its body may return that result for those arguments |
+  | A named function | For `time`, a constant where its clause is `O(n)` for a literal `n`. For `allocations` and `allocated_bytes`, `n` where its clause is `<= n` or `== n` for a literal `n`. | Where its `ensures` holds |
+  | A parameter of the caller | The caller's own term | The caller's own `visit.ensures` |
+
+  A function that states no bound on a resource has no value for that term,
+  and neither has one whose bound is `amortized`, which bounds a call
+  together with the potential it changes. A bound that names the term is
+  then unbounded, so the caller proves no bound on that resource through the
+  call.
+- **A law over a callback's answers is stated over `visit.ensures`.** A
+  contract that needs the law makes it the premise of an implication, so the
+  conclusion holds for every callback that keeps the law, and a callback
+  that breaks it loses only the conclusion:
+
+  ```truss
+  fn Slice[Element].max_by(
+    self,
+    compare: (fn(Element, Element) -> Ordering uses generic Granted),
+  ) lends Option[Element]
+    uses generic Granted
+    ensures (result is Some(_)) == (self.length() > 0)
+    ensures self.model().is_totally_ordered_by(compare) ==> match result {
+      Some(largest) => forall i in 0..self.length() => !compare.ensures(self[i], largest, Ordering.Greater)
+      None => true
+    }
+  ```
 
 ## Methods
 
@@ -1351,6 +1445,22 @@ mut grid.cell(position).visit()
   `if counts.get(word) is Some(count) { counts[word] = count + 1 }`. A name
   that is not a copy aliases the part, which stays lent until the then-block
   or the body ends. It is never lent into the `else` block.
+- **A `match` arm lends as an `if` does,** with the scrutinees, the arm's
+  patterns, and its guard as the condition, and the arm's body as the
+  then-block. Each arm decides for itself, so an arm whose names are copies
+  can mutate the receiver. A part that a scrutinee lends stays lent while the
+  arms are tested. A guard that fails ends its lends before the next arm is
+  tested.
+
+  ```truss
+  fn tally(counts: mut Map[String, UInt64], word: String) {
+    match counts.get(word) {
+      Some(count) => counts[word.copy()] = count.saturating_add(1)
+      None => counts[word.copy()] = 1
+    }
+  }
+  ```
+
 - **For that long, the receiver is lent whole:** the statement makes no other
   use of a receiver lent `mut`, and does not mutate one lent read-only. A
   receiver that is a view lends its original too, so `names[..].first()`
@@ -1487,18 +1597,19 @@ impl FiniteCursor for Countdown {
 ```ebnf
 block     = "{" lines(statement) "}" ;
 
-statement = "let" pattern [ ":" type ] "=" expression [ "else" block ]
-          | "var" pattern [ ":" type ] "=" expression [ "else" block ]
+statement = "let" binding_pattern "=" expression [ "else" block ]
+          | "var" binding_pattern "=" expression [ "else" block ]
           | expression [ assignment_operator expression ]
-          | "for" pattern [ ":" type ] "in" expression { loop_clause } block
+          | "for" binding_pattern "in" expression { loop_clause } block
           | "while" expression { loop_clause } block
           | "parallel" block
-          | "parallel" "for" pattern [ ":" type ] "in" expression { loop_clause } block
+          | "parallel" "for" binding_pattern "in" expression { loop_clause } block
           | "concurrent" block
-          | "concurrent" "for" pattern [ ":" type ] "in" expression { loop_clause } block
+          | "concurrent" "for" binding_pattern "in" expression { loop_clause } block
           | "proof" block
           | "assert" expression [ "by" "bit_vector" ] ;
 
+binding_pattern = pattern [ ":" type ] | tuple_pattern ;
 assignment_operator = "=" | "+=" | "-=" | "*=" | "/=" | "%="
                     | "&=" | "|=" | "^=" | "<<=" | ">>=" ;
 loop_clause = ( "invariant" expression | "decreases" expression { "," expression }
@@ -1558,6 +1669,7 @@ constant        = module_path "::" LOWER_NAME
                 | [ module_path "::" ] UPPER_NAME "." LOWER_NAME ;
 pattern_fields  = "(" list(pattern_field) ")" ;
 pattern_field   = LOWER_NAME ":" pattern | pattern | ".." ;
+tuple_pattern   = pattern "," pattern { "," pattern } ;
 ```
 
 ```truss
@@ -1588,6 +1700,12 @@ match status_code {
   or its type, `http::ok` or `Status.teapot`. A constant in a pattern has a
   type with structural equality (see [Equality](#equality)).
 - Range patterns match integers and characters.
+- A tuple pattern matches a tuple type, one pattern for each field, in the
+  order of the fields. It is written without parentheses, and only as the
+  whole pattern of a `let`, a `var`, or a `for`.
+- In a tuple pattern, a bare name that names another field of the type is
+  an error. Matched by position, `for value, key in ports` would bind each
+  key under the name `value`.
 - Every alternative of an or-pattern binds the same names, with the same
   types.
 - A pattern in `let`, `var`, `for`, or a lambda's parameters matches every
@@ -2760,6 +2878,7 @@ an invariant, a law, or a proof.
 | `exists item in items => item == target` | True for at least one value |
 | `a ==> b` | When `a` holds, so does `b` |
 | `old(self.items)` | A value as it was when the function was called |
+| `transform.ensures(value, output)` | The function passed for `transform` may return `output` for `value` |
 
 - A quantifier over a range or a collection is also an expression in code,
   which runs as a loop that stops when the answer is known. Its body may rely

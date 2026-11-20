@@ -196,8 +196,9 @@ let report_keyword_macro cursor ~(bang : Token.t) ~(closing : Token.t) ~has_argu
       [ Diagnostic.delete (Source.make_span bang.span.start closing.span.stop) ]
 
 let no_tuples =
-  "Truss has no tuples. Values that belong together go in a record, whose fields have names, such \
-   as `Pair(first: a, second: b)`."
+  "Parentheses do not make a tuple: every tuple type has a name and named fields. Values that \
+   belong together go in a record or a tuple type, such as `core::Pair`, built as \
+   `core::Pair(first: a, second: b)`."
 
 let report_tuple cursor ~(opening : Token.t) =
   Cursor.report cursor Tuple opening.span no_tuples;
@@ -205,7 +206,7 @@ let report_tuple cursor ~(opening : Token.t) =
 
 let report_tuple_field cursor ~(field : Token.t) =
   Cursor.report cursor Tuple field.span
-    "Truss has no tuples, so a value has no numbered fields. A record's fields have names, as in \
+    "A value has no numbered fields. Every field has a name, in a tuple type too, as in \
      `pair.first`.";
   raise Cursor.Failed
 

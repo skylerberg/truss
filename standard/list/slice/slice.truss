@@ -159,12 +159,15 @@ public fn Slice[Element: Equal].last_index_of(self, item: Element) -> Option[UIn
   None
 }
 
-public fn Slice[Element].find_index(self, predicate: fn(Element) -> Bool) -> Option[UInt64]
-
+public fn Slice[Element].find_index(
+  self,
+  predicate: (fn(element: Element) -> Bool uses generic Granted requires self.model().contains(element)),
+) -> Option[UInt64]
+  uses generic Granted
   ensures match result {
-    Some(index) => index < self.length() && predicate(self.model()[index])
-      && (forall i in 0..index => !predicate(self.model()[i]))
-    None => forall i in 0..self.length() => !predicate(self.model()[i])
+    Some(index) => index < self.length() && predicate.ensures(self.model()[index], true)
+      && (forall i in 0..index => predicate.ensures(self.model()[i], false))
+    None => forall i in 0..self.length() => predicate.ensures(self.model()[i], false)
   }
   cost time O(self.length() * time(predicate))
   cost allocations <= self.length() * allocations(predicate)
@@ -172,7 +175,7 @@ public fn Slice[Element].find_index(self, predicate: fn(Element) -> Bool) -> Opt
   var index: UInt64 = 0
   while index < self.length()
     invariant index <= self.length()
-    invariant forall i in 0..index => !predicate(self.model()[i])
+    invariant forall i in 0..index => predicate.ensures(self.model()[i], false)
     decreases self.length() - index
     cost time O(index * time(predicate))
   {
@@ -527,16 +530,21 @@ public fn Slice[Element: Copyable].to_list(self) -> List[Element]
   List(storage: own copy)
 }
 
-public fn Slice[Element: Copyable].filter(self, keep: fn(Element) -> Bool) -> List[Element]
+public fn Slice[Element: Copyable].filter(
+  self,
+  keep: (fn(element: Element) -> Bool uses generic Granted requires self.model().contains(element)),
+) -> List[Element]
+  uses generic Granted
   ensures result.length() <= self.length()
-  ensures forall i in 0..result.length() => keep(result.model()[i])
+  ensures forall i in 0..result.length() => keep.ensures(result.model()[i], true)
   cost time O(self.length() * (time(keep) + time(Element.copy)))
 {
   var retained: intrinsic::Storage[Element] = intrinsic::storage_with_capacity(self.length())
   for index in 0..self.length()
     invariant intrinsic::storage_length(retained) <= index
     invariant intrinsic::storage_capacity(retained) == self.length()
-    invariant forall i in 0..intrinsic::storage_length(retained) => keep(intrinsic::storage_model(retained)[i])
+    invariant forall i in 0..intrinsic::storage_length(retained) =>
+      keep.ensures(intrinsic::storage_model(retained)[i], true)
   {
     if keep(self[index]) {
       intrinsic::storage_push(mut retained, value: self[index].copy())
@@ -785,12 +793,15 @@ public fn Slice[Element].update_each(
   change: (fn(mut Element) uses generic Granted),
 )
   uses generic Granted
+  ensures forall i in 0..self.length() => change.ensures(old(self.model())[i], self.model()[i])
   cost calls(change) == self.length()
   cost time O(self.length() * time(change))
   cost allocations <= self.length() * allocations(change)
 {
   for index in 0..self.length()
     invariant self.length() == old(self.length())
+    invariant forall i in 0..index => change.ensures(old(self.model())[i], self.model()[i])
+    invariant forall i in index..self.length() => identical(self.model()[i], old(self.model())[i])
   {
     change(mut self[index])
   }
@@ -1676,6 +1687,28 @@ public fn Slice[Element].sort_by_key[Key: Ordered](mut self, key: (fn(Element) -
   mut self.sort_by(fn(first, second) { key(first).compare(key(second)) })
 }
 
+public fn Sequence[Element].is_totally_ordered_by(
+  self,
+  compare: (fn(Element, Element) -> Ordering uses generic Granted),
+) -> Bool
+  ensures result == (forall a in 0..self.length() => forall b in 0..self.length() =>
+    forall c in 0..self.length() =>
+      !(compare.ensures(self[a], self[b], Ordering.Less) && compare.ensures(self[a], self[b], Ordering.Equal))
+      && !(compare.ensures(self[a], self[b], Ordering.Less) && compare.ensures(self[a], self[b], Ordering.Greater))
+      && !(compare.ensures(self[a], self[b], Ordering.Equal) && compare.ensures(self[a], self[b], Ordering.Greater))
+      && compare.ensures(self[a], self[b], Ordering.Less) == compare.ensures(self[b], self[a], Ordering.Greater)
+      && (!compare.ensures(self[a], self[b], Ordering.Greater) && !compare.ensures(self[b], self[c], Ordering.Greater)
+        ==> !compare.ensures(self[a], self[c], Ordering.Greater)))
+{
+  forall a in 0..self.length() => forall b in 0..self.length() => forall c in 0..self.length() =>
+    !(compare.ensures(self[a], self[b], Ordering.Less) && compare.ensures(self[a], self[b], Ordering.Equal))
+    && !(compare.ensures(self[a], self[b], Ordering.Less) && compare.ensures(self[a], self[b], Ordering.Greater))
+    && !(compare.ensures(self[a], self[b], Ordering.Equal) && compare.ensures(self[a], self[b], Ordering.Greater))
+    && compare.ensures(self[a], self[b], Ordering.Less) == compare.ensures(self[b], self[a], Ordering.Greater)
+    && (!compare.ensures(self[a], self[b], Ordering.Greater) && !compare.ensures(self[b], self[c], Ordering.Greater)
+      ==> !compare.ensures(self[a], self[c], Ordering.Greater))
+}
+
 internal fn Slice[Element].extreme_position(
   self,
   compare: (fn(Element, Element) -> Ordering uses generic Granted),
@@ -1684,6 +1717,8 @@ internal fn Slice[Element].extreme_position(
   uses generic Granted
   requires self.length() > 0
   ensures result < self.length()
+  ensures self.model().is_totally_ordered_by(compare) ==> forall i in 0..self.length() =>
+    !compare.ensures(self[i], self[result], if greatest { Ordering.Greater } else { Ordering.Less })
   cost time O(self.length() * time(compare))
   cost allocations <= self.length() * allocations(compare)
 {
@@ -1693,6 +1728,8 @@ internal fn Slice[Element].extreme_position(
     invariant best < index
     invariant 1 <= index
     invariant index <= self.length()
+    invariant self.model().is_totally_ordered_by(compare) ==> forall i in 0..index =>
+      !compare.ensures(self[i], self[best], if greatest { Ordering.Greater } else { Ordering.Less })
     decreases self.length() - index
     cost time O(index * time(compare))
   {
@@ -1711,6 +1748,10 @@ public fn Slice[Element].min_by(
 ) lends Option[Element]
   uses generic Granted
   ensures (result is Some(_)) == (self.length() > 0)
+  ensures self.model().is_totally_ordered_by(compare) ==> match result {
+    Some(least) => forall i in 0..self.length() => !compare.ensures(self[i], least, Ordering.Less)
+    None => true
+  }
   cost time O(self.length() * time(compare))
   cost allocations <= self.length() * allocations(compare)
 {
@@ -1728,6 +1769,10 @@ public fn Slice[Element].max_by(
 ) lends Option[Element]
   uses generic Granted
   ensures (result is Some(_)) == (self.length() > 0)
+  ensures self.model().is_totally_ordered_by(compare) ==> match result {
+    Some(largest) => forall i in 0..self.length() => !compare.ensures(self[i], largest, Ordering.Greater)
+    None => true
+  }
   cost time O(self.length() * time(compare))
   cost allocations <= self.length() * allocations(compare)
 {

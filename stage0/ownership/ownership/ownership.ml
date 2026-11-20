@@ -2,7 +2,7 @@ module Lookups = Lookups
 
 type result = {
   diagnostics : Diagnostic.in_definition list;
-  must_be_disjoint : (Core.origin list * Core.origin list) list;
+  must_be_disjoint : (Core.id list * Core.id list) list;
 }
 
 let implements_capability (lookups : Lookups.t) key =
@@ -31,6 +31,7 @@ let check_definition (lookups : Lookups.t) (key : Resolve.Names.key) : result =
       origins = Context.Local_table.create 32;
       binding_modes = Context.Local_table.create 32;
       literal_views = Context.Local_table.create 4;
+      owned_scrutinees = Context.Local_table.create 4;
       types = Context.Local_table.create 32;
       parameters = [];
       implements_capability = implements_capability lookups key;

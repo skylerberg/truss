@@ -1,0 +1,38 @@
+fn bumped(value: UInt64, change: (fn(item: mut UInt64) uses generic Granted ensures item >= old(item))) -> UInt64
+  uses generic Granted
+  ensures result >= value
+{
+  var item = value
+  change(mut item)
+  item
+}
+
+fn bumps(value: UInt64) -> UInt64
+  ensures result >= value
+{
+  bumped(value, change: fn(item) {
+    if item < 100 {
+      item += 1
+    }
+  })
+}
+
+fn changed(value: UInt64, change: (fn(mut UInt64) uses generic Granted)) -> UInt64
+  uses generic Granted
+  ensures change.ensures(value, result)
+{
+  var item = value
+  change(mut item)
+  item
+}
+
+fn doubles(value: UInt64) -> UInt64
+  requires value < 100
+  ensures result == value * 2
+{
+  changed(value, change: fn(item) {
+    if item < 100 {
+      item = item * 2
+    }
+  })
+}

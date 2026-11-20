@@ -95,7 +95,7 @@ module For_testing : sig
   val read_derived_form : t -> Path.t -> Core.t option
   val read_core : t -> Path.t -> (Core.t * Types.substitution) option
   val make_mir_lookups : t -> Mir.lookups
-  val read_ownership : t -> Resolve.Names.key -> (Core.origin list * Core.origin list) list part
+  val read_ownership : t -> Resolve.Names.key -> (Core.id list * Core.id list) list part
   val find_proof : proofs -> Resolve.Names.key -> Prover.proof part option
   val list_reads : t -> Part.any -> Part.t list
   val list_unread_parts : t -> Path.package list -> Part.any list

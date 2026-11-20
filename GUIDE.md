@@ -205,7 +205,11 @@ A diagnostic gives the file, line, and column; a code, such as
 `capabilities.not_available`, that names the kind of error; and a message
 that says how to fix it. Many diagnostics also carry a `fix:`, an edit that
 makes the code compile. `truss check --fix` applies every fix that is its
-diagnostic's only fix, then reports what is left.
+diagnostic's only fix, then reports what is left. When a check reports
+errors, run it first, then read what it changed: a missing label or a
+misplaced `own` is gone, and a diagnostic with a choice of fixes is left for
+you to decide. A fix can add a `.copy()`, which allocates, so keep only the
+copies you want.
 
 ## 2. Programming a Guessing Game
 
@@ -605,7 +609,7 @@ main.truss:2:3: error[types.mismatched_integers]: Integer types never convert im
   |   ^^^^^^^^^^^^^
   fix: Convert the left side to `UInt64`.
     replace "small" with "UInt64.from_integer(small)" at main.truss:2:3
-1 error
+1 error. `truss check --fix` fixes it.
 ```
 
 A conversion between built-in number types is a method of the target type.
@@ -774,9 +778,8 @@ test "arrays" {
 Most collections are `List`s, which grow; [Chapter 7](#7-collections)
 covers both.
 
-Truss has no tuples. Where another language returns a tuple, a Truss
-function returns a record with named fields, which [Chapter
-5](#5-records-and-sum-types) introduces.
+Where another language returns a tuple, a Truss function returns a record
+with named fields, which [Chapter 5](#5-records-and-sum-types) introduces.
 
 ### Functions
 
@@ -1018,7 +1021,7 @@ main.truss:3:22: error[ownership.use_after_move]: `name` is used after it was mo
   fix: Pass a copy at the move instead.
     delete "own " at main.truss:2:18
     insert ".copy()" at main.truss:2:26
-1 error
+1 error. `truss check --fix` fixes it.
 ```
 
 Leaving out `own` is an error too, because a move or a copy is always
@@ -1168,7 +1171,7 @@ main.truss:2:7: error[ownership.lent_part_escapes]: This part is lent only until
   |       ^^^^^
   fix: Copy the scrutinee.
     insert ".copy()" at main.truss:2:27
-1 error
+1 error. `truss check --fix` fixes it.
 ```
 
 Use the part within the statement, or copy it:
@@ -1221,6 +1224,32 @@ test "taking a value leaves something behind" {
   assert names == ["Grace"]
 }
 ```
+
+A pattern binds views of the scrutinee's fields, so a `match` cannot move a
+field out of its scrutinee. `match own` moves the scrutinee into the `match`
+instead, and each binding owns its field:
+
+```truss
+type Entry =
+  | Empty
+  | Named(name: String, count: UInt64)
+
+fn into_name(entry: own Entry) -> Option[String] {
+  match own entry {
+    Empty => None
+    Named(name, ..) => Some(own name)
+  }
+}
+
+test "a match moves fields out of an owned scrutinee" {
+  assert into_name(Entry.Named(name: "Ada", count: 1)) == Some("Ada")
+  assert into_name(Entry.Empty) == None
+}
+```
+
+Without `own`, `name` is a view of `entry`, and `Some(own name)` is an error.
+`is` and `let ... else` take `own` the same way, as in `if own entry is
+Named(name, ..)`.
 
 ### Temporaries
 
@@ -1312,6 +1341,32 @@ test "a record pattern" {
   assert sum(Point(x: 1, y: 2)) == 3
 }
 ```
+
+A *tuple type* is a record whose field order is part of the type. A list of
+patterns without parentheses, after `let`, `var`, or `for`, matches its
+fields by position, so each binding takes the name you choose:
+
+```truss
+tuple type Span(start: UInt64, end: UInt64)
+
+fn width(span: Span) -> UInt64
+  requires span.start <= span.end
+{
+  let low, high = span
+  high - low
+}
+
+test "a tuple pattern" {
+  assert width(Span(start: 2, end: 7)) == 5
+}
+```
+
+- In parentheses, fields match by name in every record, so
+  `let (start, end) = span` works and `let (low, high) = span` is an error.
+- A name that belongs to another field is an error: `let end, start = span`
+  would bind `end` to the field `start`.
+- A map's entries, `enumerate`, and `zip` give tuple types, so a loop over
+  them names the parts by position ([Chapter 7](#7-collections)).
 
 ### Methods
 
@@ -1527,7 +1582,7 @@ main.truss:6:5: error[patterns.unreachable_arm]: Earlier arms already match ever
   |     ^^^^^^^^^^^^
   fix: Write `lottery::lucky`.
     replace "lucky" with "lottery::lucky" at main.truss:5:5
-2 errors and 1 warning
+2 errors and 1 warning. `truss check --fix` fixes 1 of them.
 ```
 
 A constant of a type, such as `Config.quiet`, is written with its type, as
@@ -1542,7 +1597,7 @@ main.truss:7:3: error[patterns.not_covered]: This `match` does not cover every c
   |   ^^^^^^^^^^^^^
   fix: Add an arm for each missing case.
     insert "\n    Empty => todo" at main.truss:9:32
-1 error
+1 error. `truss check --fix` fixes it.
 ```
 
 ```text
@@ -1551,7 +1606,7 @@ main.truss:4:5: error[patterns.unreachable_arm]: Earlier arms already match ever
   |     ^^^^^^^^^^^
   fix: Delete the arm.
     delete "\n    0 => \"none\"" at main.truss:3:15
-1 error
+1 error. `truss check --fix` fixes it.
 ```
 
 #### is
@@ -1920,8 +1975,9 @@ test "reading elements" {
 ```
 
 - `numbers[1]` reads an element, and **the compiler proves the index is in
-  bounds.** In `second`, the `if` above establishes it. Where no fact shows
-  the index is in bounds, `get` returns an `Option` instead.
+  bounds.** In `second`, the `if` above establishes it. When no fact shows
+  that an index is in bounds, check it first with an `if`, or read the
+  element with `get`, which returns `None` for an index out of bounds.
 - `numbers[1..3]` is a slice of the elements at 1 and 2. A slice's bounds are
   proven too. `numbers[..2]` and `numbers[1..]` leave out an end.
 - `truss show List` lists every method of a list, including those of its
@@ -1954,7 +2010,7 @@ test "changing elements" {
 | `for item in items` | Reads an element, as a view |
 | `for item in mut items` | Changes an element in place |
 | `for item in own items` | Takes an element, moving it out of the list |
-| `for entry in items.enumerate()` | Reads `entry.index` and `entry.element` |
+| `for index, item in items.enumerate()` | Reads each element with its position |
 | `for item in items.reversed()` | Reads the elements from the last to the first |
 
 ```truss
@@ -1971,8 +2027,8 @@ fn longest(names: own List[String]) -> String {
 test "iterating" {
   let numbers = [7, 8, 9]
   var positions: List[UInt64] = []
-  for entry in numbers.enumerate() {
-    mut positions.push(entry.index)
+  for index, _ in numbers.enumerate() {
+    mut positions.push(index)
   }
   assert positions == [0, 1, 2]
   var backwards: List[Int64] = []
@@ -2030,10 +2086,10 @@ test "transforming" {
   [Chapter 10](#10-lambdas-and-function-types) covers lambdas.
 - `fold[UInt64](0, ...)` gives the type argument because the literal `0`
   alone would be an `Int64`.
-- **A lambda knows nothing about the element it is given** beyond its type.
-  In `numbers.map(fn(number) { number * 2 })`, the prover cannot show the
-  multiplication fits, so use `saturating_multiply`, or a loop with an
-  invariant ([Chapter 13](#loops)).
+- **A lambda knows that its argument is an element of the collection,** and
+  nothing more. In `numbers.map(fn(number) { number * 2 })`, the
+  multiplication fits only where the caller's `requires` bounds every
+  element. Otherwise use `saturating_multiply`.
 
 ### Strings
 
@@ -2080,7 +2136,7 @@ main.truss:7:19: error[ownership.not_owned]: `name` views a string literal, so i
   fix: Copy it.
     delete "own " at main.truss:7:15
     insert ".copy()" at main.truss:7:23
-1 error
+1 error. `truss check --fix` fixes it.
 ```
 
 #### Building text
@@ -2178,6 +2234,15 @@ fn count_words(text: StringSlice) -> Map[String, UInt64] {
   counts
 }
 
+fn group_by_lowercase(words: Slice[String]) -> Map[String, List[String]] {
+  var groups: Map[String, List[String]] = [:]
+  for word in words {
+    let key = word.to_lowercase()
+    mut groups.get_or_insert(own key, default: []).push(word.copy())
+  }
+  groups
+}
+
 test "maps" {
   var ports = ["http": 80, "https": 443]
   assert ports.get("https") == Some(443)
@@ -2187,14 +2252,15 @@ test "maps" {
   mut ports.remove("http")
   assert ports.length() == 2
   var names: List[String] = []
-  for (key, value) in ports {
-    if value > 100 {
-      mut names.push(key.copy())
+  for name, port in ports {
+    if port > 100 {
+      mut names.push(name.copy())
     }
   }
   assert names == ["https"]
   let counts = count_words("the cat saw the dog")
   assert counts.get("the") == Some(2)
+  assert group_by_lowercase(["Ab", "ab", "c"]).get("ab") == Some(["Ab", "ab"])
 }
 ```
 
@@ -2205,10 +2271,16 @@ test "maps" {
 - `update` changes the value for a key in place, inserting the default
   first when the key is missing. Its lambda takes the value `mut`. Nothing
   bounds how often a word repeats, so the count saturates rather than
-  overflowing. `get_or_insert` lends the value for a key `mut` instead, for
-  the rest of the statement.
-- A `for` loop over a map visits entries, records with the fields `key` and
-  `value`, so `(key, value)` takes them apart.
+  overflowing.
+- `get_or_insert` also inserts the default when the key is missing, then
+  lends the value `mut` for the rest of the statement. `group_by_lowercase`
+  pushes onto each key's list this way, with no index into a separate list.
+  The key is stored in the map, so `key`, a place, is passed `own`; a
+  temporary such as `word.to_lowercase()` written in the call would need no
+  `own`.
+- A `for` loop over a map visits its entries. Their type, `map::Entry`, is a
+  tuple type, so `name, port` binds each key and value. `ports.keys()` and
+  `ports.values()` visit one of the two.
 
 A key type implements `Hash` and `Ordered`, which a record or sum type
 derives. A type without them cannot be a key:
@@ -3022,6 +3094,7 @@ type go inside parentheses:
 | `(fn(Item) uses generic Granted)` | May use whatever the function passed uses, as the next section explains |
 | `(fn(Int64) -> Bool cost time O(1))` | Takes constant time |
 | `(fn(element: Element) -> Output requires items.contains(element))` | May rely on a precondition, which the caller proves at each call |
+| `(fn(count: UInt64) -> UInt64 ensures result < count)` | Promises a postcondition of each result, which the caller may rely on |
 
 **A function type takes only functions whose capabilities its `uses`
 names,** exactly as a function declaration uses only the capabilities it
@@ -3039,29 +3112,22 @@ test "a named function as a value" {
 }
 ```
 
-`truss show` tells you what a callback may do. `filter`'s function type
-names no capability, so `filter` takes only a pure function, while `update`'s
-callback may use whatever its caller can:
+`truss show` tells you what a callback may do and what it is told. `filter`'s
+callback may use whatever its caller can, and may rely on receiving an
+element of the slice. The result holds the elements for which it answered
+`true` ([Callback contracts](#callback-contracts)):
 
 ```text
-$ truss show Slice.filter Map.update
-standard/list/slice/slice.truss:592
-public fn Slice[Element: Copyable].filter(self, keep: fn(Element) -> Bool) -> List[Element]
-  ensures result.length() <= self.length()
-  ensures forall i in 0..result.length() => keep(result.model()[i])
-  cost time O(self.length() * (time(keep) + time(Element.copy)))
-
-standard/map/map.truss:337
-public fn Map[Key: Hash + Ordered, Value].update(
-  mut self,
-  key: own Key,
-  default: own Value,
-  change: (fn(mut Value) uses generic Granted),
-)
+$ truss show Slice.filter
+standard/list/slice/slice.truss:533
+public fn Slice[Element: Copyable].filter(
+  self,
+  keep: (fn(element: Element) -> Bool uses generic Granted requires self.model().contains(element)),
+) -> List[Element]
   uses generic Granted
-  ensures self.contains(key)
-  cost calls(change) == 1
-  cost time O(1 + old(self.length()) * (1 + time(Key.equal)) + time(change))
+  ensures result.length() <= self.length()
+  ensures forall i in 0..result.length() => keep.ensures(result.model()[i], true)
+  cost time O(self.length() * (time(keep) + time(Element.copy)))
 ```
 
 ### Capability parameters
@@ -3140,6 +3206,64 @@ test "a lambda that may run forever" uses RunForever {
 This is *polymorphic termination*: a higher-order function terminates
 exactly when the functions passed to it do, with no promise written for
 either.
+
+### Callback contracts
+
+A parameter's function type can promise its callee something of each
+result, and a callee's contract can say what the function passed returned:
+
+```truss
+fn pick(
+  items: Slice[UInt8],
+  choose: (fn(count: UInt64) -> UInt64 uses generic Granted requires count > 0 ensures result < count),
+) -> UInt8
+  uses generic Granted
+  requires items.length() > 0
+{
+  items[choose(items.length())]
+}
+
+fn mapped(value: Option[Int64], transform: (fn(Int64) -> Int64 uses generic Granted)) -> Option[Int64]
+  uses generic Granted
+  ensures match value {
+    Some(inner) => result is Some(output) && transform.ensures(inner, output)
+    None => result is None
+  }
+{
+  match value {
+    Some(inner) => Some(transform(inner))
+    None => None
+  }
+}
+
+fn halved(value: Option[Int64]) -> Option[Int64]
+  ensures match value {
+    Some(inner) => result is Some(half) && half == inner / 2
+    None => result is None
+  }
+{
+  mapped(value, transform: fn(inner) { inner / 2 })
+}
+
+test "callback contracts" {
+  assert pick([1, 2, 3], choose: fn(count) { count - 1 }) == 3
+  assert halved(Some(4)) == Some(2)
+}
+```
+
+- **The function passed keeps the `ensures` of its parameter's type.** `pick`
+  indexes with `choose`'s result, which the type promises is below `count`.
+  A lambda passed for `choose` proves that, as `fn(count) { count - 1 }`
+  does, and a named function's own `ensures` must imply it.
+- **`transform.ensures(inner, output)` names the postcondition of the
+  function passed:** it holds where that function may return `output` for
+  `inner`. `mapped` promises it of its result, and `halved` learns
+  `half == inner / 2` from its lambda's body.
+- **It is a relation, not a call.** A callback that reads `Random` may answer
+  differently each time, so a specification writes `transform(inner)` only
+  for a pure `transform`.
+- **A lambda states no `requires` or `ensures`:** its body is its contract.
+  A callback that needs a contract of its own is a named function.
 
 ### Returning and storing functions
 
@@ -4357,8 +4481,8 @@ test "a cursor's provided methods" {
   assert Countdown(left: 5).skip(3).to_list() == [1, 0]
   assert Countdown(left: 4).count() == 4
   var sums: List[UInt64] = []
-  for pair in Countdown(left: 2).zip(Countdown(left: 2)) {
-    mut sums.push(pair.first.saturating_add(pair.second))
+  for left, right in Countdown(left: 2).zip(Countdown(left: 2)) {
+    mut sums.push(left.saturating_add(right))
   }
   assert sums == [2, 0]
 }

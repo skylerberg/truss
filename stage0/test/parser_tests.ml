@@ -505,9 +505,25 @@ let () =
   Harness.test "a function type without requires names no input" (fun () ->
       Parse_support.expect_error "fn f(value: fn(item: Item)) {}" ~code:Function_type_names
         ~at:"fn(item");
-  Harness.test "ensures in a function type" (fun () ->
-      Parse_support.expect_error "fn f(value: (fn(item: Item) ensures true)) {}"
-        ~code:Unexpected_token ~at:"ensures");
+  Harness.test "a function type's ensures names its inputs and the callback's result" (fun () ->
+      Parse_support.expect_definition
+        "fn f(choose: (fn(count: UInt64) -> UInt64 requires count > 0 ensures result < count)) {}"
+        "(fn f ((choose: (fn (count: UInt64) -> UInt64 (requires (> count 0)) (ensures (< result \
+         count))))) (block))");
+  Harness.test "ensures in a function type needs every input named" (fun () ->
+      Parse_support.expect_error "fn f(value: (fn(Item) -> Bool ensures result)) {}"
+        ~code:Function_type_names ~at:"fn(Item)");
+  Harness.test "a function type has no decreases" (fun () ->
+      Parse_support.expect_error "fn f(value: (fn(item: Item) decreases 1)) {}"
+        ~code:Unexpected_token ~at:"decreases");
+  Harness.test "ensures on a function type that is not a parameter's" (fun () ->
+      Parse_support.expect_error "type T(visit: (fn(index: UInt64) ensures index < 3))"
+        ~code:Misplaced_callback_contract ~at:"ensures");
+  Harness.test "ensures after a dot names the postcondition of a function passed" (fun () ->
+      Parse_support.expect_definition
+        "fn f(transform: fn(Int64) -> Int64)\n  ensures transform.ensures(1, 2)\n{}"
+        "(fn f ((transform: (fn (Int64) -> Int64))) (ensures (call (. transform ensures) 1 2)) \
+         (block))");
   Harness.test "a clause takes a condition after when, on the next line too" (fun () ->
       Parse_support.expect_definition
         "fn f[Source: Cursor](source: Source)\n\
@@ -549,9 +565,9 @@ let () =
         ~code:Misplaced_condition ~at:"uses");
   Harness.test "requires on a function type that is not a parameter's" (fun () ->
       Parse_support.expect_error "type T(visit: (fn(index: UInt64) requires index < 3))"
-        ~code:Misplaced_requires ~at:"requires";
+        ~code:Misplaced_callback_contract ~at:"requires";
       Parse_support.expect_error "fn f(visits: List[(fn(index: UInt64) requires index < 3)]) {}"
-        ~code:Misplaced_requires ~at:"requires");
+        ~code:Misplaced_callback_contract ~at:"requires");
   Harness.test "generic parameters" (fun () ->
       Parse_support.expect_definition "fn f[Key: Hash + Ordered, count: UInt64]() {}"
         "(fn f[Key: Hash + Ordered, count: UInt64] () (block))");
@@ -756,6 +772,14 @@ let () =
         "(for index : UInt8 (.. 0 10) (block))";
       Parse_support.expect_statement "for (index, element): Indexed[UInt8] in data.enumerate() {}"
         "(for (record index element) : Indexed[UInt8] (call (. data enumerate)) (block))");
+  Harness.test "a tuple pattern is a list of patterns after let, var, and for" (fun () ->
+      Parse_support.expect_statement "for name, count in counts {}"
+        "(for (tuple name count) counts (block))";
+      Parse_support.expect_statement "parallel for _, player in mut players {}"
+        "(parallel-for (tuple _ player) (mut players) (block))";
+      Parse_support.expect_statement "let low, high = span" "(let (tuple low high) span)";
+      Parse_support.expect_statement "var low, Some(high) = span else { return }"
+        "(var (tuple low (Some high)) span (else (block (return))))");
   Harness.test "a loop clause takes a condition after when" (fun () ->
       Parse_support.expect_statement
         "while mut cursor.next() is Some(item)\n\

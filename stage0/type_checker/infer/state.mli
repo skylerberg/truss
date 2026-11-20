@@ -191,6 +191,7 @@ val unify : state -> Types.ty -> Types.ty -> bool
 val unify_as_hint : state -> Types.ty -> Types.ty -> unit
 val normalize_trait : state -> Types.trait_reference -> Types.trait_reference
 val find_evidence : state -> Types.ty -> Types.trait_reference -> Interface.Impls.evidence option
+val elaborate : state -> Syntax.id -> Tables.elaboration -> unit
 
 val decide_property :
   state -> Interface.Properties.property -> Types.ty -> Interface.Properties.decision
@@ -207,3 +208,4 @@ val show : state -> Types.ty -> string
 val describe : state -> Types.ty -> string
 val note_mode_keyword : state -> Syntax.expression -> Syntax.mode -> Syntax.expression -> unit
 val find_local_type : state -> Syntax.name -> Types.ty option
+val find_local : state -> Syntax.name -> local option

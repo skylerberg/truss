@@ -5,11 +5,14 @@ let find_selected_place (context : State.context) selection =
   in
   let rec find_from offset = function
     | [] -> Facts.raise_bug "a selection of no range or element"
-    | [ innermost ] -> Option.map (shift offset) (List.assoc_opt innermost context.indexes)
+    | [ innermost ] ->
+        Option.map
+          (fun (noted : State.noted_place) -> shift offset noted.value)
+          (List.assoc_opt innermost context.indexes)
     | range :: inner -> (
         match List.assoc_opt range context.indexes with
-        | Some (Run (start, _)) -> find_from (Costs.plus offset start) inner
-        | Some (One _) -> Facts.raise_bug "a selection that selects inside an element"
+        | Some { value = Run (start, _); _ } -> find_from (Costs.plus offset start) inner
+        | Some { value = One _; _ } -> Facts.raise_bug "a selection that selects inside an element"
         | None -> None)
   in
   find_from (Logic.int 0) selection
@@ -19,14 +22,17 @@ let read_innermost selection =
   | innermost :: _ -> innermost
   | [] -> Facts.raise_bug "a selection of no range or element"
 
-let note_place (context : State.context) (frame : State.frame) origin place =
-  let mentions (first, second) = List.mem origin first || List.mem origin second in
-  if frame.source.key = Some context.home && List.exists mentions context.disjoint then begin
-    context.indexes <- (origin, place) :: context.indexes;
+let note_place (context : State.context) (frame : State.frame) ~node ~origin value =
+  let mentions (first, second) = List.mem node first || List.mem node second in
+  if Facts.is_home context frame.source && List.exists mentions context.disjoint then begin
+    context.indexes <- (node, { State.origin; value }) :: context.indexes;
+    let quote selection =
+      Facts.quote frame.source (List.assoc (read_innermost selection) context.indexes).origin
+    in
     let outside index start stop = Logic.(less index start ||| less_equal stop index) in
     List.iter
       (fun (first, second) ->
-        if read_innermost first = origin || read_innermost second = origin then
+        if read_innermost first = node || read_innermost second = node then
           match (find_selected_place context first, find_selected_place context second) with
           | Some left, Some right ->
               let apart =
@@ -47,9 +53,9 @@ let note_place (context : State.context) (frame : State.frame) origin place =
                 (Facts.locate context frame.source origin)
                 [
                   Text "`";
-                  Facts.quote frame.source (read_innermost first);
+                  quote first;
                   Text "` and `";
-                  Facts.quote frame.source (read_innermost second);
+                  quote second;
                   Text "` may reach the same elements, which are used together.";
                 ]
                 apart
@@ -230,6 +236,21 @@ let make_callback_contract_frame (frame : State.frame) inputs arguments =
   in
   { frame with locals; self = frame.old_self; makes_obligations = false }
 
+let make_callback_ensures_frame (frame : State.frame) inputs ~entries ~exits ~result =
+  let bind terms =
+    List.fold_left2
+      (fun locals input term -> Locals.add (Core_local input) term locals)
+      frame.old_locals inputs terms
+  in
+  {
+    frame with
+    locals = bind exits;
+    old_locals = bind entries;
+    self = frame.old_self;
+    result = Some result;
+    makes_obligations = false;
+  }
+
 let find_own_callback (context : State.context) local =
   List.find_map
     (fun (parameter, name, callback) -> if parameter = local then Some (name, callback) else None)
@@ -252,7 +273,7 @@ let check_escaping_callback context frame local =
   match
     (find_own_callback context local, Facts.find_local_type context frame (Core_local local))
   with
-  | ( Some (name, ({ inputs; requires = _ :: _ as requires } : Mir.callback)),
+  | ( Some (name, ({ inputs; requires = _ :: _ as requires; _ } : Mir.callback)),
       Some (Types.Function function_type) )
     when List.length inputs = List.length function_type.inputs ->
       let arguments = declare_callback_arguments context frame function_type.inputs in
@@ -300,57 +321,145 @@ let make_callee_substitution (frame : State.frame) (signature : Types.signature)
   Types.make_signature_substitution signature
     (Types.substitute_instantiation frame.substitution instantiation)
 
-let list_callback_facts (context : State.context) frame (invocation : Invocation.t) position known
-    arguments =
+let find_callee_declaration (context : State.context) frame (invocation : Invocation.t) =
+  let read path = Interface.Impls.read_signature context.lookups.interface path in
   match invocation.callee with
-  | Function { path; instantiation } -> (
+  | Function { path; instantiation } ->
+      Option.map
+        (fun signature -> (path, signature, make_callee_substitution frame signature instantiation))
+        (read path)
+  | Trait_method { trait; name; receiver; self_type; instantiation; _ } ->
+      let path = Path.Method { owner = trait.trait; name; receiver } in
+      Option.map
+        (fun signature ->
+          let trait =
+            {
+              trait with
+              trait_arguments =
+                List.map (Types.substitute_argument frame.substitution) trait.trait_arguments;
+            }
+          in
+          ( path,
+            signature,
+            Types.combine_substitutions
+              (Contracts.make_trait_substitution context.lookups trait
+                 (Facts.substitute_type context frame self_type))
+              (make_callee_substitution frame signature instantiation) ))
+        (read path)
+  | Capability_method _ | Intrinsic _ | Indirect _ -> None
+
+let read_callee_callback (context : State.context) frame (invocation : Invocation.t) position known
+    read =
+  match find_callee_declaration context frame invocation with
+  | Some (path, _, substitution) -> (
       match
         Option.bind (Contracts.find_source context.lookups path) (fun (callee, _, _) ->
             Contracts.find_clauses context.lookups path callee)
       with
       | Some clauses -> (
           match List.assoc_opt position clauses.callbacks with
-          | Some { inputs; requires } when List.length inputs = List.length arguments ->
-              let substitution =
-                match Interface.Impls.read_signature context.lookups.interface path with
-                | Some (signature : Types.signature) ->
-                    make_callee_substitution frame signature instantiation
-                | None -> Types.no_substitution
-              in
-              let inside = bind_arguments frame clauses ~arguments:known ~substitution in
-              let inside =
-                {
-                  inside with
-                  locals =
-                    List.fold_left2
-                      (fun locals local term -> Locals.add (Core_local local) term locals)
-                      inside.locals inputs arguments;
-                }
-              in
-              List.map (fun clause -> snd (read_specification context inside clause)) requires
-          | _ -> [])
+          | Some callback ->
+              read clauses.callee
+                (bind_arguments frame clauses ~arguments:known ~substitution)
+                callback
+          | None -> [])
       | None -> [])
-  | _ -> []
+  | None -> []
+
+let list_callback_facts context frame invocation position known arguments =
+  read_callee_callback context frame invocation position known
+    (fun _ inside ({ inputs; requires; _ } : Mir.callback) ->
+      if List.length inputs <> List.length arguments then []
+      else
+        let inside = make_callback_contract_frame inside inputs arguments in
+        List.map (fun clause -> snd (read_specification context inside clause)) requires)
+
+let list_callback_promises context frame invocation position known ~entries ~exits ~result =
+  read_callee_callback context frame invocation position known
+    (fun callee inside ({ inputs; ensures; _ } : Mir.callback) ->
+      if List.length inputs <> List.length entries then []
+      else
+        let inside = make_callback_ensures_frame inside inputs ~entries ~exits ~result in
+        List.map
+          (fun (clause : Mir.formula) ->
+            (Facts.quote callee clause.origin, snd (read_specification context inside clause)))
+          ensures)
+
+let assume_own_callback_ensures context frame local ~entries ~exits ~result =
+  match find_own_callback context local with
+  | Some (_, ({ inputs; ensures; _ } : Mir.callback)) when List.length inputs = List.length entries
+    ->
+      let inside = make_callback_ensures_frame frame inputs ~entries ~exits ~result in
+      List.iter
+        (fun clause -> Facts.assume context frame (snd (read_specification context inside clause)))
+        ensures
+  | _ -> ()
+
+let declare_callback_results context frame (function_type : Types.function_type) entries =
+  let exits =
+    List.map2
+      (fun ((mode : Language.Mode.t), input) entry ->
+        match mode with
+        | Mut ->
+            let input = Facts.substitute_type context frame input in
+            let exit_ = Facts.arrive context frame "changed" input in
+            assume_valid context frame input exit_;
+            exit_
+        | Read | Own -> entry)
+      function_type.inputs entries
+  in
+  let output = Facts.substitute_type context frame function_type.output in
+  let result = Facts.arrive context frame "result" output in
+  assume_valid context frame output result;
+  (exits, result)
 
 let find_parameter_type (context : State.context) frame (invocation : Invocation.t) index =
-  match invocation.callee with
-  | Function { path; instantiation } -> (
-      match Interface.Impls.read_signature context.lookups.interface path with
-      | Some (signature : Types.signature) ->
-          let types =
-            (match signature.receiver with Some (_, ty) -> [ ty ] | None -> [])
-            @ List.map (fun (info : Types.parameter_info) -> info.type_) signature.parameters
-          in
-          Option.map
-            (Types.substitute (make_callee_substitution frame signature instantiation))
-            (List.nth_opt types index)
-      | None -> None)
-  | _ -> None
+  Option.bind (find_callee_declaration context frame invocation)
+    (fun (_, (signature : Types.signature), substitution) ->
+      let types =
+        (match signature.receiver with Some (_, ty) -> [ ty ] | None -> [])
+        @ List.map (fun (info : Types.parameter_info) -> info.type_) signature.parameters
+      in
+      Option.map (Types.substitute substitution) (List.nth_opt types index))
+
+let has_callback_promises context frame invocation position =
+  read_callee_callback context frame invocation position []
+    (fun _ _ ({ ensures; _ } : Mir.callback) -> ensures)
+  <> []
+
+let check_callback_promises context frame ~location (invocation : Invocation.t)
+    (passed : State.passed) ~described ~assume values =
+  match find_parameter_type context frame invocation passed.position with
+  | Some (Types.Function expected)
+    when has_callback_promises context frame invocation passed.position ->
+      let entries = declare_callback_arguments context frame expected.inputs in
+      let known = List.map (fun (passed : State.passed) -> (passed.position, passed.term)) values in
+      let exits, result = declare_callback_results context frame expected entries in
+      let at_call =
+        Facts.restrict frame
+          (Logic.conjunction
+             (list_callback_facts context frame invocation passed.position known entries))
+      in
+      assume at_call expected ~entries ~exits ~result;
+      List.iter
+        (fun (quoted, promise) ->
+          Facts.oblige context at_call Ensures location
+            [
+              Text "This argument's parameter promises `";
+              quoted;
+              Text ("` of each result of the function passed for it, " ^ described);
+            ]
+            promise)
+        (list_callback_promises context frame invocation passed.position known ~entries ~exits
+           ~result)
+  | _ -> ()
+
+let assume_nothing _ _ ~entries:_ ~exits:_ ~result:_ = ()
 
 let check_forwarded_callback context frame (site : Invocation.site) (invocation : Invocation.t)
     (passed : State.passed) local values =
-  match find_own_callback context local with
-  | Some (name, ({ inputs; requires = _ :: _ as requires } : Mir.callback)) -> (
+  (match find_own_callback context local with
+  | Some (name, ({ inputs; requires = _ :: _ as requires; _ } : Mir.callback)) -> (
       match find_parameter_type context frame invocation passed.position with
       | Some (Types.Function expected) when List.length expected.inputs = List.length inputs ->
           let arguments = declare_callback_arguments context frame expected.inputs in
@@ -365,4 +474,20 @@ let check_forwarded_callback context frame (site : Invocation.site) (invocation 
                  (list_callback_facts context frame invocation passed.position known arguments))
             ~why:"is passed for a parameter that may not promise its `requires`"
       | _ -> check_escaping_callback context frame local)
-  | _ -> ()
+  | _ -> ());
+  let location = Facts.locate context frame.source site.origin in
+  match find_own_callback context local with
+  | Some (name, _) ->
+      check_callback_promises context frame ~location invocation passed
+        ~described:(Printf.sprintf "and the type of `%s` may not promise it." name)
+        ~assume:(fun at_call _ -> assume_own_callback_ensures context at_call local)
+        values
+  | None ->
+      check_callback_promises context frame ~location invocation passed
+        ~described:
+          (match local with
+          | Declared { name; _ } ->
+              Printf.sprintf "and the type of `%s` promises nothing of its results." name
+          | Self | Trait_parameter _ | Synthetic _ ->
+              "and nothing promises it of the function passed here.")
+        ~assume:assume_nothing values

@@ -10,6 +10,8 @@ val allocate_local : t -> Tree.local_kind -> Types.ty -> Core.origin -> Tree.loc
 val lookup_local_info : t -> Tree.local -> Tree.local_info
 val allocate_temporary : t -> Types.ty -> Core.origin -> Tree.local
 val add_temporary : t -> Tree.local -> unit
+val add_lent_part : t -> Tree.local -> unit
+val note_may_alias : t -> Tree.local -> unit
 val make_local_place : Tree.local -> Tree.place
 val find_source : t -> Core.local -> Tree.local option
 val add_source : t -> Core.local -> Tree.local -> unit
@@ -49,21 +51,13 @@ val run_in_block_scope : t -> scope -> Core.origin -> (unit -> 'a) -> 'a
 val run_in_scope : t -> Core.origin -> (unit -> 'a) -> 'a
 val run_in_statement : t -> Core.origin -> (unit -> 'a) -> 'a
 val run_in_value_scope : t -> Core.origin -> (unit -> Tree.operand option) -> Tree.operand option
-val run_in_arm_scope : t -> (scope -> 'a) -> 'a
+val run_in_condition : t -> scope -> (unit -> 'a) -> 'a
+val run_in_scrutinee_frame : t -> (unit -> 'a) -> 'a * scope
+val make_arm_scope : scrutinee:scope -> scope
+val run_in_guarded_block : t -> scope -> Core.origin -> (unit -> 'a) -> 'a
 val end_scope : t -> scope -> Core.origin -> unit
-val make_dead_statements : scope -> Core.origin -> Tree.statement list
-
-type lowered_condition = {
-  value : Tree.operand option;
-  ended_if_true : scope;
-  ended_if_false : scope;
-  block_scope_if_true : scope;
-}
-
-val run_in_condition_scope :
-  binds_lent_part:bool -> t -> (unit -> Tree.operand option) -> lowered_condition
-
-val run_in_guard_scope : t -> Core.origin -> (unit -> Tree.operand option) -> Tree.operand option
+val list_scope_ends : scope -> Core.origin -> Tree.statement list
+val list_unmatched_ends : scope -> scrutinee:scope -> Core.origin -> Tree.statement list
 val run_in_old : t -> (unit -> 'a) -> 'a
 val reads_entry : t -> Core.local -> bool
 val run_binding_to_statement : t -> (unit -> 'a) -> 'a
@@ -73,8 +67,8 @@ val with_compound_target : t -> Tree.place -> (unit -> 'a) -> 'a
 val compound_target : t -> Tree.place option
 val run_in_loop : t -> (unit -> unit) -> unit
 val run_in_task : t -> Tree.task -> (unit -> 'a) -> 'a
-val start_group : t -> Core.origin -> Core.origin -> unit
-val resume_group : t -> Core.origin -> Core.origin -> unit
+val start_group : t -> Core.id -> Core.origin -> unit
+val resume_group : t -> Core.id -> Core.origin -> unit
 val return_ : t -> Tree.operand option -> Core.origin -> unit
 val break_ : t -> Core.origin -> unit
 val continue_ : t -> Core.origin -> unit

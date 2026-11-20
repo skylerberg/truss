@@ -12,7 +12,7 @@ public opaque type Map[Key: Hash + Ordered, Value](keys: List[Key], values: List
   cost potential if 16 * keys.length() > index.slots.length() { 16 * (16 * keys.length() - index.slots.length()) } else { 0 }
   derives Copyable
 
-public type Entry[Key, Value](key: Key, value: Value)
+public tuple type Entry[Key, Value](key: Key, value: Value)
   derives Equal
 
 public trait FromEntries {
@@ -907,15 +907,17 @@ fn swap_pair[Key: Equal, Value](keys: mut List[Key], values: mut List[Value], fi
 fn compact[Key: Equal, Value](
   keys: mut List[Key],
   values: mut List[Value],
-  keep: fn(Key, Value) -> Bool,
+  keep: (fn(key: Key, value: Value) -> Bool uses generic Granted
+    requires exists i in 0..keys.length() => identical(keys.model()[i], key) && identical(values.model()[i], value)),
 )
+  uses generic Granted
   requires keys.length() == values.length()
   requires forall i in 0..keys.length() => forall j in 0..keys.length() =>
     i < j ==> !(keys.model()[i] == keys.model()[j])
   ensures keys.length() == values.length() && keys.length() <= old(keys.length())
   ensures forall i in 0..keys.length() => forall j in 0..keys.length() =>
     i < j ==> !(keys.model()[i] == keys.model()[j])
-  ensures forall i in 0..keys.length() => keep(keys.model()[i], values.model()[i])
+  ensures forall i in 0..keys.length() => keep.ensures(keys.model()[i], values.model()[i], true)
   cost time O(1 + old(keys.length()) * (1 + time(keep)))
 {
   let count = keys.length()
@@ -925,7 +927,9 @@ fn compact[Key: Equal, Value](
     invariant retained <= position
     invariant forall i in 0..count => forall j in 0..count =>
       i < j ==> !(keys.model()[i] == keys.model()[j])
-    invariant forall i in 0..retained => keep(keys.model()[i], values.model()[i])
+    invariant forall i in 0..retained => keep.ensures(keys.model()[i], values.model()[i], true)
+    invariant forall i in position..count =>
+      identical(keys.model()[i], old(keys.model())[i]) && identical(values.model()[i], old(values.model())[i])
     cost time O(position * (1 + time(keep)))
   {
     if keep(keys[position], values[position]) {
@@ -937,14 +941,79 @@ fn compact[Key: Equal, Value](
   mut values.truncate(retained)
 }
 
-public fn Map[Key: Hash + Ordered, Value].retain(mut self, keep: fn(Key, Value) -> Bool)
-  ensures self.length() <= old(self.length())
-  ensures forall key: Key => self.model().contains_key(key) ==> keep(key, self.model().get(key))
-  ensures forall i in 0..self.keys.length() => keep(self.keys.model()[i], self.values.model()[i])
+fn compact_keys[Key: Equal, Value](
+  keys: mut List[Key],
+  values: mut List[Value],
+  keep: (fn(key: Key) -> Bool uses generic Granted requires exists i in 0..keys.length() => identical(keys.model()[i], key)),
+)
+  uses generic Granted
+  requires keys.length() == values.length()
+  requires forall i in 0..keys.length() => forall j in 0..keys.length() =>
+    i < j ==> !(keys.model()[i] == keys.model()[j])
+  ensures keys.length() == values.length() && keys.length() <= old(keys.length())
+  ensures forall i in 0..keys.length() => forall j in 0..keys.length() =>
+    i < j ==> !(keys.model()[i] == keys.model()[j])
+  ensures forall i in 0..keys.length() => keep.ensures(keys.model()[i], true)
+  cost time O(1 + old(keys.length()) * (1 + time(keep)))
+{
+  let count = keys.length()
+  var retained: UInt64 = 0
+  for position in 0..count
+    invariant keys.length() == count && values.length() == count
+    invariant retained <= position
+    invariant forall i in 0..count => forall j in 0..count =>
+      i < j ==> !(keys.model()[i] == keys.model()[j])
+    invariant forall i in 0..retained => keep.ensures(keys.model()[i], true)
+    invariant forall i in position..count => identical(keys.model()[i], old(keys.model())[i])
+    cost time O(position * (1 + time(keep)))
+  {
+    if keep(keys[position]) {
+      swap_pair(mut keys, values: mut values, first: retained, second: position)
+      retained += 1
+    }
+  }
+  mut keys.truncate(retained)
+  mut values.truncate(retained)
+}
+
+internal fn Map[Key: Hash + Ordered, Value].retain_keys(
+  mut self,
+  keep: (fn(key: Key) -> Bool uses generic Granted
+    requires exists i in 0..self.keys.length() => identical(self.keys.model()[i], key)),
+)
+  uses generic Granted
+  ensures self.keys.length() <= old(self.keys.length())
+  ensures forall i in 0..self.keys.length() => keep.ensures(self.keys.model()[i], true)
   cost time O(16 + old(self.length()) * (16 + time(keep) + time(Key.hash)
     + (1 + log(old(self.length()))) * (1 + time(Key.compare))))
 {
   let previous = exchange(mut self, value: Map(keys: [], values: [], index: HashIndex(places: [], slots: [], overflow: Tree.Leaf)))
+  var keys = own previous.keys
+  var values = own previous.values
+  let count = keys.length()
+  compact_keys(mut keys, values: mut values, keep: keep)
+  let index = build_index(keys.slice(), bound: count)
+  self = Map(keys: own keys, values: own values, index: own index)
+}
+
+public fn Map[Key: Hash + Ordered, Value].retain(
+  mut self,
+  keep: (fn(key: Key, value: Value) -> Bool uses generic Granted
+    requires self.model().contains_key(key) && identical(self.model().get(key), value)),
+)
+  uses generic Granted
+  ensures self.length() <= old(self.length())
+  ensures forall key: Key => self.model().contains_key(key) ==> keep.ensures(key, self.model().get(key), true)
+  cost time O(16 + old(self.length()) * (16 + time(keep) + time(Key.hash)
+    + (1 + log(old(self.length()))) * (1 + time(Key.compare))))
+{
+  proof {
+    assert self.length() == self.keys.length()
+  }
+  let previous = exchange(mut self, value: Map(keys: [], values: [], index: HashIndex(places: [], slots: [], overflow: Tree.Leaf)))
+  proof {
+    modeled_keys(previous)
+  }
   var keys = own previous.keys
   var values = own previous.values
   let count = keys.length()

@@ -27,8 +27,11 @@ let () =
     "  var part = items.slice()\n  take(mut items, view: part)\n" "ownership.conflicting_loan";
   expect_rejected "a view cannot be passed before the place that it views is passed `mut`"
     "  var part = items.slice()\n  give(part, items: mut items)\n" "ownership.conflicting_loan";
-  expect_rejected "a slice of a place cannot be passed beside the place passed `mut`"
-    "  take(mut items, view: items[..1])\n" "ownership.conflicting_loan";
+  Harness.test "a slice of a place cannot be passed beside the place passed `mut`" (fun () ->
+      expect_one_diagnostic
+        (functions ^ "fn f(items: mut List[Int64]) {\n  take(mut items, view: items[..1])\n}\n")
+        "ownership.conflicting_loan"
+        ~says:"`items` is passed `mut` to this call, so the call cannot also use `items[...]`.");
   Harness.test
     "a view of another place, and a value copied out of the place, can be passed beside the place \
      passed `mut`" (fun () ->
@@ -605,8 +608,12 @@ let () =
      Fixtures.Ownership.field_moved_out_of_mut_self "ownership.not_reinitialized";
    expect_accepted "a place lent `mut` can be moved out whole and reinitialized"
      Fixtures.Ownership.mut_slot_moved_out_and_reset;
-   expect_rejected "a place lent `mut` that is moved out whole must be reinitialized"
-     Fixtures.Ownership.mut_holder_moved_out_whole "ownership.not_reinitialized";
+   Harness.test
+     "a place lent `mut` that is moved out whole must be reinitialized by the body's last \
+      expression" (fun () ->
+       expect_one_diagnostic
+         (holder ^ Fixtures.Ownership.mut_holder_moved_out_whole)
+         "ownership.not_reinitialized" ~at:("moved", 2));
    expect_rejected "a place lent `mut` must be reinitialized on every path"
      Fixtures.Ownership.mut_holder_reinitialized_on_one_path "ownership.not_reinitialized";
    expect_rejected "a place lent `mut` cannot be used while it is moved out"
@@ -869,6 +876,33 @@ let () =
       expect_one_diagnostic Fixtures.Ownership.is_on_a_parameter_kept "ownership.not_owned")
 
 let () =
+  Harness.test "a part moved out of a match on an owned parameter is fixed with `match own`"
+    (fun () ->
+      expect_one_diagnostic ~says:"`name` views part of `entry`, so it cannot be moved"
+        Fixtures.Ownership.match_on_an_own_parameter_moved_out "ownership.not_owned"
+        ~fixed:Fixtures.Ownership.match_on_an_own_parameter_moved_out_fixed);
+  Harness.test "a part moved out of an is on an owned parameter is fixed with `own`" (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.is_on_an_own_parameter_moved_out
+        "ownership.not_owned" ~fixed:Fixtures.Ownership.is_on_an_own_parameter_moved_out_fixed);
+  Harness.test "a part returned from a match on an owned parameter is fixed with `match own`"
+    (fun () ->
+      expect_one_diagnostic ~says:"`text` views part of `present`"
+        Fixtures.Ownership.match_binding_of_an_own_parameter_returned "ownership.needs_owned"
+        ~fixed:Fixtures.Ownership.match_binding_of_an_own_parameter_returned_fixed);
+  Harness.test "a `let` of an owned parameter that is moved on is fixed with `own`" (fun () ->
+      expect_one_diagnostic ~says:"`other` views `name`, so it cannot be moved"
+        Fixtures.Ownership.let_of_an_own_parameter_moved_out "ownership.not_owned"
+        ~fixed:Fixtures.Ownership.let_of_an_own_parameter_moved_out_fixed);
+  Harness.test "a part moved out of a match on a read-only parameter is fixed with a copy"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.is_on_a_parameter_kept "ownership.not_owned"
+        ~fixed:Fixtures.Ownership.is_on_a_parameter_kept_fixed);
+  Harness.test "a part of a scrutinee that a lambda captures is fixed with a copy" (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.match_on_a_captured_own_parameter_returned
+        "ownership.needs_owned"
+        ~fixed:Fixtures.Ownership.match_on_a_captured_own_parameter_returned_fixed)
+
+let () =
   Harness.test "a `String` cannot be mutated while a view that its view's method returned is live"
     (fun () ->
       expect_one_diagnostic Fixtures.Ownership.string_mutated_while_its_trimmed_view_is_live
@@ -942,16 +976,24 @@ let () =
     (fun () -> expect_fine Fixtures.Ownership.is_binding_before_a_failing_and);
   Harness.test "the else-block may mutate the lender" (fun () ->
       expect_fine Fixtures.Ownership.else_block_mutating_the_lender);
+  Harness.test "a lambda's parameter in the condition does not alias the lent part" (fun () ->
+      expect_fine Fixtures.Ownership.then_block_mutating_the_lender_after_a_lambda_in_the_condition);
   Harness.test
     "the then-block cannot mutate the lender while a name the condition binds aliases the lent part"
     (fun () ->
       expect_one_diagnostic Fixtures.Ownership.then_block_mutating_the_lender
-        "ownership.mutated_while_viewed");
+        "ownership.mutated_while_viewed"
+        ~says:
+          "`names` cannot be passed `mut` while it is lent to a lending call until `name` goes out \
+           of scope.");
   Harness.test
     "a `while` body cannot mutate the lender while a name the condition binds aliases the lent part"
     (fun () ->
       expect_one_diagnostic Fixtures.Ownership.while_body_mutating_the_lender
-        "ownership.mutated_while_viewed");
+        "ownership.mutated_while_viewed"
+        ~says:
+          "`names` cannot be passed `mut` while it is lent to a lending call until `name` goes out \
+           of scope.");
   Harness.test
     "a name an `if` condition binds may alias the lent part when the `if` is the function's result"
     (fun () -> expect_fine Fixtures.Ownership.if_as_the_result_aliasing_the_lent_part);
@@ -963,6 +1005,35 @@ let () =
      binds aliases the lent part" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.then_block_of_the_result_mutating_the_lender
         "ownership.mutated_while_viewed")
+
+let () =
+  Harness.test "a `match` arm may mutate the lender when it binds only copies" (fun () ->
+      expect_fine Fixtures.Ownership.arm_mutating_the_lender_when_it_binds_only_copies);
+  Harness.test "a `match` arm that binds no name may mutate the lender" (fun () ->
+      expect_fine Fixtures.Ownership.arm_binding_nothing_mutating_the_lender);
+  Harness.test "a `match` arm cannot mutate the lender while a name it binds aliases the lent part"
+    (fun () ->
+      expect_one_diagnostic
+        Fixtures.Ownership.arm_mutating_the_lender_while_a_name_aliases_the_lent_part
+        "ownership.mutated_while_viewed"
+        ~says:
+          "`names` cannot be passed `mut` while it is lent to a lending call until `name` goes out \
+           of scope.");
+  Harness.test "an arm may mutate the lender when its guard binds only copies" (fun () ->
+      expect_fine Fixtures.Ownership.arm_mutating_the_lender_when_its_guard_binds_only_copies);
+  Harness.test "the arm after a failed guard may mutate the guard's lender" (fun () ->
+      expect_fine Fixtures.Ownership.arm_after_a_failed_guard_mutating_the_guards_lender);
+  Harness.test "a name that a guard binds may alias the lent part until the arm ends" (fun () ->
+      expect_fine Fixtures.Ownership.guard_binding_a_name_that_aliases_the_lent_part);
+  Harness.test "an arm cannot mutate the lender while a name its guard binds aliases the lent part"
+    (fun () ->
+      expect_one_diagnostic
+        Fixtures.Ownership
+        .arm_mutating_the_lender_while_a_name_its_guard_binds_aliases_the_lent_part
+        "ownership.mutated_while_viewed"
+        ~says:
+          "`names` cannot be passed `mut` while it is lent to a lending call until `name` goes out \
+           of scope.")
 
 let () =
   List.iter
@@ -1115,7 +1186,10 @@ let () =
     (fun () ->
       expect_one_diagnostic
         (tally ^ Fixtures.Ownership.tally_element_assigned_from_another)
-        "ownership.mutated_while_viewed");
+        "ownership.mutated_while_viewed"
+        ~says:
+          "`tally` cannot be passed `mut` while it is lent to a lending call until this statement \
+           ends.");
   Harness.test "two parts of a place are lent read-only in one statement" (fun () ->
       expect_fine (tally ^ Fixtures.Ownership.sum_of_two_tally_indexes));
   Harness.test "a lending call's loan ends with its statement" (fun () ->

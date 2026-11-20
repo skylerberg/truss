@@ -20,7 +20,7 @@ type checked = Body.checked = {
   form : Core.t;
   tables : tables;
   used_packages : Path.package list;
-  places_without_keyword : (Core.origin * Language.Mode.t) list;
+  places_without_keyword : (Syntax.id * Language.Mode.t) list;
   mode_keywords : Core.mode_keyword list;
   requires_run_forever : bool;
 }
@@ -56,3 +56,7 @@ let show_resolution = Tables.show_resolution
 let statement_diverges (tables : tables) =
   State.diverges ~is_never:(fun (value : Syntax.expression) ->
       match tables.types.(value.id) with Some Types.Never -> true | _ -> false)
+
+module For_testing = struct
+  let is_written_expression = Form.For_testing.is_written_expression
+end

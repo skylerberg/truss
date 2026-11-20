@@ -23,7 +23,8 @@ let extract_parameter (body : Mir.Graph.body) local =
 let read_spans state = (Lowering.require_written state).spans
 
 let locate_site state (origin : Core.origin) =
-  Lowering.make_site state (Source.Definition_span.locate (read_spans state) origin)
+  Lowering.make_site state
+    (Source.Definition_span.locate (read_spans state) (Core_walk.locate_origin origin))
 
 let find_reported_site (state : Lowering.state) : Lowered.operand option =
   match state.frame.mir with
@@ -186,9 +187,9 @@ let rec lower_place state (written : Mir.place) : Lowered.place =
       match projection with
       | Field field -> Lowered.project place (Field field)
       | Variant_field { variant; field } -> Lowered.project place (Variant_field { variant; field })
-      | Element { index; sequence; origin } ->
+      | Element { index; sequence; origin; _ } ->
           lower_element state place (lower_index state index) ~sequence ~origin
-      | Range { start; stop; sequence; origin } ->
+      | Range { start; stop; sequence; origin; _ } ->
           lower_range state place (lower_index state start)
             (Option.map (lower_index state) stop)
             ~sequence ~origin)

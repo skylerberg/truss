@@ -1,0 +1,12 @@
+type Entry =
+  | Empty
+  | Named(name: String, count: UInt64)
+
+fn f(entry: own Entry, present: Option[UInt64]) -> Option[String] {
+  present.map(fn(_) {
+    match entry {
+      Empty => ""
+      Named(name, ..) => name.copy()
+    }
+  })
+}

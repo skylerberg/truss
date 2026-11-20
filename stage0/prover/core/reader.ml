@@ -1,7 +1,7 @@
 let ( let* ) = Option.bind
 
 type loop_exits = {
-  loop : Core.origin;
+  loop : Core.id;
   mutable breaks : State.frame list;
   mutable ends : State.frame list;
 }
@@ -9,6 +9,7 @@ type loop_exits = {
 type run = {
   infos : Mir.local_info array;
   changed_in_place : (Mir.local, unit) Hashtbl.t;
+  held_callbacks : (Mir.local, Core.local) Hashtbl.t;
   lambdas : Mir.body array;
   mutable loops : loop_exits list;
   mutable cancelled : (Mir.task * State.frame list ref) list;
@@ -123,10 +124,13 @@ let read_root context frame run (root : Mir.root) =
           | Some self -> self
           | None -> Facts.raise_bug "`%s` reads `self` outside a method" frame.source.name)
       | key -> (
-          (match key with
-          | Core_local core when frame.makes_obligations && not context.reading_callback ->
-              Validity.check_escaping_callback context frame core
-          | Core_local _ | Mir_local _ -> ());
+          (if frame.makes_obligations && not context.reading_callback then
+             match key with
+             | Core_local core -> Validity.check_escaping_callback context frame core
+             | Mir_local _ -> (
+                 match Hashtbl.find_opt run.held_callbacks local with
+                 | Some core -> Validity.check_escaping_callback context frame core
+                 | None -> ()));
           match Locals.find_opt key frame.locals with
           | Some term -> term
           | None ->
@@ -153,13 +157,13 @@ let rec read_resolved context frame run (place : Mir.place) =
           match projection with
           | Field field -> project_field None field
           | Variant_field { variant; field } -> project_field (Some variant) field
-          | Element { index; origin; _ } ->
+          | Element { node; index; origin; _ } ->
               Intrinsics.read_sequence_element context frame base_type term
                 (read_index context frame run index)
-                ~origin
-          | Range { start; stop; origin; _ } ->
+                ~node ~origin
+          | Range { node; start; stop; origin; _ } ->
               let _, viewed, _, _ =
-                Intrinsics.apply_slice context frame
+                Intrinsics.apply_slice context frame ~node
                   { origin; type_ = compute_place_type context frame run projected }
                   ~base_type ~collection:term
                   ~low:(read_index context frame run start)
@@ -226,10 +230,10 @@ let write_resolved context frame run (place : Mir.place) new_value =
         match projection with
         | Field field -> replace_part None field
         | Variant_field { variant; field } -> replace_part (Some variant) field
-        | Element { index; origin; _ } ->
+        | Element { node; index; origin; _ } ->
             let index = read_index context frame run index in
             let replaced =
-              Intrinsics.read_sequence_element context frame base_type whole index ~origin
+              Intrinsics.read_sequence_element context frame base_type whole index ~node ~origin
             in
             let element = rebuilt replaced in
             (match rest with
@@ -244,9 +248,9 @@ let write_resolved context frame run (place : Mir.place) new_value =
             Amounts.assume_element_potential_change context frame base_type ~before:whole ~after
               ~replaced ~written:element;
             after
-        | Range { start; stop; origin; _ } ->
+        | Range { node; start; stop; origin; _ } ->
             let _, viewed, start, stop =
-              Intrinsics.apply_slice context frame { origin; type_ = part_type } ~base_type
+              Intrinsics.apply_slice context frame ~node { origin; type_ = part_type } ~base_type
                 ~collection:whole
                 ~low:(read_index context frame run start)
                 ~high:(Option.map (read_index context frame run) stop)
@@ -366,7 +370,7 @@ let compute_changes ?(also = []) run (frame : State.frame) (blocks : Mir.block l
             Option.iter (fun (_, local) -> note { root = Local local; projections = [] }) returned
         | Basic
             ( Live _ | Dead _ | Assert _ | Echo _ | Loan_start _ | Loan_end _ | Ghost_assert _
-            | Matched _ | Proof _ )
+            | Path_note _ | Proof _ )
         | Assert_by_bit_vector _ | While _ | Fork _ | Resume _
         | For { iteration = Range _; _ }
         | Yield { mode = Read | Own; _ }
@@ -438,13 +442,30 @@ let make_passed_place context run place =
         | Constant _ | Literal _ -> ());
   }
 
+let find_held_callback context run held (value : Mir.rvalue) =
+  let read_whole (operand : Mir.operand) =
+    match operand with
+    | Use { place = { root = Local local; projections = [] }; _ }
+    | Borrow { place = { root = Local local; projections = [] }; _ } -> (
+        match run.infos.(local).kind with
+        | Source { local = core; _ } when Option.is_some (Validity.find_own_callback context core)
+          ->
+            Some core
+        | Source _ | Temporary | Lent _ -> Hashtbl.find_opt run.held_callbacks local)
+    | Use _ | Borrow _ | Take _ | Immediate _ -> None
+  in
+  match (run.infos.(held).kind, value) with
+  | (Temporary | Lent _), (Operand operand | Convert { conversion = Widen; value = operand; _ }) ->
+      read_whole operand
+  | _ -> None
+
 let classify_shape run ?function_ (value : Mir.operand) : Invocation.shape =
   match (function_, find_whole_local value) with
   | Some (Mir.Function_reference { path; origin }), _ -> Named_function { origin; path }
   | (Some (Lambda_expression _) | None), Some local -> (
-      match run.infos.(local).kind with
-      | Source { local = core; _ } -> Forwarded core
-      | Temporary | Lent _ -> Other)
+      match (run.infos.(local).kind, Hashtbl.find_opt run.held_callbacks local) with
+      | Source { local = core; _ }, _ | (Temporary | Lent _), Some core -> Forwarded core
+      | (Temporary | Lent _), None -> Other)
   | (Some (Lambda_expression _) | None), None -> Other
 
 let find_argument_place context run (mode : Language.Mode.t) (value : Mir.operand) =
@@ -627,15 +648,19 @@ let bind_parts context (frame : State.frame) run =
       | _ -> frame)
     frame.aliases frame
 
-let note_decision (context : State.context) (frame : State.frame) origin test =
-  if frame.makes_obligations && frame.source.key = Some context.home then begin
-    let text = Facts.quote_origin context frame origin in
-    context.decisions <-
-      ( Printf.sprintf "`%s` is true" text,
-        Some (Printf.sprintf "`%s` is false" text),
-        frame.condition,
-        test )
-      :: context.decisions
+let note_path (context : State.context) (frame : State.frame) (note : Mir.path_note) =
+  if frame.makes_obligations && Facts.is_home context frame.source then begin
+    let quote = Facts.quote_origin context frame in
+    let text =
+      match note with
+      | Arm_taken patterns ->
+          Printf.sprintf "the arm `%s` is taken" (String.concat ", " (List.map quote patterns))
+      | Condition_holds { condition; holds } -> Printf.sprintf "`%s` is %b" (quote condition) holds
+      | Else_runs pattern ->
+          Printf.sprintf "`%s` does not match, so the `else` runs" (quote pattern)
+      | Returns_early tried -> Printf.sprintf "`%s` returns early" (quote tried)
+    in
+    context.path_notes <- (text, frame.condition) :: context.path_notes
   end
 
 let refresh_place context frame ty (place : State.passed_place) =
@@ -765,6 +790,7 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
       Lambdas.translate_lambda context frame ~site
         { code = run.lambdas.(body); lambdas = run.lambdas }
         ~list_facts:(fun _ -> [])
+        ~list_promises:(fun ~entries:_ ~exits:_ ~result:_ -> [])
   | Specification Result -> (
       match frame.result with
       | Some result -> (frame, result)
@@ -785,8 +811,7 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
   | Specification Yielded -> (
       match (frame.yielded, frame.yielded_so_far) with
       | Some yielded, _ -> (frame, yielded)
-      | None, Some yielded_so_far when frame.source.key = Some context.home ->
-          (frame, yielded_so_far)
+      | None, Some yielded_so_far when Facts.is_home context frame.source -> (frame, yielded_so_far)
       | _ -> Facts.raise_bug "`%s` reads `yielded` outside a lending method" frame.source.name)
   | Specification (Identical (first, second)) ->
       let first_value = translate_operand first and second_value = translate_operand second in
@@ -885,13 +910,10 @@ and merge_alternatives context ~outer ~condition (entered, read) (entered_otherw
 
 and read_choice context frame run (choice : Mir.choice) =
   match choice with
-  | Conditional { condition; then_; else_; if_condition } -> (
+  | Conditional { condition; then_; else_ } -> (
       match read_block context frame run condition with
       | None -> None
       | Some (frame, test) ->
-          (match if_condition with
-          | Some origin -> note_decision context frame origin test
-          | None -> ());
           let entered_then = Facts.restrict frame test
           and entered_else = Facts.restrict frame (Logic.not_ test) in
           merge_alternatives context ~outer:frame ~condition:test
@@ -1077,7 +1099,7 @@ and read_statement context frame run (statement : Mir.statement) =
             | None -> (None, exits)
             | Some frame ->
                 let cancelled = ref [] in
-                run.cancelled <- (Mir.Branch { block = fork; index }, cancelled) :: run.cancelled;
+                run.cancelled <- (Mir.Branch { fork; index }, cancelled) :: run.cancelled;
                 let ended = read_statements context frame run branch.statements in
                 run.cancelled <- List.tl run.cancelled;
                 (ended, exits @ List.map (fun exited -> (index, exited)) (List.rev !cancelled)))
@@ -1125,7 +1147,7 @@ and read_statement context frame run (statement : Mir.statement) =
           test = (fun head -> read_block context head run condition);
           run_body =
             (fun entered ->
-              let exits = { loop = loop.origin; breaks = []; ends = [] } in
+              let exits = { loop = loop.node; breaks = []; ends = [] } in
               run.loops <- exits :: run.loops;
               let ended = read_statements context entered run body.statements in
               run.loops <- List.tl run.loops;
@@ -1219,7 +1241,7 @@ and read_statement context frame run (statement : Mir.statement) =
             (Facts.substitute_type context inside run.infos.(part).type_)
             element
         in
-        let exits = { loop = loop.origin; breaks = []; ends = [] } in
+        let exits = { loop = loop.node; breaks = []; ends = [] } in
         run.loops <- exits :: run.loops;
         let ended =
           read_statements context inside run (loop_bindings.statements @ body.statements)
@@ -1262,12 +1284,13 @@ and read_statement context frame run (statement : Mir.statement) =
         | Range { start; stop; inclusive } ->
             Loops.Over_range
               { low = translate_operand start; high = translate_operand stop; inclusive }
-        | Pull { cursor; next } ->
+        | Pull { cursor; next; next_origin } ->
             Over_cursor
               {
                 cursor = make_passed_place context run cursor;
                 cursor_type = compute_place_type context frame run cursor;
                 next = make_invocation next ~lends:None;
+                next_origin;
               }
       in
       let for_loop =
@@ -1356,13 +1379,21 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
       Some
         (write_place context frame run target
            (Facts.arrive context frame "lambda" (compute_place_type context frame run target)))
-  | Assign { target; value } ->
-      write_assignment context run target
-        ~copied:(match value with Operand copied -> [ copied ] | _ -> [])
-        (Some
-           (read_rvalue context frame run value
-              ~site:
-                { origin = statement.origin; type_ = compute_target_type context frame run target }))
+  | Assign { target; value } -> (
+      let read () =
+        read_rvalue context frame run value
+          ~site:{ origin = statement.origin; type_ = compute_target_type context frame run target }
+      in
+      let copied = match value with Operand copied -> [ copied ] | _ -> [] in
+      match target with
+      | { root = Local held; projections = [] } -> (
+          match find_held_callback context run held value with
+          | Some core ->
+              Hashtbl.replace run.held_callbacks held core;
+              write_assignment context run target ~copied
+                (Some (Validity.run_reading_callback context read))
+          | None -> write_assignment context run target ~copied (Some (read ())))
+      | _ -> write_assignment context run target ~copied (Some (read ())))
   | Call { destination; call } -> (
       let result_type =
         match destination with
@@ -1463,15 +1494,8 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
       Some frame
   | Proof code ->
       Some (Facts.restrict frame (Logic.not_ (Values.run_ghost_code context frame code)))
-  | Matched { patterns } ->
-      if frame.makes_obligations then
-        context.decisions <-
-          ( Printf.sprintf "the arm `%s` is taken"
-              (String.concat ", " (List.map (Facts.quote_origin context frame) patterns)),
-            None,
-            frame.condition,
-            Logic.Boolean true )
-          :: context.decisions;
+  | Path_note note ->
+      note_path context frame note;
       Some frame
   | Template { destination; literals; call } -> (
       match (call.callee.target, call.arguments) with
@@ -1502,9 +1526,9 @@ and write_assignment context run (target : Mir.place) ~(copied : Mir.operand lis
   | Local local -> (
       match run.infos.(local).kind with
       | Source { local = (Declared { name; _ } | Trait_parameter { name; _ }) as core; _ }
-        when frame.source.key = Some context.home ->
+        when Facts.is_home context frame.source ->
           Tables.Local_table.replace context.local_names (Core_local core) name
-      | Source { local = Synthetic _ as core; _ } when frame.source.key = Some context.home ->
+      | Source { local = Synthetic _ as core; _ } when Facts.is_home context frame.source ->
           Tables.Local_table.replace context.local_origins (Core_local core)
             run.infos.(local).origin
       | Source _ | Temporary | Lent _ -> ())
@@ -1513,7 +1537,14 @@ and write_assignment context run (target : Mir.place) ~(copied : Mir.operand lis
   Some (write_place context frame run target term)
 
 let make_run ~locals ~lambdas =
-  { infos = locals; changed_in_place = Hashtbl.create 4; lambdas; loops = []; cancelled = [] }
+  {
+    infos = locals;
+    changed_in_place = Hashtbl.create 4;
+    held_callbacks = Hashtbl.create 4;
+    lambdas;
+    loops = [];
+    cancelled = [];
+  }
 
 let read_formula context (frame : State.frame) (formula : Mir.formula) ~arguments =
   let run = make_run ~locals:formula.locals ~lambdas:formula.lambdas in

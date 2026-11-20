@@ -385,6 +385,8 @@ let find_evidence state type_ trait =
   Interface.Impls.find_evidence state.lookups.interface ~list_bounds:(lookup_bounds state)
     (normalize state type_) (normalize_trait state trait)
 
+let elaborate state id elaboration = state.tables.elaborations.(id) <- Some elaboration
+
 let decide_property state property type_ =
   Interface.Impls.decide_property property state.lookups.interface
     ~list_bounds:(lookup_bounds state) (zonk state type_)
@@ -442,10 +444,10 @@ let note_mode_keyword state (written : Syntax.expression) (mode : Syntax.mode)
     }
     :: state.mode_keywords
 
-let find_local_type state (name : Syntax.name) =
+let find_local state (name : Syntax.name) =
   match find_target state name with
-  | Some (Local id) ->
-      Option.map
-        (fun (local : local) -> resolve state local.type_)
-        (Hashtbl.find_opt state.locals id)
+  | Some (Local id) -> Hashtbl.find_opt state.locals id
   | _ -> None
+
+let find_local_type state (name : Syntax.name) =
+  Option.map (fun (local : local) -> resolve state local.type_) (find_local state name)

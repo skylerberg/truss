@@ -3,7 +3,7 @@ let check_callback_requires context frame (site : Invocation.site) through
   match through with
   | Some (_, _, Invocation.Forwarded local) -> (
       match Validity.find_own_callback context local with
-      | Some (name, { inputs; requires }) when List.length inputs = List.length values ->
+      | Some (name, { inputs; requires; _ }) when List.length inputs = List.length values ->
           let inside =
             Validity.make_callback_contract_frame frame inputs
               (List.map (fun (passed : State.passed) -> passed.term) values)
@@ -15,7 +15,12 @@ let check_callback_requires context frame (site : Invocation.site) through
                 [
                   Text "`";
                   Facts.quote frame.source clause.origin;
-                  Text (Printf.sprintf "` may not hold for this call through `%s`." name);
+                  Text
+                    (Printf.sprintf "` may not hold for %s through `%s`."
+                       (Facts.describe_call context
+                          (Facts.locate context frame.source site.origin)
+                          ())
+                       name);
                 ]
                 (snd (Validity.read_specification context inside clause)))
             requires
@@ -129,6 +134,75 @@ let has_method_cost (context : State.context) (callee : Invocation.callee) (path
       | None -> true)
   | (Function _ | Capability_method _ | Intrinsic _ | Indirect ()), _ -> false
 
+let read_named_ensures context (frame : State.frame) (clauses : State.clauses)
+    (expected : Types.function_type) ~entries ~exits ~result =
+  let inside =
+    Validity.bind_arguments frame clauses
+      ~arguments:(List.mapi (fun index entry -> (index, entry)) entries)
+      ~substitution:Types.no_substitution
+  in
+  let inside =
+    List.fold_left2
+      (fun (inside : State.frame) (parameter : Mir.parameter) (((mode : Language.Mode.t), _), exit_)
+         ->
+        match (mode, parameter.local) with
+        | Mut, Self -> { inside with self = Some exit_ }
+        | Mut, local -> { inside with locals = Locals.add (Core_local local) exit_ inside.locals }
+        | (Read | Own), _ -> inside)
+      { inside with result = Some result }
+      clauses.parameters
+      (List.combine expected.inputs exits)
+  in
+  List.filter_map
+    (fun (clause : Mir.formula) ->
+      match
+        Conditions.find_obligation_condition
+          (Conditions.decide context ~substitution:Types.no_substitution clause.holds_when)
+      with
+      | Some _ -> Some (snd (Validity.read_specification context inside clause))
+      | None -> None)
+    clauses.ensures
+
+let add_named_relation context frame (expected : Types.function_type) callee_term
+    (clauses : State.clauses) =
+  let variable label index input =
+    (Facts.make_variable label ~numbers:[ index ], Facts.declare_sort context input)
+  in
+  let inputs =
+    List.mapi (fun index (_, input) -> variable "named.argument" index input) expected.inputs
+  in
+  let changed =
+    List.mapi
+      (fun index ((mode : Language.Mode.t), input) ->
+        match mode with Mut -> Some (variable "named.changed" index input) | Read | Own -> None)
+      expected.inputs
+  in
+  let returned = variable "named.result" 0 expected.output in
+  let entries = List.map (fun (name, _) -> Logic.Symbol name) inputs in
+  let exits =
+    List.map2
+      (fun entry changed ->
+        match changed with Some (name, _) -> Logic.Symbol name | None -> entry)
+      entries changed
+  in
+  let result = Logic.Symbol (fst returned) in
+  let parameters = inputs @ List.filter_map Fun.id changed @ [ returned ] in
+  let holds = Lambdas.make_callback_ensures context expected callee_term ~entries ~exits ~result in
+  if Lambdas.is_in_the_logic expected then
+    Facts.add_frame_fact context frame
+      (Logic.forall ~trigger:[ holds ]
+         ( parameters,
+           Logic.equal holds
+             (Logic.equal result (Lambdas.apply_function context expected callee_term entries)) ));
+  let mark = context.State.fresh in
+  match read_named_ensures context frame clauses expected ~entries ~exits ~result with
+  | [] -> ()
+  | ensures when List.exists (Facts.mentions_fresh_after context mark) ensures -> ()
+  | ensures ->
+      Facts.add_frame_fact context frame
+        (Logic.forall ~trigger:[ holds ]
+           (parameters, Logic.( ==> ) holds (Logic.conjunction ensures)))
+
 let check_named_callback context (frame : State.frame) (invocation : Invocation.t)
     (passed : State.passed) ~origin path (contract : State.contract) (values : State.passed list) =
   let location = Facts.locate context frame.source origin in
@@ -142,7 +216,7 @@ let check_named_callback context (frame : State.frame) (invocation : Invocation.
           (Validity.list_callback_facts context frame invocation passed.position known inputs)
       in
       let at_call = Facts.restrict frame promised in
-      if List.length callee_clauses.parameters = List.length inputs then
+      if List.length callee_clauses.parameters = List.length inputs then (
         let inside =
           Validity.bind_arguments frame callee_clauses
             ~arguments:(List.mapi (fun index input -> (index, input)) inputs)
@@ -160,7 +234,17 @@ let check_named_callback context (frame : State.frame) (invocation : Invocation.
                 Text "` may not hold.";
               ]
               (snd (Validity.read_specification context inside requirement)))
-          (Facts.list_clauses callee_clauses.requires)
+          (Facts.list_clauses callee_clauses.requires);
+        if List.length callee_clauses.parameters = List.length expected.inputs then begin
+          add_named_relation context frame expected passed.term callee_clauses;
+          Validity.check_callback_promises context frame ~location invocation passed
+            ~described:
+              (Printf.sprintf "and the `ensures` of `%s` may not promise it." (Path.show path))
+            ~assume:(fun at_call expected ~entries ~exits ~result ->
+              List.iter (Facts.assume context at_call)
+                (read_named_ensures context at_call callee_clauses expected ~entries ~exits ~result))
+            values
+        end)
   | _ ->
       if callee_clauses.requires <> [] then
         Facts.raise_unsupported location

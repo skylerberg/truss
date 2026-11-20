@@ -171,6 +171,23 @@ let () =
   Harness.test "a law's proof takes no visibility" (fun () ->
       Parse_support.expect_error "public proof A.b for C {}" ~code:Misplaced_visibility ~at:"public"
         ~fixed:"proof A.b for C {}");
+  Harness.test "a tuple type" (fun () ->
+      Parse_support.expect_definition "tuple type Span(start: UInt64, end: UInt64)"
+        "(tuple type Span ((start: UInt64) (end: UInt64)))";
+      Parse_support.expect_definition "public tuple type Span(start: UInt64, end: UInt64)"
+        "(public (tuple type Span ((start: UInt64) (end: UInt64))))");
+  Harness.test "only a record with two or more fields is a tuple type" (fun () ->
+      Parse_support.expect_error "tuple type Id(number: UInt64)" ~code:Misplaced_tuple ~at:"tuple"
+        ~fixed:"type Id(number: UInt64)";
+      Parse_support.expect_error "tuple type Bit = Zero | One" ~code:Misplaced_tuple ~at:"tuple"
+        ~fixed:"type Bit = Zero | One");
+  Harness.test "only `tuple` comes before `type`" (fun () ->
+      Parse_support.expect_error "tupel type Span(start: UInt64, end: UInt64)" ~code:Misplaced_tuple
+        ~at:"tupel" ~fixed:"tuple type Span(start: UInt64, end: UInt64)";
+      Parse_support.expect_error "record type Span(start: UInt64, end: UInt64)"
+        ~code:Misplaced_tuple ~at:"record" ~fixed:"type Span(start: UInt64, end: UInt64)");
+  Harness.test "a tuple pattern takes no type annotation" (fun () ->
+      Parse_support.expect_body_error "let low, high: Span = span" ~code:Unexpected_token ~at:":");
   Harness.test "only a type is opaque" (fun () ->
       Parse_support.expect_error "public opaque fn f() {}" ~code:Misplaced_opaque ~at:"opaque"
         ~fixed:"public fn f() {}");

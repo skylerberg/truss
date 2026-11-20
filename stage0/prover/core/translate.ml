@@ -1,8 +1,3 @@
-let require_home (source : State.source) =
-  match source.key with
-  | Some key -> key
-  | None -> Facts.raise_bug "%s has no definition key" source.name
-
 let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_failures = true)
     ?(panics = false) ?(can_declare_panic = false) ?panic_condition (lookups : Lookups.t) ~home
     ~current ~terminates ~measures ~inherits_precondition =
@@ -36,6 +31,7 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       facts = [];
       scopes = [];
       quantifier_facts = Tables.Term_table.create 16;
+      written_quantifiers = Tables.Term_table.create 4;
       quantifier_symbols = [];
       obligations = [];
       fresh = 0;
@@ -66,7 +62,7 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       holds_potential = Tables.Type_table.create 16;
       buffers = Tables.Type_table.create 16;
       equalities = [];
-      decisions = [];
+      path_notes = [];
       entry = [];
       inherits_precondition;
       holes = [];
@@ -143,7 +139,7 @@ let list_promises context (source : State.source) locals (costs : Mir.cost list)
 
 let show_promiser_kind (lookups : Lookups.t) (source : State.source) =
   match source.key with
-  | Some { path = Method { owner; _ }; _ }
+  | { path = Method { owner; _ }; _ }
     when Resolve.Names.find_kind lookups.interface.names owner = Some Resolve.Names.Capability ->
       "capability"
   | _ -> "trait"
@@ -253,11 +249,11 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
     has_trait_frame
     &&
     match inherited with
-    | Some ({ callee = { key = Some { path = Method { owner; _ }; _ }; _ }; _ }, _) ->
+    | Some ({ callee = { key = { path = Method { owner; _ }; _ }; _ }; _ }, _) ->
         not (Well_known.is From_template owner)
     | Some _ | None -> true
   in
-  let home = require_home source in
+  let home = source.key in
   let measures =
     List.filter
       (fun (measure : Mir.formula) -> implies condition measure.holds_when)
@@ -721,7 +717,7 @@ let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_sub
 
 let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~for_type ~proofs ~at
     =
-  let home = require_home source in
+  let home = source.key in
   let context =
     make_context lookups ~home ~current:impl ~terminates:false ~measures:[]
       ~inherits_precondition:false
@@ -750,10 +746,7 @@ let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~f
           List.fold_left
             (fun (start : State.frame) ((proof_source : State.source), renaming) ->
               let proof =
-                match
-                  Option.bind proof_source.key (fun key ->
-                      Mir.find_code (lookups.mir.read_body_part key))
-                with
+                match Mir.find_code (lookups.mir.read_body_part proof_source.key) with
                 | Some proof -> proof
                 | None -> Facts.raise_bug "the proof `%s` has no MIR" proof_source.name
               in
@@ -1031,7 +1024,7 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
 
 let translate_restated_clauses (lookups : Lookups.t) (source : State.source) ~impl ~trait ~for_type
     ~at =
-  let home = require_home source in
+  let home = source.key in
   let context =
     make_context lookups ~home ~current:impl ~terminates:false ~measures:[]
       ~inherits_precondition:false
@@ -1056,7 +1049,7 @@ let translate_restated_clauses (lookups : Lookups.t) (source : State.source) ~im
   make_outcome context
 
 let translate_type (lookups : Lookups.t) (source : State.source) ~path =
-  let home = require_home source in
+  let home = source.key in
   let context =
     make_context lookups ~home ~current:path ~terminates:false ~measures:[]
       ~inherits_precondition:false
@@ -1105,7 +1098,7 @@ let translate_type (lookups : Lookups.t) (source : State.source) ~path =
   make_outcome context
 
 let translate_constant (lookups : Lookups.t) (source : State.source) ~path =
-  let home = require_home source in
+  let home = source.key in
   let context =
     make_context lookups ~home ~current:path ~terminates:false ~measures:[]
       ~inherits_precondition:false

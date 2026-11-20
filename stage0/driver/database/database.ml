@@ -517,8 +517,7 @@ let add_recording (names : Resolve.Names.lookups) (note : Part.t -> unit) : Reso
     find = (fun module_ name -> note_name_read (Entry (module_, name)) (names.find module_ name));
     list_entries = (fun module_ -> note_name_read (Entries module_) (names.list_entries module_));
     list_imports = (fun key -> note_name_read (Imports key) (names.list_imports key));
-    module_exists =
-      (fun module_ -> note_input_read (Modules module_.package) (names.module_exists module_));
+    module_exists = (fun module_ -> note_name_read (Module module_) (names.module_exists module_));
     split_module = (fun parts -> note_input_read Packages (names.split_module parts));
     list_dependency_names =
       (fun package -> note_input_read (Dependencies package) (names.list_dependency_names package));
@@ -1051,6 +1050,7 @@ let holds_position database (Part.Any typed as part) =
 let mark_change database package (change : Resolve.Namespace.change) =
   let part : Part.name =
     match change with
+    | Module module_ -> Module module_
     | Entry (module_, name) -> Entry (module_, name)
     | Entries module_ -> Entries module_
     | Imports key -> Imports key
@@ -1443,6 +1443,10 @@ let find_call_successors database calling_package node =
 let update_groups database package =
   match Package_table.find_opt database.graphs package with
   | Some graph when Call_graph.has_changes graph ->
+      if list_stale_parts database package Call_edges <> [] then
+        Compiler_bug.raise_bug ~stage:"Database"
+          "the call graph of %s is updated while some of its call edges are stale"
+          (Path.show_package package);
       let find_successors = find_call_successors database package in
       let { Call_graph.touched; removed } = Call_graph.update graph ~find_successors in
       List.iter
@@ -1863,7 +1867,6 @@ let find_saved_value database (entry : Entry.t) =
   | Claimed claimant -> Option.map marshal (Part_table.find_opt database.claimed_roots claimant)
 
 let list_unsaved database =
-  List.iter (update_groups database) database.project;
   Entry_table.fold
     (fun entry () entries ->
       (Marshal.to_string entry [ No_sharing ], find_saved_value database entry) :: entries)
@@ -1935,7 +1938,15 @@ let restore_namespaces database =
                   (Call_graph.change_successors graph path ~before:[]
                      ~after:(list_call_edges (Some value)))
             | Binding _ -> ())
-          package_database.values
+          package_database.values;
+        forget database
+          (Stored_table.fold
+             (fun part _ groups ->
+               match part with
+               | Part.Any (Recursion_group node) when not (Call_graph.is_node graph node) ->
+                   part :: groups
+               | _ -> groups)
+             package_database.values [])
       end)
     (sort_in_dependency_order database database.project)
 
@@ -1969,7 +1980,6 @@ let restore ?on_bug ~saved ~find_text ~loaded packages entries =
   restore_parts database entries;
   restore_namespaces database;
   restore_references database;
-  List.iter (update_groups database) database.project;
   mark_saved database;
   record_layout database ~loaded packages;
   propagate_checks ?on_bug database;

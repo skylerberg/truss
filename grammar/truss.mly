@@ -191,6 +191,7 @@ marked_bound:
 
 type_definition:
   | TYPE UPPER generics_opt type_body list(type_clause) { () }
+  | LOWER TYPE UPPER generics_opt type_body list(type_clause) { () }
 
 type_body:
   | fields { () }
@@ -254,6 +255,7 @@ function_type_clause:
   | USES capability_list { () }
   | COST cost { () }
   | REQUIRES expression { () }
+  | ENSURES expression { () }
 
 generics_opt:
   | { () }
@@ -332,19 +334,23 @@ block:
   | LBRACE newline_separated(statement) RBRACE { () }
 
 statement:
-  | LET pattern annotation_opt EQ expression else_opt { () }
-  | VAR pattern annotation_opt EQ expression else_opt { () }
+  | LET binding_pattern EQ expression else_opt { () }
+  | VAR binding_pattern EQ expression else_opt { () }
   | expression { () }
   | expression assignment_operator expression { () }
-  | FOR pattern annotation_opt IN expression list(loop_clause) newline_opt block { () }
+  | FOR binding_pattern IN expression list(loop_clause) newline_opt block { () }
   | WHILE expression list(loop_clause) newline_opt block { () }
   | PARALLEL block { () }
-  | PARALLEL FOR pattern annotation_opt IN expression list(loop_clause) newline_opt block { () }
+  | PARALLEL FOR binding_pattern IN expression list(loop_clause) newline_opt block { () }
   | CONCURRENT block { () }
-  | CONCURRENT FOR pattern annotation_opt IN expression list(loop_clause) newline_opt block { () }
+  | CONCURRENT FOR binding_pattern IN expression list(loop_clause) newline_opt block { () }
   | PROOF block { () }
   | ASSERT expression { () }
   | ASSERT expression LOWER LOWER { () }
+
+binding_pattern:
+  | pattern annotation_opt { () }
+  | pattern COMMA separated_nonempty_list(COMMA, pattern) { () }
 
 annotation_opt:
   | { () }
@@ -486,6 +492,7 @@ postfix:
   | primary { () }
   | postfix DOT LOWER { () }
   | postfix DOT UPPER { () }
+  | postfix DOT ENSURES { () }
   | postfix LBRACKET brackets RBRACKET { () }
   | postfix LPAREN comma_list(argument) RPAREN { () }
   | postfix QUESTION { () }

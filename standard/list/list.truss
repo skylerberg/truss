@@ -558,10 +558,11 @@ public fn List[Element: Copyable].filled(value: Element, count: UInt64) -> List[
 
 public fn List[Element].generate(
   count: UInt64,
-  make: (fn(index: UInt64) -> Element requires index < count),
+  make: (fn(index: UInt64) -> Element uses generic Granted requires index < count),
 ) -> List[Element]
+  uses generic Granted
   ensures result.length() == count
-  ensures forall i in 0..count => identical(result.model()[i], make(i))
+  ensures forall i in 0..count => make.ensures(i, result.model()[i])
   cost calls(make) == count
   cost time O(count * time(make))
 {
@@ -569,7 +570,7 @@ public fn List[Element].generate(
   for index in 0..count
     invariant intrinsic::storage_length(elements) == index
     invariant intrinsic::storage_capacity(elements) == count
-    invariant forall i in 0..index => identical(intrinsic::storage_model(elements)[i], make(i))
+    invariant forall i in 0..index => make.ensures(i, intrinsic::storage_model(elements)[i])
   {
     intrinsic::storage_push(mut elements, value: make(index))
   }
@@ -785,9 +786,13 @@ public fn List[Element].extend[Source: Cursor[Element = Element]](mut self, item
   }
 }
 
-public fn List[Element].retain(mut self, keep: fn(Element) -> Bool)
+public fn List[Element].retain(
+  mut self,
+  keep: (fn(element: Element) -> Bool uses generic Granted requires self.model().contains(element)),
+)
+  uses generic Granted
   ensures self.length() <= old(self.length())
-  ensures forall i in 0..self.length() => keep(self.model()[i])
+  ensures forall i in 0..self.length() => keep.ensures(self.model()[i], true)
   cost time O(old(self.length()) * time(keep))
 {
   let count = self.length()
@@ -795,7 +800,8 @@ public fn List[Element].retain(mut self, keep: fn(Element) -> Bool)
   for index in 0..count
     invariant self.length() == count
     invariant retained_count <= index
-    invariant forall i in 0..retained_count => keep(self.model()[i])
+    invariant forall i in 0..retained_count => keep.ensures(self.model()[i], true)
+    invariant forall i in index..count => identical(self.model()[i], old(self.model())[i])
   {
     if keep(self[index]) {
       intrinsic::storage_swap(mut self.storage, first: retained_count, second: index)
@@ -805,9 +811,13 @@ public fn List[Element].retain(mut self, keep: fn(Element) -> Bool)
   mut self.truncate(retained_count)
 }
 
-public fn List[Element].filter(own self, keep: fn(Element) -> Bool) -> List[Element]
+public fn List[Element].filter(
+  own self,
+  keep: (fn(element: Element) -> Bool uses generic Granted requires self.model().contains(element)),
+) -> List[Element]
+  uses generic Granted
   ensures result.length() <= self.length()
-  ensures forall i in 0..result.length() => keep(result.model()[i])
+  ensures forall i in 0..result.length() => keep.ensures(result.model()[i], true)
   cost time O(self.length() * time(keep))
 {
   var retained = own self

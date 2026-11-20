@@ -1,0 +1,7 @@
+fn total(groups: Map[String, List[String]]) -> UInt64 {
+  var count: UInt64 = 0
+  for _, group in groups {
+    count = count.saturating_add(group.length())
+  }
+  count
+}

@@ -55,7 +55,7 @@ and mir_frame = {
 type task = { id : Mir.task; group : Lowered.place; end_block : Lowered.block; scope_depth : int }
 
 type spawn_loop = {
-  origin : Core.origin;
+  task : Mir.task;
   group : Lowered.place;
   item : Lowered.local;
   element : Ground.ty;

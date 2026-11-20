@@ -102,9 +102,13 @@ and check_placement cursor ~top (type_ : Syntax.type_expression) =
           (fun (clause : Syntax.clause) ->
             match clause.kind with
             | Requires _ ->
-                report cursor Misplaced_requires clause.id
+                report cursor Misplaced_callback_contract clause.id
                   "A function type has a `requires` only as the type of a parameter, where it \
                    constrains the arguments the callee passes its callback."
+            | Ensures _ ->
+                report cursor Misplaced_callback_contract clause.id
+                  "A function type has an `ensures` only as the type of a parameter, where it \
+                   constrains the results the callback returns to the callee."
             | _ -> ())
           clauses;
       List.iter

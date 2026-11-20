@@ -24,7 +24,7 @@ type checked = Body.checked = {
   form : Core.t;
   tables : tables;
   used_packages : Path.package list;
-  places_without_keyword : (Core.origin * Language.Mode.t) list;
+  places_without_keyword : (Syntax.id * Language.Mode.t) list;
   mode_keywords : Core.mode_keyword list;
   requires_run_forever : bool;
 }
@@ -35,3 +35,7 @@ val check_contract :
 val check_body : Lookups.t -> Resolve.Names.key -> (checked, Diagnostic.in_definition list) result
 val derive_form : Lookups.t -> Path.t -> Core.t option
 val is_derived_method : Path.t -> bool
+
+module For_testing : sig
+  val is_written_expression : Syntax.expression -> Core.kind -> bool
+end

@@ -233,7 +233,7 @@ let list_statement_edges interface instance (statement : Tree.statement) =
             _;
           }
       | Call _ | Lend _ | Template _ | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _
-      | Loan_end _ | Ghost_assert _ | Matched _ | Proof _ )
+      | Loan_end _ | Ghost_assert _ | Path_note _ | Proof _ )
   | For _
   | Jump (Return _ | Break | Continue | Cancel _ | Unreachable | Written_unreachable | Todo)
   | Choose _ | Assert_by_bit_vector _ | While _ | Fork _ | Resume _ | Yield _ ->
@@ -275,7 +275,7 @@ let list_edges (lookups : lookups) instance (code : Tree.t) =
               _;
             }
         | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _ | Loan_end _ | Ghost_assert _
-        | Matched _ | Proof _ )
+        | Path_note _ | Proof _ )
     | For _
     | Jump (Return _ | Break | Continue | Cancel _ | Unreachable | Written_unreachable | Todo)
     | Choose _ | Assert_by_bit_vector _ | While _ | Fork _ | Provide _ | Resume _ | Yield _ ->

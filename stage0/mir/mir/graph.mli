@@ -23,8 +23,8 @@ type terminator =
   | Goto of block
   | Branch of { condition : Tree.operand; yes : block; no : block }
   | For of loop_head
-  | Fork of { fork : Core.origin; concurrent : bool; branches : branch list; join : block option }
-  | Join of { fork : Core.origin; next : block }
+  | Fork of { fork : Core.id; concurrent : bool; branches : branch list; join : block option }
+  | Join of { fork : Core.id; next : block }
   | Iteration_end of { loop : block }
   | Yield of { mode : Language.Mode.t; part : Tree.yielded; resume : block }
   | Return of Tree.operand option
@@ -55,7 +55,7 @@ type body = {
 
 type t = { body : body; lambdas : body array }
 
-val canonicalize : basic_block array -> basic_block array
+val canonicalize : basic_block option array -> basic_block array
 val find_iteration_loop : terminator -> block option
 val read_loop_head : body -> block -> loop_head
 val list_block_successors : body -> block -> block list

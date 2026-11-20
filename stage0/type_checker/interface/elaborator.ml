@@ -924,33 +924,38 @@ let elaborate_type_head context owner (head : Syntax.type_head) =
   | Some (Unknown report) -> (generics, Types.Error report)
   | _ -> raise_bug "the type head `%s` is not resolved" (show_path head.path)
 
-let elaborate_fields context (written : Syntax.field list) =
-  List.stable_sort
-    (fun (left : Types.field) (right : Types.field) ->
-      String.compare left.field_name right.field_name)
-    (List.filter_map
-       (fun (field : Syntax.field) ->
-         match field.kind with
-         | Field_declaration { name; type_; default } ->
-             let field_type = elaborate_type context type_ in
-             let field_type =
-               match Types.find_specification_only_type field_type with
-               | None -> field_type
-               | Some specification_type ->
-                   report_error_type context Specification_only context.spans.(type_.id)
-                     (Printf.sprintf
-                        "`%s` exists only in specifications and has no representation in code that \
-                         runs, so it is not the type of a field."
-                        (Types.show specification_type))
-             in
-             Some
-               {
-                 Types.field_name = name.text;
-                 field_type;
-                 field_has_default = Option.is_some default;
-               }
-         | Field_error -> None)
-       written)
+let elaborate_fields context ~is_tuple (written : Syntax.field list) =
+  let fields =
+    List.filter_map
+      (fun (field : Syntax.field) ->
+        match field.kind with
+        | Field_declaration { name; type_; default } ->
+            let field_type = elaborate_type context type_ in
+            let field_type =
+              match Types.find_specification_only_type field_type with
+              | None -> field_type
+              | Some specification_type ->
+                  report_error_type context Specification_only context.spans.(type_.id)
+                    (Printf.sprintf
+                       "`%s` exists only in specifications and has no representation in code that \
+                        runs, so it is not the type of a field."
+                       (Types.show specification_type))
+            in
+            Some
+              {
+                Types.field_name = name.text;
+                field_type;
+                field_has_default = Option.is_some default;
+              }
+        | Field_error -> None)
+      written
+  in
+  if is_tuple then fields
+  else
+    List.stable_sort
+      (fun (left : Types.field) (right : Types.field) ->
+        String.compare left.field_name right.field_name)
+      fields
 
 let elaborate_container (context : t) (path : Path.t) (definition : Syntax.definition) :
     (Environment.container, Diagnostic.reported) Stdlib.result * t =
@@ -1336,7 +1341,7 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
                      is_update_step =
                        takes_mut_self && (lookups.names.read_declaration key).visibility = Private;
                    })
-          | Type_definition { generics; body; clauses; _ } ->
+          | Type_definition { is_tuple; generics; body; clauses; _ } ->
               let type_generics = elaborate_generics context path generics in
               let self =
                 Types.Named { path; arguments = Types.list_generic_arguments type_generics }
@@ -1344,32 +1349,24 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
               let context = { context with self_type = Some self } in
               let shape =
                 match body with
-                | Fields written -> Types.Record (elaborate_fields context written)
+                | Fields written -> Types.Record (elaborate_fields context ~is_tuple written)
                 | Variants variants ->
                     Types.Sum
                       (List.map
                          (fun (variant : Syntax.variant) ->
                            {
                              Types.variant_name = variant.name.text;
-                             fields = Option.map (elaborate_fields context) variant.fields;
+                             fields =
+                               Option.map (elaborate_fields context ~is_tuple:false) variant.fields;
                              indirect = variant.indirect;
                            })
                          variants)
                 | Type_todo -> Types.Todo_type
               in
               let derives =
-                List.concat_map
-                  (fun (clause : Syntax.type_clause) ->
-                    match clause.kind with
-                    | Derives traits ->
-                        List.filter_map
-                          (fun (trait : Syntax.path_type) ->
-                            match find_target context trait.path.last with
-                            | Some (Definition (_, trait)) -> Some trait
-                            | _ -> None)
-                          traits
-                    | Type_invariant _ | Potential _ -> [])
-                  clauses
+                List.map
+                  (fun (_, _, trait) -> trait)
+                  (Definition.list_derives_entries context.resolved clauses)
               in
               make_elaborated_interface context
                 (Type_interface
@@ -1377,6 +1374,7 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
                      type_generics;
                      shape;
                      opaque = (lookups.names.read_declaration key).visibility = Public_opaque;
+                     is_tuple;
                      derives;
                    })
           | Constant { name; type_; _ } ->

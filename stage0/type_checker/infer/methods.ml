@@ -9,6 +9,7 @@ let report_unmatched_receiver_mode state env arguments (member : Syntax.name) =
 let rec check_call state env ?expected (value : Syntax.expression) (callee : Syntax.expression)
     (arguments : Syntax.argument list) : Types.ty =
   match callee.kind with
+  | Member (base, { text = "ensures"; _ }) -> check_callback_ensures state env value base arguments
   | Member (base, member) -> (
       match Instantiation.find_static state base with
       | Some (Static_type type_) ->
@@ -33,7 +34,9 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
   match target with
   | Old -> (
       match arguments with
-      | [ argument ] -> Hooks.check_expression state env ?expected argument.value
+      | [ argument ] ->
+          State.elaborate state value.id (Specification_call Old);
+          Hooks.check_expression state env ?expected argument.value
       | _ ->
           Calls.check_arguments_alone state env arguments
             (State.make_error_type state
@@ -50,6 +53,7 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
           ignore (Hooks.check_expression state env argument.value);
           let part = State.normalize state part in
           state.tables.resolutions.(value.id) <- Some Specification_value;
+          State.elaborate state value.id (Specification_call (Final { part }));
           part
       | _ ->
           Calls.check_arguments_alone state env arguments
@@ -59,6 +63,7 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
   | Identical -> (
       match arguments with
       | [ first; second ] ->
+          State.elaborate state value.id (Specification_call Identical);
           let first_type = Hooks.check_expression state env first.value in
           let second_type = Hooks.check_expression state env ~expected:first_type second.value in
           if not (State.unify state first_type second_type) then
@@ -103,16 +108,91 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
 
 and check_specification_function state env (value : Syntax.expression)
     (function_ : Core.specification_function) (arguments : Syntax.argument list) =
-  state.tables.specification_calls.(value.id) <- Some (Specification_function function_);
+  State.elaborate state value.id (Specification_call (Specification_function function_));
   List.iter
     (fun (argument : Syntax.argument) ->
       match function_ with
       | Log -> Clauses.require_integer state env argument.value ~described:"An argument of `log`"
       | Power ->
           Clauses.require_integer state env argument.value ~described:"An argument of `power`"
-      | Callback_cost _ | Calls -> ignore (Hooks.check_expression state env argument.value))
+      | Callback_cost _ | Calls -> ignore (Hooks.check_expression state env argument.value)
+      | Callback_ensures -> State.raise_bug "`.ensures` checked as an integer function")
     arguments;
   Types.Integer
+
+and check_callback_ensures state env (value : Syntax.expression) (base : Syntax.expression)
+    (arguments : Syntax.argument list) =
+  let span = State.read_span state value.id in
+  let reject code message =
+    Calls.check_arguments_alone state env arguments (State.make_error_type state code span message)
+  in
+  let base_type = Conversions.read_actual_head state base (Hooks.check_expression state env base) in
+  match (base.kind, base_type) with
+  | Name { modules = []; last }, Types.Function function_type
+    when match State.find_local state last with
+         | Some { binding = Parameter; _ } -> true
+         | _ -> false -> (
+      let expected =
+        List.concat_map
+          (fun ((mode : Language.Mode.t), input) ->
+            match mode with Mut -> [ input; input ] | Read | Own -> [ input ])
+          function_type.inputs
+        @ if Types.equal function_type.output Types.unit then [] else [ function_type.output ]
+      in
+      let shape =
+        String.concat ", "
+          (List.concat_map
+             (fun ((mode : Language.Mode.t), _) ->
+               match mode with
+               | Mut -> [ "its value at entry"; "its value at exit" ]
+               | Read | Own -> [ "an input" ])
+             function_type.inputs
+          @ if Types.equal function_type.output Types.unit then [] else [ "the result" ])
+      in
+      match List.find_map (fun (argument : Syntax.argument) -> argument.label) arguments with
+      | _ when not env.specification ->
+          Calls.check_arguments_alone state env arguments
+            (Types.Error
+               (State.report_specification_only state span
+                  (Printf.sprintf
+                     "`%s.ensures` names the postcondition of the function passed for `%s`, so it \
+                      appears only in specifications."
+                     last.text last.text)))
+      | Some label ->
+          Calls.check_arguments_alone state env arguments
+            (State.make_error_type state Unknown_label (State.read_span state label.id)
+               (Printf.sprintf
+                  "`%s.ensures` takes its arguments by position, as a call through `%s` does."
+                  last.text last.text))
+      | None when List.length expected <> List.length arguments ->
+          reject
+            (if List.length arguments < List.length expected then Missing_argument
+             else Too_many_arguments)
+            (Printf.sprintf "`%s.ensures` takes %d %s: %s." last.text (List.length expected)
+               (if List.length expected = 1 then "argument" else "arguments")
+               (if shape = "" then "none" else shape))
+      | None ->
+          List.iter2
+            (fun (argument : Syntax.argument) expected_type ->
+              Hooks.check state env argument.value expected_type)
+            arguments expected;
+          State.elaborate state value.id
+            (Specification_call (Specification_function Callback_ensures));
+          Types.bool)
+  | Name { modules = []; last }, Types.Function _ ->
+      reject Not_callable
+        (Printf.sprintf
+           "`%s` is not a parameter of this definition, and `.ensures` names the postcondition of \
+            the function passed for a function parameter, as in `transform.ensures(value, \
+            output)`."
+           last.text)
+  | _, (Types.Error _ as error) -> Calls.check_arguments_alone state env arguments error
+  | _ ->
+      reject Not_callable
+        (Printf.sprintf
+           "`.ensures` follows a function parameter, as in `transform.ensures(value, output)`, and \
+            this is %s."
+           (State.describe state base_type))
 
 and check_callee_cost state env (value : Syntax.expression) (metric : Language.Metric.t)
     (arguments : Syntax.argument list) =
@@ -151,8 +231,8 @@ and check_method_cost state (value : Syntax.expression) (metric : Language.Metri
   in
   match (Interface.Elaborator.find_operand_method overloads, overloads) with
   | Some { self_type; trait; name; receiver }, _ ->
-      state.tables.specification_calls.(value.id) <-
-        Some (Method_cost { metric; trait; name; receiver; self_type });
+      State.elaborate state value.id
+        (Specification_call (Method_cost { metric; trait; name; receiver; self_type }));
       Types.Integer
   | None, [] ->
       State.make_error_type state Unknown_member (State.read_span state member.id)
@@ -396,15 +476,15 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
   | Error error -> error
   | Ok (checked, left_out) ->
       let result = Types.extract_result_type instance.signature.output in
-      Modes.note_lending state value instance.signature.output;
-      state.tables.calls.(value.id) <-
-        Some
-          {
-            callee;
-            arguments = receiver_argument @ checked;
-            omitted_defaults = left_out;
-            callee_result = result;
-          };
+      State.elaborate state value.id
+        (Call
+           {
+             callee;
+             arguments = receiver_argument @ checked;
+             omitted_defaults = left_out;
+             callee_result = result;
+             lends = Types.find_lent_mode instance.signature.output;
+           });
       Solver.require state (Method_call (State.read_span state value.id)) self_type reference;
       State.normalize state result
 
@@ -472,14 +552,15 @@ and check_capability_call state env (value : Syntax.expression) capability (memb
       | Error error -> error
       | Ok (checked, left_out) ->
           let result = Types.extract_result_type instance.signature.output in
-          state.tables.calls.(value.id) <-
-            Some
-              {
-                callee = Capability_method { capability; name = member.text };
-                arguments = checked;
-                omitted_defaults = left_out;
-                callee_result = result;
-              };
+          State.elaborate state value.id
+            (Call
+               {
+                 callee = Capability_method { capability; name = member.text };
+                 arguments = checked;
+                 omitted_defaults = left_out;
+                 callee_result = result;
+                 lends = None;
+               });
           result)
   | None ->
       Calls.check_arguments_alone state env arguments
@@ -728,7 +809,6 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
           | Error error -> error
           | Ok (checked, left_out) ->
               let result = Types.extract_result_type instance.signature.output in
-              Modes.note_lending state value instance.signature.output;
               let receiver_argument =
                 {
                   Tables.expression = receiver;
@@ -737,14 +817,15 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
                     (match method_.method_receiver with Instance mode -> mode | Static -> Read);
                 }
               in
-              state.tables.calls.(value.id) <-
-                Some
-                  {
-                    callee;
-                    arguments = receiver_argument :: checked;
-                    omitted_defaults = left_out;
-                    callee_result = result;
-                  };
+              State.elaborate state value.id
+                (Call
+                   {
+                     callee;
+                     arguments = receiver_argument :: checked;
+                     omitted_defaults = left_out;
+                     callee_result = result;
+                     lends = Types.find_lent_mode instance.signature.output;
+                   });
               List.iter
                 (Solver.require state (Method_call (State.read_span state value.id)) receiver_type)
                 (Option.to_list (Name_lookup.find_sealed_provider state receiver_type trait)

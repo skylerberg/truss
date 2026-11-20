@@ -1,0 +1,12 @@
+type Entry =
+  | Empty
+  | Named(name: String, count: UInt64)
+
+fn keep(text: own String) {}
+
+fn f(entry: own Entry) {
+  match own entry {
+    Empty => {}
+    Named(name, ..) => keep(own name)
+  }
+}

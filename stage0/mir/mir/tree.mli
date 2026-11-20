@@ -20,8 +20,14 @@ and root = Local of local | Constant of Path.t | Literal of { text : string; typ
 and projection =
   | Field of string
   | Variant_field of { variant : string; field : string }
-  | Element of { index : operand; sequence : Types.ty; origin : Core.origin }
-  | Range of { start : operand; stop : operand option; sequence : Types.ty; origin : Core.origin }
+  | Element of { node : Core.id; index : operand; sequence : Types.ty; origin : Core.origin }
+  | Range of {
+      node : Core.id;
+      start : operand;
+      stop : operand option;
+      sequence : Types.ty;
+      origin : Core.origin;
+    }
 
 and operand =
   | Use of { place : place; type_ : Types.ty; origin : Core.origin }
@@ -54,12 +60,18 @@ type provided = {
   origin : Core.origin;
 }
 
-type loan_duration = Loop_body | Provide_body | Rest_of_statement | Operand_evaluation
-type task = Branch of { block : Core.origin; index : int } | Iteration of { loop : Core.origin }
+type loan_duration =
+  | Loop_body
+  | Provide_body
+  | Rest_of_statement
+  | Operand_evaluation
+  | Alias_scope of Core.local
+
+type task = Branch of { fork : Core.id; index : int } | Iteration of { loop : Core.id }
 
 type iteration =
   | Range of { start : operand; stop : operand; inclusive : bool }
-  | Pull of { cursor : place; next : callee }
+  | Pull of { cursor : place; next : callee; next_origin : Core.origin }
 
 type rvalue =
   | Operand of operand
@@ -89,13 +101,14 @@ type rvalue =
   | Value_parameter of Types.parameter
   | Specification of specification
 
+and path_note =
+  | Arm_taken of Core.origin list
+  | Condition_holds of { condition : Core.origin; holds : bool }
+  | Else_runs of Core.origin
+  | Returns_early of Core.origin
+
 and choice =
-  | Conditional of {
-      condition : block;
-      then_ : block;
-      else_ : block;
-      if_condition : Core.origin option;
-    }
+  | Conditional of { condition : block; then_ : block; else_ : block }
   | Cases of case list
   | Connective of { connective : Language.Connective.t; left : block; right : block }
 
@@ -151,6 +164,7 @@ and loop_clause = Invariant of formula | Decreases of formula list | Cost of cos
 and quantified = { quantifier : Language.Quantifier.t; decides : local }
 
 and loop = {
+  node : Core.id;
   clauses : loop_clause list;
   schedule : Language.Loop_mode.t;
   origin : Core.origin;
@@ -190,7 +204,7 @@ and basic =
     }
   | Loan_end of int list
   | Ghost_assert of { condition : formula; by_bit_vector : bool }
-  | Matched of { patterns : Core.origin list }
+  | Path_note of path_note
   | Proof of t
 
 and statement_kind =
@@ -212,7 +226,7 @@ and statement_kind =
       bindings : block;
       body : block;
     }
-  | Fork of { fork : Core.origin; concurrent : bool; branches : block list }
+  | Fork of { fork : Core.id; concurrent : bool; branches : block list }
   | Provide of { target : place; provided : provided list; can_use_tasks : bool; body : block }
   | Resume of { winner : local; exits : early_exit list }
   | Yield of { mode : Language.Mode.t; part : yielded }
@@ -255,7 +269,7 @@ type requirement = {
   names : (Core.local * Core.origin) list;
 }
 
-type callback = { inputs : Core.local list; requires : formula list }
+type callback = { inputs : Core.local list; requires : formula list; ensures : formula list }
 
 type parameter = {
   local : Core.local;

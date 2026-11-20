@@ -414,7 +414,11 @@ type worktree = {
 
 let worktrees : (string, worktree) Hashtbl.t = Hashtbl.create 4
 let is_serving = ref false
-let log_bug bug = prerr_endline (Compiler_bug.to_string bug)
+let observe_logged_bug : (Compiler_bug.t -> unit) ref = ref ignore
+
+let log_bug bug =
+  !observe_logged_bug bug;
+  prerr_endline (Compiler_bug.to_string bug)
 
 let commit worktree =
   match Database.list_unsaved worktree.database with
@@ -795,4 +799,5 @@ module For_testing = struct
     | None -> Compiler_bug.raise_bug ~stage:"Workspace" "%s has no open database" root
 
   let compiler_digest = Compiler_version.digest
+  let observe_logged_bugs observe = observe_logged_bug := observe
 end

@@ -49,7 +49,7 @@ let make_builtin_shape (builtin : Language.Builtin_type.t) : Types.type_interfac
         })
       (Resolve.Names.list_builtin_generics builtin)
   in
-  { type_generics; shape = Builtin_type builtin; opaque = true; derives = [] }
+  { type_generics; shape = Builtin_type builtin; opaque = true; is_tuple = false; derives = [] }
 
 let find_type_interface lookups (path : Path.t) =
   match Well_known.find_builtin_type path with
@@ -158,3 +158,17 @@ let is_specification = function
   | Type_interface _ | Trait_interface _ | Impl_interface _ | Constant_interface _
   | Error_interface _ ->
       false
+
+let list_derives_entries (resolved : Resolve.resolved) (clauses : Syntax.type_clause list) =
+  List.concat_map
+    (fun (clause : Syntax.type_clause) ->
+      match clause.kind with
+      | Derives traits ->
+          List.filter_map
+            (fun (written : Syntax.path_type) ->
+              match resolved.names.(written.path.last.id) with
+              | Some (Resolve.Definition (_, trait)) -> Some (clause, written, trait)
+              | _ -> None)
+            traits
+      | Type_invariant _ | Potential _ -> [])
+    clauses

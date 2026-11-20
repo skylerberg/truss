@@ -73,7 +73,8 @@ let list_core_at text written occurrence =
     {
       Core_walk.ignore_all with
       expression =
-        (fun (node : Core.expression) -> if node.origin = value.id then nodes := node :: !nodes);
+        (fun (node : Core.expression) ->
+          if Core_walk.locate_origin node.origin = value.id then nodes := node :: !nodes);
     }
     form.definition;
   List.rev !nodes
@@ -1439,6 +1440,36 @@ let () =
         "types.unknown_member")
 
 let () =
+  Harness.test "a tuple pattern binds the fields of a tuple type by position" (fun () ->
+      let text = Fixtures.Infer.tuple_patterns_bind_fields_by_position in
+      expect_fine text;
+      expect_type text "name" ~occurrence:2 "String";
+      expect_type text "count" ~occurrence:4 "Int64";
+      expect_type text "index" ~occurrence:2 "UInt64";
+      expect_type text "byte" ~occurrence:4 "UInt8");
+  Harness.test "a tuple pattern names the fields in their order" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.tuple_pattern_names_fields_out_of_order
+        "types.out_of_order" ~says:"`value` here would bind the field `key`"
+        ~fixed:Fixtures.Infer.tuple_pattern_names_fields_out_of_order_fixed);
+  Harness.test "a tuple pattern has one pattern for each field" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.tuple_pattern_with_a_pattern_too_many "types.arity");
+  Harness.test "a tuple pattern matches only a tuple type" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.tuple_pattern_on_a_record "types.not_a_tuple_type"
+        ~fixed:Fixtures.Infer.tuple_pattern_on_a_record_fixed);
+  Harness.test "parentheses match the fields of a tuple type by name" (fun () ->
+      expect_fine Fixtures.Infer.record_pattern_on_a_tuple_type_by_name;
+      expect_one_diagnostic Fixtures.Infer.record_pattern_on_map_entries_with_a_wildcard
+        "types.unknown_member"
+        ~says:"a list of patterns without parentheses matches its fields by position"
+        ~fixed:Fixtures.Infer.record_pattern_on_map_entries_with_a_wildcard_fixed);
+  Harness.test "a bare pattern that names no field is offered the field in its position" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.record_pattern_on_map_entries_in_a_lambda
+        "types.unknown_member" ~fixed:Fixtures.Infer.record_pattern_on_map_entries_in_a_lambda_fixed;
+      expect_one_diagnostic Fixtures.Infer.variant_pattern_with_a_wildcard_for_a_field
+        "types.unknown_member"
+        ~fixed:Fixtures.Infer.variant_pattern_with_a_wildcard_for_a_field_fixed)
+
+let () =
   Harness.test "a lambda with nothing to give its parameter types is an error" (fun () ->
       expect_one_diagnostic Fixtures.Infer.lambda_bound_without_a_type "types.lambda_needs_type");
   Harness.test "a lambda takes its parameter types from the function type it is passed as"
@@ -2202,6 +2233,59 @@ let () =
         "types.unknown_member";
       expect_one_diagnostic "fn f(visit: fn(), run: (fn() cost calls(visit) <= 1)) {}\n"
         "types.not_a_capability");
+  Harness.test "`.ensures` names a function parameter's postcondition in a specification" (fun () ->
+      expect_fine
+        "fn f(visit: fn(Int64) -> Int64, value: Int64) -> Int64\n\
+        \  ensures visit.ensures(value, result)\n\
+         {\n\
+        \  visit(value)\n\
+         }\n");
+  Harness.test "`.ensures` follows a parameter of function type" (fun () ->
+      expect_one_diagnostic "fn f(count: Int64) -> Bool\n  ensures count.ensures(1)\n{\n  todo\n}\n"
+        "types.not_callable";
+      expect_one_diagnostic
+        "fn f(visit: fn(Int64) -> Int64) -> Bool {\n\
+        \  let local: fn(Int64) -> Int64 = visit\n\
+        \  proof {\n\
+        \    assert local.ensures(1, 2)\n\
+        \  }\n\
+        \  true\n\
+         }\n"
+        "types.not_callable");
+  Harness.test "`.ensures` appears only in specifications" (fun () ->
+      expect_one_diagnostic "fn f(visit: fn(Int64) -> Int64) -> Bool {\n  visit.ensures(1, 2)\n}\n"
+        "types.specification_only");
+  Harness.test "`.ensures` takes each input, a mut input twice, and then the result" (fun () ->
+      expect_one_diagnostic
+        "fn f(visit: fn(Int64) -> Int64) -> Bool\n  ensures visit.ensures(1)\n{\n  todo\n}\n"
+        "types.missing_argument";
+      expect_one_diagnostic
+        "fn f(visit: fn(mut Int64)) -> Bool\n  ensures visit.ensures(1, 2, 3)\n{\n  todo\n}\n"
+        "types.too_many_arguments";
+      expect_fine
+        "fn f(visit: fn(mut Int64)) -> Bool\n  ensures visit.ensures(1, 2)\n{\n  todo\n}\n";
+      expect_one_diagnostic
+        "fn f(visit: fn(Int64) -> Bool) -> Bool\n  ensures visit.ensures(1, 2)\n{\n  todo\n}\n"
+        "types.mismatch");
+  Harness.test "`.ensures` takes its arguments by position" (fun () ->
+      expect_one_diagnostic
+        "fn f(visit: fn(Int64) -> Int64) -> Bool\n\
+        \  ensures visit.ensures(value: 1, 2)\n\
+         {\n\
+        \  todo\n\
+         }\n"
+        "types.unknown_label");
+  Harness.test "a callback type's ensures names its inputs and its result" (fun () ->
+      expect_fine
+        "fn f(choose: (fn(count: UInt64) -> UInt64 requires count > 0 ensures result < count)) -> \
+         UInt64 {\n\
+        \  choose(1)\n\
+         }\n";
+      expect_one_diagnostic
+        "fn f(choose: (fn(count: UInt64) -> Bool ensures result == count)) -> Bool {\n\
+        \  choose(1)\n\
+         }\n"
+        "types.mismatch");
   Harness.test
     "the target of `calls` in a clause is a function parameter, a capability, or a capability's \
      method" (fun () ->

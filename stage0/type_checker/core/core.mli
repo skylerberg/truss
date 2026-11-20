@@ -1,9 +1,19 @@
 type id = int
-type origin = int
-type mode_keyword = { mode : Language.Mode.t; written : origin; operand : origin; place : origin }
+type desugaring = Rewrite | For_loop | Quantifier | Try | Derived
+
+type origin =
+  | Written of Syntax.id
+  | Desugared of { construct : Syntax.id; desugaring : desugaring }
+
+type mode_keyword = {
+  mode : Language.Mode.t;
+  written : Syntax.id;
+  operand : Syntax.id;
+  place : Syntax.id;
+}
 
 type local =
-  | Declared of { origin : origin; name : string }
+  | Declared of { origin : Syntax.id; name : string }
   | Trait_parameter of { index : int; name : string }
   | Self
   | Synthetic of int
@@ -41,8 +51,9 @@ and place =
   | Local of { local : local; type_ : Types.ty; origin : origin }
   | Constant of { path : Path.t; type_ : Types.ty; origin : origin }
   | Field of { base : place; field : string; type_ : Types.ty; origin : origin }
-  | Element of { base : place; index : expression; type_ : Types.ty; origin : origin }
+  | Element of { id : id; base : place; index : expression; type_ : Types.ty; origin : origin }
   | Range of {
+      id : id;
       base : place;
       start : expression;
       stop : expression option;
@@ -82,8 +93,8 @@ and kind =
   | Matches of { value : operand; pattern : pattern }
   | Convert of { conversion : conversion; value : expression }
   | To_any of { value : expression; trait : Types.trait_reference; evidence : evidence }
-  | If of { condition : expression; then_ : block; else_ : block option; binds_lent_part : bool }
-  | Match of { scrutinees : operand list; arms : arm list; is_written : bool }
+  | If of { condition : expression; then_ : block; else_ : block option }
+  | Match of { scrutinees : operand list; arms : arm list }
   | Block of block
   | Provide of { implementations : implementation list; body : block }
   | Return of expression option
@@ -102,7 +113,14 @@ and kind =
   | Method_cost of { metric : Language.Metric.t; method_ : operand target }
 
 and capture = { local : local; type_ : Types.ty }
-and specification_function = Log | Power | Callback_cost of Language.Metric.t | Calls
+
+and specification_function =
+  | Log
+  | Power
+  | Callback_cost of Language.Metric.t
+  | Callback_ensures
+  | Calls
+
 and construction = Array | Specification_only
 and conversion = Widen | To_integer | From_integer | View_to_owned
 
@@ -135,12 +153,7 @@ and statement_kind =
       body : block;
       mode : Language.Loop_mode.t;
     }
-  | While of {
-      condition : expression;
-      clauses : loop_clause conditional list;
-      body : block;
-      binds_lent_part : bool;
-    }
+  | While of { condition : expression; clauses : loop_clause conditional list; body : block }
   | Parallel of statement list
   | Concurrent of statement list
   | Proof of block
@@ -150,7 +163,7 @@ and statement_kind =
 and iteration =
   | Integer_range of { start : expression; stop : expression; inclusive : bool }
   | Elements of elements
-  | Cursor of { cursor : place; next : callee }
+  | Cursor of { cursor : place; next : callee; next_origin : origin }
 
 and elements = { count : expression; position : pattern; element : place; lends : Language.Mode.t }
 and loop_clause = Invariant of expression | Decreases of expression list | Cost of cost
@@ -170,7 +183,7 @@ and pattern = { id : id; origin : origin; type_ : Types.ty; kind : pattern_kind 
 
 and pattern_kind =
   | Wildcard
-  | Bind of { local : local; is_var : bool; mode : Language.Mode.t }
+  | Bind of { local : local; is_var : bool; mode : Language.Mode.t; may_alias : bool }
   | Variant of { variant : string; fields : (string * pattern) list }
   | Record of (string * pattern) list
   | Literal of pattern_constant
@@ -186,7 +199,11 @@ type parameter = {
   callback_contract : callback_contract option;
 }
 
-and callback_contract = { inputs : local list; requires : expression list }
+and callback_contract = {
+  inputs : local list;
+  requires : expression list;
+  ensures : expression list;
+}
 
 type contract = {
   panics_unless : expression list;
@@ -196,7 +213,13 @@ type contract = {
   costs : cost conditional list;
 }
 
-type law = { name : string; parameters : parameter list; requires : expression list; body : block }
+type law = {
+  name : string;
+  parameters : parameter list;
+  requires : expression list;
+  body : block;
+  origin : origin;
+}
 
 type definition =
   | Function of { parameters : parameter list; contract : contract; body : block option }
@@ -211,4 +234,4 @@ type definition =
   | Law_proof of { parameters : parameter list; body : block option }
   | Empty
 
-type t = { definition : definition }
+type t = { definition : definition; origin : origin }

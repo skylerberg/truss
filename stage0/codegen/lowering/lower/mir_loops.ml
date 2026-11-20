@@ -178,7 +178,7 @@ let lower_for_each state ~(schedule : Lowering.schedule) ~(iteration : Mir.itera
   match iteration with
   | Range { start = low; stop = high; inclusive } ->
       lower_range_loop state ~schedule ~low ~high ~inclusive ~each
-  | Pull { cursor; next } ->
+  | Pull { cursor; next; _ } ->
       let cursor = Mir_places.lower_place state cursor in
       Targets.pull_loop state
         ~option:(Mir_calls.compute_result_type state next)

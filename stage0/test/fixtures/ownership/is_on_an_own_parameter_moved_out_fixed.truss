@@ -1,0 +1,7 @@
+fn keep(text: own String) {}
+
+fn f(present: own Option[String]) {
+  if own present is Some(text) {
+    keep(own text)
+  }
+}

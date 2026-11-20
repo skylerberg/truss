@@ -246,6 +246,69 @@ let check_impl (state : Checking.state) (written_members : Syntax.impl_member Sy
                   so the write would reach elements that were lent read-only."
                  shown_trait (Types.show impl.for_type)))
 
+let list_callback_contracts (definition : Syntax.definition) ~text ~spans =
+  let parameters =
+    match definition.kind with
+    | Function { signature; _ } | Method_declaration signature -> signature.parameters
+    | _ -> []
+  in
+  let quote (value : Syntax.expression) =
+    String.concat " "
+      (List.filter
+         (fun word -> word <> "")
+         (String.split_on_char ' '
+            (String.map
+               (function '\n' | '\t' -> ' ' | character -> character)
+               (Source.Definition_span.quote text (Source.Definition_span.locate spans value.id)))))
+  in
+  List.filter_map
+    (fun (parameter : Syntax.parameter) ->
+      match parameter.kind with
+      | Named_parameter { name; type_ = { kind = Function_type { clauses; _ }; _ }; _ } ->
+          Some
+            ( name.text,
+              List.filter_map
+                (fun (clause : Syntax.clause) ->
+                  match clause.kind with
+                  | Requires value -> Some ("requires " ^ quote value)
+                  | Ensures value -> Some ("ensures " ^ quote value)
+                  | Uses _ | Cost _ | Decreases _ | Clause_error -> None)
+                clauses )
+      | Named_parameter _ | Self_parameter _ | Parameter_error -> None)
+    parameters
+
+let check_callback_contracts (state : Checking.state) (name : Syntax.name) ~shown_trait declaration
+    =
+  match state.lookups.names.find_key declaration with
+  | None -> ()
+  | Some key ->
+      let declared =
+        list_callback_contracts
+          (state.lookups.names.read_definition key)
+          ~text:(state.lookups.names.read_text key)
+          ~spans:(state.lookups.names.read_spans key)
+      and written =
+        list_callback_contracts state.definition
+          ~text:(state.lookups.names.read_text state.key)
+          ~spans:state.spans
+      in
+      List.iter
+        (fun (parameter, clauses) ->
+          let written_clauses = Option.value ~default:[] (List.assoc_opt parameter written) in
+          if clauses <> written_clauses then
+            Checking.report state Signature_mismatch state.spans.(name.id)
+              (Printf.sprintf
+                 "`%s` must state the callback contract that `%s` declares for `%s`: %s. A caller \
+                  through `%s` relies on that contract, so the method's own callback contract is \
+                  that one."
+                 name.text shown_trait parameter
+                 (match clauses with
+                 | [] -> "no `requires` and no `ensures`"
+                 | clauses ->
+                     String.concat ", " (List.map (fun clause -> "`" ^ clause ^ "`") clauses))
+                 shown_trait))
+        declared
+
 let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : Path.receiver)
     (written : Types.signature) (impl : Types.impl_interface) ~trait_span
     (trait_path : Syntax.path_type) =
@@ -323,4 +386,5 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
                      "`%s` declares `%s` with `uses Panic unless` a condition, and this `%s` uses \
                       `Panic` without one, so it could panic where that condition holds. Declare \
                       `uses Panic unless` a condition that `%s`'s implies."
-                     shown_trait name.text name.text shown_trait))
+                     shown_trait name.text name.text shown_trait)
+              else check_callback_contracts state name ~shown_trait implemented.declaration)

@@ -670,6 +670,7 @@ let empty =
   }
 
 type change =
+  | Module of Path.module_
   | Entry of Path.module_ * string
   | Entries of Path.module_
   | Imports of Names.key
@@ -705,7 +706,8 @@ let list_changes before after =
         let declarations_before, declarations_after =
           select_before_and_after (fun names -> names.module_declarations)
         in
-        (if differs entries_before entries_after then [ Entries module_ ] else [])
+        (if Option.is_some before <> Option.is_some after then [ Module module_ ] else [])
+        @ (if differs entries_before entries_after then [ Entries module_ ] else [])
         @ (if differs declarations_before declarations_after then [ Module_declarations module_ ]
            else [])
         @ String_map.fold

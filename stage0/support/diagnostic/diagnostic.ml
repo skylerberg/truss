@@ -50,6 +50,7 @@ module Code = struct
     | Let_else_brace
     | Nesting_too_deep
     | Misplaced_opaque
+    | Misplaced_tuple
     | Misplaced_visibility
     | Misplaced_self
     | Lends_own
@@ -58,7 +59,7 @@ module Code = struct
     | Loop_cost_bound
     | Function_type_cost_bound
     | Function_type_names
-    | Misplaced_requires
+    | Misplaced_callback_contract
     | Misplaced_condition
     | Misplaced_function_type
     | Misplaced_associated_type
@@ -148,6 +149,7 @@ module Code = struct
     | Wrong_try
     | Lambda_needs_type
     | Not_a_record
+    | Not_a_tuple_type
     | Unknown_variant
     | Specification_only
     | Not_in_specification
@@ -234,6 +236,7 @@ module Code = struct
     | Division
     | Shift
     | Out_of_range
+    | Out_of_bounds
     | Requires
     | Ensures
     | Invariant
@@ -324,6 +327,7 @@ module Code = struct
     | Let_else_brace -> "let_else_brace"
     | Nesting_too_deep -> "nesting_too_deep"
     | Misplaced_opaque -> "misplaced_opaque"
+    | Misplaced_tuple -> "misplaced_tuple"
     | Misplaced_visibility -> "misplaced_visibility"
     | Misplaced_self -> "misplaced_self"
     | Lends_own -> "lends_own"
@@ -332,7 +336,7 @@ module Code = struct
     | Loop_cost_bound -> "loop_cost_bound"
     | Function_type_cost_bound -> "function_type_cost_bound"
     | Function_type_names -> "function_type_names"
-    | Misplaced_requires -> "misplaced_requires"
+    | Misplaced_callback_contract -> "misplaced_callback_contract"
     | Misplaced_condition -> "misplaced_condition"
     | Misplaced_function_type -> "misplaced_function_type"
     | Misplaced_associated_type -> "misplaced_associated_type"
@@ -424,6 +428,7 @@ module Code = struct
     | Wrong_try -> "wrong_try"
     | Lambda_needs_type -> "lambda_needs_type"
     | Not_a_record -> "not_a_record"
+    | Not_a_tuple_type -> "not_a_tuple_type"
     | Unknown_variant -> "unknown_variant"
     | Not_structural -> "not_structural"
     | Specification_only -> "specification_only"
@@ -532,6 +537,7 @@ module Code = struct
     | Division -> "division"
     | Shift -> "shift"
     | Out_of_range -> "out_of_range"
+    | Out_of_bounds -> "out_of_bounds"
     | Requires -> "requires"
     | Ensures -> "ensures"
     | Invariant -> "invariant"

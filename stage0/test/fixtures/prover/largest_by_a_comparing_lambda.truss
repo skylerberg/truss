@@ -1,0 +1,9 @@
+fn largest_is_greatest(scores: Slice[Int64]) -> Bool
+  requires scores.length() > 0
+  ensures result
+{
+  match scores.max_by(fn(first, second) { first.compare(second) }) {
+    Some(largest) => forall i in 0..scores.length() => scores[i] <= largest
+    None => false
+  }
+}

@@ -99,16 +99,16 @@ test "a map's entries, keys, and values are walked, and its values changed in pl
   var table = sample()
   var seen = ""
   var sum: Int64 = 0
-  for entry in table {
-    mut seen.push(entry.key.slice())
-    sum += entry.value
+  for key, value in table {
+    mut seen.push(key.slice())
+    sum += value
   }
   assert seen == "bac" && sum == 6
   mut table.update_values(fn(value) { value *= 2 })
   assert total(table) == 12 && table.get("c") == Some(6)
   var owned = ""
-  for entry in own table {
-    mut owned.push(entry.key.slice())
+  for key, _ in own table {
+    mut owned.push(key.slice())
   }
   assert owned == "bac"
 }

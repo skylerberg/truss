@@ -1,21 +1,17 @@
-# Truss Design Decisions
+# Truss Current Design
 
 Truss is a language for a time when LLMs write code faster than tools can
 build, test, and verify it. Development time then goes to builds, test
 suites, bugs, conflicts between agents, and security problems. Truss is
 designed to make each of those cheap ([GOALS.md](GOALS.md)).
 
-This document gives the reasons for the design.
-[SPECIFICATION.md](SPECIFICATION.md) states the rules of the language, and
-[PACKAGES.md](PACKAGES.md) the rules of packages.
-
 ## Overview
 
 Three decisions shape the rest of the design.
 
-**Every definition is checked alone, against the signatures it names.** A
-signature carries the types, the capabilities, the contract, and the cost of
-a function, and the compiler proves that the body meets them:
+**The signature is enough to meaningfully review the code.** A signature carries
+the types, the capabilities, the contract, and the cost of a function, and the
+compiler proves that the body meets them:
 
 ```truss
 public fn binary_search(sorted: Slice[Int64], target: Int64) -> Option[UInt64]
@@ -28,13 +24,11 @@ public fn binary_search(sorted: Slice[Int64], target: Int64) -> Option[UInt64]
   cost allocations == 0
 ```
 
-This signature has no `uses` clause, so the function is pure. A caller's
-types and proofs depend on the signature and never on the body. A reviewer
-therefore reads signatures instead of bodies, and an edit to a body
-invalidates no caller. The cost is that a signature must state every effect
-and every failure of a call: an operation that can fail is a proof
-obligation or a declared `Panic`, and there is no `assume`. See
-[Proofs](#proofs).
+This signature has no `uses` clause, so the function is pure. A caller's types
+and proofs depend on the signature and never on the body. A reviewer therefore
+reads signatures instead of bodies. The cost is that a signature must state
+every effect and every failure of a call: an operation that can fail is a proof
+obligation or a declared `Panic`. See [Proofs](#proofs).
 
 **No two names alias a value that either can mutate.** This is mutable value
 semantics. A call can then mutate only its `mut` arguments and the state behind
@@ -43,12 +37,10 @@ value is freed when its owner's scope ends. The cost is that a reference cannot
 be stored. Views, lending methods, and cursors do the jobs of stored references.
 See [Values and ownership](#values-and-ownership).
 
-**Effects are capabilities.** A function that acts outside pure computation
-lists the capabilities it `uses`, and its caller provides their
-implementations. A test provides fakes, so its result is deterministic and
-is cached until the code it runs changes. A dependency has only the effects
-that its signatures and its grant allow. The cost is a `uses` clause on
-every function that has an effect. See [Capabilities](#capabilities).
+**Effects are capabilities.** A non-pure function must list the capabilities it
+`uses`. Its caller provides the capability implementations. A test provides
+fakes, so its result is deterministic and is cached until the code it runs
+changes. See [Capabilities](#capabilities).
 
 These reasons recur. A later section cites one by name instead of restating
 it:
@@ -213,6 +205,25 @@ Rules: [Built-in types](SPECIFICATION.md#built-in-types).
 |---|---|
 | A size, a length, and an index are `UInt64`, and an offset is `Int64`. | A length is never negative, and a bounds check is one comparison. A subtraction that may go below zero is a compile error, so an unsigned index does not wrap. |
 | A `Character` is a Unicode scalar value. | It has a fixed size, so it is `Plain`, and its definition does not change between Unicode versions. A grapheme cluster has no fixed size, and its boundaries change as Unicode adds rules, so a grapheme is a slice of its string. |
+
+### Tuple types
+
+Rules: [Tuple types](SPECIFICATION.md#tuple-types).
+
+A loop over a map, an `enumerate`, or a `zip` yields records whose field
+names stand for positions: `key` and `value`, `index` and `element`, `first`
+and `second`. Matched by name, they bind those placeholder names, and a
+descriptive name costs a label, as in `(key: word, value: count)`. A tuple
+type declares that its field order is part of its API, so a tuple pattern
+binds each field by position to a name the reader chooses:
+`for word, count in counts`.
+
+| Rule | Reason |
+|---|---|
+| A record matches by position only where it is declared a tuple type. | Reordering two fields of one type would otherwise silently swap the bindings of every positional pattern. Only a type whose field names stand for positions commits to an order. |
+| A tuple pattern has no parentheses. | Parentheses match fields by name in every type, so the semantics of a pattern never depends on whether its type is a tuple type. `for (_, group) in groups`, a habit from Rust and Swift, is an error whose fix removes the parentheses (*LLM habits*). |
+| A tuple pattern is the whole pattern of a `let`, a `var`, or a `for`. | Without parentheses it cannot nest, and in a `match` arm or a lambda's parameters a comma already separates values. |
+| In a tuple pattern, a bare name that names another field is an error. | `for value, key in ports` would bind each key as `value`. The same rule reports `copy(destination, source)`. |
 
 ### Recursive types
 
@@ -451,13 +462,13 @@ State that is updated from one call to the next goes in a `for` loop or a
 method such as `fold`, and behavior with state is a record that implements
 a trait.
 
-A lambda's parameters have no annotations, so its body can prove a fact
-about an argument only if the callee states one. The function type of a
-parameter can therefore carry a `requires`, as in
-`make: (fn(index: UInt64) -> Element requires index < count)`, and a lambda
-passed for `make` may rely on `index < count`. A `requires` is allowed only
-on the type of a parameter, so no type that values are stored in or compared
-by carries one.
+A lambda has no annotations, so what it knows of its arguments comes from
+the callee. A parameter's function type states that fact in a `requires`,
+as in `make: (fn(index: UInt64) -> Element requires index < count)`, and a
+lambda passed for `make` may rely on `index < count`. The callee's contract
+names the lambda's results as `make.ensures(index, element)`, which the
+caller reads from the lambda's body
+([Callback contracts](#callback-contracts)).
 
 | Rule | Reason |
 |---|---|
@@ -467,6 +478,7 @@ by carries one.
 | `return` exits the lambda. | Kotlin's non-local `return` from an inline lambda is a known source of confusion. |
 | A lambda has one form, `fn(x) { ... }`, passed inside the call's parentheses. | *One spelling.* A block's value is its last expression, so `x => x * 2` would be a second form, and a trailing lambda a second way to pass an argument. |
 | A lambda names its parameters. | An implicit parameter such as `it` or `$0` is not a descriptive name ([Names](#names)). |
+| A lambda has no `requires` or `ensures` of its own: its body is its contract. | A caller reads `visit.ensures` from the lambda's body, so an `ensures` on the lambda would restate the body. A lambda's own `requires` would bind no one, since the callee that calls it cannot see it. A callback that needs a contract of its own, to be reused or to hide its body, is a named function. |
 
 ### Handles
 
@@ -677,6 +689,18 @@ order they have in a definition, and the parentheses mark where they end.
 | Rule | Reason |
 |---|---|
 | A bound in a function type is an integer literal. | Type checking compares a function value's clauses with its expected type's without the prover, and two literals compare as numbers. A bound that named a value would need a proof at each comparison, and a field's type or a type argument has no value in scope to name. |
+
+### Callback contracts
+
+Rules: [Callback contracts](SPECIFICATION.md#callback-contracts).
+
+| Rule | Reason |
+|---|---|
+| A `requires` or an `ensures` in a function type appears only on the type of a definition's parameter. | Type checking compares function types without the prover, so no type that values are stored in or compared by carries a clause that would need a proof. |
+| A callee names the postcondition of the function passed as `visit.ensures(...)`, a relation. | A callback that reads `Random` returns different results for one argument. Two occurrences of `transform(value)` in a formula are equal, so a contract that called the callback would promise what it does not keep. The relation holds of each call alone, so the prover still models no capability's state between calls ([What proofs do not model](#what-proofs-do-not-model)). |
+| Every term of a callback contract takes its value from the function passed by one rule: a lambda's body, a named function's contract, or the caller's own term. | `time(visit)`, `allocations(visit)`, and `visit.ensures` come from the same three places. One rule covers every term, so a new term needs no rule of its own. |
+| An `impl`'s method states the callback contracts of its trait's method, clause for clause. | A call through the trait proves its callback contracts of the function passed, and the method's body assumes its own. Contracts that differed would let the body assume what no caller proved. |
+| A law over a callback's answers is stated over `visit.ensures`, and a contract that needs it is an implication. | A comparator that logs, or panics only on bad input, but answers consistently keeps the conclusion. No condition on a capability parameter is needed, and a callback that breaks the law loses only the conclusion. |
 
 ## Methods
 
@@ -954,7 +978,7 @@ narrowing limits the reach of one capability.
 
 | Rule | Reason |
 |---|---|
-| A callback uses capabilities only through a capability parameter. | One rule stays true: no `uses` means pure. A callback is pure by default, which is the safe default for a comparator and for code that runs in parallel. |
+| A callback uses capabilities only through a capability parameter. | One rule stays true: no `uses` means pure. A callback is pure by default, which is the safe default for code that runs in parallel. |
 | An intrinsic that reaches the operating system uses `System`, a capability that only the standard library names and that the runtime grants to the real implementations. | No `uses` means pure inside the standard library too. A helper that called `read` without declaring it would be a function in the logic, so the prover could prove that two reads return the same bytes. Nothing implements `System`, so no `provide` grants it to code that does not declare it. |
 | Providing a type provides every capability that the type implements. | A type that narrows both reading and writing cannot leave one of them unnarrowed by mistake. |
 | An `impl` of a capability can declare `uses`, and a `provide` of it requires those capabilities. | Capabilities layer instead of inheriting. `ReadDatabase` is implemented with `NetworkClient`, which is required where the implementation is provided. A dependency that is granted `ReadDatabase` alone never reaches the network. |
@@ -1324,7 +1348,7 @@ only, to state the definition.
 | A clause applies only where every name it mentions is visible. | An `ensures` that reads the fields of an opaque type is a fact inside the type's package and no fact elsewhere, so `opaque` hides the representation from proofs too. |
 | A public `requires` or `cost` names only public definitions, and an `ensures` may name a private function. | The proofs of callers in other packages read a `requires` and a `cost`, and a clause applies only where every name it mentions is visible. The `ensures` lets callers inside the package know a result in terms of private helpers. |
 | A bit-level fact is requested with `assert ... by bit_vector`. | Bit-blasting is slow on most queries, so only the assertion that asks for it is proven that way, as with Verus's `by (bit_vector)`. |
-| A quantifier over a range or a collection is also an expression in code. | The binder carries its range, so the body may rely on it. A lambda passed to a method would know nothing about its argument. The standard library therefore has no `all` or `any` methods, and a test of every element has *one spelling*. |
+| A quantifier over a range or a collection is also an expression in code. | The binder carries its range, so the body may rely on it. The standard library therefore has no `all` or `any` methods, and a test of every element has *one spelling*. |
 
 ### Writing specifications
 
@@ -1505,6 +1529,7 @@ clause can promise. This is why a key is `Ordered` as well as `Hash`.
 | A method that every integer type has, or both float types have, is declared once, in a sealed trait. | Generic code over the trait can call the method, and the method's contract in the trait holds for every type. A method declared on each type is a separate function per type, which generic code cannot call. |
 | `FloatingPoint` is sealed: only `Float32` and `Float64` implement it. | The trait describes their IEEE 754 formats, which its `Bits` and methods such as `is_nan` expose. In generic code over the trait, `is_nan` and the `ieee_` comparisons then mean what IEEE 754 defines, for every instantiation. |
 | A capability declares only primitive operations. | A narrowing implementation or a fake has few methods to write. |
+| A callback that receives an element of the receiver states so in its function type's `requires`. | A lambda knows a fact about its argument only where the callee states it, so a caller's fact about every element reaches the lambda only through that `requires`. |
 | Every failure of the operating system is a `SystemError`. | Code that reads a file and sends it over a connection handles one error type. |
 | Text in an embedded language is a tagged template, and a `processes::Command` is a program and a list of arguments. | Neither is a string that is passed to an interpreter, so neither allows an injection. |
 
@@ -1560,7 +1585,7 @@ Rules: [The registry](PACKAGES.md#the-registry).
 |---|---|
 | Comments | [Comments](#comments) |
 | Numeric literal suffixes | [Number literals](#number-literals) |
-| Tuples | Naming by position lets users mix up which is which. Destructuring a record suffices. |
+| Tuples without a name, such as `(Int64, String)` | Naming by position lets users mix up which is which. A [tuple type](#tuple-types) has a name and named fields, and matches by position only in a tuple pattern. |
 | Type aliases | A type name always means one type. |
 | A garbage collector, lifetimes, stored references, and mutable global state | [Values and ownership](#values-and-ownership) |
 | Destructors | [Handles](#handles) |

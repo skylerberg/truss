@@ -876,6 +876,11 @@ let is_plain = has_property Plain
 let is_view = has_property View
 let holds_function = has_property Holds_function
 
+let binding_may_alias lookups ~list_bounds (mode : Language.Mode.t) type_ =
+  match mode with
+  | Mut -> true
+  | Read | Own -> is_view lookups ~list_bounds type_ || not (is_plain lookups ~list_bounds type_)
+
 let collect_contents lookups ~list_bounds type_ =
   Properties.collect_contents lookups
     ~normalize:(fun type_ ->

@@ -1,6 +1,6 @@
 let is_bookkeeping (statement : Mir.Graph.statement) =
   match statement.kind with
-  | Basic (Live _ | Dead _ | Loan_start _ | Loan_end _ | Ghost_assert _ | Matched _ | Proof _) ->
+  | Basic (Live _ | Dead _ | Loan_start _ | Loan_end _ | Ghost_assert _ | Path_note _ | Proof _) ->
       true
   | Basic (Assign _ | Call _ | Lend _ | Template _ | Assert _ | Echo _)
   | Provide_start _ | Provide_end ->
@@ -184,12 +184,17 @@ let forward_call ~(substitution : Types.substitution) ~(make_fresh_local : unit 
   and find_forwarded_projection (projection : Mir.projection) : Mir.projection option =
     match projection with
     | Field _ | Variant_field _ -> Some projection
-    | Element { index; sequence; _ } ->
+    | Element { node; index; sequence; _ } ->
         let* index = find_forwarded index in
         Some
           (Mir.Element
-             { index; sequence = Types.substitute substitution sequence; origin = outer.origin })
-    | Range { start; stop; sequence; _ } ->
+             {
+               node;
+               index;
+               sequence = Types.substitute substitution sequence;
+               origin = outer.origin;
+             })
+    | Range { node; start; stop; sequence; _ } ->
         let* start = find_forwarded start in
         let* stop =
           match stop with
@@ -199,6 +204,7 @@ let forward_call ~(substitution : Types.substitution) ~(make_fresh_local : unit 
         Some
           (Mir.Range
              {
+               node;
                start;
                stop;
                sequence = Types.substitute substitution sequence;

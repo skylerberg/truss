@@ -10,9 +10,9 @@ type jump_targets = {
 }
 
 let expand_body (body : Tree.body) : Graph.body =
-  let blocks : Graph.basic_block Dynarray.t = Dynarray.create () in
+  let blocks : Graph.basic_block option Dynarray.t = Dynarray.create () in
   let take_fresh_number () =
-    Dynarray.add_last blocks { statements = []; terminator = Unreachable; terminator_origin = 0 };
+    Dynarray.add_last blocks None;
     Dynarray.length blocks - 1
   in
   let list_blocks_since first =
@@ -20,7 +20,7 @@ let expand_body (body : Tree.body) : Graph.body =
   in
   let close (index, emitted) terminator origin =
     Dynarray.set blocks index
-      { statements = List.rev emitted; terminator; terminator_origin = origin }
+      (Some { Graph.statements = List.rev emitted; terminator; terminator_origin = origin })
   in
   let make_assignment target value origin : Graph.statement =
     { kind = Basic (Assign { target; value = Operand value }); origin }
@@ -141,7 +141,7 @@ let expand_body (body : Tree.body) : Graph.body =
                 task_provides =
                   (match loop.schedule with
                   | Concurrent ->
-                      (Tree.Iteration { loop = loop.origin }, targets.provides)
+                      (Tree.Iteration { loop = loop.node }, targets.provides)
                       :: targets.task_provides
                   | Sequential | Parallel -> targets.task_provides);
               }
@@ -202,11 +202,9 @@ let expand_body (body : Tree.body) : Graph.body =
                     | Some branch_end ->
                         {
                           targets with
-                          task_ends =
-                            (Tree.Branch { block = fork; index }, branch_end) :: targets.task_ends;
+                          task_ends = (Tree.Branch { fork; index }, branch_end) :: targets.task_ends;
                           task_provides =
-                            (Tree.Branch { block = fork; index }, targets.provides)
-                            :: targets.task_provides;
+                            (Tree.Branch { fork; index }, targets.provides) :: targets.task_provides;
                         }
                     | None -> targets
                   in

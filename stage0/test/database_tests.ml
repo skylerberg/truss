@@ -631,6 +631,31 @@ let () =
         (list_propagated
            ~before:[ ("app::main", "public fn caller() -> Int64 { callee(1) }\n") ]
            ~after:[ ("app::main", callee_and_caller) ]));
+  Harness.test "saving between an edit and its proofs keeps the call graph whole" (fun () ->
+      let with_store name =
+        Printf.sprintf
+          "fn %s(counts: mut Map[String, UInt64]) {\n\
+          \  mut counts.insert(\"key\", value: 1)\n\
+           }\n\n\
+           public fn run() {\n\
+          \  var counts: Map[String, UInt64] = [:]\n\
+          \  %s(mut counts)\n\
+           }\n"
+          name name
+      in
+      let file = Support.parse_file "app::main" in
+      let database = build [ ("app::main", "public fn run() {}\n") ] in
+      List.iter
+        (fun name ->
+          Database.update database [ (file, Some (with_store name)) ];
+          ignore (Database.list_unsaved database);
+          ignore (Support.prove database file))
+        [ "store"; "put" ];
+      match
+        Database.For_testing.list_differences database (build [ ("app::main", with_store "put") ])
+      with
+      | [] -> ()
+      | parts -> Harness.fail "the database differs from a cold build in %s" (show_parts parts));
   Harness.test "removing a definition deletes its parts and fails its callers" (fun () ->
       expect_untouched
         (list_propagated
@@ -1122,6 +1147,16 @@ let () =
       in
       expect_recomputed (observe_reopen log after).recomputed
         ~exactly:(remove_rebuilt_on_reopen propagated.recomputed));
+  Harness.test
+    "a database saved before the call graph drops removed definitions reopens without their \
+     recursion groups" (fun () ->
+      let before = [ ("app::main", cyclic) ] in
+      let after = [ ("app::main", "fn h() -> Int64 { 1 }\n") ] in
+      let hot = build before in
+      let log = commit [] (list_saved hot) in
+      Database.update hot (list_changes ~before ~after);
+      let log = commit log (list_saved hot) in
+      ignore (observe_reopen log after));
   Harness.test "a database saved after a package is removed reopens without the package" (fun () ->
       let with_lib = Support.setup ~dependencies:[ ("app", "lib") ] tool_user in
       let alone = [ ("app::main", "fn caller() -> Int64 { 1 }\n") ] in
@@ -1399,6 +1434,27 @@ let () =
         (list_propagated ~before:[ user ]
            ~after:[ user; ("app::tools", "public fn helper() -> Int64 { 1 }\n") ])
         ~parts:[ Any (Checked_body (make_main_key "caller")) ]);
+  let tools_user =
+    ("app::main", "use app::tools\n\nfn caller() -> Int64 {\n  tools::helper()\n}\n")
+  in
+  let tools = ("app::tools", "public fn helper() -> Int64 { 1 }\n") in
+  let extra = ("app::extra", "public fn unused() -> Int64 { 2 }\n") in
+  let is_main_resolution = function
+    | Database.Part.Any (Resolved (key, _)) -> key.module_ = (make_main_key "caller").module_
+    | _ -> false
+  in
+  Harness.test "adding a module re-resolves no definition that does not name it" (fun () ->
+      expect_untouched
+        (list_propagated ~before:[ tools_user; tools ] ~after:[ tools_user; tools; extra ])
+        ~is_excluded:is_main_resolution);
+  Harness.test "removing a module re-resolves no definition that does not name it" (fun () ->
+      expect_untouched
+        (list_propagated ~before:[ tools_user; tools; extra ] ~after:[ tools_user; tools ])
+        ~is_excluded:is_main_resolution);
+  Harness.test "removing the module that a use names re-resolves the user" (fun () ->
+      expect_included
+        (list_propagated ~before:[ tools_user; tools ] ~after:[ tools_user ])
+        ~parts:[ Any (Resolved (make_main_key "caller", Body)) ]);
   let read_callee_ownership database =
     Database.For_testing.read_ownership database (make_main_key "callee")
   in

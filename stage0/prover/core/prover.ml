@@ -36,7 +36,7 @@ let translate_impl (lookups : Lookups.t) (key : Resolve.Names.key) source =
     | { kind = Impl { trait_; _ }; _ } ->
         [
           Translate.translate_restated_clauses lookups source ~impl:key.path
-            ~trait:interface.implements ~for_type:interface.for_type ~at:trait_.id;
+            ~trait:interface.implements ~for_type:interface.for_type ~at:(Written trait_.id);
         ]
     | _ -> [])
 
@@ -106,9 +106,9 @@ let translate_derived_default (lookups : Lookups.t) (key : Resolve.Names.key)
                   "The value that the derived `Default` builds from the fields' defaults may not \
                    meet this type's invariant.";
               ]
-          | _ -> Text "In the derived `Default`: " :: obligation.message
+          | _ -> obligation.message
         in
-        { obligation with location = Whole_definition; message })
+        { obligation with message })
       outcome.obligations
   else []
 
@@ -294,15 +294,11 @@ let show_counterexample members (obligation : Obligation.t) answer_values =
   let path =
     List.filter_map Fun.id
       (List.mapi
-         (fun index (holding, failing, _, _) ->
-           match
-             ( List.assoc_opt (Logic.Symbol.Reached index) answer_values,
-               List.assoc_opt (Logic.Symbol.Condition index) answer_values )
-           with
-           | Some (Solver.Atom "true"), Some (Solver.Atom "true") -> Some holding
-           | Some (Solver.Atom "true"), Some (Solver.Atom "false") -> failing
+         (fun index (note, _) ->
+           match List.assoc_opt (Logic.Symbol.Reached index) answer_values with
+           | Some (Solver.Atom "true") -> Some note
            | _ -> None)
-         obligation.decisions)
+         obligation.path_notes)
   in
   (match shown with [] -> "" | shown -> " For example, when " ^ String.concat ", " shown ^ ".")
   ^ match path with [] -> "" | path -> " On that path, " ^ String.concat ", " path ^ "."
@@ -314,7 +310,7 @@ let resolve_location (names : Resolve.Names.lookups) (key : Resolve.Names.key)
     (location : Obligation.location) =
   Source.Definition_span.locate (names.read_spans key)
     (match location with
-    | Node origin -> origin
+    | Node origin -> Core_walk.locate_origin origin
     | Whole_definition -> (names.read_definition key).id)
 
 let is_word_character character =
@@ -349,7 +345,8 @@ let replace_type_names type_names text =
   end
 
 let substitute_clause text spans clause replacements type_names =
-  let clause_span = Source.Definition_span.locate spans clause in
+  let locate origin = Source.Definition_span.locate spans (Core_walk.locate_origin origin) in
+  let clause_span = locate clause in
   let clause_text = Facts.quote_span text clause_span in
   let buffer = Buffer.create (String.length clause_text) in
   let next =
@@ -365,9 +362,7 @@ let substitute_clause text spans clause replacements type_names =
         end)
       0
       (List.sort_uniq compare
-         (List.map
-            (fun (origin, replacement) -> (Source.Definition_span.locate spans origin, replacement))
-            replacements))
+         (List.map (fun (origin, replacement) -> (locate origin, replacement)) replacements))
   in
   Buffer.add_string buffer (replace_type_names type_names (String.drop_first next clause_text));
   Buffer.contents buffer
@@ -380,7 +375,9 @@ let render (lookups : Lookups.t) (message : Obligation.message) =
          | Quote (key, origin) ->
              Facts.quote_span
                (lookups.interface.names.read_text key)
-               (Source.Definition_span.locate (lookups.interface.names.read_spans key) origin)
+               (Source.Definition_span.locate
+                  (lookups.interface.names.read_spans key)
+                  (Core_walk.locate_origin origin))
          | Substituted { key; clause; replacements; type_names } ->
              substitute_clause
                (lookups.interface.names.read_text key)
@@ -399,7 +396,9 @@ let locate_citation (lookups : Lookups.t) ((key : Resolve.Names.key), origin) =
   let place = lookups.interface.names.read_place key in
   ( place,
     Source.Definition_span.to_file ~base:place.base
-      (Source.Definition_span.locate (lookups.interface.names.read_spans key) origin) )
+      (Source.Definition_span.locate
+         (lookups.interface.names.read_spans key)
+         (Core_walk.locate_origin origin)) )
 
 type answer = Solved of Solver.answer | Ran of bool | Run_failed of string
 type 'span site = { code : Diagnostic.Code.prover; span : 'span; shows : string }
@@ -426,9 +425,8 @@ let make_request (obligation : Obligation.t) =
     List.map (fun (term, _) -> (Logic.Symbol.Named_term term, term)) obligation.locals
     @ List.concat
         (List.mapi
-           (fun index (_, _, reached, condition) ->
-             [ (Logic.Symbol.Reached index, reached); (Logic.Symbol.Condition index, condition) ])
-           obligation.decisions)
+           (fun index (_, reached) -> [ (Logic.Symbol.Reached index, reached) ])
+           obligation.path_notes)
   in
   ( Solver.make_request ~symbols:(List.map fst obligation.values) ~terms obligation.query,
     obligation.query )
@@ -499,6 +497,8 @@ let make_state (lookups : Lookups.t) ({ site; obligation; _ } : posed) answer =
     match site.code with
     | Overflow | Division | Shift ->
         " It can also be checked first with an `if`, or done with the checked operation."
+    | Out_of_bounds ->
+        " It can also be checked first with an `if`, or, for one element, read with `get`."
     | _ -> ""
   in
   let find_failure explained =
@@ -526,7 +526,7 @@ let make_state (lookups : Lookups.t) ({ site; obligation; _ } : posed) answer =
              ^ " If the code is correct, a `proof` block or a theorem can lead the solver to the \
                 proof."
               ^
-              if Logic.has_untriggered_fact obligation.query then
+              if obligation.has_untriggered_written_fact then
                 " A quantified fact in the query has no trigger, so an `assert` of that fact at \
                  the term the proof needs may be enough."
               else ""));

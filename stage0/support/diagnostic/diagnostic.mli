@@ -50,6 +50,7 @@ module Code : sig
     | Let_else_brace
     | Nesting_too_deep
     | Misplaced_opaque
+    | Misplaced_tuple
     | Misplaced_visibility
     | Misplaced_self
     | Lends_own
@@ -58,7 +59,7 @@ module Code : sig
     | Loop_cost_bound
     | Function_type_cost_bound
     | Function_type_names
-    | Misplaced_requires
+    | Misplaced_callback_contract
     | Misplaced_condition
     | Misplaced_function_type
     | Misplaced_associated_type
@@ -148,6 +149,7 @@ module Code : sig
     | Wrong_try
     | Lambda_needs_type
     | Not_a_record
+    | Not_a_tuple_type
     | Unknown_variant
     | Specification_only
     | Not_in_specification
@@ -234,6 +236,7 @@ module Code : sig
     | Division
     | Shift
     | Out_of_range
+    | Out_of_bounds
     | Requires
     | Ensures
     | Invariant

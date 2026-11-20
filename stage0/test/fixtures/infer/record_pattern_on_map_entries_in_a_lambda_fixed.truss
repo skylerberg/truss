@@ -1,0 +1,3 @@
+fn count_large(counts: Map[String, UInt64]) -> UInt64 {
+  counts.count_where(fn((key, value: count)) { count > key.length() })
+}

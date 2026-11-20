@@ -17,6 +17,7 @@ module Symbol : sig
     | Field of { type_ : Types.ty; variant : string option; field : string }
     | Unit
     | Apply of sort list
+    | Callback_ensures of sort list
     | Equal of Types.ty
     | Valid of Types.ty
     | Rank of Types.ty
@@ -49,7 +50,6 @@ module Symbol : sig
     | Cost_log
     | Cost_power
     | Reached of int
-    | Condition of int
 end
 
 type rounding_mode = Nearest_ties_to_even | Toward_positive | Toward_negative | Toward_zero
@@ -152,7 +152,7 @@ val remove_quantified_facts : query -> query
 val forall : ?trigger:term list -> (symbol * sort) list * term -> term
 val substitute : (symbol * term) list -> term -> term
 val replace : from:term -> into:term -> term -> term
-val has_untriggered_fact : query -> bool
+val has_untriggered_fact : ?is_counted:(term -> bool) -> query -> bool
 val prune : query -> query
 val show_query : ?cardinality_bound:int -> query -> string
 val has_uninterpreted_sort : query -> bool

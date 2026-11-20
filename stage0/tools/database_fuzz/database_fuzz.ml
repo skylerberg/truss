@@ -3,7 +3,8 @@ let usage =
    Edits the files of a project at random and propagates each edit through the project's database \
    in .truss, then compares that database with one built from the edited files. At random points \
    it commits the database and opens it again, before or after the edit is propagated through \
-   every stage, or stops a commit before its rename. With no file, it edits the corpus beside it."
+   every stage, or stops a commit before its rename. A compiler bug that the workspace logs counts \
+   as a failure of the edit. With no file, it edits the corpus beside it."
 
 let example : Path.module_ = { package = { owner = None; name = "example" }; modules = [] }
 let standard_package_database = lazy (Workspace.For_testing.load_standard_package_database ())
@@ -302,6 +303,14 @@ let () =
     incr failures;
     Printf.printf "seed %d, edit %d (%s): %s\n%!" !seed step edit.description problem
   in
+  let logged_bugs = ref [] in
+  Workspace.For_testing.observe_logged_bugs (fun bug -> logged_bugs := bug :: !logged_bugs);
+  let report_logged_bugs step edit =
+    List.iter
+      (fun bug -> report step edit ("the workspace logged " ^ Compiler_bug.to_string bug))
+      (List.rev !logged_bugs);
+    logged_bugs := []
+  in
   let start_over () =
     Workspace.flush ();
     File_system.remove (Filename.concat root ".truss")
@@ -312,45 +321,47 @@ let () =
       else make_random_edit !current
     with
     | None -> ()
-    | Some edit -> (
-        if !verbose then Printf.printf "%d: %s\n%!" step edit.description;
-        write_project root edit.files;
-        if draw_number 4 = 0 then begin
-          if !verbose then Printf.printf "  check, commit and reopen\n%!";
-          ignore (capture_outcome (fun () -> check_and_reopen root))
-        end;
-        let propagated =
-          capture_outcome (fun () ->
-              let hot = open_database root in
-              Database.For_testing.propagate hot;
-              hot)
-        in
-        match (propagated, capture_outcome (fun () -> build edit.files)) with
-        | Ok hot, Ok cold -> (
-            current := edit.files;
-            match Database.For_testing.list_differences hot cold with
-            | [] -> (
-                match find_reopening root with
-                | Some (description, reopen) ->
-                    if !verbose then Printf.printf "  %s\n%!" description;
-                    reopen ()
-                | None -> ())
-            | parts ->
-                report step edit
-                  ("the propagated database differs from a cold build in "
-                  ^ String.concat ", "
-                      (List.map (fun part -> Database.Part.show (Stored part)) (List.take 20 parts))
-                  );
-                start_over ())
-        | Error failure, Ok _ ->
-            report step edit ("propagating it raised " ^ show_failure failure);
-            start_over ();
-            current := edit.files
-        | (Ok _ | Error _), Error failure ->
-            incr skipped;
-            if !verbose then
-              Printf.printf "  skipped: a cold build raises %s\n%!" (show_failure failure);
-            write_project root !current)
+    | Some edit ->
+        (if !verbose then Printf.printf "%d: %s\n%!" step edit.description;
+         write_project root edit.files;
+         if draw_number 4 = 0 then begin
+           if !verbose then Printf.printf "  check, commit and reopen\n%!";
+           ignore (capture_outcome (fun () -> check_and_reopen root))
+         end;
+         let propagated =
+           capture_outcome (fun () ->
+               let hot = open_database root in
+               Database.For_testing.propagate hot;
+               hot)
+         in
+         match (propagated, capture_outcome (fun () -> build edit.files)) with
+         | Ok hot, Ok cold -> (
+             current := edit.files;
+             match Database.For_testing.list_differences hot cold with
+             | [] -> (
+                 match find_reopening root with
+                 | Some (description, reopen) ->
+                     if !verbose then Printf.printf "  %s\n%!" description;
+                     reopen ()
+                 | None -> ())
+             | parts ->
+                 report step edit
+                   ("the propagated database differs from a cold build in "
+                   ^ String.concat ", "
+                       (List.map
+                          (fun part -> Database.Part.show (Stored part))
+                          (List.take 20 parts)));
+                 start_over ())
+         | Error failure, Ok _ ->
+             report step edit ("propagating it raised " ^ show_failure failure);
+             start_over ();
+             current := edit.files
+         | (Ok _ | Error _), Error failure ->
+             incr skipped;
+             if !verbose then
+               Printf.printf "  skipped: a cold build raises %s\n%!" (show_failure failure);
+             write_project root !current);
+        report_logged_bugs step edit
   done;
   Workspace.flush ();
   Printf.printf "%d edits, %d skipped because a cold build raises, %d failures\n" !count !skipped

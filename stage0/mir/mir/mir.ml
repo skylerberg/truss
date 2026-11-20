@@ -15,7 +15,7 @@ let make_body_part ?interface (form : Core.t) : body_part =
         Builder.of_definition
           ~is_specification:
             (Option.fold ~none:false ~some:Interface.Definition.is_specification interface)
-          definition
+          ~origin:form.origin definition
       with
       | Some tree -> Body (make_code tree)
       | None -> No_code)
@@ -101,12 +101,16 @@ let find_contract (definition : Core.definition) =
                (List.mapi
                   (fun position (parameter : Core.parameter) ->
                     match parameter.callback_contract with
-                    | Some { inputs; requires } ->
+                    | Some { inputs; requires; ensures } ->
                         [
                           ( position,
                             {
                               inputs;
                               requires = List.map (Builder.of_specification ~entry_locals) requires;
+                              ensures =
+                                List.map
+                                  (Builder.of_specification ~entry_locals:(entry_locals @ inputs))
+                                  ensures;
                             } );
                         ]
                     | None -> [])
@@ -140,7 +144,7 @@ let list_laws (definition : Core.definition) =
                 (fun (parameter : Core.parameter) -> (parameter.local, parameter.type_))
                 law.parameters;
             requires = List.map (Builder.of_specification ~entry_locals) law.requires;
-            states = Builder.of_law_statement ~entry_locals law.body;
+            states = Builder.of_law_statement ~entry_locals ~origin:law.origin law.body;
           })
         laws
   | Function _ | Type _ | Constant _ | Test _ | Law_proof _ | Empty -> []

@@ -25,8 +25,8 @@ type terminator =
   | Goto of block
   | Branch of { condition : Tree.operand; yes : block; no : block }
   | For of loop_head
-  | Fork of { fork : Core.origin; concurrent : bool; branches : branch list; join : block option }
-  | Join of { fork : Core.origin; next : block }
+  | Fork of { fork : Core.id; concurrent : bool; branches : branch list; join : block option }
+  | Join of { fork : Core.id; next : block }
   | Iteration_end of { loop : block }
   | Yield of { mode : Language.Mode.t; part : Tree.yielded; resume : block }
   | Return of Tree.operand option
@@ -69,17 +69,22 @@ let list_successors = function
   | Resume { exits; next; _ } -> List.map (fun exit -> exit.resume) exits @ [ next ]
   | Iteration_end _ | Return _ | Unreachable | Written_unreachable | Todo -> []
 
-let canonicalize (blocks : basic_block array) =
-  let visited = Array.make (Array.length blocks) false and order = ref [] in
+let canonicalize (closed : basic_block option array) =
+  let read_block block =
+    match closed.(block) with
+    | Some basic -> basic
+    | None -> raise_bug "block %d is reached and was never closed" block
+  in
+  let visited = Array.make (Array.length closed) false and order = ref [] in
   let rec visit block =
     if not visited.(block) then begin
       visited.(block) <- true;
-      List.iter visit (list_successors blocks.(block).terminator);
+      List.iter visit (list_successors (read_block block).terminator);
       order := block :: !order
     end
   in
   visit 0;
-  let renumbered = Array.make (Array.length blocks) None in
+  let renumbered = Array.make (Array.length closed) None in
   List.iteri (fun index block -> renumbered.(block) <- Some index) !order;
   let read_target block =
     match renumbered.(block) with
@@ -90,7 +95,7 @@ let canonicalize (blocks : basic_block array) =
   let innermost = Hashtbl.create 4 in
   List.iter
     (fun loop ->
-      match blocks.(loop).terminator with
+      match (read_block loop).terminator with
       | For { blocks = inside; _ } ->
           let size = List.length inside in
           List.iter
@@ -152,7 +157,8 @@ let canonicalize (blocks : basic_block array) =
   Array.of_list
     (List.map
        (fun block ->
-         { (blocks.(block)) with terminator = renumber block blocks.(block).terminator })
+         let basic = read_block block in
+         { basic with terminator = renumber block basic.terminator })
        !order)
 
 let find_iteration_loop = function Iteration_end { loop } -> Some loop | _ -> None

@@ -224,10 +224,10 @@ and parse_function_type cursor ~clauses:with_clauses =
     if with_clauses then
       let rec gather clauses =
         match Cursor.peek_kind cursor with
-        | Keyword (Uses | Cost | Requires) -> gather (parse_clause cursor :: clauses)
-        | Keyword (Ensures | Decreases) ->
+        | Keyword (Uses | Cost | Requires | Ensures) -> gather (parse_clause cursor :: clauses)
+        | Keyword Decreases ->
             Cursor.fail cursor
-              "`uses`, `cost`, or `requires`; a function type has no `ensures` or `decreases`"
+              "`uses`, `cost`, `requires`, or `ensures`; a function type has no `decreases`"
         | _ -> List.rev clauses
       in
       gather []
@@ -266,21 +266,21 @@ and parse_function_type cursor ~clauses:with_clauses =
       | Requires _ | Ensures _ | Decreases _ | Uses _ | Clause_error -> ())
     clauses;
   let is_named (input : Syntax.function_input) = Option.is_some input.name in
-  let has_requires =
+  let has_callback_contract =
     List.exists (fun (clause : Syntax.clause) ->
-        match clause.kind with Requires _ -> true | _ -> false)
+        match clause.kind with Requires _ | Ensures _ -> true | _ -> false)
   in
   let span = (Cursor.lookup_token cursor start).span in
-  if has_requires clauses then
+  if has_callback_contract clauses then
     begin if not (List.for_all is_named inputs) then
       Cursor.report cursor Function_type_names span
-        "A function type with `requires` names every input, as in `fn(index: UInt64)`, so that the \
-         `requires` can mention them."
+        "A function type with `requires` or `ensures` names every input, as in `fn(index: \
+         UInt64)`, so that its clauses can mention them."
     end
   else if List.exists is_named inputs then
     Cursor.report cursor Function_type_names span
-      "A function type names its inputs only when a `requires` mentions them; remove the names, \
-       since calls through a function value pass arguments by position.";
+      "A function type names its inputs only when a `requires` or an `ensures` mentions them; \
+       remove the names, since calls through a function value pass arguments by position.";
   { inputs; output; clauses }
 
 and parse_parenthesized_function_type cursor =
@@ -753,7 +753,7 @@ and parse_postfix cursor : Syntax.expression =
     | Punctuation Dot -> (
         Cursor.advance cursor;
         match Cursor.peek_kind cursor with
-        | Lower _ | Upper _ ->
+        | Lower _ | Upper _ | Keyword Ensures ->
             let name = Atoms.make_name cursor (Cursor.take cursor) in
             with_postfixes (Atoms.make_expression_node cursor start (Member (value, name)))
         | Integer _ | Float _ -> Habits.report_tuple_field cursor ~field:(Cursor.peek cursor)
@@ -1343,11 +1343,19 @@ and parse_statement cursor : Syntax.statement =
             (Assignment { target; operator = Assign; value = parse_expression cursor })
       | None, _ -> make_statement_node (Expression target))
 
+and parse_binding_annotation cursor (pattern : Syntax.pattern) =
+  match (pattern.kind, Cursor.peek cursor) with
+  | Tuple _, ({ kind = Punctuation Colon; _ } as colon) ->
+      Cursor.report cursor Unexpected_token colon.span
+        "A tuple pattern takes no type annotation: the value's tuple type gives each pattern the \
+         type of its field.";
+      raise Cursor.Failed
+  | _ ->
+      if Cursor.accept_punctuation cursor Colon then Some (parse_type_expression cursor) else None
+
 and parse_binding cursor ~is_var =
-  let pattern = Parse_pattern.parse_pattern cursor in
-  let annotation =
-    if Cursor.accept_punctuation cursor Colon then Some (parse_type_expression cursor) else None
-  in
+  let pattern = Parse_pattern.parse_binding_pattern cursor in
+  let annotation = parse_binding_annotation cursor pattern in
   Cursor.expect_punctuation cursor Equal;
   let value = parse_expression cursor in
   let else_ =
@@ -1375,10 +1383,8 @@ and parse_binding cursor ~is_var =
   Let { is_var; pattern; annotation; value; else_ }
 
 and parse_for_loop cursor ~mode =
-  let pattern = Parse_pattern.parse_pattern cursor in
-  let annotation =
-    if Cursor.accept_punctuation cursor Colon then Some (parse_type_expression cursor) else None
-  in
+  let pattern = Parse_pattern.parse_binding_pattern cursor in
+  let annotation = parse_binding_annotation cursor pattern in
   Cursor.expect_keyword cursor In;
   let iterable = parse_expression cursor in
   (match iterable.kind with

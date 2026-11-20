@@ -449,7 +449,7 @@ let walk_names ~on_name (definition : Syntax.definition) =
         on_name name;
         Option.iter (List.iter walk_pattern_field) fields
     | Record fields -> List.iter walk_pattern_field fields
-    | Alternatives alternatives -> List.iter walk_pattern alternatives
+    | Tuple patterns | Alternatives patterns -> List.iter walk_pattern patterns
   and walk_pattern_field (field : Syntax.pattern_field) =
     match field.kind with
     | Named_field (name, inner) ->
@@ -523,7 +523,7 @@ let walk_names ~on_name (definition : Syntax.definition) =
       walk_signature signature;
       walk_block body
   | Method_declaration signature -> walk_signature signature
-  | Type_definition { name; generics; body; clauses } ->
+  | Type_definition { name; generics; body; clauses; _ } ->
       on_name name;
       List.iter walk_generic generics;
       (match body with

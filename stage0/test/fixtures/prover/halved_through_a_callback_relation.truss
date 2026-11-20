@@ -1,0 +1,46 @@
+fn mapped[Value](value: Option[Value], transform: (fn(Value) -> Value uses generic Granted)) -> Option[Value]
+  uses generic Granted
+  ensures match value {
+    Some(inner) => result is Some(output) && transform.ensures(inner, output)
+    None => result is None
+  }
+{
+  match value {
+    Some(inner) => Some(transform(inner))
+    None => None
+  }
+}
+
+fn halve(value: Int64) -> Int64
+  ensures result == value / 2
+{
+  value / 2
+}
+
+fn halved(value: Option[Int64]) -> Option[Int64]
+  ensures match value {
+    Some(inner) => result is Some(half) && half == inner / 2
+    None => result is None
+  }
+{
+  mapped(value, transform: fn(inner) { inner / 2 })
+}
+
+fn halved_by_name(value: Option[Int64]) -> Option[Int64]
+  ensures match value {
+    Some(inner) => result is Some(half) && half == inner / 2
+    None => result is None
+  }
+{
+  mapped(value, transform: halve)
+}
+
+fn raised(value: Option[UInt64]) -> Option[UInt64]
+  uses Random
+  ensures match value {
+    Some(inner) => result is Some(output) && output >= inner
+    None => result is None
+  }
+{
+  mapped(value, transform: fn(inner) { if inner > 1000 { inner } else { inner + Random.next() % 10 } })
+}

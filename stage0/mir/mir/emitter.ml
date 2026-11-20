@@ -4,20 +4,13 @@ end))
 
 let raise_bug format = Compiler_bug.raise_bug ~stage:"MIR" format
 
-type frame = Bindings | Statement | Condition
+type frame = Bindings | Statement
 
 type scope = {
   frame : frame;
   mutable bound : Tree.local list;
   mutable loans : int list;
   mutable temporaries : Tree.local list;
-}
-
-type lowered_condition = {
-  value : Tree.operand option;
-  ended_if_true : scope;
-  ended_if_false : scope;
-  block_scope_if_true : scope;
 }
 
 type task_exit = Exit_return of Tree.operand option | Exit_break | Exit_continue
@@ -44,9 +37,12 @@ type t = {
   mutable extended : Core.id list;
   mutable binds_to_statement : bool;
   mutable tasks : (Tree.task * int) list;
-  groups : (Core.origin, group) Hashtbl.t;
+  groups : (Core.id, group) Hashtbl.t;
   held_places : (Tree.local, Tree.place) Hashtbl.t;
   bound_to_places : (Tree.local, unit) Hashtbl.t;
+  lent_parts : (Tree.local, unit) Hashtbl.t;
+  aliasing_names : (Tree.local, unit) Hashtbl.t;
+  loan_starts : (int, Tree.operand * Language.Mode.t) Hashtbl.t;
   is_specification : bool;
   entry_locals : Core.local list;
   mutable in_old : bool;
@@ -78,6 +74,9 @@ let create ?(is_specification = false) ~entry_locals ?(takes_free_locals = false
     groups = Hashtbl.create 1;
     held_places = Hashtbl.create 8;
     bound_to_places = Hashtbl.create 8;
+    lent_parts = Hashtbl.create 8;
+    aliasing_names = Hashtbl.create 8;
+    loan_starts = Hashtbl.create 8;
   }
 
 let allocate_local builder kind type_ origin =
@@ -90,6 +89,12 @@ let add_temporary builder local =
   match builder.scopes with
   | scope :: _ -> scope.temporaries <- local :: scope.temporaries
   | [] -> ()
+
+let add_lent_part builder local =
+  Hashtbl.replace builder.lent_parts local ();
+  add_temporary builder local
+
+let note_may_alias builder local = Hashtbl.replace builder.aliasing_names local ()
 
 let allocate_temporary builder type_ origin =
   let local = allocate_local builder Temporary type_ origin in
@@ -180,6 +185,7 @@ let start_loan builder borrowed mode duration origin =
   let loan = builder.loan_count in
   if not builder.is_specification then begin
     builder.loan_count <- loan + 1;
+    Hashtbl.replace builder.loan_starts loan (borrowed, mode);
     emit builder (Basic (Loan_start { loan; borrowed; mode; duration })) origin;
     match builder.scopes with scope :: _ -> scope.loans <- loan :: scope.loans | [] -> ()
   end;
@@ -250,8 +256,8 @@ let return_from_scopes builder value origin =
 
 let unit_value = Tree.Immediate { value = Unit; type_ = Types.unit }
 
-let group_key : Tree.task -> Core.origin = function
-  | Branch { block; _ } -> block
+let group_key : Tree.task -> Core.id = function
+  | Branch { fork; _ } -> fork
   | Iteration { loop } -> loop
 
 let hold_operand builder (value : Tree.operand) type_ origin =
@@ -281,65 +287,56 @@ let rec borrow_place builder (place : Tree.place) =
       | None -> place)
   | Constant _ | Literal _ -> place
 
-let partition_lent builder temporaries =
-  List.partition
-    (fun local ->
-      match (Hashtbl.find builder.infos local).kind with
-      | Lent _ -> true
-      | Source _ | Temporary -> false)
-    temporaries
+let partition_lent_parts builder temporaries =
+  List.partition (Hashtbl.mem builder.lent_parts) temporaries
 
-let run_in_condition_frame builder evaluate =
-  let scope = { frame = Condition; bound = []; loans = []; temporaries = [] } in
+let run_in_condition builder scope evaluate =
+  let statement_scope = find_statement_scope builder in
+  let bound_before = statement_scope.bound in
   builder.scopes <- scope :: builder.scopes;
-  let value = evaluate () in
-  builder.scopes <- List.tl builder.scopes;
+  let value = Fun.protect ~finally:(fun () -> builder.scopes <- List.tl builder.scopes) evaluate in
+  let names = List.filter (fun local -> not (List.mem local bound_before)) statement_scope.bound in
+  statement_scope.bound <- bound_before;
+  scope.bound <- names @ scope.bound;
+  value
+
+let run_in_scrutinee_frame builder evaluate =
+  let scope = make_block_scope () in
+  let value = run_in_condition builder scope evaluate in
+  let lent_parts, others = partition_lent_parts builder scope.temporaries in
+  List.iter (add_temporary builder) (List.rev others);
+  scope.temporaries <- lent_parts;
   (value, scope)
 
-let run_in_condition_scope ~binds_lent_part builder evaluate =
-  if binds_lent_part then begin
-    let statement_scope = find_statement_scope builder in
-    let bound_before = statement_scope.bound in
-    let value, scope = run_in_condition_frame builder evaluate in
-    let names =
-      List.filter (fun local -> not (List.mem local bound_before)) statement_scope.bound
-    in
-    statement_scope.bound <- bound_before;
-    let lent_parts, others = partition_lent builder scope.temporaries in
-    {
-      value;
-      ended_if_true = { scope with temporaries = others; loans = [] };
-      ended_if_false = { scope with bound = names };
-      block_scope_if_true =
-        { (make_block_scope ()) with bound = names; loans = scope.loans; temporaries = lent_parts };
-    }
-  end
-  else
-    let value, scope = run_in_condition_frame builder evaluate in
-    {
-      value;
-      ended_if_true = scope;
-      ended_if_false = scope;
-      block_scope_if_true = make_block_scope ();
-    }
+let make_arm_scope ~scrutinee =
+  {
+    frame = Bindings;
+    bound = scrutinee.bound;
+    loans = scrutinee.loans;
+    temporaries = scrutinee.temporaries;
+  }
 
-let run_in_guard_scope builder origin evaluate =
-  let value, scope = run_in_condition_frame builder evaluate in
-  let lent_parts, others = partition_lent builder scope.temporaries in
-  List.iter (add_temporary builder) (List.rev lent_parts);
-  (match builder.scopes with
-  | enclosing :: _ -> enclosing.loans <- scope.loans @ enclosing.loans
-  | [] -> ());
-  let holds =
-    Option.map
-      (fun value ->
-        let local = allocate_temporary builder Types.bool origin in
-        assign builder (make_local_place local) (Operand value) origin;
-        Tree.Use { place = make_local_place local; type_ = Types.bool; origin })
-      value
-  in
-  end_scope builder { scope with temporaries = others; loans = [] } origin;
-  holds
+let run_in_guarded_block builder scope origin build =
+  let lent_parts, others = partition_lent_parts builder scope.temporaries in
+  match (lent_parts, List.find_opt (Hashtbl.mem builder.aliasing_names) (List.rev scope.bound)) with
+  | _ :: _, Some alias ->
+      let name =
+        match (Hashtbl.find builder.infos alias).kind with
+        | Source { local; _ } -> local
+        | Temporary | Lent _ -> raise_bug "a name that may alias a lent part and is no source local"
+      in
+      run_in_block_scope builder { scope with loans = []; temporaries = lent_parts } origin
+        (fun () ->
+          List.iter
+            (fun loan ->
+              let borrowed, mode = Hashtbl.find builder.loan_starts loan in
+              ignore (start_loan builder borrowed mode (Alias_scope name) origin))
+            (List.rev scope.loans);
+          end_scope builder { scope with bound = []; temporaries = others } origin;
+          build ())
+  | _ ->
+      end_scope builder { scope with bound = [] } origin;
+      run_in_block_scope builder { scope with loans = []; temporaries = [] } origin build
 
 let run_in_value_scope builder origin (build : unit -> Tree.operand option) =
   run_in_scope builder origin (fun () ->
@@ -560,16 +557,16 @@ let resume_block builder (enclosing : suspended) =
   builder.statements <- enclosing;
   statements
 
-let run_in_arm_scope builder build =
-  let scope = { frame = Bindings; bound = []; loans = []; temporaries = [] } in
-  builder.scopes <- scope :: builder.scopes;
-  Fun.protect ~finally:(fun () -> builder.scopes <- List.tl builder.scopes) (fun () -> build scope)
-
-let make_dead_statements scope origin =
-  List.map
-    (fun basic -> { Tree.kind = Basic basic; origin })
-    ((if scope.bound <> [] then [ Tree.Dead (List.rev scope.bound) ] else [])
-    @ if scope.temporaries <> [] then [ Dead (List.rev scope.temporaries) ] else [])
+let list_unmatched_ends scope ~scrutinee origin =
+  list_scope_ends
+    {
+      scope with
+      bound = List.filter (fun local -> not (List.mem local scrutinee.bound)) scope.bound;
+      loans = List.filter (fun loan -> not (List.mem loan scrutinee.loans)) scope.loans;
+      temporaries =
+        List.filter (fun local -> not (List.mem local scrutinee.temporaries)) scope.temporaries;
+    }
+    origin
 
 let run_in_task builder task build =
   builder.tasks <- (task, List.length builder.scopes) :: builder.tasks;

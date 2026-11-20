@@ -99,10 +99,10 @@ let add_bitwise_definitions (query : Logic.query) =
 
 let assert_bit_vector (context : State.context) frame ~named ~origin
     ~(read : State.frame -> Logic.term) =
-  let saved_facts = context.facts and saved_decisions = context.decisions in
+  let saved_facts = context.facts and saved_path_notes = context.path_notes in
   let saved_stated = Tables.Stated_table.copy context.stated in
   context.facts <- [];
-  context.decisions <- [];
+  context.path_notes <- [];
   let isolated =
     {
       frame with
@@ -138,15 +138,13 @@ let assert_bit_vector (context : State.context) frame ~named ~origin
       term
   in
   let cited =
-    match frame.source.key with
-    | Some key when key <> context.home -> Some (key, origin)
-    | Some _ | None -> None
+    if not (Facts.is_home context frame.source) then Some (frame.source.key, origin) else None
   in
   context.obligations <-
     { obligation with query = add_bitwise_definitions obligation.query; cited }
     :: context.obligations;
   context.facts <- saved_facts;
-  context.decisions <- saved_decisions;
+  context.path_notes <- saved_path_notes;
   Tables.Stated_table.reset context.stated;
   Tables.Stated_table.iter (Tables.Stated_table.replace context.stated) saved_stated
 

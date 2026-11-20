@@ -25,7 +25,7 @@ let collect_bindings context (definition : Syntax.definition) =
     match written.kind with
     | Binding name -> bind ~site name Wildcard
     | Variant { fields = Some fields; _ } | Record fields -> visit_pattern_fields ~site fields
-    | Alternatives alternatives -> List.iter (visit_pattern ~site) alternatives
+    | Tuple patterns | Alternatives patterns -> List.iter (visit_pattern ~site) patterns
     | _ -> ()
   and visit_pattern_fields ~site (fields : Syntax.pattern_field list) =
     let has_rest = List.exists (fun (field : Syntax.pattern_field) -> field.kind = Rest) fields in

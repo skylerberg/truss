@@ -1,0 +1,17 @@
+tuple type Span(low: Int64, high: Int64)
+
+fn width(span: Span) -> Int64 {
+  let low, high = span
+  high.saturating_subtract(low)
+}
+
+test "a tuple pattern binds each field of a tuple type by its position" {
+  assert width(Span(low: 3, high: 10)) == 7
+  var widths: List[Int64] = []
+  for low, high in [Span(low: 1, high: 4), Span(low: -2, high: 2)] {
+    mut widths.push(high.saturating_subtract(low))
+  }
+  assert widths == [3, 4]
+  let (high, low) = Span(low: 5, high: 6)
+  assert high == 6 && low == 5
+}

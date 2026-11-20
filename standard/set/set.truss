@@ -178,13 +178,17 @@ public fn Set[Element: Hash + Ordered].reserve(mut self, additional: UInt64)
   mut self.map.reserve(additional)
 }
 
-public fn Set[Element: Hash + Ordered].retain(mut self, keep: fn(Element) -> Bool)
+public fn Set[Element: Hash + Ordered].retain(
+  mut self,
+  keep: (fn(element: Element) -> Bool uses generic Granted requires self.model().contains(element)),
+)
+  uses generic Granted
   ensures self.length() <= old(self.length())
-  ensures forall element: Element => self.model().contains(element) ==> keep(element)
+  ensures forall element: Element => self.model().contains(element) ==> keep.ensures(element, true)
   cost time O(16 + old(self.length()) * (16 + time(keep) + time(Element.hash)
     + (1 + log(old(self.length()))) * (1 + time(Element.compare))))
 {
-  mut self.map.retain(fn(key, _) { keep(key) })
+  mut self.map.retain_keys(keep)
 }
 
 public fn Set[Element: Hash + Ordered].extend[Source: Cursor[Element = Element]](mut self, elements: own Source)

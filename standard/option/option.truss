@@ -47,6 +47,10 @@ public fn Option[Value].unwrap_or_else(
   make: (fn() -> Value uses generic Granted),
 ) -> Value
   uses generic Granted
+  ensures match self {
+    Some(value) => identical(result, value)
+    None => make.ensures(result)
+  }
   cost time O(time(make))
   cost allocations <= allocations(make)
   cost allocated_bytes <= allocated_bytes(make)
@@ -59,9 +63,14 @@ public fn Option[Value].unwrap_or_else(
 
 public fn Option[Value].map[Output](
   own self,
-  transform: (fn(own Value) -> Output uses generic Granted),
+  transform: (fn(value: own Value) -> Output uses generic Granted
+    requires self is Some(held) && identical(held, value)),
 ) -> Option[Output]
   uses generic Granted
+  ensures match self {
+    Some(value) => result is Some(output) && transform.ensures(value, output)
+    None => result is None
+  }
   cost time O(time(transform))
   cost allocations <= allocations(transform)
   cost allocated_bytes <= allocated_bytes(transform)
@@ -74,9 +83,14 @@ public fn Option[Value].map[Output](
 
 public fn Option[Value].map[Output](
   self,
-  transform: (fn(Value) -> Output uses generic Granted),
+  transform: (fn(value: Value) -> Output uses generic Granted
+    requires self is Some(held) && identical(held, value)),
 ) -> Option[Output]
   uses generic Granted
+  ensures match self {
+    Some(value) => result is Some(output) && transform.ensures(value, output)
+    None => result is None
+  }
   cost time O(time(transform))
   cost allocations <= allocations(transform)
   cost allocated_bytes <= allocated_bytes(transform)
@@ -89,9 +103,14 @@ public fn Option[Value].map[Output](
 
 public fn Option[Value].and_then[Output](
   own self,
-  next: (fn(own Value) -> Option[Output] uses generic Granted),
+  next: (fn(value: own Value) -> Option[Output] uses generic Granted
+    requires self is Some(held) && identical(held, value)),
 ) -> Option[Output]
   uses generic Granted
+  ensures match self {
+    Some(value) => next.ensures(value, result)
+    None => result is None
+  }
   cost time O(time(next))
   cost allocations <= allocations(next)
   cost allocated_bytes <= allocated_bytes(next)
@@ -104,9 +123,14 @@ public fn Option[Value].and_then[Output](
 
 public fn Option[Value].and_then[Output](
   self,
-  next: (fn(Value) -> Option[Output] uses generic Granted),
+  next: (fn(value: Value) -> Option[Output] uses generic Granted
+    requires self is Some(held) && identical(held, value)),
 ) -> Option[Output]
   uses generic Granted
+  ensures match self {
+    Some(value) => next.ensures(value, result)
+    None => result is None
+  }
   cost time O(time(next))
   cost allocations <= allocations(next)
   cost allocated_bytes <= allocated_bytes(next)
@@ -117,8 +141,18 @@ public fn Option[Value].and_then[Output](
   }
 }
 
-public fn Option[Value].filter(own self, keep: (fn(Value) -> Bool uses generic Granted)) -> Option[Value]
+public fn Option[Value].filter(
+  own self,
+  keep: (fn(value: Value) -> Bool uses generic Granted requires self is Some(held) && identical(held, value)),
+) -> Option[Value]
   uses generic Granted
+  ensures match self {
+    Some(value) => match result {
+      Some(kept) => identical(kept, value) && keep.ensures(value, true)
+      None => keep.ensures(value, false)
+    }
+    None => result is None
+  }
   cost time O(time(keep))
   cost allocations <= allocations(keep)
   cost allocated_bytes <= allocated_bytes(keep)
@@ -143,6 +177,10 @@ public fn Option[Value].or_else(
   make: (fn() -> Option[Value] uses generic Granted),
 ) -> Option[Value]
   uses generic Granted
+  ensures match self {
+    Some(value) => result is Some(held) && identical(held, value)
+    None => make.ensures(result)
+  }
   cost time O(time(make))
   cost allocations <= allocations(make)
   cost allocated_bytes <= allocated_bytes(make)
@@ -176,6 +214,10 @@ public fn Option[Value].ok_or_else[Error](
   make: (fn() -> Error uses generic Granted),
 ) -> Result[Value, Error]
   uses generic Granted
+  ensures match self {
+    Some(value) => result is Ok(held) && identical(held, value)
+    None => result is Err(error) && make.ensures(error)
+  }
   cost time O(time(make))
   cost allocations <= allocations(make)
   cost allocated_bytes <= allocated_bytes(make)

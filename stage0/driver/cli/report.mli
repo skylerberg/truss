@@ -6,7 +6,7 @@ val of_files : file list -> t
 val force_proofs : t -> Proofs.t option
 val has_errors : t -> bool
 val make_document : t -> (string * Json.t) list -> Json.t
-val print : t -> unit
+val print : ?offers_fix:bool -> t -> unit
 
 exception Errors of t
 

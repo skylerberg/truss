@@ -26,7 +26,8 @@ type t = {
   values : (Logic.symbol * string) list;
   locals : (Logic.term * string) list;
   template_clause : template_clause option;
-  decisions : (string * string option * Logic.term * Logic.term) list;
+  path_notes : (string * Logic.term) list;
+  has_untriggered_written_fact : bool;
 }
 
 type outcome = {

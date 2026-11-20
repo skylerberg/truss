@@ -652,3 +652,13 @@ let () =
                (List.map
                   (fun (shown, ordinal) -> Printf.sprintf "%s, ordinal %d" shown ordinal)
                   impls)))
+
+let () =
+  Harness.test "a bare variant in an expression is fixed by writing it under its type" (fun () ->
+      expect_one_diagnostic ~says:"`End` is a variant of `Chain`, and in an expression"
+        Fixtures.Resolve.bare_variant_in_an_expression "resolve.unknown_name"
+        ~fixed:Fixtures.Resolve.bare_variant_in_an_expression_fixed);
+  Harness.test "a bare variant of two types names both, with a fix for each" (fun () ->
+      expect_one_diagnostic ~says:"`Empty` is a variant of `Box` and `Bag`"
+        Fixtures.Resolve.bare_variant_of_two_types "resolve.unknown_name"
+        ~fixed:Fixtures.Resolve.bare_variant_of_two_types_fixed)

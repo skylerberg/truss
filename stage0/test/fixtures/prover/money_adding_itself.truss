@@ -1,0 +1,13 @@
+type Money(cents: UInt8)
+
+impl Add[Money] for Money {
+  type Output = Money
+
+  fn add_is_defined(self, right: Money) -> Bool {
+    true
+  }
+
+  fn add(self, right: Money) -> Money {
+    self + right
+  }
+}

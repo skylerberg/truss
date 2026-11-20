@@ -371,8 +371,10 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
   in
   let quote () =
     match (!at, Lazy.force source) with
-    | Some origin, Some (spans, text) when origin >= 0 && origin < Array.length spans ->
-        let span : Source.Definition_span.t = spans.(origin) in
+    | Some origin, Some (spans, text)
+      when Core_walk.locate_origin origin >= 0
+           && Core_walk.locate_origin origin < Array.length spans ->
+        let span : Source.Definition_span.t = spans.(Core_walk.locate_origin origin) in
         Printf.sprintf ", in `%s`" (excerpt (String.sub text span.start (span.stop - span.start)))
     | _ -> ""
   in
@@ -469,18 +471,6 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
   let check_unique id =
     if Hashtbl.mem seen id then report "the node id %d is used twice" id;
     Hashtbl.replace seen id ()
-  in
-  let task_origins = Hashtbl.create 4 in
-  let check_unique_task_origin (node : Core.statement) =
-    match node.kind with
-    | Concurrent _ | For { mode = Concurrent; _ } ->
-        if Hashtbl.mem task_origins node.origin then
-          report
-            "two `concurrent` statements have the origin %d, so an early exit of a task of one \
-             would end the tasks of the other"
-            node.origin;
-        Hashtbl.replace task_origins node.origin ()
-    | _ -> ()
   in
   let check_instantiation subject (instantiation : Types.instantiation) =
     List.iter (check_argument (subject ^ "'s type argument")) instantiation.type_arguments;
@@ -734,7 +724,6 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
          statement =
            (fun (node : Core.statement) ->
              check_unique node.id;
-             check_unique_task_origin node;
              match node.kind with
              | Assign { target; _ } -> check_mutable_place "an assignment" target
              | Compound_assign { target; value; _ } -> (
@@ -795,7 +784,10 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
            (fun callee ->
              check_target callee.target;
              check_capabilities "a callee's `uses`" callee.uses);
-         place = ignore;
+         place =
+           (function
+           | Element { id; _ } | Range { id; _ } -> check_unique id
+           | Local _ | Constant _ | Field _ | Lent _ | Temporary _ -> ());
        })
     form.definition;
   at := None;
@@ -805,10 +797,112 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
   at := None;
   check_semantics { interface; report; at; bounds = list_bounds } form
 
-let check interface (key : Resolve.Names.key) form =
-  check_form interface ~path:key.path ~key:(Some key) form
+type written_node =
+  | Written_expression of Syntax.expression
+  | Written_statement of Syntax.statement
+  | Written_pattern
 
-let check_derived interface path form = check_form interface ~path ~key:None form
+let index_written_nodes (definition : Syntax.definition) =
+  let nodes = Hashtbl.create 64 in
+  let rec visit_pattern (pattern : Syntax.pattern) =
+    Hashtbl.replace nodes pattern.id Written_pattern;
+    match pattern.kind with
+    | Variant { fields = Some fields; _ } | Record fields -> List.iter visit_field fields
+    | Tuple patterns | Alternatives patterns -> List.iter visit_pattern patterns
+    | Wildcard | Binding _ | Qualified_constant _ | Literal _ | Pattern_range _
+    | Variant { fields = None; _ }
+    | Pattern_error ->
+        ()
+  and visit_field (field : Syntax.pattern_field) =
+    match field.kind with
+    | Named_field (_, pattern) | Field pattern -> visit_pattern pattern
+    | Rest -> ()
+  in
+  let rec visit_expression (value : Syntax.expression) =
+    Hashtbl.replace nodes value.id (Written_expression value);
+    (match value.kind with
+    | Match { arms; _ } ->
+        List.iter (fun (arm : Syntax.arm) -> List.iter visit_pattern arm.patterns) arms
+    | Lambda { parameters; _ } -> List.iter visit_pattern parameters
+    | Is { pattern; _ } | Quantified { binder = Binder_in (pattern, _); _ } -> visit_pattern pattern
+    | _ -> ());
+    Syntax_walk.visit_expression_parts ~on_expression:visit_expression ~on_statement:visit_statement
+      value
+  and visit_statement (statement : Syntax.statement) =
+    Hashtbl.replace nodes statement.id (Written_statement statement);
+    (match statement.kind with
+    | Let { pattern; _ } | For { pattern; _ } -> visit_pattern pattern
+    | _ -> ());
+    Syntax_walk.visit_statement_parts ~on_expression:visit_expression ~on_statement:visit_statement
+      statement
+  in
+  Syntax_walk.visit_definition ~on_statement:visit_statement visit_expression definition;
+  nodes
+
+let check_written_origins (interface : Interface.Lookups.t) (key : Resolve.Names.key)
+    (form : Core.t) =
+  let nodes = index_written_nodes (interface.names.read_definition key) in
+  let fail subject node =
+    Harness.fail "%s: %s has the written origin %d, which is not the construct written there"
+      (Resolve.Names.show_key key) subject node
+  in
+  Core_walk.walk_definition
+    {
+      Core_walk.ignore_all with
+      expression =
+        (fun (node : Core.expression) ->
+          match node.origin with
+          | Written id -> (
+              match Hashtbl.find_opt nodes id with
+              | Some (Written_expression written)
+                when Infer.For_testing.is_written_expression written node.kind ->
+                  ()
+              | Some (Written_expression _ | Written_statement _ | Written_pattern) | None ->
+                  fail "an expression" id)
+          | Desugared _ -> ());
+      statement =
+        (fun (node : Core.statement) ->
+          match node.origin with
+          | Written id -> (
+              match Hashtbl.find_opt nodes id with
+              | Some (Written_statement _) -> ()
+              | Some (Written_expression _ | Written_pattern) | None -> fail "a statement" id)
+          | Desugared _ -> ());
+      pattern =
+        (fun (node : Core.pattern) ->
+          match node.origin with
+          | Written id -> (
+              match Hashtbl.find_opt nodes id with
+              | Some Written_pattern -> ()
+              | Some (Written_expression _ | Written_statement _) | None -> fail "a pattern" id)
+          | Desugared _ -> ());
+    }
+    form.definition
+
+let check interface (key : Resolve.Names.key) form =
+  check_form interface ~path:key.path ~key:(Some key) form;
+  check_written_origins interface key form
+
+let check_derived_origins path (form : Core.t) =
+  let check subject (origin : Core.origin) =
+    match origin with
+    | Desugared { desugaring = Derived; _ } -> ()
+    | Written _ | Desugared _ ->
+        Harness.fail "%s: %s has an origin other than its `derives` entry" (Path.show path) subject
+  in
+  check "the definition" form.origin;
+  Core_walk.walk_definition
+    {
+      Core_walk.ignore_all with
+      expression = (fun (node : Core.expression) -> check "an expression" node.origin);
+      statement = (fun (node : Core.statement) -> check "a statement" node.origin);
+      pattern = (fun (node : Core.pattern) -> check "a pattern" node.origin);
+    }
+    form.definition
+
+let check_derived interface path form =
+  check_form interface ~path ~key:None form;
+  check_derived_origins path form
 
 let check_file (interface : Interface.Lookups.t) ~find_core (file : Path.file) =
   List.fold_left
