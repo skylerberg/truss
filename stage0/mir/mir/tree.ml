@@ -282,7 +282,8 @@ type contract = {
   callbacks : (int * callback) list;
 }
 
-type type_clauses = { invariants : requirement list; potential : formula option }
+type invariant = { requirement : requirement; reads_fields : bool }
+type type_clauses = { invariants : invariant list; potential : formula option }
 
 type law = {
   name : string;

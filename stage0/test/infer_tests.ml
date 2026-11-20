@@ -2386,6 +2386,25 @@ let () =
          \  items.length() < 2\n\
           }\n\n"
        ^ "public fn sort(items: mut Slice[Int64])\n  ensures in_order(items)\n{\n  todo\n}\n"));
+  Harness.test "an opaque type's invariant that reads no field names only public functions"
+    (fun () ->
+      let make_counter_source visibility invariant =
+        Printf.sprintf
+          "%sfn is_small(value: UInt64) -> Bool {\n\
+          \  value <= 10\n\
+           }\n\n\
+           public opaque type Counter(count: UInt64)\n\
+          \  invariant %s\n\n\
+           public fn Counter.value(self) -> UInt64 {\n\
+          \  self.count\n\
+           }\n"
+          visibility invariant
+      in
+      expect_one_diagnostic
+        (make_counter_source "" "is_small(self.value())")
+        "types.private_in_public";
+      expect_fine (make_counter_source "public " "is_small(self.value())");
+      expect_fine (make_counter_source "" "is_small(count)"));
   Harness.test "a public contract names only constants that other packages can name" (fun () ->
       let make_capped_source visibility =
         Printf.sprintf

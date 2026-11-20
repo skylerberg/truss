@@ -59,6 +59,43 @@ let check_clauses (state : State.state) (name : Syntax.name) clauses =
       state.tables.resolutions
   end
 
+let check_invariants (state : State.state) (form : Core.t) =
+  match form.definition with
+  | Type { invariants; _ }
+    when (state.lookups.interface.names.read_declaration state.key).visibility = Public_opaque ->
+      let owner = Path.show state.key.path in
+      let report_hidden origin path =
+        if not (is_visible_to_other_packages state.lookups path) then
+          let hidden = Path.show path in
+          State.report state Private_in_public
+            (State.read_span state (Core_walk.locate_origin origin))
+            (Printf.sprintf
+               "This invariant reads no field of `%s`, so proofs in other packages assume it, and \
+                those packages cannot see `%s`. Make `%s` public, or state the invariant with \
+                functions and constants that are public."
+               owner hidden hidden)
+      in
+      List.iter
+        (fun (invariant : Core.condition) ->
+          if not (Core_walk.reads_fields ~owner:state.key.path invariant.value) then
+            Core_walk.walk_expression
+              {
+                Core_walk.ignore_all with
+                expression =
+                  (fun (node : Core.expression) ->
+                    match node.kind with
+                    | Call { callee = { target = Function { path; _ }; _ }; _ } ->
+                        report_hidden node.origin path
+                    | Call { callee = { target = Trait_method { trait; _ }; _ }; _ } ->
+                        report_hidden node.origin trait.trait
+                    | _ -> ());
+                place =
+                  (function Constant { path; origin; _ } -> report_hidden origin path | _ -> ());
+              }
+              invariant.value)
+        invariants
+  | _ -> ()
+
 let check (state : State.state) =
   match state.definition.kind with
   | Syntax.Function { signature; _ } | Method_declaration signature ->

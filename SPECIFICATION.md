@@ -484,6 +484,8 @@ public type Interval =
 
 - `self` names the value, and a record's fields can be named directly.
 - Repeated invariants all hold, and each may rely on the ones before it.
+- An invariant may pass `self` to a function, as `invariant self.value() <= 10`
+  does. The call needs no invariant of `self`, which the invariant states.
 - Invariants are proven, never checked when the program runs. An invariant
   holds wherever other code can observe the value: when it is built,
   directly or with `with`, passed to a call, or returned, and when its
@@ -3022,6 +3024,11 @@ and the prelude changes only with a language version.
 - `opaque` appears only before `public type`. Outside its package, an opaque
   type's fields cannot be read, built, updated, or matched on. Visibility is
   set for a type as a whole.
+- An opaque type's invariant that reads none of its fields, such as
+  `invariant self.value() <= 10`, holds in other packages too: their proofs
+  assume it of every value of the type. It names only functions and
+  constants those packages can see. An invariant that reads a field holds
+  only in the type's package.
 - A public signature cannot mention a private or `internal` type, and
   neither can a public type's fields unless the type is opaque.
 - The `requires` and `cost` of a public function, of a method of a public

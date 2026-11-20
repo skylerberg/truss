@@ -127,32 +127,42 @@ let list_invariants (clauses : Mir.loop_clause list) =
 
 let find_invariants context (ty : Types.ty) =
   match find_type_clauses context ty with
-  | Some (source, { invariants = _ :: _ as invariants; _ }) ->
-      Some (source, List.map (fun (invariant : Mir.requirement) -> invariant.clause) invariants)
+  | Some (source, { invariants = _ :: _ as invariants; _ }) -> Some (source, invariants)
   | _ -> None
+
+let run_validating (context : State.context) ty run =
+  let validating = context.validating in
+  context.validating <- ty :: validating;
+  Fun.protect ~finally:(fun () -> context.validating <- validating) run
 
 let rec make_validity (context : State.context) frame ~assuming ?(deep = true)
     ?(includes_invariants = true) ?(seen = []) ty term =
   if List.exists (Types.equal ty) seen || List.exists (Types.equal ty) context.validating then
     Logic.Boolean true
   else
-    let validating = context.validating in
-    context.validating <- ty :: validating;
-    Fun.protect ~finally:(fun () -> context.validating <- validating) @@ fun () ->
+    run_validating context ty @@ fun () ->
+    let read_invariants source (written : Mir.invariant list) =
+      let inner = make_type_frame context frame source ty ~self:(Some term) in
+      try
+        Logic.conjunction
+          (List.map
+             (fun (invariant : Mir.invariant) ->
+               snd (read_specification context inner invariant.requirement.clause))
+             written)
+      with Facts.Unsupported _ when assuming -> Logic.Boolean true
+    in
     let invariants_hold =
       match find_invariants context ty with
       | _ when not includes_invariants -> Logic.Boolean true
-      | Some _ when Facts.find_constructors context ty = None ->
+      | Some (source, written) when Facts.find_constructors context ty = None ->
           let symbol = Logic.Symbol.Valid ty in
           Facts.declare context
             (Logic.Function (symbol, [ Facts.declare_sort context ty ], Logic.Bool));
-          Logic.Apply (symbol, [ term ])
-      | Some (source, written) -> (
-          let inner = make_type_frame context frame source ty ~self:(Some term) in
-          try
-            Logic.conjunction
-              (List.map (fun invariant -> snd (read_specification context inner invariant)) written)
-          with Facts.Unsupported _ when assuming -> Logic.Boolean true)
+          Logic.( &&& )
+            (Logic.Apply (symbol, [ term ]))
+            (read_invariants source
+               (List.filter (fun (invariant : Mir.invariant) -> not invariant.reads_fields) written))
+      | Some (source, written) -> read_invariants source written
       | None -> Logic.Boolean true
     in
     let fields =

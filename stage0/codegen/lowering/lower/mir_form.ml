@@ -565,8 +565,8 @@ and check_invariant state ~value ~clause ~destination =
   in
   let invariant =
     match List.nth_opt clauses.invariants index with
-    | Some { clause; is_executable = true; _ } -> Mir.expand_formula clause
-    | Some { is_executable = false; _ } | None ->
+    | Some { requirement = { clause; is_executable = true; _ }; _ } -> Mir.expand_formula clause
+    | Some { requirement = { is_executable = false; _ }; _ } | None ->
         Definitions.raise_bug "%s has no clause %d that runs" (Path.show path) index
   in
   Targets.run_in_type_definition state ~source value_ty (fun () ->

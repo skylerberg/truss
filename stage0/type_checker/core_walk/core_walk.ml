@@ -317,6 +317,31 @@ let rec has_implicit_measure (condition : Core.expression) =
   | Connective { connective = And; left; _ } -> has_implicit_measure left
   | _ -> false
 
+let reads_fields ~(owner : Path.t) (expression : Core.expression) =
+  let is_owner : Types.ty -> bool = function
+    | Named { path; _ } -> Path.equal path owner
+    | _ -> false
+  in
+  let reads = ref false in
+  walk_expression
+    {
+      ignore_all with
+      expression =
+        (fun (node : Core.expression) ->
+          match node.kind with Construct _ when is_owner node.type_ -> reads := true | _ -> ());
+      pattern =
+        (fun (pattern : Core.pattern) ->
+          match pattern.kind with
+          | (Variant _ | Record _) when is_owner pattern.type_ -> reads := true
+          | _ -> ());
+      place =
+        (function
+        | Field { base; _ } when is_owner (compute_place_type base) -> reads := true
+        | _ -> ());
+    }
+    expression;
+  !reads
+
 type tasks_use = Uses_tasks | Through_parameter | No_tasks
 
 let compute_tasks_use ?(read_solved = fun (_ : int) : Types.capability_set -> Types.no_capabilities)
