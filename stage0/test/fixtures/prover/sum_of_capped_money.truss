@@ -8,7 +8,7 @@ impl Add[Money] for Money {
   }
 
   fn add(self, right: Money) -> Money
-    requires self.add_is_defined(right)
+    uses Panic unless self.add_is_defined(right)
   {
     Money(cents: self.cents.wrapping_add(right.cents))
   }

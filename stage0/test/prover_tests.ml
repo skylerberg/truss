@@ -2115,9 +2115,9 @@ let () =
   Harness.test "a precondition of a `for` loop's call names the loop" (fun () ->
       expect_message_saying Fixtures.Prover.sum_over_a_short_bag
         "may not hold for the call to `Bag.element` that this `for` loop makes.");
-  Harness.test "a precondition of an operator's call names the operator" (fun () ->
+  Harness.test "a panic condition of an operator's call names the operator" (fun () ->
       expect_message_saying Fixtures.Prover.sum_of_capped_money
-        "may not hold for the call to `Money.add` that `left + right` makes.")
+        "may not hold for the call to `Money.add` that `left + right` makes, so the call may panic.")
 
 let () =
   Harness.test "a pure call's result is in its type's range for every bound value" (fun () ->
