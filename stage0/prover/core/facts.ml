@@ -8,6 +8,9 @@ type unsupported = {
 
 exception Unsupported of unsupported
 
+let is_home (context : State.context) (source : State.source) =
+  source.key = context.home && Path.equal source.definition context.home.path
+
 let raise_unsupported location format =
   Printf.ksprintf
     (fun construct -> raise (Unsupported { location; construct; foreign_definition = None }))
@@ -16,7 +19,9 @@ let raise_unsupported location format =
 let run_in_source (context : State.context) (source : State.source) read =
   try read ()
   with
-  | Unsupported ({ foreign_definition = None; _ } as unsupported) when source.key <> context.home ->
+  | Unsupported ({ foreign_definition = None; _ } as unsupported)
+  when not (is_home context source)
+  ->
     raise (Unsupported { unsupported with foreign_definition = Some source.name })
 
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Prover" format
@@ -181,7 +186,7 @@ let assume context (frame : State.frame) term =
       else add_scoped_fact context frame guarded
 
 let locate (context : State.context) (source : State.source) origin =
-  if source.key = context.home then Obligation.Node origin else Whole_definition
+  if is_home context source then Obligation.Node origin else Whole_definition
 
 let insert_line_before_body (context : State.context) (line : Obligation.message) =
   let names = context.lookups.interface.names in
@@ -370,7 +375,7 @@ and make_obligation ?template_clause (context : State.context) (frame : State.fr
     fixes = [];
     query;
     values = context.values;
-    decisions = List.rev context.decisions;
+    path_notes = List.rev context.path_notes;
     locals =
       (let is_parameter = function
          | Logic.Symbol symbol -> List.mem_assoc symbol context.values
@@ -417,7 +422,7 @@ let oblige ?template_clause ?cited ?(fixes = []) ?holds_when (context : State.co
            context goal)
     with
     | Some obligation ->
-        let is_home_body = frame.source.key = context.home && frame.makes_obligations in
+        let is_home_body = is_home context frame.source && frame.makes_obligations in
         let fixes =
           match fixes with
           | [] when is_home_body -> (
@@ -435,18 +440,21 @@ let oblige ?template_clause ?cited ?(fixes = []) ?holds_when (context : State.co
         assume context frame goal
     | None -> ()
 
+let quote_span text (span : Source.Definition_span.t) =
+  if span.stop = span.start then raise_bug "a quote of an empty span at %d" span.start
+  else Source.Definition_span.quote text span
+
+let quote_home (context : State.context) origin =
+  let names = context.lookups.interface.names in
+  quote_span (names.read_text context.home)
+    (Source.Definition_span.locate (names.read_spans context.home) (Core_walk.locate_origin origin))
+
 let describe_call (context : State.context) (at : Obligation.location) ?callee () =
   match at with
   | Whole_definition -> (
       match callee with Some callee -> Printf.sprintf "a call to `%s`" callee | None -> "a call")
   | Node origin ->
-      let names = context.lookups.interface.names in
-      Core_walk.describe_call origin ?callee
-        ~quote:(fun () ->
-          Source.Definition_span.quote (names.read_text context.home)
-            (Source.Definition_span.locate (names.read_spans context.home)
-               (Core_walk.locate_origin origin)))
-        ()
+      Core_walk.describe_call origin ?callee ~quote:(fun () -> quote_home context origin) ()
 
 let reject_recursion_through_supplied_code (context : State.context) (frame : State.frame) location
     (statement : Mir.statement) =
@@ -542,16 +550,10 @@ let reject_uncompared_recursion (context : State.context) frame location recursi
 
 let quote (source : State.source) origin = Obligation.Quote (source.key, origin)
 
-let quote_span text (span : Source.Definition_span.t) =
-  if span.stop = span.start then raise_bug "a quote of an empty span at %d" span.start
-  else Source.Definition_span.quote text span
-
 let quote_origin (context : State.context) (frame : State.frame) origin =
-  if frame.source.key <> context.home then
+  if not (is_home context frame.source) then
     raise_bug "a quote of %s, outside the definition being proven" frame.source.name;
-  let names = context.lookups.interface.names in
-  quote_span (names.read_text context.home)
-    (Source.Definition_span.locate (names.read_spans context.home) (Core_walk.locate_origin origin))
+  quote_home context origin
 
 let find_bounds (ty : Types.ty) =
   if Types.is_builtin Character ty then Some (Z.zero, Z.of_int 0x10FFFF)

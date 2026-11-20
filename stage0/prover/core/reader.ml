@@ -628,7 +628,7 @@ let bind_parts context (frame : State.frame) run =
     frame.aliases frame
 
 let note_path (context : State.context) (frame : State.frame) (note : Mir.path_note) =
-  if frame.makes_obligations && frame.source.key = context.home then begin
+  if frame.makes_obligations && Facts.is_home context frame.source then begin
     let quote = Facts.quote_origin context frame in
     let text =
       match note with
@@ -639,7 +639,7 @@ let note_path (context : State.context) (frame : State.frame) (note : Mir.path_n
           Printf.sprintf "`%s` does not match, so the `else` runs" (quote pattern)
       | Returns_early tried -> Printf.sprintf "`%s` returns early" (quote tried)
     in
-    context.decisions <- (text, frame.condition) :: context.decisions
+    context.path_notes <- (text, frame.condition) :: context.path_notes
   end
 
 let refresh_place context frame ty (place : State.passed_place) =
@@ -789,7 +789,7 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
   | Specification Yielded -> (
       match (frame.yielded, frame.yielded_so_far) with
       | Some yielded, _ -> (frame, yielded)
-      | None, Some yielded_so_far when frame.source.key = context.home -> (frame, yielded_so_far)
+      | None, Some yielded_so_far when Facts.is_home context frame.source -> (frame, yielded_so_far)
       | _ -> Facts.raise_bug "`%s` reads `yielded` outside a lending method" frame.source.name)
   | Specification (Identical (first, second)) ->
       let first_value = translate_operand first and second_value = translate_operand second in
@@ -1262,12 +1262,13 @@ and read_statement context frame run (statement : Mir.statement) =
         | Range { start; stop; inclusive } ->
             Loops.Over_range
               { low = translate_operand start; high = translate_operand stop; inclusive }
-        | Pull { cursor; next } ->
+        | Pull { cursor; next; next_origin } ->
             Over_cursor
               {
                 cursor = make_passed_place context run cursor;
                 cursor_type = compute_place_type context frame run cursor;
                 next = make_invocation next ~lends:None;
+                next_origin;
               }
       in
       let for_loop =
@@ -1495,9 +1496,9 @@ and write_assignment context run (target : Mir.place) ~(copied : Mir.operand lis
   | Local local -> (
       match run.infos.(local).kind with
       | Source { local = (Declared { name; _ } | Trait_parameter { name; _ }) as core; _ }
-        when frame.source.key = context.home ->
+        when Facts.is_home context frame.source ->
           Tables.Local_table.replace context.local_names (Core_local core) name
-      | Source { local = Synthetic _ as core; _ } when frame.source.key = context.home ->
+      | Source { local = Synthetic _ as core; _ } when Facts.is_home context frame.source ->
           Tables.Local_table.replace context.local_origins (Core_local core)
             run.infos.(local).origin
       | Source _ | Temporary | Lent _ -> ())

@@ -1559,6 +1559,15 @@ let () =
           "This recursive call may not end: give the function a `decreases` clause for the prover \
            to show that the recursion ends."
         Fixtures.Prover.from_calling_itself_through_its_type "prover.termination");
+  Harness.test "an operator that calls its own method is recursion named by the operator" (fun () ->
+      Support.expect_one_diagnostic ~check
+        ~says:"The call to `Money.add` that `self + right` makes may not"
+        Fixtures.Prover.money_adding_itself "prover.termination");
+  Harness.test "a cursor's `next` that its own `for` loop calls is recursion named by the loop"
+    (fun () ->
+      Support.expect_one_diagnostic ~check ~at:("inner", 2)
+        ~says:"The call to `Countdown.next` that this `for` loop makes may not"
+        Fixtures.Prover.countdown_pulling_itself "prover.termination");
   Harness.test "an impl's method that calls itself through its receiver is recursion" (fun () ->
       expect_not_proven Fixtures.Prover.grow_calling_itself_through_its_receiver
         "prover.termination");
@@ -2115,6 +2124,9 @@ let () =
   Harness.test "a precondition of a `for` loop's call names the loop" (fun () ->
       expect_message_saying Fixtures.Prover.sum_over_a_short_bag
         "may not hold for the call to `Bag.element` that this `for` loop makes.");
+  Harness.test "a precondition of a quantifier's call names the quantifier" (fun () ->
+      expect_message_saying Fixtures.Prover.all_small_in_a_short_bag
+        "may not hold for the call to `Bag.element` that this quantifier makes.");
   Harness.test "a panic condition of an operator's call names the operator" (fun () ->
       expect_message_saying Fixtures.Prover.sum_of_capped_money
         "may not hold for the call to `Money.add` that `left + right` makes, so the call may panic.")

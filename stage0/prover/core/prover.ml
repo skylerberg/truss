@@ -108,7 +108,7 @@ let translate_derived_default (lookups : Lookups.t) (key : Resolve.Names.key)
                   "The value that the derived `Default` builds from the fields' defaults may not \
                    meet this type's invariant.";
               ]
-          | _ -> Text "In the derived `Default`: " :: obligation.message
+          | _ -> obligation.message
         in
         { obligation with message })
       outcome.obligations
@@ -306,7 +306,7 @@ let show_counterexample members (obligation : Obligation.t) answer_values =
            match List.assoc_opt (Logic.Symbol.Reached index) answer_values with
            | Some (Solver.Atom "true") -> Some note
            | _ -> None)
-         obligation.decisions)
+         obligation.path_notes)
   in
   (match shown with [] -> "" | shown -> " For example, when " ^ String.concat ", " shown ^ ".")
   ^ match path with [] -> "" | path -> " On that path, " ^ String.concat ", " path ^ "."
@@ -434,7 +434,7 @@ let make_request (obligation : Obligation.t) =
     @ List.concat
         (List.mapi
            (fun index (_, reached) -> [ (Logic.Symbol.Reached index, reached) ])
-           obligation.decisions)
+           obligation.path_notes)
   in
   ( Solver.make_request ~symbols:(List.map fst obligation.values) ~terms obligation.query,
     obligation.query )

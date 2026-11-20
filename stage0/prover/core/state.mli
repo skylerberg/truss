@@ -1,4 +1,4 @@
-type source = { key : Resolve.Names.key; name : string }
+type source = { key : Resolve.Names.key; definition : Path.t; name : string }
 
 type clauses = {
   callee : source;
@@ -135,7 +135,7 @@ type context = {
   holds_potential : bool Tables.Type_table.t;
   buffers : (Types.ty * (Logic.term -> Logic.term)) option Tables.Type_table.t;
   mutable equalities : Logic.term list;
-  mutable decisions : (string * Logic.term) list;
+  mutable path_notes : (string * Logic.term) list;
   mutable entry : Logic.symbol list;
   inherits_precondition : bool;
   mutable holes : (Resolve.Names.key * Obligation.location) list;

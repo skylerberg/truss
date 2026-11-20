@@ -172,7 +172,7 @@ let lower_condition_block builder build : Tree.block option =
       Emitter.mark_unreachable builder;
       None
 
-let is_noted_choice : Core.origin -> bool = function Written _ -> true | Desugared _ -> false
+let is_written : Core.origin -> bool = function Written _ -> true | Desugared _ -> false
 let emit_path_note builder note origin = Emitter.emit builder (Basic (Path_note note)) origin
 
 let rec lower_expression builder (node : Core.expression) : Tree.operand option =
@@ -272,7 +272,7 @@ let rec lower_expression builder (node : Core.expression) : Tree.operand option 
         let result = allocate_value_local builder node in
         let lower_arm ~holds ended block_scope (body : Core.block option) =
           Emitter.build_block builder (fun () ->
-              if is_noted_choice node.origin then
+              if is_written node.origin then
                 emit_path_note builder
                   (Condition_holds { condition = tested.origin; holds })
                   tested.origin;
@@ -309,11 +309,11 @@ let rec lower_expression builder (node : Core.expression) : Tree.operand option 
                           value;
                           type_ = implementation.type_;
                           provides = implementation.provides;
-                          origin = Written implementation.origin;
+                          origin = implementation.origin;
                         })
                       (In_order.evaluate_operand builder
                          (fun () -> lower_operand builder implementation.mode implementation.value)
-                         implementation.type_ (Written implementation.origin)))
+                         implementation.type_ implementation.origin))
                   implementations))
         in
         let block =
@@ -783,7 +783,7 @@ and match_patterns ?(covers = false) ?owned builder (patterns : Core.pattern lis
 and match_ builder (node : Core.expression) scrutinees (arms : Core.arm list) : Tree.operand option
     =
   let origin = node.origin in
-  let is_noted = is_noted_choice origin && List.compare_length_with arms 1 > 0 in
+  let is_noted = is_written origin && List.compare_length_with arms 1 > 0 in
   let* scrutinee_values =
     In_order.run builder
       (In_order.all
@@ -865,6 +865,12 @@ and lower_block builder (body : Core.block) : Tree.operand option =
   match body.value with
   | Some value -> lower_expression builder value
   | None -> if Emitter.reaches builder then Some Emitter.unit_value else None
+
+and compute_end_origin ~(enclosing : Core.origin) (body : Core.block) : Core.origin =
+  match (body.value, List.rev body.statements) with
+  | Some value, _ -> value.origin
+  | None, last :: _ -> last.origin
+  | None, [] -> enclosing
 
 and lower_body builder (body : Core.block) ~returns ~origin =
   let return_ value = Emitter.return_ builder (if returns then Some value else None) origin in
@@ -1077,7 +1083,7 @@ and lower_statement builder (node : Core.statement) =
                   let then_ = Emitter.build_block builder (fun () -> Some Emitter.unit_value) in
                   let else_ =
                     Emitter.build_block builder (fun () ->
-                        if is_noted_choice origin then
+                        if is_written origin then
                           emit_path_note builder (Else_runs pattern.origin) pattern.origin;
                         ignore
                           (Emitter.run_in_scope builder origin (fun () -> lower_block builder else_));
@@ -1183,8 +1189,8 @@ and lower_statement builder (node : Core.statement) =
               lower_elements_loop builder ~origin ~pattern ~elements
                 ~loop:(fun () -> loop)
                 ~each:(fun bind_part -> each ~bind_part)
-          | Cursor { cursor; next } ->
-              lower_cursor_loop builder ~origin ~pattern ~cursor ~next
+          | Cursor { cursor; next; next_origin } ->
+              lower_cursor_loop builder ~origin ~pattern ~cursor ~next ~next_origin
                 ~loop:(fun () -> loop)
                 ~each:(fun bind_part -> each ~bind_part))
       | While { condition = tested; clauses; body; binds_lent_part } ->
@@ -1416,7 +1422,7 @@ and find_lent_place builder part =
       | _ -> None)
     (Emitter.emitted builder)
 
-and lower_cursor_loop builder ~origin ~pattern ~cursor ~next ~loop ~each =
+and lower_cursor_loop builder ~origin ~pattern ~cursor ~next ~next_origin ~loop ~each =
   match lower_place builder cursor with
   | None -> ()
   | Some place_ ->
@@ -1425,7 +1431,7 @@ and lower_cursor_loop builder ~origin ~pattern ~cursor ~next ~loop ~each =
       Option.iter
         (fun next ->
           lower_for_loop ~cursor_type builder ~origin ~pattern
-            ~iteration:(Pull { cursor; next })
+            ~iteration:(Pull { cursor; next; next_origin })
             ~loop ~each)
         (lower_callee builder next)
 
@@ -1550,6 +1556,7 @@ and lower_lambda builder ~origin (parameters : Core.pattern list) (captures : Co
         | _ -> Emitter.allocate_local inner Temporary pattern.type_ pattern.origin)
       parameters
   in
+  let origin = compute_end_origin ~enclosing:origin body in
   Emitter.run_in_scope inner origin (fun () ->
       List.iter2
         (fun (pattern : Core.pattern) local ->
@@ -1576,6 +1583,7 @@ and compute_block_type (body : Core.block) =
 
 and of_proof ~entry_locals ~origin (written : Core.block) =
   let builder = Emitter.create ~is_specification:true ~entry_locals ~takes_free_locals:true () in
+  let origin = compute_end_origin ~enclosing:origin written in
   Emitter.run_in_scope builder origin (fun () -> lower_body builder written ~returns:true ~origin);
   let body = Emitter.finish builder ~parameters:(Emitter.free_locals builder) in
   { body; lambdas = Emitter.lambdas builder }
@@ -1611,14 +1619,7 @@ and lower_loop_clauses builder (clauses : Core.loop_clause Core.conditional list
       | Core.Invariant invariant -> Tree.Invariant (lower_formula invariant)
       | Decreases measures -> Decreases (List.map lower_formula measures)
       | Cost { origin; amortized; resource; bound = written } ->
-          Cost
-            {
-              origin = Written origin;
-              amortized;
-              resource;
-              bound = lower_bound written;
-              holds_when;
-            })
+          Cost { origin; amortized; resource; bound = lower_bound written; holds_when })
     clauses
 
 let of_expression (written : Core.expression) =
@@ -1679,6 +1680,7 @@ let of_definition ~is_specification ~origin (definition : Core.definition) =
               (compute_parameter_origin ~enclosing:origin parameter))
           parameters
       in
+      let origin = compute_end_origin ~enclosing:origin body in
       Emitter.run_in_scope builder origin (fun () -> lower_body builder body ~returns ~origin);
       { Tree.body = Emitter.finish builder ~parameters:locals; lambdas = Emitter.lambdas builder })
     code

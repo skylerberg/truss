@@ -69,7 +69,7 @@ let visit_iteration_places visit (iteration : Tree.iteration) =
   | Range { start; stop; _ } ->
       visit_operand_places visit start;
       visit_operand_places visit stop
-  | Pull { cursor; next } ->
+  | Pull { cursor; next; _ } ->
       visit_place visit cursor;
       visit_target_places visit next.target
 

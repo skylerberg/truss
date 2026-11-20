@@ -85,6 +85,14 @@ let () =
     (fun () ->
       expect_one_diagnostic "fn f() {\n  Panic.crash(\"no\")\n}\n" "capabilities.not_available"
         ~says:"This call uses `Panic`, which is not available here. Declare it with `uses Panic`.");
+  Harness.test "a call that a `for` loop makes is named by the loop" (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.panicking_bag_in_a_for_loop
+        "capabilities.not_available" ~at:("bag", 2)
+        ~says:"The call that this `for` loop makes uses `Panic`, which is not available here.");
+  Harness.test "a `concurrent` block needs `Tasks`" (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.concurrent_block_without_tasks
+        "capabilities.not_available"
+        ~says:"This `concurrent` block uses `Tasks`, which is not available here.");
   Harness.test "a function that declares a capability may call it" (fun () ->
       expect_fine Fixtures.Capabilities.clock_call_using_clock);
   Harness.test "a call to a function with uses needs its capabilities" (fun () ->

@@ -122,7 +122,7 @@ and binder =
   | Over_elements of { pattern : pattern; elements : elements }
 
 and implementation = {
-  origin : Syntax.id;
+  origin : origin;
   mode : Language.Mode.t;
   value : operand;
   type_ : Types.ty;
@@ -160,12 +160,12 @@ and statement_kind =
 and iteration =
   | Integer_range of { start : expression; stop : expression; inclusive : bool }
   | Elements of elements
-  | Cursor of { cursor : place; next : callee }
+  | Cursor of { cursor : place; next : callee; next_origin : origin }
 
 and elements = { count : expression; position : pattern; element : place; lends : Language.Mode.t }
 and loop_clause = Invariant of expression | Decreases of expression list | Cost of cost
 and 'clause conditional = { holds_when : Types.condition; clause : 'clause }
-and cost = { origin : Syntax.id; amortized : bool; resource : resource; bound : bound }
+and cost = { origin : origin; amortized : bool; resource : resource; bound : bound }
 and resource = Metric of Language.Metric.t | Calls of calls_target
 
 and calls_target =
@@ -211,7 +211,7 @@ type law = {
   parameters : parameter list;
   requires : expression list;
   body : block;
-  origin : Syntax.id;
+  origin : origin;
 }
 
 type definition =

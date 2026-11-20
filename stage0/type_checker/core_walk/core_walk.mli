@@ -8,7 +8,6 @@ type visit = {
 
 val ignore_all : visit
 val locate_origin : Core.origin -> Syntax.id
-val rewrite_origin : Core.origin -> Core.origin
 val describe_call : Core.origin -> ?callee:string -> quote:(unit -> string) -> unit -> string
 val compute_place_type : Core.place -> Types.ty
 val compute_place_origin : Core.place -> Core.origin

@@ -61,7 +61,7 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       holds_potential = Tables.Type_table.create 16;
       buffers = Tables.Type_table.create 16;
       equalities = [];
-      decisions = [];
+      path_notes = [];
       entry = [];
       inherits_precondition;
       holes = [];

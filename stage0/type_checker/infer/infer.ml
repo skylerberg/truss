@@ -58,5 +58,4 @@ let statement_diverges (tables : tables) =
 
 module For_testing = struct
   let is_written_expression = Form.For_testing.is_written_expression
-  let is_written_statement = Form.For_testing.is_written_statement
 end

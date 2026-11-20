@@ -46,7 +46,8 @@ let list_required_fixes (context : State.context) (frame : State.frame) (clauses
               (Facts.show_truss_value context passed.term)))
       (List.mapi (fun index parameter -> (index, parameter)) clauses.parameters)
   in
-  if frame.source.key = context.home && List.for_all is_fixed (Logic.list_free_constants term) then begin
+  if Facts.is_home context frame.source && List.for_all is_fixed (Logic.list_free_constants term)
+  then begin
     let written = list_written () in
     let replacements =
       List.map
@@ -85,7 +86,7 @@ let name_term context ty term =
     named
 
 let evaluate_default_value (context : State.context) frame (clauses : State.clauses) position =
-  match Mir.read_defaults context.lookups.mir clauses.callee.key.path with
+  match Mir.read_defaults context.lookups.mir clauses.callee.definition with
   | Some { form = Parameter_defaults defaults; _ } -> (
       match (List.assoc_opt position defaults, List.nth_opt clauses.parameters position) with
       | Some default, Some parameter ->
@@ -929,10 +930,11 @@ let compute_function_value_amount context frame ~location (function_type : Types
             [
               Text
                 (Printf.sprintf
-                   "Only an upper bound is known for the `%s` of this call, which may spend less, \
-                    so no `==` bound can count it. State the cost with `<=`, or give the type of \
-                    the function called an `==` bound."
-                   (Language.Metric.show metric));
+                   "Only an upper bound is known for the `%s` of %s, which may spend less, so no \
+                    `==` bound can count it. State the cost with `<=`, or give the type of the \
+                    function called an `==` bound."
+                   (Language.Metric.show metric)
+                   (Facts.describe_call context location ()));
             ]
             (Logic.equal cost Costs.zero);
         cost

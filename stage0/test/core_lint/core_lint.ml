@@ -875,11 +875,8 @@ let check_written_origins (interface : Interface.Lookups.t) (key : Resolve.Names
           match node.origin with
           | Written id -> (
               match Hashtbl.find_opt nodes id with
-              | Some (Written_statement written)
-                when Infer.For_testing.is_written_statement written node.kind ->
-                  ()
-              | Some (Written_expression _ | Written_statement _ | Written_pattern) | None ->
-                  fail "a statement" id)
+              | Some (Written_statement _) -> ()
+              | Some (Written_expression _ | Written_pattern) | None -> fail "a statement" id)
           | Desugared _ -> ());
       pattern =
         (fun (node : Core.pattern) ->
@@ -896,7 +893,26 @@ let check interface (key : Resolve.Names.key) form =
   check_form interface ~path:key.path ~key:(Some key) form;
   check_written_origins interface key form
 
-let check_derived interface path form = check_form interface ~path ~key:None form
+let check_derived_origins path (form : Core.t) =
+  let check subject (origin : Core.origin) =
+    match origin with
+    | Desugared { desugaring = Derived; _ } -> ()
+    | Written _ | Desugared _ ->
+        Harness.fail "%s: %s has an origin other than its `derives` entry" (Path.show path) subject
+  in
+  check "the definition" form.origin;
+  Core_walk.walk_definition
+    {
+      Core_walk.ignore_all with
+      expression = (fun (node : Core.expression) -> check "an expression" node.origin);
+      statement = (fun (node : Core.statement) -> check "a statement" node.origin);
+      pattern = (fun (node : Core.pattern) -> check "a pattern" node.origin);
+    }
+    form.definition
+
+let check_derived interface path form =
+  check_form interface ~path ~key:None form;
+  check_derived_origins path form
 
 let check_file (interface : Interface.Lookups.t) ~find_core (file : Path.file) =
   List.fold_left

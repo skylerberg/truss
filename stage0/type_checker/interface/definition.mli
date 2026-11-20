@@ -23,3 +23,8 @@ val find_real_implementation : Lookups.t -> Path.t -> Path.t option
 
 val find_trait_method :
   Lookups.t -> Path.t -> name:string -> receiver:Path.receiver -> Types.trait_method option
+
+val list_derives_entries :
+  Resolve.resolved ->
+  Syntax.type_clause list ->
+  (Syntax.type_clause * Syntax.path_type * Path.t) list

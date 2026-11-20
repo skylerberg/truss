@@ -12,10 +12,6 @@ let ignore_all =
 let locate_origin : Core.origin -> Syntax.id = function
   | Written node | Desugared { construct = node; _ } -> node
 
-let rewrite_origin : Core.origin -> Core.origin = function
-  | Written construct -> Desugared { construct; desugaring = Rewrite }
-  | Desugared _ as origin -> origin
-
 let describe_call (origin : Core.origin) ?callee ~quote () =
   let call =
     match callee with Some callee -> Printf.sprintf "call to `%s`" callee | None -> "call"
@@ -164,7 +160,7 @@ let walk_iteration visit : Core.iteration -> unit = function
       visit.expression count;
       visit.pattern position;
       walk_place visit element
-  | Cursor { cursor; next } ->
+  | Cursor { cursor; next; _ } ->
       walk_place visit cursor;
       visit.callee next
 

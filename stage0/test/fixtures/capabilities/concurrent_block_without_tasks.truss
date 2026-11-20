@@ -1,0 +1,11 @@
+fn double(value: UInt8) -> UInt8 {
+  value.wrapping_add(value)
+}
+
+fn both(left: UInt8, right: UInt8) -> UInt8 {
+  concurrent {
+    let first = double(left)
+    let second = double(right)
+  }
+  first.wrapping_add(second)
+}

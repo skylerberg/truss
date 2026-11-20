@@ -89,11 +89,11 @@ let locate_node context (node : Syntax.id) : Source.Definition_span.t =
 let locate_origin context (origin : Core.origin) : Source.Definition_span.t =
   locate_node context (Core_walk.locate_origin origin)
 
+let quote_origin context (origin : Core.origin) =
+  Source.Definition_span.quote (Lazy.force context.text) (locate_origin context origin)
+
 let describe_call context (origin : Core.origin) =
-  Core_walk.describe_call origin
-    ~quote:(fun () ->
-      Source.Definition_span.quote (Lazy.force context.text) (locate_origin context origin))
-    ()
+  Core_walk.describe_call origin ~quote:(fun () -> quote_origin context origin) ()
 
 let find_mode_keyword context (place : Core.origin) =
   Hashtbl.find_opt context.mode_keywords (Core_walk.locate_origin place)
@@ -131,8 +131,7 @@ let show_root context (root : Place.root) =
         (Local_table.find_opt context.names local, Local_table.find_opt context.origins local)
       with
       | Some name, _ -> name
-      | None, Some origin ->
-          Source.Definition_span.quote (Lazy.force context.text) (locate_origin context origin)
+      | None, Some origin -> quote_origin context origin
       | None, None -> Compiler_bug.raise_bug ~stage:"Ownership" "a local that no body holds")
   | Temporary _ -> "temporary"
   | Constant (Top { name; _ } | Member_constant { name; _ }) -> name

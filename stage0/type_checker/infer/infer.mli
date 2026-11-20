@@ -37,5 +37,4 @@ val is_derived_method : Path.t -> bool
 
 module For_testing : sig
   val is_written_expression : Syntax.expression -> Core.kind -> bool
-  val is_written_statement : Syntax.statement -> Core.statement_kind -> bool
 end

@@ -1,4 +1,5 @@
-let make_source (key : Resolve.Names.key) = { State.key; name = Resolve.Names.show_key key }
+let make_source (key : Resolve.Names.key) =
+  { State.key; definition = key.path; name = Resolve.Names.show_key key }
 
 let read_source_at_key (lookups : Lookups.t) key =
   ignore (lookups.mir.read_body_part key);
@@ -10,7 +11,7 @@ let find_source (lookups : Lookups.t) (path : Path.t) =
       let source =
         match origin with
         | Written key | Inherited key -> make_source key
-        | Derived type_key -> { key = type_key; name = Path.show path }
+        | Derived type_key -> { key = type_key; definition = path; name = Path.show path }
       in
       (source, substitution, origin))
     (lookups.mir.find_form_origin path)

@@ -19,18 +19,12 @@ let collapse_spaces text =
     text;
   Buffer.contents buffer
 
-let find_derives_entry (lookups : Lookups.t) ~(type_ : Path.t) ~(trait : Path.t) : Syntax.id =
+let read_derives_entry (lookups : Lookups.t) ~(type_ : Path.t) ~(trait : Path.t) : Syntax.id =
   let key =
     match lookups.interface.names.find_key type_ with
     | Some key -> key
     | None ->
         raise_bug "`%s` derives `%s` and has no declaration" (Path.show type_) (Path.show trait)
-  in
-  let resolved = lookups.interface.read_resolved Interface key in
-  let names_trait (written : Syntax.path_type) =
-    match resolved.names.(written.path.last.id) with
-    | Some (Definition (_, named)) -> Path.equal named trait
-    | _ -> false
   in
   let clauses =
     match (lookups.interface.names.read_definition key).kind with
@@ -38,14 +32,13 @@ let find_derives_entry (lookups : Lookups.t) ~(type_ : Path.t) ~(trait : Path.t)
     | _ -> raise_bug "`%s` derives `%s` and is not a type" (Path.show type_) (Path.show trait)
   in
   match
-    List.find_map
-      (fun (clause : Syntax.type_clause) ->
-        match clause.kind with
-        | Derives traits -> List.find_opt names_trait traits
-        | Type_invariant _ | Potential _ -> None)
-      clauses
+    List.find_opt
+      (fun (_, _, derived) -> Path.equal derived trait)
+      (Interface.Definition.list_derives_entries
+         (lookups.interface.read_resolved Interface key)
+         clauses)
   with
-  | Some written -> written.id
+  | Some (_, (written : Syntax.path_type), _) -> written.id
   | None ->
       raise_bug "`%s` derives `%s` and no `derives` entry names it" (Path.show type_)
         (Path.show trait)
@@ -72,7 +65,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
             Synthetic local
           in
           let origin : Core.origin =
-            Desugared { construct = find_derives_entry lookups ~type_ ~trait; desugaring = Derived }
+            Desugared { construct = read_derives_entry lookups ~type_ ~trait; desugaring = Derived }
           in
           let node type_ kind : Core.expression = { id = take_id (); origin; type_; kind } in
           let pattern type_ kind : Core.pattern = { id = take_id (); origin; type_; kind } in

@@ -91,7 +91,7 @@ let find_contract (definition : Core.definition) =
                   | At_most amount -> At_most (Builder.of_clause ~parameters amount)
                   | Exactly amount -> Exactly (Builder.of_clause ~parameters amount)
                 in
-                { origin = Written origin; amortized; resource; bound; holds_when })
+                { origin; amortized; resource; bound; holds_when })
               contract.costs;
           callbacks =
             (let entry_locals =
@@ -140,7 +140,7 @@ let list_laws (definition : Core.definition) =
                 (fun (parameter : Core.parameter) -> (parameter.local, parameter.type_))
                 law.parameters;
             requires = List.map (Builder.of_specification ~entry_locals) law.requires;
-            states = Builder.of_law_statement ~entry_locals ~origin:(Written law.origin) law.body;
+            states = Builder.of_law_statement ~entry_locals ~origin:law.origin law.body;
           })
         laws
   | Function _ | Type _ | Constant _ | Test _ | Law_proof _ | Empty -> []
