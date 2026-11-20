@@ -28,8 +28,7 @@ let find_stated_operand costs metric =
     (fun (bound : Types.cost_bound) ->
       match (counting, bound) with
       | Units, Order_of -> Some (Logic.Integer Z.one)
-      | At_most, (No_more_than (Some limit) | Exactly_cost (Some limit)) ->
-          Some (Logic.Integer limit)
+      | At_most, (No_more_than limit | Exactly_cost limit) -> Some (Logic.Integer limit)
       | (Units | At_most | Exactly), (Order_of | No_more_than _ | Exactly_cost _) -> None)
     (list_stated_bounds costs metric)
 

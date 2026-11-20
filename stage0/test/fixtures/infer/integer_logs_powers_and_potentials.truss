@@ -1,0 +1,8 @@
+type Counter(value: UInt64, limit: UInt32)
+  cost potential value + limit
+
+fn measure(items: List[Int64]) -> UInt64
+  cost time O(items.length() * log(items.length()) + power(2, 3))
+{
+  items.length()
+}

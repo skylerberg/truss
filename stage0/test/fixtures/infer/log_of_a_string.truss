@@ -1,0 +1,5 @@
+fn halve(count: UInt64) -> UInt64
+  cost time O(log("steps"))
+{
+  count / 2
+}

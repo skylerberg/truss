@@ -481,6 +481,19 @@ let () =
   Harness.test "a function type in parentheses with clauses" (fun () ->
       expect_type "(fn(Item) uses Clock, Random cost time O(1))"
         "(fn (Item) (uses Clock Random) (cost time (O 1)))");
+  Harness.test "a function type's cost bounds are integer literals" (fun () ->
+      expect_type "(fn(Item) cost time O(1) cost allocations <= 2 cost allocated_bytes == 0)"
+        "(fn (Item) (cost time (O 1)) (cost allocations (<= 2)) (cost allocated_bytes (== 0)))");
+  Harness.test "a function type's cost bound that is not an integer literal is rejected" (fun () ->
+      Parse_support.expect_error
+        "fn f(change: (fn(UInt64) -> UInt64 cost time O(time(String.no_such_member)))) {}"
+        ~code:Function_type_cost_bound ~at:"time(String";
+      Parse_support.expect_error "fn f(count: UInt64, visit: (fn() cost allocations <= count)) {}"
+        ~code:Function_type_cost_bound ~at:"count))";
+      Parse_support.expect_error "type T(visit: (fn() cost time O(\"steps\")))"
+        ~code:Function_type_cost_bound ~at:"\"steps\"";
+      Parse_support.expect_error "fn f(visits: List[(fn() cost allocations == 1 + 1)]) {}"
+        ~code:Function_type_cost_bound ~at:"1 + 1");
   Harness.test "parentheses around a function type need clauses" (fun () ->
       Parse_support.expect_error "fn f(value: (fn(Item))) {}" ~code:Unexpected_token ~at:"(fn");
   Harness.test "a function type's requires names its inputs" (fun () ->

@@ -2036,7 +2036,24 @@ let () =
     (fun () ->
       let text = Fixtures.Infer.integer_measures_and_bounds in
       expect_fine text;
-      expect_type text "1" "Integer")
+      expect_type text "1" "Integer");
+  List.iter
+    (fun (amount, fixture, says) ->
+      Harness.test (Printf.sprintf "%s that is not an integer is a type error" amount) (fun () ->
+          expect_one_diagnostic fixture "types.mismatch" ~says ~at:("\"steps\"", 1)))
+    [
+      ( "an argument of log",
+        Fixtures.Infer.log_of_a_string,
+        "An argument of `log` is an integer, not `String`." );
+      ( "an argument of power",
+        Fixtures.Infer.power_of_a_string,
+        "An argument of `power` is an integer, not `String`." );
+      ( "a potential",
+        Fixtures.Infer.potential_of_a_string,
+        "A `potential` is an integer, not `String`." );
+    ];
+  Harness.test "the arguments of log and power and a potential of integers check cleanly" (fun () ->
+      expect_fine Fixtures.Infer.integer_logs_powers_and_potentials)
 
 let identity = Fixtures.Infer.identity
 

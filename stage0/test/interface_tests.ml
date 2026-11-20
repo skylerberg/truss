@@ -334,16 +334,16 @@ let () =
   Harness.test "an impl's callback type cannot drop its trait's time clause" (fun () ->
       expect_signature_mismatch
         Fixtures.Interface.walk_impl_dropping_the_time_clause_of_its_callback
-        ~declared:"`each(self, visit: (fn(Int64) cost time O(...)))`");
+        ~declared:"`each(self, visit: (fn(Int64) cost time O(1)))`");
   Harness.test "an impl's callback type cannot drop `amortized` from its trait's cost" (fun () ->
       expect_signature_mismatch
         Fixtures.Interface.walk_impl_dropping_amortized_from_the_cost_of_its_callback
-        ~declared:"`each(self, visit: (fn(Int64) cost amortized time O(...)))`");
+        ~declared:"`each(self, visit: (fn(Int64) cost amortized time O(1)))`");
   Harness.test "an impl's callback type cannot bound the allocations that its trait's does not"
     (fun () ->
       expect_signature_mismatch
         Fixtures.Interface.walk_impl_bounding_the_allocations_of_its_callback
-        ~declared:"`each(self, visit: (fn(Int64) cost time O(...)))`");
+        ~declared:"`each(self, visit: (fn(Int64) cost time O(1)))`");
   Harness.test "an impl's callback type cannot use fewer capabilities than its trait's" (fun () ->
       expect_signature_mismatch Fixtures.Interface.walk_impl_dropping_a_capability_of_its_callback
         ~declared:"`each(self, visit: (fn(Int64) uses Log))`");
@@ -399,7 +399,7 @@ let () =
     (fun () ->
       expect_signature_mismatch
         Fixtures.Interface.chooses_impl_dropping_the_time_clause_of_its_result
-        ~declared:"`choose(self) -> (fn(Int64) -> Int64 cost time O(...))`")
+        ~declared:"`choose(self) -> (fn(Int64) -> Int64 cost time O(1))`")
 
 let () =
   let feed = "`feed[Item: Convert[Int64]](self, item: Item) -> UInt64`" in
@@ -1095,3 +1095,37 @@ let () =
           if Well_known.find_builtin_capability path <> Some builtin_capability then
             Harness.fail "`%s` is not found by its path" (Path.show path))
         Language.Builtin_capability.all)
+
+let () =
+  List.iter
+    (fun (error, container, fixture, parser_code) ->
+      Harness.test
+        (Printf.sprintf "%s leaves %s unelaborated, and the other definitions are checked" error
+           container) (fun () ->
+          let database = Support.make_database (Support.setup [ ("app::main", fixture) ]) in
+          match
+            List.sort compare
+              (Support.list_codes
+                 (Database.For_testing.list_diagnostics [ Parse; Interface ] database
+                    (Support.parse_file "app::main")))
+          with
+          | [ first; "types.arity" ] when first = parser_code -> ()
+          | codes -> Harness.fail "reported [%s]" (String.concat "; " codes)))
+    [
+      ( "a cost bound that is not a literal in an impl's associated type",
+        "the impl",
+        Fixtures.Interface.impl_associated_type_with_a_cost_bound_that_is_not_a_literal,
+        "parser.function_type_cost_bound" );
+      ( "a named input of a function type in an impl's associated type",
+        "the impl",
+        Fixtures.Interface.impl_associated_type_naming_a_function_type_input,
+        "parser.function_type_names" );
+      ( "a cost bound that is not a literal in a law's parameter",
+        "the trait",
+        Fixtures.Interface.trait_law_parameter_with_a_cost_bound_that_is_not_a_literal,
+        "parser.function_type_cost_bound" );
+      ( "a named input of a function type in a law's parameter",
+        "the trait",
+        Fixtures.Interface.trait_law_parameter_naming_a_function_type_input,
+        "parser.function_type_names" );
+    ]

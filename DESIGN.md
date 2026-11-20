@@ -673,6 +673,10 @@ A function type puts its clauses after its result, inside parentheses, as in
 whole clauses, not one or two effect keywords, so the clauses come in the
 order they have in a definition, and the parentheses mark where they end.
 
+| Rule | Reason |
+|---|---|
+| A bound in a function type is an integer literal. | Type checking compares a function value's clauses with its expected type's without the prover, and two literals compare as numbers. A bound that named a value would need a proof at each comparison, and a field's type or a type argument has no value in scope to name. |
+
 ## Methods
 
 Rules: [Methods](SPECIFICATION.md#methods).
