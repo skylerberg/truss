@@ -118,48 +118,46 @@ fn u32_at(bytes: Slice[UInt8], at: UInt64) -> UInt32 {
 
 type Frame(kind: UInt8, flags: UInt8, stream: UInt32, payload: List[UInt8])
 
-internal type Inbox(bytes: List[UInt8])
-
-fn fill[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox) -> Result[Unit, Failure]
+fn fill[Stream: streams::Duplex](stream: Stream, inbox: mut streams::ByteQueue) -> Result[Unit, Failure]
   uses Handles, Tasks, RunForever
 {
-  match stream.receive(mut inbox.bytes, limit: 65536) {
+  match mut inbox.receive_from(stream, limit: 65536) {
     Ok(0) => Err(Failure.Closed)
     Ok(_) => Ok(Unit)
     Err(error) => Err(Failure.System(error: error))
   }
 }
 
-fn take_bytes[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox, count: UInt64) -> Result[List[UInt8], Failure]
+fn take_bytes[Stream: streams::Duplex](stream: Stream, inbox: mut streams::ByteQueue, count: UInt64) -> Result[List[UInt8], Failure]
   uses Handles, Tasks, RunForever
 {
-  while inbox.bytes.length() < count {
+  while inbox.length() < count {
     fill(stream, inbox: mut inbox)?
   }
-  let rest = mut inbox.bytes.split_off(count)
-  Ok(map::exchange(mut inbox.bytes, value: own rest))
+  Ok(mut inbox.take(count))
 }
 
-fn read_frame[Stream: streams::Duplex](stream: Stream, inbox: mut Inbox) -> Result[Frame, Failure]
+fn read_frame[Stream: streams::Duplex](stream: Stream, inbox: mut streams::ByteQueue) -> Result[Frame, Failure]
   uses Handles, Tasks, RunForever
 {
-  while inbox.bytes.length() < 9 {
+  while inbox.length() < 9 {
     fill(stream, inbox: mut inbox)?
   }
-  let length = intrinsic::convert[UInt8, UInt64](inbox.bytes[0]) * 65536 + intrinsic::convert[UInt8, UInt64](inbox.bytes[1]) * 256
-    + intrinsic::convert[UInt8, UInt64](inbox.bytes[2])
+  let header = inbox.bytes()
+  let length = intrinsic::convert[UInt8, UInt64](header[0]) * 65536 + intrinsic::convert[UInt8, UInt64](header[1]) * 256
+    + intrinsic::convert[UInt8, UInt64](header[2])
   if length > 16384 {
     return Err(violation(frame_size_error, message: "a frame larger than the advertised maximum"))
   }
-  while inbox.bytes.length() < 9 || inbox.bytes.length() - 9 < length {
+  while inbox.length() < 9 || inbox.length() - 9 < length {
     fill(stream, inbox: mut inbox)?
   }
-  let rest = mut inbox.bytes.split_off(9 + length)
-  let whole = map::exchange(mut inbox.bytes, value: own rest)
-  if whole.length() < 9 {
-    return Err(Failure.Closed)
-  }
-  Ok(Frame(kind: whole[3], flags: whole[4], stream: u32_at(whole.slice(), at: 5) & 2147483647, payload: whole[9..].to_list()))
+  let head = inbox.bytes()
+  let kind = head[3]
+  let flags = head[4]
+  let id = u32_at(head, at: 5) & 2147483647
+  mut inbox.skip(9)
+  Ok(Frame(kind: kind, flags: flags, stream: id, payload: mut inbox.take(length)))
 }
 
 fn frame_bytes(output: mut List[UInt8], kind: UInt8, flags: UInt8, stream: UInt32, payload: Slice[UInt8]) {
@@ -600,7 +598,7 @@ fn serve_frame(reading: mut Reading, frame: own Frame, arrivals: tasks::Channel[
 
 fn read_requests[Stream: streams::Duplex](
   stream: Stream,
-  inbox: mut Inbox,
+  inbox: mut streams::ByteQueue,
   reading: mut Reading,
   arrivals: tasks::Channel[Arrival],
   outbound: tasks::Channel[flow::Outbound],
@@ -630,7 +628,8 @@ fn read_requests[Stream: streams::Duplex](
   }
 }
 
-type Pending(bytes: List[UInt8], is_end: Bool, ack: tasks::Channel[Bool])
+type Pending(bytes: List[UInt8], sent: UInt64, is_end: Bool, ack: tasks::Channel[Bool])
+  invariant sent <= bytes.length()
 
 type Outflow(stream: UInt32, window: Int64, queue: List[Pending])
 
@@ -662,7 +661,8 @@ fn flush_outflow[Stream: streams::Duplex](stream: Stream, writing: mut Writing, 
   while index < writing.outflows.length() && !writing.outflows[index].queue.is_empty() {
     let id = writing.outflows[index].stream
     let window = smaller(writing.connection_window, second: writing.outflows[index].window)
-    let total = writing.outflows[index].queue[0].bytes.length()
+    let sent = writing.outflows[index].queue[0].sent
+    let total = writing.outflows[index].queue[0].bytes.length() - sent
     let is_end = writing.outflows[index].queue[0].is_end
     if total > 0 && window <= 0 {
       return Ok(Unit)
@@ -678,10 +678,15 @@ fn flush_outflow[Stream: streams::Duplex](stream: Stream, writing: mut Writing, 
       }
     }
     let is_whole = size == total
-    let rest = mut writing.outflows[index].queue[0].bytes.split_off(size)
-    let piece = map::exchange(mut writing.outflows[index].queue[0].bytes, value: own rest)
-    send_frame(stream, kind: data_frame, flags: if is_whole && is_end { end_stream } else { 0 }, id: id, payload: piece.slice())?
-    let used: Int64 = intrinsic::convert(piece.length())
+    send_frame(
+      stream,
+      kind: data_frame,
+      flags: if is_whole && is_end { end_stream } else { 0 },
+      id: id,
+      payload: writing.outflows[index].queue[0].bytes[sent..sent + size],
+    )?
+    writing.outflows[index].queue[0].sent = sent + size
+    let used: Int64 = intrinsic::convert(size)
     writing.connection_window = writing.connection_window.saturating_subtract(used)
     if index < writing.outflows.length() {
       writing.outflows[index].window = writing.outflows[index].window.saturating_subtract(used)
@@ -765,7 +770,7 @@ fn write_message[Stream: streams::Duplex](connection: Stream, writing: mut Writi
             let _ = ack.send(false)
             return Ok(Unit)
           }
-          mut writing.outflows[index].queue.push(Pending(bytes: own bytes, is_end: is_end, ack: ack.copy()))
+          mut writing.outflows[index].queue.push(Pending(bytes: own bytes, sent: 0, is_end: is_end, ack: ack.copy()))
           flush_outflow(connection, writing: mut writing, index: index)?
         }
         None => {
@@ -911,7 +916,7 @@ fn drain(admission: tasks::Cell[Admission], drained: tasks::Channel[Unit], outbo
 
 internal fn serve[Stream: streams::Duplex](
   stream: Stream,
-  inbox: own Inbox,
+  inbox: own streams::ByteQueue,
   header_limit: UInt64,
   stopping: tasks::Channel[Unit],
   respond: (fn(own Arrival) uses generic Granted),
@@ -993,7 +998,7 @@ type Outstream(
 
 internal type Session[Stream: streams::Duplex](
   stream: Stream,
-  inbox: Inbox,
+  inbox: streams::ByteQueue,
   decoder: hpack::Decoder,
   encoder: hpack::Encoder,
   frame_size: UInt64,
@@ -1012,7 +1017,7 @@ internal fn connect[Stream: streams::Duplex](stream: own Stream, header_limit: U
   open_connection(stream, is_server: false, header_limit: header_limit)?
   Ok(Session(
     stream: own stream,
-    inbox: Inbox(bytes: []),
+    inbox: [],
     decoder: hpack::Decoder.new(),
     encoder: hpack::Encoder.new(),
     frame_size: 16384,

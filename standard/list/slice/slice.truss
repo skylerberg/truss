@@ -498,6 +498,7 @@ public fn Slice[Element: Ordered].maximum(self) lends Option[Element]
 public fn Slice[Element: Copyable].to_list(self) -> List[Element]
   ensures identical(result.model(), self.model())
   cost time O(self.length() * time(Element.copy))
+  cost allocations <= 1 + self.length() * allocations(Element.copy)
 {
   var copy: intrinsic::Storage[Element] = intrinsic::storage_with_capacity(self.length())
   for index in 0..self.length()
@@ -505,6 +506,7 @@ public fn Slice[Element: Copyable].to_list(self) -> List[Element]
     invariant intrinsic::storage_capacity(copy) == self.length()
     invariant forall i in 0..index =>
       identical(intrinsic::storage_model(copy)[i], self.model()[i])
+    cost allocations <= index * allocations(Element.copy)
   {
     intrinsic::storage_push(mut copy, value: self[index].copy())
   }
