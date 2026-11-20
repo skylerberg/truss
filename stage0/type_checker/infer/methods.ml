@@ -686,9 +686,10 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
     (method_ : Types.trait_method) ~type_arguments arguments =
   let not_callable =
     match receiver_type with
-    | Types.Any _ -> (
+    | Types.Any any -> (
         match
-          Interface.Impls.classify_through_any state.lookups.interface ~trait:trait.trait method_
+          Interface.Impls.classify_through_any state.lookups.interface ~any ~trait:trait.trait
+            method_
         with
         | Callable -> None
         | Has_generics ->
