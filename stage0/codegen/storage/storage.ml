@@ -53,5 +53,7 @@ let build_empty ty =
   build_storage ty ~buffer:(Constant empty_buffer) ~length:(Lowered.make_uint64_constant 0)
     ~capacity:(Lowered.make_uint64_constant 0)
 
+let list_view_fields ~buffer ~length = [ (buffer_field, buffer); (length_field, length) ]
+
 let build_view ty ~buffer ~length : Lowered.rvalue =
-  Build { ty; variant = None; fields = [ (buffer_field, buffer); (length_field, length) ] }
+  Build { ty; variant = None; fields = list_view_fields ~buffer ~length }

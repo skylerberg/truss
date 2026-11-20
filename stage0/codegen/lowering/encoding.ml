@@ -45,23 +45,25 @@ let encode env ty =
         | Raw _ -> raise_bug "a raw field in a value written out")
       fields
   in
-  (match Representation.classify env ty with
-  | Handle -> raise_bug "a handle cannot be computed while compiling"
-  | Shared _ -> raise_bug "a shared value cannot be computed while compiling"
-  | Any -> raise_bug "an any value cannot be computed while compiling"
-  | Storage element ->
-      append_bytes (Storage.project_length value) (Memory_layout.compute_integer_size UInt64);
-      Emit_c.Ir_builder.emit_loop builder
-        ~count:(Copy (Storage.project_length value))
-        (fun index ->
-          encode_call element (Storage.index_element value (Copy (Lowered.make_local_place index))))
-  | Shape (Scalar _) -> append_bytes value (Memory_layout.of_type env ty).size
-  | Shape (Record members) -> encode_fields value None members
-  | Shape (Array (element, count)) ->
+  let encode_elements element =
+    append_bytes (Storage.project_length value) (Memory_layout.compute_integer_size UInt64);
+    Emit_c.Ir_builder.emit_loop builder
+      ~count:(Copy (Storage.project_length value))
+      (fun index ->
+        encode_call element (Storage.index_element value (Copy (Lowered.make_local_place index))))
+  in
+  (match (Storage.find_view_element ty, Representation.classify env ty) with
+  | Some element, _ | None, Storage element -> encode_elements element
+  | None, Handle -> raise_bug "a handle cannot be computed while compiling"
+  | None, Shared _ -> raise_bug "a shared value cannot be computed while compiling"
+  | None, Any -> raise_bug "an any value cannot be computed while compiling"
+  | None, Shape (Scalar _) -> append_bytes value (Memory_layout.of_type env ty).size
+  | None, Shape (Record members) -> encode_fields value None members
+  | None, Shape (Array (element, count)) ->
       Emit_c.Ir_builder.emit_loop builder ~count:(Lowered.make_uint64_constant count) (fun index ->
           encode_call element
             (Lowered.project value (Index (Copy (Lowered.make_local_place index)))))
-  | Shape (Sum variants) ->
+  | None, Shape (Sum variants) ->
       let after = Emit_c.Ir_builder.allocate_block builder in
       let cases =
         List.mapi
@@ -130,20 +132,22 @@ let decode env ty encoded : Lowered.static_value =
   let rec decode_value ty : Lowered.static_value =
     if Memory_layout.has_zero_size env ty then make_empty ty
     else
-      match Representation.classify env ty with
-      | Handle -> raise_bug "a handle computed while compiling"
-      | Shared _ -> raise_bug "a shared value computed while compiling"
-      | Any -> raise_bug "an any value computed while compiling"
-      | Storage element ->
-          let count = Z.to_int (decode_integer reader UInt64) in
-          Static_storage { element; elements = List.init count (fun _ -> decode_value element) }
-      | Shape (Scalar kind) -> Static_scalar (decode_scalar reader kind)
-      | Shape (Record members) -> Static_record (decode_fields members)
-      | Shape (Array (element, count)) ->
+      match (Storage.find_view_element ty, Representation.classify env ty) with
+      | Some element, _ -> Static_view { element; elements = decode_elements element }
+      | None, Storage element -> Static_storage { element; elements = decode_elements element }
+      | None, Handle -> raise_bug "a handle computed while compiling"
+      | None, Shared _ -> raise_bug "a shared value computed while compiling"
+      | None, Any -> raise_bug "an any value computed while compiling"
+      | None, Shape (Scalar kind) -> Static_scalar (decode_scalar reader kind)
+      | None, Shape (Record members) -> Static_record (decode_fields members)
+      | None, Shape (Array (element, count)) ->
           Static_array (List.init count (fun _ -> decode_value element))
-      | Shape (Sum variants) ->
+      | None, Shape (Sum variants) ->
           let variant = List.nth variants (Z.to_int (decode_integer reader variant_index)) in
           Static_variant (variant.name, decode_fields variant.fields)
+  and decode_elements element =
+    let count = Z.to_int (decode_integer reader UInt64) in
+    List.init count (fun _ -> decode_value element)
   and decode_fields members =
     List.map
       (fun (name, (member : Memory_layout.member)) ->
