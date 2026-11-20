@@ -56,4 +56,7 @@ let statement_diverges (tables : tables) =
   State.diverges ~is_never:(fun (value : Syntax.expression) ->
       match tables.types.(value.id) with Some Types.Never -> true | _ -> false)
 
-module For_testing = Form.For_testing
+module For_testing = struct
+  let is_written_expression = Form.For_testing.is_written_expression
+  let is_written_statement = Form.For_testing.is_written_statement
+end
