@@ -605,7 +605,7 @@ main.truss:2:3: error[types.mismatched_integers]: Integer types never convert im
   |   ^^^^^^^^^^^^^
   fix: Convert the left side to `UInt64`.
     replace "small" with "UInt64.from_integer(small)" at main.truss:2:3
-1 error
+1 error. `truss check --fix` fixes it.
 ```
 
 A conversion between built-in number types is a method of the target type.
@@ -1018,7 +1018,7 @@ main.truss:3:22: error[ownership.use_after_move]: `name` is used after it was mo
   fix: Pass a copy at the move instead.
     delete "own " at main.truss:2:18
     insert ".copy()" at main.truss:2:26
-1 error
+1 error. `truss check --fix` fixes it.
 ```
 
 Leaving out `own` is an error too, because a move or a copy is always
@@ -1168,7 +1168,7 @@ main.truss:2:7: error[ownership.lent_part_escapes]: This part is lent only until
   |       ^^^^^
   fix: Copy the scrutinee.
     insert ".copy()" at main.truss:2:27
-1 error
+1 error. `truss check --fix` fixes it.
 ```
 
 Use the part within the statement, or copy it:
@@ -1553,7 +1553,7 @@ main.truss:6:5: error[patterns.unreachable_arm]: Earlier arms already match ever
   |     ^^^^^^^^^^^^
   fix: Write `lottery::lucky`.
     replace "lucky" with "lottery::lucky" at main.truss:5:5
-2 errors and 1 warning
+2 errors and 1 warning. `truss check --fix` fixes 1 of them.
 ```
 
 A constant of a type, such as `Config.quiet`, is written with its type, as
@@ -1568,7 +1568,7 @@ main.truss:7:3: error[patterns.not_covered]: This `match` does not cover every c
   |   ^^^^^^^^^^^^^
   fix: Add an arm for each missing case.
     insert "\n    Empty => todo" at main.truss:9:32
-1 error
+1 error. `truss check --fix` fixes it.
 ```
 
 ```text
@@ -1577,7 +1577,7 @@ main.truss:4:5: error[patterns.unreachable_arm]: Earlier arms already match ever
   |     ^^^^^^^^^^^
   fix: Delete the arm.
     delete "\n    0 => \"none\"" at main.truss:3:15
-1 error
+1 error. `truss check --fix` fixes it.
 ```
 
 #### is
@@ -2107,7 +2107,7 @@ main.truss:7:19: error[ownership.not_owned]: `name` views a string literal, so i
   fix: Copy it.
     delete "own " at main.truss:7:15
     insert ".copy()" at main.truss:7:23
-1 error
+1 error. `truss check --fix` fixes it.
 ```
 
 #### Building text
