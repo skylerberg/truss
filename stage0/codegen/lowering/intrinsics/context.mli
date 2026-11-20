@@ -34,6 +34,7 @@ val panic_with_message : t -> message:Lowered.operand -> length:Lowered.operand 
 val panic : t -> string -> unit
 val panic_when : t -> Emit_c.Ir_builder.condition -> string -> unit
 val fail_obligation_when : t -> Emit_c.Ir_builder.condition -> string -> unit
+val fail_operation_when : t -> Emit_c.Ir_builder.condition -> string -> unit
 val check_index : t -> Lowered.operand -> Lowered.operand -> unit
 val compute_room : t -> Lowered.place -> Lowered.operand
 val read_array_length : t -> Z.t

@@ -7,6 +7,7 @@ val parse_bounds : Cursor.t -> Syntax.path_type list
 val parse_generics : Cursor.t -> Syntax.generic_parameter list
 val parse_path_type_list : Cursor.t -> Syntax.path_type list
 val parse_capability_list : Cursor.t -> Syntax.capability_reference list
+val parse_capability_uses : Cursor.t -> Syntax.capability_use list
 val parse_clause : Cursor.t -> Syntax.clause
 val parse_expression : ?open_range:bool -> Cursor.t -> Syntax.expression
 

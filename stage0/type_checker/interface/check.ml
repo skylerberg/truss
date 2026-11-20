@@ -361,7 +361,18 @@ and name_declaring_capability_traits lookups capabilities =
                    };
                ])
       | _ -> None)
-    capabilities
+    (Types.map_conditions
+       (Types.map_condition_types (name_declaring_traits lookups) (fun trait ->
+            {
+              trait with
+              trait_arguments =
+                List.map
+                  (function
+                    | Types.Type type_ -> Types.Type (name_declaring_traits lookups type_)
+                    | value -> value)
+                  trait.trait_arguments;
+            }))
+       capabilities)
 
 let name_signature_declaring_traits lookups (signature : Types.signature) =
   let signature = Types.map_signature (name_declaring_traits lookups) signature in
@@ -436,11 +447,14 @@ let check_restated (state : Checking.state) (signature : Syntax.signature) ~has_
           name_signature_declaring_traits state.lookups
             (Types.substitute_signature substitution original)
         and written = name_signature_declaring_traits state.lookups written in
+        let implies =
+          Impls.implies_condition state.lookups ~list_bounds:(Types.list_bounds expected.generics)
+        in
         if
           not
             (Impl_checks.signatures_agree expected written
-            && Types.is_capability_subset expected.uses written.uses
-            && Types.is_capability_subset written.uses expected.uses)
+            && Types.is_capability_subset ~implies expected.uses written.uses
+            && Types.is_capability_subset ~implies written.uses expected.uses)
         then
           Checking.report state Signature_mismatch state.spans.(name.id)
             (Printf.sprintf "`%s` restates `%s.%s`, so it has the signature `%s%s%s`." name.text

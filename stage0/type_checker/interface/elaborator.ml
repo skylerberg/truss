@@ -385,10 +385,19 @@ and elaborate_condition context (written : Syntax.condition) : Types.condition =
            ignore
              (record_diagnostic context.diagnostics Decided_condition
                 context.spans.(bound.subject.id)
-                (Printf.sprintf
-                   "A condition names a type parameter or `Self`, and `%s` is neither: whether it \
-                    implements a trait is decided where it is written."
-                   (Types.show subject)));
+                (match subject with
+                | Types.Projection { base; trait; name } ->
+                    Printf.sprintf
+                      "A condition names a type parameter or `Self`, as a bound does, and `%s` is \
+                       an associated type. Give it a type parameter, as in `[%s, %s: %s[%s = \
+                       %s]]`, and name `%s` in the condition."
+                      (Types.show subject) name (Types.show base) (Types.show_trait trait) name name
+                      name
+                | _ ->
+                    Printf.sprintf
+                      "A condition names a type parameter or `Self`, and `%s` is neither: whether \
+                       it implements a trait is decided where it is written."
+                      (Types.show subject)));
            []
          end
          else
@@ -499,65 +508,36 @@ and elaborate_function_type context (written : Syntax.function_type) :
   | Error report -> Error report
 
 and report_time_of_run_forever context ~uses (clauses : Syntax.clause list) =
-  List.iter
-    (fun (clause : Syntax.clause) ->
-      match clause.kind with
-      | Cost { resource = Metric Time; _ } -> (
-          let condition =
-            Option.fold ~none:[]
-              ~some:(elaborate_condition { context with diagnostics = ref [] })
-              clause.condition
-          in
-          if not (Types.terminates_when condition uses) then
-            let span = context.spans.(clause.id) in
-            match Types.find_unless (Built_in Run_forever) uses with
-            | Some unless when not (Types.has_capability (Built_in Run_forever) uses) ->
-                let shown = Types.show_condition unless in
-                ignore
-                  (record_diagnostic context.diagnostics Unbounded_time span
-                     ~fixes:
-                       [
-                         Diagnostic.fix
-                           (Printf.sprintf "Add `when %s`." shown)
-                           [
-                             Diagnostic.insert
-                               (Source.Definition_span.make_zero_width span.stop)
-                               (" when " ^ shown);
-                           ];
-                       ]
-                     (Printf.sprintf
-                        "This function uses `RunForever unless %s`, so it may run forever where \
-                         the condition does not hold, and a `time` clause bounds it only `when \
-                         %s`."
-                        shown shown))
-            | _ ->
-                ignore
-                  (record_diagnostic context.diagnostics Unbounded_time span
-                     "A function that uses `RunForever` may run forever, so no `time` clause \
-                      bounds it. Remove the `time` clause, or remove `RunForever` and give each \
-                      loop a measure."))
-      | _ -> ())
-    clauses
+  if Types.has_capability (Built_in Run_forever) uses then
+    List.iter
+      (fun (clause : Syntax.clause) ->
+        match clause.kind with
+        | Cost { resource = Metric Time; _ } ->
+            ignore
+              (record_diagnostic context.diagnostics Unbounded_time context.spans.(clause.id)
+                 "A function that uses `RunForever` may run forever, so no `time` clause bounds \
+                  it. Remove the `time` clause, or remove `RunForever` and give each loop a \
+                  measure.")
+        | _ -> ())
+      clauses
 
 and elaborate_uses context clauses =
   Types.make_capability_set
     (List.concat_map
        (fun (clause : Syntax.clause) ->
-         match clause.kind with
-         | Uses uses ->
-             List.concat_map
-               (fun (use : Syntax.capability_use) ->
-                 let capabilities = elaborate_capability context use.capability in
-                 match use.unless with
-                 | None -> capabilities
-                 | Some unless ->
-                     let unless = elaborate_condition context unless in
-                     List.filter_map
-                       (fun capability -> Types.make_unless capability unless)
-                       capabilities)
-               uses
-         | _ -> [])
+         match clause.kind with Uses uses -> elaborate_capability_uses context uses | _ -> [])
        clauses)
+
+and elaborate_capability_uses context uses =
+  List.concat_map
+    (fun (use : Syntax.capability_use) ->
+      let capabilities = elaborate_capability context use.capability in
+      match use.unless with
+      | None -> capabilities
+      | Some unless ->
+          let unless = elaborate_condition context unless in
+          List.filter_map (fun capability -> Types.make_unless capability unless) capabilities)
+    uses
 
 and elaborate_costs context clauses : (Types.cost list, Diagnostic.reported) Stdlib.result =
   let report_error code span message =
@@ -1070,7 +1050,10 @@ let elaborate_container (context : t) (path : Path.t) (definition : Syntax.defin
                 match line.kind with
                 | Capability_definition (name, written) ->
                     let set =
-                      elaborate_capabilities { context with self_capabilities = sets } written
+                      Types.make_capability_set
+                        (elaborate_capability_uses
+                           { context with self_capabilities = sets }
+                           written)
                     in
                     let is_defined_by_this_impl = function
                       | Types.Capability_projection { base; trait; name } ->

@@ -301,7 +301,7 @@ impl_uses:
 impl_item:
   | signature newline_opt block { () }
   | TYPE UPPER EQ type_expression { () }
-  | CAPABILITY UPPER EQ capability_list { () }
+  | CAPABILITY UPPER EQ separated_nonempty_list(COMMA, capability_use) { () }
 
 capability_definition:
   | CAPABILITY UPPER newline_opt LBRACE newline_separated(signature) RBRACE { () }

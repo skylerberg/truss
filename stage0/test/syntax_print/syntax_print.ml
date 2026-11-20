@@ -478,7 +478,7 @@ let show_definition ?(methods = []) (definition : Syntax.definition) =
                     make_form "type" [ name.text; "="; show_type_expression type_ ]
                 | Capability_definition (name, capabilities) ->
                     make_form "capability"
-                      (name.text :: "=" :: list show_capability_reference capabilities)
+                      (name.text :: "=" :: list show_capability_use capabilities)
                 | Impl_member_error -> "error")
               impl_members
           @ methods)

@@ -1,0 +1,7 @@
+trait Short: FiniteCursor {}
+
+fn gather[Items: Cursor](items: own Items) -> List[Items.Element]
+  uses Items.Uses, RunForever unless Items: Short
+{
+  List.collect(own items)
+}

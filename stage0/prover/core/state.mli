@@ -149,6 +149,9 @@ type context = {
   condition : Types.condition;
   bounds : Interface.Impls.bounds;
   keeps_termination : bool;
+  keeps_failures : bool;
+  mutable panics : bool;
+  mutable can_declare_panic : bool;
   mutable obligation_condition : Types.condition;
   mutable skipped_conditions : Types.condition list;
   run_body : frame -> lambdas:Mir.body array -> Mir.body -> unit;

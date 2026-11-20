@@ -677,7 +677,7 @@ fn add_wrapping(left: UInt8, right: UInt8) -> UInt8 {
 fn add_or_stop(left: UInt8, right: UInt8) -> UInt8
   uses Panic
 {
-  left.checked_add(right).expect("the sum of two small numbers fits in a UInt8")
+  left + right
 }
 
 test "the ways an addition can fit" uses Panic {
@@ -697,16 +697,18 @@ test "the ways an addition can fit" uses Panic {
 | `add_saturating` | The result stops at the type's maximum |
 | `add_checked` | The result is `None` when the sum does not fit |
 | `add_wrapping` | The result wraps around, as hardware arithmetic does |
-| `add_or_stop` | The program stops, with the message given to `expect`, when the sum does not fit |
+| `add_or_stop` | The program stops when the sum does not fit |
 
 `uses Panic` declares that a function may stop the program, and the test
-that calls `add_or_stop` declares it too. It changes nothing about what is
-proven: the addition is still checked, by `checked_add`, and `expect` stops
-the program when the check fails. [Chapter 8](#8-error-handling) covers
-failure in detail.
+that calls `add_or_stop` declares it too. In code that has `Panic`, an
+addition that does not fit stops the program with `arithmetic overflow`, so
+nothing about it is proven. Code without `Panic` proves every addition, and
+its release build checks none. To stop with a message of your own, write
+`left.checked_add(right).expect("the sum fits in a UInt8")`.
+[Chapter 8](#8-error-handling) covers failure in detail.
 
-Division by zero, an index out of bounds, and a shift by too many bits are
-proof obligations in the same way.
+Division by zero and a shift by too many bits follow the same rule. An index
+out of bounds is proven even in code that has `Panic`.
 
 #### Floating point
 
@@ -2430,9 +2432,10 @@ signature declares `uses Panic`.** A caller can see from a signature that a
 call may end the program, and a server that must keep running can require
 handlers whose types have no `Panic`.
 
-`uses Panic` permits a crash, and nothing else: it does not excuse an
-operation from its proof. Code that should stop when an operation fails
-writes the stop, with the checked form of the operation:
+`uses Panic` permits a crash. An integer operation that fails stops the
+program there, as in `add_or_stop` above. Indexing is still proven, so code
+that should stop on a missing element writes the stop, with the checked
+form of the operation:
 
 ```truss
 fn third(items: Slice[Int64]) -> Int64
@@ -2497,7 +2500,7 @@ $ echo $?
 | A value may be absent as a normal case | Return an `Option` |
 | The caller can be expected to know the fact | `requires`, so every caller proves it |
 | The code just checked the fact | Nothing: the prover knows it |
-| A failure would be a bug, and proving otherwise is not worth it | The checked operation and `expect`, in a function with `uses Panic` |
+| A failure would be a bug, and proving otherwise is not worth it | `uses Panic`: an integer operation then stops the program, and `expect` does for a checked one |
 
 `expect` is a fine choice for a script or a prototype. Code that others
 depend on usually proves its operations safe, since `Panic` in a signature
@@ -4373,6 +4376,11 @@ test "a cursor's provided methods" {
   `next` uses. A cursor that reads lines from a file has `Uses = FileRead,
   Handles`, and a function that pulls a generic cursor declares `uses
   Source.Uses`.
+- An adapter whose `next` pulls its source in a loop, until a value
+  matches, defines `capability Uses = Source.Uses, RunForever unless
+  Source: FiniteCursor` and measures the loop
+  `decreases self.source.remaining() when Source: FiniteCursor`. Over a
+  list's cursor it then ends, and its callers need no `RunForever`.
 - `items.cursor()` makes a cursor that owns a collection's elements, which
   is what `for item in own items` pulls. It measures itself, as
   `text.characters()` does.

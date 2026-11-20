@@ -289,7 +289,13 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
               let allowed =
                 if trait.is_capability then normalize_capabilities impl.impl_uses else expected.uses
               in
-              if not (Types.is_capability_subset (normalize_capabilities written.uses) allowed) then
+              if
+                not
+                  (Types.is_capability_subset
+                     ~implies:(Impls.implies_condition state.lookups ~list_bounds)
+                     (normalize_capabilities written.uses)
+                     allowed)
+              then
                 Checking.report state Impl_uses state.spans.(name.id)
                   (if trait.is_capability then
                      Printf.sprintf

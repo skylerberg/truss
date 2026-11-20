@@ -185,7 +185,7 @@ let assume context (frame : State.frame) term =
 let locate (context : State.context) (source : State.source) origin =
   if source.key = Some context.home then Obligation.Node origin else Whole_definition
 
-let make_requires_fix (context : State.context) required =
+let insert_line_before_body (context : State.context) (line : Obligation.message) =
   let names = context.lookups.interface.names in
   let text = names.read_text context.home in
   let brace =
@@ -195,21 +195,49 @@ let make_requires_fix (context : State.context) required =
     | _ -> None
   in
   let edit at before =
-    Some
-      {
-        Obligation.at;
-        replacement = (Obligation.Text (before ^ "  requires ") :: required) @ [ Text "\n" ];
-      }
+    Some { Obligation.at; replacement = (Obligation.Text (before ^ "  ") :: line) @ [ Text "\n" ] }
   in
+  match brace with
+  | Some at when at > 0 && text.[at - 1] = '\n' ->
+      edit (Source.Definition_span.make_zero_width at) ""
+  | Some at when at > 0 && text.[at - 1] = ' ' ->
+      edit (Source.Definition_span.make (at - 1) at) "\n"
+  | _ -> None
+
+let make_panic_fix (context : State.context) =
+  let names = context.lookups.interface.names in
   let edit =
-    match brace with
-    | Some at when at > 0 && text.[at - 1] = '\n' ->
-        edit (Source.Definition_span.make_zero_width at) ""
-    | Some at when at > 0 && text.[at - 1] = ' ' ->
-        edit (Source.Definition_span.make (at - 1) at) "\n"
+    match names.read_definition context.home with
+    | { kind = Function { signature; _ }; _ } -> (
+        let locate id = Source.Definition_span.locate (names.read_spans context.home) id in
+        match
+          ( List.find_opt
+              (fun (clause : Syntax.clause) -> match clause.kind with Uses _ -> true | _ -> false)
+              signature.clauses,
+            signature.clauses )
+        with
+        | Some uses, _ ->
+            Some
+              {
+                Obligation.at = Source.Definition_span.make_zero_width (locate uses.id).stop;
+                replacement = [ Text ", Panic" ];
+              }
+        | None, first :: _ ->
+            Some
+              {
+                Obligation.at = Source.Definition_span.make_zero_width (locate first.id).start;
+                replacement = [ Text "uses Panic\n  " ];
+              }
+        | None, [] -> insert_line_before_body context [ Text "uses Panic" ])
     | _ -> None
   in
   match edit with
+  | Some edit when not context.inherits_precondition ->
+      [ { Obligation.title = [ Text "Add `uses Panic`" ]; edits = [ edit ] } ]
+  | Some _ | None -> []
+
+let make_requires_fix (context : State.context) required =
+  match insert_line_before_body context (Obligation.Text "requires " :: required) with
   | Some edit when not context.inherits_precondition ->
       [
         {
@@ -363,13 +391,19 @@ and make_obligation ?template_clause (context : State.context) (frame : State.fr
     template_clause;
   }
 
+let is_failing_operation : Diagnostic.Code.prover -> bool = function
+  | Overflow | Division | Shift -> true
+  | _ -> false
+
 let oblige ?template_clause ?cited ?(fixes = []) ?holds_when (context : State.context)
     (frame : State.frame) code location message goal =
   let holds_when = Option.value holds_when ~default:context.obligation_condition in
   if
-    not
-      (holds_when = context.condition
-      || (code = Diagnostic.Code.Termination && context.keeps_termination))
+    (is_failing_operation code && context.panics)
+    || not
+         (holds_when = context.condition
+         || (code = Diagnostic.Code.Termination && context.keeps_termination)
+         || (is_failing_operation code && context.keeps_failures))
   then assume context frame goal
   else
     match
@@ -379,13 +413,19 @@ let oblige ?template_clause ?cited ?(fixes = []) ?holds_when (context : State.co
            context goal)
     with
     | Some obligation ->
+        let is_home_body = frame.source.key = Some context.home && frame.makes_obligations in
         let fixes =
           match fixes with
-          | [] when frame.source.key = Some context.home && frame.makes_obligations -> (
+          | [] when is_home_body -> (
               match show_truss_goal context goal with
               | Some required -> add_requires context frame [ Text required ]
               | None -> [])
           | fixes -> fixes
+        in
+        let fixes =
+          if is_failing_operation code && context.can_declare_panic && is_home_body then
+            fixes @ make_panic_fix context
+          else fixes
         in
         context.obligations <- { obligation with cited; fixes } :: context.obligations;
         assume context frame goal
@@ -652,14 +692,25 @@ let list_definition_bounds (lookups : Lookups.t) ~(current : Path.t) ~(condition
         | Some signature -> signature.generics
         | None -> list_impl_generics current)
   in
-  fun parameter ->
-    Types.list_bounds generics parameter
-    @ List.filter_map
-        (fun (bound : Types.bound_condition) ->
-          match bound.subject with
-          | Types.Parameter subject when subject = parameter -> Some bound.bound
-          | _ -> None)
-        condition
+  let list_self_bounds (parameter : Types.parameter) =
+    match
+      if Types.is_self_parameter parameter then
+        Interface.Definition.find_trait_interface lookups.interface parameter.owner
+      else None
+    with
+    | Some interface ->
+        [
+          {
+            Types.trait = parameter.owner;
+            trait_arguments = Types.list_generic_arguments interface.trait_generics;
+            associated = [];
+          };
+        ]
+    | None -> []
+  in
+  Interface.Impls.add_condition_bounds
+    (fun parameter -> list_self_bounds parameter @ Types.list_bounds generics parameter)
+    condition
 
 let substitute_type (context : State.context) (frame : State.frame) ty =
   (Interface.Impls.normalize context.lookups.interface ~list_bounds:context.bounds)

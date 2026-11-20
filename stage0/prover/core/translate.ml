@@ -3,14 +3,18 @@ let require_home (source : State.source) =
   | Some key -> key
   | None -> Facts.raise_bug "%s has no definition key" source.name
 
-let make_context ?node ?(condition = []) ?(keeps_termination = true) (lookups : Lookups.t) ~home
-    ~current ~terminates ~measures ~inherits_precondition =
+let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_failures = true)
+    ?(panics = false) ?(can_declare_panic = false) (lookups : Lookups.t) ~home ~current ~terminates
+    ~measures ~inherits_precondition =
   let node = Option.value node ~default:current in
   let rec context =
     {
       State.condition;
       bounds = Facts.list_definition_bounds lookups ~current ~condition;
       keeps_termination;
+      keeps_failures;
+      panics;
+      can_declare_panic;
       obligation_condition = [];
       skipped_conditions = [];
       run_body = (fun frame ~lambdas body -> Reader.read_body context frame ~lambdas body);
@@ -200,10 +204,14 @@ let translate_run ~proof ?inherited ~substitution ~condition (lookups : Lookups.
     | Some (signature : Types.signature) -> signature.uses
     | None -> Types.make_capability_set [ Built_in Run_forever ]
   in
-  let terminates = proof || Types.terminates_when condition uses in
+  let implies = Conditions.implies lookups ~current:path in
+  let terminates = proof || Types.terminates_when ~implies condition uses in
   let keeps_termination =
     condition = [] || Types.find_unless (Built_in Run_forever) uses = Some condition
   in
+  let keeps_failures = condition = [] || Types.find_unless (Built_in Panic) uses = Some condition in
+  let panics = Conditions.may_panic lookups ~current:path ~condition uses in
+  let can_declare_panic = not (Types.may_use (Built_in Panic) uses) in
   let pair_up terms =
     match (inherited, parameters, terms) with
     | Some ((clauses : State.clauses), _), { local = Self; _ } :: _, _ :: rest
@@ -231,11 +239,12 @@ let translate_run ~proof ?inherited ~substitution ~condition (lookups : Lookups.
   let home = require_home source in
   let measures =
     List.filter
-      (fun (measure : Mir.formula) -> Types.implies_condition condition measure.holds_when)
+      (fun (measure : Mir.formula) -> implies condition measure.holds_when)
       contract.decreases
   in
   let context =
-    make_context lookups ~condition ~keeps_termination ~home ~current:path
+    make_context lookups ~condition ~keeps_termination ~keeps_failures ~panics ~can_declare_panic
+      ~home ~current:path
       ~node:
         (Mir.Call_edges.resolve_node
            { interface = lookups.interface; mir = lookups.mir }
@@ -617,19 +626,21 @@ let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_sub
     translate_run ~proof ?inherited ~substitution ~condition lookups source ~path
   in
   let base, skipped = run [] in
-  let terminating_condition =
+  let find_capability_condition capability =
     match Interface.Impls.read_signature lookups.interface path with
-    | Some signature when not (Types.has_capability (Built_in Run_forever) signature.uses) ->
+    | Some signature when not (Types.has_capability capability signature.uses) ->
         Option.to_list
-          (Types.find_unless (Built_in Run_forever)
-             (Types.substitute_capabilities substitution signature.uses))
+          (Types.find_unless capability (Types.substitute_capabilities substitution signature.uses))
     | Some _ | None -> []
   in
   let outcomes =
     base
     :: List.map
          (fun condition -> fst (run condition))
-         (List.sort_uniq compare (terminating_condition @ skipped))
+         (List.sort_uniq compare
+            (find_capability_condition (Built_in Run_forever)
+            @ find_capability_condition (Built_in Panic)
+            @ skipped))
   in
   {
     Obligation.obligations =

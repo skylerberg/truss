@@ -2254,6 +2254,10 @@ let () =
   Harness.test "a condition names a type parameter or Self" (fun () ->
       expect_one_diagnostic Fixtures.Infer.condition_on_a_concrete_type "types.decided_condition"
         ~says:"`Int64` is neither");
+  Harness.test "a condition names an associated type through a type parameter" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.condition_on_an_associated_type "types.decided_condition"
+        ~says:"Give it a type parameter, as in `[Element, Items: Cursor[Element = Element]]`";
+      expect_fine Fixtures.Infer.condition_on_a_parameter_bound_to_an_associated_type);
   Harness.test "a clause whose condition never holds is rejected" (fun () ->
       expect_one_diagnostic Fixtures.Infer.clause_whose_condition_never_holds
         "types.decided_condition" ~says:"never holds");

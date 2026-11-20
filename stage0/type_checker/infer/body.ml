@@ -76,14 +76,16 @@ let declare_parameters state (written : Syntax.parameter list) (signature : Type
 let classify_self_mode (signature : Types.signature) =
   match signature.receiver with Some (mode, _) -> mode | None -> Language.Mode.Read
 
-let check_clauses state env (clauses : Syntax.clause list) =
+let check_clauses state env ~uses (clauses : Syntax.clause list) =
   List.iter
     (fun (clause : Syntax.clause) ->
       Clauses.check_under_condition state ~id:clause.id clause.condition (fun () ->
           match clause.kind with
           | Requires value | Ensures value -> Clauses.check_condition state env value
           | Decreases measures -> Clauses.check_measures state env measures
-          | Cost cost -> Clauses.check_cost state env cost
+          | Cost cost ->
+              Clauses.check_cost state env cost;
+              if cost.resource = Metric Time then Clauses.check_time_terminates state clause ~uses
           | Uses _ | Clause_error -> ()))
     clauses
 
@@ -257,7 +259,7 @@ let check_function state ~broken_body (written : Syntax.signature)
     { constant_expression with specification = signature.specification_only }
     written.parameters signature;
   check_function_type_requires state env written.parameters signature;
-  check_clauses state env written.clauses;
+  check_clauses state env ~uses:signature.uses written.clauses;
   state.form.definition_builder <-
     Some
       (fun ~holds_body ->
@@ -503,7 +505,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
         let env : State.env =
           { no_output with specification = true; output = Some (Returns Types.unit) }
         in
-        check_clauses state env clauses;
+        check_clauses state env ~uses:Types.no_capabilities clauses;
         state.form.definition_builder <-
           Some
             (fun ~holds_body ->

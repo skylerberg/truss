@@ -29,15 +29,14 @@ and visit_condition on_expression (condition : Syntax.condition) =
       List.iter (visit_path_type on_expression) bound.bounds)
     condition
 
+and visit_capability_use on_expression (use : Syntax.capability_use) =
+  visit_capability_reference on_expression use.capability;
+  Option.iter (visit_condition on_expression) use.unless
+
 and visit_clause on_expression (clause : Syntax.clause) =
   Option.iter (visit_condition on_expression) clause.condition;
   match clause.kind with
-  | Uses uses ->
-      List.iter
-        (fun (use : Syntax.capability_use) ->
-          visit_capability_reference on_expression use.capability;
-          Option.iter (visit_condition on_expression) use.unless)
-        uses
+  | Uses uses -> List.iter (visit_capability_use on_expression) uses
   | Requires value | Ensures value -> on_expression value
   | Decreases measures -> List.iter on_expression measures
   | Cost cost -> (
@@ -266,7 +265,7 @@ let visit_definition ?on_statement:visit on_expression (definition : Syntax.defi
           match member.kind with
           | Associated_definition (_, type_) -> visit_type_expression on_expression type_
           | Capability_definition (_, capabilities) ->
-              List.iter (visit_capability_reference on_expression) capabilities
+              List.iter (visit_capability_use on_expression) capabilities
           | Impl_member_error -> ())
         members
   | Capability _ -> ()
@@ -333,18 +332,16 @@ let walk_names ~on_name (definition : Syntax.definition) =
         walk_type bound.subject;
         List.iter walk_path_type bound.bounds)
       condition
+  and walk_capability_use (use : Syntax.capability_use) =
+    walk_capability use.capability;
+    Option.iter walk_condition use.unless
   and walk_loop_clause (clause : Syntax.loop_clause) =
     Option.iter walk_condition clause.condition;
     visit_loop_clause walk_expression { clause with condition = None }
   and walk_clause (clause : Syntax.clause) =
     Option.iter walk_condition clause.condition;
     match clause.kind with
-    | Uses uses ->
-        List.iter
-          (fun (use : Syntax.capability_use) ->
-            walk_capability use.capability;
-            Option.iter walk_condition use.unless)
-          uses
+    | Uses uses -> List.iter walk_capability_use uses
     | Requires value | Ensures value -> walk_expression value
     | Decreases measures -> List.iter walk_expression measures
     | Cost cost -> (
@@ -572,7 +569,7 @@ let walk_names ~on_name (definition : Syntax.definition) =
               walk_type type_
           | Capability_definition (name, capabilities) ->
               on_name name;
-              List.iter walk_capability capabilities
+              List.iter walk_capability_use capabilities
           | Impl_member_error -> ())
         members
   | Capability { name; _ } -> on_name name

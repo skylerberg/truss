@@ -112,14 +112,11 @@ let exists_capability predicate (set : capability_set) =
 let list_capabilities (set : capability_set) : capability list = set
 let terminates set = not (may_use (Built_in Run_forever) set)
 
-let implies_condition (premise : condition) (condition : condition) =
-  List.for_all (fun bound -> List.mem bound premise) condition
-
-let terminates_when (premise : condition) (set : capability_set) =
+let terminates_when ~implies (premise : condition) (set : capability_set) =
   (not (has_capability (Built_in Run_forever) set))
   &&
   match find_unless (Built_in Run_forever) set with
-  | Some unless -> implies_condition premise unless
+  | Some unless -> implies premise unless
   | None -> true
 
 let contains_capability_error (capabilities : capability_set) =
@@ -127,34 +124,35 @@ let contains_capability_error (capabilities : capability_set) =
     (fun capability -> match find_base capability with Capability_error _ -> true | _ -> false)
     capabilities
 
-let is_covered (available : capability_set) capability =
+let is_covered ~implies (available : capability_set) capability =
   match capability with
   | Capability_unless { capability = base; unless } ->
       List.mem base available
       || List.exists
            (function
              | Capability_unless { capability = covering; unless = covering_unless } ->
-                 covering = base && implies_condition covering_unless unless
+                 covering = base && implies covering_unless unless
              | _ -> false)
            available
   | _ -> List.mem capability available
 
-let subtract_capabilities (left : capability_set) (right : capability_set) =
-  List.filter (fun capability -> not (is_covered right capability)) left
+let subtract_capabilities ~implies (left : capability_set) (right : capability_set) =
+  List.filter (fun capability -> not (is_covered ~implies right capability)) left
 
-let is_capability_subset (smaller : capability_set) (larger : capability_set) =
+let is_capability_subset ~implies (smaller : capability_set) (larger : capability_set) =
   contains_capability_error smaller || contains_capability_error larger
-  || subtract_capabilities smaller larger = []
+  || subtract_capabilities ~implies smaller larger = []
 
-let intersect_capabilities (sets : capability_set list) : capability_set =
+let intersect_capabilities ~implies (sets : capability_set list) : capability_set =
   make_capability_set
     (List.filter
-       (fun capability -> List.for_all (fun set -> is_covered set capability) sets)
+       (fun capability -> List.for_all (fun set -> is_covered ~implies set capability) sets)
        (List.concat sets))
 
-let compute_missing_capabilities ~(required : capability_set) ~(available : capability_set) =
+let compute_missing_capabilities ~implies ~(required : capability_set) ~(available : capability_set)
+    =
   if contains_capability_error required || contains_capability_error available then no_capabilities
-  else subtract_capabilities required available
+  else subtract_capabilities ~implies required available
 
 let replace_capabilities find_replacement (set : capability_set) =
   make_capability_set
@@ -344,12 +342,12 @@ and substitute_capabilities substitution capabilities =
     (map_conditions (substitute_condition substitution) capabilities)
 
 and substitute_condition substitution (condition : condition) =
+  map_condition_types (substitute substitution) (substitute_trait substitution) condition
+
+and map_condition_types map_type map_trait (condition : condition) =
   List.map
     (fun (bound : bound_condition) ->
-      {
-        subject = substitute substitution bound.subject;
-        bound = substitute_trait substitution bound.bound;
-      })
+      { subject = map_type bound.subject; bound = map_trait bound.bound })
     condition
 
 and substitute_trait substitution (trait : trait_reference) =
