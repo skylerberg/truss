@@ -208,3 +208,4 @@ val show : state -> Types.ty -> string
 val describe : state -> Types.ty -> string
 val note_mode_keyword : state -> Syntax.expression -> Syntax.mode -> Syntax.expression -> unit
 val find_local_type : state -> Syntax.name -> Types.ty option
+val find_local : state -> Syntax.name -> local option

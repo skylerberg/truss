@@ -1,0 +1,12 @@
+trait Chooses {
+  fn choose(self, count: UInt64, pick: (fn(limit: UInt64) -> UInt64 ensures result < limit)) -> UInt64
+    requires count > 0
+}
+
+type Stronger()
+
+impl Chooses for Stronger {
+  fn choose(self, count: UInt64, pick: (fn(limit: UInt64) -> UInt64 ensures result == 0)) -> UInt64 {
+    pick(count)
+  }
+}

@@ -948,13 +948,20 @@ and build_specification_call form env (value : Syntax.expression) (arguments : S
     (specification : Tables.specification_call) : Core.kind =
   match specification with
   | Specification_function function_ ->
+      let operands =
+        match (function_, value.kind) with
+        | Callback_ensures, Call ({ kind = Member (callback, _); _ }, _) ->
+            [ build_expression form env callback ]
+        | _ -> []
+      in
       Specification_function
         {
           function_;
           arguments =
-            List.map
-              (fun (argument : Syntax.argument) -> build_expression form env argument.value)
-              arguments;
+            operands
+            @ List.map
+                (fun (argument : Syntax.argument) -> build_expression form env argument.value)
+                arguments;
         }
   | Method_cost { metric; trait; name; receiver; self_type } ->
       Method_cost
@@ -1849,10 +1856,20 @@ let build_parameters form env (written : Syntax.parameter list) (signature : Typ
                 default;
                 callback_contract =
                   (match type_.kind with
-                  | Function_type { inputs = _ :: _ as inputs; clauses; _ }
-                    when List.for_all
-                           (fun (input : Syntax.function_input) -> Option.is_some input.name)
-                           inputs ->
+                  | Function_type { inputs; clauses; _ }
+                    when List.exists
+                           (fun (clause : Syntax.clause) ->
+                             match clause.kind with Requires _ | Ensures _ -> true | _ -> false)
+                           clauses
+                         && List.for_all
+                              (fun (input : Syntax.function_input) -> Option.is_some input.name)
+                              inputs ->
+                      let list_clauses select =
+                        List.filter_map
+                          (fun (clause : Syntax.clause) ->
+                            Option.map (build_expression form env) (select clause.kind))
+                          clauses
+                      in
                       Some
                         {
                           inputs =
@@ -1864,12 +1881,11 @@ let build_parameters form env (written : Syntax.parameter list) (signature : Typ
                                   input.name)
                               inputs;
                           requires =
-                            List.filter_map
-                              (fun (clause : Syntax.clause) ->
-                                match clause.kind with
-                                | Requires value -> Some (build_expression form env value)
-                                | _ -> None)
-                              clauses;
+                            list_clauses (function
+                              | Syntax.Requires value -> Some value
+                              | _ -> None);
+                          ensures =
+                            list_clauses (function Syntax.Ensures value -> Some value | _ -> None);
                         }
                   | _ -> None);
               })

@@ -2203,6 +2203,59 @@ let () =
         "types.unknown_member";
       expect_one_diagnostic "fn f(visit: fn(), run: (fn() cost calls(visit) <= 1)) {}\n"
         "types.not_a_capability");
+  Harness.test "`.ensures` names a function parameter's postcondition in a specification" (fun () ->
+      expect_fine
+        "fn f(visit: fn(Int64) -> Int64, value: Int64) -> Int64\n\
+        \  ensures visit.ensures(value, result)\n\
+         {\n\
+        \  visit(value)\n\
+         }\n");
+  Harness.test "`.ensures` follows a parameter of function type" (fun () ->
+      expect_one_diagnostic "fn f(count: Int64) -> Bool\n  ensures count.ensures(1)\n{\n  todo\n}\n"
+        "types.not_callable";
+      expect_one_diagnostic
+        "fn f(visit: fn(Int64) -> Int64) -> Bool {\n\
+        \  let local: fn(Int64) -> Int64 = visit\n\
+        \  proof {\n\
+        \    assert local.ensures(1, 2)\n\
+        \  }\n\
+        \  true\n\
+         }\n"
+        "types.not_callable");
+  Harness.test "`.ensures` appears only in specifications" (fun () ->
+      expect_one_diagnostic "fn f(visit: fn(Int64) -> Int64) -> Bool {\n  visit.ensures(1, 2)\n}\n"
+        "types.specification_only");
+  Harness.test "`.ensures` takes each input, a mut input twice, and then the result" (fun () ->
+      expect_one_diagnostic
+        "fn f(visit: fn(Int64) -> Int64) -> Bool\n  ensures visit.ensures(1)\n{\n  todo\n}\n"
+        "types.missing_argument";
+      expect_one_diagnostic
+        "fn f(visit: fn(mut Int64)) -> Bool\n  ensures visit.ensures(1, 2, 3)\n{\n  todo\n}\n"
+        "types.too_many_arguments";
+      expect_fine
+        "fn f(visit: fn(mut Int64)) -> Bool\n  ensures visit.ensures(1, 2)\n{\n  todo\n}\n";
+      expect_one_diagnostic
+        "fn f(visit: fn(Int64) -> Bool) -> Bool\n  ensures visit.ensures(1, 2)\n{\n  todo\n}\n"
+        "types.mismatch");
+  Harness.test "`.ensures` takes its arguments by position" (fun () ->
+      expect_one_diagnostic
+        "fn f(visit: fn(Int64) -> Int64) -> Bool\n\
+        \  ensures visit.ensures(value: 1, 2)\n\
+         {\n\
+        \  todo\n\
+         }\n"
+        "types.unknown_label");
+  Harness.test "a callback type's ensures names its inputs and its result" (fun () ->
+      expect_fine
+        "fn f(choose: (fn(count: UInt64) -> UInt64 requires count > 0 ensures result < count)) -> \
+         UInt64 {\n\
+        \  choose(1)\n\
+         }\n";
+      expect_one_diagnostic
+        "fn f(choose: (fn(count: UInt64) -> Bool ensures result == count)) -> Bool {\n\
+        \  choose(1)\n\
+         }\n"
+        "types.mismatch");
   Harness.test
     "the target of `calls` in a clause is a function parameter, a capability, or a capability's \
      method" (fun () ->

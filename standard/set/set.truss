@@ -205,9 +205,13 @@ public fn Set[Element: Hash + Ordered].reserve(mut self, additional: UInt64)
   mut self.elements.reserve(additional)
 }
 
-public fn Set[Element: Hash + Ordered].retain(mut self, keep: fn(Element) -> Bool)
+public fn Set[Element: Hash + Ordered].retain(
+  mut self,
+  keep: (fn(element: Element) -> Bool uses generic Granted requires self.model().contains(element)),
+)
+  uses generic Granted
   ensures self.length() <= old(self.length())
-  ensures forall element: Element => self.model().contains(element) ==> keep(element)
+  ensures forall element: Element => self.model().contains(element) ==> keep.ensures(element, true)
   cost time O(old(self.length()) * time(keep))
 {
   let count = self.elements.length()
@@ -217,7 +221,8 @@ public fn Set[Element: Hash + Ordered].retain(mut self, keep: fn(Element) -> Boo
     invariant kept_count <= index
     invariant forall i in 0..self.elements.length() => forall j in 0..self.elements.length() =>
       i < j ==> !(self.elements.model()[i] == self.elements.model()[j])
-    invariant forall i in 0..kept_count => keep(self.elements.model()[i])
+    invariant forall i in 0..kept_count => keep.ensures(self.elements.model()[i], true)
+    invariant forall i in index..count => identical(self.elements.model()[i], old(self.elements.model())[i])
   {
     if keep(self.elements[index]) {
       mut self.elements.swap(kept_count, second: index)

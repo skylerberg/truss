@@ -263,7 +263,7 @@ type requirement = {
   names : (Core.local * Core.origin) list;
 }
 
-type callback = { inputs : Core.local list; requires : formula list }
+type callback = { inputs : Core.local list; requires : formula list; ensures : formula list }
 
 type parameter = {
   local : Core.local;

@@ -142,6 +142,12 @@ let () =
   Harness.test "an impl's method must have the trait's signature" (fun () ->
       expect_one_diagnostic Fixtures.Interface.equal_impl_with_a_renamed_parameter
         "types.signature_mismatch");
+  Harness.test "an impl's method states its trait's callback contracts" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.impl_stating_another_callback_contract
+        "types.signature_mismatch"
+        ~says:
+          "must state the callback contract that `Chooses` declares for `pick`: `ensures result < \
+           limit`");
   Harness.test "an impl cannot give a method its trait does not declare" (fun () ->
       expect_one_diagnostic Fixtures.Interface.equal_impl_with_an_extra_method "types.extra_member");
   Harness.test "an impl must give every associated type" (fun () ->

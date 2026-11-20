@@ -5,4 +5,5 @@ type t = { callee : callee; lends : Language.Mode.t option; uses : Types.capabil
 type shape =
   | Named_function of { origin : Core.origin; path : Path.t }
   | Forwarded of Core.local
+  | Lambda
   | Other

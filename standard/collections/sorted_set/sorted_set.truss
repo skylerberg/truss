@@ -481,9 +481,13 @@ public fn collections::SortedSet[Element: Ordered].in_range(self, range: Range[E
   if first < end { self.elements[first..end] } else { self.elements[first..first] }
 }
 
-public fn collections::SortedSet[Element: Ordered].retain(mut self, keep: fn(Element) -> Bool)
+public fn collections::SortedSet[Element: Ordered].retain(
+  mut self,
+  keep: (fn(element: Element) -> Bool uses generic Granted requires self.model().contains(element)),
+)
+  uses generic Granted
   ensures self.length() <= old(self.length())
-  ensures forall element: Element => self.model().contains(element) ==> keep(element)
+  ensures forall element: Element => self.model().contains(element) ==> keep.ensures(element, true)
   cost time O(old(self.length()) * time(keep))
 {
   var elements = map::exchange(mut self.elements, value: [])
@@ -499,7 +503,8 @@ public fn collections::SortedSet[Element: Ordered].retain(mut self, keep: fn(Ele
     invariant forall i in index..count =>
       forall j in index..count =>
         i < j ==> elements.model()[i] < elements.model()[j]
-    invariant forall i in 0..retained => keep(elements.model()[i])
+    invariant forall i in 0..retained => keep.ensures(elements.model()[i], true)
+    invariant forall i in index..count => identical(elements.model()[i], old(self.elements.model())[i])
   {
     if keep(elements[index]) {
       mut elements.swap(retained, second: index)

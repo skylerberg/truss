@@ -37,9 +37,14 @@ public fn Result[Value, Error].err(own self) -> Option[Error]
 
 public fn Result[Value, Error].map[Output](
   own self,
-  transform: (fn(own Value) -> Output uses generic Granted),
+  transform: (fn(value: own Value) -> Output uses generic Granted
+    requires self is Ok(held) && identical(held, value)),
 ) -> Result[Output, Error]
   uses generic Granted
+  ensures match self {
+    Ok(value) => result is Ok(output) && transform.ensures(value, output)
+    Err(error) => result is Err(held) && identical(held, error)
+  }
   cost time O(time(transform))
   cost allocations <= allocations(transform)
   cost allocated_bytes <= allocated_bytes(transform)
@@ -52,9 +57,14 @@ public fn Result[Value, Error].map[Output](
 
 public fn Result[Value, Error].map_error[Other](
   own self,
-  transform: (fn(own Error) -> Other uses generic Granted),
+  transform: (fn(error: own Error) -> Other uses generic Granted
+    requires self is Err(held) && identical(held, error)),
 ) -> Result[Value, Other]
   uses generic Granted
+  ensures match self {
+    Ok(value) => result is Ok(held) && identical(held, value)
+    Err(error) => result is Err(output) && transform.ensures(error, output)
+  }
   cost time O(time(transform))
   cost allocations <= allocations(transform)
   cost allocated_bytes <= allocated_bytes(transform)
@@ -67,9 +77,14 @@ public fn Result[Value, Error].map_error[Other](
 
 public fn Result[Value, Error].and_then[Output](
   own self,
-  next: (fn(own Value) -> Result[Output, Error] uses generic Granted),
+  next: (fn(value: own Value) -> Result[Output, Error] uses generic Granted
+    requires self is Ok(held) && identical(held, value)),
 ) -> Result[Output, Error]
   uses generic Granted
+  ensures match self {
+    Ok(value) => next.ensures(value, result)
+    Err(error) => result is Err(held) && identical(held, error)
+  }
   cost time O(time(next))
   cost allocations <= allocations(next)
   cost allocated_bytes <= allocated_bytes(next)
@@ -82,9 +97,14 @@ public fn Result[Value, Error].and_then[Output](
 
 public fn Result[Value, Error].or_else[Other](
   own self,
-  recover: (fn(own Error) -> Result[Value, Other] uses generic Granted),
+  recover: (fn(error: own Error) -> Result[Value, Other] uses generic Granted
+    requires self is Err(held) && identical(held, error)),
 ) -> Result[Value, Other]
   uses generic Granted
+  ensures match self {
+    Ok(value) => result is Ok(held) && identical(held, value)
+    Err(error) => recover.ensures(error, result)
+  }
   cost time O(time(recover))
   cost allocations <= allocations(recover)
   cost allocated_bytes <= allocated_bytes(recover)
@@ -108,9 +128,14 @@ public fn Result[Value, Error].unwrap_or(own self, default: own Value) -> Value
 
 public fn Result[Value, Error].unwrap_or_else(
   own self,
-  recover: (fn(own Error) -> Value uses generic Granted),
+  recover: (fn(error: own Error) -> Value uses generic Granted
+    requires self is Err(held) && identical(held, error)),
 ) -> Value
   uses generic Granted
+  ensures match self {
+    Ok(value) => identical(result, value)
+    Err(error) => recover.ensures(error, result)
+  }
   cost time O(time(recover))
   cost allocations <= allocations(recover)
   cost allocated_bytes <= allocated_bytes(recover)

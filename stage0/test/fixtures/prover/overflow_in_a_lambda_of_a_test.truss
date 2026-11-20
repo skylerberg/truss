@@ -1,4 +1,7 @@
+fn kept(item: UInt8, keep: fn(UInt8) -> Bool) -> Bool {
+  keep(item)
+}
+
 test "a" {
-  let items: List[UInt8] = [1, 2, 3]
-  let _ = items.filter(fn(item) { item + 1 > 3 })
+  let _ = kept(1, keep: fn(value) { value + 1 > 3 })
 }

@@ -254,6 +254,7 @@ function_type_clause:
   | USES capability_list { () }
   | COST cost { () }
   | REQUIRES expression { () }
+  | ENSURES expression { () }
 
 generics_opt:
   | { () }
@@ -486,6 +487,7 @@ postfix:
   | primary { () }
   | postfix DOT LOWER { () }
   | postfix DOT UPPER { () }
+  | postfix DOT ENSURES { () }
   | postfix LBRACKET brackets RBRACKET { () }
   | postfix LPAREN comma_list(argument) RPAREN { () }
   | postfix QUESTION { () }

@@ -2061,10 +2061,10 @@ test "transforming" {
   [Chapter 10](#10-lambdas-and-function-types) covers lambdas.
 - `fold[UInt64](0, ...)` gives the type argument because the literal `0`
   alone would be an `Int64`.
-- **A lambda knows nothing about the element it is given** beyond its type.
-  In `numbers.map(fn(number) { number * 2 })`, the prover cannot show the
-  multiplication fits, so use `saturating_multiply`, or a loop with an
-  invariant ([Chapter 13](#loops)).
+- **A lambda knows that its argument is an element of the collection,** and
+  nothing more. In `numbers.map(fn(number) { number * 2 })`, the
+  multiplication fits only where the caller's `requires` bounds every
+  element. Otherwise use `saturating_multiply`.
 
 ### Strings
 
@@ -3068,6 +3068,7 @@ type go inside parentheses:
 | `(fn(Item) uses generic Granted)` | May use whatever the function passed uses, as the next section explains |
 | `(fn(Int64) -> Bool cost time O(1))` | Takes constant time |
 | `(fn(element: Element) -> Output requires items.contains(element))` | May rely on a precondition, which the caller proves at each call |
+| `(fn(count: UInt64) -> UInt64 ensures result < count)` | Promises a postcondition of each result, which the caller may rely on |
 
 **A function type takes only functions whose capabilities its `uses`
 names,** exactly as a function declaration uses only the capabilities it
@@ -3085,29 +3086,22 @@ test "a named function as a value" {
 }
 ```
 
-`truss show` tells you what a callback may do. `filter`'s function type
-names no capability, so `filter` takes only a pure function, while `update`'s
-callback may use whatever its caller can:
+`truss show` tells you what a callback may do and what it is told. `filter`'s
+callback may use whatever its caller can, and may rely on receiving an
+element of the slice. The result holds the elements for which it answered
+`true` ([Callback contracts](#callback-contracts)):
 
 ```text
-$ truss show Slice.filter Map.update
-standard/list/slice/slice.truss:592
-public fn Slice[Element: Copyable].filter(self, keep: fn(Element) -> Bool) -> List[Element]
-  ensures result.length() <= self.length()
-  ensures forall i in 0..result.length() => keep(result.model()[i])
-  cost time O(self.length() * (time(keep) + time(Element.copy)))
-
-standard/map/map.truss:337
-public fn Map[Key: Hash + Ordered, Value].update(
-  mut self,
-  key: own Key,
-  default: own Value,
-  change: (fn(mut Value) uses generic Granted),
-)
+$ truss show Slice.filter
+standard/list/slice/slice.truss:533
+public fn Slice[Element: Copyable].filter(
+  self,
+  keep: (fn(element: Element) -> Bool uses generic Granted requires self.model().contains(element)),
+) -> List[Element]
   uses generic Granted
-  ensures self.contains(key)
-  cost calls(change) == 1
-  cost time O(1 + old(self.length()) * (1 + time(Key.equal)) + time(change))
+  ensures result.length() <= self.length()
+  ensures forall i in 0..result.length() => keep.ensures(result.model()[i], true)
+  cost time O(self.length() * (time(keep) + time(Element.copy)))
 ```
 
 ### Capability parameters
@@ -3186,6 +3180,64 @@ test "a lambda that may run forever" uses RunForever {
 This is *polymorphic termination*: a higher-order function terminates
 exactly when the functions passed to it do, with no promise written for
 either.
+
+### Callback contracts
+
+A parameter's function type can promise its callee something of each
+result, and a callee's contract can say what the function passed returned:
+
+```truss
+fn pick(
+  items: Slice[UInt8],
+  choose: (fn(count: UInt64) -> UInt64 uses generic Granted requires count > 0 ensures result < count),
+) -> UInt8
+  uses generic Granted
+  requires items.length() > 0
+{
+  items[choose(items.length())]
+}
+
+fn mapped(value: Option[Int64], transform: (fn(Int64) -> Int64 uses generic Granted)) -> Option[Int64]
+  uses generic Granted
+  ensures match value {
+    Some(inner) => result is Some(output) && transform.ensures(inner, output)
+    None => result is None
+  }
+{
+  match value {
+    Some(inner) => Some(transform(inner))
+    None => None
+  }
+}
+
+fn halved(value: Option[Int64]) -> Option[Int64]
+  ensures match value {
+    Some(inner) => result is Some(half) && half == inner / 2
+    None => result is None
+  }
+{
+  mapped(value, transform: fn(inner) { inner / 2 })
+}
+
+test "callback contracts" {
+  assert pick([1, 2, 3], choose: fn(count) { count - 1 }) == 3
+  assert halved(Some(4)) == Some(2)
+}
+```
+
+- **The function passed keeps the `ensures` of its parameter's type.** `pick`
+  indexes with `choose`'s result, which the type promises is below `count`.
+  A lambda passed for `choose` proves that, as `fn(count) { count - 1 }`
+  does, and a named function's own `ensures` must imply it.
+- **`transform.ensures(inner, output)` names the postcondition of the
+  function passed:** it holds where that function may return `output` for
+  `inner`. `mapped` promises it of its result, and `halved` learns
+  `half == inner / 2` from its lambda's body.
+- **It is a relation, not a call.** A callback that reads `Random` may answer
+  differently each time, so a specification writes `transform(inner)` only
+  for a pure `transform`.
+- **A lambda states no `requires` or `ensures`:** its body is its contract.
+  A callback that needs a contract of its own is a named function.
 
 ### Returning and storing functions
 

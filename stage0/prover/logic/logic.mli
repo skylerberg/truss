@@ -17,6 +17,7 @@ module Symbol : sig
     | Field of { type_ : Types.ty; variant : string option; field : string }
     | Unit
     | Apply of sort list
+    | Callback_ensures of sort list
     | Equal of Types.ty
     | Valid of Types.ty
     | Rank of Types.ty

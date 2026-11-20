@@ -17,9 +17,10 @@ public fn Array[Element: Copyable, count: UInt64].filled(value: Element) -> Arra
 }
 
 public fn Array[Element, count: UInt64].generate(
-  make: (fn(index: UInt64) -> Element requires index < count),
+  make: (fn(index: UInt64) -> Element uses generic Granted requires index < count),
 ) -> Array[Element, count]
-  ensures forall i in 0..count => identical(result.model()[i], make(i))
+  uses generic Granted
+  ensures forall i in 0..count => make.ensures(i, result.model()[i])
   cost calls(make) == count
   cost time O(count * time(make))
 {
@@ -27,7 +28,7 @@ public fn Array[Element, count: UInt64].generate(
   for index in 0..count
     invariant intrinsic::storage_length(elements) == index
     invariant intrinsic::storage_capacity(elements) == count
-    invariant forall i in 0..index => identical(intrinsic::storage_model(elements)[i], make(i))
+    invariant forall i in 0..index => make.ensures(i, intrinsic::storage_model(elements)[i])
   {
     intrinsic::storage_push(mut elements, value: make(index))
   }
@@ -130,9 +131,11 @@ public fn Array[Element, count: UInt64].element(mut self, position: UInt64) lend
 
 public fn Array[Element, count: UInt64].map_each[Output](
   own self,
-  transform: (fn(own Element) -> Output uses generic Granted),
+  transform: (fn(element: own Element) -> Output uses generic Granted
+    requires self.model().contains(element)),
 ) -> Array[Output, count]
   uses generic Granted
+  ensures forall i in 0..count => transform.ensures(self.model()[i], result.model()[i])
   cost calls(transform) == count
   cost time O(count * time(transform))
 {
@@ -143,6 +146,10 @@ public fn Array[Element, count: UInt64].map_each[Output](
     invariant remaining.length() + index == count
     invariant intrinsic::storage_length(outputs) == index
     invariant intrinsic::storage_capacity(outputs) == count
+    invariant forall i in 0..remaining.length() =>
+      identical(remaining.model()[i], old(self.model())[count - 1 - i])
+    invariant forall i in 0..index =>
+      transform.ensures(old(self.model())[i], intrinsic::storage_model(outputs)[i])
   {
     var item = intrinsic::storage_pop(mut remaining.storage)
     intrinsic::storage_push(mut outputs, value: transform(own item))

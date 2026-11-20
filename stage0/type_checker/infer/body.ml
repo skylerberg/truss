@@ -95,15 +95,18 @@ let check_clauses state env ~uses (clauses : Syntax.clause list) =
           | Clause_error -> ()))
     clauses
 
-let check_function_type_requires state env (written : Syntax.parameter list)
+let check_callback_contracts state env (written : Syntax.parameter list)
     (signature : Types.signature) =
   let env = { env with State.specification = true } in
   List.iter
     (fun (parameter : Syntax.parameter) ->
       match parameter.kind with
       | Named_parameter { name; type_ = { kind = Function_type { inputs; clauses; _ }; _ }; _ }
-        when List.exists (fun (input : Syntax.function_input) -> Option.is_some input.name) inputs
-        -> (
+        when List.for_all (fun (input : Syntax.function_input) -> Option.is_some input.name) inputs
+             && List.exists
+                  (fun (clause : Syntax.clause) ->
+                    match clause.kind with Requires _ | Ensures _ -> true | _ -> false)
+                  clauses -> (
           match
             List.find_opt
               (fun (info : Types.parameter_info) -> info.name = name.text)
@@ -116,12 +119,16 @@ let check_function_type_requires state env (written : Syntax.parameter list)
                     (fun input_name -> State.declare state input_name type_ ~binding:Let ~mode)
                     input.name)
                 inputs elaborated.inputs;
+              let check_clause env (value : Syntax.expression) =
+                Solver.run_in_statement state env (State.read_span state value.id) (fun () ->
+                    Expressions.check state env value Types.bool)
+              in
               List.iter
                 (fun (clause : Syntax.clause) ->
                   match clause.kind with
-                  | Requires value ->
-                      Solver.run_in_statement state env (State.read_span state value.id) (fun () ->
-                          Expressions.check state env value Types.bool)
+                  | Requires value -> check_clause env value
+                  | Ensures value ->
+                      check_clause { env with output = Some (Returns elaborated.output) } value
                   | _ -> ())
                 clauses
           | _ -> ())
@@ -168,7 +175,7 @@ let check_function state ~broken_body (written : Syntax.signature)
   check_defaults state
     { constant_expression with specification = signature.specification_only }
     written.parameters signature;
-  check_function_type_requires state env written.parameters signature;
+  check_callback_contracts state env written.parameters signature;
   check_clauses state env ~uses:signature.uses written.clauses;
   match body_block with Some block when not broken_body -> check_body state env block | _ -> ()
 

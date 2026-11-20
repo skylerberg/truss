@@ -324,6 +324,7 @@ let () =
               | Log -> "log"
               | Power -> "power"
               | Callback_cost metric -> Language.Metric.show metric
+              | Callback_ensures -> "ensures"
               | Calls -> "calls")
         | Call call -> Some ("call " ^ Core_lint.show_target call.callee.target)
         | _ -> None)

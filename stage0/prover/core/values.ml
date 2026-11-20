@@ -661,6 +661,8 @@ let apply_specification_function context frame ~location (measure : Core.specifi
   | Power, [ base; exponent ], _, _ -> (frame, Operations.declare_power context frame base exponent)
   | Callback_cost metric, [ function_term ], _, [ function_type ] ->
       (frame, Calls.make_callback_cost context frame metric function_type function_term)
+  | Callback_ensures, _, _, Types.Function function_type :: _ ->
+      (frame, Lambdas.apply_callback_ensures context function_type values)
   | _ -> Facts.raise_unsupported location "this specification function"
 
 let copy_value ?literal (context : State.context) frame ty term =

@@ -1565,16 +1565,46 @@ let () =
   Harness.test "an impl's method proves the requires that its callback type states" (fun () ->
       expect_not_proven Fixtures.Prover.impl_calling_its_callback_outside_its_requires
         "prover.requires");
-  Harness.test "a lambda passed to a trait's method cannot rely on the callback type's requires"
+  Harness.test "a lambda passed to a trait's method relies on the callback type's requires"
     (fun () ->
-      expect_not_proven Fixtures.Prover.lambda_relying_on_the_requires_of_a_trait_methods_callback
-        "prover.out_of_bounds");
+      expect_proven Fixtures.Prover.lambda_relying_on_the_requires_of_a_trait_methods_callback);
+  Harness.test "a forwarded callback with the callee's requires is accepted" (fun () ->
+      expect_proven Fixtures.Prover.callback_forwarded_with_its_requires);
   Harness.test "a call through a function value gives a valid result" (fun () ->
       expect_proven Fixtures.Prover.positive_made_by_a_function_value);
   Harness.test "a lambda returns a valid value" (fun () ->
       expect_not_proven Fixtures.Prover.apply_of_a_positive_lambda "prover.invariant");
   Harness.test "a callback with a requires bound to a local must accept every argument" (fun () ->
       expect_not_proven Fixtures.Prover.callback_with_a_requires_bound_to_a_local "prover.requires")
+
+let () =
+  Harness.test "a callee relies on its callback type's ensures, which a lambda proves" (fun () ->
+      expect_proven Fixtures.Prover.index_chosen_by_a_callback);
+  Harness.test "a lambda must meet its callback type's ensures" (fun () ->
+      expect_not_proven Fixtures.Prover.lambda_breaking_its_callback_ensures "prover.ensures");
+  Harness.test "a named function's ensures must imply its callback type's" (fun () ->
+      expect_not_proven Fixtures.Prover.named_function_breaking_its_callback_ensures
+        "prover.ensures");
+  Harness.test "a forwarded callback without a contract promises nothing of its results" (fun () ->
+      expect_not_proven Fixtures.Prover.callback_forwarded_without_a_contract "prover.ensures");
+  Harness.test "a forwarded callback keeps the contract its type states" (fun () ->
+      expect_proven Fixtures.Prover.callback_forwarded_with_its_contract);
+  Harness.test "a lambda passed to a trait's method must meet its callback type's ensures"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.trait_method_lambda_breaking_its_callback_ensures
+        "prover.ensures");
+  Harness.test "a caller reads the postcondition of the function it passes from its body" (fun () ->
+      expect_proven Fixtures.Prover.halved_through_a_callback_relation);
+  Harness.test "a callback's mut input is related at its entry and its exit" (fun () ->
+      expect_proven Fixtures.Prover.value_changed_through_a_mut_callback);
+  Harness.test "two calls of an effectful callback are not known to agree" (fun () ->
+      expect_not_proven Fixtures.Prover.two_random_results_claimed_equal "prover.ensures");
+  Harness.test "a lambda knows that its argument is an element of the receiver" (fun () ->
+      expect_proven Fixtures.Prover.doubled_elements_of_a_bounded_list);
+  Harness.test "a comparator that keeps its laws gives max_by's conclusion" (fun () ->
+      expect_proven Fixtures.Prover.largest_by_a_comparing_lambda);
+  Harness.test "a comparator that breaks its laws gives max_by's conclusion nothing" (fun () ->
+      expect_not_proven Fixtures.Prover.largest_by_a_comparator_breaking_its_laws "prover.ensures")
 
 let () =
   Harness.test "provided methods that call each other are recursion" (fun () ->

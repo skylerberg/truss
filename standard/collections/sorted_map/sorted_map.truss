@@ -541,11 +541,13 @@ public fn collections::SortedMap[Key: Ordered, Value].in_range(self, range: Rang
 
 public fn collections::SortedMap[Key: Ordered, Value].retain(
   mut self,
-  keep: fn(map::Entry[Key, Value]) -> Bool,
+  keep: (fn(entry: map::Entry[Key, Value]) -> Bool uses generic Granted
+    requires self.model().contains_key(entry.key) && identical(self.model().get(entry.key), entry.value)),
 )
+  uses generic Granted
   ensures self.length() <= old(self.length())
   ensures forall key: Key =>
-    self.model().contains_key(key) ==> keep(map::Entry(key: key, value: self.model().get(key)))
+    self.model().contains_key(key) ==> keep.ensures(map::Entry(key: key, value: self.model().get(key)), true)
   cost time O(old(self.length()) * time(keep))
 {
   var entries = map::exchange(mut self.entries, value: [])
@@ -560,7 +562,8 @@ public fn collections::SortedMap[Key: Ordered, Value].retain(
       entries.model()[i].key < entries.model()[j].key
     invariant forall i in index..count => forall j in index..count =>
       i < j ==> entries.model()[i].key < entries.model()[j].key
-    invariant forall i in 0..retained => keep(entries.model()[i])
+    invariant forall i in 0..retained => keep.ensures(entries.model()[i], true)
+    invariant forall i in index..count => identical(entries.model()[i], old(self.entries.model())[i])
   {
     if keep(entries[index]) {
       mut entries.swap(retained, second: index)
