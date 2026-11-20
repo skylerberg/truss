@@ -524,7 +524,7 @@ let make_state (lookups : Lookups.t) ({ site; obligation; _ } : posed) answer =
              ^ " If the code is correct, a `proof` block or a theorem can lead the solver to the \
                 proof."
               ^
-              if Logic.has_untriggered_fact obligation.query then
+              if obligation.has_untriggered_written_fact then
                 " A quantified fact in the query has no trigger, so an `assert` of that fact at \
                  the term the proof needs may be enough."
               else ""));

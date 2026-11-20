@@ -145,6 +145,7 @@ type context = {
   ranking : bool;
   mutable scopes : (Logic.symbol * Logic.term list ref) list;
   quantifier_facts : Logic.term list Tables.Term_table.t;
+  written_quantifiers : unit Tables.Term_table.t;
   mutable quantifier_symbols : Logic.symbol list;
   mutable validating : Types.ty list;
   condition : Types.condition;

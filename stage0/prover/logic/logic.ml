@@ -571,12 +571,12 @@ let make_triggering_test declarations =
     declarations;
   Symbol_table.mem functions
 
-let has_untriggered_fact query =
+let has_untriggered_fact ?(is_counted = fun _ -> true) query =
   let is_triggering = make_triggering_test query.declarations in
   let rec is_untriggered = function
     | Operation (Implies, [ _; inner ]) -> is_untriggered inner
-    | Forall (variables, trigger, body) ->
-        choose_triggers ~is_triggering variables trigger body = []
+    | Forall (variables, trigger, body) as quantifier ->
+        is_counted quantifier && choose_triggers ~is_triggering variables trigger body = []
     | _ -> false
   in
   List.exists is_untriggered query.facts

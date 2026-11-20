@@ -1,0 +1,11 @@
+type Box =
+  | Empty
+  | Full(value: Int64)
+
+type Bag =
+  | Empty
+  | Holding(count: UInt64)
+
+fn start() -> Box {
+  Empty
+}

@@ -89,6 +89,6 @@ let run ~fix:fixing ~proofs =
     if fixed <> [] then
       Output.eprintf "Fixed %s.\n"
         (Diagnostic.show_count (List.length fixed) "diagnostic" "diagnostics");
-    Report.print report
+    Report.print ~offers_fix:(not fixing) report
   end;
   if Report.has_errors report then 1 else 0
