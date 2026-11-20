@@ -1399,6 +1399,27 @@ let () =
         (list_propagated ~before:[ user ]
            ~after:[ user; ("app::tools", "public fn helper() -> Int64 { 1 }\n") ])
         ~parts:[ Any (Checked_body (make_main_key "caller")) ]);
+  let tools_user =
+    ("app::main", "use app::tools\n\nfn caller() -> Int64 {\n  tools::helper()\n}\n")
+  in
+  let tools = ("app::tools", "public fn helper() -> Int64 { 1 }\n") in
+  let extra = ("app::extra", "public fn unused() -> Int64 { 2 }\n") in
+  let is_main_resolution = function
+    | Database.Part.Any (Resolved (key, _)) -> key.module_ = (make_main_key "caller").module_
+    | _ -> false
+  in
+  Harness.test "adding a module re-resolves no definition that does not name it" (fun () ->
+      expect_untouched
+        (list_propagated ~before:[ tools_user; tools ] ~after:[ tools_user; tools; extra ])
+        ~is_excluded:is_main_resolution);
+  Harness.test "removing a module re-resolves no definition that does not name it" (fun () ->
+      expect_untouched
+        (list_propagated ~before:[ tools_user; tools; extra ] ~after:[ tools_user; tools ])
+        ~is_excluded:is_main_resolution);
+  Harness.test "removing the module that a use names re-resolves the user" (fun () ->
+      expect_included
+        (list_propagated ~before:[ tools_user; tools ] ~after:[ tools_user ])
+        ~parts:[ Any (Resolved (make_main_key "caller", Body)) ]);
   let read_callee_ownership database =
     Database.For_testing.read_ownership database (make_main_key "callee")
   in
