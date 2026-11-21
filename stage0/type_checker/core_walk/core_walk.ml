@@ -106,8 +106,11 @@ let walk_expression_children visit (node : Core.expression) =
       | Indirect function_value -> walk_operand visit function_value
       | Function _ | Trait_method _ | Capability_method _ | Intrinsic _ -> ());
       List.iter
-        (function Core.Passed { value; _ } -> walk_operand visit value | Default -> ())
-        call.arguments;
+        (fun index ->
+          match List.nth call.arguments index with
+          | Core.Passed { value; _ } -> walk_operand visit value
+          | Default -> ())
+        call.evaluation_order;
       visit.callee call.callee
   | Operator { arguments; _ } | Specification_function { arguments; _ } ->
       List.iter visit.expression arguments

@@ -245,7 +245,7 @@ fn check_radix(text: StringSlice) -> CheckedNumber
         "lexer.number_missing_digits",
         message: "`${text.substring(0, to: 2)}` must be followed by ${base_name} digits.",
         start: 0,
-        stop,
+        stop: stop,
         is_fixable: false,
       ),
     )

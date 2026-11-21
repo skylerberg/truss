@@ -263,11 +263,11 @@ fn scan_ordinary(scanner: mut Scanner, tag: Option[token::Tag], nesting: UInt64,
           mut scanner,
           code: "lexer.unterminated_string",
           span: source::make_span(literal_start, stop: position),
-          message,
+          message: message,
           fixes: own fixes,
         )
       } else {
-        report(mut scanner, code: "lexer.unterminated_string", span: source::make_span(literal_start, stop: position), message)
+        report(mut scanner, code: "lexer.unterminated_string", span: source::make_span(literal_start, stop: position), message: message)
       }
       ending = Ending.Unterminated
       stop = position
@@ -303,7 +303,7 @@ fn scan_ordinary(scanner: mut Scanner, tag: Option[token::Tag], nesting: UInt64,
     }
     read_character(mut scanner, buffer: mut builder.buffer, context: Context.OrdinaryString)
   }
-  ScannedString(kind: make_literal(mut scanner, tag, form: token::Form.Ordinary, builder: mut builder, stop), ending)
+  ScannedString(kind: make_literal(mut scanner, tag, form: token::Form.Ordinary, builder: mut builder, stop: stop), ending)
 }
 
 fn scan_escape(scanner: mut Scanner, buffer: mut String) -> EscapeResult
@@ -425,7 +425,7 @@ fn hexadecimal_value(byte: UInt8) -> UInt8
 fn report_escape_problem(scanner: mut Scanner, start: UInt64, stop: UInt64, message: StringSlice)
   uses Panic
 {
-  report(mut scanner, code: "lexer.invalid_escape", span: source::make_span(start, stop), message)
+  report(mut scanner, code: "lexer.invalid_escape", span: source::make_span(start, stop), message: message)
   scanner.position = stop
 }
 
@@ -546,7 +546,7 @@ fn scan_one_line_raw(
       scanner.position = position + run
       if run >= quotes {
         if run > quotes {
-          report_too_many_quotes(mut scanner, start: position, run, quotes, is_multi_line: false)
+          report_too_many_quotes(mut scanner, start: position, run: run, quotes: quotes, is_multi_line: false)
         }
         stop = position
         break
@@ -555,7 +555,7 @@ fn scan_one_line_raw(
       continue
     }
     if scanner.is_at(position, byte: 36) {
-      if lex_raw_dollars(mut scanner, builder: mut builder, dollars, nesting) == Ending.Unterminated {
+      if lex_raw_dollars(mut scanner, builder: mut builder, dollars: dollars, nesting: nesting) == Ending.Unterminated {
         ending = Ending.Unterminated
         stop = scanner.position
         break
@@ -564,7 +564,7 @@ fn scan_one_line_raw(
     }
     read_character(mut scanner, buffer: mut builder.buffer, context: Context.RawString)
   }
-  ScannedString(kind: make_literal(mut scanner, tag, form, builder: mut builder, stop), ending)
+  ScannedString(kind: make_literal(mut scanner, tag, form, builder: mut builder, stop: stop), ending)
 }
 
 type Closing =
@@ -634,7 +634,7 @@ fn read_raw_lines(scanner: mut Scanner, dollars: UInt64, quotes: UInt64, line_en
     if scanner.run_length(first, byte: 34) >= quotes {
       let run = scanner.run_length(first, byte: 34)
       if run > quotes {
-        report_too_many_quotes(mut scanner, start: first, run, quotes, is_multi_line: true)
+        report_too_many_quotes(mut scanner, start: first, run: run, quotes: quotes, is_multi_line: true)
       }
       scanner.position = first + run
       let indentation = scanner.text(line_start, stop: first).to_string()
@@ -662,13 +662,13 @@ fn read_raw_lines(scanner: mut Scanner, dollars: UInt64, quotes: UInt64, line_en
           return RawLines(lines: own lines, closing: Some(Closing.AfterText(start: position)))
         }
         if run > quotes {
-          report_too_many_quotes(mut scanner, start: position, run, quotes, is_multi_line: true)
+          report_too_many_quotes(mut scanner, start: position, run: run, quotes: quotes, is_multi_line: true)
         }
         mut builder.buffer.push("\"".repeated(run))
         continue
       }
       if scanner.is_at(position, byte: 36) {
-        let _ = lex_raw_dollars(mut scanner, builder: mut builder, dollars, nesting: 0)
+        let _ = lex_raw_dollars(mut scanner, builder: mut builder, dollars: dollars, nesting: 0)
         continue
       }
       read_character(mut scanner, buffer: mut builder.buffer, context: Context.RawString)

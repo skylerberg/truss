@@ -343,7 +343,7 @@ fn parse_type_arguments(cursor: mut TokenCursor) -> Result[List[syntax::TypeArgu
   let arguments = parse_bracketed(mut cursor, parse_item: parse_type_argument, recover: recover_type_argument)
   if arguments.is_empty() {
     let span = cursor.lookup_token(start).span
-    report(mut cursor, code: "parser.unexpected_token", span, message: "Type arguments cannot be empty.")
+    report(mut cursor, code: "parser.unexpected_token", span: span, message: "Type arguments cannot be empty.")
     return Err(Failure.Failed)
   }
   Ok(own arguments)
@@ -447,7 +447,7 @@ fn parse_function_type(cursor: mut TokenCursor, with_clauses: Bool) -> Result[sy
       report(
         mut cursor,
         code: "parser.misplaced_condition",
-        span,
+        span: span,
         message: "A function type's clauses take no condition: a call through a function value has no type arguments to decide one.",
       )
     }
@@ -473,7 +473,7 @@ fn parse_function_type(cursor: mut TokenCursor, with_clauses: Bool) -> Result[sy
       report(
         mut cursor,
         code: "parser.function_type_names",
-        span,
+        span: span,
         message: "A function type with `requires` names every input, as in `fn(index: UInt64)`, so that the `requires` can mention them.",
       )
     }
@@ -481,7 +481,7 @@ fn parse_function_type(cursor: mut TokenCursor, with_clauses: Bool) -> Result[sy
     report(
       mut cursor,
       code: "parser.function_type_names",
-      span,
+      span: span,
       message: "A function type names its inputs only when a `requires` mentions them; remove the names, since calls through a function value pass arguments by position.",
     )
   }
@@ -519,7 +519,7 @@ fn parse_parenthesized_function_type_inner(cursor: mut TokenCursor, start: UInt6
   let function_type = parse_function_type(mut cursor, with_clauses: true)?
   if function_type.clauses.is_empty() {
     let span = cursor.lookup_token(start).span
-    report(mut cursor, code: "parser.unexpected_token", span, message: "Parentheses around a function type are only for its clauses; remove them.")
+    report(mut cursor, code: "parser.unexpected_token", span: span, message: "Parentheses around a function type are only for its clauses; remove them.")
     return Err(Failure.Failed)
   }
   if cursor.index < closer {
@@ -552,7 +552,7 @@ fn parse_generics(cursor: mut TokenCursor) -> Result[List[syntax::GenericParamet
   let parameters = parse_bracketed(mut cursor, parse_item: parse_generic_parameter, recover: recover_generic_parameter)
   if parameters.is_empty() {
     let span = cursor.lookup_token(start).span
-    report(mut cursor, code: "parser.unexpected_token", span, message: "Generic parameters cannot be empty.")
+    report(mut cursor, code: "parser.unexpected_token", span: span, message: "Generic parameters cannot be empty.")
     return Err(Failure.Failed)
   }
   Ok(own parameters)
@@ -659,7 +659,7 @@ fn parse_condition_after(cursor: mut TokenCursor, keyword: token::Keyword) -> Re
         report(
           mut cursor,
           code: "parser.misplaced_condition",
-          span,
+          span: span,
           message: "A `when` condition names bounds, such as `T: Trait`. A clause that holds where a value condition does is written with `==>`, as in `ensures P ==> Q`.",
         )
       }
@@ -790,7 +790,7 @@ fn parse_cost(cursor: mut TokenCursor) -> Result[syntax::CostClause, Failure]
     report(
       mut cursor,
       code: "parser.misplaced_potential",
-      span,
+      span: span,
       message: "`cost potential` belongs to a type, and states the potential its values hold.",
     )
     return Err(Failure.Failed)

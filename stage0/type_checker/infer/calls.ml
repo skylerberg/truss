@@ -130,7 +130,25 @@ and match_arguments state ?constructor (value : Syntax.expression)
   let named =
     List.mapi (fun index (parameter : Types.parameter_info) -> (parameter.name, index)) parameters
   in
-  let find_bare_name_index (argument : Syntax.argument) =
+  let first_error = ref None in
+  let reject ?fixes code span message =
+    let error = State.make_error_type state ?fixes code span message in
+    if Option.is_none !first_error then first_error := Some error
+  in
+  let find_labeled_index (label : Syntax.name) =
+    match List.assoc_opt label.text named with
+    | Some index -> Some index
+    | None ->
+        reject Unknown_label (State.read_span state label.id)
+          ~fixes:
+            (Diagnostic.list_spelling_fixes (State.read_span state label.id) ~written:label.text
+               (List.map fst named))
+          (match constructor with
+          | Some name -> Printf.sprintf "`%s` has no field `%s`." name label.text
+          | None -> Printf.sprintf "No parameter is named `%s`." label.text);
+        None
+  in
+  let find_punned_index (argument : Syntax.argument) =
     let rec find_name (expression : Syntax.expression) =
       match expression.kind with
       | Name { modules = []; last } -> Some last.text
@@ -139,89 +157,106 @@ and match_arguments state ?constructor (value : Syntax.expression)
     in
     Option.bind (find_name argument.value) (fun name -> List.assoc_opt name named)
   in
-  let has_several_fields = Option.is_some constructor && List.length parameters > 1 in
-  let takes_bare_value position = position = 0 && not has_several_fields in
-  let first_error = ref None in
-  let reject ?fixes code span message =
-    let error = State.make_error_type state ?fixes code span message in
-    if Option.is_none !first_error then first_error := Some error
+  let labeled_indexes =
+    List.filter_map
+      (fun (argument : Syntax.argument) ->
+        Option.bind argument.label (fun (label : Syntax.name) -> List.assoc_opt label.text named))
+      arguments
+  in
+  let rec list_parameter_indexes position ~follows_label ~is_aligned = function
+    | [] -> []
+    | (argument : Syntax.argument) :: rest -> (
+        match argument.label with
+        | Some label ->
+            let index = find_labeled_index label in
+            index
+            :: list_parameter_indexes (position + 1) ~follows_label:true
+                 ~is_aligned:(is_aligned && index = Some position)
+                 rest
+        | None when follows_label ->
+            let fixes =
+              match List.nth_opt parameters position with
+              | Some parameter
+                when is_aligned
+                     && (not (List.mem position labeled_indexes))
+                     && Option.fold ~none:true ~some:(Int.equal position)
+                          (find_punned_index argument) ->
+                  [
+                    State.fix
+                      (Printf.sprintf "Label it `%s`." parameter.name)
+                      [
+                        State.insert (State.read_span state argument.value.id).start
+                          (parameter.name ^ ": ");
+                      ];
+                  ]
+              | _ -> []
+            in
+            reject Positional_after_labeled
+              (State.read_span state argument.value.id)
+              ~fixes
+              "A positional argument cannot follow a labeled argument. Label it, or move it before \
+               the labeled arguments.";
+            None
+            :: list_parameter_indexes (position + 1) ~follows_label ~is_aligned:(fixes <> []) rest
+        | None ->
+            Some position :: list_parameter_indexes (position + 1) ~follows_label ~is_aligned rest)
+  in
+  let list_field_indexes constructor =
+    let claims =
+      List.mapi
+        (fun position (argument : Syntax.argument) ->
+          match argument.label with
+          | Some label -> List.assoc_opt label.text named
+          | None -> (
+              match find_punned_index argument with
+              | Some index -> Some index
+              | None -> if position = 0 && List.length parameters = 1 then Some 0 else None))
+        arguments
+    in
+    let open_fields = List.filter (fun (_, index) -> not (List.mem (Some index) claims)) named in
+    let unclaimed_count =
+      List.length
+        (List.filter
+           (fun ((argument : Syntax.argument), claim) -> argument.label = None && claim = None)
+           (List.combine arguments claims))
+    in
+    List.map2
+      (fun (argument : Syntax.argument) claim ->
+        match (argument.label, claim) with
+        | _, Some index -> Some index
+        | Some label, None -> find_labeled_index label
+        | None, None ->
+            let fixes =
+              match (open_fields, unclaimed_count) with
+              | [ (field, _) ], 1 ->
+                  [
+                    State.fix
+                      (Printf.sprintf "Label it `%s`." field)
+                      [
+                        State.insert (State.read_span state argument.value.id).start (field ^ ": ");
+                      ];
+                  ]
+              | _ -> []
+            in
+            reject Missing_label
+              (State.read_span state argument.value.id)
+              ~fixes
+              (Printf.sprintf
+                 "`%s` has %d fields, and fields have no order. Every argument needs a label, or a \
+                  variable with its field's name."
+                 constructor (List.length parameters));
+            None)
+      arguments claims
+  in
+  let parameter_indexes =
+    match constructor with
+    | None -> list_parameter_indexes 0 ~follows_label:false ~is_aligned:true arguments
+    | Some constructor -> list_field_indexes constructor
   in
   let assigned = Hashtbl.create 8 in
   let assignments =
-    List.mapi
-      (fun position (argument : Syntax.argument) ->
-        let parameter_index =
-          match argument.label with
-          | Some label -> (
-              match List.assoc_opt label.text named with
-              | Some index -> Some index
-              | None ->
-                  reject Unknown_label (State.read_span state label.id)
-                    ~fixes:
-                      (Diagnostic.list_spelling_fixes (State.read_span state label.id)
-                         ~written:label.text (List.map fst named))
-                    (match constructor with
-                    | Some name -> Printf.sprintf "`%s` has no field `%s`." name label.text
-                    | None -> Printf.sprintf "No parameter is named `%s`." label.text);
-                  None)
-          | None -> (
-              match find_bare_name_index argument with
-              | Some index -> Some index
-              | None ->
-                  if takes_bare_value position then Some 0
-                  else begin
-                    let claimed =
-                      List.concat
-                        (List.mapi
-                           (fun position (other : Syntax.argument) ->
-                             match other.label with
-                             | Some label -> Option.to_list (List.assoc_opt label.text named)
-                             | None -> (
-                                 match find_bare_name_index other with
-                                 | Some index -> [ index ]
-                                 | None -> if takes_bare_value position then [ 0 ] else []))
-                           arguments)
-                    in
-                    let unlabeled =
-                      List.length
-                        (List.filteri
-                           (fun position (other : Syntax.argument) ->
-                             other.label = None
-                             && Option.is_none (find_bare_name_index other)
-                             && not (takes_bare_value position))
-                           arguments)
-                    in
-                    let open_parameters =
-                      List.filter (fun (_, index) -> not (List.mem index claimed)) named
-                    in
-                    let fixes =
-                      match (open_parameters, unlabeled) with
-                      | [ (label, _) ], 1 ->
-                          [
-                            State.fix
-                              (Printf.sprintf "Label it `%s`." label)
-                              [
-                                State.insert (State.read_span state argument.value.id).start
-                                  (label ^ ": ");
-                              ];
-                          ]
-                      | _ -> []
-                    in
-                    reject Missing_label
-                      (State.read_span state argument.value.id)
-                      ~fixes
-                      (match constructor with
-                      | Some name ->
-                          Printf.sprintf
-                            "`%s` has %d fields, and fields have no order. Every argument needs a \
-                             label, or a variable with its field's name."
-                            name (List.length parameters)
-                      | None ->
-                          "Every argument after the first needs a label, or a variable with its \
-                           parameter's name.");
-                    None
-                  end)
-        in
+    List.map2
+      (fun (argument : Syntax.argument) parameter_index ->
         match parameter_index with
         | Some index when Hashtbl.mem assigned index ->
             reject Repeated_argument
@@ -233,46 +268,8 @@ and match_arguments state ?constructor (value : Syntax.expression)
             Hashtbl.replace assigned index ();
             (argument, Some index)
         | None -> (argument, None))
-      arguments
+      arguments parameter_indexes
   in
-  (if Option.is_none constructor then
-     let indexes = List.filter_map snd assignments in
-     let sorted = List.sort compare indexes in
-     if indexes <> sorted && List.length assignments = List.length indexes then
-       match (arguments, List.rev arguments) with
-       | first :: _, last :: _ ->
-           let ordered =
-             List.map fst
-               (List.sort
-                  (fun (_, left) (_, right) -> compare left right)
-                  (List.map (fun (argument, index) -> (argument, Option.get index)) assignments))
-           in
-           let spell_written (argument : Syntax.argument) =
-             let start =
-               match argument.label with
-               | Some label -> (State.read_span state label.id).start
-               | None -> (State.read_span state argument.value.id).start
-             in
-             State.quote_span state
-               (Source.Definition_span.make start (State.read_span state argument.value.id).stop)
-           in
-           let start =
-             match first.label with
-             | Some label -> (State.read_span state label.id).start
-             | None -> (State.read_span state first.value.id).start
-           in
-           reject Out_of_order (State.read_span state value.id)
-             ~fixes:
-               [
-                 State.fix "Put the arguments in the order of the parameters."
-                   [
-                     State.replace
-                       (Source.Definition_span.make start (State.read_span state last.value.id).stop)
-                       (String.concat ", " (List.map spell_written ordered));
-                   ];
-               ]
-             "The arguments must come in the order of the parameters."
-       | _ -> ());
   let missing =
     List.filter
       (fun (_, index) ->

@@ -351,6 +351,8 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
                         (report_unknown_static_method state ?expected value type_ member arguments))
               | Ok (Visible overloads) -> (
                   match (arguments, List.assoc_opt wanted overloads) with
+                  | ([] | { Syntax.label = Some _; _ } :: _), _ ->
+                      report_missing_receiver state env value arguments
                   | receiver :: rest, Some (Type_overload method_path | View_overload method_path)
                     ->
                       let inner =
@@ -382,10 +384,7 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
                   | _ :: _, Some (Trait_overload (trait, method_)) ->
                       check_trait_method_through_type state env ?expected value type_ trait method_
                         arguments
-                  | _ :: _, None -> report_unmatched_receiver_mode state env arguments member
-                  | [], _ ->
-                      State.make_error_type state Missing_argument (State.read_span state value.id)
-                        "A method written in full takes its receiver as its first argument."))))
+                  | _ :: _, None -> report_unmatched_receiver_mode state env arguments member))))
   | Types.Parameter parameter -> (
       let without_self =
         List.fold_left
@@ -453,40 +452,47 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
     Name_lookup.instantiate_trait_method state (State.read_span state value.id) ~self_type reference
       method_
   in
-  let receiver_argument, arguments =
-    match instance.signature.receiver with
-    | Some (mode, receiver_type) -> (
-        match arguments with
-        | first :: rest ->
-            let parameter : Types.parameter_info =
-              { name = "self"; mode; type_ = receiver_type; has_default = false }
-            in
-            let mode =
-              Calls.check_argument state env first.value parameter ~has_generic_type:false
-            in
-            ([ { Tables.expression = first.value; core_argument_index = 0; mode } ], rest)
-        | [] -> ([], []))
-    | None -> ([], arguments)
+  let receiver_and_arguments =
+    match (instance.signature.receiver, arguments) with
+    | None, _ -> Ok ([], arguments)
+    | Some (mode, receiver_type), ({ Syntax.label = None; _ } as receiver) :: rest ->
+        let parameter : Types.parameter_info =
+          { name = "self"; mode; type_ = receiver_type; has_default = false }
+        in
+        let mode =
+          Calls.check_argument state env receiver.value parameter ~has_generic_type:false
+        in
+        Ok ([ { Tables.expression = receiver.value; core_argument_index = 0; mode } ], rest)
+    | Some _, ([] | { label = Some _; _ } :: _) ->
+        Error (report_missing_receiver state env value arguments)
   in
-  match
-    Calls.check_arguments state env value instance.signature.parameters
-      ~declared:instance.declared.parameters ~flatten:instance.flatten arguments
-      ~has_receiver:(Option.is_some instance.signature.receiver)
-  with
+  match receiver_and_arguments with
   | Error error -> error
-  | Ok (checked, left_out) ->
-      let result = Types.extract_result_type instance.signature.output in
-      State.elaborate state value.id
-        (Call
-           {
-             callee;
-             arguments = receiver_argument @ checked;
-             omitted_defaults = left_out;
-             callee_result = result;
-             lends = Types.find_lent_mode instance.signature.output;
-           });
-      Solver.require state (Method_call (State.read_span state value.id)) self_type reference;
-      State.normalize state result
+  | Ok (receiver_argument, arguments) -> (
+      match
+        Calls.check_arguments state env value instance.signature.parameters
+          ~declared:instance.declared.parameters ~flatten:instance.flatten arguments
+          ~has_receiver:(Option.is_some instance.signature.receiver)
+      with
+      | Error error -> error
+      | Ok (checked, left_out) ->
+          let result = Types.extract_result_type instance.signature.output in
+          State.elaborate state value.id
+            (Call
+               {
+                 callee;
+                 arguments = receiver_argument @ checked;
+                 omitted_defaults = left_out;
+                 callee_result = result;
+                 lends = Types.find_lent_mode instance.signature.output;
+               });
+          Solver.require state (Method_call (State.read_span state value.id)) self_type reference;
+          State.normalize state result)
+
+and report_missing_receiver state env (value : Syntax.expression) arguments =
+  Calls.check_arguments_alone state env arguments
+    (State.make_error_type state Missing_argument (State.read_span state value.id)
+       "A method written in full takes its receiver as its first argument, without a label.")
 
 and check_trait_call_in_full state env (value : Syntax.expression) trait ~trait_arguments
     (member : Syntax.name) arguments =

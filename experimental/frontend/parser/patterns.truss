@@ -57,7 +57,7 @@ fn parse_literal(cursor: mut TokenCursor) -> Result[Option[syntax::Literal], Fai
       report(
         mut cursor,
         code: "parser.float_pattern",
-        span,
+        span: span,
         message: "A float literal cannot be a pattern, since `==` on floats treats `-0.0` and `0.0` as equal; match with a guard instead, as in `value if value == 0.0`.",
       )
       Err(Failure.Failed)
@@ -71,7 +71,7 @@ fn parse_literal(cursor: mut TokenCursor) -> Result[Option[syntax::Literal], Fai
     } else {
       Ok(None)
     }
-    String(literal) => Ok(Some(syntax::Literal.LiteralString(parse_pattern_string(mut cursor, start, modules: [], literal)?)))
+    String(literal) => Ok(Some(syntax::Literal.LiteralString(parse_pattern_string(mut cursor, start, modules: [], literal: literal)?)))
     _ => Ok(None)
   }
 }
@@ -212,7 +212,7 @@ fn parse_name_pattern(cursor: mut TokenCursor, start: UInt64) -> Result[syntax::
       if !has_tag {
         return Err(fail(mut cursor, expected: "a name after `::`"))
       }
-      let parsed = syntax::Literal.LiteralString(parse_pattern_string(mut cursor, start, modules: own modules, literal)?)
+      let parsed = syntax::Literal.LiteralString(parse_pattern_string(mut cursor, start, modules: own modules, literal: literal)?)
       parse_range_or_single(
         mut cursor,
         start,
@@ -284,7 +284,7 @@ fn parse_pattern_fields(cursor: mut TokenCursor) -> List[syntax::PatternField]
   for entry in fields.enumerate() {
     if entry.element.kind == syntax::PatternFieldKind.Rest && entry.index + 1 < count {
       let span = cursor.read_file_span(entry.element.id)
-      report(mut cursor, code: "parser.unexpected_token", span, message: "`..` must be the last field of a pattern.")
+      report(mut cursor, code: "parser.unexpected_token", span: span, message: "`..` must be the last field of a pattern.")
     }
   }
   fields

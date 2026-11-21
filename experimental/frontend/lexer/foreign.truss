@@ -93,7 +93,7 @@ fn report_confusable(scanner: mut Scanner, start: UInt64, length: UInt64, replac
   report(
     mut scanner,
     code: "lexer.confusable_character",
-    span,
+    span: span,
     message: "${shown} is not ${name}. Truss is written with ASCII punctuation.",
     fixes: own fixes,
   )
@@ -120,7 +120,7 @@ fn scan_confusable(scanner: mut Scanner, code: UInt32, length: UInt64) -> Option
       }
       None => None
     }
-    OpeningQuote(closing) => match lex_curly_quoted_string(mut scanner, opening_length: length, closing) {
+    OpeningQuote(closing) => match lex_curly_quoted_string(mut scanner, opening_length: length, closing: closing) {
       Some(kind) => Some(ConfusableScan.LexedConfusable(kind))
       None => None
     }
@@ -171,14 +171,14 @@ fn report_foreign_escape(scanner: mut Scanner, buffer: mut String, start: UInt64
 fn check_hexadecimal_escape(scanner: mut Scanner, buffer: mut String, start: UInt64, count: UInt64) -> Bool
   uses Panic
 {
-  if !are_hexadecimal_digits(scanner, position: start + 2, count) {
+  if !are_hexadecimal_digits(scanner, position: start + 2, count: count) {
     return false
   }
-  let value = read_hexadecimal(scanner, position: start + 2, count)
+  let value = read_hexadecimal(scanner, position: start + 2, count: count)
   if value > 1114111 || (value >= 55296 && value <= 57343) {
     return false
   }
-  report_foreign_escape(mut scanner, buffer: mut buffer, start, stop: start + 2 + count, value: UInt32.from_integer(value))
+  report_foreign_escape(mut scanner, buffer: mut buffer, start: start, stop: start + 2 + count, value: UInt32.from_integer(value))
 }
 
 fn scan_foreign_escape(scanner: mut Scanner, buffer: mut String) -> Bool
@@ -190,13 +190,13 @@ fn scan_foreign_escape(scanner: mut Scanner, buffer: mut String) -> Bool
   }
   let escaped = scanner.lookup(start + 1)
   if escaped == 117 && !scanner.is_at(start + 2, byte: 123) {
-    return check_hexadecimal_escape(mut scanner, buffer: mut buffer, start, count: 4)
+    return check_hexadecimal_escape(mut scanner, buffer: mut buffer, start: start, count: 4)
   }
   if escaped == 120 {
-    return check_hexadecimal_escape(mut scanner, buffer: mut buffer, start, count: 2)
+    return check_hexadecimal_escape(mut scanner, buffer: mut buffer, start: start, count: 2)
   }
   if escaped == 85 {
-    return check_hexadecimal_escape(mut scanner, buffer: mut buffer, start, count: 8)
+    return check_hexadecimal_escape(mut scanner, buffer: mut buffer, start: start, count: 8)
   }
   let control: Option[UInt32] = if escaped == 97 {
     Some(7)
@@ -212,7 +212,7 @@ fn scan_foreign_escape(scanner: mut Scanner, buffer: mut String) -> Bool
     None
   }
   if control is Some(value) {
-    return report_foreign_escape(mut scanner, buffer: mut buffer, start, stop: start + 2, value)
+    return report_foreign_escape(mut scanner, buffer: mut buffer, start: start, stop: start + 2, value: value)
   }
   if escaped == 40 {
     let content = start + 2
@@ -474,13 +474,13 @@ fn lex_prefixed_string(scanner: mut Scanner, prefix: StringSlice, start: UInt64,
       mut scanner,
       tag: None,
       form: token::Form.Raw(quotes: 3, dollars: 0, multi_line: false),
-      nesting,
+      nesting: nesting,
       literal_start: start,
       dollars: 0,
       quotes: 1,
     )
   } else {
-    scan_string(mut scanner, tag: None, nesting)
+    scan_string(mut scanner, tag: None, nesting: nesting)
   }
   let delimiter = if is_empty { 1 } else { quotes }
   let text_start = quote_start + delimiter
@@ -546,7 +546,7 @@ fn lex_prefixed_string(scanner: mut Scanner, prefix: StringSlice, start: UInt64,
     mut scanner,
     code: "lexer.string_prefix",
     span: source::make_span(start, stop: quote_start),
-    message,
+    message: message,
     fixes: own reported_fixes,
   )
   scanned
@@ -641,7 +641,7 @@ fn lex_quoted_string(scanner: mut Scanner, nesting: UInt64, delimiter: UInt8) ->
   uses Panic, RunForever
 {
   let start = scanner.position
-  let scanned = scan_ordinary(mut scanner, tag: None, nesting, closing: delimiter)
+  let scanned = scan_ordinary(mut scanner, tag: None, nesting: nesting, closing: delimiter)
   let stop = scanner.position
   var interpolation_spans: List[source::Span] = []
   if scanned.kind is String(literal) {
@@ -681,7 +681,7 @@ fn lex_quoted_string(scanner: mut Scanner, nesting: UInt64, delimiter: UInt8) ->
   } else {
     "A string is written between `\"`s."
   }
-  report(mut scanner, code: "lexer.string_delimiter", span: source::make_span(start, stop: start + 1), message, fixes: own fixes)
+  report(mut scanner, code: "lexer.string_delimiter", span: source::make_span(start, stop: start + 1), message: message, fixes: own fixes)
   scanned
 }
 
@@ -739,7 +739,7 @@ fn scan_string_form(scanner: mut Scanner, nesting: UInt64) -> Option[StringFormS
   let start = scanner.position
   if scanner.is_at(start, byte: 39) {
     if find_character_literal_end(scanner, start) is Some(stop) {
-      let kind = lex_character_literal(mut scanner, tag: "Character", literal_start: start, stop)
+      let kind = lex_character_literal(mut scanner, tag: "Character", literal_start: start, stop: stop)
       return Some(StringFormScan.LexedString(kind, ending: Ending.Closed))
     }
     let is_apostrophe = touches_word_before(scanner, index: start)
@@ -801,7 +801,7 @@ fn lex_after_name(scanner: mut Scanner, nesting: UInt64, start: UInt64, name: to
   }
   let is_prefix = spelling == "f" || spelling == "r" || spelling == "b"
   if is_prefix && scanner.is_at(stop, byte: 34) && (spelling != "b" || scanner.run_length(stop, byte: 34) <= 2) {
-    return Some(lex_prefixed_string(mut scanner, prefix: spelling, start, nesting))
+    return Some(lex_prefixed_string(mut scanner, prefix: spelling, start: start, nesting: nesting))
   }
   if spelling == "b" && scanner.is_at(stop, byte: 39) {
     return match find_character_literal_end(scanner, start: stop, after_prefix: true) {

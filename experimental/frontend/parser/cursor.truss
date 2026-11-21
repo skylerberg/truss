@@ -277,13 +277,13 @@ fn accept_keyword(cursor: mut TokenCursor, keyword: token::Keyword) -> Bool
 fn TokenCursor.make_definition_span(self, span: source::Span) -> source::Span
   uses Panic
 {
-  source::of_file(base: self.base, span)
+  source::of_file(base: self.base, span: span)
 }
 
 fn TokenCursor.make_file_span(self, span: source::Span) -> source::Span
   uses Panic
 {
-  source::to_file(base: self.base, span)
+  source::to_file(base: self.base, span: span)
 }
 
 fn TokenCursor.find_previous_token(self) -> Option[token::Token]
@@ -437,7 +437,7 @@ fn enter_nested(cursor: mut TokenCursor) -> Result[Unit, Failure]
 {
   if cursor.nesting_depth >= nesting_limit {
     let span = cursor.peek().span
-    report(mut cursor, code: "parser.nesting_too_deep", span, message: "This is nested more than ${nesting_limit} levels deep.")
+    report(mut cursor, code: "parser.nesting_too_deep", span: span, message: "This is nested more than ${nesting_limit} levels deep.")
     return Err(Failure.Failed)
   }
   cursor.nesting_depth += 1
@@ -458,7 +458,7 @@ fn check_chain_length(cursor: mut TokenCursor, chain_length: UInt64) -> Result[U
     report(
       mut cursor,
       code: "parser.nesting_too_deep",
-      span,
+      span: span,
       message: "This chains more than ${chain_limit} operations, each of which nests one level deeper. Give parts of it names with `let`.",
     )
     return Err(Failure.Failed)
@@ -732,7 +732,7 @@ fn TokenCursor.list_group_tokens(self, start: UInt64, stop: UInt64, span: source
     for segment in literal.rest {
       let interpolation = segment.interpolation
       if interpolation.span.start <= span.start && span.stop <= interpolation.span.stop {
-        return self.list_group_tokens(start: interpolation.first, stop: interpolation.stop, span)
+        return self.list_group_tokens(start: interpolation.first, stop: interpolation.stop, span: span)
       }
     }
     return []
@@ -743,7 +743,7 @@ fn TokenCursor.list_group_tokens(self, start: UInt64, stop: UInt64, span: source
 fn TokenCursor.spell(self, span: source::Span, insertions: Slice[token::Insertion] = []) -> Option[String]
   uses Panic, RunForever
 {
-  let tokens = self.list_group_tokens(start: self.first, stop: self.stop, span)
+  let tokens = self.list_group_tokens(start: self.first, stop: self.stop, span: span)
   if tokens.is_empty() {
     return None
   }

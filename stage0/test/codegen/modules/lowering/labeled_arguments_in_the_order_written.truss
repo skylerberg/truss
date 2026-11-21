@@ -1,0 +1,15 @@
+fn record(log: mut List[Int64], value: Int64) -> Int64 {
+  mut log.push(value)
+  value
+}
+
+fn pair(first: Int64, second: Int64) -> Int64 {
+  first * 10 + second
+}
+
+test "labeled arguments are evaluated in the order written" {
+  var log: List[Int64] = []
+  let paired = pair(second: record(mut log, 2), first: record(mut log, 1))
+  assert paired == 12
+  assert log == [2, 1]
+}

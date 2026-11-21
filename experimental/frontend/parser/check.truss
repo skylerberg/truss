@@ -86,7 +86,7 @@ fn check_expression(cursor: mut TokenCursor, context: CheckContext, value: synta
       report(
         mut cursor,
         code: "parser.exits_parallel",
-        span,
+        span: span,
         message: "`?` cannot exit a `parallel` block or a `parallel for`; return a `Result` from the branch and use `?` after it.",
       )
     }
@@ -101,7 +101,7 @@ fn check_expression(cursor: mut TokenCursor, context: CheckContext, value: synta
       let enclosing_loop = if context.enclosing_loop == EnclosingLoop.NoLoop { EnclosingLoop.NoLoop } else { EnclosingLoop.AcrossLambda }
       check_block(mut cursor, context: context with (allows_assert: false, is_in_parallel: false, enclosing_loop), block: body)
     }
-    _ => walk_expression_parts(mut cursor, visitor: Visitor.CheckVisitor(context), value)
+    _ => walk_expression_parts(mut cursor, visitor: Visitor.CheckVisitor(context), value: value)
   }
 }
 
@@ -143,7 +143,7 @@ fn check_types(cursor: mut TokenCursor, context: CheckContext, written: syntax::
   uses Panic, RunForever
 {
   check_placement(mut cursor, written, is_top: is_parameter)
-  walk_type_expression(mut cursor, visitor: Visitor.CheckVisitor(enter_specification(context)), written)
+  walk_type_expression(mut cursor, visitor: Visitor.CheckVisitor(enter_specification(context)), written: written)
 }
 
 fn check_placement(cursor: mut TokenCursor, written: syntax::TypeExpression, is_top: Bool)
@@ -190,7 +190,7 @@ fn check_loop_clauses(cursor: mut TokenCursor, context: CheckContext, clauses: S
   uses Panic, RunForever
 {
   for clause in clauses {
-    walk_loop_clause(mut cursor, visitor: Visitor.CheckVisitor(enter_specification(context)), clause)
+    walk_loop_clause(mut cursor, visitor: Visitor.CheckVisitor(enter_specification(context)), clause: clause)
   }
 }
 
@@ -239,9 +239,9 @@ fn check_statement(cursor: mut TokenCursor, context: CheckContext, statement: sy
       if !context.allows_assert {
         report_at(mut cursor, code: "parser.misplaced_assert", id: statement.id, message: "`assert` is only allowed in tests, theorems, and proofs.")
       }
-      walk_statement_parts(mut cursor, visitor: Visitor.CheckVisitor(context), statement)
+      walk_statement_parts(mut cursor, visitor: Visitor.CheckVisitor(context), statement: statement)
     }
-    Expression(_) | Assignment(..) | StatementError => walk_statement_parts(mut cursor, visitor: Visitor.CheckVisitor(context), statement)
+    Expression(_) | Assignment(..) | StatementError => walk_statement_parts(mut cursor, visitor: Visitor.CheckVisitor(context), statement: statement)
   }
 }
 
@@ -268,7 +268,7 @@ fn check_parameters(cursor: mut TokenCursor, parameters: Slice[syntax::Parameter
       }
       check_types(mut cursor, context: plain_context(), written: annotation, is_parameter: true)
       if default is Some(value) {
-        check_expression(mut cursor, context: plain_context(), value)
+        check_expression(mut cursor, context: plain_context(), value: value)
       }
     }
   }
@@ -293,25 +293,25 @@ fn report_associated_type(cursor: mut TokenCursor, id: UInt64, written: StringSl
   } else {
     "`${written}` cannot be a trait argument of an `impl`: an associated type may stand for any type, so the `impl` could overlap every other `impl` of the trait for its type."
   }
-  report_at(mut cursor, code: "parser.misplaced_associated_type", id, message)
+  report_at(mut cursor, code: "parser.misplaced_associated_type", id: id, message: message)
 }
 
 fn check_trait_argument(cursor: mut TokenCursor, written: syntax::TypeExpression, is_law_proof: Bool)
   uses Panic, RunForever
 {
   match written.kind {
-    PathType(path_type) | AnyType(path_type) => check_trait_arguments(mut cursor, implemented_trait: path_type, is_law_proof)
+    PathType(path_type) | AnyType(path_type) => check_trait_arguments(mut cursor, implemented_trait: path_type, is_law_proof: is_law_proof)
     FunctionType(_) => {
       let message = if is_law_proof {
         "A function type cannot be a trait argument of a law proof, since no `impl` can have one."
       } else {
         "A function type cannot be a trait argument of an `impl`. Use a record that holds the function, such as `type Callback(run: fn(Int64) -> Int64)`, as the argument."
       }
-      report_at(mut cursor, code: "parser.misplaced_function_type", id: written.id, message)
+      report_at(mut cursor, code: "parser.misplaced_function_type", id: written.id, message: message)
     }
-    Associated(parameter, name) => report_associated_type(mut cursor, id: written.id, written: "${parameter.text}.${name.text}", is_law_proof)
+    Associated(parameter, name) => report_associated_type(mut cursor, id: written.id, written: "${parameter.text}.${name.text}", is_law_proof: is_law_proof)
     SelfType(name) => if name is Some(associated) {
-      report_associated_type(mut cursor, id: written.id, written: "Self.${associated.text}", is_law_proof)
+      report_associated_type(mut cursor, id: written.id, written: "Self.${associated.text}", is_law_proof: is_law_proof)
     }
     TypeError => {}
   }
@@ -336,7 +336,7 @@ fn check_header_trait(cursor: mut TokenCursor, implemented_trait: syntax::PathTy
         }
         "An `impl` chooses its associated types in its body, so `${written}` on its trait would have no effect. Write `type ${name.text} = ${value_spelling}` in the `impl` instead."
       }
-      report(mut cursor, code: "parser.misplaced_constraint", span, message)
+      report(mut cursor, code: "parser.misplaced_constraint", span: span, message: message)
     }
   }
   check_trait_arguments(mut cursor, implemented_trait, is_law_proof)
@@ -346,7 +346,7 @@ fn check_clauses(cursor: mut TokenCursor, clauses: Slice[syntax::Clause])
   uses Panic, RunForever
 {
   for clause in clauses {
-    walk_clause(mut cursor, visitor: Visitor.CheckVisitor(enter_specification(plain_context())), clause)
+    walk_clause(mut cursor, visitor: Visitor.CheckVisitor(enter_specification(plain_context())), clause: clause)
   }
 }
 
@@ -354,7 +354,7 @@ fn check_generic_parameters(cursor: mut TokenCursor, generics: Slice[syntax::Gen
   uses Panic, RunForever
 {
   for parameter in generics {
-    walk_generic_parameter(mut cursor, visitor: Visitor.CheckVisitor(enter_specification(plain_context())), parameter)
+    walk_generic_parameter(mut cursor, visitor: Visitor.CheckVisitor(enter_specification(plain_context())), parameter: parameter)
   }
 }
 
@@ -392,7 +392,7 @@ fn check_signature(cursor: mut TokenCursor, signature: syntax::Signature)
     Some(output) => output is Lends(..)
     None => false
   }
-  check_parameters(mut cursor, parameters: signature.parameters, is_lending)
+  check_parameters(mut cursor, parameters: signature.parameters, is_lending: is_lending)
   if signature.output is Some(output) {
     match output {
       Returns(annotation) | Lends(annotation, ..) => check_types(mut cursor, context: plain_context(), written: annotation)
@@ -408,7 +408,7 @@ fn check_fields(cursor: mut TokenCursor, fields: Slice[syntax::Field])
     if field.kind is FieldDeclaration(annotation, default, ..) {
       check_types(mut cursor, context: plain_context(), written: annotation)
       if default is Some(value) {
-        check_expression(mut cursor, context: plain_context(), value)
+        check_expression(mut cursor, context: plain_context(), value: value)
       }
     }
   }
@@ -436,7 +436,7 @@ fn check_definition(cursor: mut TokenCursor, definition: syntax::Definition)
       }
       for clause in clauses {
         match clause.kind {
-          TypeInvariant(value) | Potential(value) => check_expression(mut cursor, context: enter_specification(plain_context()), value)
+          TypeInvariant(value) | Potential(value) => check_expression(mut cursor, context: enter_specification(plain_context()), value: value)
           Derives(_) => {}
         }
       }
@@ -458,14 +458,14 @@ fn check_definition(cursor: mut TokenCursor, definition: syntax::Definition)
       check_generic_parameters(mut cursor, generics: implementing_type.generics)
       for member in members {
         if member.kind is AssociatedDefinition(definition: written, ..) {
-          check_types(mut cursor, context: plain_context(), written)
+          check_types(mut cursor, context: plain_context(), written: written)
         }
       }
     }
     Capability(..) => {}
     Constant(annotation, value, ..) => {
       check_types(mut cursor, context: plain_context(), written: annotation)
-      check_expression(mut cursor, context: plain_context(), value)
+      check_expression(mut cursor, context: plain_context(), value: value)
     }
     Test(body, ..) => check_block(mut cursor, context: plain_context() with (allows_assert: true), block: body)
     Theorem(generics, parameters, clauses, body, ..) => {

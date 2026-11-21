@@ -308,12 +308,12 @@ fn expect_contextual(
       mut cursor,
       code: "parser.cost_word",
       span: current.span,
-      message,
+      message: message,
       fixes: [source::make_fix("Write `${spelling}`", edits: [source::replace(current.span, replacement: spelling)])],
     )
     advance(mut cursor)
     return Ok(word)
   }
-  report(mut cursor, code: "parser.cost_word", span: current.span, message)
+  report(mut cursor, code: "parser.cost_word", span: current.span, message: message)
   Err(Failure.Failed)
 }

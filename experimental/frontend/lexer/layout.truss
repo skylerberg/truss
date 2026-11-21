@@ -316,7 +316,7 @@ fn close_bracket(scanner: mut Scanner, run: mut Run, current: token::Token, brac
     report(
       mut scanner,
       code: "lexer.unmatched_closing_bracket",
-      span,
+      span: span,
       message: "This `${spell_closer(bracket)}` has no `${spell_opener(bracket)}` to close.",
     )
     return
@@ -362,7 +362,7 @@ fn finish_run(
     InterpolationMode => if ends_unterminated {
       close_silently(mut run, position)
     } else {
-      close_all(mut scanner, run: mut run, position, reason: " before the end of the interpolation")
+      close_all(mut scanner, run: mut run, position: position, reason: " before the end of the interpolation")
     }
   }
   if mode != LayoutMode.InterpolationMode && run.previous is Some(previous_kind) && token::can_end(previous_kind) {
@@ -415,7 +415,7 @@ fn run_layout(scanner: mut Scanner, mode: LayoutMode, state: mut InterpolationSt
   while true {
     match read_next_input(mut scanner, mode, state: mut state) {
       Finish(position, first_line_break, blank_line, ends_unterminated) => {
-        return finish_run(mut scanner, run: mut run, mode, position, first_line_break, blank_line, ends_unterminated)
+        return finish_run(mut scanner, run: mut run, mode: mode, position: position, first_line_break: first_line_break, blank_line: blank_line, ends_unterminated: ends_unterminated)
       }
       Next(kind, span, first_line_break, blank_line, unterminated_string) => {
         if mode == LayoutMode.FileMode(recovery: true) && !run.stack.is_empty()
@@ -453,7 +453,7 @@ fn run_layout(scanner: mut Scanner, mode: LayoutMode, state: mut InterpolationSt
               push_opener(mut run, bracket, span)
               emit(mut run, current)
             }
-            Close(bracket) => close_bracket(mut scanner, run: mut run, current, bracket)
+            Close(bracket) => close_bracket(mut scanner, run: mut run, current: current, bracket: bracket)
             _ => emit(mut run, current)
           }
           _ => emit(mut run, current)
