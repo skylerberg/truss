@@ -1,8 +1,8 @@
-use clock_library::time
+use clock_library.time
 
 fn f() -> Instant
   uses Clock
 {
-  let stamp = time::stamp
+  let stamp = time.stamp
   stamp()
 }

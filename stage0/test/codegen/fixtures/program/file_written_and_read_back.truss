@@ -1,4 +1,4 @@
-use standard::files
+use standard.files
 
 fn main(arguments: List[String]) -> ExitCode
   uses Console, FileRead, FileWrite, Handles, RunForever
@@ -11,7 +11,7 @@ fn main(arguments: List[String]) -> ExitCode
     Console.print_line("${text.length()} bytes".slice())
   }
   let streamed = Path.new("${arguments[1]}.streamed".slice())
-  let wrote = files::write_with(streamed, write: fn(writer) {
+  let wrote = files.write_with(streamed, write: fn(writer) {
     mut writer.write("one ".slice())?
     mut writer.write_line("two".slice())?
     mut writer.write_bytes("three".slice().bytes())

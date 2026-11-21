@@ -1,5 +1,5 @@
-use standard::intrinsic
-use standard::streams
+use standard.intrinsic
+use standard.streams
 
 public type Options(delimiter: Character = Character",", quote: Character = Character"\"", trim_fields: Bool = false)
   derives Equal
@@ -52,7 +52,7 @@ fn append_field(row: mut List[String], field: own String, trimmed_length: UInt64
 {
   var trimmed = own field
   if trim_fields {
-    intrinsic::storage_shorten(mut trimmed.storage, length: trimmed_length)
+    intrinsic.storage_shorten(mut trimmed.storage, length: trimmed_length)
   }
   mut row.push(own trimmed)
 }
@@ -322,10 +322,10 @@ public fn Table.format(self, options: Options = Options()) -> String
   text
 }
 
-public opaque type RowReader[Source: streams::Reader](source: streams::BufferedReader[Source], options: Options)
+public opaque type RowReader[Source: streams.Reader](source: streams.BufferedReader[Source], options: Options)
 
-public fn RowReader[Source: streams::Reader].new(source: own Source, options: Options = Options()) -> RowReader[Source] {
-  RowReader(source: streams::BufferedReader.new(own source), options: options)
+public fn RowReader[Source: streams.Reader].new(source: own Source, options: Options = Options()) -> RowReader[Source] {
+  RowReader(source: streams.BufferedReader.new(own source), options: options)
 }
 
 fn quotes_in(text: StringSlice, quote: Character) -> UInt64
@@ -346,7 +346,7 @@ fn quotes_in(text: StringSlice, quote: Character) -> UInt64
   count
 }
 
-public fn RowReader[Source: streams::Reader].next_row(mut self) -> Result[Option[List[String]], ReadError]
+public fn RowReader[Source: streams.Reader].next_row(mut self) -> Result[Option[List[String]], ReadError]
   uses Handles, RunForever
 {
   var record = ""

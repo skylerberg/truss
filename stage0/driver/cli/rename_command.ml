@@ -126,7 +126,7 @@ let plan_module database snapshot packages (old_module : Path.module_) to_ =
     | Some modules -> modules
     | None ->
         let package = Path.show_package package in
-        Outcome.raise_cannot_run "`%s` is not a module path in %s, such as `%s::name`." to_ package
+        Outcome.raise_cannot_run "`%s` is not a module path in %s, such as `%s.name`." to_ package
           package
   in
   List.iter
@@ -147,7 +147,7 @@ let plan_module database snapshot packages (old_module : Path.module_) to_ =
         | Module edit_module when edit_module = old_module ->
             let text = Source.text (Database.read_source database file) in
             let written = String.sub text span.start (span.stop - span.start) in
-            Some (file, Diagnostic.replace span (if String.contains written ':' then full else last))
+            Some (file, Diagnostic.replace span (if String.contains written '.' then full else last))
         | _ -> None)
       (list_occurrences database snapshot packages)
     @ List.concat_map

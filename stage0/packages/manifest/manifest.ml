@@ -34,9 +34,7 @@ type token =
   | Bare of string
   | Line_break
 
-let is_bare = function
-  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' | '.' | ':' -> true
-  | _ -> false
+let is_bare = function 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' | '.' -> true | _ -> false
 
 let tokenize_line line text =
   let length = String.length text in
@@ -184,8 +182,8 @@ let parse_tables text =
   | _, (line, message) :: _ -> raise (Malformed { line; message })
 
 let name_expected =
-  "a `lower_snake_case` name, or an owner and a name joined by `::`, such as `weather` or \
-   `acme::geometry`"
+  "a `lower_snake_case` name, or an owner and a name joined by `.`, such as `weather` or \
+   `acme.geometry`"
 
 let read_text (entry : entry) =
   match entry.value with
@@ -229,7 +227,7 @@ let parse_dependency (entry : entry) : dependency =
           name_expected
   in
   if (not entry.quoted) && package.owner <> None then
-    raise_malformed entry.line "A name with `::` is written in quotes: `\"%s\" = []`." entry.key;
+    raise_malformed entry.line "A name with `.` is written in quotes: `\"%s\" = []`." entry.key;
   match entry.value with
   | List capabilities ->
       { package; capabilities = List.map (parse_granted_capability entry) capabilities }

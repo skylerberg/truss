@@ -1,5 +1,5 @@
-use standard::intrinsic
+use standard.intrinsic
 
-fn lengthen(storage: mut intrinsic::Storage[intrinsic::Storage[UInt8]]) {
-  intrinsic::storage_lengthen(mut storage, by: 1)
+fn lengthen(storage: mut intrinsic.Storage[intrinsic.Storage[UInt8]]) {
+  intrinsic.storage_lengthen(mut storage, by: 1)
 }

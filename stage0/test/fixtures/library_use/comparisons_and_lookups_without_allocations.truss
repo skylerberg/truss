@@ -1,4 +1,4 @@
-use standard::collections
+use standard.collections
 
 fn same_text(first: String, second: String) -> Bool
   cost allocations == 0
@@ -39,7 +39,7 @@ fn port_of(ports: Map[String, Int64], name: String) -> Int64
   }
 }
 
-fn has_sorted_key(ports: collections::SortedMap[String, Int64], name: String) -> Bool
+fn has_sorted_key(ports: collections.SortedMap[String, Int64], name: String) -> Bool
   cost allocations == 0
 {
   ports.contains(name)

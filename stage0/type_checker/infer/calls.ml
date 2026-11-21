@@ -129,7 +129,7 @@ and match_arguments state site (value : Syntax.expression) (parameters : Types.p
     (arguments : Syntax.argument list) =
   let rec find_name (expression : Syntax.expression) =
     match expression.kind with
-    | Name { modules = []; last } -> Some last.text
+    | Name last -> Some last.text
     | Mode (_, inner) -> find_name inner
     | _ -> None
   in

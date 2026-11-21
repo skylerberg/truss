@@ -52,7 +52,7 @@ let parse_upper_name cursor expected =
 let parse_module_prefix cursor =
   let rec gather modules =
     match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
-    | Lower _, Punctuation Colon_colon ->
+    | Lower _, Punctuation Dot ->
         let module_name = make_name cursor (Cursor.take cursor) in
         Cursor.advance cursor;
         gather (module_name :: modules)

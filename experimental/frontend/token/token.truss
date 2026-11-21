@@ -1,5 +1,5 @@
-use frontend::source
-use standard::math
+use frontend.source
+use standard.math
 
 internal type Keyword =
   | Any
@@ -79,7 +79,6 @@ internal type Punctuation =
   | Close(bracket: Bracket)
   | Comma
   | Colon
-  | ColonColon
   | Dot
   | DotDot
   | DotDotEqual
@@ -120,7 +119,7 @@ internal type Punctuation =
   | ShiftRight
   derives Equal
 
-internal type Foreign = PlusPlus | MinusMinus | StarStar | ColonEqual | PipeGreater
+internal type Foreign = PlusPlus | MinusMinus | StarStar | ColonEqual | ColonColon | PipeGreater
   derives Equal
 
 internal type Kind =
@@ -140,21 +139,21 @@ internal type Kind =
 
 internal type Token(
   kind: Kind,
-  span: source::Span,
+  span: source.Span,
   line_break_before: Bool,
   blank_line_before: Bool,
   is_inserted_closer: Bool,
 )
   derives Equal
 
-internal fn make_token(kind: Kind, span: source::Span) -> Token {
+internal fn make_token(kind: Kind, span: source.Span) -> Token {
   Token(kind, span, line_break_before: false, blank_line_before: false, is_inserted_closer: false)
 }
 
 internal type Decimal(significand: String, exponent: String)
   derives Equal
 
-internal fn normalize_decimal(significand: StringSlice, exponent: own math::BigInteger) -> Decimal
+internal fn normalize_decimal(significand: StringSlice, exponent: own math.BigInteger) -> Decimal
   uses Panic
 {
   if significand == "0" {
@@ -165,20 +164,20 @@ internal fn normalize_decimal(significand: StringSlice, exponent: own math::BigI
     stop -= 1
   }
   let zeros = significand.length() - stop
-  let shifted = exponent + math::BigInteger.from(zeros)
+  let shifted = exponent + math.BigInteger.from(zeros)
   Decimal(significand: significand.substring(0, to: stop).to_string(), exponent: "${shifted}")
 }
 
-internal type Tag(name: String, span: source::Span)
+internal type Tag(name: String, span: source.Span)
   derives Equal
 
 internal type Form = Ordinary | Raw(quotes: UInt64, dollars: UInt64, multi_line: Bool)
   derives Equal
 
-internal type Text(value: String, span: source::Span)
+internal type Text(value: String, span: source.Span)
   derives Equal
 
-internal type Interpolation(first: UInt64, stop: UInt64, span: source::Span, is_closed: Bool)
+internal type Interpolation(first: UInt64, stop: UInt64, span: source.Span, is_closed: Bool)
   derives Equal
 
 internal type Segment(interpolation: Interpolation, text: Text)
@@ -389,7 +388,6 @@ internal fn spell_punctuation(punctuation: Punctuation) -> StringSlice {
     }
     Comma => ","
     Colon => ":"
-    ColonColon => "::"
     Dot => "."
     DotDot => ".."
     DotDotEqual => "..="
@@ -437,6 +435,7 @@ internal fn spell_foreign(foreign: Foreign) -> StringSlice {
     MinusMinus => "--"
     StarStar => "**"
     ColonEqual => ":="
+    ColonColon => "::"
     PipeGreater => "|>"
   }
 }
@@ -461,7 +460,7 @@ internal fn can_end(kind: Kind) -> Bool {
     }
     Foreign(foreign) => match foreign {
       PlusPlus | MinusMinus => true
-      StarStar | ColonEqual | PipeGreater => false
+      StarStar | ColonEqual | ColonColon | PipeGreater => false
     }
     Reserved(_) | Newline | EndOfFile => false
   }
@@ -472,7 +471,7 @@ internal fn can_begin(kind: Kind) -> Bool {
     Upper(_) | Lower(_) | Underscore | Integer(_) | Float(_) | String(_) | Reserved(_) => true
     Foreign(foreign) => match foreign {
       PlusPlus | MinusMinus => true
-      StarStar | ColonEqual | PipeGreater => false
+      StarStar | ColonEqual | ColonColon | PipeGreater => false
     }
     Punctuation(punctuation) => match punctuation {
       Open(_) | Minus | Bang | Tilde => true

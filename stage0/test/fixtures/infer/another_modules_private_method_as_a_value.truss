@@ -1,5 +1,5 @@
-use app::shapes
+use app.shapes
 
-fn f(all: List[shapes::Shape]) -> List[UInt64] {
-  all.map(shapes::Shape.secret)
+fn f(all: List[shapes.Shape]) -> List[UInt64] {
+  all.map(shapes.Shape.secret)
 }

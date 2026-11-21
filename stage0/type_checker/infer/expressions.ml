@@ -92,11 +92,14 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
   | Self_type_value ->
       State.make_error_type state Not_a_value (State.read_span state value.id)
         "`Self` is a type. Build a value of it, or call one of its methods."
-  | Name path -> (
+  | Name name -> (
       match State.find_head state value with
       | Some resolution -> Name_lookup.check_name state env value resolution
-      | None -> State.raise_bug "the name `%s` is not resolved" path.last.text)
-  | Member (base, member) -> check_member_value state env value base member
+      | None -> State.raise_bug "the name `%s` is not resolved" name.text)
+  | Member (base, member) -> (
+      match State.find_head state value with
+      | Some resolution -> Name_lookup.check_name state env value resolution
+      | None -> check_member_value state env value base member)
   | Bracket (base, items) -> check_bracket state env ?expected value base items
   | Call (callee, arguments) -> Methods.check_call state env ?expected value callee arguments
   | Try inner -> Operators.try_ state env value inner

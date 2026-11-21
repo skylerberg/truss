@@ -1,12 +1,12 @@
-use standard::growth
-use standard::intrinsic
-use standard::numbers::float_text
-use standard::writing
+use standard.growth
+use standard.intrinsic
+use standard.numbers.float_text
+use standard.writing
 
-public opaque type String(storage: intrinsic::Storage[UInt8])
+public opaque type String(storage: intrinsic.Storage[UInt8])
   derives Copyable
 
-public opaque type StringSlice(bytes: intrinsic::View[UInt8])
+public opaque type StringSlice(bytes: intrinsic.View[UInt8])
   derives Plain
 
 public trait FromTemplate {
@@ -23,9 +23,9 @@ impl Model for String {
   type Value = Sequence[UInt8]
 
   fn model(self) -> Sequence[UInt8]
-    ensures identical(result, intrinsic::storage_model(self.storage))
+    ensures identical(result, intrinsic.storage_model(self.storage))
   {
-    intrinsic::storage_model(self.storage)
+    intrinsic.storage_model(self.storage)
   }
 }
 
@@ -33,9 +33,9 @@ impl Model for StringSlice {
   type Value = Sequence[UInt8]
 
   fn model(self) -> Sequence[UInt8]
-    ensures identical(result, intrinsic::view_model(self.bytes))
+    ensures identical(result, intrinsic.view_model(self.bytes))
   {
-    intrinsic::view_model(self.bytes)
+    intrinsic.view_model(self.bytes)
   }
 }
 
@@ -54,26 +54,26 @@ public fn String.length(self) -> UInt64
   cost time O(1)
   cost allocations == 0
 {
-  intrinsic::storage_length(self.storage)
+  intrinsic.storage_length(self.storage)
 }
 
-internal fn push_bytes(storage: mut intrinsic::Storage[UInt8], text: StringSlice)
-  requires intrinsic::storage_length(storage) + text.length() <= intrinsic::storage_capacity(storage)
-  ensures identical(intrinsic::storage_model(storage), old(intrinsic::storage_model(storage)).concatenate(text.model()))
-  ensures intrinsic::storage_capacity(storage) == old(intrinsic::storage_capacity(storage))
+internal fn push_bytes(storage: mut intrinsic.Storage[UInt8], text: StringSlice)
+  requires intrinsic.storage_length(storage) + text.length() <= intrinsic.storage_capacity(storage)
+  ensures identical(intrinsic.storage_model(storage), old(intrinsic.storage_model(storage)).concatenate(text.model()))
+  ensures intrinsic.storage_capacity(storage) == old(intrinsic.storage_capacity(storage))
   cost time O(text.length())
   cost allocations == 0
 {
   for index in 0..text.length()
-    invariant intrinsic::storage_length(storage) == old(intrinsic::storage_length(storage)) + index
-    invariant forall i in 0..old(intrinsic::storage_length(storage)) =>
-      identical(intrinsic::storage_model(storage)[i], old(intrinsic::storage_model(storage))[i])
+    invariant intrinsic.storage_length(storage) == old(intrinsic.storage_length(storage)) + index
+    invariant forall i in 0..old(intrinsic.storage_length(storage)) =>
+      identical(intrinsic.storage_model(storage)[i], old(intrinsic.storage_model(storage))[i])
     invariant forall i in 0..index =>
-      identical(intrinsic::storage_model(storage)[old(intrinsic::storage_length(storage)) + i], text.model()[i])
-    invariant intrinsic::storage_capacity(storage) == old(intrinsic::storage_capacity(storage))
+      identical(intrinsic.storage_model(storage)[old(intrinsic.storage_length(storage)) + i], text.model()[i])
+    invariant intrinsic.storage_capacity(storage) == old(intrinsic.storage_capacity(storage))
     cost allocations == 0
   {
-    intrinsic::storage_push(mut storage, value: intrinsic::view_at(text.bytes, index: index))
+    intrinsic.storage_push(mut storage, value: intrinsic.view_at(text.bytes, index: index))
   }
 }
 
@@ -81,7 +81,7 @@ public fn String.push(mut self, text: StringSlice)
   ensures identical(self.model(), old(self.model()).concatenate(text.model()))
   cost amortized time O(text.length())
 {
-  growth::reserve(mut self.storage, additional: text.length())
+  growth.reserve(mut self.storage, additional: text.length())
   push_bytes(mut self.storage, text: text)
 }
 
@@ -90,20 +90,20 @@ public fn String.slice(self) -> StringSlice
   cost time O(1)
   cost allocations == 0
 {
-  StringSlice(bytes: intrinsic::storage_view(self.storage))
+  StringSlice(bytes: intrinsic.storage_view(self.storage))
 }
 
-internal fn String.from_bytes(bytes: own intrinsic::Storage[UInt8]) -> String {
-  if valid_utf8(intrinsic::storage_view(bytes)) {
+internal fn String.from_bytes(bytes: own intrinsic.Storage[UInt8]) -> String {
+  if valid_utf8(intrinsic.storage_view(bytes)) {
     String(storage: own bytes)
   } else {
-    String(storage: replaced(intrinsic::storage_view(bytes)))
+    String(storage: replaced(intrinsic.storage_view(bytes)))
   }
 }
 
-fn valid_utf8(bytes: intrinsic::View[UInt8]) -> Bool {
+fn valid_utf8(bytes: intrinsic.View[UInt8]) -> Bool {
   var at: UInt64 = 0
-  while at < intrinsic::view_length(bytes) {
+  while at < intrinsic.view_length(bytes) {
     let step = utf8_sequence(bytes, at)
     if step == 0 {
       return false
@@ -113,19 +113,19 @@ fn valid_utf8(bytes: intrinsic::View[UInt8]) -> Bool {
   true
 }
 
-fn replaced(bytes: intrinsic::View[UInt8]) -> intrinsic::Storage[UInt8] {
-  var fixed: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(intrinsic::view_length(bytes))
+fn replaced(bytes: intrinsic.View[UInt8]) -> intrinsic.Storage[UInt8] {
+  var fixed: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(intrinsic.view_length(bytes))
   var at: UInt64 = 0
-  while at < intrinsic::view_length(bytes) {
+  while at < intrinsic.view_length(bytes) {
     let step = utf8_sequence(bytes, at)
     if step == 0 {
-      growth::push(mut fixed, value: 239)
-      growth::push(mut fixed, value: 191)
-      growth::push(mut fixed, value: 189)
+      growth.push(mut fixed, value: 239)
+      growth.push(mut fixed, value: 191)
+      growth.push(mut fixed, value: 189)
       at += 1
     } else {
       for index in at..at + step {
-        growth::push(mut fixed, value: intrinsic::view_at(bytes, index: index))
+        growth.push(mut fixed, value: intrinsic.view_at(bytes, index: index))
       }
       at += step
     }
@@ -133,25 +133,25 @@ fn replaced(bytes: intrinsic::View[UInt8]) -> intrinsic::Storage[UInt8] {
   fixed
 }
 
-fn utf8_sequence(bytes: intrinsic::View[UInt8], at: UInt64) -> UInt64
-  requires at < intrinsic::view_length(bytes)
-  ensures result <= intrinsic::view_length(bytes) - at
+fn utf8_sequence(bytes: intrinsic.View[UInt8], at: UInt64) -> UInt64
+  requires at < intrinsic.view_length(bytes)
+  ensures result <= intrinsic.view_length(bytes) - at
 {
-  let first = intrinsic::view_at(bytes, index: at)
+  let first = intrinsic.view_at(bytes, index: at)
   let length: UInt64 =
     if first < 128 { 1 } else if (first & 224) == 192 { 2 } else if (first & 240) == 224 { 3 } else if (first & 248) == 240 { 4 } else { 0 }
-  if length == 0 || length > intrinsic::view_length(bytes) - at {
+  if length == 0 || length > intrinsic.view_length(bytes) - at {
     0
   } else {
     let mask: UInt8 = if length == 1 { 127 } else if length == 2 { 31 } else if length == 3 { 15 } else { 7 }
-    var code: UInt32 = intrinsic::convert(first & mask)
+    var code: UInt32 = intrinsic.convert(first & mask)
     var continued = true
     for index in at + 1..at + length {
-      let byte = intrinsic::view_at(bytes, index: index)
+      let byte = intrinsic.view_at(bytes, index: index)
       if (byte & 192) != 128 {
         continued = false
       }
-      let low: UInt32 = intrinsic::convert(byte & 63)
+      let low: UInt32 = intrinsic.convert(byte & 63)
       code = (code << 6) | low
     }
     let overlong = (length == 2 && code < 128) || (length == 3 && code < 2048) || (length == 4 && code < 65536)
@@ -164,7 +164,7 @@ public fn StringSlice.length(self) -> UInt64
   cost time O(1)
   cost allocations == 0
 {
-  intrinsic::view_length(self.bytes)
+  intrinsic.view_length(self.bytes)
 }
 
 public fn StringSlice.byte(self, index: UInt64) -> UInt8
@@ -176,7 +176,7 @@ public fn StringSlice.byte(self, index: UInt64) -> UInt8
   if index >= self.length() {
     Panic.crash("index out of bounds")
   }
-  intrinsic::view_at(self.bytes, index: index)
+  intrinsic.view_at(self.bytes, index: index)
 }
 
 public fn Literal.text(self) -> StringSlice
@@ -191,7 +191,7 @@ public fn StringSlice.to_string(self) -> String
   cost time O(self.length())
   cost allocations <= 1
 {
-  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(self.length())
+  var output: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(self.length())
   self.copy_onto(mut output)
   String(storage: own output)
 }
@@ -200,27 +200,27 @@ internal fn String.push_byte(mut self, byte: UInt8)
   ensures identical(self.model(), old(self.model()).append(byte))
   cost amortized time O(1)
 {
-  growth::push(mut self.storage, value: byte)
+  growth.push(mut self.storage, value: byte)
 }
 
 internal fn String.push_float32(mut self, value: Float32)
 {
-  float_text::write_shortest_float32(mut self.storage, value: value)
+  float_text.write_shortest_float32(mut self.storage, value: value)
 }
 
 internal fn String.push_float64(mut self, value: Float64)
 {
-  float_text::write_shortest_float64(mut self.storage, value: value)
+  float_text.write_shortest_float64(mut self.storage, value: value)
 }
 
 internal fn String.push_unsigned(mut self, value: UInt64)
 {
-  writing::unsigned(mut self.storage, value: value)
+  writing.unsigned(mut self.storage, value: value)
 }
 
 internal fn String.push_signed(mut self, value: Int64)
 {
-  writing::signed(mut self.storage, value: value)
+  writing.signed(mut self.storage, value: value)
 }
 
 impl Equal for String {
@@ -235,12 +235,12 @@ impl Equal for String {
 
 impl Ordered for String {
   fn compare(self, other: String) -> Ordering
-    ensures (result == Ordering.Less) == (intrinsic::compare_bytes(intrinsic::storage_view(self.storage), right: intrinsic::storage_view(other.storage)) < 0)
+    ensures (result == Ordering.Less) == (intrinsic.compare_bytes(intrinsic.storage_view(self.storage), right: intrinsic.storage_view(other.storage)) < 0)
     ensures (result == Ordering.Equal) == identical(self.model(), other.model())
     cost time O(self.length())
     cost allocations == 0
   {
-    let order = intrinsic::compare_bytes(intrinsic::storage_view(self.storage), right: intrinsic::storage_view(other.storage))
+    let order = intrinsic.compare_bytes(intrinsic.storage_view(self.storage), right: intrinsic.storage_view(other.storage))
     if order < 0 { Ordering.Less } else if order > 0 { Ordering.Greater } else { Ordering.Equal }
   }
 }
@@ -267,7 +267,7 @@ impl Equal for StringSlice {
     cost time O(other.length())
     cost allocations == 0
   {
-    intrinsic::compare_bytes(other.bytes, right: self.bytes) == 0
+    intrinsic.compare_bytes(other.bytes, right: self.bytes) == 0
   }
 }
 
@@ -315,7 +315,7 @@ impl Display for Utf16Error {
 public fn String.with_capacity(capacity: UInt64) -> String
   ensures result.length() == 0
 {
-  String(storage: intrinsic::storage_with_capacity(capacity))
+  String(storage: intrinsic.storage_with_capacity(capacity))
 }
 
 public fn String.from_utf8(bytes: own List[UInt8]) -> Result[String, Utf8Error]
@@ -383,11 +383,11 @@ internal fn StringSlice.is_malformed_at(self, offset: UInt64) -> Bool
   self.decode(offset).length == 1 && self.byte(offset) >= 128
 }
 
-internal fn reverse_run(storage: mut intrinsic::Storage[UInt8], from: UInt64, to: UInt64)
+internal fn reverse_run(storage: mut intrinsic.Storage[UInt8], from: UInt64, to: UInt64)
   requires from <= to
-  requires to <= intrinsic::storage_length(storage)
-  ensures intrinsic::storage_length(storage) == old(intrinsic::storage_length(storage))
-  ensures intrinsic::storage_capacity(storage) == old(intrinsic::storage_capacity(storage))
+  requires to <= intrinsic.storage_length(storage)
+  ensures intrinsic.storage_length(storage) == old(intrinsic.storage_length(storage))
+  ensures intrinsic.storage_capacity(storage) == old(intrinsic.storage_capacity(storage))
   cost time O(to - from)
   cost allocations == 0
 {
@@ -397,14 +397,14 @@ internal fn reverse_run(storage: mut intrinsic::Storage[UInt8], from: UInt64, to
     invariant from <= low
     invariant low <= high
     invariant high <= to
-    invariant intrinsic::storage_length(storage) == old(intrinsic::storage_length(storage))
-    invariant intrinsic::storage_capacity(storage) == old(intrinsic::storage_capacity(storage))
+    invariant intrinsic.storage_length(storage) == old(intrinsic.storage_length(storage))
+    invariant intrinsic.storage_capacity(storage) == old(intrinsic.storage_capacity(storage))
     decreases high - low
     cost time O(low - from)
     cost allocations == 0
   {
     high -= 1
-    intrinsic::storage_swap(mut storage, first: low, second: high)
+    intrinsic.storage_swap(mut storage, first: low, second: high)
     low += 1
   }
 }
@@ -414,7 +414,7 @@ public fn String.from_utf8_lossy(bytes: Slice[UInt8]) -> String
 {
   let text = StringSlice(bytes: bytes.elements)
   if text.length() > UInt64.maximum / 4 {
-    intrinsic::crash("a string cannot hold that many bytes")
+    intrinsic.crash("a string cannot hold that many bytes")
   }
   var budget: UInt64 = 0
   var offset: UInt64 = 0
@@ -433,21 +433,21 @@ public fn String.from_utf8_lossy(bytes: Slice[UInt8]) -> String
     }
   }
   let capacity = text.length() + budget
-  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(capacity)
+  var output: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(capacity)
   var position: UInt64 = 0
   while position < text.length()
     invariant position <= text.length()
-    invariant intrinsic::storage_length(output) + (text.length() - position) + budget <= capacity
-    invariant intrinsic::storage_capacity(output) == capacity
+    invariant intrinsic.storage_length(output) + (text.length() - position) + budget <= capacity
+    invariant intrinsic.storage_capacity(output) == capacity
     decreases text.length() - position
     cost time O(position)
   {
     if text.is_malformed_at(position) {
       let run = text.malformed_length(position)
       if budget >= 3 - run {
-        intrinsic::storage_push(mut output, value: 239)
-        intrinsic::storage_push(mut output, value: 191)
-        intrinsic::storage_push(mut output, value: 189)
+        intrinsic.storage_push(mut output, value: 239)
+        intrinsic.storage_push(mut output, value: 191)
+        intrinsic.storage_push(mut output, value: 189)
         budget -= 3 - run
       }
       position += run
@@ -464,7 +464,7 @@ public fn String.from_utf16(units: Slice[UInt16]) -> Result[String, Utf16Error]
   cost time O(units.length())
 {
   if units.length() > UInt64.maximum / 4 {
-    intrinsic::crash("a string cannot hold that many bytes")
+    intrinsic.crash("a string cannot hold that many bytes")
   }
   var size: UInt64 = 0
   var index: UInt64 = 0
@@ -485,27 +485,27 @@ public fn String.from_utf16(units: Slice[UInt16]) -> Result[String, Utf16Error]
       return Err(Utf16Error(valid_up_to: index))
     }
   }
-  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(size)
+  var output: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(size)
   var room = size
   var position: UInt64 = 0
   while position < units.length()
     invariant position <= units.length()
-    invariant intrinsic::storage_length(output) + room == size
-    invariant intrinsic::storage_capacity(output) == size
+    invariant intrinsic.storage_length(output) + room == size
+    invariant intrinsic.storage_capacity(output) == size
     decreases units.length() - position
     cost time O(position)
   {
-    let unit: UInt32 = intrinsic::convert(units[position])
+    let unit: UInt32 = intrinsic.convert(units[position])
     var code = unit
     var step: UInt64 = 1
     if unit >= 55296 && unit <= 56319 && position + 1 < units.length() {
-      let low: UInt32 = intrinsic::convert(units[position + 1])
+      let low: UInt32 = intrinsic.convert(units[position + 1])
       if low >= 56320 && low <= 57343 {
         code = 65536 + (unit - 55296) * 1024 + (low - 56320)
         step = 2
       }
     }
-    let character: Character = if code >= 55296 && code <= 57343 { Character"\u{fffd}" } else { intrinsic::convert(code) }
+    let character: Character = if code >= 55296 && code <= 57343 { Character"\u{fffd}" } else { intrinsic.convert(code) }
     if room >= character.utf8_length() {
       character.encode_onto(mut output)
       room -= character.utf8_length()
@@ -530,16 +530,16 @@ public fn String.collect[Source: Cursor[Element = Character]](source: own Source
 
 public fn String.capacity(self) -> UInt64
   ensures result >= self.length()
-  ensures result == (intrinsic::storage_capacity(self.storage))
+  ensures result == (intrinsic.storage_capacity(self.storage))
   cost time O(1)
 {
-  intrinsic::storage_capacity(self.storage)
+  intrinsic.storage_capacity(self.storage)
 }
 
 public fn String.reserve(mut self, additional: UInt64)
   ensures identical(self.model(), old(self.model()))
 {
-  growth::reserve(mut self.storage, additional: additional)
+  growth.reserve(mut self.storage, additional: additional)
 }
 
 public fn String.clear(mut self)
@@ -548,14 +548,14 @@ public fn String.clear(mut self)
   cost time O(1)
   cost allocations == 0
 {
-  intrinsic::storage_shorten(mut self.storage, length: 0)
+  intrinsic.storage_shorten(mut self.storage, length: 0)
 }
 
 public fn String.push_character(mut self, character: Character)
   ensures self.length() == old(self.length()) + character.utf8_length()
   cost amortized time O(1)
 {
-  growth::reserve(mut self.storage, additional: character.utf8_length())
+  growth.reserve(mut self.storage, additional: character.utf8_length())
   character.encode_onto(mut self.storage)
 }
 
@@ -569,7 +569,7 @@ public fn String.pop_character(mut self) -> Option[Character]
   }
   let start = self.slice().previous_start(self.length())
   let character = self.slice().decode(start).character
-  intrinsic::storage_shorten(mut self.storage, length: start)
+  intrinsic.storage_shorten(mut self.storage, length: start)
   Some(character)
 }
 
@@ -582,7 +582,7 @@ public fn String.insert(mut self, offset: UInt64, text: StringSlice)
     Panic.crash("slice out of bounds")
   }
   let end = self.length() + text.length()
-  growth::reserve(mut self.storage, additional: text.length())
+  growth.reserve(mut self.storage, additional: text.length())
   text.copy_onto(mut self.storage)
   reverse_run(mut self.storage, from: offset, to: end)
   reverse_run(mut self.storage, from: offset, to: offset + text.length())
@@ -610,10 +610,10 @@ public fn String.remove_range(mut self, from: UInt64, to: UInt64)
     decreases self.length() - index
     cost allocations == 0
   {
-    intrinsic::storage_swap(mut self.storage, first: index - width, second: index)
+    intrinsic.storage_swap(mut self.storage, first: index - width, second: index)
     index += 1
   }
-  intrinsic::storage_shorten(mut self.storage, length: self.length() - width)
+  intrinsic.storage_shorten(mut self.storage, length: self.length() - width)
 }
 
 public fn String.truncate(mut self, length: UInt64)
@@ -625,7 +625,7 @@ public fn String.truncate(mut self, length: UInt64)
   if length > self.length() || !self.is_boundary(length) {
     Panic.crash("slice out of bounds")
   }
-  intrinsic::storage_shorten(mut self.storage, length: length)
+  intrinsic.storage_shorten(mut self.storage, length: length)
 }
 
 impl Default for String {
@@ -637,7 +637,7 @@ impl Default for String {
 impl From[Character] for String {
   fn from(value: own Character) -> String
   {
-    var text = String(storage: intrinsic::storage_with_capacity(4))
+    var text = String(storage: intrinsic.storage_with_capacity(4))
     mut text.push_character(value)
     text
   }

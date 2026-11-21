@@ -1,4 +1,4 @@
-use standard::intrinsic
+use standard.intrinsic
 
 public type DecodeError =
   | InvalidCharacter(offset: UInt64)
@@ -84,21 +84,21 @@ public fn encode(bytes: Slice[UInt8], padding: Bool = true) -> String
 {
   let count = bytes.length()
   if count > UInt64.maximum / 16 {
-    intrinsic::crash("a string cannot hold that many bytes")
+    intrinsic.crash("a string cannot hold that many bytes")
   }
   let groups = (count + 4) / 5
   let symbol_count = (8 * count + 4) / 5
   let length = if padding { 8 * groups } else { symbol_count }
-  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(8 * groups)
+  var output: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(8 * groups)
   for position in 0..length
-    invariant intrinsic::storage_length(output) == position
-    invariant intrinsic::storage_capacity(output) == 8 * groups
+    invariant intrinsic.storage_length(output) == position
+    invariant intrinsic.storage_capacity(output) == 8 * groups
     cost allocations == 0
   {
     if position < symbol_count {
-      intrinsic::storage_push(mut output, value: symbol(symbol_at(bytes, start: position / 8 * 5, position: position % 8)))
+      intrinsic.storage_push(mut output, value: symbol(symbol_at(bytes, start: position / 8 * 5, position: position % 8)))
     } else {
-      intrinsic::storage_push(mut output, value: 61)
+      intrinsic.storage_push(mut output, value: 61)
     }
   }
   String(storage: own output)
@@ -136,7 +136,7 @@ fn byte_of(text: Slice[UInt8], symbol_count: UInt64, index: UInt64) -> UInt8
 public fn decode(text: StringSlice) -> Result[List[UInt8], DecodeError] {
   let symbols = text.bytes()
   if symbols.length() > UInt64.maximum / 4 {
-    intrinsic::crash("a string cannot hold that many bytes")
+    intrinsic.crash("a string cannot hold that many bytes")
   }
   var symbol_count = symbols.length()
   while symbol_count > 0 && symbols[symbol_count - 1] == 61

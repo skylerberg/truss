@@ -34,7 +34,6 @@ val report_brace_record :
 
 val report_turbofish : Cursor.t -> colons:Token.t -> less:Token.t -> greater:Token.t -> unit
 val report_angle_brackets : Cursor.t -> angles:Token.t list -> unit
-val report_path_separator : Cursor.t -> separator:Token.t -> unit
 val report_qualified_variant : Cursor.t -> qualifier_start:int -> variant:Syntax.name -> unit
 val report_macro_call : Cursor.t -> name:Syntax.name -> bang:Token.t -> opening:Token.t -> unit
 val report_keyword_macro : Cursor.t -> bang:Token.t -> closing:Token.t -> has_arguments:bool -> unit

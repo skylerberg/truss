@@ -1,8 +1,8 @@
-use framework::sources
+use framework.sources
 
 public type Timer()
 
-impl sources::Source for Timer {
+impl sources.Source for Timer {
   fn read(self) -> Instant
     uses Clock
   {

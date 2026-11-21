@@ -1,9 +1,9 @@
-use standard::intrinsic
+use standard.intrinsic
 
 theorem t(word: UInt64, bits: UInt64)
   requires bits <= 64
   requires word != 0
   requires bits == 64 || word < power(2, bits)
-  ensures intrinsic::trailing_zeros(word) < bits
+  ensures intrinsic.trailing_zeros(word) < bits
 {
 }

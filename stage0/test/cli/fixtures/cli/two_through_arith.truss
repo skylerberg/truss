@@ -1,5 +1,5 @@
-use lib::arith
+use lib.arith
 
 public fn two() -> UInt8 {
-  arith::bump(1)
+  arith.bump(1)
 }

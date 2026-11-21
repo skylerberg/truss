@@ -641,6 +641,8 @@ and build_kind form env (value : Syntax.expression) : Core.kind =
   | Continue -> Continue
   | Self_value -> Use (build_self_local env ~origin:(Written value.id))
   | Name _ -> build_name form env value
+  | Member _ when Option.is_some (Resolve.find_head form.resolved value) ->
+      build_name form env value
   | Member (base, member) -> build_member form env value base member
   | Bracket (base, items) -> (
       match form.resolved.brackets.(value.id) with

@@ -1,32 +1,32 @@
-use standard::capabilities
-use standard::intrinsic
-use standard::processes
-use standard::system::handles
+use standard.capabilities
+use standard.intrinsic
+use standard.processes
+use standard.system.handles
 
 internal type SystemSignals()
 
 impl Signals for SystemSignals
-  uses capabilities::System
+  uses capabilities.System
 {
-  fn wait(self, signals: Slice[processes::Signal]) -> Option[processes::Signal] {
-    var numbers: intrinsic::Storage[Int32] = intrinsic::storage_with_capacity(signals.length())
+  fn wait(self, signals: Slice[processes.Signal]) -> Option[processes.Signal] {
+    var numbers: intrinsic.Storage[Int32] = intrinsic.storage_with_capacity(signals.length())
     for signal in signals
-      invariant intrinsic::storage_length(numbers) <= visited.length()
-      invariant intrinsic::storage_capacity(numbers) == signals.length()
+      invariant intrinsic.storage_length(numbers) <= visited.length()
+      invariant intrinsic.storage_capacity(numbers) == signals.length()
     {
-      let number = handles::signal_number(signal)
+      let number = handles.signal_number(signal)
       if number > 0 {
-        intrinsic::storage_push(mut numbers, value: number)
+        intrinsic.storage_push(mut numbers, value: number)
       }
     }
-    let arrived = intrinsic::runtime_signals_wait(
-      intrinsic::storage_view(numbers),
-      count: intrinsic::storage_length(numbers),
+    let arrived = intrinsic.runtime_signals_wait(
+      intrinsic.storage_view(numbers),
+      count: intrinsic.storage_length(numbers),
     )
     if arrived == 0 {
       None
     } else {
-      Some(handles::signal_from(arrived))
+      Some(handles.signal_from(arrived))
     }
   }
 }

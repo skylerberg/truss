@@ -1,4 +1,4 @@
-use a::b
+use a.b
 
 fn f() -> Int64 {
   1

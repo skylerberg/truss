@@ -1,7 +1,7 @@
-use standard::list
-use standard::map
+use standard.list
+use standard.map
 
-public opaque type Set[Element: Hash + Ordered](map: map::Map[Element, Unit])
+public opaque type Set[Element: Hash + Ordered](map: map.Map[Element, Unit])
   derives Copyable
 
 impl Model for Set[Element: Hash + Ordered] {
@@ -116,7 +116,7 @@ public fn Set[Element: Hash + Ordered].with_capacity(capacity: UInt64) -> Set[El
   ensures forall value: Element => !result.model().contains(value)
   cost time O(1)
 {
-  Set(map: map::Map.with_capacity(capacity))
+  Set(map: map.Map.with_capacity(capacity))
 }
 
 public fn Set[Element: Hash + Ordered].collect[Source: Cursor[Element = Element]](source: own Source) -> Set[Element]
@@ -402,7 +402,7 @@ impl Iterable for Set[Element: Hash + Ordered] {
   }
 }
 
-public fn Set[Element: Hash + Ordered].cursor(own self) -> list::ListCursor[Element]
+public fn Set[Element: Hash + Ordered].cursor(own self) -> list.ListCursor[Element]
   ensures result.remaining() == self.length()
   ensures identical(result.model().elements(), self.model())
   cost time O(self.length())
@@ -462,7 +462,7 @@ impl Default for Set[Element: Hash + Ordered] {
     ensures result.length() == 0
     ensures forall value: Element => !result.model().contains(value)
   {
-    Set(map: map::Map.default())
+    Set(map: map.Map.default())
   }
 }
 

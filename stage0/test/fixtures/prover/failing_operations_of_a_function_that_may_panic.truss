@@ -1,4 +1,4 @@
-use standard::collections
+use standard.collections
 
 fn sum(left: Int64, right: Int64) -> Int64
   uses Panic
@@ -42,7 +42,7 @@ fn port(ports: Map[String, UInt16], name: String) -> UInt16
   ports[name]
 }
 
-fn mark(bits: mut collections::BitSet, index: UInt64)
+fn mark(bits: mut collections.BitSet, index: UInt64)
   uses Panic
 {
   bits[index] = true

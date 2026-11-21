@@ -1,5 +1,5 @@
-use app::counter
+use app.counter
 
-fn forged() -> counter::Counter {
-  counter::Counter(count: 50)
+fn forged() -> counter.Counter {
+  counter.Counter(count: 50)
 }

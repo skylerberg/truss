@@ -1,4 +1,4 @@
-use standard::collections
+use standard.collections
 
 fn total(items: Slice[Int64]) -> Int64
   uses Panic
@@ -46,7 +46,7 @@ fn port(ports: Map[String, UInt16], name: String) -> UInt16
 fn marked(index: UInt64) -> UInt64
   uses Panic
 {
-  var bits = collections::BitSet.new(2)
+  var bits = collections.BitSet.new(2)
   if index >= bits.length() {
     Panic.crash("index out of bounds")
   }

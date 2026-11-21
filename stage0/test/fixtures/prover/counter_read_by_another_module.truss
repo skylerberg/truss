@@ -1,6 +1,6 @@
-use app::counter
+use app.counter
 
-fn small(value: counter::Counter) -> Int64
+fn small(value: counter.Counter) -> Int64
   ensures result <= 10
 {
   value.count

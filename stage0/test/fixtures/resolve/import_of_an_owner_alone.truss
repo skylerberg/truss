@@ -1,5 +1,5 @@
-use acme::vector
+use acme.vector
 
 fn f() -> Int64 {
-  vector::length(1)
+  vector.length(1)
 }

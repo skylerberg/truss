@@ -1,9 +1,9 @@
-use standard::math
+use standard.math
 
 fn f(value: Int64) -> Int64
   ensures result == value
 {
-  match Int64.try_from(math::BigInteger.from(value)) {
+  match Int64.try_from(math.BigInteger.from(value)) {
     Ok(converted) => converted
     Err(_) => unreachable
   }
@@ -12,7 +12,7 @@ fn f(value: Int64) -> Int64
 fn g(value: UInt64) -> UInt64
   ensures result == value
 {
-  match UInt64.try_from(math::BigInteger.from(value)) {
+  match UInt64.try_from(math.BigInteger.from(value)) {
     Ok(converted) => converted
     Err(_) => unreachable
   }
@@ -21,7 +21,7 @@ fn g(value: UInt64) -> UInt64
 fn h(value: Int64) -> UInt64
   requires value < 0
 {
-  match UInt64.try_from(math::BigInteger.from(value)) {
+  match UInt64.try_from(math.BigInteger.from(value)) {
     Ok(_) => unreachable
     Err(_) => 0
   }

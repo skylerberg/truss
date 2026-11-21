@@ -1,7 +1,7 @@
-use standard::intrinsic
-use standard::core
-use standard::list
-use standard::specification
+use standard.intrinsic
+use standard.core
+use standard.list
+use standard.specification
 
 public fn Slice[Element].is_empty(self) -> Bool
   ensures result == (self.length() == 0)
@@ -49,31 +49,31 @@ public fn Slice[Element].last(self) lends Option[Element]
   }
 }
 
-public fn Slice[Element].split_first(self) lends Option[list::SplitFirst[Element]]
+public fn Slice[Element].split_first(self) lends Option[list.SplitFirst[Element]]
 
   ensures (result is Some(_)) == (self.length() > 0)
   cost time O(1)
 {
   if self.length() > 0 {
-    Some(list::SplitFirst(first: self[0], rest: self[1..]))
+    Some(list.SplitFirst(first: self[0], rest: self[1..]))
   } else {
     None
   }
 }
 
-public fn Slice[Element].split_last(self) lends Option[list::SplitLast[Element]]
+public fn Slice[Element].split_last(self) lends Option[list.SplitLast[Element]]
 
   ensures (result is Some(_)) == (self.length() > 0)
   cost time O(1)
 {
   if self.length() > 0 {
-    Some(list::SplitLast(last: self[self.length() - 1], rest: self[..self.length() - 1]))
+    Some(list.SplitLast(last: self[self.length() - 1], rest: self[..self.length() - 1]))
   } else {
     None
   }
 }
 
-public fn Slice[Element].split_at(self, index: UInt64) -> core::Pair[Slice[Element], Slice[Element]]
+public fn Slice[Element].split_at(self, index: UInt64) -> core.Pair[Slice[Element], Slice[Element]]
   uses Panic unless index <= self.length()
   ensures result.first.length() == index
   ensures result.second.length() == self.length() - index
@@ -82,7 +82,7 @@ public fn Slice[Element].split_at(self, index: UInt64) -> core::Pair[Slice[Eleme
   if index > self.length() {
     Panic.crash("slice out of bounds")
   }
-  core::Pair(
+  core.Pair(
     first: self[..index],
     second: self[index..],
   )
@@ -243,20 +243,20 @@ fn failure_table[Element: Equal](needle: Slice[Element]) -> List[UInt64]
   ensures forall i in 0..result.length() => result.model()[i] <= i
   cost time O(needle.length() * time(Element.equal))
 {
-  var table: intrinsic::Storage[UInt64] = intrinsic::storage_with_capacity(needle.length())
+  var table: intrinsic.Storage[UInt64] = intrinsic.storage_with_capacity(needle.length())
   if needle.length() == 0 {
     return List(storage: own table)
   }
-  intrinsic::storage_push(mut table, value: 0)
+  intrinsic.storage_push(mut table, value: 0)
   var matched: UInt64 = 0
   var index: UInt64 = 1
   while index < needle.length()
     invariant 1 <= index
     invariant index <= needle.length()
     invariant matched < index
-    invariant intrinsic::storage_length(table) == index
-    invariant intrinsic::storage_capacity(table) == needle.length()
-    invariant forall i in 0..index => intrinsic::storage_model(table)[i] <= i
+    invariant intrinsic.storage_length(table) == index
+    invariant intrinsic.storage_capacity(table) == needle.length()
+    invariant forall i in 0..index => intrinsic.storage_model(table)[i] <= i
     decreases needle.length() - index
     cost time O((4 * index - matched) * time(Element.equal))
   {
@@ -266,12 +266,12 @@ fn failure_table[Element: Equal](needle: Slice[Element]) -> List[UInt64]
       decreases matched
       cost time O((before - matched + 1) * time(Element.equal))
     {
-      matched = intrinsic::view_at(intrinsic::storage_view(table), index: matched - 1)
+      matched = intrinsic.view_at(intrinsic.storage_view(table), index: matched - 1)
     }
     if needle[index] == needle[matched] {
       matched += 1
     }
-    intrinsic::storage_push(mut table, value: matched)
+    intrinsic.storage_push(mut table, value: matched)
     index += 1
   }
   List(storage: own table)
@@ -517,15 +517,15 @@ public fn Slice[Element: Copyable].to_list(self) -> List[Element]
   cost time O(self.length() * time(Element.copy))
   cost allocations <= 1 + self.length() * allocations(Element.copy)
 {
-  var copy: intrinsic::Storage[Element] = intrinsic::storage_with_capacity(self.length())
+  var copy: intrinsic.Storage[Element] = intrinsic.storage_with_capacity(self.length())
   for index in 0..self.length()
-    invariant intrinsic::storage_length(copy) == index
-    invariant intrinsic::storage_capacity(copy) == self.length()
+    invariant intrinsic.storage_length(copy) == index
+    invariant intrinsic.storage_capacity(copy) == self.length()
     invariant forall i in 0..index =>
-      identical(intrinsic::storage_model(copy)[i], self.model()[i])
+      identical(intrinsic.storage_model(copy)[i], self.model()[i])
     cost allocations <= index * allocations(Element.copy)
   {
-    intrinsic::storage_push(mut copy, value: self[index].copy())
+    intrinsic.storage_push(mut copy, value: self[index].copy())
   }
   List(storage: own copy)
 }
@@ -539,15 +539,15 @@ public fn Slice[Element: Copyable].filter(
   ensures forall i in 0..result.length() => keep.ensures(result.model()[i], true)
   cost time O(self.length() * (time(keep) + time(Element.copy)))
 {
-  var retained: intrinsic::Storage[Element] = intrinsic::storage_with_capacity(self.length())
+  var retained: intrinsic.Storage[Element] = intrinsic.storage_with_capacity(self.length())
   for index in 0..self.length()
-    invariant intrinsic::storage_length(retained) <= index
-    invariant intrinsic::storage_capacity(retained) == self.length()
-    invariant forall i in 0..intrinsic::storage_length(retained) =>
-      keep.ensures(intrinsic::storage_model(retained)[i], true)
+    invariant intrinsic.storage_length(retained) <= index
+    invariant intrinsic.storage_capacity(retained) == self.length()
+    invariant forall i in 0..intrinsic.storage_length(retained) =>
+      keep.ensures(intrinsic.storage_model(retained)[i], true)
   {
     if keep(self[index]) {
-      intrinsic::storage_push(mut retained, value: self[index].copy())
+      intrinsic.storage_push(mut retained, value: self[index].copy())
     }
   }
   List(storage: own retained)
@@ -572,16 +572,16 @@ public fn Slice[Element: Copyable].repeated(self, times: UInt64) -> List[Element
   }
   match self.length().checked_multiply(times) {
     Some(total) => {
-      var elements: intrinsic::Storage[Element] = intrinsic::storage_with_capacity(total)
+      var elements: intrinsic.Storage[Element] = intrinsic.storage_with_capacity(total)
       for position in 0..total
-        invariant intrinsic::storage_length(elements) == position
-        invariant intrinsic::storage_capacity(elements) == total
+        invariant intrinsic.storage_length(elements) == position
+        invariant intrinsic.storage_capacity(elements) == total
       {
-        intrinsic::storage_push(mut elements, value: self[position % self.length()].copy())
+        intrinsic.storage_push(mut elements, value: self[position % self.length()].copy())
       }
       List(storage: own elements)
     }
-    None => intrinsic::crash("a list cannot hold that many elements")
+    None => intrinsic.crash("a list cannot hold that many elements")
   }
 }
 
@@ -602,23 +602,23 @@ public fn Slice[Element: Display].join(self, separator: StringSlice) -> String
   output
 }
 
-public fn Slice[Element].enumerate(self) -> list::Enumerated[Element]
+public fn Slice[Element].enumerate(self) -> list.Enumerated[Element]
   ensures result.count() == self.length()
   cost time O(1)
   cost allocations == 0
 {
-  list::Enumerated(elements: self)
+  list.Enumerated(elements: self)
 }
 
-public fn Slice[Element].reversed(self) -> list::Reversed[Element]
+public fn Slice[Element].reversed(self) -> list.Reversed[Element]
   ensures result.count() == self.length()
   cost time O(1)
   cost allocations == 0
 {
-  list::Reversed(elements: self)
+  list.Reversed(elements: self)
 }
 
-public fn Slice[Element].windows(self, size: UInt64) -> list::Windows[Element]
+public fn Slice[Element].windows(self, size: UInt64) -> list.Windows[Element]
   uses Panic unless size > 0
   ensures result.count() <= self.length()
   cost time O(1)
@@ -627,10 +627,10 @@ public fn Slice[Element].windows(self, size: UInt64) -> list::Windows[Element]
   if size == 0 {
     Panic.crash("the size is zero")
   }
-  list::Windows(elements: self, size: size)
+  list.Windows(elements: self, size: size)
 }
 
-public fn Slice[Element].chunks(self, size: UInt64) -> list::Chunks[Element]
+public fn Slice[Element].chunks(self, size: UInt64) -> list.Chunks[Element]
   uses Panic unless size > 0
   ensures result.count() <= self.length()
   cost time O(1)
@@ -639,7 +639,7 @@ public fn Slice[Element].chunks(self, size: UInt64) -> list::Chunks[Element]
   if size == 0 {
     Panic.crash("the size is zero")
   }
-  list::Chunks(elements: self, size: size)
+  list.Chunks(elements: self, size: size)
 }
 
 public fn Slice[Element: Equal].split(self, separator: Element) -> List[Slice[Element]]
@@ -664,13 +664,13 @@ public fn Slice[Element: Equal].split(self, separator: Element) -> List[Slice[El
   parts
 }
 
-public fn Slice[Element].zip[Other](self, other: Slice[Other]) -> list::Zipped[Element, Other]
+public fn Slice[Element].zip[Other](self, other: Slice[Other]) -> list.Zipped[Element, Other]
   ensures result.count() <= self.length()
   ensures result.count() <= other.length()
   cost time O(1)
   cost allocations == 0
 {
-  list::Zipped(first: self, second: other)
+  list.Zipped(first: self, second: other)
 }
 
 public fn Slice[Element].swap(mut self, first: UInt64, second: UInt64)
@@ -685,7 +685,7 @@ public fn Slice[Element].swap(mut self, first: UInt64, second: UInt64)
   if first >= self.length() || second >= self.length() {
     Panic.crash("index out of bounds")
   }
-  intrinsic::view_swap(mut self.elements, first: first, second: second)
+  intrinsic.view_swap(mut self.elements, first: first, second: second)
 }
 
 internal fn Slice[Element].reverse_between(mut self, start: UInt64, stop: UInt64)
@@ -1445,14 +1445,14 @@ fn quicksort[Element: Ordered](
   if length <= insertion_sort_threshold {
     insertion_sort(mut items)
     proof {
-      specification::elements_of_a_permutation(items.model(), original: old(items.model()))
+      specification.elements_of_a_permutation(items.model(), original: old(items.model()))
     }
     return
   }
   if limit == 0 {
     heap_sort(mut items)
     proof {
-      specification::elements_of_a_permutation(items.model(), original: old(items.model()))
+      specification.elements_of_a_permutation(items.model(), original: old(items.model()))
     }
     return
   }
@@ -1470,7 +1470,7 @@ fn quicksort[Element: Ordered](
   if was_balanced && was_partitioned && is_ascending {
     if try_insertion_sort(mut items) {
       proof {
-        specification::elements_of_a_permutation(items.model(), original: old(items.model()))
+        specification.elements_of_a_permutation(items.model(), original: old(items.model()))
       }
       return
     }
@@ -1496,7 +1496,7 @@ fn quicksort[Element: Ordered](
     )
   }
   proof {
-    specification::elements_of_a_permutation(items.model(), original: old(items.model()))
+    specification.elements_of_a_permutation(items.model(), original: old(items.model()))
   }
 }
 
@@ -1674,7 +1674,7 @@ public fn Slice[Element].sort_by(mut self, compare: (fn(Element, Element) -> Ord
   build_heap_by(mut self, compare: compare)
   drain_heap_by(mut self, compare: compare)
   proof {
-    specification::elements_of_a_permutation(self.model(), original: old(self.model()))
+    specification.elements_of_a_permutation(self.model(), original: old(self.model()))
   }
 }
 

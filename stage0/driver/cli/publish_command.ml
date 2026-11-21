@@ -119,8 +119,8 @@ let run ~version =
   let name = Command_packages.require_one packages in
   if name.owner = None then
     Outcome.raise_cannot_run
-      "`%s` has no owner in its name, which a published package's has, such as `acme::%s`."
-      name.name name.name;
+      "`%s` has no owner in its name, which a published package's has, such as `acme.%s`." name.name
+      name.name;
   let major, _, _ = version and name_major = Registry.Version.parse_major name in
   if major <> name_major then
     Outcome.raise_cannot_run

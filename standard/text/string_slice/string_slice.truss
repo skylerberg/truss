@@ -1,7 +1,7 @@
-use standard::core
-use standard::intrinsic
-use standard::text::grapheme_breaks
-use standard::text::unicode_tables
+use standard.core
+use standard.intrinsic
+use standard.text.grapheme_breaks
+use standard.text.unicode_tables
 
 public fn StringSlice.is_empty(self) -> Bool
   ensures result == (self.length() == 0)
@@ -61,7 +61,7 @@ internal fn StringSlice.continuation(self, index: UInt64) -> UInt32
   cost allocations == 0
 {
   let byte = self.byte(index)
-  if byte >= 128 && byte <= 191 { intrinsic::convert(byte - 128) } else { 64 }
+  if byte >= 128 && byte <= 191 { intrinsic.convert(byte - 128) } else { 64 }
 }
 
 internal fn StringSlice.decode(self, offset: UInt64) -> Decoded
@@ -79,38 +79,38 @@ internal fn StringSlice.decode(self, offset: UInt64) -> Decoded
     return invalid
   }
   if length == 1 {
-    return Decoded(character: intrinsic::convert(first), length: 1)
+    return Decoded(character: intrinsic.convert(first), length: 1)
   }
   let second = self.continuation(offset + 1)
   if second == 64 {
     return invalid
   }
   if length == 2 {
-    let lead: UInt32 = intrinsic::convert(first - 192)
-    return Decoded(character: intrinsic::convert(lead * 64 + second), length: 2)
+    let lead: UInt32 = intrinsic.convert(first - 192)
+    return Decoded(character: intrinsic.convert(lead * 64 + second), length: 2)
   }
   let third = self.continuation(offset + 2)
   if third == 64 {
     return invalid
   }
   if length == 3 {
-    let lead: UInt32 = intrinsic::convert(first - 224)
+    let lead: UInt32 = intrinsic.convert(first - 224)
     let code = lead * 4096 + second * 64 + third
     if code < 2048 || (code >= 55296 && code <= 57343) {
       return invalid
     }
-    return Decoded(character: intrinsic::convert(code), length: 3)
+    return Decoded(character: intrinsic.convert(code), length: 3)
   }
   let fourth = self.continuation(offset + 3)
   if fourth == 64 {
     return invalid
   }
-  let lead: UInt32 = intrinsic::convert(first - 240)
+  let lead: UInt32 = intrinsic.convert(first - 240)
   let code = lead * 262144 + second * 4096 + third * 64 + fourth
   if code < 65536 || code > 1114111 {
     invalid
   } else {
-    Decoded(character: intrinsic::convert(code), length: 4)
+    Decoded(character: intrinsic.convert(code), length: 4)
   }
 }
 
@@ -143,7 +143,7 @@ internal fn StringSlice.part(self, from: UInt64, to: UInt64) -> StringSlice
   ensures forall index in 0..result.length() => result.model()[index] == self.model()[from + index]
   cost time O(1)
 {
-  StringSlice(bytes: intrinsic::view_slice(self.bytes, start: from, stop: to))
+  StringSlice(bytes: intrinsic.view_slice(self.bytes, start: from, stop: to))
 }
 
 internal fn StringSlice.matches_at(self, pattern: StringSlice, offset: UInt64) -> Bool
@@ -151,23 +151,23 @@ internal fn StringSlice.matches_at(self, pattern: StringSlice, offset: UInt64) -
   requires pattern.length() <= self.length() - offset
   cost time O(pattern.length())
 {
-  intrinsic::compare_bytes(self.part(offset, to: offset + pattern.length()).bytes, right: pattern.bytes) == 0
+  intrinsic.compare_bytes(self.part(offset, to: offset + pattern.length()).bytes, right: pattern.bytes) == 0
 }
 
-internal fn StringSlice.copy_onto(self, output: mut intrinsic::Storage[UInt8])
-  requires intrinsic::storage_length(output) + self.length() <= intrinsic::storage_capacity(output)
-  ensures intrinsic::storage_length(output) == old(intrinsic::storage_length(output)) + self.length()
-  ensures intrinsic::storage_capacity(output) == old(intrinsic::storage_capacity(output))
+internal fn StringSlice.copy_onto(self, output: mut intrinsic.Storage[UInt8])
+  requires intrinsic.storage_length(output) + self.length() <= intrinsic.storage_capacity(output)
+  ensures intrinsic.storage_length(output) == old(intrinsic.storage_length(output)) + self.length()
+  ensures intrinsic.storage_capacity(output) == old(intrinsic.storage_capacity(output))
   cost time O(self.length())
   cost allocations == 0
 {
-  let start = intrinsic::storage_length(output)
+  let start = intrinsic.storage_length(output)
   for index in 0..self.length()
-    invariant intrinsic::storage_length(output) == start + index
-    invariant intrinsic::storage_capacity(output) == old(intrinsic::storage_capacity(output))
+    invariant intrinsic.storage_length(output) == start + index
+    invariant intrinsic.storage_capacity(output) == old(intrinsic.storage_capacity(output))
     cost allocations == 0
   {
-    intrinsic::storage_push(mut output, value: self.byte(index))
+    intrinsic.storage_push(mut output, value: self.byte(index))
   }
 }
 
@@ -245,9 +245,9 @@ impl FiniteCursor for CharactersWithOffsets {
 }
 
 impl Cursor for CharactersWithOffsets {
-  type Element = core::Indexed[Character]
+  type Element = core.Indexed[Character]
 
-  fn next(mut self) -> Option[core::Indexed[Character]]
+  fn next(mut self) -> Option[core.Indexed[Character]]
     ensures (result is Some(_)) == (old(self.remaining()) > 0)
     ensures (result is Some(_)) ==> self.remaining() < old(self.remaining())
     ensures (result is None) ==> self.remaining() == old(self.remaining())
@@ -259,7 +259,7 @@ impl Cursor for CharactersWithOffsets {
       let decoded = self.text.decode(self.offset)
       let index = self.offset
       self.offset += decoded.length
-      Some(core::Indexed(index: index, element: decoded.character))
+      Some(core.Indexed(index: index, element: decoded.character))
     } else {
       None
     }
@@ -317,7 +317,7 @@ public fn StringSlice.graphemes(self) -> List[StringSlice]
   var parts: List[StringSlice] = []
   var start: UInt64 = 0
   var offset: UInt64 = 0
-  var state = grapheme_breaks::State.start()
+  var state = grapheme_breaks.State.start()
   while offset < self.length()
     invariant start <= offset
     invariant offset <= self.length()
@@ -390,7 +390,7 @@ public fn StringSlice.get_substring(self, from: UInt64, to: UInt64) -> Option[St
   }
 }
 
-public fn StringSlice.split_at(self, offset: UInt64) -> core::Pair[StringSlice, StringSlice]
+public fn StringSlice.split_at(self, offset: UInt64) -> core.Pair[StringSlice, StringSlice]
   uses Panic unless offset <= self.length() && self.is_boundary(offset)
   ensures result.first.length() == offset
   ensures result.second.length() == self.length() - offset
@@ -399,7 +399,7 @@ public fn StringSlice.split_at(self, offset: UInt64) -> core::Pair[StringSlice, 
   if offset > self.length() || !self.is_boundary(offset) {
     Panic.crash("slice out of bounds")
   }
-  core::Pair(first: self.part(0, to: offset), second: self.part(offset, to: self.length()))
+  core.Pair(first: self.part(0, to: offset), second: self.part(offset, to: self.length()))
 }
 
 internal fn failure_table(pattern: StringSlice) -> List[UInt64]
@@ -407,20 +407,20 @@ internal fn failure_table(pattern: StringSlice) -> List[UInt64]
   ensures forall i in 0..result.length() => result.model()[i] <= i
   cost time O(pattern.length())
 {
-  var table: intrinsic::Storage[UInt64] = intrinsic::storage_with_capacity(pattern.length())
+  var table: intrinsic.Storage[UInt64] = intrinsic.storage_with_capacity(pattern.length())
   if pattern.length() == 0 {
     return List(storage: own table)
   }
-  intrinsic::storage_push(mut table, value: 0)
+  intrinsic.storage_push(mut table, value: 0)
   var matched: UInt64 = 0
   var index: UInt64 = 1
   while index < pattern.length()
     invariant 1 <= index
     invariant index <= pattern.length()
     invariant matched < index
-    invariant intrinsic::storage_length(table) == index
-    invariant intrinsic::storage_capacity(table) == pattern.length()
-    invariant forall i in 0..index => intrinsic::storage_model(table)[i] <= i
+    invariant intrinsic.storage_length(table) == index
+    invariant intrinsic.storage_capacity(table) == pattern.length()
+    invariant forall i in 0..index => intrinsic.storage_model(table)[i] <= i
     decreases pattern.length() - index
     cost time O(2 * index - matched)
   {
@@ -430,12 +430,12 @@ internal fn failure_table(pattern: StringSlice) -> List[UInt64]
       decreases matched
       cost time O(before - matched)
     {
-      matched = intrinsic::view_at(intrinsic::storage_view(table), index: matched - 1)
+      matched = intrinsic.view_at(intrinsic.storage_view(table), index: matched - 1)
     }
     if pattern.byte(index) == pattern.byte(matched) {
       matched += 1
     }
-    intrinsic::storage_push(mut table, value: matched)
+    intrinsic.storage_push(mut table, value: matched)
     index += 1
   }
   List(storage: own table)
@@ -897,13 +897,13 @@ public fn StringSlice.split_whitespace(self) -> List[StringSlice]
   parts
 }
 
-public fn StringSlice.split_once(self, separator: StringSlice) -> Option[core::Pair[StringSlice, StringSlice]]
+public fn StringSlice.split_once(self, separator: StringSlice) -> Option[core.Pair[StringSlice, StringSlice]]
   ensures (result is Some(_)) == self.contains(separator)
   cost time O(self.length() + separator.length())
 {
   match self.find(separator) {
     Some(offset) => Some(
-      core::Pair(
+      core.Pair(
         first: self.part(0, to: offset),
         second: self.part(offset + separator.length(), to: self.length()),
       ),
@@ -912,13 +912,13 @@ public fn StringSlice.split_once(self, separator: StringSlice) -> Option[core::P
   }
 }
 
-public fn StringSlice.split_once_last(self, separator: StringSlice) -> Option[core::Pair[StringSlice, StringSlice]]
+public fn StringSlice.split_once_last(self, separator: StringSlice) -> Option[core.Pair[StringSlice, StringSlice]]
   ensures (result is Some(_)) == (self.find_last(separator) is Some(_))
   cost time O(self.length() + separator.length())
 {
   match self.find_last(separator) {
     Some(offset) => Some(
-      core::Pair(
+      core.Pair(
         first: self.part(0, to: offset),
         second: self.part(offset + separator.length(), to: self.length()),
       ),
@@ -942,11 +942,11 @@ public fn StringSlice.replace(self, pattern: StringSlice, replacement: StringSli
     return self.to_string()
   }
   if replacement.length() > UInt64.maximum / 4 / count || self.length() > UInt64.maximum / 4 {
-    intrinsic::crash("a string cannot hold that many bytes")
+    intrinsic.crash("a string cannot hold that many bytes")
   }
   var budget = count * replacement.length()
   let capacity = self.length() + budget
-  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(capacity)
+  var output: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(capacity)
   let table = failure_table(pattern)
   var copied: UInt64 = 0
   var matched: UInt64 = 0
@@ -955,10 +955,10 @@ public fn StringSlice.replace(self, pattern: StringSlice, replacement: StringSli
     invariant index <= self.length()
     invariant matched < pattern.length()
     invariant copied + matched <= index
-    invariant intrinsic::storage_length(output) + (self.length() - copied) + budget <= capacity
-    invariant intrinsic::storage_capacity(output) == capacity
+    invariant intrinsic.storage_length(output) + (self.length() - copied) + budget <= capacity
+    invariant intrinsic.storage_capacity(output) == capacity
     decreases self.length() - index
-    cost time O(2 * index - matched + intrinsic::storage_length(output))
+    cost time O(2 * index - matched + intrinsic.storage_length(output))
   {
     matched = self.advance(pattern, table: table.slice(), matched: matched, index: index)
     index += 1
@@ -987,10 +987,10 @@ public fn StringSlice.replace_first(self, pattern: StringSlice, replacement: Str
   match self.find(pattern) {
     Some(offset) => {
       if replacement.length() > UInt64.maximum / 4 || self.length() > UInt64.maximum / 4 {
-        intrinsic::crash("a string cannot hold that many bytes")
+        intrinsic.crash("a string cannot hold that many bytes")
       }
-      var output: intrinsic::Storage[UInt8] =
-        intrinsic::storage_with_capacity(self.length() - pattern.length() + replacement.length())
+      var output: intrinsic.Storage[UInt8] =
+        intrinsic.storage_with_capacity(self.length() - pattern.length() + replacement.length())
       self.part(0, to: offset).copy_onto(mut output)
       replacement.copy_onto(mut output)
       self.part(offset + pattern.length(), to: self.length()).copy_onto(mut output)
@@ -1005,18 +1005,18 @@ public fn StringSlice.repeated(self, times: UInt64) -> String
   cost time O(self.length() * times)
 {
   if self.length() == 0 || times == 0 {
-    return String(storage: intrinsic::storage_empty())
+    return String(storage: intrinsic.storage_empty())
   }
   if times > UInt64.maximum / 2 / self.length() {
-    intrinsic::crash("a string cannot hold that many bytes")
+    intrinsic.crash("a string cannot hold that many bytes")
   }
   let total = self.length() * times
-  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(total)
+  var output: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(total)
   for index in 0..total
-    invariant intrinsic::storage_length(output) == index
-    invariant intrinsic::storage_capacity(output) == total
+    invariant intrinsic.storage_length(output) == index
+    invariant intrinsic.storage_capacity(output) == total
   {
-    intrinsic::storage_push(mut output, value: self.byte(index % self.length()))
+    intrinsic.storage_push(mut output, value: self.byte(index % self.length()))
   }
   String(storage: own output)
 }
@@ -1025,21 +1025,21 @@ public fn StringSlice.reversed(self) -> String
   ensures result.length() == self.length()
   cost time O(self.length())
 {
-  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(self.length())
+  var output: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(self.length())
   var end = self.length()
   while end > 0
     invariant end <= self.length()
-    invariant intrinsic::storage_length(output) == self.length() - end
-    invariant intrinsic::storage_capacity(output) == self.length()
+    invariant intrinsic.storage_length(output) == self.length() - end
+    invariant intrinsic.storage_capacity(output) == self.length()
     decreases end
     cost time O(self.length() - end)
   {
     let start = self.previous_start(end)
     for index in start..end
-      invariant intrinsic::storage_length(output) == self.length() - end + (index - start)
-      invariant intrinsic::storage_capacity(output) == self.length()
+      invariant intrinsic.storage_length(output) == self.length() - end + (index - start)
+      invariant intrinsic.storage_capacity(output) == self.length()
     {
-      intrinsic::storage_push(mut output, value: self.byte(index))
+      intrinsic.storage_push(mut output, value: self.byte(index))
     }
     end = start
   }
@@ -1050,11 +1050,11 @@ internal fn push_scalar(output: mut String, code: UInt32)
   cost amortized time O(1)
 {
   if code <= 1114111 && (code < 55296 || code > 57343) {
-    mut output.push_character(intrinsic::convert(code))
+    mut output.push_character(intrinsic.convert(code))
   }
 }
 
-internal fn push_expansion(output: mut String, expansion: unicode_tables::Expansion)
+internal fn push_expansion(output: mut String, expansion: unicode_tables.Expansion)
   cost amortized time O(1)
 {
   push_scalar(mut output, code: expansion.first)
@@ -1076,7 +1076,7 @@ public fn StringSlice.to_uppercase(self) -> String
     decreases self.length() - offset
   {
     let decoded = self.decode(offset)
-    match unicode_tables::uppercase_expansion_of(decoded.character.code()) {
+    match unicode_tables.uppercase_expansion_of(decoded.character.code()) {
       Some(expansion) => push_expansion(mut output, expansion: expansion)
       None => mut output.push_character(decoded.character.to_uppercase())
     }
@@ -1111,8 +1111,8 @@ internal fn lower_character(
   cost amortized time O(1)
 {
   let code = character.code()
-  let cased = unicode_tables::is_cased(code)
-  let ignorable = unicode_tables::is_case_ignorable(code)
+  let cased = unicode_tables.is_cased(code)
+  let ignorable = unicode_tables.is_case_ignorable(code)
   if !ignorable && sigma_is_undecided {
     if cased {
       mut output.push("σ")
@@ -1131,7 +1131,7 @@ internal fn lower_character(
   } else if sigma_is_undecided {
     mut after_sigma.push_character(character.to_lowercase())
   } else {
-    match unicode_tables::lowercase_expansion_of(code) {
+    match unicode_tables.lowercase_expansion_of(code) {
       Some(expansion) => push_expansion(mut output, expansion: expansion)
       None => mut output.push_character(character.to_lowercase())
     }
@@ -1174,12 +1174,12 @@ public fn StringSlice.to_ascii_uppercase(self) -> String
   ensures result.length() == self.length()
   cost time O(self.length())
 {
-  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(self.length())
+  var output: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(self.length())
   for index in 0..self.length()
-    invariant intrinsic::storage_length(output) == index
-    invariant intrinsic::storage_capacity(output) == self.length()
+    invariant intrinsic.storage_length(output) == index
+    invariant intrinsic.storage_capacity(output) == self.length()
   {
-    intrinsic::storage_push(mut output, value: ascii_uppercase(self.byte(index)))
+    intrinsic.storage_push(mut output, value: ascii_uppercase(self.byte(index)))
   }
   String(storage: own output)
 }
@@ -1188,12 +1188,12 @@ public fn StringSlice.to_ascii_lowercase(self) -> String
   ensures result.length() == self.length()
   cost time O(self.length())
 {
-  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(self.length())
+  var output: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(self.length())
   for index in 0..self.length()
-    invariant intrinsic::storage_length(output) == index
-    invariant intrinsic::storage_capacity(output) == self.length()
+    invariant intrinsic.storage_length(output) == index
+    invariant intrinsic.storage_capacity(output) == self.length()
   {
-    intrinsic::storage_push(mut output, value: ascii_lowercase(self.byte(index)))
+    intrinsic.storage_push(mut output, value: ascii_lowercase(self.byte(index)))
   }
   String(storage: own output)
 }
@@ -1234,7 +1234,7 @@ internal fn StringSlice.padded(self, width: UInt64, fill: Character, at_start: B
   let missing = width - count
   let unit = fill.utf8_length()
   if missing > UInt64.maximum / 16 || self.length() > UInt64.maximum / 4 {
-    intrinsic::crash("a string cannot hold that many bytes")
+    intrinsic.crash("a string cannot hold that many bytes")
   }
   var room: UInt64 = if unit == 1 {
     missing
@@ -1247,15 +1247,15 @@ internal fn StringSlice.padded(self, width: UInt64, fill: Character, at_start: B
   }
   let after: UInt64 = if at_start { self.length() } else { 0 }
   let capacity = self.length() + room
-  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(capacity)
+  var output: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(capacity)
   if !at_start {
     self.copy_onto(mut output)
   }
   while room >= unit
-    invariant intrinsic::storage_length(output) + room + after <= capacity
-    invariant intrinsic::storage_capacity(output) == capacity
+    invariant intrinsic.storage_length(output) + room + after <= capacity
+    invariant intrinsic.storage_capacity(output) == capacity
     decreases room
-    cost time O(intrinsic::storage_length(output))
+    cost time O(intrinsic.storage_length(output))
   {
     fill.encode_onto(mut output)
     room -= unit
@@ -1295,23 +1295,23 @@ public fn StringSlice.to_utf16(self) -> List[UInt16]
   ensures result.length() <= self.length()
   cost time O(self.length())
 {
-  var units: intrinsic::Storage[UInt16] = intrinsic::storage_with_capacity(self.length())
+  var units: intrinsic.Storage[UInt16] = intrinsic.storage_with_capacity(self.length())
   var offset: UInt64 = 0
   while offset < self.length()
     invariant offset <= self.length()
-    invariant intrinsic::storage_length(units) <= offset
-    invariant intrinsic::storage_capacity(units) == self.length()
+    invariant intrinsic.storage_length(units) <= offset
+    invariant intrinsic.storage_capacity(units) == self.length()
     decreases self.length() - offset
     cost time O(offset)
   {
     let decoded = self.decode(offset)
     let code = decoded.character.code()
     if code < 65536 {
-      intrinsic::storage_push(mut units, value: intrinsic::convert(code))
+      intrinsic.storage_push(mut units, value: intrinsic.convert(code))
     } else {
       let above = code - 65536
-      intrinsic::storage_push(mut units, value: intrinsic::convert(55296 + above / 1024))
-      intrinsic::storage_push(mut units, value: intrinsic::convert(56320 + above % 1024))
+      intrinsic.storage_push(mut units, value: intrinsic.convert(55296 + above / 1024))
+      intrinsic.storage_push(mut units, value: intrinsic.convert(56320 + above % 1024))
     }
     offset += decoded.length
   }
@@ -1320,12 +1320,12 @@ public fn StringSlice.to_utf16(self) -> List[UInt16]
 
 impl Ordered for StringSlice {
   fn compare(self, other: StringSlice) -> Ordering
-    ensures (result == Ordering.Less) == (intrinsic::compare_bytes(self.bytes, right: other.bytes) < 0)
+    ensures (result == Ordering.Less) == (intrinsic.compare_bytes(self.bytes, right: other.bytes) < 0)
     ensures (result == Ordering.Equal) == identical(self.model(), other.model())
     cost time O(self.length())
     cost allocations == 0
   {
-    let order = intrinsic::compare_bytes(self.bytes, right: other.bytes)
+    let order = intrinsic.compare_bytes(self.bytes, right: other.bytes)
     if order < 0 { Ordering.Less } else if order > 0 { Ordering.Greater } else { Ordering.Equal }
   }
 }

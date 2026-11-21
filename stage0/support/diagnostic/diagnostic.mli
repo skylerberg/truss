@@ -12,6 +12,7 @@ module Code : sig
     | String_delimiter
     | Attribute
     | Foreign_operator
+    | Path_separator
     | Confusable_character
     | Lifetime
     | Number_hexadecimal_float
@@ -78,7 +79,6 @@ module Code : sig
     | As_conversion
     | Elif
     | Angle_brackets
-    | Path_separator
     | Qualified_variant
     | Macro_call
     | Tuple

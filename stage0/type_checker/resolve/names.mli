@@ -64,6 +64,7 @@ type lookups = {
 }
 
 val resolve_used_module : lookups -> from:Path.module_ -> Syntax.path -> Path.module_
+val list_package_roots : lookups -> Path.package -> string list
 val list_transitive_dependencies : lookups -> Path.package -> Path.package list
 val is_visible_package : lookups -> from:Path.module_ -> Path.package -> bool
 val is_visible_module : lookups -> from:Path.module_ -> Path.module_ -> bool

@@ -1,5 +1,5 @@
-use app::shapes
+use app.shapes
 
 fn f() -> Int64 {
-  let = shapes::area()
+  let = shapes.area()
 }

@@ -13,7 +13,7 @@ let run ~name =
     | None ->
         Outcome.raise_cannot_run
           "`%s` is not a package's name, which is a lower_snake_case name, such as `weather`, or \
-           an owner and a name, such as `acme::weather`."
+           an owner and a name, such as `acme.weather`."
           name
   in
   let path = directory_name in

@@ -1,4 +1,4 @@
-use standard::map
+use standard.map
 
 fn order(map: Map[String, Int64]) -> String {
   var text = ""
@@ -127,14 +127,14 @@ test "maps are equal when they hold equal values under equal keys, in any order"
 }
 
 test "a map is made from a cursor of entries, the last of a key winning" uses RunForever {
-  let entries: List[map::Entry[String, Int64]] = [
-    map::Entry(key: "a", value: 1),
-    map::Entry(key: "b", value: 2),
-    map::Entry(key: "a", value: 3),
+  let entries: List[map.Entry[String, Int64]] = [
+    map.Entry(key: "a", value: 1),
+    map.Entry(key: "b", value: 2),
+    map.Entry(key: "a", value: 3),
   ]
   var collected: Map[String, Int64] = Map.collect(entries.copy().cursor())
   assert collected.length() == 2 && collected.get("a") == Some(3) && order(collected) == "a b "
-  let more: List[map::Entry[String, Int64]] = [map::Entry(key: "c", value: 4), map::Entry(key: "b", value: 5)]
+  let more: List[map.Entry[String, Int64]] = [map.Entry(key: "c", value: 4), map.Entry(key: "b", value: 5)]
   mut collected.extend(more.copy().cursor())
   assert order(collected) == "a b c " && collected.get("b") == Some(5)
 }

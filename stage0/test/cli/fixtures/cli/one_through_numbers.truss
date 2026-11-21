@@ -1,5 +1,5 @@
-use library::numbers
+use library.numbers
 
 public fn one() -> Int64 {
-  numbers::one()
+  numbers.one()
 }

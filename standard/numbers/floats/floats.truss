@@ -1,25 +1,25 @@
-use standard::intrinsic
+use standard.intrinsic
 
 impl Equal for Float32 {
   fn equal(self, other: Float32) -> Bool
     cost time O(1)
-    ensures result == (intrinsic::equal(self, right: other))
+    ensures result == (intrinsic.equal(self, right: other))
     cost allocations == 0
   {
-    intrinsic::equal(self, right: other)
+    intrinsic.equal(self, right: other)
   }
 }
 
 impl Ordered for Float32 {
   fn compare(self, other: Float32) -> Ordering
     cost time O(1)
-    ensures (result == Ordering.Less) == intrinsic::less(self, right: other)
-    ensures (result == Ordering.Equal) == intrinsic::equal(self, right: other)
+    ensures (result == Ordering.Less) == intrinsic.less(self, right: other)
+    ensures (result == Ordering.Equal) == intrinsic.equal(self, right: other)
     cost allocations == 0
   {
-    if intrinsic::less(self, right: other) {
+    if intrinsic.less(self, right: other) {
       Ordering.Less
-    } else if intrinsic::equal(self, right: other) {
+    } else if intrinsic.equal(self, right: other) {
       Ordering.Equal
     } else {
       Ordering.Greater
@@ -50,9 +50,9 @@ impl Add[Float32] for Float32 {
   }
 
   fn add(self, right: Float32) -> Float32
-    ensures identical(result, intrinsic::add(self, right))
+    ensures identical(result, intrinsic.add(self, right))
   {
-    intrinsic::add(self, right)
+    intrinsic.add(self, right)
   }
 }
 
@@ -67,9 +67,9 @@ impl Subtract[Float32] for Float32 {
   }
 
   fn subtract(self, right: Float32) -> Float32
-    ensures identical(result, intrinsic::subtract(self, right))
+    ensures identical(result, intrinsic.subtract(self, right))
   {
-    intrinsic::subtract(self, right)
+    intrinsic.subtract(self, right)
   }
 }
 
@@ -84,9 +84,9 @@ impl Multiply[Float32] for Float32 {
   }
 
   fn multiply(self, right: Float32) -> Float32
-    ensures identical(result, intrinsic::multiply(self, right))
+    ensures identical(result, intrinsic.multiply(self, right))
   {
-    intrinsic::multiply(self, right)
+    intrinsic.multiply(self, right)
   }
 }
 
@@ -101,9 +101,9 @@ impl Divide[Float32] for Float32 {
   }
 
   fn divide(self, right: Float32) -> Float32
-    ensures identical(result, intrinsic::divide(self, right))
+    ensures identical(result, intrinsic.divide(self, right))
   {
-    intrinsic::divide(self, right)
+    intrinsic.divide(self, right)
   }
 }
 
@@ -119,7 +119,7 @@ impl Remainder[Float32] for Float32 {
 
   fn remainder(self, right: Float32) -> Float32
   {
-    intrinsic::remainder(self, right)
+    intrinsic.remainder(self, right)
   }
 }
 
@@ -134,42 +134,42 @@ impl Negate for Float32 {
   }
 
   fn negate(self) -> Float32
-    ensures identical(result, intrinsic::negate(self))
+    ensures identical(result, intrinsic.negate(self))
   {
-    intrinsic::negate(self)
+    intrinsic.negate(self)
   }
 }
 
 impl Hash for Float32 {
   fn hash(self, hasher: Hasher) -> Hasher
-    ensures identical(result, hasher.write(if intrinsic::is_nan(self) { 0x7fc0_0000 } else if self == 0.0 { 0 } else { intrinsic::convert(intrinsic::to_bits[Float32, UInt32](self)) }))
+    ensures identical(result, hasher.write(if intrinsic.is_nan(self) { 0x7fc0_0000 } else if self == 0.0 { 0 } else { intrinsic.convert(intrinsic.to_bits[Float32, UInt32](self)) }))
     cost time O(1)
     cost allocations == 0
   {
-    hasher.write(if intrinsic::is_nan(self) { 0x7fc0_0000 } else if self == 0.0 { 0 } else { intrinsic::convert(intrinsic::to_bits[Float32, UInt32](self)) })
+    hasher.write(if intrinsic.is_nan(self) { 0x7fc0_0000 } else if self == 0.0 { 0 } else { intrinsic.convert(intrinsic.to_bits[Float32, UInt32](self)) })
   }
 }
 
 impl Equal for Float64 {
   fn equal(self, other: Float64) -> Bool
     cost time O(1)
-    ensures result == (intrinsic::equal(self, right: other))
+    ensures result == (intrinsic.equal(self, right: other))
     cost allocations == 0
   {
-    intrinsic::equal(self, right: other)
+    intrinsic.equal(self, right: other)
   }
 }
 
 impl Ordered for Float64 {
   fn compare(self, other: Float64) -> Ordering
     cost time O(1)
-    ensures (result == Ordering.Less) == intrinsic::less(self, right: other)
-    ensures (result == Ordering.Equal) == intrinsic::equal(self, right: other)
+    ensures (result == Ordering.Less) == intrinsic.less(self, right: other)
+    ensures (result == Ordering.Equal) == intrinsic.equal(self, right: other)
     cost allocations == 0
   {
-    if intrinsic::less(self, right: other) {
+    if intrinsic.less(self, right: other) {
       Ordering.Less
-    } else if intrinsic::equal(self, right: other) {
+    } else if intrinsic.equal(self, right: other) {
       Ordering.Equal
     } else {
       Ordering.Greater
@@ -178,42 +178,42 @@ impl Ordered for Float64 {
 }
 
 theorem float64_less_then_less(first: Float64, second: Float64, third: Float64)
-  requires intrinsic::less(first, right: second)
-  requires intrinsic::less(second, right: third)
+  requires intrinsic.less(first, right: second)
+  requires intrinsic.less(second, right: third)
   ensures first <= third
 {
 }
 
 theorem float64_less_then_equal(first: Float64, second: Float64, third: Float64)
-  requires intrinsic::less(first, right: second)
-  requires intrinsic::equal(second, right: third)
+  requires intrinsic.less(first, right: second)
+  requires intrinsic.equal(second, right: third)
   ensures first <= third
 {
 }
 
 theorem float64_equal_then_less(first: Float64, second: Float64, third: Float64)
-  requires intrinsic::equal(first, right: second)
-  requires intrinsic::less(second, right: third)
+  requires intrinsic.equal(first, right: second)
+  requires intrinsic.less(second, right: third)
   ensures first <= third
 {
 }
 
 theorem float64_equal_then_equal(first: Float64, second: Float64, third: Float64)
-  requires intrinsic::equal(first, right: second)
-  requires intrinsic::equal(second, right: third)
+  requires intrinsic.equal(first, right: second)
+  requires intrinsic.equal(second, right: third)
   ensures first <= third
 {
 }
 
 proof Ordered.transitive for Float64 {
-  if intrinsic::less(first, right: second) {
-    if intrinsic::less(second, right: third) {
+  if intrinsic.less(first, right: second) {
+    if intrinsic.less(second, right: third) {
       float64_less_then_less(first, second: second, third: third)
     } else {
       float64_less_then_equal(first, second: second, third: third)
     }
   } else {
-    if intrinsic::less(second, right: third) {
+    if intrinsic.less(second, right: third) {
       float64_equal_then_less(first, second: second, third: third)
     } else {
       float64_equal_then_equal(first, second: second, third: third)
@@ -244,9 +244,9 @@ impl Add[Float64] for Float64 {
   }
 
   fn add(self, right: Float64) -> Float64
-    ensures identical(result, intrinsic::add(self, right))
+    ensures identical(result, intrinsic.add(self, right))
   {
-    intrinsic::add(self, right)
+    intrinsic.add(self, right)
   }
 }
 
@@ -261,9 +261,9 @@ impl Subtract[Float64] for Float64 {
   }
 
   fn subtract(self, right: Float64) -> Float64
-    ensures identical(result, intrinsic::subtract(self, right))
+    ensures identical(result, intrinsic.subtract(self, right))
   {
-    intrinsic::subtract(self, right)
+    intrinsic.subtract(self, right)
   }
 }
 
@@ -278,9 +278,9 @@ impl Multiply[Float64] for Float64 {
   }
 
   fn multiply(self, right: Float64) -> Float64
-    ensures identical(result, intrinsic::multiply(self, right))
+    ensures identical(result, intrinsic.multiply(self, right))
   {
-    intrinsic::multiply(self, right)
+    intrinsic.multiply(self, right)
   }
 }
 
@@ -295,9 +295,9 @@ impl Divide[Float64] for Float64 {
   }
 
   fn divide(self, right: Float64) -> Float64
-    ensures identical(result, intrinsic::divide(self, right))
+    ensures identical(result, intrinsic.divide(self, right))
   {
-    intrinsic::divide(self, right)
+    intrinsic.divide(self, right)
   }
 }
 
@@ -313,7 +313,7 @@ impl Remainder[Float64] for Float64 {
 
   fn remainder(self, right: Float64) -> Float64
   {
-    intrinsic::remainder(self, right)
+    intrinsic.remainder(self, right)
   }
 }
 
@@ -328,18 +328,18 @@ impl Negate for Float64 {
   }
 
   fn negate(self) -> Float64
-    ensures identical(result, intrinsic::negate(self))
+    ensures identical(result, intrinsic.negate(self))
   {
-    intrinsic::negate(self)
+    intrinsic.negate(self)
   }
 }
 
 impl Hash for Float64 {
   fn hash(self, hasher: Hasher) -> Hasher
-    ensures identical(result, hasher.write(if intrinsic::is_nan(self) { 0x7ff8_0000_0000_0000 } else if self == 0.0 { 0 } else { intrinsic::to_bits[Float64, UInt64](self) }))
+    ensures identical(result, hasher.write(if intrinsic.is_nan(self) { 0x7ff8_0000_0000_0000 } else if self == 0.0 { 0 } else { intrinsic.to_bits[Float64, UInt64](self) }))
     cost time O(1)
     cost allocations == 0
   {
-    hasher.write(if intrinsic::is_nan(self) { 0x7ff8_0000_0000_0000 } else if self == 0.0 { 0 } else { intrinsic::to_bits[Float64, UInt64](self) })
+    hasher.write(if intrinsic.is_nan(self) { 0x7ff8_0000_0000_0000 } else if self == 0.0 { 0 } else { intrinsic.to_bits[Float64, UInt64](self) })
   }
 }

@@ -1,4 +1,4 @@
-use standard::core
+use standard.core
 
 public type Option[Value] =
   | Some(value: Value)
@@ -191,11 +191,11 @@ public fn Option[Value].or_else(
   }
 }
 
-public fn Option[Value].zip[Other](own self, other: own Option[Other]) -> Option[core::Pair[Value, Other]]
+public fn Option[Value].zip[Other](own self, other: own Option[Other]) -> Option[core.Pair[Value, Other]]
   cost time O(1)
 {
   match own self, own other {
-    Some(first), Some(second) => Some(core::Pair(first: own first, second: own second))
+    Some(first), Some(second) => Some(core.Pair(first: own first, second: own second))
     _, _ => None
   }
 }

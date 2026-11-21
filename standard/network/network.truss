@@ -1,7 +1,7 @@
-use standard::intrinsic
-use standard::serialization
-use standard::streams
-use standard::text
+use standard.intrinsic
+use standard.serialization
+use standard.streams
+use standard.text
 
 public type IpAddress =
   | Version4(octets: Array[UInt8, 4])
@@ -65,7 +65,7 @@ internal fn group(octets: Array[UInt8, 16], index: UInt64) -> UInt16
   requires index < 8
   cost time O(1)
 {
-  intrinsic::convert[UInt8, UInt16](octets[2 * index]) * 256 + intrinsic::convert[UInt8, UInt16](octets[2 * index + 1])
+  intrinsic.convert[UInt8, UInt16](octets[2 * index]) * 256 + intrinsic.convert[UInt8, UInt16](octets[2 * index + 1])
 }
 
 internal type ZeroRun(start: UInt64, length: UInt64)
@@ -161,13 +161,13 @@ internal fn parse_octet(text: StringSlice, from: UInt64) -> Result[ParsedOctet, 
     invariant value < 1000
     decreases from + 3 - index
   {
-    value = value * 10 + intrinsic::convert[UInt8, UInt16](text.byte(index) - 48)
+    value = value * 10 + intrinsic.convert[UInt8, UInt16](text.byte(index) - 48)
     index += 1
   }
   if index == from || value > 255 || (index - from > 1 && text.byte(from) == 48) {
     return Err(AddressError(offset: from))
   }
-  Ok(ParsedOctet(value: intrinsic::convert(value), end: index))
+  Ok(ParsedOctet(value: intrinsic.convert(value), end: index))
 }
 
 internal fn expect_byte(text: StringSlice, from: UInt64, byte: UInt8) -> Result[UInt64, AddressError]
@@ -234,7 +234,7 @@ internal fn parse_group(text: StringSlice, from: UInt64) -> Result[Group, Addres
     invariant index - from <= 3 ==> value < 4096
     decreases from + 4 - index
   {
-    let digit: UInt16 = intrinsic::convert(text.byte(index).digit_value())
+    let digit: UInt16 = intrinsic.convert(text.byte(index).digit_value())
     value = value * 16 + digit
     index += 1
   }
@@ -262,8 +262,8 @@ internal fn Ipv6Parser.with_quad(self, text: StringSlice) -> Result[Ipv6Parser, 
 {
   let quad = parse_dotted_quad(text, from: self.index)?
   var groups = self.groups
-  groups[self.count] = intrinsic::convert[UInt8, UInt16](quad.octets[0]) * 256 + intrinsic::convert[UInt8, UInt16](quad.octets[1])
-  groups[self.count + 1] = intrinsic::convert[UInt8, UInt16](quad.octets[2]) * 256 + intrinsic::convert[UInt8, UInt16](quad.octets[3])
+  groups[self.count] = intrinsic.convert[UInt8, UInt16](quad.octets[0]) * 256 + intrinsic.convert[UInt8, UInt16](quad.octets[1])
+  groups[self.count + 1] = intrinsic.convert[UInt8, UInt16](quad.octets[2]) * 256 + intrinsic.convert[UInt8, UInt16](quad.octets[3])
   if quad.end != text.length() {
     return Err(AddressError(offset: quad.end))
   }
@@ -322,11 +322,11 @@ internal fn Ipv6Parser.octets(self) -> Option[Array[UInt8, 16]]
   let positions: UInt64 = 8
   for position in 0..positions {
     if self.gap == 9 || position < self.gap {
-      octets[2 * position] = intrinsic::convert(self.groups[position] / 256)
-      octets[2 * position + 1] = intrinsic::convert(self.groups[position] % 256)
+      octets[2 * position] = intrinsic.convert(self.groups[position] / 256)
+      octets[2 * position + 1] = intrinsic.convert(self.groups[position] % 256)
     } else if position >= self.gap + missing {
-      octets[2 * position] = intrinsic::convert(self.groups[position - missing] / 256)
-      octets[2 * position + 1] = intrinsic::convert(self.groups[position - missing] % 256)
+      octets[2 * position] = intrinsic.convert(self.groups[position - missing] / 256)
+      octets[2 * position + 1] = intrinsic.convert(self.groups[position - missing] % 256)
     }
   }
   Some(octets)
@@ -405,7 +405,7 @@ internal fn parse_number(text: StringSlice, from: UInt64, to: UInt64, limit: UIn
     if byte < 48 || byte > 57 {
       return Err(AddressError(offset: index))
     }
-    let next = value * 10 + intrinsic::convert[UInt8, UInt32](byte - 48)
+    let next = value * 10 + intrinsic.convert[UInt8, UInt32](byte - 48)
     if next > limit {
       return Err(AddressError(offset: index))
     }
@@ -434,7 +434,7 @@ internal fn find_byte(text: StringSlice, byte: UInt8) -> UInt64
   index
 }
 
-impl text::Parse for IpAddress {
+impl text.Parse for IpAddress {
   type Error = AddressError
 
   fn parse(text: StringSlice) -> Result[IpAddress, AddressError]
@@ -463,7 +463,7 @@ impl Display for SocketAddress {
   }
 }
 
-impl text::Parse for SocketAddress {
+impl text.Parse for SocketAddress {
   type Error = AddressError
 
   fn parse(text: StringSlice) -> Result[SocketAddress, AddressError]
@@ -480,7 +480,7 @@ impl text::Parse for SocketAddress {
     }
     let colon = if bracketed { expect_byte(text, from: close + 1, byte: 58)? } else { close + 1 }
     let port = parse_number(text, from: colon, to: text.length(), limit: 65535)?
-    Ok(SocketAddress(address: address, port: intrinsic::convert(port)))
+    Ok(SocketAddress(address: address, port: intrinsic.convert(port)))
   }
 }
 
@@ -502,7 +502,7 @@ internal fn mask_octet(octet: UInt8, index: UInt64, prefix_length: UInt8) -> UIn
   requires index < 16
   cost time O(1)
 {
-  let prefix_bits: UInt64 = intrinsic::convert(prefix_length)
+  let prefix_bits: UInt64 = intrinsic.convert(prefix_length)
   if prefix_bits >= 8 * index + 8 {
     octet
   } else if prefix_bits <= 8 * index {
@@ -560,7 +560,7 @@ impl Display for IpNetwork {
   }
 }
 
-impl text::Parse for IpNetwork {
+impl text.Parse for IpNetwork {
   type Error = AddressError
 
   fn parse(text: StringSlice) -> Result[IpNetwork, AddressError]
@@ -572,7 +572,7 @@ impl text::Parse for IpNetwork {
     }
     let address = address_within(text, from: 0, to: slash)?
     let length = parse_number(text, from: slash + 1, to: text.length(), limit: 128)?
-    match IpNetwork.new(address, prefix_length: intrinsic::convert(length)) {
+    match IpNetwork.new(address, prefix_length: intrinsic.convert(length)) {
       Some(network) => Ok(network)
       None => Err(AddressError(offset: slash + 1))
     }
@@ -582,9 +582,9 @@ impl text::Parse for IpNetwork {
 public type Direction = Receiving | Sending | Both
   derives Equal
 
-public opaque type Connection(handle: streams::Handle, local: SocketAddress, peer: SocketAddress)
+public opaque type Connection(handle: streams.Handle, local: SocketAddress, peer: SocketAddress)
 
-public fn Connection.from_handle(handle: own streams::Handle, local: SocketAddress, peer: SocketAddress) -> Connection {
+public fn Connection.from_handle(handle: own streams.Handle, local: SocketAddress, peer: SocketAddress) -> Connection {
   Connection(handle: own handle, local: local, peer: peer)
 }
 
@@ -630,7 +630,7 @@ public fn Connection.set_keep_alive(mut self, idle: Option[Duration]) -> Result[
   Handles.configure(self.handle, option: SocketOption.KeepAlive(idle: idle))
 }
 
-impl streams::Reader for Connection {
+impl streams.Reader for Connection {
   fn read(mut self, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError]
     uses Handles
   {
@@ -638,7 +638,7 @@ impl streams::Reader for Connection {
   }
 }
 
-impl streams::Duplex for Connection {
+impl streams.Duplex for Connection {
   fn receive(self, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError]
     uses Handles, Tasks
   {
@@ -658,7 +658,7 @@ impl streams::Duplex for Connection {
   }
 }
 
-impl streams::Writer for Connection {
+impl streams.Writer for Connection {
   fn write(mut self, bytes: Slice[UInt8]) -> Result[UInt64, SystemError]
     uses Handles
   {
@@ -680,11 +680,11 @@ public type SocketOption =
 public type ListenOptions(backlog: UInt32 = 1024, reuse_port: Bool = false)
   derives Equal
 
-public type Accepted(handle: streams::Handle, peer: SocketAddress)
+public type Accepted(handle: streams.Handle, peer: SocketAddress)
 
-public opaque type Listener(handle: streams::Handle, local: SocketAddress)
+public opaque type Listener(handle: streams.Handle, local: SocketAddress)
 
-public fn Listener.from_handle(handle: own streams::Handle, local: SocketAddress) -> Listener {
+public fn Listener.from_handle(handle: own streams.Handle, local: SocketAddress) -> Listener {
   Listener(handle: own handle, local: local)
 }
 
@@ -701,9 +701,9 @@ public fn Listener.accept(mut self) -> Result[Connection, SystemError]
   Ok(Connection(handle: own accepted.handle, local: self.local, peer: accepted.peer))
 }
 
-public opaque type LocalConnection(handle: streams::Handle)
+public opaque type LocalConnection(handle: streams.Handle)
 
-public fn LocalConnection.from_handle(handle: own streams::Handle) -> LocalConnection {
+public fn LocalConnection.from_handle(handle: own streams.Handle) -> LocalConnection {
   LocalConnection(handle: own handle)
 }
 
@@ -725,7 +725,7 @@ public fn LocalConnection.shut_down(mut self, direction: Direction) -> Result[Un
   Handles.shut_down(self.handle, direction: direction)
 }
 
-impl streams::Reader for LocalConnection {
+impl streams.Reader for LocalConnection {
   fn read(mut self, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError]
     uses Handles
   {
@@ -733,7 +733,7 @@ impl streams::Reader for LocalConnection {
   }
 }
 
-impl streams::Duplex for LocalConnection {
+impl streams.Duplex for LocalConnection {
   fn receive(self, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError]
     uses Handles, Tasks
   {
@@ -753,7 +753,7 @@ impl streams::Duplex for LocalConnection {
   }
 }
 
-impl streams::Writer for LocalConnection {
+impl streams.Writer for LocalConnection {
   fn write(mut self, bytes: Slice[UInt8]) -> Result[UInt64, SystemError]
     uses Handles
   {
@@ -767,9 +767,9 @@ impl streams::Writer for LocalConnection {
   }
 }
 
-public opaque type LocalListener(handle: streams::Handle, path: Path)
+public opaque type LocalListener(handle: streams.Handle, path: Path)
 
-public fn LocalListener.from_handle(handle: own streams::Handle, path: own Path) -> LocalListener {
+public fn LocalListener.from_handle(handle: own streams.Handle, path: own Path) -> LocalListener {
   LocalListener(handle: own handle, path: own path)
 }
 
@@ -786,9 +786,9 @@ public fn LocalListener.accept(mut self) -> Result[LocalConnection, SystemError]
 public type Datagram(length: UInt64, from: SocketAddress)
   derives Equal
 
-public opaque type DatagramSocket(handle: streams::Handle, local: SocketAddress)
+public opaque type DatagramSocket(handle: streams.Handle, local: SocketAddress)
 
-public fn DatagramSocket.from_handle(handle: own streams::Handle, local: SocketAddress) -> DatagramSocket {
+public fn DatagramSocket.from_handle(handle: own streams.Handle, local: SocketAddress) -> DatagramSocket {
   DatagramSocket(handle: own handle, local: local)
 }
 
@@ -873,38 +873,38 @@ impl NetworkClient for HostsAllowed
   }
 }
 
-impl serialization::Serialize for IpAddress {
-  fn serialize[Sink: serialization::Serializer](self, sink: mut Sink) {
-    serialization::serialize_text(self, sink: mut sink)
+impl serialization.Serialize for IpAddress {
+  fn serialize[Sink: serialization.Serializer](self, sink: mut Sink) {
+    serialization.serialize_text(self, sink: mut sink)
   }
 }
 
-impl serialization::Deserialize for IpAddress {
-  fn deserialize[Source: serialization::Deserializer](source: mut Source) -> Result[IpAddress, serialization::Error] {
-    serialization::deserialize_text(mut source, expected: "an IP address")
+impl serialization.Deserialize for IpAddress {
+  fn deserialize[Source: serialization.Deserializer](source: mut Source) -> Result[IpAddress, serialization.Error] {
+    serialization.deserialize_text(mut source, expected: "an IP address")
   }
 }
 
-impl serialization::Serialize for SocketAddress {
-  fn serialize[Sink: serialization::Serializer](self, sink: mut Sink) {
-    serialization::serialize_text(self, sink: mut sink)
+impl serialization.Serialize for SocketAddress {
+  fn serialize[Sink: serialization.Serializer](self, sink: mut Sink) {
+    serialization.serialize_text(self, sink: mut sink)
   }
 }
 
-impl serialization::Deserialize for SocketAddress {
-  fn deserialize[Source: serialization::Deserializer](source: mut Source) -> Result[SocketAddress, serialization::Error] {
-    serialization::deserialize_text(mut source, expected: "an IP address and a port")
+impl serialization.Deserialize for SocketAddress {
+  fn deserialize[Source: serialization.Deserializer](source: mut Source) -> Result[SocketAddress, serialization.Error] {
+    serialization.deserialize_text(mut source, expected: "an IP address and a port")
   }
 }
 
-impl serialization::Serialize for IpNetwork {
-  fn serialize[Sink: serialization::Serializer](self, sink: mut Sink) {
-    serialization::serialize_text(self, sink: mut sink)
+impl serialization.Serialize for IpNetwork {
+  fn serialize[Sink: serialization.Serializer](self, sink: mut Sink) {
+    serialization.serialize_text(self, sink: mut sink)
   }
 }
 
-impl serialization::Deserialize for IpNetwork {
-  fn deserialize[Source: serialization::Deserializer](source: mut Source) -> Result[IpNetwork, serialization::Error] {
-    serialization::deserialize_text(mut source, expected: "an IP network, such as `10.0.0.0/8`")
+impl serialization.Deserialize for IpNetwork {
+  fn deserialize[Source: serialization.Deserializer](source: mut Source) -> Result[IpNetwork, serialization.Error] {
+    serialization.deserialize_text(mut source, expected: "an IP network, such as `10.0.0.0/8`")
   }
 }

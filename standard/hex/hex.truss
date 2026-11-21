@@ -1,4 +1,4 @@
-use standard::intrinsic
+use standard.intrinsic
 
 public type DecodeError =
   | InvalidCharacter(offset: UInt64)
@@ -25,16 +25,16 @@ public fn encode(bytes: Slice[UInt8], uppercase: Bool = false) -> String
   cost allocations <= 1
 {
   if bytes.length() > UInt64.maximum / 2 {
-    intrinsic::crash("a string cannot hold that many bytes")
+    intrinsic.crash("a string cannot hold that many bytes")
   }
-  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(2 * bytes.length())
+  var output: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(2 * bytes.length())
   for index in 0..bytes.length()
-    invariant intrinsic::storage_length(output) == 2 * index
-    invariant intrinsic::storage_capacity(output) == 2 * bytes.length()
+    invariant intrinsic.storage_length(output) == 2 * index
+    invariant intrinsic.storage_capacity(output) == 2 * bytes.length()
   {
     let byte = bytes[index]
-    intrinsic::storage_push(mut output, value: (byte / 16).digit_byte(uppercase: uppercase))
-    intrinsic::storage_push(mut output, value: (byte % 16).digit_byte(uppercase: uppercase))
+    intrinsic.storage_push(mut output, value: (byte / 16).digit_byte(uppercase: uppercase))
+    intrinsic.storage_push(mut output, value: (byte % 16).digit_byte(uppercase: uppercase))
   }
   String(storage: own output)
 }
@@ -50,13 +50,13 @@ public fn decode(text: StringSlice) -> Result[List[UInt8], DecodeError]
   if text.length() % 2 != 0 {
     return Err(DecodeError.OddLength)
   }
-  var bytes: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(text.length() / 2)
+  var bytes: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(text.length() / 2)
   var index: UInt64 = 0
   while index < text.length()
     invariant index <= text.length()
     invariant index % 2 == 0
-    invariant 2 * intrinsic::storage_length(bytes) == index
-    invariant intrinsic::storage_capacity(bytes) == text.length() / 2
+    invariant 2 * intrinsic.storage_length(bytes) == index
+    invariant intrinsic.storage_capacity(bytes) == text.length() / 2
     decreases text.length() - index
     cost time O(index)
     cost allocations == 0
@@ -69,7 +69,7 @@ public fn decode(text: StringSlice) -> Result[List[UInt8], DecodeError]
     if low >= 16 {
       return Err(DecodeError.InvalidCharacter(offset: index + 1))
     }
-    intrinsic::storage_push(mut bytes, value: high * 16 + low)
+    intrinsic.storage_push(mut bytes, value: high * 16 + low)
     index += 2
   }
   Ok(List(storage: own bytes))

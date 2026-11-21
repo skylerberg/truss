@@ -6,7 +6,7 @@ let show_target : Core.operand Core.target -> string = function
   | Function { path; _ } -> Path.show path
   | Trait_method { trait; name; _ } -> Path.show trait.trait ^ "." ^ name
   | Capability_method { capability; name } -> Path.show capability ^ "." ^ name
-  | Intrinsic { operation; _ } -> "intrinsic::" ^ Intrinsic.show_operation operation
+  | Intrinsic { operation; _ } -> "intrinsic." ^ Intrinsic.show_operation operation
   | Indirect _ -> "a function value"
 
 let find_method_signature interface owner name receiver =

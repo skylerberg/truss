@@ -1,4 +1,4 @@
-use standard::tasks
+use standard.tasks
 
 public type Label(name: String, value: String)
   derives Equal
@@ -26,23 +26,23 @@ type Entry(
   count: UInt64,
 )
 
-public opaque type Registry(entries: tasks::Cell[List[Entry]])
+public opaque type Registry(entries: tasks.Cell[List[Entry]])
 
-public opaque type Counter(entries: tasks::Cell[List[Entry]], index: UInt64)
+public opaque type Counter(entries: tasks.Cell[List[Entry]], index: UInt64)
 
-public opaque type Gauge(entries: tasks::Cell[List[Entry]], index: UInt64)
+public opaque type Gauge(entries: tasks.Cell[List[Entry]], index: UInt64)
 
-public opaque type Histogram(entries: tasks::Cell[List[Entry]], index: UInt64)
+public opaque type Histogram(entries: tasks.Cell[List[Entry]], index: UInt64)
 
 public fn Registry.new() -> Registry {
-  Registry(entries: tasks::Cell.new([]))
+  Registry(entries: tasks.Cell.new([]))
 }
 
 public fn Registry.copy(self) -> Registry {
   Registry(entries: self.entries.copy())
 }
 
-fn index_of(entries: tasks::Cell[List[Entry]], name: StringSlice, labels: Slice[Label], kind: Kind, bounds: Slice[Float64]) -> UInt64
+fn index_of(entries: tasks.Cell[List[Entry]], name: StringSlice, labels: Slice[Label], kind: Kind, bounds: Slice[Float64]) -> UInt64
   uses Tasks
 {
   let wanted = name.to_string()
@@ -102,7 +102,7 @@ fn ascending(values: Slice[Float64]) -> List[Float64] {
   sorted
 }
 
-fn change(entries: tasks::Cell[List[Entry]], index: UInt64, amount: Float64, is_set: Bool)
+fn change(entries: tasks.Cell[List[Entry]], index: UInt64, amount: Float64, is_set: Bool)
   uses Tasks
 {
   entries.update(fn(listed) {
@@ -112,7 +112,7 @@ fn change(entries: tasks::Cell[List[Entry]], index: UInt64, amount: Float64, is_
   })
 }
 
-fn read(entries: tasks::Cell[List[Entry]], index: UInt64) -> Float64
+fn read(entries: tasks.Cell[List[Entry]], index: UInt64) -> Float64
   uses Tasks
 {
   entries.read(fn(listed) { if index < listed.length() { listed[index].value } else { 0.0 } })

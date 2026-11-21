@@ -12,6 +12,7 @@ module Code = struct
     | String_delimiter
     | Attribute
     | Foreign_operator
+    | Path_separator
     | Confusable_character
     | Lifetime
     | Number_hexadecimal_float
@@ -78,7 +79,6 @@ module Code = struct
     | As_conversion
     | Elif
     | Angle_brackets
-    | Path_separator
     | Qualified_variant
     | Macro_call
     | Tuple
@@ -289,6 +289,7 @@ module Code = struct
     | String_delimiter -> "string_delimiter"
     | Attribute -> "attribute"
     | Foreign_operator -> "foreign_operator"
+    | Path_separator -> "path_separator"
     | Confusable_character -> "confusable_character"
     | Lifetime -> "lifetime"
     | Number_hexadecimal_float -> "number_hexadecimal_float"
@@ -356,7 +357,6 @@ module Code = struct
     | As_conversion -> "as_conversion"
     | Elif -> "elif"
     | Angle_brackets -> "angle_brackets"
-    | Path_separator -> "path_separator"
     | Qualified_variant -> "qualified_variant"
     | Macro_call -> "macro_call"
     | Tuple -> "tuple"

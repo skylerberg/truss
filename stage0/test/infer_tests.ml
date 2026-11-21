@@ -17,11 +17,11 @@ let check_as_standard_library packages =
 
 let expect_one_diagnostic = Support.expect_one_diagnostic ~check
 let expect_no_diagnostics = Support.expect_no_diagnostics ~check
-let expect_fine text = expect_no_diagnostics [ ("app::main", text) ]
+let expect_fine text = expect_no_diagnostics [ ("app.main", text) ]
 
 let locate_expression text written occurrence =
-  let packages = Support.setup [ ("app::main", text) ] in
-  let file = Support.parse_file "app::main" in
+  let packages = Support.setup [ ("app.main", text) ] in
+  let file = Support.parse_file "app.main" in
   let offset = Support.locate_occurrence ~sub:written ~occurrence text in
   let actual =
     List.find_map
@@ -119,12 +119,12 @@ let expect_type text written ?(occurrence = 1) expected =
   | None -> Harness.fail "`%s` has no type" written
 
 let expect_fix_titles text expected =
-  let packages = Support.setup [ ("app::main", text) ] in
+  let packages = Support.setup [ ("app.main", text) ] in
   let titles =
     List.concat_map
       (fun (diagnostic : Diagnostic.t) ->
         List.map (fun (fix : Source.span Diagnostic.fix) -> fix.title) diagnostic.fixes)
-      (Support.run_check ~check packages "app::main")
+      (Support.run_check ~check packages "app.main")
   in
   if titles <> expected then
     Harness.fail "expected the fixes [%s], got [%s]"
@@ -136,7 +136,7 @@ let () =
       let packages =
         Support.setup
           [
-            ( "app::main",
+            ( "app.main",
               "fn double(x: Int64) -> Int64 {\n\
               \  x\n\
                }\n\n\
@@ -151,7 +151,7 @@ let () =
                }\n" );
           ]
       in
-      let file = Support.parse_file "app::main" in
+      let file = Support.parse_file "app.main" in
       let database = Support.make_database packages in
       if List.length (Database.For_testing.list_diagnostics [ Parse ] database file) <> 2 then
         Harness.fail "expected two syntax errors";
@@ -633,7 +633,7 @@ let () =
           ]
         (List.map
            (fun (diagnostic : Diagnostic.t) -> diagnostic.message)
-           (check (Support.setup [ ("app::main", text) ]) (Support.parse_file "app::main")));
+           (check (Support.setup [ ("app.main", text) ]) (Support.parse_file "app.main")));
       expect_fix_titles text []);
   Harness.test
     "a hexadecimal integer literal compared with a float is an error that spells it as a decimal \
@@ -654,8 +654,8 @@ let () =
         Support.list_codes
           (check
              (Support.setup
-                [ ("app::main", Fixtures.Infer.invariant_multiplies_a_span_by_a_float_local) ])
-             (Support.parse_file "app::main"))
+                [ ("app.main", Fixtures.Infer.invariant_multiplies_a_span_by_a_float_local) ])
+             (Support.parse_file "app.main"))
       with
       | [ "types.cannot_infer"; "types.unknown_member" ] -> ()
       | reported -> Harness.fail "reported [%s]" (String.concat "; " reported))
@@ -734,10 +734,10 @@ let () =
           (check
              (Support.setup
                 [
-                  ( "app::main",
+                  ( "app.main",
                     Fixtures.Infer.loop_over_an_unknown_whose_element_takes_an_associated_type );
                 ])
-             (Support.parse_file "app::main"))
+             (Support.parse_file "app.main"))
       with
       | [ "types.cannot_infer"; "types.not_indexable" ] -> ()
       | reported -> Harness.fail "reported [%s]" (String.concat "; " reported))
@@ -814,7 +814,7 @@ let () =
   Harness.test
     "a local's method that only UInt8 declares gives the local its default type at the call"
     (fun () ->
-      Support.expect_one_diagnostic ~setup:make_standard_packages ~file:"standard::probe"
+      Support.expect_one_diagnostic ~setup:make_standard_packages ~file:"standard.probe"
         ~check:check_as_standard_library Fixtures.Infer.local_calling_a_method_of_uint8_alone
         "types.unknown_member" ~says:"`Int64` has no method `twice`.");
   Harness.test
@@ -962,8 +962,8 @@ let () =
      like another parameter" (fun () ->
       List.iter
         (fun text ->
-          let packages = Support.setup [ ("app::main", text) ] in
-          match check packages (Support.parse_file "app::main") with
+          let packages = Support.setup [ ("app.main", text) ] in
+          match check packages (Support.parse_file "app.main") with
           | [ ({ fixes = []; _ } as diagnostic) ]
             when Diagnostic.Code.name diagnostic.code = "types.positional_after_labeled" ->
               ()
@@ -1000,9 +1000,9 @@ let () =
         "types.too_many_arguments" ~says:"`Circle` has 1 field, and 2 arguments are given.");
   Harness.test "an argument without a parameter is still checked" (fun () ->
       let packages =
-        Support.setup [ ("app::main", Fixtures.Infer.apply_twice_with_a_string_sum_after_a_label) ]
+        Support.setup [ ("app.main", Fixtures.Infer.apply_twice_with_a_string_sum_after_a_label) ]
       in
-      match Support.list_codes (check packages (Support.parse_file "app::main")) with
+      match Support.list_codes (check packages (Support.parse_file "app.main")) with
       | [ "types.positional_after_labeled"; "types.string_addition" ] -> ()
       | reported -> Harness.fail "reported [%s]" (String.concat "; " reported));
   Harness.test "a call with an argument without a parameter has the error type" (fun () ->
@@ -1187,7 +1187,7 @@ let () =
 
 let () =
   let shapes = Fixtures.Infer.others_shape_with_private_members in
-  let others = [ ("app::shapes", shapes) ] in
+  let others = [ ("app.shapes", shapes) ] in
   List.iter
     (fun (use, fixture) ->
       Harness.test (Printf.sprintf "another module's private %s is not visible" use) (fun () ->
@@ -1207,13 +1207,13 @@ let () =
      visible" (fun () ->
       expect_no_diagnostics
         [
-          ("app::main", Fixtures.Infer.calls_of_another_modules_internal_and_public_methods);
-          ("app::shapes", shapes);
+          ("app.main", Fixtures.Infer.calls_of_another_modules_internal_and_public_methods);
+          ("app.shapes", shapes);
         ]);
   Harness.test "an internal method of another package is not visible" (fun () ->
       expect_one_diagnostic
         ~setup:(Support.setup ~dependencies:[ ("app", "tools") ])
-        ~others:[ ("tools::shapes", shapes) ]
+        ~others:[ ("tools.shapes", shapes) ]
         Fixtures.Infer.call_of_another_packages_internal_method "types.member_not_visible"
         ~says:"internal to its package");
   List.iter
@@ -1222,7 +1222,7 @@ let () =
         (Printf.sprintf "%s of another module's private trait names the method as not visible" call)
         (fun () ->
           expect_one_diagnostic ~others fixture "types.member_not_visible"
-            ~says:(Printf.sprintf "`app::shapes::Measured.%s` is private to its module" method_)))
+            ~says:(Printf.sprintf "`app.shapes.Measured.%s` is private to its module" method_)))
     [
       ( "a call with a dot of a method",
         Fixtures.Infer.call_of_a_method_of_another_modules_private_trait,
@@ -1239,10 +1239,10 @@ let () =
      visible" (fun () ->
       expect_one_diagnostic
         ~setup:(Support.setup ~dependencies:[ ("app", "tools") ])
-        ~others:[ ("tools::shapes", shapes) ]
+        ~others:[ ("tools.shapes", shapes) ]
         Fixtures.Infer.call_of_a_method_of_another_packages_internal_trait
         "types.member_not_visible"
-        ~says:"`tools::shapes::Sided.side_count` is internal to its package");
+        ~says:"`tools.shapes.Sided.side_count` is internal to its package");
   Harness.test
     "a call with a dot does not name a private trait that the receiver's type does not implement"
     (fun () ->
@@ -1255,10 +1255,10 @@ let () =
      method of the same name" (fun () ->
       expect_no_diagnostics
         [
-          ( "app::main",
+          ( "app.main",
             Fixtures.Infer
             .call_of_a_visible_trait_method_named_like_another_modules_private_trait_method );
-          ("app::shapes", shapes);
+          ("app.shapes", shapes);
         ]);
   List.iter
     (fun (construct, fixture) ->
@@ -1267,7 +1267,7 @@ let () =
            "%s over another module's private `count` and `element` names the hidden method"
            construct) (fun () ->
           expect_one_diagnostic ~others fixture "types.member_not_visible"
-            ~says:"`app::shapes::Shape.count` is private to its module"))
+            ~says:"`app.shapes.Shape.count` is private to its module"))
     [
       ("a loop", Fixtures.Infer.loop_over_a_type_with_a_private_loop_protocol);
       ("a quantifier", Fixtures.Infer.quantifier_over_a_type_with_a_private_loop_protocol);
@@ -1283,9 +1283,9 @@ let () =
         Support.setup
           ~dependencies:[ ("app", "tools") ]
           [
-            ( "app::main",
+            ( "app.main",
               Fixtures.Infer.call_of_a_trait_method_named_like_another_packages_internal_method );
-            ("tools::kits", Fixtures.Infer.kit_with_an_internal_part);
+            ("tools.kits", Fixtures.Infer.kit_with_an_internal_part);
           ]
       in
       let list_callees module_ definition_name =
@@ -1305,10 +1305,10 @@ let () =
             | _ -> [])
           (Support.list_declarations packages file.module_)
       in
-      (match list_callees "app::main" "f" with
+      (match list_callees "app.main" "f" with
       | [ Trait_method { name = "part"; _ } ] -> ()
       | _ -> Harness.fail "the call in `app` does not reach `Parted.part`");
-      match list_callees "tools::kits" "measure" with
+      match list_callees "tools.kits" "measure" with
       | [ Function { path = Method { name = "part"; receiver = Instance Read; _ }; _ } ] -> ()
       | _ -> Harness.fail "the call in `tools` does not reach `Kit.part`")
 
@@ -1514,9 +1514,7 @@ let () =
         ~fixed:Fixtures.Infer.variant_pattern_with_a_wildcard_for_a_field_fixed)
 
 let () =
-  let report text =
-    check (Support.setup [ ("app::main", text) ]) (Support.parse_file "app::main")
-  in
+  let report text = check (Support.setup [ ("app.main", text) ]) (Support.parse_file "app.main") in
   let expect_codes code ~count diagnostics =
     let codes = Support.list_codes diagnostics in
     if codes <> List.init count (fun _ -> code) then
@@ -1795,7 +1793,7 @@ let () =
         (fun (diagnostic : Diagnostic.t) ->
           if diagnostic.fixes <> [] then
             Harness.fail "`[]` alone would not say which collection it is, and a fix is offered")
-        (check (Support.setup [ ("app::main", text) ]) (Support.parse_file "app::main")))
+        (check (Support.setup [ ("app.main", text) ]) (Support.parse_file "app.main")))
 
 let () =
   Harness.test "deriving Deserialize needs every invariant clause to run" (fun () ->
@@ -1832,9 +1830,9 @@ let () =
   Harness.test "checking twice gives the same result" (fun () ->
       let text = Fixtures.Infer.loop_summing_a_list in
       let find_type_check_result () =
-        let packages = Support.setup [ ("app::main", text) ] in
+        let packages = Support.setup [ ("app.main", text) ] in
         let key =
-          (List.hd (Support.list_declarations packages (Support.parse_module "app::main"))).key
+          (List.hd (Support.list_declarations packages (Support.parse_module "app.main"))).key
         in
         Database.read_checked_body (Support.make_database packages) key
       in
@@ -1868,14 +1866,14 @@ let () =
         (point ^ Fixtures.Infer.need_of_an_unordered_point)
         "types.unsatisfied_bound");
   Harness.test "a type written in a body must meet its bounds" (fun () ->
-      let packages = Support.setup [ ("app::main", point ^ Fixtures.Infer.set_of_points) ] in
-      match Support.list_codes (check packages (Support.parse_file "app::main")) with
+      let packages = Support.setup [ ("app.main", point ^ Fixtures.Infer.set_of_points) ] in
+      match Support.list_codes (check packages (Support.parse_file "app.main")) with
       | [ "types.unsatisfied_bound"; "types.unsatisfied_bound" ] -> ()
       | actual -> Harness.fail "found [%s]" (String.concat "; " actual));
   Harness.test
     "storage_lengthen rejects an element type with a drop, which would free memory that nothing \
      wrote" (fun () ->
-      Support.expect_one_diagnostic ~setup:make_standard_packages ~file:"standard::probe"
+      Support.expect_one_diagnostic ~setup:make_standard_packages ~file:"standard.probe"
         ~check:check_as_standard_library Fixtures.Infer.storage_lengthen_of_storages
         "types.unsatisfied_bound");
   Harness.test "a type written in a body that is not a type is an error" (fun () ->
@@ -1939,10 +1937,10 @@ let () =
   Harness.test "an operation on a hole is a hole" (fun () ->
       expect_fine Fixtures.Infer.addition_to_a_todo);
   Harness.test "a mistake is not reported again as a type that cannot be inferred" (fun () ->
-      let packages = Support.setup [ ("app::main", Fixtures.Infer.map_of_an_undefined_name) ] in
+      let packages = Support.setup [ ("app.main", Fixtures.Infer.map_of_an_undefined_name) ] in
       if
         List.mem "types.cannot_infer"
-          (Support.list_codes (check packages (Support.parse_file "app::main")))
+          (Support.list_codes (check packages (Support.parse_file "app.main")))
       then Harness.fail "cascaded");
   Harness.test "a Float32 literal too large is an error" (fun () ->
       expect_one_diagnostic Fixtures.Infer.float32_literal_too_large "types.literal_out_of_range");
@@ -1998,12 +1996,12 @@ let () =
   Harness.test
     "a compound assignment copies a `Plain` operand that its operator reads, and views an operand \
      of another type" (fun () ->
-      let packages = Support.setup [ ("app::main", Fixtures.Infer.compound_assignment_operands) ] in
+      let packages = Support.setup [ ("app.main", Fixtures.Infer.compound_assignment_operands) ] in
       let assigning =
         List.find
           (fun (declaration : Resolve.Names.declaration) ->
-            Path.equal declaration.key.path (Support.make_top_path "app::main" "f"))
-          (Support.list_declarations packages (Support.parse_module "app::main"))
+            Path.equal declaration.key.path (Support.make_top_path "app.main" "f"))
+          (Support.list_declarations packages (Support.parse_module "app.main"))
       in
       match
         List.filter_map
@@ -2057,10 +2055,10 @@ let () =
   Harness.test "a type given too few arguments is one error, not a mismatch for each field"
     (fun () -> expect_one_diagnostic Fixtures.Infer.pair_built_with_one_type_argument "types.arity");
   Harness.test "an associated type that a supertrait fixes to Self is Self" (fun () ->
-      expect_no_diagnostics [ ("app::main", Fixtures.Infer.output_of_a_fixed_width_integer) ]);
+      expect_no_diagnostics [ ("app.main", Fixtures.Infer.output_of_a_fixed_width_integer) ]);
   Harness.test "an associated type of a generic supertrait takes the supertrait's arguments"
     (fun () ->
-      expect_no_diagnostics [ ("app::main", Fixtures.Infer.output_of_a_generic_supertrait) ]);
+      expect_no_diagnostics [ ("app.main", Fixtures.Infer.output_of_a_generic_supertrait) ]);
   Harness.test "the string + fix keeps escapes" (fun () ->
       expect_one_diagnostic Fixtures.Infer.escaped_string_plus_a_string "types.string_addition"
         ~fixed:Fixtures.Infer.escaped_string_plus_a_string_fixed);
@@ -2201,13 +2199,11 @@ let () =
   Harness.test "a parenthesized name with type arguments is a value of that function" (fun () ->
       expect_fine (identity ^ Fixtures.Infer.parenthesized_identity_with_a_type_argument));
   Harness.test "a trait's written arguments are the ones its call uses" (fun () ->
-      let packages =
-        Support.setup [ ("app::main", Fixtures.Infer.add_of_strings_given_integers) ]
-      in
+      let packages = Support.setup [ ("app.main", Fixtures.Infer.add_of_strings_given_integers) ] in
       if
         not
           (List.mem "types.unsatisfied_bound"
-             (Support.list_codes (check packages (Support.parse_file "app::main"))))
+             (Support.list_codes (check packages (Support.parse_file "app.main"))))
       then Harness.fail "the written argument was ignored");
   Harness.test "a literal is the receiver of a trait method written in full" (fun () ->
       expect_fine Fixtures.Infer.add_of_two_literals_written_in_full);
@@ -2763,7 +2759,7 @@ let () =
   Harness.test "a float literal far below every float rounds to zero, whatever its exponent"
     (fun () ->
       List.iter
-        (fun literal -> expect_no_diagnostics [ ("app::main", declare literal) ])
+        (fun literal -> expect_no_diagnostics [ ("app.main", declare literal) ])
         [ "2e-324"; "1e-99999999999"; "-1e-9999999999999999999" ])
 
 let () =
@@ -2786,8 +2782,8 @@ let () =
         Support.list_codes
           (check
              (Support.setup
-                [ ("app::main", Fixtures.Infer.clause_calling_a_method_without_its_condition) ])
-             (Support.parse_file "app::main"))
+                [ ("app.main", Fixtures.Infer.clause_calling_a_method_without_its_condition) ])
+             (Support.parse_file "app.main"))
       with
       | [] -> Harness.fail "no diagnostics"
       | codes ->

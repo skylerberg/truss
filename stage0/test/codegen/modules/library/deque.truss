@@ -1,14 +1,14 @@
-use standard::collections
+use standard.collections
 
-fn numbered(count: Int64) -> collections::Deque[Int64] {
-  var queue: collections::Deque[Int64] = []
+fn numbered(count: Int64) -> collections.Deque[Int64] {
+  var queue: collections.Deque[Int64] = []
   for value in 0..count {
     mut queue.push_back(value)
   }
   queue
 }
 
-fn listed(queue: collections::Deque[Int64]) -> List[Int64] {
+fn listed(queue: collections.Deque[Int64]) -> List[Int64] {
   var items: List[Int64] = []
   for item in queue {
     mut items.push(item)
@@ -17,7 +17,7 @@ fn listed(queue: collections::Deque[Int64]) -> List[Int64] {
 }
 
 test "a deque pops from both ends in order" {
-  var queue: collections::Deque[Int64] = []
+  var queue: collections.Deque[Int64] = []
   assert queue.is_empty() && queue.length() == 0
   mut queue.push_back(2)
   mut queue.push_back(3)
@@ -48,7 +48,7 @@ test "a deque filled at one end empties from the other" {
 }
 
 test "a deque keeps its order when both ends are used in turn" {
-  var queue: collections::Deque[Int64] = []
+  var queue: collections.Deque[Int64] = []
   for value in 0..50 {
     mut queue.push_back(value)
     mut queue.push_front(-1 - value)
@@ -63,7 +63,7 @@ test "a deque keeps its order when both ends are used in turn" {
 }
 
 test "a deque is indexed from its front" {
-  var queue: collections::Deque[Int64] = []
+  var queue: collections.Deque[Int64] = []
   mut queue.push_front(2)
   mut queue.push_front(1)
   mut queue.push_back(3)
@@ -89,7 +89,7 @@ test "a deque rotates in both directions" {
 }
 
 test "a deque is collected, extended, searched, cleared, and turned into a list" uses RunForever {
-  var queue: collections::Deque[Int64] = collections::Deque.collect([1, 2, 3].cursor())
+  var queue: collections.Deque[Int64] = collections.Deque.collect([1, 2, 3].cursor())
   mut queue.push_front(0)
   mut queue.extend([4, 5].cursor())
   assert queue.contains(0) && queue.contains(5) && !queue.contains(6)
@@ -120,20 +120,20 @@ test "a deque's items can be changed and consumed in order" {
 
 test "deques with the same items are equal however they were built" {
   var pushed_back = numbered(4)
-  var pushed_front: collections::Deque[Int64] = []
+  var pushed_front: collections.Deque[Int64] = []
   for value in 0..4 {
     mut pushed_front.push_front(3 - value)
   }
-  let from_list: collections::Deque[Int64] = [0, 1, 2, 3]
+  let from_list: collections.Deque[Int64] = [0, 1, 2, 3]
   assert pushed_back == pushed_front && pushed_front == from_list
   mut pushed_back.push_back(4)
   assert !(pushed_back == pushed_front)
-  let empty: collections::Deque[Int64] = collections::Deque.default()
-  assert empty == collections::Deque.with_capacity(8)
+  let empty: collections.Deque[Int64] = collections.Deque.default()
+  assert empty == collections.Deque.with_capacity(8)
 }
 
 test "a deque literal holds its elements from front to back" {
-  var queue: collections::Deque[Int64] = [1, 2, 3]
+  var queue: collections.Deque[Int64] = [1, 2, 3]
   assert queue.length() == 3 && listed(queue) == [1, 2, 3]
   assert mut queue.pop_front() == Some(1) && mut queue.pop_back() == Some(3)
 }

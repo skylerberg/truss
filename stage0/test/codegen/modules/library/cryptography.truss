@@ -1,34 +1,34 @@
-use standard::cryptography
-use standard::hex
-use standard::random
+use standard.cryptography
+use standard.hex
+use standard.random
 
 fn letters(count: UInt64) -> List[UInt8] {
   List.filled(97, count: count)
 }
 
 fn sha256_of(bytes: Slice[UInt8]) -> String {
-  let digest = cryptography::sha256(bytes)
-  hex::encode(digest[..])
+  let digest = cryptography.sha256(bytes)
+  hex.encode(digest[..])
 }
 
 fn sha512_of(bytes: Slice[UInt8]) -> String {
-  let digest = cryptography::sha512(bytes)
-  hex::encode(digest[..])
+  let digest = cryptography.sha512(bytes)
+  hex.encode(digest[..])
 }
 
 fn sha384_of(bytes: Slice[UInt8]) -> String {
-  let digest = cryptography::sha384(bytes)
-  hex::encode(digest[..])
+  let digest = cryptography.sha384(bytes)
+  hex.encode(digest[..])
 }
 
 fn md5_of(bytes: Slice[UInt8]) -> String {
-  let digest = cryptography::md5(bytes)
-  hex::encode(digest[..])
+  let digest = cryptography.md5(bytes)
+  hex.encode(digest[..])
 }
 
 fn sha1_of(bytes: Slice[UInt8]) -> String {
-  let digest = cryptography::sha1(bytes)
-  hex::encode(digest[..])
+  let digest = cryptography.sha1(bytes)
+  hex.encode(digest[..])
 }
 
 test "SHA-256 of the standard's examples" {
@@ -50,18 +50,18 @@ test "SHA-256 at every length around the padding's edges" {
 }
 
 test "a hasher given bytes in pieces gives the digest of the whole" {
-  var hasher = cryptography::Sha256.new()
+  var hasher = cryptography.Sha256.new()
   mut hasher.update(letters(30))
   mut hasher.update(letters(0))
   mut hasher.update(letters(100))
   mut hasher.update(letters(70))
   let digest = own hasher.finish()
-  assert hex::encode(digest[..]) == "c2a908d98f5df987ade41b5fce213067efbcc21ef2240212a41e54b5e7c28ae5"
-  var wide = cryptography::Sha512.new()
+  assert hex.encode(digest[..]) == "c2a908d98f5df987ade41b5fce213067efbcc21ef2240212a41e54b5e7c28ae5"
+  var wide = cryptography.Sha512.new()
   mut wide.update(letters(127))
   mut wide.update(letters(73))
   let wide_digest = own wide.finish()
-  assert hex::encode(wide_digest[..])
+  assert hex.encode(wide_digest[..])
     == "4b11459c33f52a22ee8236782714c150a3b2c60994e9acee17fe68947a3e6789f31e7668394592da7bef827cddca88c4e6f86e4df7ed1ae6cba71f3e98faee9f"
 }
 
@@ -116,13 +116,13 @@ test "SHA-1 of the standard's examples and around the padding's edges" {
 }
 
 fn hmac256_of(key: Slice[UInt8], message: Slice[UInt8]) -> String {
-  let code = cryptography::hmac_sha256(key, message: message)
-  hex::encode(code[..])
+  let code = cryptography.hmac_sha256(key, message: message)
+  hex.encode(code[..])
 }
 
 fn hmac512_of(key: Slice[UInt8], message: Slice[UInt8]) -> String {
-  let code = cryptography::hmac_sha512(key, message: message)
-  hex::encode(code[..])
+  let code = cryptography.hmac_sha512(key, message: message)
+  hex.encode(code[..])
 }
 
 test "HMAC with keys shorter than, as long as, and longer than a block" {
@@ -143,18 +143,18 @@ test "HMAC with keys shorter than, as long as, and longer than a block" {
 
 test "HMAC-SHA-384 gives the bytes of RFC 4231" {
   let short_key: List[UInt8] = List.filled(11, count: 20)
-  let code = cryptography::hmac_sha384(short_key, message: "Hi There".bytes())
-  assert hex::encode(code[..])
+  let code = cryptography.hmac_sha384(short_key, message: "Hi There".bytes())
+  assert hex.encode(code[..])
     == "afd03944d84895626b0825f4ab46907f15f9dadbe4101ec682aa034c7cebc59cfaea9ea9076ede7f4af152e8b2fa9cb6"
   let long_key: List[UInt8] = List.filled(170, count: 131)
-  let hashed = cryptography::hmac_sha384(long_key, message: "Test Using Larger Than Block-Size Key - Hash Key First".bytes())
-  assert hex::encode(hashed[..])
+  let hashed = cryptography.hmac_sha384(long_key, message: "Test Using Larger Than Block-Size Key - Hash Key First".bytes())
+  assert hex.encode(hashed[..])
     == "4ece084485813e9088d2c63a041bc5b44f9ef1012a2b588f3cd11f05033ac4c60c2ef6ab4030fe8296248df163f44952"
 }
 
 test "HKDF-SHA-384 matches Python's hmac module" {
-  let derived = cryptography::hkdf_sha384("secret".bytes(), salt: "salt".bytes(), information: "info".bytes(), length: 100)
-  assert hex::encode(derived)
+  let derived = cryptography.hkdf_sha384("secret".bytes(), salt: "salt".bytes(), information: "info".bytes(), length: 100)
+  assert hex.encode(derived)
     == "29c042775183ec5dbc2c085eb49502b15d9e8abe4a4c1ef98e8e0fb95ad5f6a9fa0e85c3523ecd2f61559c763355e2f2dfed63026045c7a7b9c55a558ccab4807691a096e509089499ede615913c1e8a0be4892aa300a28d570eddcf87707de249644ed7"
 }
 
@@ -162,41 +162,41 @@ test "HKDF gives the bytes of RFC 5869, and any length up to its limit" {
   let secret: List[UInt8] = List.filled(11, count: 22)
   let salt: List[UInt8] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
   let information: List[UInt8] = [240, 241, 242, 243, 244, 245, 246, 247, 248, 249]
-  assert hex::encode(cryptography::hkdf_sha256(secret, salt: salt, information: information, length: 42))
+  assert hex.encode(cryptography.hkdf_sha256(secret, salt: salt, information: information, length: 42))
     == "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865"
-  assert hex::encode(cryptography::hkdf_sha256(secret, salt: [], information: [], length: 42))
+  assert hex.encode(cryptography.hkdf_sha256(secret, salt: [], information: [], length: 42))
     == "8da4e775a563c18f715f802a063c5a31b8a11f5c5ee1879ec3454e5f3c738d2d9d201395faa4b61a96c8"
-  let hundred = cryptography::hkdf_sha256("secret".bytes(), salt: "salt".bytes(), information: "info".bytes(), length: 100)
+  let hundred = cryptography.hkdf_sha256("secret".bytes(), salt: "salt".bytes(), information: "info".bytes(), length: 100)
   assert hundred.length() == 100
   assert sha256_of(hundred) == "53c418dbf98518e4ad94b87f488f49045017c539bd046cc07509c7e02b6c8b5a"
-  let most = cryptography::hkdf_sha256("secret".bytes(), salt: "salt".bytes(), information: "info".bytes(), length: 8160)
+  let most = cryptography.hkdf_sha256("secret".bytes(), salt: "salt".bytes(), information: "info".bytes(), length: 8160)
   assert most.length() == 8160
   assert sha256_of(most) == "cba3a942d3923adc5281096393efb90cd7a388796af48ea75b7c469458c8e6e2"
-  assert cryptography::hkdf_sha256("secret".bytes(), salt: "salt".bytes(), information: "info".bytes(), length: 0).length() == 0
+  assert cryptography.hkdf_sha256("secret".bytes(), salt: "salt".bytes(), information: "info".bytes(), length: 0).length() == 0
 }
 
 test "PBKDF2 gives the bytes of RFC 7914's and RFC 6070's inputs" {
-  assert hex::encode(cryptography::pbkdf2_hmac_sha256("password".bytes(), salt: "salt".bytes(), iterations: 1, length: 32))
+  assert hex.encode(cryptography.pbkdf2_hmac_sha256("password".bytes(), salt: "salt".bytes(), iterations: 1, length: 32))
     == "120fb6cffcf8b32c43e7225256c4f837a86548c92ccc35480805987cb70be17b"
-  assert hex::encode(cryptography::pbkdf2_hmac_sha256("password".bytes(), salt: "salt".bytes(), iterations: 2, length: 32))
+  assert hex.encode(cryptography.pbkdf2_hmac_sha256("password".bytes(), salt: "salt".bytes(), iterations: 2, length: 32))
     == "ae4d0c95af6b46d32d0adff928f06dd02a303f8ef3c251dfd6e2d85a95474c43"
-  assert hex::encode(
-    cryptography::pbkdf2_hmac_sha256(
+  assert hex.encode(
+    cryptography.pbkdf2_hmac_sha256(
       "passwordPASSWORDpassword".bytes(),
       salt: "saltSALTsaltSALTsaltSALTsaltSALTsalt".bytes(),
       iterations: 3,
       length: 40,
     ),
   ) == "325651a5ca818d11f4331cb0c300d6f8b68790c75a09ebad494e74b3f649475856c392e03e00705f"
-  assert cryptography::pbkdf2_hmac_sha256("password".bytes(), salt: "salt".bytes(), iterations: 1, length: 0).length() == 0
+  assert cryptography.pbkdf2_hmac_sha256("password".bytes(), salt: "salt".bytes(), iterations: 1, length: 0).length() == 0
 }
 
 test "bytes compare equal only when they are the same bytes" {
-  assert cryptography::constant_time_equal("secret".bytes(), second: "secret".bytes())
-  assert !cryptography::constant_time_equal("secret".bytes(), second: "secreT".bytes())
-  assert !cryptography::constant_time_equal("secret".bytes(), second: "secre".bytes())
-  assert !cryptography::constant_time_equal("xecret".bytes(), second: "secret".bytes())
-  assert cryptography::constant_time_equal("".bytes(), second: "".bytes())
+  assert cryptography.constant_time_equal("secret".bytes(), second: "secret".bytes())
+  assert !cryptography.constant_time_equal("secret".bytes(), second: "secreT".bytes())
+  assert !cryptography.constant_time_equal("secret".bytes(), second: "secre".bytes())
+  assert !cryptography.constant_time_equal("xecret".bytes(), second: "secret".bytes())
+  assert cryptography.constant_time_equal("".bytes(), second: "".bytes())
 }
 
 fn pattern(count: UInt64) -> List[UInt8] {
@@ -213,8 +213,8 @@ fn pattern_byte(index: UInt64) -> UInt8
 }
 
 fn blake3_of(bytes: Slice[UInt8]) -> String {
-  let digest = cryptography::blake3(bytes)
-  hex::encode(digest[..])
+  let digest = cryptography.blake3(bytes)
+  hex.encode(digest[..])
 }
 
 test "BLAKE3 of the published test vectors" {
@@ -247,10 +247,10 @@ fn keyed_blake3_of(bytes: Slice[UInt8]) -> String {
   for index in 0..count {
     words[index] = key[index]
   }
-  var hasher = cryptography::Blake3.keyed(words)
+  var hasher = cryptography.Blake3.keyed(words)
   mut hasher.update(bytes)
   let digest = own hasher.finish()
-  hex::encode(digest[..])
+  hex.encode(digest[..])
 }
 
 test "keyed BLAKE3 of the published test vectors" {
@@ -261,32 +261,32 @@ test "keyed BLAKE3 of the published test vectors" {
 
 test "BLAKE3 in pieces is BLAKE3 of the whole, and its output extends" {
   let bytes = pattern(2049)
-  var hasher = cryptography::Blake3.new()
+  var hasher = cryptography.Blake3.new()
   mut hasher.update(bytes[..1])
   mut hasher.update(bytes[1..1000])
   mut hasher.update(bytes[1000..1030])
   mut hasher.update(bytes[1030..])
   let digest = own hasher.finish()
-  assert hex::encode(digest[..]) == "5f4d72f40d7a5f82b15ca2b2e44b1de3c2ef86c426c95c1af0b6879522563030"
-  var long = cryptography::Blake3.new()
+  assert hex.encode(digest[..]) == "5f4d72f40d7a5f82b15ca2b2e44b1de3c2ef86c426c95c1af0b6879522563030"
+  var long = cryptography.Blake3.new()
   mut long.update(pattern(1025))
   let extended = own long.finish_extended(131)
-  assert hex::encode(extended) == "d00278ae47eb27b34faecf67b4fe263f82d5412916c1ffd97c8cb7fb814b8444f4c4a22b4b399155358a994e52bf255de60035742ec71bd08ac275a1b51cc6bfe332b0ef84b409108cda080e6269ed4b3e2c3f7d722aa4cdc98d16deb554e5627be8f955c98e1d5f9565a9194cad0c4285f93700062d9595adb992ae68ff12800ab67a"
-  let empty = cryptography::Blake3.new()
-  assert hex::encode(own empty.finish_extended(70)) == "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262e00f03e7b69af26b7faaf09fcd333050338ddfe085b8cc869ca98b206c08243a26f5487789e8"
-  let none = cryptography::Blake3.new()
+  assert hex.encode(extended) == "d00278ae47eb27b34faecf67b4fe263f82d5412916c1ffd97c8cb7fb814b8444f4c4a22b4b399155358a994e52bf255de60035742ec71bd08ac275a1b51cc6bfe332b0ef84b409108cda080e6269ed4b3e2c3f7d722aa4cdc98d16deb554e5627be8f955c98e1d5f9565a9194cad0c4285f93700062d9595adb992ae68ff12800ab67a"
+  let empty = cryptography.Blake3.new()
+  assert hex.encode(own empty.finish_extended(70)) == "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262e00f03e7b69af26b7faaf09fcd333050338ddfe085b8cc869ca98b206c08243a26f5487789e8"
+  let none = cryptography.Blake3.new()
   assert (own none.finish_extended(0)).length() == 0
 }
 
-fn sealing_key() -> cryptography::SecretKey {
-  cryptography::SecretKey.from_bytes([
+fn sealing_key() -> cryptography.SecretKey {
+  cryptography.SecretKey.from_bytes([
     128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143,
     144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159,
   ])
 }
 
-fn sealing_nonce() -> cryptography::Nonce {
-  cryptography::Nonce(bytes: [64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75])
+fn sealing_nonce() -> cryptography.Nonce {
+  cryptography.Nonce(bytes: [64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75])
 }
 
 fn associated_byte(index: UInt64) -> UInt8
@@ -301,8 +301,8 @@ fn associated(count: UInt64) -> List[UInt8] {
   List.generate(count, make: fn(index) { associated_byte(index) })
 }
 
-fn seal_pattern(cipher: cryptography::Cipher, plain: UInt64, data: UInt64) -> List[UInt8] {
-  cryptography::seal(
+fn seal_pattern(cipher: cryptography.Cipher, plain: UInt64, data: UInt64) -> List[UInt8] {
+  cryptography.seal(
     sealing_key(),
     nonce: sealing_nonce(),
     plaintext: pattern(plain),
@@ -311,16 +311,16 @@ fn seal_pattern(cipher: cryptography::Cipher, plain: UInt64, data: UInt64) -> Li
   )
 }
 
-fn sealed_text(cipher: cryptography::Cipher, plain: UInt64, data: UInt64) -> String {
-  hex::encode(seal_pattern(cipher, plain: plain, data: data))
+fn sealed_text(cipher: cryptography.Cipher, plain: UInt64, data: UInt64) -> String {
+  hex.encode(seal_pattern(cipher, plain: plain, data: data))
 }
 
-fn sealed_digest(cipher: cryptography::Cipher, plain: UInt64, data: UInt64) -> String {
+fn sealed_digest(cipher: cryptography.Cipher, plain: UInt64, data: UInt64) -> String {
   sha256_of(seal_pattern(cipher, plain: plain, data: data))
 }
 
 test "ChaCha20-Poly1305 seals to the bytes OpenSSL produces" {
-  let cipher = cryptography::Cipher.ChaCha20Poly1305
+  let cipher = cryptography.Cipher.ChaCha20Poly1305
   assert sealed_text(cipher, plain: 0, data: 0) == "4968bfa6ac4c53184fac3d9c8e0d17c4"
   assert sealed_text(cipher, plain: 1, data: 13) == "5d8fa1d73a31170e23ca7f37885694bb8d"
   assert sealed_text(cipher, plain: 15, data: 14) == "5d8150399a1c3df221a6117ac8d4097b9b47e6fc6ba5d4ebb46e426694e6c6"
@@ -337,7 +337,7 @@ test "ChaCha20-Poly1305 seals to the bytes OpenSSL produces" {
 }
 
 test "AES-256-GCM seals to the bytes OpenSSL produces" {
-  let cipher = cryptography::Cipher.Aes256Gcm
+  let cipher = cryptography.Cipher.Aes256Gcm
   assert sealed_text(cipher, plain: 0, data: 0) == "fdcf33bb6f37f3a12b3fc5eeeff1ed47"
   assert sealed_text(cipher, plain: 1, data: 13) == "d967882cb12ee59bfae106f4377a1271da"
   assert sealed_text(cipher, plain: 15, data: 14) == "d9cb034537e0b86d70f8db7233a3157b0357880a4ac59b988468ca602cd816"
@@ -353,8 +353,8 @@ test "AES-256-GCM seals to the bytes OpenSSL produces" {
   assert sealed_digest(cipher, plain: 300, data: 0) == "f07eb869e75d33553f8185ebeedbb018f3df2b0e078a4bc128b87cd01713007c"
 }
 
-fn opens(cipher: cryptography::Cipher, sealed: Slice[UInt8], data: UInt64) -> Option[List[UInt8]] {
-  match cryptography::open(
+fn opens(cipher: cryptography.Cipher, sealed: Slice[UInt8], data: UInt64) -> Option[List[UInt8]] {
+  match cryptography.open(
     sealing_key(),
     nonce: sealing_nonce(),
     sealed: sealed,
@@ -366,7 +366,7 @@ fn opens(cipher: cryptography::Cipher, sealed: Slice[UInt8], data: UInt64) -> Op
   }
 }
 
-fn open_round_trips(cipher: cryptography::Cipher) -> Bool {
+fn open_round_trips(cipher: cryptography.Cipher) -> Bool {
   var box = seal_pattern(cipher, plain: 100, data: 9)
   if opens(cipher, sealed: box, data: 9) != Some(pattern(100)) {
     return false
@@ -388,26 +388,26 @@ fn open_round_trips(cipher: cryptography::Cipher) -> Bool {
 }
 
 test "open returns the sealed data and rejects any change to it" {
-  assert open_round_trips(cryptography::Cipher.ChaCha20Poly1305)
-  assert open_round_trips(cryptography::Cipher.Aes256Gcm)
-  let empty = seal_pattern(cryptography::Cipher.ChaCha20Poly1305, plain: 0, data: 0)
-  assert opens(cryptography::Cipher.ChaCha20Poly1305, sealed: empty, data: 0) == Some([])
-  assert opens(cryptography::Cipher.Aes256Gcm, sealed: empty, data: 0) is None
+  assert open_round_trips(cryptography.Cipher.ChaCha20Poly1305)
+  assert open_round_trips(cryptography.Cipher.Aes256Gcm)
+  let empty = seal_pattern(cryptography.Cipher.ChaCha20Poly1305, plain: 0, data: 0)
+  assert opens(cryptography.Cipher.ChaCha20Poly1305, sealed: empty, data: 0) == Some([])
+  assert opens(cryptography.Cipher.Aes256Gcm, sealed: empty, data: 0) is None
 }
 
 test "keys and nonces are drawn from the random capability" {
-  provide random::SeededRandom.new(11) {
-    let first = cryptography::SecretKey.generate()
-    let second = cryptography::SecretKey.generate()
+  provide random.SeededRandom.new(11) {
+    let first = cryptography.SecretKey.generate()
+    let second = cryptography.SecretKey.generate()
     assert first.expose() != second.expose()
-    let nonce = cryptography::Nonce.generate()
-    let other = cryptography::Nonce.generate()
+    let nonce = cryptography.Nonce.generate()
+    let other = cryptography.Nonce.generate()
     assert nonce != other
   }
-  provide random::SeededRandom.new(11) {
-    let again = cryptography::SecretKey.generate()
-    provide random::SeededRandom.new(11) {
-      assert again.expose() == cryptography::SecretKey.generate().expose()
+  provide random.SeededRandom.new(11) {
+    let again = cryptography.SecretKey.generate()
+    provide random.SeededRandom.new(11) {
+      assert again.expose() == cryptography.SecretKey.generate().expose()
     }
   }
 }
@@ -437,13 +437,13 @@ fn message_of(count: UInt64) -> List[UInt8] {
 }
 
 fn public_key_hex(private: Array[UInt8, 32]) -> String {
-  let public_key = cryptography::AgreementKey.from_bytes(private).public_key()
-  hex::encode(public_key.bytes[..])
+  let public_key = cryptography.AgreementKey.from_bytes(private).public_key()
+  hex.encode(public_key.bytes[..])
 }
 
-fn shared_hex(private: Array[UInt8, 32], their: cryptography::AgreementPublicKey) -> String {
-  match cryptography::AgreementKey.from_bytes(private).agree(their) {
-    Some(secret) => hex::encode(secret.expose()[..])
+fn shared_hex(private: Array[UInt8, 32], their: cryptography.AgreementPublicKey) -> String {
+  match cryptography.AgreementKey.from_bytes(private).agree(their) {
+    Some(secret) => hex.encode(secret.expose()[..])
     None => "none"
   }
 }
@@ -453,14 +453,14 @@ test "X25519 gives the public keys and the shared secret that OpenSSL produces" 
   let second = stepped_32(2, step: 5)
   assert public_key_hex(first) == "c37077fb432d19c51d6a8c6fdf9dbf06f8471cf12edb1cadab76aeac29917a1e"
   assert public_key_hex(second) == "b5a8a94cec7ee33acb0fc1501b6180f147542e2cd41ff4cdf20ebcc1521c1b0b"
-  let second_public = cryptography::AgreementKey.from_bytes(second).public_key()
-  let first_public = cryptography::AgreementKey.from_bytes(first).public_key()
+  let second_public = cryptography.AgreementKey.from_bytes(second).public_key()
+  let first_public = cryptography.AgreementKey.from_bytes(first).public_key()
   assert shared_hex(first, their: second_public) == "b1726613cf762380186440efa70706292be62a41153200b0fa2946a8d8971570"
   assert shared_hex(second, their: first_public) == "b1726613cf762380186440efa70706292be62a41153200b0fa2946a8d8971570"
   let third = stepped_32(200, step: 3)
   let fourth = stepped_32(77, step: 5)
   assert public_key_hex(third) == "eebeea3c07a2a7f60ec9a6fa2b9c069a639a2a3976660561e6ae241099142843"
-  assert shared_hex(third, their: cryptography::AgreementKey.from_bytes(fourth).public_key())
+  assert shared_hex(third, their: cryptography.AgreementKey.from_bytes(fourth).public_key())
     == "d799098a349c515afa2eaf6bcf8d967e44419d71c91780e83e22e89bec53551a"
 }
 
@@ -468,19 +468,19 @@ test "X25519 refuses a public key of low order" {
   let zero: Array[UInt8, 32] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
   ]
-  assert shared_hex(stepped_32(1, step: 3), their: cryptography::AgreementPublicKey(bytes: zero)) == "none"
+  assert shared_hex(stepped_32(1, step: 3), their: cryptography.AgreementPublicKey(bytes: zero)) == "none"
   var one = zero
   one[0] = 1
-  assert shared_hex(stepped_32(1, step: 3), their: cryptography::AgreementPublicKey(bytes: one)) == "none"
+  assert shared_hex(stepped_32(1, step: 3), their: cryptography.AgreementPublicKey(bytes: one)) == "none"
 }
 
 fn signature_hex(seed: Array[UInt8, 32], message: Slice[UInt8]) -> String {
-  let signature = cryptography::SigningKey.from_seed(seed).sign(message)
-  hex::encode(signature.bytes[..])
+  let signature = cryptography.SigningKey.from_seed(seed).sign(message)
+  hex.encode(signature.bytes[..])
 }
 
 fn verifying_key_hex(seed: Array[UInt8, 32]) -> String {
-  hex::encode(cryptography::SigningKey.from_seed(seed).verifying_key().bytes()[..])
+  hex.encode(cryptography.SigningKey.from_seed(seed).verifying_key().bytes()[..])
 }
 
 test "Ed25519 gives the public keys and the signatures that OpenSSL produces" {
@@ -501,7 +501,7 @@ test "Ed25519 gives the public keys and the signatures that OpenSSL produces" {
 }
 
 test "Ed25519 verifies its own signatures and rejects anything that was changed" {
-  let key = cryptography::SigningKey.from_seed(stepped_32(100, step: 7))
+  let key = cryptography.SigningKey.from_seed(stepped_32(100, step: 7))
   let verifying_key = key.verifying_key()
   let message = message_of(64)
   let signature = key.sign(message)
@@ -512,16 +512,16 @@ test "Ed25519 verifies its own signatures and rejects anything that was changed"
   assert !verifying_key.verify(changed_message, signature: signature)
   var changed_commitment = signature.bytes
   changed_commitment[3] = changed_commitment[3] ^ 4
-  assert !verifying_key.verify(message, signature: cryptography::Signature(bytes: changed_commitment))
+  assert !verifying_key.verify(message, signature: cryptography.Signature(bytes: changed_commitment))
   var changed_response = signature.bytes
   changed_response[40] = changed_response[40] ^ 4
-  assert !verifying_key.verify(message, signature: cryptography::Signature(bytes: changed_response))
-  let other = cryptography::SigningKey.from_seed(stepped_32(9, step: 7)).verifying_key()
+  assert !verifying_key.verify(message, signature: cryptography.Signature(bytes: changed_response))
+  let other = cryptography.SigningKey.from_seed(stepped_32(9, step: 7)).verifying_key()
   assert !other.verify(message, signature: signature)
 }
 
 test "Ed25519 rejects a response that is not below the group's order" {
-  let key = cryptography::SigningKey.from_seed(stepped_32(100, step: 7))
+  let key = cryptography.SigningKey.from_seed(stepped_32(100, step: 7))
   let message = message_of(8)
   let signature = key.sign(message)
   let order: Array[UInt8, 32] = [
@@ -542,37 +542,37 @@ test "Ed25519 rejects a response that is not below the group's order" {
     carry = sum >> 8
   }
   assert key.verifying_key().verify(message, signature: signature)
-  assert !key.verifying_key().verify(message, signature: cryptography::Signature(bytes: malleated))
+  assert !key.verifying_key().verify(message, signature: cryptography.Signature(bytes: malleated))
 }
 
 test "a verifying key is made only from bytes that name a point of the curve" {
-  let valid = cryptography::SigningKey.from_seed(stepped_32(9, step: 7)).verifying_key().bytes()
-  assert cryptography::VerifyingKey.from_bytes(valid) is Some(_)
+  let valid = cryptography.SigningKey.from_seed(stepped_32(9, step: 7)).verifying_key().bytes()
+  assert cryptography.VerifyingKey.from_bytes(valid) is Some(_)
   var invalid = valid
   invalid[0] = invalid[0] ^ 1
   var invalid_count = 0
-  if cryptography::VerifyingKey.from_bytes(invalid) is None {
+  if cryptography.VerifyingKey.from_bytes(invalid) is None {
     invalid_count += 1
   }
   invalid[0] = invalid[0] ^ 3
-  if cryptography::VerifyingKey.from_bytes(invalid) is None {
+  if cryptography.VerifyingKey.from_bytes(invalid) is None {
     invalid_count += 1
   }
   invalid[1] = invalid[1] ^ 1
-  if cryptography::VerifyingKey.from_bytes(invalid) is None {
+  if cryptography.VerifyingKey.from_bytes(invalid) is None {
     invalid_count += 1
   }
   assert invalid_count >= 1
 }
 
 test "signing keys and agreement keys are drawn from the random capability" {
-  provide random::SeededRandom.new(5) {
-    let first = cryptography::SigningKey.generate()
-    let second = cryptography::SigningKey.generate()
+  provide random.SeededRandom.new(5) {
+    let first = cryptography.SigningKey.generate()
+    let second = cryptography.SigningKey.generate()
     assert first.verifying_key() != second.verifying_key()
     assert first.verifying_key().verify("message".bytes(), signature: first.sign("message".bytes()))
-    let ours = cryptography::AgreementKey.generate()
-    let theirs = cryptography::AgreementKey.generate()
+    let ours = cryptography.AgreementKey.generate()
+    let theirs = cryptography.AgreementKey.generate()
     let our_public = ours.public_key()
     let their_public = theirs.public_key()
     assert our_public != their_public
@@ -593,32 +593,32 @@ fn stepped_bytes(count: UInt64, start: UInt64, modulus: UInt64) -> List[UInt8] {
   bytes
 }
 
-fn password_hash_hex(password: UInt64, salt: UInt64, password_cost: cryptography::PasswordCost) -> String {
-  let hash = cryptography::hash_password(
+fn password_hash_hex(password: UInt64, salt: UInt64, password_cost: cryptography.PasswordCost) -> String {
+  let hash = cryptography.hash_password(
     stepped_bytes(password, start: 48, modulus: 77),
     salt: stepped_bytes(salt, start: 160, modulus: 53),
     password_cost: password_cost,
   )
-  hex::encode(hash[..])
+  hex.encode(hash[..])
 }
 
 test "hash_password gives the bytes that OpenSSL's Argon2id produces" {
   assert password_hash_hex(
     8,
     salt: 8,
-    password_cost: cryptography::PasswordCost(memory_kibibytes: 8, iterations: 1, parallelism: 1),
+    password_cost: cryptography.PasswordCost(memory_kibibytes: 8, iterations: 1, parallelism: 1),
   )
     == "9f5cbedabc0b5a5fc68c616d931cf7d0d41808260123b081e38401a058effc7e"
   assert password_hash_hex(
     0,
     salt: 8,
-    password_cost: cryptography::PasswordCost(memory_kibibytes: 8, iterations: 1, parallelism: 1),
+    password_cost: cryptography.PasswordCost(memory_kibibytes: 8, iterations: 1, parallelism: 1),
   )
     == "dc1a6bd586d35fb0e40abdd27db6da14335f8c04c64b990d21acd36a0b583d11"
   assert password_hash_hex(
     11,
     salt: 16,
-    password_cost: cryptography::PasswordCost(memory_kibibytes: 32, iterations: 3, parallelism: 1),
+    password_cost: cryptography.PasswordCost(memory_kibibytes: 32, iterations: 3, parallelism: 1),
   )
     == "ec96795655b389788c0aa55be337ea66200c20686f259310fc349e23ab185400"
 }
@@ -627,24 +627,24 @@ test "hash_password with several lanes and a memory size that is not a multiple 
   assert password_hash_hex(
     32,
     salt: 16,
-    password_cost: cryptography::PasswordCost(memory_kibibytes: 64, iterations: 2, parallelism: 2),
+    password_cost: cryptography.PasswordCost(memory_kibibytes: 64, iterations: 2, parallelism: 2),
   )
     == "0d99ad0cab8a280629027b813e74bd323ce823924c3bea6b627d121d2ab7b04b"
   assert password_hash_hex(
     100,
     salt: 33,
-    password_cost: cryptography::PasswordCost(memory_kibibytes: 71, iterations: 2, parallelism: 3),
+    password_cost: cryptography.PasswordCost(memory_kibibytes: 71, iterations: 2, parallelism: 3),
   )
     == "4216edbca32c089f1f00079b4516e65488c8b2752b09405ccdc8aa7c61bfdfdf"
   assert password_hash_hex(
     16,
     salt: 16,
-    password_cost: cryptography::PasswordCost(memory_kibibytes: 256, iterations: 2, parallelism: 4),
+    password_cost: cryptography.PasswordCost(memory_kibibytes: 256, iterations: 2, parallelism: 4),
   )
     == "ff6f4f5585fe87450ec7fc361494ed733c4e0e583099d584c3d5d8333c7daa99"
 }
 
 test "hash_password with the default cost" {
-  assert password_hash_hex(16, salt: 16, password_cost: cryptography::PasswordCost())
+  assert password_hash_hex(16, salt: 16, password_cost: cryptography.PasswordCost())
     == "b2fe92bef9e06d5c129e728b2e78965e2180818a2a9ae126914187564ecde44d"
 }

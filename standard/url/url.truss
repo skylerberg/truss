@@ -1,11 +1,11 @@
-use standard::intrinsic
-use standard::network
-use standard::serialization
-use standard::text
+use standard.intrinsic
+use standard.network
+use standard.serialization
+use standard.text
 
 public type Host =
   | Domain(name: String)
-  | Address(address: network::IpAddress)
+  | Address(address: network.IpAddress)
   derives Equal, Hash, Ordered
 
 impl Display for Host {
@@ -221,8 +221,8 @@ internal fn parse_port(text: StringSlice, from: UInt64, to: UInt64) -> Result[Op
   if from == to {
     return Ok(None)
   }
-  match network::parse_number(text, from: from, to: to, limit: 65535) {
-    Ok(port) => Ok(Some(intrinsic::convert(port)))
+  match network.parse_number(text, from: from, to: to, limit: 65535) {
+    Ok(port) => Ok(Some(intrinsic.convert(port)))
     Err(_) => Err(ParseError.InvalidPort)
   }
 }
@@ -233,7 +233,7 @@ internal fn parse_host(text: StringSlice, from: UInt64, to: UInt64) -> Result[Ho
   cost time O(to - from)
 {
   let name = text.part(from, to: to)
-  match network::parse_address(name) {
+  match network.parse_address(name) {
     Ok(address) => {
       if address is Version4(_) {
         return Ok(Host.Address(address))
@@ -271,7 +271,7 @@ internal fn parse_authority(text: StringSlice, from: UInt64, to: UInt64) -> Resu
     if close == to {
       return Err(ParseError.InvalidHost)
     }
-    match network::parse_address(text.part(start + 1, to: close)) {
+    match network.parse_address(text.part(start + 1, to: close)) {
       Ok(address) => {
         if address is Version4(_) {
           return Err(ParseError.InvalidHost)
@@ -397,7 +397,7 @@ internal fn percent_encode(text: StringSlice, how: EscapeSet) -> String
   cost time O(text.length())
 {
   if text.length() > UInt64.maximum / 8 {
-    intrinsic::crash("a string cannot hold that many bytes")
+    intrinsic.crash("a string cannot hold that many bytes")
   }
   let form = how == EscapeSet.AsForm
   var extra: UInt64 = 0
@@ -410,21 +410,21 @@ internal fn percent_encode(text: StringSlice, how: EscapeSet) -> String
     }
   }
   let capacity = text.length() + extra
-  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(capacity)
+  var output: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(capacity)
   var budget = extra
   for index in 0..text.length()
-    invariant intrinsic::storage_length(output) + (text.length() - index) + budget <= capacity
-    invariant intrinsic::storage_capacity(output) == capacity
+    invariant intrinsic.storage_length(output) + (text.length() - index) + budget <= capacity
+    invariant intrinsic.storage_capacity(output) == capacity
   {
     let byte = text.byte(index)
     if form && byte == 32 {
-      intrinsic::storage_push(mut output, value: 43)
+      intrinsic.storage_push(mut output, value: 43)
     } else if how.allows(byte) || budget < 2 {
-      intrinsic::storage_push(mut output, value: byte)
+      intrinsic.storage_push(mut output, value: byte)
     } else {
-      intrinsic::storage_push(mut output, value: 37)
-      intrinsic::storage_push(mut output, value: (byte / 16).digit_byte(uppercase: true))
-      intrinsic::storage_push(mut output, value: (byte % 16).digit_byte(uppercase: true))
+      intrinsic.storage_push(mut output, value: 37)
+      intrinsic.storage_push(mut output, value: (byte / 16).digit_byte(uppercase: true))
+      intrinsic.storage_push(mut output, value: (byte % 16).digit_byte(uppercase: true))
       budget -= 2
     }
   }
@@ -437,13 +437,13 @@ internal fn percent_decode_bytes(text: StringSlice, from: UInt64, to: UInt64, fo
   ensures !(result is Ok(bytes) && bytes.length() > to - from)
   cost time O(to - from)
 {
-  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(to - from)
+  var output: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(to - from)
   var index = from
   while index < to
     invariant from <= index
     invariant index <= to
-    invariant intrinsic::storage_length(output) <= index - from
-    invariant intrinsic::storage_capacity(output) == to - from
+    invariant intrinsic.storage_length(output) <= index - from
+    invariant intrinsic.storage_capacity(output) == to - from
     decreases to - index
     cost time O(index - from)
   {
@@ -457,10 +457,10 @@ internal fn percent_decode_bytes(text: StringSlice, from: UInt64, to: UInt64, fo
       if high >= 16 || low >= 16 {
         return Err(ParseError.InvalidPercentEncoding(offset: index))
       }
-      intrinsic::storage_push(mut output, value: high * 16 + low)
+      intrinsic.storage_push(mut output, value: high * 16 + low)
       index += 3
     } else {
-      intrinsic::storage_push(mut output, value: if form && byte == 43 { 32 } else { byte })
+      intrinsic.storage_push(mut output, value: if form && byte == 43 { 32 } else { byte })
       index += 1
     }
   }
@@ -507,16 +507,16 @@ internal fn count_byte(text: StringSlice, byte: UInt8) -> UInt64
   count
 }
 
-internal fn find_last_slash(output: intrinsic::Storage[UInt8]) -> UInt64
-  ensures result <= intrinsic::storage_length(output)
-  cost time O(intrinsic::storage_length(output) - result)
+internal fn find_last_slash(output: intrinsic.Storage[UInt8]) -> UInt64
+  ensures result <= intrinsic.storage_length(output)
+  cost time O(intrinsic.storage_length(output) - result)
   cost allocations == 0
 {
-  var length = intrinsic::storage_length(output)
-  while length > 0 && intrinsic::storage_at(output, index: length - 1) != 47
-    invariant length <= intrinsic::storage_length(output)
+  var length = intrinsic.storage_length(output)
+  while length > 0 && intrinsic.storage_at(output, index: length - 1) != 47
+    invariant length <= intrinsic.storage_length(output)
     decreases length
-    cost time O(intrinsic::storage_length(output) - length)
+    cost time O(intrinsic.storage_length(output) - length)
     cost allocations == 0
   {
     length -= 1
@@ -547,14 +547,14 @@ internal fn remove_dot_segments(path: StringSlice) -> String
   cost time O(path.length())
 {
   let length = path.length()
-  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(length)
+  var output: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(length)
   var index: UInt64 = 0
   while index < length
     invariant index <= length
-    invariant intrinsic::storage_length(output) <= index
-    invariant intrinsic::storage_capacity(output) == length
+    invariant intrinsic.storage_length(output) <= index
+    invariant intrinsic.storage_capacity(output) == length
     decreases length - index
-    cost time O(2 * index - intrinsic::storage_length(output))
+    cost time O(2 * index - intrinsic.storage_length(output))
   {
     let slashed = path.byte(index) == 47
     let start = if slashed { index + 1 } else { index }
@@ -562,11 +562,11 @@ internal fn remove_dot_segments(path: StringSlice) -> String
     let dot = is_dot(path, from: start, to: end)
     let double = is_double_dot(path, from: start, to: end)
     if double {
-      intrinsic::storage_shorten(mut output, length: find_last_slash(output))
+      intrinsic.storage_shorten(mut output, length: find_last_slash(output))
     }
     if dot || double {
       if slashed && end == length {
-        intrinsic::storage_push(mut output, value: 47)
+        intrinsic.storage_push(mut output, value: 47)
       }
       index = if !slashed && end < length { end + 1 } else { end }
     } else {
@@ -644,21 +644,21 @@ public fn decode_query(text: StringSlice) -> Result[List[Parameter], ParseError]
   cost time O(text.length())
 {
   let room = count_byte(text, byte: 38) + 1
-  var output: intrinsic::Storage[Parameter] = intrinsic::storage_with_capacity(room)
+  var output: intrinsic.Storage[Parameter] = intrinsic.storage_with_capacity(room)
   var failure: Option[ParseError] = None
   var failed = false
   var index: UInt64 = 0
   while index < text.length() && !failed
     invariant index <= text.length()
-    invariant intrinsic::storage_length(output) <= room
-    invariant intrinsic::storage_capacity(output) == room
+    invariant intrinsic.storage_length(output) <= room
+    invariant intrinsic.storage_capacity(output) == room
     decreases text.length() - index
     cost time O(index)
   {
     let end = find_first_of(text, from: index, to: text.length(), first: 38, second: 38, third: 38)
-    if end > index && intrinsic::storage_length(output) < room {
+    if end > index && intrinsic.storage_length(output) < room {
       match parse_parameter(text, from: index, to: end) {
-        Ok(parameter) => intrinsic::storage_push(mut output, value: own parameter)
+        Ok(parameter) => intrinsic.storage_push(mut output, value: own parameter)
         Err(error) => {
           failure = Some(error)
         }
@@ -733,22 +733,22 @@ public fn Url.path_segments(self) -> List[String]
     return []
   }
   let room = count_byte(path, byte: 47) + 1
-  var output: intrinsic::Storage[String] = intrinsic::storage_with_capacity(room)
+  var output: intrinsic.Storage[String] = intrinsic.storage_with_capacity(room)
   var index: UInt64 = if path.byte(0) == 47 { 1 } else { 0 }
   var more = true
   while more && index <= path.length()
     invariant index <= path.length() + 1
-    invariant intrinsic::storage_length(output) <= room
-    invariant intrinsic::storage_capacity(output) == room
+    invariant intrinsic.storage_length(output) <= room
+    invariant intrinsic.storage_capacity(output) == room
     decreases path.length() + 1 - index
     cost time O(index)
   {
     let end = find_first_of(path, from: index, to: path.length(), first: 47, second: 47, third: 47)
-    if intrinsic::storage_length(output) < room {
+    if intrinsic.storage_length(output) < room {
       if percent_decode(path, from: index, to: end, form: false) is Ok(segment) {
-        intrinsic::storage_push(mut output, value: own segment)
+        intrinsic.storage_push(mut output, value: own segment)
       } else {
-        intrinsic::storage_push(mut output, value: path.part(index, to: end).to_string())
+        intrinsic.storage_push(mut output, value: path.part(index, to: end).to_string())
       }
     }
     more = end < path.length()
@@ -939,7 +939,7 @@ impl Display for Url {
   }
 }
 
-impl text::Parse for Url {
+impl text.Parse for Url {
   type Error = ParseError
 
   fn parse(text: StringSlice) -> Result[Url, ParseError]
@@ -1008,7 +1008,7 @@ impl FromTemplate for Url {
   }
 }
 
-internal fn template_text(literals: Slice[text::Literal], part: StringSlice) -> String
+internal fn template_text(literals: Slice[text.Literal], part: StringSlice) -> String
 {
   var text = ""
   var index: UInt64 = 0
@@ -1040,7 +1040,7 @@ internal fn path_start(text: StringSlice) -> UInt64
   }
 }
 
-internal fn parses_with_parts_after_authority(literals: Slice[text::Literal], part: StringSlice) -> Bool
+internal fn parses_with_parts_after_authority(literals: Slice[text.Literal], part: StringSlice) -> Bool
   requires literals.length() > 0
 {
   let text = template_text(literals, part: part)
@@ -1050,21 +1050,21 @@ internal fn parses_with_parts_after_authority(literals: Slice[text::Literal], pa
   literals.length() == 1 || path_start(text) <= literals[0].text().length()
 }
 
-public fn is_valid_template(literals: Slice[text::Literal]) -> Bool
+public fn is_valid_template(literals: Slice[text.Literal]) -> Bool
 {
   literals.length() > 0
     && parses_with_parts_after_authority(literals, part: "~")
     && parses_with_parts_after_authority(literals, part: "")
 }
 
-impl serialization::Serialize for Url {
-  fn serialize[Sink: serialization::Serializer](self, sink: mut Sink) {
-    serialization::serialize_text(self, sink: mut sink)
+impl serialization.Serialize for Url {
+  fn serialize[Sink: serialization.Serializer](self, sink: mut Sink) {
+    serialization.serialize_text(self, sink: mut sink)
   }
 }
 
-impl serialization::Deserialize for Url {
-  fn deserialize[Source: serialization::Deserializer](source: mut Source) -> Result[Url, serialization::Error] {
-    serialization::deserialize_text(mut source, expected: "a URL")
+impl serialization.Deserialize for Url {
+  fn deserialize[Source: serialization.Deserializer](source: mut Source) -> Result[Url, serialization.Error] {
+    serialization.deserialize_text(mut source, expected: "a URL")
   }
 }

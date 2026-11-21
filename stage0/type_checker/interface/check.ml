@@ -222,8 +222,7 @@ let check_derives state (interface : Types.type_interface) (clauses : Syntax.typ
         Checking.report state Not_derivable state.spans.(written.id)
           (Printf.sprintf
              "Only `Equal`, `Hash`, `Ordered`, `Default`, `Copyable`, `Plain`, \
-              `serialization::Serialize`, and `serialization::Deserialize` can be derived, not \
-              `%s`."
+              `serialization.Serialize`, and `serialization.Deserialize` can be derived, not `%s`."
              shown)
       else if Well_known.is Copyable trait || Well_known.is Plain trait then
         begin if not interface.opaque then

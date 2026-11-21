@@ -1,5 +1,5 @@
 
-fn echoed(through: mut processes::Child, count: UInt64) -> UInt64
+fn echoed(through: mut processes.Child, count: UInt64) -> UInt64
   uses Tasks, Handles, Panic, RunForever
 {
   var input = mut through.take_input().expect("the child was spawned with a piped input")
@@ -49,9 +49,9 @@ fn main(arguments: List[String]) -> ExitCode
     }
   }
   Console.print_line("captured from many")
-  let cat = processes::Command.new("cat")
-    .input(processes::Redirect.Pipe)
-    .output(processes::Redirect.Pipe)
+  let cat = processes.Command.new("cat")
+    .input(processes.Redirect.Pipe)
+    .output(processes.Redirect.Pipe)
   match Processes.spawn(cat) {
     Ok(child) => {
       var through = own child

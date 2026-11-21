@@ -93,7 +93,7 @@ let use_path cursor : Syntax.path option =
     Cursor.expect_keyword cursor Use;
     let names =
       List.rev
-        (Cursor.parse_separated cursor ~separator:Colon_colon (fun cursor ->
+        (Cursor.parse_separated cursor ~separator:Dot (fun cursor ->
              Atoms.lower_name cursor "a module name"))
     in
     if not (Cursor.is_at_end cursor) then Cursor.fail cursor "a line break after the module path";

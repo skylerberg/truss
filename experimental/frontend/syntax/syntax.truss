@@ -1,5 +1,5 @@
-use frontend::source
-use frontend::token
+use frontend.source
+use frontend.token
 
 internal type Case = Upper | Lower
   derives Equal
@@ -134,7 +134,7 @@ internal type Expression(kind: ExpressionKind, id: UInt64)
 
 internal type ExpressionKind =
   | Integer(digits: String)
-  | Float(value: token::Decimal)
+  | Float(value: token.Decimal)
   | String(literal: StringLiteral)
   | True
   | False
@@ -144,7 +144,7 @@ internal type ExpressionKind =
   | Continue
   | SelfValue
   | SelfTypeValue
-  | Name(path: NamePath)
+  | Name(name: Name)
   | indirect Member(base: Expression, name: Name)
   | indirect Bracket(base: Expression, items: List[BracketItem])
   | indirect Call(callee: Expression, arguments: List[Argument])
@@ -173,7 +173,7 @@ internal type ExpressionKind =
 internal type Entry(key: Expression, value: Expression)
   derives Equal
 
-internal type StringLiteral(tag: Option[NamePath], form: token::Form, first: Text, rest: List[Interpolated], id: UInt64)
+internal type StringLiteral(tag: Option[NamePath], form: token.Form, first: Text, rest: List[Interpolated], id: UInt64)
   derives Equal
 
 internal type Interpolated(value: Expression, text: Text)
@@ -386,7 +386,7 @@ internal type DefinitionKind =
 internal type Definition(visibility: Option[Visibility], kind: DefinitionKind, id: UInt64)
   derives Equal
 
-internal type Positions(spans: List[source::Span], syntax_errors: List[source::Span])
+internal type Positions(spans: List[source.Span], syntax_errors: List[source.Span])
   derives Equal
 
 internal type Item[Value](base: UInt64, stop: UInt64, value: Value, positions: Positions)

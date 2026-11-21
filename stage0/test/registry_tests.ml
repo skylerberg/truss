@@ -82,36 +82,36 @@ let () =
     | _ -> Harness.fail "accepted"
   in
   Harness.test "a lock file without its first line is malformed" (fun () ->
-      expect_malformed_at 1 (Printf.sprintf "acme::geometry 1.0.0 %s\n" hash));
+      expect_malformed_at 1 (Printf.sprintf "acme.geometry 1.0.0 %s\n" hash));
   Harness.test "a line that is not a name, a version, and a hash is malformed, at its line"
     (fun () ->
-      expect_malformed_at 2 "format 1\nacme::geometry 1.0.0\n";
+      expect_malformed_at 2 "format 1\nacme.geometry 1.0.0\n";
       expect_malformed_at 2 (Printf.sprintf "format 1\ngeometry 1.0.0 %s\n" hash);
-      expect_malformed_at 2 (Printf.sprintf "format 1\nacme::geometry 1.0 %s\n" hash);
-      expect_malformed_at 2 "format 1\nacme::geometry 1.0.0 abc\n";
+      expect_malformed_at 2 (Printf.sprintf "format 1\nacme.geometry 1.0 %s\n" hash);
+      expect_malformed_at 2 "format 1\nacme.geometry 1.0.0 abc\n";
       expect_malformed_at 3
-        (Printf.sprintf "format 1\nacme::geometry 1.0.0 %s\nacme::geometry 1.1.0 %s\n" hash hash));
+        (Printf.sprintf "format 1\nacme.geometry 1.0.0 %s\nacme.geometry 1.1.0 %s\n" hash hash));
   Harness.test "a prelude capability that a lock file holds by its full path is written by its name"
     (fun () ->
-      let line = Printf.sprintf "acme::geometry 1.0.0 %s holds" hash in
+      let line = Printf.sprintf "acme.geometry 1.0.0 %s holds" hash in
       let written =
         Registry.Lock.print
           (Registry.Lock.parse
-             (Printf.sprintf "format 1\n%s standard::capabilities::Clock, Handles\n" line))
+             (Printf.sprintf "format 1\n%s standard.capabilities.Clock, Handles\n" line))
       in
       if written <> Printf.sprintf "format 1\n%s Clock, Handles\n" line then
         Harness.fail "written as %S" written);
   Harness.test "a capability that a lock file holds is a name or a full path" (fun () ->
-      expect_malformed_at 2 (Printf.sprintf "format 1\nacme::geometry 1.0.0 %s holds a:b\n" hash);
-      expect_malformed_at 2 (Printf.sprintf "format 1\nacme::geometry 1.0.0 %s holds Clock,\n" hash));
+      expect_malformed_at 2 (Printf.sprintf "format 1\nacme.geometry 1.0.0 %s holds a:b\n" hash);
+      expect_malformed_at 2 (Printf.sprintf "format 1\nacme.geometry 1.0.0 %s holds Clock,\n" hash));
   Harness.test "a lock file's lines are in order of owner, and then of name" (fun () ->
-      let first = Printf.sprintf "a::y 1.0.0 %s\n" hash
-      and second = Printf.sprintf "a1::x 1.0.0 %s\n" hash in
+      let first = Printf.sprintf "a.y 1.0.0 %s\n" hash
+      and second = Printf.sprintf "a1.x 1.0.0 %s\n" hash in
       let written = Registry.Lock.print (Registry.Lock.parse ("format 1\n" ^ second ^ first)) in
       if written <> "format 1\n" ^ first ^ second then Harness.fail "written as %S" written);
   Harness.test "a version must start with the number its package's name ends in" (fun () ->
-      expect_malformed_at 2 (Printf.sprintf "format 1\nacme::geometry_v2 1.0.0 %s\n" hash);
-      expect_malformed_at 2 (Printf.sprintf "format 1\nacme::geometry 2.0.0 %s\n" hash))
+      expect_malformed_at 2 (Printf.sprintf "format 1\nacme.geometry_v2 1.0.0 %s\n" hash);
+      expect_malformed_at 2 (Printf.sprintf "format 1\nacme.geometry 2.0.0 %s\n" hash))
 
 let make_scratch_directory = Harness.make_scratch_directory
 
@@ -124,7 +124,7 @@ let make_version_directory root (package : Path.package) version =
     (Path.list_package_parts package @ [ Registry.Version.show version ])
 
 let () =
-  let files = [ ("truss.toml", "[package]\nname = \"acme::geometry\"\n"); ("vector.truss", "") ] in
+  let files = [ ("truss.toml", "[package]\nname = \"acme.geometry\"\n"); ("vector.truss", "") ] in
   Harness.test "a registry lists a package's versions in the order they were added" (fun () ->
       let registry = use_registry_at (make_scratch_directory "registry") in
       Registry.Index.add registry { Path.owner = Some "acme"; name = "geometry" } (1, 0, 0) files;
@@ -237,48 +237,46 @@ let list_chosen (packages, problems) =
 let () =
   let published =
     [
-      (("acme::geometry", (1, 0, 0)), ([ ("acme::units", []) ], [ ("acme::units", (1, 0, 0)) ]));
-      (("acme::geometry", (1, 1, 0)), ([ ("acme::units", []) ], [ ("acme::units", (1, 2, 0)) ]));
-      (("acme::shapes", (1, 0, 0)), ([ ("acme::units", []) ], [ ("acme::units", (1, 1, 0)) ]));
-      (("acme::units", (1, 0, 0)), ([], []));
-      (("acme::units", (1, 1, 0)), ([], []));
-      (("acme::units", (1, 2, 0)), ([], []));
-      (("acme::units", (1, 3, 0)), ([], []));
+      (("acme.geometry", (1, 0, 0)), ([ ("acme.units", []) ], [ ("acme.units", (1, 0, 0)) ]));
+      (("acme.geometry", (1, 1, 0)), ([ ("acme.units", []) ], [ ("acme.units", (1, 2, 0)) ]));
+      (("acme.shapes", (1, 0, 0)), ([ ("acme.units", []) ], [ ("acme.units", (1, 1, 0)) ]));
+      (("acme.units", (1, 0, 0)), ([], []));
+      (("acme.units", (1, 1, 0)), ([], []));
+      (("acme.units", (1, 2, 0)), ([], []));
+      (("acme.units", (1, 3, 0)), ([], []));
     ]
   in
   let choose lock roots =
     Registry.Selection.choose ~lock
       ~roots:(List.map (fun name -> (parse_package "app", parse_package name)) roots)
-      ~is_local:(fun name -> name = parse_package "app" || name = parse_package "acme::local")
+      ~is_local:(fun name -> name = parse_package "app" || name = parse_package "acme.local")
       ~load:(load published)
   in
   Harness.test "a build uses the version its lock file names, and nothing newer" (fun () ->
       if
-        list_chosen (choose [ make_entry "acme::units" (1, 1, 0) ] [ "acme::units" ])
-        <> [ ("acme::units", (1, 1, 0)) ]
+        list_chosen (choose [ make_entry "acme.units" (1, 1, 0) ] [ "acme.units" ])
+        <> [ ("acme.units", (1, 1, 0)) ]
       then Harness.fail "chose another");
   Harness.test "a build uses the highest version any of its packages was published with" (fun () ->
-      let lock = [ make_entry "acme::geometry" (1, 0, 0); make_entry "acme::shapes" (1, 0, 0) ] in
+      let lock = [ make_entry "acme.geometry" (1, 0, 0); make_entry "acme.shapes" (1, 0, 0) ] in
       if
-        list_chosen (choose lock [ "acme::geometry"; "acme::shapes" ])
-        <> [
-             ("acme::geometry", (1, 0, 0)); ("acme::shapes", (1, 0, 0)); ("acme::units", (1, 1, 0));
-           ]
+        list_chosen (choose lock [ "acme.geometry"; "acme.shapes" ])
+        <> [ ("acme.geometry", (1, 0, 0)); ("acme.shapes", (1, 0, 0)); ("acme.units", (1, 1, 0)) ]
       then Harness.fail "chose another");
   Harness.test "a version the lock file names above every record's is kept" (fun () ->
-      let lock = [ make_entry "acme::geometry" (1, 0, 0); make_entry "acme::units" (1, 3, 0) ] in
+      let lock = [ make_entry "acme.geometry" (1, 0, 0); make_entry "acme.units" (1, 3, 0) ] in
       if
-        list_chosen (choose lock [ "acme::geometry" ])
-        <> [ ("acme::geometry", (1, 0, 0)); ("acme::units", (1, 3, 0)) ]
+        list_chosen (choose lock [ "acme.geometry" ])
+        <> [ ("acme.geometry", (1, 0, 0)); ("acme.units", (1, 3, 0)) ]
       then Harness.fail "chose another");
   Harness.test "a package no dependency reaches is not in the build, whatever the lock file names"
     (fun () ->
-      let lock = [ make_entry "acme::units" (1, 0, 0); make_entry "acme::shapes" (1, 0, 0) ] in
-      if list_chosen (choose lock [ "acme::units" ]) <> [ ("acme::units", (1, 0, 0)) ] then
+      let lock = [ make_entry "acme.units" (1, 0, 0); make_entry "acme.shapes" (1, 0, 0) ] in
+      if list_chosen (choose lock [ "acme.units" ]) <> [ ("acme.units", (1, 0, 0)) ] then
         Harness.fail "chose another");
   Harness.test "a dependency that nothing gives a version is a problem that names who wants it"
     (fun () ->
-      match choose [] [ "acme::units" ] with
+      match choose [] [ "acme.units" ] with
       | ( _,
           [
             No_version
@@ -290,7 +288,7 @@ let () =
           ()
       | _ -> Harness.fail "not reported");
   Harness.test "a version whose files cannot be had is a problem" (fun () ->
-      match choose [ make_entry "acme::units" (1, 9, 0) ] [ "acme::units" ] with
+      match choose [ make_entry "acme.units" (1, 9, 0) ] [ "acme.units" ] with
       | ( _,
           [
             Cannot_load
@@ -302,11 +300,11 @@ let () =
     (fun () ->
       let lock =
         [
-          make_entry "acme::geometry" (1, 0, 0);
-          { (make_entry "acme::units" (1, 0, 0)) with hash = "other" };
+          make_entry "acme.geometry" (1, 0, 0);
+          { (make_entry "acme.units" (1, 0, 0)) with hash = "other" };
         ]
       in
-      match choose lock [ "acme::geometry" ] with
+      match choose lock [ "acme.geometry" ] with
       | _, problems ->
           if
             not
@@ -320,12 +318,12 @@ let () =
           then Harness.fail "not reported");
   Harness.test "a project's package is used whatever the registry has by its name" (fun () ->
       let published =
-        (("acme::walls", (1, 0, 0)), ([ ("acme::local", []) ], [ ("acme::local", (1, 0, 0)) ]))
+        (("acme.walls", (1, 0, 0)), ([ ("acme.local", []) ], [ ("acme.local", (1, 0, 0)) ]))
         :: published
       in
       let packages =
         Registry.Selection.choose
-          ~lock:[ make_entry "acme::walls" (1, 0, 0) ]
+          ~lock:[ make_entry "acme.walls" (1, 0, 0) ]
           ~roots:
             [
               ({ Path.owner = None; name = "app" }, { Path.owner = Some "acme"; name = "walls" });
@@ -334,7 +332,7 @@ let () =
           ~is_local:(fun name -> name = { Path.owner = Some "acme"; name = "local" })
           ~load:(load published)
       in
-      if list_chosen packages <> [ ("acme::walls", (1, 0, 0)) ] then Harness.fail "chose another")
+      if list_chosen packages <> [ ("acme.walls", (1, 0, 0)) ] then Harness.fail "chose another")
 
 let () =
   let make_package name dependencies : Registry.Selection.package =
@@ -429,7 +427,7 @@ let () =
           (Registry.Selection.lock
              ~project:
                (read_dependencies
-                  "[package]\nname = \"app\"\n[dependencies]\n\"truss::http\" = [\"Clock\"]\n")
+                  "[package]\nname = \"app\"\n[dependencies]\n\"truss.http\" = [\"Clock\"]\n")
              [
                {
                  http_package with
@@ -439,9 +437,9 @@ let () =
                      dependencies =
                        read_dependencies
                          "[package]\n\
-                          name = \"truss::http\"\n\
+                          name = \"truss.http\"\n\
                           [dependencies]\n\
-                          \"truss::tls\" = [\"standard::capabilities::Clock\"]\n";
+                          \"truss.tls\" = [\"standard.capabilities.Clock\"]\n";
                    };
                };
                make_package tls [];
@@ -457,17 +455,17 @@ let () =
     (fun () ->
       let written =
         [
-          make_entry "acme::units" (1, 0, 0);
-          { (make_entry "truss::http" (1, 0, 0)) with holds = [ Prelude "Clock" ] };
+          make_entry "acme.units" (1, 0, 0);
+          { (make_entry "truss.http" (1, 0, 0)) with holds = [ Prelude "Clock" ] };
         ]
-      and current = [ make_entry "acme::geometry" (1, 0, 0); make_entry "truss::http" (1, 0, 0) ] in
+      and current = [ make_entry "acme.geometry" (1, 0, 0); make_entry "truss.http" (1, 0, 0) ] in
       let actual = String.concat " " (Registry.Selection.list_differences ~written ~current) in
       List.iter
         (fun part ->
           if not (String.includes ~affix:part actual) then
             Harness.fail "%s is not in: %s" part actual)
         [
-          "`acme::geometry` 1.0.0 is in the build and has no line";
-          "Nothing in the build uses `acme::units`";
-          "`truss::http` is said to hold Clock, and the manifests grant it nothing";
+          "`acme.geometry` 1.0.0 is in the build and has no line";
+          "Nothing in the build uses `acme.units`";
+          "`truss.http` is said to hold Clock, and the manifests grant it nothing";
         ])

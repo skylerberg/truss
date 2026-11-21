@@ -1,60 +1,60 @@
-use standard::capabilities
-use standard::files
-use standard::intrinsic
-use standard::system::calls
-use standard::system::handles
+use standard.capabilities
+use standard.files
+use standard.intrinsic
+use standard.system.calls
+use standard.system.handles
 
 internal type SystemFileWrite()
 
 impl FileWrite for SystemFileWrite
-  uses RunForever, capabilities::System
+  uses RunForever, capabilities.System
 {
   fn write(self, file: Path, contents: Slice[UInt8]) -> Result[Unit, SystemError] {
-    var handle = handles::open_to_write_from_empty(file)?
-    handles::write_all(mut handle, bytes: contents.elements)
+    var handle = handles.open_to_write_from_empty(file)?
+    handles.write_all(mut handle, bytes: contents.elements)
   }
 
   fn write_text(self, file: Path, contents: StringSlice) -> Result[Unit, SystemError] {
-    var handle = handles::open_to_write_from_empty(file)?
-    handles::write_all(mut handle, bytes: contents.bytes)
+    var handle = handles.open_to_write_from_empty(file)?
+    handles.write_all(mut handle, bytes: contents.bytes)
   }
 
-  fn open(self, file: Path, mode: files::WriteMode) -> Result[files::File, SystemError] {
-    let write_only_made_if_missing = intrinsic::libc_o_wronly() | intrinsic::libc_o_creat()
+  fn open(self, file: Path, mode: files.WriteMode) -> Result[files.File, SystemError] {
+    let write_only_made_if_missing = intrinsic.libc_o_wronly() | intrinsic.libc_o_creat()
     let flags = match mode {
-      Replace => write_only_made_if_missing | intrinsic::libc_o_trunc()
-      Append => write_only_made_if_missing | intrinsic::libc_o_append()
-      CreateNew => write_only_made_if_missing | intrinsic::libc_o_excl()
-      Update => intrinsic::libc_o_rdwr() | intrinsic::libc_o_creat()
+      Replace => write_only_made_if_missing | intrinsic.libc_o_trunc()
+      Append => write_only_made_if_missing | intrinsic.libc_o_append()
+      CreateNew => write_only_made_if_missing | intrinsic.libc_o_excl()
+      Update => intrinsic.libc_o_rdwr() | intrinsic.libc_o_creat()
     }
-    Ok(files::File(handle: handles::open_with(file, flags: flags)?))
+    Ok(files.File(handle: handles.open_with(file, flags: flags)?))
   }
 
   fn create_directory(self, directory: Path) -> Result[Unit, SystemError] {
-    handles::with_file_error(calls::make_directory(directory.text.slice().bytes))
+    handles.with_file_error(calls.make_directory(directory.text.slice().bytes))
   }
 
   fn remove(self, path: Path) -> Result[Unit, SystemError] {
-    handles::with_file_error(calls::remove(path.text.slice().bytes))
+    handles.with_file_error(calls.remove(path.text.slice().bytes))
   }
 
   fn rename(self, from: Path, to: Path) -> Result[Unit, SystemError] {
-    handles::with_file_error(calls::rename(from.text.slice().bytes, to: to.text.slice().bytes))
+    handles.with_file_error(calls.rename(from.text.slice().bytes, to: to.text.slice().bytes))
   }
 
-  fn link(self, target: Path, link: Path, kind: files::LinkKind) -> Result[Unit, SystemError] {
-    handles::with_file_error(
-      calls::make_link(
+  fn link(self, target: Path, link: Path, kind: files.LinkKind) -> Result[Unit, SystemError] {
+    handles.with_file_error(
+      calls.make_link(
         target.text.slice().bytes,
         link: link.text.slice().bytes,
-        symbolic: kind == files::LinkKind.Symbolic,
+        symbolic: kind == files.LinkKind.Symbolic,
       ),
     )
   }
 
-  fn set_permissions(self, path: Path, permissions: files::Permissions) -> Result[Unit, SystemError] {
-    let mode: Int32 = intrinsic::convert(permissions.mode())
-    handles::with_file_error(calls::set_mode(path.text.slice().bytes, mode: mode))
+  fn set_permissions(self, path: Path, permissions: files.Permissions) -> Result[Unit, SystemError] {
+    let mode: Int32 = intrinsic.convert(permissions.mode())
+    handles.with_file_error(calls.set_mode(path.text.slice().bytes, mode: mode))
   }
 
   fn set_modified(self, path: Path, time: Instant) -> Result[Unit, SystemError] {
@@ -62,8 +62,8 @@ impl FileWrite for SystemFileWrite
     let part = time.nanoseconds % 1000000000
     let seconds = if part < 0 { whole - 1 } else { whole }
     let nanoseconds = if part < 0 { part + 1000000000 } else { part }
-    handles::with_file_error(
-      calls::set_modified(path.text.slice().bytes, seconds: seconds, nanoseconds: nanoseconds),
+    handles.with_file_error(
+      calls.set_modified(path.text.slice().bytes, seconds: seconds, nanoseconds: nanoseconds),
     )
   }
 }

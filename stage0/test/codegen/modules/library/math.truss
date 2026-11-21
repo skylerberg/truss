@@ -1,34 +1,34 @@
-use standard::core
-use standard::math
+use standard.core
+use standard.math
 
 test "factorials and binomial coefficients stop where a UInt64 does" {
-  assert math::factorial(0) == Some(1)
-  assert math::factorial(5) == Some(120)
-  assert math::factorial(20) == Some(2432902008176640000)
-  assert math::factorial(21) is None
-  assert math::binomial(5, chosen: 2) == Some(10)
-  assert math::binomial(10, chosen: 0) == Some(1)
-  assert math::binomial(10, chosen: 10) == Some(1)
-  assert math::binomial(3, chosen: 5) == Some(0)
-  assert math::binomial(100, chosen: 2) == Some(4950)
-  assert math::binomial(64, chosen: 32) == Some(1832624140942590534)
-  assert math::binomial(67, chosen: 33) == Some(14226520737620288370)
-  assert math::binomial(68, chosen: 34) is None
-  assert math::binomial(UInt64.maximum, chosen: 1) == Some(UInt64.maximum)
-  assert math::binomial(UInt64.maximum, chosen: UInt64.maximum - 1) == Some(UInt64.maximum)
+  assert math.factorial(0) == Some(1)
+  assert math.factorial(5) == Some(120)
+  assert math.factorial(20) == Some(2432902008176640000)
+  assert math.factorial(21) is None
+  assert math.binomial(5, chosen: 2) == Some(10)
+  assert math.binomial(10, chosen: 0) == Some(1)
+  assert math.binomial(10, chosen: 10) == Some(1)
+  assert math.binomial(3, chosen: 5) == Some(0)
+  assert math.binomial(100, chosen: 2) == Some(4950)
+  assert math.binomial(64, chosen: 32) == Some(1832624140942590534)
+  assert math.binomial(67, chosen: 33) == Some(14226520737620288370)
+  assert math.binomial(68, chosen: 34) is None
+  assert math.binomial(UInt64.maximum, chosen: 1) == Some(UInt64.maximum)
+  assert math.binomial(UInt64.maximum, chosen: UInt64.maximum - 1) == Some(UInt64.maximum)
 }
 
 test "the mean, the variance, and the standard deviation of a sample" {
   let values: List[Float64] = [2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0]
-  assert math::mean(values) == Some(5.0)
-  assert math::variance(values) is Some(spread) && (spread - 4.571428571428571).absolute() < 1.0e-14
-  assert math::standard_deviation(values) is Some(deviation) && (deviation - 2.138089935299395).absolute() < 1.0e-14
+  assert math.mean(values) == Some(5.0)
+  assert math.variance(values) is Some(spread) && (spread - 4.571428571428571).absolute() < 1.0e-14
+  assert math.standard_deviation(values) is Some(deviation) && (deviation - 2.138089935299395).absolute() < 1.0e-14
   let one: List[Float64] = [3.0]
-  assert math::mean(one) == Some(3.0)
-  assert math::variance(one) is None
-  assert math::standard_deviation(one) is None
+  assert math.mean(one) == Some(3.0)
+  assert math.variance(one) is None
+  assert math.standard_deviation(one) is None
   let none: List[Float64] = []
-  assert math::mean(none) is None
+  assert math.mean(none) is None
 }
 
 test "the median is the middle value, or the mean of the two middle values" {
@@ -36,21 +36,21 @@ test "the median is the middle value, or the mean of the two middle values" {
   let even: List[Float64] = [4.0, 1.0, 3.0, 2.0]
   let one: List[Float64] = [7.5]
   let none: List[Float64] = []
-  assert math::median(odd) == Some(3.0)
-  assert math::median(even) == Some(2.5)
-  assert math::median(one) == Some(7.5)
-  assert math::median(none) is None
+  assert math.median(odd) == Some(3.0)
+  assert math.median(even) == Some(2.5)
+  assert math.median(one) == Some(7.5)
+  assert math.median(none) is None
   assert odd == [5.0, 1.0, 3.0]
   let large: List[Float64] = [1.0e308, 1.5e308]
-  assert math::median(large) == Some(1.25e308)
+  assert math.median(large) == Some(1.25e308)
   let unknown: List[Float64] = [2.0, Float64.not_a_number, 1.0]
-  assert math::median(unknown) is Some(middle) && middle.is_nan()
+  assert math.median(unknown) is Some(middle) && middle.is_nan()
 }
 
-fn big(text: StringSlice) -> math::BigInteger {
-  match math::BigInteger.parse_radix(text, radix: 10) {
+fn big(text: StringSlice) -> math.BigInteger {
+  match math.BigInteger.parse_radix(text, radix: 10) {
     Ok(value) => value
-    Err(_) => math::BigInteger.zero()
+    Err(_) => math.BigInteger.zero()
   }
 }
 
@@ -68,15 +68,15 @@ test "a big integer is read and written in any radix" {
   assert big("1180591620717411303429").format(radix: 2) == "10000000000000000000000000000000000000000000000000000000000000000000101"
   assert big("37778931862957161709577").format(radix: 8) == "10000000000000000000000011"
   assert big("13367494538843734067838845976611").format(radix: 36) == "10000000000000000000z"
-  assert math::BigInteger.parse_radix("400000000000000000000000000003039", radix: 16) == Ok(big("1361129467683753853853498429727072858169"))
-  assert math::BigInteger.parse_radix("-10000000000000000000Z", radix: 36) == Ok(big("-13367494538843734067838845976611"))
-  assert math::BigInteger.parse_radix("+17", radix: 10) == Ok(big("17"))
-  assert math::BigInteger.parse_radix("-0", radix: 10) == Ok(math::BigInteger.zero())
-  assert math::BigInteger.parse_radix("000", radix: 10) == Ok(math::BigInteger.zero())
-  assert math::BigInteger.parse_radix("", radix: 10) == Err(core::ParseIntegerError.Empty)
-  assert math::BigInteger.parse_radix("-", radix: 10) == Err(core::ParseIntegerError.Empty)
-  assert math::BigInteger.parse_radix("12a", radix: 10) == Err(core::ParseIntegerError.InvalidDigit(offset: 2))
-  assert math::BigInteger.parse_radix("102", radix: 2) == Err(core::ParseIntegerError.InvalidDigit(offset: 2))
+  assert math.BigInteger.parse_radix("400000000000000000000000000003039", radix: 16) == Ok(big("1361129467683753853853498429727072858169"))
+  assert math.BigInteger.parse_radix("-10000000000000000000Z", radix: 36) == Ok(big("-13367494538843734067838845976611"))
+  assert math.BigInteger.parse_radix("+17", radix: 10) == Ok(big("17"))
+  assert math.BigInteger.parse_radix("-0", radix: 10) == Ok(math.BigInteger.zero())
+  assert math.BigInteger.parse_radix("000", radix: 10) == Ok(math.BigInteger.zero())
+  assert math.BigInteger.parse_radix("", radix: 10) == Err(core.ParseIntegerError.Empty)
+  assert math.BigInteger.parse_radix("-", radix: 10) == Err(core.ParseIntegerError.Empty)
+  assert math.BigInteger.parse_radix("12a", radix: 10) == Err(core.ParseIntegerError.InvalidDigit(offset: 2))
+  assert math.BigInteger.parse_radix("102", radix: 2) == Err(core.ParseIntegerError.InvalidDigit(offset: 2))
   assert "${big("-1000000000000000000000000000000")}" == "-1000000000000000000000000000000"
 }
 
@@ -104,10 +104,10 @@ test "big integers are added, subtracted, and multiplied across their limbs" {
   assert big("6277101735386680763835789423207666416102355444464034512895") * big("6277101735386680763835789423207666416102355444464034512895") == big("39402006196394479212279040100143613805079739270465446667935739200774948409969539032567850922052710929917699921281025")
   assert -big("5") == big("-5")
   assert (-big("0")).is_zero()
-  assert !(-math::BigInteger.zero()).is_negative()
+  assert !(-math.BigInteger.zero()).is_negative()
 }
 
-fn divides(dividend: math::BigInteger, by: math::BigInteger, quotient: math::BigInteger, remainder: math::BigInteger) -> Bool {
+fn divides(dividend: math.BigInteger, by: math.BigInteger, quotient: math.BigInteger, remainder: math.BigInteger) -> Bool {
   if by.is_zero() {
     return false
   }
@@ -207,28 +207,28 @@ test "a big integer says its sign and its length in bits, and big integers are o
 test "a big integer goes to bytes and to the built-in integers and back" {
   let bytes_1: List[UInt8] = [1]
   assert big("1").to_big_endian_bytes() == bytes_1
-  assert math::BigInteger.from_big_endian_bytes(bytes_1.slice()) == big("1")
+  assert math.BigInteger.from_big_endian_bytes(bytes_1.slice()) == big("1")
   let bytes_8: List[UInt8] = [255]
   assert big("255").to_big_endian_bytes() == bytes_8
-  assert math::BigInteger.from_big_endian_bytes(bytes_8.slice()) == big("255")
+  assert math.BigInteger.from_big_endian_bytes(bytes_8.slice()) == big("255")
   let bytes_9: List[UInt8] = [1, 0]
   assert big("256").to_big_endian_bytes() == bytes_9
-  assert math::BigInteger.from_big_endian_bytes(bytes_9.slice()) == big("256")
+  assert math.BigInteger.from_big_endian_bytes(bytes_9.slice()) == big("256")
   let bytes_65: List[UInt8] = [1, 0, 0, 0, 0, 0, 0, 1, 2]
   assert big("18446744073709551874").to_big_endian_bytes() == bytes_65
-  assert math::BigInteger.from_big_endian_bytes(bytes_65.slice()) == big("18446744073709551874")
+  assert math.BigInteger.from_big_endian_bytes(bytes_65.slice()) == big("18446744073709551874")
   let bytes_136: List[UInt8] = [255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255]
   assert big("87112285931760246646623899502532662132735").to_big_endian_bytes() == bytes_136
-  assert math::BigInteger.from_big_endian_bytes(bytes_136.slice()) == big("87112285931760246646623899502532662132735")
+  assert math.BigInteger.from_big_endian_bytes(bytes_136.slice()) == big("87112285931760246646623899502532662132735")
   let padded: List[UInt8] = [0, 0, 1, 2]
-  assert math::BigInteger.from_big_endian_bytes(padded.slice(), negative: true) == big("-258")
+  assert math.BigInteger.from_big_endian_bytes(padded.slice(), negative: true) == big("-258")
   let none: List[UInt8] = []
-  assert math::BigInteger.from_big_endian_bytes(none.slice(), negative: true).is_zero()
-  assert math::BigInteger.zero().to_big_endian_bytes().is_empty()
+  assert math.BigInteger.from_big_endian_bytes(none.slice(), negative: true).is_zero()
+  assert math.BigInteger.zero().to_big_endian_bytes().is_empty()
   let least: Int64 = -9223372036854775808
   let greatest: UInt64 = 18446744073709551615
-  assert math::BigInteger.from(least) == big("-9223372036854775808")
-  assert math::BigInteger.from(greatest) == big("18446744073709551615")
+  assert math.BigInteger.from(least) == big("-9223372036854775808")
+  assert math.BigInteger.from(greatest) == big("18446744073709551615")
   assert Int64.try_from(big("-9223372036854775808")) == Ok(least)
   assert Int64.try_from(big("9223372036854775807")) == Ok(9223372036854775807)
   assert Int64.try_from(big("9223372036854775808")) is Err(_)
@@ -261,10 +261,10 @@ test "a big integer becomes the nearest float, with ties to the even one" {
   assert big("332306998946229005119439912489189376").to_float64().to_bits() == 5138607174829735936
 }
 
-fn decimal(text: StringSlice) -> math::Decimal {
-  match math::Decimal.parse(text) {
+fn decimal(text: StringSlice) -> math.Decimal {
+  match math.Decimal.parse(text) {
     Ok(value) => value
-    Err(_) => math::Decimal.zero()
+    Err(_) => math.Decimal.zero()
   }
 }
 
@@ -282,27 +282,27 @@ test "a decimal is read and written with the scale it was given" {
   assert "${decimal("123456789012345678901234567890.5")}" == "123456789012345678901234567890.5"
   assert "${decimal("2.5e+2")}" == "250"
   assert "${decimal("-7e-1")}" == "-0.7"
-  assert "${math::Decimal.new(big("5"), scale: -2)}" == "500"
-  assert "${math::Decimal.new(big("-5"), scale: 3)}" == "-0.005"
-  assert "${math::Decimal.new(big("0"), scale: -4)}" == "0"
-  assert math::Decimal.parse("") is Err(Empty)
-  assert math::Decimal.parse("-") is Err(InvalidCharacter(offset)) && offset == 1
-  assert math::Decimal.parse("1.2.3") is Err(InvalidCharacter(offset)) && offset == 3
-  assert math::Decimal.parse("1e") is Err(InvalidCharacter(offset)) && offset == 2
-  assert math::Decimal.parse("abc") is Err(InvalidCharacter(offset)) && offset == 0
-  assert math::Decimal.parse("1x") is Err(InvalidCharacter(offset)) && offset == 1
-  assert math::Decimal.parse(".") is Err(InvalidCharacter(offset)) && offset == 1
-  assert math::Decimal.parse("1e+") is Err(InvalidCharacter(offset)) && offset == 3
-  assert math::Decimal.parse("1 ") is Err(InvalidCharacter(offset)) && offset == 1
-  assert math::Decimal.parse("1e99999999999999999999") is Err(InvalidCharacter(offset)) && offset == 22
-  assert math::Decimal.parse("1e-99999999999999999999") is Err(InvalidCharacter(offset)) && offset == 23
-  assert math::Decimal.parse("1e-2147483647") is Ok(_)
-  assert math::Decimal.parse("1e-2147483648") is Err(InvalidCharacter(offset)) && offset == 13
+  assert "${math.Decimal.new(big("5"), scale: -2)}" == "500"
+  assert "${math.Decimal.new(big("-5"), scale: 3)}" == "-0.005"
+  assert "${math.Decimal.new(big("0"), scale: -4)}" == "0"
+  assert math.Decimal.parse("") is Err(Empty)
+  assert math.Decimal.parse("-") is Err(InvalidCharacter(offset)) && offset == 1
+  assert math.Decimal.parse("1.2.3") is Err(InvalidCharacter(offset)) && offset == 3
+  assert math.Decimal.parse("1e") is Err(InvalidCharacter(offset)) && offset == 2
+  assert math.Decimal.parse("abc") is Err(InvalidCharacter(offset)) && offset == 0
+  assert math.Decimal.parse("1x") is Err(InvalidCharacter(offset)) && offset == 1
+  assert math.Decimal.parse(".") is Err(InvalidCharacter(offset)) && offset == 1
+  assert math.Decimal.parse("1e+") is Err(InvalidCharacter(offset)) && offset == 3
+  assert math.Decimal.parse("1 ") is Err(InvalidCharacter(offset)) && offset == 1
+  assert math.Decimal.parse("1e99999999999999999999") is Err(InvalidCharacter(offset)) && offset == 22
+  assert math.Decimal.parse("1e-99999999999999999999") is Err(InvalidCharacter(offset)) && offset == 23
+  assert math.Decimal.parse("1e-2147483647") is Ok(_)
+  assert math.Decimal.parse("1e-2147483648") is Err(InvalidCharacter(offset)) && offset == 13
   assert decimal("1.50").scale() == 2 && decimal("1.50").coefficient() == big("150")
   assert decimal("1e3").scale() == -3 && decimal("0").is_zero() && !decimal("0.01").is_zero()
   assert decimal("-0.5").is_negative() && "${decimal("-0.5").absolute()}" == "0.5"
   let seven: Int64 = -7
-  assert "${math::Decimal.from(seven)}" == "-7" && "${math::Decimal.from(big("10000000000000000000000000"))}" == "10000000000000000000000000"
+  assert "${math.Decimal.from(seven)}" == "-7" && "${math.Decimal.from(big("10000000000000000000000000"))}" == "10000000000000000000000000"
 }
 
 test "decimals are added, subtracted, and multiplied exactly" {
@@ -331,69 +331,69 @@ test "decimals are added, subtracted, and multiplied exactly" {
 }
 
 test "a decimal is rounded to a number of decimals in each of the seven ways" {
-  assert "${decimal("2.5").rounded(0, rounding: math::Rounding.HalfToEven)}" == "2"
-  assert "${decimal("2.5").rounded(0, rounding: math::Rounding.HalfAwayFromZero)}" == "3"
-  assert "${decimal("2.5").rounded(0, rounding: math::Rounding.HalfTowardZero)}" == "2"
-  assert "${decimal("2.5").rounded(0, rounding: math::Rounding.AwayFromZero)}" == "3"
-  assert "${decimal("2.5").rounded(0, rounding: math::Rounding.TowardZero)}" == "2"
-  assert "${decimal("2.5").rounded(0, rounding: math::Rounding.Ceiling)}" == "3"
-  assert "${decimal("2.5").rounded(0, rounding: math::Rounding.Floor)}" == "2"
-  assert "${decimal("3.5").rounded(0, rounding: math::Rounding.HalfToEven)}" == "4"
-  assert "${decimal("3.5").rounded(0, rounding: math::Rounding.HalfAwayFromZero)}" == "4"
-  assert "${decimal("3.5").rounded(0, rounding: math::Rounding.HalfTowardZero)}" == "3"
-  assert "${decimal("3.5").rounded(0, rounding: math::Rounding.AwayFromZero)}" == "4"
-  assert "${decimal("3.5").rounded(0, rounding: math::Rounding.TowardZero)}" == "3"
-  assert "${decimal("3.5").rounded(0, rounding: math::Rounding.Ceiling)}" == "4"
-  assert "${decimal("3.5").rounded(0, rounding: math::Rounding.Floor)}" == "3"
-  assert "${decimal("-2.5").rounded(0, rounding: math::Rounding.HalfToEven)}" == "-2"
-  assert "${decimal("-2.5").rounded(0, rounding: math::Rounding.HalfAwayFromZero)}" == "-3"
-  assert "${decimal("-2.5").rounded(0, rounding: math::Rounding.HalfTowardZero)}" == "-2"
-  assert "${decimal("-2.5").rounded(0, rounding: math::Rounding.AwayFromZero)}" == "-3"
-  assert "${decimal("-2.5").rounded(0, rounding: math::Rounding.TowardZero)}" == "-2"
-  assert "${decimal("-2.5").rounded(0, rounding: math::Rounding.Ceiling)}" == "-2"
-  assert "${decimal("-2.5").rounded(0, rounding: math::Rounding.Floor)}" == "-3"
-  assert "${decimal("2.4").rounded(0, rounding: math::Rounding.HalfToEven)}" == "2"
-  assert "${decimal("2.4").rounded(0, rounding: math::Rounding.HalfAwayFromZero)}" == "2"
-  assert "${decimal("2.4").rounded(0, rounding: math::Rounding.HalfTowardZero)}" == "2"
-  assert "${decimal("2.4").rounded(0, rounding: math::Rounding.AwayFromZero)}" == "3"
-  assert "${decimal("2.4").rounded(0, rounding: math::Rounding.TowardZero)}" == "2"
-  assert "${decimal("2.4").rounded(0, rounding: math::Rounding.Ceiling)}" == "3"
-  assert "${decimal("2.4").rounded(0, rounding: math::Rounding.Floor)}" == "2"
-  assert "${decimal("2.6").rounded(0, rounding: math::Rounding.HalfToEven)}" == "3"
-  assert "${decimal("2.6").rounded(0, rounding: math::Rounding.HalfAwayFromZero)}" == "3"
-  assert "${decimal("2.6").rounded(0, rounding: math::Rounding.HalfTowardZero)}" == "3"
-  assert "${decimal("2.6").rounded(0, rounding: math::Rounding.AwayFromZero)}" == "3"
-  assert "${decimal("2.6").rounded(0, rounding: math::Rounding.TowardZero)}" == "2"
-  assert "${decimal("2.6").rounded(0, rounding: math::Rounding.Ceiling)}" == "3"
-  assert "${decimal("2.6").rounded(0, rounding: math::Rounding.Floor)}" == "2"
-  assert "${decimal("-2.6").rounded(0, rounding: math::Rounding.HalfToEven)}" == "-3"
-  assert "${decimal("-2.6").rounded(0, rounding: math::Rounding.HalfAwayFromZero)}" == "-3"
-  assert "${decimal("-2.6").rounded(0, rounding: math::Rounding.HalfTowardZero)}" == "-3"
-  assert "${decimal("-2.6").rounded(0, rounding: math::Rounding.AwayFromZero)}" == "-3"
-  assert "${decimal("-2.6").rounded(0, rounding: math::Rounding.TowardZero)}" == "-2"
-  assert "${decimal("-2.6").rounded(0, rounding: math::Rounding.Ceiling)}" == "-2"
-  assert "${decimal("-2.6").rounded(0, rounding: math::Rounding.Floor)}" == "-3"
-  assert "${decimal("0.5").rounded(0, rounding: math::Rounding.HalfToEven)}" == "0"
-  assert "${decimal("0.5").rounded(0, rounding: math::Rounding.HalfAwayFromZero)}" == "1"
-  assert "${decimal("0.5").rounded(0, rounding: math::Rounding.HalfTowardZero)}" == "0"
-  assert "${decimal("0.5").rounded(0, rounding: math::Rounding.AwayFromZero)}" == "1"
-  assert "${decimal("0.5").rounded(0, rounding: math::Rounding.TowardZero)}" == "0"
-  assert "${decimal("0.5").rounded(0, rounding: math::Rounding.Ceiling)}" == "1"
-  assert "${decimal("0.5").rounded(0, rounding: math::Rounding.Floor)}" == "0"
-  assert "${decimal("-0.5").rounded(0, rounding: math::Rounding.HalfToEven)}" == "0"
-  assert "${decimal("-0.5").rounded(0, rounding: math::Rounding.HalfAwayFromZero)}" == "-1"
-  assert "${decimal("-0.5").rounded(0, rounding: math::Rounding.HalfTowardZero)}" == "0"
-  assert "${decimal("-0.5").rounded(0, rounding: math::Rounding.AwayFromZero)}" == "-1"
-  assert "${decimal("-0.5").rounded(0, rounding: math::Rounding.TowardZero)}" == "0"
-  assert "${decimal("-0.5").rounded(0, rounding: math::Rounding.Ceiling)}" == "0"
-  assert "${decimal("-0.5").rounded(0, rounding: math::Rounding.Floor)}" == "-1"
-  assert "${decimal("2.0").rounded(0, rounding: math::Rounding.HalfToEven)}" == "2"
-  assert "${decimal("2.0").rounded(0, rounding: math::Rounding.HalfAwayFromZero)}" == "2"
-  assert "${decimal("2.0").rounded(0, rounding: math::Rounding.HalfTowardZero)}" == "2"
-  assert "${decimal("2.0").rounded(0, rounding: math::Rounding.AwayFromZero)}" == "2"
-  assert "${decimal("2.0").rounded(0, rounding: math::Rounding.TowardZero)}" == "2"
-  assert "${decimal("2.0").rounded(0, rounding: math::Rounding.Ceiling)}" == "2"
-  assert "${decimal("2.0").rounded(0, rounding: math::Rounding.Floor)}" == "2"
+  assert "${decimal("2.5").rounded(0, rounding: math.Rounding.HalfToEven)}" == "2"
+  assert "${decimal("2.5").rounded(0, rounding: math.Rounding.HalfAwayFromZero)}" == "3"
+  assert "${decimal("2.5").rounded(0, rounding: math.Rounding.HalfTowardZero)}" == "2"
+  assert "${decimal("2.5").rounded(0, rounding: math.Rounding.AwayFromZero)}" == "3"
+  assert "${decimal("2.5").rounded(0, rounding: math.Rounding.TowardZero)}" == "2"
+  assert "${decimal("2.5").rounded(0, rounding: math.Rounding.Ceiling)}" == "3"
+  assert "${decimal("2.5").rounded(0, rounding: math.Rounding.Floor)}" == "2"
+  assert "${decimal("3.5").rounded(0, rounding: math.Rounding.HalfToEven)}" == "4"
+  assert "${decimal("3.5").rounded(0, rounding: math.Rounding.HalfAwayFromZero)}" == "4"
+  assert "${decimal("3.5").rounded(0, rounding: math.Rounding.HalfTowardZero)}" == "3"
+  assert "${decimal("3.5").rounded(0, rounding: math.Rounding.AwayFromZero)}" == "4"
+  assert "${decimal("3.5").rounded(0, rounding: math.Rounding.TowardZero)}" == "3"
+  assert "${decimal("3.5").rounded(0, rounding: math.Rounding.Ceiling)}" == "4"
+  assert "${decimal("3.5").rounded(0, rounding: math.Rounding.Floor)}" == "3"
+  assert "${decimal("-2.5").rounded(0, rounding: math.Rounding.HalfToEven)}" == "-2"
+  assert "${decimal("-2.5").rounded(0, rounding: math.Rounding.HalfAwayFromZero)}" == "-3"
+  assert "${decimal("-2.5").rounded(0, rounding: math.Rounding.HalfTowardZero)}" == "-2"
+  assert "${decimal("-2.5").rounded(0, rounding: math.Rounding.AwayFromZero)}" == "-3"
+  assert "${decimal("-2.5").rounded(0, rounding: math.Rounding.TowardZero)}" == "-2"
+  assert "${decimal("-2.5").rounded(0, rounding: math.Rounding.Ceiling)}" == "-2"
+  assert "${decimal("-2.5").rounded(0, rounding: math.Rounding.Floor)}" == "-3"
+  assert "${decimal("2.4").rounded(0, rounding: math.Rounding.HalfToEven)}" == "2"
+  assert "${decimal("2.4").rounded(0, rounding: math.Rounding.HalfAwayFromZero)}" == "2"
+  assert "${decimal("2.4").rounded(0, rounding: math.Rounding.HalfTowardZero)}" == "2"
+  assert "${decimal("2.4").rounded(0, rounding: math.Rounding.AwayFromZero)}" == "3"
+  assert "${decimal("2.4").rounded(0, rounding: math.Rounding.TowardZero)}" == "2"
+  assert "${decimal("2.4").rounded(0, rounding: math.Rounding.Ceiling)}" == "3"
+  assert "${decimal("2.4").rounded(0, rounding: math.Rounding.Floor)}" == "2"
+  assert "${decimal("2.6").rounded(0, rounding: math.Rounding.HalfToEven)}" == "3"
+  assert "${decimal("2.6").rounded(0, rounding: math.Rounding.HalfAwayFromZero)}" == "3"
+  assert "${decimal("2.6").rounded(0, rounding: math.Rounding.HalfTowardZero)}" == "3"
+  assert "${decimal("2.6").rounded(0, rounding: math.Rounding.AwayFromZero)}" == "3"
+  assert "${decimal("2.6").rounded(0, rounding: math.Rounding.TowardZero)}" == "2"
+  assert "${decimal("2.6").rounded(0, rounding: math.Rounding.Ceiling)}" == "3"
+  assert "${decimal("2.6").rounded(0, rounding: math.Rounding.Floor)}" == "2"
+  assert "${decimal("-2.6").rounded(0, rounding: math.Rounding.HalfToEven)}" == "-3"
+  assert "${decimal("-2.6").rounded(0, rounding: math.Rounding.HalfAwayFromZero)}" == "-3"
+  assert "${decimal("-2.6").rounded(0, rounding: math.Rounding.HalfTowardZero)}" == "-3"
+  assert "${decimal("-2.6").rounded(0, rounding: math.Rounding.AwayFromZero)}" == "-3"
+  assert "${decimal("-2.6").rounded(0, rounding: math.Rounding.TowardZero)}" == "-2"
+  assert "${decimal("-2.6").rounded(0, rounding: math.Rounding.Ceiling)}" == "-2"
+  assert "${decimal("-2.6").rounded(0, rounding: math.Rounding.Floor)}" == "-3"
+  assert "${decimal("0.5").rounded(0, rounding: math.Rounding.HalfToEven)}" == "0"
+  assert "${decimal("0.5").rounded(0, rounding: math.Rounding.HalfAwayFromZero)}" == "1"
+  assert "${decimal("0.5").rounded(0, rounding: math.Rounding.HalfTowardZero)}" == "0"
+  assert "${decimal("0.5").rounded(0, rounding: math.Rounding.AwayFromZero)}" == "1"
+  assert "${decimal("0.5").rounded(0, rounding: math.Rounding.TowardZero)}" == "0"
+  assert "${decimal("0.5").rounded(0, rounding: math.Rounding.Ceiling)}" == "1"
+  assert "${decimal("0.5").rounded(0, rounding: math.Rounding.Floor)}" == "0"
+  assert "${decimal("-0.5").rounded(0, rounding: math.Rounding.HalfToEven)}" == "0"
+  assert "${decimal("-0.5").rounded(0, rounding: math.Rounding.HalfAwayFromZero)}" == "-1"
+  assert "${decimal("-0.5").rounded(0, rounding: math.Rounding.HalfTowardZero)}" == "0"
+  assert "${decimal("-0.5").rounded(0, rounding: math.Rounding.AwayFromZero)}" == "-1"
+  assert "${decimal("-0.5").rounded(0, rounding: math.Rounding.TowardZero)}" == "0"
+  assert "${decimal("-0.5").rounded(0, rounding: math.Rounding.Ceiling)}" == "0"
+  assert "${decimal("-0.5").rounded(0, rounding: math.Rounding.Floor)}" == "-1"
+  assert "${decimal("2.0").rounded(0, rounding: math.Rounding.HalfToEven)}" == "2"
+  assert "${decimal("2.0").rounded(0, rounding: math.Rounding.HalfAwayFromZero)}" == "2"
+  assert "${decimal("2.0").rounded(0, rounding: math.Rounding.HalfTowardZero)}" == "2"
+  assert "${decimal("2.0").rounded(0, rounding: math.Rounding.AwayFromZero)}" == "2"
+  assert "${decimal("2.0").rounded(0, rounding: math.Rounding.TowardZero)}" == "2"
+  assert "${decimal("2.0").rounded(0, rounding: math.Rounding.Ceiling)}" == "2"
+  assert "${decimal("2.0").rounded(0, rounding: math.Rounding.Floor)}" == "2"
   assert "${decimal("2.345").rounded(2)}" == "2.34"
   assert "${decimal("2.355").rounded(2)}" == "2.36"
   assert "${decimal("-1.005").rounded(2)}" == "-1.00"
@@ -416,13 +416,13 @@ test "a decimal is divided to a number of decimals, and truncated to an integer"
   assert "${decimal("5").quotient(decimal("0.002"), decimals: 0)}" == "2500"
   assert "${decimal("1").quotient(decimal("3"), decimals: -1)}" == "0"
   assert "${decimal("12345").quotient(decimal("10"), decimals: -2)}" == "1200"
-  assert "${decimal("-1").quotient(decimal("8"), decimals: 2, rounding: math::Rounding.HalfToEven)}" == "-0.12"
-  assert "${decimal("-1").quotient(decimal("8"), decimals: 2, rounding: math::Rounding.HalfAwayFromZero)}" == "-0.13"
-  assert "${decimal("-1").quotient(decimal("8"), decimals: 2, rounding: math::Rounding.HalfTowardZero)}" == "-0.12"
-  assert "${decimal("-1").quotient(decimal("8"), decimals: 2, rounding: math::Rounding.AwayFromZero)}" == "-0.13"
-  assert "${decimal("-1").quotient(decimal("8"), decimals: 2, rounding: math::Rounding.TowardZero)}" == "-0.12"
-  assert "${decimal("-1").quotient(decimal("8"), decimals: 2, rounding: math::Rounding.Ceiling)}" == "-0.12"
-  assert "${decimal("-1").quotient(decimal("8"), decimals: 2, rounding: math::Rounding.Floor)}" == "-0.13"
+  assert "${decimal("-1").quotient(decimal("8"), decimals: 2, rounding: math.Rounding.HalfToEven)}" == "-0.12"
+  assert "${decimal("-1").quotient(decimal("8"), decimals: 2, rounding: math.Rounding.HalfAwayFromZero)}" == "-0.13"
+  assert "${decimal("-1").quotient(decimal("8"), decimals: 2, rounding: math.Rounding.HalfTowardZero)}" == "-0.12"
+  assert "${decimal("-1").quotient(decimal("8"), decimals: 2, rounding: math.Rounding.AwayFromZero)}" == "-0.13"
+  assert "${decimal("-1").quotient(decimal("8"), decimals: 2, rounding: math.Rounding.TowardZero)}" == "-0.12"
+  assert "${decimal("-1").quotient(decimal("8"), decimals: 2, rounding: math.Rounding.Ceiling)}" == "-0.12"
+  assert "${decimal("-1").quotient(decimal("8"), decimals: 2, rounding: math.Rounding.Floor)}" == "-0.13"
   assert decimal("12.99").truncated() == big("12")
   assert decimal("-12.99").truncated() == big("-12")
   assert decimal("0.5").truncated() == big("0")
@@ -431,17 +431,17 @@ test "a decimal is divided to a number of decimals, and truncated to an integer"
 }
 
 test "a decimal is made from a float exactly and becomes the nearest float" {
-  assert math::Decimal.from_float64(0.5) is Some(exact) && "${exact}" == "0.5"
-  assert math::Decimal.from_float64(0.1) is Some(exact) && "${exact}" == "0.1000000000000000055511151231257827021181583404541015625"
-  assert math::Decimal.from_float64(3.0) is Some(exact) && "${exact}" == "3"
-  assert math::Decimal.from_float64(-2.75) is Some(exact) && "${exact}" == "-2.75"
-  assert math::Decimal.from_float64(1e+22) is Some(exact) && "${exact}" == "10000000000000000000000"
-  assert math::Decimal.from_float64(5e-324) is Some(exact) && "${exact}" == "0.000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004940656458412465441765687928682213723650598026143247644255856825006755072702087518652998363616359923797965646954457177309266567103559397963987747960107818781263007131903114045278458171678489821036887186360569987307230500063874091535649843873124733972731696151400317153853980741262385655911710266585566867681870395603106249319452715914924553293054565444011274801297099995419319894090804165633245247571478690147267801593552386115501348035264934720193790268107107491703332226844753335720832431936092382893458368060106011506169809753078342277318329247904982524730776375927247874656084778203734469699533647017972677717585125660551199131504891101451037862738167250955837389733598993664809941164205702637090279242767544565229087538682506419718265533447265625"
-  assert math::Decimal.from_float64(1.7976931348623157e+308) is Some(exact) && "${exact}" == "179769313486231570814527423731704356798070567525844996598917476803157260780028538760589558632766878171540458953514382464234321326889464182768467546703537516986049910576551282076245490090389328944075868508455133942304583236903222948165808559332123348274797826204144723168738177180919299881250404026184124858368"
-  assert math::Decimal.from_float64(123456.789) is Some(exact) && "${exact}" == "123456.789000000004307366907596588134765625"
-  assert math::Decimal.from_float64(-0.0) is Some(exact) && "${exact}" == "0"
-  assert math::Decimal.from_float64(Float64.infinity) is None
-  assert math::Decimal.from_float64(Float64.not_a_number) is None
+  assert math.Decimal.from_float64(0.5) is Some(exact) && "${exact}" == "0.5"
+  assert math.Decimal.from_float64(0.1) is Some(exact) && "${exact}" == "0.1000000000000000055511151231257827021181583404541015625"
+  assert math.Decimal.from_float64(3.0) is Some(exact) && "${exact}" == "3"
+  assert math.Decimal.from_float64(-2.75) is Some(exact) && "${exact}" == "-2.75"
+  assert math.Decimal.from_float64(1e+22) is Some(exact) && "${exact}" == "10000000000000000000000"
+  assert math.Decimal.from_float64(5e-324) is Some(exact) && "${exact}" == "0.000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004940656458412465441765687928682213723650598026143247644255856825006755072702087518652998363616359923797965646954457177309266567103559397963987747960107818781263007131903114045278458171678489821036887186360569987307230500063874091535649843873124733972731696151400317153853980741262385655911710266585566867681870395603106249319452715914924553293054565444011274801297099995419319894090804165633245247571478690147267801593552386115501348035264934720193790268107107491703332226844753335720832431936092382893458368060106011506169809753078342277318329247904982524730776375927247874656084778203734469699533647017972677717585125660551199131504891101451037862738167250955837389733598993664809941164205702637090279242767544565229087538682506419718265533447265625"
+  assert math.Decimal.from_float64(1.7976931348623157e+308) is Some(exact) && "${exact}" == "179769313486231570814527423731704356798070567525844996598917476803157260780028538760589558632766878171540458953514382464234321326889464182768467546703537516986049910576551282076245490090389328944075868508455133942304583236903222948165808559332123348274797826204144723168738177180919299881250404026184124858368"
+  assert math.Decimal.from_float64(123456.789) is Some(exact) && "${exact}" == "123456.789000000004307366907596588134765625"
+  assert math.Decimal.from_float64(-0.0) is Some(exact) && "${exact}" == "0"
+  assert math.Decimal.from_float64(Float64.infinity) is None
+  assert math.Decimal.from_float64(Float64.not_a_number) is None
   assert decimal("0.1").to_float64().to_bits() == 4591870180066957722
   assert decimal("123.456").to_float64().to_bits() == 4638387860618067575
   assert decimal("-1e3").to_float64().to_bits() == 13875379345695965184
@@ -466,7 +466,7 @@ test "decimals are equal and ordered by their value, whatever their scale" {
   assert decimal("123.456").compare(decimal("123.4560")) == Ordering.Equal
   assert decimal("0.1").compare(decimal("0.09")) == Ordering.Greater
   assert decimal("100").compare(decimal("99")) == Ordering.Greater
-  var values: List[math::Decimal] = [decimal("2.5"), decimal("-1"), decimal("2.05"), decimal("0"), decimal("-1.5"), decimal("25e-1")]
+  var values: List[math.Decimal] = [decimal("2.5"), decimal("-1"), decimal("2.05"), decimal("0"), decimal("-1.5"), decimal("25e-1")]
   mut values.sort()
   assert "${values[0]}" == "-1.5" && "${values[1]}" == "-1" && "${values[2]}" == "0"
     && "${values[3]}" == "2.05" && values[4] == decimal("2.5") && values[5] == decimal("2.5")

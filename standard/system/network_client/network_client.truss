@@ -1,29 +1,29 @@
-use standard::capabilities
-use standard::network
-use standard::system::sockets
+use standard.capabilities
+use standard.network
+use standard.system.sockets
 
 internal type SystemNetworkClient()
 
 impl NetworkClient for SystemNetworkClient
-  uses RunForever, capabilities::System
+  uses RunForever, capabilities.System
 {
-  fn resolve(self, host: StringSlice) -> Result[List[network::IpAddress], SystemError] {
-    sockets::addresses_of(host)
+  fn resolve(self, host: StringSlice) -> Result[List[network.IpAddress], SystemError] {
+    sockets.addresses_of(host)
   }
 
   fn connect(
     self,
-    address: network::SocketAddress,
+    address: network.SocketAddress,
     timeout: Option[Duration],
-  ) -> Result[network::Connection, SystemError] {
-    sockets::connect(address, timeout: timeout)
+  ) -> Result[network.Connection, SystemError] {
+    sockets.connect(address, timeout: timeout)
   }
 
-  fn connect_local(self, path: Path) -> Result[network::LocalConnection, SystemError] {
-    sockets::connect_local(path)
+  fn connect_local(self, path: Path) -> Result[network.LocalConnection, SystemError] {
+    sockets.connect_local(path)
   }
 
-  fn open_datagram(self) -> Result[network::DatagramSocket, SystemError] {
-    sockets::open_datagram()
+  fn open_datagram(self) -> Result[network.DatagramSocket, SystemError] {
+    sockets.open_datagram()
   }
 }

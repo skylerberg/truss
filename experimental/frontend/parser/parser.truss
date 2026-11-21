@@ -1,8 +1,8 @@
-use frontend::source
-use frontend::syntax
-use frontend::token
+use frontend.source
+use frontend.syntax
+use frontend.token
 
-internal type ParseResult(file: syntax::File, diagnostics: List[source::Diagnostic])
+internal type ParseResult(file: syntax.File, diagnostics: List[source.Diagnostic])
 
 fn TokenCursor.piece_start(self, piece: Piece) -> UInt64
   uses Panic
@@ -23,21 +23,21 @@ fn begin_piece(cursor: mut TokenCursor, piece: Piece)
   start_piece(mut cursor, base, first: piece.first, stop: piece.stop)
 }
 
-type Finished[Value](item: syntax::Item[Value], diagnostics: List[source::Diagnostic])
+type Finished[Value](item: syntax.Item[Value], diagnostics: List[source.Diagnostic])
 
 fn finish_piece[Value](cursor: mut TokenCursor, piece: Piece, value: own Value) -> Finished[Value]
   uses Panic
 {
   let positions = collect_positions(mut cursor)
-  let diagnostics = source::sort_by_start(own cursor.diagnostics)
+  let diagnostics = source.sort_by_start(own cursor.diagnostics)
   cursor.diagnostics = []
   Finished(
-    item: syntax::Item(base: cursor.base, stop: cursor.piece_stop(piece), own value, own positions),
+    item: syntax.Item(base: cursor.base, stop: cursor.piece_stop(piece), own value, own positions),
     own diagnostics,
   )
 }
 
-fn TokenCursor.overlaps(self, piece: Piece, span: source::Span) -> Bool
+fn TokenCursor.overlaps(self, piece: Piece, span: source.Span) -> Bool
   uses Panic
 {
   let start = self.piece_start(piece)
@@ -51,14 +51,14 @@ fn TokenCursor.overlaps(self, piece: Piece, span: source::Span) -> Bool
 
 fn attach_lexer_errors[Value](
   cursor: TokenCursor,
-  lexer_diagnostics: Slice[source::Diagnostic],
+  lexer_diagnostics: Slice[source.Diagnostic],
   nested: Slice[Piece],
   piece: Piece,
   finished: own Finished[Value],
 ) -> Finished[Value]
   uses Panic
 {
-  var errors: List[source::Span] = []
+  var errors: List[source.Span] = []
   for diagnostic in lexer_diagnostics {
     let span = diagnostic.span
     if !cursor.overlaps(piece, span) {
@@ -78,34 +78,34 @@ fn attach_lexer_errors[Value](
     return finished
   }
   let item = own finished.item
-  var syntax_errors: List[source::Span] = []
+  var syntax_errors: List[source.Span] = []
   for span in errors {
     let start = if span.start > item.base { span.start } else { item.base }
     let stop = if span.stop < item.stop { span.stop } else { item.stop }
-    mut syntax_errors.push(source::of_file(base: item.base, span: source::make_span(start, stop)))
+    mut syntax_errors.push(source.of_file(base: item.base, span: source.make_span(start, stop)))
   }
   mut syntax_errors.append(item.positions.syntax_errors.copy())
-  let positions = syntax::Positions(spans: own item.positions.spans, syntax_errors: sort_unique(own syntax_errors))
-  var diagnostics: List[source::Diagnostic] = []
+  let positions = syntax.Positions(spans: own item.positions.spans, syntax_errors: sort_unique(own syntax_errors))
+  var diagnostics: List[source.Diagnostic] = []
   for diagnostic in own finished.diagnostics {
     var stripped = own diagnostic
     stripped.fixes = []
     mut diagnostics.push(own stripped)
   }
   Finished(
-    item: syntax::Item(base: item.base, stop: item.stop, value: own item.value, own positions),
+    item: syntax.Item(base: item.base, stop: item.stop, value: own item.value, own positions),
     own diagnostics,
   )
 }
 
-fn check_parsed_definition(cursor: mut TokenCursor, definition: syntax::Definition)
+fn check_parsed_definition(cursor: mut TokenCursor, definition: syntax.Definition)
   uses Panic, RunForever
 {
   walk_definition(mut cursor, visitor: Visitor.PrecedenceVisitor, definition: definition)
   check_definition(mut cursor, definition)
 }
 
-fn container_of(definition: syntax::Definition) -> Option[Container] {
+fn container_of(definition: syntax.Definition) -> Option[Container] {
   match definition.kind {
     Trait(..) => Some(Container.InTrait)
     Impl(..) => Some(Container.InImpl)
@@ -114,9 +114,9 @@ fn container_of(definition: syntax::Definition) -> Option[Container] {
   }
 }
 
-type ParsedTopLevel(top_level: syntax::TopLevel, diagnostics: List[source::Diagnostic])
+type ParsedTopLevel(top_level: syntax.TopLevel, diagnostics: List[source.Diagnostic])
 
-fn parse_top_level(cursor: mut TokenCursor, lexer_diagnostics: Slice[source::Diagnostic], piece: Piece) -> ParsedTopLevel
+fn parse_top_level(cursor: mut TokenCursor, lexer_diagnostics: Slice[source.Diagnostic], piece: Piece) -> ParsedTopLevel
   uses Panic, RunForever
 {
   begin_piece(mut cursor, piece)
@@ -126,7 +126,7 @@ fn parse_top_level(cursor: mut TokenCursor, lexer_diagnostics: Slice[source::Dia
   let finished = finish_piece(mut cursor, piece, value: own parsed.definition)
   let attached = attach_lexer_errors(cursor, lexer_diagnostics, nested: parsed.methods, piece: piece, finished: own finished)
   var diagnostics = own attached.diagnostics
-  var methods: List[syntax::Item[syntax::Definition]] = []
+  var methods: List[syntax.Item[syntax.Definition]] = []
   if container is Some(kind) {
     for method_piece in parsed.methods {
       begin_piece(mut cursor, piece: method_piece)
@@ -138,30 +138,30 @@ fn parse_top_level(cursor: mut TokenCursor, lexer_diagnostics: Slice[source::Dia
       mut diagnostics.append(own method_attached.diagnostics)
     }
   }
-  ParsedTopLevel(top_level: syntax::TopLevel(definition: own attached.item, own methods), own diagnostics)
+  ParsedTopLevel(top_level: syntax.TopLevel(definition: own attached.item, own methods), own diagnostics)
 }
 
-fn parse_module_name(cursor: mut TokenCursor) -> Result[syntax::Name, Failure]
+fn parse_module_name(cursor: mut TokenCursor) -> Result[syntax.Name, Failure]
   uses Panic
 {
   lower_name(mut cursor, expected: "a module name")
 }
 
-fn parse_use_path(cursor: mut TokenCursor) -> Result[syntax::NamePath, Failure]
+fn parse_use_path(cursor: mut TokenCursor) -> Result[syntax.NamePath, Failure]
   uses Panic, RunForever
 {
-  expect_keyword(mut cursor, keyword: token::Keyword.Use)?
-  var names = parse_separated(mut cursor, separator: token::Punctuation.ColonColon, parse_item: parse_module_name)?
+  expect_keyword(mut cursor, keyword: token.Keyword.Use)?
+  var names = parse_separated(mut cursor, separator: token.Punctuation.Dot, parse_item: parse_module_name)?
   if !cursor.is_at_end() {
     return Err(fail(mut cursor, expected: "a line break after the module path"))
   }
   let Some(last) = mut names.pop() else {
     return Err(Failure.Failed)
   }
-  Ok(syntax::NamePath(modules: own names, own last))
+  Ok(syntax.NamePath(modules: own names, own last))
 }
 
-fn parse_use_line(cursor: mut TokenCursor, piece: Piece) -> Finished[Option[syntax::NamePath]]
+fn parse_use_line(cursor: mut TokenCursor, piece: Piece) -> Finished[Option[syntax.NamePath]]
   uses Panic, RunForever
 {
   begin_piece(mut cursor, piece)
@@ -176,49 +176,49 @@ fn TokenCursor.compute_line_stop(self, piece: Piece) -> UInt64
   uses Panic
 {
   let after = self.tables.token(piece.stop)
-  if after.kind == token::Kind.Newline { after.span.stop } else { self.piece_stop(piece) }
+  if after.kind == token.Kind.Newline { after.span.stop } else { self.piece_stop(piece) }
 }
 
-fn use_after_definition(cursor: TokenCursor, piece: Piece, base: UInt64, stop: UInt64, destination: UInt64) -> source::Diagnostic
+fn use_after_definition(cursor: TokenCursor, piece: Piece, base: UInt64, stop: UInt64, destination: UInt64) -> source.Diagnostic
   uses Panic, RunForever
 {
-  var tokens: List[token::Token] = []
+  var tokens: List[token.Token] = []
   for index in piece.first..piece.stop {
     mut tokens.push(cursor.tables.token(index))
   }
-  let fixes = match token::spell_tokens(cursor.tables, tokens, insertions: []) {
+  let fixes = match token.spell_tokens(cursor.tables, tokens, insertions: []) {
     Some(spelling) => [
-      source::make_fix(
+      source.make_fix(
         "Move it up to the other `use` lines",
         edits: [
-          source::insert(source::make_zero_width(destination), replacement: "${spelling}\n"),
-          source::delete(source::make_span(base, stop: cursor.compute_line_stop(piece))),
+          source.insert(source.make_zero_width(destination), replacement: "${spelling}\n"),
+          source.delete(source.make_span(base, stop: cursor.compute_line_stop(piece))),
         ],
       ),
     ]
     None => []
   }
-  source::make_diagnostic(
+  source.make_diagnostic(
     "parser.use_after_definition",
-    span: source::make_span(base, stop),
+    span: source.make_span(base, stop),
     message: "`use` lines come before every definition in a file.",
     fixes: own fixes,
   )
 }
 
-internal fn parse(lexed: own token::Lexed, lexer_diagnostics: Slice[source::Diagnostic]) -> ParseResult
+internal fn parse(lexed: own token.Lexed, lexer_diagnostics: Slice[source.Diagnostic]) -> ParseResult
   uses Panic, RunForever
 {
   let first = lexed.first
   let stop = lexed.stop
   var cursor = TokenCursor.create(own lexed.tables, file_stop: stop)
   let pieces = split_pieces(cursor.tables, first, stop)
-  var imports: List[syntax::Item[syntax::NamePath]] = []
-  var definitions: List[syntax::TopLevel] = []
-  var diagnostics: List[source::Diagnostic] = []
+  var imports: List[syntax.Item[syntax.NamePath]] = []
+  var definitions: List[syntax.TopLevel] = []
+  var diagnostics: List[source.Diagnostic] = []
   var destination: Option[UInt64] = None
   for piece in pieces {
-    if cursor.tables.token(piece.first).kind == token::Kind.Keyword(token::Keyword.Use) {
+    if cursor.tables.token(piece.first).kind == token.Kind.Keyword(token.Keyword.Use) {
       let line = parse_use_line(mut cursor, piece)
       mut diagnostics.append(line.diagnostics.copy())
       if definitions.is_empty() {
@@ -227,7 +227,7 @@ internal fn parse(lexed: own token::Lexed, lexer_diagnostics: Slice[source::Diag
         mut diagnostics.push(use_after_definition(cursor, piece, base: line.item.base, stop: line.item.stop, destination: target))
       }
       if line.item.value is Some(path) {
-        mut imports.push(syntax::Item(base: line.item.base, stop: line.item.stop, value: path.copy(), positions: line.item.positions.copy()))
+        mut imports.push(syntax.Item(base: line.item.base, stop: line.item.stop, value: path.copy(), positions: line.item.positions.copy()))
       }
     } else {
       let parsed = parse_top_level(mut cursor, lexer_diagnostics, piece)
@@ -238,5 +238,5 @@ internal fn parse(lexed: own token::Lexed, lexer_diagnostics: Slice[source::Diag
       mut definitions.push(own parsed.top_level)
     }
   }
-  ParseResult(file: syntax::File(own imports, own definitions), diagnostics: source::sort_by_start(own diagnostics))
+  ParseResult(file: syntax.File(own imports, own definitions), diagnostics: source.sort_by_start(own diagnostics))
 }

@@ -1,7 +1,7 @@
-use standard::cryptography
-use standard::der
-use standard::files
-use standard::x509
+use standard.cryptography
+use standard.der
+use standard.files
+use standard.x509
 
 let leaf_pem: String = "-----BEGIN CERTIFICATE-----\nMIICbjCCAVagAwIBAgIBAzANBgkqhkiG9w0BAQsFADAiMSAwHgYDVQQDDBdUcnVz\ncyBUZXN0IEludGVybWVkaWF0ZTAgFw0yNjExMTIyMjIxMjJaGA8yMTI2MTAxOTIy\nMjEyMlowFzEVMBMGA1UEAwwMZXhhbXBsZS50ZXN0MHYwEAYHKoZIzj0CAQYFK4EE\nACIDYgAEvzvKOxz5C93X+OXxQrp3/F0dtxh3eK9pIopcBnV1gVjKYzM4mKt45UQ/\nzGDdhSCOAEOBzULop1k3QI6hM7vDTltWP4mICpcLW2aHRcfMRSDhLuzXlVtsOfzZ\nlpFnVsTGo2YwZDAJBgNVHRMEAjAAMA4GA1UdDwEB/wQEAwIHgDATBgNVHSUEDDAK\nBggrBgEFBQcDATAyBgNVHREEKzApggxleGFtcGxlLnRlc3SCEyouYXBwcy5leGFt\ncGxlLnRlc3SHBAoBAgMwDQYJKoZIhvcNAQELBQADggEBAIutZbGNFD9/bKe4syl2\n3zsPy2RM7QNpEANP1qnre58eQ3jrex5CgUXrjphhM4+aA3JHrYEhnTo0aR+06SNg\n6SdIZRGnarCFyCHLGlU7U6egA5q9lghJmwLW16DCFk0B0cYEB7mqXJI3Ggn+o+Ld\nYaeXx5E32o+Zxk9WAlWZxAJWA8hhYwk7BlrD05tDoHnD8dtRyFZkjPQA2JtiiepX\nDKvL8+nnv38K+TPx3PgKHvlUCXemKXf1IM7BnVuWQ7h11TRcRaOyMI2nj+z9chnH\nb668LZE68cgTcXc2WT+xDpKZ7++gMW8WR/5VD/p8PmGCIuf0q3PX8QxvMubFV57+\nQ8M=\n-----END CERTIFICATE-----\n"
 
@@ -17,10 +17,10 @@ let sha1_root_pem: String = "-----BEGIN CERTIFICATE-----\nMIIC/jCCAeagAwIBAgIUJ/
 
 let sha1_signed_leaf_pem: String = "-----BEGIN CERTIFICATE-----\nMIICKDCCARCgAwIBAgIBTTANBgkqhkiG9w0BAQsFADAWMRQwEgYDVQQDDAtMZWdh\nY3kgUm9vdDAgFw0yNjExMTIyMjUxNDhaGA8yMTI2MTAxOTIyNTE0OFowFjEUMBIG\nA1UEAwwLbGVnYWN5LnRlc3QwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQuLRSk\ndXvxRz+fv3AmVhHYqL7VpGZyiKFwkWAwwEx8CmPyuuoIu7eKqfLc+einKKwLwBxT\naU9xekoN+KHpRCMdo0owSDAJBgNVHRMEAjAAMA4GA1UdDwEB/wQEAwIHgDATBgNV\nHSUEDDAKBggrBgEFBQcDATAWBgNVHREEDzANggtsZWdhY3kudGVzdDANBgkqhkiG\n9w0BAQsFAAOCAQEAb5khD9gmPvbtdJttaIUXXq1YCfWVtWkhTVxpB9uKqCTKTdCC\ngyvK24122riAIocf+rM4H3N4pIypayKIbl2aXxbXG1BbvLaemSjUeNzC9gOXICZM\nzY6kCti2WD803YeJpNvnVEwhFkwQ9zyhRL0z1CKt/Rzlea8fFaV8xAoVlPZgV4HR\nh8TixSDjDFIr+QcwvOX62sM2Ttg21zpv/tLygHZjnIvDhCsPso3UajPBPO7oOvwM\nY8T2SFDr3upi3zbTj/ieKsDIcUhvb2+46YWolOytEl2NkKzvKicEQg9B37FqGBkQ\nlC6Y3WBG6g+qp/8bHar0g7TKHP8ZBdPYzO8HCw==\n-----END CERTIFICATE-----\n"
 
-fn one(text: StringSlice) -> x509::Certificate
+fn one(text: StringSlice) -> x509.Certificate
   uses Panic
 {
-  match x509::parse_pem(text) {
+  match x509.parse_pem(text) {
     Ok(certificates) => certificates[0].copy()
     Err(_) => Panic.crash("a certificate")
   }
@@ -36,59 +36,59 @@ test "a certificate is read: names, validity, key, and extensions" uses Panic {
   let leaf = one(leaf_pem.slice())
   assert leaf.common_name() == Some("example.test".slice())
   assert leaf.dns_names().length() == 2 && !leaf.is_authority()
-  assert leaf.public_key() is Ecdsa(key) && key.curve() == cryptography::Curve.P384
+  assert leaf.public_key() is Ecdsa(key) && key.curve() == cryptography.Curve.P384
   assert leaf.not_before() < now() && now() < leaf.not_after()
   let intermediate = one(intermediate_pem.slice())
   assert intermediate.is_authority() && intermediate.public_key() is Rsa(_)
-  assert der::parse(leaf.encoded()) is Ok(_)
+  assert der.parse(leaf.encoded()) is Ok(_)
 }
 
 test "a chain verifies up to a trusted root, and fails for another host, time, or root" uses Panic {
-  let chain: List[x509::Certificate] = [one(leaf_pem.slice()), one(intermediate_pem.slice())]
-  let roots: List[x509::Certificate] = [one(root_pem.slice())]
-  assert x509::verify_chain(chain, roots: roots, host: "example.test", now: now()) == Ok(Unit)
-  assert x509::verify_chain(chain, roots: roots, host: "API.Apps.Example.Test", now: now()) == Ok(Unit)
-  assert x509::verify_chain(chain, roots: roots, host: "10.1.2.3", now: now()) == Ok(Unit)
-  assert x509::verify_chain(chain, roots: roots, host: "a.b.apps.example.test", now: now()) == Err(x509::VerifyError.WrongHost)
-  assert x509::verify_chain(chain, roots: roots, host: "other.test", now: now()) == Err(x509::VerifyError.WrongHost)
+  let chain: List[x509.Certificate] = [one(leaf_pem.slice()), one(intermediate_pem.slice())]
+  let roots: List[x509.Certificate] = [one(root_pem.slice())]
+  assert x509.verify_chain(chain, roots: roots, host: "example.test", now: now()) == Ok(Unit)
+  assert x509.verify_chain(chain, roots: roots, host: "API.Apps.Example.Test", now: now()) == Ok(Unit)
+  assert x509.verify_chain(chain, roots: roots, host: "10.1.2.3", now: now()) == Ok(Unit)
+  assert x509.verify_chain(chain, roots: roots, host: "a.b.apps.example.test", now: now()) == Err(x509.VerifyError.WrongHost)
+  assert x509.verify_chain(chain, roots: roots, host: "other.test", now: now()) == Err(x509.VerifyError.WrongHost)
   let early = Instant.from_unix_seconds(1000000000).expect("in range")
-  assert x509::verify_chain(chain, roots: roots, host: "example.test", now: early) == Err(x509::VerifyError.NotYetValid)
-  let no_roots: List[x509::Certificate] = []
-  assert x509::verify_chain(chain, roots: no_roots, host: "example.test", now: now()) == Err(x509::VerifyError.UnknownIssuer)
-  let only_leaf: List[x509::Certificate] = [one(leaf_pem.slice())]
-  assert x509::verify_chain(only_leaf, roots: roots, host: "example.test", now: now()) == Err(x509::VerifyError.UnknownIssuer)
-  let leaf_as_issuer: List[x509::Certificate] = [one(intermediate_pem.slice())]
-  assert x509::verify_chain(leaf_as_issuer, roots: roots, host: "example.test", now: now()) is Err(_)
+  assert x509.verify_chain(chain, roots: roots, host: "example.test", now: early) == Err(x509.VerifyError.NotYetValid)
+  let no_roots: List[x509.Certificate] = []
+  assert x509.verify_chain(chain, roots: no_roots, host: "example.test", now: now()) == Err(x509.VerifyError.UnknownIssuer)
+  let only_leaf: List[x509.Certificate] = [one(leaf_pem.slice())]
+  assert x509.verify_chain(only_leaf, roots: roots, host: "example.test", now: now()) == Err(x509.VerifyError.UnknownIssuer)
+  let leaf_as_issuer: List[x509.Certificate] = [one(intermediate_pem.slice())]
+  assert x509.verify_chain(leaf_as_issuer, roots: roots, host: "example.test", now: now()) is Err(_)
 }
 
 test "PKCS #8 keys are read, and sign what their certificates' keys verify" uses Panic {
-  let blocks = x509::pem_blocks(leaf_key_pem.slice(), label: "PRIVATE KEY")
+  let blocks = x509.pem_blocks(leaf_key_pem.slice(), label: "PRIVATE KEY")
   assert blocks.length() == 1
-  assert x509::parse_private_key(blocks[0]) is Some(Ecdsa(key)) && key.verifying_key().curve() == cryptography::Curve.P384
-  let rsa_blocks = x509::pem_blocks(intermediate_key_pem.slice(), label: "PRIVATE KEY")
-  assert x509::parse_private_key(rsa_blocks[0]) is Some(Rsa(private))
-    && one(intermediate_pem.slice()).public_key() == x509::PublicKey.Rsa(key: private.public_key())
+  assert x509.parse_private_key(blocks[0]) is Some(Ecdsa(key)) && key.verifying_key().curve() == cryptography.Curve.P384
+  let rsa_blocks = x509.pem_blocks(intermediate_key_pem.slice(), label: "PRIVATE KEY")
+  assert x509.parse_private_key(rsa_blocks[0]) is Some(Rsa(private))
+    && one(intermediate_pem.slice()).public_key() == x509.PublicKey.Rsa(key: private.public_key())
 }
 
 test "an ECDSA signature goes to DER and back" {
   var raw: List[UInt8] = List.filled(1, count: 64)
   raw[0] = 200
   raw[32] = 0
-  let encoded = x509::ecdsa_signature_to_der(raw)
-  assert x509::ecdsa_signature_from_der(encoded, size: 32) == Some(own raw)
+  let encoded = x509.ecdsa_signature_to_der(raw)
+  assert x509.ecdsa_signature_from_der(encoded, size: 32) == Some(own raw)
 }
 
 test "the system's roots are read from the first bundle present" uses Panic, RunForever {
-  var disk = files::MemoryFiles.new().with_text(Path.new("/etc/ssl/cert.pem"), contents: root_pem.slice())
+  var disk = files.MemoryFiles.new().with_text(Path.new("/etc/ssl/cert.pem"), contents: root_pem.slice())
   provide mut disk {
-    assert x509::system_roots() is Ok(roots) && roots.length() == 1
+    assert x509.system_roots() is Ok(roots) && roots.length() == 1
   }
 }
 
 test "a root self-signed with SHA-1 is read, and anchors a chain whose links use SHA-256" uses Panic {
   let root = one(sha1_root_pem.slice())
   assert !root.is_signed_by(root)
-  let chain: List[x509::Certificate] = [one(sha1_signed_leaf_pem.slice())]
-  let roots: List[x509::Certificate] = [root.copy()]
-  assert x509::verify_chain(chain, roots: roots, host: "legacy.test", now: now()) == Ok(Unit)
+  let chain: List[x509.Certificate] = [one(sha1_signed_leaf_pem.slice())]
+  let roots: List[x509.Certificate] = [root.copy()]
+  assert x509.verify_chain(chain, roots: roots, host: "legacy.test", now: now()) == Ok(Unit)
 }

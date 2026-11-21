@@ -1,6 +1,6 @@
-use frontend::source
-use frontend::syntax
-use frontend::token
+use frontend.source
+use frontend.syntax
+use frontend.token
 
 let nesting_limit: UInt64 = 256
 
@@ -13,7 +13,7 @@ type Piece(first: UInt64, stop: UInt64)
   derives Equal
 
 type TokenCursor(
-  tables: token::Tables,
+  tables: token.Tables,
   file_stop: UInt64,
   first: UInt64,
   stop: UInt64,
@@ -22,15 +22,15 @@ type TokenCursor(
   angle_closers: List[Option[UInt64]],
   index: UInt64,
   nesting_depth: UInt64,
-  spans: List[source::Span],
-  syntax_errors: List[source::Span],
-  diagnostics: List[source::Diagnostic],
+  spans: List[source.Span],
+  syntax_errors: List[source.Span],
+  diagnostics: List[source.Diagnostic],
   after_inserted_closer: Bool,
   is_unterminated_interpolation: Bool,
   previous_if: Option[UInt64],
 )
 
-fn compute_group_ends(tables: token::Tables, first: UInt64, stop: UInt64) -> List[UInt64]
+fn compute_group_ends(tables: token.Tables, first: UInt64, stop: UInt64) -> List[UInt64]
   uses Panic
 {
   var ends: List[UInt64] = List.with_capacity(stop - first)
@@ -56,11 +56,11 @@ fn compute_group_ends(tables: token::Tables, first: UInt64, stop: UInt64) -> Lis
   ends
 }
 
-fn continues_type_arguments(kind: token::Kind) -> Bool {
+fn continues_type_arguments(kind: token.Kind) -> Bool {
   match kind {
     Upper(_) | Lower(_) | Integer(_) => true
     Punctuation(punctuation) => match punctuation {
-      Comma | Colon | ColonColon | Dot | Equal | Plus | Arrow => true
+      Comma | Colon | Dot | Equal | Plus | Arrow => true
       _ => false
     }
     Keyword(keyword) => match keyword {
@@ -71,7 +71,7 @@ fn continues_type_arguments(kind: token::Kind) -> Bool {
   }
 }
 
-fn list_angle_closers(tables: token::Tables, first: UInt64, stop: UInt64) -> List[Option[UInt64]]
+fn list_angle_closers(tables: token.Tables, first: UInt64, stop: UInt64) -> List[Option[UInt64]]
   uses Panic
 {
   var closers: List[Option[UInt64]] = List.with_capacity(stop - first)
@@ -120,7 +120,7 @@ fn list_angle_closers(tables: token::Tables, first: UInt64, stop: UInt64) -> Lis
   closers
 }
 
-fn TokenCursor.create(tables: own token::Tables, file_stop: UInt64) -> TokenCursor {
+fn TokenCursor.create(tables: own token.Tables, file_stop: UInt64) -> TokenCursor {
   TokenCursor(
     own tables,
     file_stop,
@@ -170,7 +170,7 @@ type Saved(
   previous_if: Option[UInt64],
 )
 
-fn enter_interpolation(cursor: mut TokenCursor, inner: token::Interpolation) -> Saved
+fn enter_interpolation(cursor: mut TokenCursor, inner: token.Interpolation) -> Saved
   uses Panic
 {
   let inner_stop = inner.stop - 1
@@ -210,38 +210,38 @@ fn leave_interpolation(cursor: mut TokenCursor, saved: own Saved) {
   cursor.previous_if = saved.previous_if
 }
 
-fn TokenCursor.make_end_token(self) -> token::Token
+fn TokenCursor.make_end_token(self) -> token.Token
   uses Panic
 {
   let position = if self.stop > self.first { self.tables.token(self.stop - 1).span.stop } else { self.base }
-  token::make_token(token::Kind.EndOfFile, span: source::make_zero_width(position))
+  token.make_token(token.Kind.EndOfFile, span: source.make_zero_width(position))
 }
 
-fn TokenCursor.lookup_token(self, index: UInt64) -> token::Token
+fn TokenCursor.lookup_token(self, index: UInt64) -> token.Token
   uses Panic
 {
   if index < self.stop { self.tables.token(index) } else { self.make_end_token() }
 }
 
-fn TokenCursor.peek(self) -> token::Token
+fn TokenCursor.peek(self) -> token.Token
   uses Panic
 {
   self.lookup_token(self.index)
 }
 
-fn TokenCursor.peek_kind(self) -> token::Kind
+fn TokenCursor.peek_kind(self) -> token.Kind
   uses Panic
 {
   self.lookup_token(self.index).kind
 }
 
-fn TokenCursor.peek_ahead(self, count: UInt64) -> token::Kind
+fn TokenCursor.peek_ahead(self, count: UInt64) -> token.Kind
   uses Panic
 {
   self.lookup_token(self.index + count).kind
 }
 
-fn TokenCursor.name(self, kind: token::Kind) -> StringSlice
+fn TokenCursor.name(self, kind: token.Kind) -> StringSlice
   uses Panic
 {
   match kind {
@@ -250,7 +250,7 @@ fn TokenCursor.name(self, kind: token::Kind) -> StringSlice
   }
 }
 
-fn TokenCursor.is_lower_named(self, kind: token::Kind, text: StringSlice) -> Bool
+fn TokenCursor.is_lower_named(self, kind: token.Kind, text: StringSlice) -> Bool
   uses Panic
 {
   match kind {
@@ -259,14 +259,14 @@ fn TokenCursor.is_lower_named(self, kind: token::Kind, text: StringSlice) -> Boo
   }
 }
 
-fn record_syntax_error(cursor: mut TokenCursor, index: UInt64, span: source::Span)
+fn record_syntax_error(cursor: mut TokenCursor, index: UInt64, span: source.Span)
   uses Panic
   ensures cursor.index == old(cursor.index)
   ensures cursor.stop == old(cursor.stop)
 {
   let recorded = if span.start == span.stop && index > cursor.first {
     let previous_start = cursor.lookup_token(index - 1).span.start
-    source::make_span(if previous_start < span.start { previous_start } else { span.start }, stop: span.stop)
+    source.make_span(if previous_start < span.start { previous_start } else { span.start }, stop: span.stop)
   } else {
     span
   }
@@ -296,7 +296,7 @@ fn advance(cursor: mut TokenCursor)
   }
 }
 
-fn take(cursor: mut TokenCursor) -> token::Token
+fn take(cursor: mut TokenCursor) -> token.Token
   uses Panic
 {
   let current = cursor.peek()
@@ -308,25 +308,25 @@ fn TokenCursor.is_at_end(self) -> Bool {
   self.index >= self.stop
 }
 
-fn TokenCursor.is_kind(self, kind: token::Kind) -> Bool
+fn TokenCursor.is_kind(self, kind: token.Kind) -> Bool
   uses Panic
 {
   self.peek_kind() == kind
 }
 
-fn TokenCursor.is_punctuation(self, punctuation: token::Punctuation) -> Bool
+fn TokenCursor.is_punctuation(self, punctuation: token.Punctuation) -> Bool
   uses Panic
 {
-  self.peek_kind() == token::Kind.Punctuation(punctuation)
+  self.peek_kind() == token.Kind.Punctuation(punctuation)
 }
 
-fn TokenCursor.is_keyword(self, keyword: token::Keyword) -> Bool
+fn TokenCursor.is_keyword(self, keyword: token.Keyword) -> Bool
   uses Panic
 {
-  self.peek_kind() == token::Kind.Keyword(keyword)
+  self.peek_kind() == token.Kind.Keyword(keyword)
 }
 
-fn accept_punctuation(cursor: mut TokenCursor, punctuation: token::Punctuation) -> Bool
+fn accept_punctuation(cursor: mut TokenCursor, punctuation: token.Punctuation) -> Bool
   uses Panic
 {
   if cursor.is_punctuation(punctuation) {
@@ -336,7 +336,7 @@ fn accept_punctuation(cursor: mut TokenCursor, punctuation: token::Punctuation) 
   false
 }
 
-fn accept_keyword(cursor: mut TokenCursor, keyword: token::Keyword) -> Bool
+fn accept_keyword(cursor: mut TokenCursor, keyword: token.Keyword) -> Bool
   uses Panic
 {
   if cursor.is_keyword(keyword) {
@@ -346,19 +346,19 @@ fn accept_keyword(cursor: mut TokenCursor, keyword: token::Keyword) -> Bool
   false
 }
 
-fn TokenCursor.make_definition_span(self, span: source::Span) -> source::Span
+fn TokenCursor.make_definition_span(self, span: source.Span) -> source.Span
   uses Panic
 {
-  source::of_file(base: self.base, span: span)
+  source.of_file(base: self.base, span: span)
 }
 
-fn TokenCursor.make_file_span(self, span: source::Span) -> source::Span
+fn TokenCursor.make_file_span(self, span: source.Span) -> source.Span
   uses Panic
 {
-  source::to_file(base: self.base, span: span)
+  source.to_file(base: self.base, span: span)
 }
 
-fn TokenCursor.find_previous_token(self) -> Option[token::Token]
+fn TokenCursor.find_previous_token(self) -> Option[token.Token]
   uses Panic
 {
   if self.index > self.first { Some(self.tables.token(self.index - 1)) } else { None }
@@ -373,16 +373,16 @@ fn TokenCursor.compute_previous_stop(self) -> UInt64
   }
 }
 
-fn TokenCursor.make_span_from(self, start_index: UInt64) -> source::Span
+fn TokenCursor.make_span_from(self, start_index: UInt64) -> source.Span
   uses Panic
 {
   let start = self.lookup_token(start_index).span.start
   let previous_stop = self.compute_previous_stop()
   let stop = if previous_stop > start { previous_stop } else { start }
-  self.make_definition_span(source::make_span(start, stop))
+  self.make_definition_span(source.make_span(start, stop))
 }
 
-fn allocate_id(cursor: mut TokenCursor, span: source::Span) -> UInt64 {
+fn allocate_id(cursor: mut TokenCursor, span: source.Span) -> UInt64 {
   mut cursor.spans.push(span)
   cursor.spans.length() - 1
 }
@@ -394,20 +394,20 @@ fn allocate_id_from(cursor: mut TokenCursor, start_index: UInt64) -> UInt64
   allocate_id(mut cursor, span)
 }
 
-fn allocate_token_id(cursor: mut TokenCursor, span: source::Span) -> UInt64
+fn allocate_token_id(cursor: mut TokenCursor, span: source.Span) -> UInt64
   uses Panic
 {
   let definition_span = cursor.make_definition_span(span)
   allocate_id(mut cursor, span: definition_span)
 }
 
-fn TokenCursor.read_span(self, id: UInt64) -> source::Span
+fn TokenCursor.read_span(self, id: UInt64) -> source.Span
   uses Panic
 {
   self.spans.get(id).expect("a node id")
 }
 
-fn set_span(cursor: mut TokenCursor, id: UInt64, span: source::Span)
+fn set_span(cursor: mut TokenCursor, id: UInt64, span: source.Span)
   uses Panic
 {
   if id < cursor.spans.length() {
@@ -415,7 +415,7 @@ fn set_span(cursor: mut TokenCursor, id: UInt64, span: source::Span)
   }
 }
 
-fn TokenCursor.read_file_span(self, id: UInt64) -> source::Span
+fn TokenCursor.read_file_span(self, id: UInt64) -> source.Span
   uses Panic
 {
   self.make_file_span(self.read_span(id))
@@ -428,9 +428,9 @@ fn TokenCursor.has_reported(self) -> Bool {
 fn report(
   cursor: mut TokenCursor,
   code: StringSlice,
-  span: source::Span,
+  span: source.Span,
   message: StringSlice,
-  fixes: own List[source::Fix] = [],
+  fixes: own List[source.Fix] = [],
 )
   uses Panic
 {
@@ -440,10 +440,10 @@ fn report(
     let index = cursor.index
     record_syntax_error(mut cursor, index, span)
   }
-  mut cursor.diagnostics.push(source::make_diagnostic(code, span, message, fixes: own fixes))
+  mut cursor.diagnostics.push(source.make_diagnostic(code, span, message, fixes: own fixes))
 }
 
-fn TokenCursor.describe(self, current: token::Token) -> String
+fn TokenCursor.describe(self, current: token.Token) -> String
   uses Panic
 {
   match current.kind {
@@ -451,12 +451,12 @@ fn TokenCursor.describe(self, current: token::Token) -> String
     EndOfFile => "the end of the definition"
     Upper(_) | Lower(_) => "the name `${self.name(current.kind)}`"
     Underscore => "`_`"
-    Keyword(keyword) => "`${token::spell_keyword(keyword)}`"
-    Reserved(reserved) => "`${token::spell_reserved(reserved)}`"
+    Keyword(keyword) => "`${token.spell_keyword(keyword)}`"
+    Reserved(reserved) => "`${token.spell_reserved(reserved)}`"
     Integer(_) | Float(_) => "a number"
     String(_) => "a string"
-    Punctuation(punctuation) => "`${token::spell_punctuation(punctuation)}`"
-    Foreign(foreign) => "`${token::spell_foreign(foreign)}`"
+    Punctuation(punctuation) => "`${token.spell_punctuation(punctuation)}`"
+    Foreign(foreign) => "`${token.spell_foreign(foreign)}`"
   }
 }
 
@@ -465,7 +465,7 @@ fn fail(cursor: mut TokenCursor, expected: StringSlice) -> Failure
 {
   let current = cursor.peek()
   let is_reported_by_lexer = current.is_inserted_closer || cursor.after_inserted_closer
-    || (current.kind == token::Kind.EndOfFile && cursor.is_unterminated_interpolation)
+    || (current.kind == token.Kind.EndOfFile && cursor.is_unterminated_interpolation)
   if is_reported_by_lexer {
     let index = cursor.index
     record_syntax_error(mut cursor, index, span: current.span)
@@ -475,7 +475,7 @@ fn fail(cursor: mut TokenCursor, expected: StringSlice) -> Failure
         mut cursor,
         code: "parser.reserved_word",
         span: current.span,
-        message: "`${token::spell_reserved(reserved)}` is reserved for possible later use, and means nothing in Truss yet.",
+        message: "`${token.spell_reserved(reserved)}` is reserved for possible later use, and means nothing in Truss yet.",
       )
       _ => {
         let description = cursor.describe(current)
@@ -486,20 +486,20 @@ fn fail(cursor: mut TokenCursor, expected: StringSlice) -> Failure
   Failure.Failed
 }
 
-fn expect_punctuation(cursor: mut TokenCursor, punctuation: token::Punctuation) -> Result[Unit, Failure]
+fn expect_punctuation(cursor: mut TokenCursor, punctuation: token.Punctuation) -> Result[Unit, Failure]
   uses Panic
 {
   if !accept_punctuation(mut cursor, punctuation) {
-    return Err(fail(mut cursor, expected: "`${token::spell_punctuation(punctuation)}`"))
+    return Err(fail(mut cursor, expected: "`${token.spell_punctuation(punctuation)}`"))
   }
   Ok(Unit)
 }
 
-fn expect_keyword(cursor: mut TokenCursor, keyword: token::Keyword) -> Result[Unit, Failure]
+fn expect_keyword(cursor: mut TokenCursor, keyword: token.Keyword) -> Result[Unit, Failure]
   uses Panic
 {
   if !accept_keyword(mut cursor, keyword) {
-    return Err(fail(mut cursor, expected: "`${token::spell_keyword(keyword)}`"))
+    return Err(fail(mut cursor, expected: "`${token.spell_keyword(keyword)}`"))
   }
   Ok(Unit)
 }
@@ -583,7 +583,7 @@ fn skip_one(cursor: mut TokenCursor)
 
 fn parse_separated[Item](
   cursor: mut TokenCursor,
-  separator: token::Punctuation,
+  separator: token.Punctuation,
   parse_item: (fn(mut TokenCursor) -> Result[Item, Failure] uses Panic, RunForever),
 ) -> Result[List[Item], Failure]
   uses Panic, RunForever
@@ -596,7 +596,7 @@ fn parse_separated[Item](
   Ok(own items)
 }
 
-fn split_stop(tables: token::Tables, limit: UInt64, first: UInt64) -> UInt64
+fn split_stop(tables: token.Tables, limit: UInt64, first: UInt64) -> UInt64
   uses Panic
 {
   var index = first
@@ -605,7 +605,7 @@ fn split_stop(tables: token::Tables, limit: UInt64, first: UInt64) -> UInt64
     match tables.token(index).kind {
       EndOfFile => return index
       Newline => if depth == 0 {
-        if index + 1 < limit && tables.token(index + 1).kind == token::Kind.Punctuation(token::Punctuation.Open(token::Bracket.Curly)) {
+        if index + 1 < limit && tables.token(index + 1).kind == token.Kind.Punctuation(token.Punctuation.Open(token.Bracket.Curly)) {
           index += 1
         } else {
           return index
@@ -632,7 +632,7 @@ fn split_stop(tables: token::Tables, limit: UInt64, first: UInt64) -> UInt64
   index
 }
 
-fn split_pieces(tables: token::Tables, first: UInt64, stop: UInt64) -> List[Piece]
+fn split_pieces(tables: token.Tables, first: UInt64, stop: UInt64) -> List[Piece]
   uses Panic
 {
   var pieces: List[Piece] = []
@@ -667,7 +667,7 @@ fn TokenCursor.is_after_inserted_closer(self) -> Bool {
 fn skip_line(cursor: mut TokenCursor, closer_index: UInt64)
   uses Panic
 {
-  while cursor.index < closer_index && cursor.index < cursor.stop && cursor.peek_kind() != token::Kind.Newline {
+  while cursor.index < closer_index && cursor.index < cursor.stop && cursor.peek_kind() != token.Kind.Newline {
     skip_one(mut cursor)
   }
 }
@@ -675,7 +675,7 @@ fn skip_line(cursor: mut TokenCursor, closer_index: UInt64)
 fn parse_bracketed[Item](
   cursor: mut TokenCursor,
   parse_item: (fn(mut TokenCursor) -> Result[Item, Failure] uses Panic, RunForever),
-  recover: (fn(mut TokenCursor, source::Span) -> Item uses Panic),
+  recover: (fn(mut TokenCursor, source.Span) -> Item uses Panic),
 ) -> List[Item]
   uses Panic, RunForever
 {
@@ -687,7 +687,7 @@ fn parse_bracketed[Item](
     let start = cursor.index
     let parsed = match parse_item(mut cursor) {
       Ok(value) => if cursor.index < closer_index {
-        match expect_punctuation(mut cursor, punctuation: token::Punctuation.Comma) {
+        match expect_punctuation(mut cursor, punctuation: token.Punctuation.Comma) {
           Ok(_) => Ok(own value)
           Err(failure) => Err(failure)
         }
@@ -699,10 +699,10 @@ fn parse_bracketed[Item](
     match own parsed {
       Ok(value) => mut items.push(own value)
       Err(_) => {
-        while cursor.index < closer_index && cursor.peek_kind() != token::Kind.Punctuation(token::Punctuation.Comma) {
+        while cursor.index < closer_index && cursor.peek_kind() != token.Kind.Punctuation(token.Punctuation.Comma) {
           skip_one(mut cursor)
         }
-        let span = cursor.make_definition_span(source::make_span(cursor.lookup_token(start).span.start, stop: cursor.peek().span.start))
+        let span = cursor.make_definition_span(source.make_span(cursor.lookup_token(start).span.start, stop: cursor.peek().span.start))
         if cursor.index < closer_index {
           advance(mut cursor)
         }
@@ -717,7 +717,7 @@ fn parse_bracketed[Item](
 fn parse_lines[Item](
   cursor: mut TokenCursor,
   parse_item: (fn(mut TokenCursor) -> Result[Item, Failure] uses Panic, RunForever),
-  recover: (fn(mut TokenCursor, source::Span) -> Item uses Panic),
+  recover: (fn(mut TokenCursor, source.Span) -> Item uses Panic),
 ) -> List[Item]
   uses Panic, RunForever
 {
@@ -732,10 +732,10 @@ fn parse_lines[Item](
     let parsed = match parse_item(mut cursor) {
       Ok(value) => {
         let ends_with_comma = match cursor.find_previous_token() {
-          Some(previous) => previous.kind == token::Kind.Punctuation(token::Punctuation.Comma)
+          Some(previous) => previous.kind == token.Kind.Punctuation(token.Punctuation.Comma)
           None => false
         }
-        let is_separated = cursor.peek_kind() == token::Kind.Newline || (ends_with_comma && cursor.peek().line_break_before)
+        let is_separated = cursor.peek_kind() == token.Kind.Newline || (ends_with_comma && cursor.peek().line_break_before)
         if cursor.index < closer_index && !is_separated {
           Err(fail(mut cursor, expected: "a line break or `}`"))
         } else {
@@ -752,7 +752,7 @@ fn parse_lines[Item](
         recover(mut cursor, span)
       }
     }
-    if cursor.index < closer_index && cursor.peek_kind() == token::Kind.Newline {
+    if cursor.index < closer_index && cursor.peek_kind() == token.Kind.Newline {
       advance(mut cursor)
     }
     mut items.push(own value)
@@ -762,12 +762,12 @@ fn parse_lines[Item](
   items
 }
 
-fn sort_unique(spans: own List[source::Span]) -> List[source::Span]
+fn sort_unique(spans: own List[source.Span]) -> List[source.Span]
   uses Panic
 {
   var sorted = own spans
   mut sorted.sort()
-  var unique: List[source::Span] = []
+  var unique: List[source.Span] = []
   for span in sorted {
     let is_repeat = match unique.last() {
       Some(last) => last == span
@@ -780,28 +780,28 @@ fn sort_unique(spans: own List[source::Span]) -> List[source::Span]
   unique
 }
 
-fn collect_positions(cursor: mut TokenCursor) -> syntax::Positions
+fn collect_positions(cursor: mut TokenCursor) -> syntax.Positions
   uses Panic
 {
   let spans = own cursor.spans
   cursor.spans = []
-  var errors: List[source::Span] = []
+  var errors: List[source.Span] = []
   for span in cursor.syntax_errors {
     mut errors.push(cursor.make_definition_span(span))
   }
-  syntax::Positions(own spans, syntax_errors: sort_unique(own errors))
+  syntax.Positions(own spans, syntax_errors: sort_unique(own errors))
 }
 
 type SpanEdge = Start | Stop
 
-fn read_edge(span: source::Span, edge: SpanEdge) -> UInt64 {
+fn read_edge(span: source.Span, edge: SpanEdge) -> UInt64 {
   match edge {
     Start => span.start
     Stop => span.stop
   }
 }
 
-fn locate_first(tables: token::Tables, first: UInt64, stop: UInt64, edge: SpanEdge, offset: UInt64) -> UInt64
+fn locate_first(tables: token.Tables, first: UInt64, stop: UInt64, edge: SpanEdge, offset: UInt64) -> UInt64
   uses Panic, RunForever
 {
   var low = first
@@ -817,12 +817,12 @@ fn locate_first(tables: token::Tables, first: UInt64, stop: UInt64, edge: SpanEd
   low
 }
 
-fn TokenCursor.list_group_tokens(self, start: UInt64, stop: UInt64, span: source::Span) -> List[token::Token]
+fn TokenCursor.list_group_tokens(self, start: UInt64, stop: UInt64, span: source.Span) -> List[token.Token]
   uses Panic, RunForever
 {
   let inside_first = locate_first(self.tables, first: start, stop: stop, edge: SpanEdge.Start, offset: span.start)
   let inside_stop = locate_first(self.tables, first: inside_first, stop: stop, edge: SpanEdge.Stop, offset: span.stop + 1)
-  var inside: List[token::Token] = []
+  var inside: List[token.Token] = []
   for index in inside_first..inside_stop {
     mut inside.push(self.tables.token(index))
   }
@@ -853,14 +853,14 @@ fn TokenCursor.list_group_tokens(self, start: UInt64, stop: UInt64, span: source
   []
 }
 
-fn TokenCursor.spell(self, span: source::Span, insertions: Slice[token::Insertion] = []) -> Option[String]
+fn TokenCursor.spell(self, span: source.Span, insertions: Slice[token.Insertion] = []) -> Option[String]
   uses Panic, RunForever
 {
   let tokens = self.list_group_tokens(start: self.first, stop: self.stop, span: span)
   if tokens.is_empty() {
     return None
   }
-  token::spell_tokens(self.tables, tokens, insertions)
+  token.spell_tokens(self.tables, tokens, insertions)
 }
 
 fn TokenCursor.find_spelling_at(self, edge: SpanEdge, offset: UInt64) -> Option[String]
@@ -870,14 +870,14 @@ fn TokenCursor.find_spelling_at(self, edge: SpanEdge, offset: UInt64) -> Option[
   while index < self.stop && read_edge(self.tables.token(index).span, edge) == offset {
     let current = self.tables.token(index)
     if current.span.start < current.span.stop {
-      return token::spell_tokens(self.tables, tokens: [current], insertions: [])
+      return token.spell_tokens(self.tables, tokens: [current], insertions: [])
     }
     index += 1
   }
   None
 }
 
-fn TokenCursor.joins_neighbors(self, span: source::Span, code: StringSlice) -> Bool
+fn TokenCursor.joins_neighbors(self, span: source.Span, code: StringSlice) -> Bool
   uses Panic, RunForever
 {
   var before: Option[UInt8] = None
@@ -888,5 +888,5 @@ fn TokenCursor.joins_neighbors(self, span: source::Span, code: StringSlice) -> B
   if self.find_spelling_at(edge: SpanEdge.Start, offset: span.stop) is Some(spelling) && !spelling.is_empty() {
     after = Some(spelling.byte(0))
   }
-  token::joins_neighbor(before, after, code)
+  token.joins_neighbor(before, after, code)
 }

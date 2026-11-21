@@ -3,7 +3,7 @@ let check packages =
     (Support.make_database packages)
 
 let expect_one_diagnostic = Support.expect_one_diagnostic ~check
-let expect_fine text = Support.expect_no_diagnostics ~check [ ("app::main", text) ]
+let expect_fine text = Support.expect_no_diagnostics ~check [ ("app.main", text) ]
 
 let () =
   Harness.test "an impl must live with its trait, its type, or a type its trait names" (fun () ->
@@ -13,7 +13,7 @@ let () =
       List.iter
         (fun (text, says) ->
           let diagnostics =
-            check (Support.setup [ ("app::main", text) ]) (Support.parse_file "app::main")
+            check (Support.setup [ ("app.main", text) ]) (Support.parse_file "app.main")
           in
           if
             not
@@ -34,12 +34,12 @@ let () =
   Harness.test "two impls of a trait for one type constructor overlap when their arguments unify"
     (fun () ->
       let packages =
-        Support.setup [ ("app::main", Fixtures.Package_checks.two_add_impls_for_vector) ]
+        Support.setup [ ("app.main", Fixtures.Package_checks.two_add_impls_for_vector) ]
       in
       if
         not
           (List.mem "package.overlapping_impls"
-             (Support.list_codes (check packages (Support.parse_file "app::main"))))
+             (Support.list_codes (check packages (Support.parse_file "app.main"))))
       then Harness.fail "no overlap");
   Harness.test "a type's own method cannot share a name with a trait's" (fun () ->
       expect_one_diagnostic Fixtures.Package_checks.own_method_named_like_a_trait_method
@@ -87,9 +87,9 @@ let () =
   Harness.test "constants whose values read each other are an error at each of them" (fun () ->
       let packages =
         Support.setup
-          [ ("app::main", "let first: Int64 = second + 1\nlet second: Int64 = first + 1\n") ]
+          [ ("app.main", "let first: Int64 = second + 1\nlet second: Int64 = first + 1\n") ]
       in
-      match Support.list_codes (check packages (Support.parse_file "app::main")) with
+      match Support.list_codes (check packages (Support.parse_file "app.main")) with
       | [ "package.constant_cycle"; "package.constant_cycle" ] -> ()
       | found -> Harness.fail "found [%s]" (String.concat "; " found));
   Harness.test "a constant whose value reads itself is an error" (fun () ->
@@ -114,12 +114,12 @@ let () =
   Harness.test "generic code that instantiates itself with growing arguments is an error" (fun () ->
       let packages =
         Support.setup
-          [ ("app::main", Fixtures.Package_checks.function_calling_itself_with_a_growing_type) ]
+          [ ("app.main", Fixtures.Package_checks.function_calling_itself_with_a_growing_type) ]
       in
       if
         not
           (List.mem "package.instantiation_cycle"
-             (Support.list_codes (check packages (Support.parse_file "app::main"))))
+             (Support.list_codes (check packages (Support.parse_file "app.main"))))
       then Harness.fail "no cycle");
   Harness.test
     "of generic functions that instantiate each other, only the one whose call grows is an error"
@@ -127,7 +127,7 @@ let () =
       let packages =
         Support.setup
           [
-            ( "app::main",
+            ( "app.main",
               "fn ping[Element](value: own Element) -> Int64 {\n\
               \  pong(Some(own value))\n\
                }\n\n\
@@ -139,7 +139,7 @@ let () =
       match
         List.filter
           (String.equal "package.instantiation_cycle")
-          (Support.list_codes (check packages (Support.parse_file "app::main")))
+          (Support.list_codes (check packages (Support.parse_file "app.main")))
       with
       | [ _ ] -> ()
       | reported -> Harness.fail "found %d instantiation cycles" (List.length reported));
@@ -169,9 +169,9 @@ let () =
   Harness.test "two tests of a package cannot share a name" (fun () ->
       let packages =
         Support.setup
-          [ ("app::main", "test \"adds\" {\n}\n"); ("app::other", "test \"adds\" {\n}\n") ]
+          [ ("app.main", "test \"adds\" {\n}\n"); ("app.other", "test \"adds\" {\n}\n") ]
       in
-      match Support.list_codes (check packages (Support.parse_file "app::other")) with
+      match Support.list_codes (check packages (Support.parse_file "app.other")) with
       | [ "package.duplicate_test" ] -> ()
       | actual -> Harness.fail "found [%s]" (String.concat "; " actual))
 
@@ -205,9 +205,9 @@ let () =
       expect_fine Fixtures.Package_checks.tree_in_a_wrapper_list);
   Harness.test "generic types whose arguments grow through each other are both growing" (fun () ->
       let packages =
-        Support.setup [ ("app::main", Fixtures.Package_checks.types_growing_through_each_other) ]
+        Support.setup [ ("app.main", Fixtures.Package_checks.types_growing_through_each_other) ]
       in
-      match Support.list_codes (check packages (Support.parse_file "app::main")) with
+      match Support.list_codes (check packages (Support.parse_file "app.main")) with
       | [ "package.growing_type"; "package.growing_type" ] -> ()
       | actual -> Harness.fail "found [%s]" (String.concat "; " actual));
   Harness.test "a generic type that swaps its arguments is not growing" (fun () ->
@@ -219,7 +219,7 @@ let holder = "type Kept[Source: Shown](part: Source.Part)\n\n"
 let () =
   let list_actual text =
     Support.list_codes
-      (check (Support.setup [ ("app::main", text) ]) (Support.parse_file "app::main"))
+      (check (Support.setup [ ("app.main", text) ]) (Support.parse_file "app.main"))
   in
   let expect expected text =
     match list_actual text with
@@ -308,11 +308,11 @@ let () =
         Support.setup
           ~dependencies:[ ("app", "lib") ]
           [
-            ("lib::vector", Fixtures.Package_checks.vector_adding_elements);
-            ("app::main", Fixtures.Package_checks.impl_adding_meters_to_vectors);
+            ("lib.vector", Fixtures.Package_checks.vector_adding_elements);
+            ("app.main", Fixtures.Package_checks.impl_adding_meters_to_vectors);
           ]
       in
-      match Support.list_codes (check packages (Support.parse_file "app::main")) with
+      match Support.list_codes (check packages (Support.parse_file "app.main")) with
       | [ "package.overlapping_impls" ] -> ()
       | actual -> Harness.fail "found [%s]" (String.concat "; " actual));
   Harness.test "an impl in another package cannot give a type another overload of its method"
@@ -321,11 +321,11 @@ let () =
         Support.setup
           ~dependencies:[ ("app", "lib") ]
           [
-            ("lib::counter", Fixtures.Package_checks.counter_with_a_label_method);
-            ("app::main", Fixtures.Package_checks.impl_overloading_counters_label);
+            ("lib.counter", Fixtures.Package_checks.counter_with_a_label_method);
+            ("app.main", Fixtures.Package_checks.impl_overloading_counters_label);
           ]
       in
-      match Support.list_codes (check packages (Support.parse_file "app::main")) with
+      match Support.list_codes (check packages (Support.parse_file "app.main")) with
       | [ "package.method_name_clash" ] -> ()
       | actual -> Harness.fail "found [%s]" (String.concat "; " actual));
   Harness.test "an impl in another package may name a method after the type's `internal` method"
@@ -334,19 +334,19 @@ let () =
         Support.setup
           ~dependencies:[ ("app", "tools") ]
           [
-            ("tools::kits", Fixtures.Package_checks.kit_with_an_internal_part);
-            ( "app::main",
+            ("tools.kits", Fixtures.Package_checks.kit_with_an_internal_part);
+            ( "app.main",
               Fixtures.Package_checks.impl_naming_a_method_after_an_internal_one_of_another_package
             );
           ]
       in
-      match Support.list_codes (check packages (Support.parse_file "app::main")) with
+      match Support.list_codes (check packages (Support.parse_file "app.main")) with
       | [] -> ()
       | actual -> Harness.fail "found [%s]" (String.concat "; " actual));
   Harness.test "an impl in the type's package counts the type's private method of another module"
     (fun () ->
       expect_one_diagnostic
-        ~others:[ ("app::shapes", Fixtures.Package_checks.shape_with_a_private_measure) ]
+        ~others:[ ("app.shapes", Fixtures.Package_checks.shape_with_a_private_measure) ]
         Fixtures.Package_checks.impl_naming_a_method_after_a_private_one_of_another_module
         "package.method_name_clash" ~says:"a `measure` of its own");
   Harness.test "impls whose heads unify only through an infinite type do not overlap" (fun () ->
@@ -356,19 +356,19 @@ let check_package packages = Database.list_file_diagnostics (Support.make_databa
 let expect_unused = Support.expect_one_diagnostic ~check:check_package
 
 let expect_severity text (severity : Diagnostic.severity) =
-  match check_package (Support.setup [ ("app::main", text) ]) (Support.parse_file "app::main") with
+  match check_package (Support.setup [ ("app.main", text) ]) (Support.parse_file "app.main") with
   | [ diagnostic ] ->
       if diagnostic.severity <> severity then
         Harness.fail "the unused definition has the other severity"
   | found -> Harness.fail "found [%s]" (String.concat "; " (Support.list_codes found))
 
-let expect_used ?(others = []) ?(file = "app::main") text =
+let expect_used ?(others = []) ?(file = "app.main") text =
   Support.expect_no_diagnostics ~check:check_package ((file, text) :: others)
 
 let () =
   Harness.test "an internal function that nothing in its package uses is an error" (fun () ->
       expect_unused Fixtures.Package_checks.unused_internal_function "usage.unused_function"
-        ~says:"Nothing in `app` uses the internal function `app::main::double`";
+        ~says:"Nothing in `app` uses the internal function `app.main.double`";
       expect_severity Fixtures.Package_checks.unused_internal_function Error);
   Harness.test "an internal constant that nothing in its package uses is rejected" (fun () ->
       expect_unused Fixtures.Package_checks.unused_internal_constant "usage.unused_constant");
@@ -379,23 +379,23 @@ let () =
     (fun () ->
       let packages =
         Support.setup
-          [ ("app::main", Fixtures.Package_checks.internal_functions_used_only_by_each_other) ]
+          [ ("app.main", Fixtures.Package_checks.internal_functions_used_only_by_each_other) ]
       in
-      match check_package packages (Support.parse_file "app::main") with
+      match check_package packages (Support.parse_file "app.main") with
       | [ first; second ] ->
           let messages = List.sort compare [ first.message; second.message ] in
           if
             messages
             <> [
-                 "Nothing in `app` uses the internal function `app::main::quadruple`. Delete it.";
-                 "Only unused definitions use the internal function `app::main::twice`. Delete it \
+                 "Nothing in `app` uses the internal function `app.main.quadruple`. Delete it.";
+                 "Only unused definitions use the internal function `app.main.twice`. Delete it \
                   with them.";
                ]
           then Harness.fail "found %s" (String.concat "; " messages)
       | found -> Harness.fail "found [%s]" (String.concat "; " (Support.list_codes found)));
   Harness.test "an internal function that another module of the package calls is used" (fun () ->
       expect_used Fixtures.Package_checks.public_function_calling_an_internal_helper
-        ~others:[ ("app::helpers", Fixtures.Package_checks.internal_helpers) ]);
+        ~others:[ ("app.helpers", Fixtures.Package_checks.internal_helpers) ]);
   Harness.test "an internal method called with a dot is used" (fun () ->
       expect_used Fixtures.Package_checks.internal_method_called_with_a_dot);
   Harness.test "a method of an internal trait called through the trait is used" (fun () ->
@@ -406,10 +406,10 @@ let () =
       expect_used Fixtures.Package_checks.internal_function_named_only_in_an_ensures);
   Harness.test "an internal constant named only in a pattern is used" (fun () ->
       expect_used Fixtures.Package_checks.internal_constant_named_only_in_a_pattern
-        ~others:[ ("app::limits", Fixtures.Package_checks.internal_limit) ]);
+        ~others:[ ("app.limits", Fixtures.Package_checks.internal_limit) ]);
   Harness.test "a private function that nothing in its package uses is a warning" (fun () ->
       expect_unused Fixtures.Package_checks.unused_private_function "usage.unused_function"
-        ~says:"Nothing in `app` uses the private function `app::main::double`";
+        ~says:"Nothing in `app` uses the private function `app.main.double`";
       expect_severity Fixtures.Package_checks.unused_private_function Warning);
   Harness.test "a private function that a test calls is used" (fun () ->
       expect_used Fixtures.Package_checks.private_function_called_by_a_test);

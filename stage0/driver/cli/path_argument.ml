@@ -3,17 +3,14 @@ type t = { prefix : string list; last : string; member : string option }
 let parse text =
   let refuse () =
     Outcome.raise_cannot_run
-      "`%s` is not a path, such as `weather::forecast::parse` or \
-       `weather::forecast::Forecast.summary`."
+      "`%s` is not a path, such as `weather.forecast.parse` or `weather.forecast.Forecast.summary`."
       text
   in
+  let is_type_name name = Char.uppercase_ascii name.[0] = name.[0] in
   match Option.map List.rev (Path.parse_names text) with
-  | Some (last :: rest) -> (
-      let prefix = List.rev rest in
-      match String.split_on_char '.' last with
-      | [ last ] -> { prefix; last; member = None }
-      | [ last; member ] when last <> "" && member <> "" -> { prefix; last; member = Some member }
-      | _ -> refuse ())
+  | Some (member :: last :: rest) when is_type_name last ->
+      { prefix = List.rev rest; last; member = Some member }
+  | Some (last :: rest) -> { prefix = List.rev rest; last; member = None }
   | Some [] | None -> refuse ()
 
 type target = Package of Path.package | Module of Path.module_ | Definition of Path.t

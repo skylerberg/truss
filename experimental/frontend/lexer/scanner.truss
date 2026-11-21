@@ -1,16 +1,16 @@
-use frontend::source
-use frontend::token
-use standard::collections
+use frontend.source
+use frontend.token
+use standard.collections
 
 type Ending = Closed | Unterminated
   derives Equal
 
 type Scanned(
-  kind: token::Kind,
+  kind: token.Kind,
   start: UInt64,
   stop: UInt64,
   ending: Ending,
-  first_line_break: Option[source::Span],
+  first_line_break: Option[source.Span],
   blank_line: Bool,
 )
   derives Equal
@@ -26,23 +26,23 @@ type Decoded(is_valid: Bool, code: UInt32, length: UInt64)
   derives Equal
 
 type Scanner(
-  source: source::Source,
+  source: source.Source,
   length: UInt64,
-  diagnostics: List[source::Diagnostic],
+  diagnostics: List[source.Diagnostic],
   position: UInt64,
-  first_line_break: Option[source::Span],
+  first_line_break: Option[source.Span],
   blank_line: Bool,
   line_is_blank: Bool,
   unterminated_at_end: Bool,
-  name_indices: collections::SortedMap[String, UInt64],
+  name_indices: collections.SortedMap[String, UInt64],
   name_checks: List[NameCheck],
   previous: Option[Scanned],
   held: List[Item],
   semicolons: List[UInt64],
-  tables: token::Tables,
+  tables: token.Tables,
 )
 
-fn Scanner.create(source: own source::Source) -> Scanner
+fn Scanner.create(source: own source.Source) -> Scanner
   uses Panic
 {
   let length = source.text.length()
@@ -61,7 +61,7 @@ fn Scanner.create(source: own source::Source) -> Scanner
     previous: None,
     held: [],
     semicolons: [],
-    tables: token::Tables.empty(),
+    tables: token.Tables.empty(),
   )
 }
 
@@ -84,12 +84,12 @@ fn Scanner.is_at(self, index: UInt64, byte: UInt8) -> Bool
 fn report(
   scanner: mut Scanner,
   code: StringSlice,
-  span: source::Span,
+  span: source.Span,
   message: StringSlice,
-  notes: own List[source::Note] = [],
-  fixes: own List[source::Fix] = [],
+  notes: own List[source.Note] = [],
+  fixes: own List[source.Fix] = [],
 ) {
-  mut scanner.diagnostics.push(source::make_diagnostic(code, span, message, own notes, own fixes))
+  mut scanner.diagnostics.push(source.make_diagnostic(code, span, message, own notes, own fixes))
 }
 
 fn Scanner.text(self, start: UInt64, stop: UInt64) -> StringSlice
@@ -168,19 +168,19 @@ fn Scanner.byte_after(self, index: UInt64) -> Option[UInt8]
   if index < self.length { Some(self.lookup(index)) } else { None }
 }
 
-fn Scanner.joins_neighbor(self, span: source::Span, code: StringSlice) -> Bool
+fn Scanner.joins_neighbor(self, span: source.Span, code: StringSlice) -> Bool
   uses Panic
 {
-  token::joins_neighbor(self.byte_before(span.start), after: self.byte_after(span.stop), code: code)
+  token.joins_neighbor(self.byte_before(span.start), after: self.byte_after(span.stop), code: code)
 }
 
-fn Scanner.list_code_fixes(self, span: source::Span, codes: Slice[String]) -> List[source::Fix]
+fn Scanner.list_code_fixes(self, span: source.Span, codes: Slice[String]) -> List[source.Fix]
   uses Panic
 {
-  var fixes: List[source::Fix] = []
+  var fixes: List[source.Fix] = []
   for code in codes {
     if !self.joins_neighbor(span, code) {
-      mut fixes.push(source::make_fix("Write `${code}`", edits: [source::replace(span, replacement: code)]))
+      mut fixes.push(source.make_fix("Write `${code}`", edits: [source.replace(span, replacement: code)]))
     }
   }
   fixes
@@ -434,7 +434,7 @@ fn is_control(code: UInt32) -> Bool
 type Context = Code | OrdinaryString | RawString
   derives Equal
 
-fn Scanner.remove_trivia(self, start: UInt64, stop: UInt64, line_break: Bool) -> source::Edit
+fn Scanner.remove_trivia(self, start: UInt64, stop: UInt64, line_break: Bool) -> source.Edit
   uses Panic, RunForever
 {
   let before = self.count_spaces_before(start)
@@ -443,17 +443,17 @@ fn Scanner.remove_trivia(self, start: UInt64, stop: UInt64, line_break: Bool) ->
   let code_after = !self.is_end_of_line(after)
   if code_before && code_after {
     let replacement = if line_break { "\n${self.extract_indentation(start)}" } else { " " }
-    return source::replace(source::make_span(before, stop: after), replacement)
+    return source.replace(source.make_span(before, stop: after), replacement)
   }
   if code_before {
-    return source::delete(source::make_span(before, stop: after))
+    return source.delete(source.make_span(before, stop: after))
   }
   if code_after {
-    return source::delete(source::make_span(start, stop: after))
+    return source.delete(source.make_span(start, stop: after))
   }
   let line_start = self.source.compute_line_start(start)
   let line_stop = if self.is_at_end(after) { after } else { after + self.measure_line_break(after) }
-  source::delete(source::make_span(line_start, stop: line_stop))
+  source.delete(source.make_span(line_start, stop: line_stop))
 }
 
 fn report_forbidden_run(scanner: mut Scanner, context: Context)
@@ -503,19 +503,19 @@ fn report_forbidden_run(scanner: mut Scanner, context: Context)
   match context {
     Code => {
       let title = if is_plural { "Delete the characters" } else { "Delete the character" }
-      let fix = source::make_fix(title, edits: [scanner.remove_trivia(start, stop, line_break: false)])
-      report(mut scanner, code: "lexer.forbidden_character", span: source::make_span(start, stop), message: base, fixes: [own fix])
+      let fix = source.make_fix(title, edits: [scanner.remove_trivia(start, stop, line_break: false)])
+      report(mut scanner, code: "lexer.forbidden_character", span: source.make_span(start, stop), message: base, fixes: [own fix])
     }
     OrdinaryString => {
       var escapes = ""
       for character in characters {
         mut escapes.push("\\u{${format_hexadecimal(character, minimum_digits: 1)}}")
       }
-      let fix = source::make_fix("Replace with `${escapes}`", edits: [source::replace(source::make_span(start, stop), replacement: escapes)])
+      let fix = source.make_fix("Replace with `${escapes}`", edits: [source.replace(source.make_span(start, stop), replacement: escapes)])
       report(
         mut scanner,
         code: "lexer.forbidden_character",
-        span: source::make_span(start, stop),
+        span: source.make_span(start, stop),
         message: "${base} Write it as an escape, so that it can be seen.",
         fixes: [own fix],
       )
@@ -524,7 +524,7 @@ fn report_forbidden_run(scanner: mut Scanner, context: Context)
       report(
         mut scanner,
         code: "lexer.forbidden_character",
-        span: source::make_span(start, stop),
+        span: source.make_span(start, stop),
         message: "${base} A raw string has no escapes, so write the text as an ordinary string, with the character as an escape such as `\\u{200B}`.",
       )
     }
@@ -541,7 +541,7 @@ fn report_invalid_run(scanner: mut Scanner)
   report(
     mut scanner,
     code: "lexer.invalid_utf8",
-    span: source::make_span(start, stop: scanner.position),
+    span: source.make_span(start, stop: scanner.position),
     message: "Source files must be UTF-8, and these bytes are not valid UTF-8.",
   )
 }
@@ -589,29 +589,29 @@ fn read_character(scanner: mut Scanner, buffer: mut String, context: Context)
   }
 }
 
-fn consume_line_break(scanner: mut Scanner) -> source::Span
+fn consume_line_break(scanner: mut Scanner) -> source.Span
   uses Panic
 {
   let start = scanner.position
   let length = scanner.measure_line_break(start)
   if length == 1 && scanner.is_at(start, byte: 13) {
-    let fix = source::make_fix(
+    let fix = source.make_fix(
       "Replace with a line feed",
-      edits: [source::replace(source::make_span(start, stop: start + 1), replacement: "\n")],
+      edits: [source.replace(source.make_span(start, stop: start + 1), replacement: "\n")],
     )
     report(
       mut scanner,
       code: "lexer.carriage_return",
-      span: source::make_span(start, stop: start + 1),
+      span: source.make_span(start, stop: start + 1),
       message: "A carriage return is a line break only before a line feed.",
       fixes: [own fix],
     )
   }
   scanner.position = start + length
-  source::make_span(start, stop: scanner.position)
+  source.make_span(start, stop: scanner.position)
 }
 
-fn note_line_break(scanner: mut Scanner, line_break: source::Span) {
+fn note_line_break(scanner: mut Scanner, line_break: source.Span) {
   if scanner.first_line_break.is_some() && scanner.line_is_blank {
     scanner.blank_line = true
   }
@@ -627,5 +627,5 @@ fn reject(scanner: mut Scanner, length: UInt64, message: StringSlice, code: Stri
   let start = scanner.position
   scanner.position = start + length
   scanner.line_is_blank = false
-  report(mut scanner, code, span: source::make_span(start, stop: start + length), message: message)
+  report(mut scanner, code, span: source.make_span(start, stop: start + length), message: message)
 }

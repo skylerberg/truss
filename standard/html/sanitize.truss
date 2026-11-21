@@ -1,4 +1,4 @@
-use standard::intrinsic
+use standard.intrinsic
 
 public type AllowedAttribute(element: String, name: String)
   derives Equal
@@ -147,11 +147,11 @@ fn hex_value(byte: UInt8) -> UInt32
   ensures result < 16
 {
   if byte >= 48 && byte <= 57 {
-    intrinsic::convert(byte - 48)
+    intrinsic.convert(byte - 48)
   } else if byte >= 97 && byte <= 102 {
-    intrinsic::convert(byte - 87)
+    intrinsic.convert(byte - 87)
   } else if byte >= 65 && byte <= 70 {
-    intrinsic::convert(byte - 55)
+    intrinsic.convert(byte - 55)
   } else {
     0
   }
@@ -188,7 +188,7 @@ fn decoded_url(bytes: Slice[UInt8]) -> Option[String] {
           return None
         }
         if value < 128 {
-          let ascii: UInt8 = intrinsic::convert(value)
+          let ascii: UInt8 = intrinsic.convert(value)
           mut decoded.push(ascii)
         } else {
           mut decoded.push(63)

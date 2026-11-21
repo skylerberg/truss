@@ -38,6 +38,6 @@ let parse_capability text =
 
 let show_capability = function
   | Prelude name -> name
-  | Full_path { module_names; name } -> String.concat "::" (module_names @ [ name ])
+  | Full_path { module_names; name } -> String.concat "." (module_names @ [ name ])
 
 let compare_capability : capability -> capability -> int = Stdlib.compare

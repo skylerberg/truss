@@ -1,4 +1,4 @@
-use standard::intrinsic
+use standard.intrinsic
 
 public type Field(name: String, value: String, is_sensitive: Bool = false)
   derives Equal
@@ -151,14 +151,14 @@ fn read_integer(block: Slice[UInt8], at: mut UInt64, prefix_bits: UInt64) -> Res
     return Err(failure("a header block that ends early"))
   }
   let mask: UInt64 = (1 << prefix_bits) - 1
-  var value = intrinsic::convert[UInt8, UInt64](block[at]) & mask
+  var value = intrinsic.convert[UInt8, UInt64](block[at]) & mask
   at += 1
   if value < mask {
     return Ok(value)
   }
   var shift: UInt64 = 0
   while at < block.length() {
-    let byte = intrinsic::convert[UInt8, UInt64](block[at])
+    let byte = intrinsic.convert[UInt8, UInt64](block[at])
     at += 1
     if shift > 21 {
       return Err(failure("an integer that is too large"))
@@ -179,16 +179,16 @@ fn huffman_decode(bytes: Slice[UInt8]) -> Result[List[UInt8], Error] {
   let width: UInt64 = 8
   for byte in bytes {
     for bit_index in 0..width {
-      let bit: UInt32 = intrinsic::convert((byte >> (7 - bit_index)) & 1)
+      let bit: UInt32 = intrinsic.convert((byte >> (7 - bit_index)) & 1)
       code = ((code << 1) & 1073741823) | bit
       length = length.saturating_add(1)
       if length > 30 {
         return Err(failure("a Huffman code that is too long"))
       }
       let first = huffman_first_codes[length]
-      let count: UInt32 = intrinsic::convert(huffman_counts[length])
+      let count: UInt32 = intrinsic.convert(huffman_counts[length])
       if code >= first && code - first < count {
-        let position = intrinsic::convert[UInt16, UInt64](huffman_offsets[length]) + intrinsic::convert[UInt32, UInt64](code - first)
+        let position = intrinsic.convert[UInt16, UInt64](huffman_offsets[length]) + intrinsic.convert[UInt32, UInt64](code - first)
         if position >= 257 {
           return Err(failure("a Huffman code that is not in the table"))
         }
@@ -196,7 +196,7 @@ fn huffman_decode(bytes: Slice[UInt8]) -> Result[List[UInt8], Error] {
         if symbol >= 256 {
           return Err(failure("a Huffman string that holds the end-of-string code"))
         }
-        mut output.push(intrinsic::convert(symbol))
+        mut output.push(intrinsic.convert(symbol))
         code = 0
         length = 0
       }
@@ -211,7 +211,7 @@ fn huffman_decode(bytes: Slice[UInt8]) -> Result[List[UInt8], Error] {
 fn huffman_length(bytes: Slice[UInt8]) -> UInt64 {
   var bits: UInt64 = 0
   for byte in bytes {
-    bits = bits.saturating_add(intrinsic::convert(huffman_lengths[intrinsic::convert[UInt8, UInt64](byte)]))
+    bits = bits.saturating_add(intrinsic.convert(huffman_lengths[intrinsic.convert[UInt8, UInt64](byte)]))
   }
   bits.saturating_add(7) / 8
 }
@@ -220,9 +220,9 @@ fn huffman_encode(output: mut List[UInt8], bytes: Slice[UInt8]) {
   var pending: UInt64 = 0
   var bits: UInt64 = 0
   for byte in bytes {
-    let symbol: UInt64 = intrinsic::convert(byte)
-    let length: UInt64 = intrinsic::convert(huffman_lengths[symbol])
-    let code: UInt64 = intrinsic::convert(huffman_codes[symbol])
+    let symbol: UInt64 = intrinsic.convert(byte)
+    let length: UInt64 = intrinsic.convert(huffman_lengths[symbol])
+    let code: UInt64 = intrinsic.convert(huffman_codes[symbol])
     if bits > 7 || length > 30 {
       return
     }
@@ -232,13 +232,13 @@ fn huffman_encode(output: mut List[UInt8], bytes: Slice[UInt8]) {
       invariant bits <= 37
     {
       bits -= 8
-      mut output.push(intrinsic::convert((pending >> bits) & 255))
+      mut output.push(intrinsic.convert((pending >> bits) & 255))
     }
     pending = pending & ((1 << bits) - 1)
   }
   if bits > 0 && bits < 8 {
     let fill: UInt64 = 8 - bits
-    mut output.push(intrinsic::convert(((pending << fill) | (255 >> bits)) & 255))
+    mut output.push(intrinsic.convert(((pending << fill) | (255 >> bits)) & 255))
   }
 }
 
@@ -320,16 +320,16 @@ fn write_integer(output: mut List[UInt8], flags: UInt8, prefix_bits: UInt64, val
   }
   let mask: UInt64 = (1 << prefix_bits) - 1
   if value < mask {
-    mut output.push(flags | intrinsic::convert(value & 255))
+    mut output.push(flags | intrinsic.convert(value & 255))
     return
   }
-  mut output.push(flags | intrinsic::convert(mask & 255))
+  mut output.push(flags | intrinsic.convert(mask & 255))
   var rest = value - mask
   while rest >= 128 {
-    mut output.push(intrinsic::convert((rest & 127) | 128))
+    mut output.push(intrinsic.convert((rest & 127) | 128))
     rest = rest >> 7
   }
-  mut output.push(intrinsic::convert(rest & 255))
+  mut output.push(intrinsic.convert(rest & 255))
 }
 
 fn write_string(output: mut List[UInt8], text: StringSlice) {

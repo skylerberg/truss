@@ -1,4 +1,4 @@
-use standard::intrinsic
+use standard.intrinsic
 
 let crc32_table: Array[UInt32, 256] = [
   0x00000000, 0x77073096, 0xEE0E612C, 0x990951BA, 0x076DC419, 0x706AF48F, 0xE963A535, 0x9E6495A3,
@@ -78,8 +78,8 @@ internal fn crc_update(state: UInt32, bytes: Slice[UInt8], table: Array[UInt32, 
   for index in 0..bytes.length()
     cost allocations == 0
   {
-    let byte: UInt32 = intrinsic::convert(bytes[index])
-    let entry: UInt64 = intrinsic::convert((crc ^ byte) & 255)
+    let byte: UInt32 = intrinsic.convert(bytes[index])
+    let entry: UInt64 = intrinsic.convert((crc ^ byte) & 255)
     crc = table[entry] ^ (crc >> 8)
   }
   crc ^ 0xFFFFFFFF
@@ -109,7 +109,7 @@ public fn adler32(bytes: Slice[UInt8]) -> UInt32
     invariant low < 65521
     invariant high < 65521
   {
-    low = (low + intrinsic::convert(bytes[index])) % 65521
+    low = (low + intrinsic.convert(bytes[index])) % 65521
     high = (high + low) % 65521
   }
   high * 65536 + low
@@ -150,7 +150,7 @@ fn little_endian_64(bytes: Slice[UInt8], at: UInt64) -> UInt64
   var value: UInt64 = 0
   let count: UInt64 = 8
   for index in 0..count {
-    let byte: UInt64 = intrinsic::convert(bytes[at + index])
+    let byte: UInt64 = intrinsic.convert(bytes[at + index])
     value = value | (byte << (8 * index))
   }
   value
@@ -159,14 +159,14 @@ fn little_endian_64(bytes: Slice[UInt8], at: UInt64) -> UInt64
 fn xxh_round(accumulator: UInt64, input: UInt64) -> UInt64
   cost time O(1)
 {
-  let mixed = intrinsic::wrapping_add(accumulator, right: intrinsic::wrapping_multiply(input, right: xxh_prime_2))
-  intrinsic::wrapping_multiply(intrinsic::rotate_left(mixed, amount: 31), right: xxh_prime_1)
+  let mixed = intrinsic.wrapping_add(accumulator, right: intrinsic.wrapping_multiply(input, right: xxh_prime_2))
+  intrinsic.wrapping_multiply(intrinsic.rotate_left(mixed, amount: 31), right: xxh_prime_1)
 }
 
 fn xxh_merge(hash: UInt64, value: UInt64) -> UInt64
   cost time O(1)
 {
-  intrinsic::wrapping_add(intrinsic::wrapping_multiply(hash ^ xxh_round(0, input: value), right: xxh_prime_1), right: xxh_prime_4)
+  intrinsic.wrapping_add(intrinsic.wrapping_multiply(hash ^ xxh_round(0, input: value), right: xxh_prime_1), right: xxh_prime_4)
 }
 
 public fn xxh64(bytes: Slice[UInt8], seed: UInt64 = 0) -> UInt64
@@ -176,10 +176,10 @@ public fn xxh64(bytes: Slice[UInt8], seed: UInt64 = 0) -> UInt64
   var index: UInt64 = 0
   var hash: UInt64 = 0
   if length >= 32 {
-    var first = intrinsic::wrapping_add(intrinsic::wrapping_add(seed, right: xxh_prime_1), right: xxh_prime_2)
-    var second = intrinsic::wrapping_add(seed, right: xxh_prime_2)
+    var first = intrinsic.wrapping_add(intrinsic.wrapping_add(seed, right: xxh_prime_1), right: xxh_prime_2)
+    var second = intrinsic.wrapping_add(seed, right: xxh_prime_2)
     var third = seed
-    var fourth = intrinsic::wrapping_subtract(seed, right: xxh_prime_1)
+    var fourth = intrinsic.wrapping_subtract(seed, right: xxh_prime_1)
     while length - index >= 32
       invariant index <= length
       decreases length - index
@@ -190,48 +190,48 @@ public fn xxh64(bytes: Slice[UInt8], seed: UInt64 = 0) -> UInt64
       fourth = xxh_round(fourth, input: little_endian_64(bytes, at: index + 24))
       index += 32
     }
-    hash = intrinsic::wrapping_add(
-      intrinsic::wrapping_add(intrinsic::rotate_left(first, amount: 1), right: intrinsic::rotate_left(second, amount: 7)),
-      right: intrinsic::wrapping_add(intrinsic::rotate_left(third, amount: 12), right: intrinsic::rotate_left(fourth, amount: 18)),
+    hash = intrinsic.wrapping_add(
+      intrinsic.wrapping_add(intrinsic.rotate_left(first, amount: 1), right: intrinsic.rotate_left(second, amount: 7)),
+      right: intrinsic.wrapping_add(intrinsic.rotate_left(third, amount: 12), right: intrinsic.rotate_left(fourth, amount: 18)),
     )
     hash = xxh_merge(hash, value: first)
     hash = xxh_merge(hash, value: second)
     hash = xxh_merge(hash, value: third)
     hash = xxh_merge(hash, value: fourth)
   } else {
-    hash = intrinsic::wrapping_add(seed, right: xxh_prime_5)
+    hash = intrinsic.wrapping_add(seed, right: xxh_prime_5)
   }
-  hash = intrinsic::wrapping_add(hash, right: length)
+  hash = intrinsic.wrapping_add(hash, right: length)
   while length - index >= 8
     invariant index <= length
     decreases length - index
   {
     hash = hash ^ xxh_round(0, input: little_endian_64(bytes, at: index))
-    hash = intrinsic::wrapping_add(intrinsic::wrapping_multiply(intrinsic::rotate_left(hash, amount: 27), right: xxh_prime_1), right: xxh_prime_4)
+    hash = intrinsic.wrapping_add(intrinsic.wrapping_multiply(intrinsic.rotate_left(hash, amount: 27), right: xxh_prime_1), right: xxh_prime_4)
     index += 8
   }
   if length - index >= 4 {
     var word: UInt64 = 0
     let count: UInt64 = 4
     for offset in 0..count {
-      let byte: UInt64 = intrinsic::convert(bytes[index + offset])
+      let byte: UInt64 = intrinsic.convert(bytes[index + offset])
       word = word | (byte << (8 * offset))
     }
-    hash = hash ^ intrinsic::wrapping_multiply(word, right: xxh_prime_1)
-    hash = intrinsic::wrapping_add(intrinsic::wrapping_multiply(intrinsic::rotate_left(hash, amount: 23), right: xxh_prime_2), right: xxh_prime_3)
+    hash = hash ^ intrinsic.wrapping_multiply(word, right: xxh_prime_1)
+    hash = intrinsic.wrapping_add(intrinsic.wrapping_multiply(intrinsic.rotate_left(hash, amount: 23), right: xxh_prime_2), right: xxh_prime_3)
     index += 4
   }
   while index < length
     decreases length - index
   {
-    let byte: UInt64 = intrinsic::convert(bytes[index])
-    hash = hash ^ intrinsic::wrapping_multiply(byte, right: xxh_prime_5)
-    hash = intrinsic::wrapping_multiply(intrinsic::rotate_left(hash, amount: 11), right: xxh_prime_1)
+    let byte: UInt64 = intrinsic.convert(bytes[index])
+    hash = hash ^ intrinsic.wrapping_multiply(byte, right: xxh_prime_5)
+    hash = intrinsic.wrapping_multiply(intrinsic.rotate_left(hash, amount: 11), right: xxh_prime_1)
     index += 1
   }
   hash = hash ^ (hash >> 33)
-  hash = intrinsic::wrapping_multiply(hash, right: xxh_prime_2)
+  hash = intrinsic.wrapping_multiply(hash, right: xxh_prime_2)
   hash = hash ^ (hash >> 29)
-  hash = intrinsic::wrapping_multiply(hash, right: xxh_prime_3)
+  hash = intrinsic.wrapping_multiply(hash, right: xxh_prime_3)
   hash ^ (hash >> 32)
 }

@@ -1,4 +1,4 @@
-use standard::core
+use standard.core
 
 public opaque type Skip[Source: Cursor](source: Source, left: UInt64)
 
@@ -135,10 +135,10 @@ impl Cursor for Chain[First: Cursor, Second: Cursor[Element = First.Element]] {
 public opaque type Zip[First: Cursor, Second: Cursor](first: First, second: Second)
 
 impl Cursor for Zip[First: Cursor, Second: Cursor] {
-  type Element = core::Pair[First.Element, Second.Element]
+  type Element = core.Pair[First.Element, Second.Element]
   capability Uses = First.Uses, Second.Uses
 
-  fn next(mut self) -> Option[core::Pair[First.Element, Second.Element]]
+  fn next(mut self) -> Option[core.Pair[First.Element, Second.Element]]
     uses Self.Uses
     ensures (result is Some(_)) ==> self.first.remaining() < old(self.first.remaining())
       when First: FiniteCursor
@@ -146,7 +146,7 @@ impl Cursor for Zip[First: Cursor, Second: Cursor] {
   {
     match mut self.first.next() {
       Some(left) => match mut self.second.next() {
-        Some(right) => Some(core::Pair(first: own left, second: own right))
+        Some(right) => Some(core.Pair(first: own left, second: own right))
         None => None
       }
       None => None
@@ -165,10 +165,10 @@ impl FiniteCursor for Zip[First: FiniteCursor, Second: Cursor] {
 public opaque type Enumerate[Source: Cursor](source: Source, index: UInt64)
 
 impl Cursor for Enumerate[Source: Cursor] {
-  type Element = core::Indexed[Source.Element]
+  type Element = core.Indexed[Source.Element]
   capability Uses = Source.Uses
 
-  fn next(mut self) -> Option[core::Indexed[Source.Element]]
+  fn next(mut self) -> Option[core.Indexed[Source.Element]]
     uses Self.Uses
     ensures (result is Some(_)) ==> self.source.remaining() < old(self.source.remaining())
       when Source: FiniteCursor
@@ -180,7 +180,7 @@ impl Cursor for Enumerate[Source: Cursor] {
         if self.index < UInt64.maximum {
           self.index += 1
         }
-        Some(core::Indexed(index: index, element: own element))
+        Some(core.Indexed(index: index, element: own element))
       }
       None => None
     }

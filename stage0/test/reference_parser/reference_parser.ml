@@ -79,7 +79,6 @@ let token_of_kind (kind : Token.kind) : Truss.token option =
         | Close Curly -> RBRACE
         | Comma -> COMMA
         | Colon -> COLON
-        | Colon_colon -> COLONCOLON
         | Dot -> DOT
         | Dot_dot -> DOTDOT
         | Dot_dot_equal -> DOTDOTEQ

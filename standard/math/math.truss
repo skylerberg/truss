@@ -1,7 +1,7 @@
-use standard::core
-use standard::intrinsic
-use standard::numbers::float_math
-use standard::text
+use standard.core
+use standard.intrinsic
+use standard.numbers.float_math
+use standard.text
 
 public let pi: Float64 = 3.141592653589793
 
@@ -116,7 +116,7 @@ public fn standard_deviation(values: Slice[Float64]) -> Option[Float64]
   cost time O(values.length())
 {
   match variance(values) {
-    Some(spread) => Some(intrinsic::square_root(spread))
+    Some(spread) => Some(intrinsic.square_root(spread))
     None => None
   }
 }
@@ -374,7 +374,7 @@ fn multiply_magnitudes(first: Slice[UInt64], second: Slice[UInt64]) -> List[UInt
     return []
   }
   if first.length() > UInt64.maximum - second.length() {
-    intrinsic::crash("a big integer cannot hold that many limbs")
+    intrinsic.crash("a big integer cannot hold that many limbs")
   }
   let count = first.length() + second.length()
   var product = zero_limbs(count)
@@ -393,7 +393,7 @@ fn multiply_magnitudes(first: Slice[UInt64], second: Slice[UInt64]) -> List[UInt
       decreases second.length() - inner
     {
       let low = factor.wrapping_multiply(second[inner])
-      let high = intrinsic::multiply_high(factor, right: second[inner])
+      let high = intrinsic.multiply_high(factor, right: second[inner])
       let with_carry = low.wrapping_add(carry)
       let total = with_carry.wrapping_add(product[outer + inner])
       let carries: UInt64 = (if with_carry < low { 1 } else { 0 }) + (if total < with_carry { 1 } else { 0 })
@@ -418,7 +418,7 @@ fn multiply_add_small(limbs: mut List[UInt64], factor: UInt64, addend: UInt64)
     decreases limbs.length() - index
   {
     let low = limbs[index].wrapping_multiply(factor)
-    let high = intrinsic::multiply_high(limbs[index], right: factor)
+    let high = intrinsic.multiply_high(limbs[index], right: factor)
     let total = low.wrapping_add(carry)
     limbs[index] = total
     carry = high.wrapping_add(if total < low { 1 } else { 0 })
@@ -596,7 +596,7 @@ fn divide_digits(dividend: Slice[UInt64], divisor: Slice[UInt64]) -> DigitDivisi
   let leading = scaled[count - 1]
   let second = scaled[count - 2]
   if leading == 0 {
-    intrinsic::crash("the divisor of a big integer has a zero leading digit")
+    intrinsic.crash("the divisor of a big integer has a zero leading digit")
   }
   var quotient = zero_limbs(extra + 1)
   var position = extra + 1
@@ -689,7 +689,7 @@ public fn BigInteger.from_big_endian_bytes(bytes: Slice[UInt8], negative: Bool =
       invariant index <= end
       decreases end - index
     {
-      limb = (limb << 8) | intrinsic::convert[UInt8, UInt64](bytes[index])
+      limb = (limb << 8) | intrinsic.convert[UInt8, UInt64](bytes[index])
       index += 1
     }
     mut limbs.push(limb)
@@ -716,7 +716,7 @@ public fn BigInteger.to_big_endian_bytes(self) -> List[UInt8]
       decreases shift
     {
       shift -= 8
-      let byte: UInt8 = intrinsic::convert((limb >> shift) & 255)
+      let byte: UInt8 = intrinsic.convert((limb >> shift) & 255)
       if byte != 0 || !leading {
         mut bytes.push(byte)
         leading = false
@@ -726,7 +726,7 @@ public fn BigInteger.to_big_endian_bytes(self) -> List[UInt8]
   bytes
 }
 
-public fn BigInteger.parse_radix(text: StringSlice, radix: UInt32) -> Result[BigInteger, core::ParseIntegerError]
+public fn BigInteger.parse_radix(text: StringSlice, radix: UInt32) -> Result[BigInteger, core.ParseIntegerError]
   uses Panic unless 2 <= radix && radix <= 36
 {
   if radix < 2 || radix > 36 {
@@ -739,17 +739,17 @@ public fn BigInteger.parse_radix(text: StringSlice, radix: UInt32) -> Result[Big
     index = 1
   }
   if index == text.length() {
-    return Err(core::ParseIntegerError.Empty)
+    return Err(core.ParseIntegerError.Empty)
   }
-  let base: UInt64 = intrinsic::convert(radix)
+  let base: UInt64 = intrinsic.convert(radix)
   var limbs: List[UInt64] = []
   while index < text.length()
     invariant index <= text.length()
     decreases text.length() - index
   {
-    let digit: UInt64 = intrinsic::convert(text.byte(index).digit_value())
+    let digit: UInt64 = intrinsic.convert(text.byte(index).digit_value())
     if digit >= base {
-      return Err(core::ParseIntegerError.InvalidDigit(offset: index))
+      return Err(core.ParseIntegerError.InvalidDigit(offset: index))
     }
     multiply_add_small(mut limbs, factor: base, addend: digit)
     index += 1
@@ -776,7 +776,7 @@ fn digit_group(radix: UInt32) -> DigitGroup
   } else if radix == 8 {
     DigitGroup(divisor: 1073741824, digits: 10)
   } else {
-    DigitGroup(divisor: intrinsic::convert(radix), digits: 1)
+    DigitGroup(divisor: intrinsic.convert(radix), digits: 1)
   }
 }
 
@@ -787,7 +787,7 @@ public fn BigInteger.format(self, radix: UInt32 = 10) -> String
     Panic.crash("the radix is not between 2 and 36")
   }
   let group = digit_group(radix)
-  let base: UInt64 = intrinsic::convert(radix)
+  let base: UInt64 = intrinsic.convert(radix)
   var limbs = self.magnitude.copy()
   var digits: List[UInt8] = []
   var rounds = self.bit_length()
@@ -800,7 +800,7 @@ public fn BigInteger.format(self, radix: UInt32 = 10) -> String
       invariant written <= group.digits
       decreases group.digits - written
     {
-      let digit: UInt8 = intrinsic::convert(part % base)
+      let digit: UInt8 = intrinsic.convert(part % base)
       mut digits.push(digit.digit_byte(uppercase: false))
       part = part / base
       written += 1
@@ -818,16 +818,16 @@ public fn BigInteger.format(self, radix: UInt32 = 10) -> String
   if self.negative {
     mut digits.push(45)
   }
-  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(digits.length())
+  var output: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(digits.length())
   var index = digits.length()
   while index > 0
     invariant index <= digits.length()
-    invariant intrinsic::storage_length(output) == digits.length() - index
-    invariant intrinsic::storage_capacity(output) == digits.length()
+    invariant intrinsic.storage_length(output) == digits.length() - index
+    invariant intrinsic.storage_capacity(output) == digits.length()
     decreases index
   {
     index -= 1
-    intrinsic::storage_push(mut output, value: digits[index])
+    intrinsic.storage_push(mut output, value: digits[index])
   }
   String(storage: own output)
 }
@@ -1072,9 +1072,9 @@ impl From[Int64] for BigInteger {
       return BigInteger.zero()
     }
     let magnitude: UInt64 = if value > 0 {
-      intrinsic::convert(value)
+      intrinsic.convert(value)
     } else {
-      intrinsic::convert[Int64, UInt64](-(value + 1)) + 1
+      intrinsic.convert[Int64, UInt64](-(value + 1)) + 1
     }
     BigInteger(negative: value < 0, magnitude: [magnitude])
   }
@@ -1089,9 +1089,9 @@ impl From[UInt64] for BigInteger {
 }
 
 impl TryFrom[BigInteger] for Int64 {
-  type Error = core::ConversionError
+  type Error = core.ConversionError
 
-  fn try_from(value: own BigInteger) -> Result[Int64, core::ConversionError]
+  fn try_from(value: own BigInteger) -> Result[Int64, core.ConversionError]
     ensures (result is Ok(_)) == (Int64.minimum <= value.model() && value.model() <= Int64.maximum)
     ensures !(result is Ok(converted) && converted != value.model())
   {
@@ -1102,27 +1102,27 @@ impl TryFrom[BigInteger] for Int64 {
       proof {
         limbs_value_is_positive(value.magnitude.model(), from: 1)
       }
-      return Err(core::ConversionError())
+      return Err(core.ConversionError())
     }
     let limb = value.magnitude[0]
     if value.negative {
       if limb > 9223372036854775808 {
-        return Err(core::ConversionError())
+        return Err(core.ConversionError())
       }
-      Ok(-intrinsic::convert[UInt64, Int64](limb - 1) - 1)
+      Ok(-intrinsic.convert[UInt64, Int64](limb - 1) - 1)
     } else {
       if limb > 9223372036854775807 {
-        return Err(core::ConversionError())
+        return Err(core.ConversionError())
       }
-      Ok(intrinsic::convert(limb))
+      Ok(intrinsic.convert(limb))
     }
   }
 }
 
 impl TryFrom[BigInteger] for UInt64 {
-  type Error = core::ConversionError
+  type Error = core.ConversionError
 
-  fn try_from(value: own BigInteger) -> Result[UInt64, core::ConversionError]
+  fn try_from(value: own BigInteger) -> Result[UInt64, core.ConversionError]
     ensures (result is Ok(_)) == (0 <= value.model() && value.model() <= UInt64.maximum)
     ensures !(result is Ok(converted) && converted != value.model())
   {
@@ -1136,7 +1136,7 @@ impl TryFrom[BigInteger] for UInt64 {
           limbs_value_is_positive(value.magnitude.model(), from: 1)
         }
       }
-      return Err(core::ConversionError())
+      return Err(core.ConversionError())
     }
     Ok(value.magnitude[0])
   }
@@ -1336,10 +1336,10 @@ impl Display for BigInteger {
   }
 }
 
-impl text::Parse for BigInteger {
-  type Error = core::ParseIntegerError
+impl text.Parse for BigInteger {
+  type Error = core.ParseIntegerError
 
-  fn parse(text: StringSlice) -> Result[BigInteger, core::ParseIntegerError] {
+  fn parse(text: StringSlice) -> Result[BigInteger, core.ParseIntegerError] {
     BigInteger.parse_radix(text, radix: 10)
   }
 }
@@ -1366,8 +1366,8 @@ fn scale_gap(larger: Int32, smaller: Int32) -> UInt32
   requires smaller <= larger
   cost time O(1)
 {
-  let gap: Int64 = intrinsic::convert[Int32, Int64](larger) - intrinsic::convert[Int32, Int64](smaller)
-  intrinsic::convert(gap)
+  let gap: Int64 = intrinsic.convert[Int32, Int64](larger) - intrinsic.convert[Int32, Int64](smaller)
+  intrinsic.convert(gap)
 }
 
 fn rounded_quotient(dividend: BigInteger, divisor: BigInteger, rounding: Rounding) -> BigInteger
@@ -1472,19 +1472,19 @@ public fn Decimal.quotient(
 ) -> Decimal
   uses Panic unless !divisor.is_zero()
 {
-  let wanted: Int64 = intrinsic::convert[Int32, Int64](decimals) + intrinsic::convert[Int32, Int64](divisor.scale)
-  let shift = wanted - intrinsic::convert[Int32, Int64](self.scale)
+  let wanted: Int64 = intrinsic.convert[Int32, Int64](decimals) + intrinsic.convert[Int32, Int64](divisor.scale)
+  let shift = wanted - intrinsic.convert[Int32, Int64](self.scale)
   if shift > 4294967295 || shift < -4294967295 {
-    intrinsic::crash("a decimal cannot hold that many digits")
+    intrinsic.crash("a decimal cannot hold that many digits")
   }
   if shift >= 0 {
-    let numerator = self.coefficient.times(power_of_ten(intrinsic::convert(shift)))
+    let numerator = self.coefficient.times(power_of_ten(intrinsic.convert(shift)))
     Decimal(
       coefficient: rounded_quotient(numerator, divisor: divisor.coefficient, rounding: rounding),
       scale: decimals,
     )
   } else {
-    let denominator = divisor.coefficient.times(power_of_ten(intrinsic::convert(-shift)))
+    let denominator = divisor.coefficient.times(power_of_ten(intrinsic.convert(-shift)))
     Decimal(
       coefficient: rounded_quotient(self.coefficient, divisor: denominator, rounding: rounding),
       scale: decimals,
@@ -1495,7 +1495,7 @@ public fn Decimal.quotient(
 public fn Decimal.to_float64(self) -> Float64
 {
   let text = "${self}"
-  match float_math::parse_float64(text) {
+  match float_math.parse_float64(text) {
     Ok(value) => value
     Err(_) => Float64.not_a_number
   }
@@ -1513,7 +1513,7 @@ public fn Decimal.from_float64(value: Float64) -> Option[Decimal]
     return Some(Decimal.zero())
   }
   var mantissa = if biased == 0 { fraction } else { fraction + 4503599627370496 }
-  var exponent: Int64 = (if biased == 0 { 1 } else { intrinsic::convert[UInt64, Int64](biased) }) - 1075
+  var exponent: Int64 = (if biased == 0 { 1 } else { intrinsic.convert[UInt64, Int64](biased) }) - 1075
   while mantissa % 2 == 0 && exponent < 0
     invariant -1074 <= exponent
     invariant exponent <= 972
@@ -1524,11 +1524,11 @@ public fn Decimal.from_float64(value: Float64) -> Option[Decimal]
   }
   let negative = bits >= 9223372036854775808
   if exponent >= 0 {
-    var scaled = BigInteger.from_limb(mantissa).times(BigInteger.from_limb(2).power(intrinsic::convert(exponent)))
+    var scaled = BigInteger.from_limb(mantissa).times(BigInteger.from_limb(2).power(intrinsic.convert(exponent)))
     Some(Decimal(coefficient: with_sign(negative, magnitude: own scaled.magnitude), scale: 0))
   } else {
-    var scaled = BigInteger.from_limb(mantissa).times(BigInteger.from_limb(5).power(intrinsic::convert(-exponent)))
-    Some(Decimal(coefficient: with_sign(negative, magnitude: own scaled.magnitude), scale: intrinsic::convert(-exponent)))
+    var scaled = BigInteger.from_limb(mantissa).times(BigInteger.from_limb(5).power(intrinsic.convert(-exponent)))
+    Some(Decimal(coefficient: with_sign(negative, magnitude: own scaled.magnitude), scale: intrinsic.convert(-exponent)))
   }
 }
 
@@ -1592,8 +1592,8 @@ impl Multiply[Decimal] for Decimal {
     ensures result == (Int32.minimum <= self.scale + right.scale && self.scale + right.scale <= Int32.maximum)
     cost time O(1)
   {
-    let scale: Int64 = intrinsic::convert[Int32, Int64](self.scale) + intrinsic::convert[Int32, Int64](right.scale)
-    intrinsic::fits[Int64, Int32](scale)
+    let scale: Int64 = intrinsic.convert[Int32, Int64](self.scale) + intrinsic.convert[Int32, Int64](right.scale)
+    intrinsic.fits[Int64, Int32](scale)
   }
 
   fn multiply(self, right: Decimal) -> Decimal
@@ -1628,7 +1628,7 @@ fn Decimal.key(self) -> DecimalKey
   }
   let text = self.coefficient.absolute().format()
   if text.length() > 4294967295 {
-    intrinsic::crash("a decimal cannot hold that many digits")
+    intrinsic.crash("a decimal cannot hold that many digits")
   }
   let bytes = text.slice()
   var count = bytes.length()
@@ -1647,10 +1647,10 @@ fn Decimal.key(self) -> DecimalKey
     mut digits.push(bytes.byte(index))
     index += 1
   }
-  let places: Int64 = intrinsic::convert[UInt64, Int64](text.length())
+  let places: Int64 = intrinsic.convert[UInt64, Int64](text.length())
   DecimalKey(
     sign: self.coefficient.sign(),
-    exponent: places - intrinsic::convert[Int32, Int64](self.scale),
+    exponent: places - intrinsic.convert[Int32, Int64](self.scale),
     digits: own digits,
   )
 }
@@ -1798,10 +1798,10 @@ impl Display for Decimal {
     }
     if self.scale <= 0 {
       mut output.push(digits)
-      write_zeros(mut output, count: intrinsic::convert(scale_gap(0, smaller: self.scale)))
+      write_zeros(mut output, count: intrinsic.convert(scale_gap(0, smaller: self.scale)))
       return
     }
-    let places: UInt64 = intrinsic::convert(scale_gap(self.scale, smaller: 0))
+    let places: UInt64 = intrinsic.convert(scale_gap(self.scale, smaller: 0))
     if digits.length() > places {
       let whole = digits.length() - places
       mut output.push(digits.slice().part(0, to: whole))
@@ -1822,10 +1822,10 @@ fn is_decimal_digit(byte: UInt8) -> Bool
   48 <= byte && byte <= 57
 }
 
-fn parse_decimal(text: StringSlice) -> Result[Decimal, core::ParseFloatError]
+fn parse_decimal(text: StringSlice) -> Result[Decimal, core.ParseFloatError]
 {
   if text.length() == 0 {
-    return Err(core::ParseFloatError.Empty)
+    return Err(core.ParseFloatError.Empty)
   }
   var index: UInt64 = 0
   var negative = false
@@ -1847,7 +1847,7 @@ fn parse_decimal(text: StringSlice) -> Result[Decimal, core::ParseFloatError]
     if byte == 46 {
       after_point = true
     } else {
-      multiply_add_small(mut limbs, factor: 10, addend: intrinsic::convert[UInt8, UInt64](byte - 48))
+      multiply_add_small(mut limbs, factor: 10, addend: intrinsic.convert[UInt8, UInt64](byte - 48))
       digits += 1
       if after_point {
         places += 1
@@ -1856,7 +1856,7 @@ fn parse_decimal(text: StringSlice) -> Result[Decimal, core::ParseFloatError]
     index += 1
   }
   if digits == 0 {
-    return Err(core::ParseFloatError.InvalidCharacter(offset: index))
+    return Err(core.ParseFloatError.InvalidCharacter(offset: index))
   }
   var exponent: Int64 = 0
   if index < text.length() && (text.byte(index) == 101 || text.byte(index) == 69) {
@@ -1873,36 +1873,36 @@ fn parse_decimal(text: StringSlice) -> Result[Decimal, core::ParseFloatError]
       invariant 0 <= exponent
       decreases text.length() - index
     {
-      exponent = exponent.saturating_multiply(10).saturating_add(intrinsic::convert[UInt8, Int64](text.byte(index) - 48))
+      exponent = exponent.saturating_multiply(10).saturating_add(intrinsic.convert[UInt8, Int64](text.byte(index) - 48))
       index += 1
     }
     if index == start {
-      return Err(core::ParseFloatError.InvalidCharacter(offset: index))
+      return Err(core.ParseFloatError.InvalidCharacter(offset: index))
     }
     if exponent_negative {
       exponent = -exponent
     }
   }
   if index < text.length() {
-    return Err(core::ParseFloatError.InvalidCharacter(offset: index))
+    return Err(core.ParseFloatError.InvalidCharacter(offset: index))
   }
-  if !intrinsic::fits[UInt64, Int64](places) {
-    return Err(core::ParseFloatError.InvalidCharacter(offset: text.length()))
+  if !intrinsic.fits[UInt64, Int64](places) {
+    return Err(core.ParseFloatError.InvalidCharacter(offset: text.length()))
   }
-  let scale = match intrinsic::convert[UInt64, Int64](places).checked_subtract(exponent) {
+  let scale = match intrinsic.convert[UInt64, Int64](places).checked_subtract(exponent) {
     Some(scale) => scale
-    None => return Err(core::ParseFloatError.InvalidCharacter(offset: text.length()))
+    None => return Err(core.ParseFloatError.InvalidCharacter(offset: text.length()))
   }
-  if !intrinsic::fits[Int64, Int32](scale) {
-    return Err(core::ParseFloatError.InvalidCharacter(offset: text.length()))
+  if !intrinsic.fits[Int64, Int32](scale) {
+    return Err(core.ParseFloatError.InvalidCharacter(offset: text.length()))
   }
-  Ok(Decimal(coefficient: with_sign(negative, magnitude: own limbs), scale: intrinsic::convert(scale)))
+  Ok(Decimal(coefficient: with_sign(negative, magnitude: own limbs), scale: intrinsic.convert(scale)))
 }
 
-impl text::Parse for Decimal {
-  type Error = core::ParseFloatError
+impl text.Parse for Decimal {
+  type Error = core.ParseFloatError
 
-  fn parse(text: StringSlice) -> Result[Decimal, core::ParseFloatError] {
+  fn parse(text: StringSlice) -> Result[Decimal, core.ParseFloatError] {
     parse_decimal(text)
   }
 }

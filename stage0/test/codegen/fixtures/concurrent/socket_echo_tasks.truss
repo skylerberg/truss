@@ -2,7 +2,7 @@
 fn main(arguments: List[String]) -> ExitCode
   uses Tasks, Console, NetworkServer, NetworkClient, Handles
 {
-  let loopback = network::SocketAddress(address: network::IpAddress.loopback, port: 0)
+  let loopback = network.SocketAddress(address: network.IpAddress.loopback, port: 0)
   var counter = Counter(count: 0)
   if NetworkServer.listen(loopback) is Ok(opened) {
     var listener = own opened

@@ -96,6 +96,12 @@ type lookups = {
 let list_visible_packages lookups package =
   List.sort_uniq compare (package :: Path.standard_package :: lookups.list_dependency_names package)
 
+let list_package_roots lookups package =
+  List.sort_uniq compare
+    (List.map
+       (fun package -> List.hd (Path.list_package_parts package))
+       (list_visible_packages lookups package))
+
 let list_transitive_dependencies lookups package =
   let rec close seen = function
     | [] -> seen
@@ -194,7 +200,7 @@ module Scope = struct
   let is_restricted_module ~(from : Path.module_) (module_ : Path.module_) =
     module_ = Well_known.intrinsic_module && from.package <> Path.standard_package
 
-  let restricted_module_message = "Only the `standard` package can use `standard::intrinsic`."
+  let restricted_module_message = "Only the `standard` package can use `standard.intrinsic`."
 
   let describe_path_start (module_ : Path.module_) =
     Printf.sprintf
@@ -224,8 +230,8 @@ module Scope = struct
     | _ when exists package ->
         if is_restricted_module ~from package then Restricted_module else Found_module package
     | None when not (is_visible_package lookups ~from package.package) ->
-        No_package (String.concat "::" (first :: rest))
-    | _ -> No_module (String.concat "::" (first :: rest))
+        No_package (String.concat "." (first :: rest))
+    | _ -> No_module (String.concat "." (first :: rest))
 
   let make_top_path module_ name : Path.t = Top { module_; name }
 

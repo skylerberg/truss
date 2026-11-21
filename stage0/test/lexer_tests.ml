@@ -472,7 +472,7 @@ let () =
   Harness.test "the longest match" (fun () ->
       expect_tokens "a<<=b" [ "a"; "<<="; "b"; "NL" ];
       expect_tokens "a==>b" [ "a"; "==>"; "b"; "NL" ];
-      expect_tokens "a::b" [ "a"; "::"; "b"; "NL" ])
+      expect_tokens "a..=b" [ "a"; "..="; "b"; "NL" ])
 
 let () =
   Harness.test "a float with no digit on one side of its point" (fun () ->
@@ -504,6 +504,13 @@ let () =
       expect_error "a <> b" ~code:Foreign_operator ~at:"<>" ~fixed:"a != b";
       expect_error "0..<count" ~code:Foreign_operator ~at:"..<" ~fixed:"0..count";
       expect_equal_lists Fun.id "tokens" [ "a"; "!="; "b"; "NL" ] (list_tokens "a <> b"));
+  Harness.test "a path written with `::` becomes a path written with `.`" (fun () ->
+      expect_error "json::parse(text)" ~code:Path_separator ~at:"::" ~fixed:"json.parse(text)";
+      expect_error "Shape::Circle" ~code:Path_separator ~at:"::" ~fixed:"Shape.Circle";
+      expect_equal_lists Fun.id "tokens" [ "json"; "."; "parse"; "NL" ] (list_tokens "json::parse");
+      expect_equal_lists Fun.id "tokens"
+        [ "parse"; "::"; "<"; "Int64"; ">" ]
+        (list_tokens "parse::<Int64>"));
   Harness.test "three dots between operands are either range" (fun () ->
       expect_error "1...5" ~code:Foreign_operator ~at:"..." ~fixed:"1..5" ~alternatives:[ "1..=5" ];
       expect_equal_lists Fun.id "tokens" [ "a"; "..="; "b"; "NL" ] (list_tokens "a...b"));

@@ -1,9 +1,9 @@
-use frontend::syntax
+use frontend.syntax
 
 type Visitor = PrecedenceVisitor | CheckVisitor(context: CheckContext)
   derives Equal
 
-fn on_expression(cursor: mut TokenCursor, visitor: Visitor, value: syntax::Expression)
+fn on_expression(cursor: mut TokenCursor, visitor: Visitor, value: syntax.Expression)
   uses Panic, RunForever
 {
   match visitor {
@@ -12,7 +12,7 @@ fn on_expression(cursor: mut TokenCursor, visitor: Visitor, value: syntax::Expre
   }
 }
 
-fn on_statement(cursor: mut TokenCursor, visitor: Visitor, statement: syntax::Statement)
+fn on_statement(cursor: mut TokenCursor, visitor: Visitor, statement: syntax.Statement)
   uses Panic, RunForever
 {
   match visitor {
@@ -21,7 +21,7 @@ fn on_statement(cursor: mut TokenCursor, visitor: Visitor, statement: syntax::St
   }
 }
 
-fn walk_block(cursor: mut TokenCursor, visitor: Visitor, block: syntax::Block)
+fn walk_block(cursor: mut TokenCursor, visitor: Visitor, block: syntax.Block)
   uses Panic, RunForever
 {
   for statement in block.statements {
@@ -29,7 +29,7 @@ fn walk_block(cursor: mut TokenCursor, visitor: Visitor, block: syntax::Block)
   }
 }
 
-fn walk_type_expression(cursor: mut TokenCursor, visitor: Visitor, written: syntax::TypeExpression)
+fn walk_type_expression(cursor: mut TokenCursor, visitor: Visitor, written: syntax.TypeExpression)
   uses Panic, RunForever
 {
   match written.kind {
@@ -49,7 +49,7 @@ fn walk_type_expression(cursor: mut TokenCursor, visitor: Visitor, written: synt
   }
 }
 
-fn walk_path_type(cursor: mut TokenCursor, visitor: Visitor, path_type: syntax::PathType)
+fn walk_path_type(cursor: mut TokenCursor, visitor: Visitor, path_type: syntax.PathType)
   uses Panic, RunForever
 {
   for argument in path_type.arguments {
@@ -60,7 +60,7 @@ fn walk_path_type(cursor: mut TokenCursor, visitor: Visitor, path_type: syntax::
   }
 }
 
-fn walk_capability_reference(cursor: mut TokenCursor, visitor: Visitor, reference: syntax::CapabilityReference)
+fn walk_capability_reference(cursor: mut TokenCursor, visitor: Visitor, reference: syntax.CapabilityReference)
   uses Panic, RunForever
 {
   if reference.kind is CapabilityPath(path_type) {
@@ -68,7 +68,7 @@ fn walk_capability_reference(cursor: mut TokenCursor, visitor: Visitor, referenc
   }
 }
 
-fn walk_condition(cursor: mut TokenCursor, visitor: Visitor, condition: Slice[syntax::BoundCondition])
+fn walk_condition(cursor: mut TokenCursor, visitor: Visitor, condition: Slice[syntax.BoundCondition])
   uses Panic, RunForever
 {
   for bound in condition {
@@ -79,7 +79,7 @@ fn walk_condition(cursor: mut TokenCursor, visitor: Visitor, condition: Slice[sy
   }
 }
 
-fn walk_capability_use(cursor: mut TokenCursor, visitor: Visitor, capability_use: syntax::CapabilityUse)
+fn walk_capability_use(cursor: mut TokenCursor, visitor: Visitor, capability_use: syntax.CapabilityUse)
   uses Panic, RunForever
 {
   walk_capability_reference(mut cursor, visitor, reference: capability_use.reference)
@@ -91,7 +91,7 @@ fn walk_capability_use(cursor: mut TokenCursor, visitor: Visitor, capability_use
   }
 }
 
-fn walk_bound(cursor: mut TokenCursor, visitor: Visitor, bound: syntax::Bound)
+fn walk_bound(cursor: mut TokenCursor, visitor: Visitor, bound: syntax.Bound)
   uses Panic, RunForever
 {
   match bound {
@@ -99,7 +99,7 @@ fn walk_bound(cursor: mut TokenCursor, visitor: Visitor, bound: syntax::Bound)
   }
 }
 
-fn walk_clause(cursor: mut TokenCursor, visitor: Visitor, clause: syntax::Clause)
+fn walk_clause(cursor: mut TokenCursor, visitor: Visitor, clause: syntax.Clause)
   uses Panic, RunForever
 {
   if clause.condition is Some(condition) {
@@ -118,7 +118,7 @@ fn walk_clause(cursor: mut TokenCursor, visitor: Visitor, clause: syntax::Clause
   }
 }
 
-fn walk_loop_clause(cursor: mut TokenCursor, visitor: Visitor, clause: syntax::LoopClause)
+fn walk_loop_clause(cursor: mut TokenCursor, visitor: Visitor, clause: syntax.LoopClause)
   uses Panic, RunForever
 {
   if clause.condition is Some(condition) {
@@ -133,7 +133,7 @@ fn walk_loop_clause(cursor: mut TokenCursor, visitor: Visitor, clause: syntax::L
   }
 }
 
-fn walk_string_literal(cursor: mut TokenCursor, visitor: Visitor, literal: syntax::StringLiteral)
+fn walk_string_literal(cursor: mut TokenCursor, visitor: Visitor, literal: syntax.StringLiteral)
   uses Panic, RunForever
 {
   for interpolated in literal.rest {
@@ -141,7 +141,7 @@ fn walk_string_literal(cursor: mut TokenCursor, visitor: Visitor, literal: synta
   }
 }
 
-fn walk_expression_parts(cursor: mut TokenCursor, visitor: Visitor, value: syntax::Expression)
+fn walk_expression_parts(cursor: mut TokenCursor, visitor: Visitor, value: syntax.Expression)
   uses Panic, RunForever
 {
   match value.kind {
@@ -236,7 +236,7 @@ fn walk_expression_parts(cursor: mut TokenCursor, visitor: Visitor, value: synta
   }
 }
 
-fn walk_statement_parts(cursor: mut TokenCursor, visitor: Visitor, statement: syntax::Statement)
+fn walk_statement_parts(cursor: mut TokenCursor, visitor: Visitor, statement: syntax.Statement)
   uses Panic, RunForever
 {
   match statement.kind {
@@ -276,7 +276,7 @@ fn walk_statement_parts(cursor: mut TokenCursor, visitor: Visitor, statement: sy
   }
 }
 
-fn walk_generic_parameter(cursor: mut TokenCursor, visitor: Visitor, parameter: syntax::GenericParameter)
+fn walk_generic_parameter(cursor: mut TokenCursor, visitor: Visitor, parameter: syntax.GenericParameter)
   uses Panic, RunForever
 {
   match parameter.kind {
@@ -288,7 +288,7 @@ fn walk_generic_parameter(cursor: mut TokenCursor, visitor: Visitor, parameter: 
   }
 }
 
-fn walk_type_head(cursor: mut TokenCursor, visitor: Visitor, head: syntax::TypeHead)
+fn walk_type_head(cursor: mut TokenCursor, visitor: Visitor, head: syntax.TypeHead)
   uses Panic, RunForever
 {
   for parameter in head.generics {
@@ -296,7 +296,7 @@ fn walk_type_head(cursor: mut TokenCursor, visitor: Visitor, head: syntax::TypeH
   }
 }
 
-fn walk_definition_name(cursor: mut TokenCursor, visitor: Visitor, name: syntax::DefinitionName)
+fn walk_definition_name(cursor: mut TokenCursor, visitor: Visitor, name: syntax.DefinitionName)
   uses Panic, RunForever
 {
   if name is MemberName(head, ..) {
@@ -304,7 +304,7 @@ fn walk_definition_name(cursor: mut TokenCursor, visitor: Visitor, name: syntax:
   }
 }
 
-fn walk_parameter(cursor: mut TokenCursor, visitor: Visitor, parameter: syntax::Parameter)
+fn walk_parameter(cursor: mut TokenCursor, visitor: Visitor, parameter: syntax.Parameter)
   uses Panic, RunForever
 {
   if parameter.kind is NamedParameter(annotation, default, ..) {
@@ -315,7 +315,7 @@ fn walk_parameter(cursor: mut TokenCursor, visitor: Visitor, parameter: syntax::
   }
 }
 
-fn walk_signature(cursor: mut TokenCursor, visitor: Visitor, signature: syntax::Signature)
+fn walk_signature(cursor: mut TokenCursor, visitor: Visitor, signature: syntax.Signature)
   uses Panic, RunForever
 {
   walk_definition_name(mut cursor, visitor, name: signature.name)
@@ -335,7 +335,7 @@ fn walk_signature(cursor: mut TokenCursor, visitor: Visitor, signature: syntax::
   }
 }
 
-fn walk_field(cursor: mut TokenCursor, visitor: Visitor, field: syntax::Field)
+fn walk_field(cursor: mut TokenCursor, visitor: Visitor, field: syntax.Field)
   uses Panic, RunForever
 {
   if field.kind is FieldDeclaration(annotation, default, ..) {
@@ -346,7 +346,7 @@ fn walk_field(cursor: mut TokenCursor, visitor: Visitor, field: syntax::Field)
   }
 }
 
-fn walk_definition(cursor: mut TokenCursor, visitor: Visitor, definition: syntax::Definition)
+fn walk_definition(cursor: mut TokenCursor, visitor: Visitor, definition: syntax.Definition)
   uses Panic, RunForever
 {
   match definition.kind {

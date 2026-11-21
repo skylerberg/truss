@@ -263,7 +263,7 @@ let script = Shell$$"""
 ### Punctuation
 
 ```text
-(  )  [  ]  {  }  ,  :  ::  .  ..  ..=  ->  =>  ?  |
+(  )  [  ]  {  }  ,  :  .  ..  ..=  ->  =>  ?  |
 =  +=  -=  *=  /=  %=  &=  |=  ^=  <<=  >>=
 +  -  *  /  %  ==  !=  <  <=  >  >=  &&  ||  ==>  !  &  ^  ~  <<  >>
 ```
@@ -275,7 +275,7 @@ The lexer takes the longest match.
 These sequences are errors:
 
 ```text
-//  /*  #  ;  '  `  @  ++  --  ===  !==
+//  /*  #  ;  '  `  @  ++  --  ===  !==  ::
 ```
 
 ### Line breaks
@@ -316,7 +316,7 @@ let active_names = users
 ```ebnf
 file        = { use NEWLINE } { definition NEWLINE } ;
 use         = "use" module_path ;
-module_path = LOWER_NAME { "::" LOWER_NAME } ;
+module_path = LOWER_NAME { "." LOWER_NAME } ;
 
 definition = [ visibility ] ( function | type_definition | trait
                             | capability | constant | theorem )
@@ -335,13 +335,24 @@ its file or its position in the file.
 - A local, a parameter, or a generic parameter cannot shadow another of an
   enclosing scope, or a prelude name. `let name = name.trim()` is an error.
 - A local or a parameter may shadow a function, a constant, or a theorem of
-  its module.
+  its module, and a module.
 - A generic parameter cannot shadow a type, a trait, or a capability of its
   module, so `impl Shown for Box[Marker]` is an error where `Marker` is a
   type of the module.
-- Module names are a namespace of their own, written only before `::`. A
-  variable can be named `url` in a file that imports the `url` module.
-- `::` reaches into a module, and `.` into a type or a value.
+- In an expression, a name before `.` is a local, a module that the file's
+  `use` lines import, a definition of the file's module, or a package that
+  module can use. A local shadows the other three: in
+  `for network in subnets { network.contains(address) }`, `network` is the
+  local even in a file that imports the `network` module.
+- A module's names never repeat: a definition cannot have the name of a
+  submodule of its module, and a file cannot import a module whose last name
+  is a definition of its module.
+- A package is named in the manifest, not in the module, so a definition may
+  have the first name of a package's path. A path that starts with that name
+  is an error, since it could name either.
+- After a module, a path names the longest module it can, then a definition
+  of that module: in `standard.json.parse`, `standard.json` is the module and
+  `parse` is its function.
 
 ## Types
 
@@ -404,11 +415,11 @@ let answer = Some(3)
   default, as a parameter can.
 - In an expression, a variant is written under its type, as in
   `Shape.Circle`, and from another module under the module too, as in
-  `geometry::Shape.Circle`. The prelude's `Some`, `None`, `Ok`, and `Err`
+  `geometry.Shape.Circle`. The prelude's `Some`, `None`, `Ok`, and `Err`
   are written bare.
 - A `type_clause` after the last variant belongs to the whole type.
 - The order of a record's fields has no meaning, except in a tuple type and
-  to a derived `Ordered` or `serialization::Serialize`, which follow the
+  to a derived `Ordered` or `serialization.Serialize`, which follow the
   order the fields are declared in. The compiler chooses a record's layout in
   memory.
 - A record with one field has none of its field's methods or operators:
@@ -435,7 +446,7 @@ fn length(span: Span) -> UInt64
   argument that is a variable named like another field is an error. It is
   read, updated with `with`, and matched in parentheses by name, as any
   record is.
-- `map::Entry`, `core::Indexed`, and `core::Pair` are tuple types, so
+- `map.Entry`, `core.Indexed`, and `core.Pair` are tuple types, so
   `for name, port in ports` binds each entry's key and value.
 
 ### Recursive types
@@ -468,7 +479,7 @@ type           = path_type
                | function_type
                | "(" function_type { function_type_clause } ")" ;
 
-path_type      = [ module_path "::" ] UPPER_NAME [ type_arguments ] ;
+path_type      = [ module_path "." ] UPPER_NAME [ type_arguments ] ;
 type_arguments = "[" type_argument { "," type_argument } [ "," ] "]" ;
 type_argument  = type | INTEGER | LOWER_NAME | UPPER_NAME "=" type ;
 ```
@@ -733,7 +744,7 @@ public let seconds_per_day: Int64 = 24 * 60 * 60
 function      = "fn" function_name [ generics ] parameters [ result ]
                 { clause } body ;
 function_name = LOWER_NAME | type_head "." LOWER_NAME ;
-type_head     = [ module_path "::" ] UPPER_NAME [ generics ] ;
+type_head     = [ module_path "." ] UPPER_NAME [ generics ] ;
 
 parameters    = "(" list(parameter) ")" ;
 parameter     = [ mode ] "self"
@@ -747,7 +758,7 @@ body          = block ;
 ```truss
 fn area(shape: Shape) -> Float64 {
   match shape {
-    Circle(radius, ..) => math::pi * radius * radius
+    Circle(radius, ..) => math.pi * radius * radius
     Rectangle(corner, opposite_corner) =>
       (opposite_corner.x - corner.x) * (opposite_corner.y - corner.y)
     Empty => 0.0
@@ -1416,7 +1427,7 @@ fn Slice[Element].zip[Other](self, other: Slice[Other]) -> Zipped[Element, Other
   method's own go after its name.
 - A method is defined in its type's package, in a file where the type is
   visible. From another module, the type is named with its module:
-  `fn hourly::Forecast.summary(self) -> String`.
+  `fn hourly.Forecast.summary(self) -> String`.
 
 ### Overloads by receiver mode
 
@@ -1679,9 +1690,9 @@ pattern_primary = "_"
                 | pattern_fields ;
 range_end       = literal_pattern | constant ;
 literal_pattern = [ "-" ] INTEGER | "true" | "false" | plain_string
-                | [ module_path "::" ] TAGGED_STRING ;
-constant        = module_path "::" LOWER_NAME
-                | [ module_path "::" ] UPPER_NAME "." LOWER_NAME ;
+                | [ module_path "." ] TAGGED_STRING ;
+constant        = module_path "." LOWER_NAME
+                | [ module_path "." ] UPPER_NAME "." LOWER_NAME ;
 pattern_fields  = "(" list(pattern_field) ")" ;
 pattern_field   = LOWER_NAME ":" pattern | pattern | ".." ;
 tuple_pattern   = pattern "," pattern { "," pattern } ;
@@ -1695,7 +1706,7 @@ match shape {
 }
 
 match status_code {
-  http::ok => todo
+  http.ok => todo
   301 | 302 | 307 => todo
   500..=599 => todo
   code if code >= 400 => todo
@@ -1712,7 +1723,7 @@ match status_code {
 - Fields can be written in any order, and `..`, the remaining fields, comes
   last.
 - A bare name binds, in every pattern. A constant is written with its module
-  or its type, `http::ok` or `Status.teapot`. A constant in a pattern has a
+  or its type, `http.ok` or `Status.teapot`. A constant in a pattern has a
   type with structural equality (see [Equality](#equality)).
 - Range patterns match integers and characters.
 - A tuple pattern matches a tuple type, one pattern for each field, in the
@@ -1843,7 +1854,7 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
   uses FileRead
 {
   let text = FileRead.read_text(file).map_error(ConfigError.Unreadable)?
-  let config = toml::parse(text).map_error(ConfigError.Malformed)?
+  let config = toml.parse(text).map_error(ConfigError.Malformed)?
   Ok(own config)
 }
 ```
@@ -2024,7 +2035,7 @@ let pending: Stack[Int64] = [1, 2, 3]
   `FromEntries`. The literal's elements have the type's `Element`, and a map
   literal's keys and values its `Key` and its `Value`.
 - Such a literal is a call of `from_elements` with the `List` of its
-  elements, or of `from_entries` with a `List` of one `map::Entry` for each
+  elements, or of `from_entries` with a `List` of one `map.Entry` for each
   key and value, in the order written. It costs that list and that call.
 - `from_entries` requires keys that are pairwise distinct by `==`, so a map
   literal's keys are proven distinct.
@@ -2108,6 +2119,7 @@ prefix     = ( "-" | "!" | "~" ) prefix
 
 postfix    = primary { "." LOWER_NAME
                      | "." UPPER_NAME
+                     | "." TAGGED_STRING
                      | "[" brackets "]"
                      | "(" list(argument) ")"
                      | "?"
@@ -2117,12 +2129,11 @@ brackets   = bracket_item { "," bracket_item } [ "," ]
            | [ additive ] "..=" additive ;
 bracket_item = expression | UPPER_NAME "=" type ;
 
-primary    = INTEGER | FLOAT | STRING | [ module_path "::" ] TAGGED_STRING
+primary    = INTEGER | FLOAT | STRING | TAGGED_STRING
            | "true" | "false" | "todo" | "unreachable" | "break" | "continue"
            | "self" | "Self"
            | LOWER_NAME
-           | [ module_path "::" ] UPPER_NAME
-           | module_path "::" LOWER_NAME
+           | UPPER_NAME
            | "(" expression ")"
            | "[" list(expression) "]"
            | "[" ":" "]"
@@ -2490,11 +2501,12 @@ let pattern = Regex"[a-z]+@${domain}"
 ```
 
 - The tag, a type name without type arguments, is the type of the result. A
-  plain string is the case where the tag is `String`.
+  plain string is the case where the tag is `String`. A tag of another
+  module is written after its module, as in `sql.SqlQuery"select 1"`.
 - A type is a tag by implementing the prelude trait `FromTemplate`. Its
   associated type `Part` is the type each interpolated value is converted to,
   and its method `from_template` takes a `Template[Part]`, which holds the
-  literal text as `text::Literal` values, which only the compiler makes, and
+  literal text as `text.Literal` values, which only the compiler makes, and
   the converted values.
 - A tag's `from_template` states the rules for valid literal text with
   `requires`. The literal text is known when the code is compiled, so the
@@ -2698,8 +2710,8 @@ type Priority =
 | `Hash` | Combines the hashes of the fields |
 | `Ordered` | Variants in declaration order, then fields in declaration order |
 | `Default` | For a record, each field's written default, or its type's `default()` for a field without one. The value must meet the type's invariant |
-| `serialization::Serialize` | A record as its fields by name, in declaration order. A variant with no fields as its name, and a variant with fields as a record of them under its name |
-| `serialization::Deserialize` | The same form, read back. A missing field takes its default if it has one, and a missing field of type `Option` is `None`. A value that breaks an `invariant` clause of its type is an error |
+| `serialization.Serialize` | A record as its fields by name, in declaration order. A variant with no fields as its name, and a variant with fields as a record of them under its name |
+| `serialization.Deserialize` | The same form, read back. A missing field takes its default if it has one, and a missing field of type `Option` is `None`. A value that breaks an `invariant` clause of its type is an error |
 | `Copyable`, `Plain` | Nothing: an opaque type declares that it copies (see [Copying](#copying)) |
 
 - Every field has the trait, and a derived trait's required traits are
@@ -2707,7 +2719,7 @@ type Priority =
 - A generic type has a derived trait only where its parameters do.
 - A derived implementation satisfies the trait's laws; a hand-written one
   proves them.
-- `serialization::Deserialize` is derived only for a type whose `invariant`
+- `serialization.Deserialize` is derived only for a type whose `invariant`
   clauses can be evaluated at run time: none quantifies over a type, names
   `identical`, holds a value of a type that exists only in specifications,
   or calls a function for specifications only. Data then cannot make a value
@@ -2768,8 +2780,8 @@ test = "test" plain_string [ "uses" capability_list ] block ;
 
 ```truss
 test "config loads with defaults" uses RunForever {
-  var disk = files::MemoryFiles.new().with_text(Path.new("app.toml"), contents: "")
-  let config = provide mut disk, log::DiscardLog() {
+  var disk = files.MemoryFiles.new().with_text(Path.new("app.toml"), contents: "")
+  let config = provide mut disk, log.DiscardLog() {
     load_config(Path.new("app.toml"))
   }
   assert config == Ok(Config.default())
@@ -2997,9 +3009,9 @@ fn score(player: Player) -> Int64 {
 ## Modules and visibility
 
 ```truss
-use standard::json
+use standard.json
 
-let settings = json::parse(text)?
+let settings = json.parse(text)?
 ```
 
 - `use` imports a module, never names. Every name that is not local, not a
@@ -3009,22 +3021,22 @@ let settings = json::parse(text)?
   names.
 - There are no import aliases. A full path works without a `use`, and
   importing two modules with the same last name is an error.
-- An unused `use` is an error. A `use` is used when a module path in the
-  file begins with its last name.
+- An unused `use` is an error. A `use` is used when a path in the file
+  begins with its last name where no local has that name.
 
 ### Module paths
 
 Each directory of a package that holds a `.truss` file is a module, whose
 path is the package's name, then the directory's names. The files of
 `forecast/` in the `weather` package, such as `forecast/hourly.truss` and
-`forecast/daily.truss`, are the module `weather::forecast`, and the files
+`forecast/daily.truss`, are the module `weather.forecast`, and the files
 beside the package's manifest are its root module, `weather`.
 
 - The files of a module share one namespace: each names the others'
   definitions without a module, private ones included. Two files of a
   module cannot define one name.
 - A module's subdirectory is a module of its own: `forecast/hourly/` is
-  `weather::forecast::hourly`, which names `weather::forecast` with `::`
+  `weather.forecast.hourly`, which names `weather.forecast` by its full path
   like any other module.
 - Every path starts with a package name, including inside the package.
 - A path holds no version.

@@ -1,5 +1,5 @@
-use standard::collections
-use standard::intrinsic
+use standard.collections
+use standard.intrinsic
 
 fn word_count(length: UInt64) -> UInt64
   ensures result == length / 64 + (if length % 64 == 0 { 0 } else { 1 })
@@ -51,13 +51,13 @@ fn zero_words(count: UInt64) -> List[UInt64]
   ensures forall i in 0..count => result.model()[i] == 0
   cost time O(count)
 {
-  var words: intrinsic::Storage[UInt64] = intrinsic::storage_with_capacity(count)
+  var words: intrinsic.Storage[UInt64] = intrinsic.storage_with_capacity(count)
   for index in 0..count
-    invariant intrinsic::storage_length(words) == index
-    invariant intrinsic::storage_capacity(words) == count
-    invariant forall i in 0..index => intrinsic::storage_model(words)[i] == 0
+    invariant intrinsic.storage_length(words) == index
+    invariant intrinsic.storage_capacity(words) == count
+    invariant forall i in 0..index => intrinsic.storage_model(words)[i] == 0
   {
-    intrinsic::storage_push(mut words, value: 0)
+    intrinsic.storage_push(mut words, value: 0)
   }
   List(storage: own words)
 }
@@ -167,15 +167,15 @@ fn clear_unused_bits(words: mut List[UInt64], length: UInt64)
   }
 }
 
-public fn collections::BitSet.new(length: UInt64) -> collections::BitSet
+public fn collections.BitSet.new(length: UInt64) -> collections.BitSet
   ensures result.length() == length
   ensures result.count_ones() == 0
   cost time O(length)
 {
-  collections::BitSet(words: zero_words(word_count(length)), length: length)
+  collections.BitSet(words: zero_words(word_count(length)), length: length)
 }
 
-public fn collections::BitSet.length(self) -> UInt64
+public fn collections.BitSet.length(self) -> UInt64
   ensures result == (self.length)
   cost time O(1)
   cost allocations == 0
@@ -183,14 +183,14 @@ public fn collections::BitSet.length(self) -> UInt64
   self.length
 }
 
-public fn collections::BitSet.is_empty(self) -> Bool
+public fn collections.BitSet.is_empty(self) -> Bool
   ensures result == (self.length() == 0)
   cost time O(1)
 {
   self.length == 0
 }
 
-internal fn collections::BitSet.bit(self, index: UInt64) -> Bool
+internal fn collections.BitSet.bit(self, index: UInt64) -> Bool
   requires index < self.length
   cost time O(1)
   cost allocations == 0
@@ -198,7 +198,7 @@ internal fn collections::BitSet.bit(self, index: UInt64) -> Bool
   ((self.words[index / 64] >> (index % 64)) & 1) == 1
 }
 
-internal fn collections::BitSet.assign_bit(mut self, index: UInt64, value: Bool)
+internal fn collections.BitSet.assign_bit(mut self, index: UInt64, value: Bool)
   requires index < self.length
   ensures self.length == old(self.length)
   cost time O(1)
@@ -210,14 +210,14 @@ internal fn collections::BitSet.assign_bit(mut self, index: UInt64, value: Bool)
   self.words[index / 64] = if value { word | bit } else { word & ~bit }
 }
 
-public fn collections::BitSet.get(self, index: UInt64) -> Option[Bool]
+public fn collections.BitSet.get(self, index: UInt64) -> Option[Bool]
   ensures (result is Some(_)) == (index < self.length())
   cost time O(1)
 {
   if index < self.length { Some(self.bit(index)) } else { None }
 }
 
-public fn collections::BitSet.flip(mut self, index: UInt64)
+public fn collections.BitSet.flip(mut self, index: UInt64)
   uses Panic unless index < self.length()
   ensures self.length() == old(self.length())
   cost time O(1)
@@ -230,7 +230,7 @@ public fn collections::BitSet.flip(mut self, index: UInt64)
   self.words[index / 64] = self.words[index / 64] ^ (one << (index % 64))
 }
 
-public fn collections::BitSet.fill(mut self, value: Bool)
+public fn collections.BitSet.fill(mut self, value: Bool)
   ensures self.length() == old(self.length())
   cost time O(self.length())
   cost allocations == 0
@@ -239,7 +239,7 @@ public fn collections::BitSet.fill(mut self, value: Bool)
   clear_unused_bits(mut self.words, length: self.length)
 }
 
-public fn collections::BitSet.resize(mut self, length: UInt64)
+public fn collections.BitSet.resize(mut self, length: UInt64)
   ensures self.length() == length
   cost time O(length)
 {
@@ -247,10 +247,10 @@ public fn collections::BitSet.resize(mut self, length: UInt64)
   var words = zero_words(count)
   copy_words(mut words, source: self.words, count: if count < self.words.length() { count } else { self.words.length() })
   clear_unused_bits(mut words, length: length)
-  self = collections::BitSet(words: own words, length: length)
+  self = collections.BitSet(words: own words, length: length)
 }
 
-public fn collections::BitSet.count_ones(self) -> UInt64
+public fn collections.BitSet.count_ones(self) -> UInt64
   ensures result <= self.length()
   ensures (forall i in 0..self.words.length() => self.words.model()[i] == 0) ==> result == 0
   ensures ((forall i in 0..self.length / 64 => self.words.model()[i] == UInt64.maximum)
@@ -289,7 +289,7 @@ public fn collections::BitSet.count_ones(self) -> UInt64
   count
 }
 
-public fn collections::BitSet.count_zeros(self) -> UInt64
+public fn collections.BitSet.count_zeros(self) -> UInt64
   ensures result <= self.length()
   ensures result == self.length() - self.count_ones()
   cost time O(self.length())
@@ -297,7 +297,7 @@ public fn collections::BitSet.count_zeros(self) -> UInt64
   self.length - self.count_ones()
 }
 
-public fn collections::BitSet.first_one(self) -> Option[UInt64]
+public fn collections.BitSet.first_one(self) -> Option[UInt64]
   ensures match result {
     Some(index) => index < self.length()
     None => self.count_ones() == 0
@@ -326,7 +326,7 @@ public fn collections::BitSet.first_one(self) -> Option[UInt64]
   Some(index * 64 + self.words[index].trailing_zeros())
 }
 
-public fn collections::BitSet.first_zero(self) -> Option[UInt64]
+public fn collections.BitSet.first_zero(self) -> Option[UInt64]
   ensures match result {
     Some(index) => index < self.length()
     None => self.count_zeros() == 0
@@ -363,7 +363,7 @@ public fn collections::BitSet.first_zero(self) -> Option[UInt64]
   Some(full * 64 + zeros.trailing_zeros())
 }
 
-public fn collections::BitSet.ones(self) -> List[UInt64]
+public fn collections.BitSet.ones(self) -> List[UInt64]
   cost time O(self.length())
 {
   var parts: List[UInt64] = []
@@ -397,7 +397,7 @@ public fn collections::BitSet.ones(self) -> List[UInt64]
   parts
 }
 
-internal fn collections::BitSet.combine(mut self, other: collections::BitSet, how: Combination)
+internal fn collections.BitSet.combine(mut self, other: collections.BitSet, how: Combination)
   requires other.length == self.length
   ensures self.length == old(self.length)
   cost time O(self.length)
@@ -411,7 +411,7 @@ internal fn collections::BitSet.combine(mut self, other: collections::BitSet, ho
   }
 }
 
-public fn collections::BitSet.union_with(mut self, other: collections::BitSet)
+public fn collections.BitSet.union_with(mut self, other: collections.BitSet)
   uses Panic unless other.length() == self.length()
   ensures self.length() == old(self.length())
   cost time O(self.length())
@@ -423,7 +423,7 @@ public fn collections::BitSet.union_with(mut self, other: collections::BitSet)
   mut self.combine(other, how: Combination.Union)
 }
 
-public fn collections::BitSet.intersect_with(mut self, other: collections::BitSet)
+public fn collections.BitSet.intersect_with(mut self, other: collections.BitSet)
   uses Panic unless other.length() == self.length()
   ensures self.length() == old(self.length())
   cost time O(self.length())
@@ -435,7 +435,7 @@ public fn collections::BitSet.intersect_with(mut self, other: collections::BitSe
   mut self.combine(other, how: Combination.Intersection)
 }
 
-public fn collections::BitSet.difference_with(mut self, other: collections::BitSet)
+public fn collections.BitSet.difference_with(mut self, other: collections.BitSet)
   uses Panic unless other.length() == self.length()
   ensures self.length() == old(self.length())
   cost time O(self.length())
@@ -447,7 +447,7 @@ public fn collections::BitSet.difference_with(mut self, other: collections::BitS
   mut self.combine(other, how: Combination.Difference)
 }
 
-public fn collections::BitSet.complement(mut self)
+public fn collections.BitSet.complement(mut self)
   ensures self.length() == old(self.length())
   cost time O(self.length())
   cost allocations == 0
@@ -456,7 +456,7 @@ public fn collections::BitSet.complement(mut self)
   clear_unused_bits(mut self.words, length: self.length)
 }
 
-impl Index for collections::BitSet {
+impl Index for collections.BitSet {
   type Key = UInt64
   type Output = Bool
 
@@ -477,7 +477,7 @@ impl Index for collections::BitSet {
   }
 }
 
-impl IndexAssign for collections::BitSet {
+impl IndexAssign for collections.BitSet {
   fn accepts_key(self, key: UInt64) -> Bool
     ensures result == (key < self.length())
     cost time O(1)
@@ -496,7 +496,7 @@ impl IndexAssign for collections::BitSet {
   }
 }
 
-impl Iterable for collections::BitSet {
+impl Iterable for collections.BitSet {
   type Element = Bool
 
   fn count(self) -> UInt64
@@ -514,8 +514,8 @@ impl Iterable for collections::BitSet {
   }
 }
 
-impl Equal for collections::BitSet {
-  fn equal(self, other: collections::BitSet) -> Bool
+impl Equal for collections.BitSet {
+  fn equal(self, other: collections.BitSet) -> Bool
     ensures result == (self.length == other.length && self.words == other.words)
     cost time O(self.words.length())
     cost allocations == 0
@@ -524,7 +524,7 @@ impl Equal for collections::BitSet {
   }
 }
 
-impl Hash for collections::BitSet {
+impl Hash for collections.BitSet {
   fn hash(self, hasher: Hasher) -> Hasher
     ensures identical(result, self.words.hash(self.length.hash(hasher)))
     cost time O(self.words.length())

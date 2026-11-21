@@ -1,15 +1,15 @@
-use standard::collections
-use standard::map
+use standard.collections
+use standard.map
 
-fn squares(keys: List[Int64]) -> collections::SortedMap[Int64, Int64] {
-  var sorted: collections::SortedMap[Int64, Int64] = [:]
+fn squares(keys: List[Int64]) -> collections.SortedMap[Int64, Int64] {
+  var sorted: collections.SortedMap[Int64, Int64] = [:]
   for key in keys {
     mut sorted.insert(key, value: key * key)
   }
   sorted
 }
 
-fn keys_of(sorted: collections::SortedMap[Int64, Int64]) -> List[Int64] {
+fn keys_of(sorted: collections.SortedMap[Int64, Int64]) -> List[Int64] {
   var keys: List[Int64] = []
   for key in sorted.keys() {
     mut keys.push(key)
@@ -17,14 +17,14 @@ fn keys_of(sorted: collections::SortedMap[Int64, Int64]) -> List[Int64] {
   keys
 }
 
-fn key_of(entry: Option[map::Entry[Int64, Int64]]) -> Int64 {
+fn key_of(entry: Option[map.Entry[Int64, Int64]]) -> Int64 {
   match entry {
     Some(present) => present.key
     None => -1
   }
 }
 
-fn keys_within(sorted: collections::SortedMap[Int64, Int64], range: Range[Int64]) -> List[Int64] {
+fn keys_within(sorted: collections.SortedMap[Int64, Int64], range: Range[Int64]) -> List[Int64] {
   var keys: List[Int64] = []
   for entry in sorted.in_range(range) {
     mut keys.push(entry.key)
@@ -54,7 +54,7 @@ test "a sorted map keeps its entries in the order of their keys" {
   assert sorted.contains(4) && !sorted.contains(6) && !sorted.contains(0)
   assert sorted.get(3) == Some(9) && sorted.get(7) is None
   assert key_of(sorted.first()) == 1 && key_of(sorted.last()) == 5
-  let empty: collections::SortedMap[Int64, Int64] = [:]
+  let empty: collections.SortedMap[Int64, Int64] = [:]
   assert empty.is_empty() && empty.first() is None && empty.last() is None && !empty.contains(1)
 }
 
@@ -109,7 +109,7 @@ test "a sorted map finds the entries nearest a key" {
   assert key_of(sorted.before(10)) == -1 && key_of(sorted.before(99)) == 30
   assert key_of(sorted.after(20)) == 30 && key_of(sorted.after(25)) == 30
   assert key_of(sorted.after(30)) == -1 && key_of(sorted.after(5)) == 10
-  let empty: collections::SortedMap[Int64, Int64] = [:]
+  let empty: collections.SortedMap[Int64, Int64] = [:]
   assert empty.at_or_before(1) is None && empty.at_or_after(1) is None
   assert empty.before(1) is None && empty.after(1) is None
 }
@@ -136,25 +136,25 @@ test "retain keeps the entries a function accepts, in order" {
 }
 
 test "a sorted map is made from a cursor of entries in any order, the last of a key winning" uses RunForever {
-  let entries: List[map::Entry[Int64, Int64]] = [
-    map::Entry(key: 3, value: 1),
-    map::Entry(key: 1, value: 2),
-    map::Entry(key: 3, value: 3),
-    map::Entry(key: 2, value: 4),
-    map::Entry(key: 3, value: 5),
+  let entries: List[map.Entry[Int64, Int64]] = [
+    map.Entry(key: 3, value: 1),
+    map.Entry(key: 1, value: 2),
+    map.Entry(key: 3, value: 3),
+    map.Entry(key: 2, value: 4),
+    map.Entry(key: 3, value: 5),
   ]
-  var collected: collections::SortedMap[Int64, Int64] = collections::SortedMap.collect(entries.copy().cursor())
+  var collected: collections.SortedMap[Int64, Int64] = collections.SortedMap.collect(entries.copy().cursor())
   assert keys_of(collected) == [1, 2, 3] && collected.get(3) == Some(5) && collected.get(1) == Some(2)
-  let more: List[map::Entry[Int64, Int64]] = [
-    map::Entry(key: 9, value: 90),
-    map::Entry(key: 2, value: 20),
-    map::Entry(key: 0, value: 0),
-    map::Entry(key: 2, value: 21),
+  let more: List[map.Entry[Int64, Int64]] = [
+    map.Entry(key: 9, value: 90),
+    map.Entry(key: 2, value: 20),
+    map.Entry(key: 0, value: 0),
+    map.Entry(key: 2, value: 21),
   ]
   mut collected.extend(more.copy().cursor())
   assert keys_of(collected) == [0, 1, 2, 3, 9]
   assert collected.get(2) == Some(21) && collected.get(3) == Some(5) && collected.get(9) == Some(90)
-  var fresh: collections::SortedMap[Int64, Int64] = collections::SortedMap.default()
+  var fresh: collections.SortedMap[Int64, Int64] = collections.SortedMap.default()
   mut fresh.extend(more.copy().cursor())
   assert keys_of(fresh) == [0, 2, 9] && fresh.get(2) == Some(21)
   var owned: List[Int64] = []
@@ -178,7 +178,7 @@ test "sorted maps are equal when their entries are, and a copy changes on its ow
 }
 
 test "a sorted map of many keys inserted out of order stays in order" {
-  var sorted: collections::SortedMap[Int64, Int64] = [:]
+  var sorted: collections.SortedMap[Int64, Int64] = [:]
   for step in 0..101 {
     let key = step * 37 % 101
     mut sorted.insert(key, value: step)
@@ -203,7 +203,7 @@ test "a sorted map of many keys inserted out of order stays in order" {
 }
 
 test "a sorted map orders text keys by their bytes" {
-  var sorted: collections::SortedMap[String, Int64] = [:]
+  var sorted: collections.SortedMap[String, Int64] = [:]
   mut sorted.insert("pear", value: 1)
   mut sorted.insert("apple", value: 2)
   mut sorted.insert("fig", value: 3)
@@ -218,6 +218,6 @@ test "a sorted map orders text keys by their bytes" {
 }
 
 test "a sorted map literal holds its entries in the order of their keys" {
-  let sorted: collections::SortedMap[Int64, Int64] = [3: 30, 1: 10, 2: 20]
+  let sorted: collections.SortedMap[Int64, Int64] = [3: 30, 1: 10, 2: 20]
   assert keys_of(sorted) == [1, 2, 3] && sorted.get(3) == Some(30) && sorted.get(1) == Some(10)
 }

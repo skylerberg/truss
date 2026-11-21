@@ -1,7 +1,7 @@
-use standard::html
+use standard.html
 
 fn clean(input: StringSlice) -> String {
-  html::sanitize(input).text().to_string()
+  html.sanitize(input).text().to_string()
 }
 
 test "sanitize keeps allowed formatting and links, and gives links rel=nofollow" {
@@ -56,6 +56,6 @@ test "sanitize unwraps unknown elements, balances tags, and escapes stray markup
 }
 
 test "sanitize follows a policy that allows other elements and no link rel" {
-  let policy = html::SanitizePolicy(elements: ["p", "a"], attributes: [], element_attributes: [html::AllowedAttribute(element: "a", name: "href")], link_rel: None)
-  assert html::sanitize("<p><b>x</b><a href=\"/a\" title=\"t\">y</a></p>", policy: policy).text() == "<p>x<a href=\"/a\">y</a></p>"
+  let policy = html.SanitizePolicy(elements: ["p", "a"], attributes: [], element_attributes: [html.AllowedAttribute(element: "a", name: "href")], link_rel: None)
+  assert html.sanitize("<p><b>x</b><a href=\"/a\" title=\"t\">y</a></p>", policy: policy).text() == "<p>x<a href=\"/a\">y</a></p>"
 }

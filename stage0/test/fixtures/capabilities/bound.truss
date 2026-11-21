@@ -1,7 +1,7 @@
-use framework::sources
-use plugins::timers
+use framework.sources
+use plugins.timers
 
-fn first[Reader: sources::Source](reader: Reader) -> Instant
+fn first[Reader: sources.Source](reader: Reader) -> Instant
   uses Clock
 {
   reader.read()
@@ -10,5 +10,5 @@ fn first[Reader: sources::Source](reader: Reader) -> Instant
 fn f() -> Instant
   uses Clock
 {
-  first(timers::Timer())
+  first(timers.Timer())
 }

@@ -3,7 +3,7 @@ let show_optional print = function Some value -> print value | None -> ""
 let list print values = List.map print values
 
 let show_path (path : Syntax.path) =
-  String.concat "::"
+  String.concat "."
     (List.map (fun (name : Syntax.name) -> name.text) (path.modules @ [ path.last ]))
 
 let show_mode = function Syntax.Mut -> "mut" | Own -> "own"
@@ -185,7 +185,7 @@ and show_expression (value : Syntax.expression) =
   | Continue -> "continue"
   | Self_value -> "self"
   | Self_type_value -> "Self"
-  | Name name -> show_path name
+  | Name name -> name.text
   | Member (inner, name) -> make_form "." [ show_expression inner; name.text ]
   | Bracket (inner, items) -> make_form "[]" (show_expression inner :: list show_bracket_item items)
   | Call (callee, arguments) ->

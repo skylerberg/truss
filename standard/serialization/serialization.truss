@@ -1,4 +1,4 @@
-use standard::text
+use standard.text
 
 public trait Serialize {
   fn serialize[Sink: Serializer](self, sink: mut Sink)
@@ -328,7 +328,7 @@ impl Serialize for Map[Key: Hash + Ordered + Display, Member: Serialize] {
   }
 }
 
-impl Deserialize for Map[Key: Hash + Ordered + text::Parse, Member: Deserialize] {
+impl Deserialize for Map[Key: Hash + Ordered + text.Parse, Member: Deserialize] {
   fn deserialize[Source: Deserializer](source: mut Source) -> Result[Map[Key, Member], Error]
     uses RunForever
   {
@@ -353,7 +353,7 @@ public fn serialize_text[Item: Display, Sink: Serializer](item: Item, sink: mut 
   mut sink.text(text)
 }
 
-public fn deserialize_text[Item: text::Parse, Source: Deserializer](
+public fn deserialize_text[Item: text.Parse, Source: Deserializer](
   source: mut Source,
   expected: StringSlice,
 ) -> Result[Item, Error] {

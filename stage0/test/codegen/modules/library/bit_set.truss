@@ -1,6 +1,6 @@
-use standard::collections
+use standard.collections
 
-fn positions(bits: collections::BitSet) -> List[UInt64] {
+fn positions(bits: collections.BitSet) -> List[UInt64] {
   var set_positions: List[UInt64] = []
   for position in bits.ones() {
     mut set_positions.push(position)
@@ -8,8 +8,8 @@ fn positions(bits: collections::BitSet) -> List[UInt64] {
   set_positions
 }
 
-fn with_ones(length: UInt64, ones: Slice[UInt64]) -> collections::BitSet {
-  var bits = collections::BitSet.new(length)
+fn with_ones(length: UInt64, ones: Slice[UInt64]) -> collections.BitSet {
+  var bits = collections.BitSet.new(length)
   for position in ones {
     mut bits.flip(position)
   }
@@ -17,18 +17,18 @@ fn with_ones(length: UInt64, ones: Slice[UInt64]) -> collections::BitSet {
 }
 
 test "a new bit set holds only zeros" {
-  let bits = collections::BitSet.new(130)
+  let bits = collections.BitSet.new(130)
   assert bits.length() == 130 && !bits.is_empty()
   assert bits.count_ones() == 0 && bits.count_zeros() == 130
   assert bits.first_one() is None && bits.first_zero() == Some(0)
   assert bits.get(129) == Some(false) && bits.get(130) is None
-  let none = collections::BitSet.new(0)
+  let none = collections.BitSet.new(0)
   assert none.is_empty() && none.count_ones() == 0 && none.count_zeros() == 0
   assert none.first_one() is None && none.first_zero() is None && none.get(0) is None
 }
 
 test "a bit is read, flipped, and assigned by its position" {
-  var bits = collections::BitSet.new(130)
+  var bits = collections.BitSet.new(130)
   mut bits.flip(0)
   mut bits.flip(63)
   mut bits.flip(64)
@@ -46,7 +46,7 @@ test "a bit is read, flipped, and assigned by its position" {
 }
 
 test "the first one and the first zero are found in any word" {
-  var bits = collections::BitSet.new(200)
+  var bits = collections.BitSet.new(200)
   mut bits.flip(199)
   assert bits.first_one() == Some(199)
   mut bits.fill(true)
@@ -57,7 +57,7 @@ test "the first one and the first zero are found in any word" {
   mut bits.flip(70)
   mut bits.flip(199)
   assert bits.first_zero() == Some(199)
-  var whole = collections::BitSet.new(128)
+  var whole = collections.BitSet.new(128)
   mut whole.fill(true)
   assert whole.first_zero() is None && whole.count_ones() == 128
   mut whole.fill(false)
@@ -65,7 +65,7 @@ test "the first one and the first zero are found in any word" {
 }
 
 test "a bit set is resized with zeros in the new positions" {
-  var bits = collections::BitSet.new(70)
+  var bits = collections.BitSet.new(70)
   mut bits.fill(true)
   mut bits.resize(200)
   assert bits.length() == 200 && bits.count_ones() == 70 && bits.first_zero() == Some(70)

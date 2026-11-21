@@ -5,13 +5,16 @@ let is_member_constant (tables : Tables.t) (value : Syntax.expression) =
   | Some (Global { path = Member_constant _; _ }) -> true
   | _ -> false
 
+let is_named_place resolved (name : Syntax.name) =
+  match find_target resolved name with
+  | Some (Local _ | Law_parameter _ | Field _ | Definition (Constant, _)) -> true
+  | _ -> false
+
 let rec is_place resolved tables (value : Syntax.expression) =
   match value.kind with
-  | Name path -> (
-      match find_target resolved path.last with
-      | Some (Local _ | Law_parameter _ | Field _ | Definition (Constant, _)) -> true
-      | _ -> false)
+  | Name name -> is_named_place resolved name
   | Self_value -> true
+  | Member (_, name) when Option.is_some (find_target resolved name) -> is_named_place resolved name
   | Member (base, _) -> is_place resolved tables base || is_member_constant tables value
   | Bracket (base, _) -> (
       match resolved.brackets.(value.id) with

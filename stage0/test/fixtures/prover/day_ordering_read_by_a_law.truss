@@ -1,9 +1,9 @@
-use standard::core
+use standard.core
 
 type Day(count: Int32)
   derives Equal, Ordered
 
-impl core::Countable for Day {
+impl core.Countable for Day {
   fn successor(self) -> Option[Day]
     cost time O(1)
   {

@@ -1,9 +1,9 @@
-use standard::console
-use standard::intrinsic
-use standard::network
-use standard::processes
-use standard::streams
-use standard::text
+use standard.console
+use standard.intrinsic
+use standard.network
+use standard.processes
+use standard.streams
+use standard.text
 
 public opaque type Path(text: String)
   derives Copyable
@@ -148,12 +148,12 @@ internal fn join_paths(first: StringSlice, second: StringSlice) -> Path
     return Path(text: second.to_string())
   }
   if first.length() > UInt64.maximum / 4 || second.length() > UInt64.maximum / 4 {
-    intrinsic::crash("a path cannot hold that many bytes")
+    intrinsic.crash("a path cannot hold that many bytes")
   }
-  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(first.length() + 1 + second.length())
+  var output: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(first.length() + 1 + second.length())
   first.copy_onto(mut output)
   if first.byte(first.length() - 1) != 47 {
-    intrinsic::storage_push(mut output, value: 47)
+    intrinsic.storage_push(mut output, value: 47)
   }
   second.copy_onto(mut output)
   Path(text: String(storage: own output))
@@ -267,12 +267,12 @@ public fn Path.with_extension(self, extension: StringSlice) -> Path
   }
   let stem = text.part(0, to: extension_start(text, name: name))
   if stem.length() > UInt64.maximum / 4 || extension.length() > UInt64.maximum / 4 {
-    intrinsic::crash("a path cannot hold that many bytes")
+    intrinsic.crash("a path cannot hold that many bytes")
   }
-  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(stem.length() + 1 + extension.length())
+  var output: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(stem.length() + 1 + extension.length())
   stem.copy_onto(mut output)
   if extension.length() > 0 {
-    intrinsic::storage_push(mut output, value: 46)
+    intrinsic.storage_push(mut output, value: 46)
     extension.copy_onto(mut output)
   }
   Path(text: String(storage: own output))
@@ -288,9 +288,9 @@ public fn Path.with_file_name(self, name: StringSlice) -> Path
   }
   let before = text.part(0, to: last.start)
   if before.length() > UInt64.maximum / 4 || name.length() > UInt64.maximum / 4 {
-    intrinsic::crash("a path cannot hold that many bytes")
+    intrinsic.crash("a path cannot hold that many bytes")
   }
-  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(before.length() + name.length())
+  var output: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(before.length() + name.length())
   before.copy_onto(mut output)
   name.copy_onto(mut output)
   Path(text: String(storage: own output))
@@ -319,19 +319,19 @@ public fn Path.components(self) -> List[StringSlice]
   parts
 }
 
-internal fn parent_length(output: intrinsic::Storage[UInt8], floor: UInt64) -> UInt64
-  requires floor <= intrinsic::storage_length(output)
+internal fn parent_length(output: intrinsic.Storage[UInt8], floor: UInt64) -> UInt64
+  requires floor <= intrinsic.storage_length(output)
   ensures floor <= result
-  ensures result <= intrinsic::storage_length(output)
-  cost time O(intrinsic::storage_length(output) - result)
+  ensures result <= intrinsic.storage_length(output)
+  cost time O(intrinsic.storage_length(output) - result)
   cost allocations == 0
 {
-  var length = intrinsic::storage_length(output)
-  while length > floor && intrinsic::storage_at(output, index: length - 1) != 47
+  var length = intrinsic.storage_length(output)
+  while length > floor && intrinsic.storage_at(output, index: length - 1) != 47
     invariant floor <= length
-    invariant length <= intrinsic::storage_length(output)
+    invariant length <= intrinsic.storage_length(output)
     decreases length
-    cost time O(intrinsic::storage_length(output) - length)
+    cost time O(intrinsic.storage_length(output) - length)
     cost allocations == 0
   {
     length -= 1
@@ -346,55 +346,55 @@ public fn Path.normalized(self) -> Path
   let text = self.text.slice()
   let absolute = self.is_absolute()
   if text.length() > UInt64.maximum / 4 {
-    intrinsic::crash("a path cannot hold that many bytes")
+    intrinsic.crash("a path cannot hold that many bytes")
   }
-  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(text.length() + 1)
+  var output: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(text.length() + 1)
   if absolute {
-    intrinsic::storage_push(mut output, value: 47)
+    intrinsic.storage_push(mut output, value: 47)
   }
-  var floor = intrinsic::storage_length(output)
+  var floor = intrinsic.storage_length(output)
   var index: UInt64 = 0
   while index < text.length()
     invariant index <= text.length()
     invariant index == 0 || index == text.length() || text.byte(index) == 47
     invariant !absolute || (text.length() > 0 && text.byte(0) == 47)
-    invariant floor <= intrinsic::storage_length(output)
-    invariant intrinsic::storage_length(output) <= index + 1
-    invariant index == 0 ==> floor == intrinsic::storage_length(output)
-    invariant index == 0 && !absolute ==> intrinsic::storage_length(output) == 0
-    invariant intrinsic::storage_capacity(output) == text.length() + 1
+    invariant floor <= intrinsic.storage_length(output)
+    invariant intrinsic.storage_length(output) <= index + 1
+    invariant index == 0 ==> floor == intrinsic.storage_length(output)
+    invariant index == 0 && !absolute ==> intrinsic.storage_length(output) == 0
+    invariant intrinsic.storage_capacity(output) == text.length() + 1
     decreases text.length() - index
-    cost time O(3 * index + 1 - intrinsic::storage_length(output))
+    cost time O(3 * index + 1 - intrinsic.storage_length(output))
   {
     let span = next_component(text, from: index)
     if span.is_empty() {
       index = text.length()
     } else {
-      let length = intrinsic::storage_length(output)
+      let length = intrinsic.storage_length(output)
       if is_dot_or_dot_dot(text, span: span) {
         if span.end - span.start == 2 {
           if length > floor {
-            intrinsic::storage_shorten(mut output, length: parent_length(output, floor: floor))
+            intrinsic.storage_shorten(mut output, length: parent_length(output, floor: floor))
           } else if !absolute {
             if length > 0 {
-              intrinsic::storage_push(mut output, value: 47)
+              intrinsic.storage_push(mut output, value: 47)
             }
-            intrinsic::storage_push(mut output, value: 46)
-            intrinsic::storage_push(mut output, value: 46)
-            floor = intrinsic::storage_length(output)
+            intrinsic.storage_push(mut output, value: 46)
+            intrinsic.storage_push(mut output, value: 46)
+            floor = intrinsic.storage_length(output)
           }
         }
       } else {
         if length > floor || (length > 0 && !absolute) {
-          intrinsic::storage_push(mut output, value: 47)
+          intrinsic.storage_push(mut output, value: 47)
         }
         text.part(span.start, to: span.end).copy_onto(mut output)
       }
       index = span.end
     }
   }
-  if intrinsic::storage_length(output) == 0 {
-    intrinsic::storage_push(mut output, value: 46)
+  if intrinsic.storage_length(output) == 0 {
+    intrinsic.storage_push(mut output, value: 46)
   }
   Path(text: String(storage: own output))
 }
@@ -576,10 +576,10 @@ public type WriteMode =
 public type LinkKind = Symbolic | Hard
   derives Equal
 
-public opaque type FileReader(reader: streams::BufferedReader[File])
+public opaque type FileReader(reader: streams.BufferedReader[File])
 
 internal fn FileReader.new(file: own File) -> FileReader {
-  FileReader(reader: streams::BufferedReader[File].new(own file))
+  FileReader(reader: streams.BufferedReader[File].new(own file))
 }
 
 internal fn FileReader.opened(simulated_handle: UInt64) -> FileReader {
@@ -604,7 +604,7 @@ public fn FileReader.close(own self) -> Result[Unit, SystemError]
   own self.reader.finish().close()
 }
 
-impl streams::Reader for FileReader {
+impl streams.Reader for FileReader {
   fn read(mut self, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError]
     uses Handles
   {
@@ -612,8 +612,8 @@ impl streams::Reader for FileReader {
   }
 }
 
-impl streams::Seek for FileReader {
-  fn seek(mut self, to: streams::Position) -> Result[UInt64, SystemError]
+impl streams.Seek for FileReader {
+  fn seek(mut self, to: streams.Position) -> Result[UInt64, SystemError]
     uses Handles
   {
     mut self.reader.seek(to)
@@ -647,10 +647,10 @@ public fn FileWriter.flush(mut self) -> Result[Unit, SystemError]
   Ok(Unit)
 }
 
-public opaque type File(handle: streams::Handle)
+public opaque type File(handle: streams.Handle)
 
 internal fn File.opened(simulated_handle: UInt64) -> File {
-  File(handle: streams::Handle.simulated(simulated_handle))
+  File(handle: streams.Handle.simulated(simulated_handle))
 }
 
 public fn File.read_at(mut self, offset: UInt64, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError]
@@ -689,7 +689,7 @@ public fn File.close(own self) -> Result[Unit, SystemError]
   Handles.close(own self.handle)
 }
 
-impl streams::Reader for File {
+impl streams.Reader for File {
   fn read(mut self, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError]
     uses Handles
   {
@@ -697,7 +697,7 @@ impl streams::Reader for File {
   }
 }
 
-impl streams::Writer for File {
+impl streams.Writer for File {
   fn write(mut self, bytes: Slice[UInt8]) -> Result[UInt64, SystemError]
     uses Handles
   {
@@ -711,8 +711,8 @@ impl streams::Writer for File {
   }
 }
 
-impl streams::Seek for File {
-  fn seek(mut self, to: streams::Position) -> Result[UInt64, SystemError]
+impl streams.Seek for File {
+  fn seek(mut self, to: streams.Position) -> Result[UInt64, SystemError]
     uses Handles
   {
     Handles.seek(self.handle, to: to)
@@ -803,7 +803,7 @@ public fn copy(from: Path, to: Path) -> Result[UInt64, SystemError]
   let copied = match FileWrite.open(to, mode: WriteMode.Replace) {
     Ok(opened) => {
       var sink = own opened
-      let count = streams::copy(mut source, sink: mut sink)
+      let count = streams.copy(mut source, sink: mut sink)
       let closed = own sink.close()
       match closed {
         Ok(_) => count
@@ -1097,7 +1097,7 @@ impl FromTemplate for Glob {
   }
 }
 
-public fn is_valid_glob(literals: Slice[text::Literal]) -> Bool
+public fn is_valid_glob(literals: Slice[text.Literal]) -> Bool
   ensures result == (literals.length() == 1 && Glob.parse(literals[0].text()) is Ok(_))
 {
   literals.length() == 1 && Glob.parse(literals[0].text()) is Ok(_)
@@ -1740,7 +1740,7 @@ internal fn MemoryFiles.add_open_file(mut self, inode: UInt64, readable: Bool, w
   self.handles_made
 }
 
-internal fn MemoryFiles.open_file_index(self, handle: streams::Handle) -> Option[UInt64]
+internal fn MemoryFiles.open_file_index(self, handle: streams.Handle) -> Option[UInt64]
   ensures !(result is Some(index) && index >= self.open_files.length())
 {
   let number = handle.number()
@@ -2060,7 +2060,7 @@ impl FileWrite for MemoryFiles
 }
 
 impl Handles for MemoryFiles {
-  fn read(mut self, handle: streams::Handle, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError] {
+  fn read(mut self, handle: streams.Handle, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError] {
     let index = match self.open_file_index(handle) {
       Some(index) => index
       None => return Err(SystemError.Closed)
@@ -2078,7 +2078,7 @@ impl Handles for MemoryFiles {
     Ok(count)
   }
 
-  fn write(mut self, handle: streams::Handle, bytes: Slice[UInt8]) -> Result[UInt64, SystemError] {
+  fn write(mut self, handle: streams.Handle, bytes: Slice[UInt8]) -> Result[UInt64, SystemError] {
     let index = match self.open_file_index(handle) {
       Some(index) => index
       None => return Err(SystemError.Closed)
@@ -2095,7 +2095,7 @@ impl Handles for MemoryFiles {
 
   fn read_at(
     mut self,
-    handle: streams::Handle,
+    handle: streams.Handle,
     offset: UInt64,
     buffer: mut List[UInt8],
     limit: UInt64,
@@ -2110,7 +2110,7 @@ impl Handles for MemoryFiles {
     self.copy_out(self.open_files[index].inode, from: offset, buffer: mut buffer, limit: limit)
   }
 
-  fn write_at(mut self, handle: streams::Handle, offset: UInt64, bytes: Slice[UInt8]) -> Result[UInt64, SystemError] {
+  fn write_at(mut self, handle: streams.Handle, offset: UInt64, bytes: Slice[UInt8]) -> Result[UInt64, SystemError] {
     let index = match self.open_file_index(handle) {
       Some(index) => index
       None => return Err(SystemError.Closed)
@@ -2123,7 +2123,7 @@ impl Handles for MemoryFiles {
     Ok(bytes.length())
   }
 
-  fn seek(mut self, handle: streams::Handle, to: streams::Position) -> Result[UInt64, SystemError] {
+  fn seek(mut self, handle: streams.Handle, to: streams.Position) -> Result[UInt64, SystemError] {
     let index = match self.open_file_index(handle) {
       Some(index) => index
       None => return Err(SystemError.Closed)
@@ -2142,7 +2142,7 @@ impl Handles for MemoryFiles {
     }
   }
 
-  fn set_length(mut self, handle: streams::Handle, length: UInt64) -> Result[Unit, SystemError] {
+  fn set_length(mut self, handle: streams.Handle, length: UInt64) -> Result[Unit, SystemError] {
     let index = match self.open_file_index(handle) {
       Some(index) => index
       None => return Err(SystemError.Closed)
@@ -2154,21 +2154,21 @@ impl Handles for MemoryFiles {
     mut self.resize(inode, length: length)
   }
 
-  fn synchronize(mut self, handle: streams::Handle) -> Result[Unit, SystemError] {
+  fn synchronize(mut self, handle: streams.Handle) -> Result[Unit, SystemError] {
     match self.open_file_index(handle) {
       Some(_) => Ok(Unit)
       None => Err(SystemError.Closed)
     }
   }
 
-  fn metadata(mut self, handle: streams::Handle) -> Result[Metadata, SystemError] {
+  fn metadata(mut self, handle: streams.Handle) -> Result[Metadata, SystemError] {
     match self.open_file_index(handle) {
       Some(index) => self.metadata_of(self.open_files[index].inode)
       None => Err(SystemError.Closed)
     }
   }
 
-  fn close(mut self, handle: own streams::Handle) -> Result[Unit, SystemError] {
+  fn close(mut self, handle: own streams.Handle) -> Result[Unit, SystemError] {
     let index = match self.open_file_index(handle) {
       Some(index) => index
       None => return Err(SystemError.Closed)
@@ -2178,62 +2178,62 @@ impl Handles for MemoryFiles {
     Ok(Unit)
   }
 
-  fn shut_down(mut self, handle: streams::Handle, direction: network::Direction) -> Result[Unit, SystemError] {
+  fn shut_down(mut self, handle: streams.Handle, direction: network.Direction) -> Result[Unit, SystemError] {
     Err(SystemError.Unsupported)
   }
 
   fn set_timeout(
     mut self,
-    handle: streams::Handle,
-    direction: network::Direction,
+    handle: streams.Handle,
+    direction: network.Direction,
     timeout: Option[Duration],
   ) -> Result[Unit, SystemError] {
     Err(SystemError.Unsupported)
   }
 
-  fn accept(mut self, listener: streams::Handle) -> Result[network::Accepted, SystemError] {
+  fn accept(mut self, listener: streams.Handle) -> Result[network.Accepted, SystemError] {
     Err(SystemError.Unsupported)
   }
 
-  fn accept_local(mut self, listener: streams::Handle) -> Result[streams::Handle, SystemError] {
+  fn accept_local(mut self, listener: streams.Handle) -> Result[streams.Handle, SystemError] {
     Err(SystemError.Unsupported)
   }
 
-  fn configure(mut self, socket: streams::Handle, option: network::SocketOption) -> Result[Unit, SystemError] {
+  fn configure(mut self, socket: streams.Handle, option: network.SocketOption) -> Result[Unit, SystemError] {
     Err(SystemError.Unsupported)
   }
 
   fn send_to(
     mut self,
-    socket: streams::Handle,
+    socket: streams.Handle,
     bytes: Slice[UInt8],
-    address: network::SocketAddress,
+    address: network.SocketAddress,
   ) -> Result[UInt64, SystemError] {
     Err(SystemError.Unsupported)
   }
 
   fn receive_from(
     mut self,
-    socket: streams::Handle,
+    socket: streams.Handle,
     buffer: mut List[UInt8],
     limit: UInt64,
-  ) -> Result[network::Datagram, SystemError] {
+  ) -> Result[network.Datagram, SystemError] {
     Err(SystemError.Unsupported)
   }
 
-  fn wait(mut self, process: streams::Handle) -> Result[processes::ExitStatus, SystemError] {
+  fn wait(mut self, process: streams.Handle) -> Result[processes.ExitStatus, SystemError] {
     Err(SystemError.Unsupported)
   }
 
-  fn signal(mut self, process: streams::Handle, signal: processes::Signal) -> Result[Unit, SystemError] {
+  fn signal(mut self, process: streams.Handle, signal: processes.Signal) -> Result[Unit, SystemError] {
     Err(SystemError.Unsupported)
   }
 
-  fn terminal_size(mut self, terminal: streams::Handle) -> Result[console::Size, SystemError] {
+  fn terminal_size(mut self, terminal: streams.Handle) -> Result[console.Size, SystemError] {
     Err(SystemError.Unsupported)
   }
 
-  fn set_raw_mode(mut self, terminal: streams::Handle, enabled: Bool) -> Result[Unit, SystemError] {
+  fn set_raw_mode(mut self, terminal: streams.Handle, enabled: Bool) -> Result[Unit, SystemError] {
     Err(SystemError.Unsupported)
   }
 }
