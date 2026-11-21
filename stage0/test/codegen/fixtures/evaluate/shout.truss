@@ -2,26 +2,25 @@ use standard.text
 
 type Shout(text: String)
 
-fn is_quiet(literals: List[text.Literal]) -> Bool
-{
-  var quiet = true
-  for literal in literals {
-    let text = literal.text()
-    for index in 0..text.length() {
-      let byte = text.byte(index)
-      if byte >= 65 && byte <= 90 {
-        quiet = false
-      }
-    }
-  }
-  quiet
-}
-
 impl FromTemplate for Shout {
   type Part = String
 
+  fn is_valid_template(literals: List[text.Literal]) -> Bool
+  {
+    var quiet = true
+    for literal in literals {
+      let text = literal.text()
+      for index in 0..text.length() {
+        let byte = text.byte(index)
+        if byte >= 65 && byte <= 90 {
+          quiet = false
+        }
+      }
+    }
+    quiet
+  }
+
   fn from_template(template: Template[String]) -> Shout
-    requires is_quiet(template.literals)
   {
     Shout(text: "")
   }

@@ -29,7 +29,6 @@ val show_truss_value : State.context -> Logic.term -> string option
 val remove_panic_condition : Types.capability_set -> Types.capability_set
 
 val oblige :
-  ?template_clause:Obligation.template_clause ->
   ?cited:Resolve.Names.key * Core.origin ->
   ?fixes:Obligation.fix list ->
   ?holds_when:Types.condition ->
@@ -62,7 +61,6 @@ val reject_uncompared_recursion :
   unit
 
 val make_closed_obligation :
-  ?template_clause:Obligation.template_clause ->
   State.context ->
   State.frame ->
   Diagnostic.Code.prover ->
@@ -72,7 +70,6 @@ val make_closed_obligation :
   Obligation.t option
 
 val make_obligation :
-  ?template_clause:Obligation.template_clause ->
   State.context ->
   State.frame ->
   Diagnostic.Code.prover ->

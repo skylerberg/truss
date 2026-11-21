@@ -9,6 +9,7 @@ module Symbol : sig
     | Constant of Path.t
     | Generic_value of { owner : Path.t; name : string }
     | Text_literal of { type_ : Types.ty; text : string }
+    | Template_check of { function_ : Path.t; literals : string list }
     | Named_term of 'term
     | Lambda of { sorts : sort list; definition : 'term }
     | Lifted of 'term t

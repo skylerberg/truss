@@ -1,3 +1,5 @@
+use standard.text
+
 type Sum(pieces: UInt64, total: Int64)
 
 type Count(value: Int64)
@@ -10,6 +12,10 @@ impl From[Count] for Int64 {
 
 impl FromTemplate for Sum {
   type Part = Int64
+
+  fn is_valid_template(literals: List[text.Literal]) -> Bool {
+    true
+  }
 
   fn from_template(template: Template[Int64]) -> Sum {
     var total = 0

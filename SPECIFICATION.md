@@ -2501,27 +2501,27 @@ let pattern = Regex"[a-z]+@${domain}"
 ```
 
 - The tag, a type name without type arguments, is the type of the result. A
-  plain string is the case where the tag is `String`. A tag of another
-  module is written after its module, as in `sql.SqlQuery"select 1"`.
+  tag of another module is written after its module, as in
+  `sql.SqlQuery"select 1"`.
 - A type is a tag by implementing the prelude trait `FromTemplate`. Its
   associated type `Part` is the type each interpolated value is converted to,
   and its method `from_template` takes a `Template[Part]`, which holds the
   literal text as `text.Literal` values, which only the compiler makes, and
   the converted values.
-- A tag's `from_template` states the rules for valid literal text with
-  `requires`. The literal text is known when the code is compiled, so the
-  `requires` is evaluated then. `Regex"[a-z"` is an error, and so is a check
-  that panics or reaches `todo`.
-- `from_template` is the one method whose `requires` may be stronger than its
-  trait's, and a call of it through a bound or `any` is an error.
+- A tag's `is_valid_template` states the rules for valid literal text, and
+  `from_template` requires it. The literal text is known when the code is
+  compiled, so the check is evaluated then. `Regex"[a-z"` is an error, and so
+  is a check that panics or reaches `todo`.
 
 ```truss
 impl FromTemplate for Regex {
   type Part = RegexPart
 
-  fn from_template(template: Template[RegexPart]) -> Regex
-    requires is_valid_template(template.literals)
-  {
+  fn is_valid_template(literals: List[text.Literal]) -> Bool {
+    todo
+  }
+
+  fn from_template(template: Template[RegexPart]) -> Regex {
     todo
   }
 }

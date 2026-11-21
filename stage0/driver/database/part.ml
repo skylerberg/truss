@@ -68,7 +68,6 @@ let find_item_definition : Lowered.Item.t -> Path.t option = function
   | Code { path; _ }
   | Constant path
   | Evaluator path
-  | Template_check { from_template = path; _ }
   | Call_evaluation { function_ = path; _ }
   | Generated
       ( Locked_entry { capability = path; _ }

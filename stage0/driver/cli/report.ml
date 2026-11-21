@@ -101,17 +101,22 @@ let make_document report fields =
     :: fields)
 
 let print ?(offers_fix = true) report =
+  let is_colored = Output.is_colored () in
   let print_files =
     List.iter (fun file ->
         List.iter
-          (fun diagnostic -> Output.eprint (Diagnostic.render file.source diagnostic))
+          (fun diagnostic -> Output.eprint (Diagnostic.render ~is_colored file.source diagnostic))
           file.diagnostics)
   in
-  List.iter (fun problem -> Output.eprint_line (Project.show_problem problem)) report.problems;
+  List.iter (fun problem -> Output.eprint (Project.show_problem problem ^ "\n\n")) report.problems;
   print_files report.checked;
   print_files (Lazy.force report.proven);
-  let errors = Diagnostic.show_count (count_errors report) "error" "errors"
-  and warnings = Diagnostic.show_count (count_warnings report) "warning" "warnings"
+  let errors =
+    Diagnostic.paint_severity ~is_colored Error
+      (Diagnostic.show_count (count_errors report) "error" "errors")
+  and warnings =
+    Diagnostic.paint_severity ~is_colored Warning
+      (Diagnostic.show_count (count_warnings report) "warning" "warnings")
   and fixable = if offers_fix then describe_fixable report else "" in
   match (count_errors report, count_warnings report) with
   | 0, 0 -> ()

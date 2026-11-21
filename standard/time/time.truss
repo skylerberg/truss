@@ -2368,8 +2368,12 @@ fn layout_parts(pattern: StringSlice) -> Option[List[LayoutPart]]
 impl FromTemplate for Layout {
   type Part = Never
 
+  fn is_valid_template(literals: List[text.Literal]) -> Bool
+  {
+    literals.length() == 1 && layout_parts(literals[0].text()) is Some(_)
+  }
+
   fn from_template(template: Template[Never]) -> Layout
-    requires is_valid_layout(template.literals)
   {
     if template.literals.length() != 1 {
       return Layout(parts: [])
@@ -2379,11 +2383,6 @@ impl FromTemplate for Layout {
       None => Layout(parts: [])
     }
   }
-}
-
-public fn is_valid_layout(literals: Slice[text.Literal]) -> Bool
-{
-  literals.length() == 1 && layout_parts(literals[0].text()) is Some(_)
 }
 
 public fn DateTime.format(self, layout: Layout) -> String

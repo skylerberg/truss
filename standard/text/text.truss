@@ -11,7 +11,9 @@ public opaque type StringSlice(bytes: intrinsic.View[UInt8])
 
 public trait FromTemplate {
   type Part
+  fn is_valid_template(literals: List[Literal]) -> Bool
   fn from_template(template: Template[Self.Part]) -> Self
+    requires Self.is_valid_template(template.literals)
 }
 
 public opaque type Literal(text: StringSlice)

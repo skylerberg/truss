@@ -142,13 +142,8 @@ val lower_owner_of_view :
 val lower_static_constant : Lowering.state -> Path.t -> Lowered.place
 val read_list_parts : Monomorphic.context -> Ground.ty -> string * Ground.ty * Ground.ty
 
-val lower_template_value :
-  Lowering.state ->
-  Ground.ty ->
-  string list ->
-  site:Lowered.site ->
-  parts:(Lowered.place -> unit) list ->
-  Lowered.place
+val lower_literals_into :
+  Lowering.state -> Ground.ty -> Lowered.place -> site:Lowered.site -> string list -> unit
 
 val pull_loop :
   Lowering.state ->

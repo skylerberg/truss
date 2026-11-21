@@ -273,8 +273,10 @@ let run_template_checks database (file : Path.file) proofs =
           (Lazy.force c_compiler) Development
       in
       List.map
-        (fun ({ from_template; literals; clauses } as check : Prover.Obligation.template_check) ->
-          (check, Backend.run_template_check backend ~from_template ~literals ~clauses))
+        (fun ({ function_; literals } as check : Prover.Obligation.template_check) ->
+          match Backend.evaluate_predicate backend ~function_ ~arguments:[ Literals literals ] with
+          | Ok run -> (check, run)
+          | Error message -> failwith message)
         checks
 
 let compute_verdicts database file =

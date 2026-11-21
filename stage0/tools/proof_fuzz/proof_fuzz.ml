@@ -153,7 +153,8 @@ let run_mutant ~samples text =
           List.iteri
             (fun index candidate ->
               incr functions;
-              let call function_ arguments =
+              let call function_ values =
+                let arguments = List.map (fun value -> Lowered.Item.Integer value) values in
                 Database.For_testing.add_root running (Call_evaluation { function_; arguments });
                 Backend.For_testing.evaluate_call (make_backend running) ~function_ ~arguments
               in

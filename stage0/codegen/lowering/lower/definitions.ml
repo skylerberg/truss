@@ -197,19 +197,6 @@ let make_c_signature context substitution ~(parameters : (Language.Mode.t * Type
   let lending = list_lending_parameters context substitution result in
   (Convention.make_signature ~returns (written @ mask @ evidence @ lending) result_ty, result_ty)
 
-let list_template_clauses context from_template clauses =
-  match Mir.read_contract context.lookups.mir from_template with
-  | Some { form = contract; _ } ->
-      List.map
-        (fun position ->
-          match List.nth_opt contract.requires position with
-          | Some ({ clause; is_executable = true; _ } : Mir.requirement) ->
-              Mir.expand_formula clause
-          | Some { is_executable = false; _ } | None ->
-              raise_bug "clause %d of %s cannot be run" position (Path.show from_template))
-        clauses
-  | None -> raise_bug "%s is not a function" (Path.show from_template)
-
 let has_defaults (signature : Types.signature) =
   List.exists (fun (parameter : Types.parameter_info) -> parameter.has_default) signature.parameters
 

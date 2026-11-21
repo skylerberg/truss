@@ -7,6 +7,7 @@ type proof =
   | Not_proven_here
 
 val prove : Lookups.t -> Resolve.Names.key -> proof
+val list_template_checks : proof -> Obligation.template_check list
 
 val resolve_location :
   Resolve.Names.lookups -> Resolve.Names.key -> Obligation.location -> Source.Definition_span.t
@@ -26,7 +27,7 @@ val collect_warnings : Lookups.t -> (Resolve.Names.key * proof) list -> warnings
 val list_warnings : warnings -> Path.file -> Diagnostic.t list
 
 val decide :
-  runs:(Obligation.template_check * (bool list, string) result) list ->
+  runs:(Obligation.template_check * (bool, string) result) list ->
   Lookups.t ->
   Solver.t ->
   (Resolve.Names.key * proof) list ->
@@ -37,7 +38,7 @@ val list_diagnostics : verdicts -> Path.file -> Diagnostic.t list
 
 module For_testing : sig
   val list_queries :
-    runs:(Obligation.template_check * (bool list, string) result) list ->
+    runs:(Obligation.template_check * (bool, string) result) list ->
     Lookups.t ->
     (Resolve.Names.key * proof) list ->
     Path.file ->

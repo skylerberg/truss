@@ -992,8 +992,17 @@ impl text.Parse for Value {
 impl FromTemplate for Value {
   type Part = Value
 
+  fn is_valid_template(literals: List[text.Literal]) -> Bool
+  {
+    match template_text(literals) {
+      Some(text) => {
+        parse_document(text, maximum_depth: text.length(), parts: no_parts.slice(), in_template: true) is Ok(_)
+      }
+      None => false
+    }
+  }
+
   fn from_template(template: Template[Value]) -> Value
-    requires is_valid_template(template.literals)
   {
     match template_text(template.literals) {
       Some(text) => {
@@ -1031,16 +1040,6 @@ fn template_text(literals: Slice[text.Literal]) -> Option[String]
     index += 1
   }
   Some(own joined)
-}
-
-public fn is_valid_template(literals: Slice[text.Literal]) -> Bool
-{
-  match template_text(literals) {
-    Some(text) => {
-      parse_document(text, maximum_depth: text.length(), parts: no_parts.slice(), in_template: true) is Ok(_)
-    }
-    None => false
-  }
 }
 
 impl From[Bool] for Value {
