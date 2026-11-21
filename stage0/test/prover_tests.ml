@@ -2742,9 +2742,7 @@ let () =
                 let text = Logic.show_query obligation.query in
                 max most (String.find_all ~sub:"12345" (fun _ matches -> matches + 1) text 0))
               0 obligations
-        | _ ->
-            Harness.fail "expected obligations";
-            0
+        | _ -> Harness.fail "expected obligations"
       in
       let shallow = make_most 3 and deep = make_most 6 in
       if deep > shallow then
@@ -3201,9 +3199,7 @@ let () =
       Support.read_proofs (Support.make_database packages) (Support.parse_file "app::main") key.key
     with
     | Obligations { obligations; _ } -> obligations
-    | _ ->
-        Harness.fail "no obligations";
-        []
+    | _ -> Harness.fail "no obligations"
   in
   Harness.test "an untriggered fact that the program writes is named when the solver gives up"
     (fun () ->

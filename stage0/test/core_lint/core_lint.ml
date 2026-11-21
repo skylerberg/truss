@@ -22,7 +22,7 @@ let find_declared_variants interface path arguments =
 
 type context = {
   interface : Interface.Lookups.t;
-  report : 'a. ('a, unit, string, unit) format4 -> 'a;
+  report : 'a 'b. ('a, unit, string, 'b) format4 -> 'a;
   at : Core.origin option ref;
   bounds : Interface.Impls.bounds;
 }
@@ -63,11 +63,9 @@ let fits context ~expected ~found =
 
 let make_substitution context generics arguments ~subject =
   if List.length generics = List.length arguments then Types.make_substitution generics arguments
-  else begin
+  else
     context.report "%s has %d type arguments for %d generic parameters" subject
-      (List.length arguments) (List.length generics);
-    Types.no_substitution
-  end
+      (List.length arguments) (List.length generics)
 
 let make_capability_substitution context (signature : Types.signature) arguments ~subject =
   let parameters =
@@ -759,9 +757,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                  let position =
                    match position.kind with
                    | Bind { local; _ } -> Some local
-                   | _ ->
-                       report "the position of an `Elements` loop is not a `Bind`";
-                       None
+                   | _ -> report "the position of an `Elements` loop is not a `Bind`"
                  in
                  match element with
                  | Lent { kind = Call { lends = Some mode; _ }; _ } when mode = lends -> ()

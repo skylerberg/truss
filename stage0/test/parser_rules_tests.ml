@@ -423,9 +423,7 @@ let () =
             (snd (Parse_support.parse ("fn example() {\n" ^ text ^ "\n}")))
         with
         | Some diagnostic -> diagnostic.fixes
-        | None ->
-            Harness.fail "no %s for %S" (Diagnostic.Code.name (Parser code)) text;
-            []
+        | None -> Harness.fail "no %s for %S" (Diagnostic.Code.name (Parser code)) text
       in
       if list_fixes "count :=== 0" Short_declaration <> [] then Harness.fail "offered the `let` fix");
   Harness.test "a comma between arms on one line becomes a line break" (fun () ->
