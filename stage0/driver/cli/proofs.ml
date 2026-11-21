@@ -52,7 +52,7 @@ let list_diagnostics checked file = Prover.list_diagnostics (Lazy.force checked.
 let list_warnings checked file = Prover.list_warnings (Lazy.force checked.warnings) file
 let list_states checked file = Prover.list_states (Lazy.force checked.verdicts) file
 
-let list_holes snapshot checked definition =
+let list_holes snapshot checked ~reached =
   List.map
-    (fun (file, line, column) -> (Workspace.locate_file snapshot file, line, column))
-    (Database.list_holes checked.proofs definition)
+    (fun (file, line, column, way) -> (Workspace.locate_file snapshot file, line, column, way))
+    (Database.list_holes checked.proofs ~reached)

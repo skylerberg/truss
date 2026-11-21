@@ -2206,22 +2206,67 @@ let prove database files =
 let find_proof proofs key =
   find_part proofs.database (note_untracked_read proofs.database) (Proof key)
 
-let list_holes proofs path =
-  let names = make_untracked_name_lookups proofs.database in
-  match Option.bind (names.find_key path) (find_proof proofs) with
-  | Some (Value (Obligations { holes; _ })) ->
-      List.map
-        (fun ((home : Resolve.Names.key), location) ->
-          let ({ file; base } : Resolve.Names.place) = names.read_place home in
-          let span = Prover.resolve_location names home location in
-          let line, column =
-            Source.compute_position
-              (read_source proofs.database file)
-              (Source.Definition_span.to_file ~base span).start
-          in
-          (file, line, column))
-        holes
-  | Some (Value (Unsupported _ | Not_proven_here) | Failed _ | Blocked) | None -> []
+let list_holes proofs ~reached =
+  let database = proofs.database in
+  let note = note_untracked_read database in
+  let names = make_untracked_name_lookups database in
+  let proven = Path_table.create (List.length proofs.keys) in
+  List.iter (fun (key : Resolve.Names.key) -> Path_table.replace proven key.path key) proofs.keys;
+  let list_read_contracts key =
+    List.filter_map
+      (fun (read : Part.t) ->
+        match read with
+        | Stored (Any (Contract_mir contract)) -> Some contract.path
+        | Input _ | Name _ | Stored _ -> None)
+      (Option.value (Stored_table.find_opt database.reads (Part.Any (Proof key))) ~default:[])
+  in
+  let list_impls_of_callees (key : Resolve.Names.key) =
+    match find_part database note (Mir_call_edges key.path) with
+    | Some (Value callees) ->
+        List.filter_map
+          (fun (callee : Path.t) ->
+            match callee with Method { owner = Impl _ as impl; _ } -> Some impl | _ -> None)
+          callees
+    | Some (Failed _ | Blocked) | None -> []
+  in
+  let list_proof_holes key =
+    match find_proof proofs key with
+    | Some (Value (Obligations { holes; _ })) -> holes
+    | Some (Value (Unsupported _ | Not_proven_here) | Failed _ | Blocked) | None -> []
+  in
+  let locate ((home : Resolve.Names.key), location) =
+    let ({ file; base } : Resolve.Names.place) = names.read_place home in
+    let span = Prover.resolve_location names home location in
+    let line, column =
+      Source.compute_position (read_source database file)
+        (Source.Definition_span.to_file ~base span).start
+    in
+    (file, line, column)
+  in
+  let visited = Path_table.create 64 and pending = Queue.create () in
+  let visit way path =
+    match Path_table.find_opt proven path with
+    | Some key when not (Path_table.mem visited path) ->
+        Path_table.replace visited path ();
+        Queue.add (key, way @ [ path ]) pending
+    | Some _ | None -> ()
+  in
+  List.iter (visit []) reached;
+  let rec collect holes =
+    match Queue.take_opt pending with
+    | None -> List.rev holes
+    | Some (key, way) ->
+        List.iter (visit way) (list_read_contracts key @ list_impls_of_callees key);
+        collect
+          (List.rev_append
+             (List.map
+                (fun hole ->
+                  let file, line, column = locate hole in
+                  (file, line, column, way))
+                (list_proof_holes key))
+             holes)
+  in
+  collect []
 
 let list_template_checks (proofs : proofs) =
   let database = proofs.database in

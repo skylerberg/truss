@@ -23,22 +23,26 @@ let find_inherited_clauses (lookups : Lookups.t) (path : Path.t) =
 
 let translate_impl (lookups : Lookups.t) (key : Resolve.Names.key) source =
   let interface = Interface.Definition.read_impl_interface lookups.interface key.path in
-  if Contracts.is_impl_unfinished lookups key then []
-  else
-    Translate.translate_laws lookups source ~impl:key.path ~trait:interface.implements
-      ~for_type:interface.for_type
-      ~proofs:
-        (Contracts.list_law_proofs lookups (Path.locate_package key.path) interface.implements
-           interface.for_type)
-      ~at:Whole_definition
-    ::
-    (match lookups.interface.names.read_definition key with
-    | { kind = Impl { trait_; _ }; _ } ->
-        [
-          Translate.translate_restated_clauses lookups source ~impl:key.path
-            ~trait:interface.implements ~for_type:interface.for_type ~at:(Written trait_.id);
-        ]
-    | _ -> [])
+  match Contracts.list_impl_holes lookups key with
+  | _ :: _ as holes ->
+      if Contracts.has_impl_obligations lookups interface.implements.trait then
+        [ { Obligation.obligations = []; holes; warnings = [] } ]
+      else []
+  | [] ->
+      Translate.translate_laws lookups source ~impl:key.path ~trait:interface.implements
+        ~for_type:interface.for_type
+        ~proofs:
+          (Contracts.list_law_proofs lookups (Path.locate_package key.path) interface.implements
+             interface.for_type)
+        ~at:Whole_definition
+      ::
+      (match lookups.interface.names.read_definition key with
+      | { kind = Impl { trait_; _ }; _ } ->
+          [
+            Translate.translate_restated_clauses lookups source ~impl:key.path
+              ~trait:interface.implements ~for_type:interface.for_type ~at:(Written trait_.id);
+          ]
+      | _ -> [])
 
 let list_integer_instances (lookups : Lookups.t) (path : Path.t) =
   let generics =

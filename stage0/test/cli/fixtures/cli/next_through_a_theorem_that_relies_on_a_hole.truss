@@ -1,0 +1,22 @@
+theorem base(n: UInt64)
+  ensures n < 10
+{
+  todo
+}
+
+theorem step(n: UInt64)
+  ensures n < 10
+{
+  base(n)
+}
+
+fn next(n: UInt64) -> UInt64 {
+  proof {
+    step(n)
+  }
+  n + 1
+}
+
+fn main(arguments: List[String]) -> ExitCode {
+  if next(arguments.length()) > 5 { ExitCode.failure } else { ExitCode.success }
+}

@@ -1407,6 +1407,7 @@ in place of an expression, a body, or a type definition.
 |---|---|
 | Code with a `todo` is type-checked and proven. | A caller's contracts are proven before its callees exist. |
 | A release build refuses a program that can reach a `todo`. | A `todo` that panicked when reached would be a failure that the signature does not show. |
+| Reaching follows proofs: to the definitions whose contracts a reached proof reads, and to the laws of each `impl` that reached code calls or passes to generic code. | A release build has no run-time checks, so an operation proven from an unproven contract or law would be undefined behavior. A theorem, or a function that only proofs call, never runs, so its `todo` cannot panic in place of the proof. |
 | A test that reaches a `todo` is incomplete, not failed. | Tests can be written first. |
 
 ## Debug output

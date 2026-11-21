@@ -1087,7 +1087,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
           | Bound, Some (Impl _ as resolved) -> resolved
           | _ -> evidence
         in
-        Laws.assume_laws context frame ~at:location trait self_type;
+        Laws.assume_laws context frame trait self_type;
         let list_operands () = List.map (fun (passed : State.passed) -> passed.term) values in
         let trait_path = Path.Method { owner = trait.trait; name; receiver } in
         let method_ = Well_known.find_method trait_path in

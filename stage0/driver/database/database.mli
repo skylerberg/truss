@@ -61,7 +61,7 @@ type 'a part = Value of 'a | Failed of Diagnostic.in_definition list | Blocked
 type proofs
 
 val prove : t -> Path.file list -> proofs
-val list_holes : proofs -> Path.t -> (Path.file * int * int) list
+val list_holes : proofs -> reached:Path.t list -> (Path.file * int * int * Path.t list) list
 val list_template_checks : proofs -> Prover.Obligation.template_check list
 val list_proofs : proofs -> (Resolve.Names.key * Prover.proof) list
 val make_proof_lookups : t -> Prover.Lookups.t

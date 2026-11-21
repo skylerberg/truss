@@ -1,0 +1,36 @@
+trait Combine: Equal {
+  fn empty() -> Self
+  fn combine(self, other: Self) -> Self
+  fn unused(self) -> Self
+
+  law left_identity(value: Self) {
+    Self.empty().combine(value) == value
+  }
+}
+
+type Maximum(value: Int64)
+  derives Equal
+
+impl Combine for Maximum {
+  fn empty() -> Maximum {
+    Maximum(Int64.minimum)
+  }
+
+  fn combine(self, other: Maximum) -> Maximum {
+    if self.value >= other.value { self } else { other }
+  }
+
+  fn unused(self) -> Maximum {
+    todo
+  }
+}
+
+fn identity_holds[Item: Combine](value: Item) -> Bool
+  ensures result
+{
+  Item.empty().combine(value) == value
+}
+
+fn main(arguments: List[String]) -> ExitCode {
+  if identity_holds(Maximum(3)) { ExitCode.success } else { ExitCode.failure }
+}
