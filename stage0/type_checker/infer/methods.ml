@@ -322,9 +322,9 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
               | Some expected, Returns output -> State.unify_as_hint state output expected
               | _ -> ());
               match
-                Calls.check_arguments state env value instance.signature.parameters
-                  ~declared:instance.declared.parameters ~flatten:instance.flatten arguments
-                  ~has_receiver:false
+                Calls.check_arguments state env Argument_matching.Call value
+                  instance.signature.parameters ~declared:instance.declared.parameters
+                  ~flatten:instance.flatten arguments ~has_receiver:false
               with
               | Error error -> error
               | Ok (checked, left_out) ->
@@ -470,7 +470,7 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
   | Error error -> error
   | Ok (receiver_argument, arguments) -> (
       match
-        Calls.check_arguments state env value instance.signature.parameters
+        Calls.check_arguments state env Argument_matching.Call value instance.signature.parameters
           ~declared:instance.declared.parameters ~flatten:instance.flatten arguments
           ~has_receiver:(Option.is_some instance.signature.receiver)
       with
@@ -551,7 +551,7 @@ and check_capability_call state env (value : Syntax.expression) capability (memb
           (Members.read_method_signature state.lookups capability method_)
       in
       match
-        Calls.check_arguments state env value instance.signature.parameters
+        Calls.check_arguments state env Argument_matching.Call value instance.signature.parameters
           ~declared:instance.declared.parameters ~flatten:instance.flatten arguments
           ~has_receiver:false
       with
@@ -751,9 +751,9 @@ and check_method_with_receiver state env ?expected ?(type_arguments = [])
           | Some expected, Returns output -> State.unify_as_hint state output expected
           | _ -> ());
           match
-            Calls.check_arguments state env value instance.signature.parameters
-              ~declared:instance.declared.parameters ~flatten:instance.flatten arguments
-              ~has_receiver:true
+            Calls.check_arguments state env Argument_matching.Call value
+              instance.signature.parameters ~declared:instance.declared.parameters
+              ~flatten:instance.flatten arguments ~has_receiver:true
           with
           | Error error -> error
           | Ok (checked, left_out) ->
@@ -808,9 +808,9 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
       | Error error -> Calls.check_arguments_alone state env arguments error
       | Ok () -> (
           match
-            Calls.check_arguments state env value instance.signature.parameters
-              ~declared:instance.declared.parameters ~flatten:instance.flatten arguments
-              ~has_receiver:true
+            Calls.check_arguments state env Argument_matching.Call value
+              instance.signature.parameters ~declared:instance.declared.parameters
+              ~flatten:instance.flatten arguments ~has_receiver:true
           with
           | Error error -> error
           | Ok (checked, left_out) ->

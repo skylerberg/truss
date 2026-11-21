@@ -824,6 +824,10 @@ test "calling functions" {
   leave the argument out. A label skips the parameters with defaults before
   it, as in `connect(host, secure: false)` for `fn connect(host: HostName,
   port: UInt16 = 443, secure: Bool = true)`.
+- **A record is built by field name, not by position,** as in
+  `Interval(start: low, stop: high)`, because its fields have no order. A
+  variable named like a field needs no label: `Interval(start, stop)`.
+  [Chapter 5](#5-records-and-sum-types) covers records.
 - **Clauses between the signature and the body** state what the function
   promises. `requires` is one. [Chapter 13](#13-contracts-and-proofs) covers
   them all.
@@ -1358,14 +1362,19 @@ fn width(span: Span) -> UInt64
 }
 
 test "a tuple pattern" {
-  assert width(Span(start: 2, end: 7)) == 5
+  assert width(Span(2, 7)) == 5
+  assert width(Span(2, end: 7)) == 5
 }
 ```
 
+- A tuple type is built as a function is called: positional arguments in
+  the order of the fields, then labeled ones in any order, so `Span(2, 7)`
+  is `Span(start: 2, end: 7)`.
 - In parentheses, fields match by name in every record, so
   `let (start, end) = span` works and `let (low, high) = span` is an error.
 - A name that belongs to another field is an error: `let end, start = span`
-  would bind `end` to the field `start`.
+  would bind `end` to the field `start`, and `Span(end, start)` would put
+  `end` in the field `start`.
 - A map's entries, `enumerate`, and `zip` give tuple types, so a loop over
   them names the parts by position ([Chapter 7](#7-collections)).
 
@@ -1450,6 +1459,28 @@ test "a sum type" {
 In an expression, a variant is written under its type, `Message.Move`. In a
 pattern, it is written alone, `Move(x, y)`, because the compiler looks it up
 in the type of the value being matched.
+
+`Move(x, y)` matches by name, not by position: each bare name binds the
+field it names, so `Move(y, x)` means the same. A label binds a field to
+another name, in a pattern as in a construction:
+
+```truss
+type Message =
+  | Quit
+  | Move(x: Int64, y: Int64)
+
+fn Message.column(self) -> Int64 {
+  match self {
+    Move(x: column, ..) => column
+    Quit => 0
+  }
+}
+
+test "a label binds a field to another name" {
+  let column: Int64 = 3
+  assert Message.Move(x: column, y: 0).column() == 3
+}
+```
 
 #### Recursive types
 
@@ -1553,6 +1584,7 @@ test "patterns" {
 | `400..=499` | An integer or character in the range |
 | `301 \| 302` | Either pattern; both bind the same names |
 | `Some(value)`, `Move(x, y)` | That variant, binding its fields by name |
+| `Move(x: column, y)` | That variant, binding its field `x` as `column` |
 | `Move(x: 0, ..)` | That variant with `x` equal to 0; `..` skips the other fields |
 | `(x, y)` | A record, binding its fields `x` and `y` |
 | `http::ok`, `Status.teapot` | A constant, written with its module or its type |

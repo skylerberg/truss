@@ -1,0 +1,6 @@
+type Interval(start: Int64, stop: Int64)
+
+fn width(interval: Interval) -> Int64 {
+  let low, high = interval
+  high.saturating_add(low)
+}

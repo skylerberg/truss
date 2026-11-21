@@ -72,60 +72,162 @@ let () =
         (board ^ Fixtures.Parallel.parallel_board_test)
         "test 0 passed\n")
 
+let lowered_int32 = Lowered.Value Codegen_support.int32
+let at ?(projections = []) local : Lowered.place = { root = Local local; projections }
+let copy local = Lowered.Copy (at local)
+let add left right = Lowered.Binary (Add, copy left, copy right)
+let take_address holder = Lowered.Address { place = at holder; writable = false }
+
+let expect_c_includes c texts =
+  List.iter
+    (fun text ->
+      if not (String.includes ~affix:text c) then Codegen_support.fail "no %s in:\n%s" text c)
+    texts
+
 let () =
   Codegen_support.test
-    "an outlined function's own local goes with it, and a shared one is reached through its \
-     environment" (fun () ->
-      let int = Lowered.Value Codegen_support.int32 in
-      let copy local = Lowered.Copy (Lowered.make_local_place local) in
-      let add left right = Lowered.Binary (Add, copy left, copy right) in
+    "an outlined function's own local goes with it, a shared local it only reads arrives by value, \
+     and one it writes arrives as a restrict pointer" (fun () ->
       let env = Codegen_support.make_shape_env () in
       let builder = Emit_c.Ir_builder.create env ~item:(Codegen_support.code_item "entry") in
-      let parameter = Emit_c.Ir_builder.allocate_local builder int in
-      let sum = Emit_c.Ir_builder.allocate_local builder int in
-      let other = Emit_c.Ir_builder.allocate_local builder int in
-      Emit_c.Ir_builder.emit builder
-        (Assign (Lowered.make_local_place parameter, Use (Codegen_support.constant_int32 5)));
-      let nested_functions = Lowered.create_nested_function_counter () in
-      let first_function = Lowered.allocate_nested_function nested_functions in
+      let parameter = Emit_c.Ir_builder.allocate_local builder lowered_int32 in
+      let sum = Emit_c.Ir_builder.allocate_local builder lowered_int32 in
+      let other = Emit_c.Ir_builder.allocate_local builder lowered_int32 in
+      Emit_c.Ir_builder.emit builder (Assign (at parameter, Use (Codegen_support.constant_int32 5)));
       let first =
-        Emit_c.Ir_builder.outline builder ~index:first_function ~parts:[] (fun () ->
-            let own = Emit_c.Ir_builder.allocate_local builder ~name:"own" int in
-            Emit_c.Ir_builder.emit builder
-              (Assign (Lowered.make_local_place own, add parameter parameter));
-            Emit_c.Ir_builder.emit builder
-              (Assign (Lowered.make_local_place sum, add own parameter));
+        Emit_c.Ir_builder.outline builder ~index:(Lowered.For_testing.make_nested_function 0)
+          ~parts:[] (fun () ->
+            let own = Emit_c.Ir_builder.allocate_local builder ~name:"own" lowered_int32 in
+            Emit_c.Ir_builder.emit builder (Assign (at own, add parameter parameter));
+            Emit_c.Ir_builder.emit builder (Assign (at sum, add own parameter));
             Emit_c.Ir_builder.finish builder (Return None))
       in
-      let second_function = Lowered.allocate_nested_function nested_functions in
       let second =
-        Emit_c.Ir_builder.outline builder ~index:second_function ~parts:[] (fun () ->
-            Emit_c.Ir_builder.emit builder
-              (Assign (Lowered.make_local_place other, Use (copy parameter)));
+        Emit_c.Ir_builder.outline builder ~index:(Lowered.For_testing.make_nested_function 1)
+          ~parts:[] (fun () ->
+            Emit_c.Ir_builder.emit builder (Assign (at other, Use (copy parameter)));
             Emit_c.Ir_builder.finish builder (Return None))
-      in
-      let take_address holder =
-        Lowered.Address { place = Lowered.make_local_place holder; writable = false }
       in
       Emit_c.Ir_builder.emit builder
         (Fork
            {
              branches =
-               [ (first_function, take_address first); (second_function, take_address second) ];
+               [
+                 (Lowered.For_testing.make_nested_function 0, take_address first);
+                 (Lowered.For_testing.make_nested_function 1, take_address second);
+               ];
            });
-      Emit_c.Ir_builder.emit builder (Assign (Lowered.make_local_place sum, add sum other));
+      Emit_c.Ir_builder.emit builder (Assign (at sum, add sum other));
       Emit_c.Ir_builder.finish builder (Return (Some (copy sum)));
       let fragment =
-        Emit_c.Ir_builder.build builder { parameters = []; result = Some int; returns = true }
+        Emit_c.Ir_builder.build builder
+          { parameters = []; result = Some lowered_int32; returns = true }
       in
       let c = Emit_c.For_testing.render_c fragment in
-      List.iter
-        (fun text ->
-          if not (String.includes ~affix:text c) then Codegen_support.fail "no %s in:\n%s" text c)
-        [ "f_capture0"; "f_capture1"; "int32_t l6_own;" ];
+      expect_c_includes c
+        [
+          "_Nested_0_body(int32_t l0, int32_t *restrict l1_address)";
+          "_Nested_0_body(*(*l5).f_capture0, (*l5).f_capture1);";
+          "_Nested_1_body(int32_t l0, int32_t *restrict l2_address)";
+          "int32_t l6_own;";
+        ];
       if String.includes ~affix:"f_capture2" c then
         Codegen_support.fail "a function reaches three locals:\n%s" c;
       Codegen_support.expect_status 20 [ Codegen_support.make_program_fragment fragment ])
+
+let () =
+  Codegen_support.test
+    "a region nested in another reaches the enclosing function's locals through it, by address \
+     where the inner region writes them and by value where it only reads them" (fun () ->
+      let env = Codegen_support.make_shape_env () in
+      let builder = Emit_c.Ir_builder.create env ~item:(Codegen_support.code_item "entry") in
+      let written = Emit_c.Ir_builder.allocate_local builder ~name:"written" lowered_int32 in
+      let read = Emit_c.Ir_builder.allocate_local builder ~name:"read" lowered_int32 in
+      let target = Emit_c.Ir_builder.allocate_local builder ~name:"target" lowered_int32 in
+      let pointer =
+        Emit_c.Ir_builder.allocate_local builder ~name:"pointer"
+          (Pointer { target = lowered_int32; writable = true })
+      in
+      let pointee = at ~projections:[ Deref ] pointer in
+      Emit_c.Ir_builder.emit builder (Assign (at written, Use (Codegen_support.constant_int32 1)));
+      Emit_c.Ir_builder.emit builder (Assign (at read, Use (Codegen_support.constant_int32 3)));
+      Emit_c.Ir_builder.emit builder (Assign (at target, Use (Codegen_support.constant_int32 10)));
+      Emit_c.Ir_builder.emit builder
+        (Assign (at pointer, Use (Address { place = at target; writable = true })));
+      let outer =
+        Emit_c.Ir_builder.outline builder ~index:(Lowered.For_testing.make_nested_function 0)
+          ~parts:[] (fun () ->
+            Emit_c.Ir_builder.emit builder
+              (Assign (pointee, Binary (Add, Copy pointee, Codegen_support.constant_int32 6)));
+            let inner =
+              Emit_c.Ir_builder.outline builder ~index:(Lowered.For_testing.make_nested_function 1)
+                ~parts:[] (fun () ->
+                  Emit_c.Ir_builder.emit builder
+                    (Assign (at written, Binary (Add, copy read, Codegen_support.constant_int32 4)));
+                  Emit_c.Ir_builder.finish builder (Return None))
+            in
+            Emit_c.Ir_builder.emit builder
+              (Fork
+                 { branches = [ (Lowered.For_testing.make_nested_function 1, take_address inner) ] });
+            Emit_c.Ir_builder.finish builder (Return None))
+      in
+      Emit_c.Ir_builder.emit builder
+        (Fork { branches = [ (Lowered.For_testing.make_nested_function 0, take_address outer) ] });
+      Emit_c.Ir_builder.emit builder (Assign (at written, add written target));
+      Emit_c.Ir_builder.finish builder (Return (Some (copy written)));
+      let fragment =
+        Emit_c.Ir_builder.build builder
+          { parameters = []; result = Some lowered_int32; returns = true }
+      in
+      expect_c_includes
+        (Emit_c.For_testing.render_c fragment)
+        [
+          "_Nested_0_body(int32_t *restrict l0_written_address, int32_t l1_read, int32_t *restrict \
+           l3_pointer)";
+          "_Nested_1_body(int32_t *restrict l0_written_address, int32_t l1_read)";
+        ];
+      Codegen_support.expect_status 23 [ Codegen_support.make_program_fragment fragment ])
+
+let () =
+  Codegen_support.test
+    "a shared record that a region only reads arrives as a restrict pointer, not as a copy"
+    (fun () ->
+      let point_shape =
+        ( "Point",
+          Memory_layout.Record
+            [
+              Codegen_support.field "x" Codegen_support.int32;
+              Codegen_support.field "y" Codegen_support.int32;
+            ] )
+      in
+      let env = Codegen_support.make_shape_env ~extra:[ point_shape ] () in
+      let builder = Emit_c.Ir_builder.create env ~item:(Codegen_support.code_item "entry") in
+      let point =
+        Emit_c.Ir_builder.allocate_local builder ~name:"point"
+          (Codegen_support.value (Codegen_support.named "Point"))
+      in
+      let sum = Emit_c.Ir_builder.allocate_local builder ~name:"sum" lowered_int32 in
+      let field name = at ~projections:[ Field name ] point in
+      Emit_c.Ir_builder.emit builder (Assign (field "x", Use (Codegen_support.constant_int32 3)));
+      Emit_c.Ir_builder.emit builder (Assign (field "y", Use (Codegen_support.constant_int32 4)));
+      let region =
+        Emit_c.Ir_builder.outline builder ~index:(Lowered.For_testing.make_nested_function 0)
+          ~parts:[] (fun () ->
+            Emit_c.Ir_builder.emit builder
+              (Assign (at sum, Binary (Add, Copy (field "x"), Copy (field "y"))));
+            Emit_c.Ir_builder.finish builder (Return None))
+      in
+      Emit_c.Ir_builder.emit builder
+        (Fork { branches = [ (Lowered.For_testing.make_nested_function 0, take_address region) ] });
+      Emit_c.Ir_builder.finish builder (Return (Some (copy sum)));
+      let fragment =
+        Emit_c.Ir_builder.build builder
+          { parameters = []; result = Some lowered_int32; returns = true }
+      in
+      let c = Emit_c.For_testing.render_c fragment in
+      expect_c_includes c [ " *restrict l0_point_address, int32_t *restrict l1_sum_address)" ];
+      Codegen_support.expect_status ~extra:[ point_shape ] 7
+        [ Codegen_support.make_program_fragment fragment ])
 
 let () =
   Codegen_support.test
@@ -246,3 +348,183 @@ let () =
                 (Return (Some (Codegen_support.copy 6)));
             ];
         ])
+
+let runtime_declarations =
+  {|#define _GNU_SOURCE
+#include <stddef.h>
+#include <stdint.h>
+#include <stdatomic.h>
+#include <time.h>
+
+struct truss_branch {
+  void (*run)(void *environment);
+  void *environment;
+};
+
+void truss_runtime_main(void (*code)(void *environment, uint64_t item, void *capabilities),
+                        void *environment, uint32_t requested_workers);
+void truss_runtime_parallel(const struct truss_branch *branches, uint64_t count);
+void truss_runtime_parallel_range(void (*body)(void *environment, uint64_t first, uint64_t last),
+                                  void *environment, uint64_t first, uint64_t last);
+|}
+
+let spinning =
+  {|
+static atomic_int timed_out;
+
+static int spin_until(atomic_int *flag, long milliseconds) {
+  struct timespec start, now;
+  clock_gettime(CLOCK_MONOTONIC, &start);
+  while (!atomic_load(flag)) {
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    long elapsed = (now.tv_sec - start.tv_sec) * 1000 + (now.tv_nsec - start.tv_nsec) / 1000000;
+    if (elapsed > milliseconds) return 0;
+  }
+  return 1;
+}
+
+static void wait_or_time_out(atomic_int *flag) {
+  if (!spin_until(flag, 2000)) atomic_store(&timed_out, 1);
+}
+|}
+
+let expect_runtime_status expected program =
+  let output = Codegen_support.make_scratch_path "runtime" in
+  match
+    C_compiler.build_executable
+      (Lazy.force Codegen_support.c_compiler)
+      Development
+      ~units:
+        [
+          ("the runtime", Startup.render_runtime ~tests:false);
+          ("the program", runtime_declarations ^ program);
+        ]
+      ~output
+  with
+  | Ok () ->
+      let status, _, errors = Process.run output [] in
+      if status <> expected then
+        Codegen_support.fail "expected status %d, got %d (%s)" expected status errors
+  | Error message -> failwith message
+
+let () =
+  Codegen_support.test
+    "a parallel block of 40 branches starts its last branch while its first still runs" (fun () ->
+      expect_runtime_status 0
+        (spinning
+       ^ {|
+static atomic_int last_ran;
+
+static void wait_for_last(void *environment) { wait_or_time_out(&last_ran); }
+static void mark_last(void *environment) { atomic_store(&last_ran, 1); }
+static void do_nothing(void *environment) {}
+
+static void run(void *environment, uint64_t item, void *capabilities) {
+  struct truss_branch branches[40];
+  branches[0] = (struct truss_branch){wait_for_last, NULL};
+  for (int index = 1; index < 39; index++) branches[index] = (struct truss_branch){do_nothing, NULL};
+  branches[39] = (struct truss_branch){mark_last, NULL};
+  truss_runtime_parallel(branches, 40);
+}
+
+int main(void) {
+  truss_runtime_main(run, NULL, 2);
+  return atomic_load(&timed_out);
+}
+|}
+        ));
+  Codegen_support.test
+    "a thread that waits for a stolen branch runs only work forked inside that branch" (fun () ->
+      expect_runtime_status 0
+        (spinning
+       ^ {|
+static atomic_int outer_started, inner_started, inner_done, unrelated_ran_early;
+
+static void fork_two(void (*first)(void *environment), void (*second)(void *environment)) {
+  struct truss_branch branches[2] = {{first, NULL}, {second, NULL}};
+  truss_runtime_parallel(branches, 2);
+}
+
+static void wait_for_inner(void *environment) { wait_or_time_out(&inner_done); }
+
+static void unrelated(void *environment) {
+  if (!atomic_load(&inner_done)) atomic_store(&unrelated_ran_early, 1);
+}
+
+static void outer(void *environment) {
+  atomic_store(&outer_started, 1);
+  wait_or_time_out(&inner_started);
+  fork_two(wait_for_inner, unrelated);
+}
+
+static void wait_for_inner_start(void *environment) { wait_or_time_out(&inner_started); }
+
+static void inner(void *environment) {
+  atomic_store(&inner_started, 1);
+  spin_until(&unrelated_ran_early, 50);
+  atomic_store(&inner_done, 1);
+}
+
+static void waiting(void *environment) {
+  wait_or_time_out(&outer_started);
+  fork_two(wait_for_inner_start, inner);
+}
+
+static void run(void *environment, uint64_t item, void *capabilities) { fork_two(waiting, outer); }
+
+int main(void) {
+  truss_runtime_main(run, NULL, 3);
+  if (atomic_load(&timed_out)) return 2;
+  return atomic_load(&unrelated_ran_early);
+}
+|}
+        ));
+  Codegen_support.test "one worker runs a parallel range as one call to its body" (fun () ->
+      expect_runtime_status 0
+        {|
+static atomic_int calls, wrong_bounds;
+
+static void count_call(void *environment, uint64_t first, uint64_t last) {
+  atomic_fetch_add(&calls, 1);
+  if (first != 0 || last != 999) atomic_store(&wrong_bounds, 1);
+}
+
+static void run(void *environment, uint64_t item, void *capabilities) {
+  truss_runtime_parallel_range(count_call, NULL, 0, 999);
+}
+
+int main(void) {
+  truss_runtime_main(run, NULL, 1);
+  return atomic_load(&calls) != 1 || atomic_load(&wrong_bounds);
+}
+|});
+  Codegen_support.test "eight workers run every index of a parallel range once" (fun () ->
+      expect_runtime_status 0
+        {|
+#define COUNT 100003
+
+static atomic_uchar visits[COUNT];
+static atomic_int wrong_bounds;
+
+static void visit(void *environment, uint64_t first, uint64_t last) {
+  if (first > last || last >= COUNT) {
+    atomic_store(&wrong_bounds, 1);
+    return;
+  }
+  for (uint64_t index = first; index <= last; index++) atomic_fetch_add(&visits[index], 1);
+}
+
+static void run(void *environment, uint64_t item, void *capabilities) {
+  truss_runtime_parallel_range(visit, NULL, 0, 0);
+  truss_runtime_parallel_range(visit, NULL, 1, 2);
+  truss_runtime_parallel_range(visit, NULL, 3, COUNT - 1);
+}
+
+int main(void) {
+  truss_runtime_main(run, NULL, 8);
+  if (atomic_load(&wrong_bounds)) return 2;
+  for (uint64_t index = 0; index < COUNT; index++)
+    if (atomic_load(&visits[index]) != 1) return 1;
+  return 0;
+}
+|})

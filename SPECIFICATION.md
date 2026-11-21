@@ -427,8 +427,12 @@ fn length(span: Span) -> UInt64
 
 - A tuple type is a record whose fields are in the order they are declared,
   and a tuple pattern matches them by position (see [Patterns](#patterns)).
-- A tuple type has two or more fields. It is built, read, and matched in
-  parentheses by name, as any record is.
+- A tuple type has two or more fields. It is built as a function is called
+  (see [Calls and arguments](#calls-and-arguments)): positional arguments in
+  the order of the fields, then labeled ones in any order. A positional
+  argument that is a variable named like another field is an error. It is
+  read, updated with `with`, and matched in parentheses by name, as any
+  record is.
 - `map::Entry`, `core::Indexed`, and `core::Pair` are tuple types, so
   `for name, port in ports` binds each entry's key and value.
 
@@ -789,7 +793,7 @@ let connection = connect(host, secure: false)?
   evaluated in the order written. A bare name that matches a field's name
   passes that variable to that field, optionally after a mode keyword. Only
   a record or variant with exactly one field takes a positional argument, as
-  in `Some(3)`.
+  in `Some(3)`, except a tuple type (see [Tuple types](#tuple-types)).
 - A call through a function value passes its arguments by position, without
   labels.
 

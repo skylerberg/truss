@@ -49,6 +49,7 @@ let resolve ~prefix ~name_item ~name_type ~name_site ~name_local : C_text.refere
   | Local local -> name_local local
   | Byte_constant index -> Printf.sprintf "%s_bytes_%d" prefix index
   | Nested_function index -> Printf.sprintf "%s_Nested_%d" prefix (index :> int)
+  | Nested_body index -> Printf.sprintf "%s_Nested_%d_body" prefix (index :> int)
   | Static index -> Printf.sprintf "%s_static_%d" prefix index
   | Helper helper -> C_runtime.render_helper_name helper
   | Capability capability -> C_runtime.render_capability_symbol capability
