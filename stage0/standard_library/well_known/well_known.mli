@@ -101,6 +101,7 @@ type method_ =
   | List_from_storage
   | String_push
   | From_template_from_template
+  | From_template_is_valid_template
   | From_elements_from_elements
   | From_entries_from_entries
   | Sequence_length

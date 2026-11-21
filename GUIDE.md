@@ -4302,6 +4302,7 @@ test "proofs" {
 | The error says | Try |
 |---|---|
 | A counterexample, such as "when `count` is 255" | The promise really fails for those values: add a `requires`, an `if`, or a checked operation |
+| "This fails every time the code reaches it" | The code fails whenever it runs, so no `proof` block can help: change the code |
 | "a value the prover knows nothing more about" | A callee's result or a loop variable is unconstrained: add an `ensures` to the callee, or an `invariant` to the loop |
 | "The solver ran out of steps, so it may hold but needs help" | Break the step into smaller ones: an `assert` in a `proof` block, or a theorem |
 | A `requires` of a callee "may not hold" | Find which fact the caller lacks; the note points at the clause |
@@ -4742,9 +4743,9 @@ test "tagged templates" {
   compiled. An invalid one is a compile error:
 
   ```text
-  main.truss:4:14: error[prover.requires]: This template may not meet `is_valid_template(template.literals)`, which its tag requires. Running it on this template's text gives `false`.
+  main.truss:4:14: error[prover.requires]: `Self.is_valid_template(template.literals)` may not hold for this call to `Regex.from_template`. This fails every time the code reaches it. The clause that must hold is at `standard/text/text.truss:16`.
     |   let word = regex.Regex"[a-z"
-    |              ^^^^^^^^^^^^^^^^^^
+    |              ^^^^^^^^^^^^^^^^^
 
   1 error
   ```
@@ -4755,14 +4756,13 @@ test "tagged templates" {
 - The standard library's tags include `regex.Regex`, `html.Html`,
   `url.Url`, `json.Value`, `files.Glob`, `processes.Command`,
   `http.Route`, and `time.Layout`.
-- `Character"é"` and `UInt8"\n"` are tags too, checked to hold exactly one
-  character.
+- `Character"é"` and `UInt8"\n"` use the same syntax, and are checked to
+  hold exactly one character.
 
 A type becomes a tag by implementing the prelude trait `FromTemplate`. Its
-`from_template` method states, with a `requires`, which literal text is
-valid, and the compiler proves that `requires` by running the check on the
-literal's text, as compiled code. See [Tagged
-templates](SPECIFICATION.md#tagged-templates).
+`is_valid_template` method states which literal text is valid, and the
+compiler checks each template's text with it when the code is compiled. See
+[Tagged templates](SPECIFICATION.md#tagged-templates).
 
 ### Overloads by receiver mode
 

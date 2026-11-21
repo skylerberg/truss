@@ -101,6 +101,7 @@ type method_ =
   | List_from_storage
   | String_push
   | From_template_from_template
+  | From_template_is_valid_template
   | From_elements_from_elements
   | From_entries_from_entries
   | Sequence_length
@@ -276,6 +277,7 @@ let methods =
     (List_from_storage, List, "from_storage", Static);
     (String_push, String, "push", Instance Mut);
     (From_template_from_template, From_template, "from_template", Static);
+    (From_template_is_valid_template, From_template, "is_valid_template", Static);
     (From_elements_from_elements, From_elements, "from_elements", Static);
     (From_entries_from_entries, From_entries, "from_entries", Static);
     (Sequence_length, Sequence, "length", Instance Read);

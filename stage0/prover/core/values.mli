@@ -6,18 +6,6 @@ val assume_extensional :
 val apply_list_literal :
   State.context -> State.frame -> Invocation.site -> Logic.term list -> State.frame * Logic.term
 
-val apply_template :
-  State.context ->
-  State.frame ->
-  Invocation.site ->
-  trait:Types.trait_reference ->
-  name:string ->
-  receiver:Path.receiver ->
-  evidence:Core.evidence ->
-  literals:string list ->
-  Logic.term ->
-  State.frame * Logic.term
-
 val apply_map_literal :
   State.context ->
   State.frame ->

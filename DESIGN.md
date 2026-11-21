@@ -1163,11 +1163,10 @@ values, which makes an injection attack impossible by construction:
 
 | Rule | Reason |
 |---|---|
-| The tag is a type. | The tag names the type of the result, and a plain string is the case where the tag is `String`. |
-| Malformed literal text is a compile error. | A tag states the rules for its literal text as the `requires` of `from_template`. A function in a specification is pure and terminates, so the compiler can run the check at compile time, and constructing the value cannot fail. The feature reuses `requires`, purity, and termination. |
-| `from_template` is the one method whose `requires` may be stronger than its trait's. | A tag exists to constrain the literal text of a template, and a template always names its tag. |
+| The tag is a type. | The tag names the type of the result. |
+| Malformed literal text is a compile error. | A tag states the rules for its literal text in `is_valid_template`, which `from_template` requires. A function in a specification is pure and terminates, so the compiler can run the check at compile time, and constructing the value cannot fail. The feature reuses `requires`, purity, and termination. |
 | A check cannot read anything outside the code, such as a live database schema. | A build has no capabilities. |
-| A character and a byte are tagged templates: `Character"é"` and `UInt8"\n"`. | They need no lexer rule of their own and no second set of escapes. |
+| A character and a byte use the syntax of a tagged template: `Character"é"` and `UInt8"\n"`. | They need no lexer rule of their own and no second set of escapes. |
 
 ## Traits and laws
 

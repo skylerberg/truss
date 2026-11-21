@@ -1034,10 +1034,24 @@ let shout = Fixtures.Prover.shout
 let () =
   Harness.test "a tagged template meets its tag's requires" (fun () ->
       expect_proven (shout ^ Fixtures.Prover.shout_of_a_literal));
-  Harness.test "a call of from_template through a bound cannot see the tag's requires" (fun () ->
+  Harness.test "a call of from_template through a bound must meet the tag's check" (fun () ->
       expect_not_proven Fixtures.Prover.from_template_through_a_bound "prover.requires");
-  Harness.test "a tagged template that does not meet its tag's requires" (fun () ->
-      expect_not_proven (shout ^ Fixtures.Prover.shout_of_a_copied_name) "prover.requires")
+  Harness.test "a call of from_template through a bound meets the check its caller requires"
+    (fun () -> expect_proven Fixtures.Prover.from_template_through_a_bound_that_requires_the_check);
+  Harness.test "a tagged template whose check gives false fails every time it is reached" (fun () ->
+      let message = read_message (shout ^ Fixtures.Prover.shout_of_a_copied_name) in
+      if
+        not
+          (String.includes ~affix:"may not hold for this call to `Shout.from_template`" message
+          && String.includes ~affix:"This fails every time the code reaches it." message)
+      then Harness.fail "message %S" message);
+  Harness.test "an impl's from_template cannot require more than the tag's check" (fun () ->
+      expect_not_proven Fixtures.Prover.shout_with_a_stronger_requires "prover.requires");
+  Harness.test "an obligation that the facts refute says it fails every time it is reached"
+    (fun () ->
+      let message = read_message Fixtures.Prover.element_past_the_end_of_a_literal in
+      if not (String.includes ~affix:"This fails every time the code reaches it." message) then
+        Harness.fail "message %S" message)
 
 let () =
   Harness.test "float equality is reflexive, even for NaN" (fun () ->
@@ -3116,10 +3130,13 @@ let () =
         (fun text ->
           let actual = read_message text in
           if
-            actual
-            <> "Only an upper bound is known for the `allocations` of this call, which may spend \
-                less, so no `==` bound can count it. State the cost with `<=`, or give the type of \
-                the function called an `==` bound."
+            not
+              (String.starts_with
+                 ~prefix:
+                   "Only an upper bound is known for the `allocations` of this call, which may \
+                    spend less, so no `==` bound can count it. State the cost with `<=`, or give \
+                    the type of the function called an `==` bound."
+                 actual)
           then Harness.fail "message %S" actual)
         [
           Fixtures.Prover.exact_allocations_through_a_callback_with_an_upper_bound;
@@ -3127,8 +3144,11 @@ let () =
         ]);
   Harness.test "an exact bound that is not met may be above or below the cost" (fun () ->
       let actual = read_message Fixtures.Prover.exact_allocations_that_are_one_short in
-      if actual <> "This may spend more or less than `cost allocations == 2` states." then
-        Harness.fail "message %S" actual)
+      if
+        actual
+        <> "This may spend more or less than `cost allocations == 2` states. This fails every time \
+            the code reaches it."
+      then Harness.fail "message %S" actual)
 
 let () =
   let probes =

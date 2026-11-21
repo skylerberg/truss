@@ -978,8 +978,14 @@ impl From[UInt64] for Component {
 impl FromTemplate for Url {
   type Part = Component
 
+  fn is_valid_template(literals: List[text.Literal]) -> Bool
+  {
+    literals.length() > 0
+      && parses_with_parts_after_authority(literals, part: "~")
+      && parses_with_parts_after_authority(literals, part: "")
+  }
+
   fn from_template(template: Template[Component]) -> Url
-    requires is_valid_template(template.literals)
   {
     var text = ""
     var index: UInt64 = 0
@@ -1048,13 +1054,6 @@ internal fn parses_with_parts_after_authority(literals: Slice[text.Literal], par
     return false
   }
   literals.length() == 1 || path_start(text) <= literals[0].text().length()
-}
-
-public fn is_valid_template(literals: Slice[text.Literal]) -> Bool
-{
-  literals.length() > 0
-    && parses_with_parts_after_authority(literals, part: "~")
-    && parses_with_parts_after_authority(literals, part: "")
 }
 
 impl serialization.Serialize for Url {

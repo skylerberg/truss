@@ -42,7 +42,6 @@ val list_roots : tests:Path.t list -> mains:Path.t list -> Lowered.Item.t list
 
 module Encoding : sig
   val decode : Memory_layout.env -> Ground.ty -> string -> Lowered.static_value
-  val decode_booleans : string -> bool list
 end
 
 module For_testing : sig

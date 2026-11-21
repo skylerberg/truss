@@ -22,4 +22,5 @@
   prover
   c_compiler
   backend
+  lowered
   database))

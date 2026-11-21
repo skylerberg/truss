@@ -69,13 +69,15 @@ let run_without_costs : 'a. _ -> (unit -> 'a) -> 'a =
   context.counters <- [];
   Fun.protect ~finally:(fun () -> context.counters <- saved) read
 
-let read_specification (context : State.context) frame (formula : Mir.formula) =
+let run_as_specification (context : State.context) read =
   let panics = context.panics in
   context.panics <- false;
   Fun.protect
     ~finally:(fun () -> context.panics <- panics)
-    (fun () ->
-      run_without_costs context (fun () -> context.read_formula frame formula ~arguments:[]))
+    (fun () -> run_without_costs context read)
+
+let read_specification (context : State.context) frame (formula : Mir.formula) =
+  run_as_specification context (fun () -> context.read_formula frame formula ~arguments:[])
 
 let select_field context ty variant field term =
   match (term, Facts.find_constructors context ty) with

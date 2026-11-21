@@ -1087,20 +1087,19 @@ fn parse_class(pattern: StringSlice, from: UInt64) -> Result[ParsedClass, GlobEr
 impl FromTemplate for Glob {
   type Part = Never
 
+  fn is_valid_template(literals: List[text.Literal]) -> Bool
+    ensures result ==> literals.length() == 1
+  {
+    literals.length() == 1 && Glob.parse(literals[0].text()) is Ok(_)
+  }
+
   fn from_template(template: Template[Never]) -> Glob
-    requires is_valid_glob(template.literals)
   {
     match Glob.parse(template.literals[0].text()) {
       Ok(glob) => glob
       Err(_) => Glob(components: [], absolute: false)
     }
   }
-}
-
-public fn is_valid_glob(literals: Slice[text.Literal]) -> Bool
-  ensures result == (literals.length() == 1 && Glob.parse(literals[0].text()) is Ok(_))
-{
-  literals.length() == 1 && Glob.parse(literals[0].text()) is Ok(_)
 }
 
 public fn Glob.parse(pattern: StringSlice) -> Result[Glob, GlobError]

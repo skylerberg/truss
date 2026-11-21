@@ -1,0 +1,18 @@
+use standard.text
+
+type Shout(text: String)
+
+impl FromTemplate for Shout {
+  type Part = String
+
+  fn is_valid_template(literals: List[text.Literal]) -> Bool
+  {
+    true
+  }
+
+  fn from_template(template: Template[String]) -> Shout
+    requires template.literals.length() == 1
+  {
+    todo
+  }
+}

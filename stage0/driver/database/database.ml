@@ -1091,18 +1091,11 @@ let read_host_system () =
         "code is lowered on a host that Stage0 does not build for"
 
 let list_proof_template_checks : Prover.proof part -> _ = function
-  | Value (Obligations { obligations; _ }) ->
-      List.filter_map
-        (fun (obligation : Prover.Obligation.t) ->
-          Option.map
-            (fun (template_clause : Prover.Obligation.template_clause) -> template_clause.check)
-            obligation.template_clause)
-        obligations
-  | Value (Unsupported _ | Not_proven_here) | Failed _ | Blocked -> []
+  | Value proof -> Prover.list_template_checks proof
+  | Failed _ | Blocked -> []
 
-let make_template_check_root
-    ({ from_template; literals; clauses } : Prover.Obligation.template_check) =
-  Lowered.Item.Template_check { from_template; literals; clauses }
+let make_template_check_root ({ function_; literals } : Prover.Obligation.template_check) =
+  Lowered.Item.Call_evaluation { function_; arguments = [ Literals literals ] }
 
 let find_entry_point (names : Resolve.Names.lookups) package =
   List.find_map

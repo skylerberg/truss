@@ -404,7 +404,6 @@ let locate_citation (lookups : Lookups.t) ((key : Resolve.Names.key), origin) =
          (lookups.interface.names.read_spans key)
          (Core_walk.locate_origin origin)) )
 
-type answer = Solved of Solver.answer | Ran of bool | Run_failed of string
 type 'span site = { code : Diagnostic.Code.prover; span : 'span; shows : string }
 
 type 'span state = {
@@ -424,7 +423,55 @@ let explain_unknown = function
          proof or a counterexample. Z3 gives the reason `%s`."
         reason
 
-let make_request (obligation : Obligation.t) =
+let list_template_checks = function
+  | Obligations outcome ->
+      List.sort_uniq compare
+        (List.concat_map
+           (fun (obligation : Obligation.t) ->
+             List.filter_map
+               (function
+                 | Logic.Constant (Template_check { function_; literals }, _) ->
+                     Some { Obligation.function_; literals }
+                 | _ -> None)
+               obligation.query.declarations)
+           outcome.obligations)
+  | Unsupported _ | Not_proven_here -> []
+
+type posed = {
+  site : Source.Definition_span.t site;
+  obligation : Obligation.t;
+  query : Logic.query;
+  has_run_result : bool;
+  failed_runs : (Obligation.template_check * string) list;
+}
+
+let pose_obligation runs site (obligation : Obligation.t) =
+  List.fold_left
+    (fun posed (declaration : Logic.declaration) ->
+      match declaration with
+      | Constant ((Template_check { function_; literals } as symbol), _) -> (
+          let check = { Obligation.function_; literals } in
+          match Template_check_table.find_opt runs check with
+          | Some (Ok holds) ->
+              {
+                posed with
+                query =
+                  {
+                    posed.query with
+                    facts =
+                      posed.query.facts
+                      @ [ Logic.equal (Logic.Symbol symbol) (Logic.Boolean holds) ];
+                  };
+                has_run_result = true;
+              }
+          | Some (Error report) ->
+              { posed with failed_runs = posed.failed_runs @ [ (check, report) ] }
+          | None -> posed)
+      | _ -> posed)
+    { site; obligation; query = obligation.query; has_run_result = false; failed_runs = [] }
+    obligation.query.declarations
+
+let make_request ({ obligation; query; _ } : posed) =
   let terms =
     List.map (fun (term, _) -> (Logic.Symbol.Named_term term, term)) obligation.locals
     @ List.concat
@@ -432,25 +479,13 @@ let make_request (obligation : Obligation.t) =
            (fun index (_, reached) -> [ (Logic.Symbol.Reached index, reached) ])
            obligation.path_notes)
   in
-  ( Solver.make_request ~symbols:(List.map fst obligation.values) ~terms obligation.query,
-    obligation.query )
+  (Solver.make_request ~symbols:(List.map fst obligation.values) ~terms query, query)
 
-type question = Decided of answer | Asked of (Solver.request * Logic.query)
-
-type posed = {
-  site : Source.Definition_span.t site;
-  obligation : Obligation.t;
-  question : question;
-}
+let make_refutation_request ({ query; _ } : posed) =
+  let refutation = { query with goal = Logic.not_ query.goal } in
+  (Solver.make_request refutation, refutation)
 
 type posed_proof = Unreadable of Source.Definition_span.t site | Posed of posed list
-
-let run_answer runs ({ check; clause } : Obligation.template_clause) =
-  Option.map
-    (function
-      | Ok holds -> Ran (List.assoc clause (List.combine check.clauses holds))
-      | Error report -> Run_failed report)
-    (Template_check_table.find_opt runs check)
 
 let pose_proof (lookups : Lookups.t) runs key proof =
   let resolve location = resolve_location lookups.interface.names key location in
@@ -469,34 +504,32 @@ let pose_proof (lookups : Lookups.t) runs key proof =
       Posed
         (List.map
            (fun (obligation : Obligation.t) ->
-             {
-               site =
-                 {
-                   code = obligation.code;
-                   span = resolve obligation.location;
-                   shows = render lookups obligation.message;
-                 };
-               obligation;
-               question =
-                 (match Option.bind obligation.template_clause (run_answer runs) with
-                 | Some answer -> Decided answer
-                 | None -> Asked (make_request obligation));
-             })
+             pose_obligation runs
+               {
+                 code = obligation.code;
+                 span = resolve obligation.location;
+                 shows = render lookups obligation.message;
+               }
+               obligation)
            outcome.obligations)
 
 let pose_proofs ~runs lookups proofs =
   let runs = Template_check_table.of_seq (List.to_seq runs) in
   List.map (fun (key, proof) -> (key, pose_proof lookups runs key proof)) proofs
 
-let list_asked = function
-  | Unreadable _ -> []
-  | Posed posed ->
-      List.filter_map
-        (fun ({ site; question; _ } : posed) ->
-          match question with Asked asked -> Some (site, asked) | Decided _ -> None)
-        posed
+let list_posed = function Unreadable _ -> [] | Posed posed -> posed
 
-let make_state (lookups : Lookups.t) ({ site; obligation; _ } : posed) answer =
+let explain_failed_runs failed_runs =
+  String.concat ""
+    (List.map
+       (fun (({ function_; literals } : Obligation.template_check), report) ->
+         Printf.sprintf
+           " Running `%s` on the template text `%s` failed, so its result is not known: %s"
+           (Facts.show_callee function_) (String.concat "${...}" literals) report)
+       failed_runs)
+
+let make_state (lookups : Lookups.t) (posed : posed) answer ~is_refuted =
+  let { site; obligation; _ } = posed in
   let others =
     match site.code with
     | Overflow | Division | Shift ->
@@ -516,25 +549,24 @@ let make_state (lookups : Lookups.t) ({ site; obligation; _ } : posed) answer =
       site;
       failure =
         (match answer with
-        | Solved Proven | Ran true -> None
-        | Ran false -> find_failure " Running it on this template's text gives `false`."
-        | Run_failed report ->
+        | Solver.Proven -> None
+        | Counterexample _ when is_refuted ->
+            find_failure " This fails every time the code reaches it."
+        | Counterexample values ->
             find_failure
-              (" Running it on this template's text failed, so it is not known: " ^ report)
-        | Solved (Counterexample values) ->
-            find_failure
-              (show_counterexample (Logic.list_members obligation.query) obligation values)
-        | Solved (Unknown unknown) ->
+              (show_counterexample (Logic.list_members posed.query) obligation values
+              ^ explain_failed_runs posed.failed_runs)
+        | Unknown unknown ->
             find_failure
               (explain_unknown unknown
              ^ " If the code is correct, a `proof` block or a theorem can lead the solver to the \
                 proof."
-              ^
-              if obligation.has_untriggered_written_fact then
-                " A quantified fact in the query has no trigger, so an `assert` of that fact at \
-                 the term the proof needs may be enough."
-              else ""));
-      trusts_compiled_code = (match answer with Ran true -> true | _ -> false);
+              ^ (if obligation.has_untriggered_written_fact then
+                   " A quantified fact in the query has no trigger, so an `assert` of that fact at \
+                    the term the proof needs may be enough."
+                 else "")
+              ^ explain_failed_runs posed.failed_runs));
+      trusts_compiled_code = answer = Proven && posed.has_run_result;
     },
     obligation.cited )
 
@@ -558,13 +590,29 @@ type verdicts = { lookups : Lookups.t; verdicts : verdict Key_table.t; warnings 
 
 let decide ~runs lookups solver proofs =
   let posed_proofs = pose_proofs ~runs lookups proofs in
-  let solved =
+  let posed = List.concat_map (fun (_, posed_proof) -> list_posed posed_proof) posed_proofs in
+  let answers = Solver.solve_all solver (List.map make_request posed) in
+  let is_refutable (posed : posed) = function
+    | Solver.Counterexample _ -> not posed.obligation.is_rejection
+    | Proven | Unknown _ -> false
+  in
+  let countered =
+    List.filter_map
+      (fun (posed, answer) -> if is_refutable posed answer then Some posed else None)
+      (List.combine posed answers)
+  in
+  let refutations =
+    Queue.of_seq
+      (List.to_seq (Solver.solve_all solver (List.map make_refutation_request countered)))
+  in
+  let decided =
     Queue.of_seq
       (List.to_seq
-         (Solver.solve_all solver
-            (List.concat_map
-               (fun (_, posed_proof) -> List.map snd (list_asked posed_proof))
-               posed_proofs)))
+         (List.map2
+            (fun posed answer ->
+              let is_refuted = is_refutable posed answer && Queue.pop refutations = Solver.Proven in
+              (posed, answer, is_refuted))
+            posed answers))
   in
   let verdicts = Key_table.create (List.length proofs) in
   let warnings = collect_warnings lookups proofs in
@@ -583,11 +631,9 @@ let decide ~runs lookups solver proofs =
             ]
         | Posed posed ->
             List.map
-              (fun (posed : posed) ->
-                make_state lookups posed
-                  (match posed.question with
-                  | Decided answer -> answer
-                  | Asked _ -> Solved (Queue.pop solved)))
+              (fun _ ->
+                let posed, answer, is_refuted = Queue.pop decided in
+                make_state lookups posed answer ~is_refuted)
               posed))
     posed_proofs;
   { lookups; verdicts; warnings }
@@ -683,8 +729,9 @@ module For_testing = struct
     List.concat_map
       (fun (base, posed_proof) ->
         List.map
-          (fun (site, asked) -> (locate_site ~base site, Solver.show_input asked))
-          (list_asked posed_proof))
+          (fun (posed : posed) ->
+            (locate_site ~base posed.site, Solver.show_input (make_request posed)))
+          (list_posed posed_proof))
       (list_file_definitions lookups
          (Key_table.of_seq (List.to_seq (pose_proofs ~runs lookups proofs)))
          file)

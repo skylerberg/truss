@@ -463,24 +463,6 @@ let build_program backend ~main ~output ~is_kept =
 let list_reached_todo_types (lookups : Lowering.lowered_lookups) root =
   lookups.list_reached_todo_types (Lowering.make_root root)
 
-let run_template_check backend ~from_template ~literals ~clauses =
-  let ran =
-    capture_failure @@ fun () ->
-    run_while_compiling backend
-      (Lowered.Item.Template_check { from_template; literals; clauses })
-      ~read:(fun output ->
-        let holds = Lowering.Encoding.decode_booleans output in
-        if List.length holds <> List.length clauses then
-          raise_bug "checking a template of %s wrote %d results for %d clauses"
-            (Path.show from_template) (List.length holds) (List.length clauses);
-        holds)
-  in
-  match ran with
-  | Ok (Ran holds) -> Ok holds
-  | Ok Ran_too_long ->
-      Error (Printf.sprintf "it ran past the time limit of %d ms" backend.evaluation_time_limit_ms)
-  | Ok (Stopped report) | Error report -> Error report
-
 let evaluate_call backend ~function_ ~arguments =
   capture_failure @@ fun () ->
   match Interface.Impls.read_signature backend.lookups.interface function_ with
@@ -490,6 +472,17 @@ let evaluate_call backend ~function_ ~arguments =
       run_while_compiling backend item ~read:(fun encoded ->
           Lowering.Encoding.decode (make_env backend) ty encoded)
   | _ -> raise_bug "%s has no result to evaluate" (Path.show function_)
+
+let evaluate_predicate backend ~function_ ~arguments =
+  Result.map
+    (function
+      | Ran (Lowered.Static_scalar (Bool holds)) -> Ok holds
+      | Ran _ -> raise_bug "%s returned a value that is not a Bool" (Path.show function_)
+      | Ran_too_long ->
+          Error
+            (Printf.sprintf "it ran past the time limit of %d ms" backend.evaluation_time_limit_ms)
+      | Stopped report -> Error report)
+    (evaluate_call backend ~function_ ~arguments)
 
 let create ?(show_file = Path.show_file) ?results ?(evaluation_time_limit_ms = 10_000)
     ?(programs = Filename.get_temp_dir_name ())

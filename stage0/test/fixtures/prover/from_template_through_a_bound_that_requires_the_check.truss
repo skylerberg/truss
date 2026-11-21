@@ -1,0 +1,5 @@
+fn make[Made: FromTemplate](template: Template[Made.Part]) -> Made
+  requires Made.is_valid_template(template.literals)
+{
+  Made.from_template(template)
+}

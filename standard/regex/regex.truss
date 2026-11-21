@@ -937,23 +937,6 @@ fn compile(text: StringSlice, placeholders: Bool) -> Result[Regex, ParseError]
   Ok(Regex(pattern: text.to_string(), program: own program, group_names: own builder.names))
 }
 
-public fn is_valid_template(literals: Slice[text.Literal]) -> Bool
-{
-  var pattern = ""
-  var index: UInt64 = 0
-  while index < literals.length()
-    invariant index <= literals.length()
-    decreases literals.length() - index
-  {
-    if index > 0 {
-      mut pattern.push("\u{1}")
-    }
-    mut pattern.push(literals[index].text())
-    index += 1
-  }
-  literals.length() > 0 && compile(pattern, placeholders: true) is Ok(_)
-}
-
 public opaque type Part(source: String)
 
 impl From[StringSlice] for Part {
@@ -985,8 +968,24 @@ impl From[Regex] for Part {
 impl FromTemplate for Regex {
   type Part = Part
 
+  fn is_valid_template(literals: List[text.Literal]) -> Bool
+  {
+    var pattern = ""
+    var index: UInt64 = 0
+    while index < literals.length()
+      invariant index <= literals.length()
+      decreases literals.length() - index
+    {
+      if index > 0 {
+        mut pattern.push("\u{1}")
+      }
+      mut pattern.push(literals[index].text())
+      index += 1
+    }
+    literals.length() > 0 && compile(pattern, placeholders: true) is Ok(_)
+  }
+
   fn from_template(template: Template[Part]) -> Regex
-    requires is_valid_template(template.literals)
   {
     var pattern = ""
     var index: UInt64 = 0
