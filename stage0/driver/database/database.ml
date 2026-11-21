@@ -2323,16 +2323,14 @@ let list_holes proofs ~reached =
         match read with
         | Stored (Any (Contract_mir contract)) -> Some contract.path
         | Input _ | Name _ | Stored _ -> None)
-      (Option.value (Stored_table.find_opt database.reads (Part.Any (Proof key))) ~default:[])
+      (Edge.list_targets Read (find_edges database (Stored (Any (Proof key)))))
   in
   let list_impls_of_callees (key : Resolve.Names.key) =
-    match find_part database note (Mir_call_edges key.path) with
-    | Some (Value callees) ->
-        List.filter_map
-          (fun (callee : Path.t) ->
-            match callee with Method { owner = Impl _ as impl; _ } -> Some impl | _ -> None)
-          callees
-    | Some (Failed _ | Blocked) | None -> []
+    note_read database note (Any (Call_edges key.path));
+    List.filter_map
+      (fun (callee : Path.t) ->
+        match callee with Method { owner = Impl _ as impl; _ } -> Some impl | _ -> None)
+      (list_callees database key.path)
   in
   let list_proof_holes key =
     match find_proof proofs key with
