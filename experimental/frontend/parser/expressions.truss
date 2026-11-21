@@ -619,9 +619,9 @@ fn parse_name_expression(cursor: mut TokenCursor, start: UInt64) -> Result[synta
     Upper(_) => {
       let name = take_name(mut cursor)
       let named = make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.Name(syntax::NamePath(modules: own modules, last: own name)))
-      let separated = parse_path_separators(mut cursor, start, value: own named)
+      let separated = parse_path_separators(mut cursor, start, value: own named)?
       let angled = parse_angle_arguments(mut cursor, start, value: own separated)
-      let value = parse_path_separators(mut cursor, start, value: own angled)
+      let value = parse_path_separators(mut cursor, start, value: own angled)?
       if brace_record_follows(cursor) {
         return parse_brace_record(mut cursor, start, record: own value)
       }
@@ -643,10 +643,11 @@ fn parse_name_expression(cursor: mut TokenCursor, start: UInt64) -> Result[synta
   }
 }
 
-fn parse_path_separators(cursor: mut TokenCursor, start: UInt64, value: own syntax::Expression) -> syntax::Expression
+fn parse_path_separators(cursor: mut TokenCursor, start: UInt64, value: own syntax::Expression) -> Result[syntax::Expression, Failure]
   uses Panic, RunForever
 {
   var current = own value
+  var chain_length: UInt64 = 0
   while true {
     let separator = cursor.peek()
     let is_name_after = match cursor.peek_ahead(1) {
@@ -656,12 +657,14 @@ fn parse_path_separators(cursor: mut TokenCursor, start: UInt64, value: own synt
     if separator.kind != token::Kind.Punctuation(token::Punctuation.ColonColon) || !is_name_after {
       break
     }
+    check_chain_length(mut cursor, chain_length)?
     report_path_separator(mut cursor, separator)
     advance(mut cursor)
     let name = take_name(mut cursor)
     current = make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.Member(base: own current, name: own name))
+    chain_length += 1
   }
-  current
+  Ok(own current)
 }
 
 fn parse_angle_arguments(cursor: mut TokenCursor, start: UInt64, value: own syntax::Expression) -> syntax::Expression
@@ -670,7 +673,7 @@ fn parse_angle_arguments(cursor: mut TokenCursor, start: UInt64, value: own synt
   if !cursor.is_punctuation(token::Punctuation.Less) {
     return value
   }
-  let Some(closer) = find_angle_closer(cursor) else {
+  let Some(closer) = cursor.find_angle_closer() else {
     return value
   }
   let follows = cursor.lookup_token(closer + 1).kind
@@ -1051,16 +1054,7 @@ fn parse_trailing_habits(cursor: mut TokenCursor, statement: own syntax::Stateme
   let next = cursor.peek_kind()
   let is_increment = next == token::Kind.Foreign(token::Foreign.PlusPlus) || next == token::Kind.Foreign(token::Foreign.MinusMinus)
   if is_increment && statement.kind is Expression(_) {
-    let after = cursor.peek_ahead(1)
-    let ends_statement = match after {
-      Newline | EndOfFile => true
-      Punctuation(punctuation) => match punctuation {
-        Close(_) => true
-        _ => false
-      }
-      _ => false
-    }
-    if ends_statement {
+    if ends_statement(cursor.peek_ahead(1)) {
       let operator = take(mut cursor)
       if statement.kind is Expression(target) {
         increment(mut cursor, target, operator)
@@ -1140,7 +1134,8 @@ fn parse_trailing_lambda(cursor: mut TokenCursor, statement: own syntax::Stateme
     return Ok(own statement)
   }
   let parameter = derive_parameter_name(callee)
-  report_trailing_lambda(mut cursor, callee, parameter, opening, closing, uses_of_it)
+  let next = cursor.lookup_token(closer + 1)
+  report_trailing_lambda(mut cursor, callee, parameter, opening, closing, next, uses_of_it)
   let _ = parse_block(mut cursor)?
   let last = cursor.make_definition_span(closing.span)
   Ok(parse_statement_error_through(mut cursor, statement, last))

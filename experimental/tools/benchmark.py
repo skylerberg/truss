@@ -33,6 +33,11 @@ worst_cases = [
     ("postfix_operations", lambda count: "let x: Int64 = a" + ".b" * count + "\n"),
     ("nested_loop_bodies", lambda count: "fn f() {\n" + "while x {\n" * count),
     ("interpolations", lambda count: "let x: String = \"" + "${a}" * count + "\"\n"),
+    ("comparisons_in_a_list", lambda count: "let x: List[Bool] = [" + "A < B, " * count + "]\n"),
+    ("a_fixable_habit_on_every_line", lambda count: "fn f() {\n" + "  a++\n" * count + "}\n"),
+    ("path_separators", lambda count: "let x: Int64 = A" + "::B" * count + "\n"),
+    ("a_chain_of_comparisons", lambda count: "let x: Bool = a" + " < a" * count + "\n"),
+    ("rest_fields_in_a_pattern", lambda count: "fn f() {\n  let P(" + ".., " * count + ") = x\n}\n"),
 ]
 
 

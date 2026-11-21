@@ -123,60 +123,10 @@ fn is_open(kind: token::Kind) -> Bool {
   }
 }
 
-fn continues_angles(kind: token::Kind) -> Bool {
-  match kind {
-    Upper(_) | Lower(_) | Integer(_) => true
-    Punctuation(punctuation) => match punctuation {
-      Comma | Colon | ColonColon | Dot | Equal | Plus | Arrow => true
-      _ => false
-    }
-    Keyword(keyword) => match keyword {
-      SelfType | Any | Fn | Mut | Own | Capability => true
-      _ => false
-    }
-    _ => false
-  }
-}
-
-fn find_angle_closer(cursor: TokenCursor) -> Option[UInt64]
-  uses Panic, RunForever
-{
-  var index = cursor.index
-  var depth: UInt64 = 0
-  while true {
-    let kind = cursor.lookup_token(index).kind
-    if kind == token::Kind.Punctuation(token::Punctuation.Less) {
-      depth += 1
-      index += 1
-    } else if kind == token::Kind.Punctuation(token::Punctuation.Greater) {
-      if depth == 1 {
-        return Some(index)
-      }
-      depth -= 1
-      index += 1
-    } else if kind == token::Kind.Punctuation(token::Punctuation.ShiftRight) {
-      if depth == 2 {
-        return Some(index)
-      }
-      if depth < 2 {
-        return None
-      }
-      depth -= 2
-      index += 1
-    } else if is_open(kind) {
-      index = cursor.lookup_closer(index) + 1
-    } else if continues_angles(kind) {
-      index += 1
-    } else {
-      return None
-    }
-  }
-}
-
 fn skip_angle_brackets(cursor: mut TokenCursor)
   uses Panic, RunForever
 {
-  let Some(closer) = find_angle_closer(cursor) else {
+  let Some(closer) = cursor.find_angle_closer() else {
     return
   }
   var angles: List[token::Token] = []

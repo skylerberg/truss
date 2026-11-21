@@ -120,6 +120,8 @@ fn report_parentheses(cursor: mut TokenCursor, id: UInt64, message: StringSlice,
   report(mut cursor, code: "parser.needs_parentheses", span: span, message: message, fixes: own fixes)
 }
 
+let longest_titled_expression: UInt64 = 80
+
 fn make_titled_fix(cursor: TokenCursor, fallback: StringSlice, whole: UInt64, edits: own List[source::Edit]) -> source::Fix
   uses Panic, RunForever
 {
@@ -127,7 +129,9 @@ fn make_titled_fix(cursor: TokenCursor, fallback: StringSlice, whole: UInt64, ed
   for edit in edits {
     mut insertions.push(token::Insertion(at: edit.span.start, text: edit.replacement.copy()))
   }
-  match cursor.spell(cursor.read_file_span(whole), insertions) {
+  let span = cursor.read_file_span(whole)
+  let spelled = if span.stop - span.start > longest_titled_expression { None } else { cursor.spell(span, insertions) }
+  match spelled {
     Some(fixed) => source::make_fix("Write `${fixed}`", edits: own edits)
     None => source::make_fix(fallback, edits: own edits)
   }

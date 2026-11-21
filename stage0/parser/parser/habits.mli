@@ -67,6 +67,7 @@ val report_trailing_lambda :
   parameter:string ->
   opening:Token.t ->
   closing:Token.t ->
+  next:Token.t ->
   uses:Token.t list ->
   unit
 

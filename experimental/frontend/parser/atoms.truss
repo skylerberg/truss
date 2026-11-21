@@ -46,6 +46,17 @@ fn begins_statement(kind: token::Kind) -> Bool {
   }
 }
 
+fn ends_statement(kind: token::Kind) -> Bool {
+  match kind {
+    Newline | EndOfFile => true
+    Punctuation(punctuation) => match punctuation {
+      Close(_) => true
+      _ => false
+    }
+    _ => false
+  }
+}
+
 fn parse_mode(cursor: mut TokenCursor) -> Option[syntax::Mode]
   uses Panic
 {

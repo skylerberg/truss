@@ -63,24 +63,8 @@ let find_assignment_operator = function
   | Punctuation Shift_right_equal -> Some (Compound (Shift Shift_right))
   | _ -> None
 
-let find_angle_closer cursor =
-  let rec scan index depth =
-    match (Cursor.lookup_token cursor index).kind with
-    | Punctuation Less -> scan (index + 1) (depth + 1)
-    | Punctuation Greater -> if depth = 1 then Some index else scan (index + 1) (depth - 1)
-    | Punctuation Shift_right ->
-        if depth = 2 then Some index else if depth > 2 then scan (index + 1) (depth - 2) else None
-    | Punctuation (Open _) -> scan (Cursor.lookup_closer cursor index + 1) depth
-    | Upper _ | Lower _ | Integer _
-    | Punctuation (Comma | Colon | Colon_colon | Dot | Equal | Plus | Arrow)
-    | Keyword (Self_type | Any | Fn | Mut | Own | Capability) ->
-        scan (index + 1) depth
-    | _ -> None
-  in
-  scan (Cursor.index cursor) 0
-
 let skip_angle_brackets cursor =
-  match find_angle_closer cursor with
+  match Cursor.find_angle_closer cursor with
   | None -> ()
   | Some closer ->
       let rec collect_angles index =
@@ -945,13 +929,14 @@ and parse_name_expression cursor start =
   | Punctuation Less -> parse_turbofish cursor start
   | _ -> Cursor.fail cursor "a name after `::`"
 
-and parse_path_separators cursor start (value : Syntax.expression) =
+and parse_path_separators ?(chain_length = 0) cursor start (value : Syntax.expression) =
   match (Cursor.peek cursor, Cursor.peek_ahead cursor 1) with
   | ({ kind = Punctuation Colon_colon; _ } as separator), (Upper _ | Lower _) ->
+      Cursor.check_chain_length cursor ~chain_length;
       Habits.report_path_separator cursor ~separator;
       Cursor.advance cursor;
       let name = Atoms.make_name cursor (Cursor.take cursor) in
-      parse_path_separators cursor start
+      parse_path_separators ~chain_length:(chain_length + 1) cursor start
         (Atoms.make_expression_node cursor start (Member (value, name)))
   | _ -> value
 
@@ -961,7 +946,7 @@ and parse_angle_arguments cursor start (value : Syntax.expression) =
     | Punctuation (Dot | Open Paren | Colon_colon) -> true
     | _ -> false
   in
-  match if Cursor.is_punctuation cursor Less then find_angle_closer cursor else None with
+  match if Cursor.is_punctuation cursor Less then Cursor.find_angle_closer cursor else None with
   | Some closer when follows_closer closer ->
       skip_angle_brackets cursor;
       Atoms.make_error_expression cursor start
@@ -1217,9 +1202,7 @@ and parse_statement_line cursor ~previous : Syntax.statement =
 and parse_trailing_habits cursor (statement : Syntax.statement) =
   match (Cursor.peek_kind cursor, statement.kind) with
   | Foreign (Plus_plus | Minus_minus), Expression target
-    when match Cursor.peek_ahead cursor 1 with
-         | Newline | End_of_file | Punctuation (Close _) -> true
-         | _ -> false ->
+    when Atoms.ends_statement (Cursor.peek_ahead cursor 1) ->
       let operator = Cursor.take cursor in
       Habits.increment cursor ~target ~operator;
       parse_statement_error_through cursor statement
@@ -1261,12 +1244,15 @@ and list_uses_of_it (tokens : Token.t array) =
 
 and parse_trailing_lambda cursor (statement : Syntax.statement) =
   let opening = Cursor.peek cursor in
-  let closing = Cursor.lookup_token cursor (Cursor.lookup_closer cursor (Cursor.index cursor)) in
+  let closer = Cursor.lookup_closer cursor (Cursor.index cursor) in
+  let closing = Cursor.lookup_token cursor closer in
   match (list_uses_of_it (Cursor.group cursor), find_trailing_callee statement) with
   | (_ :: _ as uses), Some callee ->
       Habits.report_trailing_lambda cursor ~callee
         ~parameter:(Habits.derive_parameter_name callee)
-        ~opening ~closing ~uses;
+        ~opening ~closing
+        ~next:(Cursor.lookup_token cursor (closer + 1))
+        ~uses;
       ignore (parse_block cursor);
       parse_statement_error_through cursor statement
         (Cursor.make_definition_span cursor closing.span)
