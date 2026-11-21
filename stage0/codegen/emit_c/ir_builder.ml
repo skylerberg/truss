@@ -12,6 +12,7 @@ type role =
   | Outlined of {
       index : int;
       parent : int;
+      arrives : Lowered.local;
       parts : Lowered.local list;
       holder : Lowered.local;
       environment : Lowered.local;
@@ -24,9 +25,11 @@ type function_ = {
   role : role;
   entry : Lowered.block;
   opening : Lowered.site option;
-  prologue : Lowered.statement list;
   mutable size : int;
 }
+
+type passing = By_value | By_address
+type capture = { local : Lowered.local; field : string; passing : passing }
 
 type block_body = {
   mutable statements : (Lowered.site option * Lowered.statement) list;
@@ -44,8 +47,7 @@ type t = {
   mutable site : Lowered.site option;
 }
 
-let make_function ~code ~role ~entry ~opening ~prologue =
-  { code; role; entry; opening; prologue; size = 0 }
+let make_function ~code ~role ~entry ~opening = { code; role; entry; opening; size = 0 }
 
 let make_builder env ~site =
   {
@@ -68,7 +70,7 @@ let allocate_block builder =
 
 let start_function builder ~code =
   Dynarray.add_last builder.functions
-    (make_function ~code ~role:Enclosing ~entry:0 ~opening:builder.site ~prologue:[]);
+    (make_function ~code ~role:Enclosing ~entry:0 ~opening:builder.site);
   builder
 
 let create ?site env ~item =
@@ -260,15 +262,8 @@ let outline builder ~index ~parts body =
   let entry = allocate_block builder in
   Dynarray.add_last builder.functions
     (make_function ~code
-       ~role:
-         (Outlined
-            { index; parent = builder.function_; parts = arrives :: parts; holder; environment })
-       ~entry ~opening:builder.site
-       ~prologue:
-         [
-           Assign
-             (Lowered.make_local_place environment, Use (Copy (Lowered.make_local_place arrives)));
-         ]);
+       ~role:(Outlined { index; parent = builder.function_; arrives; parts; holder; environment })
+       ~entry ~opening:builder.site);
   let number = Dynarray.length builder.functions - 1 in
   write_in builder number (fun () ->
       start builder entry;
@@ -338,14 +333,104 @@ let print_reached_blocks builder functions ~reached ~result_types ~contexts =
       | Some _ | None -> C_text.empty)
     reached
 
-let print_prologues functions ~contexts =
-  Array.mapi
-    (fun number (function_ : function_) ->
-      C_text.Concat
-        (List.map
-           (C_code.render_statement function_.code.emission contexts.(number))
-           function_.prologue))
-    functions
+let find_storage_local (place : Lowered.place) =
+  match place.root with
+  | Local local when not (List.mem Lowered.Deref place.projections) -> Some local
+  | Local _ | Static _ -> None
+
+let rec list_operand_address_taken : Lowered.operand -> Lowered.local list = function
+  | Copy place | Move place -> list_index_address_taken place
+  | Address { place; _ } | Moved_address place -> list_place_address_taken place
+  | Constant _ -> []
+
+and list_index_address_taken (place : Lowered.place) =
+  List.concat_map
+    (function
+      | Lowered.Index operand -> list_operand_address_taken operand
+      | Field _ | Variant_field _ | Deref -> [])
+    place.projections
+
+and list_place_address_taken place =
+  Option.to_list (find_storage_local place) @ list_index_address_taken place
+
+let list_operands_address_taken operands = List.concat_map list_operand_address_taken operands
+
+let list_rvalue_address_taken : Lowered.rvalue -> Lowered.local list = function
+  | Use operand | Unary (_, operand) | Convert (operand, _) -> list_operand_address_taken operand
+  | Binary (_, left, right) | Compare (_, left, right) ->
+      list_operands_address_taken [ left; right ]
+  | Build { fields; _ } -> list_operands_address_taken (List.map snd fields)
+  | Is_variant (place, _) -> list_index_address_taken place
+  | Function_value { environment; _ } -> list_operands_address_taken (Option.to_list environment)
+
+let list_target_operands : Lowered.target -> Lowered.operand list = function
+  | Direct _ | Intrinsic _ | Foreign _ -> []
+  | Indirect { code; environment; _ } -> [ code; environment ]
+  | Evidence_call { evidence; _ } -> [ evidence ]
+  | Table_call { table; value; _ } -> [ table; value ]
+
+let list_failure_operands ~message ~length ~reported ~trace =
+  message :: length :: (Option.to_list reported @ Option.to_list trace)
+
+let list_destination_address_taken : Lowered.destination -> Lowered.local list = function
+  | Discarded -> []
+  | Returned place | Written place -> list_place_address_taken place
+
+let list_statement_address_taken : Lowered.statement -> Lowered.local list = function
+  | Assign (place, rvalue) -> list_place_address_taken place @ list_rvalue_address_taken rvalue
+  | Call { target; arguments; result } ->
+      list_operands_address_taken (list_target_operands target @ arguments)
+      @ list_destination_address_taken result
+  | Drop place | Free_block { place; _ } -> list_place_address_taken place
+  | Defer_free_block { lend; place; _ } ->
+      list_operand_address_taken lend @ list_place_address_taken place
+  | Echo { text; length; _ } -> list_operands_address_taken [ text; length ]
+  | Fail_obligation_when { test = _, left, right; message; length; reported; trace; _ } ->
+      list_operands_address_taken
+        (left :: right :: list_failure_operands ~message ~length ~reported ~trace)
+  | Fork { branches } -> list_operands_address_taken (List.map snd branches)
+  | Fork_range { environment; first; last; _ } ->
+      list_operands_address_taken [ environment; first; last ]
+
+let list_terminator_address_taken : Lowered.terminator -> Lowered.local list = function
+  | Goto _ | Unreachable -> []
+  | Branch { test = _, left, right; _ } -> list_operands_address_taken [ left; right ]
+  | Switch { value; _ } -> list_operand_address_taken value
+  | Switch_variant { place; _ } -> list_index_address_taken place
+  | Return operand -> list_operands_address_taken (Option.to_list operand)
+  | Fail { message; length; reported; trace; _ } ->
+      list_operands_address_taken (list_failure_operands ~message ~length ~reported ~trace)
+
+let compute_address_taken builder functions =
+  let own = Array.map (fun _ -> Locals.empty) functions in
+  Dynarray.iteri
+    (fun block (body : block_body) ->
+      match Dynarray.get builder.owners block with
+      | Some number ->
+          let locals =
+            List.concat_map
+              (fun (_, statement) -> list_statement_address_taken statement)
+              body.statements
+            @ Option.fold ~none:[]
+                ~some:(fun (_, terminator) -> list_terminator_address_taken terminator)
+                body.terminator
+          in
+          own.(number) <- Locals.union (Locals.of_list locals) own.(number)
+      | None -> ())
+    builder.bodies;
+  let within = Array.copy own in
+  Array.iteri
+    (fun number locals ->
+      let rec reach number =
+        match functions.(number).role with
+        | Outlined { parent; _ } ->
+            within.(parent) <- Locals.union locals within.(parent);
+            reach parent
+        | Enclosing -> ()
+      in
+      reach number)
+    own;
+  within
 
 let find_homes functions ~mentioned =
   let read_parent number =
@@ -378,7 +463,7 @@ let find_homes functions ~mentioned =
     functions;
   home
 
-let list_captures functions ~home ~mentioned ~is_local_to =
+let list_captures functions ~home ~mentioned ~address_taken ~is_local_to =
   let captured = Array.make (Array.length functions) Locals.empty in
   Array.iteri
     (fun number locals ->
@@ -397,12 +482,20 @@ let list_captures functions ~home ~mentioned ~is_local_to =
             reach number)
         locals)
     mentioned;
-  Array.map
-    (fun locals ->
+  Array.mapi
+    (fun number locals ->
       List.mapi
-        (fun position local -> (local, Printf.sprintf "capture%d" position))
+        (fun position local ->
+          {
+            local;
+            field = Printf.sprintf "capture%d" position;
+            passing = (if Locals.mem local address_taken.(number) then By_address else By_value);
+          })
         (Locals.elements locals))
     captured
+
+let make_address_type builder local : Lowered.ty =
+  Pointer { target = lookup_local_type builder local; writable = true }
 
 let register_environments builder functions ~captures =
   Array.iteri
@@ -411,9 +504,7 @@ let register_environments builder functions ~captures =
       | Outlined { index; _ } ->
           C_types.add_environment function_.code.emission.types index
             (List.map
-               (fun (local, field) ->
-                 ( field,
-                   Lowered.Pointer { target = lookup_local_type builder local; writable = true } ))
+               (fun { local; field; _ } -> (field, make_address_type builder local))
                captures.(number))
       | Enclosing -> ())
     functions
@@ -426,7 +517,7 @@ let print_fills builder functions ~captures =
       match function_.role with
       | Outlined { holder; parent; _ } ->
           List.iter
-            (fun (local, field) ->
+            (fun { local; field; _ } ->
               fills.(parent) <-
                 C_code.render_statement functions.(parent).code.emission fc
                   (Assign
@@ -438,13 +529,15 @@ let print_fills builder functions ~captures =
     functions;
   Array.map (fun fills -> C_text.Concat (List.rev fills)) fills
 
-let name_local builder (function_ : function_) ~is_local ~captures local =
+let render_address_name builder local = render_local_name builder local ^ "_address"
+
+let name_local builder ~is_local ~captures local =
   if is_local local then render_local_name builder local
   else
-    match (function_.role, List.assoc_opt local captures) with
-    | Outlined { environment; _ }, Some field ->
-        Printf.sprintf "(*(*%s).f_%s)" (render_local_name builder environment) field
-    | _ -> raise_bug "local %d is neither local to the function nor in its environment" local
+    match List.find_opt (fun capture -> capture.local = local) captures with
+    | Some { passing = By_value; _ } -> render_local_name builder local
+    | Some { passing = By_address; _ } -> "(*" ^ render_address_name builder local ^ ")"
+    | None -> raise_bug "local %d is neither local to the function nor captured by it" local
 
 let render_local_declarations builder (emission : Emission.t) ~locals ~parameters =
   C_text.Concat
@@ -484,7 +577,39 @@ let render_blocks builder number (function_ : function_) ~reached ~jump_targets 
               && reached.(block))
             (List.init (Dynarray.length builder.bodies) Fun.id)))
 
-let write_function_texts builder ~enclosing_symbol { parameters; result; returns } =
+let render_thunk_body builder (emission : Emission.t) ~index ~arrives ~parts ~environment ~captures
+    =
+  let field_address field = Text "(*" ++ Name (Local environment) ++ Text (").f_" ^ field) in
+  let arguments =
+    List.map
+      (fun { field; passing; _ } ->
+        match passing with
+        | By_value -> Text "*" ++ field_address field
+        | By_address -> field_address field)
+      captures
+    @ List.map (fun part : C_text.t -> Name (Local part)) parts
+  in
+  Text " {\n"
+  ++ render_local_declarations builder emission ~locals:[ environment ] ~parameters:[]
+  ++ C_code.render_statement emission
+       (make_context builder ~note:ignore)
+       (Assign (Lowered.make_local_place environment, Use (Copy (Lowered.make_local_place arrives))))
+  ++ Text "  " ++ Name (Nested_body index) ++ Text "(" ++ C_text.join ", " arguments
+  ++ Text ");\n}\n"
+
+let make_pieces (function_ : function_) symbol ~names ~(signature : Lowered.signature) ~body
+    ~name_local : Fragment.function_pieces =
+  {
+    symbol;
+    header =
+      C_values.render_prototype function_.code.emission (Name symbol) ~names ~linkage:External
+        signature;
+    opening = function_.opening;
+    body;
+    name_local;
+  }
+
+let write_functions builder ~enclosing_symbol { parameters; result; returns } =
   let functions = Dynarray.to_array builder.functions in
   let list_parameters number =
     match functions.(number).role with Enclosing -> parameters | Outlined { parts; _ } -> parts
@@ -506,65 +631,76 @@ let write_function_texts builder ~enclosing_symbol { parameters; result; returns
       functions
   in
   let texts = print_reached_blocks builder functions ~reached ~result_types ~contexts in
-  let prologues = print_prologues functions ~contexts in
   let home = find_homes functions ~mentioned in
   let is_local_to number local =
     List.mem local (list_parameters number)
     || Hashtbl.find_opt home local = Some number
     || Lowered.is_erased builder.env (lookup_local_type builder local)
   in
-  let captures = list_captures functions ~home ~mentioned ~is_local_to in
+  let address_taken = compute_address_taken builder functions in
+  let captures = list_captures functions ~home ~mentioned ~address_taken ~is_local_to in
   register_environments builder functions ~captures;
   let fills = print_fills builder functions ~captures in
-  Array.mapi
-    (fun number (function_ : function_) : Fragment.function_pieces ->
-      let emission = function_.code.emission in
-      let locals =
-        List.sort compare
-          (Hashtbl.fold
-             (fun local owner locals -> if owner = number then local :: locals else locals)
-             home [])
-      in
-      let parameters = list_parameters number in
-      let symbol : C_text.reference =
-        match function_.role with
-        | Outlined { index; _ } -> Nested_function index
-        | Enclosing -> enclosing_symbol
-      in
-      {
-        symbol;
-        header =
-          C_values.render_prototype emission (Name symbol)
-            ~names:(List.map (fun local : C_text.t -> Name (Local local)) parameters)
-            ~linkage:External
-            {
-              parameters = List.map (lookup_local_type builder) parameters;
-              result = result_types.(number);
-              returns = (match function_.role with Enclosing -> returns | Outlined _ -> true);
-            };
-        opening = function_.opening;
-        body =
-          Text " {\n"
-          ++ render_local_declarations builder emission ~locals ~parameters
-          ++ prologues.(number) ++ fills.(number)
-          ++ render_blocks builder number function_ ~reached ~jump_targets ~texts
-          ++ Text "}\n";
-        name_local =
-          name_local builder function_ ~is_local:(is_local_to number) ~captures:captures.(number);
-      })
-    functions
-
-let write_functions builder ~enclosing_symbol prototype =
-  let functions = Dynarray.to_array builder.functions in
-  let pieces = write_function_texts builder ~enclosing_symbol prototype in
+  let render_body number (function_ : function_) =
+    let locals =
+      List.sort compare
+        (Hashtbl.fold
+           (fun local owner locals -> if owner = number then local :: locals else locals)
+           home [])
+    in
+    Text " {\n"
+    ++ render_local_declarations builder function_.code.emission ~locals
+         ~parameters:(list_parameters number)
+    ++ fills.(number)
+    ++ render_blocks builder number function_ ~reached ~jump_targets ~texts
+    ++ Text "}\n"
+  in
+  let name_parameters locals = List.map (fun local : C_text.t -> Name (Local local)) locals in
+  let list_types locals = List.map (lookup_local_type builder) locals in
   Array.iteri
     (fun number (function_ : function_) ->
       match function_.role with
-      | Outlined { index; _ } ->
-          function_.code.nested <- (index, pieces.(number)) :: function_.code.nested
+      | Outlined { index; arrives; parts; environment; _ } ->
+          let capture_names, capture_types =
+            List.split
+              (List.map
+                 (fun { local; passing; _ } : (C_text.t * Lowered.ty) ->
+                   match passing with
+                   | By_value -> (Name (Local local), lookup_local_type builder local)
+                   | By_address ->
+                       (Text (render_address_name builder local), make_address_type builder local))
+                 captures.(number))
+          in
+          let body =
+            make_pieces function_ (Nested_body index)
+              ~names:(capture_names @ name_parameters parts)
+              ~signature:
+                { parameters = capture_types @ list_types parts; result = None; returns = true }
+              ~body:(render_body number function_)
+              ~name_local:
+                (name_local builder ~is_local:(is_local_to number) ~captures:captures.(number))
+          in
+          let thunk_locals = arrives :: environment :: parts in
+          let thunk =
+            make_pieces function_ (Nested_function index)
+              ~names:(name_parameters (arrives :: parts))
+              ~signature:
+                { parameters = list_types (arrives :: parts); result = None; returns = true }
+              ~body:
+                (render_thunk_body builder function_.code.emission ~index ~arrives ~parts
+                   ~environment ~captures:captures.(number))
+              ~name_local:
+                (name_local builder
+                   ~is_local:(fun local -> List.mem local thunk_locals)
+                   ~captures:[])
+          in
+          function_.code.nested <- (index, body) :: (index, thunk) :: function_.code.nested
       | Enclosing -> ())
     functions;
-  pieces.(0)
+  make_pieces functions.(0) enclosing_symbol ~names:(name_parameters parameters)
+    ~signature:{ parameters = list_types parameters; result; returns }
+    ~body:(render_body 0 functions.(0))
+    ~name_local:(name_local builder ~is_local:(is_local_to 0) ~captures:captures.(0))
 
 let build builder prototype =
   let enclosing = Dynarray.get builder.functions 0 in

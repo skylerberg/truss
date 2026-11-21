@@ -72,25 +72,31 @@ let () =
         (board ^ Fixtures.Parallel.parallel_board_test)
         "test 0 passed\n")
 
+let lowered_int32 = Lowered.Value Codegen_support.int32
+let add left right = Lowered.Binary (Add, Codegen_support.copy left, Codegen_support.copy right)
+let take_address holder = Lowered.Address { place = Codegen_support.at holder; writable = false }
+
+let expect_c_includes c texts =
+  List.iter
+    (fun text ->
+      if not (String.includes ~affix:text c) then Codegen_support.fail "no %s in:\n%s" text c)
+    texts
+
 let () =
   Codegen_support.test
-    "an outlined function's own local goes with it, and a shared one is reached through its \
-     environment" (fun () ->
-      let int = Lowered.Value Codegen_support.int32 in
-      let add left right =
-        Lowered.Binary (Add, Codegen_support.copy left, Codegen_support.copy right)
-      in
+    "an outlined function's own local goes with it, a shared local it only reads arrives by value, \
+     and one it writes arrives as a restrict pointer" (fun () ->
       let env = Codegen_support.make_shape_env () in
       let builder = Emit_c.Ir_builder.create env ~item:(Codegen_support.code_item "entry") in
-      let parameter = Emit_c.Ir_builder.allocate_local builder int in
-      let sum = Emit_c.Ir_builder.allocate_local builder int in
-      let other = Emit_c.Ir_builder.allocate_local builder int in
+      let parameter = Emit_c.Ir_builder.allocate_local builder lowered_int32 in
+      let sum = Emit_c.Ir_builder.allocate_local builder lowered_int32 in
+      let other = Emit_c.Ir_builder.allocate_local builder lowered_int32 in
       Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
       Emit_c.Ir_builder.emit builder
         (Assign (Codegen_support.at parameter, Use (Codegen_support.constant_int32 5)));
       let first =
         Emit_c.Ir_builder.outline builder ~index:0 ~parts:[] (fun () ->
-            let own = Emit_c.Ir_builder.allocate_local builder ~name:"own" int in
+            let own = Emit_c.Ir_builder.allocate_local builder ~name:"own" lowered_int32 in
             Emit_c.Ir_builder.emit builder
               (Assign (Codegen_support.at own, add parameter parameter));
             Emit_c.Ir_builder.emit builder (Assign (Codegen_support.at sum, add own parameter));
@@ -102,24 +108,82 @@ let () =
               (Assign (Codegen_support.at other, Use (Codegen_support.copy parameter)));
             Emit_c.Ir_builder.finish builder (Return None))
       in
-      let take_address holder =
-        Lowered.Address { place = Codegen_support.at holder; writable = false }
-      in
       Emit_c.Ir_builder.emit builder
         (Fork { branches = [ (0, take_address first); (1, take_address second) ] });
       Emit_c.Ir_builder.emit builder (Assign (Codegen_support.at sum, add sum other));
       Emit_c.Ir_builder.finish builder (Return (Some (Codegen_support.copy sum)));
       let fragment =
-        Emit_c.Ir_builder.build builder { parameters = []; result = Some int; returns = true }
+        Emit_c.Ir_builder.build builder
+          { parameters = []; result = Some lowered_int32; returns = true }
       in
       let c = Emit_c.For_testing.render_c fragment in
-      List.iter
-        (fun text ->
-          if not (String.includes ~affix:text c) then Codegen_support.fail "no %s in:\n%s" text c)
-        [ "f_capture0"; "f_capture1"; "int32_t l6_own;" ];
+      expect_c_includes c
+        [
+          "_Nested_0_body(int32_t l0, int32_t *restrict l1_address)";
+          "_Nested_0_body(*(*l5).f_capture0, (*l5).f_capture1);";
+          "_Nested_1_body(int32_t l0, int32_t *restrict l2_address)";
+          "int32_t l6_own;";
+        ];
       if String.includes ~affix:"f_capture2" c then
         Codegen_support.fail "a function reaches three locals:\n%s" c;
       Codegen_support.expect_status 20 [ Codegen_support.make_program_fragment fragment ])
+
+let () =
+  Codegen_support.test
+    "a region nested in another reaches the enclosing function's locals through it, by address \
+     where the inner region writes them and by value where it only reads them" (fun () ->
+      let env = Codegen_support.make_shape_env () in
+      let builder = Emit_c.Ir_builder.create env ~item:(Codegen_support.code_item "entry") in
+      let written = Emit_c.Ir_builder.allocate_local builder ~name:"written" lowered_int32 in
+      let read = Emit_c.Ir_builder.allocate_local builder ~name:"read" lowered_int32 in
+      let target = Emit_c.Ir_builder.allocate_local builder ~name:"target" lowered_int32 in
+      let pointer =
+        Emit_c.Ir_builder.allocate_local builder ~name:"pointer"
+          (Pointer { target = lowered_int32; writable = true })
+      in
+      let pointee = Codegen_support.at ~projections:[ Deref ] pointer in
+      Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
+      Emit_c.Ir_builder.emit builder
+        (Assign (Codegen_support.at written, Use (Codegen_support.constant_int32 1)));
+      Emit_c.Ir_builder.emit builder
+        (Assign (Codegen_support.at read, Use (Codegen_support.constant_int32 3)));
+      Emit_c.Ir_builder.emit builder
+        (Assign (Codegen_support.at target, Use (Codegen_support.constant_int32 10)));
+      Emit_c.Ir_builder.emit builder
+        (Assign
+           ( Codegen_support.at pointer,
+             Use (Address { place = Codegen_support.at target; writable = true }) ));
+      let outer =
+        Emit_c.Ir_builder.outline builder ~index:0 ~parts:[] (fun () ->
+            Emit_c.Ir_builder.emit builder
+              (Assign (pointee, Binary (Add, Copy pointee, Codegen_support.constant_int32 6)));
+            let inner =
+              Emit_c.Ir_builder.outline builder ~index:1 ~parts:[] (fun () ->
+                  Emit_c.Ir_builder.emit builder
+                    (Assign
+                       ( Codegen_support.at written,
+                         Binary (Add, Codegen_support.copy read, Codegen_support.constant_int32 4)
+                       ));
+                  Emit_c.Ir_builder.finish builder (Return None))
+            in
+            Emit_c.Ir_builder.emit builder (Fork { branches = [ (1, take_address inner) ] });
+            Emit_c.Ir_builder.finish builder (Return None))
+      in
+      Emit_c.Ir_builder.emit builder (Fork { branches = [ (0, take_address outer) ] });
+      Emit_c.Ir_builder.emit builder (Assign (Codegen_support.at written, add written target));
+      Emit_c.Ir_builder.finish builder (Return (Some (Codegen_support.copy written)));
+      let fragment =
+        Emit_c.Ir_builder.build builder
+          { parameters = []; result = Some lowered_int32; returns = true }
+      in
+      expect_c_includes
+        (Emit_c.For_testing.render_c fragment)
+        [
+          "_Nested_0_body(int32_t *restrict l0_written_address, int32_t l1_read, int32_t *restrict \
+           l3_pointer)";
+          "_Nested_1_body(int32_t *restrict l0_written_address, int32_t l1_read)";
+        ];
+      Codegen_support.expect_status 23 [ Codegen_support.make_program_fragment fragment ])
 
 let () =
   Codegen_support.test
