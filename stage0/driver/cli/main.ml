@@ -450,7 +450,8 @@ type request = {
   work : work;
   directory : string;
   environment : (string * string) list;
-  terminal : bool;
+  is_terminal : bool;
+  is_colored : bool;
   columns : int option;
 }
 
@@ -462,7 +463,8 @@ let make_request ?(directory = Sys.getcwd ()) work =
     directory;
     environment =
       List.map (fun name -> (name, Option.value (Sys.getenv_opt name) ~default:"")) forwarded;
-    terminal = Output.terminal ();
+    is_terminal = Output.is_terminal ();
+    is_colored = Output.is_colored ();
     columns = Output.columns ();
   }
 
@@ -474,7 +476,8 @@ let respond ~report_progress request run =
       {
         print_out = Buffer.add_string buffer;
         print_err = report_progress;
-        terminal = request.terminal;
+        is_terminal = request.is_terminal;
+        is_colored = request.is_colored;
         columns = request.columns;
         json = false;
       }

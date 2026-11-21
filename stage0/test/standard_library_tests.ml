@@ -184,7 +184,8 @@ let () =
                       (List.assoc file Standard_library.files)
                   in
                   List.iter
-                    (fun diagnostic -> Harness.fail "%s" (Diagnostic.render source diagnostic))
+                    (fun diagnostic ->
+                      Harness.fail "%s" (Diagnostic.render ~is_colored:false source diagnostic))
                     (match errors with
                     | [] -> Prover.list_diagnostics verdicts file
                     | errors -> errors))

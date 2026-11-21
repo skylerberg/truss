@@ -329,7 +329,8 @@ module Collector : sig
 end
 
 val select_shown : t list -> t list
-val render : Source.t -> t -> string
+val paint_severity : is_colored:bool -> severity -> string -> string
+val render : is_colored:bool -> Source.t -> t -> string
 val to_json_object : Source.t -> t -> string
 val encode_json_string : string -> string
 val quote : string -> string
