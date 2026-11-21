@@ -778,7 +778,17 @@ static void truss_sleep(atomic_int *done) {
   pthread_mutex_unlock(&truss_pool_lock);
 }
 
+static pthread_once_t truss_join_locks_once = PTHREAD_ONCE_INIT;
+
+static void truss_join_locks_start(void) {
+  for (size_t index = 0; index < TRUSS_MAXIMUM_WORKERS + TRUSS_MAXIMUM_SPARES; index++) {
+    pthread_mutex_init(&truss_workers[index].join_lock, NULL);
+    pthread_cond_init(&truss_workers[index].join_wake, NULL);
+  }
+}
+
 static void truss_sleep_on_thief(struct truss_worker *thief, atomic_int *done) {
+  pthread_once(&truss_join_locks_once, truss_join_locks_start);
   atomic_fetch_add(&truss_blocked, 1);
   truss_spare_ensure();
   pthread_mutex_lock(&thief->join_lock);
@@ -855,11 +865,6 @@ static long truss_count_processors(void) {
 }
 
 static void truss_pool_start(void) {
-  for (size_t index = 0; index < TRUSS_MAXIMUM_WORKERS + TRUSS_MAXIMUM_SPARES; index++) {
-    truss_workers[index].random = (uint64_t)index + 1;
-    pthread_mutex_init(&truss_workers[index].join_lock, NULL);
-    pthread_cond_init(&truss_workers[index].join_wake, NULL);
-  }
   long count = truss_requested_workers;
   if (count == 0) {
     count = truss_count_processors();
@@ -873,6 +878,7 @@ static void truss_pool_start(void) {
   pthread_mutex_lock(&truss_spare_lock);
   while ((long)truss_pool_workers < count) {
     size_t index = atomic_load(&truss_worker_count);
+    truss_workers[index].random = (uint64_t)index + 1;
     pthread_t thread;
     if (pthread_create(&thread, &attributes, truss_worker_main, &truss_workers[index]) != 0) break;
     atomic_store(&truss_worker_count, index + 1);
@@ -960,6 +966,7 @@ static void truss_range_run(void *argument) {
 
 void truss_runtime_parallel_range(void (*body)(void *environment, uint64_t first, uint64_t last),
                               void *environment, uint64_t first, uint64_t last) {
+  if (first > last) truss_runtime_compiler_bug();
   pthread_once(&truss_pool_once, truss_pool_start);
   if (truss_pool_workers == 1) {
     body(environment, first, last);
