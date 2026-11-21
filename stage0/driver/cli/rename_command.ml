@@ -219,7 +219,7 @@ let run ~from_ ~to_ =
   let json = Output.json () in
   let snapshot, packages = Command_packages.load_worktree () in
   let database = Workspace.open_database snapshot in
-  let report = Report.gather database snapshot packages in
+  let report = Report.gather ~proofs:false database snapshot packages in
   Report.require_no_errors report;
   let plan =
     match resolve_target database packages from_ with

@@ -75,11 +75,13 @@ let refuse_unshippable snapshot lookups main proofs =
 
 let build_program ?output snapshot packages (profile : Backend.profile) ~is_kept =
   let database = Workspace.open_database snapshot in
-  let report = Report.gather ~proofs:(profile = Release) database snapshot packages in
+  let report = Report.gather ~proofs:true database snapshot packages in
   Report.require_no_errors report;
   let main = require_main database packages in
   let lookups = Workspace_backend.require_lowered_lookups database packages in
-  Option.iter (refuse_unshippable snapshot lookups main) (Report.force_proofs report);
+  (match profile with
+  | Release -> Option.iter (refuse_unshippable snapshot lookups main) (Report.force_proofs report)
+  | Development -> ());
   let backend = Workspace_backend.create snapshot lookups profile in
   let output = Option.value output ~default:(Backend.make_program_path backend) in
   match Backend.build_program backend ~main ~output ~is_kept with

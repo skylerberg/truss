@@ -347,8 +347,8 @@ let list_names (_, packages) = List.sort compare (List.map Path.show_package pac
 let list_modules (snapshot, packages) = Cli.Command_packages.list_modules snapshot packages
 let list_files (snapshot, packages) = Cli.Command_packages.list_files snapshot packages
 
-let gather ?proofs (snapshot, packages) =
-  Cli.Report.gather ?proofs (Workspace.open_database snapshot) snapshot packages
+let gather ?(proofs = false) (snapshot, packages) =
+  Cli.Report.gather ~proofs (Workspace.open_database snapshot) snapshot packages
 
 let select (snapshot, packages) =
   Cli.Test_command.select snapshot (Workspace.open_database snapshot) packages
@@ -761,10 +761,29 @@ let () =
       let status, output = run_truss [ "check"; "-C"; root ] in
       if status <> 1 then fail "status %d" status;
       if not (String.includes ~affix:"prover.overflow" output) then fail "%s" output);
-  test "check --no-proofs reports no obligation" (fun () ->
-      let root = make_package [ ("main.truss", Fixtures.Cli.next_count) ] in
-      let status, output = run_truss [ "check"; "-C"; root; "--no-proofs" ] in
-      if status <> 0 then fail "status %d: %s" status output);
+  test "test runs no test while a proof fails" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.Cli.next_count_with_a_test) ] in
+      let status, output = run_truss [ "test"; "-C"; root ] in
+      if status <> 1 then fail "status %d: %s" status output;
+      if
+        (not (String.includes ~affix:"prover.overflow" output))
+        || String.includes ~affix:"passed" output
+      then fail "%s" output);
+  test "run runs no program while a proof fails" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.Cli.main_with_an_unproven_addition) ] in
+      let status, output = run_truss [ "run"; "-C"; root ] in
+      if status <> 1 then fail "status %d: %s" status output;
+      if not (String.includes ~affix:"prover.overflow" output) then fail "%s" output);
+  test "test runs the tests of a proof left todo, and stops one at the operation it covers"
+    (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.Cli.next_count_with_a_hole_and_tests) ] in
+      let status, output = run_truss [ "test"; "-C"; root ] in
+      if status <> 1 then fail "status %d: %s" status output;
+      if
+        not
+          (String.includes ~affix:"1 passed, 1 panicked" output
+          && String.includes ~affix:"arithmetic overflow\n      at main.truss:5:3" output)
+      then fail "%s" output);
   test "check prints type errors before it proves" (fun () ->
       let root =
         make_package
@@ -1465,7 +1484,7 @@ let () =
       ignore (Workspace.For_testing.load_standard_package_database ());
       let root = make_package [ ("main.truss", Fixtures.Cli.doubling) ] in
       Unix.putenv "TRUSS_DATABASE_COUNTS" "1";
-      let _, output = run_truss [ "check"; "--no-proofs"; "-C"; root ] in
+      let _, output = run_truss [ "check"; "-C"; root ] in
       if find_counts output "parsed file" <> Some [ "1"; "0"; "1"; "1"; "1" ] then
         fail "no row counts one parsed file, computed, written, and read once: %s" output);
   test "a second release build of an unchanged package computes no body, proof, or code" (fun () ->
@@ -1588,7 +1607,7 @@ let () =
       let root = make_package [ ("main.truss", Fixtures.Cli.passing_test_reaching_an_echo) ] in
       let status, output = run_truss [ "test"; "-C"; root ] in
       if status <> 0 then fail "status %d: %s" status output;
-      if not (String.includes ~affix:"\"triples\": passed\n    main.truss:2:3: 6\n\n" output) then
+      if not (String.includes ~affix:"\"triples\": passed\n    main.truss:4:3: 6\n\n" output) then
         fail "%s" output);
   test "truss test shows a failed test's output, and --json gives each test's output" (fun () ->
       let root = make_package [ ("main.truss", Fixtures.Cli.tests_printing_to_the_console) ] in

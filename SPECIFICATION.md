@@ -2780,6 +2780,8 @@ test "config loads with defaults" uses RunForever {
   implementation](#standard-capabilities).
 - A failed `assert` ends the test as failed, and the rest of the test can
   rely on the asserted fact.
+- Tests run only when no proof in their packages fails. A proof that holds
+  a `todo` does not fail.
 - A test build checks every primitive operation that could fail when it
   runs, and a failed check fails the test. A `requires` is not run.
 - A panic fails only its test. A test that reaches a `todo` is incomplete.

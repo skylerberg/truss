@@ -1278,15 +1278,17 @@ Rules: [Dynamic dispatch](SPECIFICATION.md#dynamic-dispatch).
 
 Rules: [Tests](SPECIFICATION.md#tests).
 
-**A test does not wait for proofs.** A program is built only when every
-proof obligation that it reaches is proven. A test build instead inserts a
-run-time check at every primitive operation that can fail. Generated code
-therefore has no undefined behavior, even where a proof is pending or has
-failed, and a test runs as soon as its code type-checks, alongside the
-prover. A failed check names the operation, which tells an agent whether a
-failed proof is a real bug or a prover that needs a hint. A test build
-checks every operation, proven or not, so a test result does not depend on
-the state of any proof.
+**A test runs only once its proofs pass.** A failed proof is an error, as a
+type error is, so `truss test` and `truss run` stop at it, and a change
+cannot pass its tests while its proofs fail. A proof that is not finished
+holds a `todo`, which `truss holes` lists and a release build refuses, so a
+deferred proof is written in the code. A test build still inserts a
+run-time check at every primitive operation that can fail, so a proof hole
+or a prover bug stops a test at the operation instead of causing undefined
+behavior. A check that fails behind a hole names the operation, which tells
+an agent that the unfinished proof covers a real bug and not a prover that
+needs a hint. A test build checks every operation, proven or not, so a test
+result does not depend on the state of any proof.
 
 **No clause is evaluated at run time.** Evaluating a `requires` would pay
 for its proof a second time, at the cost of the clause: a test build would

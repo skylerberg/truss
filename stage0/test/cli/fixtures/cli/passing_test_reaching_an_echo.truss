@@ -1,4 +1,6 @@
-fn triple(value: Int64) -> Int64 {
+fn triple(value: Int64) -> Int64
+  requires value >= -1000 && value <= 1000
+{
   echo value * 3
 }
 
