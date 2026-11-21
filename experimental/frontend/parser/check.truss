@@ -156,9 +156,16 @@ fn check_placement(cursor: mut TokenCursor, written: syntax::TypeExpression, is_
           if clause.kind is Requires(_) {
             report_at(
               mut cursor,
-              code: "parser.misplaced_requires",
+              code: "parser.misplaced_callback_contract",
               id: clause.id,
               message: "A function type has a `requires` only as the type of a parameter, where it constrains the arguments the callee passes its callback.",
+            )
+          } else if clause.kind is Ensures(_) {
+            report_at(
+              mut cursor,
+              code: "parser.misplaced_callback_contract",
+              id: clause.id,
+              message: "A function type has an `ensures` only as the type of a parameter, where it constrains the results the callback returns to the callee.",
             )
           }
         }

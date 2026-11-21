@@ -17,8 +17,8 @@ fn report_habit(cursor: mut TokenCursor, code: StringSlice, span: source::Span, 
       joins = true
     }
   }
-  let fixes = if joins { [] } else { [source::make_fix(fix_title, edits: own edits)] }
-  report(mut cursor, code, span, message, fixes: own fixes)
+  let fixes = if joins { [] } else { [source::make_fix(fix_title, own edits)] }
+  report(mut cursor, code, span, message, own fixes)
 }
 
 fn extend_with_trailing_space(written: token::Token, next: token::Token) -> source::Span
@@ -314,7 +314,7 @@ fn report_tuple(cursor: mut TokenCursor, opening: token::Token) -> Failure
     mut cursor,
     code: "parser.tuple",
     span: opening.span,
-    message: "Truss has no tuples. Values that belong together go in a record, whose fields have names, such as `Pair(first: a, second: b)`.",
+    message: "Parentheses do not make a tuple: every tuple type has a name and named fields. Values that belong together go in a record or a tuple type, such as `core::Pair`, built as `core::Pair(first: a, second: b)`.",
   )
   Failure.Failed
 }
@@ -326,7 +326,7 @@ fn report_tuple_field(cursor: mut TokenCursor, field: token::Token) -> Failure
     mut cursor,
     code: "parser.tuple",
     span: field.span,
-    message: "Truss has no tuples, so a value has no numbered fields. A record's fields have names, as in `pair.first`.",
+    message: "A value has no numbered fields. Every field has a name, in a tuple type too, as in `pair.first`.",
   )
   Failure.Failed
 }
@@ -583,7 +583,7 @@ fn report_as_conversion(cursor: mut TokenCursor, value: syntax::Expression, as_t
       code: "parser.as_conversion",
       span: as_token.span,
       message: "Truss has no `as`; write `x.${method}()`.",
-      fixes: [source::make_fix("Write `.${method}()`", edits: own edits)],
+      fixes: [source::make_fix("Write `.${method}()`", own edits)],
     )
     return
   }

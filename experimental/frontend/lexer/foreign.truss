@@ -178,7 +178,7 @@ fn check_hexadecimal_escape(scanner: mut Scanner, buffer: mut String, start: UIn
   if value > 1114111 || (value >= 55296 && value <= 57343) {
     return false
   }
-  report_foreign_escape(mut scanner, buffer: mut buffer, start: start, stop: start + 2 + count, value: UInt32.from_integer(value))
+  report_foreign_escape(mut scanner, mut buffer, start, stop: start + 2 + count, value: UInt32.from_integer(value))
 }
 
 fn scan_foreign_escape(scanner: mut Scanner, buffer: mut String) -> Bool
@@ -190,13 +190,13 @@ fn scan_foreign_escape(scanner: mut Scanner, buffer: mut String) -> Bool
   }
   let escaped = scanner.lookup(start + 1)
   if escaped == 117 && !scanner.is_at(start + 2, byte: 123) {
-    return check_hexadecimal_escape(mut scanner, buffer: mut buffer, start: start, count: 4)
+    return check_hexadecimal_escape(mut scanner, mut buffer, start, count: 4)
   }
   if escaped == 120 {
-    return check_hexadecimal_escape(mut scanner, buffer: mut buffer, start: start, count: 2)
+    return check_hexadecimal_escape(mut scanner, mut buffer, start, count: 2)
   }
   if escaped == 85 {
-    return check_hexadecimal_escape(mut scanner, buffer: mut buffer, start: start, count: 8)
+    return check_hexadecimal_escape(mut scanner, mut buffer, start, count: 8)
   }
   let control: Option[UInt32] = if escaped == 97 {
     Some(7)
@@ -212,7 +212,7 @@ fn scan_foreign_escape(scanner: mut Scanner, buffer: mut String) -> Bool
     None
   }
   if control is Some(value) {
-    return report_foreign_escape(mut scanner, buffer: mut buffer, start: start, stop: start + 2, value: value)
+    return report_foreign_escape(mut scanner, mut buffer, start, stop: start + 2, value: value)
   }
   if escaped == 40 {
     let content = start + 2
@@ -396,7 +396,7 @@ fn lex_character_literal(scanner: mut Scanner, tag: StringSlice, literal_start: 
     literal: token::StringLiteral(
       tag: Some(token::Tag(name: tag.to_string(), span: source::make_zero_width(literal_start))),
       form: token::Form.Ordinary,
-      first: token::Text(value: own value, span: source::make_span(start + 1, stop: stop - 1)),
+      first: token::Text(own value, span: source::make_span(start + 1, stop: stop - 1)),
       rest: [],
     ),
   )
@@ -558,9 +558,9 @@ fn read_hash_raw_text(scanner: mut Scanner, text_start: UInt64, text_stop: UInt6
   var buffer = String.with_capacity(text_stop - text_start)
   scanner.position = text_start
   while scanner.position < text_stop {
-    copy_plain(mut scanner, buffer: mut buffer, special: Special.RawSpecial)
+    copy_plain(mut scanner, mut buffer, special: Special.RawSpecial)
     if scanner.position < text_stop {
-      read_character(mut scanner, buffer: mut buffer, context: Context.RawString)
+      read_character(mut scanner, mut buffer, context: Context.RawString)
     }
   }
   buffer
@@ -629,7 +629,7 @@ fn hash_raw_string(scanner: mut Scanner, start: UInt64) -> Option[token::Kind]
       literal: token::StringLiteral(
         tag: None,
         form: token::Form.Raw(quotes, dollars: 0, multi_line: false),
-        first: token::Text(value: own value, span: source::make_span(text_start, stop: text_stop)),
+        first: token::Text(own value, span: source::make_span(text_start, stop: text_stop)),
         rest: [],
       ),
     ),
@@ -687,7 +687,7 @@ fn lex_quoted_string(scanner: mut Scanner, nesting: UInt64, delimiter: UInt8) ->
   mut edits.push(source::replace(source::make_span(stop - 1, stop), replacement: "\""))
   let is_template = delimiter == 96
   let fixes = if scanned.ending == Ending.Closed && !quote_joins_before(scanner, index: start) {
-    [source::make_fix("Write the string between `\"`s", edits: own edits)]
+    [source::make_fix("Write the string between `\"`s", own edits)]
   } else {
     []
   }
@@ -741,7 +741,7 @@ fn lex_curly_quoted_string(scanner: mut Scanner, opening_length: UInt64, closing
       literal: token::StringLiteral(
         tag: None,
         form: token::Form.Ordinary,
-        first: token::Text(value: own value, span: source::make_span(text_start, stop: text_stop)),
+        first: token::Text(own value, span: source::make_span(text_start, stop: text_stop)),
         rest: [],
       ),
     ),

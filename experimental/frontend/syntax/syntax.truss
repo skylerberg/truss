@@ -246,6 +246,7 @@ internal type PatternKind =
   | PatternRange(start: RangeEnd, stop: RangeEnd, is_inclusive: Bool)
   | Variant(name: Name, fields: Option[List[PatternField]])
   | Record(fields: List[PatternField])
+  | Tuple(patterns: List[Pattern])
   | Alternatives(alternatives: List[Pattern])
   | PatternError
   derives Equal
@@ -360,7 +361,7 @@ internal type IntendedKind =
 internal type DefinitionKind =
   | Function(definition: FunctionDefinition)
   | MethodDeclaration(signature: Signature)
-  | TypeDefinition(name: Name, generics: List[GenericParameter], body: TypeBody, clauses: List[TypeClause])
+  | TypeDefinition(is_tuple: Bool, name: Name, generics: List[GenericParameter], body: TypeBody, clauses: List[TypeClause])
   | Trait(name: Name, generics: List[GenericParameter], supertraits: List[PathType], members: List[TraitMemberNode])
   | Impl(
     implemented_trait: PathType,

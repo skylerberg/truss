@@ -391,7 +391,7 @@ fn scan_item(scanner: mut Scanner, inline: Bool, nesting: UInt64) -> Item
     }
     if current == 46 && scanner.is_digit_at(start + 1) && !follows_operand(scanner) {
       if lex_leading_dot(mut scanner) is Some(value) {
-        let kind = store_number(mut scanner, value: own value)
+        let kind = store_number(mut scanner, own value)
         return lexed(mut scanner, inline, start, kind)
       }
       match lex_punctuation(mut scanner, current) {

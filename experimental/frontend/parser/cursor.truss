@@ -122,7 +122,7 @@ fn list_angle_closers(tables: token::Tables, first: UInt64, stop: UInt64) -> Lis
 
 fn TokenCursor.create(tables: own token::Tables, file_stop: UInt64) -> TokenCursor {
   TokenCursor(
-    tables: own tables,
+    own tables,
     file_stop,
     first: 0,
     stop: 0,
@@ -789,7 +789,7 @@ fn collect_positions(cursor: mut TokenCursor) -> syntax::Positions
   for span in cursor.syntax_errors {
     mut errors.push(cursor.make_definition_span(span))
   }
-  syntax::Positions(spans: own spans, syntax_errors: sort_unique(own errors))
+  syntax::Positions(own spans, syntax_errors: sort_unique(own errors))
 }
 
 type SpanEdge = Start | Stop

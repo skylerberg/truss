@@ -32,8 +32,8 @@ fn finish_piece[Value](cursor: mut TokenCursor, piece: Piece, value: own Value) 
   let diagnostics = source::sort_by_start(own cursor.diagnostics)
   cursor.diagnostics = []
   Finished(
-    item: syntax::Item(base: cursor.base, stop: cursor.piece_stop(piece), value: own value, positions: own positions),
-    diagnostics: own diagnostics,
+    item: syntax::Item(base: cursor.base, stop: cursor.piece_stop(piece), own value, own positions),
+    own diagnostics,
   )
 }
 
@@ -93,8 +93,8 @@ fn attach_lexer_errors[Value](
     mut diagnostics.push(own stripped)
   }
   Finished(
-    item: syntax::Item(base: item.base, stop: item.stop, value: own item.value, positions: own positions),
-    diagnostics: own diagnostics,
+    item: syntax::Item(base: item.base, stop: item.stop, value: own item.value, own positions),
+    own diagnostics,
   )
 }
 
@@ -138,7 +138,7 @@ fn parse_top_level(cursor: mut TokenCursor, lexer_diagnostics: Slice[source::Dia
       mut diagnostics.append(own method_attached.diagnostics)
     }
   }
-  ParsedTopLevel(top_level: syntax::TopLevel(definition: own attached.item, methods: own methods), diagnostics: own diagnostics)
+  ParsedTopLevel(top_level: syntax::TopLevel(definition: own attached.item, own methods), own diagnostics)
 }
 
 fn parse_module_name(cursor: mut TokenCursor) -> Result[syntax::Name, Failure]
@@ -158,7 +158,7 @@ fn parse_use_path(cursor: mut TokenCursor) -> Result[syntax::NamePath, Failure]
   let Some(last) = mut names.pop() else {
     return Err(Failure.Failed)
   }
-  Ok(syntax::NamePath(modules: own names, last: own last))
+  Ok(syntax::NamePath(modules: own names, own last))
 }
 
 fn parse_use_line(cursor: mut TokenCursor, piece: Piece) -> Finished[Option[syntax::NamePath]]
@@ -238,5 +238,5 @@ internal fn parse(lexed: own token::Lexed, lexer_diagnostics: Slice[source::Diag
       mut definitions.push(own parsed.top_level)
     }
   }
-  ParseResult(file: syntax::File(imports: own imports, definitions: own definitions), diagnostics: source::sort_by_start(own diagnostics))
+  ParseResult(file: syntax::File(own imports, own definitions), diagnostics: source::sort_by_start(own diagnostics))
 }

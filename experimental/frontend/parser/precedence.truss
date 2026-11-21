@@ -132,8 +132,8 @@ fn make_titled_fix(cursor: TokenCursor, fallback: StringSlice, whole: UInt64, ed
   let span = cursor.read_file_span(whole)
   let spelled = if span.stop - span.start > longest_titled_expression { None } else { cursor.spell(span, insertions) }
   match spelled {
-    Some(fixed) => source::make_fix("Write `${fixed}`", edits: own edits)
-    None => source::make_fix(fallback, edits: own edits)
+    Some(fixed) => source::make_fix("Write `${fixed}`", own edits)
+    None => source::make_fix(fallback, own edits)
   }
 }
 
@@ -244,7 +244,7 @@ fn make_grouping_fix(
     LeftFirst => "Group the first two operands"
     RightFirst => "Group the last two operands"
   }
-  make_titled_fix(cursor, fallback, whole: whole.id, edits: wrap_edits(cursor, context, whole, last, edits: own edits))
+  make_titled_fix(cursor, fallback, whole: whole.id, edits: wrap_edits(cursor, context, whole, last, own edits))
 }
 
 fn find_first_operand(value: syntax::Expression) -> Option[syntax::Expression]
