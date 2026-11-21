@@ -223,7 +223,8 @@ binds each field by position to a name the reader chooses:
 | A record matches by position only where it is declared a tuple type. | Reordering two fields of one type would otherwise silently swap the bindings of every positional pattern. Only a type whose field names stand for positions commits to an order. |
 | A tuple pattern has no parentheses. | Parentheses match fields by name in every type, so the semantics of a pattern never depends on whether its type is a tuple type. `for (_, group) in groups`, a habit from Rust and Swift, is an error whose fix removes the parentheses (*LLM habits*). |
 | A tuple pattern is the whole pattern of a `let`, a `var`, or a `for`. | Without parentheses it cannot nest, and in a `match` arm or a lambda's parameters a comma already separates values. |
-| In a tuple pattern, a bare name that names another field is an error. | `for value, key in ports` would bind each key as `value`. |
+| A tuple type is built as a function is called, by position and then by label. | Its field order is already part of its API, and its field names stand for positions, so a label such as `first:` repeats the position. The construction names its type, so a reader sees that the type is a tuple type; a pattern's type comes from its scrutinee, which is why parentheses in a pattern still match by name. |
+| In a tuple pattern, and among the positional arguments that build a tuple type, a bare name that names another field is an error. | `for value, key in ports` would bind each key as `value`, and `Span(end, start)` would put `end` in the field `start`. |
 
 ### Recursive types
 
@@ -540,7 +541,9 @@ takes positional arguments and a construction takes labels.
 | A variable named like a parameter is positional. | `gcd(second, first % second)` passes `second` to `first`, as written. Matching by name would make a call's semantics depend on the names of the caller's variables. |
 | No declaration requires a label. | Swift lets each parameter's author require its label, so the syntax of a call depends on the callee's declaration. |
 | A call through a function value takes no labels. | Labels in function types would make types that differ only in labels convert into each other. |
-| A record with more than one field takes no positional argument. | Field order has no meaning, so a positional argument would make it part of the record's API. A variable named like a field needs no label, because its name already names the field. |
+| A record with more than one field takes no positional argument, unless it is a tuple type. | Field order has no meaning, so a positional argument would make it part of the record's API. A variable named like a field needs no label, because its name already names the field. |
+| A construction and a record pattern report a mistake under the same code. | An agent learns one code for one mistake, and the tools that rank diagnostics by code count it once. |
+| A fix labels bare values only when their fields are certain: one field left open for one bare value, or a bare value for every field in declared order. | Agents write bare values in declared order, so the second case labels what they meant. Where some fields are labeled or skipped with `..`, the position of a bare value does not say which field it means, and a fix would apply a guess. |
 | Construction uses parentheses. | `{` then always starts a block in an expression. With braces, `if kind == Kind.Unit { x }` is ambiguous between a record and a block, which Rust and Go resolve with a special rule. |
 
 A parameter can have a default:

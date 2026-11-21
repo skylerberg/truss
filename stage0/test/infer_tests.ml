@@ -1480,7 +1480,7 @@ let () =
       expect_fine Fixtures.Infer.let_binding_both_fields_of_a_pair);
   Harness.test "a bare name that names no field of a record with several is an error" (fun () ->
       expect_one_diagnostic Fixtures.Infer.record_pattern_with_a_name_of_no_field
-        "types.unknown_member")
+        "types.missing_label")
 
 let () =
   Harness.test "a tuple pattern binds the fields of a tuple type by position" (fun () ->
@@ -1502,15 +1502,84 @@ let () =
   Harness.test "parentheses match the fields of a tuple type by name" (fun () ->
       expect_fine Fixtures.Infer.record_pattern_on_a_tuple_type_by_name;
       expect_one_diagnostic Fixtures.Infer.record_pattern_on_map_entries_with_a_wildcard
-        "types.unknown_member"
+        "types.missing_label"
         ~says:"a list of patterns without parentheses matches its fields by position"
         ~fixed:Fixtures.Infer.record_pattern_on_map_entries_with_a_wildcard_fixed);
-  Harness.test "a bare pattern that names no field is offered the field in its position" (fun () ->
+  Harness.test "a bare pattern that names no field is labeled with the one field left open"
+    (fun () ->
       expect_one_diagnostic Fixtures.Infer.record_pattern_on_map_entries_in_a_lambda
-        "types.unknown_member" ~fixed:Fixtures.Infer.record_pattern_on_map_entries_in_a_lambda_fixed;
+        "types.missing_label" ~fixed:Fixtures.Infer.record_pattern_on_map_entries_in_a_lambda_fixed;
       expect_one_diagnostic Fixtures.Infer.variant_pattern_with_a_wildcard_for_a_field
-        "types.unknown_member"
+        "types.missing_label" ~says:"`Link` has 2 fields: `value`, `rest`."
         ~fixed:Fixtures.Infer.variant_pattern_with_a_wildcard_for_a_field_fixed)
+
+let () =
+  let report text =
+    check (Support.setup [ ("app::main", text) ]) (Support.parse_file "app::main")
+  in
+  let expect_codes code ~count diagnostics =
+    let codes = Support.list_codes diagnostics in
+    if codes <> List.init count (fun _ -> code) then
+      Harness.fail "expected %d %s, got [%s]" count code (String.concat "; " codes)
+  in
+  let expect_every_fix text code ~count ~fixed =
+    let diagnostics = report text in
+    expect_codes code ~count diagnostics;
+    match
+      List.concat_map
+        (fun (diagnostic : Diagnostic.t) ->
+          match diagnostic.fixes with [ fix ] -> fix.edits | _ -> [])
+        diagnostics
+    with
+    | edits when List.length edits <> count -> Harness.fail "not every diagnostic has one fix"
+    | edits -> (
+        let after = Diagnostic.apply_edits text edits in
+        if after <> fixed then Harness.fail "fixed to %S" after
+        else
+          match report after with
+          | [] -> ()
+          | left ->
+              Harness.fail "after the fixes: [%s]" (String.concat "; " (Support.list_codes left)))
+  in
+  let expect_no_fix text code ~count =
+    let diagnostics = report text in
+    expect_codes code ~count diagnostics;
+    if List.exists (fun (diagnostic : Diagnostic.t) -> diagnostic.fixes <> []) diagnostics then
+      Harness.fail "offered a fix"
+  in
+  Harness.test "a complete positional list is labeled in the declared order of the fields"
+    (fun () ->
+      expect_every_fix Fixtures.Infer.color_built_with_three_positional_arguments
+        "types.missing_label" ~count:3 ~fixed:Fixtures.Infer.color_built_with_labeled_arguments;
+      expect_every_fix Fixtures.Infer.link_matched_with_two_names_of_no_field "types.missing_label"
+        ~count:2 ~fixed:Fixtures.Infer.link_matched_with_two_names_of_no_field_fixed);
+  Harness.test "a partial positional list gets no fix, since which field each means is not known"
+    (fun () ->
+      expect_no_fix Fixtures.Infer.color_built_with_two_positional_arguments_and_a_label
+        "types.missing_label" ~count:2;
+      expect_no_fix Fixtures.Infer.triple_matched_with_two_names_of_no_field_and_a_rest
+        "types.missing_label" ~count:2);
+  Harness.test "a label in a pattern that names no field is an unknown label" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.link_matched_with_a_misspelled_label
+        "types.unknown_label" ~says:"`Link` has no field `valu`."
+        ~fixed:Fixtures.Infer.link_matched_with_a_misspelled_label_fixed);
+  Harness.test "a field matched twice in a pattern is a repeated argument" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.link_matched_with_a_field_twice "types.repeated_argument"
+        ~says:"`value` is matched more than once.");
+  Harness.test "a tuple pattern on a record is fixed to its labeled form" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.tuple_pattern_of_other_names_on_a_record
+        "types.not_a_tuple_type" ~says:"as in `(start: low, stop: high)`"
+        ~fixed:Fixtures.Infer.tuple_pattern_of_other_names_on_a_record_fixed);
+  Harness.test "a tuple type is built by position, then by label" (fun () ->
+      expect_fine Fixtures.Infer.span_built_by_position_and_by_label);
+  Harness.test
+    "a variable named like another field of a tuple type is an error, with a fix that labels it"
+    (fun () ->
+      expect_every_fix Fixtures.Infer.span_built_with_its_fields_swapped "types.out_of_order"
+        ~count:2 ~fixed:Fixtures.Infer.span_built_with_its_fields_swapped_fixed);
+  Harness.test "a tuple type takes no positional argument after a label" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.span_built_with_a_positional_argument_after_a_label
+        "types.positional_after_labeled")
 
 let () =
   Harness.test "a lambda with nothing to give its parameter types is an error" (fun () ->
@@ -1992,19 +2061,6 @@ let () =
   Harness.test "an associated type of a generic supertrait takes the supertrait's arguments"
     (fun () ->
       expect_no_diagnostics [ ("app::main", Fixtures.Infer.output_of_a_generic_supertrait) ]);
-  Harness.test "a missing label has no fix when which field is meant is not known" (fun () ->
-      let packages =
-        Support.setup [ ("app::main", Fixtures.Infer.color_built_with_three_positional_arguments) ]
-      in
-      match check packages (Support.parse_file "app::main") with
-      | [] -> Harness.fail "reported nothing"
-      | diagnostics ->
-          List.iter
-            (fun (diagnostic : Diagnostic.t) ->
-              if Diagnostic.Code.name diagnostic.code <> "types.missing_label" then
-                Harness.fail "reported %s" (Diagnostic.Code.name diagnostic.code);
-              if diagnostic.fixes <> [] then Harness.fail "offered a fix")
-            diagnostics);
   Harness.test "the string + fix keeps escapes" (fun () ->
       expect_one_diagnostic Fixtures.Infer.escaped_string_plus_a_string "types.string_addition"
         ~fixed:Fixtures.Infer.escaped_string_plus_a_string_fixed);
