@@ -3,6 +3,13 @@ type span = private { start : int; stop : int }
 val make_span : int -> int -> span
 val make_zero_width : int -> span
 
+module Node : sig
+  type t = private int
+
+  val iteri : (t -> 'a -> unit) -> 'a array -> unit
+  val find_index : ('a -> bool) -> 'a array -> t option
+end
+
 module Definition_span : sig
   type t = private { start : int; stop : int }
 
@@ -10,7 +17,8 @@ module Definition_span : sig
   val make_zero_width : int -> t
   val to_file : base:int -> t -> span
   val of_file : base:int -> span -> t
-  val locate : t array -> int -> t
+  val allocate : t Dynarray.t -> t -> Node.t
+  val locate : t array -> Node.t -> t
   val quote : string -> t -> string
 end
 

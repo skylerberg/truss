@@ -35,14 +35,14 @@ type program_fragment = Memory_layout.env -> Emit_c.fragment
 
 val local : ?name:string -> Lowered.ty -> local_info
 val value : Ground.ty -> Lowered.ty
-val at : ?projections:Lowered.projection list -> Lowered.local -> Lowered.place
-val copy : ?projections:Lowered.projection list -> Lowered.local -> Lowered.operand
+val at : ?projections:Lowered.projection list -> int -> Lowered.place
+val copy : ?projections:Lowered.projection list -> int -> Lowered.operand
 val constant_int32 : int -> Lowered.operand
 val constant_int64 : int -> Lowered.operand
 val block : Lowered.statement list -> Lowered.terminator -> block
 
 val function_ :
-  ?parameters:Lowered.local list ->
+  ?parameters:int list ->
   ?result:Lowered.ty ->
   ?environment:(string * Lowered.ty) list ->
   local_info list ->

@@ -65,7 +65,7 @@ type local_info = { ty : Lowered.ty; name : string option }
 type block = { statements : Lowered.statement list; terminator : Lowered.terminator }
 
 type function_ = {
-  parameters : Lowered.local list;
+  parameters : int list;
   result : Lowered.ty option;
   returns : bool;
   environment : (string * Lowered.ty) list;
@@ -77,7 +77,10 @@ type program_fragment = Memory_layout.env -> Emit_c.fragment
 
 let local ?name ty = { ty; name }
 let value ty = Lowered.Value ty
-let at ?(projections = []) local : Lowered.place = { root = Local local; projections }
+
+let at ?(projections = []) local : Lowered.place =
+  { root = Local (Lowered.For_testing.make_local local); projections }
+
 let copy ?projections local = Lowered.Copy (at ?projections local)
 let constant_int32 number = Lowered.Constant (Integer (Int32, Z.of_int number))
 let constant_int64 number = Lowered.Constant (Integer (Int64, Z.of_int number))
@@ -95,14 +98,20 @@ let write builder (function_ : function_) =
     (fun (info : local_info) ->
       ignore (Emit_c.Ir_builder.allocate_local builder ?name:info.name info.ty))
     function_.locals;
-  List.iter (fun _ -> ignore (Emit_c.Ir_builder.allocate_block builder)) function_.blocks;
+  (match function_.blocks with
+  | _entry :: rest -> List.iter (fun _ -> ignore (Emit_c.Ir_builder.allocate_block builder)) rest
+  | [] -> ());
   List.iteri
     (fun index (block : block) ->
-      Emit_c.Ir_builder.start builder index;
+      Emit_c.Ir_builder.start builder (Lowered.For_testing.make_block index);
       List.iter (Emit_c.Ir_builder.emit builder) block.statements;
       Emit_c.Ir_builder.finish builder block.terminator)
     function_.blocks;
-  ({ parameters = function_.parameters; result = function_.result; returns = function_.returns }
+  ({
+     parameters = List.map Lowered.For_testing.make_local function_.parameters;
+     result = function_.result;
+     returns = function_.returns;
+   }
     : Emit_c.Ir_builder.prototype)
 
 let define_function ?(nested = []) name main : program_fragment =
@@ -110,8 +119,8 @@ let define_function ?(nested = []) name main : program_fragment =
   let builder = Emit_c.Ir_builder.create env ~item:(code_item name) in
   List.iteri
     (fun index (function_ : function_) ->
-      Emit_c.Ir_builder.build_nested builder ~index ~environment:function_.environment
-        (fun nested -> write nested function_))
+      Emit_c.Ir_builder.build_nested builder ~index:(Lowered.For_testing.make_nested_function index)
+        ~environment:function_.environment (fun nested -> write nested function_))
     nested;
   Emit_c.Ir_builder.build builder (write builder main)
 

@@ -4,9 +4,9 @@ type function_context = Lowered.local -> C_text.t * Lowered.ty
 
 let render_cast c_type text = Text "((" ++ c_type ++ Text ")" ++ text ++ Text ")"
 
-let render_local_name local = function
-  | Some name -> Printf.sprintf "l%d_%s" local name
-  | None -> Printf.sprintf "l%d" local
+let render_local_name (local : Lowered.local) = function
+  | Some name -> Printf.sprintf "l%d_%s" (local :> int) name
+  | None -> Printf.sprintf "l%d" (local :> int)
 
 let find_field (fields : Memory_layout.field list) name =
   List.find_opt (fun (field : Memory_layout.field) -> field.name = name) fields

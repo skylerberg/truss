@@ -267,8 +267,7 @@ let lower_nested_function (state : Lowering.state) ~(function_type : Ground.func
        captures:Lowered.place list ->
        (Lowered.place * Language.Mode.t * Ground.ty) list ->
        unit) destination =
-  let index = !(state.nested) in
-  incr state.nested;
+  let index = Lowered.allocate_nested_function state.nested_functions in
   let captured =
     List.mapi
       (fun position (place, ty) -> (Printf.sprintf "capture%d" position, place, ty))
@@ -300,7 +299,7 @@ let lower_nested_function (state : Lowering.state) ~(function_type : Ground.func
                  environment = Some (Address { place = environment_local; writable = false });
                } ));
       let inner =
-        Lowering.enter state.context ~nested:state.nested ~builder
+        Lowering.enter state.context ~nested_functions:state.nested_functions ~builder
           {
             state.frame with
             exit = None;
@@ -326,7 +325,6 @@ let lower_nested_function (state : Lowering.state) ~(function_type : Ground.func
         Emit_c.Ir_builder.allocate_local builder
           (Pointer { target = Environment index; writable = false })
       in
-      Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
       Emit_c.Ir_builder.emit builder
         (Assign
            ( Lowered.make_local_place environment_pointer,

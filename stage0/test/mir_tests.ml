@@ -155,7 +155,7 @@ let validate definition (body : Mir.Graph.body) =
   in
   let describe local =
     let kind =
-      match body.locals.(local).kind with
+      match body.locals.((local : Mir.local :> int)).kind with
       | Source { local; _ } -> "source " ^ Option.value (Mir.find_local_name local) ~default:"?"
       | Temporary -> "temporary"
       | Lent _ -> "lent"
@@ -196,17 +196,19 @@ let validate definition (body : Mir.Graph.body) =
     in
     kind ^ " " ^ Option.value made ~default:"unassigned"
   in
-  let check_block index =
-    if index < 0 || index >= count then raise_problem "a jump to block %d" index
+  let check_block (block : Mir.Graph.block) =
+    if (block :> int) >= count then raise_problem "a jump to block %d" (block :> int)
   in
-  let check_local index = if index < 0 || index >= locals then raise_problem "local _%d" index in
+  let check_local (local : Mir.local) =
+    if (local :> int) >= locals then raise_problem "local _%d" (local :> int)
+  in
   let loans =
     Array.fold_left
       (fun most (basic : Mir.Graph.basic_block) ->
         List.fold_left
           (fun most (statement : Mir.Graph.statement) ->
             match statement.kind with
-            | Basic (Loan_start { loan; _ }) -> max most (loan + 1)
+            | Basic (Loan_start { loan; _ }) -> max most ((loan :> int) + 1)
             | _ -> most)
           most basic.statements)
       0 body.blocks
@@ -224,19 +226,22 @@ let validate definition (body : Mir.Graph.body) =
                    value = Operand (Borrow _);
                    _;
                  }) -> (
-              bindings.(bound) <- bindings.(bound) + 1;
-              match body.locals.(bound).kind with
+              bindings.((bound :> int)) <- bindings.((bound :> int)) + 1;
+              match body.locals.((bound :> int)).kind with
               | Lent _ | Source { mode = Read | Mut; _ } -> ()
               | Temporary | Source { mode = Own; _ } ->
                   raise_problem "_%d (%s) is bound to a place, and is declared to own its value"
-                    bound (describe bound))
+                    (bound :> int)
+                    (describe bound))
           | _ -> ())
         basic.statements)
     body.blocks;
-  Array.iteri
+  Mir.iteri_locals
     (fun bound count ->
-      if count > 1 <> body.locals.(bound).has_several_bindings then
-        raise_problem "_%d (%s) is bound to a place by %d statements" bound (describe bound) count)
+      if count > 1 <> body.locals.((bound :> int)).has_several_bindings then
+        raise_problem "_%d (%s) is bound to a place by %d statements"
+          (bound :> int)
+          (describe bound) count)
     bindings;
   Array.iter
     (fun (basic : Mir.Graph.basic_block) ->
@@ -264,17 +269,17 @@ let validate definition (body : Mir.Graph.body) =
     (fun index (basic : Mir.Graph.basic_block) ->
       (match Mir.Graph.find_iteration_loop basic.terminator with
       | Some loop -> (
-          match body.blocks.(loop).terminator with
-          | For { blocks; _ } when List.mem index blocks -> ()
+          match body.blocks.((loop :> int)).terminator with
+          | For { blocks; _ } when List.mem index (blocks :> int list) -> ()
           | _ ->
               raise_problem "block %d ends an iteration of %d, which is not a loop around it" index
-                loop)
+                (loop :> int))
       | None -> ());
       match basic.terminator with
       | For { part; body = inside; blocks; after; _ } ->
           parts := part :: !parts;
           if not (List.mem inside blocks) then
-            raise_problem "a loop's body %d is not among its blocks" inside;
+            raise_problem "a loop's body %d is not among its blocks" (inside :> int);
           List.iter
             (fun inner ->
               match body.blocks.(inner).terminator with
@@ -283,10 +288,12 @@ let validate definition (body : Mir.Graph.body) =
                   List.iter
                     (fun target ->
                       if target <> after && not (List.mem target blocks) then
-                        raise_problem "block %d of the loop at %d jumps out to %d" inner index
-                          target)
+                        raise_problem "block %d of the loop at %d jumps out to %d"
+                          (inner :> int)
+                          index
+                          (target :> int))
                     (Mir.Graph.For_testing.list_successors terminator))
-            blocks
+            (blocks :> int list)
       | Fork { fork; branches; join; _ } ->
           let entries = List.map (fun (branch : Mir.Graph.branch) -> branch.entry) branches in
           List.iteri
@@ -302,15 +309,16 @@ let validate definition (body : Mir.Graph.body) =
                   | Join { fork = joined; next = target } ->
                       if joined <> fork || Some target <> next then
                         raise_problem "branch %d of the block at %d joins to %d" position index
-                          target
+                          (target :> int)
                   | terminator ->
                       List.iter
                         (fun target ->
                           if not (List.mem target branch.blocks) then
                             raise_problem "branch %d of the block at %d jumps out to %d" position
-                              index target)
+                              index
+                              (target :> int))
                         (Mir.Graph.For_testing.list_successors terminator))
-                branch.blocks)
+                (branch.blocks :> int list))
             branches
       | _ -> ())
     body.blocks;
@@ -325,7 +333,9 @@ let validate definition (body : Mir.Graph.body) =
   let locals_in = Array.init (2 * count) (fun _ -> Array.make locals 0)
   and loans_in = Array.init (2 * count) (fun _ -> Array.make loans 0)
   and reached = Array.make (2 * count) false in
-  List.iter (fun parameter -> locals_in.(0).(parameter) <- alive) (body.parameters @ body.captures);
+  List.iter
+    (fun parameter -> locals_in.(0).(parameter) <- alive)
+    (body.parameters @ body.captures :> int list);
   reached.(0) <- true;
   let pending = Queue.create () in
   Queue.add 0 pending;
@@ -357,19 +367,20 @@ let validate definition (body : Mir.Graph.body) =
     in
     let apply at (statement : Mir.Graph.statement) =
       let read_locals, given, ends = collect_graph_effects statement.kind in
-      List.iter (read at) read_locals;
-      List.iter (fun local -> state.(local) <- alive) given;
-      List.iter (fun local -> state.(local) <- ended) ends;
+      List.iter (read at) (read_locals :> int list);
+      List.iter (fun local -> state.(local) <- alive) (given :> int list);
+      List.iter (fun local -> state.(local) <- ended) (ends :> int list);
       match statement.kind with
-      | Basic (Loan_start { loan; _ }) -> open_loans.(loan) <- alive
+      | Basic (Loan_start { loan; _ }) -> open_loans.((loan :> int)) <- alive
       | Basic (Loan_end ended_loans) ->
-          List.iter (fun loan -> open_loans.(loan) <- ended) ended_loans
+          List.iter (fun loan -> open_loans.(loan) <- ended) (ended_loans :> int list)
       | _ -> ()
     in
     let list_still_alive ~kept =
       List.filter
-        (fun local -> state.(local) land alive <> 0 && not (List.mem local kept))
-        (List.init locals Fun.id)
+        (fun (local : Mir.local) ->
+          state.((local :> int)) land alive <> 0 && not (List.mem local kept))
+        (Mir.list_locals body.locals)
     in
     let list_still_open ~kept =
       List.filter
@@ -385,7 +396,7 @@ let validate definition (body : Mir.Graph.body) =
         (match list_still_alive ~kept with
         | [] -> ()
         | local :: _ ->
-            raise_problem "block %d returns with _%d alive (%s)" at local (describe local));
+            raise_problem "block %d returns with _%d alive (%s)" at (local :> int) (describe local));
         match list_still_open ~kept:[] with
         | [] -> ()
         | loan :: _ -> raise_problem "block %d returns with loan %d open" at loan
@@ -395,17 +406,18 @@ let validate definition (body : Mir.Graph.body) =
       match Mir.Graph.find_iteration_loop body.blocks.(at).terminator with
       | Some loop ->
           (if report then
-             match Hashtbl.find_opt entered loop with
+             match Hashtbl.find_opt entered (loop :> int) with
              | Some (alive_then, open_then) -> (
                  (match list_still_alive ~kept:(alive_then @ !parts @ held_by_exits) with
                  | [] -> ()
-                 | local :: _ -> raise_problem "block %d ends an iteration with _%d alive" at local);
+                 | local :: _ ->
+                     raise_problem "block %d ends an iteration with _%d alive" at (local :> int));
                  match list_still_open ~kept:open_then with
                  | [] -> ()
                  | loan :: _ -> raise_problem "block %d ends an iteration with loan %d open" at loan
                  )
              | None -> ());
-          flow (count + loop) (state, open_loans)
+          flow (count + (loop :> int)) (state, open_loans)
       | None -> ()
     in
     if node >= count then begin
@@ -413,15 +425,15 @@ let validate definition (body : Mir.Graph.body) =
       match body.blocks.(loop).terminator with
       | For { part; body = inside; after; _ } ->
           let iterating = Array.copy state in
-          iterating.(part) <- alive;
-          flow inside (iterating, open_loans);
-          flow after (state, open_loans)
+          iterating.((part :> int)) <- alive;
+          flow (inside :> int) (iterating, open_loans);
+          flow (after :> int) (state, open_loans)
       | _ -> ()
     end
     else
       let basic = body.blocks.(node) in
       List.iter (apply node) basic.statements;
-      List.iter (read node) (list_terminator_reads basic.terminator);
+      List.iter (read node) (list_terminator_reads basic.terminator :> int list);
       match basic.terminator with
       | For _ ->
           if not (Hashtbl.mem entered node) then
@@ -433,7 +445,7 @@ let validate definition (body : Mir.Graph.body) =
       | terminator ->
           List.iter
             (fun target -> flow target (state, open_loans))
-            (Mir.Graph.For_testing.list_successors terminator)
+            (Mir.Graph.For_testing.list_successors terminator :> int list)
   in
   while not (Queue.is_empty pending) do
     run ~report:false (Queue.pop pending)
@@ -493,21 +505,22 @@ let lower_tree_and_graph text =
 let lower_graph text = snd (lower_tree_and_graph text)
 
 let locate_named (body : Mir.Graph.body) name =
-  let found = ref None in
-  Array.iteri
+  let named = ref None in
+  Mir.iteri_locals
     (fun local (info : Mir.local_info) ->
       match info.kind with
-      | Source { local = core; _ } when Mir.find_local_name core = Some name -> found := Some local
+      | Source { local = core; _ } when Mir.find_local_name core = Some name -> named := Some local
       | _ -> ())
     body.locals;
-  match !found with Some local -> local | None -> failwith ("no local is named " ^ name)
+  match !named with Some local -> local | None -> failwith ("no local is named " ^ name)
 
 let compute_reachable (body : Mir.Graph.body) ~from =
   let seen = Array.make (Array.length body.blocks) false in
   let rec visit block =
     if not seen.(block) then begin
       seen.(block) <- true;
-      List.iter visit (Mir.Graph.For_testing.list_successors body.blocks.(block).terminator)
+      List.iter visit
+        (Mir.Graph.For_testing.list_successors body.blocks.(block).terminator :> int list)
     end
   in
   List.iter visit from;
@@ -519,9 +532,9 @@ let list_statements (body : Mir.Graph.body) =
     (Array.to_list body.blocks)
 
 let list_terminators (body : Mir.Graph.body) =
-  List.mapi
-    (fun index (basic : Mir.Graph.basic_block) -> (index, basic.terminator))
-    (Array.to_list body.blocks)
+  List.map
+    (fun block -> (block, body.blocks.((block : Mir.Graph.block :> int)).terminator))
+    (Mir.Graph.list_blocks body.blocks)
 
 let () =
   Harness.test "a `?` notes its early return and none of its arms" (fun () ->
@@ -585,8 +598,8 @@ let () =
       with
       | None -> Harness.fail "nothing branches on a"
       | Some (yes, no) ->
-          let from_yes = compute_reachable body ~from:[ yes ]
-          and from_no = compute_reachable body ~from:[ no ] in
+          let from_yes = compute_reachable body ~from:[ (yes :> int) ]
+          and from_no = compute_reachable body ~from:[ (no :> int) ] in
           Array.iteri
             (fun index basic ->
               if negates basic && (from_no.(index) || not from_yes.(index)) then
@@ -609,13 +622,13 @@ let () =
       | None -> Harness.fail "no range loop"
       | Some (inclusive, part, blocks) ->
           if not inclusive then Harness.fail "the range is not inclusive";
-          if body.locals.(i).kind = Temporary || i = part then
+          if body.locals.((i :> int)).kind = Temporary || i = part then
             Harness.fail "i is the loop's counter";
           let ends =
             List.filter
               (fun block ->
                 match body.blocks.(block).terminator with Iteration_end _ -> true | _ -> false)
-              blocks
+              (blocks :> int list)
           in
           if List.length ends < 2 then Harness.fail "the continue does not end the iteration");
   Harness.test "a loop over a list binds each element place and calls no `element`" (fun () ->
@@ -680,7 +693,7 @@ let () =
                    Mir.Graph.find_iteration_loop body.blocks.(block).terminator = None
                    && List.mem after
                         (Mir.Graph.For_testing.list_successors body.blocks.(block).terminator))
-                 blocks)
+                 (blocks :> int list))
           then Harness.fail "the break does not leave the loop");
   let check_range_base_ends body name compare =
     let all = list_statements body in
@@ -696,7 +709,7 @@ let () =
                      value = Operand (Borrow { place = { root = Local borrowed; _ }; _ });
                      _;
                    })
-              when target = local && body.locals.(local).kind <> Temporary ->
+              when target = local && body.locals.((local :> int)).kind <> Temporary ->
                 Some borrowed
             | _ -> None)
           all
@@ -733,7 +746,7 @@ let () =
     with
     | None -> Harness.fail "no range"
     | Some base -> (
-        if body.locals.(base).kind <> Temporary then
+        if body.locals.((base :> int)).kind <> Temporary then
           Harness.fail "the range's base is not a temporary";
         match (find_end base, find_end (locate_named body name)) with
         | Some base_end, Some named_end -> compare base_end named_end
@@ -772,7 +785,7 @@ let () =
             (fun index basic ->
               if
                 from_entry.(index) && binds basic
-                && (compute_reachable body ~from:[ index ]).(else_return)
+                && (compute_reachable body ~from:[ index ]).((else_return :> int))
               then Harness.fail "block %d binds x on the way to the else" index)
             body.blocks;
           if not (Array.exists binds body.blocks) then Harness.fail "x is never bound");
@@ -851,7 +864,7 @@ let () =
                 | [] ->
                     List.iter
                       (walk (block :: visited))
-                      (Mir.Graph.For_testing.list_successors basic.terminator)
+                      (Mir.Graph.For_testing.list_successors basic.terminator :> int list)
                 | (statement : Mir.Graph.statement) :: rest -> (
                     match statement.kind with
                     | Basic (Dead locals) when List.mem x locals -> ()
@@ -861,7 +874,7 @@ let () =
               in
               walk_successors basic.statements
           in
-          walk [] failed);
+          walk [] (failed :> int));
   Harness.test "a functional body's one jump is its return, and its graph branches" (fun () ->
       let built, graph = lower_tree_and_graph Fixtures.Mir.if_else_on_two_comparisons in
       let chosen = ref 0 and jumps = ref [] in
@@ -948,10 +961,12 @@ let () =
       then Harness.fail "no block of the graph jumps back");
   Harness.test "a name that the alternatives of a pattern bind to a part says so" (fun () ->
       let mir = lower_graph Fixtures.Mir.mut_match_whose_alternatives_bind_a_part in
-      if not mir.body.locals.(locate_named mir.body "value").has_several_bindings then
-        Harness.fail "`value`, which two alternatives bind, does not say so";
-      if mir.body.locals.(locate_named mir.body "only").has_several_bindings then
-        Harness.fail "`only`, which one pattern binds, says that several statements bind it");
+      if
+        not
+          mir.body.locals.((locate_named mir.body "value" : Mir.local :> int)).has_several_bindings
+      then Harness.fail "`value`, which two alternatives bind, does not say so";
+      if mir.body.locals.((locate_named mir.body "only" : Mir.local :> int)).has_several_bindings
+      then Harness.fail "`only`, which one pattern binds, says that several statements bind it");
   Harness.test "an argument names the function reference or the lambda expression that it is"
     (fun () ->
       let mir, _ = lower_tree_and_graph Fixtures.Mir.function_and_lambda_passed_to_apply in
@@ -969,7 +984,7 @@ let () =
       | [
        Function_reference { path = Top { name = "double"; _ }; _ }; Lambda_expression { body; _ };
       ] ->
-          if not mir.lambdas.(body).is_functional then
+          if not mir.lambdas.((body :> int)).is_functional then
             Harness.fail "the lambda's body is not functional"
       | _ -> Harness.fail "the calls of `apply` do not name `double` and the lambda");
   Harness.test "a lambda's captures and parameters are locals of its body" (fun () ->
@@ -1105,7 +1120,7 @@ let () =
       let list_parameters (clause : Mir.formula) =
         List.map
           (fun parameter ->
-            match clause.locals.(parameter).kind with
+            match clause.locals.((parameter : Mir.local :> int)).kind with
             | Source { local; _ } -> Mir.find_local_name local
             | Temporary | Lent _ -> None)
           clause.parameters
@@ -1176,7 +1191,7 @@ let () =
             Harness.fail "the quantifier's body is a body of its own";
           match list_specifications quantified.clause with
           | [ Quantified { quantifier = Forall; range = Over_range _; parameter; body; _ } ] ->
-              if quantified.clause.locals.(parameter).kind <> Temporary then
+              if quantified.clause.locals.((parameter :> int)).kind <> Temporary then
                 Harness.fail "the quantifier's index is no temporary of the clause";
               if not (computes_a_comparison body) then
                 Harness.fail "the quantifier's body is not computed in its block"
@@ -1257,7 +1272,7 @@ let () =
         match resume winner number with
         | None -> "lost"
         | Some block -> (
-            match blocks.(block).terminator with
+            match blocks.((block :> int)).terminator with
             | Cancel { winner; number; _ } -> follow_winner winner number
             | Return _ -> "return"
             | Goto _ -> "jump"
@@ -1293,7 +1308,7 @@ let () =
                            local = winner
                        | _ -> false)
                      (list_statements mir.body))
-              then Harness.fail "the winner _%d of a group is never given a value" winner
+              then Harness.fail "the winner _%d of a group is never given a value" (winner :> int)
           | _ -> ())
         blocks)
 
@@ -1303,7 +1318,7 @@ let analyse_moves text =
   let needs_drop (path : Moves.path) =
     path.projections <> []
     ||
-    match body.locals.(path.local).type_ with
+    match body.locals.((path.local :> int)).type_ with
     | Named { path = Path.Top { name = "Int64" | "Bool" | "UInt64"; _ }; _ } -> false
     | Named { path = Path.Top { module_; _ }; _ } -> not (List.mem "intrinsic" module_.modules)
     | _ -> true
@@ -1312,7 +1327,7 @@ let analyse_moves text =
 
 let find_status_where_ended (body : Mir.Graph.body) moves (path : Moves.path) =
   let found = ref None in
-  Array.iteri
+  Mir.Graph.iteri_blocks
     (fun block (basic : Mir.Graph.basic_block) ->
       if !found = None then begin
         let state = Moves.copy_entry_state moves block in

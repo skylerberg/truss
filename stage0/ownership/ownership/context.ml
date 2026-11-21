@@ -9,8 +9,8 @@ type context = {
   list_bounds : Types.parameter -> Types.trait_reference list;
   spans : Source.Definition_span.t array Lazy.t;
   text : string Lazy.t;
-  mode_keywords : (Syntax.id, Core.mode_keyword) Hashtbl.t;
-  places_without_keyword : (Syntax.id, Language.Mode.t) Hashtbl.t;
+  mode_keywords : (Source.Node.t, Core.mode_keyword) Hashtbl.t;
+  places_without_keyword : (Source.Node.t, Language.Mode.t) Hashtbl.t;
   names : string Local_table.t;
   origins : Core.origin Local_table.t;
   binding_modes : Language.Mode.t Local_table.t;
@@ -86,7 +86,7 @@ let stores_function context (callee : Mir.callee) position =
   | Indirect _ -> true
   | _ -> List.exists is_declared (list_callee_signatures context callee)
 
-let locate_node context (node : Syntax.id) : Source.Definition_span.t =
+let locate_node context (node : Source.Node.t) : Source.Definition_span.t =
   Source.Definition_span.locate (Lazy.force context.spans) node
 
 let locate_origin context (origin : Core.origin) : Source.Definition_span.t =
@@ -148,11 +148,12 @@ let show context (place : Place.t) =
          (function Place.Field name -> "." ^ name | Element _ | Range _ -> "[...]")
          place.steps)
 
-let note_owned_scrutinee context (body : Mir.Graph.body) ~bound ~(viewed : Mir.place) ~written =
-  match (body.locals.(bound).kind, viewed.root) with
+let note_owned_scrutinee context (body : Mir.Graph.body) ~(bound : Mir.local) ~(viewed : Mir.place)
+    ~written =
+  match (body.locals.((bound :> int)).kind, viewed.root) with
   | Source { local = binding; mode = Read; is_binding = true; _ }, Local scrutinee_local
     when not (List.mem scrutinee_local body.captures) -> (
-      match body.locals.(scrutinee_local).kind with
+      match body.locals.((scrutinee_local :> int)).kind with
       | Source { local = scrutinee; _ }
         when classify_binding_mode context (Local scrutinee) = Own
              && List.for_all
@@ -181,7 +182,7 @@ let collect context (mir : Mir.Graph.t) ~mode_keywords =
       Hashtbl.replace context.mode_keywords keyword.place keyword)
     mode_keywords;
   let visit_body (body : Mir.Graph.body) =
-    Array.iteri
+    Mir.iteri_locals
       (fun local (info : Mir.local_info) ->
         (match info.kind with
         | Source { local = core; _ } -> (
@@ -208,7 +209,7 @@ let collect context (mir : Mir.Graph.t) ~mode_keywords =
                      target = { root = Local local; projections = [] };
                      value = Operand (Borrow { place = { root = Literal _; _ }; _ });
                    }) -> (
-                match body.locals.(local).kind with
+                match body.locals.((local :> int)).kind with
                 | Source { local = core; is_binding = true; _ } ->
                     Local_table.replace context.literal_views core ()
                 | Source { is_binding = false; _ } | Temporary | Lent _ -> ())
@@ -226,13 +227,7 @@ let collect context (mir : Mir.Graph.t) ~mode_keywords =
   visit_body mir.body;
   Array.iter visit_body mir.lambdas;
   context.parameters <-
-    List.rev
-      (List.filter_map
-         (fun local ->
-           match mir.body.locals.(local).kind with
-           | Source { local = core; _ } -> Some core
-           | Temporary | Lent _ -> None)
-         mir.body.parameters)
+    List.rev (List.filter_map (Mir.find_core_local mir.body.locals) mir.body.parameters)
 
 let copy_edits context (moved : Core.origin) =
   (match find_mode_keyword context moved with

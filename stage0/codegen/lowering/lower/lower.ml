@@ -50,7 +50,6 @@ let begin_body (state : Lowering.state) ~(body : Mir.Graph.body) ~defaults =
     Lowering.list_evidence_parameters state
       (Definitions.list_evidence state.context code.substitution code.uses)
   in
-  Emit_c.Ir_builder.start state.builder (Emit_c.Ir_builder.allocate_block state.builder);
   let places =
     match mask with
     | Some mask ->
@@ -73,7 +72,6 @@ let lower_template_check context ~from_template ~literals ~clauses : Emit_c.frag
     | [ (_, template_type) ] -> template_type
     | _ -> Definitions.raise_bug "%s does not take one template" (Path.show from_template)
   in
-  Emit_c.Ir_builder.start state.builder (Emit_c.Ir_builder.allocate_block state.builder);
   Lowering.run_in_scope state (fun () ->
       let template =
         Targets.lower_template_value state
@@ -97,7 +95,6 @@ let lower_template_check context ~from_template ~literals ~clauses : Emit_c.frag
 let lower_call_evaluation context ~function_ ~arguments : Emit_c.fragment =
   let item = Lowered.Item.Call_evaluation { function_; arguments } in
   let state, _ = make_code_state context ~item function_ in
-  Emit_c.Ir_builder.start state.builder (Emit_c.Ir_builder.allocate_block state.builder);
   let signature = Definitions.read_signature context function_ in
   Lowering.run_in_scope state (fun () ->
       let passed =

@@ -53,7 +53,7 @@ let rec lower_body (state : Lowering.state) (frame : Lowering.mir_frame) =
       Emit_c.Ir_builder.emit state.builder
         (Assign (List.assoc path frame.flags, Use (Constant (Bool true)))))
     (Moves.list_held_at_entry frame.moves);
-  run_region state (Mir_drops.make_region state) ~entry:(0, 0)
+  run_region state (Mir_drops.make_region state) ~entry:(Mir.Graph.entry_block, 0)
 
 and run_region state (region : Mir_drops.region) ~entry:(block, index) =
   let caller = state.frame in
@@ -79,7 +79,7 @@ and run_region state (region : Mir_drops.region) ~entry:(block, index) =
   state.frame <- caller
 
 and lower_from state (region : Mir_drops.region) block index =
-  let basic = (Mir_places.require_mir_frame state).body.blocks.(block) in
+  let basic = (Mir_places.require_mir_frame state).body.blocks.((block :> int)) in
   state.frame <- region.region_frame;
   let frame = Mir_places.require_mir_frame state in
   frame.block <- block;
@@ -185,7 +185,8 @@ and lower_basic state (basic : Mir.basic) ~origin =
       Emit_c.Ir_builder.start state.builder failed;
       let message =
         "assert "
-        ^ Lowering.quote_span state (Mir_places.read_spans state).(Core_walk.locate_origin origin)
+        ^ Lowering.quote_span state
+            (Mir_places.read_spans state).((Core_walk.locate_origin origin :> int))
       in
       Emit_c.Ir_builder.finish state.builder
         (Fail
@@ -354,7 +355,7 @@ and lower_rvalue_into ?types_ty state (rvalue : Mir.rvalue) (destination : Lower
         | _ -> Definitions.raise_bug "a lambda of %s" (Ground.to_string ty)
       in
       let lambdas = (Mir_places.require_mir_frame state).lambdas in
-      let lambda = lambdas.(index) in
+      let lambda = lambdas.((index :> int)) in
       Targets.lower_nested_function state ~function_type
         ~output:
           (match types_ty with

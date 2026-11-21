@@ -1,6 +1,6 @@
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Infer" format
 
-type counters = { mutable next_node_id : int; mutable next_synthetic_local : int }
+type counters = { nodes : Core.Node.counter; mutable next_synthetic_local : int }
 
 type t = {
   lookups : Lookups.t;
@@ -18,11 +18,7 @@ type env = { output : Types.result option; self : Types.ty option }
 
 let read_span form id = Interface.Elaborator.read_span form.context id
 let quote form id = Source.Definition_span.quote (Lazy.force form.text) (read_span form id)
-
-let allocate_node_id form =
-  let id = form.counters.next_node_id in
-  form.counters.next_node_id <- id + 1;
-  id
+let allocate_node_id form = Core.Node.allocate form.counters.nodes
 
 let allocate_synthetic_local form : Core.local =
   let number = form.counters.next_synthetic_local in
@@ -166,7 +162,7 @@ let make_range form ~origin (base : Core.place) ~start ~stop ~inclusive : Core.k
 
 let was_hole form (select_table : Tables.t -> Types.ty option array) (id : Syntax.id) =
   match form.tables_with_holes with
-  | Some tables -> (select_table tables).(id) = Some Types.Hole
+  | Some tables -> (select_table tables).((id :> int)) = Some Types.Hole
   | None -> false
 
 let read_evidence form self_type trait : Core.evidence =
@@ -243,17 +239,17 @@ let read_constructor_fields form type_ variant type_arguments =
   | None -> raise_bug "`%s` is constructed but has no fields" (Path.show type_)
 
 let read_type form (value : Syntax.expression) =
-  match form.tables.types.(value.id) with
+  match form.tables.types.((value.id :> int)) with
   | Some type_ -> type_
   | None -> raise_bug "`%s` has a core node but no recorded type" (quote form value.id)
 
 let read_local_type form (id : Syntax.id) =
-  match form.tables.local_types.(id) with
+  match form.tables.local_types.((id :> int)) with
   | Some type_ -> type_
   | None -> raise_bug "a local has no recorded type"
 
 let read_pattern_type form (id : Syntax.id) =
-  match form.tables.scrutinee_types.(id) with
+  match form.tables.scrutinee_types.((id :> int)) with
   | Some type_ -> type_
   | None -> raise_bug "a pattern has no recorded type"
 
@@ -262,7 +258,7 @@ let build_literal : Tables.literal -> Core.kind = function
   | Float_value number -> Float number
 
 let build_function_value form (value : Syntax.expression) : Core.kind =
-  match form.tables.resolutions.(value.id) with
+  match form.tables.resolutions.((value.id :> int)) with
   | Some (Global { path; instantiation }) -> Function_value { path; instantiation }
   | _ -> raise_bug "`%s` is not recorded as a function" (quote form value.id)
 
@@ -398,7 +394,7 @@ let build_constant_pattern form (id : Syntax.id) (value : Core.pattern_constant)
 
 let build_literal_constant form (id : Syntax.id) (written : Syntax.literal) : Core.pattern_constant
     =
-  match (written, form.tables.patterns.(id)) with
+  match (written, form.tables.patterns.((id :> int))) with
   | _, Some (Literal_pattern number) -> Integer_constant number
   | Literal_true, _ -> Boolean_constant true
   | Literal_false, _ -> Boolean_constant false
@@ -406,7 +402,7 @@ let build_literal_constant form (id : Syntax.id) (written : Syntax.literal) : Co
   | Literal_integer _, _ -> raise_bug "an integer pattern has no value"
 
 let build_range_bound form (bound : Syntax.range_end) : Core.range_bound =
-  match (bound.kind, form.tables.patterns.(bound.id)) with
+  match (bound.kind, form.tables.patterns.((bound.id :> int))) with
   | End_literal _, Some (Literal_pattern number) -> Integer_bound number
   | End_constant _, Some (Constant_pattern constant) -> Constant_bound constant
   | (End_literal _ | End_constant _), _ -> raise_bug "a range bound was not recorded"
@@ -515,15 +511,15 @@ let convert_resource form (written : Syntax.resource) : Core.resource =
   | Metric metric -> Metric metric
   | Calls (Call_parameter name) -> (
       match Places.find_target form.resolved name with
-      | Some (Local id) -> Calls (Function_parameter (Declared { origin = id; name = name.text }))
+      | Some (Local id) -> Calls (Function_parameter (Declared { binder = id; name = name.text }))
       | _ -> raise_bug "`calls(%s)` names no parameter" name.text)
   | Calls (Call_capability path) -> Calls (Capability (resolve_capability path))
   | Calls (Call_method (path, method_)) ->
       Calls (Capability_method (resolve_capability path, method_.text))
 
-let build_under_condition form ~id (written : Syntax.condition option) build :
+let build_under_condition form ~(id : Syntax.id) (written : Syntax.condition option) build :
     'clause Core.conditional option =
-  match (form.tables.conditions.(id), written) with
+  match (form.tables.conditions.((id :> int)), written) with
   | Some holds_when, _ -> Some { holds_when; clause = build (with_condition form holds_when) }
   | None, None -> Some { holds_when = []; clause = build form }
   | None, Some _ -> None
@@ -557,7 +553,7 @@ let apply_conversion form (id : Syntax.id) (inner : Core.expression) (conversion
                   ~lends:None))
       | other -> raise_bug "`%s` is viewed and has no view" (Types.show other))
 
-let has_node form (value : Syntax.expression) = Option.is_some form.tables.types.(value.id)
+let has_node form (value : Syntax.expression) = Option.is_some form.tables.types.((value.id :> int))
 
 let rec list_operands form (value : Syntax.expression) : Syntax.expression list =
   let list_checked (part : Syntax.expression) =
@@ -609,16 +605,17 @@ let rec build_expression form env (value : Syntax.expression) : Core.expression 
       | Parenthesized inner | Mode (_, inner) -> build_expression form env inner
       | _ -> (
           let id = allocate_node_id form in
-          match form.tables.types.(value.id) with
+          match form.tables.types.((value.id :> int)) with
           | Some type_ ->
               let kind = build_kind form env value in
               { Core.id; origin = compute_expression_origin value kind; type_; kind }
           | None -> raise_bug "`%s` has a node and no type" (quote form value.id))
     in
-    List.fold_left (apply_conversion form value.id) built form.tables.conversions.(value.id)
+    List.fold_left (apply_conversion form value.id) built
+      form.tables.conversions.((value.id :> int))
 
 and build_kind form env (value : Syntax.expression) : Core.kind =
-  let elaboration = form.tables.elaborations.(value.id) in
+  let elaboration = form.tables.elaborations.((value.id :> int)) in
   let raise_unexpected () = raise_bug "`%s` has no elaboration of its form" (quote form value.id) in
   match value.kind with
   | Integer _ | Float _ -> (
@@ -643,7 +640,7 @@ and build_kind form env (value : Syntax.expression) : Core.kind =
   | Name _ -> build_name form env value
   | Member (base, member) -> build_member form env value base member
   | Bracket (base, items) -> (
-      match form.resolved.brackets.(value.id) with
+      match form.resolved.brackets.((value.id :> int)) with
       | Some Type_arguments -> build_name form env value
       | Some (Method_bracket | Index) | None -> build_index form env value base items)
   | Call (callee, arguments) -> (
@@ -725,7 +722,7 @@ and build_kind form env (value : Syntax.expression) : Core.kind =
           make_quantified
             (Over_type
                {
-                 local = Declared { origin = bound.id; name = bound.text };
+                 local = Declared { binder = bound.id; name = bound.text };
                  type_ = read_local_type form bound.id;
                })
       | Binder_in (written, collection), Some (Loop (Elements { count; element; lends })) ->
@@ -853,7 +850,7 @@ and build_name form env (value : Syntax.expression) : Core.kind =
         Use
           (Local
              {
-               local = Declared { origin = id; name = name.text };
+               local = Declared { binder = id; name = name.text };
                type_ = read_local_type form id;
                origin = Written value.id;
              })
@@ -883,7 +880,7 @@ and build_name form env (value : Syntax.expression) : Core.kind =
   | Some _ | None -> raise_bug "`%s` is not a value and has no core node" (quote form value.id)
 
 and build_member form env (value : Syntax.expression) base (member : Syntax.name) : Core.kind =
-  match form.tables.resolutions.(value.id) with
+  match form.tables.resolutions.((value.id :> int)) with
   | Some (Field_access _) ->
       Use
         (Field
@@ -1487,7 +1484,7 @@ and build_for_loop form env (written : Syntax.statement) (iterable : Syntax.expr
   let iterable_origin : Core.origin =
     Desugared { construct = iterable.id; desugaring = For_loop }
   in
-  match (form.tables.elaborations.(written.id), iterable.kind) with
+  match (form.tables.elaborations.((written.id :> int)), iterable.kind) with
   | Some (Loop (Integer_range { inclusive; _ })), Range { start = Some start; stop = Some stop; _ }
     ->
       let start = build_expression form env start in
@@ -1721,7 +1718,7 @@ and build_block form env (written : Syntax.block) : Core.block =
     match statements with
     | [] -> ([], None)
     | [ ({ kind = Expression value; _ } as last) ]
-      when form.tables.elaborations.(last.id) <> Some Discarded ->
+      when form.tables.elaborations.((last.id :> int)) <> Some Discarded ->
         ([], Some (build_expression form env value))
     | first :: rest ->
         let first = build_statement form env first in
@@ -1736,7 +1733,7 @@ and build_pattern form (written : Syntax.pattern) : Core.pattern =
     make_pattern form ~origin:(make_rewrite_origin written.id) Types.Never Wildcard
   else
     let id = allocate_node_id form in
-    match form.tables.scrutinee_types.(written.id) with
+    match form.tables.scrutinee_types.((written.id :> int)) with
     | Some type_ ->
         {
           Core.id;
@@ -1747,12 +1744,12 @@ and build_pattern form (written : Syntax.pattern) : Core.pattern =
     | None -> raise_bug "`%s` has a node and no type" (quote form written.id)
 
 and build_pattern_kind form type_ (written : Syntax.pattern) : Core.pattern_kind =
-  match (written.kind, form.tables.patterns.(written.id)) with
+  match (written.kind, form.tables.patterns.((written.id :> int))) with
   | (Wildcard | Pattern_error), _ -> Wildcard
   | Binding bound, Some (Binding_pattern { local; is_var; mode }) ->
       Bind
         {
-          local = Declared { origin = local; name = bound.text };
+          local = Declared { binder = local; name = bound.text };
           is_var;
           mode;
           may_alias = binding_may_alias form mode type_;
@@ -1848,7 +1845,7 @@ let build_parameters form env (written : Syntax.parameter list) (signature : Typ
             (fun (info : Types.parameter_info) : Core.parameter ->
               let default = Option.map (build_expression form env) default in
               {
-                local = Declared { origin = name.id; name = name.text };
+                local = Declared { binder = name.id; name = name.text };
                 mode = info.mode;
                 type_ = info.type_;
                 default;
@@ -1875,7 +1872,7 @@ let build_parameters form env (written : Syntax.parameter list) (signature : Typ
                               (fun (input : Syntax.function_input) ->
                                 Option.map
                                   (fun (input_name : Syntax.name) : Core.local ->
-                                    Declared { origin = input_name.id; name = input_name.text })
+                                    Declared { binder = input_name.id; name = input_name.text })
                                   input.name)
                               inputs;
                           requires =
@@ -1968,7 +1965,7 @@ let build_trait form ~self ~is_broken (members : Syntax.trait_member Syntax.node
                       | Named_parameter { name; _ } ->
                           Some
                             {
-                              local = Declared { origin = name.id; name = name.text };
+                              local = Declared { binder = name.id; name = name.text };
                               mode = Read;
                               type_ = read_local_type form name.id;
                               default = None;
@@ -2092,7 +2089,7 @@ let build lookups ~resolved ~tables ~context ~package ~text ~key ~definition ~el
       law_parameters;
       package;
       text;
-      counters = { next_node_id = 0; next_synthetic_local = 0 };
+      counters = { nodes = Core.Node.create_counter (); next_synthetic_local = 0 };
     }
   in
   {

@@ -540,8 +540,8 @@ let hand_open_parts_to_parent (state : State.state) (frame : State.frame) parent
   hand_up frame.recorded_expressions (fun (parent : State.frame) id ->
       parent.recorded_expressions <- id :: parent.recorded_expressions);
   hand_up frame.bindings (fun (parent : State.frame) id -> parent.bindings <- id :: parent.bindings);
-  let is_settled table id =
-    match table.(id) with
+  let is_settled table (id : Syntax.id) =
+    match table.((id :> int)) with
     | Some type_ -> not (List.exists is_open (Unify.list_unknowns state.unifier type_))
     | None -> true
   in

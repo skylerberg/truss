@@ -46,11 +46,11 @@ type goal = {
 
 type frame = {
   first_variable : int;
-  mutable recorded_expressions : int list;
-  mutable bindings : int list;
+  mutable recorded_expressions : Syntax.id list;
+  mutable bindings : Syntax.id list;
   mutable reported_unmet_bounds : (Types.ty * Types.trait_reference * Diagnostic.reported) list;
-  mutable compiled_expressions : int list;
-  mutable compiled_bindings : int list;
+  mutable compiled_expressions : Syntax.id list;
+  mutable compiled_bindings : Syntax.id list;
   mutable specification_only_report : Diagnostic.reported option;
   span : Source.Definition_span.t;
 }
@@ -161,7 +161,7 @@ let read_current_frame state =
   match state.frames with frame :: _ -> frame | [] -> raise_bug "a check runs outside every frame"
 
 let record state (value : Syntax.expression) type_ =
-  state.tables.types.(value.id) <- Some type_;
+  state.tables.types.((value.id :> int)) <- Some type_;
   let frame = read_current_frame state in
   frame.recorded_expressions <- value.id :: frame.recorded_expressions
 
@@ -232,14 +232,14 @@ let reduce_condition state (condition : Types.condition) =
   Interface.Impls.decide_condition state.lookups.interface ~list_bounds:(lookup_bounds state)
     condition
 
-let record_condition state id (written : Syntax.condition option) =
+let record_condition state (id : Syntax.id) (written : Syntax.condition option) =
   let condition =
     reduce_condition state
       (Option.fold ~none:[]
          ~some:(Interface.Elaborator.elaborate_condition (read_context state))
          written)
   in
-  state.tables.conditions.(id) <- condition;
+  state.tables.conditions.((id :> int)) <- condition;
   condition
 
 let normalize state type_ =
@@ -254,7 +254,7 @@ let normalize state type_ =
   Interface.Impls.normalize state.lookups.interface ~list_bounds:(lookup_bounds state) zonked
 
 let check_compiled_binding state (id : Syntax.id) =
-  match state.tables.local_types.(id) with
+  match state.tables.local_types.((id :> int)) with
   | Some type_ -> (
       let span = read_span state id in
       match
@@ -264,7 +264,7 @@ let check_compiled_binding state (id : Syntax.id) =
       with
       | Some report ->
           let poisoned = Types.Error report in
-          state.tables.local_types.(id) <- Some poisoned;
+          state.tables.local_types.((id :> int)) <- Some poisoned;
           Option.iter
             (fun local -> Hashtbl.replace state.locals id { local with type_ = poisoned })
             (Hashtbl.find_opt state.locals id)
@@ -277,7 +277,7 @@ let check_compiled_expression state (id : Syntax.id) =
       ignore
         (reject_specification_only_type state ~subject:"This value" (read_span state id)
            (normalize state type_)))
-    state.tables.types.(id)
+    state.tables.types.((id :> int))
 
 let find_domain state type_ =
   match resolve state type_ with
@@ -385,7 +385,8 @@ let find_evidence state type_ trait =
   Interface.Impls.find_evidence state.lookups.interface ~list_bounds:(lookup_bounds state)
     (normalize state type_) (normalize_trait state trait)
 
-let elaborate state id elaboration = state.tables.elaborations.(id) <- Some elaboration
+let elaborate state (id : Syntax.id) elaboration =
+  state.tables.elaborations.((id :> int)) <- Some elaboration
 
 let decide_property state property type_ =
   Interface.Impls.decide_property property state.lookups.interface
@@ -400,7 +401,7 @@ let rec diverges ~is_never (written : Syntax.statement) =
 
 let declare state (name : Syntax.name) type_ ~binding ~mode =
   Hashtbl.replace state.locals name.id { name = name.text; type_; binding; mode };
-  state.tables.local_types.(name.id) <- Some type_;
+  state.tables.local_types.((name.id :> int)) <- Some type_;
   let frame = read_current_frame state in
   frame.bindings <- name.id :: frame.bindings;
   match resolve state type_ with
@@ -416,7 +417,7 @@ let declare_compiled state env (name : Syntax.name) type_ ~binding ~mode =
     check_compiled_binding state name.id
   end
 
-let find_target state (name : Syntax.name) = state.resolved.names.(name.id)
+let find_target state (name : Syntax.name) = state.resolved.names.((name.id :> int))
 let find_head state (value : Syntax.expression) = Resolve.find_head state.resolved value
 let show state type_ = Types.show (zonk state type_)
 

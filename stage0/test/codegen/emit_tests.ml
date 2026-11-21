@@ -24,13 +24,13 @@ let () =
                   Assign (Codegen_support.at 0, Use (Codegen_support.constant_int32 0));
                   Assign (Codegen_support.at 1, Use (Codegen_support.constant_int32 1));
                 ]
-                (Goto 1);
+                (Goto (Lowered.For_testing.make_block 1));
               Codegen_support.block []
                 (Branch
                    {
                      test = (Less_equal, Codegen_support.copy 1, Codegen_support.constant_int32 10);
-                     yes = 2;
-                     no = 3;
+                     yes = Lowered.For_testing.make_block 2;
+                     no = Lowered.For_testing.make_block 3;
                    });
               Codegen_support.block
                 [
@@ -41,7 +41,7 @@ let () =
                     ( Codegen_support.at 1,
                       Binary (Add, Codegen_support.copy 1, Codegen_support.constant_int32 1) );
                 ]
-                (Goto 1);
+                (Goto (Lowered.For_testing.make_block 1));
               Codegen_support.block [] (Return (Some (Codegen_support.copy 0)));
             ];
         ]);
@@ -126,8 +126,12 @@ let () =
                 (Switch_variant
                    {
                      place = Codegen_support.at 0;
-                     cases = [ ("Circle", 1); ("Square", 2) ];
-                     default = Some 3;
+                     cases =
+                       [
+                         ("Circle", Lowered.For_testing.make_block 1);
+                         ("Square", Lowered.For_testing.make_block 2);
+                       ];
+                     default = Some (Lowered.For_testing.make_block 3);
                    });
               Codegen_support.block [] (Return (Some (Codegen_support.constant_int32 1)));
               Codegen_support.block []
@@ -230,7 +234,11 @@ let () =
                         } );
                 ]
                 (Switch_variant
-                   { place = Codegen_support.at 2; cases = [ ("Node", 1) ]; default = Some 2 });
+                   {
+                     place = Codegen_support.at 2;
+                     cases = [ ("Node", Lowered.For_testing.make_block 1) ];
+                     default = Some (Lowered.For_testing.make_block 2);
+                   });
               Codegen_support.block []
                 (Return
                    (Some
@@ -304,7 +312,12 @@ let () =
           [
             Codegen_support.local ~name:"environment" (Raw (Nullable_pointer Opaque));
             Codegen_support.local ~name:"argument" (Codegen_support.value Codegen_support.int32);
-            Codegen_support.local (Pointer { target = Environment 0; writable = false });
+            Codegen_support.local
+              (Pointer
+                 {
+                   target = Environment (Lowered.For_testing.make_nested_function 0);
+                   writable = false;
+                 });
             Codegen_support.local (Codegen_support.value Codegen_support.int32);
             Codegen_support.local ~name:"capabilities" Convention.capabilities;
           ]
@@ -331,7 +344,7 @@ let () =
           Codegen_support.entry ~nested:[ lambda ]
             [
               Codegen_support.local ~name:"offset" (Codegen_support.value Codegen_support.int32);
-              Codegen_support.local (Environment 0);
+              Codegen_support.local (Environment (Lowered.For_testing.make_nested_function 0));
               Codegen_support.local (Codegen_support.value (Function callback));
               Codegen_support.local (Codegen_support.value Codegen_support.int32);
             ]
@@ -346,7 +359,7 @@ let () =
                     ( Codegen_support.at 2,
                       Function_value
                         {
-                          code = Nested 0;
+                          code = Nested (Lowered.For_testing.make_nested_function 0);
                           environment =
                             Some (Address { place = Codegen_support.at 1; writable = false });
                         } );
@@ -609,14 +622,14 @@ let () =
              [
                Codegen_support.block
                  [ Assign (Codegen_support.at 2, Use (Codegen_support.constant_int32 1)) ]
-                 (Goto 2);
+                 (Goto (Lowered.For_testing.make_block 2));
                Codegen_support.block [] (Return (Some (Codegen_support.copy 1)));
                Codegen_support.block
                  [ Assign (Codegen_support.at 1, Use (Codegen_support.copy 2)) ]
-                 (Goto 1);
+                 (Goto (Lowered.For_testing.make_block 1));
                Codegen_support.block
                  [ Assign (Codegen_support.at 3, Use (Codegen_support.copy 2)) ]
-                 (Goto 1);
+                 (Goto (Lowered.For_testing.make_block 1));
              ])
       in
       let c_file = render_c_file (Codegen_support.make_shape_env ()) [ (entry, External) ] in
@@ -678,7 +691,6 @@ let intrinsic_types : Lowering.For_testing.Intrinsics.types =
 let build_entry build_body : Codegen_support.program_fragment =
  fun env ->
   let builder = Emit_c.Ir_builder.create env ~item:(Codegen_support.code_item "entry") in
-  Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
   let result = build_body builder in
   Emit_c.Ir_builder.finish builder (Return (Some (Copy (Lowered.make_local_place result))));
   Emit_c.Ir_builder.build builder

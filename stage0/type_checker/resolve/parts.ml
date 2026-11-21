@@ -10,28 +10,30 @@ let list_part_spans (spans : Source.Definition_span.t array) (definition : Synta
          (fun index (line : _ Syntax.node) ->
            match body_of line.kind with
            | Some (body : Source.Definition_span.t) ->
-               split (Member_header index) (Member_body index) spans.(line.id) body
-           | None -> [ (Member_header index, spans.(line.id)) ])
+               split (Member_header index) (Member_body index) spans.((line.id :> int)) body
+           | None -> [ (Member_header index, spans.((line.id :> int))) ])
          lines)
   in
   let with_members lines body_of =
     let header =
       match lines with
       | (first : _ Syntax.node) :: _ ->
-          Source.Definition_span.make spans.(definition.id).start spans.(first.id).start
-      | [] -> spans.(definition.id)
+          Source.Definition_span.make spans.((definition.id :> int)).start
+            spans.((first.id :> int)).start
+      | [] -> spans.((definition.id :> int))
     in
     (Header, header) :: list_members lines body_of
   in
   match definition.kind with
   | Function { body; _ } | Test { body; _ } | Theorem { body; _ } | Law_proof { body; _ } ->
-      split Header Body spans.(definition.id) spans.(body.id)
-  | Constant { value; _ } -> split Header Body spans.(definition.id) spans.(value.id)
+      split Header Body spans.((definition.id :> int)) spans.((body.id :> int))
+  | Constant { value; _ } ->
+      split Header Body spans.((definition.id :> int)) spans.((value.id :> int))
   | Method_declaration _ | Type_definition _ | Definition_error _ ->
-      [ (Header, spans.(definition.id)) ]
+      [ (Header, spans.((definition.id :> int))) ]
   | Trait { members; _ } ->
       with_members members (function
-        | Law { body; _ } -> Some spans.(body.id)
+        | Law { body; _ } -> Some spans.((body.id :> int))
         | Associated_type _ | Associated_capability _ | Trait_member_error -> None)
   | Impl { members; _ } -> with_members members (fun (_ : Syntax.impl_member) -> None)
   | Capability { members; _ } -> with_members members (fun (_ : Syntax.capability_member) -> None)

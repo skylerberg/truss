@@ -73,8 +73,10 @@ let () =
         "test 0 passed\n")
 
 let lowered_int32 = Lowered.Value Codegen_support.int32
-let add left right = Lowered.Binary (Add, Codegen_support.copy left, Codegen_support.copy right)
-let take_address holder = Lowered.Address { place = Codegen_support.at holder; writable = false }
+let at ?(projections = []) local : Lowered.place = { root = Local local; projections }
+let copy local = Lowered.Copy (at local)
+let add left right = Lowered.Binary (Add, copy left, copy right)
+let take_address holder = Lowered.Address { place = at holder; writable = false }
 
 let expect_c_includes c texts =
   List.iter
@@ -91,27 +93,32 @@ let () =
       let parameter = Emit_c.Ir_builder.allocate_local builder lowered_int32 in
       let sum = Emit_c.Ir_builder.allocate_local builder lowered_int32 in
       let other = Emit_c.Ir_builder.allocate_local builder lowered_int32 in
-      Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
-      Emit_c.Ir_builder.emit builder
-        (Assign (Codegen_support.at parameter, Use (Codegen_support.constant_int32 5)));
+      Emit_c.Ir_builder.emit builder (Assign (at parameter, Use (Codegen_support.constant_int32 5)));
       let first =
-        Emit_c.Ir_builder.outline builder ~index:0 ~parts:[] (fun () ->
+        Emit_c.Ir_builder.outline builder ~index:(Lowered.For_testing.make_nested_function 0)
+          ~parts:[] (fun () ->
             let own = Emit_c.Ir_builder.allocate_local builder ~name:"own" lowered_int32 in
-            Emit_c.Ir_builder.emit builder
-              (Assign (Codegen_support.at own, add parameter parameter));
-            Emit_c.Ir_builder.emit builder (Assign (Codegen_support.at sum, add own parameter));
+            Emit_c.Ir_builder.emit builder (Assign (at own, add parameter parameter));
+            Emit_c.Ir_builder.emit builder (Assign (at sum, add own parameter));
             Emit_c.Ir_builder.finish builder (Return None))
       in
       let second =
-        Emit_c.Ir_builder.outline builder ~index:1 ~parts:[] (fun () ->
-            Emit_c.Ir_builder.emit builder
-              (Assign (Codegen_support.at other, Use (Codegen_support.copy parameter)));
+        Emit_c.Ir_builder.outline builder ~index:(Lowered.For_testing.make_nested_function 1)
+          ~parts:[] (fun () ->
+            Emit_c.Ir_builder.emit builder (Assign (at other, Use (copy parameter)));
             Emit_c.Ir_builder.finish builder (Return None))
       in
       Emit_c.Ir_builder.emit builder
-        (Fork { branches = [ (0, take_address first); (1, take_address second) ] });
-      Emit_c.Ir_builder.emit builder (Assign (Codegen_support.at sum, add sum other));
-      Emit_c.Ir_builder.finish builder (Return (Some (Codegen_support.copy sum)));
+        (Fork
+           {
+             branches =
+               [
+                 (Lowered.For_testing.make_nested_function 0, take_address first);
+                 (Lowered.For_testing.make_nested_function 1, take_address second);
+               ];
+           });
+      Emit_c.Ir_builder.emit builder (Assign (at sum, add sum other));
+      Emit_c.Ir_builder.finish builder (Return (Some (copy sum)));
       let fragment =
         Emit_c.Ir_builder.build builder
           { parameters = []; result = Some lowered_int32; returns = true }
@@ -141,37 +148,33 @@ let () =
         Emit_c.Ir_builder.allocate_local builder ~name:"pointer"
           (Pointer { target = lowered_int32; writable = true })
       in
-      let pointee = Codegen_support.at ~projections:[ Deref ] pointer in
-      Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
+      let pointee = at ~projections:[ Deref ] pointer in
+      Emit_c.Ir_builder.emit builder (Assign (at written, Use (Codegen_support.constant_int32 1)));
+      Emit_c.Ir_builder.emit builder (Assign (at read, Use (Codegen_support.constant_int32 3)));
+      Emit_c.Ir_builder.emit builder (Assign (at target, Use (Codegen_support.constant_int32 10)));
       Emit_c.Ir_builder.emit builder
-        (Assign (Codegen_support.at written, Use (Codegen_support.constant_int32 1)));
-      Emit_c.Ir_builder.emit builder
-        (Assign (Codegen_support.at read, Use (Codegen_support.constant_int32 3)));
-      Emit_c.Ir_builder.emit builder
-        (Assign (Codegen_support.at target, Use (Codegen_support.constant_int32 10)));
-      Emit_c.Ir_builder.emit builder
-        (Assign
-           ( Codegen_support.at pointer,
-             Use (Address { place = Codegen_support.at target; writable = true }) ));
+        (Assign (at pointer, Use (Address { place = at target; writable = true })));
       let outer =
-        Emit_c.Ir_builder.outline builder ~index:0 ~parts:[] (fun () ->
+        Emit_c.Ir_builder.outline builder ~index:(Lowered.For_testing.make_nested_function 0)
+          ~parts:[] (fun () ->
             Emit_c.Ir_builder.emit builder
               (Assign (pointee, Binary (Add, Copy pointee, Codegen_support.constant_int32 6)));
             let inner =
-              Emit_c.Ir_builder.outline builder ~index:1 ~parts:[] (fun () ->
+              Emit_c.Ir_builder.outline builder ~index:(Lowered.For_testing.make_nested_function 1)
+                ~parts:[] (fun () ->
                   Emit_c.Ir_builder.emit builder
-                    (Assign
-                       ( Codegen_support.at written,
-                         Binary (Add, Codegen_support.copy read, Codegen_support.constant_int32 4)
-                       ));
+                    (Assign (at written, Binary (Add, copy read, Codegen_support.constant_int32 4)));
                   Emit_c.Ir_builder.finish builder (Return None))
             in
-            Emit_c.Ir_builder.emit builder (Fork { branches = [ (1, take_address inner) ] });
+            Emit_c.Ir_builder.emit builder
+              (Fork
+                 { branches = [ (Lowered.For_testing.make_nested_function 1, take_address inner) ] });
             Emit_c.Ir_builder.finish builder (Return None))
       in
-      Emit_c.Ir_builder.emit builder (Fork { branches = [ (0, take_address outer) ] });
-      Emit_c.Ir_builder.emit builder (Assign (Codegen_support.at written, add written target));
-      Emit_c.Ir_builder.finish builder (Return (Some (Codegen_support.copy written)));
+      Emit_c.Ir_builder.emit builder
+        (Fork { branches = [ (Lowered.For_testing.make_nested_function 0, take_address outer) ] });
+      Emit_c.Ir_builder.emit builder (Assign (at written, add written target));
+      Emit_c.Ir_builder.finish builder (Return (Some (copy written)));
       let fragment =
         Emit_c.Ir_builder.build builder
           { parameters = []; result = Some lowered_int32; returns = true }
@@ -204,18 +207,19 @@ let () =
           (Codegen_support.value (Codegen_support.named "Point"))
       in
       let sum = Emit_c.Ir_builder.allocate_local builder ~name:"sum" lowered_int32 in
-      let field name = Codegen_support.at ~projections:[ Field name ] point in
-      Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
+      let field name = at ~projections:[ Field name ] point in
       Emit_c.Ir_builder.emit builder (Assign (field "x", Use (Codegen_support.constant_int32 3)));
       Emit_c.Ir_builder.emit builder (Assign (field "y", Use (Codegen_support.constant_int32 4)));
       let region =
-        Emit_c.Ir_builder.outline builder ~index:0 ~parts:[] (fun () ->
+        Emit_c.Ir_builder.outline builder ~index:(Lowered.For_testing.make_nested_function 0)
+          ~parts:[] (fun () ->
             Emit_c.Ir_builder.emit builder
-              (Assign (Codegen_support.at sum, Binary (Add, Copy (field "x"), Copy (field "y"))));
+              (Assign (at sum, Binary (Add, Copy (field "x"), Copy (field "y"))));
             Emit_c.Ir_builder.finish builder (Return None))
       in
-      Emit_c.Ir_builder.emit builder (Fork { branches = [ (0, take_address region) ] });
-      Emit_c.Ir_builder.finish builder (Return (Some (Codegen_support.copy sum)));
+      Emit_c.Ir_builder.emit builder
+        (Fork { branches = [ (Lowered.For_testing.make_nested_function 0, take_address region) ] });
+      Emit_c.Ir_builder.finish builder (Return (Some (copy sum)));
       let fragment =
         Emit_c.Ir_builder.build builder
           { parameters = []; result = Some lowered_int32; returns = true }
@@ -250,7 +254,12 @@ let () =
           [
             Codegen_support.local ~name:"environment" (Raw (Nullable_pointer Opaque));
             Codegen_support.local ~name:"item" (Codegen_support.value Codegen_support.uint64);
-            Codegen_support.local (Pointer { target = Environment 0; writable = false });
+            Codegen_support.local
+              (Pointer
+                 {
+                   target = Environment (Lowered.For_testing.make_nested_function 0);
+                   writable = false;
+                 });
             Codegen_support.local (Codegen_support.value Codegen_support.int32);
             Codegen_support.local ~name:"capabilities" Convention.capabilities;
           ]
@@ -282,7 +291,7 @@ let () =
           Codegen_support.entry ~nested:[ coroutine ]
             [
               Codegen_support.local ~name:"count" (Codegen_support.value Codegen_support.int32);
-              Codegen_support.local (Environment 0);
+              Codegen_support.local (Environment (Lowered.For_testing.make_nested_function 0));
               Codegen_support.local (Codegen_support.value (Function work));
               Codegen_support.local (Codegen_support.value Codegen_support.uint64);
               Codegen_support.local (Raw Bool);
@@ -302,7 +311,7 @@ let () =
                     ( Codegen_support.at 2,
                       Function_value
                         {
-                          code = Nested 0;
+                          code = Nested (Lowered.For_testing.make_nested_function 0);
                           environment =
                             Some (Address { place = Codegen_support.at 1; writable = false });
                         } );

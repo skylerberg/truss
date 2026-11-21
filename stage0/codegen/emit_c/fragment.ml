@@ -48,14 +48,14 @@ let resolve ~prefix ~name_item ~name_type ~name_site ~name_local : C_text.refere
   | Site site -> name_site site
   | Local local -> name_local local
   | Byte_constant index -> Printf.sprintf "%s_bytes_%d" prefix index
-  | Nested_function index -> Printf.sprintf "%s_Nested_%d" prefix index
-  | Nested_body index -> Printf.sprintf "%s_Nested_%d_body" prefix index
+  | Nested_function index -> Printf.sprintf "%s_Nested_%d" prefix (index :> int)
+  | Nested_body index -> Printf.sprintf "%s_Nested_%d_body" prefix (index :> int)
   | Static index -> Printf.sprintf "%s_static_%d" prefix index
   | Helper helper -> C_runtime.render_helper_name helper
   | Capability capability -> C_runtime.render_capability_symbol capability
 
-let raise_local_outside_function local =
-  C_runtime.raise_bug "local %d is named outside the function that holds it" local
+let raise_local_outside_function (local : Lowered.local) =
+  C_runtime.raise_bug "local %d is named outside the function that holds it" (local :> int)
 
 let number positions key =
   match Hashtbl.find_opt positions key with

@@ -305,12 +305,7 @@ let compute_returned_type context frame (body : Mir.body) =
   Option.value ~default:Types.unit (find_returned_type body.code)
 
 let list_captured_locals (written : State.lambda_code) =
-  List.filter_map
-    (fun capture ->
-      match written.code.locals.(capture).kind with
-      | Source { local; _ } -> Some local
-      | Temporary | Lent _ -> None)
-    written.code.captures
+  List.filter_map (Mir.find_core_local written.code.locals) written.code.captures
 
 let canonicalize_binders term =
   let count = ref 0 in
@@ -354,7 +349,7 @@ let find_lambda_definition context frame (function_type : Types.function_type)
               let enter inside =
                 List.fold_left2
                   (fun inside parameter (name, _) ->
-                    let info = written.code.locals.(parameter) in
+                    let info = written.code.locals.((parameter : Mir.local :> int)) in
                     Facts.bind inside
                       (Locals.make_key written.code.locals parameter)
                       (Facts.substitute_type context inside info.type_)
@@ -551,7 +546,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
   let read_exits (exit_ : State.frame) =
     List.filter_map
       (fun (index, (parameter, ((mode : Language.Mode.t), _))) ->
-        match (mode, written.code.locals.(parameter).kind) with
+        match (mode, written.code.locals.((parameter : Mir.local :> int)).kind) with
         | Mut, Source { local; _ } ->
             Option.map (fun term -> (index, term)) (Locals.find_opt (Core_local local) exit_.locals)
         | _ -> None)
@@ -588,7 +583,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
           let inside =
             List.fold_left2
               (fun inside parameter argument ->
-                let info = written.code.locals.(parameter) in
+                let info = written.code.locals.((parameter : Mir.local :> int)) in
                 Facts.bind inside
                   (Locals.make_key written.code.locals parameter)
                   (Facts.substitute_type context inside info.type_)
@@ -615,7 +610,7 @@ let read_lambda ?(capture_free = false) context (frame : State.frame) ~(site : I
               returned;
             List.iter2
               (fun parameter (mode, input) ->
-                match (mode, written.code.locals.(parameter).kind) with
+                match (mode, written.code.locals.((parameter : Mir.local :> int)).kind) with
                 | Language.Mode.Mut, Source { local; _ } -> (
                     match Locals.find_opt (Core_local local) exit_.locals with
                     | Some term ->

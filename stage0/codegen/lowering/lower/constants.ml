@@ -170,7 +170,9 @@ and fold_body ~visiting ~depth ~steps state (mir : Mir.Graph.t)
     end
     else None
   in
-  let ground_local_type local = Lowering.ground state body.locals.(local).type_ in
+  let ground_local_type local =
+    Lowering.ground state body.locals.((local : Mir.local :> int)).type_
+  in
   let read (place : Mir.place) =
     let* whole =
       match place.root with
@@ -298,7 +300,7 @@ and fold_body ~visiting ~depth ~steps state (mir : Mir.Graph.t)
     if !steps <= 0 then None
     else begin
       decr steps;
-      let basic = body.blocks.(block) in
+      let basic = body.blocks.((block : Mir.Graph.block :> int)) in
       let* _ = collect_all (List.map fold_statement basic.statements) in
       match basic.terminator with
       | Goto target -> run target
@@ -314,7 +316,7 @@ and fold_body ~visiting ~depth ~steps state (mir : Mir.Graph.t)
           None
     end
   in
-  run 0
+  run Mir.Graph.entry_block
 
 type constant = Folded of Lowered.data | Run of Ground.ty
 
@@ -353,7 +355,6 @@ let write_output (state : Lowering.state) output =
 
 let build_evaluator context path : Emit_c.fragment =
   let state, mir, ty = make_constant_state context path in
-  Emit_c.Ir_builder.start state.builder (Emit_c.Ir_builder.allocate_block state.builder);
   Lowering.run_in_scope state (fun () ->
       let place = Lowering.allocate_temporary state ty in
       Mir_form.lower_mir_into state mir place;

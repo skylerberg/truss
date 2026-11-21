@@ -261,7 +261,10 @@ let () =
       let describe ?callee origin =
         Core_walk.describe_call origin ?callee ~quote:(fun () -> "x") ()
       in
-      let desugared desugaring : Core.origin = Desugared { construct = 1; desugaring } in
+      let construct =
+        Source.Definition_span.allocate (Dynarray.create ()) (Source.Definition_span.make 0 0)
+      in
+      let desugared desugaring : Core.origin = Desugared { construct; desugaring } in
       Harness.expect_strings
         ~expected:
           [
@@ -274,8 +277,8 @@ let () =
             "the call that `x` makes";
           ]
         [
-          describe (Written 1);
-          describe ~callee:"f" (Written 1);
+          describe (Written construct);
+          describe ~callee:"f" (Written construct);
           describe ~callee:"f" (desugared For_loop);
           describe ~callee:"f" (desugared Quantifier);
           describe ~callee:"f" (desugared Derived);
@@ -302,7 +305,7 @@ let () =
                     (fun (node : Core.statement) ->
                       match node.kind with
                       | Compound_assign _ ->
-                          let span = spans.(Core_walk.locate_origin node.origin) in
+                          let span = spans.((Core_walk.locate_origin node.origin :> int)) in
                           actual :=
                             String.sub written span.start (span.stop - span.start) :: !actual
                       | _ -> ());
@@ -409,7 +412,7 @@ let () =
           | ( Some { definition = Function { contract = { costs = [ cost ]; _ }; _ }; _ },
               spans,
               written ) ->
-              let span = spans.(Core_walk.locate_origin cost.clause.origin) in
+              let span = spans.((Core_walk.locate_origin cost.clause.origin :> int)) in
               let quoted = String.sub written span.start (span.stop - span.start) in
               if quoted <> "cost time O(items.length())" then Harness.fail "found `%s`" quoted
           | _ -> Harness.fail "no core form with exactly one cost")

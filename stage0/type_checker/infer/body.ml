@@ -421,7 +421,7 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
       definition;
       resolved;
       text;
-      tables = Tables.create (definition.id + 1);
+      tables = Tables.create (Array.length spans);
       diagnostics = [];
       unifier =
         Unify.create ~context ~list_rigid_members:(fun context rigid ->

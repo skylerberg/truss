@@ -144,14 +144,10 @@ let make_span_from cursor start_index =
   make_definition_span cursor (Source.make_span start stop)
 
 let make_file_span cursor span = Source.Definition_span.to_file ~base:cursor.base span
-
-let allocate_id cursor span =
-  Dynarray.add_last cursor.spans span;
-  Dynarray.length cursor.spans - 1
-
+let allocate_id cursor span = Source.Definition_span.allocate cursor.spans span
 let allocate_id_from cursor start_index = allocate_id cursor (make_span_from cursor start_index)
-let read_span cursor id = Dynarray.get cursor.spans id
-let set_span cursor id span = Dynarray.set cursor.spans id span
+let read_span cursor (id : Syntax.id) = Dynarray.get cursor.spans (id :> int)
+let set_span cursor (id : Syntax.id) span = Dynarray.set cursor.spans (id :> int) span
 let read_file_span cursor id = make_file_span cursor (read_span cursor id)
 
 let rec list_tokens_within (tokens : Token.t array) ~first ~stop (span : Source.span) =

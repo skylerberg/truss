@@ -47,13 +47,13 @@ let check_clauses (state : State.state) (name : Syntax.name) clauses =
               functions and constants that are public."
              name.text hidden hidden)
     in
-    Array.iteri
+    Source.Node.iteri
       (fun id (elaboration : Tables.elaboration option) ->
         match elaboration with
         | Some (Call { callee = Function { path; _ }; _ }) -> record_name id path
         | _ -> ())
       state.tables.elaborations;
-    Array.iteri
+    Source.Node.iteri
       (fun id (resolution : Tables.resolution option) ->
         match resolution with Some (Global { path; _ }) -> record_name id path | _ -> ())
       state.tables.resolutions

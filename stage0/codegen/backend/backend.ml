@@ -46,7 +46,7 @@ let locate_todo_type (lookups : Lowering.lowered_lookups) (path : Path.t) =
     Option.map (fun key -> (names.read_definition key, names.read_spans key)) (names.find_key path)
   with
   | Some ({ kind = Type_definition { name; _ }; _ }, spans) ->
-      locate_offset lookups path spans.(name.id).start
+      locate_offset lookups path spans.((name.id :> int)).start
   | Some _ | None ->
       raise_bug "%s is reached as a type defined as todo, and has no definition" (Path.show path)
 

@@ -53,12 +53,8 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
       with
       | _, Some { shape = Todo_type; _ }, _ -> None
       | Some interface, Some { shape; _ }, Some signature ->
-          let nodes = ref 0 and locals = ref 0 in
-          let take_id () =
-            let id = !nodes in
-            incr nodes;
-            id
-          in
+          let nodes = Core.Node.create_counter () and locals = ref 0 in
+          let take_id () = Core.Node.allocate nodes in
           let make_local () : Core.local =
             let local = !locals in
             incr locals;

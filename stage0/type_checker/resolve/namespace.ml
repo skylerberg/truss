@@ -207,8 +207,8 @@ let list_file_declarations (lookups : Names.lookups) (file : Path.file) ~imports
     resolve_type_path lookups ~file ~imports head.path
   in
   let resolve_local_header (item : Syntax.definition Syntax.item) =
-    let spell id =
-      let span : Source.Definition_span.t = item.positions.spans.(id) in
+    let spell (id : Syntax.id) =
+      let span : Source.Definition_span.t = item.positions.spans.((id :> int)) in
       String.sub text (item.base + span.start) (span.stop - span.start)
     in
     resolve_header lookups ~file ~imports ~spell

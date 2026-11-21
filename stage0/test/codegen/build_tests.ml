@@ -216,7 +216,8 @@ let () =
                 [ Echo { text = make_text "42"; length = make_length "42"; site } ]
                 (Return None);
             ];
-          make_suite "never_ends" [ Codegen_support.block [] (Goto 0) ];
+          make_suite "never_ends"
+            [ Codegen_support.block [] (Goto (Lowered.For_testing.make_block 0)) ];
           make_suite "unfinished"
             [ Codegen_support.block [] (make_ending Todo "hole of type Int64") ];
           make_suite "leaks"

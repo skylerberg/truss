@@ -21,7 +21,6 @@ let encode env ty =
   in
   let output = Lowered.Copy (Lowered.make_local_place output_pointer) in
   let encode_call = encode_call env builder ~output in
-  Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
   let append_bytes (place : Lowered.place) size =
     let byte = Ground.make_builtin UInt8 in
     let first = Emit_c.Ir_builder.allocate_local builder (Raw (Pointer (Data byte))) in

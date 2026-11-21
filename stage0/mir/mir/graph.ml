@@ -69,6 +69,17 @@ let list_successors = function
   | Resume { exits; next; _ } -> List.map (fun exit -> exit.resume) exits @ [ next ]
   | Iteration_end _ | Return _ | Unreachable | Written_unreachable | Todo -> []
 
+let add_block blocks basic =
+  Dynarray.add_last blocks basic;
+  Dynarray.length blocks - 1
+
+let entry_block = 0
+let list_blocks blocks = List.init (Array.length blocks) Fun.id
+let iteri_blocks = Array.iteri
+
+let list_blocks_since blocks first =
+  List.init (Dynarray.length blocks - first) (fun index -> first + index)
+
 let canonicalize (closed : basic_block option array) =
   let read_block block =
     match closed.(block) with
@@ -83,7 +94,7 @@ let canonicalize (closed : basic_block option array) =
       order := block :: !order
     end
   in
-  visit 0;
+  visit entry_block;
   let renumbered = Array.make (Array.length closed) None in
   List.iteri (fun index block -> renumbered.(block) <- Some index) !order;
   let read_target block =

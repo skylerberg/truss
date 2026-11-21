@@ -25,13 +25,13 @@ and check_pattern_with ?(accepts_tuple_pattern = false) state env (written : Syn
   let is_var = binding = Var in
   let part_binding : State.binding = match binding with Parameter -> Let | Var | Let -> binding in
   let type_ = State.normalize state type_ in
-  state.tables.scrutinee_types.(written.id) <- Some type_;
+  state.tables.scrutinee_types.((written.id :> int)) <- Some type_;
   let recurse = check_pattern_with state env ~binding:part_binding ~mode in
   let check_unknown type_ =
     check_unknown_pattern state env written type_ ~binding:part_binding ~mode
   in
   let binds local =
-    state.tables.patterns.(written.id) <- Some (Binding_pattern { local; is_var; mode })
+    state.tables.patterns.((written.id :> int)) <- Some (Binding_pattern { local; is_var; mode })
   in
   match written.kind with
   | Wildcard | Pattern_error -> ()
@@ -114,7 +114,7 @@ and check_pattern_with ?(accepts_tuple_pattern = false) state env (written : Syn
                         (list_declared_names state path ~variant:(Some variant.variant_name)
                            declared)
                   in
-                  state.tables.patterns.(written.id) <-
+                  state.tables.patterns.((written.id :> int)) <-
                     Some
                       (Variant_pattern
                          {
@@ -185,7 +185,7 @@ and check_pattern_with ?(accepts_tuple_pattern = false) state env (written : Syn
                       ~binding:part_binding ~mode ~owner:(Types.show type_) ~is_tuple_type
                       ~declared_order:(list_declared_names state path ~variant:None record_fields)
                   in
-                  state.tables.patterns.(written.id) <-
+                  state.tables.patterns.((written.id :> int)) <-
                     Some (Record_pattern { type_; fields = order_fields record_fields matched }))
           | None ->
               check_unknown
@@ -350,7 +350,7 @@ and check_tuple_fields state env (written : Syntax.pattern) type_ (declared : Ty
            field.field_type)
         ~binding ~mode)
     patterns declared;
-  state.tables.patterns.(written.id) <-
+  state.tables.patterns.((written.id :> int)) <-
     Some
       (Record_pattern
          {
@@ -430,7 +430,7 @@ and check_pattern_fields state env (written : Syntax.pattern) (fields : Types.fi
        entries indexes)
 
 and check_unknown_pattern state env (written : Syntax.pattern) unknown ~binding ~mode =
-  state.tables.scrutinee_types.(written.id) <- Some unknown;
+  state.tables.scrutinee_types.((written.id :> int)) <- Some unknown;
   match written.kind with
   | Variant { fields = Some fields; _ } | Record fields ->
       List.iter
@@ -442,8 +442,8 @@ and check_unknown_pattern state env (written : Syntax.pattern) unknown ~binding 
         fields
   | _ -> ()
 
-and check_constant_pattern (state : State.state) id span path type_ =
-  state.tables.patterns.(id) <- Some (Constant_pattern path);
+and check_constant_pattern (state : State.state) (id : Syntax.id) span path type_ =
+  state.tables.patterns.((id :> int)) <- Some (Constant_pattern path);
   match Interface.Definition.find_constant_type state.lookups.interface path with
   | Some constant_type ->
       if not (State.unify state constant_type type_) then
@@ -596,7 +596,9 @@ and check_character_literal state id literal builtin =
   Types.make_builtin builtin
 
 and check_literal_pattern state id (span : Source.Definition_span.t) literal type_ =
-  let record_integer integer = state.tables.patterns.(id) <- Some (Literal_pattern integer) in
+  let record_integer integer =
+    state.tables.patterns.((id :> int)) <- Some (Literal_pattern integer)
+  in
   match literal with
   | Literal_integer number ->
       record_integer number;

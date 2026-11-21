@@ -217,7 +217,7 @@ and check_member_value state env (value : Syntax.expression) (base : Syntax.expr
       | _ -> Name_lookup.check_field state value base_type member)
 
 and check_bracket state env ?expected (value : Syntax.expression) (base : Syntax.expression) items =
-  match state.resolved.brackets.(value.id) with
+  match state.resolved.brackets.((value.id :> int)) with
   | Some Type_arguments -> (
       match State.find_head state value with
       | Some resolution -> Name_lookup.check_name state env value resolution
@@ -235,7 +235,7 @@ and check_bracket state env ?expected (value : Syntax.expression) (base : Syntax
 
 and is_field state env (inner : Syntax.expression) (member : Syntax.name) =
   let base_type =
-    match state.tables.types.(inner.id) with
+    match state.tables.types.((inner.id :> int)) with
     | Some type_ -> type_
     | None -> check_expression state env inner
   in
@@ -250,7 +250,7 @@ and is_field state env (inner : Syntax.expression) (member : Syntax.name) =
 and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax.expression) items =
   let base_type =
     Conversions.read_actual_head state base
-      (match state.tables.types.(base.id) with
+      (match state.tables.types.((base.id :> int)) with
       | Some type_ -> type_
       | None -> check_expression state env base)
   in

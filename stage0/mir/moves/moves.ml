@@ -313,9 +313,9 @@ let list_held_at_entry analysis =
       if List.mem path.local analysis.parameters then Some path else None)
     analysis.flagged
 
-let copy_entry_state analysis block = copy analysis.entries.(block)
+let copy_entry_state analysis (block : Mir.Graph.block) = copy analysis.entries.((block :> int))
 
-let list_given_on_entry analysis block =
+let list_given_on_entry analysis (block : Mir.Graph.block) =
   List.concat_map
     (fun local ->
       List.filter_map
@@ -353,7 +353,7 @@ let make_owner_test ?(find_passed = fun _ -> None) (body : Mir.Graph.body) =
   let owns local =
     (not (List.mem local body.captures))
     &&
-    match (find_passed local, body.locals.(local).kind) with
+    match (find_passed local, body.locals.((local :> int)).kind) with
     | Some mode, _ -> mode = Language.Mode.Own
     | None, (Temporary | Source { mode = Own; _ }) -> true
     | None, (Source { mode = Read | Mut; _ } | Lent _) -> false
@@ -363,7 +363,7 @@ let make_owner_test ?(find_passed = fun _ -> None) (body : Mir.Graph.body) =
     && (not (List.mem local parts))
     && (not (List.mem local body.captures))
     &&
-    match (find_passed local, body.locals.(local).kind) with
+    match (find_passed local, body.locals.((local :> int)).kind) with
     | Some mode, _ -> mode = Language.Mode.Mut
     | None, (Source { mode = Mut; _ } | Lent Mut) -> true
     | None, (Source { mode = Read | Own; _ } | Lent (Read | Own) | Temporary) -> false
@@ -504,33 +504,34 @@ let analyse ?find_passed ?(is_moving = fun _ -> true) ~tracks:needs_drop (body :
   let changed = ref true in
   while !changed do
     changed := false;
-    Array.iteri
+    Mir.Graph.iteri_blocks
       (fun block (basic : Mir.Graph.basic_block) ->
-        if reached.(block) then begin
-          let state = copy analysis.entries.(block) in
+        if reached.((block :> int)) then begin
+          let state = copy analysis.entries.((block :> int)) in
           List.iter (apply analysis state) basic.statements;
           apply_effects analysis state ~moves:(list_basic_moves basic) ~inits:[] ~ends:[];
           List.iter
             (fun successor ->
               let state =
                 match Mir.Graph.find_iteration_loop basic.terminator with
-                | Some loop -> flow_into analysis state body.blocks.(loop).terminator successor
+                | Some loop ->
+                    flow_into analysis state body.blocks.((loop :> int)).terminator successor
                 | None -> flow_into analysis state basic.terminator successor
               in
-              if not reached.(successor) then begin
-                reached.(successor) <- true;
-                analysis.entries.(successor) <- copy state;
+              if not reached.((successor :> int)) then begin
+                reached.((successor :> int)) <- true;
+                analysis.entries.((successor :> int)) <- copy state;
                 changed := true
               end
-              else if join analysis.entries.(successor) state then changed := true)
+              else if join analysis.entries.((successor :> int)) state then changed := true)
             (Mir.Graph.list_block_successors body block)
         end)
       body.blocks
   done;
-  Array.iteri
+  Mir.Graph.iteri_blocks
     (fun block (basic : Mir.Graph.basic_block) ->
-      if reached.(block) then begin
-        let state = copy analysis.entries.(block) in
+      if reached.((block :> int)) then begin
+        let state = copy analysis.entries.((block :> int)) in
         let drop_local local =
           if owns local then
             List.iter
@@ -598,7 +599,9 @@ let list_reads_and_writes (statement : Mir.Graph.statement) =
 let compute_live_after analysis (body : Mir.Graph.body) =
   let count = Array.length body.locals in
   let sources = Array.make count [] in
-  let bind local others = sources.(local) <- others @ sources.(local) in
+  let bind (local : Mir.local) others =
+    sources.((local :> int)) <- others @ sources.((local :> int))
+  in
   Array.iter
     (fun (basic : Mir.Graph.basic_block) ->
       List.iter
@@ -619,7 +622,7 @@ let compute_live_after analysis (body : Mir.Graph.body) =
   let rec with_sources seen = function
     | [] -> seen
     | local :: rest when List.mem local seen -> with_sources seen rest
-    | local :: rest -> with_sources (local :: seen) (sources.(local) @ rest)
+    | local :: rest -> with_sources (local :: seen) (sources.((local : Mir.local :> int)) @ rest)
   in
   let list_reads locals = with_sources [] locals in
   let effects =
@@ -649,40 +652,44 @@ let compute_live_after analysis (body : Mir.Graph.body) =
   let changed = ref true in
   while !changed do
     changed := false;
-    for block = Array.length body.blocks - 1 downto 0 do
-      let basic = body.blocks.(block) in
-      let positions = before.(block) and last = List.length basic.statements in
-      let current = Array.make count false in
-      List.iter
-        (fun successor ->
-          Array.iteri
-            (fun local is_live -> if is_live then current.(local) <- true)
-            entry.(successor))
-        (Mir.Graph.list_block_successors body block);
-      positions.(last + 1) <- Array.copy current;
-      List.iter
-        (fun local -> current.(local) <- true)
-        (list_reads
-           (use_locals (list_terminator_uses ~is_moving:accept_all ~owns:analysis.is_owner basic)));
-      positions.(last) <- Array.copy current;
-      List.iteri
-        (fun index (read, writes) ->
-          List.iter (fun local -> current.(local) <- false) writes;
-          List.iter (fun local -> current.(local) <- true) (list_reads read);
-          positions.(last - 1 - index) <- Array.copy current)
-        (List.rev effects.(block));
-      Option.iter
-        (fun (part, cursor) ->
-          current.(part) <- false;
-          List.iter (fun local -> current.(local) <- true) cursor)
-        (Hashtbl.find_opt entered block);
-      if current <> entry.(block) then begin
-        entry.(block) <- current;
-        changed := true
-      end
-    done
+    List.iter
+      (fun (block : Mir.Graph.block) ->
+        let basic = body.blocks.((block :> int)) in
+        let positions = before.((block :> int)) and last = List.length basic.statements in
+        let current = Array.make count false in
+        List.iter
+          (fun (successor : Mir.Graph.block) ->
+            Array.iteri
+              (fun local is_live -> if is_live then current.(local) <- true)
+              entry.((successor :> int)))
+          (Mir.Graph.list_block_successors body block);
+        positions.(last + 1) <- Array.copy current;
+        List.iter
+          (fun (local : Mir.local) -> current.((local :> int)) <- true)
+          (list_reads
+             (use_locals (list_terminator_uses ~is_moving:accept_all ~owns:analysis.is_owner basic)));
+        positions.(last) <- Array.copy current;
+        List.iteri
+          (fun index (read, writes) ->
+            List.iter (fun (local : Mir.local) -> current.((local :> int)) <- false) writes;
+            List.iter
+              (fun (local : Mir.local) -> current.((local :> int)) <- true)
+              (list_reads read);
+            positions.(last - 1 - index) <- Array.copy current)
+          (List.rev effects.((block :> int)));
+        Option.iter
+          (fun (part, cursor) ->
+            current.((part : Mir.local :> int)) <- false;
+            List.iter (fun (local : Mir.local) -> current.((local :> int)) <- true) cursor)
+          (Hashtbl.find_opt entered block);
+        if current <> entry.((block :> int)) then begin
+          entry.((block :> int)) <- current;
+          changed := true
+        end)
+      (List.rev (Mir.Graph.list_blocks body.blocks))
   done;
-  fun block step local -> before.(block).(step + 1).(local)
+  fun (block : Mir.Graph.block) step (local : Mir.local) ->
+    before.((block :> int)).(step + 1).((local :> int))
 
 let list_terminator_uses analysis basic =
   list_terminator_uses ~is_moving:analysis.is_moving ~owns:analysis.is_owner basic

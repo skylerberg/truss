@@ -83,7 +83,7 @@ let check_tree text (item : Syntax.definition Syntax.item) =
   let spans = item.positions.spans in
   let ids = Hashtbl.create 64 in
   let rec visit_expression (outer : Source.Definition_span.t) (value : Syntax.expression) =
-    let span = spans.(value.id) in
+    let span = spans.((value.id :> int)) in
     if not (contains_span outer span) then
       fail "an expression's span is outside its parent in %s" quoted;
     if Hashtbl.mem ids value.id then fail "an id repeats in %s" quoted;
@@ -92,16 +92,16 @@ let check_tree text (item : Syntax.definition Syntax.item) =
     let previous = ref span.start in
     Syntax_walk.visit_children
       (fun (inner : Syntax.expression) ->
-        let inner_start = spans.(inner.id).start in
+        let inner_start = spans.((inner.id :> int)).start in
         if inner_start < !previous then fail "expressions out of order in %s" quoted;
         previous := inner_start;
         visit_expression span inner)
       value
   in
   let length = item.stop - item.base in
-  if Array.length spans <> item.value.id + 1 then
+  if Array.length spans <> (item.value.id :> int) + 1 then
     fail "the span table does not end at the definition's id in %s" quoted;
-  let definition_span = spans.(item.value.id) in
+  let definition_span = spans.((item.value.id :> int)) in
   if definition_span.start <> 0 || definition_span.stop > length then
     fail "a definition's span is out of bounds in %s" quoted;
   List.iter

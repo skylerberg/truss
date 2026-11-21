@@ -100,7 +100,7 @@ let rec use_mutable_indexes (state : State.state) ~(report_with : Diagnostic.Cod
 type mutation = Assignment | Passed_mut
 
 let has_slice_type (state : State.state) (value : Syntax.expression) =
-  match state.tables.types.(value.id) with
+  match state.tables.types.((value.id :> int)) with
   | Some type_ ->
       let type_ = State.normalize state type_ in
       Types.is_well_known Slice type_ || Types.is_well_known String_slice type_

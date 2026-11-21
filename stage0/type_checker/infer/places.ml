@@ -1,7 +1,8 @@
-let find_target (resolved : Resolve.resolved) (name : Syntax.name) = resolved.names.(name.id)
+let find_target (resolved : Resolve.resolved) (name : Syntax.name) =
+  resolved.names.((name.id :> int))
 
 let is_member_constant (tables : Tables.t) (value : Syntax.expression) =
-  match tables.resolutions.(value.id) with
+  match tables.resolutions.((value.id :> int)) with
   | Some (Global { path = Member_constant _; _ }) -> true
   | _ -> false
 
@@ -14,7 +15,7 @@ let rec is_place resolved tables (value : Syntax.expression) =
   | Self_value -> true
   | Member (base, _) -> is_place resolved tables base || is_member_constant tables value
   | Bracket (base, _) -> (
-      match resolved.brackets.(value.id) with
+      match resolved.brackets.((value.id :> int)) with
       | Some Index -> is_place resolved tables base
       | Some Method_bracket -> (
           match base.kind with Member _ -> is_place resolved tables base | _ -> false)
@@ -38,7 +39,7 @@ let rec find_lent_mode resolved (tables : Tables.t) (value : Syntax.expression) 
   | Call _ ->
       Option.bind (Tables.find_call tables value.id) (fun (call : Tables.call) -> call.lends)
   | Member (base, _) | Parenthesized base -> find_lent_mode resolved tables base
-  | Bracket (base, _) when resolved.Resolve.brackets.(value.id) <> Some Type_arguments ->
+  | Bracket (base, _) when resolved.Resolve.brackets.((value.id :> int)) <> Some Type_arguments ->
       find_lent_mode resolved tables base
   | Mode (_, inner) when Option.is_some (find_keyword_operation resolved tables inner) ->
       find_lent_mode resolved tables inner

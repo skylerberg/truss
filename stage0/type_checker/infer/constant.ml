@@ -1,5 +1,5 @@
 let read_final_type (state : State.state) (value : Syntax.expression) =
-  Option.map (State.finalize_type state) state.tables.types.(value.id)
+  Option.map (State.finalize_type state) state.tables.types.((value.id :> int))
 
 let rec find_offending_expression (state : State.state) (value : Syntax.expression) :
     Syntax.expression option =
@@ -25,7 +25,7 @@ let rec find_offending_expression (state : State.state) (value : Syntax.expressi
   | Binary { left; right; _ } ->
       if is_built_in left && is_built_in right then find_first [ left; right ] else Some value
   | Name _ | Member _ | Bracket _ -> (
-      match (state.tables.resolutions.(value.id), value.kind) with
+      match (state.tables.resolutions.((value.id :> int)), value.kind) with
       | Some (Global _ | Variant_value _ | Type_name _), _ -> None
       | Some (Field_access _), Member (base, _) -> find_offending_expression state base
       | _ -> Some value)

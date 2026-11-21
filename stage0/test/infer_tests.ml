@@ -36,12 +36,12 @@ let locate_expression text written occurrence =
         | definition, spans, { base; _ }, Some result ->
             let best = ref None in
             let measure (value : Syntax.expression) =
-              let span : Source.Definition_span.t = spans.(value.id) in
+              let span : Source.Definition_span.t = spans.((value.id :> int)) in
               span.stop - span.start
             in
             let is_exact value = measure value = String.length written in
             let rec visit (value : Syntax.expression) =
-              (if base + spans.(value.id).start = offset then
+              (if base + spans.((value.id :> int)).start = offset then
                  match !best with
                  | Some (other : Syntax.expression)
                    when is_exact other || ((not (is_exact value)) && measure other <= measure value)
@@ -112,7 +112,7 @@ let is_view : Core.argument -> bool = function
 
 let expect_type text written ?(occurrence = 1) expected =
   let value, (result : Infer.checked) = locate_expression text written occurrence in
-  match result.tables.types.(value.id) with
+  match result.tables.types.((value.id :> int)) with
   | Some type_ ->
       if Types.show type_ <> expected then
         Harness.fail "`%s` has type %s, not %s" written (Types.show type_) expected
@@ -2290,7 +2290,8 @@ let () =
       expect_one_diagnostic Fixtures.Infer.some_pattern_on_an_integer "types.unknown_variant");
   Harness.test "a `todo` that nothing decides keeps the hole type in the tables" (fun () ->
       let value, (result : Infer.checked) = locate_expression Fixtures.Infer.let_of_todo "todo" 1 in
-      if result.tables.types.(value.id) <> Some Types.Hole then Harness.fail "not the hole type")
+      if result.tables.types.((value.id :> int)) <> Some Types.Hole then
+        Harness.fail "not the hole type")
 
 let shape = Fixtures.Infer.shape
 let source = Fixtures.Infer.source

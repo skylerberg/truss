@@ -40,8 +40,8 @@ let collect_bindings context (definition : Syntax.definition) =
           | Field { kind = Binding name; _ }, next :: _ when has_rest ->
               bind ~site name
                 (Field_deletion
-                   (Source.Definition_span.make context.spans.(field.id).start
-                      context.spans.(next.id).start))
+                   (Source.Definition_span.make context.spans.((field.id :> int)).start
+                      context.spans.((next.id :> int)).start))
           | Field { kind = Binding name; _ }, _ when has_rest || has_several_fields ->
               bind ~site name Field_wildcard
           | (Named_field (_, inner) | Field inner), _ -> visit_pattern ~site inner
@@ -88,7 +88,7 @@ let describe_removal (binding : binding) =
       ("Delete it, since `..` matches its field.", Printf.sprintf "Delete `%s`." binding.name.text)
 
 let make_edit context (binding : binding) =
-  let span = context.spans.(binding.name.id) in
+  let span = context.spans.((binding.name.id :> int)) in
   match binding.removal with
   | Wildcard -> Diagnostic.replace span "_"
   | Field_wildcard -> Diagnostic.replace span (binding.name.text ^ ": _")
@@ -101,7 +101,9 @@ let find_shadowed_constant context (occurrences : binding list) =
   in
   match occurrences with
   | first :: _ when List.for_all may_be_constant occurrences ->
-      Option.bind context.tables.local_types.(first.name.id) (fun type_ ->
+      Option.bind
+        context.tables.local_types.((first.name.id :> int))
+        (fun type_ ->
           Interface.Definition.find_shadowed_constant context.interface context.module_
             ~name:first.name.text ~type_)
   | _ -> None
@@ -110,19 +112,20 @@ let check_unused context (definition : Syntax.definition) =
   let targets = context.resolved.names in
   let bindings, assigned = collect_bindings context definition in
   let is_binding = Array.make (Array.length targets) false in
-  List.iter (fun (binding : binding) -> is_binding.(binding.name.id) <- true) bindings;
+  List.iter (fun (binding : binding) -> is_binding.((binding.name.id :> int)) <- true) bindings;
   let is_var = Array.make (Array.length targets) false in
   List.iter
-    (fun (binding : binding) -> if binding.site.is_var then is_var.(binding.name.id) <- true)
+    (fun (binding : binding) ->
+      if binding.site.is_var then is_var.((binding.name.id :> int)) <- true)
     bindings;
   let is_assigned = Array.make (Array.length targets) false
   and is_written = Array.make (Array.length targets) false in
   List.iter
-    (fun id ->
-      match targets.(id) with
-      | Some (Resolve.Local binding) when is_var.(binding) ->
-          is_assigned.(id) <- true;
-          is_written.(binding) <- true
+    (fun (id : Syntax.id) ->
+      match targets.((id :> int)) with
+      | Some (Resolve.Local binding) when is_var.((binding :> int)) ->
+          is_assigned.((id :> int)) <- true;
+          is_written.((binding :> int)) <- true
       | _ -> ())
     assigned;
   let is_used = Array.make (Array.length targets) false in
@@ -130,12 +133,12 @@ let check_unused context (definition : Syntax.definition) =
     (fun index target ->
       match target with
       | Some (Resolve.Local id) when not (is_binding.(index) || is_assigned.(index)) ->
-          is_used.(id) <- true
+          is_used.((id :> int)) <- true
       | _ -> ())
     targets;
-  let rec read_first_alternative id =
-    match targets.(id) with
-    | Some (Resolve.Local first) when is_binding.(id) -> read_first_alternative first
+  let rec read_first_alternative (id : Syntax.id) =
+    match targets.((id :> int)) with
+    | Some (Resolve.Local first) when is_binding.((id :> int)) -> read_first_alternative first
     | _ -> id
   in
   let later_alternatives = Hashtbl.create 8 in
@@ -147,9 +150,11 @@ let check_unused context (definition : Syntax.definition) =
   List.iter
     (fun (binding : binding) ->
       let name = binding.name in
-      if targets.(name.id) = Some Binding && not is_used.(name.id) then
-        if is_written.(name.id) then
-          report context Unused_variable context.spans.(name.id) ~fixes:[]
+      if targets.((name.id :> int)) = Some Binding && not is_used.((name.id :> int)) then
+        if is_written.((name.id :> int)) then
+          report context Unused_variable
+            context.spans.((name.id :> int))
+            ~fixes:[]
             (Printf.sprintf
                "`%s` is assigned but never read. Delete it and its assignments, or read it."
                name.text)
@@ -171,17 +176,20 @@ let check_unused context (definition : Syntax.definition) =
                   (Printf.sprintf "Write `%s`." written)
                   (List.map
                      (fun (occurrence : binding) ->
-                       Diagnostic.replace context.spans.(occurrence.name.id) written)
+                       Diagnostic.replace context.spans.((occurrence.name.id :> int)) written)
                      occurrences)
               in
-              report context Unused_variable context.spans.(name.id)
+              report context Unused_variable
+                context.spans.((name.id :> int))
                 ~fixes:[ qualification; removal ]
                 (Printf.sprintf
                    "`%s` is never used. A bare name in a pattern binds a variable, which matches \
                     every value. To match the constant, write `%s`."
                    name.text written)
           | None ->
-              report context Unused_variable context.spans.(name.id) ~fixes:[ removal ]
+              report context Unused_variable
+                context.spans.((name.id :> int))
+                ~fixes:[ removal ]
                 (Printf.sprintf "`%s` is never used. %s" name.text instruction))
     bindings
 
@@ -190,7 +198,7 @@ let check_block context (written : Syntax.block) =
     | first :: (next :: _ as rest) ->
         if Infer.statement_diverges context.tables first then begin
           let last = List.nth rest (List.length rest - 1) in
-          let unreachable = context.spans.(next.id) in
+          let unreachable = context.spans.((next.id :> int)) in
           let line_start =
             Source.compute_fragment_line_start (Lazy.force context.text) unreachable.start
           in
@@ -201,7 +209,8 @@ let check_block context (written : Syntax.block) =
                 Diagnostic.fix "Delete the unreachable code."
                   [
                     Diagnostic.delete
-                      (Source.Definition_span.make deletion_start context.spans.(last.id).stop);
+                      (Source.Definition_span.make deletion_start
+                         context.spans.((last.id :> int)).stop);
                   ];
               ]
             "This code is unreachable: the statement before it diverges."
@@ -259,16 +268,20 @@ let rec find_place context (value : Syntax.expression) =
   | Parenthesized inner -> find_place context inner
   | Self_value -> Some Self_place
   | Name path -> (
-      match (context.tables.resolutions.(value.id), context.resolved.names.(path.last.id)) with
+      match
+        ( context.tables.resolutions.((value.id :> int)),
+          context.resolved.names.((path.last.id :> int)) )
+      with
       | Some (Local_value id), _ -> Some (Local_place id)
       | _, Some (Definition (Constant, constant)) -> Some (Constant_place constant)
       | _ -> None)
   | Member (base, _) -> (
-      match context.tables.resolutions.(value.id) with
+      match context.tables.resolutions.((value.id :> int)) with
       | Some (Field_access { field; _ }) ->
           Option.map (fun place -> Field_place (place, field)) (find_place context base)
       | _ -> None)
-  | Bracket (base, [ Item key ]) when context.resolved.brackets.(value.id) = Some Index -> (
+  | Bracket (base, [ Item key ]) when context.resolved.brackets.((value.id :> int)) = Some Index
+    -> (
       match (find_place context base, find_index_key context key) with
       | Some place, Some index -> Some (Index_place (place, index))
       | _ -> None)
@@ -310,15 +323,15 @@ let check_comparison context (value : Syntax.expression) comparison (left : Synt
   match (find_place context left, find_place context right) with
   | Some left_place, Some right_place when is_same_place left_place right_place ->
       let text = Lazy.force context.text in
-      let span = context.spans.(value.id) in
-      let operand = Source.Definition_span.quote text context.spans.(left.id) in
+      let span = context.spans.((value.id :> int)) in
+      let operand = Source.Definition_span.quote text context.spans.((left.id :> int)) in
       let operator, is_always_true = describe_comparison comparison in
       let outcome =
         Printf.sprintf "`%s %s %s` compares a value with itself, so it is always %b." operand
           operator operand is_always_true
       in
       let is_float =
-        match context.tables.types.(left.id) with
+        match context.tables.types.((left.id :> int)) with
         | Some type_ -> Types.is_float_type type_
         | None -> false
       in

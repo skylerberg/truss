@@ -1,6 +1,7 @@
 module References = References
 
-let find_at table id = if id < Array.length table then table.(id) else None
+let find_at table (id : Syntax.id) =
+  if (id :> int) < Array.length table then table.((id :> int)) else None
 
 let show_type (tables : Infer.tables) id =
   match find_at tables.types id with
@@ -27,14 +28,14 @@ let list_unfinished (spans : Source.Definition_span.t array) (definition : Synta
   let add keyword id (span : Source.Definition_span.t) = found := { keyword; id; span } :: !found in
   let rec visit (value : Syntax.expression) =
     (match value.kind with
-    | Todo -> add `Todo (Some value.id) spans.(value.id)
-    | Echo _ -> add `Echo (Some value.id) spans.(value.id)
+    | Todo -> add `Todo (Some value.id) spans.((value.id :> int))
+    | Echo _ -> add `Echo (Some value.id) spans.((value.id :> int))
     | _ -> ());
     Syntax_walk.visit_children visit value
   in
   Syntax_walk.visit_definition visit definition;
   (match definition.kind with
-  | Type_definition { name; body = Type_todo; _ } -> add `Todo None spans.(name.id)
+  | Type_definition { name; body = Type_todo; _ } -> add `Todo None spans.((name.id :> int))
   | _ -> ());
   List.sort (fun left right -> compare left.span.start right.span.start) !found
 
@@ -126,7 +127,7 @@ let explain_at ~path (spans : Source.Definition_span.t array) (definition : Synt
   let innermost = ref None in
   let calls = Hashtbl.create 8 in
   let rec visit (value : Syntax.expression) =
-    if is_inside spans.(value.id) offset then begin
+    if is_inside spans.((value.id :> int)) offset then begin
       (match value.kind with
       | Call (({ kind = Member _; _ } as callee), _) -> Hashtbl.replace calls callee.id value.id
       | _ -> ());
@@ -139,7 +140,7 @@ let explain_at ~path (spans : Source.Definition_span.t array) (definition : Synt
   Syntax_walk.visit_definition visit definition;
   let name_at =
     List.find_opt
-      (fun (name : Syntax.name) -> is_inside spans.(name.id) offset)
+      (fun (name : Syntax.name) -> is_inside spans.((name.id :> int)) offset)
       (Syntax_walk.collect_names spans definition)
   in
   let is_written_in (value : Syntax.expression) (name : Syntax.name) =
@@ -155,7 +156,7 @@ let explain_at ~path (spans : Source.Definition_span.t array) (definition : Synt
   | None, Some name -> Some (explain_name ~path definition resolved tables name)
   | None, None -> None
   | Some value, _ ->
-      let written = Source.Definition_span.quote text spans.(value.id) in
+      let written = Source.Definition_span.quote text spans.((value.id :> int)) in
       let meaning, refers_to =
         match value.kind with
         | Name path -> explain_resolved resolved path.last

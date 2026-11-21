@@ -7,6 +7,8 @@ type state = {
   diagnostics : Diagnostic.in_definition list ref;
 }
 
+let read_span state (id : Syntax.id) = state.spans.((id :> int))
+
 let report state ?fixes code span message =
   ignore (Elaborator.record_diagnostic state.diagnostics ?fixes code span message)
 

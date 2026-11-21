@@ -22,7 +22,7 @@ let rec check_name (state : State.state) (env : State.env) (value : Syntax.expre
   match target with
   | Local id -> (
       state.locals_read <- id :: state.locals_read;
-      state.tables.resolutions.(value.id) <- Some (Local_value id);
+      state.tables.resolutions.((value.id :> int)) <- Some (Local_value id);
       match Hashtbl.find_opt state.locals id with
       | Some local -> local.type_
       | None -> State.raise_bug "the local `%s` has no type" text)
@@ -31,7 +31,7 @@ let rec check_name (state : State.state) (env : State.env) (value : Syntax.expre
       | Some (_, type_) -> type_
       | None -> State.raise_bug "the law has no parameter `%s`" text)
   | Value_parameter parameter ->
-      state.tables.resolutions.(value.id) <- Some (Value_parameter parameter);
+      state.tables.resolutions.((value.id :> int)) <- Some (Value_parameter parameter);
       Types.make_builtin UInt64
   | Type_parameter _ | Capability_parameter _ ->
       State.make_error_type state Not_a_value (State.read_span state value.id)
@@ -53,17 +53,17 @@ let rec check_name (state : State.state) (env : State.env) (value : Syntax.expre
           with
           | Error error -> error
           | Ok () ->
-              state.tables.resolutions.(value.id) <-
+              state.tables.resolutions.((value.id :> int)) <-
                 Some (Global { path; instantiation = instance.instantiation });
               check_function_value state value instance)
       | None -> State.raise_bug "`%s` has no signature" (Path.show path))
   | Definition (Constant, path) ->
-      state.tables.resolutions.(value.id) <-
+      state.tables.resolutions.((value.id :> int)) <-
         Some (Global { path; instantiation = Types.no_instantiation });
       Interface.Definition.read_constant_type state.lookups.interface path
   | Definition (Type, path) ->
       if Well_known.find_builtin_type path = Some Unit then begin
-        state.tables.resolutions.(value.id) <-
+        state.tables.resolutions.((value.id :> int)) <-
           Some (Variant_value { type_ = Types.unit; variant = Language.Builtin_type.show Unit });
         Types.unit
       end
@@ -89,16 +89,16 @@ let rec check_name (state : State.state) (env : State.env) (value : Syntax.expre
           | None -> State.raise_bug "the field `%s` is not in a record" field)
       | _ -> State.raise_bug "the field `%s` is named outside its type" field)
   | Result_value -> (
-      state.tables.resolutions.(value.id) <- Some Specification_value;
+      state.tables.resolutions.((value.id :> int)) <- Some Specification_value;
       match env.output with
       | Some output -> Types.extract_result_type output
       | None -> State.raise_bug "`result` is named where nothing is returned")
   | Old | Identical | Final | Specification_function _ ->
-      state.tables.resolutions.(value.id) <- Some Specification_value;
+      state.tables.resolutions.((value.id :> int)) <- Some Specification_value;
       State.make_error_type state Not_a_value (State.read_span state value.id)
         (Printf.sprintf "`%s` is applied to its subject, as in `%s(...)`." text text)
   | Visited -> (
-      state.tables.resolutions.(value.id) <- Some Specification_value;
+      state.tables.resolutions.((value.id :> int)) <- Some Specification_value;
       match env.loop_element with
       | Some element ->
           Types.Named { path = Well_known.make_path Sequence; arguments = [ Types.Type element ] }
@@ -108,7 +108,7 @@ let rec check_name (state : State.state) (env : State.env) (value : Syntax.expre
 
 and check_variant_value state (value : Syntax.expression) type_path variant ~arguments =
   let type_ = Types.Named { path = type_path; arguments } in
-  state.tables.resolutions.(value.id) <- Some (Variant_value { type_; variant });
+  state.tables.resolutions.((value.id :> int)) <- Some (Variant_value { type_; variant });
   match Members.find_variants state.lookups type_path arguments with
   | Some variants -> (
       match
@@ -165,7 +165,7 @@ and check_field state (value : Syntax.expression) base_type (member : Syntax.nam
                      (State.show state base_type))
               end
               else begin
-                state.tables.resolutions.(value.id) <-
+                state.tables.resolutions.((value.id :> int)) <-
                   Some (Field_access { type_ = base_type; field = member.text });
                 Solver.flatten state
                   (Bound { at = State.read_span state member.id; of_type = None })
@@ -208,7 +208,7 @@ and check_static_member state (value : Syntax.expression) type_ (member : Syntax
             :: Members.list_method_lookups state path member.text)
         with
         | Visible (Member_constant _ as constant) ->
-            state.tables.resolutions.(value.id) <-
+            state.tables.resolutions.((value.id :> int)) <-
               Some (Global { path = constant; instantiation = Types.no_instantiation });
             Interface.Definition.read_constant_type state.lookups.interface constant
         | Visible method_path -> (
@@ -220,7 +220,7 @@ and check_static_member state (value : Syntax.expression) type_ (member : Syntax
                 (match instance.signature.receiver with
                 | Some (_, receiver) -> ignore (State.unify state receiver type_)
                 | None -> ());
-                state.tables.resolutions.(value.id) <-
+                state.tables.resolutions.((value.id :> int)) <-
                   Some (Global { path = method_path; instantiation = instance.instantiation });
                 check_function_value state value instance
             | None -> State.raise_bug "the method `%s` has no signature" (Path.show method_path))

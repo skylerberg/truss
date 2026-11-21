@@ -95,7 +95,8 @@ let rec drop_path state (path : Moves.path) =
         match List.assoc_opt path frame.flags with
         | Some flag -> flag
         | None ->
-            Definitions.raise_bug "local %d%s, which may hold nothing, has no flag" path.local
+            Definitions.raise_bug "local %d%s, which may hold nothing, has no flag"
+              (path.local :> int)
               (String.concat ""
                  (List.map
                     (function
@@ -238,6 +239,6 @@ let end_local state local =
   let frame = Mir_places.require_mir_frame state in
   if List.mem local frame.called_parts && not (Hashtbl.mem frame.placed_parts local) then
     Mir_lends.emit_mark state
-      (if frame.after_lend.(frame.block) then Lend_transfer else Lend_release)
+      (if frame.after_lend.((frame.block :> int)) then Lend_transfer else Lend_release)
       (Mir_lends.obtain_lent_call state local)
   else drop_local state local

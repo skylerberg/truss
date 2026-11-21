@@ -41,8 +41,11 @@ type suspended
 val suspend_block : t -> suspended
 val resume_block : t -> suspended -> Tree.statement list
 val emitted : t -> Tree.statement list
-val start_loan : t -> Tree.operand -> Language.Mode.t -> Tree.loan_duration -> Core.origin -> int
-val end_loans : t -> int list -> Core.origin -> unit
+
+val start_loan :
+  t -> Tree.operand -> Language.Mode.t -> Tree.loan_duration -> Core.origin -> Tree.loan
+
+val end_loans : t -> Tree.loan list -> Core.origin -> unit
 
 type scope
 
@@ -72,7 +75,7 @@ val resume_group : t -> Core.id -> Core.origin -> unit
 val return_ : t -> Tree.operand option -> Core.origin -> unit
 val break_ : t -> Core.origin -> unit
 val continue_ : t -> Core.origin -> unit
-val add_lambda : t -> Tree.body -> int
+val add_lambda : t -> Tree.body -> Tree.lambda
 val lambdas : t -> Tree.body array
 
 val finish :

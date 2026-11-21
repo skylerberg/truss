@@ -5,7 +5,11 @@ val create : ?site:Lowered.site -> Memory_layout.env -> item:Lowered.Item.t -> t
 val with_site : t -> Lowered.site -> (unit -> 'a) -> 'a
 
 val build_nested :
-  t -> index:int -> environment:(string * Lowered.ty) list -> (t -> prototype) -> unit
+  t ->
+  index:Lowered.nested_function ->
+  environment:(string * Lowered.ty) list ->
+  (t -> prototype) ->
+  unit
 
 val allocate_local : t -> ?name:string -> ?is_zeroed:bool -> Lowered.ty -> Lowered.local
 val lookup_local_type : t -> Lowered.local -> Lowered.ty
@@ -32,5 +36,7 @@ val emit_if : t -> condition -> yes:(unit -> unit) -> no:(unit -> unit) -> unit
 val emit_loop :
   t -> ?integer:Memory_layout.integer -> count:Lowered.operand -> (Lowered.local -> unit) -> unit
 
-val outline : t -> index:int -> parts:Lowered.local list -> (unit -> unit) -> Lowered.local
+val outline :
+  t -> index:Lowered.nested_function -> parts:Lowered.local list -> (unit -> unit) -> Lowered.local
+
 val build : t -> prototype -> Fragment.t

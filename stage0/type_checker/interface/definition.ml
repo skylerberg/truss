@@ -166,7 +166,7 @@ let list_derives_entries (resolved : Resolve.resolved) (clauses : Syntax.type_cl
       | Derives traits ->
           List.filter_map
             (fun (written : Syntax.path_type) ->
-              match resolved.names.(written.path.last.id) with
+              match resolved.names.((written.path.last.id :> int)) with
               | Some (Resolve.Definition (_, trait)) -> Some (clause, written, trait)
               | _ -> None)
             traits

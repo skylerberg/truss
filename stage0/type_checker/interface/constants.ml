@@ -18,11 +18,11 @@ let rec evaluate_expression lookups ~visiting resolved (value : Syntax.expressio
           | Operation (Bitwise _ | Shift _) | Comparison _ | Connective _ -> None)
       | _ -> None)
   | Name path -> (
-      match (resolved : Resolve.resolved).names.(path.last.id) with
+      match (resolved : Resolve.resolved).names.((path.last.id :> int)) with
       | Some (Definition (Constant, path)) -> evaluate_path lookups ~visiting path
       | _ -> None)
   | Member ({ kind = Name owner; _ }, member) -> (
-      match resolved.names.(owner.last.id) with
+      match resolved.names.((owner.last.id :> int)) with
       | Some (Definition (Type, owner)) ->
           evaluate_path lookups ~visiting (Member_constant { owner; name = member.text })
       | _ -> None)
@@ -42,7 +42,7 @@ let evaluate_constant lookups path = evaluate_path lookups ~visiting:[] path
 let is_uint64 (lookups : Lookups.t) path =
   match Resolve.Names.find_definition lookups.names path with
   | Some (key, { kind = Constant { type_ = { kind = Path_type written; _ }; _ }; _ }) ->
-      (lookups.read_resolved Interface key).names.(written.path.last.id)
+      (lookups.read_resolved Interface key).names.((written.path.last.id :> int))
       = Some (Definition (Type, Well_known.make_builtin_type_path UInt64))
   | _ -> false
 

@@ -76,7 +76,6 @@ let drop context ty =
     Emit_c.Ir_builder.allocate_local builder (Pointer { target = Value ty; writable = true })
   in
   let value : Lowered.place = { root = Local pointer; projections = [ Deref ] } in
-  Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
   (match Representation.classify context.env ty with
   | Any ->
       Emit_c.Ir_builder.emit builder
@@ -209,7 +208,6 @@ let drop context ty =
 let build_any_drop context ty =
   let builder = Emit_c.Ir_builder.create context.env ~item:(Any_drop ty) in
   let untyped = Emit_c.Ir_builder.allocate_local builder (Raw (Pointer Opaque)) in
-  Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
   if not (is_trivial context ty) then begin
     let typed =
       Emit_c.Ir_builder.allocate_local builder (Pointer { target = Value ty; writable = true })
@@ -274,7 +272,7 @@ let copy context ty =
     match (parameter, self_local) with
     | Some (Pointer _), Some local -> { root = Local local; projections = [ Deref ] }
     | Some _, Some local -> Lowered.make_local_place local
-    | _ -> Lowered.make_local_place 0
+    | _ -> Lowered.make_local_place (Emit_c.Ir_builder.allocate_local builder (Value ty))
   in
   let result_local =
     match result_pointer with
@@ -287,7 +285,6 @@ let copy context ty =
     | None, Some local -> Lowered.make_local_place local
     | None, None -> raise_bug "no place for the copy"
   in
-  Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
   (match Representation.classify context.env ty with
   | Handle -> raise_bug "a copy of a handle, which is not Copyable"
   | Any ->
@@ -426,7 +423,6 @@ let copy context ty =
 let build_any_copy context ty =
   let builder = Emit_c.Ir_builder.create context.env ~item:(Any_copy ty) in
   let original = Emit_c.Ir_builder.allocate_local builder (Raw (Pointer Opaque)) in
-  Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
   let copied = allocate_box context builder ty in
   if not (Memory_layout.has_zero_size context.env ty) then begin
     let source =

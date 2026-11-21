@@ -28,8 +28,8 @@ type action =
   | Drop of dropped_owner list
   | Bind_lent_part of { scrutinee : Core.origin; lent_part_type : Types.ty }
   | Pass_owned_function of view list
-  | Start_loan of { loan : int; loans : loan list }
-  | End_loans of int list
+  | Start_loan of { loan : Mir.loan; loans : loan list }
+  | End_loans of Mir.loan list
   | Arguments of {
       borrowed_arguments : borrowed_argument list;
       view_arguments : view_argument list;
@@ -89,13 +89,8 @@ type builder = {
 
 let raise_bug message = Compiler_bug.raise_bug ~stage:"Ownership" message
 let emit builder action origin = builder.written <- { action; origin } :: builder.written
-let lookup_local_info (builder : builder) local = builder.body.locals.(local)
-
-let find_core_local builder (local : Mir.local) =
-  match (lookup_local_info builder local).kind with
-  | Source { local; _ } -> Some local
-  | Temporary | Lent _ -> None
-
+let lookup_local_info (builder : builder) (local : Mir.local) = builder.body.locals.((local :> int))
+let find_core_local (builder : builder) local = Mir.find_core_local builder.body.locals local
 let union known added = known @ List.filter (fun item -> not (List.mem item known)) added
 
 let list_held_views (held : held) =
@@ -501,7 +496,7 @@ let list_returned_temporaries (body : Mir.Graph.body) =
       | Return (Some (Use { place = { root = Local local; projections = [] }; _ }))
       | Cancel
           { returned = Some (Use { place = { root = Local local; projections = [] }; _ }, _); _ }
-        when body.locals.(local).kind = Temporary ->
+        when body.locals.((local :> int)).kind = Temporary ->
           returned := local :: !returned
       | _ -> ())
     body.blocks;
@@ -521,7 +516,7 @@ let list_returned_temporaries (body : Mir.Graph.body) =
                      _;
                    })
               when List.mem target !returned
-                   && body.locals.(source).kind = Temporary
+                   && body.locals.((source :> int)).kind = Temporary
                    && not (List.mem source !returned) ->
                 returned := source :: !returned;
                 changed := true
@@ -764,13 +759,7 @@ let of_body context moves (body : Mir.Graph.body) ~returns_to_caller : t =
       context;
       moves;
       body;
-      captured =
-        List.filter_map
-          (fun local ->
-            match body.locals.(local).kind with
-            | Source { local = core; _ } -> Some core
-            | Temporary | Lent _ -> None)
-          body.captures;
+      captured = List.filter_map (Mir.find_core_local body.locals) body.captures;
       held = Hashtbl.create 32;
       returned_temporaries = list_returned_temporaries body;
       loop_elements =
@@ -782,7 +771,7 @@ let of_body context moves (body : Mir.Graph.body) ~returns_to_caller : t =
       loop_body_starts = Hashtbl.create 4;
       unassigned_locals = [];
       lent_part_bindings = [];
-      position = { block = 0; index = 0 };
+      position = { block = Mir.Graph.entry_block; index = 0 };
       written = [];
     }
   in
@@ -793,10 +782,10 @@ let of_body context moves (body : Mir.Graph.body) ~returns_to_caller : t =
   let write position body =
     builder.position <- position;
     body ();
-    steps.(position.block).(position.index) <- List.rev builder.written;
+    steps.((position.block :> int)).(position.index) <- List.rev builder.written;
     builder.written <- []
   in
-  Array.iteri
+  Mir.Graph.iteri_blocks
     (fun block (basic : Mir.Graph.basic_block) ->
       List.iteri
         (fun index statement' ->
@@ -806,12 +795,16 @@ let of_body context moves (body : Mir.Graph.body) ~returns_to_caller : t =
         { block; index = List.length basic.statements }
         (fun () -> emit_terminator builder ~returns_to_caller basic))
     body.blocks;
-  let is_terminator { block; index } = index = List.length body.blocks.(block).statements in
+  let is_terminator { block; index } =
+    index = List.length body.blocks.((block :> int)).statements
+  in
   let list_positions ?(find_start = fun _ -> None) blocks =
     List.concat_map
-      (fun block ->
+      (fun (block : Mir.Graph.block) ->
         let first = Option.value ~default:0 (find_start block) in
-        List.init (max 0 (shape.(block) - first)) (fun offset -> { block; index = first + offset }))
+        List.init
+          (max 0 (shape.((block :> int)) - first))
+          (fun offset -> { block; index = first + offset }))
       (List.sort_uniq compare blocks)
   in
   let fork_join_blocks =
@@ -830,7 +823,9 @@ let of_body context moves (body : Mir.Graph.body) ~returns_to_caller : t =
         | _ -> None)
   in
   let fork_join_loops =
-    Array.to_list (Array.mapi (fun block basic -> (block, basic)) body.blocks)
+    List.map
+      (fun (block : Mir.Graph.block) -> (block, body.blocks.((block :> int))))
+      (Mir.Graph.list_blocks body.blocks)
     |> List.filter_map (fun (loop_block, (basic : Mir.Graph.basic_block)) ->
         match basic.terminator with
         | For { body = inside; blocks; loop = { schedule = Parallel | Concurrent; _ } as loop; _ }
@@ -842,7 +837,8 @@ let of_body context moves (body : Mir.Graph.body) ~returns_to_caller : t =
                   List.filter
                     (fun position ->
                       (not (is_terminator position))
-                      || Mir.Graph.find_iteration_loop body.blocks.(position.block).terminator
+                      || Mir.Graph.find_iteration_loop
+                           body.blocks.((position.block :> int)).terminator
                          <> Some loop_block)
                     (list_positions
                        ~find_start:(fun block ->
@@ -855,7 +851,7 @@ let of_body context moves (body : Mir.Graph.body) ~returns_to_caller : t =
                       match statement.kind with
                       | Basic (Live locals) -> List.filter_map (find_core_local builder) locals
                       | Basic _ | Provide_start _ | Provide_end -> [])
-                    body.blocks.(inside).statements;
+                    body.blocks.((inside :> int)).statements;
                 temporaries =
                   List.concat_map
                     (fun block ->
@@ -867,7 +863,7 @@ let of_body context moves (body : Mir.Graph.body) ~returns_to_caller : t =
                                 Some path.local
                               else None)
                             (Moves.list_given_by statement))
-                        body.blocks.(block).statements)
+                        body.blocks.((block : Mir.Graph.block :> int)).statements)
                     blocks;
               }
         | _ -> None)

@@ -1,4 +1,4 @@
-type block = int
+type block = private int
 type early_exit = { resume : block; returned : Tree.local option }
 type branch = { entry : block; blocks : block list }
 
@@ -55,6 +55,11 @@ type body = {
 
 type t = { body : body; lambdas : body array }
 
+val entry_block : block
+val add_block : 'a Dynarray.t -> 'a -> block
+val list_blocks : 'a array -> block list
+val iteri_blocks : (block -> 'a -> unit) -> 'a array -> unit
+val list_blocks_since : 'a Dynarray.t -> int -> block list
 val canonicalize : basic_block option array -> basic_block array
 val find_iteration_loop : terminator -> block option
 val read_loop_head : body -> block -> loop_head

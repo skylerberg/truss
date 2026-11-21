@@ -38,7 +38,7 @@ type resolution =
   | Specification_value
 
 let show_resolution = function
-  | Local_value local -> Printf.sprintf "local %d" local
+  | Local_value local -> Printf.sprintf "local %d" (local :> int)
   | Global { path; _ } -> Path.show path
   | Field_access { field; _ } -> "field " ^ field
   | Variant_value { variant; _ } -> "variant " ^ variant
@@ -153,8 +153,8 @@ let make_method_call ?lends trait (method_ : Well_known.method_) ~self_type ~res
     lends;
   }
 
-let find_call (tables : t) id =
-  match tables.elaborations.(id) with Some (Call call) -> Some call | _ -> None
+let find_call (tables : t) (id : Syntax.id) =
+  match tables.elaborations.((id :> int)) with Some (Call call) -> Some call | _ -> None
 
 let map ~map_type ~map_argument ~map_capabilities (tables : t) : t =
   let map_trait (reference : Types.trait_reference) : Types.trait_reference =
@@ -272,7 +272,7 @@ let map ~map_type ~map_argument ~map_capabilities (tables : t) : t =
     elaborations = map_entries tables.elaborations map_elaboration;
   }
 
-let list_arguments_at (tables : t) id =
+let list_arguments_at (tables : t) (id : Syntax.id) =
   let {
     types;
     local_types;
@@ -314,19 +314,19 @@ let list_arguments_at (tables : t) id =
             remaining
   in
   of_types
-    (List.filter_map (fun table -> table.(id)) [ types; local_types; scrutinee_types ]
-    @ List.map snd conversions.(id))
-  @ (match resolutions.(id) with
+    (List.filter_map (fun table -> table.((id :> int))) [ types; local_types; scrutinee_types ]
+    @ List.map snd conversions.((id :> int)))
+  @ (match resolutions.((id :> int)) with
     | Some (Global { instantiation; _ }) -> instantiation.type_arguments
     | Some (Field_access { type_; _ } | Variant_value { type_; _ } | Type_name type_) ->
         [ Types.Type type_ ]
     | Some (Local_value _ | Value_parameter _ | Specification_value) | None -> [])
-  @ (match patterns.(id) with
+  @ (match patterns.((id :> int)) with
     | Some (Variant_pattern { type_; _ } | Record_pattern { type_; _ }) -> [ Types.Type type_ ]
     | Some (Binding_pattern _ | Constant_pattern _ | Literal_pattern _) | None -> [])
-  @ Option.fold ~none:[] ~some:list_condition conditions.(id)
+  @ Option.fold ~none:[] ~some:list_condition conditions.((id :> int))
   @
-  match elaborations.(id) with
+  match elaborations.((id :> int)) with
   | Some (Call call) -> list_call call
   | Some (Converted_literal { elements = List_element element; call }) ->
       Types.Type element :: list_call call

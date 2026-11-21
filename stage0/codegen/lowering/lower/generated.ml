@@ -47,7 +47,6 @@ let build_entry context (item : Lowered.Item.t) (impl_method : Lowered.Item.impl
   let evidence = Emit_c.Ir_builder.allocate_local builder Convention.evidence in
   Lowering.set_result_slot state result;
   let parameter_places = allocate_parameters state substitution capability_signature.parameters in
-  Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
   let self_ty = Monomorphic.ground context.monomorphic substitution interface.for_type in
   let implementation =
     Emit_c.Ir_builder.allocate_local builder (Pointer { target = Value self_ty; writable = true })
@@ -96,7 +95,6 @@ let build_locked_entry context (item : Lowered.Item.t) ~capability ~name : Emit_
   let parameter_places =
     allocate_parameters state Types.no_substitution capability_signature.parameters
   in
-  Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
   let implementation = load_outer_evidence builder ~evidence 0
   and tasks = load_outer_evidence builder ~evidence 1 in
   let address = Emit_c.Ir_builder.allocate_local builder (Raw (Pointer Opaque)) in
@@ -250,7 +248,6 @@ let build_program_main context (item : Lowered.Item.t) main_path : Emit_c.fragme
   let count = Emit_c.Ir_builder.allocate_local builder (Raw (Integer Int32)) in
   let arguments_pointer = Emit_c.Ir_builder.allocate_local builder (Raw (Pointer Opaque)) in
   Lowering.set_result_slot state (Returned (Raw (Integer Int32)));
-  Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
   let signature = Definitions.read_signature context main_path in
   let list_ty, list_mode =
     match signature.parameters with
@@ -341,7 +338,6 @@ let build_test_main context (item : Lowered.Item.t) test_path : Emit_c.fragment 
   let state =
     make_generated_state context ~item ~definition:test_path ~substitution:Types.no_substitution
   in
-  Emit_c.Ir_builder.start state.builder (Emit_c.Ir_builder.allocate_block state.builder);
   let signature = Definitions.read_signature context test_path in
   state.evidence <-
     list_real_implementations state ~user:(Path.show test_path)
@@ -370,7 +366,6 @@ let build_adapter context (item : Lowered.Item.t) ~(function_ : Path.t) ~instant
       ty.parameters
   in
   let capabilities = Emit_c.Ir_builder.allocate_local builder Convention.capabilities in
-  Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
   Lowering.look_up_capabilities state ~table:(Copy (Lowered.make_local_place capabilities)) ty.uses;
   Targets.lower_item_call state
     (Lowered.Item.make_code function_ instantiation)
@@ -416,7 +411,6 @@ let build_any_entry context (item : Lowered.Item.t) (impl_method : Lowered.Item.
       (fun ty -> Emit_c.Ir_builder.allocate_local builder ty)
       (Definitions.list_lending_parameters context substitution method_signature.output)
   in
-  Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
   let self_ty = Monomorphic.ground context.monomorphic substitution interface.for_type in
   let typed =
     Emit_c.Ir_builder.allocate_local builder (Pointer { target = Value self_ty; writable = true })

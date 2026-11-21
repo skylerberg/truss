@@ -60,7 +60,7 @@ let find_projection_type env ~list_environment ty projection =
     | Field name, Environment nested_index -> (
         match List.assoc_opt name (list_environment nested_index) with
         | Some ty -> Some ty
-        | None -> raise_bug "environment %d has no field %s" nested_index name)
+        | None -> raise_bug "environment %d has no field %s" (nested_index :> int) name)
     | Variant_field { variant; field }, Value sum -> find_variant_field_type env sum variant field
     | Index _, Value array -> (
         match (Memory_layout.of_type env array).form with

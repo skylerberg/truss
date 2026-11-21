@@ -15,7 +15,6 @@ let operate builder ?destination ?(type_arguments = []) operation arguments =
 let build_entry build_body : Codegen_support.program_fragment =
  fun env ->
   let builder = Emit_c.Ir_builder.create env ~item:(Codegen_support.code_item "entry") in
-  Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
   let result = build_body builder in
   Emit_c.Ir_builder.finish builder (Return (Some (Copy (Lowered.make_local_place result))));
   Emit_c.Ir_builder.build builder
@@ -97,7 +96,6 @@ let () =
     (fun () ->
       let env = Memory_layout.create linux ~compute_shape:(Codegen_support.compute_shape []) in
       let builder = Emit_c.Ir_builder.create env ~item:(Codegen_support.code_item "entry") in
-      Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
       let length =
         Emit_c.Ir_builder.allocate_local builder (Codegen_support.value Codegen_support.int32)
       in
@@ -670,7 +668,6 @@ let () =
       in
       let entry =
         let builder = Emit_c.Ir_builder.create env ~item:(Codegen_support.code_item "entry") in
-        Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
         let name = Emit_c.Ir_builder.allocate_local builder (Codegen_support.value view_ty) in
         let text = path ^ "\000" in
         Emit_c.Ir_builder.emit builder

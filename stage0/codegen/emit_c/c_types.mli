@@ -13,8 +13,8 @@ type registry
 type t = { env : Memory_layout.env; registry : registry }
 
 val create : Memory_layout.env -> owner:Lowered.Item.t option -> t
-val add_environment : t -> int -> (string * Lowered.ty) list -> unit
-val read_environment : t -> int -> (string * Lowered.ty) list
+val add_environment : t -> Lowered.nested_function -> (string * Lowered.ty) list -> unit
+val read_environment : t -> Lowered.nested_function -> (string * Lowered.ty) list
 val register : t -> C_text.key -> unit
 val list_keys : t -> C_text.key list
 val render_key : t -> C_text.key -> C_text.t
