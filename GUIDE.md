@@ -197,6 +197,7 @@ $ truss check
 main.truss:3:3: error[capabilities.not_available]: This call uses `Console`, which is not available here. Declare it with `uses Console`, or `provide` an implementation.
   |   Console.print_line("Hello, world!")
   |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 1 error
 ```
 
@@ -254,6 +255,7 @@ Console.print_line("You guessed: ${guess}")
 main.truss:7:38: error[types.no_impl]: `Option[String]` does not implement `Display`, so it cannot be interpolated.
   |   Console.print_line("You guessed: ${guess}")
   |                                      ^^^^^
+
 1 error
 ```
 
@@ -300,6 +302,7 @@ clause, the call does not compile:
 main.truss:6:16: error[capabilities.not_available]: This call uses `Random`, which is not available here. Declare it with `uses Random`, or `provide` an implementation.
   |   let secret = random.below(100) + 1
   |                ^^^^^^^^^^^^^^^^^^
+
 1 error
 ```
 
@@ -334,6 +337,7 @@ match guess.compare(secret) {
 main.truss:13:23: error[types.mismatch]: Expected `String`, found `UInt64`.
   |   match guess.compare(secret) {
   |                       ^^^^^^
+
 1 error
 ```
 
@@ -394,6 +398,7 @@ Written with only `uses Console, Random`, the loop does not compile:
 main.truss:8:3: error[capabilities.not_available]: This loop has no measure, so it uses `RunForever`, which is not available here. Declare it with `uses RunForever`, or give the loop a `decreases` clause.
   |   while true {
   |   ^^^^^^^^^^^^
+
 1 error
 ```
 
@@ -528,6 +533,7 @@ Assigning to a `let` is an error:
 main.truss:3:3: error[types.not_assignable]: `count` cannot be mutated here: only a `var`, a `mut` parameter, or `mut self`, and their parts, can be assigned.
   |   count = 1
   |   ^^^^^
+
 1 error
 ```
 
@@ -543,6 +549,7 @@ A few rules about names hold everywhere in Truss:
   main.truss:2:7: error[resolve.shadowed_name]: `name` is already a parameter, and a name cannot shadow another. Choose another name.
     |   let name = name.trim()
     |       ^^^^
+
   1 error
   ```
 
@@ -608,6 +615,7 @@ main.truss:2:3: error[types.mismatched_integers]: Integer types never convert im
   |   ^^^^^^^^^^^^^
   fix: Convert the left side to `UInt64`.
     replace "small" with "UInt64.from_integer(small)" at main.truss:2:3
+
 1 error. `truss check --fix` fixes it.
 ```
 
@@ -649,6 +657,7 @@ main.truss:2:3: error[prover.overflow]: `left + right` may overflow `UInt8`. For
   |   ^^^^^^^^^^^^
   fix: Add `requires left + right <= UInt8.maximum`
     replace " " with "\n  requires left + right <= UInt8.maximum\n" at main.truss:1:43
+
 1 error
 ```
 
@@ -1024,6 +1033,7 @@ main.truss:3:22: error[ownership.use_after_move]: `name` is used after it was mo
   fix: Pass a copy at the move instead.
     delete "own " at main.truss:2:18
     insert ".copy()" at main.truss:2:26
+
 1 error. `truss check --fix` fixes it.
 ```
 
@@ -1038,6 +1048,7 @@ main.truss:2:18: error[ownership.needs_owned]: An owned value is needed here, an
     insert "own " at main.truss:2:18
   fix: Copy it.
     insert ".copy()" at main.truss:2:22
+
 1 error
 ```
 
@@ -1134,6 +1145,7 @@ fn grow(items: mut List[Int64]) -> UInt64 {
 main.truss:3:7: error[ownership.mutated_while_viewed]: `items` cannot be passed `mut` while `middle`, which views it, is still live.
   |   mut items.push(9)
   |       ^^^^^
+
 1 error
 ```
 
@@ -1149,6 +1161,7 @@ error, because the local is freed when the function returns:
 main.truss:1:4: error[ownership.view_escapes]: This returns a view of `items`, which is dropped when the function returns, so the view would dangle. A function returns a view only of its parameters.
   | fn numbers() -> Slice[Int64] {
   |    ^^^^^^^
+
 1 error
 ```
 
@@ -1174,6 +1187,7 @@ main.truss:2:7: error[ownership.lent_part_escapes]: This part is lent only until
   |       ^^^^^
   fix: Copy the scrutinee.
     insert ".copy()" at main.truss:2:27
+
 1 error. `truss check --fix` fixes it.
 ```
 
@@ -1603,6 +1617,7 @@ the compiler says how to match the constant:
 main.truss:1:5: warning[usage.unused_constant]: Nothing in `lottery` uses the private constant `lottery.lucky`. Delete it.
   | let lucky: Int64 = 7
   |     ^^^^^
+
 main.truss:5:5: error[usage.unused_variable]: `lucky` is never used. A bare name in a pattern binds a variable, which matches every value. To match the constant, write `lottery.lucky`.
   |     lucky => "lucky"
   |     ^^^^^
@@ -1610,11 +1625,13 @@ main.truss:5:5: error[usage.unused_variable]: `lucky` is never used. A bare name
     replace "lucky" with "lottery.lucky" at main.truss:5:5
   fix: Write `_`.
     replace "lucky" with "_" at main.truss:5:5
+
 main.truss:6:5: error[patterns.unreachable_arm]: Earlier arms already match everything this arm matches, so it is never reached. `lucky` in an earlier arm binds a variable, which matches every value. To match the constant, write `lottery.lucky`.
   |     _ => "plain"
   |     ^^^^^^^^^^^^
   fix: Write `lottery.lucky`.
     replace "lucky" with "lottery.lucky" at main.truss:5:5
+
 2 errors and 1 warning. `truss check --fix` fixes 1 of them.
 ```
 
@@ -1630,6 +1647,7 @@ main.truss:7:3: error[patterns.not_covered]: This `match` does not cover every c
   |   ^^^^^^^^^^^^^
   fix: Add an arm for each missing case.
     insert "\n    Empty => todo" at main.truss:9:32
+
 1 error. `truss check --fix` fixes it.
 ```
 
@@ -1639,6 +1657,7 @@ main.truss:4:5: error[patterns.unreachable_arm]: Earlier arms already match ever
   |     ^^^^^^^^^^^
   fix: Delete the arm.
     delete "\n    0 => \"none\"" at main.truss:3:15
+
 1 error. `truss check --fix` fixes it.
 ```
 
@@ -1813,9 +1832,11 @@ a private definition from elsewhere is an error:
 app/main.truss:8:54: error[resolve.not_visible]: `geometry.origin` is private to its module, so it cannot be used here.
   |   Console.print_line("${measure.manhattan(geometry.origin(), to: corner)}")
   |                                                      ^^^^^^
+
 geometry/point.truss:4:4: warning[usage.unused_function]: Nothing in `geometry` uses the private function `geometry.origin`. Delete it.
   | fn origin() -> Point {
   |    ^^^^^^
+
 1 error and 1 warning
 ```
 
@@ -1830,6 +1851,7 @@ packages build such a type only through its public functions:
 app/main.truss:7:16: error[types.private_field]: `Point` is opaque, so only its own package can build it.
   |   let corner = geometry.Point(x: 3, y: 4)
   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 1 error
 ```
 
@@ -1986,6 +2008,7 @@ type:
 main.truss:2:3: error[types.cannot_infer]: The types in this statement cannot be inferred from it alone. Give the `let` a type, or the call type arguments, such as `var names: List[String] = []`.
   |   var names = []
   |   ^^^^^^^^^^^^^^
+
 1 error
 ```
 
@@ -2173,6 +2196,7 @@ main.truss:7:19: error[ownership.not_owned]: `name` views a string literal, so i
   fix: Copy it.
     delete "own " at main.truss:7:15
     insert ".copy()" at main.truss:7:23
+
 1 error. `truss check --fix` fixes it.
 ```
 
@@ -2235,6 +2259,7 @@ because an index could fall in the middle of a character:
 main.truss:2:3: error[types.not_indexable]: Strings cannot be indexed: say which you mean with `bytes()` or `characters()`.
   |   text[0]
   |   ^^^^^^^
+
 1 error
 ```
 
@@ -2479,6 +2504,7 @@ This example shows the parts of error handling in Truss:
   main.truss:4:14: error[types.wrong_try]: `?` returns the error unchanged, so it needs the function's error type `ConfigError`, not `ParseIntegerError`. Convert it first with `map_error`.
     |   let port = UInt16.parse(text)?
     |              ^^^^^^^^^^^^^^^^^^^
+
   1 error
   ```
 
@@ -2532,6 +2558,7 @@ reached.
 main.truss:2:24: error[prover.unreachable]: This `unreachable` may be reached. For example, when `flag` is false. On that path, `flag` is false.
   |   if flag { 1 } else { unreachable }
   |                        ^^^^^^^^^^^
+
 1 error
 ```
 
@@ -2996,6 +3023,7 @@ reports that the law may not hold, even though the body satisfies it:
 main.truss:13:1: error[prover.law]: The law `Combine.left_identity` may not hold for `Maximum`.
   | impl Combine for Maximum {
   | ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 1 error
 ```
 
@@ -3096,6 +3124,7 @@ test "lambdas" {
   main.truss:2:15: error[types.lambda_needs_type]: A lambda's parameter types come from where it is used, and nothing here gives them. Give the `let` a function type, or the call type arguments.
     |   let twice = fn(value) { value * 2 }
     |               ^^^^^^^^^^^^^^^^^^^^^^^
+
   1 error
   ```
 
@@ -3106,6 +3135,7 @@ test "lambdas" {
   main.truss:4:5: error[types.not_assignable]: A lambda cannot mutate its captures, and `total` is from outside it. Return the new value instead, or use a loop.
     |     total = 1
     |     ^^^^^
+
   1 error
   ```
 
@@ -3323,6 +3353,7 @@ test "a returned lambda" {
 main.truss:1:4: error[ownership.view_escapes]: This returns a capturing lambda. A lambda's captured variables live in this function's stack frame, so the lambda would dangle. A function returns a view only of its parameters.
   | fn make(threshold: Int64) -> fn(Int64) -> Bool {
   |    ^^^^
+
 1 error
 ```
 
@@ -3707,6 +3738,7 @@ Without the `provide`, the test does not compile:
 main.truss:8:3: error[capabilities.not_available]: This call uses `Console`, which is not available here. Declare it with `uses Console`, or `provide` an implementation.
   |   greet("Ada")
   |   ^^^^^^^^^^^^
+
 1 error
 ```
 
@@ -3858,6 +3890,7 @@ main.truss:10:3: error[prover.requires]: `value >= -1000 && value <= 1000` may n
   |   double(double(value))
   |   ^^^^^^^^^^^^^^^^^^^^^
   note: main.truss:2:12: This is the clause that must hold.
+
 1 error
 ```
 
@@ -3933,6 +3966,7 @@ test "an invariant" {
   main.truss:5:3: error[prover.invariant]: The invariant of `Percent` may not hold for the value built here.
     |   Percent(self.value + 1)
     |   ^^^^^^^^^^^^^^^^^^^^^^^
+
   1 error
   ```
 
@@ -3997,6 +4031,7 @@ This is why:
 main.truss:6:5: error[prover.overflow]: `total += value` may overflow `UInt64`. For example, when `limit` is 2, `total` is 18446744073709551615, `value` is 1. It can also be checked first with an `if`, or done with the checked operation.
   |     total += value
   |     ^^^^^^^^^^^^^^
+
 1 error
 ```
 
@@ -4102,6 +4137,7 @@ calls itself on `count / 2`, which is not a part of `count`, states none:
 main.truss:2:30: error[prover.termination]: This recursive call may not end: give the function a `decreases` clause for the prover to show that the recursion ends. For example, when `count` is 1. On that path, `count == 0` is false.
   |   if count == 0 { 0 } else { countdown(count / 2) }
   |                              ^^^^^^^^^^^^^^^^^^^^
+
 1 error
 ```
 
@@ -4113,6 +4149,7 @@ function that uses it. Without its `decreases`, the loop in
 main.truss:5:3: error[capabilities.not_available]: This loop has no measure, so it uses `RunForever`, which is not available here. Declare it with `uses RunForever`, or give the loop a `decreases` clause.
   |   while current % 2 == 0
   |   ^^^^^^^^^^^^^^^^^^^^^^
+
 1 error
 ```
 
@@ -4144,6 +4181,7 @@ Without `power >= 1` in the invariant:
 main.truss:5:3: error[prover.termination]: This loop's measure may not decrease. For example, when `limit` is 0, `power` is 0.
   |   while power <= limit
   |   ^^^^^^^^^^^^^^^^^^^^
+
 1 error
 ```
 
@@ -4339,9 +4377,11 @@ branch changes is used by no other branch:
 main.truss:3:9: error[ownership.data_race]: Data race: one branch of this `parallel` block mutates `numbers`, and another branch uses it.
   |     mut numbers.push(1)
   |         ^^^^^^^
+
 main.truss:4:9: error[ownership.data_race]: Data race: one branch of this `parallel` block mutates `numbers`, and another branch uses it.
   |     mut numbers.push(2)
   |         ^^^^^^^
+
 2 errors
 ```
 
@@ -4540,6 +4580,7 @@ test "a cursor's provided methods" {
   main.truss:19:3: error[capabilities.not_available]: This loop has no measure, so it uses `RunForever`, which is not available here. Declare it with `uses RunForever`, or give the loop a `decreases` clause, or implement `FiniteCursor` for `Countdown`.
     |   for value in Countdown(left: 3) {
     |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
   1 error
   ```
 
@@ -4704,6 +4745,7 @@ test "tagged templates" {
   main.truss:4:14: error[prover.requires]: This template may not meet `is_valid_template(template.literals)`, which its tag requires. Running it on this template's text gives `false`.
     |   let word = regex.Regex"[a-z"
     |              ^^^^^^^^^^^^^^^^^^
+
   1 error
   ```
 
@@ -4822,6 +4864,8 @@ From the tightest binding to the loosest:
 
 - **Every command** takes `-C DIRECTORY`, to run as if from that directory,
   and `--json`, to print one JSON document in place of the report.
+- **Diagnostics are colored** when standard error is a terminal. Setting
+  `NO_COLOR` to any value but the empty string turns the color off.
 - **The exit status** is 0 when the code has no error, 1 when it has one,
   and 2 when the command could not run.
 - **The commands share a background process** that keeps the project's

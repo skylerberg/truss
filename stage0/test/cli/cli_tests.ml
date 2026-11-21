@@ -13,14 +13,15 @@ let manifest = ("truss.toml", make_manifest "demo")
 let make_package files = make_directory (manifest :: files)
 let read root path = In_channel.with_open_bin (Filename.concat root path) In_channel.input_all
 
-let capture work =
+let capture ?(is_colored = false) work =
   let out = Buffer.create 256 and err = Buffer.create 256 in
   let result =
     Cli.Output.with_
       {
         print_out = Buffer.add_string out;
         print_err = Buffer.add_string err;
-        terminal = false;
+        is_terminal = false;
+        is_colored;
         columns = None;
         json = false;
       }
@@ -29,8 +30,8 @@ let capture work =
   Workspace.flush ();
   (result, Buffer.contents out ^ Buffer.contents err)
 
-let run_truss arguments =
-  match capture (fun () -> Cli.Main.For_testing.run_command_line arguments) with
+let run_truss ?is_colored arguments =
+  match capture ?is_colored (fun () -> Cli.Main.For_testing.run_command_line arguments) with
   | Cli.Outcome.Exit status, output -> (status, output)
   | Cli.Outcome.Run_program { program; _ }, output ->
       Sys.remove program;
@@ -2383,3 +2384,38 @@ let () =
       | [ diagnostic ] ->
           expect_string ~expected:"warning" (read_string_field "severity" diagnostic)
       | found -> fail "found %d diagnostics" (List.length found))
+
+let make_package_with_two_warnings () =
+  make_package
+    [
+      ( "main.truss",
+        "fn main(arguments: List[String]) -> ExitCode {\n\
+        \  ExitCode.success\n\
+         }\n\n\
+         fn helper() -> Int64 {\n\
+        \  1\n\
+         }\n\n\
+         fn other() -> Int64 {\n\
+        \  2\n\
+         }\n" );
+    ]
+
+let () =
+  test "check separates its diagnostics and its summary with blank lines, uncolored" (fun () ->
+      let status, output = run_truss [ "check"; "-C"; make_package_with_two_warnings () ] in
+      if status <> 0 then fail "check exited %d:\n%s" status output;
+      if
+        not
+          (String.starts_with ~prefix:"main.truss:" output
+          && String.includes ~affix:"\n\nmain.truss:" output
+          && String.ends_with ~suffix:"\n\n2 warnings\n" output)
+      then fail "output %S" output;
+      if String.contains output '\027' then fail "an escape in uncolored output %S" output);
+  test "check colors the severities and their counts when its output is colored" (fun () ->
+      let status, output =
+        run_truss ~is_colored:true [ "check"; "-C"; make_package_with_two_warnings () ]
+      in
+      if status <> 0 then fail "check exited %d:\n%s" status output;
+      List.iter
+        (fun affix -> if not (String.includes ~affix output) then fail "no %S in %S" affix output)
+        [ "\027[1;33mwarning[usage.unused_function]\027[0m"; "\027[1;33m2 warnings\027[0m" ])

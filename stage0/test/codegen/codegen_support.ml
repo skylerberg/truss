@@ -214,7 +214,7 @@ let load_standard_probe ?(roots = []) (file : Path.file) text =
   | diagnostics ->
       let source = Source.create ~path:(Path.show_file file) text in
       fail "the source has diagnostics:\n%s"
-        (String.concat "" (List.map (Diagnostic.render source) diagnostics)));
+        (String.concat "" (List.map (Diagnostic.render ~is_colored:false source) diagnostics)));
   (database, create_backend ~package:Path.standard_package database)
 
 let load_checked ~list_diagnostics ?results ?(roots = []) ?profile files =
@@ -236,7 +236,7 @@ let load_checked ~list_diagnostics ?results ?(roots = []) ?profile files =
                file)
       | diagnostics ->
           fail "the source has diagnostics:\n%s"
-            (String.concat "" (List.map (Diagnostic.render source) diagnostics)))
+            (String.concat "" (List.map (Diagnostic.render ~is_colored:false source) diagnostics)))
     files;
   (database, make_backend ?results ?profile database)
 

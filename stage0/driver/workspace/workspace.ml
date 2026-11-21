@@ -119,7 +119,8 @@ let load_standard_package () =
       Compiler_bug.raise_bug ~stage:"Workspace" "the standard library has diagnostics:\n%s"
         (String.concat ""
            (List.concat_map
-              (fun (source, diagnostics) -> List.map (Diagnostic.render source) diagnostics)
+              (fun (source, diagnostics) ->
+                List.map (Diagnostic.render ~is_colored:false source) diagnostics)
               failed))
 
 let list_package_databases () =

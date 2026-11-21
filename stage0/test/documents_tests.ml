@@ -43,7 +43,8 @@ let check_block name index block =
         List.mem (Diagnostic.Code.name diagnostic.code) tolerated
       in
       let render diagnostics =
-        String.concat "" (List.map (Diagnostic.render (make_source packages file)) diagnostics)
+        String.concat ""
+          (List.map (Diagnostic.render ~is_colored:false (make_source packages file)) diagnostics)
       in
       match (List.filter (fun diagnostic -> not (is_tolerated diagnostic)) diagnostics, block) with
       | [], Definitions _ when not (List.exists is_tolerated diagnostics) -> (
