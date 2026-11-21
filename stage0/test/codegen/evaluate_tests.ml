@@ -3,8 +3,10 @@ let solver =
 
 let run_template_checks backend checks =
   List.map
-    (fun ({ from_template; literals; clauses } as check : Prover.Obligation.template_check) ->
-      (check, Backend.run_template_check backend ~from_template ~literals ~clauses))
+    (fun ({ function_; literals } as check : Prover.Obligation.template_check) ->
+      match Backend.evaluate_predicate backend ~function_ ~arguments:[ Literals literals ] with
+      | Ok run -> (check, run)
+      | Error message -> failwith message)
     checks
 
 let compute_verdicts backend database =
@@ -43,23 +45,15 @@ let shout = Fixtures.Evaluate.shout
 let () =
   Codegen_support.test "a template check that holds is proven by running it" (fun () ->
       expect_proven (prove_with_running (shout ^ Fixtures.Evaluate.shout_of_a_name)));
-  Codegen_support.test "a template check that does not hold fails, saying it ran" (fun () ->
-      expect_failure_saying "Running it on this template's text gives `false`."
+  Codegen_support.test "a template whose check gives false fails every time it is reached"
+    (fun () ->
+      expect_failure_saying "This fails every time the code reaches it."
         (prove_with_running (shout ^ Fixtures.Evaluate.shout_of_capitals)));
   Codegen_support.test "a template check that reaches a todo fails, saying where" (fun () ->
       expect_failure_saying
-        "Running it on this template's text failed, so it is not known: todo reached"
+        "Running `Shout.is_valid_template` on the template text `hey` failed, so its result is not \
+         known: todo reached"
         (prove_with_running Fixtures.Evaluate.shout_with_a_todo_check));
-  Codegen_support.test "a check that reads a template's parts is not run" (fun () ->
-      let database, backend =
-        Codegen_support.load Fixtures.Evaluate.count_template_reading_its_parts
-      in
-      (match
-         Database.list_template_checks (Database.prove database [ Codegen_support.example_file ])
-       with
-      | [] -> ()
-      | checks -> Codegen_support.fail "%d template checks" (List.length checks));
-      expect_proven (list_diagnostics backend database));
   Codegen_support.test "a template check whose code has errors is not run" (fun () ->
       let database =
         Codegen_support.make_database
@@ -69,7 +63,7 @@ let () =
       let proofs = Database.prove database [ Codegen_support.example_file ] in
       match Database.list_template_checks proofs with
       | [] ->
-          expect_failure_saying "which its tag requires."
+          expect_failure_saying "may not hold for this call to `Shout.from_template`"
             (list_diagnostics (Codegen_support.make_backend database) database)
       | checks -> Codegen_support.fail "%d template checks" (List.length checks))
 
@@ -79,16 +73,17 @@ let () =
       let results = make_results () in
       let use = Fixtures.Evaluate.shout_of_capitals in
       let accepts_all =
-        String.replace_first ~sub:"        quiet = false" ~by:"        quiet = true" shout
+        String.replace_first ~sub:"          quiet = false" ~by:"          quiet = true" shout
       in
-      expect_failure_saying "gives `false`" (prove_with_running ~results (shout ^ use));
+      expect_failure_saying "fails every time the code reaches it"
+        (prove_with_running ~results (shout ^ use));
       expect_proven (prove_with_running ~results (accepts_all ^ use)))
 
 let () =
   Codegen_support.test "a template check that timed out is run again on the next check" (fun () ->
       let results = make_results () in
       let database, _ = Codegen_support.load (shout ^ Fixtures.Evaluate.shout_of_a_greeting) in
-      expect_failure_saying "failed, so it is not known: it ran past the time limit of 0 ms"
+      expect_failure_saying "failed, so its result is not known: it ran past the time limit of 0 ms"
         (list_diagnostics
            (Codegen_support.make_backend ~results ~evaluation_time_limit_ms:0 database)
            database);
@@ -126,30 +121,30 @@ let () =
           Codegen_support.fail
             "expected 1 state that trusts compiled code and 1 ensures state, got %d and %d"
             (List.length trusting) (List.length ensured));
-  Codegen_support.test "the queries listed are the ones the solver is asked, not one a run answers"
-    (fun () ->
+  Codegen_support.test "the query of a template states the result of running its check" (fun () ->
       let database, backend = Lazy.force loaded_shout_of_a_name_and_an_identity in
       let proofs = Database.prove database [ Codegen_support.example_file ] in
       let runs = run_template_checks backend (Database.list_template_checks proofs) in
       let lookups = Database.make_proof_lookups database in
-      let listed =
+      let list_queries runs =
         Prover.For_testing.list_queries ~runs lookups (Database.list_proofs proofs)
           Codegen_support.example_file
       in
+      let with_runs = list_queries runs and without_runs = list_queries [] in
       let states =
         Prover.list_states
           (Prover.decide ~runs lookups (Lazy.force solver) (Database.list_proofs proofs))
           Codegen_support.example_file
       in
+      if List.length with_runs <> List.length states then
+        Codegen_support.fail "listed %d queries for %d obligations" (List.length with_runs)
+          (List.length states);
       match
         List.filter (fun (state : Source.span Prover.state) -> state.trusts_compiled_code) states
       with
       | [ template ] ->
-          if List.exists (fun (site, _) -> site = template.site) listed then
-            Codegen_support.fail "listed the query that running the template answers";
-          if List.length listed <> List.length states - 1 then
-            Codegen_support.fail "listed %d queries for %d obligations" (List.length listed)
-              (List.length states)
+          if List.assoc template.site with_runs = List.assoc template.site without_runs then
+            Codegen_support.fail "the template's query is the same without the run of its check"
       | trusting ->
           Codegen_support.fail "expected 1 state that trusts compiled code, got %d"
             (List.length trusting))

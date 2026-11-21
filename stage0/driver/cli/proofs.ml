@@ -20,8 +20,11 @@ type t = {
 
 let run_template_checks backend checks =
   List.map
-    (fun ({ from_template; literals; clauses } as check : Prover.Obligation.template_check) ->
-      (check, Backend.run_template_check backend ~from_template ~literals ~clauses))
+    (fun ({ function_; literals } as check : Prover.Obligation.template_check) ->
+      match Backend.evaluate_predicate backend ~function_ ~arguments:[ Literals literals ] with
+      | Ok run -> (check, run)
+      | Error message ->
+          Outcome.raise_cannot_run "The check of a template's text could not be built: %s" message)
     checks
 
 let list_runs database snapshot packages proofs =
