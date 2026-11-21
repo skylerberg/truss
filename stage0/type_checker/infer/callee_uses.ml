@@ -74,4 +74,9 @@ let make_callee interface ~list_bounds (target : Core.operand Core.target) : Cor
   { target; uses = compute interface ~list_bounds target }
 
 let make_call interface ~list_bounds ~callee ~arguments ~lends : Core.call =
-  { callee = make_callee interface ~list_bounds callee; arguments; lends }
+  {
+    callee = make_callee interface ~list_bounds callee;
+    arguments;
+    evaluation_order = List.init (List.length arguments) Fun.id;
+    lends;
+  }

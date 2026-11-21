@@ -66,7 +66,7 @@ fn attach_lexer_errors[Value](
     }
     var is_nested = false
     for inner in nested {
-      if cursor.overlaps(piece: inner, span) {
+      if cursor.overlaps(piece: inner, span: span) {
         is_nested = true
       }
     }
@@ -101,7 +101,7 @@ fn attach_lexer_errors[Value](
 fn check_parsed_definition(cursor: mut TokenCursor, definition: syntax::Definition)
   uses Panic, RunForever
 {
-  walk_definition(mut cursor, visitor: Visitor.PrecedenceVisitor, definition)
+  walk_definition(mut cursor, visitor: Visitor.PrecedenceVisitor, definition: definition)
   check_definition(mut cursor, definition)
 }
 
@@ -124,7 +124,7 @@ fn parse_top_level(cursor: mut TokenCursor, lexer_diagnostics: Slice[source::Dia
   check_parsed_definition(mut cursor, definition: parsed.definition)
   let container = container_of(parsed.definition)
   let finished = finish_piece(mut cursor, piece, value: own parsed.definition)
-  let attached = attach_lexer_errors(cursor, lexer_diagnostics, nested: parsed.methods, piece, finished: own finished)
+  let attached = attach_lexer_errors(cursor, lexer_diagnostics, nested: parsed.methods, piece: piece, finished: own finished)
   var diagnostics = own attached.diagnostics
   var methods: List[syntax::Item[syntax::Definition]] = []
   if container is Some(kind) {

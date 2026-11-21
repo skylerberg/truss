@@ -223,7 +223,7 @@ binds each field by position to a name the reader chooses:
 | A record matches by position only where it is declared a tuple type. | Reordering two fields of one type would otherwise silently swap the bindings of every positional pattern. Only a type whose field names stand for positions commits to an order. |
 | A tuple pattern has no parentheses. | Parentheses match fields by name in every type, so the semantics of a pattern never depends on whether its type is a tuple type. `for (_, group) in groups`, a habit from Rust and Swift, is an error whose fix removes the parentheses (*LLM habits*). |
 | A tuple pattern is the whole pattern of a `let`, a `var`, or a `for`. | Without parentheses it cannot nest, and in a `match` arm or a lambda's parameters a comma already separates values. |
-| In a tuple pattern, a bare name that names another field is an error. | `for value, key in ports` would bind each key as `value`. The same rule reports `copy(destination, source)`. |
+| In a tuple pattern, a bare name that names another field is an error. | `for value, key in ports` would bind each key as `value`. |
 
 ### Recursive types
 
@@ -527,18 +527,20 @@ number.
 
 Rules: [Calls and arguments](SPECIFICATION.md#calls-and-arguments).
 
-One set of rules covers calls, construction, and patterns: a record is
-declared as parameters are, constructed as a function is called, and matched
-in the same shape.
+A record is declared as parameters are and built with the same labels. A
+function's parameters have an order and a record's fields do not, so a call
+takes positional arguments and a construction takes labels.
 
 | Rule | Reason |
 |---|---|
-| An argument after the first is labeled. | Two arguments of one type can otherwise be swapped silently. A newtype prevents that only when the types differ. A label also tells `source: Path` from `destination: Path`. |
-| The first argument may be bare. | The function's name usually identifies it, as in `sqrt(area)`. |
-| A variable with the parameter's name needs no label. | A label costs nothing when the names agree, which is the common case, and is written exactly when they disagree, which is when a swap is possible. A bare name goes to the parameter it names, so `copy(destination, source)` is reported as out of order. |
-| The same rules apply to every function. | Swift lets each parameter opt out of its label, so the syntax of a call depends on the choices of the callee's author. |
-| A call through a function value is positional. | Labels in function types would make types that differ only in labels convert into each other. |
-| Only a record with one field takes a bare value. | Field order has no meaning, so a bare first argument would make it part of the record's API. |
+| Arguments are positional, and a label is optional. | Most languages pass arguments by position, and agents kept doing so in Truss after reading a rule that required labels. The required label prevented no swap: its fix labeled each argument with the parameter at its position, which keeps a swapped order, and agents apply a fix without reading it. |
+| Labeled arguments follow the positional ones, in any order. | A label exists so that the caller need not know the position. Swift requires the parameter order, so its caller must know both. Python, Kotlin, and C# accept labels in any order. |
+| A positional argument cannot follow a labeled one. | Its parameter would depend on the labels before it. Kotlin and C# allow it when each earlier label is at its own position, which is an order rule again. |
+| Arguments are evaluated in the order written. | A reader reads them in that order, and construction evaluates fields in the same order. |
+| A variable named like a parameter is positional. | `gcd(second, first % second)` passes `second` to `first`, as written. Matching by name would make a call's semantics depend on the names of the caller's variables. |
+| No declaration requires a label. | Swift lets each parameter's author require its label, so the syntax of a call depends on the callee's declaration. |
+| A call through a function value takes no labels. | Labels in function types would make types that differ only in labels convert into each other. |
+| A record with more than one field takes no positional argument. | Field order has no meaning, so a positional argument would make it part of the record's API. A variable named like a field needs no label, because its name already names the field. |
 | Construction uses parentheses. | `{` then always starts a block in an expression. With braces, `if kind == Kind.Unit { x }` is ambiguous between a record and a block, which Rust and Go resolve with a special rule. |
 
 A parameter can have a default:

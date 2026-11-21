@@ -15,7 +15,7 @@ fn parse_expression_inner(cursor: mut TokenCursor, open_range: Bool) -> Result[s
   uses Panic, RunForever
 {
   let start = cursor.index
-  let binary = parse_binary(mut cursor, level: 0, open_range)?
+  let binary = parse_binary(mut cursor, level: 0, open_range: open_range)?
   let value = parse_pipes(mut cursor, start, value: own binary)?
   let question = cursor.peek()
   if question.kind != token::Kind.Punctuation(token::Punctuation.Question) {
@@ -26,7 +26,7 @@ fn parse_expression_inner(cursor: mut TokenCursor, open_range: Bool) -> Result[s
   }
   if conditional_follows(cursor.peek_ahead(1)) {
     advance(mut cursor)
-    return parse_conditional(mut cursor, start, condition: own value, question)
+    return parse_conditional(mut cursor, start, condition: own value, question: question)
   }
   Ok(own value)
 }
@@ -38,7 +38,7 @@ fn parse_pipes(cursor: mut TokenCursor, start: UInt64, value: own syntax::Expres
   while cursor.peek_kind() == token::Kind.Foreign(token::Foreign.PipeGreater) {
     let operator = take(mut cursor)
     let callee = parse_binary(mut cursor, level: 0, open_range: false)?
-    pipe_operator(mut cursor, value: current, operator, callee)
+    pipe_operator(mut cursor, value: current, operator: operator, callee: callee)
     current = make_error_expression(mut cursor, start)
   }
   Ok(own current)
@@ -381,7 +381,7 @@ fn parse_postfix(cursor: mut TokenCursor) -> Result[syntax::Expression, Failure]
                   report(
                     mut cursor,
                     code: "parser.open_range",
-                    span,
+                    span: span,
                     message: "A range without a start or an end must be the only item in its brackets, as in `items[2..]`.",
                   )
                 }
@@ -498,7 +498,7 @@ fn parse_update(cursor: mut TokenCursor) -> Result[syntax::Update, Failure]
         report(
           mut cursor,
           code: "parser.unexpected_token",
-          span,
+          span: span,
           message: "The label of an update is a field or a path of fields, such as `server.port`.",
         )
         return Err(Failure.Failed)
@@ -531,7 +531,7 @@ fn parse_primary(cursor: mut TokenCursor) -> Result[syntax::Expression, Failure]
       Ok(parse_simple(mut cursor, start, kind: syntax::ExpressionKind.Float(own value)))
     }
     String(literal) => {
-      let parsed = parse_string_literal(mut cursor, start, modules: [], literal)?
+      let parsed = parse_string_literal(mut cursor, start, modules: [], literal: literal)?
       Ok(make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.String(own parsed)))
     }
     Keyword(keyword) => match keyword {
@@ -631,7 +631,7 @@ fn parse_name_expression(cursor: mut TokenCursor, start: UInt64) -> Result[synta
       if cursor.tables.literal(literal).tag.is_none() {
         return Err(fail(mut cursor, expected: "a name after `::`"))
       }
-      let parsed = parse_string_literal(mut cursor, start, modules: own modules, literal)?
+      let parsed = parse_string_literal(mut cursor, start, modules: own modules, literal: literal)?
       Ok(make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.String(own parsed)))
     }
     Punctuation(punctuation) => if punctuation == token::Punctuation.Less {
@@ -854,7 +854,7 @@ fn parse_mixed_collection(cursor: mut TokenCursor, start: UInt64, key_id: UInt64
   report(
     mut cursor,
     code: "parser.unexpected_token",
-    span,
+    span: span,
     message: "A collection holds either list elements or map entries, `key: value`, not both.",
   )
   make_error_expression(mut cursor, start)
@@ -1079,7 +1079,7 @@ fn parse_statement_error_through(cursor: mut TokenCursor, statement: syntax::Sta
   uses Panic
 {
   let span = source::make_span(cursor.read_span(statement.id).start, stop: last.stop)
-  set_span(mut cursor, id: statement.id, span)
+  set_span(mut cursor, id: statement.id, span: span)
   syntax::Statement(kind: syntax::StatementKind.StatementError, id: statement.id)
 }
 
@@ -1321,7 +1321,7 @@ fn parse_for_loop(cursor: mut TokenCursor, mode: syntax::LoopMode) -> Result[syn
   }
   if open_operator is Some(operator_id) && !opens_body(cursor) {
     let span = cursor.read_file_span(operator_id)
-    report(mut cursor, code: "parser.open_range", span, message: open_range_message("end"))
+    report(mut cursor, code: "parser.open_range", span: span, message: open_range_message("end"))
     return Err(Failure.Failed)
   }
   let clauses = parse_loop_clauses(mut cursor)?

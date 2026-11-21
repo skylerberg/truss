@@ -135,6 +135,10 @@ let instantiate context (target : Core.operand Core.target) =
 
 let check_call_types context (node : Core.expression) (call : Core.call) =
   let callee = show_target call.callee.target in
+  if List.sort compare call.evaluation_order <> List.init (List.length call.arguments) Fun.id then
+    context.report "a call of `%s` evaluates [%s], which is not an order of its %d arguments" callee
+      (String.concat ", " (List.map string_of_int call.evaluation_order))
+      (List.length call.arguments);
   match instantiate context call.callee.target with
   | None -> ()
   | Some (parameters, output) ->

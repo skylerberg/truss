@@ -1009,12 +1009,23 @@ and build_arguments form env (call : Tables.call) : Core.argument list =
       | None -> Default)
 
 and build_call form env ~lends ?function_value (call : Tables.call) : Core.call =
-  make_call form
-    ~callee:
-      (match (call.callee, function_value) with
-      | Indirect, Some function_value -> Indirect (Operands.build Read function_value)
-      | direct, _ -> convert_callee form direct)
-    ~arguments:(build_arguments form env call) ~lends
+  let core_call =
+    make_call form
+      ~callee:
+        (match (call.callee, function_value) with
+        | Indirect, Some function_value -> Indirect (Operands.build Read function_value)
+        | direct, _ -> convert_callee form direct)
+      ~arguments:(build_arguments form env call) ~lends
+  in
+  let written_order =
+    List.map (fun (argument : Tables.argument) -> argument.core_argument_index) call.arguments
+  in
+  {
+    core_call with
+    evaluation_order =
+      written_order
+      @ List.filter (fun index -> not (List.mem index written_order)) core_call.evaluation_order;
+  }
 
 and build_argument_expressions form env (call : Tables.call) =
   List.map

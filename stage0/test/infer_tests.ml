@@ -926,18 +926,53 @@ let () =
 
 let () =
   let functions = "fn copy_file(source: Int64, destination: Int64) {}\n\n" in
-  Harness.test "an argument after the first needs a label, with a fix that adds it" (fun () ->
+  let passes_local name : Core.argument -> bool = function
+    | Passed { value = Place (Local { local = Declared { name = passed; _ }; _ }); _ } ->
+        passed = name
+    | Passed _ | Default -> false
+  in
+  Harness.test "arguments without labels are passed by position" (fun () ->
+      expect_fine (functions ^ Fixtures.Infer.copy_file_with_positional_arguments));
+  Harness.test "a variable named like another parameter is passed by position" (fun () ->
+      let text = functions ^ Fixtures.Infer.copy_file_with_swapped_arguments in
+      match locate_core_call text "copy_file(destination, source)" 1 with
+      | { arguments = [ first; second ]; _ }, _
+        when passes_local "destination" first && passes_local "source" second ->
+          ()
+      | _ -> Harness.fail "the arguments are not passed by position");
+  Harness.test "labeled arguments come in any order and are evaluated in the order written"
+    (fun () ->
+      let text = functions ^ Fixtures.Infer.copy_file_with_labels_in_reverse in
+      match locate_core_call text "copy_file(destination: backup, source: original)" 1 with
+      | { arguments = [ first; second ]; evaluation_order = [ 1; 0 ]; _ }, _
+        when passes_local "original" first && passes_local "backup" second ->
+          ()
+      | { evaluation_order; _ }, _ ->
+          Harness.fail "the call evaluates [%s]"
+            (String.concat ", " (List.map string_of_int evaluation_order)));
+  Harness.test
+    "a positional argument after labels at their own positions is an error with a fix that labels \
+     it" (fun () ->
       expect_one_diagnostic
-        (functions ^ Fixtures.Infer.copy_file_with_an_unlabeled_second_argument)
-        "types.missing_label"
-        ~fixed:(functions ^ Fixtures.Infer.copy_file_with_a_labeled_destination));
-  Harness.test "a variable with the parameter's name needs no label" (fun () ->
-      expect_fine (functions ^ Fixtures.Infer.copy_file_with_arguments_named_like_parameters));
-  Harness.test "arguments out of order are an error with a fix that reorders them" (fun () ->
-      expect_one_diagnostic
-        (functions ^ Fixtures.Infer.copy_file_with_swapped_arguments)
-        "types.out_of_order"
-        ~fixed:(functions ^ Fixtures.Infer.copy_file_with_arguments_named_like_parameters));
+        (functions ^ Fixtures.Infer.copy_file_with_a_positional_argument_after_a_label)
+        "types.positional_after_labeled"
+        ~fixed:(functions ^ Fixtures.Infer.copy_file_with_both_labels));
+  Harness.test
+    "a positional argument gets no fix after a label away from its position, or when it is named \
+     like another parameter" (fun () ->
+      List.iter
+        (fun text ->
+          let packages = Support.setup [ ("app::main", text) ] in
+          match check packages (Support.parse_file "app::main") with
+          | [ ({ fixes = []; _ } as diagnostic) ]
+            when Diagnostic.Code.name diagnostic.code = "types.positional_after_labeled" ->
+              ()
+          | reported ->
+              Harness.fail "reported [%s]" (String.concat "; " (Support.list_codes reported)))
+        [
+          functions ^ Fixtures.Infer.copy_file_with_a_destination_label_and_a_positional_source;
+          Fixtures.Infer.place_with_a_variable_named_like_a_later_parameter;
+        ]);
   Harness.test "a missing argument is an error" (fun () ->
       expect_one_diagnostic
         (functions ^ Fixtures.Infer.copy_file_with_one_argument)
@@ -950,6 +985,12 @@ let () =
       expect_one_diagnostic Fixtures.Infer.counter_read_through_its_type_with_an_extra_argument
         "types.too_many_arguments"
         ~says:"This method takes 0 arguments besides `self`, and 1 is given.");
+  Harness.test "a method called through its type takes its receiver first, without a label"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.point_shifted_through_its_type_with_a_label_first
+        "types.missing_argument" ~says:"its receiver as its first argument, without a label";
+      expect_one_diagnostic Fixtures.Infer.compare_written_in_full_with_a_label_first
+        "types.missing_argument" ~says:"its receiver as its first argument, without a label");
   Harness.test "the first argument of a record with several fields needs a label too" (fun () ->
       expect_one_diagnostic Fixtures.Infer.point_with_an_unlabeled_first_argument
         "types.missing_label" ~says:"`Point` has 2 fields"
@@ -957,16 +998,17 @@ let () =
   Harness.test "a variant with one field given two arguments is one error" (fun () ->
       expect_one_diagnostic Fixtures.Infer.circle_built_with_two_arguments
         "types.too_many_arguments" ~says:"`Circle` has 1 field, and 2 arguments are given.");
-  Harness.test "an argument without a label is still checked" (fun () ->
+  Harness.test "an argument without a parameter is still checked" (fun () ->
       let packages =
-        Support.setup [ ("app::main", Fixtures.Infer.apply_twice_with_an_unlabeled_string_sum) ]
+        Support.setup [ ("app::main", Fixtures.Infer.apply_twice_with_a_string_sum_after_a_label) ]
       in
       match Support.list_codes (check packages (Support.parse_file "app::main")) with
-      | [ "types.missing_label"; "types.string_addition" ] -> ()
+      | [ "types.positional_after_labeled"; "types.string_addition" ] -> ()
       | reported -> Harness.fail "reported [%s]" (String.concat "; " reported));
-  Harness.test "a call rejected for a missing label has the error type" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.distance_with_an_unlabeled_argument_returned_as_a_string
-        "types.missing_label");
+  Harness.test "a call with an argument without a parameter has the error type" (fun () ->
+      expect_one_diagnostic
+        Fixtures.Infer.distance_with_a_positional_argument_after_a_label_returned_as_a_string
+        "types.positional_after_labeled");
   Harness.test "a repeated argument has no parameter, so no other parameter is missing" (fun () ->
       expect_one_diagnostic
         (functions ^ Fixtures.Infer.copy_file_with_a_repeated_source)
@@ -975,7 +1017,8 @@ let () =
       expect_one_diagnostic Fixtures.Infer.apply_twice_with_an_extra_lambda
         "types.too_many_arguments");
   Harness.test "an empty list without a parameter leaves no type to infer" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.sum_of_with_an_unlabeled_empty_list "types.missing_label");
+      expect_one_diagnostic Fixtures.Infer.sum_of_with_an_empty_list_after_a_label
+        "types.positional_after_labeled");
   Harness.test "a constant built by a rejected call is one error" (fun () ->
       expect_one_diagnostic Fixtures.Infer.wrapper_constant_with_an_extra_argument
         "types.too_many_arguments");
@@ -1949,14 +1992,19 @@ let () =
   Harness.test "an associated type of a generic supertrait takes the supertrait's arguments"
     (fun () ->
       expect_no_diagnostics [ ("app::main", Fixtures.Infer.output_of_a_generic_supertrait) ]);
-  Harness.test "a missing label has no fix when which one is meant is not known" (fun () ->
+  Harness.test "a missing label has no fix when which field is meant is not known" (fun () ->
       let packages =
-        Support.setup [ ("app::main", Fixtures.Infer.call_with_three_unlabeled_arguments) ]
+        Support.setup [ ("app::main", Fixtures.Infer.color_built_with_three_positional_arguments) ]
       in
-      List.iter
-        (fun (diagnostic : Diagnostic.t) ->
-          if diagnostic.fixes <> [] then Harness.fail "offered a fix")
-        (check packages (Support.parse_file "app::main")));
+      match check packages (Support.parse_file "app::main") with
+      | [] -> Harness.fail "reported nothing"
+      | diagnostics ->
+          List.iter
+            (fun (diagnostic : Diagnostic.t) ->
+              if Diagnostic.Code.name diagnostic.code <> "types.missing_label" then
+                Harness.fail "reported %s" (Diagnostic.Code.name diagnostic.code);
+              if diagnostic.fixes <> [] then Harness.fail "offered a fix")
+            diagnostics);
   Harness.test "the string + fix keeps escapes" (fun () ->
       expect_one_diagnostic Fixtures.Infer.escaped_string_plus_a_string "types.string_addition"
         ~fixed:Fixtures.Infer.escaped_string_plus_a_string_fixed);

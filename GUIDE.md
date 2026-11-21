@@ -206,7 +206,7 @@ A diagnostic gives the file, line, and column; a code, such as
 that says how to fix it. Many diagnostics also carry a `fix:`, an edit that
 makes the code compile. `truss check --fix` applies every fix that is its
 diagnostic's only fix, then reports what is left. When a check reports
-errors, run it first, then read what it changed: a missing label or a
+errors, run it first, then read what it changed: a misspelled label or a
 misplaced `own` is gone, and a diagnostic with a choice of fixes is left for
 you to decide. A fix can add a `.copy()`, which allocates, so keep only the
 copies you want.
@@ -494,9 +494,9 @@ $ truss test
 `verdict` has no `uses` clause, so it is pure: it cannot print, read, pick
 a random number, or run forever, and its tests give the same answer every
 run. Notice
-the call `verdict(10, secret: 50)`. Every argument after the first names its
-parameter, unless it is a variable with the parameter's name, as in
-`verdict(guess, secret)`.
+the call `verdict(10, secret: 50)`. Arguments are passed by position, as in
+`verdict(guess, secret)`, and a label can name an argument's parameter where
+a bare `50` would not say what it is.
 
 You have now used variables, functions, `match`, loops, options, results,
 capabilities, termination, and tests. The next chapter covers the basics in detail.
@@ -805,10 +805,8 @@ fn describe(count: UInt64) -> String {
 }
 
 test "calling functions" {
-  assert area(3, height: 4) == 12
-  let width: UInt64 = 5
-  let height: UInt64 = 6
-  assert area(width, height) == 30
+  assert area(3, 4) == 12
+  assert area(height: 4, width: 3) == 12
   assert greeting("Ada") == "Hello, Ada!"
   assert greeting("Ada", punctuation: "?") == "Hello, Ada?"
   assert describe(0) == "none"
@@ -819,12 +817,14 @@ test "calling functions" {
 - **A block's value is its last expression.** `area` returns `width *
   height`. `return` leaves a function early. A function without `->` returns
   `Unit`.
-- **Every argument after the first is labeled with its parameter's name,** as
-  in `area(3, height: 4)`, unless the argument is a variable with that name,
-  as in `area(width, height)`. A call says what each argument means, and
-  reordering parameters of the same type cannot silently swap arguments.
+- **Arguments are passed by position, and a label names a parameter,** as in
+  `area(3, 4)` and `area(height: 4, width: 3)`. Labeled arguments come after
+  the positional ones, in any order, and every argument is evaluated in the
+  order written.
 - **A parameter can have a default,** as `punctuation` does, and a call can
-  leave the argument out.
+  leave the argument out. A label skips the parameters with defaults before
+  it, as in `connect(host, secure: false)` for `fn connect(host: HostName,
+  port: UInt16 = 443, secure: Bool = true)`.
 - **Clauses between the signature and the body** state what the function
   promises. `requires` is one. [Chapter 13](#13-contracts-and-proofs) covers
   them all.
@@ -1289,8 +1289,10 @@ test "building and reading a record" {
 }
 ```
 
-- A record is built the way a function is called, with each field labeled.
-  The labels can come in any order.
+- A record is built with each field labeled, in any order. A variable named
+  like a field needs no label, as in `Rectangle(width, height)`. Fields have
+  no order, so a record with more than one field takes no positional
+  argument.
 - `frame.width` reads a field.
 - `frame with (width: 60)` makes a new value with some fields replaced. The
   original does not change.
@@ -4031,7 +4033,7 @@ every recursive call, makes smaller, and that never goes below zero.
 fn gcd(first: UInt64, second: UInt64) -> UInt64
   decreases second
 {
-  if second == 0 { first } else { gcd(first: second, second: first % second) }
+  if second == 0 { first } else { gcd(second, first % second) }
 }
 
 fn halve_until_odd(value: UInt64) -> UInt64
@@ -4048,15 +4050,10 @@ fn halve_until_odd(value: UInt64) -> UInt64
 }
 
 test "terminating code" {
-  assert gcd(12, second: 18) == 6
+  assert gcd(12, 18) == 6
   assert halve_until_odd(12) == 3
 }
 ```
-
-Notice `gcd(first: second, second: first % second)`. A bare argument that is
-a variable named like a parameter goes to that parameter, wherever it
-appears, so `gcd(second, ...)` would pass `second` to `second` twice. Writing
-both labels avoids that.
 
 A recursion without a measure is an error. A function `countdown` that
 calls itself on `count / 2`, which is not a part of `count`, states none:

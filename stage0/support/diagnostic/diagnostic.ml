@@ -123,6 +123,7 @@ module Code = struct
     | Missing_label
     | Unknown_label
     | Out_of_order
+    | Positional_after_labeled
     | Missing_argument
     | Too_many_arguments
     | Repeated_argument
@@ -402,6 +403,7 @@ module Code = struct
     | Missing_label -> "missing_label"
     | Unknown_label -> "unknown_label"
     | Out_of_order -> "out_of_order"
+    | Positional_after_labeled -> "positional_after_labeled"
     | Missing_argument -> "missing_argument"
     | Too_many_arguments -> "too_many_arguments"
     | Repeated_argument -> "repeated_argument"

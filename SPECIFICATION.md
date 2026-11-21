@@ -769,25 +769,29 @@ fn copy(source: Path, destination: Path)
 fn connect(host: HostName, port: UInt16 = 443, secure: Bool = true) -> Result[Connection, NetworkError]
   uses NetworkClient
 
-copy(original, destination: backup)
-copy(source, destination)
-let connection = connect(host, port: 8080)?
+copy(original, backup)
+copy(destination: backup, source: original)
+let connection = connect(host, secure: false)?
 ```
 
-1. `label: value` passes `value` to the parameter named `label`.
-2. A bare name that matches a parameter's name passes that variable to that
-   parameter, wherever it appears, optionally after a mode keyword.
-3. Any other first argument goes to the first parameter. Any other later
-   argument is an error.
-4. Arguments come in the order of the parameters.
+1. A positional argument, one without a label, passes its value to the
+   parameter at its position.
+2. `label: value` passes `value` to the parameter named `label`.
+3. Labeled arguments follow the positional ones, in any order. A positional
+   argument after a labeled one is an error, and so is a parameter given
+   twice.
+4. Arguments are evaluated in the order written.
 
 - A default is a constant expression that refers to no other parameter. An
   argument for a parameter with a default can be left out, and the function
   fills it in.
-- Building a record or a variant follows the same rules, except that fields
-  may come in any order, evaluated in the order written, and only a record
-  or variant with exactly one field takes a bare value, as in `Some(3)`.
-- A call through a function value passes its arguments by position.
+- Building a record or a variant takes labeled arguments in any order,
+  evaluated in the order written. A bare name that matches a field's name
+  passes that variable to that field, optionally after a mode keyword. Only
+  a record or variant with exactly one field takes a positional argument, as
+  in `Some(3)`.
+- A call through a function value passes its arguments by position, without
+  labels.
 
 ### Explicit type arguments
 
@@ -2719,6 +2723,8 @@ type Priority =
   `name.trim()` and `String.trim(name)` are `StringSlice.trim(name)`. A
   method as a value is named through the view: `StringSlice.trim`. In the
   rules below, the methods a type has from its view count as its own.
+- A method written in full, as in `String.trim(name)`, takes `self` as its
+  first parameter, so the receiver is its first argument and has no label.
 - Two of those traits giving one name is an error at a call with a dot,
   which is then written in full: `Ordered.compare(first, second)`. A trait
   and a trait it requires are the exception.

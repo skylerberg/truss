@@ -117,7 +117,7 @@ fn report_parentheses(cursor: mut TokenCursor, id: UInt64, message: StringSlice,
   uses Panic
 {
   let span = cursor.read_file_span(id)
-  report(mut cursor, code: "parser.needs_parentheses", span, message, fixes: own fixes)
+  report(mut cursor, code: "parser.needs_parentheses", span: span, message: message, fixes: own fixes)
 }
 
 fn make_titled_fix(cursor: TokenCursor, fallback: StringSlice, whole: UInt64, edits: own List[source::Edit]) -> source::Fix
@@ -277,7 +277,7 @@ fn regroups_cleanly(whole: syntax::Expression, operand: syntax::Expression, is_r
   let middle = if is_right { find_first_operand(operand) } else { find_last_operand(operand) }
   match group_of(whole), middle {
     Some(outer), Some(middle_value) => match group_of(middle_value) {
-      Some(inner) => find_problem(outer, child: inner, is_right, operand: middle_value).is_none()
+      Some(inner) => find_problem(outer, child: inner, is_right: is_right, operand: middle_value).is_none()
       None => true
     }
     _, _ => true
@@ -328,10 +328,10 @@ fn report_problem(
       var fixes: List[source::Fix] = []
       if pieces is Some(operator_ids) {
         for grouping in groupings {
-          mut fixes.push(make_grouping_fix(cursor, context, whole, operand, pieces: operator_ids, parsed, grouping))
+          mut fixes.push(make_grouping_fix(cursor, context, whole, operand, pieces: operator_ids, parsed: parsed, grouping: grouping))
         }
       }
-      report_parentheses(mut cursor, id: extract_operator_id(whole), message, fixes: own fixes)
+      report_parentheses(mut cursor, id: extract_operator_id(whole), message: message, fixes: own fixes)
     }
     MixedBitwise => {
       var fixes: List[source::Fix] = []
@@ -353,12 +353,12 @@ fn report_problem(
           let ordered = if other_appears { [parsed, other] } else { [parsed] }
           for grouping in ordered {
             if regroups_cleanly(whole, operand, is_right, parsed, grouping) {
-              mut fixes.push(make_grouping_fix(cursor, context, whole, operand, pieces: operator_ids, parsed, grouping))
+              mut fixes.push(make_grouping_fix(cursor, context, whole, operand, pieces: operator_ids, parsed: parsed, grouping: grouping))
             }
           }
         } else {
           for grouping in groupings {
-            mut fixes.push(make_grouping_fix(cursor, context, whole, operand, pieces: operator_ids, parsed, grouping))
+            mut fixes.push(make_grouping_fix(cursor, context, whole, operand, pieces: operator_ids, parsed: parsed, grouping: grouping))
           }
         }
       }
@@ -378,7 +378,7 @@ fn report_problem(
       if is_implies {
         if pieces is Some(operator_ids) {
           for grouping in groupings.reversed() {
-            mut fixes.push(make_grouping_fix(cursor, context, whole, operand, pieces: operator_ids, parsed, grouping))
+            mut fixes.push(make_grouping_fix(cursor, context, whole, operand, pieces: operator_ids, parsed: parsed, grouping: grouping))
           }
         }
       } else if whole.kind is Binary(..) && !is_right && operand.kind is Binary(right: middle, ..) && is_name_or_literal(middle) {
@@ -394,7 +394,7 @@ fn report_problem(
           mut fixes.push(make_titled_fix(cursor, fallback: "Join the comparisons with `&&`", whole: whole.id, edits: own edits))
         }
       }
-      report_parentheses(mut cursor, id: extract_operator_id(whole), message, fixes: own fixes)
+      report_parentheses(mut cursor, id: extract_operator_id(whole), message: message, fixes: own fixes)
     }
   }
 }
@@ -407,7 +407,7 @@ fn check_operand(cursor: mut TokenCursor, context: Option[Parent], value: syntax
 {
   check_precedence(mut cursor, value: operand, context: Some(Parent(group: parent, is_right)))
   if group_of(operand) is Some(child) && find_problem(parent, child, is_right, operand) is Some(problem) {
-    report_problem(mut cursor, context, whole: value, operand, is_right, problem: problem.copy())
+    report_problem(mut cursor, context, whole: value, operand: operand, is_right: is_right, problem: problem.copy())
   }
 }
 
@@ -456,6 +456,6 @@ fn check_precedence(cursor: mut TokenCursor, value: syntax::Expression, context:
         report_problem(mut cursor, context: None, whole: value, operand: inner, is_right: true, problem: Problem.LowestOperand)
       }
     }
-    _ => walk_expression_parts(mut cursor, visitor: Visitor.PrecedenceVisitor, value)
+    _ => walk_expression_parts(mut cursor, visitor: Visitor.PrecedenceVisitor, value: value)
   }
 }

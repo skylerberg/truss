@@ -127,12 +127,12 @@ fn parse_parameters(cursor: mut TokenCursor, is_method: Bool) -> Result[List[syn
         report(
           mut cursor,
           code: "parser.misplaced_self",
-          span,
+          span: span,
           message: "Only a method takes `self`: one written `fn Type.name`, or one in a trait or an `impl`.",
         )
       } else if entry.index > 0 {
         let span = cursor.read_file_span(entry.element.id)
-        report(mut cursor, code: "parser.misplaced_self", span, message: "`self` must be the first parameter.")
+        report(mut cursor, code: "parser.misplaced_self", span: span, message: "`self` must be the first parameter.")
       }
     }
   }
@@ -207,7 +207,7 @@ fn parse_clauses(cursor: mut TokenCursor) -> List[syntax::Clause]
         } else {
           "A signature has at most one `decreases` clause; list several measures in one, separated by commas."
         }
-        report(mut cursor, code: "parser.repeated_clause", span, message)
+        report(mut cursor, code: "parser.repeated_clause", span: span, message: message)
       }
     }
     mut clauses.push(own clause)
@@ -275,7 +275,7 @@ fn parse_function_signature(cursor: mut TokenCursor, name: own syntax::Definitio
   uses Panic, RunForever
 {
   let is_method = name is MemberName(..)
-  parse_signature(mut cursor, name: own name, is_method)
+  parse_signature(mut cursor, name: own name, is_method: is_method)
 }
 
 type MemberLine[Member] = ParsedMember(member: Member) | SkippedMethod(piece: Piece)
@@ -410,7 +410,7 @@ fn parse_method_kind(cursor: mut TokenCursor, container: Container, name: own sy
           report(
             mut cursor,
             code: "parser.misplaced_self",
-            span,
+            span: span,
             message: "A capability's methods take no `self`; they are called as `Capability.method(...)`, and only an implementation's methods take `self`.",
           )
         }
@@ -624,11 +624,11 @@ fn parse_test(cursor: mut TokenCursor) -> Result[syntax::DefinitionKind, Failure
       }
       if !written.rest.is_empty() {
         let span = cursor.peek().span
-        report(mut cursor, code: "parser.interpolation_not_allowed", span, message: "A test's name cannot have interpolations.")
+        report(mut cursor, code: "parser.interpolation_not_allowed", span: span, message: "A test's name cannot have interpolations.")
         return Err(Failure.Failed)
       }
       let start = cursor.index
-      parse_string_literal(mut cursor, start, modules: [], literal)?
+      parse_string_literal(mut cursor, start, modules: [], literal: literal)?
     }
     _ => return Err(fail(mut cursor, expected: "a string to name the test"))
   }
@@ -852,7 +852,7 @@ fn parse_top_level_kind(cursor: mut TokenCursor, written: WrittenVisibility) -> 
     report(
       mut cursor,
       code: "parser.statement_at_top_level",
-      span,
+      span: span,
       message: "Statements must be inside a function, a test, or another definition with a body.",
     )
     return make_failure(None, name: None)

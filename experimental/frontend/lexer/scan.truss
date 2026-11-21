@@ -375,11 +375,11 @@ fn scan_item(scanner: mut Scanner, inline: Bool, nesting: UInt64) -> Item
       None => {}
     }
     if current == 34 {
-      return lex_string(mut scanner, tag: None, inline, nesting, start)
+      return lex_string(mut scanner, tag: None, inline: inline, nesting: nesting, start: start)
     }
     if current == 36 {
       if opens_raw_string(scanner, index: start) {
-        return lex_string(mut scanner, tag: None, inline, nesting, start)
+        return lex_string(mut scanner, tag: None, inline: inline, nesting: nesting, start: start)
       }
       let run = scanner.run_length(start, byte: 36)
       reject(
@@ -544,13 +544,13 @@ fn lex_ellipsis(scanner: mut Scanner, inline: Bool, nesting: UInt64, start: UInt
     Lexed(next) => begins_operand(next.kind)
     LineEnd | End => false
   }
-  match report_ellipsis(mut scanner, start, follows_operand: was_after_operand, operand_follows) {
+  match report_ellipsis(mut scanner, start, follows_operand: was_after_operand, operand_follows: operand_follows) {
     Some(kind) => {
       hold(mut scanner, first: following)
       Item.Lexed(raw with (kind))
     }
     None => match following {
-      Lexed(next) => Item.Lexed(attach_trivia(skipped: raw, next))
+      Lexed(next) => Item.Lexed(attach_trivia(skipped: raw, next: next))
       LineEnd | End => {
         restore_trivia(mut scanner, skipped: raw)
         following
@@ -638,7 +638,7 @@ fn lex_name(scanner: mut Scanner, inline: Bool, nesting: UInt64) -> Item
     _ => false
   }
   if is_tag {
-    return lex_string(mut scanner, tag: Some(token::Tag(name: own spelling, span: source::make_span(start, stop))), inline, nesting, start)
+    return lex_string(mut scanner, tag: Some(token::Tag(name: own spelling, span: source::make_span(start, stop))), inline: inline, nesting: nesting, start: start)
   }
   match lex_after_name(mut scanner, nesting, start, name: kind) {
     Some(scanned) => lexed(mut scanner, inline, start, kind: scanned.kind, ending: scanned.ending)

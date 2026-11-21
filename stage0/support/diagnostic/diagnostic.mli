@@ -123,6 +123,7 @@ module Code : sig
     | Missing_label
     | Unknown_label
     | Out_of_order
+    | Positional_after_labeled
     | Missing_argument
     | Too_many_arguments
     | Repeated_argument

@@ -573,6 +573,10 @@ let () =
     (fun () ->
       expect_one_diagnostic Fixtures.Ownership.call_moving_then_reading_a_list
         "ownership.use_after_move");
+  Harness.test "labeled arguments move and read places in the order written" (fun () ->
+      expect_fine Fixtures.Ownership.list_read_by_a_label_before_another_moves_it;
+      expect_one_diagnostic Fixtures.Ownership.list_moved_by_a_label_before_another_reads_it
+        "ownership.use_after_move");
   Harness.test "a place moved on one path cannot be used after the paths join" (fun () ->
       expect_one_diagnostic
         (keep ^ Fixtures.Ownership.list_moved_on_one_path)

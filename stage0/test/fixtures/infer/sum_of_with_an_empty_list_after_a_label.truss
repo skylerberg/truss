@@ -3,5 +3,5 @@ fn sum_of(first: List[Int64], second: List[Int64]) -> Int64 {
 }
 
 fn f(items: List[Int64]) -> Int64 {
-  sum_of(items, [])
+  sum_of(first: items, [])
 }
