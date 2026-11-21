@@ -19,7 +19,7 @@ val check_argument :
 val check_arguments :
   State.state ->
   State.env ->
-  ?constructor:string ->
+  Argument_matching.site ->
   Syntax.expression ->
   Types.parameter_info list ->
   declared:Types.parameter_info list ->

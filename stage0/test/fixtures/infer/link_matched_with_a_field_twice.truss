@@ -1,0 +1,10 @@
+type Chain =
+  | indirect Link(value: Int64, rest: Chain)
+  | End
+
+fn first(chain: Chain) -> Int64 {
+  match chain {
+    Link(value, value: other, ..) => value.saturating_add(other)
+    End => 0
+  }
+}

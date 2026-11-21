@@ -17,13 +17,13 @@ let check_arguments_alone state env (arguments : Syntax.argument list) (unknown 
     arguments;
   unknown
 
-let make_arity_error state ?constructor ~has_receiver (value : Syntax.expression) ~parameter_count
+let make_arity_error state site ~has_receiver (value : Syntax.expression) ~parameter_count
     ~argument_count =
   let given = Diagnostic.show_count argument_count "is" "are" in
   State.make_error_type state
     (if argument_count < parameter_count then Missing_argument else Too_many_arguments)
     (State.read_span state value.id)
-    (match constructor with
+    (match Argument_matching.find_owner site with
     | Some name ->
         Printf.sprintf "`%s` has %s, and %s given." name
           (Diagnostic.show_count parameter_count "field" "fields")
@@ -43,7 +43,7 @@ let rec check_function_value_call state env (value : Syntax.expression) (callee 
   match callee_type with
   | Types.Function function_type when List.length function_type.inputs <> List.length arguments ->
       check_arguments_alone state env arguments
-        (make_arity_error state ~has_receiver:false value
+        (make_arity_error state Argument_matching.Call ~has_receiver:false value
            ~parameter_count:(List.length function_type.inputs)
            ~argument_count:(List.length arguments))
   | Types.Function function_type -> (
@@ -125,195 +125,76 @@ and check_argument state env (value : Syntax.expression) (parameter : Types.para
   Modes.check_mode state env value parameter actual ~has_generic_type;
   parameter.mode
 
-and match_arguments state ?constructor (value : Syntax.expression)
-    (parameters : Types.parameter_info list) (arguments : Syntax.argument list) =
-  let named =
-    List.mapi (fun index (parameter : Types.parameter_info) -> (parameter.name, index)) parameters
+and match_arguments state site (value : Syntax.expression) (parameters : Types.parameter_info list)
+    (arguments : Syntax.argument list) =
+  let rec find_name (expression : Syntax.expression) =
+    match expression.kind with
+    | Name { modules = []; last } -> Some last.text
+    | Mode (_, inner) -> find_name inner
+    | _ -> None
   in
-  let first_error = ref None in
-  let reject ?fixes code span message =
-    let error = State.make_error_type state ?fixes code span message in
-    if Option.is_none !first_error then first_error := Some error
+  let indexes =
+    Argument_matching.list_indexes state site
+      ~parameter_names:
+        (List.map (fun (parameter : Types.parameter_info) -> parameter.name) parameters)
+      (List.map
+         (fun (argument : Syntax.argument) ->
+           {
+             Argument_matching.label = argument.label;
+             punned = find_name argument.value;
+             span = State.read_span state argument.value.id;
+           })
+         arguments)
   in
-  let find_labeled_index (label : Syntax.name) =
-    match List.assoc_opt label.text named with
-    | Some index -> Some index
+  let assignments = List.combine arguments (List.map Result.to_option indexes) in
+  let is_given index = List.exists (fun (_, given) -> given = Some index) assignments in
+  let argument_error =
+    List.find_map (function Error error -> Some error | Ok _ -> None) indexes
+  in
+  let missing_errors =
+    match argument_error with
+    | Some _ -> []
     | None ->
-        reject Unknown_label (State.read_span state label.id)
-          ~fixes:
-            (Diagnostic.list_spelling_fixes (State.read_span state label.id) ~written:label.text
-               (List.map fst named))
-          (match constructor with
-          | Some name -> Printf.sprintf "`%s` has no field `%s`." name label.text
-          | None -> Printf.sprintf "No parameter is named `%s`." label.text);
-        None
+        List.filter_map Fun.id
+          (List.mapi
+             (fun index (parameter : Types.parameter_info) ->
+               if is_given index || parameter.has_default then None
+               else
+                 Some
+                   (State.make_error_type state Missing_argument (State.read_span state value.id)
+                      (Printf.sprintf "`%s` is not given, and has no default." parameter.name)))
+             parameters)
   in
-  let find_punned_index (argument : Syntax.argument) =
-    let rec find_name (expression : Syntax.expression) =
-      match expression.kind with
-      | Name { modules = []; last } -> Some last.text
-      | Mode (_, inner) -> find_name inner
-      | _ -> None
-    in
-    Option.bind (find_name argument.value) (fun name -> List.assoc_opt name named)
-  in
-  let labeled_indexes =
-    List.filter_map
-      (fun (argument : Syntax.argument) ->
-        Option.bind argument.label (fun (label : Syntax.name) -> List.assoc_opt label.text named))
-      arguments
-  in
-  let rec list_parameter_indexes position ~follows_label ~is_aligned = function
-    | [] -> []
-    | (argument : Syntax.argument) :: rest -> (
-        match argument.label with
-        | Some label ->
-            let index = find_labeled_index label in
-            index
-            :: list_parameter_indexes (position + 1) ~follows_label:true
-                 ~is_aligned:(is_aligned && index = Some position)
-                 rest
-        | None when follows_label ->
-            let fixes =
-              match List.nth_opt parameters position with
-              | Some parameter
-                when is_aligned
-                     && (not (List.mem position labeled_indexes))
-                     && Option.fold ~none:true ~some:(Int.equal position)
-                          (find_punned_index argument) ->
-                  [
-                    State.fix
-                      (Printf.sprintf "Label it `%s`." parameter.name)
-                      [
-                        State.insert (State.read_span state argument.value.id).start
-                          (parameter.name ^ ": ");
-                      ];
-                  ]
-              | _ -> []
-            in
-            reject Positional_after_labeled
-              (State.read_span state argument.value.id)
-              ~fixes
-              "A positional argument cannot follow a labeled argument. Label it, or move it before \
-               the labeled arguments.";
-            None
-            :: list_parameter_indexes (position + 1) ~follows_label ~is_aligned:(fixes <> []) rest
-        | None ->
-            Some position :: list_parameter_indexes (position + 1) ~follows_label ~is_aligned rest)
-  in
-  let list_field_indexes constructor =
-    let claims =
-      List.mapi
-        (fun position (argument : Syntax.argument) ->
-          match argument.label with
-          | Some label -> List.assoc_opt label.text named
-          | None -> (
-              match find_punned_index argument with
-              | Some index -> Some index
-              | None -> if position = 0 && List.length parameters = 1 then Some 0 else None))
-        arguments
-    in
-    let open_fields = List.filter (fun (_, index) -> not (List.mem (Some index) claims)) named in
-    let unclaimed_count =
-      List.length
-        (List.filter
-           (fun ((argument : Syntax.argument), claim) -> argument.label = None && claim = None)
-           (List.combine arguments claims))
-    in
-    List.map2
-      (fun (argument : Syntax.argument) claim ->
-        match (argument.label, claim) with
-        | _, Some index -> Some index
-        | Some label, None -> find_labeled_index label
-        | None, None ->
-            let fixes =
-              match (open_fields, unclaimed_count) with
-              | [ (field, _) ], 1 ->
-                  [
-                    State.fix
-                      (Printf.sprintf "Label it `%s`." field)
-                      [
-                        State.insert (State.read_span state argument.value.id).start (field ^ ": ");
-                      ];
-                  ]
-              | _ -> []
-            in
-            reject Missing_label
-              (State.read_span state argument.value.id)
-              ~fixes
-              (Printf.sprintf
-                 "`%s` has %d fields, and fields have no order. Every argument needs a label, or a \
-                  variable with its field's name."
-                 constructor (List.length parameters));
-            None)
-      arguments claims
-  in
-  let parameter_indexes =
-    match constructor with
-    | None -> list_parameter_indexes 0 ~follows_label:false ~is_aligned:true arguments
-    | Some constructor -> list_field_indexes constructor
-  in
-  let assigned = Hashtbl.create 8 in
-  let assignments =
-    List.map2
-      (fun (argument : Syntax.argument) parameter_index ->
-        match parameter_index with
-        | Some index when Hashtbl.mem assigned index ->
-            reject Repeated_argument
-              (State.read_span state
-                 (match argument.label with Some label -> label.id | None -> argument.value.id))
-              (Printf.sprintf "`%s` is given more than once." (List.nth parameters index).name);
-            (argument, None)
-        | Some index ->
-            Hashtbl.replace assigned index ();
-            (argument, Some index)
-        | None -> (argument, None))
-      arguments parameter_indexes
-  in
-  let missing =
-    List.filter
-      (fun (_, index) ->
-        (not (Hashtbl.mem assigned index)) && not (List.nth parameters index).has_default)
-      named
-  in
-  if List.for_all (fun (_, parameter_index) -> Option.is_some parameter_index) assignments then
-    List.iter
-      (fun (name, _) ->
-        reject Missing_argument (State.read_span state value.id)
-          (Printf.sprintf "`%s` is not given, and has no default." name))
-      missing;
   {
     matched =
       List.filter_map
-        (fun (argument, parameter_index) ->
-          Option.map (fun index -> (argument, index)) parameter_index)
+        (fun (argument, index) -> Option.map (fun index -> (argument, index)) index)
         assignments;
     unmatched =
       List.filter_map
-        (fun (argument, parameter_index) ->
-          if Option.is_none parameter_index then Some argument else None)
+        (fun (argument, index) -> if Option.is_none index then Some argument else None)
         assignments;
     left_out =
-      List.filter_map
-        (fun (name, index) ->
-          if (not (Hashtbl.mem assigned index)) && (List.nth parameters index).has_default then
-            Some name
-          else None)
-        named;
-    error = !first_error;
+      List.filter_map Fun.id
+        (List.mapi
+           (fun index (parameter : Types.parameter_info) ->
+             if (not (is_given index)) && parameter.has_default then Some parameter.name else None)
+           parameters);
+    error =
+      (match argument_error with Some _ -> argument_error | None -> List.nth_opt missing_errors 0);
   }
 
-and check_arguments state env ?constructor (value : Syntax.expression)
+and check_arguments state env site (value : Syntax.expression)
     (parameters : Types.parameter_info list) ~(declared : Types.parameter_info list) ~flatten
     (arguments : Syntax.argument list) ~has_receiver =
   if List.length arguments > List.length parameters then
     Error
       (check_arguments_alone state env arguments
-         (make_arity_error state ?constructor ~has_receiver value
-            ~parameter_count:(List.length parameters) ~argument_count:(List.length arguments)))
+         (make_arity_error state site ~has_receiver value ~parameter_count:(List.length parameters)
+            ~argument_count:(List.length arguments)))
   else
     let { matched; unmatched; left_out; error } =
-      match_arguments state ?constructor value parameters arguments
+      match_arguments state site value parameters arguments
     in
     let is_lambda ((argument : Syntax.argument), _) =
       match argument.value.kind with Lambda _ -> true | _ -> false
@@ -371,7 +252,7 @@ and check_named_call state env ?expected (value : Syntax.expression) path
       | Some expected, Returns output -> State.unify_as_hint state output expected
       | _ -> ());
       match
-        check_arguments state env value instance.signature.parameters
+        check_arguments state env Argument_matching.Call value instance.signature.parameters
           ~declared:instance.declared.parameters ~flatten:instance.flatten arguments
           ~has_receiver:false
       with
@@ -431,13 +312,23 @@ and construct state env ?expected ?type_arguments (value : Syntax.expression) ty
               Hashtbl.replace state.yielded argument.value.id mode)
             arguments)
         (Hashtbl.find_opt state.yielded value.id);
-      let constructor =
+      let site =
         match variant with
-        | Some variant -> variant
-        | None -> Types.show (Types.Named { path = type_path; arguments = [] })
+        | None when Members.is_tuple_type state.lookups type_path ->
+            Argument_matching.Tuple_construction
+              (Types.show (Types.Named { path = type_path; arguments = [] }))
+        | _ ->
+            Argument_matching.Construction
+              {
+                owner =
+                  (match variant with
+                  | Some variant -> variant
+                  | None -> Types.show (Types.Named { path = type_path; arguments = [] }));
+                declared_order = list_declared_order state type_path ~variant fields;
+              }
       in
       match
-        ( check_arguments state env ~constructor value parameters ~declared:parameters
+        ( check_arguments state env site value parameters ~declared:parameters
             ~flatten:
               (Solver.flatten state (Bound { at = State.read_span state value.id; of_type = None }))
             arguments ~has_receiver:false,
@@ -455,6 +346,12 @@ and construct state env ?expected ?type_arguments (value : Syntax.expression) ty
                  lends = None;
                });
           type_)
+
+and list_declared_order state path ~variant (fields : Types.field list) =
+  lazy
+    (Interface.Definition.sort_in_declared_order state.lookups.interface path ~variant
+       ~name_of:Fun.id
+       (List.map (fun (field : Types.field) -> field.field_name) fields))
 
 and find_record_fields state span type_ =
   match State.normalize state type_ with
@@ -522,8 +419,13 @@ and check_updates state env (value : Syntax.expression) ~at record_type
       let parameters = make_field_parameters ~keeps_unlisted:true fields in
       let groups = group_updates updates in
       let { matched; unmatched; error; _ } =
-        match_arguments state ~constructor:(State.show state record_type) value parameters
-          (List.map fst groups)
+        match_arguments state
+          (Construction
+             {
+               owner = State.show state record_type;
+               declared_order = list_declared_order state path ~variant:None fields;
+             })
+          value parameters (List.map fst groups)
       in
       Option.iter (fun error -> ignore (check_arguments_alone state env unmatched error)) error;
       List.concat_map
