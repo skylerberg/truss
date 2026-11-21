@@ -48,7 +48,7 @@ fn Scanner.create(source: own source::Source) -> Scanner
   let length = source.text.length()
   let position = source.compute_line_start(0)
   Scanner(
-    source: own source,
+    own source,
     length,
     diagnostics: [],
     position,
@@ -89,7 +89,7 @@ fn report(
   notes: own List[source::Note] = [],
   fixes: own List[source::Fix] = [],
 ) {
-  mut scanner.diagnostics.push(source::make_diagnostic(code, span, message, notes: own notes, fixes: own fixes))
+  mut scanner.diagnostics.push(source::make_diagnostic(code, span, message, own notes, own fixes))
 }
 
 fn Scanner.text(self, start: UInt64, stop: UInt64) -> StringSlice

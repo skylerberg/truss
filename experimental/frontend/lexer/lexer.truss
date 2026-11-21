@@ -10,7 +10,7 @@ fn attempt(source: own source::Source, recovery: Bool) -> Attempt
 {
   var scanner = Scanner.create(own source)
   let range = lex_file(mut scanner, recovery)
-  Attempt(scanner: own scanner, range)
+  Attempt(own scanner, range)
 }
 
 fn scan_source(source: own source::Source) -> Attempt
@@ -316,7 +316,7 @@ internal fn lex(source: own source::Source) -> LexResult
     mark_inserted_closers(mut scanner.tables.tokens)
     return LexResult(
       lexed: token::Lexed(tables: own scanner.tables, first: scanned.range.first, stop: scanned.range.stop),
-      diagnostics: own diagnostics,
+      own diagnostics,
       source: own scanner.source,
     )
   }
@@ -327,8 +327,8 @@ internal fn lex(source: own source::Source) -> LexResult
   map_to_original(mut tables, placed: place_edits(sorted_edits))
   mark_inserted_closers(mut tables.tokens)
   LexResult(
-    lexed: token::Lexed(tables: own tables, first: fixed.range.first, stop: fixed.range.stop),
-    diagnostics: own diagnostics,
+    lexed: token::Lexed(own tables, first: fixed.range.first, stop: fixed.range.stop),
+    own diagnostics,
     source: own scanner.source,
   )
 }

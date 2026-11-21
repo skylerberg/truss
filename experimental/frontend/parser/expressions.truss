@@ -22,7 +22,7 @@ fn parse_expression_inner(cursor: mut TokenCursor, open_range: Bool) -> Result[s
     return Ok(own value)
   }
   if coalescing_follows(cursor) {
-    return parse_coalescing(mut cursor, start, value: own value)
+    return parse_coalescing(mut cursor, start, own value)
   }
   if conditional_follows(cursor.peek_ahead(1)) {
     advance(mut cursor)
@@ -72,7 +72,7 @@ fn parse_binary(cursor: mut TokenCursor, level: UInt64, open_range: Bool) -> Res
     make_expression_node(
       mut cursor,
       start,
-      kind: syntax::ExpressionKind.Range(start: None, operator_id, stop: own stop, is_inclusive),
+      kind: syntax::ExpressionKind.Range(start: None, operator_id, own stop, is_inclusive),
     )
   } else {
     parse_prefix(mut cursor)?
@@ -98,19 +98,19 @@ fn parse_binary(cursor: mut TokenCursor, level: UInt64, open_range: Bool) -> Res
           left = make_expression_node(
             mut cursor,
             start,
-            kind: syntax::ExpressionKind.Binary(operator: binary, operator_id, left: own left, right: own right),
+            kind: syntax::ExpressionKind.Binary(operator: binary, operator_id, own left, own right),
           )
         }
         IsOperator => {
           let pattern = parse_pattern(mut cursor)?
-          left = make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.Is(value: own left, operator_id, pattern: own pattern))
+          left = make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.Is(value: own left, operator_id, own pattern))
         }
         RangeOperator(is_inclusive) => {
           let stop = parse_range_stop(mut cursor, open_range, is_inclusive, operator: operator_token)?
           left = make_expression_node(
             mut cursor,
             start,
-            kind: syntax::ExpressionKind.Range(start: Some(own left), operator_id, stop: own stop, is_inclusive),
+            kind: syntax::ExpressionKind.Range(start: Some(own left), operator_id, own stop, is_inclusive),
           )
         }
       }
@@ -198,12 +198,12 @@ fn parse_prefix(cursor: mut TokenCursor) -> Result[syntax::Expression, Failure]
       Mut => {
         advance(mut cursor)
         let inner = parse_postfix(mut cursor)?
-        make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.Mode(mode: syntax::Mode.Mut, inner: own inner))
+        make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.Mode(mode: syntax::Mode.Mut, own inner))
       }
       Own => {
         advance(mut cursor)
         let inner = parse_postfix(mut cursor)?
-        make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.Mode(mode: syntax::Mode.Own, inner: own inner))
+        make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.Mode(mode: syntax::Mode.Own, own inner))
       }
       Any => {
         advance(mut cursor)
@@ -248,7 +248,7 @@ fn parse_prefix_operator(cursor: mut TokenCursor, start: UInt64, operator: synta
 {
   advance(mut cursor)
   let operand = parse_nested_prefix(mut cursor)?
-  Ok(make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.Prefix(operator, operand: own operand)))
+  Ok(make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.Prefix(operator, own operand)))
 }
 
 fn parse_quantified(cursor: mut TokenCursor) -> Result[syntax::Expression, Failure]
@@ -263,15 +263,15 @@ fn parse_quantified(cursor: mut TokenCursor) -> Result[syntax::Expression, Failu
   let binder = if cursor.peek_kind() is Lower(_) && cursor.peek_ahead(1) == token::Kind.Punctuation(token::Punctuation.Colon) {
     let name = take_name(mut cursor)
     advance(mut cursor)
-    syntax::Binder.BinderType(name: own name, domain: parse_type_expression(mut cursor)?)
+    syntax::Binder.BinderType(own name, domain: parse_type_expression(mut cursor)?)
   } else {
     let pattern = parse_pattern(mut cursor)?
     expect_keyword(mut cursor, keyword: token::Keyword.In)?
-    syntax::Binder.BinderIn(pattern: own pattern, collection: parse_expression(mut cursor)?)
+    syntax::Binder.BinderIn(own pattern, collection: parse_expression(mut cursor)?)
   }
   expect_punctuation(mut cursor, punctuation: token::Punctuation.FatArrow)?
   let body = parse_expression(mut cursor)?
-  Ok(make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.Quantified(quantifier, binder: own binder, body: own body)))
+  Ok(make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.Quantified(quantifier, own binder, own body)))
 }
 
 fn parse_closure_bars(cursor: mut TokenCursor) -> Result[syntax::Expression, Failure]
@@ -342,10 +342,15 @@ fn parse_postfix(cursor: mut TokenCursor) -> Result[syntax::Expression, Failure]
       Punctuation(punctuation) => match punctuation {
         Dot => {
           advance(mut cursor)
-          match cursor.peek_kind() {
+          let after_dot = cursor.peek_kind()
+          match after_dot {
             Lower(_) | Upper(_) => {
               let name = take_name(mut cursor)
-              value = make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.Member(base: own value, name: own name))
+              value = make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.Member(base: own value, own name))
+            }
+            Keyword(keyword) if keyword == token::Keyword.Ensures => {
+              let name = take_name(mut cursor)
+              value = make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.Member(base: own value, own name))
             }
             Integer(_) | Float(_) => {
               let field = cursor.peek()
@@ -387,11 +392,11 @@ fn parse_postfix(cursor: mut TokenCursor) -> Result[syntax::Expression, Failure]
                 }
               }
             }
-            value = make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.Bracket(base: own value, items: own items))
+            value = make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.Bracket(base: own value, own items))
           }
           Paren => {
             let arguments = parse_arguments(mut cursor)
-            value = make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.Call(callee: own value, arguments: own arguments))
+            value = make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.Call(callee: own value, own arguments))
           }
           Curly => break
         }
@@ -416,7 +421,7 @@ fn parse_postfix(cursor: mut TokenCursor) -> Result[syntax::Expression, Failure]
           return Err(fail(mut cursor, expected: "`(` after `with`"))
         }
         let updates = parse_bracketed(mut cursor, parse_item: parse_update, recover: recover_update)
-        value = make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.With(base: own value, updates: own updates))
+        value = make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.With(base: own value, own updates))
       }
       _ => break
     }
@@ -442,7 +447,7 @@ fn parse_bracket_item(cursor: mut TokenCursor) -> Result[syntax::BracketItem, Fa
   if cursor.peek_kind() is Upper(_) && cursor.peek_ahead(1) == token::Kind.Punctuation(token::Punctuation.Equal) {
     let name = take_name(mut cursor)
     advance(mut cursor)
-    return Ok(syntax::BracketItem.ItemConstraint(name: own name, value: parse_type_expression(mut cursor)?))
+    return Ok(syntax::BracketItem.ItemConstraint(own name, value: parse_type_expression(mut cursor)?))
   }
   Ok(syntax::BracketItem.Item(parse_expression(mut cursor, open_range: true)?))
 }
@@ -492,7 +497,7 @@ fn parse_update(cursor: mut TokenCursor) -> Result[syntax::Update, Failure]
   let first = parse_expression(mut cursor)?
   let kind = if accept_punctuation(mut cursor, punctuation: token::Punctuation.Colon) {
     match read_update_path(first) {
-      Some(path) => syntax::UpdateKind.FieldUpdate(path: own path, value: parse_expression(mut cursor)?)
+      Some(path) => syntax::UpdateKind.FieldUpdate(own path, value: parse_expression(mut cursor)?)
       None => {
         let span = cursor.read_file_span(first.id)
         report(
@@ -507,14 +512,14 @@ fn parse_update(cursor: mut TokenCursor) -> Result[syntax::Update, Failure]
   } else {
     syntax::UpdateKind.FieldUpdate(path: [], value: own first)
   }
-  Ok(syntax::Update(kind: own kind, id: allocate_id_from(mut cursor, start_index: start)))
+  Ok(syntax::Update(own kind, id: allocate_id_from(mut cursor, start_index: start)))
 }
 
 fn parse_simple(cursor: mut TokenCursor, start: UInt64, kind: own syntax::ExpressionKind) -> syntax::Expression
   uses Panic
 {
   advance(mut cursor)
-  make_expression_node(mut cursor, start, kind: own kind)
+  make_expression_node(mut cursor, start, own kind)
 }
 
 fn parse_primary(cursor: mut TokenCursor) -> Result[syntax::Expression, Failure]
@@ -539,11 +544,11 @@ fn parse_primary(cursor: mut TokenCursor) -> Result[syntax::Expression, Failure]
       False => Ok(parse_simple(mut cursor, start, kind: syntax::ExpressionKind.False))
       Todo => {
         let value = parse_simple(mut cursor, start, kind: syntax::ExpressionKind.Todo)
-        Ok(parse_keyword_macro(mut cursor, value: own value))
+        Ok(parse_keyword_macro(mut cursor, own value))
       }
       Unreachable => {
         let value = parse_simple(mut cursor, start, kind: syntax::ExpressionKind.Unreachable)
-        Ok(parse_keyword_macro(mut cursor, value: own value))
+        Ok(parse_keyword_macro(mut cursor, own value))
       }
       Break => Ok(parse_simple(mut cursor, start, kind: syntax::ExpressionKind.Break))
       Continue => Ok(parse_simple(mut cursor, start, kind: syntax::ExpressionKind.Continue))
@@ -556,7 +561,7 @@ fn parse_primary(cursor: mut TokenCursor) -> Result[syntax::Expression, Failure]
         advance(mut cursor)
         let implementations = parse_expression_list(mut cursor)?
         let body = parse_body(mut cursor)?
-        Ok(make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.Provide(implementations: own implementations, body: own body)))
+        Ok(make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.Provide(own implementations, own body)))
       }
       _ => Err(fail(mut cursor, expected: "an expression"))
     }
@@ -614,11 +619,11 @@ fn parse_name_expression(cursor: mut TokenCursor, start: UInt64) -> Result[synta
       if modules.is_empty() && macro_follows(cursor, name_stop: written.span.stop) {
         return parse_macro(mut cursor, start, name)
       }
-      Ok(make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.Name(syntax::NamePath(modules: own modules, last: own name))))
+      Ok(make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.Name(syntax::NamePath(own modules, last: own name))))
     }
     Upper(_) => {
       let name = take_name(mut cursor)
-      let named = make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.Name(syntax::NamePath(modules: own modules, last: own name)))
+      let named = make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.Name(syntax::NamePath(own modules, last: own name)))
       let separated = parse_path_separators(mut cursor, start, value: own named)?
       let angled = parse_angle_arguments(mut cursor, start, value: own separated)
       let value = parse_path_separators(mut cursor, start, value: own angled)?
@@ -631,7 +636,7 @@ fn parse_name_expression(cursor: mut TokenCursor, start: UInt64) -> Result[synta
       if cursor.tables.literal(literal).tag.is_none() {
         return Err(fail(mut cursor, expected: "a name after `::`"))
       }
-      let parsed = parse_string_literal(mut cursor, start, modules: own modules, literal: literal)?
+      let parsed = parse_string_literal(mut cursor, start, own modules, literal)?
       Ok(make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.String(own parsed)))
     }
     Punctuation(punctuation) => if punctuation == token::Punctuation.Less {
@@ -661,7 +666,7 @@ fn parse_path_separators(cursor: mut TokenCursor, start: UInt64, value: own synt
     report_path_separator(mut cursor, separator)
     advance(mut cursor)
     let name = take_name(mut cursor)
-    current = make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.Member(base: own current, name: own name))
+    current = make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.Member(base: own current, own name))
     chain_length += 1
   }
   Ok(own current)
@@ -760,7 +765,7 @@ fn parse_turbofish(cursor: mut TokenCursor, start: UInt64) -> Result[syntax::Exp
 fn parse_string_literal(cursor: mut TokenCursor, start: UInt64, modules: own List[syntax::Name], literal: UInt64) -> Result[syntax::StringLiteral, Failure]
   uses Panic, RunForever
 {
-  make_string_literal(mut cursor, start, modules: own modules, literal_index: literal, mode: InterpolationMode.ParseInterpolations)
+  make_string_literal(mut cursor, start, own modules, literal_index: literal, mode: InterpolationMode.ParseInterpolations)
 }
 
 fn parse_interpolation(cursor: mut TokenCursor, inner: token::Interpolation) -> syntax::Expression
@@ -775,7 +780,7 @@ fn parse_interpolation(cursor: mut TokenCursor, inner: token::Interpolation) -> 
       Err(failure) => Err(failure)
     }
   }
-  leave_interpolation(mut cursor, saved: own saved)
+  leave_interpolation(mut cursor, own saved)
   match own result {
     Ok(value) => value
     Err(_) => syntax::Expression(kind: syntax::ExpressionKind.ExpressionError, id: allocate_token_id(mut cursor, span: inner.span))
@@ -790,7 +795,7 @@ fn parse_element(cursor: mut TokenCursor) -> Result[Element, Failure]
 {
   let key = parse_expression(mut cursor)?
   let value = if accept_punctuation(mut cursor, punctuation: token::Punctuation.Colon) { Some(parse_expression(mut cursor)?) } else { None }
-  Ok(Element(key: own key, value: own value))
+  Ok(Element(own key, own value))
 }
 
 fn recover_element(cursor: mut TokenCursor, span: source::Span) -> Element {
@@ -897,7 +902,7 @@ fn parse_lambda(cursor: mut TokenCursor) -> Result[syntax::Expression, Failure]
     report_lambda_annotation(mut cursor, from, stop: cursor.compute_previous_stop())
   }
   let body = parse_body(mut cursor)?
-  Ok(make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.Lambda(parameters: own parameters, body: own body)))
+  Ok(make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.Lambda(own parameters, own body)))
 }
 
 fn parse_if_expression(cursor: mut TokenCursor, chain_length: UInt64 = 0) -> Result[syntax::Expression, Failure]
@@ -912,7 +917,7 @@ fn parse_if_expression(cursor: mut TokenCursor, chain_length: UInt64 = 0) -> Res
     make_expression_node(
       mut cursor,
       start,
-      kind: syntax::ExpressionKind.If(condition: own condition, then_block: own then_block, else_branch: own else_branch),
+      kind: syntax::ExpressionKind.If(own condition, own then_block, own else_branch),
     ),
   )
 }
@@ -933,7 +938,7 @@ fn parse_else_branch(cursor: mut TokenCursor, chain_length: UInt64) -> Result[Op
 fn recover_arm(cursor: mut TokenCursor, span: source::Span) -> syntax::Arm {
   let id = allocate_id(mut cursor, span)
   let body = syntax::Statement(kind: syntax::StatementKind.StatementError, id: allocate_id(mut cursor, span))
-  syntax::Arm(patterns: [], guard: None, body: own body, id)
+  syntax::Arm(patterns: [], guard: None, own body, id)
 }
 
 fn parse_match(cursor: mut TokenCursor) -> Result[syntax::Expression, Failure]
@@ -944,7 +949,7 @@ fn parse_match(cursor: mut TokenCursor) -> Result[syntax::Expression, Failure]
   let scrutinees = parse_expression_list(mut cursor)?
   expect_body_opening(mut cursor)?
   let arms = parse_lines(mut cursor, parse_item: parse_arm, recover: recover_arm)
-  Ok(make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.Match(scrutinees: own scrutinees, arms: own arms)))
+  Ok(make_expression_node(mut cursor, start, kind: syntax::ExpressionKind.Match(own scrutinees, own arms)))
 }
 
 fn parse_arm(cursor: mut TokenCursor) -> Result[syntax::Arm, Failure]
@@ -961,7 +966,7 @@ fn parse_arm(cursor: mut TokenCursor) -> Result[syntax::Arm, Failure]
     match_arm_comma(mut cursor, comma, next)
     advance(mut cursor)
   }
-  Ok(syntax::Arm(patterns: own patterns, guard: own guard, body: own body, id: allocate_id_from(mut cursor, start_index: start)))
+  Ok(syntax::Arm(own patterns, own guard, own body, id: allocate_id_from(mut cursor, start_index: start)))
 }
 
 fn opens_body(cursor: TokenCursor) -> Bool
@@ -1019,7 +1024,7 @@ fn parse_block(cursor: mut TokenCursor) -> Result[syntax::Block, Failure]
   cursor.previous_if = None
   let statements = parse_lines(mut cursor, parse_item: parse_block_statement, recover: recover_block_statement)
   cursor.previous_if = enclosing_previous
-  let block = syntax::Block(statements: own statements, id: allocate_id_from(mut cursor, start_index: start))
+  let block = syntax::Block(own statements, id: allocate_id_from(mut cursor, start_index: start))
   leave_nested(mut cursor)
   Ok(own block)
 }
@@ -1039,13 +1044,13 @@ fn parse_statement_line(cursor: mut TokenCursor, previous: Option[UInt64]) -> Re
     let value = make_expression_node(
       mut cursor,
       start,
-      kind: syntax::ExpressionKind.If(condition: own condition, then_block: own then_block, else_branch: own else_branch),
+      kind: syntax::ExpressionKind.If(own condition, own then_block, own else_branch),
     )
     let span = cursor.read_span(value.id)
     return Ok(syntax::Statement(kind: syntax::StatementKind.Expression(own value), id: allocate_id(mut cursor, span)))
   }
   let statement = parse_statement(mut cursor)?
-  parse_trailing_habits(mut cursor, statement: own statement)
+  parse_trailing_habits(mut cursor, own statement)
 }
 
 fn parse_trailing_habits(cursor: mut TokenCursor, statement: own syntax::Statement) -> Result[syntax::Statement, Failure]
@@ -1064,7 +1069,7 @@ fn parse_trailing_habits(cursor: mut TokenCursor, statement: own syntax::Stateme
     }
   }
   if next == token::Kind.Punctuation(token::Punctuation.Open(token::Bracket.Curly)) && !cursor.peek().line_break_before {
-    return parse_trailing_lambda(mut cursor, statement: own statement)
+    return parse_trailing_lambda(mut cursor, own statement)
   }
   Ok(own statement)
 }
@@ -1144,7 +1149,7 @@ fn parse_trailing_lambda(cursor: mut TokenCursor, statement: own syntax::Stateme
 fn make_statement_node(cursor: mut TokenCursor, start: UInt64, kind: own syntax::StatementKind) -> syntax::Statement
   uses Panic
 {
-  syntax::Statement(kind: own kind, id: allocate_id_from(mut cursor, start_index: start))
+  syntax::Statement(own kind, id: allocate_id_from(mut cursor, start_index: start))
 }
 
 fn parse_statement(cursor: mut TokenCursor) -> Result[syntax::Statement, Failure]
@@ -1159,20 +1164,20 @@ fn parse_statement(cursor: mut TokenCursor) -> Result[syntax::Statement, Failure
           let mut_token = take(mut cursor)
           report_let_mut(mut cursor, let_token, mut_token)
           let kind = parse_binding(mut cursor, is_var: true)?
-          return Ok(make_statement_node(mut cursor, start, kind: own kind))
+          return Ok(make_statement_node(mut cursor, start, own kind))
         }
         let kind = parse_binding(mut cursor, is_var: false)?
-        return Ok(make_statement_node(mut cursor, start, kind: own kind))
+        return Ok(make_statement_node(mut cursor, start, own kind))
       }
       Var => {
         advance(mut cursor)
         let kind = parse_binding(mut cursor, is_var: true)?
-        return Ok(make_statement_node(mut cursor, start, kind: own kind))
+        return Ok(make_statement_node(mut cursor, start, own kind))
       }
       For => {
         advance(mut cursor)
         let kind = parse_for_loop(mut cursor, mode: syntax::LoopMode.Sequential)?
-        return Ok(make_statement_node(mut cursor, start, kind: own kind))
+        return Ok(make_statement_node(mut cursor, start, own kind))
       }
       While => {
         advance(mut cursor)
@@ -1180,7 +1185,7 @@ fn parse_statement(cursor: mut TokenCursor) -> Result[syntax::Statement, Failure
         let clauses = parse_loop_clauses(mut cursor)?
         let body = parse_body(mut cursor)?
         return Ok(
-          make_statement_node(mut cursor, start, kind: syntax::StatementKind.While(condition: own condition, clauses: own clauses, body: own body)),
+          make_statement_node(mut cursor, start, kind: syntax::StatementKind.While(own condition, own clauses, own body)),
         )
       }
       Parallel => {
@@ -1190,7 +1195,7 @@ fn parse_statement(cursor: mut TokenCursor) -> Result[syntax::Statement, Failure
         } else {
           syntax::StatementKind.Parallel(parse_body(mut cursor)?)
         }
-        return Ok(make_statement_node(mut cursor, start, kind: own kind))
+        return Ok(make_statement_node(mut cursor, start, own kind))
       }
       Concurrent => {
         advance(mut cursor)
@@ -1199,7 +1204,7 @@ fn parse_statement(cursor: mut TokenCursor) -> Result[syntax::Statement, Failure
         } else {
           syntax::StatementKind.Concurrent(parse_body(mut cursor)?)
         }
-        return Ok(make_statement_node(mut cursor, start, kind: own kind))
+        return Ok(make_statement_node(mut cursor, start, own kind))
       }
       Proof => {
         advance(mut cursor)
@@ -1215,7 +1220,7 @@ fn parse_statement(cursor: mut TokenCursor) -> Result[syntax::Statement, Failure
           advance(mut cursor)
           advance(mut cursor)
         }
-        return Ok(make_statement_node(mut cursor, start, kind: syntax::StatementKind.Assert(value: own value, by_bit_vector)))
+        return Ok(make_statement_node(mut cursor, start, kind: syntax::StatementKind.Assert(own value, by_bit_vector)))
       }
       _ => {}
     }
@@ -1233,7 +1238,7 @@ fn parse_statement(cursor: mut TokenCursor) -> Result[syntax::Statement, Failure
   if find_assignment_operator(cursor.peek_kind()) is Some(operator) {
     advance(mut cursor)
     let value = parse_expression(mut cursor)?
-    return Ok(make_statement_node(mut cursor, start, kind: syntax::StatementKind.Assignment(target: own target, operator, value: own value)))
+    return Ok(make_statement_node(mut cursor, start, kind: syntax::StatementKind.Assignment(own target, operator, own value)))
   }
   let operator = cursor.peek()
   if operator.kind == token::Kind.Foreign(token::Foreign.ColonEqual) {
@@ -1244,22 +1249,42 @@ fn parse_statement(cursor: mut TokenCursor) -> Result[syntax::Statement, Failure
       make_statement_node(
         mut cursor,
         start,
-        kind: syntax::StatementKind.Assignment(target: own target, operator: syntax::Assignment.Assign, value: own value),
+        kind: syntax::StatementKind.Assignment(own target, operator: syntax::Assignment.Assign, own value),
       ),
     )
   }
   Ok(make_statement_node(mut cursor, start, kind: syntax::StatementKind.Expression(own target)))
 }
 
+fn parse_binding_annotation(cursor: mut TokenCursor, pattern: syntax::Pattern) -> Result[Option[syntax::TypeExpression], Failure]
+  uses Panic, RunForever
+{
+  let next = cursor.peek()
+  let is_tuple = match pattern.kind {
+    Tuple(_) => true
+    _ => false
+  }
+  if is_tuple && next.kind == token::Kind.Punctuation(token::Punctuation.Colon) {
+    report(
+      mut cursor,
+      "parser.unexpected_token",
+      next.span,
+      "A tuple pattern takes no type annotation: the value's tuple type gives each pattern the type of its field.",
+    )
+    return Err(Failure.Failed)
+  }
+  if accept_punctuation(mut cursor, token::Punctuation.Colon) {
+    Ok(Some(parse_type_expression(mut cursor)?))
+  } else {
+    Ok(None)
+  }
+}
+
 fn parse_binding(cursor: mut TokenCursor, is_var: Bool) -> Result[syntax::StatementKind, Failure]
   uses Panic, RunForever
 {
-  let pattern = parse_pattern(mut cursor)?
-  let annotation = if accept_punctuation(mut cursor, punctuation: token::Punctuation.Colon) {
-    Some(parse_type_expression(mut cursor)?)
-  } else {
-    None
-  }
+  let pattern = parse_binding_pattern(mut cursor)?
+  let annotation = parse_binding_annotation(mut cursor, pattern)?
   expect_punctuation(mut cursor, punctuation: token::Punctuation.Equal)?
   let value = parse_expression(mut cursor)?
   var else_block: Option[syntax::Block] = None
@@ -1290,18 +1315,14 @@ fn parse_binding(cursor: mut TokenCursor, is_var: Bool) -> Result[syntax::Statem
     advance(mut cursor)
     else_block = Some(parse_body(mut cursor)?)
   }
-  Ok(syntax::StatementKind.Let(is_var, pattern: own pattern, annotation: own annotation, value: own value, else_block: own else_block))
+  Ok(syntax::StatementKind.Let(is_var, own pattern, own annotation, own value, own else_block))
 }
 
 fn parse_for_loop(cursor: mut TokenCursor, mode: syntax::LoopMode) -> Result[syntax::StatementKind, Failure]
   uses Panic, RunForever
 {
-  let pattern = parse_pattern(mut cursor)?
-  let annotation = if accept_punctuation(mut cursor, punctuation: token::Punctuation.Colon) {
-    Some(parse_type_expression(mut cursor)?)
-  } else {
-    None
-  }
+  let pattern = parse_binding_pattern(mut cursor)?
+  let annotation = parse_binding_annotation(mut cursor, pattern)?
   expect_keyword(mut cursor, keyword: token::Keyword.In)?
   let iterable = parse_expression(mut cursor)?
   let open_operator = match iterable.kind {
@@ -1324,11 +1345,11 @@ fn parse_for_loop(cursor: mut TokenCursor, mode: syntax::LoopMode) -> Result[syn
   Ok(
     syntax::StatementKind.For(
       mode,
-      pattern: own pattern,
-      annotation: own annotation,
-      iterable: own iterable,
-      clauses: own clauses,
-      body: own body,
+      own pattern,
+      own annotation,
+      own iterable,
+      own clauses,
+      own body,
     ),
   )
 }
@@ -1353,13 +1374,13 @@ fn parse_loop_clauses(cursor: mut TokenCursor) -> Result[List[syntax::LoopClause
       }
       let id = allocate_id_from(mut cursor, start_index: start)
       let condition = parse_condition_after(mut cursor, keyword: token::Keyword.When)?
-      mut clauses.push(syntax::LoopClause(kind: syntax::LoopClauseKind.LoopCost(own cost_clause), condition: own condition, id))
+      mut clauses.push(syntax::LoopClause(kind: syntax::LoopClauseKind.LoopCost(own cost_clause), own condition, id))
     } else if kind == token::Kind.Keyword(token::Keyword.Invariant) {
       advance(mut cursor)
       let value = parse_expression(mut cursor)?
       let id = allocate_id_from(mut cursor, start_index: start)
       let condition = parse_condition_after(mut cursor, keyword: token::Keyword.When)?
-      mut clauses.push(syntax::LoopClause(kind: syntax::LoopClauseKind.Invariant(own value), condition: own condition, id))
+      mut clauses.push(syntax::LoopClause(kind: syntax::LoopClauseKind.Invariant(own value), own condition, id))
     } else if kind == token::Kind.Keyword(token::Keyword.Decreases) {
       let keyword = take(mut cursor)
       var has_decreases = false
@@ -1379,7 +1400,7 @@ fn parse_loop_clauses(cursor: mut TokenCursor) -> Result[List[syntax::LoopClause
       let measures = parse_expression_list(mut cursor)?
       let id = allocate_id_from(mut cursor, start_index: start)
       let condition = parse_condition_after(mut cursor, keyword: token::Keyword.When)?
-      mut clauses.push(syntax::LoopClause(kind: syntax::LoopClauseKind.LoopDecreases(own measures), condition: own condition, id))
+      mut clauses.push(syntax::LoopClause(kind: syntax::LoopClauseKind.LoopDecreases(own measures), own condition, id))
     } else {
       break
     }
