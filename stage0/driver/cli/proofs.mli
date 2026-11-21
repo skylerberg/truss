@@ -4,4 +4,6 @@ val check : Database.t -> Workspace.snapshot -> Path.package list -> Path.file l
 val list_diagnostics : t -> Path.file -> Diagnostic.t list
 val list_warnings : t -> Path.file -> Diagnostic.t list
 val list_states : t -> Path.file -> Source.span Prover.state list
-val list_holes : Workspace.snapshot -> t -> Path.t -> (string * int * int) list
+
+val list_holes :
+  Workspace.snapshot -> t -> reached:Path.t list -> (string * int * int * Path.t list) list

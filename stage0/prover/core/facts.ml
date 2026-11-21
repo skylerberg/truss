@@ -202,6 +202,9 @@ let assume context (frame : State.frame) term =
 let locate (context : State.context) (source : State.source) origin =
   if is_home context source then Obligation.Node origin else Whole_definition
 
+let add_hole (context : State.context) hole =
+  if not (List.mem hole context.holes) then context.holes <- hole :: context.holes
+
 let insert_line_before_body (context : State.context) (line : Obligation.message) =
   let names = context.lookups.interface.names in
   let text = names.read_text context.home in

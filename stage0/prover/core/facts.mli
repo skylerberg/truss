@@ -82,6 +82,7 @@ val make_obligation :
   Obligation.t
 
 val locate : State.context -> State.source -> Core.origin -> Obligation.location
+val add_hole : State.context -> Resolve.Names.key * Obligation.location -> unit
 val quote : State.source -> Core.origin -> Obligation.piece
 val is_home : State.context -> State.source -> bool
 val is_in_home_package : State.context -> State.source -> bool

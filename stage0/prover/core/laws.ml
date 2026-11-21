@@ -99,8 +99,7 @@ let make_law_fact (context : State.context) (frame : State.frame) source ~substi
     with Facts.Unsupported _ -> None
   end
 
-let assume_laws (context : State.context) frame ~at (trait : Types.trait_reference) (ty : Types.ty)
-    =
+let assume_laws (context : State.context) frame (trait : Types.trait_reference) (ty : Types.ty) =
   let key = (trait, ty) in
   if not (List.mem key context.laws_assumed) then begin
     context.laws_assumed <- key :: context.laws_assumed;
@@ -112,11 +111,11 @@ let assume_laws (context : State.context) frame ~at (trait : Types.trait_referen
           (fun (source, (law : Mir.law)) ->
             match make_law_fact context frame source ~substitution law with
             | Some fact_ ->
-                (match impl with
-                | Some impl when Contracts.is_law_unshown context.lookups impl required ty law.name
-                  ->
-                    context.holes <- (context.home, at) :: context.holes
-                | _ -> ());
+                Option.iter
+                  (fun impl ->
+                    List.iter (Facts.add_hole context)
+                      (Contracts.list_law_holes context.lookups impl required ty law.name))
+                  impl;
                 Facts.add_frame_fact context frame fact_
             | None -> ())
           (list_laws context required.trait))

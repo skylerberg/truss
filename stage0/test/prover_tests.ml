@@ -1463,7 +1463,7 @@ let () =
   Harness.test "a potential its invariant keeps at or above zero" (fun () ->
       expect_proven Fixtures.Prover.debt_potential)
 
-let count_holes text =
+let count_holes ?(in_ = fun (_ : Path.t) -> true) text =
   let packages = Support.setup [ ("app::main", text) ] in
   let prove_key =
     Support.read_proofs (Support.make_database packages) (Support.parse_file "app::main")
@@ -1471,10 +1471,15 @@ let count_holes text =
   List.fold_left
     (fun total (declaration : Resolve.Names.declaration) ->
       match prove_key declaration.key with
-      | Obligations outcome -> total + List.length outcome.holes
-      | Unsupported _ | Not_proven_here -> total)
+      | Obligations outcome when in_ declaration.key.path -> total + List.length outcome.holes
+      | Obligations _ | Unsupported _ | Not_proven_here -> total)
     0
     (Support.list_declarations packages (Support.parse_module "app::main"))
+
+let is_function name (path : Path.t) =
+  match path with Top { name = top; _ } -> top = name | _ -> false
+
+let is_impl (path : Path.t) = match path with Impl _ -> true | _ -> false
 
 let () =
   Harness.test "a todo in a theorem is a hole, not a failure" (fun () ->
@@ -1489,17 +1494,18 @@ let () =
           if count_holes text <> holes then Harness.fail "%d holes" (count_holes text))
         [
           (Fixtures.Prover.todo_requires_with_a_caller, 2);
-          (Fixtures.Prover.todo_ensures_with_a_caller, 3);
+          (Fixtures.Prover.todo_ensures_with_a_caller, 4);
           (Fixtures.Prover.positive_with_a_todo_invariant, 2);
         ]);
   Harness.test "a todo in a proof block leaves the rest of its path to it" (fun () ->
       let text = Fixtures.Prover.proof_block_of_todo in
       expect_proven text;
       if count_holes text <> 1 then Harness.fail "%d holes" (count_holes text));
-  Harness.test "a contract on a body that is not written waits for it, and is no hole" (fun () ->
+  Harness.test "a contract on a body that is not written waits for it, and the todo is a hole"
+    (fun () ->
       let text = Fixtures.Prover.todo_body_with_an_ensures in
       expect_proven text;
-      if count_holes text <> 0 then Harness.fail "%d holes" (count_holes text));
+      if count_holes text <> 1 then Harness.fail "%d holes" (count_holes text));
   Harness.test "the code before a todo is still proven" (fun () ->
       expect_not_proven Fixtures.Prover.element_read_before_a_todo "prover.out_of_bounds");
   Harness.test "a constant, a field default, or a parameter default left todo is read" (fun () ->
@@ -1539,7 +1545,14 @@ let () =
     (fun () -> expect_not_proven Fixtures.Prover.scaled_impl "prover.ensures");
   Harness.test "a law of an unfinished impl is a hole where it is assumed" (fun () ->
       let text = Fixtures.Prover.sized_law_of_an_unfinished_impl in
-      if count_holes text <> 1 then Harness.fail "%d holes" (count_holes text));
+      let holes = count_holes ~in_:(is_function "f") text in
+      if holes <> 1 then Harness.fail "%d holes" holes);
+  Harness.test "an unfinished impl of a trait with a law holds each todo as a hole" (fun () ->
+      let holes = count_holes ~in_:is_impl Fixtures.Prover.sized_law_of_an_unfinished_impl in
+      if holes <> 1 then Harness.fail "%d holes" holes);
+  Harness.test "an unfinished impl of a trait without laws holds no hole" (fun () ->
+      let holes = count_holes ~in_:is_impl Fixtures.Prover.box_of_an_unfinished_impl_without_laws in
+      if holes <> 0 then Harness.fail "%d holes" holes);
   Harness.test "a law whose proof holds a todo is a hole where it is assumed" (fun () ->
       let text = Fixtures.Prover.zero_law_with_a_todo_proof in
       if count_holes text <> 2 then Harness.fail "%d holes" (count_holes text));

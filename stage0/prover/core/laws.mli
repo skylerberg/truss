@@ -17,14 +17,7 @@ val bind_law_parameters :
   Logic.term list ->
   State.frame
 
-val assume_laws :
-  State.context ->
-  State.frame ->
-  at:Obligation.location ->
-  Types.trait_reference ->
-  Types.ty ->
-  unit
-
+val assume_laws : State.context -> State.frame -> Types.trait_reference -> Types.ty -> unit
 val has_method_cost : State.context -> Invocation.callee -> Path.t -> bool
 
 val check_named_callback :

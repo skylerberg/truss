@@ -783,8 +783,8 @@ let () =
       if status <> 1 then fail "did not refuse";
       if
         not
-          (String.includes ~affix:"main.truss:3:5: `todo` in a proof or a contract can be reached"
-             output)
+          (String.includes
+             ~affix:"main.truss:3:5: `todo` leaves unfinished a proof that `main` relies on" output)
       then fail "%s" output);
   test "build refuses a program that can reach a hole in a contract" (fun () ->
       let root = make_package [ ("main.truss", Fixtures.Cli.main_with_a_todo_requires) ] in
@@ -792,9 +792,75 @@ let () =
       if status <> 1 then fail "did not refuse";
       if
         not
-          (String.includes ~affix:"main.truss:7:12: `todo` in a proof or a contract can be reached"
+          (String.includes
+             ~affix:"main.truss:7:12: `todo` leaves unfinished a proof that `main` relies on" output)
+      then fail "%s" output);
+  test "build refuses a program whose proof relies on a theorem that relies on a hole" (fun () ->
+      let root =
+        make_package [ ("main.truss", Fixtures.Cli.next_through_a_theorem_that_relies_on_a_hole) ]
+      in
+      let status, output = run_truss [ "build"; "-C"; root ] in
+      if status <> 1 then fail "status %d: %s" status output;
+      if
+        not
+          (String.includes
+             ~affix:
+               "main.truss:4:3: `todo` leaves unfinished a proof that `main` relies on, so the \
+                program cannot be built.\n\
+               \    demo::next -> demo::step -> demo::base"
              output)
-      then fail "%s" output)
+      then fail "%s" output);
+  test "build refuses a program whose proof relies on a function whose body is a todo" (fun () ->
+      let root =
+        make_package [ ("main.truss", Fixtures.Cli.next_through_a_function_whose_body_is_a_todo) ]
+      in
+      let status, output = run_truss [ "build"; "-C"; root ] in
+      if status <> 1 then fail "status %d: %s" status output;
+      if
+        not
+          (String.includes
+             ~affix:
+               "main.truss:4:3: `todo` leaves unfinished a proof that `main` relies on, so the \
+                program cannot be built.\n\
+               \    demo::next -> demo::bound"
+             output)
+      then fail "%s" output);
+  test "build refuses a program that gives generic code an impl whose law proof is a hole"
+    (fun () ->
+      let root =
+        make_package
+          [ ("main.truss", Fixtures.Cli.generic_proof_relying_on_a_law_proof_with_a_hole) ]
+      in
+      let status, output = run_truss [ "build"; "-C"; root ] in
+      if status <> 1 then fail "status %d: %s" status output;
+      if
+        not
+          (String.includes
+             ~affix:
+               "main.truss:25:3: `todo` leaves unfinished a proof that `main` relies on, so the \
+                program cannot be built.\n\
+               \    demo::main -> demo::impl demo::Combine for demo::Maximum"
+             output)
+      then fail "%s" output);
+  test "build refuses a program that gives generic code an unfinished impl of a trait with a law"
+    (fun () ->
+      let root =
+        make_package
+          [ ("main.truss", Fixtures.Cli.unreached_todo_in_an_impl_of_a_trait_with_a_law) ]
+      in
+      let status, output = run_truss [ "build"; "-C"; root ] in
+      if status <> 1 then fail "status %d: %s" status output;
+      if not (String.includes ~affix:"main.truss:24:5: `todo` leaves unfinished a proof" output)
+      then fail "%s" output);
+  test "build ignores an unreached todo in an impl of a trait without laws" (fun () ->
+      let root =
+        make_package
+          [ ("main.truss", Fixtures.Cli.unreached_todo_in_an_impl_of_a_trait_without_laws) ]
+      in
+      let status, output = run_truss [ "build"; "-C"; root ] in
+      if status <> 1 then fail "status %d: %s" status output;
+      if not (String.includes ~affix:"main.truss:24:5:" output) then fail "%s" output;
+      if String.includes ~affix:"main.truss:10:5:" output then fail "%s" output)
 
 let encode_report_record kind fields =
   let payload = Buffer.create 32 in
@@ -1445,6 +1511,15 @@ let () =
       in
       expect_strings ~expected:[] (list_blocks "say");
       expect_strings ~expected:[ "main"; "test demo \"speaks\"" ] (list_blocks "shout"));
+  test "a hole in a theorem that main's proofs rely on blocks main" (fun () ->
+      match
+        list_holes
+          (make_package
+             [ ("main.truss", Fixtures.Cli.next_through_a_theorem_that_relies_on_a_hole) ])
+      with
+      | [ hole ] ->
+          expect_strings ~expected:[ "main" ] (list_strings (Cli.Json.lookup_field "blocks" hole))
+      | found -> fail "found %d holes" (List.length found));
   test "a hole blocks a test that also reaches a type defined as todo" (fun () ->
       match
         list_holes

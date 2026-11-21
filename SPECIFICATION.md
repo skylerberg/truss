@@ -2954,9 +2954,13 @@ public opaque type Session = todo
   against the signature of an unfinished function.
 - A `todo` in a specification is a hole: on the paths through it, the
   specification is neither proven nor assumed.
-- A release build refuses a program whose `main` can reach a `todo`, in its
-  code or its specifications. In a development build, a `todo` that runs
-  stops the program and reports its position.
+- The laws of an `impl` that holds a `todo` are not proven, so the `todo` is
+  a hole in each proof that assumes them.
+- A release build refuses a program whose `main` can reach a `todo`. It
+  reaches the code that `main` calls, the proofs of that code, the
+  definitions whose contracts those proofs read, and the `impl`s whose
+  methods that code calls or passes to generic code. In a development
+  build, a `todo` that runs stops the program and reports its position.
 - A type defined as `todo` can be named, but its contents cannot be used.
 
 ## Debug output
