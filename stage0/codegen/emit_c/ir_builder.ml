@@ -338,30 +338,29 @@ let find_storage_local (place : Lowered.place) =
   | Local local when not (List.mem Lowered.Deref place.projections) -> Some local
   | Local _ | Static _ -> None
 
-let rec list_operand_address_taken : Lowered.operand -> Lowered.local list = function
-  | Copy place | Move place -> list_index_address_taken place
-  | Address { place; _ } | Moved_address place -> list_place_address_taken place
+let rec list_operand_addressed : Lowered.operand -> Lowered.local list = function
+  | Copy place | Move place -> list_index_addressed place
+  | Address { place; _ } | Moved_address place -> list_place_written_or_addressed place
   | Constant _ -> []
 
-and list_index_address_taken (place : Lowered.place) =
+and list_index_addressed (place : Lowered.place) =
   List.concat_map
     (function
-      | Lowered.Index operand -> list_operand_address_taken operand
+      | Lowered.Index operand -> list_operand_addressed operand
       | Field _ | Variant_field _ | Deref -> [])
     place.projections
 
-and list_place_address_taken place =
-  Option.to_list (find_storage_local place) @ list_index_address_taken place
+and list_place_written_or_addressed place =
+  Option.to_list (find_storage_local place) @ list_index_addressed place
 
-let list_operands_address_taken operands = List.concat_map list_operand_address_taken operands
+let list_operands_addressed operands = List.concat_map list_operand_addressed operands
 
-let list_rvalue_address_taken : Lowered.rvalue -> Lowered.local list = function
-  | Use operand | Unary (_, operand) | Convert (operand, _) -> list_operand_address_taken operand
-  | Binary (_, left, right) | Compare (_, left, right) ->
-      list_operands_address_taken [ left; right ]
-  | Build { fields; _ } -> list_operands_address_taken (List.map snd fields)
-  | Is_variant (place, _) -> list_index_address_taken place
-  | Function_value { environment; _ } -> list_operands_address_taken (Option.to_list environment)
+let list_rvalue_addressed : Lowered.rvalue -> Lowered.local list = function
+  | Use operand | Unary (_, operand) | Convert (operand, _) -> list_operand_addressed operand
+  | Binary (_, left, right) | Compare (_, left, right) -> list_operands_addressed [ left; right ]
+  | Build { fields; _ } -> list_operands_addressed (List.map snd fields)
+  | Is_variant (place, _) -> list_index_addressed place
+  | Function_value { environment; _ } -> list_operands_addressed (Option.to_list environment)
 
 let list_target_operands : Lowered.target -> Lowered.operand list = function
   | Direct _ | Intrinsic _ | Foreign _ -> []
@@ -372,36 +371,36 @@ let list_target_operands : Lowered.target -> Lowered.operand list = function
 let list_failure_operands ~message ~length ~reported ~trace =
   message :: length :: (Option.to_list reported @ Option.to_list trace)
 
-let list_destination_address_taken : Lowered.destination -> Lowered.local list = function
+let list_destination_written_or_addressed : Lowered.destination -> Lowered.local list = function
   | Discarded -> []
-  | Returned place | Written place -> list_place_address_taken place
+  | Returned place | Written place -> list_place_written_or_addressed place
 
-let list_statement_address_taken : Lowered.statement -> Lowered.local list = function
-  | Assign (place, rvalue) -> list_place_address_taken place @ list_rvalue_address_taken rvalue
+let list_statement_written_or_addressed : Lowered.statement -> Lowered.local list = function
+  | Assign (place, rvalue) -> list_place_written_or_addressed place @ list_rvalue_addressed rvalue
   | Call { target; arguments; result } ->
-      list_operands_address_taken (list_target_operands target @ arguments)
-      @ list_destination_address_taken result
-  | Drop place | Free_block { place; _ } -> list_place_address_taken place
+      list_operands_addressed (list_target_operands target @ arguments)
+      @ list_destination_written_or_addressed result
+  | Drop place | Free_block { place; _ } -> list_place_written_or_addressed place
   | Defer_free_block { lend; place; _ } ->
-      list_operand_address_taken lend @ list_place_address_taken place
-  | Echo { text; length; _ } -> list_operands_address_taken [ text; length ]
+      list_operand_addressed lend @ list_place_written_or_addressed place
+  | Echo { text; length; _ } -> list_operands_addressed [ text; length ]
   | Fail_obligation_when { test = _, left, right; message; length; reported; trace; _ } ->
-      list_operands_address_taken
+      list_operands_addressed
         (left :: right :: list_failure_operands ~message ~length ~reported ~trace)
-  | Fork { branches } -> list_operands_address_taken (List.map snd branches)
+  | Fork { branches } -> list_operands_addressed (List.map snd branches)
   | Fork_range { environment; first; last; _ } ->
-      list_operands_address_taken [ environment; first; last ]
+      list_operands_addressed [ environment; first; last ]
 
-let list_terminator_address_taken : Lowered.terminator -> Lowered.local list = function
+let list_terminator_addressed : Lowered.terminator -> Lowered.local list = function
   | Goto _ | Unreachable -> []
-  | Branch { test = _, left, right; _ } -> list_operands_address_taken [ left; right ]
-  | Switch { value; _ } -> list_operand_address_taken value
-  | Switch_variant { place; _ } -> list_index_address_taken place
-  | Return operand -> list_operands_address_taken (Option.to_list operand)
+  | Branch { test = _, left, right; _ } -> list_operands_addressed [ left; right ]
+  | Switch { value; _ } -> list_operand_addressed value
+  | Switch_variant { place; _ } -> list_index_addressed place
+  | Return operand -> list_operands_addressed (Option.to_list operand)
   | Fail { message; length; reported; trace; _ } ->
-      list_operands_address_taken (list_failure_operands ~message ~length ~reported ~trace)
+      list_operands_addressed (list_failure_operands ~message ~length ~reported ~trace)
 
-let compute_address_taken builder functions =
+let compute_written_or_addressed builder functions =
   let own = Array.map (fun _ -> Locals.empty) functions in
   Dynarray.iteri
     (fun block (body : block_body) ->
@@ -409,10 +408,10 @@ let compute_address_taken builder functions =
       | Some number ->
           let locals =
             List.concat_map
-              (fun (_, statement) -> list_statement_address_taken statement)
+              (fun (_, statement) -> list_statement_written_or_addressed statement)
               body.statements
             @ Option.fold ~none:[]
-                ~some:(fun (_, terminator) -> list_terminator_address_taken terminator)
+                ~some:(fun (_, terminator) -> list_terminator_addressed terminator)
                 body.terminator
           in
           own.(number) <- Locals.union (Locals.of_list locals) own.(number)
@@ -463,7 +462,7 @@ let find_homes functions ~mentioned =
     functions;
   home
 
-let list_captures functions ~home ~mentioned ~address_taken ~is_local_to =
+let list_captures functions ~home ~mentioned ~written_or_addressed ~is_scalar ~is_local_to =
   let captured = Array.make (Array.length functions) Locals.empty in
   Array.iteri
     (fun number locals ->
@@ -489,10 +488,18 @@ let list_captures functions ~home ~mentioned ~address_taken ~is_local_to =
           {
             local;
             field = Printf.sprintf "capture%d" position;
-            passing = (if Locals.mem local address_taken.(number) then By_address else By_value);
+            passing =
+              (if is_scalar local && not (Locals.mem local written_or_addressed.(number)) then
+                 By_value
+               else By_address);
           })
         (Locals.elements locals))
     captured
+
+let is_scalar_type (emission : Emission.t) : Lowered.ty -> bool = function
+  | Pointer _ | Raw _ -> true
+  | Value ty -> not (C_types.is_struct emission.types ty)
+  | Environment _ | Evidence _ | Capabilities _ | Trace | Lend | Lend_mark -> false
 
 let make_address_type builder local : Lowered.ty =
   Pointer { target = lookup_local_type builder local; writable = true }
@@ -637,8 +644,13 @@ let write_functions builder ~enclosing_symbol { parameters; result; returns } =
     || Hashtbl.find_opt home local = Some number
     || Lowered.is_erased builder.env (lookup_local_type builder local)
   in
-  let address_taken = compute_address_taken builder functions in
-  let captures = list_captures functions ~home ~mentioned ~address_taken ~is_local_to in
+  let written_or_addressed = compute_written_or_addressed builder functions in
+  let is_scalar local =
+    is_scalar_type functions.(0).code.emission (lookup_local_type builder local)
+  in
+  let captures =
+    list_captures functions ~home ~mentioned ~written_or_addressed ~is_scalar ~is_local_to
+  in
   register_environments builder functions ~captures;
   let fills = print_fills builder functions ~captures in
   let render_body number (function_ : function_) =

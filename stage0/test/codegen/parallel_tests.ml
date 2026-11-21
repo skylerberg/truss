@@ -187,6 +187,46 @@ let () =
 
 let () =
   Codegen_support.test
+    "a shared record that a region only reads arrives as a restrict pointer, not as a copy"
+    (fun () ->
+      let point_shape =
+        ( "Point",
+          Memory_layout.Record
+            [
+              Codegen_support.field "x" Codegen_support.int32;
+              Codegen_support.field "y" Codegen_support.int32;
+            ] )
+      in
+      let env = Codegen_support.make_shape_env ~extra:[ point_shape ] () in
+      let builder = Emit_c.Ir_builder.create env ~item:(Codegen_support.code_item "entry") in
+      let point =
+        Emit_c.Ir_builder.allocate_local builder ~name:"point"
+          (Codegen_support.value (Codegen_support.named "Point"))
+      in
+      let sum = Emit_c.Ir_builder.allocate_local builder ~name:"sum" lowered_int32 in
+      let field name = Codegen_support.at ~projections:[ Field name ] point in
+      Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
+      Emit_c.Ir_builder.emit builder (Assign (field "x", Use (Codegen_support.constant_int32 3)));
+      Emit_c.Ir_builder.emit builder (Assign (field "y", Use (Codegen_support.constant_int32 4)));
+      let region =
+        Emit_c.Ir_builder.outline builder ~index:0 ~parts:[] (fun () ->
+            Emit_c.Ir_builder.emit builder
+              (Assign (Codegen_support.at sum, Binary (Add, Copy (field "x"), Copy (field "y"))));
+            Emit_c.Ir_builder.finish builder (Return None))
+      in
+      Emit_c.Ir_builder.emit builder (Fork { branches = [ (0, take_address region) ] });
+      Emit_c.Ir_builder.finish builder (Return (Some (Codegen_support.copy sum)));
+      let fragment =
+        Emit_c.Ir_builder.build builder
+          { parameters = []; result = Some lowered_int32; returns = true }
+      in
+      let c = Emit_c.For_testing.render_c fragment in
+      expect_c_includes c [ " *restrict l0_point_address, int32_t *restrict l1_sum_address)" ];
+      Codegen_support.expect_status ~extra:[ point_shape ] 7
+        [ Codegen_support.make_program_fragment fragment ])
+
+let () =
+  Codegen_support.test
     "a coroutine runs when resumed, switches back when it suspends, and ends when it returns"
     (fun () ->
       let work : Ground.function_type =
