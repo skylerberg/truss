@@ -13,6 +13,7 @@ type reference =
   | Local of Lowered.local
   | Byte_constant of int
   | Nested_function of int
+  | Nested_body of int
   | Static of int
   | Helper of C_runtime.helper
   | Capability of Path.t
