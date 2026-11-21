@@ -82,7 +82,7 @@ let describe_target (target : Resolve.target) =
   | Type_parameter _ | Value_parameter _ -> ("a generic parameter", None)
   | Capability_parameter _ -> ("a capability parameter", None)
   | Variant (path, name) -> (Printf.sprintf "the variant %s of %s" name (Path.show path), None)
-  | Module module_ -> (Printf.sprintf "the module %s" (Path.show_module module_), None)
+  | Module { module_; _ } -> (Printf.sprintf "the module %s" (Path.show_module module_), None)
   | Field name -> (Printf.sprintf "the field %s" name, None)
   | Result_value -> ("the result, in a specification", None)
   | Old -> ("a value as it was when the function was called", None)

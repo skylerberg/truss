@@ -1279,6 +1279,49 @@ let () =
           (String.includes ~affix:"use demo.outlook" main
           && String.includes ~affix:"outlook.total([1]) + demo.outlook.total([2])" main)
       then fail "wrote %s" main);
+  test "renaming a module reached through its parent's import rewrites the names after the import"
+    (fun () ->
+      let root =
+        make_package
+          [
+            ("weather/weather.truss", Fixtures.Cli.two_files_weather);
+            ("weather/daily/daily.truss", "public fn forecast() -> UInt64 {\n  1\n}\n");
+            ( "main.truss",
+              "use demo.weather\n\n\
+               fn main(arguments: List[String]) -> ExitCode {\n\
+              \  let _ = weather.daily.forecast()\n\
+              \  ExitCode.success\n\
+               }\n" );
+          ]
+      in
+      if rename root "demo.weather.daily" "demo.weather.today" <> 0 then fail "refused";
+      let main = read root "main.truss" in
+      if
+        not
+          (String.includes ~affix:"use demo.weather\n" main
+          && String.includes ~affix:"weather.today.forecast()" main)
+      then fail "wrote %s" main);
+  test "renaming a module writes the full path of a submodule reached through its import" (fun () ->
+      let root =
+        make_package
+          [
+            ("weather/weather.truss", Fixtures.Cli.two_files_weather);
+            ("weather/daily/daily.truss", "public fn forecast() -> UInt64 {\n  1\n}\n");
+            ( "main.truss",
+              "use demo.weather\n\n\
+               fn main(arguments: List[String]) -> ExitCode {\n\
+              \  let _ = weather.total([1]) + weather.daily.forecast()\n\
+              \  ExitCode.success\n\
+               }\n" );
+          ]
+      in
+      if rename root "demo.weather" "demo.outlook" <> 0 then fail "refused";
+      let main = read root "main.truss" in
+      if
+        not
+          (String.includes ~affix:"use demo.outlook" main
+          && String.includes ~affix:"outlook.total([1]) + demo.weather.daily.forecast()" main)
+      then fail "wrote %s" main);
   test "renaming in a package with an owner rewrites a full path into it" (fun () ->
       let root = make_directory owned in
       if rename root "acme.geometry.vector.double" "twice" <> 0 then fail "refused";

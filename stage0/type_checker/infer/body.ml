@@ -359,7 +359,7 @@ let list_used_packages (resolved : Resolve.resolved) ~evidence_packages (form : 
     List.filter_map
       (function
         | Some (Resolve.Definition (_, path) | Variant (path, _)) -> Some (Path.locate_package path)
-        | Some (Module module_) -> Some module_.package
+        | Some (Module { module_; _ }) -> Some module_.package
         | _ -> None)
       (Array.to_list resolved.names)
   in

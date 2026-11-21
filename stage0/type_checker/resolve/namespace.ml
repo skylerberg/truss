@@ -81,7 +81,7 @@ let find_head_type (lookups : Names.lookups) ~(from : Path.module_) ~imports (pa
         Names.Scope.lookup_module lookups ~from ~imports first.text
           (List.map (fun (name : Syntax.name) -> name.text) rest)
       with
-      | Found_module module_ -> (
+      | Found_module { module_; _ } -> (
           match
             Names.Scope.lookup_in lookups ~from module_ path.last.text
               ~is_kind:Names.Scope.is_type_kind

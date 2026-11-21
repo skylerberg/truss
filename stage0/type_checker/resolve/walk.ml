@@ -2,6 +2,12 @@ module String_map = Map.Make (String)
 
 type specification_function = Log | Power | Call_cost of Language.Metric.t | Calls
 
+type module_path = {
+  module_ : Path.module_;
+  imported : Path.module_ option;
+  last_name : Syntax.name;
+}
+
 type target =
   | Binding
   | Local of Syntax.id
@@ -11,7 +17,7 @@ type target =
   | Value_parameter of Types.parameter
   | Definition of Names.named * Path.t
   | Variant of Path.t * string
-  | Module of Path.module_
+  | Module of module_path
   | Field of string
   | Result_value
   | Old
@@ -233,7 +239,7 @@ let resolve_path state scope (first : Syntax.name) (rest : Syntax.name list) ~mo
         Compiler_bug.raise_bug ~stage:"Resolve" "the path at `%s` has no length to try" first.text
     | length :: shorter -> (
         match lookup length with
-        | Found_module module_ -> Ok (module_, length)
+        | Found_module { module_; imported } -> Ok (module_, imported, length)
         | (No_module _ | No_package _) as failure ->
             let longest_failure = Option.value longest_failure ~default:failure in
             if shorter = [] then Error (longest_failure, length)
@@ -241,9 +247,10 @@ let resolve_path state scope (first : Syntax.name) (rest : Syntax.name list) ~mo
         | failure -> Error (failure, length))
   in
   match search ~longest_failure:None module_lengths with
-  | Ok (module_, length) ->
+  | Ok (module_, imported, length) ->
       let item = List.nth rest length in
-      set_target state first (Module module_);
+      let last_name = if length = 0 then first else List.nth rest (length - 1) in
+      set_target state first (Module { module_; imported; last_name });
       ignore (find_in_module state module_ item ~types:(item.case = Upper))
   | Error (failure, length) ->
       let report = report_unresolved_path_start state scope first ~may_start_with_value failure in

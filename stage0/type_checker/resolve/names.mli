@@ -89,7 +89,7 @@ module Scope : sig
   val describe_path_start : Path.module_ -> string
 
   type module_lookup =
-    | Found_module of Path.module_
+    | Found_module of { module_ : Path.module_; imported : Path.module_ option }
     | Restricted_module
     | Ambiguous_module of Path.module_ * Path.module_
     | No_module of string
