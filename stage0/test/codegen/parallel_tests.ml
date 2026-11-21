@@ -339,3 +339,183 @@ let () =
                 (Return (Some (Codegen_support.copy 6)));
             ];
         ])
+
+let runtime_declarations =
+  {|#define _GNU_SOURCE
+#include <stddef.h>
+#include <stdint.h>
+#include <stdatomic.h>
+#include <time.h>
+
+struct truss_branch {
+  void (*run)(void *environment);
+  void *environment;
+};
+
+void truss_runtime_main(void (*code)(void *environment, uint64_t item, void *capabilities),
+                        void *environment, uint32_t requested_workers);
+void truss_runtime_parallel(const struct truss_branch *branches, uint64_t count);
+void truss_runtime_parallel_range(void (*body)(void *environment, uint64_t first, uint64_t last),
+                                  void *environment, uint64_t first, uint64_t last);
+|}
+
+let spinning =
+  {|
+static atomic_int timed_out;
+
+static int spin_until(atomic_int *flag, long milliseconds) {
+  struct timespec start, now;
+  clock_gettime(CLOCK_MONOTONIC, &start);
+  while (!atomic_load(flag)) {
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    long elapsed = (now.tv_sec - start.tv_sec) * 1000 + (now.tv_nsec - start.tv_nsec) / 1000000;
+    if (elapsed > milliseconds) return 0;
+  }
+  return 1;
+}
+
+static void wait_or_time_out(atomic_int *flag) {
+  if (!spin_until(flag, 2000)) atomic_store(&timed_out, 1);
+}
+|}
+
+let expect_runtime_status expected program =
+  let output = Codegen_support.make_scratch_path "runtime" in
+  match
+    C_compiler.build_executable
+      (Lazy.force Codegen_support.c_compiler)
+      Development
+      ~units:
+        [
+          ("the runtime", Startup.render_runtime ~tests:false);
+          ("the program", runtime_declarations ^ program);
+        ]
+      ~output
+  with
+  | Ok () ->
+      let status, _, errors = Process.run output [] in
+      if status <> expected then
+        Codegen_support.fail "expected status %d, got %d (%s)" expected status errors
+  | Error message -> failwith message
+
+let () =
+  Codegen_support.test
+    "a parallel block of 40 branches starts its last branch while its first still runs" (fun () ->
+      expect_runtime_status 0
+        (spinning
+       ^ {|
+static atomic_int last_ran;
+
+static void wait_for_last(void *environment) { wait_or_time_out(&last_ran); }
+static void mark_last(void *environment) { atomic_store(&last_ran, 1); }
+static void do_nothing(void *environment) {}
+
+static void run(void *environment, uint64_t item, void *capabilities) {
+  struct truss_branch branches[40];
+  branches[0] = (struct truss_branch){wait_for_last, NULL};
+  for (int index = 1; index < 39; index++) branches[index] = (struct truss_branch){do_nothing, NULL};
+  branches[39] = (struct truss_branch){mark_last, NULL};
+  truss_runtime_parallel(branches, 40);
+}
+
+int main(void) {
+  truss_runtime_main(run, NULL, 2);
+  return atomic_load(&timed_out);
+}
+|}
+        ));
+  Codegen_support.test
+    "a thread that waits for a stolen branch runs only work forked inside that branch" (fun () ->
+      expect_runtime_status 0
+        (spinning
+       ^ {|
+static atomic_int outer_started, inner_started, inner_done, unrelated_ran_early;
+
+static void fork_two(void (*first)(void *environment), void (*second)(void *environment)) {
+  struct truss_branch branches[2] = {{first, NULL}, {second, NULL}};
+  truss_runtime_parallel(branches, 2);
+}
+
+static void wait_for_inner(void *environment) { wait_or_time_out(&inner_done); }
+
+static void unrelated(void *environment) {
+  if (!atomic_load(&inner_done)) atomic_store(&unrelated_ran_early, 1);
+}
+
+static void outer(void *environment) {
+  atomic_store(&outer_started, 1);
+  wait_or_time_out(&inner_started);
+  fork_two(wait_for_inner, unrelated);
+}
+
+static void wait_for_inner_start(void *environment) { wait_or_time_out(&inner_started); }
+
+static void inner(void *environment) {
+  atomic_store(&inner_started, 1);
+  spin_until(&unrelated_ran_early, 50);
+  atomic_store(&inner_done, 1);
+}
+
+static void waiting(void *environment) {
+  wait_or_time_out(&outer_started);
+  fork_two(wait_for_inner_start, inner);
+}
+
+static void run(void *environment, uint64_t item, void *capabilities) { fork_two(waiting, outer); }
+
+int main(void) {
+  truss_runtime_main(run, NULL, 3);
+  if (atomic_load(&timed_out)) return 2;
+  return atomic_load(&unrelated_ran_early);
+}
+|}
+        ));
+  Codegen_support.test "one worker runs a parallel range as one call to its body" (fun () ->
+      expect_runtime_status 0
+        {|
+static atomic_int calls, wrong_bounds;
+
+static void count_call(void *environment, uint64_t first, uint64_t last) {
+  atomic_fetch_add(&calls, 1);
+  if (first != 0 || last != 999) atomic_store(&wrong_bounds, 1);
+}
+
+static void run(void *environment, uint64_t item, void *capabilities) {
+  truss_runtime_parallel_range(count_call, NULL, 0, 999);
+}
+
+int main(void) {
+  truss_runtime_main(run, NULL, 1);
+  return atomic_load(&calls) != 1 || atomic_load(&wrong_bounds);
+}
+|});
+  Codegen_support.test "eight workers run every index of a parallel range once" (fun () ->
+      expect_runtime_status 0
+        {|
+#define COUNT 100003
+
+static atomic_uchar visits[COUNT];
+static atomic_int wrong_bounds;
+
+static void visit(void *environment, uint64_t first, uint64_t last) {
+  if (first > last || last >= COUNT) {
+    atomic_store(&wrong_bounds, 1);
+    return;
+  }
+  for (uint64_t index = first; index <= last; index++) atomic_fetch_add(&visits[index], 1);
+}
+
+static void run(void *environment, uint64_t item, void *capabilities) {
+  truss_runtime_parallel_range(visit, NULL, 0, 0);
+  truss_runtime_parallel_range(visit, NULL, 1, 2);
+  truss_runtime_parallel_range(visit, NULL, 3, COUNT - 1);
+}
+
+int main(void) {
+  truss_runtime_main(run, NULL, 8);
+  if (atomic_load(&wrong_bounds)) return 2;
+  for (uint64_t index = 0; index < COUNT; index++)
+    if (atomic_load(&visits[index]) != 1) return 1;
+  return 0;
+}
+|})
