@@ -43,16 +43,13 @@ let find_forwarded_call state (call : Mir.call) : Forwarded.t option =
   match Mir_calls.resolve_callee state call.callee with
   | Some (path, instantiation) when Path.locate_package path = Path.standard_package ->
       let frame = Mir_places.require_mir_frame state in
-      let take_fresh_number () =
-        frame.forwarded_locals <- frame.forwarded_locals + 1;
-        -frame.forwarded_locals
-      in
       let code = Definitions.make_code state.context path instantiation in
       let passes_no_evidence (forwarded_call : Mir.call) =
         Definitions.list_evidence state.context code.substitution forwarded_call.callee.uses = []
       in
       Option.bind
-        (Forwarded.forward_call ~substitution:code.substitution ~make_fresh_local:take_fresh_number
+        (Forwarded.forward_call ~substitution:code.substitution
+           ~make_fresh_local:frame.make_forwarded_local
            (Mir_places.read_mir_graph state.context path)
            call)
         (fun (forwarded : Forwarded.t) ->
@@ -68,7 +65,7 @@ let find_forwarded_call state (call : Mir.call) : Forwarded.t option =
   | _ -> None
 
 let is_forwarded_whole (frame : Lowering.mir_frame) part =
-  match frame.body.blocks.(frame.block).terminator with
+  match frame.body.blocks.((frame.block :> int)).terminator with
   | Yield { part = Part (Borrow { place = { root = Local lent; projections = [] }; _ }); _ } ->
       lent = part
   | _ -> false
@@ -81,7 +78,7 @@ let make_owned_locals state =
         match block.terminator with For { part; _ } -> part :: parts | _ -> parts)
       [] frame.body.blocks
   in
-  Array.iteri
+  Mir.iteri_locals
     (fun local _ ->
       if
         Moves.owns frame.moves local
@@ -178,7 +175,7 @@ let outlives_call ~(owns : Mir.local -> bool) ~(is_view : Types.ty -> bool) (bod
     | Constant _ | Literal _ -> true
     | Local local when List.mem (local, holds_view) seen -> true
     | Local local -> (
-        match body.locals.(local).kind with
+        match body.locals.((local :> int)).kind with
         | Source { mode = Read | Mut; _ } when List.mem local body.parameters -> true
         | _ when List.mem local body.parameters -> holds_view
         | _ when owns local && not holds_view -> false

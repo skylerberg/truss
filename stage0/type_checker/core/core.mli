@@ -1,19 +1,21 @@
-type id = int
+module Node = Node
+
+type id = Node.t
 type desugaring = Rewrite | For_loop | Quantifier | Try | Derived
 
 type origin =
-  | Written of Syntax.id
-  | Desugared of { construct : Syntax.id; desugaring : desugaring }
+  | Written of Source.Node.t
+  | Desugared of { construct : Source.Node.t; desugaring : desugaring }
 
 type mode_keyword = {
   mode : Language.Mode.t;
-  written : Syntax.id;
-  operand : Syntax.id;
-  place : Syntax.id;
+  written : Source.Node.t;
+  operand : Source.Node.t;
+  place : Source.Node.t;
 }
 
 type local =
-  | Declared of { origin : Syntax.id; name : string }
+  | Declared of { binder : Source.Node.t; name : string }
   | Trait_parameter of { index : int; name : string }
   | Self
   | Synthetic of int

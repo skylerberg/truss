@@ -2,7 +2,7 @@ type key =
   | Type of Ground.ty
   | Block of Ground.ty * string
   | Code of Ground.function_type
-  | Environment of Lowered.Item.t * int
+  | Environment of Lowered.Item.t * Lowered.nested_function
   | Evidence of int
   | Capabilities of int
 
@@ -12,7 +12,7 @@ type reference =
   | Site of Lowered.site
   | Local of Lowered.local
   | Byte_constant of int
-  | Nested_function of int
+  | Nested_function of Lowered.nested_function
   | Static of int
   | Helper of C_runtime.helper
   | Capability of Path.t
@@ -42,7 +42,7 @@ let render_key_name = function
   | Block (ty, variant) -> Mangling.make_type_name ty ^ "_Block_" ^ variant
   | Code function_type -> Mangling.make_type_name (Function function_type) ^ "_Code"
   | Environment (item, nested_index) ->
-      Printf.sprintf "%s_Environment_%d" (Mangling.make_symbol item) nested_index
+      Printf.sprintf "%s_Environment_%d" (Mangling.make_symbol item) (nested_index :> int)
   | Evidence nested_index -> Printf.sprintf "truss_Evidence_%d" nested_index
   | Capabilities count -> Printf.sprintf "truss_Capabilities_%d" count
 

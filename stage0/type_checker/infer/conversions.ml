@@ -25,8 +25,9 @@ let convert (state : State.state) (env : State.env) ?argument ?(takes_view_as_ow
   let is_argument = Option.is_some argument in
   let record_conversion conversion =
     match (conversion, expression) with
-    | Some conversion, Some id ->
-        state.tables.conversions.(id) <- state.tables.conversions.(id) @ [ (conversion, expected) ]
+    | Some conversion, Some (id : Syntax.id) ->
+        state.tables.conversions.((id :> int)) <-
+          state.tables.conversions.((id :> int)) @ [ (conversion, expected) ]
     | _ -> ()
   in
   record_conversion

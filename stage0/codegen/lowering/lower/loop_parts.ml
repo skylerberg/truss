@@ -1,5 +1,7 @@
-let lookup_block (blocks : Mir.Graph.basic_block Dynarray.t) block = Dynarray.get blocks block
-let set_block blocks block basic = Dynarray.set blocks block basic
+let lookup_block (blocks : Mir.Graph.basic_block Dynarray.t) (block : Mir.Graph.block) =
+  Dynarray.get blocks (block :> int)
+
+let set_block blocks (block : Mir.Graph.block) basic = Dynarray.set blocks (block :> int) basic
 
 let retarget (retarget_block : Mir.Graph.block -> Mir.Graph.block)
     (terminator : Mir.Graph.terminator) : Mir.Graph.terminator =
@@ -81,13 +83,14 @@ let end_on_exits blocks ~(body : Mir.Graph.block list) ~part ~origin =
       match Hashtbl.find_opt pads target with
       | Some pad -> pad
       | None ->
-          Dynarray.add_last blocks
-            {
-              Mir.Graph.statements = [ dead ];
-              terminator = Goto target;
-              terminator_origin = origin;
-            };
-          let pad = Dynarray.length blocks - 1 in
+          let pad =
+            Mir.Graph.add_block blocks
+              {
+                Mir.Graph.statements = [ dead ];
+                terminator = Goto target;
+                terminator_origin = origin;
+              }
+          in
           Hashtbl.replace pads target pad;
           pad
   in
@@ -108,18 +111,19 @@ let end_on_exits blocks ~(body : Mir.Graph.block list) ~part ~origin =
 
 let end_body_parts (body : Mir.Graph.body) : Mir.Graph.body =
   let blocks = Dynarray.of_array body.blocks in
-  for block = 0 to Array.length body.blocks - 1 do
-    match lookup_block blocks block with
-    | { terminator = For { iteration = Pull _; part; blocks = loop_body; loop; _ }; _ } ->
-        let dead : Mir.Graph.statement = { kind = Basic (Dead [ part ]); origin = loop.origin } in
-        List.iter
-          (fun ending ->
-            let basic = lookup_block blocks ending in
-            set_block blocks ending { basic with statements = basic.statements @ [ dead ] })
-          (list_own_iteration_ends blocks loop_body);
-        end_on_exits blocks ~body:loop_body ~part ~origin:loop.origin
-    | _ -> ()
-  done;
+  List.iter
+    (fun block ->
+      match lookup_block blocks block with
+      | { terminator = For { iteration = Pull _; part; blocks = loop_body; loop; _ }; _ } ->
+          let dead : Mir.Graph.statement = { kind = Basic (Dead [ part ]); origin = loop.origin } in
+          List.iter
+            (fun ending ->
+              let basic = lookup_block blocks ending in
+              set_block blocks ending { basic with statements = basic.statements @ [ dead ] })
+            (list_own_iteration_ends blocks loop_body);
+          end_on_exits blocks ~body:loop_body ~part ~origin:loop.origin
+      | _ -> ())
+    (Mir.Graph.list_blocks body.blocks);
   { body with blocks = Mir.Graph.canonicalize (Array.map Option.some (Dynarray.to_array blocks)) }
 
 let end_parts (mir : Mir.Graph.t) : Mir.Graph.t =

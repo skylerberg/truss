@@ -1,4 +1,6 @@
 type local = int
+type loan = int
+type lambda = int
 
 type local_kind =
   | Source of { local : Core.local; mode : Language.Mode.t; is_var : bool; is_binding : bool }
@@ -39,7 +41,7 @@ type callee = { target : operand Core.target; uses : Types.capability_set }
 
 type function_argument =
   | Function_reference of { path : Path.t; origin : Core.origin }
-  | Lambda_expression of { body : int; origin : Core.origin; type_ : Types.ty }
+  | Lambda_expression of { body : lambda; origin : Core.origin; type_ : Types.ty }
 
 type argument =
   | Passed of { mode : Language.Mode.t; value : operand; function_ : function_argument option }
@@ -97,7 +99,7 @@ type rvalue =
   | To_any of { value : operand; trait : Types.trait_reference; evidence : Core.evidence }
   | Copy of operand
   | Function_value of { path : Path.t; instantiation : Types.instantiation; is_argument : bool }
-  | Lambda of { body : int; captures : capture list; is_argument : bool }
+  | Lambda of { body : lambda; captures : capture list; is_argument : bool }
   | Value_parameter of Types.parameter
   | Specification of specification
 
@@ -197,12 +199,12 @@ and basic =
   | Assert of operand
   | Echo of operand
   | Loan_start of {
-      loan : int;
+      loan : loan;
       borrowed : operand;
       mode : Language.Mode.t;
       duration : loan_duration;
     }
-  | Loan_end of int list
+  | Loan_end of loan list
   | Ghost_assert of { condition : formula; by_bit_vector : bool }
   | Path_note of path_note
   | Proof of t
@@ -296,3 +298,25 @@ type law = {
   requires : formula list;
   states : formula;
 }
+
+let add table value =
+  Dynarray.add_last table value;
+  Dynarray.length table - 1
+
+let add_local = add
+let list_locals locals = List.init (Array.length locals) Fun.id
+
+let make_fresh_locals locals =
+  let next = ref (Array.length locals) in
+  fun () ->
+    let local = !next in
+    incr next;
+    local
+
+let iteri_locals = Array.iteri
+
+let find_core_local (locals : local_info array) local =
+  match locals.(local).kind with Source { local; _ } -> Some local | Temporary | Lent _ -> None
+
+let add_loan = add
+let add_lambda = add

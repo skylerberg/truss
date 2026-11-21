@@ -411,7 +411,7 @@ let render_terminator (emission : Emission.t) fc (terminator : Lowered.terminato
     | Some expression -> expression
     | None -> C_runtime.raise_bug "an operand of zero size"
   in
-  let render_goto block = Printf.sprintf "goto b%d;" block in
+  let render_goto (block : Lowered.block) = Printf.sprintf "goto b%d;" (block :> int) in
   let render_default = function Some block -> render_goto block | None -> unreachable in
   let render_text_line text = render_line (Text text) in
   let render_switch scrutinee cases ~default =

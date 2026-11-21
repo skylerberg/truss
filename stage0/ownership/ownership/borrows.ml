@@ -89,7 +89,7 @@ let check_body context (actions : Actions.t) moves =
   let states = Dataflow.forward context actions in
   let is_live_after = Moves.compute_live_after moves actions.body in
   let mir_local = Context.Local_table.create 16 in
-  Array.iteri
+  Mir.iteri_locals
     (fun local (info : Mir.local_info) ->
       match info.kind with
       | Source { local = core; _ } -> Context.Local_table.replace mir_local core local
@@ -107,7 +107,7 @@ let check_body context (actions : Actions.t) moves =
   let check_each_step positions check_step =
     List.iter
       (fun ({ block; index } as position : Actions.position) ->
-        match states.(block) with
+        match states.((block :> int)) with
         | Some before ->
             List.iteri
               (fun step_index (step : Actions.step) ->
@@ -120,16 +120,17 @@ let check_body context (actions : Actions.t) moves =
                     origin = step.origin;
                   }
                   step)
-              actions.steps.(block).(index)
+              actions.steps.((block :> int)).(index)
         | None -> ())
       positions
   in
   let all_positions =
-    List.concat
-      (List.mapi
-         (fun block positions ->
-           List.init (Array.length positions) (fun index : Actions.position -> { block; index }))
-         (Array.to_list actions.steps))
+    List.concat_map
+      (fun (block : Mir.Graph.block) ->
+        List.init
+          (Array.length actions.steps.((block :> int)))
+          (fun index : Actions.position -> { block; index }))
+      (Mir.Graph.list_blocks actions.steps)
   in
   let list_covering_loans (here : here) (place : Place.t) =
     List.filter_map

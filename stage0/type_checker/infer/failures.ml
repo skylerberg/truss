@@ -10,7 +10,7 @@ let find_refused_class (state : State.state) ~sides =
 let report_decided_in_specification (state : State.state) span root =
   let message =
     match
-      Array.find_index
+      Source.Node.find_index
         (Option.fold ~none:false ~some:(holds_class state root))
         state.tables.local_types
     with
@@ -89,8 +89,8 @@ let find_log_report (state : State.state) ~fixes code span message (root, wanted
   with
   | Some (State.Literal { allowed; _ })
     when State.is_within state wanted Types.float_types && not (State.is_float_domain allowed) ->
-      let spell_as_float literal =
-        match state.tables.elaborations.(literal) with
+      let spell_as_float (literal : Syntax.id) =
+        match state.tables.elaborations.((literal :> int)) with
         | Some (Literal (Integer_value number)) ->
             Printf.sprintf "`%s` as `%s.0`" (quote literal) (Z.to_string number)
         | _ -> State.raise_bug "`%s` is no integer literal" (quote literal)

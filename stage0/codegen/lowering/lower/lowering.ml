@@ -46,7 +46,7 @@ and mir_frame = {
   called_parts : Mir.local list;
   lent_calls : (Mir.local, lent_call) Hashtbl.t;
   placed_parts : (Mir.local, unit) Hashtbl.t;
-  mutable forwarded_locals : int;
+  make_forwarded_local : unit -> Mir.local;
   ended_after_lend : Mir.local list;
   after_lend : bool array;
   mutable block : Mir.Graph.block;
@@ -71,7 +71,7 @@ type state = {
   mutable scopes : scope list;
   mutable loops : loop list;
   mutable result : result_slot;
-  nested : int ref;
+  nested_functions : Lowered.nested_function_counter;
   mutable evidence : (Path.t * Lowered.operand) list;
   mutable tasks : task list;
   mutable moved : Lowered.place list;
@@ -80,7 +80,7 @@ type state = {
 
 let make_frame code = { code; self_place = None; exit = None; mir = None }
 
-let enter context ?(nested = ref 0) ~builder frame =
+let enter context ?(nested_functions = Lowered.create_nested_function_counter ()) ~builder frame =
   {
     context;
     frame;
@@ -88,7 +88,7 @@ let enter context ?(nested = ref 0) ~builder frame =
     scopes = [ { kind = Bindings; owned = [] } ];
     loops = [];
     result = No_result;
-    nested;
+    nested_functions;
     evidence = [];
     tasks = [];
     moved = [];
@@ -107,13 +107,12 @@ let allocate_local state ?name ty : Lowered.place =
   Lowered.make_local_place (Emit_c.Ir_builder.allocate_local state.builder ?name ty)
 
 let outline state ~parts body =
-  let nested = !(state.nested) in
-  incr state.nested;
+  let nested_function = Lowered.allocate_nested_function state.nested_functions in
   let enclosing = state.lend_record in
   state.lend_record <- None;
-  let holder = Emit_c.Ir_builder.outline state.builder ~index:nested ~parts body in
+  let holder = Emit_c.Ir_builder.outline state.builder ~index:nested_function ~parts body in
   state.lend_record <- enclosing;
-  (nested, Lowered.Address { place = Lowered.make_local_place holder; writable = false })
+  (nested_function, Lowered.Address { place = Lowered.make_local_place holder; writable = false })
 
 let ground state ty = Monomorphic.ground state.context.monomorphic state.frame.code.substitution ty
 let is_trivial state ty = Drop_and_copy.is_trivial state.context.drop_and_copy ty

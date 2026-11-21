@@ -14,7 +14,6 @@
   resolve
   types
   interface
-  syntax
   core
   core_walk
   mir

@@ -49,7 +49,7 @@ let create env ~owner =
 let make_environment_key { registry; _ } nested_index : C_text.key =
   match registry.owner with
   | Some owner -> Environment (owner, nested_index)
-  | None -> C_runtime.raise_bug "the environment %d of no function" nested_index
+  | None -> C_runtime.raise_bug "the environment %d of no function" (nested_index :> int)
 
 let add_environment types nested_index fields =
   types.registry.environments <-
@@ -58,7 +58,7 @@ let add_environment types nested_index fields =
 let read_environment types nested_index =
   match Keys.find_opt (make_environment_key types nested_index) types.registry.environments with
   | Some fields -> fields
-  | None -> C_runtime.raise_bug "the environment %d has no fields" nested_index
+  | None -> C_runtime.raise_bug "the environment %d has no fields" (nested_index :> int)
 
 let register { registry; _ } key =
   (match registry.references with
@@ -110,7 +110,7 @@ let rec render_type types : Lowered.ty -> C_text.t = function
       Text (if writable then "" else "const ") ++ render_type types target ++ Text " *"
   | Raw scalar -> render_scalar_type types scalar
   | Environment nested_index -> render_key types (make_environment_key types nested_index)
-  | Evidence nested_index -> render_key types (Evidence (max nested_index 1))
+  | Evidence outer_count -> render_key types (Evidence (max outer_count 1))
   | Capabilities count -> render_key types (Capabilities count)
   | Trace -> Text "struct truss_trace"
   | Lend -> Text "struct truss_lend"
@@ -220,14 +220,14 @@ and define_text types (key : C_text.key) =
         ++ Text " (*" ++ Name (Type_name key) ++ Text ")("
         ++ render_signature_parameters types signature.parameters None
         ++ Text ");\n")
-  | Evidence nested_index ->
+  | Evidence outer_count ->
       Struct
         {
           body =
             Text
               (Printf.sprintf
                  "  struct truss_evidence evidence;\n  const struct truss_evidence *outer[%d];\n"
-                 nested_index);
+                 outer_count);
           holds = [];
         }
   | Capabilities count ->

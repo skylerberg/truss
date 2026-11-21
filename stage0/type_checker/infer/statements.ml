@@ -14,7 +14,7 @@ let record_integer_range state ~(loop : Syntax.id) ~described ~admits_integer
 
 let statement_diverges (state : State.state) =
   State.diverges ~is_never:(fun (value : Syntax.expression) ->
-      match state.tables.types.(value.id) with
+      match state.tables.types.((value.id :> int)) with
       | Some type_ -> Conversions.read_expected_head state type_ = Types.Never
       | None -> false)
 
@@ -167,7 +167,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
               | _ -> ()));
           loop_element := Some element;
           (if inner != iterable then
-             match state.tables.types.(inner.id) with
+             match state.tables.types.((inner.id :> int)) with
              | Some type_ -> State.record state iterable type_
              | None -> ());
           if mode = Language.Mode.Mut then Modes.mutate state env ~by:Passed_mut inner;
@@ -200,7 +200,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
 
 and assigns_through_index state env (written : Syntax.statement) (target : Syntax.expression)
     (value : Syntax.expression) =
-  match (target.kind, state.resolved.brackets.(target.id)) with
+  match (target.kind, state.resolved.brackets.((target.id :> int))) with
   | Bracket (_, [ Item { kind = Range _; _ } ]), _ -> false
   | Bracket (base, [ Item key ]), (Some Index | None) -> (
       let base_type = Conversions.read_checked_head state env base in

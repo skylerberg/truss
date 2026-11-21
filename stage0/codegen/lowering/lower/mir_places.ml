@@ -16,7 +16,7 @@ let read_parameter_defaults (context : Definitions.context) path :
       Definitions.raise_bug "%s is not a function" (Path.show path)
 
 let extract_parameter (body : Mir.Graph.body) local =
-  match body.locals.(local) with
+  match body.locals.((local : Mir.local :> int)) with
   | { kind = Source { local = core; mode; _ }; type_; _ } -> (mode, Mir.find_local_name core, type_)
   | _ -> Definitions.raise_bug "a parameter that is no source local"
 
@@ -33,13 +33,10 @@ let find_reported_site (state : Lowering.state) : Lowered.operand option =
       Some site
   | _ -> None
 
-let lookup_local_info state local = (require_mir_frame state).body.locals.(local)
+let lookup_local_info state local =
+  (require_mir_frame state).body.locals.((local : Mir.local :> int))
 
-let find_core_local state local =
-  match (lookup_local_info state local).kind with
-  | Source { local; _ } -> Some local
-  | Temporary | Lent _ -> None
-
+let find_core_local state local = Mir.find_core_local (require_mir_frame state).body.locals local
 let find_local_name state local = Option.bind (find_core_local state local) Mir.find_local_name
 
 let bind_local state local place =
@@ -228,7 +225,7 @@ let make_body_frame (state : Lowering.state) ?owner ?returns_into ?lending
     ?(passed : Language.Mode.t list option) ~lambdas (body : Mir.Graph.body) : Lowering.mir_frame =
   let find_passed_mode local : Language.Mode.t option =
     Option.bind passed (fun modes ->
-        Option.map (List.nth modes) (List.find_index (Int.equal local) body.parameters))
+        Option.map (List.nth modes) (List.find_index (( = ) local) body.parameters))
   in
   let needs_drop (path : Moves.path) =
     let rec find_path_type ty = function
@@ -250,16 +247,18 @@ let make_body_frame (state : Lowering.state) ?owner ?returns_into ?lending
           match member with Some (Typed field_ty) -> find_path_type field_ty rest | _ -> None)
     in
     match
-      find_path_type (Lowering.ground state body.locals.(path.local).type_) path.projections
+      find_path_type
+        (Lowering.ground state body.locals.((path.local :> int)).type_)
+        path.projections
     with
     | Some ty -> not (Lowering.is_trivial state ty)
     | None -> false
   in
   let moves = Moves.analyse ~find_passed:find_passed_mode ~tracks:needs_drop body in
   let after_lend = Array.make (Array.length body.blocks) false in
-  let rec reach block =
-    if not after_lend.(block) then begin
-      after_lend.(block) <- true;
+  let rec reach (block : Mir.Graph.block) =
+    if not after_lend.((block :> int)) then begin
+      after_lend.((block :> int)) <- true;
       List.iter reach (Mir.Graph.list_block_successors body block)
     end
   in
@@ -286,7 +285,7 @@ let make_body_frame (state : Lowering.state) ?owner ?returns_into ?lending
         (fun returned (block : Mir.Graph.basic_block) ->
           match block.terminator with
           | Return (Some (Use { place = { root = Local local; projections = [] }; _ }))
-            when body.locals.(local).kind = Temporary ->
+            when body.locals.((local :> int)).kind = Temporary ->
               local :: returned
           | _ -> returned)
         [] body.blocks;
@@ -299,7 +298,7 @@ let make_body_frame (state : Lowering.state) ?owner ?returns_into ?lending
             Lowered.make_local_place
               (Emit_c.Ir_builder.allocate_local state.builder ~is_zeroed:true (Raw Bool)) ))
         (Moves.list_flagged moves);
-    move_state = Moves.copy_entry_state moves 0;
+    move_state = Moves.copy_entry_state moves Mir.Graph.entry_block;
     lending;
     called_parts =
       list_statements_where
@@ -311,10 +310,10 @@ let make_body_frame (state : Lowering.state) ?owner ?returns_into ?lending
           | Basic _ | Provide_start _ | Provide_end -> []);
     lent_calls = Hashtbl.create 4;
     placed_parts = Hashtbl.create 4;
-    forwarded_locals = 0;
+    make_forwarded_local = Mir.make_fresh_locals body.locals;
     ended_after_lend = list_statements_where (fun block -> after_lend.(block)) Moves.list_ended;
     after_lend;
-    block = 0;
+    block = Mir.Graph.entry_block;
   }
 
 let make_field_projection variant field : Lowered.projection =

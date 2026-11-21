@@ -46,7 +46,7 @@ and mir_frame = {
   called_parts : Mir.local list;
   lent_calls : (Mir.local, lent_call) Hashtbl.t;
   placed_parts : (Mir.local, unit) Hashtbl.t;
-  mutable forwarded_locals : int;
+  make_forwarded_local : unit -> Mir.local;
   ended_after_lend : Mir.local list;
   after_lend : bool array;
   mutable block : Mir.Graph.block;
@@ -71,7 +71,7 @@ type state = {
   mutable scopes : scope list;
   mutable loops : loop list;
   mutable result : result_slot;
-  nested : int ref;
+  nested_functions : Lowered.nested_function_counter;
   mutable evidence : (Path.t * Lowered.operand) list;
   mutable tasks : task list;
   mutable moved : Lowered.place list;
@@ -79,11 +79,21 @@ type state = {
 }
 
 val make_frame : Definitions.code -> frame
-val enter : Definitions.context -> ?nested:int ref -> builder:Emit_c.Ir_builder.t -> frame -> state
+
+val enter :
+  Definitions.context ->
+  ?nested_functions:Lowered.nested_function_counter ->
+  builder:Emit_c.Ir_builder.t ->
+  frame ->
+  state
+
 val enter_item : Definitions.context -> item:Lowered.Item.t -> Definitions.code -> state
 val may_fork : state -> bool
 val allocate_local : state -> ?name:string -> Lowered.ty -> Lowered.place
-val outline : state -> parts:Lowered.local list -> (unit -> unit) -> int * Lowered.operand
+
+val outline :
+  state -> parts:Lowered.local list -> (unit -> unit) -> Lowered.nested_function * Lowered.operand
+
 val ground : state -> Types.ty -> Ground.ty
 val is_trivial : state -> Ground.ty -> bool
 val is_zero_size : state -> Ground.ty -> bool

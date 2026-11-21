@@ -1,7 +1,7 @@
 let list_bound_diagnostics lookups ~package ~list_bounds ~spans named =
   List.concat_map
-    (fun (id, (type_ : Types.ty)) ->
-      let make_diagnostic code message = Diagnostic.make ~code spans.(id) message in
+    (fun ((id : Syntax.id), (type_ : Types.ty)) ->
+      let make_diagnostic code message = Diagnostic.make ~code spans.((id :> int)) message in
       match type_ with
       | Named { path; arguments } -> (
           match
@@ -83,14 +83,16 @@ let check_method_location (state : Checking.state) (head : Syntax.type_head) =
       match state.lookups.names.find owner_module name with
       | Some { kind = Type; visibility; _ } ->
           if owner_module.package <> state.key.module_.package then
-            Checking.report state Method_outside_package state.spans.(head.id)
+            Checking.report state Method_outside_package
+              (Checking.read_span state head.id)
               (Printf.sprintf
                  "`%s` is defined in the package `%s`, so its methods and constants must be too. A \
                   function of this package can take it as a parameter instead."
                  (Path.show owner)
                  (Path.show_package owner_module.package))
           else if visibility = Private && owner_module <> state.key.module_ then
-            Checking.report state Method_outside_package state.spans.(head.id)
+            Checking.report state Method_outside_package
+              (Checking.read_span state head.id)
               (Printf.sprintf
                  "`%s` is private to its module, so its methods and constants must be in that \
                   module."
@@ -114,18 +116,20 @@ let check_real_implementations (state : Checking.state) (resolved : Resolve.reso
     (fun (capability : Syntax.capability_reference) ->
       match capability.kind with
       | Capability_path written -> (
-          match resolved.names.(written.path.last.id) with
+          match resolved.names.((written.path.last.id :> int)) with
           | Some (Definition (Capability, path)) -> (
               match Well_known.find_builtin_capability path with
               | Some (Panic | Run_forever) -> ()
               | Some System ->
-                  Checking.report state No_real_implementation state.spans.(capability.id)
+                  Checking.report state No_real_implementation
+                    (Checking.read_span state capability.id)
                     (Printf.sprintf
                        "The runtime grants `System` only to the real implementations of the \
                         standard capabilities, so it cannot provide it to %s."
                        recipient)
               | None when Option.is_none (Definition.find_real_implementation state.lookups path) ->
-                  Checking.report state No_real_implementation state.spans.(capability.id)
+                  Checking.report state No_real_implementation
+                    (Checking.read_span state capability.id)
                     (Printf.sprintf
                        "`%s` has no real implementation, so the runtime cannot provide it to %s. \
                         Provide an implementation in the body with `provide`."
@@ -178,8 +182,8 @@ let make_element_removal (spans : Source.Definition_span.t array)
     | [] -> Compiler_bug.raise_bug ~stage:"Interface" "the removed element is not in its list"
   in
   match find_neighbors None elements with
-  | _, Some next -> delete spans.(removed).start spans.(next).start
-  | Some previous, None -> delete spans.(previous).stop spans.(removed).stop
+  | _, Some next -> delete spans.((removed :> int)).start spans.((next :> int)).start
+  | Some previous, None -> delete spans.((previous :> int)).stop spans.((removed :> int)).stop
   | None, None -> delete clause.start clause.stop
 
 let check_duplicates state member_kind (names : Syntax.name list) =
@@ -187,7 +191,8 @@ let check_duplicates state member_kind (names : Syntax.name list) =
     (List.fold_left
        (fun seen (name : Syntax.name) ->
          if List.mem name.text seen then
-           Checking.report state Duplicate_field state.spans.(name.id)
+           Checking.report state Duplicate_field
+             (Checking.read_span state name.id)
              (Printf.sprintf "Another %s of this type is already named `%s`." member_kind name.text);
          name.text :: seen)
        [] names)
@@ -219,7 +224,8 @@ let check_derives state (interface : Types.type_interface) (clauses : Syntax.typ
           (Resolve.Names.is_derivable trait || Well_known.is Copyable trait
          || Well_known.is Plain trait)
       then
-        Checking.report state Not_derivable state.spans.(written.id)
+        Checking.report state Not_derivable
+          (Checking.read_span state written.id)
           (Printf.sprintf
              "Only `Equal`, `Hash`, `Ordered`, `Default`, `Copyable`, `Plain`, \
               `serialization::Serialize`, and `serialization::Deserialize` can be derived, not \
@@ -227,12 +233,14 @@ let check_derives state (interface : Types.type_interface) (clauses : Syntax.typ
              shown)
       else if Well_known.is Copyable trait || Well_known.is Plain trait then
         begin if not interface.opaque then
-          Checking.report state Derives_inferred state.spans.(written.id)
+          Checking.report state Derives_inferred
+            (Checking.read_span state written.id)
             ~fixes:
               [
                 Diagnostic.fix "Remove the declaration."
                   [
-                    make_element_removal state.spans ~clause:state.spans.(clause.id)
+                    make_element_removal state.spans
+                      ~clause:(Checking.read_span state clause.id)
                       (match clause.kind with
                       | Derives traits ->
                           List.map (fun (trait : Syntax.path_type) -> trait.id) traits
@@ -258,21 +266,24 @@ let check_derives state (interface : Types.type_interface) (clauses : Syntax.typ
             else Impls.is_copyable state.lookups ~list_bounds self
           in
           if not holds then
-            Checking.report state Cannot_derive state.spans.(written.id)
+            Checking.report state Cannot_derive
+              (Checking.read_span state written.id)
               (Printf.sprintf "A field of this type is not `%s`, so the type cannot be." shown)
         end
       else begin
         (if Well_known.is Default trait then
            match interface.shape with
            | Sum _ ->
-               Checking.report state Cannot_derive state.spans.(written.id)
+               Checking.report state Cannot_derive
+                 (Checking.read_span state written.id)
                  "`Default` is derived as each field's default, so only a record can derive it: no \
                   variant of this type is its default. Write the `impl`, which says which variant \
                   is."
            | Record _ | Todo_type | Builtin_type _ -> ());
         if Well_known.is Ordered trait || Well_known.is Hash trait then
           if not (List.exists (Well_known.is Equal) interface.derives) then
-            Checking.report state Cannot_derive state.spans.(written.id)
+            Checking.report state Cannot_derive
+              (Checking.read_span state written.id)
               (Printf.sprintf
                  "Deriving `%s` needs `Equal` to be derived too, so that the two agree." shown);
         let needed =
@@ -292,7 +303,8 @@ let check_derives state (interface : Types.type_interface) (clauses : Syntax.typ
                 (Impls.find_evidence state.lookups ~list_bounds:(list_derived_bounds trait) type_
                    wanted)
             then
-              Checking.report state Cannot_derive state.spans.(written.id)
+              Checking.report state Cannot_derive
+                (Checking.read_span state written.id)
                 (Printf.sprintf
                    "A field of type `%s` does not implement `%s`, so `%s` cannot be derived."
                    (Types.show type_) shown shown))
@@ -308,7 +320,8 @@ let check_trait_cycle (state : Checking.state) (requires : Syntax.path_type list
   | Some header when List.exists is_required_by header.required -> (
       match requires with
       | first :: _ ->
-          Checking.report state Trait_cycle state.spans.(first.id)
+          Checking.report state Trait_cycle
+            (Checking.read_span state first.id)
             "This trait requires itself through the traits it requires."
       | [] -> ())
   | _ -> ()
@@ -386,13 +399,15 @@ let check_restated (state : Checking.state) (signature : Syntax.signature) ~has_
         (fun (clause : Syntax.clause) ->
           match clause.kind with
           | Requires _ ->
-              Checking.report state Restated_method_clause state.spans.(clause.id)
+              Checking.report state Restated_method_clause
+                (Checking.read_span state clause.id)
                 (Printf.sprintf
                    "`%s` restates `%s.%s`, so it adds only `ensures` and `cost` clauses. A caller \
                     through `%s` would never prove this `requires`."
                    name.text declared_by name.text declared_by)
           | Decreases _ ->
-              Checking.report state Restated_method_clause state.spans.(clause.id)
+              Checking.report state Restated_method_clause
+                (Checking.read_span state clause.id)
                 (Printf.sprintf
                    "`%s` restates `%s.%s`, so it adds only `ensures` and `cost` clauses. It has no \
                     body, so it has no recursion to measure."
@@ -400,12 +415,14 @@ let check_restated (state : Checking.state) (signature : Syntax.signature) ~has_
           | Ensures _ | Cost _ | Uses _ | Clause_error -> ())
         signature.clauses;
       if has_body then
-        Checking.report state Restated_method_body state.spans.(name.id)
+        Checking.report state Restated_method_body
+          (Checking.read_span state name.id)
           (Printf.sprintf
              "`%s` restates `%s.%s`, so it has no body: each type's `impl` of `%s` gives the body."
              name.text declared_by name.text declared_by)
       else if not (List.exists is_added signature.clauses) then
-        Checking.report state Redeclared_method state.spans.(name.id)
+        Checking.report state Redeclared_method
+          (Checking.read_span state name.id)
           (Printf.sprintf
              "`%s` already declares a `%s` that takes %s, and this restatement adds no `ensures` \
               or `cost` clause. Add the clauses that the trait promises, or delete the method."
@@ -444,7 +461,8 @@ let check_restated (state : Checking.state) (signature : Syntax.signature) ~has_
             && Types.is_capability_subset ~implies expected.uses written.uses
             && Types.is_capability_subset ~implies written.uses expected.uses)
         then
-          Checking.report state Signature_mismatch state.spans.(name.id)
+          Checking.report state Signature_mismatch
+            (Checking.read_span state name.id)
             (Printf.sprintf "`%s` restates `%s.%s`, so it has the signature `%s%s%s`." name.text
                declared_by name.text name.text
                (Impl_checks.show_signature expected)
@@ -474,8 +492,9 @@ let check_proof_bounds (state : Checking.state) (written : Syntax.type_head)
                 then
                   let span =
                     match List.nth_opt written.generics index with
-                    | Some (generic : Syntax.generic_parameter) -> state.spans.(generic.id)
-                    | None -> state.spans.(written.id)
+                    | Some (generic : Syntax.generic_parameter) ->
+                        Checking.read_span state generic.id
+                    | None -> Checking.read_span state written.id
                   in
                   Checking.report state Unsatisfied_bound span
                     (Printf.sprintf
@@ -509,12 +528,12 @@ let check (state : Checking.state) =
               ~has_body:(match definition.kind with Function _ -> true | _ -> false)
               written ~trait_path:container.path trait;
             check_private_in_public state ~visibility (list_signature_types written)
-              state.spans.(name.id)
+              (Checking.read_span state name.id)
         | { kind = Impl { trait_; _ }; _ }, Impl_interface impl ->
             Impl_checks.check_impl_method state name
               (Resolve.Names.classify_receiver signature.parameters)
               written impl
-              ~trait_span:(lookups.names.read_spans container).(trait_.id)
+              ~trait_span:(lookups.names.read_spans container).((trait_.id :> int))
               trait_
         | _ -> ())
     | Some _, _, _ -> ()
@@ -523,16 +542,17 @@ let check (state : Checking.state) =
         | Member_name (head, _) -> check_method_location state head
         | Plain_name name ->
             if Path.is_entry_point state.key.path then
-              check_main state resolved signature.clauses elaborated state.spans.(name.id));
+              check_main state resolved signature.clauses elaborated
+                (Checking.read_span state name.id));
         let span =
           match signature.name with
-          | Plain_name name | Member_name (_, name) -> state.spans.(name.id)
+          | Plain_name name | Member_name (_, name) -> Checking.read_span state name.id
         in
         check_private_in_public state ~visibility (list_signature_types elaborated) span
     | None, Law_proof { law; type_; _ }, Law_proof_interface { generics; trait; for_type; _ } -> (
         (match lookups.find_trait_header trait.trait with
         | Some header when not (List.mem law.text header.laws) ->
-            Checking.report state Unknown_member state.spans.(law.id)
+            Checking.report state Unknown_member (Checking.read_span state law.id)
               (Printf.sprintf "`%s` has no law `%s`." (Types.show_trait trait) law.text)
         | _ -> ());
         let arity_matches =
@@ -546,7 +566,8 @@ let check (state : Checking.state) =
         if arity_matches && not (Types.is_error for_type) then
           match Checking.find_evidence state for_type trait with
           | None ->
-              Checking.report state No_impl state.spans.(type_.id)
+              Checking.report state No_impl
+                (Checking.read_span state type_.id)
                 (Printf.sprintf "`%s` does not implement `%s`, so it has no law of it to keep."
                    (Types.show for_type) (Types.show_trait trait))
           | Some (Impls.From_impl { impl; _ }) ->
@@ -571,14 +592,15 @@ let check (state : Checking.state) =
         if visibility = Public then
           check_private_in_public state ~visibility
             (Types.list_field_types interface)
-            state.spans.(name.id)
+            (Checking.read_span state name.id)
     | None, Trait { name; requires; _ }, Trait_interface trait ->
         check_trait_cycle state requires;
         check_private_in_public state ~visibility
           (List.map (fun (bound : Types.trait_reference) -> Types.Any bound) trait.requires)
-          state.spans.(name.id)
+          (Checking.read_span state name.id)
     | None, Constant { name = Plain_name name; _ }, Constant_interface constant ->
-        check_private_in_public state ~visibility [ constant.constant_type ] state.spans.(name.id)
+        check_private_in_public state ~visibility [ constant.constant_type ]
+          (Checking.read_span state name.id)
     | None, Impl { trait_; members; _ }, Impl_interface impl ->
         Impl_checks.check_impl state members impl trait_
     | None, Constant { name = Member_name (head, _); _ }, _ -> check_method_location state head
@@ -599,7 +621,7 @@ let list_diagnostics (lookups : Lookups.t) key =
   in
   (try check state
    with Properties.Recursion_limit message ->
-     Checking.report state Recursion_limit state.spans.(state.definition.id) message);
+     Checking.report state Recursion_limit (Checking.read_span state state.definition.id) message);
   List.sort
     (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
       compare (left.span, left.code) (right.span, right.code))

@@ -9,7 +9,7 @@ type visit = {
 let ignore_all =
   { expression = ignore; statement = ignore; pattern = ignore; callee = ignore; place = ignore }
 
-let locate_origin : Core.origin -> Syntax.id = function
+let locate_origin : Core.origin -> Source.Node.t = function
   | Written node | Desugared { construct = node; _ } -> node
 
 let describe_call (origin : Core.origin) ?callee ~quote () =

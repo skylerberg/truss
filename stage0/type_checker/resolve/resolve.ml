@@ -69,9 +69,9 @@ let rec find_head resolved (value : Syntax.expression) =
   | Name path ->
       Option.map
         (fun target -> { name = path.last; target; type_arguments = None })
-        resolved.names.(path.last.id)
+        resolved.names.((path.last.id :> int))
   | Parenthesized inner -> find_head resolved inner
-  | Bracket (base, items) when resolved.brackets.(value.id) = Some Type_arguments ->
+  | Bracket (base, items) when resolved.brackets.((value.id :> int)) = Some Type_arguments ->
       Option.map
         (fun resolved_head -> { resolved_head with type_arguments = Some items })
         (find_head resolved base)
@@ -116,7 +116,8 @@ let resolve (lookups : Names.lookups) (key : Names.key) section =
       in
       match find_declared_name definition with
       | Some declared when not defines_it ->
-          Walk.report state Shadowed_name spans.(declared.id)
+          Walk.report state Shadowed_name
+            spans.((declared.id :> int))
             (Printf.sprintf
                "`%s` is a name in the prelude, and a name cannot shadow another. Choose another \
                 name."
@@ -126,8 +127,8 @@ let resolve (lookups : Names.lookups) (key : Names.key) section =
   if key.ordinal > 0 && Path.is_resolved key.path then begin
     let span =
       match find_declared_name definition with
-      | Some name -> spans.(name.id)
-      | None -> Source.Definition_span.make_zero_width spans.(definition.id).start
+      | Some name -> spans.((name.id :> int))
+      | None -> Source.Definition_span.make_zero_width spans.((definition.id :> int)).start
     in
     let first = lookups.read_place { key with ordinal = 0 } in
     let first =
@@ -247,7 +248,7 @@ let make_trait_header (definition : Syntax.definition) (resolved : resolved) =
           required =
             List.filter_map
               (fun (bound : Syntax.path_type) ->
-                match resolved.names.(bound.path.last.id) with
+                match resolved.names.((bound.path.last.id :> int)) with
                 | Some (Definition (_, path)) -> Some path
                 | _ -> None)
               requires;

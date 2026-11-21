@@ -601,5 +601,5 @@ let collect_names (spans : Source.Definition_span.t array) (definition : Syntax.
   walk_names ~on_name:(fun name -> names := name :: !names) definition;
   List.stable_sort
     (fun (left : Syntax.name) (right : Syntax.name) ->
-      compare spans.(left.id).start spans.(right.id).start)
+      compare spans.((left.id :> int)).start spans.((right.id :> int)).start)
     !names

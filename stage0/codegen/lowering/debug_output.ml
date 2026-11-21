@@ -62,7 +62,7 @@ let build_debug env ty =
   let value : Lowered.place =
     match parameter with
     | Some parameter_local -> { root = Local parameter_local; projections = [ Deref ] }
-    | None -> Lowered.make_local_place 0
+    | None -> Lowered.make_local_place (Emit_c.Ir_builder.allocate_local builder (Value ty))
   in
   let output_pointer =
     Emit_c.Ir_builder.allocate_local builder (Writing.make_output_parameter env)
@@ -70,7 +70,6 @@ let build_debug env ty =
   let output = Lowered.Copy (Lowered.make_local_place output_pointer) in
   let write_output_text = write_text env builder ~output in
   let emit_output_call = emit_debug_call env builder ~output in
-  Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
   let rec write_list element ~index_element ~count =
     write_output_text "[";
     Emit_c.Ir_builder.emit_loop builder ~count (fun index ->

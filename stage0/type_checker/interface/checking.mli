@@ -7,6 +7,8 @@ type state = {
   diagnostics : Diagnostic.in_definition list ref;
 }
 
+val read_span : state -> Syntax.id -> Source.Definition_span.t
+
 val report :
   state ->
   ?fixes:Source.Definition_span.t Diagnostic.fix list ->

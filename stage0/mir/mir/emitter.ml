@@ -9,7 +9,7 @@ type frame = Bindings | Statement
 type scope = {
   frame : frame;
   mutable bound : Tree.local list;
-  mutable loans : int list;
+  mutable loans : Tree.loan list;
   mutable temporaries : Tree.local list;
 }
 
@@ -23,16 +23,14 @@ type group = {
 type enclosing_loop = { depth : int; tasks_around : int }
 
 type t = {
-  infos : (Tree.local, Tree.local_info) Hashtbl.t;
-  mutable local_count : int;
+  locals : Tree.local_info Dynarray.t;
   mutable statements : Tree.statement list;
   mutable reaches : bool;
   sources : Tree.local Local_table.t;
   mutable scopes : scope list;
   mutable loops : enclosing_loop list;
   mutable compound_target : Tree.place option;
-  lambdas : Tree.body list ref;
-  mutable loan_count : int;
+  lambdas : Tree.body Dynarray.t;
   mutable deferred : Tree.local list option;
   mutable extended : Core.id list;
   mutable binds_to_statement : bool;
@@ -42,7 +40,7 @@ type t = {
   bound_to_places : (Tree.local, unit) Hashtbl.t;
   lent_parts : (Tree.local, unit) Hashtbl.t;
   aliasing_names : (Tree.local, unit) Hashtbl.t;
-  loan_starts : (int, Tree.operand * Language.Mode.t) Hashtbl.t;
+  loan_starts : (Tree.operand * Language.Mode.t) Dynarray.t;
   is_specification : bool;
   entry_locals : Core.local list;
   mutable in_old : bool;
@@ -57,16 +55,14 @@ let create ?(is_specification = false) ~entry_locals ?(takes_free_locals = false
     is_specification;
     entry_locals;
     in_old = false;
-    infos = Hashtbl.create 16;
-    local_count = 0;
+    locals = Dynarray.create ();
     statements = [];
     reaches = true;
     sources = Local_table.create 16;
     scopes = [];
     loops = [];
     compound_target = None;
-    lambdas = ref [];
-    loan_count = 0;
+    lambdas = Dynarray.create ();
     deferred = None;
     extended = [];
     binds_to_statement = false;
@@ -76,14 +72,13 @@ let create ?(is_specification = false) ~entry_locals ?(takes_free_locals = false
     bound_to_places = Hashtbl.create 8;
     lent_parts = Hashtbl.create 8;
     aliasing_names = Hashtbl.create 8;
-    loan_starts = Hashtbl.create 8;
+    loan_starts = Dynarray.create ();
   }
 
+let lookup_local_info builder (local : Tree.local) = Dynarray.get builder.locals (local :> int)
+
 let allocate_local builder kind type_ origin =
-  let local = builder.local_count in
-  Hashtbl.replace builder.infos local { kind; type_; origin; has_several_bindings = false };
-  builder.local_count <- local + 1;
-  local
+  Tree.add_local builder.locals { kind; type_; origin; has_several_bindings = false }
 
 let add_temporary builder local =
   match builder.scopes with
@@ -182,10 +177,8 @@ let bind_source ?(is_var = false) builder (local : Core.local) mode type_ origin
       bound
 
 let start_loan builder borrowed mode duration origin =
-  let loan = builder.loan_count in
+  let loan = Tree.add_loan builder.loan_starts (borrowed, mode) in
   if not builder.is_specification then begin
-    builder.loan_count <- loan + 1;
-    Hashtbl.replace builder.loan_starts loan (borrowed, mode);
     emit builder (Basic (Loan_start { loan; borrowed; mode; duration })) origin;
     match builder.scopes with scope :: _ -> scope.loans <- loan :: scope.loans | [] -> ()
   end;
@@ -264,7 +257,7 @@ let hold_operand builder (value : Tree.operand) type_ origin =
   match value with
   | Immediate _ | Borrow { mode = Mut; _ } | Take _ -> value
   | Use { place = { root = Local local; projections = [] }; _ }
-    when (Hashtbl.find builder.infos local).kind = Temporary ->
+    when (lookup_local_info builder local).kind = Temporary ->
       value
   | Use _ ->
       let local = allocate_temporary builder type_ origin in
@@ -321,15 +314,15 @@ let run_in_guarded_block builder scope origin build =
   match (lent_parts, List.find_opt (Hashtbl.mem builder.aliasing_names) (List.rev scope.bound)) with
   | _ :: _, Some alias ->
       let name =
-        match (Hashtbl.find builder.infos alias).kind with
+        match (lookup_local_info builder alias).kind with
         | Source { local; _ } -> local
         | Temporary | Lent _ -> raise_bug "a name that may alias a lent part and is no source local"
       in
       run_in_block_scope builder { scope with loans = []; temporaries = lent_parts } origin
         (fun () ->
           List.iter
-            (fun loan ->
-              let borrowed, mode = Hashtbl.find builder.loan_starts loan in
+            (fun (loan : Tree.loan) ->
+              let borrowed, mode = Dynarray.get builder.loan_starts (loan :> int) in
               ignore (start_loan builder borrowed mode (Alias_scope name) origin))
             (List.rev scope.loans);
           end_scope builder { scope with bound = []; temporaries = others } origin;
@@ -469,19 +462,14 @@ let reaches builder = builder.reaches
 let mark_unreachable builder = builder.reaches <- false
 let is_specification builder = builder.is_specification
 let entry_locals builder = builder.entry_locals
-let lookup_local_info builder local = Hashtbl.find builder.infos local
-let collect_locals builder = Array.init builder.local_count (Hashtbl.find builder.infos)
+let collect_locals builder = Dynarray.to_array builder.locals
 let find_source builder local = Local_table.find_opt builder.sources local
 let add_source builder core local = Local_table.replace builder.sources core local
 let free_locals builder = List.rev builder.free
 let statements builder = List.rev builder.statements
 let emitted builder = builder.statements
-
-let add_lambda builder body =
-  builder.lambdas := body :: !(builder.lambdas);
-  List.length !(builder.lambdas) - 1
-
-let lambdas builder = Array.of_list (List.rev !(builder.lambdas))
+let add_lambda builder body = Tree.add_lambda builder.lambdas body
+let lambdas builder = Dynarray.to_array builder.lambdas
 
 let make_lambda_builder builder =
   {
@@ -541,8 +529,9 @@ let allocate_place_temporary builder ~node type_ origin =
 
 let note_bound_to_place builder local =
   if Hashtbl.mem builder.bound_to_places local then
-    Hashtbl.replace builder.infos local
-      { (Hashtbl.find builder.infos local) with has_several_bindings = true }
+    Dynarray.set builder.locals
+      (local :> int)
+      { (lookup_local_info builder local) with has_several_bindings = true }
   else Hashtbl.replace builder.bound_to_places local ()
 
 type suspended = Tree.statement list

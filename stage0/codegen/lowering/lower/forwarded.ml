@@ -9,7 +9,7 @@ let is_bookkeeping (statement : Mir.Graph.statement) =
 let rec only_returns (body : Mir.Graph.body) block ~seen =
   (not (List.mem block seen))
   &&
-  let basic = body.blocks.(block) in
+  let basic = body.blocks.((block : Mir.Graph.block :> int)) in
   List.for_all is_bookkeeping basic.statements
   &&
   match basic.terminator with
@@ -28,9 +28,11 @@ type forwarding = {
 }
 
 let find_forwarding (body : Mir.Graph.body) : forwarding option =
-  let entry = body.blocks.(0) in
+  let entry = body.blocks.((Mir.Graph.entry_block :> int)) in
   let is_unnamed local =
-    match body.locals.(local).kind with Temporary | Lent _ -> true | Source _ -> false
+    match body.locals.((local : Mir.local :> int)).kind with
+    | Temporary | Lent _ -> true
+    | Source _ -> false
   in
   let rec scan ~held ~computed : Mir.Graph.statement list -> _ = function
     | [] -> Some (held, computed, None)
@@ -61,7 +63,7 @@ let find_forwarding (body : Mir.Graph.body) : forwarding option =
   in
   match (scan ~held:[] ~computed:[] entry.statements, entry.terminator) with
   | Some (held, computed, lend), Yield { part = Part (Borrow { place; _ } as yielded); resume; _ }
-    when only_returns body resume ~seen:[ 0 ] -> (
+    when only_returns body resume ~seen:[ Mir.Graph.entry_block ] -> (
       match (lend, place) with
       | Some (part, call), { root = Local lent; projections = [] } when lent = part ->
           Some { held; computed; lending = Lending_call call }
@@ -127,7 +129,7 @@ let forward_call ~(substitution : Types.substitution) ~(make_fresh_local : unit 
   in
   let find_parameter local =
     Option.bind
-      (List.find_index (Int.equal local) body.parameters)
+      (List.find_index (( = ) local) body.parameters)
       (fun position -> List.nth_opt outer_values position)
   in
   let renamed = List.map (fun (local, _) -> (local, make_fresh_local ())) computed in
@@ -233,7 +235,9 @@ let forward_call ~(substitution : Types.substitution) ~(make_fresh_local : unit 
         let* setup = setup in
         let* call = find_forwarded_call inner in
         Some
-          ((List.assoc local renamed, Types.substitute substitution body.locals.(local).type_, call)
+          (( List.assoc local renamed,
+             Types.substitute substitution body.locals.((local :> int)).type_,
+             call )
           :: setup))
       computed (Some [])
   in

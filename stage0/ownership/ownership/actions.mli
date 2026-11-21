@@ -28,8 +28,8 @@ type action =
   | Drop of dropped_owner list
   | Bind_lent_part of { scrutinee : Core.origin; lent_part_type : Types.ty }
   | Pass_owned_function of view list
-  | Start_loan of { loan : int; loans : loan list }
-  | End_loans of int list
+  | Start_loan of { loan : Mir.loan; loans : loan list }
+  | End_loans of Mir.loan list
   | Arguments of {
       borrowed_arguments : borrowed_argument list;
       view_arguments : view_argument list;

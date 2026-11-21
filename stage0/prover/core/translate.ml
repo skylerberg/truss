@@ -753,7 +753,7 @@ let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~f
               let parameters =
                 List.map
                   (fun parameter ->
-                    match proof.body.locals.(parameter) with
+                    match proof.body.locals.((parameter : Mir.local :> int)) with
                     | { kind = Source { local; _ }; type_; _ } -> (local, type_)
                     | { kind = Temporary | Lent _; _ } ->
                         Facts.raise_bug "a parameter of the proof `%s` is a temporary"

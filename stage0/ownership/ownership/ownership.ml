@@ -81,7 +81,7 @@ let check (lookups : Lookups.t) key =
       diagnostics =
         [
           Diagnostic.make ~code:(Types Recursion_limit)
-            (names.read_spans key).((names.read_definition key).id)
+            (names.read_spans key).(((names.read_definition key).id :> int))
             message;
         ];
       must_be_disjoint = [];

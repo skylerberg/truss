@@ -37,7 +37,7 @@ let check lookups (key : Resolve.Names.key) ~checks_body =
         Error
           [
             Diagnostic.make ~code:(Types Recursion_limit)
-              (names.read_spans key).((names.read_definition key).id)
+              (names.read_spans key).(((names.read_definition key).id :> int))
               message;
           ])
 
@@ -55,7 +55,7 @@ let show_resolution = Tables.show_resolution
 
 let statement_diverges (tables : tables) =
   State.diverges ~is_never:(fun (value : Syntax.expression) ->
-      match tables.types.(value.id) with Some Types.Never -> true | _ -> false)
+      match tables.types.((value.id :> int)) with Some Types.Never -> true | _ -> false)
 
 module For_testing = struct
   let is_written_expression = Form.For_testing.is_written_expression

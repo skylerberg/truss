@@ -1,4 +1,4 @@
-type id = int
+type id = Source.Node.t
 type case = Upper | Lower
 type name = { text : string; case : case; id : id }
 type path = { modules : name list; last : name }

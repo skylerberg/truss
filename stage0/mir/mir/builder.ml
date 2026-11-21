@@ -28,7 +28,7 @@ module In_order = struct
   type 'value t = {
     slots : int;
     origin : Core.origin option;
-    evaluate : count:int -> index:int -> loans:int list ref -> 'value option;
+    evaluate : count:int -> index:int -> loans:Tree.loan list ref -> 'value option;
   }
 
   let pure value =
@@ -1653,7 +1653,7 @@ let of_expression (written : Core.expression) =
 
 let compute_parameter_origin ~(enclosing : Core.origin) (parameter : Core.parameter) : Core.origin =
   match parameter.local with
-  | Declared { origin = name; _ } -> Written name
+  | Declared { binder; _ } -> Written binder
   | Trait_parameter _ | Self | Synthetic _ -> enclosing
 
 let of_clause ?(is_executable = false) ~(parameters : Core.parameter list)

@@ -123,7 +123,7 @@ let decide_move context (place : Place.t) ~origin ~type_ ~is_returned ~is_captur
 
 let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
   let find_place (path : Moves.path) : Place.t option =
-    match body.locals.(path.local).kind with
+    match body.locals.((path.local :> int)).kind with
     | Source { local; is_binding = true; _ } ->
         Some
           {
@@ -209,7 +209,7 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
           | _ -> ())
       locals
   in
-  let all_locals = List.init (Array.length body.locals) Fun.id in
+  let all_locals = Mir.list_locals body.locals in
   let describe_scope_end moved root =
     Printf.sprintf
       "`%s` is moved out here and not reinitialized. `%s` is lent `mut`, so every part of it must \
@@ -241,7 +241,7 @@ let check_body context (body : Mir.Graph.body) moves ~returns_to_caller =
         if use.moves then Moves.move_out moves statement_state use.place ~origin:use.origin)
       uses
   in
-  Array.iteri
+  Mir.Graph.iteri_blocks
     (fun block (basic : Mir.Graph.basic_block) ->
       let state = Moves.copy_entry_state moves block in
       List.iter

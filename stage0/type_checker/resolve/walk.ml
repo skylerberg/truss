@@ -113,7 +113,7 @@ let lookup_section_names state = function
   | Body -> state.body
 
 let lookup_current_names state = lookup_section_names state state.section
-let read_span state id = state.spans.(id)
+let read_span state (id : Syntax.id) = state.spans.((id :> int))
 
 let run_in_section state section walk =
   if section = state.walked then begin
@@ -132,7 +132,7 @@ let add_diagnostic state ?fixes code (span : Source.Definition_span.t) message =
 let report state ?fixes code span message = ignore (add_diagnostic state ?fixes code span message)
 
 let set_target state (name : Syntax.name) target =
-  (lookup_current_names state).names.(name.id) <- Some target
+  (lookup_current_names state).names.((name.id :> int)) <- Some target
 
 let report_unknown state (name : Syntax.name) ~expected candidates =
   let span = read_span state name.id in
@@ -282,7 +282,7 @@ let resolve_type_name state scope ?(variants = false) (path : Syntax.path) =
                     (list_type_candidates state scope
                     @ if variants then List.map Well_known.show_variant Prelude.variants else []))))
 
-let find_target state (name : Syntax.name) = (lookup_current_names state).names.(name.id)
+let find_target state (name : Syntax.name) = (lookup_current_names state).names.((name.id :> int))
 
 let rec resolve_type_expression state scope (type_ : Syntax.type_expression) =
   match type_.kind with
@@ -507,7 +507,7 @@ and resolve_bracket state scope (value : Syntax.expression) base items =
             Type_arguments
         | _ -> Index)
   in
-  (lookup_current_names state).brackets.(value.id) <- Some decision;
+  (lookup_current_names state).brackets.((value.id :> int)) <- Some decision;
   List.iter
     (function
       | Syntax.Item item -> resolve_expression state scope item
@@ -520,7 +520,7 @@ and check_place state (written : Syntax.expression) (inner : Syntax.expression) 
     | Member (base, _) -> classify_head base
     | Parenthesized inner -> classify_head inner
     | Bracket (base, _) -> (
-        match (lookup_current_names state).brackets.(value.id) with
+        match (lookup_current_names state).brackets.((value.id :> int)) with
         | Some (Index | Method_bracket) -> classify_head base
         | _ -> `Not_a_place value)
     | Call ({ kind = Member (base, _); _ }, _)
@@ -1210,7 +1210,7 @@ let resolve_definition state ~(path : Path.t) ?(container : (Path.t * Syntax.def
         let scope = resolve_generics state scope ~owner:path type_.generics in
         resolve_path_type state scope trait_;
         let law_parameters =
-          match (lookup_current_names state).names.(trait_.path.last.id) with
+          match (lookup_current_names state).names.((trait_.path.last.id :> int)) with
           | Some (Definition (Trait, trait)) ->
               Option.value ~default:[] (find_law_parameters state.lookups trait law.text)
           | _ -> []

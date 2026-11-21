@@ -2,7 +2,7 @@ type key =
   | Type of Ground.ty
   | Block of Ground.ty * string
   | Code of Ground.function_type
-  | Environment of Lowered.Item.t * int
+  | Environment of Lowered.Item.t * Lowered.nested_function
   | Evidence of int
   | Capabilities of int
 
@@ -12,7 +12,7 @@ type reference =
   | Site of Lowered.site
   | Local of Lowered.local
   | Byte_constant of int
-  | Nested_function of int
+  | Nested_function of Lowered.nested_function
   | Static of int
   | Helper of C_runtime.helper
   | Capability of Path.t

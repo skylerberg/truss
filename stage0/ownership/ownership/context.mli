@@ -7,8 +7,8 @@ type context = {
   list_bounds : Types.parameter -> Types.trait_reference list;
   spans : Source.Definition_span.t array Lazy.t;
   text : string Lazy.t;
-  mode_keywords : (Syntax.id, Core.mode_keyword) Hashtbl.t;
-  places_without_keyword : (Syntax.id, Language.Mode.t) Hashtbl.t;
+  mode_keywords : (Source.Node.t, Core.mode_keyword) Hashtbl.t;
+  places_without_keyword : (Source.Node.t, Language.Mode.t) Hashtbl.t;
   names : string Local_table.t;
   origins : Core.origin Local_table.t;
   binding_modes : Language.Mode.t Local_table.t;

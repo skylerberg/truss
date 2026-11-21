@@ -45,11 +45,11 @@ type goal = {
 
 type frame = {
   first_variable : int;
-  mutable recorded_expressions : int list;
-  mutable bindings : int list;
+  mutable recorded_expressions : Syntax.id list;
+  mutable bindings : Syntax.id list;
   mutable reported_unmet_bounds : (Types.ty * Types.trait_reference * Diagnostic.reported) list;
-  mutable compiled_expressions : int list;
-  mutable compiled_bindings : int list;
+  mutable compiled_expressions : Syntax.id list;
+  mutable compiled_bindings : Syntax.id list;
   mutable specification_only_report : Diagnostic.reported option;
   span : Source.Definition_span.t;
 }

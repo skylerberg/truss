@@ -1,11 +1,11 @@
 let list_bodies (spans : Source.Definition_span.t array) (definition : Syntax.definition) =
   match definition.kind with
   | Function { body; _ } | Theorem { body; _ } | Test { body; _ } | Law_proof { body; _ } ->
-      [ spans.(body.id) ]
+      [ spans.((body.id :> int)) ]
   | Trait { members; _ } ->
       List.concat_map
         (fun (member : Syntax.trait_member Syntax.node) ->
-          match member.kind with Law law -> [ spans.(law.body.id) ] | _ -> [])
+          match member.kind with Law law -> [ spans.((law.body.id :> int)) ] | _ -> [])
         members
   | Method_declaration _ | Type_definition _ | Impl _ | Capability _ | Constant _
   | Definition_error _ ->
@@ -17,26 +17,26 @@ let list_representation text (spans : Source.Definition_span.t array)
   | Type_definition { name; generics; clauses; _ } ->
       let body_stop =
         match clauses with
-        | [] -> spans.(definition.id).stop
+        | [] -> spans.((definition.id :> int)).stop
         | (first : Syntax.type_clause) :: _ ->
             String.length
               (String.drop_last_while Char.Ascii.is_white
-                 (String.take_first spans.(first.id).start text))
+                 (String.take_first spans.((first.id :> int)).start text))
       in
       let head_stop =
         match List.rev generics with
-        | [] -> spans.(name.id).stop
+        | [] -> spans.((name.id :> int)).stop
         | (last : Syntax.generic_parameter) :: _ -> (
-            match String.index_from_opt text spans.(last.id).stop ']' with
+            match String.index_from_opt text spans.((last.id :> int)).stop ']' with
             | Some closer when closer < body_stop -> closer + 1
-            | Some _ | None -> spans.(last.id).stop)
+            | Some _ | None -> spans.((last.id :> int)).stop)
       in
       Source.Definition_span.make head_stop body_stop
       :: List.filter_map
            (fun (clause : Syntax.type_clause) ->
              match clause.kind with
              | Derives _ -> None
-             | Type_invariant _ | Potential _ -> Some spans.(clause.id))
+             | Type_invariant _ | Potential _ -> Some spans.((clause.id :> int)))
            clauses
   | Function _ | Method_declaration _ | Theorem _ | Test _ | Law_proof _ | Trait _ | Impl _
   | Capability _ | Constant _ | Definition_error _ ->

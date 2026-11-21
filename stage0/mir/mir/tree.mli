@@ -1,4 +1,6 @@
-type local = int
+type local = private int
+type loan = private int
+type lambda = private int
 
 type local_kind =
   | Source of { local : Core.local; mode : Language.Mode.t; is_var : bool; is_binding : bool }
@@ -39,7 +41,7 @@ type callee = { target : operand Core.target; uses : Types.capability_set }
 
 type function_argument =
   | Function_reference of { path : Path.t; origin : Core.origin }
-  | Lambda_expression of { body : int; origin : Core.origin; type_ : Types.ty }
+  | Lambda_expression of { body : lambda; origin : Core.origin; type_ : Types.ty }
 
 type argument =
   | Passed of { mode : Language.Mode.t; value : operand; function_ : function_argument option }
@@ -97,7 +99,7 @@ type rvalue =
   | To_any of { value : operand; trait : Types.trait_reference; evidence : Core.evidence }
   | Copy of operand
   | Function_value of { path : Path.t; instantiation : Types.instantiation; is_argument : bool }
-  | Lambda of { body : int; captures : capture list; is_argument : bool }
+  | Lambda of { body : lambda; captures : capture list; is_argument : bool }
   | Value_parameter of Types.parameter
   | Specification of specification
 
@@ -197,12 +199,12 @@ and basic =
   | Assert of operand
   | Echo of operand
   | Loan_start of {
-      loan : int;
+      loan : loan;
       borrowed : operand;
       mode : Language.Mode.t;
       duration : loan_duration;
     }
-  | Loan_end of int list
+  | Loan_end of loan list
   | Ghost_assert of { condition : formula; by_bit_vector : bool }
   | Path_note of path_note
   | Proof of t
@@ -296,3 +298,11 @@ type law = {
   requires : formula list;
   states : formula;
 }
+
+val add_local : local_info Dynarray.t -> local_info -> local
+val list_locals : 'a array -> local list
+val make_fresh_locals : local_info array -> unit -> local
+val iteri_locals : (local -> 'a -> unit) -> 'a array -> unit
+val find_core_local : local_info array -> local -> Core.local option
+val add_loan : (operand * Language.Mode.t) Dynarray.t -> operand * Language.Mode.t -> loan
+val add_lambda : body Dynarray.t -> body -> lambda

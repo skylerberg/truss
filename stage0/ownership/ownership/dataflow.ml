@@ -1,5 +1,5 @@
 type held_views = (Place.root * Actions.view list) list
-type state = { views : held_views; loans : (int * Actions.loan list) list }
+type state = { views : held_views; loans : (Mir.loan * Actions.loan list) list }
 
 let find_views_held_by (held_views : held_views) (holder : Place.root) =
   List.assoc_opt holder held_views
@@ -89,30 +89,30 @@ let forward context (actions : Actions.t) =
   let blocks = Array.length actions.steps in
   let entries = Array.make blocks None and pending = Queue.create () in
   if blocks > 0 then begin
-    entries.(0) <- Some { views = []; loans = [] };
-    Queue.add 0 pending
+    entries.((Mir.Graph.entry_block :> int)) <- Some { views = []; loans = [] };
+    Queue.add Mir.Graph.entry_block pending
   end;
   let transfer_through steps state =
     List.fold_left (fun state step -> transfer context step state) state steps
   in
   while not (Queue.is_empty pending) do
-    let block = Queue.pop pending in
+    let block : Mir.Graph.block = Queue.pop pending in
     let after =
       Array.fold_left
         (fun state steps -> transfer_through steps state)
-        (Option.get entries.(block))
-        actions.steps.(block)
+        (Option.get entries.((block :> int)))
+        actions.steps.((block :> int))
     in
     List.iter
-      (fun successor ->
-        match entries.(successor) with
+      (fun (successor : Mir.Graph.block) ->
+        match entries.((successor :> int)) with
         | None ->
-            entries.(successor) <- Some after;
+            entries.((successor :> int)) <- Some after;
             Queue.add successor pending
         | Some known -> (
             match join after ~into:known with
             | Some merged ->
-                entries.(successor) <- Some merged;
+                entries.((successor :> int)) <- Some merged;
                 Queue.add successor pending
             | None -> ()))
       (Mir.Graph.list_block_successors actions.body block)

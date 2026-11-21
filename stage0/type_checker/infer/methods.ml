@@ -21,7 +21,7 @@ let rec check_call state env ?expected (value : Syntax.expression) (callee : Syn
       | None -> check_method_call state env ?expected value base member ~type_arguments:[] arguments
       )
   | Bracket ({ kind = Member (base, member); _ }, items)
-    when state.resolved.brackets.(callee.id) = Some Method_bracket ->
+    when state.resolved.brackets.((callee.id :> int)) = Some Method_bracket ->
       check_method_call state env ?expected value base member ~type_arguments:items arguments
   | _ -> (
       match State.find_head state callee with
@@ -52,7 +52,7 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
       | [ argument ], Some (Lends (_, part)) when names_result argument.value ->
           ignore (Hooks.check_expression state env argument.value);
           let part = State.normalize state part in
-          state.tables.resolutions.(value.id) <- Some Specification_value;
+          state.tables.resolutions.((value.id :> int)) <- Some Specification_value;
           State.elaborate state value.id (Specification_call (Final { part }));
           part
       | _ ->

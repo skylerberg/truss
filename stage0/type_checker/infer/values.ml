@@ -274,7 +274,7 @@ and check_lambda (state : State.state) env ?expected (value : Syntax.expression)
                if id = state.definition.id then (id, Self)
                else
                  match Hashtbl.find_opt state.locals id with
-                 | Some local -> (id, Declared { origin = id; name = local.name })
+                 | Some local -> (id, Declared { binder = id; name = local.name })
                  | None -> State.raise_bug "a lambda captures a local that nothing declares")
              captures;
        });

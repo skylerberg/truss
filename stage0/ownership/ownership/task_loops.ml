@@ -11,7 +11,7 @@ let find_collection_type (body : Mir.Graph.body) ~(inside : Mir.Graph.block) par
         when lent = part ->
           Some type_
       | Basic _ | Provide_start _ | Provide_end -> None)
-    body.blocks.(inside).statements
+    body.blocks.((inside :> int)).statements
 
 let check context (mir : Mir.Graph.t) =
   List.iter
@@ -30,7 +30,8 @@ let check context (mir : Mir.Graph.t) =
               } -> (
               let keyword = if schedule = Parallel then "parallel" else "concurrent" in
               (match elements with
-              | Some { element = Lent_by_call lent; _ } when body.locals.(lent).kind = Lent Mut ->
+              | Some { element = Lent_by_call lent; _ }
+                when body.locals.((lent :> int)).kind = Lent Mut ->
                   Context.report context Data_race
                     (Context.locate_origin context origin)
                     (Printf.sprintf
@@ -45,7 +46,7 @@ let check context (mir : Mir.Graph.t) =
                        | None -> "the collection"))
               | Some { element = Lent_by_call _ | Sequence_element _; _ } | None -> ());
               match (schedule, iteration) with
-              | Concurrent, Pull _ when Context.is_view context body.locals.(part).type_ ->
+              | Concurrent, Pull _ when Context.is_view context body.locals.((part :> int)).type_ ->
                   Context.report context Task_outlives_view
                     (Context.locate_origin context block.terminator_origin)
                     (Printf.sprintf
@@ -53,7 +54,7 @@ let check context (mir : Mir.Graph.t) =
                         that started it. The element type `%s` is a view, and the next pull could \
                         mutate or drop the value that it views, which would leave the task with a \
                         dangling view. Use a `for` loop, or pull owned values."
-                       (Types.show body.locals.(part).type_))
+                       (Types.show body.locals.((part :> int)).type_))
               | _ -> ())
           | _ -> ())
         body.blocks)

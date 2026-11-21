@@ -376,9 +376,8 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
   let quote () =
     match (!at, Lazy.force source) with
     | Some origin, Some (spans, text)
-      when Core_walk.locate_origin origin >= 0
-           && Core_walk.locate_origin origin < Array.length spans ->
-        let span : Source.Definition_span.t = spans.(Core_walk.locate_origin origin) in
+      when (Core_walk.locate_origin origin :> int) < Array.length spans ->
+        let span : Source.Definition_span.t = spans.((Core_walk.locate_origin origin :> int)) in
         Printf.sprintf ", in `%s`" (excerpt (String.sub text span.start (span.stop - span.start)))
     | _ -> ""
   in
@@ -472,8 +471,8 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
     List.iter (fun (_, inner) -> check_type subject inner) reference.associated
   in
   let seen = Hashtbl.create 64 in
-  let check_unique id =
-    if Hashtbl.mem seen id then report "the node id %d is used twice" id;
+  let check_unique (id : Core.id) =
+    if Hashtbl.mem seen id then report "the node id %d is used twice" (id :> int);
     Hashtbl.replace seen id ()
   in
   let check_instantiation subject (instantiation : Types.instantiation) =
@@ -846,9 +845,10 @@ let index_written_nodes (definition : Syntax.definition) =
 let check_written_origins (interface : Interface.Lookups.t) (key : Resolve.Names.key)
     (form : Core.t) =
   let nodes = index_written_nodes (interface.names.read_definition key) in
-  let fail subject node =
+  let fail subject (node : Syntax.id) =
     Harness.fail "%s: %s has the written origin %d, which is not the construct written there"
-      (Resolve.Names.show_key key) subject node
+      (Resolve.Names.show_key key) subject
+      (node :> int)
   in
   Core_walk.walk_definition
     {

@@ -146,7 +146,7 @@ let apply_list_literal context frame (site : Invocation.site) values =
 
 let reads_only_literals (parameter : Core.local) (clause : Mir.formula) =
   let is_parameter local =
-    match clause.locals.(local).kind with
+    match clause.locals.((local : Mir.local :> int)).kind with
     | Source { local = core; _ } -> core = parameter
     | Temporary | Lent _ -> false
   in

@@ -46,7 +46,7 @@ let locate_name packages name text occurrence =
             Option.map
               (fun (name : Syntax.name) -> (name, spans, base, resolved))
               (List.find_opt
-                 (fun (name : Syntax.name) -> base + spans.(name.id).start = offset)
+                 (fun (name : Syntax.name) -> base + spans.((name.id :> int)).start = offset)
                  (Syntax_walk.collect_names spans definition))
         | _ -> None)
       ((Support.make_names packages).list_declarations_in file)
@@ -56,7 +56,7 @@ let locate_name packages name text occurrence =
   | None -> failwith (Printf.sprintf "no name at %S" text)
 
 let describe (spans : Source.Definition_span.t array) base (target : Resolve.target option) =
-  let compute_offset id = base + spans.(id).start in
+  let compute_offset (id : Syntax.id) = base + spans.((id :> int)).start in
   match target with
   | None -> "nothing"
   | Some Binding -> "binding"
@@ -79,7 +79,7 @@ let describe (spans : Source.Definition_span.t array) base (target : Resolve.tar
 let expect_reference ?(others = []) text ~name:(written, occurrence) expected =
   let packages = setup (("app::main", text) :: others) in
   let name, spans, base, resolved = locate_name packages "app::main" written occurrence in
-  let actual = describe spans base resolved.names.(name.id) in
+  let actual = describe spans base resolved.names.((name.id :> int)) in
   if actual <> expected then
     Harness.fail "`%s` #%d is %s, not %s" written occurrence actual expected
 
@@ -89,7 +89,7 @@ let expect_binding_reference text ~use ~binding =
     Support.locate_occurrence ~sub:(fst binding) ~occurrence:(snd binding) text
   in
   let name, spans, base, resolved = locate_name packages "app::main" (fst use) (snd use) in
-  let actual = describe spans base resolved.names.(name.id) in
+  let actual = describe spans base resolved.names.((name.id :> int)) in
   let expected = Printf.sprintf "local at %d" binding_offset in
   if actual <> expected then Harness.fail "`%s` is %s, not %s" (fst use) actual expected
 
@@ -260,8 +260,8 @@ let find_bracket text written occurrence =
           Syntax_walk.visit_definition
             (let rec visit (value : Syntax.expression) =
                (match value.kind with
-               | Bracket _ when base + spans.(value.id).start = offset ->
-                   bracket := resolved.brackets.(value.id)
+               | Bracket _ when base + spans.((value.id :> int)).start = offset ->
+                   bracket := resolved.brackets.((value.id :> int))
                | _ -> ());
                Syntax_walk.visit_children visit value
              in

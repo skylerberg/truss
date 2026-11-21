@@ -6,6 +6,13 @@ let make_span start stop =
 
 let make_zero_width position = make_span position position
 
+module Node = struct
+  type t = int
+
+  let iteri = Array.iteri
+  let find_index = Array.find_index
+end
+
 module Definition_span = struct
   type t = { start : int; stop : int }
 
@@ -21,12 +28,15 @@ module Definition_span = struct
 
   let of_file ~base (file_span : span) = make (file_span.start - base) (file_span.stop - base)
 
-  let locate spans origin =
-    if origin < 0 || origin >= Array.length spans then
+  let allocate spans span =
+    Dynarray.add_last spans span;
+    Dynarray.length spans - 1
+
+  let locate spans id =
+    if id < 0 || id >= Array.length spans then
       invalid_arg
-        (Printf.sprintf "Source.Definition_span.locate: no node %d among %d" origin
-           (Array.length spans));
-    spans.(origin)
+        (Printf.sprintf "Source.Definition_span.locate: no node %d among %d" id (Array.length spans));
+    spans.(id)
 
   let quote text (span : t) =
     if span.stop > String.length text then

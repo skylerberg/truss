@@ -89,7 +89,7 @@ let () =
             _;
           },
           _ ) ->
-          let body_start = spans.(body.id).start in
+          let body_start = spans.((body.id :> int)).start in
           if
             List.map
               (fun (span : Source.Definition_span.t) -> (span.start, span.stop))
@@ -103,7 +103,7 @@ let () =
       with
       | { value = { kind = Function { body; _ }; _ }; positions = { spans; syntax_errors }; _ } :: _
         ->
-          let body_span = spans.(body.id) in
+          let body_span = spans.((body.id :> int)) in
           if
             not
               (List.exists
@@ -120,7 +120,8 @@ let () =
           if
             not
               (List.exists
-                 (fun (span : Source.Definition_span.t) -> span.start < spans.(body.id).start)
+                 (fun (span : Source.Definition_span.t) ->
+                   span.start < spans.((body.id :> int)).start)
                  syntax_errors)
           then Harness.fail "no syntax error in the signature"
       | _ -> Harness.fail "wrong definitions");
@@ -160,7 +161,7 @@ let () =
       match Parse_support.list_items (fst (Parse_support.parse "fn f() {}\n\nfn g() {}")) with
       | [ _; second ] ->
           if second.base <> 11 then Harness.fail "base %d" second.base;
-          let span = second.positions.spans.(second.value.id) in
+          let span = second.positions.spans.((second.value.id :> int)) in
           if span.start <> 0 || span.stop <> 9 then Harness.fail "span";
           if second.stop <> 20 then Harness.fail "stop %d" second.stop
       | _ -> Harness.fail "expected two definitions");
@@ -210,7 +211,7 @@ let () =
          _;
        };
       ] ->
-          let start = spans.(value.id).start in
+          let start = spans.((value.id :> int)).start in
           if start <> 12 then Harness.fail "interpolation span %d" start
       | _ -> Harness.fail "wrong tree");
   Harness.test "nesting deeper than the limit is one error, not a stack overflow" (fun () ->
@@ -408,7 +409,9 @@ let list_ids (definition : Syntax.definition) =
   let ids = ref [] in
   let rec check_expression ~parent (value : Syntax.expression) =
     if value.id >= parent then
-      Harness.fail "an expression's id %d is not before its parent's %d" value.id parent;
+      Harness.fail "an expression's id %d is not before its parent's %d"
+        (value.id :> int)
+        (parent :> int);
     ids := value.id :: !ids;
     Syntax_walk.visit_expression_parts
       ~on_expression:(check_expression ~parent:value.id)
@@ -416,7 +419,9 @@ let list_ids (definition : Syntax.definition) =
       value
   and check_statement ~parent (written : Syntax.statement) =
     if written.id >= parent then
-      Harness.fail "a statement's id %d is not before its parent's %d" written.id parent;
+      Harness.fail "a statement's id %d is not before its parent's %d"
+        (written.id :> int)
+        (parent :> int);
     ids := written.id :: !ids;
     Syntax_walk.visit_statement_parts
       ~on_expression:(check_expression ~parent:written.id)

@@ -6,7 +6,7 @@ include Map.Make (struct
   let compare = compare
 end)
 
-let make_key (infos : Mir.local_info array) local =
-  match infos.(local).kind with
+let make_key (infos : Mir.local_info array) (local : Mir.local) =
+  match infos.((local :> int)).kind with
   | Source { local = core; _ } -> Core_local core
   | Temporary | Lent _ -> Mir_local local

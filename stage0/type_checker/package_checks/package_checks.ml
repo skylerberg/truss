@@ -31,9 +31,9 @@ let read_definition (lookups : Lookups.t) (declaration : Resolve.Names.declarati
 
 let locate_header (spans : Source.Definition_span.t array) (definition : Syntax.definition) =
   match definition.kind with
-  | Impl { trait_; _ } -> spans.(trait_.id)
-  | Type_definition { name; _ } -> spans.(name.id)
-  | _ -> spans.(definition.id)
+  | Impl { trait_; _ } -> spans.((trait_.id :> int))
+  | Type_definition { name; _ } -> spans.((name.id :> int))
+  | _ -> spans.((definition.id :> int))
 
 let list_outer_packages (impl : Types.impl_interface) =
   Path.locate_package impl.implements.trait
@@ -352,7 +352,7 @@ let locate_field (spans : Source.Definition_span.t array) (body : Syntax.type_bo
         (fun (written : Syntax.field) ->
           match written.kind with
           | Field_declaration { name; _ } when name.text = field.field_name ->
-              Some spans.(written.id)
+              Some spans.((written.id :> int))
           | _ -> None)
         fields
     with
@@ -389,7 +389,7 @@ let check_recursion lookups ~list_contained (declaration : Resolve.Names.declara
           (fun ((variant : Types.variant option), _) ->
             match (body, variant) with
             | Variants variants, Some variant ->
-                let span = spans.((read_written_variant variants variant).name.id) in
+                let span = spans.(((read_written_variant variants variant).name.id :> int)) in
                 make_diagnostic key Needs_indirect span
                   ~fixes:
                     [
@@ -437,7 +437,8 @@ let check_associated_types (lookups : Lookups.t) ~list_contained
         List.find_map
           (fun (member : Syntax.impl_member Syntax.node) ->
             match member.kind with
-            | Associated_definition (written, _) when written.text = name -> Some spans.(member.id)
+            | Associated_definition (written, _) when written.text = name ->
+                Some spans.((member.id :> int))
             | _ -> None)
           members
     | _ -> None
@@ -568,7 +569,8 @@ let check_tests (lookups : Lookups.t) (package : Path.package) =
            ( seen,
              diagnostics
              @ [
-                 make_diagnostic declaration.key Duplicate_test spans.(definition.id)
+                 make_diagnostic declaration.key Duplicate_test
+                   spans.((definition.id :> int))
                    (Printf.sprintf "Another test of this package is named %S." name);
                ] )
          else (name :: seen, diagnostics))
@@ -744,7 +746,7 @@ let check_constant (lookups : Lookups.t) (declaration : Resolve.Names.declaratio
           if depends_on_constant named.constant then
             Some
               (make_diagnostic key Constant_cycle
-                 spans.(Core_walk.locate_origin named.origin)
+                 spans.((Core_walk.locate_origin named.origin :> int))
                  (describe_constant_cycle ~cyclic:path named))
           else None)
         (list_named_constants lookups value)
@@ -802,8 +804,8 @@ let list_used_paths (lookups : Lookups.t) key =
 let locate_name (spans : Source.Definition_span.t array) (definition : Syntax.definition) =
   match definition.kind with
   | Function { signature; _ } | Method_declaration signature ->
-      spans.((Resolve.Names.extract_signature_name signature).id)
-  | Constant { name = Plain_name name | Member_name (_, name); _ } -> spans.(name.id)
+      spans.(((Resolve.Names.extract_signature_name signature).id :> int))
+  | Constant { name = Plain_name name | Member_name (_, name); _ } -> spans.((name.id :> int))
   | _ -> raise_bug "an unused definition that is neither a function nor a constant"
 
 let report_unused (lookups : Lookups.t) (declaration : Resolve.Names.declaration) ~is_named =
@@ -921,7 +923,7 @@ let check_definition (lookups : Lookups.t) key check_declaration =
             key;
             diagnostic =
               Diagnostic.make ~code:(Types Recursion_limit)
-                (names.read_spans key).((names.read_definition key).id)
+                (names.read_spans key).(((names.read_definition key).id :> int))
                 message;
           };
         ]

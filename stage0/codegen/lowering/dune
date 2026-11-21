@@ -25,7 +25,6 @@
   builtin_records
   intrinsic
   types
-  syntax
   core
   core_walk
   mir

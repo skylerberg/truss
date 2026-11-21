@@ -1,11 +1,12 @@
 type local = int
 type block = int
+type nested_function = int
 
 type ty =
   | Value of Ground.ty
   | Pointer of { target : ty; writable : bool }
   | Raw of Memory_layout.scalar
-  | Environment of int
+  | Environment of nested_function
   | Evidence of int
   | Capabilities of int
   | Trace
@@ -44,7 +45,7 @@ and constant =
   | Size_of of Ground.ty
   | Alignment_of of Ground.ty
 
-and function_ref = Item of Item.t | Nested of int
+and function_ref = Item of Item.t | Nested of nested_function
 
 type signature = { parameters : ty list; result : ty option; returns : bool }
 type unary = Negate | Not | Complement
@@ -167,8 +168,8 @@ type statement =
     }
   | Free_block of { place : place; variant : string }
   | Defer_free_block of { lend : operand; place : place; variant : string }
-  | Fork of { branches : (int * operand) list }
-  | Fork_range of { body : int; environment : operand; first : operand; last : operand }
+  | Fork of { branches : (nested_function * operand) list }
+  | Fork_range of { body : nested_function; environment : operand; first : operand; last : operand }
 
 type terminator =
   | Goto of block
@@ -201,3 +202,26 @@ type table = {
   capability : Path.t option;
   entries : (Item.t * signature) list;
 }
+
+let add table value =
+  Dynarray.add_last table value;
+  Dynarray.length table - 1
+
+let add_local = add
+let add_block = add
+let list_blocks blocks = List.init (Dynarray.length blocks) Fun.id
+
+type nested_function_counter = int ref
+
+let create_nested_function_counter () = ref 0
+
+let allocate_nested_function counter =
+  let nested_function = !counter in
+  incr counter;
+  nested_function
+
+module For_testing = struct
+  let make_local local = local
+  let make_block block = block
+  let make_nested_function nested_function = nested_function
+end

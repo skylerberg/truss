@@ -77,38 +77,44 @@ let () =
     "an outlined function's own local goes with it, and a shared one is reached through its \
      environment" (fun () ->
       let int = Lowered.Value Codegen_support.int32 in
-      let add left right =
-        Lowered.Binary (Add, Codegen_support.copy left, Codegen_support.copy right)
-      in
+      let copy local = Lowered.Copy (Lowered.make_local_place local) in
+      let add left right = Lowered.Binary (Add, copy left, copy right) in
       let env = Codegen_support.make_shape_env () in
       let builder = Emit_c.Ir_builder.create env ~item:(Codegen_support.code_item "entry") in
       let parameter = Emit_c.Ir_builder.allocate_local builder int in
       let sum = Emit_c.Ir_builder.allocate_local builder int in
       let other = Emit_c.Ir_builder.allocate_local builder int in
-      Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
       Emit_c.Ir_builder.emit builder
-        (Assign (Codegen_support.at parameter, Use (Codegen_support.constant_int32 5)));
+        (Assign (Lowered.make_local_place parameter, Use (Codegen_support.constant_int32 5)));
+      let nested_functions = Lowered.create_nested_function_counter () in
+      let first_function = Lowered.allocate_nested_function nested_functions in
       let first =
-        Emit_c.Ir_builder.outline builder ~index:0 ~parts:[] (fun () ->
+        Emit_c.Ir_builder.outline builder ~index:first_function ~parts:[] (fun () ->
             let own = Emit_c.Ir_builder.allocate_local builder ~name:"own" int in
             Emit_c.Ir_builder.emit builder
-              (Assign (Codegen_support.at own, add parameter parameter));
-            Emit_c.Ir_builder.emit builder (Assign (Codegen_support.at sum, add own parameter));
+              (Assign (Lowered.make_local_place own, add parameter parameter));
+            Emit_c.Ir_builder.emit builder
+              (Assign (Lowered.make_local_place sum, add own parameter));
             Emit_c.Ir_builder.finish builder (Return None))
       in
+      let second_function = Lowered.allocate_nested_function nested_functions in
       let second =
-        Emit_c.Ir_builder.outline builder ~index:1 ~parts:[] (fun () ->
+        Emit_c.Ir_builder.outline builder ~index:second_function ~parts:[] (fun () ->
             Emit_c.Ir_builder.emit builder
-              (Assign (Codegen_support.at other, Use (Codegen_support.copy parameter)));
+              (Assign (Lowered.make_local_place other, Use (copy parameter)));
             Emit_c.Ir_builder.finish builder (Return None))
       in
       let take_address holder =
-        Lowered.Address { place = Codegen_support.at holder; writable = false }
+        Lowered.Address { place = Lowered.make_local_place holder; writable = false }
       in
       Emit_c.Ir_builder.emit builder
-        (Fork { branches = [ (0, take_address first); (1, take_address second) ] });
-      Emit_c.Ir_builder.emit builder (Assign (Codegen_support.at sum, add sum other));
-      Emit_c.Ir_builder.finish builder (Return (Some (Codegen_support.copy sum)));
+        (Fork
+           {
+             branches =
+               [ (first_function, take_address first); (second_function, take_address second) ];
+           });
+      Emit_c.Ir_builder.emit builder (Assign (Lowered.make_local_place sum, add sum other));
+      Emit_c.Ir_builder.finish builder (Return (Some (copy sum)));
       let fragment =
         Emit_c.Ir_builder.build builder { parameters = []; result = Some int; returns = true }
       in
@@ -146,7 +152,12 @@ let () =
           [
             Codegen_support.local ~name:"environment" (Raw (Nullable_pointer Opaque));
             Codegen_support.local ~name:"item" (Codegen_support.value Codegen_support.uint64);
-            Codegen_support.local (Pointer { target = Environment 0; writable = false });
+            Codegen_support.local
+              (Pointer
+                 {
+                   target = Environment (Lowered.For_testing.make_nested_function 0);
+                   writable = false;
+                 });
             Codegen_support.local (Codegen_support.value Codegen_support.int32);
             Codegen_support.local ~name:"capabilities" Convention.capabilities;
           ]
@@ -178,7 +189,7 @@ let () =
           Codegen_support.entry ~nested:[ coroutine ]
             [
               Codegen_support.local ~name:"count" (Codegen_support.value Codegen_support.int32);
-              Codegen_support.local (Environment 0);
+              Codegen_support.local (Environment (Lowered.For_testing.make_nested_function 0));
               Codegen_support.local (Codegen_support.value (Function work));
               Codegen_support.local (Codegen_support.value Codegen_support.uint64);
               Codegen_support.local (Raw Bool);
@@ -198,7 +209,7 @@ let () =
                     ( Codegen_support.at 2,
                       Function_value
                         {
-                          code = Nested 0;
+                          code = Nested (Lowered.For_testing.make_nested_function 0);
                           environment =
                             Some (Address { place = Codegen_support.at 1; writable = false });
                         } );

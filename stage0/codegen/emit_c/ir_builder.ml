@@ -1,16 +1,29 @@
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Ir_builder" format
 let ( ++ ) = C_text.( ++ )
 
-module Locals = Set.Make (Int)
-module Blocks = Set.Make (Int)
+module Locals = Set.Make (struct
+  type t = Lowered.local
+
+  let compare = compare
+end)
+
+module Blocks = Set.Make (struct
+  type t = Lowered.block
+
+  let compare = compare
+end)
 
 type local_info = { ty : Lowered.ty; name : string option; is_zeroed : bool }
-type code = { emission : Emission.t; mutable nested : (int * Fragment.function_pieces) list }
+
+type code = {
+  emission : Emission.t;
+  mutable nested : (Lowered.nested_function * Fragment.function_pieces) list;
+}
 
 type role =
   | Enclosing
   | Outlined of {
-      index : int;
+      index : Lowered.nested_function;
       parent : int;
       parts : Lowered.local list;
       holder : Lowered.local;
@@ -47,28 +60,29 @@ type t = {
 let make_function ~code ~role ~entry ~opening ~prologue =
   { code; role; entry; opening; prologue; size = 0 }
 
+let make_empty_body () = { statements = []; terminator = None }
+
 let make_builder env ~site =
+  let bodies = Dynarray.create () in
+  let entry = Lowered.add_block bodies (make_empty_body ()) in
   {
     env;
     locals = Dynarray.create ();
-    bodies = Dynarray.create ();
-    owners = Dynarray.create ();
-    current = 0;
+    bodies;
+    owners = Dynarray.make 1 (Some 0);
+    current = entry;
     functions = Dynarray.create ();
     function_ = 0;
     site;
   }
 
-let make_empty_body () = { statements = []; terminator = None }
-
 let allocate_block builder =
-  Dynarray.add_last builder.bodies (make_empty_body ());
   Dynarray.add_last builder.owners None;
-  Dynarray.length builder.bodies - 1
+  Lowered.add_block builder.bodies (make_empty_body ())
 
 let start_function builder ~code =
   Dynarray.add_last builder.functions
-    (make_function ~code ~role:Enclosing ~entry:0 ~opening:builder.site ~prologue:[]);
+    (make_function ~code ~role:Enclosing ~entry:builder.current ~opening:builder.site ~prologue:[]);
   builder
 
 let create ?site env ~item =
@@ -83,15 +97,16 @@ let with_site builder site body =
   result
 
 let allocate_local builder ?name ?(is_zeroed = false) ty =
-  Dynarray.add_last builder.locals { ty; name; is_zeroed };
-  Dynarray.length builder.locals - 1
+  Lowered.add_local builder.locals { ty; name; is_zeroed }
 
-let lookup_local_type builder local = (Dynarray.get builder.locals local).ty
+let lookup_local_type builder local =
+  (Dynarray.get builder.locals (local : Lowered.local :> int)).ty
+
 let lookup_current_function builder = Dynarray.get builder.functions builder.function_
 
-let start builder block =
-  Dynarray.set builder.owners block (Some builder.function_);
-  Dynarray.set builder.bodies block (make_empty_body ());
+let start builder (block : Lowered.block) =
+  Dynarray.set builder.owners (block :> int) (Some builder.function_);
+  Dynarray.set builder.bodies (block :> int) (make_empty_body ());
   builder.current <- block
 
 let find_constant_truth : Lowered.test -> bool option = function
@@ -130,13 +145,14 @@ let emit builder statement =
   | Some statement ->
       let function_ = lookup_current_function builder in
       function_.size <- function_.size + 1;
-      let body = Dynarray.get builder.bodies builder.current in
+      let body = Dynarray.get builder.bodies (builder.current :> int) in
       body.statements <- (builder.site, statement) :: body.statements
 
 let finish builder terminator =
   let function_ = lookup_current_function builder in
   function_.size <- function_.size + 2;
-  (Dynarray.get builder.bodies builder.current).terminator <- Some (builder.site, terminator)
+  (Dynarray.get builder.bodies (builder.current :> int)).terminator <-
+    Some (builder.site, terminator)
 
 let run_in_block builder block body =
   let current = builder.current in
@@ -276,7 +292,7 @@ let outline builder ~index ~parts body =
   holder
 
 let render_local_name builder local =
-  C_values.render_local_name local (Dynarray.get builder.locals local).name
+  C_values.render_local_name local (Dynarray.get builder.locals (local :> int)).name
 
 let make_context builder ~note : C_values.function_context =
  fun local ->
@@ -286,10 +302,10 @@ let make_context builder ~note : C_values.function_context =
 let mark_reached_blocks builder functions =
   let reached = Array.make (Dynarray.length builder.bodies) false in
   let jump_targets = ref Blocks.empty in
-  let rec reach block =
-    if not reached.(block) then begin
-      reached.(block) <- true;
-      match (Dynarray.get builder.bodies block).terminator with
+  let rec reach (block : Lowered.block) =
+    if not reached.((block :> int)) then begin
+      reached.((block :> int)) <- true;
+      match (Dynarray.get builder.bodies (block :> int)).terminator with
       | Some (_, terminator) ->
           List.iter
             (fun target ->
@@ -444,7 +460,8 @@ let name_local builder (function_ : function_) ~is_local ~captures local =
     match (function_.role, List.assoc_opt local captures) with
     | Outlined { environment; _ }, Some field ->
         Printf.sprintf "(*(*%s).f_%s)" (render_local_name builder environment) field
-    | _ -> raise_bug "local %d is neither local to the function nor in its environment" local
+    | _ ->
+        raise_bug "local %d is neither local to the function nor in its environment" (local :> int)
 
 let render_local_declarations builder (emission : Emission.t) ~locals ~parameters =
   C_text.Concat
@@ -454,7 +471,7 @@ let render_local_declarations builder (emission : Emission.t) ~locals ~parameter
          if List.mem local parameters || Lowered.is_erased emission.types.env ty then None
          else
            let initializer_ =
-             if not (Dynarray.get builder.locals local).is_zeroed then ""
+             if not (Dynarray.get builder.locals (local :> int)).is_zeroed then ""
              else
                match ty with
                | Value ty when C_types.is_struct emission.types ty -> " = {0}"
@@ -473,16 +490,17 @@ let render_local_declarations builder (emission : Emission.t) ~locals ~parameter
 let render_blocks builder number (function_ : function_) ~reached ~jump_targets ~texts =
   C_text.Concat
     (List.map
-       (fun block ->
-         Text (if Blocks.mem block jump_targets then Printf.sprintf "b%d:;\n" block else "")
-         ++ texts.(block))
+       (fun (block : Lowered.block) ->
+         Text
+           (if Blocks.mem block jump_targets then Printf.sprintf "b%d:;\n" (block :> int) else "")
+         ++ texts.((block :> int)))
        (function_.entry
        :: List.filter
-            (fun block ->
+            (fun (block : Lowered.block) ->
               block <> function_.entry
-              && Dynarray.get builder.owners block = Some number
-              && reached.(block))
-            (List.init (Dynarray.length builder.bodies) Fun.id)))
+              && Dynarray.get builder.owners (block :> int) = Some number
+              && reached.((block :> int)))
+            (Lowered.list_blocks builder.bodies)))
 
 let write_function_texts builder ~enclosing_symbol { parameters; result; returns } =
   let functions = Dynarray.to_array builder.functions in
@@ -573,7 +591,7 @@ let build builder prototype =
     write_functions builder ~enclosing_symbol:(C_text.Item emission.item) prototype
   in
   let nested =
-    List.sort (fun (first, _) (second, _) -> Int.compare first second) enclosing.code.nested
+    List.sort (fun (first, _) (second, _) -> compare first second) enclosing.code.nested
   in
   Fragment.make emission
     ~kind:(Functions { nested = List.length nested; weight = enclosing.size })
