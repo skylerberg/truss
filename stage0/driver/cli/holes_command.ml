@@ -113,7 +113,7 @@ let print hole =
 let run ~paths =
   let snapshot, packages = Command_packages.load_current () in
   let database = Workspace.open_database snapshot in
-  let report = Report.gather database snapshot packages in
+  let report = Report.gather ~proofs:false database snapshot packages in
   let holes =
     match gather snapshot packages database paths with
     | [] -> []

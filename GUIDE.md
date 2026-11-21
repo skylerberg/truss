@@ -179,9 +179,8 @@ Hello, world!
 the command that matters most: **code is finished when `truss check` reports
 no errors.** A warning, such as for a private function nothing uses, points
 at code to clean up, but it does not stop a build.
-`truss run` and `truss test` build the program without waiting for the
-prover, so a program can run while one of its proofs still fails. `truss
-build` waits for every proof.
+`truss run`, `truss test`, and `truss build` stop at any error, a failed
+proof included.
 
 Every command exits with status 0 when the code has no error, 1 when it has
 one, and 2 when it could not run. Each runs in the package's directory, or
@@ -3625,9 +3624,13 @@ does.
 | `truss test --rerun` | Every selected test, ignoring cached results |
 | `truss test --timings` | The tests, then each one's duration, slowest first |
 
-`truss test` does not wait for the prover, so tests run while you are still
-working on a proof. Each test has a time limit, 10 seconds unless the
-project's manifest sets another, and a test that runs past it fails.
+`truss test` runs the tests only once every proof passes. To run them while
+you are still working on a proof, write `todo` in the proof, as
+[Chapter 13](#theorems-and-proof-blocks) shows. A test build checks each
+operation that could fail, so a test that reaches a real bug stops at the
+operation, and `truss build` refuses the `todo` until the proof is written.
+Each test has a time limit, 10 seconds unless the project's manifest sets
+another, and a test that runs past it fails.
 
 ### Deterministic tests and caching
 
@@ -4764,7 +4767,6 @@ From the tightest binding to the loosest:
 | `truss new NAME` | Create the package `NAME` in a new directory |
 | `truss check` | Report every diagnostic of the packages and of the packages they depend on |
 | `truss check --fix` | Apply every fix that is its diagnostic's only fix, check again, and repeat |
-| `truss check --no-proofs` | Report every diagnostic except the prover's |
 | `truss test [PATH...]` | Check the packages, then run the tests without a cached result |
 | `truss test --match TEXT` | Run only the tests whose names contain `TEXT` |
 | `truss test --rerun` | Run the selected tests, ignoring cached results |
