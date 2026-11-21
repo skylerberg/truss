@@ -1462,8 +1462,8 @@ keeps its own `use` lines, so a file shows the modules that it depends on.
 | Every path starts with a package name, even inside the package. | A path is written the same everywhere and is found by a text search. A relative path gives one module a different spelling at each place that names it. |
 | Modules can depend on each other in a cycle. | Dependencies are tracked between definitions, not between files. |
 | `.` separates every name of a path: a module's, a type's, and a value's. | Agents predict `.`, which Go, Python, Java, and Swift write for a module, and `:` is left to labels, fields, and map entries, so a call's labels do not look like its paths. |
-| In an expression, a name before `.` is looked up among the locals, then the file's imports, then the module's definitions, then the packages. | A local is declared in the enclosing function, where a reader finds it. A `use` is in the file, and a definition may be in another file of the module, so adding a definition to one file never changes what a path in another file names (*parallel agents*). |
-| A constant cannot have the name of a submodule of its module. | Inside the module, `limits.max` would be the constant's field, and outside it `app.limits.max` would be a definition of the submodule. |
+| A module's definitions, its submodules, and the modules its files import never share a name. | The files of a module share one namespace, so a name means one thing in all of them, as two files cannot define one name. An order among them would make a path's meaning depend on a rule the reader must recall, and a definition added to one file would silently change what a path in another file names. |
+| A path that starts with a name that is both a definition of its module and the first name of a package's path is an error, and the definition is not. | A package is named in the manifest, and an owner's name is chosen by someone else, so rejecting the definition would let adding a dependency break code that never names the package, and a package `json` could not define a function `json`. |
 
 ### The prelude
 

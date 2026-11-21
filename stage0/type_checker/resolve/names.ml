@@ -96,6 +96,12 @@ type lookups = {
 let list_visible_packages lookups package =
   List.sort_uniq compare (package :: Path.standard_package :: lookups.list_dependency_names package)
 
+let list_package_roots lookups package =
+  List.sort_uniq compare
+    (List.map
+       (fun package -> List.hd (Path.list_package_parts package))
+       (list_visible_packages lookups package))
+
 let list_transitive_dependencies lookups package =
   let rec close seen = function
     | [] -> seen

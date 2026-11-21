@@ -408,7 +408,7 @@ let () =
       expect_one_diagnostic ~others
         "use app.shapes\n\nfn f(shapes: Int64) -> Int64 {\n  shapes.abs()\n}\n"
         "resolve.unused_import");
-  Harness.test "an imported module comes before a definition of the module named like it" (fun () ->
+  Harness.test "a file cannot import a module named like a definition of its module" (fun () ->
       let text =
         "use app.shapes\n\n\
          fn shapes() -> Int64 {\n\
@@ -418,31 +418,36 @@ let () =
         \  shapes.area() + shapes()\n\
          }\n"
       in
-      expect_reference ~others text ~name:("area", 1) "app.shapes.area";
-      expect_reference ~others text ~name:("shapes", 4) "app.main.shapes");
-  Harness.test "a definition of the module comes before a package named like it" (fun () ->
-      expect_reference
+      expect_one_diagnostic ~others text "resolve.duplicate_import";
+      expect_reference ~others text ~name:("area", 1) "app.shapes.area");
+  Harness.test "a path that starts with a definition's name and a package's is ambiguous" (fun () ->
+      expect_one_diagnostic
         "type Point(x: Int64, y: Int64)\n\n\
          let app: Point = Point(x: 0, y: 0)\n\n\
          fn f() -> Int64 {\n\
         \  app.x\n\
          }\n"
-        ~name:("app", 2) "app.main.app");
+        "resolve.ambiguous_module");
+  Harness.test "a definition may have the first name of a package's path" (fun () ->
+      expect_no_diagnostics
+        [ ("app.main", "fn app() -> Int64 {\n  0\n}\n\nfn f() -> Int64 {\n  app()\n}\n") ]);
   Harness.test "a path names the longest module it can and the definition after it" (fun () ->
       let others =
         [
-          ("app.shapes", "internal fn round() -> Int64 { 0 }\n");
+          ("app.shapes", "internal fn corners() -> Int64 { 4 }\n");
           ("app.shapes.round", "internal fn area() -> Int64 { 0 }\n");
         ]
       in
-      let text = "fn f() -> Int64 {\n  app.shapes.round.area() + app.shapes.round()\n}\n" in
+      let text = "fn f() -> Int64 {\n  app.shapes.round.area() + app.shapes.corners()\n}\n" in
       expect_reference ~others text ~name:("area", 1) "app.shapes.round.area";
-      expect_reference ~others text ~name:("round", 2) "app.shapes.round";
+      expect_reference ~others text ~name:("corners", 1) "app.shapes.corners";
+      expect_reference ~others text ~name:("app", 1) "module app.shapes.round";
       expect_reference ~others text ~name:("app", 2) "module app.shapes");
-  Harness.test "a constant cannot have the name of a submodule of its module" (fun () ->
-      expect_one_diagnostic
-        ~others:[ ("app.main.limits", "internal let max: Int64 = 1\n") ]
-        "let limits: Int64 = 2\n" "resolve.duplicate_definition");
+  Harness.test "a definition cannot have the name of a submodule of its module" (fun () ->
+      let others = [ ("app.main.limits", "internal let max: Int64 = 1\n") ] in
+      expect_one_diagnostic ~others "let limits: Int64 = 2\n" "resolve.duplicate_definition";
+      expect_one_diagnostic ~others "fn limits() -> Int64 {\n  2\n}\n"
+        "resolve.duplicate_definition");
   Harness.test "a private definition of another file is not visible" (fun () ->
       expect_one_diagnostic ~others Fixtures.Resolve.call_of_another_files_private_function
         "resolve.not_visible");

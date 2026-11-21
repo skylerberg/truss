@@ -88,6 +88,15 @@ let find_declared_name (definition : Syntax.definition) : Syntax.name option =
       Some name
   | Impl _ | Test _ | Definition_error _ -> None
 
+let find_value_name (definition : Syntax.definition) : Syntax.name option =
+  match definition.kind with
+  | Function { signature = { name = Plain_name name; _ }; _ }
+  | Method_declaration { name = Plain_name name; _ }
+  | Constant { name = Plain_name name; _ }
+  | Theorem { name; _ } ->
+      Some name
+  | _ -> None
+
 let resolve (lookups : Names.lookups) (key : Names.key) section =
   let definition = lookups.read_definition key and spans = lookups.read_spans key in
   let module_ = key.module_ in
@@ -135,17 +144,17 @@ let resolve (lookups : Names.lookups) (key : Names.key) section =
       (Printf.sprintf "%s is already defined in %s, so this definition is never used."
          (Path.show key.path) first)
   end;
-  (match definition.kind with
-  | Constant { name = Plain_name name; _ } ->
+  (match find_value_name definition with
+  | Some name when key.ordinal = 0 ->
       let submodule : Path.module_ = { module_ with modules = module_.modules @ [ name.text ] } in
       if lookups.module_exists submodule then
         Walk.report state Duplicate_definition spans.(name.id)
           (Printf.sprintf
-             "`%s` is a module, so a constant of `%s` cannot be named `%s`: `%s.%s.x` would name \
-              the definition `x` of the module, never a field of the constant."
+             "`%s` is a module, so no definition of `%s` can be named `%s`: `%s.x` would name \
+              either."
              (Path.show_module submodule) (Path.show_module module_) name.text
-             (Path.show_module module_) name.text)
-  | _ -> ());
+             (Path.show_module submodule))
+  | Some _ | None -> ());
   let compute_outcome () =
     let walked = Walk.lookup_section_names state section in
     let resolved =
@@ -214,6 +223,16 @@ let list_file_diagnostics (lookups : Names.lookups) (path : Path.file) (file : S
                 "Another `use` already imports a module named `%s`. Write one of them by its full \
                  path instead."
                 last)
+         else if
+           match lookups.find module_ last with
+           | Some entry -> Names.Scope.is_value_kind entry.kind
+           | None -> false
+         then
+           report Duplicate_import span
+             (Printf.sprintf
+                "`%s` is a definition of `%s`, so this file cannot import a module named `%s`: \
+                 `%s.x` would name either. Rename the definition, or write the module's full path."
+                last (Path.show_module module_) last last)
          else
            begin match used with
            | Some used when not (List.mem last used) ->

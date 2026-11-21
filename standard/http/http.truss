@@ -3287,7 +3287,7 @@ fn offered_protocol(header: Option[StringSlice], protocols: Slice[String]) -> Op
   }
 }
 
-public fn websocket(
+public fn accept_websocket(
   request: own Request,
   responder: mut Responder,
   protocols: Slice[String] = [],

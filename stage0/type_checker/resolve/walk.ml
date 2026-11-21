@@ -474,7 +474,7 @@ and resolve_name_expression state scope (name : Syntax.name) =
   | Upper -> resolve_type_name state scope ~variants:true { modules = []; last = name }
   | Lower -> resolve_local_value state scope name
 
-and is_qualifier state scope text =
+and classify_path_head state scope text =
   let is_local =
     String_map.mem text scope.values
     ||
@@ -482,13 +482,15 @@ and is_qualifier state scope text =
     | Some (Meaning _ | Loop_element) -> true
     | Some (Meaning_unless_defined _) | None -> false
   in
-  let is_module_value () =
+  if is_local then `Value
+  else if List.mem_assoc text (state.lookups.list_imports state.key) then `Module
+  else
     match find_module_item state text with
-    | Some item -> Names.Scope.is_value_kind item.kind
-    | None -> false
-  in
-  (not is_local)
-  && (List.mem_assoc text (state.lookups.list_imports state.key) || not (is_module_value ()))
+    | Some item when Names.Scope.is_value_kind item.kind ->
+        if List.mem text (Names.list_package_roots state.lookups state.key.module_.package) then
+          `Ambiguous
+        else `Value
+    | Some _ | None -> `Module
 
 and resolve_member_chain state scope (value : Syntax.expression) =
   let rec flatten (written : Syntax.expression) members =
@@ -497,9 +499,23 @@ and resolve_member_chain state scope (value : Syntax.expression) =
     | _ -> (written, members)
   in
   match flatten value [] with
-  | { kind = Name ({ case = Lower; _ } as first); _ }, (_ :: _ as members)
-    when is_qualifier state scope first.text ->
-      resolve_qualified_name state scope first members
+  | ({ kind = Name ({ case = Lower; _ } as first); _ } as head), (member :: _ as members) -> (
+      match classify_path_head state scope first.text with
+      | `Module -> resolve_qualified_name state scope first members
+      | `Ambiguous ->
+          let report =
+            add_diagnostic state Ambiguous_module (read_span state first.id)
+              (Printf.sprintf
+                 "`%s` is a definition of `%s` and the first name of a package's path, so `%s.%s` \
+                  could name either. Rename the definition, or import the module and write its \
+                  last name."
+                 first.text
+                 (Path.show_module state.key.module_)
+                 first.text member.text)
+          in
+          set_target state first (Unknown report);
+          set_target state member (Unknown report)
+      | `Value -> resolve_expression state scope head)
   | head, _ -> resolve_expression state scope head
 
 and resolve_qualified_name state scope (first : Syntax.name) (members : Syntax.name list) =
@@ -566,10 +582,7 @@ and report_unknown_qualifier state scope (first : Syntax.name) =
             if Names.Scope.is_value_kind item.kind then Some item.name else None)
           (state.lookups.list_entries module_)
       @ List.map fst (state.lookups.list_imports state.key)
-      @ List.map
-          (fun (package : Path.package) -> List.hd (Path.list_package_parts package))
-          (module_.package :: Path.standard_package
-          :: state.lookups.list_dependency_names module_.package)
+      @ Names.list_package_roots state.lookups module_.package
     in
     add_diagnostic state Unknown_name span
       ~fixes:(Diagnostic.list_spelling_fixes span ~written:first.text candidates)

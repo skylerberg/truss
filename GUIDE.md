@@ -1783,8 +1783,9 @@ from it, so a reader always sees where a name comes from.
 - A local named like an imported module hides the module where it is in
   scope: in `for measure in measures { measure.total() }`, `measure` is the
   local. Name the local something else to call the module there.
-- There are no import aliases, and importing two modules with the same last
-  name is an error.
+- There are no import aliases. Importing two modules with the same last name
+  is an error, and so is importing a module named like a definition of the
+  file's module.
 - An unused `use` is an error, with a fix that deletes it.
 - The modules of a package may use each other in a cycle.
 

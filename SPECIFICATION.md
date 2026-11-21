@@ -339,17 +339,20 @@ its file or its position in the file.
 - A generic parameter cannot shadow a type, a trait, or a capability of its
   module, so `impl Shown for Box[Marker]` is an error where `Marker` is a
   type of the module.
-- In an expression, a name before `.` is looked up among the locals, then
-  the modules that the file's `use` lines import, then the definitions of
-  the file's module, then the packages that module can use. In
+- In an expression, a name before `.` is a local, a module that the file's
+  `use` lines import, a definition of the file's module, or a package that
+  module can use. A local shadows the other three: in
   `for network in subnets { network.contains(address) }`, `network` is the
   local even in a file that imports the `network` module.
+- A module's names never repeat: a definition cannot have the name of a
+  submodule of its module, and a file cannot import a module whose last name
+  is a definition of its module.
+- A package is named in the manifest, not in the module, so a definition may
+  have the first name of a package's path. A path that starts with that name
+  is an error, since it could name either.
 - After a module, a path names the longest module it can, then a definition
   of that module: in `standard.json.parse`, `standard.json` is the module and
-  `parse` is its function. A constant cannot have the name of a submodule of
-  its module, since `app.limits.max` would then name a definition of the
-  module `app.limits` where the field `max` of the constant `limits` was
-  meant.
+  `parse` is its function.
 
 ## Types
 

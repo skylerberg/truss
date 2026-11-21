@@ -15,7 +15,7 @@ fn chat(request: own http.Request, responder: mut http.Responder)
     let _ = mut responder.finish()
     return
   }
-  match http.websocket(own request, responder: mut responder, protocols: ["chat.v1"]) {
+  match http.accept_websocket(own request, responder: mut responder, protocols: ["chat.v1"]) {
     Ok(opened) => {
       var socket = own opened
       while mut socket.receive() is Ok(Some(message)) {
