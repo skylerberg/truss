@@ -711,20 +711,20 @@ let () =
            ~after:[ ("app::main", stepper_that_runs) ])
         ~parts:
           [
-            Any (Call_edges (make_method (make_main_path "Step") "step" (Instance Own), app));
+            Any (Implementations (make_method (make_main_path "Step") "step" (Instance Own), app));
             Any (Proof (make_main_key "run"));
           ]);
-  Harness.test "only a trait method's call edges read the dependencies of the calling package"
+  Harness.test "only a trait method's implementations read the dependencies of the calling package"
     (fun () ->
       let database = build [ ("app::main", stepper_that_runs) ] in
       let dependencies : Database.Part.t list =
         [ Input (Dependencies app); Input (Dependencies Path.standard_package) ]
       in
       expect_reads database
-        (Any (Call_edges (make_method (make_main_path "Step") "step" (Instance Own), app)))
+        (Any (Implementations (make_method (make_main_path "Step") "step" (Instance Own), app)))
         ~includes:dependencies ~excludes:[];
       expect_reads database
-        (Any (Call_edges (make_main_path "run", app)))
+        (Any (Call_edges (make_main_path "run")))
         ~includes:[] ~excludes:dependencies);
   Harness.test
     "a construction that runs a field default that fails adds no call edge to the default's callee"
@@ -734,14 +734,14 @@ let () =
           ~before:[ ("app::main", make_configured_source "Config(size: 1)") ]
           ~after:[ ("app::main", make_configured_source "Config()") ]
       in
-      expect_included recomputed ~parts:[ Any (Mir_call_edges (make_main_path "make")) ];
+      expect_included recomputed ~parts:[ Any (Call_edges (make_main_path "make")) ];
       expect_untouched recomputed ~is_excluded:(function
         | Any (Recursion_group _) -> true
         | _ -> false));
-  Harness.test "a derived method's MIR call edges read its generated MIR" (fun () ->
+  Harness.test "a derived method's call edges read its generated MIR" (fun () ->
       expect_reads
         (build [ ("app::main", version_deriving_over_a_key) ])
-        (Any (Mir_call_edges derived_version_default))
+        (Any (Call_edges derived_version_default))
         ~includes:[ Stored (Any (Generated_mir derived_version_default)) ]
         ~excludes:[]);
   Harness.test "a function that passes a derived impl where a bound needs one has a proof"
@@ -772,7 +772,7 @@ let () =
            ~after:[ ("app::main", version_deriving_over_a_loop) ])
         ~parts:
           [
-            Any (Mir_call_edges derived_version_default);
+            Any (Call_edges derived_version_default);
             Any (Recursion_group (make_main_path "check"));
             Any (Proof (make_main_key "check"));
           ]);
@@ -796,17 +796,12 @@ let () =
         (list_propagated
            ~before:[ ("app::main", version_with_a_written_default) ]
            ~after:[ ("app::main", version_deriving_over_a_key) ])
-        ~parts:
-          [
-            Any (Mir_call_edges derived_version_default);
-            Any (Call_edges (derived_version_default, app));
-            Any (Proof (make_main_key "check"));
-          ]);
-  Harness.test "an inherited method's MIR call edges read the MIR of its trait's provided body"
+        ~parts:[ Any (Call_edges derived_version_default); Any (Proof (make_main_key "check")) ]);
+  Harness.test "an inherited method's call edges read the MIR of its trait's provided body"
     (fun () ->
       expect_reads
         (build [ ("app::main", make_level_source ~height:"self.height") ])
-        (Any (Mir_call_edges raised_of_shelf))
+        (Any (Call_edges raised_of_shelf))
         ~includes:
           [
             Stored
@@ -853,10 +848,8 @@ let () =
       in
       expect_included
         (propagate_with_lib ~before:without_raised ~after:with_raised)
-        ~parts:[ Any (Call_edges (raised_of_library_shelf, app)) ];
-      expect_included
-        (propagate_with_lib ~before:with_raised ~after:without_raised)
-        ~parts:[ Any (Call_edges (raised_of_library_shelf, app)) ]);
+        ~parts:[ Any (Call_edges raised_of_library_shelf) ];
+      ignore (propagate_with_lib ~before:with_raised ~after:without_raised));
   Harness.test
     "a dependency's body that fails reports its error and hides a recursion through it only until \
      the body is fixed" (fun () ->
@@ -881,7 +874,7 @@ let () =
         (propagate_with_lib ~before:failing ~after:fixed)
         ~parts:
           [
-            Any (Call_edges (Support.make_top_path "lib::tools" "follow", app));
+            Any (Call_edges (Support.make_top_path "lib::tools" "follow"));
             Any (Proof (make_key step_of_hop));
           ];
       if count_termination_obligations (settle fixed) ~of_:step_of_hop <> 1 then

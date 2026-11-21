@@ -22,4 +22,8 @@ val list_code_supplied_to_generics :
 
 val resolve_node : lookups -> Path.t -> Types.substitution -> Path.t
 val list_path_edges : lookups -> Path.t -> Path.t list
+
+type node = Definition | Trait_method_declaration
+
+val find_node : lookups -> Path.t -> node
 val list_implementations : lookups -> calling_package:Path.package -> Path.t -> Path.t list

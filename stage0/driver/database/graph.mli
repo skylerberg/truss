@@ -11,6 +11,7 @@ module Make (Node : Strongly_connected.Node) : sig
   val change_successors : t -> Node.t -> before:Node.t list -> after:Node.t list -> Node.t list
   val is_node : t -> Node.t -> bool
   val has_changes : t -> bool
+  val list_roots : t -> Node.t list
   val update : t -> find_successors:(Node.t -> Node.t list option) -> update
   val group : t -> find_successors:(Node.t -> Node.t list option) -> Node.t -> group
 end
