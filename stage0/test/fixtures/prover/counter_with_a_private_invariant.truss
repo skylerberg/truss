@@ -1,0 +1,21 @@
+public opaque type Counter(count: Int64)
+  invariant count >= 0
+  invariant is_small(count)
+
+fn is_small(count: Int64) -> Bool
+  ensures result == (count <= 10)
+{
+  count <= 10
+}
+
+public fn Counter.new() -> Counter
+  ensures result.count == 0
+{
+  Counter(count: 0)
+}
+
+public fn Counter.read(self) -> Int64
+  ensures result <= 10
+{
+  self.count
+}

@@ -1349,9 +1349,7 @@ let () =
         match Convention.classify_parameter env Read ty with
         | Some (Value _) -> true
         | Some _ -> false
-        | None ->
-            Codegen_support.fail "a parameter with a size is not passed";
-            false
+        | None -> Codegen_support.fail "a parameter with a size is not passed"
       in
       if not (is_by_value Codegen_support.int64) then
         Codegen_support.fail "a number is passed by address";

@@ -85,6 +85,12 @@ module In_order = struct
     let value = evaluation.evaluate ~count:evaluation.slots ~index:0 ~loans in
     Option.iter (Emitter.end_loans builder (List.rev !loans)) evaluation.origin;
     value
+
+  let run_arguments builder (called : Core.call) plan =
+    let plans = Array.of_list (List.map plan called.arguments) in
+    let* values = run builder (all (List.map (Array.get plans) called.evaluation_order)) in
+    let by_position = List.combine called.evaluation_order values in
+    Some (List.mapi (fun position _ -> List.assoc position by_position) called.arguments)
 end
 
 let rec runs_code (place : Core.place) =
@@ -665,9 +671,7 @@ and lower_callee builder (callee : Core.callee) : Tree.callee option =
 
 and lower_call builder (called : Core.call) ~node ~origin : Tree.call option =
   let* callee = lower_callee builder called.callee in
-  let* arguments =
-    In_order.run builder (In_order.all (List.map (plan_argument builder) called.arguments))
-  in
+  let* arguments = In_order.run_arguments builder called (plan_argument builder) in
   Some { Tree.callee; arguments; node; origin }
 
 and plan_argument builder (argument : Core.argument) =
@@ -692,13 +696,9 @@ and lower_call_value builder (node : Core.expression) (called : Core.call) =
   match called.callee.target with
   | Intrinsic { operation = Scalar operation; type_arguments } ->
       let* operands =
-        In_order.run builder
-          (In_order.all
-             (List.map
-                (function
-                  | Core.Passed { value; mode; _ } -> plan_operand builder mode value
-                  | Default -> raise_bug "a primitive operation with a default argument")
-                called.arguments))
+        In_order.run_arguments builder called (function
+          | Core.Passed { value; mode; _ } -> plan_operand builder mode value
+          | Default -> raise_bug "a primitive operation with a default argument")
       in
       Emitter.hold builder node.type_ origin (Operation { operation; type_arguments; operands })
   | _ ->

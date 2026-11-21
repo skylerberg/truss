@@ -10,7 +10,7 @@ fn make_definition_node(
 ) -> syntax::Definition
   uses Panic
 {
-  syntax::Definition(visibility, kind: own kind, id: allocate_id_from(mut cursor, start_index: start))
+  syntax::Definition(visibility, own kind, id: allocate_id_from(mut cursor, start_index: start))
 }
 
 type WrittenVisibility(visibility: Option[syntax::Visibility], tokens: List[token::Token], public_token: Option[token::Token], opaque_token: Option[token::Token])
@@ -63,7 +63,7 @@ fn parse_type_head(cursor: mut TokenCursor) -> Result[syntax::TypeHead, Failure]
   let start = cursor.index
   let path = parse_upper_path(mut cursor, expected: "a type name")?
   let generics = parse_generics(mut cursor)?
-  Ok(syntax::TypeHead(path: own path, generics: own generics, id: allocate_id_from(mut cursor, start_index: start)))
+  Ok(syntax::TypeHead(own path, own generics, id: allocate_id_from(mut cursor, start_index: start)))
 }
 
 fn parse_definition_name(cursor: mut TokenCursor) -> Result[syntax::DefinitionName, Failure]
@@ -77,7 +77,7 @@ fn parse_definition_name(cursor: mut TokenCursor) -> Result[syntax::DefinitionNa
   if is_member {
     let head = parse_type_head(mut cursor)?
     expect_punctuation(mut cursor, punctuation: token::Punctuation.Dot)?
-    return Ok(syntax::DefinitionName.MemberName(head: own head, name: lower_name(mut cursor, expected: "a method name after `.`")?))
+    return Ok(syntax::DefinitionName.MemberName(own head, name: lower_name(mut cursor, expected: "a method name after `.`")?))
   }
   Ok(syntax::DefinitionName.PlainName(lower_name(mut cursor, expected: "a name")?))
 }
@@ -104,9 +104,9 @@ fn parse_parameter(cursor: mut TokenCursor) -> Result[syntax::Parameter, Failure
     } else {
       None
     }
-    syntax::ParameterKind.NamedParameter(name: own name, mode, annotation: own annotation, default: own default)
+    syntax::ParameterKind.NamedParameter(own name, mode, own annotation, own default)
   }
-  Ok(syntax::Parameter(kind: own kind, id: allocate_id_from(mut cursor, start_index: start)))
+  Ok(syntax::Parameter(own kind, id: allocate_id_from(mut cursor, start_index: start)))
 }
 
 fn recover_parameter(cursor: mut TokenCursor, span: source::Span) -> syntax::Parameter {
@@ -127,12 +127,12 @@ fn parse_parameters(cursor: mut TokenCursor, is_method: Bool) -> Result[List[syn
         report(
           mut cursor,
           code: "parser.misplaced_self",
-          span,
+          span: span,
           message: "Only a method takes `self`: one written `fn Type.name`, or one in a trait or an `impl`.",
         )
       } else if entry.index > 0 {
         let span = cursor.read_file_span(entry.element.id)
-        report(mut cursor, code: "parser.misplaced_self", span, message: "`self` must be the first parameter.")
+        report(mut cursor, code: "parser.misplaced_self", span: span, message: "`self` must be the first parameter.")
       }
     }
   }
@@ -207,7 +207,7 @@ fn parse_clauses(cursor: mut TokenCursor) -> List[syntax::Clause]
         } else {
           "A signature has at most one `decreases` clause; list several measures in one, separated by commas."
         }
-        report(mut cursor, code: "parser.repeated_clause", span, message)
+        report(mut cursor, code: "parser.repeated_clause", span: span, message: message)
       }
     }
     mut clauses.push(own clause)
@@ -268,14 +268,14 @@ fn parse_signature(cursor: mut TokenCursor, name: own syntax::DefinitionName, is
   let parameters = parse_parameters(mut cursor, is_method)?
   let output = parse_output(mut cursor)?
   let clauses = parse_clauses(mut cursor)
-  Ok(syntax::Signature(name: own name, generics: own generics, parameters: own parameters, output: own output, clauses: own clauses))
+  Ok(syntax::Signature(own name, own generics, own parameters, own output, own clauses))
 }
 
 fn parse_function_signature(cursor: mut TokenCursor, name: own syntax::DefinitionName) -> Result[syntax::Signature, Failure]
   uses Panic, RunForever
 {
   let is_method = name is MemberName(..)
-  parse_signature(mut cursor, name: own name, is_method)
+  parse_signature(mut cursor, own name, is_method)
 }
 
 type MemberLine[Member] = ParsedMember(member: Member) | SkippedMethod(piece: Piece)
@@ -292,7 +292,7 @@ fn split_member_lines[Member](lines: own List[MemberLine[Member]]) -> Members[Me
       SkippedMethod(piece) => mut methods.push(piece)
     }
   }
-  Members(members: own members, methods: own methods)
+  Members(own members, own methods)
 }
 
 fn parse_trait_line(cursor: mut TokenCursor) -> Result[MemberLine[syntax::TraitMemberNode], Failure]
@@ -303,7 +303,7 @@ fn parse_trait_line(cursor: mut TokenCursor) -> Result[MemberLine[syntax::TraitM
     return Ok(MemberLine.SkippedMethod(skip_piece(mut cursor)))
   }
   let kind = parse_trait_member(mut cursor)?
-  Ok(MemberLine.ParsedMember(syntax::TraitMemberNode(kind: own kind, id: allocate_id_from(mut cursor, start_index: start))))
+  Ok(MemberLine.ParsedMember(syntax::TraitMemberNode(own kind, id: allocate_id_from(mut cursor, start_index: start))))
 }
 
 fn recover_trait_line(cursor: mut TokenCursor, span: source::Span) -> MemberLine[syntax::TraitMemberNode] {
@@ -318,7 +318,7 @@ fn parse_impl_line(cursor: mut TokenCursor) -> Result[MemberLine[syntax::ImplMem
     return Ok(MemberLine.SkippedMethod(skip_piece(mut cursor)))
   }
   let kind = parse_impl_member(mut cursor)?
-  Ok(MemberLine.ParsedMember(syntax::ImplMemberNode(kind: own kind, id: allocate_id_from(mut cursor, start_index: start))))
+  Ok(MemberLine.ParsedMember(syntax::ImplMemberNode(own kind, id: allocate_id_from(mut cursor, start_index: start))))
 }
 
 fn recover_impl_line(cursor: mut TokenCursor, span: source::Span) -> MemberLine[syntax::ImplMemberNode] {
@@ -346,7 +346,7 @@ fn parse_trait_member(cursor: mut TokenCursor) -> Result[syntax::TraitMember, Fa
     advance(mut cursor)
     let name = parse_upper_name(mut cursor, expected: "the name of an associated type")?
     let bounds = if accept_punctuation(mut cursor, punctuation: token::Punctuation.Colon) { parse_bounds(mut cursor)? } else { [] }
-    return Ok(syntax::TraitMember.AssociatedType(name: own name, bounds: own bounds))
+    return Ok(syntax::TraitMember.AssociatedType(own name, own bounds))
   }
   if kind == token::Kind.Keyword(token::Keyword.Capability) {
     advance(mut cursor)
@@ -362,7 +362,7 @@ fn parse_trait_member(cursor: mut TokenCursor) -> Result[syntax::TraitMember, Fa
     }
     let body = parse_body(mut cursor)?
     return Ok(
-      syntax::TraitMember.Law(syntax::LawDefinition(name: own name, parameters: own parameters, premises: own premises, body: own body)),
+      syntax::TraitMember.Law(syntax::LawDefinition(own name, own parameters, own premises, own body)),
     )
   }
   Err(fail(mut cursor, expected: "`fn`, `type`, `capability`, or `law` to start a member of the trait"))
@@ -376,13 +376,13 @@ fn parse_impl_member(cursor: mut TokenCursor) -> Result[syntax::ImplMember, Fail
     advance(mut cursor)
     let name = parse_upper_name(mut cursor, expected: "the name of an associated type")?
     expect_punctuation(mut cursor, punctuation: token::Punctuation.Equal)?
-    return Ok(syntax::ImplMember.AssociatedDefinition(name: own name, definition: parse_type_expression(mut cursor)?))
+    return Ok(syntax::ImplMember.AssociatedDefinition(own name, definition: parse_type_expression(mut cursor)?))
   }
   if kind == token::Kind.Keyword(token::Keyword.Capability) {
     advance(mut cursor)
     let name = parse_upper_name(mut cursor, expected: "the name of an associated capability set")?
     expect_punctuation(mut cursor, punctuation: token::Punctuation.Equal)?
-    return Ok(syntax::ImplMember.CapabilityDefinition(name: own name, capabilities: parse_capability_uses(mut cursor)?))
+    return Ok(syntax::ImplMember.CapabilityDefinition(own name, capabilities: parse_capability_uses(mut cursor)?))
   }
   Err(fail(mut cursor, expected: "`fn`, `type`, or `capability` to start a member of the `impl`"))
 }
@@ -393,15 +393,15 @@ type Container = InTrait | InImpl | InCapability
 fn parse_method_kind(cursor: mut TokenCursor, container: Container, name: own syntax::DefinitionName) -> Result[syntax::DefinitionKind, Failure]
   uses Panic, RunForever
 {
-  let signature = parse_signature(mut cursor, name: own name, is_method: true)?
+  let signature = parse_signature(mut cursor, own name, is_method: true)?
   let kind = match container {
     InTrait => match parse_optional_body(mut cursor)? {
-      Some(body) => syntax::DefinitionKind.Function(syntax::FunctionDefinition(signature: own signature, body: body.copy()))
+      Some(body) => syntax::DefinitionKind.Function(syntax::FunctionDefinition(own signature, body: body.copy()))
       None => syntax::DefinitionKind.MethodDeclaration(own signature)
     }
     InImpl => {
       let body = parse_definition_body(mut cursor)?
-      syntax::DefinitionKind.Function(syntax::FunctionDefinition(signature: own signature, body: own body))
+      syntax::DefinitionKind.Function(syntax::FunctionDefinition(own signature, own body))
     }
     InCapability => {
       for parameter in signature.parameters {
@@ -410,7 +410,7 @@ fn parse_method_kind(cursor: mut TokenCursor, container: Container, name: own sy
           report(
             mut cursor,
             code: "parser.misplaced_self",
-            span,
+            span: span,
             message: "A capability's methods take no `self`; they are called as `Capability.method(...)`, and only an implementation's methods take `self`.",
           )
         }
@@ -453,7 +453,7 @@ fn parse_field(cursor: mut TokenCursor) -> Result[syntax::Field, Failure]
   let default = if accept_punctuation(mut cursor, punctuation: token::Punctuation.Equal) { Some(parse_expression(mut cursor)?) } else { None }
   Ok(
     syntax::Field(
-      kind: syntax::FieldKind.FieldDeclaration(name: own name, annotation: own annotation, default: own default),
+      kind: syntax::FieldKind.FieldDeclaration(own name, own annotation, own default),
       id: allocate_id_from(mut cursor, start_index: start),
     ),
   )
@@ -476,7 +476,7 @@ fn parse_variant(cursor: mut TokenCursor) -> Result[syntax::VariantDeclaration, 
   let is_indirect = accept_keyword(mut cursor, keyword: token::Keyword.Indirect)
   let name = parse_upper_name(mut cursor, expected: "the name of a variant")?
   let fields = if cursor.is_punctuation(token::Punctuation.Open(token::Bracket.Paren)) { Some(parse_fields(mut cursor)) } else { None }
-  Ok(syntax::VariantDeclaration(is_indirect, name: own name, fields: own fields, id: allocate_id_from(mut cursor, start_index: start)))
+  Ok(syntax::VariantDeclaration(is_indirect, own name, own fields, id: allocate_id_from(mut cursor, start_index: start)))
 }
 
 fn parse_variants(cursor: mut TokenCursor) -> Result[List[syntax::VariantDeclaration], Failure]
@@ -516,7 +516,36 @@ fn parse_type_clauses(cursor: mut TokenCursor) -> Result[List[syntax::TypeClause
   Ok(own clauses)
 }
 
-fn parse_type_definition(cursor: mut TokenCursor, name: own syntax::Name) -> Result[syntax::DefinitionKind, Failure]
+type TupleWord(word: source::Span, removal: source::Span)
+  derives Equal
+
+fn take_tuple_word(cursor: mut TokenCursor) -> Option[TupleWord]
+  uses Panic
+{
+  let kind = cursor.peek_kind()
+  let is_word = match kind {
+    Lower(_) => true
+    _ => false
+  }
+  if !is_word || cursor.peek_ahead(1) != token::Kind.Keyword(token::Keyword.Type) {
+    return None
+  }
+  let written = cursor.name(kind).to_string()
+  let word = take(mut cursor).span
+  let removal = source::make_span(word.start, cursor.peek().span.start)
+  if written == "tuple" {
+    return Some(TupleWord(word, removal))
+  }
+  let fixes = if edit_distance(written, "tuple") <= 2 {
+    [source::make_fix("Write `tuple`", [source::replace(word, "tuple")])]
+  } else {
+    [source::make_fix("Remove `${written}`", [source::delete(removal)])]
+  }
+  report(mut cursor, "parser.misplaced_tuple", word, "Only `tuple` can come before `type`, not `${written}`.", own fixes)
+  None
+}
+
+fn parse_type_definition(cursor: mut TokenCursor, name: own syntax::Name, tuple: Option[TupleWord]) -> Result[syntax::DefinitionKind, Failure]
   uses Panic, RunForever
 {
   let generics = parse_generics(mut cursor)?
@@ -531,8 +560,24 @@ fn parse_type_definition(cursor: mut TokenCursor, name: own syntax::Name) -> Res
   } else {
     return Err(fail(mut cursor, expected: "`(` to start the fields, or `=` before the variants"))
   }
+  let is_tuple = match tuple {
+    None => false
+    Some(tuple_word) => match body {
+      Fields(fields) if fields.length() >= 2 => true
+      _ => {
+        report(
+          mut cursor,
+          "parser.misplaced_tuple",
+          tuple_word.word,
+          "Only a record with two or more fields can be a tuple type. A record with one field already takes a bare pattern, and a sum type's fields belong to its variants.",
+          [source::make_fix("Remove `tuple`", [source::delete(tuple_word.removal)])],
+        )
+        false
+      }
+    }
+  }
   let clauses = parse_type_clauses(mut cursor)?
-  Ok(syntax::DefinitionKind.TypeDefinition(name: own name, generics: own generics, body: own body, clauses: own clauses))
+  Ok(syntax::DefinitionKind.TypeDefinition(is_tuple, own name, own generics, own body, own clauses))
 }
 
 type Parsed(kind: syntax::DefinitionKind, methods: List[Piece])
@@ -547,7 +592,7 @@ fn parse_trait(cursor: mut TokenCursor, name: own syntax::Name) -> Result[Parsed
   let split = split_member_lines(own lines)
   Ok(
     Parsed(
-      kind: syntax::DefinitionKind.Trait(name: own name, generics: own generics, supertraits: own supertraits, members: own split.members),
+      kind: syntax::DefinitionKind.Trait(own name, own generics, own supertraits, members: own split.members),
       methods: own split.methods,
     ),
   )
@@ -557,7 +602,7 @@ fn parse_impl(cursor: mut TokenCursor) -> Result[Parsed, Failure]
   uses Panic, RunForever
 {
   advance(mut cursor)
-  let closer = if cursor.is_punctuation(token::Punctuation.Less) { find_angle_closer(cursor) } else { None }
+  let closer = if cursor.is_punctuation(token::Punctuation.Less) { cursor.find_angle_closer() } else { None }
   if closer is Some(closer_index) {
     let opening = cursor.peek()
     var has_bounds = false
@@ -584,9 +629,9 @@ fn parse_impl(cursor: mut TokenCursor) -> Result[Parsed, Failure]
   Ok(
     Parsed(
       kind: syntax::DefinitionKind.Impl(
-        implemented_trait: own implemented_trait,
-        implementing_type: own implementing_type,
-        capabilities: own capabilities,
+        own implemented_trait,
+        own implementing_type,
+        own capabilities,
         members: own split.members,
       ),
       methods: own split.methods,
@@ -600,7 +645,7 @@ fn parse_capability_definition(cursor: mut TokenCursor, name: own syntax::Name) 
   expect_body_opening(mut cursor)?
   let lines = parse_lines(mut cursor, parse_item: parse_capability_line, recover: recover_capability_line)
   let split = split_member_lines(own lines)
-  Ok(Parsed(kind: syntax::DefinitionKind.Capability(name: own name, members: own split.members), methods: own split.methods))
+  Ok(Parsed(kind: syntax::DefinitionKind.Capability(own name, members: own split.members), methods: own split.methods))
 }
 
 fn parse_constant(cursor: mut TokenCursor, name: own syntax::DefinitionName) -> Result[syntax::DefinitionKind, Failure]
@@ -609,7 +654,7 @@ fn parse_constant(cursor: mut TokenCursor, name: own syntax::DefinitionName) -> 
   expect_punctuation(mut cursor, punctuation: token::Punctuation.Colon)?
   let annotation = parse_type_expression(mut cursor)?
   expect_punctuation(mut cursor, punctuation: token::Punctuation.Equal)?
-  Ok(syntax::DefinitionKind.Constant(name: own name, annotation: own annotation, value: parse_expression(mut cursor)?))
+  Ok(syntax::DefinitionKind.Constant(own name, own annotation, value: parse_expression(mut cursor)?))
 }
 
 fn parse_test(cursor: mut TokenCursor) -> Result[syntax::DefinitionKind, Failure]
@@ -624,16 +669,16 @@ fn parse_test(cursor: mut TokenCursor) -> Result[syntax::DefinitionKind, Failure
       }
       if !written.rest.is_empty() {
         let span = cursor.peek().span
-        report(mut cursor, code: "parser.interpolation_not_allowed", span, message: "A test's name cannot have interpolations.")
+        report(mut cursor, code: "parser.interpolation_not_allowed", span: span, message: "A test's name cannot have interpolations.")
         return Err(Failure.Failed)
       }
       let start = cursor.index
-      parse_string_literal(mut cursor, start, modules: [], literal)?
+      parse_string_literal(mut cursor, start, modules: [], literal: literal)?
     }
     _ => return Err(fail(mut cursor, expected: "a string to name the test"))
   }
   let capabilities = if accept_keyword(mut cursor, keyword: token::Keyword.Uses) { parse_capability_list(mut cursor)? } else { [] }
-  Ok(syntax::DefinitionKind.Test(name: own name, capabilities: own capabilities, body: parse_body(mut cursor)?))
+  Ok(syntax::DefinitionKind.Test(own name, own capabilities, body: parse_body(mut cursor)?))
 }
 
 fn parse_theorem(cursor: mut TokenCursor, name: own syntax::Name) -> Result[syntax::DefinitionKind, Failure]
@@ -644,10 +689,10 @@ fn parse_theorem(cursor: mut TokenCursor, name: own syntax::Name) -> Result[synt
   let clauses = parse_clauses(mut cursor)
   Ok(
     syntax::DefinitionKind.Theorem(
-      name: own name,
-      generics: own generics,
-      parameters: own parameters,
-      clauses: own clauses,
+      own name,
+      own generics,
+      own parameters,
+      own clauses,
       body: parse_body(mut cursor)?,
     ),
   )
@@ -664,9 +709,9 @@ fn parse_law_proof(cursor: mut TokenCursor) -> Result[syntax::DefinitionKind, Fa
   let implementing_type = parse_type_head(mut cursor)?
   Ok(
     syntax::DefinitionKind.LawProof(
-      proved_trait: own proved_trait,
-      law_name: own law_name,
-      implementing_type: own implementing_type,
+      own proved_trait,
+      own law_name,
+      own implementing_type,
       body: parse_body(mut cursor)?,
     ),
   )
@@ -675,9 +720,9 @@ fn parse_law_proof(cursor: mut TokenCursor) -> Result[syntax::DefinitionKind, Fa
 fn parse_function(cursor: mut TokenCursor, name: own syntax::DefinitionName) -> Result[syntax::DefinitionKind, Failure]
   uses Panic, RunForever
 {
-  let signature = parse_function_signature(mut cursor, name: own name)?
+  let signature = parse_function_signature(mut cursor, own name)?
   let body = parse_definition_body(mut cursor)?
-  Ok(syntax::DefinitionKind.Function(syntax::FunctionDefinition(signature: own signature, body: own body)))
+  Ok(syntax::DefinitionKind.Function(syntax::FunctionDefinition(own signature, own body)))
 }
 
 fn finish_definition(cursor: mut TokenCursor, written: WrittenVisibility, parsed: own Parsed) -> Result[Parsed, Failure]
@@ -707,16 +752,17 @@ fn finish_definition(cursor: mut TokenCursor, written: WrittenVisibility, parsed
 }
 
 fn make_failure(intended: Option[syntax::IntendedKind], name: own Option[syntax::DefinitionName]) -> Parsed {
-  Parsed(kind: syntax::DefinitionKind.DefinitionError(intended, name: own name), methods: [])
+  Parsed(kind: syntax::DefinitionKind.DefinitionError(intended, own name), methods: [])
 }
 
 fn without_methods(kind: own syntax::DefinitionKind) -> Parsed {
-  Parsed(kind: own kind, methods: [])
+  Parsed(own kind, methods: [])
 }
 
 fn parse_top_level_kind(cursor: mut TokenCursor, written: WrittenVisibility) -> Parsed
   uses Panic, RunForever
 {
+  let tuple = take_tuple_word(mut cursor)
   let kind = cursor.peek_kind()
   let keyword = match kind {
     Keyword(word) => Some(word)
@@ -757,7 +803,7 @@ fn parse_top_level_kind(cursor: mut TokenCursor, written: WrittenVisibility) -> 
       return make_failure(Some(intended), name: None)
     }
     let definition = if keyword == Some(token::Keyword.Type) {
-      match parse_type_definition(mut cursor, name: name.copy()) {
+      match parse_type_definition(mut cursor, name.copy(), tuple) {
         Ok(type_kind) => Ok(without_methods(own type_kind))
         Err(failure) => Err(failure)
       }
@@ -852,7 +898,7 @@ fn parse_top_level_kind(cursor: mut TokenCursor, written: WrittenVisibility) -> 
     report(
       mut cursor,
       code: "parser.statement_at_top_level",
-      span,
+      span: span,
       message: "Statements must be inside a function, a test, or another definition with a body.",
     )
     return make_failure(None, name: None)
@@ -873,5 +919,5 @@ fn parse_definition(cursor: mut TokenCursor) -> ParsedDefinition
   let written = parse_visibility(mut cursor)
   let parsed = parse_top_level_kind(mut cursor, written)
   let definition = make_definition_node(mut cursor, start, visibility: written.visibility, kind: own parsed.kind)
-  ParsedDefinition(definition: own definition, methods: own parsed.methods)
+  ParsedDefinition(own definition, methods: own parsed.methods)
 }

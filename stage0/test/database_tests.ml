@@ -390,8 +390,7 @@ let request_served_length ~key request =
   match Process.run served_length_program [ key; request ] with
   | 0, output, _ -> String.split_on_char '\n' (String.trim output)
   | status, _, errors ->
-      Harness.fail "served_length exited with status %d: %s" status (String.trim errors);
-      []
+      Harness.fail "served_length exited with status %d: %s" status (String.trim errors)
 
 let () =
   Harness.test "a client whose background process exits without serving gets an error at once"

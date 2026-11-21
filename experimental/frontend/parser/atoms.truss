@@ -5,13 +5,13 @@ use frontend::token
 fn make_expression_node(cursor: mut TokenCursor, start: UInt64, kind: own syntax::ExpressionKind) -> syntax::Expression
   uses Panic
 {
-  syntax::Expression(kind: own kind, id: allocate_id_from(mut cursor, start_index: start))
+  syntax::Expression(own kind, id: allocate_id_from(mut cursor, start_index: start))
 }
 
 fn make_type_node(cursor: mut TokenCursor, start: UInt64, kind: own syntax::TypeKind) -> syntax::TypeExpression
   uses Panic
 {
-  syntax::TypeExpression(kind: own kind, id: allocate_id_from(mut cursor, start_index: start))
+  syntax::TypeExpression(own kind, id: allocate_id_from(mut cursor, start_index: start))
 }
 
 fn make_error_expression(cursor: mut TokenCursor, start: UInt64) -> syntax::Expression
@@ -46,6 +46,17 @@ fn begins_statement(kind: token::Kind) -> Bool {
   }
 }
 
+fn ends_statement(kind: token::Kind) -> Bool {
+  match kind {
+    Newline | EndOfFile => true
+    Punctuation(punctuation) => match punctuation {
+      Close(_) => true
+      _ => false
+    }
+    _ => false
+  }
+}
+
 fn parse_mode(cursor: mut TokenCursor) -> Option[syntax::Mode]
   uses Panic
 {
@@ -64,10 +75,14 @@ fn make_name(cursor: mut TokenCursor, written: token::Token) -> syntax::Name
   let case = match written.kind {
     Upper(_) => syntax::Case.Upper
     Lower(_) => syntax::Case.Lower
+    Keyword(keyword) if keyword == token::Keyword.Ensures => syntax::Case.Lower
     _ => Panic.crash("Parser: a name is made from a token that is not a name")
   }
-  let text = cursor.name(written.kind).to_string()
-  syntax::Name(text: own text, case, id: allocate_token_id(mut cursor, span: written.span))
+  let text = match written.kind {
+    Keyword(_) => "ensures".to_string()
+    _ => cursor.name(written.kind).to_string()
+  }
+  syntax::Name(own text, case, id: allocate_token_id(mut cursor, span: written.span))
 }
 
 fn take_name(cursor: mut TokenCursor) -> syntax::Name
@@ -110,7 +125,7 @@ fn parse_upper_path(cursor: mut TokenCursor, expected: StringSlice) -> Result[sy
   uses Panic, RunForever
 {
   let modules = parse_module_prefix(mut cursor)
-  Ok(syntax::NamePath(modules: own modules, last: parse_upper_name(mut cursor, expected)?))
+  Ok(syntax::NamePath(own modules, last: parse_upper_name(mut cursor, expected)?))
 }
 
 fn make_text(cursor: mut TokenCursor, text: token::Text) -> syntax::Text
@@ -137,7 +152,7 @@ fn make_string_literal(
   let tag = match literal.tag {
     Some(written) => Some(
       syntax::NamePath(
-        modules: own modules,
+        own modules,
         last: syntax::Name(text: written.name.copy(), case: syntax::Case.Upper, id: allocate_token_id(mut cursor, span: written.span)),
       ),
     )
@@ -158,14 +173,14 @@ fn make_string_literal(
         return Err(Failure.Failed)
       }
     }
-    mut rest.push(syntax::Interpolated(value: own value, text: make_text(mut cursor, text: segment.text)))
+    mut rest.push(syntax::Interpolated(own value, text: make_text(mut cursor, text: segment.text)))
   }
   Ok(
     syntax::StringLiteral(
-      tag: own tag,
+      own tag,
       form: literal.form,
-      first: own first,
-      rest: own rest,
+      own first,
+      own rest,
       id: allocate_id_from(mut cursor, start_index: start),
     ),
   )
@@ -308,12 +323,12 @@ fn expect_contextual(
       mut cursor,
       code: "parser.cost_word",
       span: current.span,
-      message,
+      message: message,
       fixes: [source::make_fix("Write `${spelling}`", edits: [source::replace(current.span, replacement: spelling)])],
     )
     advance(mut cursor)
     return Ok(word)
   }
-  report(mut cursor, code: "parser.cost_word", span: current.span, message)
+  report(mut cursor, code: "parser.cost_word", span: current.span, message: message)
   Err(Failure.Failed)
 }

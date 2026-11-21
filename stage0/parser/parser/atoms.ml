@@ -20,6 +20,10 @@ let begins_statement = function
   | Token.Keyword (Let | Var | For | While | Parallel | Concurrent | Proof | Assert) -> true
   | kind -> begins_expression kind
 
+let ends_statement = function
+  | Token.Newline | End_of_file | Punctuation (Close _) -> true
+  | _ -> false
+
 let parse_mode cursor =
   if Cursor.accept_keyword cursor Mut then Some Syntax.Mut
   else if Cursor.accept_keyword cursor Own then Some Own

@@ -48,7 +48,7 @@ fn Scanner.create(source: own source::Source) -> Scanner
   let length = source.text.length()
   let position = source.compute_line_start(0)
   Scanner(
-    source: own source,
+    own source,
     length,
     diagnostics: [],
     position,
@@ -89,7 +89,7 @@ fn report(
   notes: own List[source::Note] = [],
   fixes: own List[source::Fix] = [],
 ) {
-  mut scanner.diagnostics.push(source::make_diagnostic(code, span, message, notes: own notes, fixes: own fixes))
+  mut scanner.diagnostics.push(source::make_diagnostic(code, span, message, own notes, own fixes))
 }
 
 fn Scanner.text(self, start: UInt64, stop: UInt64) -> StringSlice
@@ -171,7 +171,7 @@ fn Scanner.byte_after(self, index: UInt64) -> Option[UInt8]
 fn Scanner.joins_neighbor(self, span: source::Span, code: StringSlice) -> Bool
   uses Panic
 {
-  token::joins_neighbor(self.byte_before(span.start), after: self.byte_after(span.stop), code)
+  token::joins_neighbor(self.byte_before(span.start), after: self.byte_after(span.stop), code: code)
 }
 
 fn Scanner.list_code_fixes(self, span: source::Span, codes: Slice[String]) -> List[source::Fix]
@@ -627,5 +627,5 @@ fn reject(scanner: mut Scanner, length: UInt64, message: StringSlice, code: Stri
   let start = scanner.position
   scanner.position = start + length
   scanner.line_is_blank = false
-  report(mut scanner, code, span: source::make_span(start, stop: start + length), message)
+  report(mut scanner, code, span: source::make_span(start, stop: start + length), message: message)
 }

@@ -321,6 +321,17 @@ let () =
       expect_error "r#\"caf\u{E9}\"#" ~code:String_prefix ~at:"r" ~fixed:"\"\"\"caf\u{E9}\"\"\"");
   Harness.test "a Rust raw string that ends with a quote has no fix" (fun () ->
       expect_error {|r#"say "hi""#|} ~code:String_prefix ~at:"r");
+  Harness.test "a Rust raw string reports invalid UTF-8 in its text, as its fix would" (fun () ->
+      expect_equal_lists Fun.id "codes"
+        [ "lexer.string_prefix"; "lexer.invalid_utf8" ]
+        (list_codes "r#\"a\xFFb\"#");
+      expect_equal_lists Fun.id "codes" [ "lexer.invalid_utf8" ]
+        (list_codes (apply_machine_fixes "r#\"a\xFFb\"#"));
+      expect_equal_lists Fun.id "tokens" [ {|"ab"|}; "NL" ] (list_tokens "r#\"a\xFFb\"#"));
+  Harness.test "a Rust raw string reports a bidirectional control in its text" (fun () ->
+      expect_equal_lists Fun.id "codes"
+        [ "lexer.string_prefix"; "lexer.forbidden_character" ]
+        (list_codes "r#\"a\xE2\x80\xAEb\"#"));
   Harness.test "a Python string with three quotes loses its prefix" (fun () ->
       expect_error "f\"\"\"\n  Hello {name}\n  \"\"\"" ~code:String_prefix ~at:"f"
         ~fixed:"\"\"\"\n  Hello ${name}\n  \"\"\"";

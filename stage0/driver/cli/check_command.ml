@@ -54,7 +54,7 @@ let apply_fixes snapshot database files list_diagnostics =
           List.map (fun diagnostic -> Diagnostic.to_json_object source diagnostic) chosen)
     files
 
-let fix snapshot packages ~proofs =
+let fix snapshot packages =
   let rec run_round snapshot number fixed =
     let database = Workspace.open_database snapshot in
     let files = Command_packages.list_files snapshot packages in
@@ -64,7 +64,7 @@ let fix snapshot packages ~proofs =
         @ remove_unused_dependencies snapshot database packages
         @ lock_file snapshot
       with
-      | [] when proofs ->
+      | [] ->
           apply_fixes snapshot database files
             (Proofs.list_warnings (Proofs.check database snapshot packages files))
       | applied -> applied
@@ -74,11 +74,11 @@ let fix snapshot packages ~proofs =
   in
   run_round snapshot 1 []
 
-let run ~fix:fixing ~proofs =
+let run ~fix:fixing =
   let snapshot, packages = Command_packages.load_current () in
-  let snapshot, fixed = if fixing then fix snapshot packages ~proofs else (snapshot, []) in
+  let snapshot, fixed = if fixing then fix snapshot packages else (snapshot, []) in
   let database = Workspace.open_database snapshot in
-  let report = Report.gather ~proofs database snapshot packages in
+  let report = Report.gather ~proofs:true database snapshot packages in
   if Output.json () then
     Json.print
       (Report.make_document report

@@ -31,12 +31,22 @@ let share =
 let failures = ref 0
 let count = ref 0
 let current_test = ref ""
+let running_depth = ref 0
+
+exception Test_failed of string
+
+let report_failure test message =
+  incr failures;
+  Printf.printf "FAIL %s: %s\n" test message
 
 let fail format =
   Printf.ksprintf
     (fun message ->
-      incr failures;
-      Printf.printf "FAIL %s: %s\n" !current_test message)
+      if !running_depth > 0 then raise (Test_failed message)
+      else begin
+        report_failure "outside a test" message;
+        exit 1
+      end)
     format
 
 let is_wanted =
@@ -56,12 +66,18 @@ let restore_environment saved =
 
 let test_always name body =
   incr count;
+  let enclosing_test = !current_test in
   current_test := name;
+  incr running_depth;
   let environment = read_environment () in
   (match body () with
   | () -> ()
+  | exception Test_failed message -> report_failure name message
   | exception exception_ ->
-      fail "raised %s%s" (Printexc.to_string exception_) (Printexc.get_backtrace ()));
+      report_failure name
+        (Printf.sprintf "raised %s%s" (Printexc.to_string exception_) (Printexc.get_backtrace ())));
+  decr running_depth;
+  current_test := enclosing_test;
   restore_environment environment
 
 let ordinal = ref 0

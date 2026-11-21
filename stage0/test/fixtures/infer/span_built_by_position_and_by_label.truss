@@ -1,0 +1,5 @@
+tuple type Span(start: Int64, end: Int64)
+
+fn f(start: Int64, end: Int64) -> List[Span] {
+  [Span(3, 7), Span(3, end: 7), Span(end: 7, start: 3), Span(start, end)]
+}

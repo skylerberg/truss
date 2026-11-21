@@ -213,10 +213,10 @@ let run ~paths ~match_ ~timings:show_timings ~rerun =
   let started = read_microseconds () in
   let snapshot, packages = Command_packages.load_current () in
   let database = Workspace.open_database snapshot in
-  let report = Report.gather database snapshot packages in
-  let checked = read_microseconds () in
+  let report = Report.gather ~proofs:true database snapshot packages in
   let tests = select snapshot database packages ~paths ~match_ in
   Report.require_no_errors report;
+  let checked = read_microseconds () in
   let progress =
     {
       status_line = Status_line.create ~enabled:(not json);

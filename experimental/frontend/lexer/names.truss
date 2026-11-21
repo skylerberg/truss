@@ -191,7 +191,7 @@ fn check_name(name: StringSlice) -> NameCheck
     && token::find_word(corrected).is_none()
   NameCheck(
     is_upper: is_upper_name,
-    problem: Some(NameProblem(code: "lexer.name_case", message: own message)),
+    problem: Some(NameProblem(code: "lexer.name_case", own message)),
     fix: if is_fixable { Some(own corrected) } else { None },
   )
 }

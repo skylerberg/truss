@@ -3,37 +3,6 @@ let find_interface (lookups : Lookups.t) path =
     (fun key -> (lookups.read_elaborated_interface key).interface)
     (lookups.names.find_key path)
 
-let list_declared_fields (lookups : Lookups.t) path =
-  let list_names (written : Syntax.field list) =
-    List.filter_map
-      (fun (field : Syntax.field) ->
-        match field.kind with
-        | Field_declaration { name; _ } -> Some name.text
-        | Field_error -> None)
-      written
-  in
-  match Option.map lookups.names.read_definition (lookups.names.find_key path) with
-  | Some { kind = Type_definition { body = Fields written; _ }; _ } ->
-      [ (None, list_names written) ]
-  | Some { kind = Type_definition { body = Variants variants; _ }; _ } ->
-      List.map
-        (fun (variant : Syntax.variant) ->
-          (Some variant.name.text, list_names (Option.value ~default:[] variant.fields)))
-        variants
-  | _ -> []
-
-let sort_in_declared_order lookups path ~variant ~name_of fields =
-  match List.assoc_opt variant (list_declared_fields lookups path) with
-  | Some declared ->
-      let locate_position field =
-        Option.value ~default:(List.length declared)
-          (List.find_index (fun declared_name -> declared_name = name_of field) declared)
-      in
-      List.stable_sort
-        (fun left right -> compare (locate_position left) (locate_position right))
-        fields
-  | None -> fields
-
 let make_builtin_shape (builtin : Language.Builtin_type.t) : Types.type_interface =
   let bounds : Types.trait_reference list =
     match builtin with

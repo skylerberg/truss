@@ -1,0 +1,10 @@
+type Chain =
+  | indirect Link(value: Int64, rest: Chain)
+  | End
+
+fn first_of_one(chain: Chain) -> Int64 {
+  match chain {
+    Link(value: head, rest: tail) => if tail is End { head } else { 0 }
+    End => 0
+  }
+}

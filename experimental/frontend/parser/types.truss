@@ -123,60 +123,10 @@ fn is_open(kind: token::Kind) -> Bool {
   }
 }
 
-fn continues_angles(kind: token::Kind) -> Bool {
-  match kind {
-    Upper(_) | Lower(_) | Integer(_) => true
-    Punctuation(punctuation) => match punctuation {
-      Comma | Colon | ColonColon | Dot | Equal | Plus | Arrow => true
-      _ => false
-    }
-    Keyword(keyword) => match keyword {
-      SelfType | Any | Fn | Mut | Own | Capability => true
-      _ => false
-    }
-    _ => false
-  }
-}
-
-fn find_angle_closer(cursor: TokenCursor) -> Option[UInt64]
-  uses Panic, RunForever
-{
-  var index = cursor.index
-  var depth: UInt64 = 0
-  while true {
-    let kind = cursor.lookup_token(index).kind
-    if kind == token::Kind.Punctuation(token::Punctuation.Less) {
-      depth += 1
-      index += 1
-    } else if kind == token::Kind.Punctuation(token::Punctuation.Greater) {
-      if depth == 1 {
-        return Some(index)
-      }
-      depth -= 1
-      index += 1
-    } else if kind == token::Kind.Punctuation(token::Punctuation.ShiftRight) {
-      if depth == 2 {
-        return Some(index)
-      }
-      if depth < 2 {
-        return None
-      }
-      depth -= 2
-      index += 1
-    } else if is_open(kind) {
-      index = cursor.lookup_closer(index) + 1
-    } else if continues_angles(kind) {
-      index += 1
-    } else {
-      return None
-    }
-  }
-}
-
 fn skip_angle_brackets(cursor: mut TokenCursor)
   uses Panic, RunForever
 {
-  let Some(closer) = find_angle_closer(cursor) else {
+  let Some(closer) = cursor.find_angle_closer() else {
     return
   }
   var angles: List[token::Token] = []
@@ -303,7 +253,7 @@ fn parse_type_expression_inner(cursor: mut TokenCursor) -> Result[syntax::TypeEx
         let parameter = take_name(mut cursor)
         advance(mut cursor)
         let name = parse_upper_name(mut cursor, expected: "an associated type")?
-        return Ok(make_type_node(mut cursor, start, kind: syntax::TypeKind.Associated(parameter: own parameter, name: own name)))
+        return Ok(make_type_node(mut cursor, start, kind: syntax::TypeKind.Associated(own parameter, own name)))
       }
       let path_type = parse_path_type(mut cursor)?
       Ok(make_type_node(mut cursor, start, kind: syntax::TypeKind.PathType(own path_type)))
@@ -329,7 +279,7 @@ fn parse_path_type(cursor: mut TokenCursor) -> Result[syntax::PathType, Failure]
     }
     []
   }
-  Ok(syntax::PathType(path: own path, arguments: own arguments, id: allocate_id_from(mut cursor, start_index: start)))
+  Ok(syntax::PathType(own path, own arguments, id: allocate_id_from(mut cursor, start_index: start)))
 }
 
 fn recover_type_argument(cursor: mut TokenCursor, span: source::Span) -> syntax::TypeArgument {
@@ -343,7 +293,7 @@ fn parse_type_arguments(cursor: mut TokenCursor) -> Result[List[syntax::TypeArgu
   let arguments = parse_bracketed(mut cursor, parse_item: parse_type_argument, recover: recover_type_argument)
   if arguments.is_empty() {
     let span = cursor.lookup_token(start).span
-    report(mut cursor, code: "parser.unexpected_token", span, message: "Type arguments cannot be empty.")
+    report(mut cursor, code: "parser.unexpected_token", span: span, message: "Type arguments cannot be empty.")
     return Err(Failure.Failed)
   }
   Ok(own arguments)
@@ -368,7 +318,7 @@ fn parse_type_argument(cursor: mut TokenCursor) -> Result[syntax::TypeArgument, 
     Upper(_) => if second == token::Kind.Punctuation(token::Punctuation.Equal) {
       let name = take_name(mut cursor)
       advance(mut cursor)
-      Ok(syntax::TypeArgument.Constraint(name: own name, value: parse_type_expression(mut cursor)?))
+      Ok(syntax::TypeArgument.Constraint(own name, value: parse_type_expression(mut cursor)?))
     } else {
       Ok(syntax::TypeArgument.TypeArgument(parse_type_expression(mut cursor)?))
     }
@@ -387,7 +337,7 @@ fn parse_function_input(cursor: mut TokenCursor) -> Result[syntax::FunctionInput
     None
   }
   let mode = parse_mode(mut cursor)
-  Ok(syntax::FunctionInput(name: own name, mode, annotation: parse_type_expression(mut cursor)?))
+  Ok(syntax::FunctionInput(own name, mode, annotation: parse_type_expression(mut cursor)?))
 }
 
 fn recover_function_input(cursor: mut TokenCursor, span: source::Span) -> syntax::FunctionInput {
@@ -431,11 +381,11 @@ fn parse_function_type(cursor: mut TokenCursor, with_clauses: Bool) -> Result[sy
     while true {
       let kind = cursor.peek_kind()
       if kind == token::Kind.Keyword(token::Keyword.Uses) || kind == token::Kind.Keyword(token::Keyword.Cost)
-        || kind == token::Kind.Keyword(token::Keyword.Requires)
+        || kind == token::Kind.Keyword(token::Keyword.Requires) || kind == token::Kind.Keyword(token::Keyword.Ensures)
       {
         mut clauses.push(parse_clause(mut cursor)?)
-      } else if kind == token::Kind.Keyword(token::Keyword.Ensures) || kind == token::Kind.Keyword(token::Keyword.Decreases) {
-        return Err(fail(mut cursor, expected: "`uses`, `cost`, or `requires`; a function type has no `ensures` or `decreases`"))
+      } else if kind == token::Kind.Keyword(token::Keyword.Decreases) {
+        return Err(fail(mut cursor, "`uses`, `cost`, `requires`, or `ensures`; a function type has no `decreases`"))
       } else {
         break
       }
@@ -447,15 +397,31 @@ fn parse_function_type(cursor: mut TokenCursor, with_clauses: Bool) -> Result[sy
       report(
         mut cursor,
         code: "parser.misplaced_condition",
-        span,
+        span: span,
         message: "A function type's clauses take no condition: a call through a function value has no type arguments to decide one.",
       )
     }
   }
-  var has_requires = false
   for clause in clauses {
-    if clause.kind is Requires(_) {
-      has_requires = true
+    if clause.kind is Cost(clause: cost_clause) {
+      let non_literal_id = match cost_clause.bound {
+        BigO(value) | AtMost(value) | Exactly(value) => if value.kind is Integer(_) { None } else { Some(value.id) }
+      }
+      if non_literal_id is Some(amount_id) {
+        let amount_span = cursor.read_file_span(amount_id)
+        report(
+          mut cursor,
+          "parser.function_type_cost_bound",
+          amount_span,
+          "An `O(...)`, `<=`, or `==` bound in a function type is an integer literal, as in `O(1)` or `<= 2`, since the type holds a number and not an expression. State a bound that depends on a value in the enclosing function's own `cost` clause, which names the callback's cost as `time(visit)`.",
+        )
+      }
+    }
+  }
+  var has_callback_contract = false
+  for clause in clauses {
+    if clause.kind is Requires(_) || clause.kind is Ensures(_) {
+      has_callback_contract = true
     }
   }
   var every_named = true
@@ -468,24 +434,24 @@ fn parse_function_type(cursor: mut TokenCursor, with_clauses: Bool) -> Result[sy
     }
   }
   let span = cursor.lookup_token(start).span
-  if has_requires {
+  if has_callback_contract {
     if !every_named {
       report(
         mut cursor,
-        code: "parser.function_type_names",
+        "parser.function_type_names",
         span,
-        message: "A function type with `requires` names every input, as in `fn(index: UInt64)`, so that the `requires` can mention them.",
+        "A function type with `requires` or `ensures` names every input, as in `fn(index: UInt64)`, so that its clauses can mention them.",
       )
     }
   } else if some_named {
     report(
       mut cursor,
-      code: "parser.function_type_names",
+      "parser.function_type_names",
       span,
-      message: "A function type names its inputs only when a `requires` mentions them; remove the names, since calls through a function value pass arguments by position.",
+      "A function type names its inputs only when a `requires` or an `ensures` mentions them; remove the names, since calls through a function value pass arguments by position.",
     )
   }
-  Ok(syntax::FunctionType(inputs: own inputs, output: own output, clauses: own clauses))
+  Ok(syntax::FunctionType(own inputs, own output, own clauses))
 }
 
 fn parse_parenthesized_function_type(cursor: mut TokenCursor) -> syntax::TypeExpression
@@ -519,7 +485,7 @@ fn parse_parenthesized_function_type_inner(cursor: mut TokenCursor, start: UInt6
   let function_type = parse_function_type(mut cursor, with_clauses: true)?
   if function_type.clauses.is_empty() {
     let span = cursor.lookup_token(start).span
-    report(mut cursor, code: "parser.unexpected_token", span, message: "Parentheses around a function type are only for its clauses; remove them.")
+    report(mut cursor, code: "parser.unexpected_token", span: span, message: "Parentheses around a function type are only for its clauses; remove them.")
     return Err(Failure.Failed)
   }
   if cursor.index < closer {
@@ -552,7 +518,7 @@ fn parse_generics(cursor: mut TokenCursor) -> Result[List[syntax::GenericParamet
   let parameters = parse_bracketed(mut cursor, parse_item: parse_generic_parameter, recover: recover_generic_parameter)
   if parameters.is_empty() {
     let span = cursor.lookup_token(start).span
-    report(mut cursor, code: "parser.unexpected_token", span, message: "Generic parameters cannot be empty.")
+    report(mut cursor, code: "parser.unexpected_token", span: span, message: "Generic parameters cannot be empty.")
     return Err(Failure.Failed)
   }
   Ok(own parameters)
@@ -566,16 +532,16 @@ fn parse_generic_parameter(cursor: mut TokenCursor) -> Result[syntax::GenericPar
     Upper(_) => {
       let name = take_name(mut cursor)
       let bounds = if accept_punctuation(mut cursor, punctuation: token::Punctuation.Colon) { parse_bounds(mut cursor)? } else { [] }
-      syntax::GenericKind.TypeParameter(name: own name, bounds: own bounds)
+      syntax::GenericKind.TypeParameter(own name, own bounds)
     }
     Lower(_) => {
       let name = take_name(mut cursor)
       expect_punctuation(mut cursor, punctuation: token::Punctuation.Colon)?
-      syntax::GenericKind.ValueParameter(name: own name, annotation: parse_type_expression(mut cursor)?)
+      syntax::GenericKind.ValueParameter(own name, annotation: parse_type_expression(mut cursor)?)
     }
     _ => return Err(fail(mut cursor, expected: "a generic parameter"))
   }
-  Ok(syntax::GenericParameter(kind: own kind, id: allocate_id_from(mut cursor, start_index: start)))
+  Ok(syntax::GenericParameter(own kind, id: allocate_id_from(mut cursor, start_index: start)))
 }
 
 fn parse_path_type_list(cursor: mut TokenCursor) -> Result[List[syntax::PathType], Failure]
@@ -599,7 +565,7 @@ fn parse_capability_reference(cursor: mut TokenCursor) -> Result[syntax::Capabil
     let parameter = take_name(mut cursor)
     advance(mut cursor)
     syntax::CapabilityReferenceKind.AssociatedCapabilities(
-      parameter: own parameter,
+      own parameter,
       name: parse_upper_name(mut cursor, expected: "an associated capability set")?,
     )
   } else if cursor.is_lower_named(first, text: "generic") && cursor.peek_ahead(1) is Upper(_) {
@@ -608,7 +574,7 @@ fn parse_capability_reference(cursor: mut TokenCursor) -> Result[syntax::Capabil
   } else {
     syntax::CapabilityReferenceKind.CapabilityPath(parse_path_type(mut cursor)?)
   }
-  Ok(syntax::CapabilityReference(kind: own kind, id: allocate_id_from(mut cursor, start_index: start)))
+  Ok(syntax::CapabilityReference(own kind, id: allocate_id_from(mut cursor, start_index: start)))
 }
 
 fn parse_capability_list(cursor: mut TokenCursor) -> Result[List[syntax::CapabilityReference], Failure]
@@ -622,7 +588,7 @@ fn parse_capability_use(cursor: mut TokenCursor) -> Result[syntax::CapabilityUse
 {
   let reference = parse_capability_reference(mut cursor)?
   if !accept_keyword(mut cursor, keyword: token::Keyword.Unless) {
-    return Ok(syntax::CapabilityUse(reference: own reference, unless_bounds: None, unless_values: []))
+    return Ok(syntax::CapabilityUse(own reference, unless_bounds: None, unless_values: []))
   }
   let atoms = parse_condition_atoms(mut cursor)?
   var bounds: List[syntax::BoundCondition] = []
@@ -634,7 +600,7 @@ fn parse_capability_use(cursor: mut TokenCursor) -> Result[syntax::CapabilityUse
     }
   }
   let unless_bounds = if bounds.is_empty() { None } else { Some(own bounds) }
-  Ok(syntax::CapabilityUse(reference: own reference, unless_bounds: own unless_bounds, unless_values: own values))
+  Ok(syntax::CapabilityUse(own reference, own unless_bounds, unless_values: own values))
 }
 
 fn parse_capability_uses(cursor: mut TokenCursor) -> Result[List[syntax::CapabilityUse], Failure]
@@ -659,7 +625,7 @@ fn parse_condition_after(cursor: mut TokenCursor, keyword: token::Keyword) -> Re
         report(
           mut cursor,
           code: "parser.misplaced_condition",
-          span,
+          span: span,
           message: "A `when` condition names bounds, such as `T: Trait`. A clause that holds where a value condition does is written with `==>`, as in `ensures P ==> Q`.",
         )
       }
@@ -720,7 +686,7 @@ fn parse_condition_atom(cursor: mut TokenCursor) -> Result[ConditionAtom, Failur
     let bounds = parse_bounds(mut cursor)?
     return Ok(
       ConditionAtom.BoundAtom(
-        syntax::BoundCondition(subject: own subject, bounds: own bounds, id: allocate_id_from(mut cursor, start_index: start)),
+        syntax::BoundCondition(own subject, own bounds, id: allocate_id_from(mut cursor, start_index: start)),
       ),
     )
   }
@@ -775,7 +741,7 @@ fn parse_clause(cursor: mut TokenCursor) -> Result[syntax::Clause, Failure]
   } else {
     parse_condition_after(mut cursor, keyword: token::Keyword.When)?
   }
-  Ok(syntax::Clause(kind: own kind, condition: own condition, id: allocate_id_from(mut cursor, start_index: start)))
+  Ok(syntax::Clause(own kind, own condition, id: allocate_id_from(mut cursor, start_index: start)))
 }
 
 fn parse_cost(cursor: mut TokenCursor) -> Result[syntax::CostClause, Failure]
@@ -790,7 +756,7 @@ fn parse_cost(cursor: mut TokenCursor) -> Result[syntax::CostClause, Failure]
     report(
       mut cursor,
       code: "parser.misplaced_potential",
-      span,
+      span: span,
       message: "`cost potential` belongs to a type, and states the potential its values hold.",
     )
     return Err(Failure.Failed)
@@ -822,7 +788,7 @@ fn parse_cost(cursor: mut TokenCursor) -> Result[syntax::CostClause, Failure]
     )?
     syntax::Bound.BigO(parse_parenthesized_expression(mut cursor)?)
   }
-  Ok(syntax::CostClause(is_amortized, resource: own resource, bound: own bound))
+  Ok(syntax::CostClause(is_amortized, own resource, own bound))
 }
 
 fn parse_call_target(cursor: mut TokenCursor) -> Result[syntax::CallTarget, Failure]

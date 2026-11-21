@@ -105,7 +105,7 @@ fn show_literal(tables: token::Tables, literal: token::StringLiteral) -> String
 fn print_tokens(path: StringSlice, text: own String)
   uses Console, Panic, RunForever
 {
-  let result = lexer::lex(source::Source.create(path, text: own text))
+  let result = lexer::lex(source::Source.create(path, own text))
   Console.print_line("== ${path}")
   let tables = result.lexed.tables
   for index in result.lexed.first..result.lexed.stop {
@@ -119,7 +119,7 @@ fn print_tokens(path: StringSlice, text: own String)
 fn print_file(path: StringSlice, text: own String)
   uses Console, Panic, RunForever
 {
-  let lexed = lexer::lex(source::Source.create(path, text: own text))
+  let lexed = lexer::lex(source::Source.create(path, own text))
   let parsed = parser::parse(own lexed.lexed, lexer_diagnostics: lexed.diagnostics)
   Console.print_line("== ${path}")
   let tree = show::show_file(parsed.file)
@@ -155,7 +155,7 @@ fn measure(path: StringSlice, text: StringSlice, rounds: UInt64) -> Timing
   var best_parsing: Int64 = Int64.maximum
   for _ in 0..rounds {
     let tables = lexed.lexed.tables.copy()
-    let input = token::Lexed(tables: own tables, first: lexed.lexed.first, stop: lexed.lexed.stop)
+    let input = token::Lexed(own tables, first: lexed.lexed.first, stop: lexed.lexed.stop)
     let before = Clock.monotonic()
     let parsed = parser::parse(own input, lexer_diagnostics: lexed.diagnostics)
     let elapsed = (Clock.monotonic() - before).total_nanoseconds()
@@ -200,9 +200,9 @@ fn main(arguments: List[String]) -> ExitCode
   for path in arguments.slice()[2..] {
     let text = FileRead.read_text(Path.new(path)).expect("a readable UTF-8 file")
     if command_name == "tokens" {
-      print_tokens(path, text: own text)
+      print_tokens(path, own text)
     } else if command_name == "print" {
-      print_file(path, text: own text)
+      print_file(path, own text)
     }
   }
   ExitCode.success

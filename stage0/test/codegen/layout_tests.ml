@@ -1,5 +1,6 @@
 let () =
-  Codegen_support.test "fields are placed by alignment, largest first, then by name" (fun () ->
+  Codegen_support.test "fields are placed by alignment, largest first, then in declared order"
+    (fun () ->
       let extra =
         [
           ( "Mixed",
@@ -11,34 +12,8 @@ let () =
               ] );
         ]
       in
-      Codegen_support.expect_string ~expected:"16/8 struct(large@0 flag@8 small@9) niche flag 2+254"
+      Codegen_support.expect_string ~expected:"16/8 struct(large@0 small@8 flag@9) niche flag 2+254"
         (Codegen_support.describe ~extra (Codegen_support.named "Mixed")));
-  Codegen_support.test "reordering fields in the source does not change the layout" (fun () ->
-      let first =
-        [
-          ( "Point",
-            Memory_layout.Record
-              [
-                Codegen_support.field "x" Codegen_support.float64;
-                Codegen_support.field "y" Codegen_support.float64;
-                Codegen_support.field "z" Codegen_support.uint8;
-              ] );
-        ]
-      in
-      let second =
-        [
-          ( "Point",
-            Memory_layout.Record
-              [
-                Codegen_support.field "z" Codegen_support.uint8;
-                Codegen_support.field "y" Codegen_support.float64;
-                Codegen_support.field "x" Codegen_support.float64;
-              ] );
-        ]
-      in
-      Codegen_support.expect_string
-        ~expected:(Codegen_support.describe ~extra:first (Codegen_support.named "Point"))
-        (Codegen_support.describe ~extra:second (Codegen_support.named "Point")));
   Codegen_support.test "a record with one field has the field's size and alignment" (fun () ->
       let extra =
         [
@@ -188,7 +163,7 @@ let () =
         Memory_layout.create Codegen_support.host
           ~compute_shape:(Codegen_support.compute_shape [ ("Tree", tree) ])
       in
-      Codegen_support.expect_string ~expected:"24/8 struct(left@0 right@8 value@16)"
+      Codegen_support.expect_string ~expected:"24/8 struct(left@0 value@8 right@16)"
         (Memory_layout.For_testing.to_string
            (Memory_layout.lay_out_block env (Codegen_support.named "Tree") "Node")));
   Codegen_support.test "an indirect variant whose fields take no space has a one-byte block"

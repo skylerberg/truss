@@ -206,6 +206,15 @@ Rules: [Built-in types](SPECIFICATION.md#built-in-types).
 | A size, a length, and an index are `UInt64`, and an offset is `Int64`. | A length is never negative, and a bounds check is one comparison. A subtraction that may go below zero is a compile error, so an unsigned index does not wrap. |
 | A `Character` is a Unicode scalar value. | It has a fixed size, so it is `Plain`, and its definition does not change between Unicode versions. A grapheme cluster has no fixed size, and its boundaries change as Unicode adds rules, so a grapheme is a slice of its string. |
 
+### Type definitions
+
+Rules: [Type definitions](SPECIFICATION.md#type-definitions).
+
+| Rule | Reason |
+|---|---|
+| A type keeps its fields in the order they are declared. | Messages, fixes, a derived `Ordered`, and a derived `Serialize` show fields in the order their author wrote, and all of them read one list. Moving a field re-checks every reader of the type, but a move that changes nothing else is rare, and adding or changing a field re-checks them under any order. |
+| The compiler chooses a record's layout in memory: fields of larger alignment first, and fields of equal alignment in declared order. | Less padding fits more values in a cache line. No program depends on where a field sits, so a later compiler can change the layout, as Rust's and Zig's can. A type shared with C will need a declared layout, as Rust's `repr(C)` gives. |
+
 ### Tuple types
 
 Rules: [Tuple types](SPECIFICATION.md#tuple-types).
@@ -223,7 +232,8 @@ binds each field by position to a name the reader chooses:
 | A record matches by position only where it is declared a tuple type. | Reordering two fields of one type would otherwise silently swap the bindings of every positional pattern. Only a type whose field names stand for positions commits to an order. |
 | A tuple pattern has no parentheses. | Parentheses match fields by name in every type, so the semantics of a pattern never depends on whether its type is a tuple type. `for (_, group) in groups`, a habit from Rust and Swift, is an error whose fix removes the parentheses (*LLM habits*). |
 | A tuple pattern is the whole pattern of a `let`, a `var`, or a `for`. | Without parentheses it cannot nest, and in a `match` arm or a lambda's parameters a comma already separates values. |
-| In a tuple pattern, a bare name that names another field is an error. | `for value, key in ports` would bind each key as `value`. The same rule reports `copy(destination, source)`. |
+| A tuple type is built as a function is called, by position and then by label. | Its field order is already part of its API, and its field names stand for positions, so a label such as `first:` repeats the position. The construction names its type, so a reader sees that the type is a tuple type; a pattern's type comes from its scrutinee, which is why parentheses in a pattern still match by name. |
+| In a tuple pattern, and among the positional arguments that build a tuple type, a bare name that names another field is an error. | `for value, key in ports` would bind each key as `value`, and `Span(end, start)` would put `end` in the field `start`. |
 
 ### Recursive types
 
@@ -264,6 +274,7 @@ call a helper while the list is unsorted.
 | Rule | Reason |
 |---|---|
 | An invariant belongs to the whole type, never to one variant. | It can state a fact about the whole value, such as a tree being balanced, and a clause after the last variant is unambiguous. A condition on one variant is a `match` in the invariant, or a field whose type carries the condition. |
+| An invariant clause that calls a definition private to its type's module is opaque in other modules. | The clause can only be proven where its definition is visible, so other modules gain nothing from the definition, and each obligation that holds a value of the type would carry it: `Map`'s index invariant added about 1 MB of axioms to every obligation of `Set`, `json`, and `toml`, and some ran out of steps. A module that builds the value from its fields cannot prove the clause, so no module can make a value that breaks it. |
 | A type with an invariant can still expose its fields. | An invariant protects facts about the contents of a value. `opaque` does a different job: it controls where a value is constructed and hides the representation ([Visibility](#visibility)). |
 
 ## Values and ownership
@@ -526,18 +537,22 @@ number.
 
 Rules: [Calls and arguments](SPECIFICATION.md#calls-and-arguments).
 
-One set of rules covers calls, construction, and patterns: a record is
-declared as parameters are, constructed as a function is called, and matched
-in the same shape.
+A record is declared as parameters are and built with the same labels. A
+function's parameters have an order and a record's fields do not, so a call
+takes positional arguments and a construction takes labels.
 
 | Rule | Reason |
 |---|---|
-| An argument after the first is labeled. | Two arguments of one type can otherwise be swapped silently. A newtype prevents that only when the types differ. A label also tells `source: Path` from `destination: Path`. |
-| The first argument may be bare. | The function's name usually identifies it, as in `sqrt(area)`. |
-| A variable with the parameter's name needs no label. | A label costs nothing when the names agree, which is the common case, and is written exactly when they disagree, which is when a swap is possible. A bare name goes to the parameter it names, so `copy(destination, source)` is reported as out of order. |
-| The same rules apply to every function. | Swift lets each parameter opt out of its label, so the syntax of a call depends on the choices of the callee's author. |
-| A call through a function value is positional. | Labels in function types would make types that differ only in labels convert into each other. |
-| Only a record with one field takes a bare value. | Field order has no meaning, so a bare first argument would make it part of the record's API. |
+| Arguments are positional, and a label is optional. | Most languages pass arguments by position, and agents kept doing so in Truss after reading a rule that required labels. The required label prevented no swap: its fix labeled each argument with the parameter at its position, which keeps a swapped order, and agents apply a fix without reading it. |
+| Labeled arguments follow the positional ones, in any order. | A label exists so that the caller need not know the position. Swift requires the parameter order, so its caller must know both. Python, Kotlin, and C# accept labels in any order. |
+| A positional argument cannot follow a labeled one. | Its parameter would depend on the labels before it. Kotlin and C# allow it when each earlier label is at its own position, which is an order rule again. |
+| Arguments are evaluated in the order written. | A reader reads them in that order, and construction evaluates fields in the same order. |
+| A variable named like a parameter is positional. | `gcd(second, first % second)` passes `second` to `first`, as written. Matching by name would make a call's semantics depend on the names of the caller's variables. |
+| No declaration requires a label. | Swift lets each parameter's author require its label, so the syntax of a call depends on the callee's declaration. |
+| A call through a function value takes no labels. | Labels in function types would make types that differ only in labels convert into each other. |
+| A record with more than one field takes no positional argument, unless it is a tuple type. | Field order has no meaning, so a positional argument would make it part of the record's API. A variable named like a field needs no label, because its name already names the field. |
+| A construction and a record pattern report a mistake under the same code. | An agent learns one code for one mistake, and the tools that rank diagnostics by code count it once. |
+| A fix labels bare values only when their fields are certain: one field left open for one bare value, or a bare value for every field in declared order. | Agents write bare values in declared order, so the second case labels what they meant. Where some fields are labeled or skipped with `..`, the position of a bare value does not say which field it means, and a fix would apply a guess. |
 | Construction uses parentheses. | `{` then always starts a block in an expression. With braces, `if kind == Kind.Unit { x }` is ambiguous between a record and a block, which Rust and Go resolve with a special rule. |
 
 A parameter can have a default:
@@ -1275,15 +1290,17 @@ Rules: [Dynamic dispatch](SPECIFICATION.md#dynamic-dispatch).
 
 Rules: [Tests](SPECIFICATION.md#tests).
 
-**A test does not wait for proofs.** A program is built only when every
-proof obligation that it reaches is proven. A test build instead inserts a
-run-time check at every primitive operation that can fail. Generated code
-therefore has no undefined behavior, even where a proof is pending or has
-failed, and a test runs as soon as its code type-checks, alongside the
-prover. A failed check names the operation, which tells an agent whether a
-failed proof is a real bug or a prover that needs a hint. A test build
-checks every operation, proven or not, so a test result does not depend on
-the state of any proof.
+**A test runs only once its proofs pass.** A failed proof is an error, as a
+type error is, so `truss test` and `truss run` stop at it, and a change
+cannot pass its tests while its proofs fail. A proof that is not finished
+holds a `todo`, which `truss holes` lists and a release build refuses, so a
+deferred proof is written in the code. A test build still inserts a
+run-time check at every primitive operation that can fail, so a proof hole
+or a prover bug stops a test at the operation instead of causing undefined
+behavior. A check that fails behind a hole names the operation, which tells
+an agent that the unfinished proof covers a real bug and not a prover that
+needs a hint. A test build checks every operation, proven or not, so a test
+result does not depend on the state of any proof.
 
 **No clause is evaluated at run time.** Evaluating a `requires` would pay
 for its proof a second time, at the cost of the clause: a test build would
@@ -1404,6 +1421,7 @@ in place of an expression, a body, or a type definition.
 |---|---|
 | Code with a `todo` is type-checked and proven. | A caller's contracts are proven before its callees exist. |
 | A release build refuses a program that can reach a `todo`. | A `todo` that panicked when reached would be a failure that the signature does not show. |
+| Reaching follows proofs: to the definitions whose contracts a reached proof reads, and to the laws of each `impl` that reached code calls or passes to generic code. | A release build has no run-time checks, so an operation proven from an unproven contract or law would be undefined behavior. A theorem, or a function that only proofs call, never runs, so its `todo` cannot panic in place of the proof. |
 | A test that reaches a `todo` is incomplete, not failed. | Tests can be written first. |
 
 ## Debug output
@@ -1504,15 +1522,22 @@ different versions build together, as Rust's editions allow.
 
 ### Maps and sets
 
-`Map` and `Set` iterate in insertion order. The order never varies from run
-to run, so tests stay deterministic and their results can be cached.
+`Map` and `Set` iterate in insertion order until an entry is removed: a
+removal moves the last entry into the removed entry's place, so it costs O(1)
+instead of the O(n) of shifting every later entry. The order never varies from
+run to run, so tests stay deterministic and their results can be cached.
 
 **A `Map` resists hash flooding deterministically.** The usual defense is a
 random hash key for each process. That would change timing and allocation
 counts from run to run, and make a test near its time limit flaky. Instead, a
-bucket that fills up becomes a balanced tree, so the worst case is O(log n),
-which a `cost` clause can promise. This is why a key is `Ordered` as well as
-`Hash`.
+key whose 16 probed slots are all full goes into one balanced tree for the
+whole map, ordered by key, so the worst case is O(log n), which a `cost`
+clause can promise. This is why a key is `Ordered` as well as `Hash`.
+
+| Rule | Reason |
+|---|---|
+| A `Map` keeps its keys and its values in two lists. | A value lent `mut`, as by `get_or_insert`, leaves the list of keys unchanged, so the invariant of the index over the keys holds with no new proof. A lookup's comparisons read only the keys. |
+| `retain` on `Map` and on `SortedMap` takes the key and the value as two parameters. | A `Map` holds no `Entry` to lend, and building one would move or copy both. One shape of callback serves both maps. |
 
 ### Conventions
 

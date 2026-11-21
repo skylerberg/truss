@@ -1,0 +1,14 @@
+fn next(count: UInt8) -> UInt8 {
+  proof {
+    todo
+  }
+  count + 1
+}
+
+test "next counts up" {
+  assert next(1) == 2
+}
+
+test "next of the largest count" {
+  assert next(255) > 0
+}

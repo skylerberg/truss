@@ -40,16 +40,16 @@ let find_clauses (lookups : Lookups.t) path callee =
        (fun ({ form; _ } : Mir.contract Mir.sourced) -> form)
        (Mir.read_contract lookups.mir path))
 
-let holds_todo (lookups : Lookups.t) (key : Resolve.Names.key) =
+let list_todo_origins (lookups : Lookups.t) (key : Resolve.Names.key) =
   match Mir.find_code (lookups.mir.read_body_part key) with
   | Some code ->
-      let holds = ref false in
+      let origins = ref [] in
       Mir.iter_code
         (fun (statement : Mir.statement) ->
-          match statement.kind with Jump Todo -> holds := true | _ -> ())
+          match statement.kind with Jump Todo -> origins := statement.origin :: !origins | _ -> ())
         code;
-      !holds
-  | None -> false
+      List.rev !origins
+  | None -> []
 
 let list_law_proofs (lookups : Lookups.t) package (trait : Types.trait_reference)
     (for_type : Types.ty) =
@@ -84,18 +84,35 @@ let list_law_proofs (lookups : Lookups.t) package (trait : Types.trait_reference
       | _ -> Compiler_bug.raise_bug ~stage:"Prover" "%s is not a law proof" (Path.show key.path))
     named_laws
 
-let is_impl_unfinished (lookups : Lookups.t) (key : Resolve.Names.key) =
-  List.exists (holds_todo lookups) (lookups.interface.names.list_contained key)
+let list_impl_holes (lookups : Lookups.t) (key : Resolve.Names.key) =
+  List.concat_map
+    (fun contained ->
+      List.map
+        (fun origin -> (contained, Obligation.Node origin))
+        (list_todo_origins lookups contained))
+    (lookups.interface.names.list_contained key)
 
-let is_law_unshown (lookups : Lookups.t) (impl : Path.t) (trait : Types.trait_reference) for_type
+let has_impl_obligations (lookups : Lookups.t) trait =
+  (Interface.Definition.read_trait_interface lookups.interface trait).restated <> []
+  ||
+  match lookups.interface.find_trait_header trait with
+  | Some header -> header.laws <> []
+  | None -> false
+
+let list_law_holes (lookups : Lookups.t) (impl : Path.t) (trait : Types.trait_reference) for_type
     name =
   match lookups.interface.names.find_key impl with
   | Some key ->
-      is_impl_unfinished lookups key
-      || List.exists
-           (fun (law, ((proof : State.source), _)) -> law = name && holds_todo lookups proof.key)
-           (list_law_proofs lookups (Path.locate_package impl) trait for_type)
-  | None -> false
+      list_impl_holes lookups key
+      @ List.concat_map
+          (fun (law, ((proof : State.source), _)) ->
+            if law = name then
+              List.map
+                (fun origin -> (proof.key, Obligation.Node origin))
+                (list_todo_origins lookups proof.key)
+            else [])
+          (list_law_proofs lookups (Path.locate_package impl) trait for_type)
+  | None -> []
 
 let make_contract ?trait_clauses (lookups : Lookups.t) path callee_clauses =
   let signature = Interface.Impls.read_signature lookups.interface path in

@@ -455,9 +455,7 @@ let () =
               let definition = Resolve.Names.show_key key in
               match
                 try find_graph (Lazy.force parts) key
-                with Compiler_bug.Bug bug ->
-                  Harness.fail "%s: %s" definition bug.message;
-                  None
+                with Compiler_bug.Bug bug -> Harness.fail "%s: %s" definition bug.message
               with
               | Some mir ->
                   incr built;

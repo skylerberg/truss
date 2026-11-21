@@ -99,8 +99,7 @@ let make_law_fact (context : State.context) (frame : State.frame) source ~substi
     with Facts.Unsupported _ -> None
   end
 
-let assume_laws (context : State.context) frame ~at (trait : Types.trait_reference) (ty : Types.ty)
-    =
+let assume_laws (context : State.context) frame (trait : Types.trait_reference) (ty : Types.ty) =
   let key = (trait, ty) in
   if not (List.mem key context.laws_assumed) then begin
     context.laws_assumed <- key :: context.laws_assumed;
@@ -112,11 +111,11 @@ let assume_laws (context : State.context) frame ~at (trait : Types.trait_referen
           (fun (source, (law : Mir.law)) ->
             match make_law_fact context frame source ~substitution law with
             | Some fact_ ->
-                (match impl with
-                | Some impl when Contracts.is_law_unshown context.lookups impl required ty law.name
-                  ->
-                    context.holes <- (context.home, at) :: context.holes
-                | _ -> ());
+                Option.iter
+                  (fun impl ->
+                    List.iter (Facts.add_hole context)
+                      (Contracts.list_law_holes context.lookups impl required ty law.name))
+                  impl;
                 Facts.add_frame_fact context frame fact_
             | None -> ())
           (list_laws context required.trait))
@@ -195,7 +194,17 @@ let add_named_relation context frame (expected : Types.function_type) callee_ter
            Logic.equal holds
              (Logic.equal result (Lambdas.apply_function context expected callee_term entries)) ));
   let mark = context.State.fresh in
-  match read_named_ensures context frame clauses expected ~entries ~exits ~result with
+  let facts_mark = List.length context.facts in
+  let read = read_named_ensures context frame clauses expected ~entries ~exits ~result in
+  let bound = List.map fst parameters in
+  let is_inside_the_relation fact =
+    Logic.mentions bound fact || Facts.mentions_fresh_after context mark fact
+  in
+  let added = Lambdas.list_facts_since context facts_mark in
+  context.facts <-
+    List.filter (fun fact -> not (is_inside_the_relation fact)) added
+    @ List.drop (List.length added) context.facts;
+  match read with
   | [] -> ()
   | ensures when List.exists (Facts.mentions_fresh_after context mark) ensures -> ()
   | ensures ->

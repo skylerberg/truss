@@ -47,8 +47,8 @@ let write_scalar_debug env builder ~output (scalar : Memory_layout.scalar) (plac
   match scalar with
   | Integer (Int8 | Int16 | Int32 | Int64) -> write_widened Writing_signed int64 Int64
   | Integer (UInt8 | UInt16 | UInt32 | UInt64) -> write_widened Writing_unsigned uint64 UInt64
-  | Float32 -> write Writing_float32 (Ground.make_builtin Float32) place
-  | Float64 -> write Writing_float64 (Ground.make_builtin Float64) place
+  | Float32 -> write Float_text_write_shortest_float32 (Ground.make_builtin Float32) place
+  | Float64 -> write Float_text_write_shortest_float64 (Ground.make_builtin Float64) place
   | Bool -> write Writing_boolean (Ground.make_builtin Bool) place
   | Character -> write Writing_quoted_character (Ground.make_builtin Character) place
   | Pointer _ | Nullable_pointer _ -> write_text env builder ~output "pointer"

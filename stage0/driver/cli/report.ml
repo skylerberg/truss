@@ -13,7 +13,7 @@ let make_shown_file snapshot database file diagnostics =
   | diagnostics ->
       Some { file; source = Command_packages.read_source snapshot database file; diagnostics }
 
-let gather ?(proofs = false) database snapshot packages =
+let gather ~proofs database snapshot packages =
   let program_packages = Command_packages.list_program_packages snapshot packages in
   let files = Command_packages.list_files snapshot program_packages in
   let proofs =

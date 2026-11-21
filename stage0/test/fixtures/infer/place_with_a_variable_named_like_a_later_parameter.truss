@@ -1,0 +1,7 @@
+fn place(row: Int64, column: Int64 = 0, layer: Int64 = 0) -> Int64 {
+  row
+}
+
+fn f(layer: Int64) -> Int64 {
+  place(row: 1, layer)
+}

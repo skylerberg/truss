@@ -612,6 +612,13 @@ fn show_pattern(written: syntax::Pattern) -> String
       Some(written_fields) => make_form(name.text, parts: show_pattern_fields(written_fields))
     }
     Record(fields) => make_form("record", parts: show_pattern_fields(fields))
+    Tuple(patterns) => {
+      var parts: List[String] = []
+      for pattern in patterns {
+        mut parts.push(show_pattern(pattern))
+      }
+      make_form("tuple", parts)
+    }
     Alternatives(alternatives) => {
       var parts: List[String] = []
       for alternative in alternatives {
@@ -775,7 +782,7 @@ fn show_definition(definition: syntax::Definition, methods: Slice[String]) -> St
       make_form("fn", parts)
     }
     MethodDeclaration(signature) => make_form("fn", parts: show_signature(signature))
-    TypeDefinition(name, generics, body, clauses) => {
+    TypeDefinition(is_tuple, name, generics, body, clauses) => {
       let shown_body = match body {
         Fields(fields) => show_fields(fields)
         Variants(variants) => {
@@ -807,7 +814,7 @@ fn show_definition(definition: syntax::Definition, methods: Slice[String]) -> St
         }
         mut parts.push(own text)
       }
-      make_form("type", parts)
+      make_form(if is_tuple { "tuple type" } else { "type" }, parts)
     }
     Trait(name, generics, supertraits, members) => {
       let shown_requires = if supertraits.is_empty() { "" } else { ": ${show_path_types(supertraits, separator: " + ")}" }

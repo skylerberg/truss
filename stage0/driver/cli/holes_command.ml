@@ -46,15 +46,26 @@ let gather snapshot packages database paths =
     (Command_packages.select_files snapshot packages paths)
 
 let attach_blocks snapshot packages database holes =
+  let lookups = lazy (Workspace_backend.require_lowered_lookups database packages) in
+  let list_holes_relied_on main =
+    let proofs =
+      Proofs.check database snapshot packages
+        (Command_packages.list_files snapshot
+           (Command_packages.list_program_packages snapshot packages))
+    in
+    List.map
+      (fun (file, line, column, _) -> (file, line, column))
+      (Proofs.list_holes snapshot proofs
+         ~reached:(Backend.list_reached_definitions (Lazy.force lookups) main))
+  in
   let roots =
     (match Program_command.list_mains snapshot packages with
-      | [ main ] -> [ ("main", main) ]
+      | [ main ] -> [ ("main", main, list_holes_relied_on main) ]
       | _ -> [])
     @ List.map
-        (fun (test : Test_command.test) -> ("test " ^ Test_command.label_test test, test.path))
+        (fun (test : Test_command.test) -> ("test " ^ Test_command.label_test test, test.path, []))
         (Test_command.select snapshot database packages ~paths:[] ~match_:None)
   in
-  let lookups = lazy (Workspace_backend.require_lowered_lookups database packages) in
   let read_memoized table list_reached root =
     match Path_table.find_opt table root with
     | Some reached -> reached
@@ -74,8 +85,11 @@ let attach_blocks snapshot packages database holes =
         hole with
         blocks =
           List.filter_map
-            (fun (label, root) ->
-              if List.exists (Path.equal hole.definition) (list_reached root) then Some label
+            (fun (label, root, holes_relied_on) ->
+              if
+                List.exists (Path.equal hole.definition) (list_reached root)
+                || List.mem (hole.file, hole.line, hole.column) holes_relied_on
+              then Some label
               else None)
             roots;
       })
@@ -113,7 +127,7 @@ let print hole =
 let run ~paths =
   let snapshot, packages = Command_packages.load_current () in
   let database = Workspace.open_database snapshot in
-  let report = Report.gather database snapshot packages in
+  let report = Report.gather ~proofs:false database snapshot packages in
   let holes =
     match gather snapshot packages database paths with
     | [] -> []

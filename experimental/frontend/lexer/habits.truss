@@ -61,7 +61,7 @@ fn lex_block_comment(scanner: mut Scanner)
   } else {
     "${comment_message} This comment is never closed, so it runs to the end of the file."
   }
-  report(mut scanner, code: "lexer.comment", span: source::make_span(start, stop: position), message)
+  report(mut scanner, code: "lexer.comment", span: source::make_span(start, stop: position), message: message)
 }
 
 fn record_semicolon(scanner: mut Scanner)
@@ -86,7 +86,7 @@ fn report_semicolons(scanner: mut Scanner, line_break: Bool)
   }
   for start in semicolons {
     let title = if line_break { "Replace the `;` with a line break" } else { "Remove the `;`" }
-    let fix = source::make_fix(title, edits: [scanner.remove_trivia(start, stop: start + 1, line_break)])
+    let fix = source::make_fix(title, edits: [scanner.remove_trivia(start, stop: start + 1, line_break: line_break)])
     report(
       mut scanner,
       code: "lexer.semicolon",

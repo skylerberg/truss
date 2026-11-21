@@ -408,7 +408,9 @@ let answer = Some(3)
   are written bare.
 - A `type_clause` after the last variant belongs to the whole type.
 - The order of a record's fields has no meaning, except in a tuple type and
-  to a derived `Ordered`.
+  to a derived `Ordered` or `serialization::Serialize`, which follow the
+  order the fields are declared in. The compiler chooses a record's layout in
+  memory.
 - A record with one field has none of its field's methods or operators:
   `type UserId(number: UInt64)` is a type of its own.
 
@@ -427,8 +429,12 @@ fn length(span: Span) -> UInt64
 
 - A tuple type is a record whose fields are in the order they are declared,
   and a tuple pattern matches them by position (see [Patterns](#patterns)).
-- A tuple type has two or more fields. It is built, read, and matched in
-  parentheses by name, as any record is.
+- A tuple type has two or more fields. It is built as a function is called
+  (see [Calls and arguments](#calls-and-arguments)): positional arguments in
+  the order of the fields, then labeled ones in any order. A positional
+  argument that is a variable named like another field is an error. It is
+  read, updated with `with`, and matched in parentheses by name, as any
+  record is.
 - `map::Entry`, `core::Indexed`, and `core::Pair` are tuple types, so
   `for name, port in ports` binds each entry's key and value.
 
@@ -513,6 +519,11 @@ public type Interval =
   its updates. An element of a `List`, a `Slice`, or an `Array` meets it
   when a write to a part of the element ends, as in `spans[0].low = 1` or
   `bump(mut spans[0].low)`, since the next read of the element assumes it.
+- An invariant clause that calls a definition private to its type's
+  module is known only in that module. Another module assumes the clause of
+  every value of the type and proves it only of a value it was given or a
+  call returned, so it cannot build a value of the type from its fields when
+  the clause must hold.
 - A private method that takes `mut self` is a step of an update: the
   invariant of its `self` is neither assumed when it is called nor required
   when it returns. A method written in a trait, a capability, or an `impl`
@@ -764,25 +775,29 @@ fn copy(source: Path, destination: Path)
 fn connect(host: HostName, port: UInt16 = 443, secure: Bool = true) -> Result[Connection, NetworkError]
   uses NetworkClient
 
-copy(original, destination: backup)
-copy(source, destination)
-let connection = connect(host, port: 8080)?
+copy(original, backup)
+copy(destination: backup, source: original)
+let connection = connect(host, secure: false)?
 ```
 
-1. `label: value` passes `value` to the parameter named `label`.
-2. A bare name that matches a parameter's name passes that variable to that
-   parameter, wherever it appears, optionally after a mode keyword.
-3. Any other first argument goes to the first parameter. Any other later
-   argument is an error.
-4. Arguments come in the order of the parameters.
+1. A positional argument, one without a label, passes its value to the
+   parameter at its position.
+2. `label: value` passes `value` to the parameter named `label`.
+3. Labeled arguments follow the positional ones, in any order. A positional
+   argument after a labeled one is an error, and so is a parameter given
+   twice.
+4. Arguments are evaluated in the order written.
 
 - A default is a constant expression that refers to no other parameter. An
   argument for a parameter with a default can be left out, and the function
   fills it in.
-- Building a record or a variant follows the same rules, except that fields
-  may come in any order, evaluated in the order written, and only a record
-  or variant with exactly one field takes a bare value, as in `Some(3)`.
-- A call through a function value passes its arguments by position.
+- Building a record or a variant takes labeled arguments in any order,
+  evaluated in the order written. A bare name that matches a field's name
+  passes that variable to that field, optionally after a mode keyword. Only
+  a record or variant with exactly one field takes a positional argument, as
+  in `Some(3)`, except a tuple type (see [Tuple types](#tuple-types)).
+- A call through a function value passes its arguments by position, without
+  labels.
 
 ### Explicit type arguments
 
@@ -2714,6 +2729,8 @@ type Priority =
   `name.trim()` and `String.trim(name)` are `StringSlice.trim(name)`. A
   method as a value is named through the view: `StringSlice.trim`. In the
   rules below, the methods a type has from its view count as its own.
+- A method written in full, as in `String.trim(name)`, takes `self` as its
+  first parameter, so the receiver is its first argument and has no label.
 - Two of those traits giving one name is an error at a call with a dot,
   which is then written in full: `Ordered.compare(first, second)`. A trait
   and a trait it requires are the exception.
@@ -2769,6 +2786,8 @@ test "config loads with defaults" uses RunForever {
   implementation](#standard-capabilities).
 - A failed `assert` ends the test as failed, and the rest of the test can
   rely on the asserted fact.
+- Tests run only when no proof in their packages fails. A proof that holds
+  a `todo` does not fail.
 - A test build checks every primitive operation that could fail when it
   runs, and a failed check fails the test. A `requires` is not run.
 - A panic fails only its test. A test that reaches a `todo` is incomplete.
@@ -2949,9 +2968,13 @@ public opaque type Session = todo
   against the signature of an unfinished function.
 - A `todo` in a specification is a hole: on the paths through it, the
   specification is neither proven nor assumed.
-- A release build refuses a program whose `main` can reach a `todo`, in its
-  code or its specifications. In a development build, a `todo` that runs
-  stops the program and reports its position.
+- The laws of an `impl` that holds a `todo` are not proven, so the `todo` is
+  a hole in each proof that assumes them.
+- A release build refuses a program whose `main` can reach a `todo`. It
+  reaches the code that `main` calls, the proofs of that code, the
+  definitions whose contracts those proofs read, and the `impl`s whose
+  methods that code calls or passes to generic code. In a development
+  build, a `todo` that runs stops the program and reports its position.
 - A type defined as `todo` can be named, but its contents cannot be used.
 
 ## Debug output

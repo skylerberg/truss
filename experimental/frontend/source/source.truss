@@ -46,7 +46,7 @@ internal fn Source.create(path: StringSlice, text: own String) -> Source
       mut line_starts.push(index + 1)
     }
   }
-  Source(path: path.to_string(), text: own text, line_starts: own line_starts)
+  Source(path: path.to_string(), own text, own line_starts)
 }
 
 internal fn Source.compute_line_index(self, offset: UInt64) -> UInt64
@@ -96,11 +96,11 @@ internal fn make_diagnostic(
   notes: own List[Note] = [],
   fixes: own List[Fix] = [],
 ) -> Diagnostic {
-  Diagnostic(code: code.to_string(), span, message: message.to_string(), notes: own notes, fixes: own fixes)
+  Diagnostic(code: code.to_string(), span, message: message.to_string(), own notes, own fixes)
 }
 
 internal fn make_fix(title: StringSlice, edits: own List[Edit]) -> Fix {
-  Fix(title: title.to_string(), edits: own edits)
+  Fix(title: title.to_string(), own edits)
 }
 
 internal fn replace(span: Span, replacement: StringSlice) -> Edit {

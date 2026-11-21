@@ -313,18 +313,21 @@ let derive_parameter_name (callee : Syntax.expression) =
   | _ -> "element"
 
 let report_trailing_lambda cursor ~(callee : Syntax.expression) ~parameter ~(opening : Token.t)
-    ~(closing : Token.t) ~(uses : Token.t list) =
-  let callee_stop = (Cursor.read_file_span cursor callee.id).stop in
-  report cursor Trailing_lambda opening.span
-    (Printf.sprintf
-       "A lambda is passed inside the parentheses, with a named parameter: `fn(%s) { ... }`."
-       parameter)
-    "Pass a lambda"
-    (Diagnostic.replace
-       (Source.make_span callee_stop opening.span.start)
-       (Printf.sprintf "(fn(%s) " parameter)
-    :: Diagnostic.insert (Source.make_zero_width closing.span.stop) ")"
-    :: List.map (fun (token : Token.t) -> Diagnostic.replace token.span parameter) uses)
+    ~(closing : Token.t) ~(next : Token.t) ~(uses : Token.t list) =
+  let message =
+    Printf.sprintf
+      "A lambda is passed inside the parentheses, with a named parameter: `fn(%s) { ... }`."
+      parameter
+  in
+  if Atoms.ends_statement next.kind then
+    let callee_stop = (Cursor.read_file_span cursor callee.id).stop in
+    report cursor Trailing_lambda opening.span message "Pass a lambda"
+      (Diagnostic.replace
+         (Source.make_span callee_stop opening.span.start)
+         (Printf.sprintf "(fn(%s) " parameter)
+      :: Diagnostic.insert (Source.make_zero_width closing.span.stop) ")"
+      :: List.map (fun (token : Token.t) -> Diagnostic.replace token.span parameter) uses)
+  else Cursor.report cursor Trailing_lambda opening.span message
 
 let integer_type_names =
   [ "Int8"; "Int16"; "Int32"; "Int64"; "UInt8"; "UInt16"; "UInt32"; "UInt64" ]

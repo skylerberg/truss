@@ -1,0 +1,5 @@
+fn take(items: own List[Int64], count: UInt64) {}
+
+fn f(items: own List[Int64]) {
+  take(count: items.length(), items: own items)
+}

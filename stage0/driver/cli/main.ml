@@ -84,19 +84,12 @@ let check =
              such fix remains, then report the remaining diagnostics. A fix for an obligation that \
              the prover could not prove is never applied, since it changes the contract.")
   in
-  let no_proofs =
-    Cmdliner.Arg.(
-      value & flag
-      & info [ "no-proofs" ]
-          ~doc:"Skip the prover: report every other diagnostic, without the pinned solver.")
-  in
   make_command "check"
-    ~doc:"Report every diagnostic of the packages and of the project's packages they depend on."
+    ~doc:
+      "Report every diagnostic of the packages and of the project's packages they depend on, the \
+       prover's included."
     (make_project_term
-       Cmdliner.Term.(
-         const (fun fix no_proofs () ->
-             Outcome.Exit (Check_command.run ~fix ~proofs:(not no_proofs)))
-         $ fix $ no_proofs))
+       Cmdliner.Term.(const (fun fix () -> Outcome.Exit (Check_command.run ~fix)) $ fix))
 
 let test =
   let match_ =

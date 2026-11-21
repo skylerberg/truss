@@ -179,9 +179,8 @@ Hello, world!
 the command that matters most: **code is finished when `truss check` reports
 no errors.** A warning, such as for a private function nothing uses, points
 at code to clean up, but it does not stop a build.
-`truss run` and `truss test` build the program without waiting for the
-prover, so a program can run while one of its proofs still fails. `truss
-build` waits for every proof.
+`truss run`, `truss test`, and `truss build` stop at any error, a failed
+proof included.
 
 Every command exits with status 0 when the code has no error, 1 when it has
 one, and 2 when it could not run. Each runs in the package's directory, or
@@ -206,7 +205,7 @@ A diagnostic gives the file, line, and column; a code, such as
 that says how to fix it. Many diagnostics also carry a `fix:`, an edit that
 makes the code compile. `truss check --fix` applies every fix that is its
 diagnostic's only fix, then reports what is left. When a check reports
-errors, run it first, then read what it changed: a missing label or a
+errors, run it first, then read what it changed: a misspelled label or a
 misplaced `own` is gone, and a diagnostic with a choice of fixes is left for
 you to decide. A fix can add a `.copy()`, which allocates, so keep only the
 copies you want.
@@ -494,9 +493,9 @@ $ truss test
 `verdict` has no `uses` clause, so it is pure: it cannot print, read, pick
 a random number, or run forever, and its tests give the same answer every
 run. Notice
-the call `verdict(10, secret: 50)`. Every argument after the first names its
-parameter, unless it is a variable with the parameter's name, as in
-`verdict(guess, secret)`.
+the call `verdict(10, secret: 50)`. Arguments are passed by position, as in
+`verdict(guess, secret)`, and a label can name an argument's parameter where
+a bare `50` would not say what it is.
 
 You have now used variables, functions, `match`, loops, options, results,
 capabilities, termination, and tests. The next chapter covers the basics in detail.
@@ -805,10 +804,8 @@ fn describe(count: UInt64) -> String {
 }
 
 test "calling functions" {
-  assert area(3, height: 4) == 12
-  let width: UInt64 = 5
-  let height: UInt64 = 6
-  assert area(width, height) == 30
+  assert area(3, 4) == 12
+  assert area(height: 4, width: 3) == 12
   assert greeting("Ada") == "Hello, Ada!"
   assert greeting("Ada", punctuation: "?") == "Hello, Ada?"
   assert describe(0) == "none"
@@ -819,12 +816,18 @@ test "calling functions" {
 - **A block's value is its last expression.** `area` returns `width *
   height`. `return` leaves a function early. A function without `->` returns
   `Unit`.
-- **Every argument after the first is labeled with its parameter's name,** as
-  in `area(3, height: 4)`, unless the argument is a variable with that name,
-  as in `area(width, height)`. A call says what each argument means, and
-  reordering parameters of the same type cannot silently swap arguments.
+- **Arguments are passed by position, and a label names a parameter,** as in
+  `area(3, 4)` and `area(height: 4, width: 3)`. Labeled arguments come after
+  the positional ones, in any order, and every argument is evaluated in the
+  order written.
 - **A parameter can have a default,** as `punctuation` does, and a call can
-  leave the argument out.
+  leave the argument out. A label skips the parameters with defaults before
+  it, as in `connect(host, secure: false)` for `fn connect(host: HostName,
+  port: UInt16 = 443, secure: Bool = true)`.
+- **A record is built by field name, not by position,** as in
+  `Interval(start: low, stop: high)`, because its fields have no order. A
+  variable named like a field needs no label: `Interval(start, stop)`.
+  [Chapter 5](#5-records-and-sum-types) covers records.
 - **Clauses between the signature and the body** state what the function
   promises. `requires` is one. [Chapter 13](#13-contracts-and-proofs) covers
   them all.
@@ -1289,8 +1292,10 @@ test "building and reading a record" {
 }
 ```
 
-- A record is built the way a function is called, with each field labeled.
-  The labels can come in any order.
+- A record is built with each field labeled, in any order. A variable named
+  like a field needs no label, as in `Rectangle(width, height)`. Fields have
+  no order, so a record with more than one field takes no positional
+  argument.
 - `frame.width` reads a field.
 - `frame with (width: 60)` makes a new value with some fields replaced. The
   original does not change.
@@ -1357,14 +1362,19 @@ fn width(span: Span) -> UInt64
 }
 
 test "a tuple pattern" {
-  assert width(Span(start: 2, end: 7)) == 5
+  assert width(Span(2, 7)) == 5
+  assert width(Span(2, end: 7)) == 5
 }
 ```
 
+- A tuple type is built as a function is called: positional arguments in
+  the order of the fields, then labeled ones in any order, so `Span(2, 7)`
+  is `Span(start: 2, end: 7)`.
 - In parentheses, fields match by name in every record, so
   `let (start, end) = span` works and `let (low, high) = span` is an error.
 - A name that belongs to another field is an error: `let end, start = span`
-  would bind `end` to the field `start`.
+  would bind `end` to the field `start`, and `Span(end, start)` would put
+  `end` in the field `start`.
 - A map's entries, `enumerate`, and `zip` give tuple types, so a loop over
   them names the parts by position ([Chapter 7](#7-collections)).
 
@@ -1449,6 +1459,28 @@ test "a sum type" {
 In an expression, a variant is written under its type, `Message.Move`. In a
 pattern, it is written alone, `Move(x, y)`, because the compiler looks it up
 in the type of the value being matched.
+
+`Move(x, y)` matches by name, not by position: each bare name binds the
+field it names, so `Move(y, x)` means the same. A label binds a field to
+another name, in a pattern as in a construction:
+
+```truss
+type Message =
+  | Quit
+  | Move(x: Int64, y: Int64)
+
+fn Message.column(self) -> Int64 {
+  match self {
+    Move(x: column, ..) => column
+    Quit => 0
+  }
+}
+
+test "a label binds a field to another name" {
+  let column: Int64 = 3
+  assert Message.Move(x: column, y: 0).column() == 3
+}
+```
 
 #### Recursive types
 
@@ -1552,6 +1584,7 @@ test "patterns" {
 | `400..=499` | An integer or character in the range |
 | `301 \| 302` | Either pattern; both bind the same names |
 | `Some(value)`, `Move(x, y)` | That variant, binding its fields by name |
+| `Move(x: column, y)` | That variant, binding its field `x` as `column` |
 | `Move(x: 0, ..)` | That variant with `x` equal to 0; `..` skips the other fields |
 | `(x, y)` | A record, binding its fields `x` and `y` |
 | `http::ok`, `Status.teapot` | A constant, written with its module or its type |
@@ -3625,9 +3658,13 @@ does.
 | `truss test --rerun` | Every selected test, ignoring cached results |
 | `truss test --timings` | The tests, then each one's duration, slowest first |
 
-`truss test` does not wait for the prover, so tests run while you are still
-working on a proof. Each test has a time limit, 10 seconds unless the
-project's manifest sets another, and a test that runs past it fails.
+`truss test` runs the tests only once every proof passes. To run them while
+you are still working on a proof, write `todo` in the proof, as
+[Chapter 13](#theorems-and-proof-blocks) shows. A test build checks each
+operation that could fail, so a test that reaches a real bug stops at the
+operation, and `truss build` refuses the `todo` until the proof is written.
+Each test has a time limit, 10 seconds unless the project's manifest sets
+another, and a test that runs past it fails.
 
 ### Deterministic tests and caching
 
@@ -3730,9 +3767,10 @@ shop "discounts are coming": incomplete
       at main.truss:2:3
 ```
 
-`truss build` refuses a program whose `main` can reach a `todo`. In a
-development build from `truss run`, a `todo` that runs stops the program
-and reports where.
+`truss build` refuses a program whose `main` can reach a `todo`, including
+a `todo` in a proof that the program relies on, such as the body of a
+theorem that its code calls. In a development build from `truss run`, a
+`todo` that runs stops the program and reports where.
 
 ### echo
 
@@ -4031,7 +4069,7 @@ every recursive call, makes smaller, and that never goes below zero.
 fn gcd(first: UInt64, second: UInt64) -> UInt64
   decreases second
 {
-  if second == 0 { first } else { gcd(first: second, second: first % second) }
+  if second == 0 { first } else { gcd(second, first % second) }
 }
 
 fn halve_until_odd(value: UInt64) -> UInt64
@@ -4048,15 +4086,10 @@ fn halve_until_odd(value: UInt64) -> UInt64
 }
 
 test "terminating code" {
-  assert gcd(12, second: 18) == 6
+  assert gcd(12, 18) == 6
   assert halve_until_odd(12) == 3
 }
 ```
-
-Notice `gcd(first: second, second: first % second)`. A bare argument that is
-a variable named like a parameter goes to that parameter, wherever it
-appears, so `gcd(second, ...)` would pass `second` to `second` twice. Writing
-both labels avoids that.
 
 A recursion without a measure is an error. A function `countdown` that
 calls itself on `count / 2`, which is not a part of `count`, states none:
@@ -4764,7 +4797,6 @@ From the tightest binding to the loosest:
 | `truss new NAME` | Create the package `NAME` in a new directory |
 | `truss check` | Report every diagnostic of the packages and of the packages they depend on |
 | `truss check --fix` | Apply every fix that is its diagnostic's only fix, check again, and repeat |
-| `truss check --no-proofs` | Report every diagnostic except the prover's |
 | `truss test [PATH...]` | Check the packages, then run the tests without a cached result |
 | `truss test --match TEXT` | Run only the tests whose names contain `TEXT` |
 | `truss test --rerun` | Run the selected tests, ignoring cached results |

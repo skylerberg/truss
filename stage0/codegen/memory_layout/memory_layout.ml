@@ -127,9 +127,7 @@ let place_fields (fields : (string * member * t) list) =
   let sized = List.filter (fun (_, _, (layout : t)) -> layout.size > 0) fields in
   let ordered =
     List.stable_sort
-      (fun (name, _, (left : t)) (other, _, (right : t)) ->
-        let order = Int.compare right.alignment left.alignment in
-        if order <> 0 then order else String.compare name other)
+      (fun (_, _, (left : t)) (_, _, (right : t)) -> Int.compare right.alignment left.alignment)
       sized
   in
   let offset, alignment, placed =

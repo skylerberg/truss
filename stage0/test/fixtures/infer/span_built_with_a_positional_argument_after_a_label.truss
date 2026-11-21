@@ -1,0 +1,5 @@
+tuple type Span(start: Int64, end: Int64)
+
+fn f() -> Span {
+  Span(end: 7, 3)
+}

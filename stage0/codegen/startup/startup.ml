@@ -1,5 +1,5 @@
 let headers =
-  {|#define _DEFAULT_SOURCE
+  {|#define _GNU_SOURCE
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -623,23 +623,28 @@ struct truss_branch {
   void *environment;
 };
 
+struct truss_worker;
+
 struct truss_job {
   void (*run)(void *environment);
   void *environment;
+  _Atomic(struct truss_worker *) thief;
   atomic_int done;
-  int offered;
 };
 
 #define TRUSS_QUEUE 256
 #define TRUSS_MAXIMUM_WORKERS 256
 #define TRUSS_MAXIMUM_SPARES 256
-#define TRUSS_FORK 32
+#define TRUSS_GRAINS_PER_WORKER 8
 
 struct truss_worker {
   _Alignas(64) _Atomic(int64_t) top;
   _Alignas(64) _Atomic(int64_t) bottom;
   uint64_t random;
   _Alignas(64) _Atomic(struct truss_job *) jobs[TRUSS_QUEUE];
+  _Alignas(64) atomic_size_t joiners;
+  pthread_mutex_t join_lock;
+  pthread_cond_t join_wake;
 };
 
 static struct truss_worker truss_workers[TRUSS_MAXIMUM_WORKERS + TRUSS_MAXIMUM_SPARES];
@@ -656,7 +661,6 @@ static pthread_once_t truss_pool_once = PTHREAD_ONCE_INIT;
 static pthread_mutex_t truss_pool_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t truss_pool_wake = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t truss_spare_lock = PTHREAD_MUTEX_INITIALIZER;
-static atomic_size_t truss_sleepers;
 static atomic_size_t truss_idle_runners;
 
 static atomic_size_t truss_run_count;
@@ -720,25 +724,37 @@ static struct truss_job *truss_find(struct truss_worker *self) {
   return NULL;
 }
 
+static int truss_has_job(struct truss_worker *worker) {
+  return atomic_load(&worker->top) < atomic_load(&worker->bottom);
+}
+
 static int truss_any_job(void) {
   size_t count = atomic_load(&truss_worker_count);
   for (size_t index = 0; index < count; index++)
-    if (atomic_load(&truss_workers[index].top) < atomic_load(&truss_workers[index].bottom)) return 1;
+    if (truss_has_job(&truss_workers[index])) return 1;
   return 0;
 }
 
 static void truss_wake(int everyone) {
-  if (atomic_load(&truss_sleepers) == 0) return;
+  if (atomic_load(&truss_idle_runners) == 0) return;
   pthread_mutex_lock(&truss_pool_lock);
   if (everyone) pthread_cond_broadcast(&truss_pool_wake);
   else pthread_cond_signal(&truss_pool_wake);
   pthread_mutex_unlock(&truss_pool_lock);
 }
 
-static void truss_run_taken(struct truss_job *job) {
+static void truss_wake_joiners(struct truss_worker *worker) {
+  if (atomic_load(&worker->joiners) == 0) return;
+  pthread_mutex_lock(&worker->join_lock);
+  pthread_cond_broadcast(&worker->join_wake);
+  pthread_mutex_unlock(&worker->join_lock);
+}
+
+static void truss_run_stolen(struct truss_worker *self, struct truss_job *job) {
+  atomic_store_explicit(&job->thief, self, memory_order_release);
   job->run(job->environment);
   atomic_store(&job->done, 1);
-  truss_wake(1);
+  truss_wake_joiners(self);
 }
 
 static void truss_rest(unsigned idle) {
@@ -753,32 +769,48 @@ static void truss_rest(unsigned idle) {
   }
 }
 
-static void truss_sleep(atomic_int *done, int runner) {
+static void truss_sleep(atomic_int *done) {
   pthread_mutex_lock(&truss_pool_lock);
-  atomic_fetch_add(&truss_sleepers, 1);
-  if (runner) atomic_fetch_add(&truss_idle_runners, 1);
-  if (!(done != NULL && atomic_load(done)) && !truss_any_job() &&
-      !(runner && atomic_load(&truss_run_count) > 0))
+  atomic_fetch_add(&truss_idle_runners, 1);
+  if (!(done != NULL && atomic_load(done)) && !truss_any_job() && atomic_load(&truss_run_count) == 0)
     pthread_cond_wait(&truss_pool_wake, &truss_pool_lock);
-  if (runner) atomic_fetch_sub(&truss_idle_runners, 1);
-  atomic_fetch_sub(&truss_sleepers, 1);
+  atomic_fetch_sub(&truss_idle_runners, 1);
   pthread_mutex_unlock(&truss_pool_lock);
 }
 
-static void truss_wait_for(struct truss_worker *self, struct truss_job *job) {
+static pthread_once_t truss_join_locks_once = PTHREAD_ONCE_INIT;
+
+static void truss_join_locks_start(void) {
+  for (size_t index = 0; index < TRUSS_MAXIMUM_WORKERS + TRUSS_MAXIMUM_SPARES; index++) {
+    pthread_mutex_init(&truss_workers[index].join_lock, NULL);
+    pthread_cond_init(&truss_workers[index].join_wake, NULL);
+  }
+}
+
+static void truss_sleep_on_thief(struct truss_worker *thief, atomic_int *done) {
+  pthread_once(&truss_join_locks_once, truss_join_locks_start);
+  atomic_fetch_add(&truss_blocked, 1);
+  truss_spare_ensure();
+  pthread_mutex_lock(&thief->join_lock);
+  atomic_fetch_add(&thief->joiners, 1);
+  if (!atomic_load(done) && !truss_has_job(thief)) pthread_cond_wait(&thief->join_wake, &thief->join_lock);
+  atomic_fetch_sub(&thief->joiners, 1);
+  pthread_mutex_unlock(&thief->join_lock);
+  atomic_fetch_sub(&truss_blocked, 1);
+}
+
+static void truss_join(struct truss_worker *self, struct truss_job *job) {
   unsigned idle = 0;
   while (!atomic_load_explicit(&job->done, memory_order_acquire)) {
-    struct truss_job *other = truss_find(self);
-    if (other != NULL) {
-      truss_run_taken(other);
+    struct truss_worker *thief = atomic_load_explicit(&job->thief, memory_order_acquire);
+    struct truss_job *descendant = thief == NULL ? NULL : truss_steal(thief);
+    if (descendant != NULL) {
+      truss_run_stolen(self, descendant);
       idle = 0;
-    } else if (++idle < 40) {
+    } else if (++idle < 40 || thief == NULL) {
       truss_rest(idle);
     } else {
-      atomic_fetch_add(&truss_blocked, 1);
-      truss_spare_ensure();
-      truss_sleep(&job->done, 0);
-      atomic_fetch_sub(&truss_blocked, 1);
+      truss_sleep_on_thief(thief, &job->done);
       idle = 0;
     }
   }
@@ -804,12 +836,12 @@ static void truss_run_until(struct truss_worker *self, atomic_int *done) {
       truss_task_run(task);
       idle = 0;
     } else if (job != NULL) {
-      truss_run_taken(job);
+      truss_run_stolen(self, job);
       idle = 0;
     } else if (++idle < 40) {
       truss_rest(idle);
     } else {
-      truss_sleep(done, 1);
+      truss_sleep(done);
       idle = 0;
     }
   }
@@ -824,10 +856,18 @@ static void *truss_worker_main(void *argument) {
   return NULL;
 }
 
+static long truss_count_processors(void) {
+#ifdef __linux__
+  cpu_set_t allowed;
+  if (sched_getaffinity(0, sizeof allowed, &allowed) == 0) return CPU_COUNT(&allowed);
+#endif
+  return sysconf(_SC_NPROCESSORS_ONLN);
+}
+
 static void truss_pool_start(void) {
   long count = truss_requested_workers;
   if (count == 0) {
-    count = sysconf(_SC_NPROCESSORS_ONLN);
+    count = truss_count_processors();
     const char *requested = getenv("TRUSS_WORKERS");
     if (requested != NULL && requested[0] != 0) count = strtol(requested, NULL, 10);
   }
@@ -848,45 +888,52 @@ static void truss_pool_start(void) {
   pthread_attr_destroy(&attributes);
 }
 
-static void truss_fork(struct truss_worker *self, const struct truss_branch *branches, size_t count) {
-  struct truss_job jobs[TRUSS_FORK];
-  int offered = 0;
-  for (size_t index = count - 1; index >= 1; index--) {
-    struct truss_job *job = &jobs[index - 1];
-    job->run = branches[index].run;
-    job->environment = branches[index].environment;
-    atomic_init(&job->done, 0);
-    job->offered = truss_offer(self, job);
-    offered |= job->offered;
+static void truss_fork(struct truss_worker *self, struct truss_branch first, struct truss_branch second) {
+  struct truss_job job;
+  job.run = second.run;
+  job.environment = second.environment;
+  atomic_init(&job.thief, NULL);
+  atomic_init(&job.done, 0);
+  if (!truss_offer(self, &job)) {
+    first.run(first.environment);
+    second.run(second.environment);
+    return;
   }
-  if (offered) truss_wake(0);
-  branches[0].run(branches[0].environment);
-  for (size_t index = 1; index < count; index++) {
-    struct truss_job *job = &jobs[index - 1];
-    if (!job->offered) {
-      job->run(job->environment);
-      continue;
-    }
-    struct truss_job *back = truss_take_back(self);
-    if (back == job) job->run(job->environment);
-    else if (back == NULL) truss_wait_for(self, job);
-    else truss_runtime_compiler_bug();
+  truss_wake(0);
+  truss_wake_joiners(self);
+  first.run(first.environment);
+  struct truss_job *back = truss_take_back(self);
+  if (back == &job) second.run(second.environment);
+  else if (back == NULL) truss_join(self, &job);
+  else truss_runtime_compiler_bug();
+}
+
+struct truss_branches {
+  const struct truss_branch *branches;
+  uint64_t count;
+};
+
+static void truss_branches_run(void *argument) {
+  const struct truss_branches *all = argument;
+  if (all->count == 1) {
+    all->branches[0].run(all->branches[0].environment);
+    return;
   }
+  struct truss_branches low = {all->branches, all->count / 2};
+  struct truss_branches high = {all->branches + low.count, all->count - low.count};
+  truss_fork(truss_worker_self(), (struct truss_branch){truss_branches_run, &low},
+             (struct truss_branch){truss_branches_run, &high});
 }
 
 void truss_runtime_parallel(const struct truss_branch *branches, uint64_t count) {
+  if (count == 0) truss_runtime_compiler_bug();
   pthread_once(&truss_pool_once, truss_pool_start);
   if (truss_pool_workers == 1) {
     for (uint64_t index = 0; index < count; index++) branches[index].run(branches[index].environment);
     return;
   }
-  struct truss_worker *self = truss_worker_self();
-  while (count > 0) {
-    size_t batch = count > TRUSS_FORK + 1 ? TRUSS_FORK + 1 : (size_t)count;
-    truss_fork(self, branches, batch);
-    branches += batch;
-    count -= batch;
-  }
+  struct truss_branches all = {branches, count};
+  truss_branches_run(&all);
 }
 
 struct truss_range {
@@ -894,27 +941,39 @@ struct truss_range {
   void *environment;
   uint64_t first;
   uint64_t last;
-  uint64_t size;
+  uint64_t grain;
 };
 
 static void truss_range_run(void *argument) {
-  const struct truss_range *range = argument;
-  if (range->last - range->first < range->size) {
-    range->body(range->environment, range->first, range->last);
-    return;
+  struct truss_range range = *(const struct truss_range *)argument;
+  struct truss_worker *self = truss_worker_self();
+  for (;;) {
+    if (range.last - range.first >= range.grain && !truss_has_job(self)) {
+      struct truss_range low = range;
+      struct truss_range high = range;
+      low.last = range.first + (range.last - range.first) / 2;
+      high.first = low.last + 1;
+      truss_fork(self, (struct truss_branch){truss_range_run, &low},
+                 (struct truss_branch){truss_range_run, &high});
+      return;
+    }
+    uint64_t last = range.last - range.first < range.grain ? range.last : range.first + range.grain - 1;
+    range.body(range.environment, range.first, last);
+    if (last == range.last) return;
+    range.first = last + 1;
   }
-  uint64_t middle = range->first + (range->last - range->first) / 2;
-  struct truss_range low = *range;
-  struct truss_range high = *range;
-  low.last = middle;
-  high.first = middle + 1;
-  const struct truss_branch halves[2] = {{truss_range_run, &low}, {truss_range_run, &high}};
-  truss_runtime_parallel(halves, 2);
 }
 
 void truss_runtime_parallel_range(void (*body)(void *environment, uint64_t first, uint64_t last),
                               void *environment, uint64_t first, uint64_t last) {
-  struct truss_range whole = {body, environment, first, last, ((last - first) >> 8) + 1};
+  if (first > last) truss_runtime_compiler_bug();
+  pthread_once(&truss_pool_once, truss_pool_start);
+  if (truss_pool_workers == 1) {
+    body(environment, first, last);
+    return;
+  }
+  struct truss_range whole = {body, environment, first, last,
+                              (last - first) / (TRUSS_GRAINS_PER_WORKER * truss_pool_workers) + 1};
   truss_range_run(&whole);
 }
 
@@ -1108,13 +1167,11 @@ static void truss_spare_ensure(void) {
       pthread_cond_signal(&truss_spare_wake);
     } else if (truss_spares < TRUSS_MAXIMUM_SPARES) {
       size_t index = atomic_load(&truss_worker_count);
-      struct truss_worker *worker = &truss_workers[index];
-      worker->random = (uint64_t)index + 1;
       pthread_t thread;
       pthread_attr_t attributes;
       truss_thread_attributes(&attributes);
       pthread_attr_setdetachstate(&attributes, PTHREAD_CREATE_DETACHED);
-      if (pthread_create(&thread, &attributes, truss_spare_main, worker) == 0) {
+      if (pthread_create(&thread, &attributes, truss_spare_main, &truss_workers[index]) == 0) {
         atomic_store(&truss_worker_count, index + 1);
         truss_spares += 1;
         truss_spares_busy += 1;
@@ -1852,7 +1909,6 @@ void truss_runtime_main(void (*code)(void *environment, uint64_t item, void *cap
   truss_install_signal_dispositions();
   truss_requested_workers = requested_workers;
   truss_self = &truss_workers[0];
-  truss_workers[0].random = 1;
   atomic_store(&truss_worker_count, 1);
   struct truss_root root = {code, environment, 0};
   truss_task_run(truss_task_new(truss_group_new(NULL), truss_root_run, &root, 0));

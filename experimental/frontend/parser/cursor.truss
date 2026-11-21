@@ -19,6 +19,7 @@ type TokenCursor(
   stop: UInt64,
   base: UInt64,
   group_ends: List[UInt64],
+  angle_closers: List[Option[UInt64]],
   index: UInt64,
   nesting_depth: UInt64,
   spans: List[source::Span],
@@ -55,14 +56,79 @@ fn compute_group_ends(tables: token::Tables, first: UInt64, stop: UInt64) -> Lis
   ends
 }
 
+fn continues_type_arguments(kind: token::Kind) -> Bool {
+  match kind {
+    Upper(_) | Lower(_) | Integer(_) => true
+    Punctuation(punctuation) => match punctuation {
+      Comma | Colon | ColonColon | Dot | Equal | Plus | Arrow => true
+      _ => false
+    }
+    Keyword(keyword) => match keyword {
+      SelfType | Any | Fn | Mut | Own | Capability => true
+      _ => false
+    }
+    _ => false
+  }
+}
+
+fn list_angle_closers(tables: token::Tables, first: UInt64, stop: UInt64) -> List[Option[UInt64]]
+  uses Panic
+{
+  var closers: List[Option[UInt64]] = List.with_capacity(stop - first)
+  for _ in first..stop {
+    mut closers.push(None)
+  }
+  var openers: List[UInt64] = []
+  var enclosing: List[List[UInt64]] = []
+  for index in first..stop {
+    let kind = tables.token(index).kind
+    match kind {
+      Punctuation(punctuation) => match punctuation {
+        Less => mut openers.push(index)
+        Greater => if mut openers.pop() is Some(innermost) {
+          let slot = innermost - first
+          if slot < closers.length() {
+            closers[slot] = Some(index)
+          }
+        }
+        ShiftRight => {
+          let _ = mut openers.pop()
+          if mut openers.pop() is Some(second) {
+            let slot = second - first
+            if slot < closers.length() {
+              closers[slot] = Some(index)
+            }
+          }
+        }
+        Open(_) => {
+          mut enclosing.push(own openers)
+          openers = []
+        }
+        Close(_) => openers = match mut enclosing.pop() {
+          Some(outer) => own outer
+          None => []
+        }
+        _ => if !continues_type_arguments(kind) {
+          openers = []
+        }
+      }
+      _ => if !continues_type_arguments(kind) {
+        openers = []
+      }
+    }
+  }
+  closers
+}
+
 fn TokenCursor.create(tables: own token::Tables, file_stop: UInt64) -> TokenCursor {
   TokenCursor(
-    tables: own tables,
+    own tables,
     file_stop,
     first: 0,
     stop: 0,
     base: 0,
     group_ends: [],
+    angle_closers: [],
     index: 0,
     nesting_depth: 0,
     spans: [],
@@ -78,6 +144,7 @@ fn start_piece(cursor: mut TokenCursor, base: UInt64, first: UInt64, stop: UInt6
   uses Panic
 {
   cursor.group_ends = compute_group_ends(cursor.tables, first, stop)
+  cursor.angle_closers = list_angle_closers(cursor.tables, first, stop)
   cursor.base = base
   cursor.first = first
   cursor.stop = stop
@@ -95,6 +162,7 @@ type Saved(
   first: UInt64,
   stop: UInt64,
   group_ends: List[UInt64],
+  angle_closers: List[Option[UInt64]],
   index: UInt64,
   nesting_depth: UInt64,
   after_inserted_closer: Bool,
@@ -107,10 +175,12 @@ fn enter_interpolation(cursor: mut TokenCursor, inner: token::Interpolation) -> 
 {
   let inner_stop = inner.stop - 1
   let group_ends = compute_group_ends(cursor.tables, first: inner.first, stop: inner_stop)
+  let angle_closers = list_angle_closers(cursor.tables, first: inner.first, stop: inner_stop)
   let saved = Saved(
     first: cursor.first,
     stop: cursor.stop,
     group_ends: own cursor.group_ends,
+    angle_closers: own cursor.angle_closers,
     index: cursor.index,
     nesting_depth: cursor.nesting_depth,
     after_inserted_closer: cursor.after_inserted_closer,
@@ -118,6 +188,7 @@ fn enter_interpolation(cursor: mut TokenCursor, inner: token::Interpolation) -> 
     previous_if: cursor.previous_if,
   )
   cursor.group_ends = own group_ends
+  cursor.angle_closers = own angle_closers
   cursor.first = inner.first
   cursor.stop = inner_stop
   cursor.index = inner.first
@@ -131,6 +202,7 @@ fn leave_interpolation(cursor: mut TokenCursor, saved: own Saved) {
   cursor.first = saved.first
   cursor.stop = saved.stop
   cursor.group_ends = own saved.group_ends
+  cursor.angle_closers = own saved.angle_closers
   cursor.index = saved.index
   cursor.nesting_depth = saved.nesting_depth
   cursor.after_inserted_closer = saved.after_inserted_closer
@@ -277,13 +349,13 @@ fn accept_keyword(cursor: mut TokenCursor, keyword: token::Keyword) -> Bool
 fn TokenCursor.make_definition_span(self, span: source::Span) -> source::Span
   uses Panic
 {
-  source::of_file(base: self.base, span)
+  source::of_file(base: self.base, span: span)
 }
 
 fn TokenCursor.make_file_span(self, span: source::Span) -> source::Span
   uses Panic
 {
-  source::to_file(base: self.base, span)
+  source::to_file(base: self.base, span: span)
 }
 
 fn TokenCursor.find_previous_token(self) -> Option[token::Token]
@@ -437,7 +509,7 @@ fn enter_nested(cursor: mut TokenCursor) -> Result[Unit, Failure]
 {
   if cursor.nesting_depth >= nesting_limit {
     let span = cursor.peek().span
-    report(mut cursor, code: "parser.nesting_too_deep", span, message: "This is nested more than ${nesting_limit} levels deep.")
+    report(mut cursor, code: "parser.nesting_too_deep", span: span, message: "This is nested more than ${nesting_limit} levels deep.")
     return Err(Failure.Failed)
   }
   cursor.nesting_depth += 1
@@ -458,7 +530,7 @@ fn check_chain_length(cursor: mut TokenCursor, chain_length: UInt64) -> Result[U
     report(
       mut cursor,
       code: "parser.nesting_too_deep",
-      span,
+      span: span,
       message: "This chains more than ${chain_limit} operations, each of which nests one level deeper. Give parts of it names with `let`.",
     )
     return Err(Failure.Failed)
@@ -470,6 +542,12 @@ fn TokenCursor.lookup_closer(self, index: UInt64) -> UInt64
   uses Panic
 {
   self.group_ends.get(index - self.first).expect("a group end")
+}
+
+fn TokenCursor.find_angle_closer(self) -> Option[UInt64]
+  uses Panic
+{
+  self.angle_closers.get(self.index - self.first).expect("an angle closer slot")
 }
 
 fn skip_to(cursor: mut TokenCursor, limit: UInt64)
@@ -711,68 +789,104 @@ fn collect_positions(cursor: mut TokenCursor) -> syntax::Positions
   for span in cursor.syntax_errors {
     mut errors.push(cursor.make_definition_span(span))
   }
-  syntax::Positions(spans: own spans, syntax_errors: sort_unique(own errors))
+  syntax::Positions(own spans, syntax_errors: sort_unique(own errors))
+}
+
+type SpanEdge = Start | Stop
+
+fn read_edge(span: source::Span, edge: SpanEdge) -> UInt64 {
+  match edge {
+    Start => span.start
+    Stop => span.stop
+  }
+}
+
+fn locate_first(tables: token::Tables, first: UInt64, stop: UInt64, edge: SpanEdge, offset: UInt64) -> UInt64
+  uses Panic, RunForever
+{
+  var low = first
+  var high = stop
+  while low < high {
+    let middle = low + (high - low) / 2
+    if read_edge(tables.token(middle).span, edge) >= offset {
+      high = middle
+    } else {
+      low = middle + 1
+    }
+  }
+  low
 }
 
 fn TokenCursor.list_group_tokens(self, start: UInt64, stop: UInt64, span: source::Span) -> List[token::Token]
   uses Panic, RunForever
 {
+  let inside_first = locate_first(self.tables, first: start, stop: stop, edge: SpanEdge.Start, offset: span.start)
+  let inside_stop = locate_first(self.tables, first: inside_first, stop: stop, edge: SpanEdge.Stop, offset: span.stop + 1)
   var inside: List[token::Token] = []
-  var enclosing: Option[token::Token] = None
-  for index in start..stop {
-    let current = self.tables.token(index)
-    if span.start <= current.span.start && current.span.stop <= span.stop {
-      mut inside.push(current)
-    } else if current.span.start <= span.start && span.stop <= current.span.stop {
-      enclosing = Some(current)
-    }
+  for index in inside_first..inside_stop {
+    mut inside.push(self.tables.token(index))
   }
-  if inside.is_empty() && enclosing is Some(outer) && outer.kind is String(literal_index) {
-    let literal = self.tables.literal(literal_index)
-    for segment in literal.rest {
-      let interpolation = segment.interpolation
-      if interpolation.span.start <= span.start && span.stop <= interpolation.span.stop {
-        return self.list_group_tokens(start: interpolation.first, stop: interpolation.stop, span)
+  if !inside.is_empty() {
+    return inside
+  }
+  var candidates: List[UInt64] = [inside_stop]
+  if inside_first > start {
+    mut candidates.push(inside_first - 1)
+  }
+  for index in candidates {
+    if index < stop {
+      let outer = self.tables.token(index)
+      if outer.span.start <= span.start && span.stop <= outer.span.stop {
+        if outer.kind is String(literal_index) {
+          let literal = self.tables.literal(literal_index)
+          for segment in literal.rest {
+            let interpolation = segment.interpolation
+            if interpolation.span.start <= span.start && span.stop <= interpolation.span.stop {
+              return self.list_group_tokens(start: interpolation.first, stop: interpolation.stop, span: span)
+            }
+          }
+        }
+        return []
       }
     }
-    return []
   }
-  inside
+  []
 }
 
 fn TokenCursor.spell(self, span: source::Span, insertions: Slice[token::Insertion] = []) -> Option[String]
   uses Panic, RunForever
 {
-  let tokens = self.list_group_tokens(start: self.first, stop: self.stop, span)
+  let tokens = self.list_group_tokens(start: self.first, stop: self.stop, span: span)
   if tokens.is_empty() {
     return None
   }
   token::spell_tokens(self.tables, tokens, insertions)
 }
 
+fn TokenCursor.find_spelling_at(self, edge: SpanEdge, offset: UInt64) -> Option[String]
+  uses Panic, RunForever
+{
+  var index = locate_first(self.tables, first: self.first, stop: self.stop, edge: edge, offset: offset)
+  while index < self.stop && read_edge(self.tables.token(index).span, edge) == offset {
+    let current = self.tables.token(index)
+    if current.span.start < current.span.stop {
+      return token::spell_tokens(self.tables, tokens: [current], insertions: [])
+    }
+    index += 1
+  }
+  None
+}
+
 fn TokenCursor.joins_neighbors(self, span: source::Span, code: StringSlice) -> Bool
   uses Panic, RunForever
 {
   var before: Option[UInt8] = None
+  if self.find_spelling_at(edge: SpanEdge.Stop, offset: span.start) is Some(spelling) && !spelling.is_empty() {
+    before = Some(spelling.byte(spelling.length() - 1))
+  }
   var after: Option[UInt8] = None
-  var has_token_before = false
-  var has_token_after = false
-  for index in self.first..self.stop {
-    let current = self.tables.token(index)
-    if current.span.start < current.span.stop {
-      if !has_token_before && current.span.stop == span.start {
-        has_token_before = true
-        if token::spell_tokens(self.tables, tokens: [current], insertions: []) is Some(spelling) && !spelling.is_empty() {
-          before = Some(spelling.byte(spelling.length() - 1))
-        }
-      }
-      if !has_token_after && current.span.start == span.stop {
-        has_token_after = true
-        if token::spell_tokens(self.tables, tokens: [current], insertions: []) is Some(spelling) && !spelling.is_empty() {
-          after = Some(spelling.byte(0))
-        }
-      }
-    }
+  if self.find_spelling_at(edge: SpanEdge.Start, offset: span.stop) is Some(spelling) && !spelling.is_empty() {
+    after = Some(spelling.byte(0))
   }
   token::joins_neighbor(before, after, code)
 }

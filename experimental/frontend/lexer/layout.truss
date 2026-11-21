@@ -45,6 +45,31 @@ fn is_layout_name_byte(byte: UInt8) -> Bool {
   is_ascii_name_byte(byte)
 }
 
+fn find_word_end(text: StringSlice, offset: UInt64) -> UInt64
+  uses Panic
+{
+  var stop = offset
+  while stop < text.length() && is_layout_name_byte(text.byte(stop)) {
+    stop += 1
+  }
+  stop
+}
+
+fn is_tuple_type_at(source: source::Source, offset: UInt64) -> Bool
+  uses Panic
+{
+  let text = source.text.slice()
+  let stop = find_word_end(text, offset)
+  if text.substring(offset, to: stop) != "tuple" {
+    return false
+  }
+  var next = stop
+  while next < text.length() && is_space(text.byte(next)) {
+    next += 1
+  }
+  next > stop && text.substring(next, to: find_word_end(text, offset: next)) == "type"
+}
+
 fn starts_definition(source: source::Source, offset: UInt64) -> Bool
   uses Panic
 {
@@ -52,19 +77,13 @@ fn starts_definition(source: source::Source, offset: UInt64) -> Bool
     return false
   }
   let text = source.text.slice()
-  var stop = offset
-  while stop < text.length() && is_layout_name_byte(text.byte(stop)) {
-    stop += 1
-  }
-  if stop <= offset {
-    return false
-  }
+  let stop = find_word_end(text, offset)
   match token::find_word(text.substring(offset, to: stop)) {
     Some(kind) => match kind {
       Keyword(keyword) => token::is_definition_keyword(keyword)
-      _ => false
+      _ => is_tuple_type_at(source, offset)
     }
-    None => false
+    None => is_tuple_type_at(source, offset)
   }
 }
 
@@ -85,6 +104,7 @@ fn token_starts_definition(source: source::Source, first_line_break: Option[sour
 {
   first_line_break.is_some() && layout_indentation(source, offset).is_empty() && match kind {
     Keyword(keyword) => token::is_definition_keyword(keyword)
+    Lower(_) => is_tuple_type_at(source, offset)
     _ => false
   }
 }
@@ -316,7 +336,7 @@ fn close_bracket(scanner: mut Scanner, run: mut Run, current: token::Token, brac
     report(
       mut scanner,
       code: "lexer.unmatched_closing_bracket",
-      span,
+      span: span,
       message: "This `${spell_closer(bracket)}` has no `${spell_opener(bracket)}` to close.",
     )
     return
@@ -357,12 +377,12 @@ fn finish_run(
     FileMode(_) => if ends_unterminated {
       close_silently(mut run, position: compute_closer_position(first_line_break, position))
     } else {
-      close_all(mut scanner, run: mut run, position: compute_closer_position(first_line_break, position), reason: " before the end of the file")
+      close_all(mut scanner, mut run, position: compute_closer_position(first_line_break, position), reason: " before the end of the file")
     }
     InterpolationMode => if ends_unterminated {
       close_silently(mut run, position)
     } else {
-      close_all(mut scanner, run: mut run, position, reason: " before the end of the interpolation")
+      close_all(mut scanner, mut run, position, reason: " before the end of the interpolation")
     }
   }
   if mode != LayoutMode.InterpolationMode && run.previous is Some(previous_kind) && token::can_end(previous_kind) {
@@ -394,7 +414,7 @@ fn read_next_input(scanner: mut Scanner, mode: LayoutMode, state: mut Interpolat
 {
   match mode {
     FileMode(_) => lex_next(mut scanner)
-    InterpolationMode => read_interpolation_input(mut scanner, state: mut state)
+    InterpolationMode => read_interpolation_input(mut scanner, mut state)
   }
 }
 
@@ -413,9 +433,9 @@ fn run_layout(scanner: mut Scanner, mode: LayoutMode, state: mut InterpolationSt
     unterminated_strings: [],
   )
   while true {
-    match read_next_input(mut scanner, mode, state: mut state) {
+    match read_next_input(mut scanner, mode, mut state) {
       Finish(position, first_line_break, blank_line, ends_unterminated) => {
-        return finish_run(mut scanner, run: mut run, mode, position, first_line_break, blank_line, ends_unterminated)
+        return finish_run(mut scanner, mut run, mode, position, first_line_break, blank_line, ends_unterminated)
       }
       Next(kind, span, first_line_break, blank_line, unterminated_string) => {
         if mode == LayoutMode.FileMode(recovery: true) && !run.stack.is_empty()
@@ -423,7 +443,7 @@ fn run_layout(scanner: mut Scanner, mode: LayoutMode, state: mut InterpolationSt
         {
           close_all(
             mut scanner,
-            run: mut run,
+            mut run,
             position: compute_closer_position(first_line_break, position: span.start),
             reason: " before the next definition",
           )
@@ -453,7 +473,7 @@ fn run_layout(scanner: mut Scanner, mode: LayoutMode, state: mut InterpolationSt
               push_opener(mut run, bracket, span)
               emit(mut run, current)
             }
-            Close(bracket) => close_bracket(mut scanner, run: mut run, current, bracket)
+            Close(bracket) => close_bracket(mut scanner, mut run, current, bracket)
             _ => emit(mut run, current)
           }
           _ => emit(mut run, current)

@@ -669,12 +669,9 @@ let refresh_place context frame ty (place : State.passed_place) =
   Validity.assume_valid context frame ty fresh_value;
   frame
 
-let record_todo (context : State.context) (frame : State.frame) location =
-  if frame.is_ghost then begin
-    if not (List.mem (context.home, location) context.holes) then
-      context.holes <- (context.home, location) :: context.holes;
-    context.unfinished <- frame.condition :: context.unfinished
-  end
+let record_todo (context : State.context) (frame : State.frame) origin =
+  Facts.add_hole context (frame.source.key, Obligation.Node origin);
+  if frame.is_ghost then context.unfinished <- frame.condition :: context.unfinished
 
 let oblige_unreachable context frame location =
   Facts.oblige context frame Unreachable location
@@ -1089,7 +1086,7 @@ and read_statement context frame run (statement : Mir.statement) =
               | None -> Facts.raise_bug "an early exit of an iteration that is not around it"))
       | Unreachable -> ()
       | Written_unreachable -> oblige_unreachable context frame location
-      | Todo -> record_todo context frame location);
+      | Todo -> record_todo context frame statement.origin);
       None
   | Fork { fork; concurrent; branches } ->
       let ended, exits =

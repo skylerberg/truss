@@ -17,8 +17,8 @@ fn report_habit(cursor: mut TokenCursor, code: StringSlice, span: source::Span, 
       joins = true
     }
   }
-  let fixes = if joins { [] } else { [source::make_fix(fix_title, edits: own edits)] }
-  report(mut cursor, code, span, message, fixes: own fixes)
+  let fixes = if joins { [] } else { [source::make_fix(fix_title, own edits)] }
+  report(mut cursor, code, span, message, own fixes)
 }
 
 fn extend_with_trailing_space(written: token::Token, next: token::Token) -> source::Span
@@ -142,7 +142,7 @@ fn report_address_of(cursor: mut TokenCursor, before: Option[token::Token], ampe
     span: ampersand.span,
     message: "Truss has no `&`; write ${written}, with `mut` or `own` before a place only when it is mutated or moved.",
     fix_title: "Remove the `&`",
-    edits: [source::replace(extend_with_trailing_space(written: ampersand, next), replacement: separator)],
+    edits: [source::replace(extend_with_trailing_space(written: ampersand, next: next), replacement: separator)],
   )
 }
 
@@ -251,7 +251,7 @@ fn report_qualified_variant(cursor: mut TokenCursor, qualifier_start: UInt64, va
   report_habit(
     mut cursor,
     code: "parser.qualified_variant",
-    span,
+    span: span,
     message: "A pattern names a variant alone: `${variant.text}`. The type of the scrutinee says which type's variant it is.",
     fix_title: "Remove the qualifier",
     edits: [source::delete(span)],
@@ -280,13 +280,13 @@ fn report_macro_call(cursor: mut TokenCursor, name: syntax::Name, bang: token::T
       mut cursor,
       code: "parser.macro_call",
       span: bang.span,
-      message,
+      message: message,
       fix_title: "Write a list",
       edits: [source::delete(source::make_span(name_start, stop: bang.span.stop))],
     )
     return
   }
-  report(mut cursor, code: "parser.macro_call", span: bang.span, message)
+  report(mut cursor, code: "parser.macro_call", span: bang.span, message: message)
 }
 
 fn report_keyword_macro(cursor: mut TokenCursor, bang: token::Token, closing: token::Token, has_arguments: Bool)
@@ -294,14 +294,14 @@ fn report_keyword_macro(cursor: mut TokenCursor, bang: token::Token, closing: to
 {
   let message = "Truss has no macros. `todo` and `unreachable` are written without `!()`."
   if has_arguments {
-    report(mut cursor, code: "parser.macro_call", span: bang.span, message)
+    report(mut cursor, code: "parser.macro_call", span: bang.span, message: message)
     return
   }
   report_habit(
     mut cursor,
     code: "parser.macro_call",
     span: bang.span,
-    message,
+    message: message,
     fix_title: "Remove `!()`",
     edits: [source::delete(source::make_span(bang.span.start, stop: closing.span.stop))],
   )
@@ -314,7 +314,7 @@ fn report_tuple(cursor: mut TokenCursor, opening: token::Token) -> Failure
     mut cursor,
     code: "parser.tuple",
     span: opening.span,
-    message: "Truss has no tuples. Values that belong together go in a record, whose fields have names, such as `Pair(first: a, second: b)`.",
+    message: "Parentheses do not make a tuple: every tuple type has a name and named fields. Values that belong together go in a record or a tuple type, such as `core::Pair`, built as `core::Pair(first: a, second: b)`.",
   )
   Failure.Failed
 }
@@ -326,7 +326,7 @@ fn report_tuple_field(cursor: mut TokenCursor, field: token::Token) -> Failure
     mut cursor,
     code: "parser.tuple",
     span: field.span,
-    message: "Truss has no tuples, so a value has no numbered fields. A record's fields have names, as in `pair.first`.",
+    message: "A value has no numbered fields. Every field has a name, in a tuple type too, as in `pair.first`.",
   )
   Failure.Failed
 }
@@ -356,13 +356,13 @@ fn report_short_declaration(cursor: mut TokenCursor, target: syntax::Expression,
       mut cursor,
       code: "parser.short_declaration",
       span: operator.span,
-      message,
+      message: message,
       fix_title: "Declare the name with `let`",
       edits: [source::insert(source::make_zero_width(target_start), replacement: "let "), source::replace(operator.span, replacement: "=")],
     )
     return
   }
-  report(mut cursor, code: "parser.short_declaration", span: operator.span, message)
+  report(mut cursor, code: "parser.short_declaration", span: operator.span, message: message)
 }
 
 fn is_path_expression(candidate: syntax::Expression) -> Bool
@@ -387,7 +387,7 @@ fn pipe_operator(cursor: mut TokenCursor, value: syntax::Expression, operator: t
       mut cursor,
       code: "parser.pipe_operator",
       span: operator.span,
-      message,
+      message: message,
       fix_title: "Write the call",
       edits: [
         source::insert(source::make_zero_width(value_span.start), replacement: "${callee_spelling}("),
@@ -396,7 +396,7 @@ fn pipe_operator(cursor: mut TokenCursor, value: syntax::Expression, operator: t
     )
     return
   }
-  report(mut cursor, code: "parser.pipe_operator", span: operator.span, message)
+  report(mut cursor, code: "parser.pipe_operator", span: operator.span, message: message)
 }
 
 fn report_lambda_annotation(cursor: mut TokenCursor, from: UInt64, stop: UInt64)
@@ -406,7 +406,7 @@ fn report_lambda_annotation(cursor: mut TokenCursor, from: UInt64, stop: UInt64)
   report_habit(
     mut cursor,
     code: "parser.lambda_annotation",
-    span,
+    span: span,
     message: "A lambda's parameters and result have no annotations. Their types are inferred from where the lambda is passed.",
     fix_title: "Remove the annotation",
     edits: [source::delete(span)],
@@ -418,14 +418,14 @@ fn report_impl_parameters(cursor: mut TokenCursor, opening: token::Token, closin
 {
   let message = "An `impl` has no parameters of its own. The type after `for` declares them, with their bounds: `impl Trait for Box[Item: Ordered]`."
   if has_bounds {
-    report(mut cursor, code: "parser.impl_parameters", span: opening.span, message)
+    report(mut cursor, code: "parser.impl_parameters", span: opening.span, message: message)
     return
   }
   report_habit(
     mut cursor,
     code: "parser.impl_parameters",
     span: opening.span,
-    message,
+    message: message,
     fix_title: "Remove the parameters",
     edits: [source::delete(source::make_span(opening.span.start, stop: closing.span.stop))],
   )
@@ -495,10 +495,16 @@ fn report_trailing_lambda(
   parameter: StringSlice,
   opening: token::Token,
   closing: token::Token,
+  next: token::Token,
   uses_of_it: Slice[token::Token],
 )
   uses Panic, RunForever
 {
+  let message = "A lambda is passed inside the parentheses, with a named parameter: `fn(${parameter}) { ... }`."
+  if !ends_statement(next.kind) {
+    report(mut cursor, code: "parser.trailing_lambda", span: opening.span, message: message)
+    return
+  }
   let callee_stop = cursor.read_file_span(callee.id).stop
   var edits: List[source::Edit] = [
     source::replace(source::make_span(callee_stop, stop: opening.span.start), replacement: "(fn(${parameter}) "),
@@ -511,7 +517,7 @@ fn report_trailing_lambda(
     mut cursor,
     code: "parser.trailing_lambda",
     span: opening.span,
-    message: "A lambda is passed inside the parentheses, with a named parameter: `fn(${parameter}) { ... }`.",
+    message: message,
     fix_title: "Pass a lambda",
     edits: own edits,
   )
@@ -577,7 +583,7 @@ fn report_as_conversion(cursor: mut TokenCursor, value: syntax::Expression, as_t
       code: "parser.as_conversion",
       span: as_token.span,
       message: "Truss has no `as`; write `x.${method}()`.",
-      fixes: [source::make_fix("Write `.${method}()`", edits: own edits)],
+      fixes: [source::make_fix("Write `.${method}()`", own edits)],
     )
     return
   }

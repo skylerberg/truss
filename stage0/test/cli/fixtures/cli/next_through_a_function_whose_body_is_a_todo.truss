@@ -1,0 +1,16 @@
+fn bound(n: UInt64) -> UInt64
+  ensures result == 10 && n < result
+{
+  todo
+}
+
+fn next(n: UInt64) -> UInt64 {
+  proof {
+    assert n < bound(n)
+  }
+  n + 1
+}
+
+fn main(arguments: List[String]) -> ExitCode {
+  if next(arguments.length()) > 5 { ExitCode.failure } else { ExitCode.success }
+}

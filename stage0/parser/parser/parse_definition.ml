@@ -385,9 +385,7 @@ let parse_trait cursor ~name =
 
 let parse_impl cursor =
   Cursor.advance cursor;
-  (match
-     if Cursor.is_punctuation cursor Less then Parse_expression.find_angle_closer cursor else None
-   with
+  (match if Cursor.is_punctuation cursor Less then Cursor.find_angle_closer cursor else None with
   | Some closer ->
       let opening = Cursor.peek cursor in
       let has_bounds =

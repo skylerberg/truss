@@ -205,6 +205,15 @@ let lex_prefixed_string (cursor : Cursor.t) ~scan ~prefix ~start ~nesting =
     message;
   (kind, ending)
 
+let read_hash_raw_text (cursor : Cursor.t) ~text_start ~text_stop =
+  let buffer = Buffer.create (text_stop - text_start) in
+  cursor.position <- text_start;
+  while cursor.position < text_stop do
+    Source_text.copy_plain cursor buffer ~is_special:(fun character -> character = '"');
+    if cursor.position < text_stop then Source_text.read_character cursor buffer ~context:Raw_string
+  done;
+  Buffer.contents buffer
+
 let hash_raw_string cursor ~start =
   let hashes = Cursor.run_length cursor cursor.position '#' in
   let text_start = cursor.position + hashes + 1 in
@@ -221,7 +230,7 @@ let hash_raw_string cursor ~start =
     match close text_start with
     | None -> None
     | Some text_stop ->
-        let value = String.sub cursor.text text_start (text_stop - text_start) in
+        let written = String.sub cursor.text text_start (text_stop - text_start) in
         let rec measure_longest_run position longest =
           if position >= text_stop then longest
           else
@@ -230,14 +239,14 @@ let hash_raw_string cursor ~start =
         in
         let quotes = max 3 (measure_longest_run text_start 0 + 1) in
         let delimiter = String.make quotes '"' in
-        let interpolates = String.includes ~affix:"${" value in
+        let interpolates = String.includes ~affix:"${" written in
         let stop = text_stop + 1 + hashes in
         Cursor.report cursor ~code:String_prefix
           ~fixes:
             (if
                interpolates || quote_joins_before cursor start
-               || String.starts_with ~prefix:"\"" value
-               || String.ends_with ~suffix:"\"" value
+               || String.starts_with ~prefix:"\"" written
+               || String.ends_with ~suffix:"\"" written
              then []
              else
                [
@@ -250,6 +259,7 @@ let hash_raw_string cursor ~start =
           (Source.make_span start text_start)
           "Truss has no `r#` strings. A raw string is written between `\"\"\"`s, or between more \
            quotes when its text has `\"\"\"` in it.";
+        let value = read_hash_raw_text cursor ~text_start ~text_stop in
         cursor.position <- stop;
         Some
           (Token.String
