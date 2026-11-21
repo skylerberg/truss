@@ -208,27 +208,29 @@ module Scope = struct
       (Path.show_module module_)
 
   type module_lookup =
-    | Found_module of Path.module_
+    | Found_module of { module_ : Path.module_; imported : Path.module_ option }
     | Restricted_module
     | Ambiguous_module of Path.module_ * Path.module_
     | No_module of string
     | No_package of string
 
   let lookup_module lookups ~(from : Path.module_) ~imports first rest =
-    let imported =
+    let imported = List.assoc_opt first imports in
+    let through_import =
       Option.map
         (fun (module_ : Path.module_) : Path.module_ ->
           { module_ with modules = module_.modules @ rest })
-        (List.assoc_opt first imports)
+        imported
     in
     let package = resolve_full_module lookups ~from first rest in
     let exists module_ = is_visible_module lookups ~from module_ in
-    match imported with
-    | Some imported when exists imported && exists package && imported <> package ->
-        Ambiguous_module (imported, package)
-    | Some imported when exists imported -> Found_module imported
+    match through_import with
+    | Some module_ when exists module_ && exists package && module_ <> package ->
+        Ambiguous_module (module_, package)
+    | Some module_ when exists module_ -> Found_module { module_; imported }
     | _ when exists package ->
-        if is_restricted_module ~from package then Restricted_module else Found_module package
+        if is_restricted_module ~from package then Restricted_module
+        else Found_module { module_ = package; imported = None }
     | None when not (is_visible_package lookups ~from package.package) ->
         No_package (String.concat "." (first :: rest))
     | _ -> No_module (String.concat "." (first :: rest))

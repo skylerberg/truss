@@ -1,5 +1,11 @@
 type specification_function = Log | Power | Call_cost of Language.Metric.t | Calls
 
+type module_path = {
+  module_ : Path.module_;
+  imported : Path.module_ option;
+  last_name : Syntax.name;
+}
+
 type target =
   | Binding
   | Local of Syntax.id
@@ -9,7 +15,7 @@ type target =
   | Value_parameter of Types.parameter
   | Definition of Names.named * Path.t
   | Variant of Path.t * string
-  | Module of Path.module_
+  | Module of module_path
   | Field of string
   | Result_value
   | Old

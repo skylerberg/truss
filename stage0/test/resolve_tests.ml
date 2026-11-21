@@ -66,7 +66,7 @@ let describe (spans : Source.Definition_span.t array) base (target : Resolve.tar
       Printf.sprintf "generic %s of %s" parameter.name (Path.show parameter.owner)
   | Some (Definition (_, path)) -> Path.show path
   | Some (Variant (type_, name)) -> Printf.sprintf "variant %s of %s" name (Path.show type_)
-  | Some (Module module_) -> "module " ^ Path.show_module module_
+  | Some (Module { module_; _ }) -> "module " ^ Path.show_module module_
   | Some (Field name) -> "field " ^ name
   | Some Result_value -> "result"
   | Some Old -> "old"

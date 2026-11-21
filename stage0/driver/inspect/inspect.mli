@@ -1,5 +1,8 @@
 module References : sig
-  type target = References.target = Definition of Path.t | Module of Path.module_
+  type target = References.target =
+    | Definition of Path.t
+    | Module of { module_ : Path.module_; imported : Path.module_ option }
+
   type occurrence = References.occurrence = { span : Source.Definition_span.t; target : target }
 
   val list_occurrences :

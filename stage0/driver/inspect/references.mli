@@ -1,4 +1,7 @@
-type target = Definition of Path.t | Module of Path.module_
+type target =
+  | Definition of Path.t
+  | Module of { module_ : Path.module_; imported : Path.module_ option }
+
 type occurrence = { span : Source.Definition_span.t; target : target }
 
 val find_declared_name : Syntax.definition -> Syntax.name option
