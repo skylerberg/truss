@@ -70,8 +70,8 @@ and show_argument (passed : Core.argument) =
   | Default -> "default"
 
 let make_definition_form text (path : Path.t) =
-  let packages = Support.setup [ ("app::main", text) ] in
-  let file = Support.parse_file "app::main" in
+  let packages = Support.setup [ ("app.main", text) ] in
+  let file = Support.parse_file "app.main" in
   (match
      Database.For_testing.list_diagnostics
        [ Parse; Resolve; Interface; Infer ]
@@ -102,7 +102,7 @@ let expect_observed expected observed =
     Harness.fail "expected [%s], found [%s]" (String.concat "; " expected)
       (String.concat "; " observed)
 
-let expect ?(definition = Support.make_top_path "app::main" "g") test_name text observe expected =
+let expect ?(definition = Support.make_top_path "app.main" "g") test_name text observe expected =
   Harness.test test_name (fun () ->
       expect_observed expected (observe (make_definition_form text definition)))
 
@@ -148,7 +148,7 @@ let () =
     (fun form ->
       List.filter_map
         (fun (call : Core.call) ->
-          if Core_lint.show_target call.callee.target = "app::main::clear" then
+          if Core_lint.show_target call.callee.target = "app.main.clear" then
             Some (String.concat ", " (List.map show_argument call.arguments))
           else None)
         (list_calls form))
@@ -163,7 +163,7 @@ let () =
               Database.For_testing.list_diagnostics [ Resolve; Interface; Infer ]
                 (Support.make_database packages) module_)
             [
-              ( "app::main",
+              ( "app.main",
                 "type Config(port: Int64)\n\n\
                  fn take(count: Int64) -> Int64 {\n\
                 \  count\n\
@@ -209,7 +209,7 @@ let () =
       (fun (call : Core.call) ->
         match call.callee.target with
         | Function { path; instantiation }
-          when Path.equal path (Support.make_top_path "app::main" "apply") ->
+          when Path.equal path (Support.make_top_path "app.main" "apply") ->
             List.concat_map
               (fun (_, argument) -> list_capabilities argument)
               instantiation.capability_arguments
@@ -219,11 +219,11 @@ let () =
   expect "a capability parameter is inferred as the set of capabilities that a lambda uses"
     (apply ^ Fixtures.Core.lambda_using_console_passed_to_apply)
     list_granted
-    [ "standard::capabilities::Console" ];
+    [ "standard.capabilities.Console" ];
   expect "a capability parameter is inferred as the set of capabilities that a named function uses"
     (apply ^ Fixtures.Core.named_function_passed_for_a_capability_generic)
     list_granted
-    [ "standard::capabilities::Console" ];
+    [ "standard.capabilities.Console" ];
   expect "a call's `uses` and a lambda's type contain the inferred set, not the callee's parameter"
     (apply ^ Fixtures.Core.lambda_using_console_passed_to_apply)
     (fun form ->
@@ -232,7 +232,7 @@ let () =
            (fun (node : Core.expression) ->
              match node.kind with
              | Call { callee = { target = Function { path; _ }; uses }; _ }
-               when Path.equal path (Support.make_top_path "app::main" "apply") ->
+               when Path.equal path (Support.make_top_path "app.main" "apply") ->
                  Some ("needs " ^ Types.show_capabilities uses)
              | Lambda _ -> Some (Types.show node.type_)
              | _ -> None)
@@ -284,7 +284,7 @@ let () =
         ]);
   Harness.test "a node's origin gives its source span" (fun () ->
       let text = Fixtures.Core.loop_summing_a_list in
-      let packages = Support.setup [ ("app::main", text) ] in
+      let packages = Support.setup [ ("app.main", text) ] in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
           let key = declaration.key in
@@ -311,7 +311,7 @@ let () =
               if !actual <> [ "total += item" ] then
                 Harness.fail "found [%s]" (String.concat "; " !actual)
           | _ -> Harness.fail "no core form")
-        (Support.list_declarations packages (Support.parse_module "app::main")))
+        (Support.list_declarations packages (Support.parse_module "app.main")))
 
 let () =
   let list_applied form =
@@ -353,13 +353,13 @@ let () =
            (read_contract form).costs))
     [
       "calls through visit exactly";
-      "calls of standard::capabilities::Clock.now at most";
+      "calls of standard.capabilities.Clock.now at most";
       "time of an order";
     ];
   expect "`log` and `power` are specification functions outside a cost bound too"
     Fixtures.Core.ensures_with_log_and_power list_applied [ "log"; "power" ];
   expect "a function of the file named `power` is called in a specification"
-    Fixtures.Core.function_named_power list_applied [ "call app::main::power" ];
+    Fixtures.Core.function_named_power list_applied [ "call app.main.power" ];
   let list_method_costs form =
     List.filter_map
       (fun (node : Core.expression) ->
@@ -377,27 +377,27 @@ let () =
   in
   expect "the time of a method of a type parameter's bound names the trait method"
     Fixtures.Core.cost_naming_time_of_a_bounds_method list_method_costs
-    [ "time(standard::core::Equal.equal) for Element by a bound" ];
+    [ "time(standard.core.Equal.equal) for Element by a bound" ];
   expect "the allocations of a method of a bound name the trait method and the resource"
     Fixtures.Core.cost_naming_allocations_of_a_callback_and_a_bounds_method list_method_costs
     [
-      "allocations(standard::core::Equal.equal) for Element by a bound";
-      "allocated_bytes(standard::core::Equal.equal) for Element by a bound";
+      "allocations(standard.core.Equal.equal) for Element by a bound";
+      "allocated_bytes(standard.core.Equal.equal) for Element by a bound";
     ];
   expect "the allocations of a callback are a specification function of the resource"
     Fixtures.Core.cost_naming_allocations_of_a_callback_and_a_bounds_method list_applied
-    [ "call standard::list::List.length"; "allocations"; "allocated_bytes" ];
+    [ "call standard.list.List.length"; "allocations"; "allocated_bytes" ];
   Harness.test "in a trait, `time(Self.method)` names the trait's own method" (fun () ->
       Support.expect_no_diagnostics
         ~check:(fun packages module_ ->
           Database.For_testing.list_diagnostics [ Resolve; Interface; Infer ]
             (Support.make_database packages) module_)
-        [ ("app::main", Fixtures.Core.trait_method_costing_time_of_self_size) ])
+        [ ("app.main", Fixtures.Core.trait_method_costing_time_of_self_size) ])
 
 let () =
   Harness.test "the origin of a cost is its cost clause" (fun () ->
       let text = Fixtures.Core.cost_linear_in_a_lists_length in
-      let packages = Support.setup [ ("app::main", text) ] in
+      let packages = Support.setup [ ("app.main", text) ] in
       List.iter
         (fun (declaration : Resolve.Names.declaration) ->
           let key = declaration.key in
@@ -413,7 +413,7 @@ let () =
               let quoted = String.sub written span.start (span.stop - span.start) in
               if quoted <> "cost time O(items.length())" then Harness.fail "found `%s`" quoted
           | _ -> Harness.fail "no core form with exactly one cost")
-        (Support.list_declarations packages (Support.parse_module "app::main")))
+        (Support.list_declarations packages (Support.parse_module "app.main")))
 
 let () =
   let packages = Support.setup [] in
@@ -434,13 +434,13 @@ let () =
 
 let () =
   Harness.test "a `todo` type has no derived core form" (fun () ->
-      let packages = Support.setup [ ("app::main", "type Later = todo\n  derives Equal\n") ] in
+      let packages = Support.setup [ ("app.main", "type Later = todo\n  derives Equal\n") ] in
       let path =
         Well_known.make_impl_method_path Equal_equal
           ~impl:
             (Derived
                {
-                 type_ = Top { module_ = Support.parse_module "app::main"; name = "Later" };
+                 type_ = Top { module_ = Support.parse_module "app.main"; name = "Later" };
                  trait = Well_known.make_path Equal;
                })
       in
@@ -492,16 +492,16 @@ let () =
 
 let () =
   let text = Fixtures.Core.described_both in
-  let both : Path.t = Top { module_ = Support.parse_module "app::main"; name = "Both" } in
+  let both : Path.t = Top { module_ = Support.parse_module "app.main"; name = "Both" } in
   let described : Types.trait_reference =
     {
-      trait = Top { module_ = Support.parse_module "app::main"; name = "Described" };
+      trait = Top { module_ = Support.parse_module "app.main"; name = "Described" };
       trait_arguments = [];
       associated = [];
     }
   in
   let read_method_core name =
-    let packages = Support.setup [ ("app::main", text) ] in
+    let packages = Support.setup [ ("app.main", text) ] in
     let parameter : Types.parameter = { owner = both; name = "Value" } in
     let list_bounds (actual : Types.parameter) = if actual = parameter then [ described ] else [] in
     let owner =
@@ -533,17 +533,17 @@ let () =
   in
   Harness.test "a method defined in an impl has its own core form" (fun () ->
       expect_observed
-        [ "app::main::Described.describe for Value by a bound(place self.first)" ]
+        [ "app.main.Described.describe for Value by a bound(place self.first)" ]
         (list_observed "describe"));
   Harness.test
     "a method inherited from a trait has the default method's core form and a substitution for Self"
     (fun () ->
-      let describe = "app::main::Described.describe for Self by a bound(place self)" in
+      let describe = "app.main.Described.describe for Self by a bound(place self)" in
       expect_observed
         [ Printf.sprintf "add(%s, %s)" describe describe; "Self = Both[Value]" ]
         (list_observed "twice"));
   Harness.test "a method of a derived impl has the generated core form" (fun () ->
-      let packages = Support.setup [ ("app::main", text) ] in
+      let packages = Support.setup [ ("app.main", text) ] in
       let owner : Path.t = Derived { type_ = both; trait = Well_known.make_path Equal } in
       match
         ( Database.For_testing.read_core (Support.make_database packages)
@@ -564,15 +564,15 @@ let () =
     ~definition:
       (Law_proof
          {
-           module_ = Support.parse_module "app::main";
+           module_ = Support.parse_module "app.main";
            trait =
              {
-               path = Support.make_top_path "standard::core" "Ordered";
+               path = Support.make_top_path "standard.core" "Ordered";
                arguments = [];
                associated = [];
              };
            law = "agrees_with_equal";
-           for_type = Support.make_top_path "app::main" "Pair";
+           for_type = Support.make_top_path "app.main" "Pair";
          })
     "a law's proof has the law's parameters, with the proof's type for Self"
     (Fixtures.Core.pair_ordering
@@ -593,7 +593,7 @@ let () =
     [
       "first: Pair, trait parameter 0";
       "second: Pair, trait parameter 1";
-      "app::main::only_equal(place first, place second)";
+      "app.main.only_equal(place first, place second)";
     ]
 
 let () =
@@ -628,8 +628,8 @@ let () =
         form.definition;
       List.rev !held)
     [
-      "a loop holds standard::core::Cursor.next uses [app::main::Meter]";
-      "a pattern holds standard::core::Equal.equal uses []";
+      "a loop holds standard.core.Cursor.next uses [app.main.Meter]";
+      "a pattern holds standard.core.Equal.equal uses []";
     ];
   expect "the walker hands every callee that a body invokes to its callee hook" text
     (fun form ->
@@ -642,13 +642,13 @@ let () =
         form.definition;
       List.rev !invoked)
     [
-      "standard::core::Cursor.next uses [app::main::Meter]";
-      "standard::core::Equal.equal uses []";
-      "standard::list::Slice.length uses []";
+      "standard.core.Cursor.next uses [app.main.Meter]";
+      "standard.core.Equal.equal uses []";
+      "standard.list.Slice.length uses []";
     ];
   Harness.test "the callee of an intrinsic holds the capabilities that the intrinsic uses"
     (fun () ->
-      let probe = Support.parse_file "standard::probe" in
+      let probe = Support.parse_file "standard.probe" in
       let database =
         Support.extend_standard_library
           [
@@ -670,7 +670,7 @@ let () =
       | Some { form; _ } ->
           Core_lint.check (Database.make_interface_lookups database) key form;
           expect_observed
-            [ "intrinsic::shared_update uses [standard::capabilities::Tasks]" ]
+            [ "intrinsic.shared_update uses [standard.capabilities.Tasks]" ]
             (List.filter_map
                (fun (call : Core.call) ->
                  match call.callee.target with

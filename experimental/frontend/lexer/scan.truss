@@ -1,183 +1,178 @@
-use frontend::source
-use frontend::token
+use frontend.source
+use frontend.token
 
-fn store_number(scanner: mut Scanner, value: own NumberValue) -> token::Kind {
+fn store_number(scanner: mut Scanner, value: own NumberValue) -> token.Kind {
   match own value {
     IntegerValue(integer) => {
       let index = scanner.tables.integers.length()
       mut scanner.tables.integers.push(own integer)
-      token::Kind.Integer(index)
+      token.Kind.Integer(index)
     }
     FloatValue(decimal) => {
       let index = scanner.tables.decimals.length()
       mut scanner.tables.decimals.push(own decimal)
-      token::Kind.Float(index)
+      token.Kind.Float(index)
     }
   }
 }
 
-fn punctuation(kind: token::Punctuation) -> Option[token::Kind] {
-  Some(token::Kind.Punctuation(kind))
+fn punctuation(kind: token.Punctuation) -> Option[token.Kind] {
+  Some(token.Kind.Punctuation(kind))
 }
 
-fn lex_punctuation(scanner: mut Scanner, current: UInt8) -> Option[token::Kind]
+fn lex_punctuation(scanner: mut Scanner, current: UInt8) -> Option[token.Kind]
   uses Panic
 {
   let start = scanner.position
   let next = if start + 1 < scanner.length { scanner.lookup(start + 1) } else { 0 }
   let after = if start + 2 < scanner.length { scanner.lookup(start + 2) } else { 0 }
   var length: UInt64 = 1
-  let kind: token::Punctuation = if current == 40 {
-    token::Punctuation.Open(token::Bracket.Paren)
+  let kind: token.Punctuation = if current == 40 {
+    token.Punctuation.Open(token.Bracket.Paren)
   } else if current == 41 {
-    token::Punctuation.Close(token::Bracket.Paren)
+    token.Punctuation.Close(token.Bracket.Paren)
   } else if current == 91 {
-    token::Punctuation.Open(token::Bracket.Square)
+    token.Punctuation.Open(token.Bracket.Square)
   } else if current == 93 {
-    token::Punctuation.Close(token::Bracket.Square)
+    token.Punctuation.Close(token.Bracket.Square)
   } else if current == 123 {
-    token::Punctuation.Open(token::Bracket.Curly)
+    token.Punctuation.Open(token.Bracket.Curly)
   } else if current == 125 {
-    token::Punctuation.Close(token::Bracket.Curly)
+    token.Punctuation.Close(token.Bracket.Curly)
   } else if current == 44 {
-    token::Punctuation.Comma
+    token.Punctuation.Comma
   } else if current == 63 {
-    token::Punctuation.Question
+    token.Punctuation.Question
   } else if current == 126 {
-    token::Punctuation.Tilde
+    token.Punctuation.Tilde
   } else if current == 58 {
-    if next == 58 {
-      length = 2
-      token::Punctuation.ColonColon
-    } else {
-      token::Punctuation.Colon
-    }
+    token.Punctuation.Colon
   } else if current == 46 {
     if next == 46 {
       if after == 61 {
         length = 3
-        token::Punctuation.DotDotEqual
+        token.Punctuation.DotDotEqual
       } else {
         length = 2
-        token::Punctuation.DotDot
+        token.Punctuation.DotDot
       }
     } else {
-      token::Punctuation.Dot
+      token.Punctuation.Dot
     }
   } else if current == 45 {
     if next == 62 {
       length = 2
-      token::Punctuation.Arrow
+      token.Punctuation.Arrow
     } else if next == 61 {
       length = 2
-      token::Punctuation.MinusEqual
+      token.Punctuation.MinusEqual
     } else {
-      token::Punctuation.Minus
+      token.Punctuation.Minus
     }
   } else if current == 43 {
     if next == 61 {
       length = 2
-      token::Punctuation.PlusEqual
+      token.Punctuation.PlusEqual
     } else {
-      token::Punctuation.Plus
+      token.Punctuation.Plus
     }
   } else if current == 42 {
     if next == 61 {
       length = 2
-      token::Punctuation.StarEqual
+      token.Punctuation.StarEqual
     } else {
-      token::Punctuation.Star
+      token.Punctuation.Star
     }
   } else if current == 47 {
     if next == 61 {
       length = 2
-      token::Punctuation.SlashEqual
+      token.Punctuation.SlashEqual
     } else {
-      token::Punctuation.Slash
+      token.Punctuation.Slash
     }
   } else if current == 37 {
     if next == 61 {
       length = 2
-      token::Punctuation.PercentEqual
+      token.Punctuation.PercentEqual
     } else {
-      token::Punctuation.Percent
+      token.Punctuation.Percent
     }
   } else if current == 94 {
     if next == 61 {
       length = 2
-      token::Punctuation.CaretEqual
+      token.Punctuation.CaretEqual
     } else {
-      token::Punctuation.Caret
+      token.Punctuation.Caret
     }
   } else if current == 38 {
     if next == 38 {
       length = 2
-      token::Punctuation.AndAnd
+      token.Punctuation.AndAnd
     } else if next == 61 {
       length = 2
-      token::Punctuation.AmpersandEqual
+      token.Punctuation.AmpersandEqual
     } else {
-      token::Punctuation.Ampersand
+      token.Punctuation.Ampersand
     }
   } else if current == 124 {
     if next == 124 {
       length = 2
-      token::Punctuation.OrOr
+      token.Punctuation.OrOr
     } else if next == 61 {
       length = 2
-      token::Punctuation.BarEqual
+      token.Punctuation.BarEqual
     } else {
-      token::Punctuation.Bar
+      token.Punctuation.Bar
     }
   } else if current == 61 {
     if next == 61 && after == 62 {
       length = 3
-      token::Punctuation.Implies
+      token.Punctuation.Implies
     } else if next == 61 {
       length = 2
-      token::Punctuation.EqualEqual
+      token.Punctuation.EqualEqual
     } else if next == 62 {
       length = 2
-      token::Punctuation.FatArrow
+      token.Punctuation.FatArrow
     } else {
-      token::Punctuation.Equal
+      token.Punctuation.Equal
     }
   } else if current == 33 {
     if next == 61 {
       length = 2
-      token::Punctuation.NotEqual
+      token.Punctuation.NotEqual
     } else {
-      token::Punctuation.Bang
+      token.Punctuation.Bang
     }
   } else if current == 60 {
     if next == 60 {
       if after == 61 {
         length = 3
-        token::Punctuation.ShiftLeftEqual
+        token.Punctuation.ShiftLeftEqual
       } else {
         length = 2
-        token::Punctuation.ShiftLeft
+        token.Punctuation.ShiftLeft
       }
     } else if next == 61 {
       length = 2
-      token::Punctuation.LessEqual
+      token.Punctuation.LessEqual
     } else {
-      token::Punctuation.Less
+      token.Punctuation.Less
     }
   } else if current == 62 {
     if next == 62 {
       if after == 61 {
         length = 3
-        token::Punctuation.ShiftRightEqual
+        token.Punctuation.ShiftRightEqual
       } else {
         length = 2
-        token::Punctuation.ShiftRight
+        token.Punctuation.ShiftRight
       }
     } else if next == 61 {
       length = 2
-      token::Punctuation.GreaterEqual
+      token.Punctuation.GreaterEqual
     } else {
-      token::Punctuation.Greater
+      token.Punctuation.Greater
     }
   } else {
     return None
@@ -186,7 +181,7 @@ fn lex_punctuation(scanner: mut Scanner, current: UInt8) -> Option[token::Kind]
   punctuation(kind)
 }
 
-fn ends_operand(kind: token::Kind) -> Bool {
+fn ends_operand(kind: token.Kind) -> Bool {
   match kind {
     Upper(_) | Lower(_) | Underscore | Integer(_) | Float(_) | String(_) => true
     Punctuation(punctuation_kind) => match punctuation_kind {
@@ -208,11 +203,11 @@ fn follows_operand(scanner: Scanner) -> Bool {
   }
 }
 
-fn begins_operand(kind: token::Kind) -> Bool {
+fn begins_operand(kind: token.Kind) -> Bool {
   match kind {
     Upper(_) | Lower(_) | Underscore | Integer(_) | Float(_) | String(_) => true
     Punctuation(punctuation_kind) => match punctuation_kind {
-      Open(bracket) => bracket != token::Bracket.Curly
+      Open(bracket) => bracket != token.Bracket.Curly
       _ => false
     }
     Keyword(keyword) => match keyword {
@@ -223,17 +218,17 @@ fn begins_operand(kind: token::Kind) -> Bool {
   }
 }
 
-fn is_word(kind: token::Kind) -> Bool {
+fn is_word(kind: token.Kind) -> Bool {
   match kind {
     Upper(_) | Lower(_) | Underscore | Keyword(_) | Reserved(_) => true
     _ => false
   }
 }
 
-fn make_scanned(scanner: mut Scanner, inline: Bool, start: UInt64, kind: token::Kind, ending: Ending = Ending.Closed) -> Scanned
+fn make_scanned(scanner: mut Scanner, inline: Bool, start: UInt64, kind: token.Kind, ending: Ending = Ending.Closed) -> Scanned
   uses Panic, RunForever
 {
-  report_semicolons(mut scanner, line_break: kind != token::Kind.Punctuation(token::Punctuation.Close(token::Bracket.Curly)))
+  report_semicolons(mut scanner, line_break: kind != token.Kind.Punctuation(token.Punctuation.Close(token.Bracket.Curly)))
   let first_line_break = if inline { None } else { scanner.first_line_break }
   let blank_line = !inline && scanner.blank_line
   if !inline {
@@ -286,7 +281,7 @@ fn scan_after(scanner: mut Scanner, inline: Bool, nesting: UInt64, previous: Opt
   scan_item(mut scanner, inline, nesting)
 }
 
-fn lexed(scanner: mut Scanner, inline: Bool, start: UInt64, kind: token::Kind, ending: Ending = Ending.Closed) -> Item
+fn lexed(scanner: mut Scanner, inline: Bool, start: UInt64, kind: token.Kind, ending: Ending = Ending.Closed) -> Item
   uses Panic, RunForever
 {
   Item.Lexed(make_scanned(mut scanner, inline, start, kind, ending))
@@ -416,16 +411,16 @@ fn lex_number(scanner: mut Scanner, inline: Bool, nesting: UInt64) -> Item
   scanner.position = stop
   let checked = check_number(scanner.text(start, stop))
   if checked.problem is Some(problem) {
-    var fixes: List[source::Fix] = []
+    var fixes: List[source.Fix] = []
     if !scanner.is_at(stop, byte: 46) {
       for fix in checked.fixes {
-        mut fixes.push(source::make_fix(fix.title, edits: [source::replace(source::make_span(start, stop), replacement: fix.text)]))
+        mut fixes.push(source.make_fix(fix.title, edits: [source.replace(source.make_span(start, stop), replacement: fix.text)]))
       }
     }
     report(
       mut scanner,
       code: problem.code,
-      span: source::make_span(start + problem.start, stop: start + problem.stop),
+      span: source.make_span(start + problem.start, stop: start + problem.stop),
       message: problem.message,
       fixes: own fixes,
     )
@@ -438,7 +433,7 @@ fn lex_number(scanner: mut Scanner, inline: Bool, nesting: UInt64) -> Item
   }
   let following = scan_after(mut scanner, inline, nesting, previous: Some(integer))
   let is_point = match following {
-    Lexed(dot) => dot.kind == token::Kind.Punctuation(token::Punctuation.Dot) && dot.start == stop
+    Lexed(dot) => dot.kind == token.Kind.Punctuation(token.Punctuation.Dot) && dot.start == stop
     _ => false
   }
   if !is_point {
@@ -488,11 +483,11 @@ fn report_trailing_point(scanner: mut Scanner, start: UInt64, point: UInt64)
   uses Panic
 {
   let written = scanner.text(start, stop: point + 1).to_string()
-  let fixes = scanner.list_code_fixes(source::make_span(start, stop: point + 1), codes: ["${written}0"])
+  let fixes = scanner.list_code_fixes(source.make_span(start, stop: point + 1), codes: ["${written}0"])
   report(
     mut scanner,
     code: "lexer.number_missing_digits",
-    span: source::make_span(point, stop: point + 1),
+    span: source.make_span(point, stop: point + 1),
     message: "A float has a digit after its `.`: `${written}0`.",
     fixes: own fixes,
   )
@@ -515,11 +510,11 @@ fn lex_leading_dot(scanner: mut Scanner) -> Option[NumberValue]
   }
   scanner.position = stop
   if checked.problem.is_none() {
-    let fixes = scanner.list_code_fixes(source::make_span(start, stop), codes: [fixed.copy()])
+    let fixes = scanner.list_code_fixes(source.make_span(start, stop), codes: [fixed.copy()])
     report(
       mut scanner,
       code: "lexer.number_missing_digits",
-      span: source::make_span(start, stop: start + 1),
+      span: source.make_span(start, stop: start + 1),
       message: "A float has a digit before its `.`: `${fixed}`.",
       fixes: own fixes,
     )
@@ -527,7 +522,7 @@ fn lex_leading_dot(scanner: mut Scanner) -> Option[NumberValue]
     report(
       mut scanner,
       code: "lexer.number_missing_digits",
-      span: source::make_span(start, stop: start + 1),
+      span: source.make_span(start, stop: start + 1),
       message: "A float has a digit before its `.`.",
     )
   }
@@ -538,7 +533,7 @@ fn lex_ellipsis(scanner: mut Scanner, inline: Bool, nesting: UInt64, start: UInt
   uses Panic, RunForever
 {
   let was_after_operand = follows_operand(scanner)
-  let raw = make_scanned(mut scanner, inline, start, kind: token::Kind.Punctuation(token::Punctuation.DotDotEqual))
+  let raw = make_scanned(mut scanner, inline, start, kind: token.Kind.Punctuation(token.Punctuation.DotDotEqual))
   let following = scan_after(mut scanner, inline, nesting, previous: None)
   let operand_follows = match following {
     Lexed(next) => begins_operand(next.kind)
@@ -559,7 +554,7 @@ fn lex_ellipsis(scanner: mut Scanner, inline: Bool, nesting: UInt64, start: UInt
   }
 }
 
-fn lex_string(scanner: mut Scanner, tag: Option[token::Tag], inline: Bool, nesting: UInt64, start: UInt64) -> Item
+fn lex_string(scanner: mut Scanner, tag: Option[token.Tag], inline: Bool, nesting: UInt64, start: UInt64) -> Item
   uses Panic, RunForever
 {
   let scanned = scan_string(mut scanner, tag, nesting)
@@ -610,26 +605,26 @@ fn lex_name(scanner: mut Scanner, inline: Bool, nesting: UInt64) -> Item
   let stop = position
   let spelling = scanner.text(start, stop).to_string()
   let kind = if spelling == "_" {
-    token::Kind.Underscore
+    token.Kind.Underscore
   } else {
-    match token::find_word(spelling) {
+    match token.find_word(spelling) {
       Some(word) => word
       None => {
         let index = check_cached_name(mut scanner, spelling)
         let checked = scanner.name_checks.get(index).expect("a name check").copy()
         if checked.problem is Some(problem) {
-          var fixes: List[source::Fix] = []
+          var fixes: List[source.Fix] = []
           if checked.fix is Some(fixed) {
             let opens_literal = opens_literal_at(scanner, stop)
             if !opens_literal || (fixed.byte(0) >= 65 && fixed.byte(0) <= 90) {
               mut fixes.push(
-                source::make_fix("Write `${fixed}`", edits: [source::replace(source::make_span(start, stop), replacement: fixed)]),
+                source.make_fix("Write `${fixed}`", edits: [source.replace(source.make_span(start, stop), replacement: fixed)]),
               )
             }
           }
-          report(mut scanner, code: problem.code, span: source::make_span(start, stop), message: problem.message, fixes: own fixes)
+          report(mut scanner, code: problem.code, span: source.make_span(start, stop), message: problem.message, fixes: own fixes)
         }
-        if checked.is_upper { token::Kind.Upper(index) } else { token::Kind.Lower(index) }
+        if checked.is_upper { token.Kind.Upper(index) } else { token.Kind.Lower(index) }
       }
     }
   }
@@ -638,7 +633,7 @@ fn lex_name(scanner: mut Scanner, inline: Bool, nesting: UInt64) -> Item
     _ => false
   }
   if is_tag {
-    return lex_string(mut scanner, tag: Some(token::Tag(name: own spelling, span: source::make_span(start, stop))), inline: inline, nesting: nesting, start: start)
+    return lex_string(mut scanner, tag: Some(token.Tag(name: own spelling, span: source.make_span(start, stop))), inline: inline, nesting: nesting, start: start)
   }
   match lex_after_name(mut scanner, nesting, start, name: kind) {
     Some(scanned) => lexed(mut scanner, inline, start, kind: scanned.kind, ending: scanned.ending)
@@ -666,7 +661,7 @@ fn lex_next(scanner: mut Scanner) -> LayoutInput
       Lexed(scanned) => {
         return LayoutInput.Next(
           kind: scanned.kind,
-          span: source::make_span(scanned.start, stop: scanned.stop),
+          span: source.make_span(scanned.start, stop: scanned.stop),
           first_line_break: scanned.first_line_break,
           blank_line: scanned.blank_line,
           unterminated_string: scanned.ending == Ending.Unterminated,

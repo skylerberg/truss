@@ -4,7 +4,7 @@ let check packages =
     (Support.make_database packages)
 
 let expect_one_diagnostic = Support.expect_one_diagnostic ~check
-let expect_fine text = Support.expect_no_diagnostics ~check [ ("app::main", text) ]
+let expect_fine text = Support.expect_no_diagnostics ~check [ ("app.main", text) ]
 let keep = Fixtures.Ownership.keep
 
 let () =
@@ -552,11 +552,11 @@ let () =
         ~fixed:(keep ^ Fixtures.Ownership.list_copied_then_read));
   Harness.test "a moved place whose type is not `Copyable` gets no fix that copies it" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.token_moved_then_read "ownership.use_after_move";
-      let packages = Support.setup [ ("app::main", Fixtures.Ownership.token_moved_then_read) ] in
+      let packages = Support.setup [ ("app.main", Fixtures.Ownership.token_moved_then_read) ] in
       List.iter
         (fun (diagnostic : Diagnostic.t) ->
           if diagnostic.fixes <> [] then Harness.fail "offered a fix that copies the token")
-        (check packages (Support.parse_file "app::main")));
+        (check packages (Support.parse_file "app.main")));
   Harness.test "a `let` that reads a moved place is reported at the place" (fun () ->
       expect_one_diagnostic
         (keep ^ Fixtures.Ownership.list_moved_then_bound)
@@ -1075,8 +1075,8 @@ let () =
     (fun () -> expect_fine Fixtures.Ownership.then_block_mutating_a_temporary_list_that_lends)
 
 let count_disjoint_obligations text =
-  let packages = Support.setup [ ("app::main", text) ] in
-  let file = Support.parse_file "app::main" in
+  let packages = Support.setup [ ("app.main", text) ] in
+  let file = Support.parse_file "app.main" in
   let database = Support.make_database packages in
   List.fold_left
     (fun total (declaration : Resolve.Names.declaration) ->

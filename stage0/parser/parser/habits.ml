@@ -145,13 +145,6 @@ let report_angle_brackets cursor ~(angles : Token.t list) =
            | _ -> "]"))
        angles)
 
-let report_path_separator cursor ~(separator : Token.t) =
-  report cursor Path_separator separator.span
-    "`::` follows only the name of a module. A variant, a constant, or a function of a type is \
-     named with `.`, as in `Shape.Circle`."
-    "Write `.`"
-    [ Diagnostic.replace separator.span "." ]
-
 let report_qualified_variant cursor ~qualifier_start ~(variant : Syntax.name) =
   let variant_start = (Cursor.read_file_span cursor variant.id).start in
   report cursor Qualified_variant
@@ -197,8 +190,8 @@ let report_keyword_macro cursor ~(bang : Token.t) ~(closing : Token.t) ~has_argu
 
 let no_tuples =
   "Parentheses do not make a tuple: every tuple type has a name and named fields. Values that \
-   belong together go in a record or a tuple type, such as `core::Pair`, built as \
-   `core::Pair(first: a, second: b)`."
+   belong together go in a record or a tuple type, such as `core.Pair`, built as `core.Pair(first: \
+   a, second: b)`."
 
 let report_tuple cursor ~(opening : Token.t) =
   Cursor.report cursor Tuple opening.span no_tuples;
@@ -218,7 +211,7 @@ let report_power_operator cursor ~(operator : Token.t) =
 let report_short_declaration cursor ~(target : Syntax.expression) ~(operator : Token.t) =
   let message = "Truss has no `:=`. A new name is declared with `let name = value`." in
   match target.kind with
-  | Name { modules = []; _ } ->
+  | Name _ ->
       report cursor Short_declaration operator.span message "Declare the name with `let`"
         [
           Diagnostic.insert
@@ -304,9 +297,7 @@ let singularize word =
 let derive_parameter_name (callee : Syntax.expression) =
   let receiver = match callee.kind with Member (receiver, _) -> Some receiver | _ -> None in
   let candidate =
-    match receiver with
-    | Some { kind = Name { modules = []; last }; _ } -> singularize last.text
-    | _ -> None
+    match receiver with Some { kind = Name last; _ } -> singularize last.text | _ -> None
   in
   match candidate with
   | Some name when name <> "it" && Token.find_word name = None -> name

@@ -528,7 +528,7 @@ let () =
       let path = Filename.concat (Lazy.force Codegen_support.scratch) "served.socket" in
       let status, output, _ =
         Codegen_support.run_main ~arguments:[ path ]
-          {|use standard::network
+          {|use standard.network
 
 fn say(text: String) uses Console {
   Console.print_line(text.slice())
@@ -562,8 +562,8 @@ fn main(arguments: List[String]) -> ExitCode
   if NetworkClient.connect_local(Path.new("${arguments[1]}.missing".slice())) is Err(_) {
     say("a missing path is refused")
   }
-  let loopback = network::SocketAddress(address: network::IpAddress.loopback, port: 0)
-  let shared = network::ListenOptions(backlog: 16, reuse_port: true)
+  let loopback = network.SocketAddress(address: network.IpAddress.loopback, port: 0)
+  let shared = network.ListenOptions(backlog: 16, reuse_port: true)
   if NetworkServer.listen(loopback, options: shared) is Ok(opened) {
     let listener = own opened
     if NetworkClient.connect(listener.local_address(), timeout: None) is Ok(made) {

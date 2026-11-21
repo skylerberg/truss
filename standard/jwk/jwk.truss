@@ -1,6 +1,6 @@
-use standard::base64
-use standard::cryptography
-use standard::json
+use standard.base64
+use standard.cryptography
+use standard.json
 
 public type Error(message: String)
   derives Equal
@@ -19,29 +19,29 @@ fn failure(message: StringSlice) -> Error {
 
 public type Material =
   | Secret(bytes: List[UInt8])
-  | RsaPublic(key: cryptography::RsaPublicKey)
-  | RsaPrivate(key: cryptography::RsaPrivateKey)
-  | EcPublic(key: cryptography::EcdsaVerifyingKey)
-  | EcPrivate(key: cryptography::EcdsaSigningKey)
-  | Ed25519Public(key: cryptography::VerifyingKey)
-  | Ed25519Private(key: cryptography::SigningKey)
+  | RsaPublic(key: cryptography.RsaPublicKey)
+  | RsaPrivate(key: cryptography.RsaPrivateKey)
+  | EcPublic(key: cryptography.EcdsaVerifyingKey)
+  | EcPrivate(key: cryptography.EcdsaSigningKey)
+  | Ed25519Public(key: cryptography.VerifyingKey)
+  | Ed25519Private(key: cryptography.SigningKey)
 
 public type Key(material: Material, id: Option[String] = None, algorithm: Option[String] = None, usage: Option[String] = None)
 
 public type KeySet(keys: List[Key])
 
 internal fn encoded(bytes: Slice[UInt8]) -> String {
-  base64::encode(bytes, alphabet: base64::Alphabet.UrlSafe, padding: false)
+  base64.encode(bytes, alphabet: base64.Alphabet.UrlSafe, padding: false)
 }
 
 internal fn decoded(text: StringSlice) -> Result[List[UInt8], Error] {
-  match base64::decode(text, alphabet: base64::Alphabet.UrlSafe) {
+  match base64.decode(text, alphabet: base64.Alphabet.UrlSafe) {
     Ok(bytes) => Ok(own bytes)
     Err(_) => Err(failure("a member that is not base64url"))
   }
 }
 
-fn text_of(value: json::Value, name: StringSlice) -> Option[String] {
+fn text_of(value: json.Value, name: StringSlice) -> Option[String] {
   match value.get(name) {
     Some(member) => match member.as_text() {
       Some(text) => Some(text.to_string())
@@ -51,24 +51,24 @@ fn text_of(value: json::Value, name: StringSlice) -> Option[String] {
   }
 }
 
-fn bytes_of(value: json::Value, name: StringSlice) -> Result[List[UInt8], Error] {
+fn bytes_of(value: json.Value, name: StringSlice) -> Result[List[UInt8], Error] {
   match text_of(value, name: name) {
     Some(text) => decoded(text)
     None => Err(Error(message: "a key without its \"${name}\" member"))
   }
 }
 
-fn curve_named(name: StringSlice) -> Result[cryptography::Curve, Error] {
+fn curve_named(name: StringSlice) -> Result[cryptography.Curve, Error] {
   if name == "P-256" {
-    Ok(cryptography::Curve.P256)
+    Ok(cryptography.Curve.P256)
   } else if name == "P-384" {
-    Ok(cryptography::Curve.P384)
+    Ok(cryptography.Curve.P384)
   } else {
     Err(Error(message: "the curve ${name}, which is not supported"))
   }
 }
 
-fn curve_name(curve: cryptography::Curve) -> StringSlice {
+fn curve_name(curve: cryptography.Curve) -> StringSlice {
   match curve {
     P256 => "P-256".slice()
     P384 => "P-384".slice()
@@ -87,7 +87,7 @@ fn array_32(bytes: Slice[UInt8]) -> Result[Array[UInt8, 32], Error] {
   Ok(array)
 }
 
-fn material_of(value: json::Value) -> Result[Material, Error]
+fn material_of(value: json.Value) -> Result[Material, Error]
   uses Panic
 {
   let kind = match text_of(value, name: "kty") {
@@ -101,14 +101,14 @@ fn material_of(value: json::Value) -> Result[Material, Error]
   if kind == "RSA" {
     let modulus = bytes_of(value, name: "n")?
     let exponent = bytes_of(value, name: "e")?
-    let public_key = match cryptography::RsaPublicKey.new(modulus.slice(), exponent: exponent.slice()) {
+    let public_key = match cryptography.RsaPublicKey.new(modulus.slice(), exponent: exponent.slice()) {
       Some(key) => key
       None => return Err(failure("an RSA key whose modulus or exponent cannot be used"))
     }
     if !is_private {
       return Ok(Material.RsaPublic(key: own public_key))
     }
-    let private_key = cryptography::RsaPrivateKey.new(
+    let private_key = cryptography.RsaPrivateKey.new(
       public_key,
       exponent: bytes_of(value, name: "d")?.slice(),
       first_prime: bytes_of(value, name: "p")?.slice(),
@@ -129,7 +129,7 @@ fn material_of(value: json::Value) -> Result[Material, Error]
     var point: List[UInt8] = [4]
     mut point.append_slice(x.slice())
     mut point.append_slice(y.slice())
-    let public_key = match cryptography::EcdsaVerifyingKey.from_sec1(curve, bytes: point.slice()) {
+    let public_key = match cryptography.EcdsaVerifyingKey.from_sec1(curve, bytes: point.slice()) {
       Some(key) => key
       None => return Err(failure("an EC key that is not a point on its curve"))
     }
@@ -137,7 +137,7 @@ fn material_of(value: json::Value) -> Result[Material, Error]
       return Ok(Material.EcPublic(key: own public_key))
     }
     let scalar = bytes_of(value, name: "d")?
-    return match cryptography::EcdsaSigningKey.from_scalar(curve, bytes: scalar.slice()) {
+    return match cryptography.EcdsaSigningKey.from_scalar(curve, bytes: scalar.slice()) {
       Some(key) => {
         if key.verifying_key() != public_key {
           return Err(failure("an EC private key that does not match its public point"))
@@ -153,13 +153,13 @@ fn material_of(value: json::Value) -> Result[Material, Error]
     }
     let x = array_32(bytes_of(value, name: "x")?.slice())?
     if !is_private {
-      return match cryptography::VerifyingKey.from_bytes(x) {
+      return match cryptography.VerifyingKey.from_bytes(x) {
         Some(key) => Ok(Material.Ed25519Public(key: key))
         None => Err(failure("an Ed25519 public key that is not a point"))
       }
     }
     let seed = array_32(bytes_of(value, name: "d")?.slice())?
-    let key = cryptography::SigningKey.from_seed(seed)
+    let key = cryptography.SigningKey.from_seed(seed)
     if key.verifying_key().bytes() != x {
       return Err(failure("an Ed25519 private key that does not match its public key"))
     }
@@ -168,7 +168,7 @@ fn material_of(value: json::Value) -> Result[Material, Error]
   Err(Error(message: "the key type ${kind}, which is not supported"))
 }
 
-public fn Key.from_value(value: json::Value) -> Result[Key, Error]
+public fn Key.from_value(value: json.Value) -> Result[Key, Error]
   uses Panic
 {
   if value.as_members() is None {
@@ -185,24 +185,24 @@ public fn Key.from_value(value: json::Value) -> Result[Key, Error]
 public fn Key.parse(text: StringSlice) -> Result[Key, Error]
   uses Panic
 {
-  match json::parse(text) {
+  match json.parse(text) {
     Ok(value) => Key.from_value(value)
     Err(_) => Err(failure("a key that is not JSON"))
   }
 }
 
-fn put(members: mut Map[String, json::Value], name: StringSlice, text: StringSlice) {
-  mut members.insert(name.to_string(), value: json::Value.String(value: text.to_string()))
+fn put(members: mut Map[String, json.Value], name: StringSlice, text: StringSlice) {
+  mut members.insert(name.to_string(), value: json.Value.String(value: text.to_string()))
 }
 
-fn put_bytes(members: mut Map[String, json::Value], name: StringSlice, bytes: Slice[UInt8]) {
+fn put_bytes(members: mut Map[String, json.Value], name: StringSlice, bytes: Slice[UInt8]) {
   put(mut members, name: name, text: encoded(bytes))
 }
 
-public fn Key.to_value(self) -> json::Value
+public fn Key.to_value(self) -> json.Value
   uses Panic
 {
-  var members: Map[String, json::Value] = [:]
+  var members: Map[String, json.Value] = [:]
   match self.material {
     Secret(bytes) => {
       put(mut members, name: "kty", text: "oct")
@@ -258,10 +258,10 @@ public fn Key.to_value(self) -> json::Value
     Some(usage) => put(mut members, name: "use", text: usage)
     None => {}
   }
-  json::Value.Object(members: own members)
+  json.Value.Object(members: own members)
 }
 
-fn put_point(members: mut Map[String, json::Value], key: cryptography::EcdsaVerifyingKey) {
+fn put_point(members: mut Map[String, json.Value], key: cryptography.EcdsaVerifyingKey) {
   let point = key.sec1()
   let size = point.length().saturating_subtract(1) / 2
   if point.length() < 1 + 2 * size {
@@ -298,9 +298,9 @@ public fn Key.is_private(self) -> Bool {
   }
 }
 
-fn member_text(value: json::Value, name: StringSlice) -> String {
+fn member_text(value: json.Value, name: StringSlice) -> String {
   let member = text_of(value, name: name).unwrap_or("")
-  "\"${name}\":${json::quote(member)}"
+  "\"${name}\":${json.quote(member)}"
 }
 
 public fn Key.thumbprint(self) -> String
@@ -313,14 +313,14 @@ public fn Key.thumbprint(self) -> String
     EcPublic(..) | EcPrivate(..) => "{${member_text(value, name: "crv")},${member_text(value, name: "kty")},${member_text(value, name: "x")},${member_text(value, name: "y")}}"
     Ed25519Public(..) | Ed25519Private(..) => "{${member_text(value, name: "crv")},${member_text(value, name: "kty")},${member_text(value, name: "x")}}"
   }
-  let digest = cryptography::sha256(canonical.slice().bytes())
+  let digest = cryptography.sha256(canonical.slice().bytes())
   encoded(digest[..])
 }
 
 public fn KeySet.parse(text: StringSlice) -> Result[KeySet, Error]
   uses Panic
 {
-  let value = match json::parse(text) {
+  let value = match json.parse(text) {
     Ok(value) => own value
     Err(_) => return Err(failure("a key set that is not JSON"))
   }
@@ -358,11 +358,11 @@ public fn KeySet.find(self, id: StringSlice) -> Option[Key] {
 public fn KeySet.to_text(self) -> String
   uses Panic
 {
-  var items: List[json::Value] = []
+  var items: List[json.Value] = []
   for key in self.keys {
     mut items.push(key.to_value())
   }
-  var members: Map[String, json::Value] = [:]
-  mut members.insert("keys", value: json::Value.Array(items: own items))
-  json::Value.Object(members: own members).to_text()
+  var members: Map[String, json.Value] = [:]
+  mut members.insert("keys", value: json.Value.Array(items: own items))
+  json.Value.Object(members: own members).to_text()
 }

@@ -8,9 +8,10 @@ let report_unmatched_receiver_mode state env arguments (member : Syntax.name) =
 
 let rec check_call state env ?expected (value : Syntax.expression) (callee : Syntax.expression)
     (arguments : Syntax.argument list) : Types.ty =
-  match callee.kind with
-  | Member (base, { text = "ensures"; _ }) -> check_callback_ensures state env value base arguments
-  | Member (base, member) -> (
+  match (callee.kind, State.find_head state callee) with
+  | Member (base, { text = "ensures"; _ }), None ->
+      check_callback_ensures state env value base arguments
+  | Member (base, member), None -> (
       match Instantiation.find_static state base with
       | Some (Static_type type_) ->
           check_static_call state env ?expected value type_ member arguments
@@ -20,14 +21,12 @@ let rec check_call state env ?expected (value : Syntax.expression) (callee : Syn
           check_capability_call state env value capability member arguments
       | None -> check_method_call state env ?expected value base member ~type_arguments:[] arguments
       )
-  | Bracket ({ kind = Member (base, member); _ }, items)
+  | Bracket ({ kind = Member (base, member); _ }, items), _
     when state.resolved.brackets.(callee.id) = Some Method_bracket ->
       check_method_call state env ?expected value base member ~type_arguments:items arguments
-  | _ -> (
-      match State.find_head state callee with
-      | Some resolution ->
-          check_named_method_call state env ?expected value callee resolution arguments
-      | None -> Calls.check_function_value_call state env value callee arguments)
+  | _, Some resolution ->
+      check_named_method_call state env ?expected value callee resolution arguments
+  | _, None -> Calls.check_function_value_call state env value callee arguments
 
 and check_named_method_call state env ?expected (value : Syntax.expression)
     (callee : Syntax.expression) ({ name; target; type_arguments } : Resolve.head) arguments =
@@ -45,7 +44,7 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
   | Final -> (
       let names_result (argument : Syntax.expression) =
         match argument.kind with
-        | Name path -> State.find_target state path.last = Some Result_value
+        | Name name -> State.find_target state name = Some Result_value
         | _ -> false
       in
       match (arguments, env.output) with
@@ -128,7 +127,7 @@ and check_callback_ensures state env (value : Syntax.expression) (base : Syntax.
   in
   let base_type = Conversions.read_actual_head state base (Hooks.check_expression state env base) in
   match (base.kind, base_type) with
-  | Name { modules = []; last }, Types.Function function_type
+  | Name last, Types.Function function_type
     when match State.find_local state last with
          | Some { binding = Parameter; _ } -> true
          | _ -> false -> (
@@ -179,7 +178,7 @@ and check_callback_ensures state env (value : Syntax.expression) (base : Syntax.
           State.elaborate state value.id
             (Specification_call (Specification_function Callback_ensures));
           Types.bool)
-  | Name { modules = []; last }, Types.Function _ ->
+  | Name last, Types.Function _ ->
       reject Not_callable
         (Printf.sprintf
            "`%s` is not a parameter of this definition, and `.ensures` names the postcondition of \
@@ -209,7 +208,7 @@ and check_callee_cost state env (value : Syntax.expression) (metric : Language.M
       match Interface.Elaborator.find_bounded_type (State.read_context state) base with
       | Some type_ -> check_method_cost state value metric type_ member
       | None -> report_not_a_callee "its operand is neither")
-  | [ { value = { kind = Name { modules = []; last }; _ } as operand; _ } ] -> (
+  | [ { value = { kind = Name last; _ } as operand; _ } ] -> (
       match
         ( State.find_target state last,
           Option.map (Conversions.read_actual_head state operand) (State.find_local_type state last)

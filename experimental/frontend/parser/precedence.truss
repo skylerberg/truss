@@ -1,11 +1,11 @@
-use frontend::source
-use frontend::syntax
-use frontend::token
+use frontend.source
+use frontend.syntax
+use frontend.token
 
 type Group =
   | ArithmeticGroup
   | ShiftGroup
-  | BitwiseGroup(bitwise: syntax::Bitwise)
+  | BitwiseGroup(bitwise: syntax.Bitwise)
   | RangeGroup
   | ComparisonGroup
   | AndGroup
@@ -17,7 +17,7 @@ type Group =
 type Parent(group: Group, is_right: Bool)
   derives Equal
 
-fn classify_binary(binary: syntax::Binary) -> Group {
+fn classify_binary(binary: syntax.Binary) -> Group {
   match binary {
     Operation(operation) => match operation {
       Arithmetic(_) => Group.ArithmeticGroup
@@ -33,7 +33,7 @@ fn classify_binary(binary: syntax::Binary) -> Group {
   }
 }
 
-fn group_of(value: syntax::Expression) -> Option[Group] {
+fn group_of(value: syntax.Expression) -> Option[Group] {
   match value.kind {
     Binary(operator, ..) => Some(classify_binary(operator))
     Is(..) => Some(Group.ComparisonGroup)
@@ -46,7 +46,7 @@ fn group_of(value: syntax::Expression) -> Option[Group] {
 type Operands(first: UInt64, second: UInt64)
   derives Equal
 
-fn find_operands(value: syntax::Expression) -> Option[Operands] {
+fn find_operands(value: syntax.Expression) -> Option[Operands] {
   match value.kind {
     Binary(left, right, ..) => Some(Operands(first: left.id, second: right.id))
     Is(value: tested, pattern, ..) => Some(Operands(first: tested.id, second: pattern.id))
@@ -58,7 +58,7 @@ fn find_operands(value: syntax::Expression) -> Option[Operands] {
   }
 }
 
-fn extract_operator_id(value: syntax::Expression) -> UInt64 {
+fn extract_operator_id(value: syntax.Expression) -> UInt64 {
   match value.kind {
     Binary(operator_id, ..) | Is(operator_id, ..) | Range(operator_id, ..) => operator_id
     _ => value.id
@@ -68,7 +68,7 @@ fn extract_operator_id(value: syntax::Expression) -> UInt64 {
 type Language = TrussLanguage | CLanguage | GoLanguage | SwiftLanguage
   derives Equal
 
-fn rank_in(language: Language, operator: syntax::Binary) -> UInt64 {
+fn rank_in(language: Language, operator: syntax.Binary) -> UInt64 {
   if language == Language.TrussLanguage {
     return rank_binary(operator)
   }
@@ -106,14 +106,14 @@ fn rank_in(language: Language, operator: syntax::Binary) -> UInt64 {
   }
 }
 
-fn applies_first(language: Language, first: syntax::Binary, second: syntax::Binary) -> Bool {
+fn applies_first(language: Language, first: syntax.Binary, second: syntax.Binary) -> Bool {
   rank_in(language, operator: first) >= rank_in(language, operator: second)
 }
 
 type Grouping = LeftFirst | RightFirst
   derives Equal
 
-fn report_parentheses(cursor: mut TokenCursor, id: UInt64, message: StringSlice, fixes: own List[source::Fix])
+fn report_parentheses(cursor: mut TokenCursor, id: UInt64, message: StringSlice, fixes: own List[source.Fix])
   uses Panic
 {
   let span = cursor.read_file_span(id)
@@ -122,31 +122,31 @@ fn report_parentheses(cursor: mut TokenCursor, id: UInt64, message: StringSlice,
 
 let longest_titled_expression: UInt64 = 80
 
-fn make_titled_fix(cursor: TokenCursor, fallback: StringSlice, whole: UInt64, edits: own List[source::Edit]) -> source::Fix
+fn make_titled_fix(cursor: TokenCursor, fallback: StringSlice, whole: UInt64, edits: own List[source.Edit]) -> source.Fix
   uses Panic, RunForever
 {
-  var insertions: List[token::Insertion] = []
+  var insertions: List[token.Insertion] = []
   for edit in edits {
-    mut insertions.push(token::Insertion(at: edit.span.start, text: edit.replacement.copy()))
+    mut insertions.push(token.Insertion(at: edit.span.start, text: edit.replacement.copy()))
   }
   let span = cursor.read_file_span(whole)
   let spelled = if span.stop - span.start > longest_titled_expression { None } else { cursor.spell(span, insertions) }
   match spelled {
-    Some(fixed) => source::make_fix("Write `${fixed}`", own edits)
-    None => source::make_fix(fallback, own edits)
+    Some(fixed) => source.make_fix("Write `${fixed}`", own edits)
+    None => source.make_fix(fallback, own edits)
   }
 }
 
-fn make_parentheses(cursor: TokenCursor, first: UInt64, last: UInt64) -> List[source::Edit]
+fn make_parentheses(cursor: TokenCursor, first: UInt64, last: UInt64) -> List[source.Edit]
   uses Panic
 {
   [
-    source::insert(source::make_zero_width(cursor.read_file_span(first).start), replacement: "("),
-    source::insert(source::make_zero_width(cursor.read_file_span(last).stop), replacement: ")"),
+    source.insert(source.make_zero_width(cursor.read_file_span(first).start), replacement: "("),
+    source.insert(source.make_zero_width(cursor.read_file_span(last).stop), replacement: ")"),
   ]
 }
 
-fn is_name_or_literal(value: syntax::Expression) -> Bool {
+fn is_name_or_literal(value: syntax.Expression) -> Bool {
   match value.kind {
     Name(_) | Integer(_) | Float(_) | String(_) | True | False => true
     _ => false
@@ -167,7 +167,7 @@ fn is_connective_group(group: Group) -> Bool {
   group == Group.AndGroup || group == Group.OrGroup || group == Group.ImpliesGroup
 }
 
-fn find_problem(parent: Group, child: Group, is_right: Bool, operand: syntax::Expression) -> Option[Problem] {
+fn find_problem(parent: Group, child: Group, is_right: Bool, operand: syntax.Expression) -> Option[Problem] {
   if is_connective_group(parent) && child == Group.Lowest && is_right && operand.kind is Quantified(..) {
     return None
   }
@@ -210,7 +210,7 @@ fn find_problem(parent: Group, child: Group, is_right: Bool, operand: syntax::Ex
   Some(Problem.Mixed("These operators need parentheses to say which applies first."))
 }
 
-fn wrap_edits(cursor: TokenCursor, context: Option[Parent], whole: syntax::Expression, last: Option[Group], edits: own List[source::Edit]) -> List[source::Edit]
+fn wrap_edits(cursor: TokenCursor, context: Option[Parent], whole: syntax.Expression, last: Option[Group], edits: own List[source.Edit]) -> List[source.Edit]
   uses Panic
 {
   if context is Some(outer) && last is Some(last_group) && find_problem(outer.group, child: last_group, is_right: outer.is_right, operand: whole).is_some() {
@@ -227,12 +227,12 @@ type Pieces(first_operator: UInt64, second_operator: UInt64, third_operator: UIn
 fn make_grouping_fix(
   cursor: TokenCursor,
   context: Option[Parent],
-  whole: syntax::Expression,
-  operand: syntax::Expression,
+  whole: syntax.Expression,
+  operand: syntax.Expression,
   pieces: Pieces,
   parsed: Grouping,
   grouping: Grouping,
-) -> source::Fix
+) -> source.Fix
   uses Panic, RunForever
 {
   let edits = match grouping {
@@ -247,7 +247,7 @@ fn make_grouping_fix(
   make_titled_fix(cursor, fallback, whole: whole.id, edits: wrap_edits(cursor, context, whole, last, own edits))
 }
 
-fn find_first_operand(value: syntax::Expression) -> Option[syntax::Expression]
+fn find_first_operand(value: syntax.Expression) -> Option[syntax.Expression]
   uses RunForever
 {
   match value.kind {
@@ -261,7 +261,7 @@ fn find_first_operand(value: syntax::Expression) -> Option[syntax::Expression]
   }
 }
 
-fn find_last_operand(value: syntax::Expression) -> Option[syntax::Expression] {
+fn find_last_operand(value: syntax.Expression) -> Option[syntax.Expression] {
   match value.kind {
     Binary(right, ..) => Some(right.copy())
     Range(start, stop, ..) => match start, stop {
@@ -272,7 +272,7 @@ fn find_last_operand(value: syntax::Expression) -> Option[syntax::Expression] {
   }
 }
 
-fn regroups_cleanly(whole: syntax::Expression, operand: syntax::Expression, is_right: Bool, parsed: Grouping, grouping: Grouping) -> Bool
+fn regroups_cleanly(whole: syntax.Expression, operand: syntax.Expression, is_right: Bool, parsed: Grouping, grouping: Grouping) -> Bool
   uses RunForever
 {
   if grouping == parsed {
@@ -291,8 +291,8 @@ fn regroups_cleanly(whole: syntax::Expression, operand: syntax::Expression, is_r
 fn report_problem(
   cursor: mut TokenCursor,
   context: Option[Parent],
-  whole: syntax::Expression,
-  operand: syntax::Expression,
+  whole: syntax.Expression,
+  operand: syntax.Expression,
   is_right: Bool,
   problem: Problem,
 )
@@ -329,7 +329,7 @@ fn report_problem(
       )
     }
     Mixed(message) => {
-      var fixes: List[source::Fix] = []
+      var fixes: List[source.Fix] = []
       if pieces is Some(operator_ids) {
         for grouping in groupings {
           mut fixes.push(make_grouping_fix(cursor, context, whole, operand, pieces: operator_ids, parsed: parsed, grouping: grouping))
@@ -338,7 +338,7 @@ fn report_problem(
       report_parentheses(mut cursor, id: extract_operator_id(whole), message: message, fixes: own fixes)
     }
     MixedBitwise => {
-      var fixes: List[source::Fix] = []
+      var fixes: List[source.Fix] = []
       let both_binary = match whole.kind, operand.kind {
         Binary(operator: outer, ..), Binary(operator: inner, ..) => Some(Operators(outer, inner))
         _, _ => None
@@ -374,9 +374,9 @@ fn report_problem(
       )
     }
     Chained(message) => {
-      var fixes: List[source::Fix] = []
+      var fixes: List[source.Fix] = []
       let is_implies = match whole.kind {
-        Binary(operator, ..) => operator == syntax::Binary.Connective(syntax::Connective.Implies)
+        Binary(operator, ..) => operator == syntax.Binary.Connective(syntax.Connective.Implies)
         _ => false
       }
       if is_implies {
@@ -393,7 +393,7 @@ fn report_problem(
             context,
             whole,
             last: Some(Group.AndGroup),
-            edits: [source::insert(source::make_zero_width(middle_span.stop), replacement: " && ${middle_spelling}")],
+            edits: [source.insert(source.make_zero_width(middle_span.stop), replacement: " && ${middle_spelling}")],
           )
           mut fixes.push(make_titled_fix(cursor, fallback: "Join the comparisons with `&&`", whole: whole.id, edits: own edits))
         }
@@ -403,10 +403,10 @@ fn report_problem(
   }
 }
 
-type Operators(outer: syntax::Binary, inner: syntax::Binary)
+type Operators(outer: syntax.Binary, inner: syntax.Binary)
   derives Equal
 
-fn check_operand(cursor: mut TokenCursor, context: Option[Parent], value: syntax::Expression, parent: Group, is_right: Bool, operand: syntax::Expression)
+fn check_operand(cursor: mut TokenCursor, context: Option[Parent], value: syntax.Expression, parent: Group, is_right: Bool, operand: syntax.Expression)
   uses Panic, RunForever
 {
   check_precedence(mut cursor, value: operand, context: Some(Parent(group: parent, is_right)))
@@ -415,7 +415,7 @@ fn check_operand(cursor: mut TokenCursor, context: Option[Parent], value: syntax
   }
 }
 
-fn check_precedence(cursor: mut TokenCursor, value: syntax::Expression, context: Option[Parent])
+fn check_precedence(cursor: mut TokenCursor, value: syntax.Expression, context: Option[Parent])
   uses Panic, RunForever
 {
   match value.kind {
@@ -425,15 +425,15 @@ fn check_precedence(cursor: mut TokenCursor, value: syntax::Expression, context:
       check_operand(mut cursor, context, value, parent: group, is_right: true, operand: right)
     }
     Is(value: left, operator_id, ..) => {
-      if left.kind is Prefix(operator, ..) && operator == syntax::PrefixOperator.Not {
+      if left.kind is Prefix(operator, ..) && operator == syntax.PrefixOperator.Not {
         let whole = cursor.read_file_span(value.id)
         let negate_test = make_titled_fix(
           cursor,
           fallback: "Negate the test",
           whole: value.id,
           edits: [
-            source::insert(source::make_zero_width(whole.start + 1), replacement: "("),
-            source::insert(source::make_zero_width(whole.stop), replacement: ")"),
+            source.insert(source.make_zero_width(whole.start + 1), replacement: "("),
+            source.insert(source.make_zero_width(whole.stop), replacement: ")"),
           ],
         )
         let negate_value = make_titled_fix(cursor, fallback: "Negate the value", whole: value.id, edits: make_parentheses(cursor, first: left.id, last: left.id))

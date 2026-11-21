@@ -93,7 +93,7 @@ let () =
           projections = [];
         }
       in
-      expect_bug ~saying:"a move out of test::words, which is static data" (fun () ->
+      expect_bug ~saying:"a move out of test.words, which is static data" (fun () ->
           emit
             (Codegen_support.make_shape_env ~extra:Codegen_support.drop_shapes ())
             (Codegen_support.entry
@@ -116,5 +116,5 @@ let () =
             assumes_condition = false;
           }
       in
-      expect_bug ~saying:"while lowering example::Point" (fun () ->
+      expect_bug ~saying:"while lowering example.Point" (fun () ->
           ignore (Codegen_support.load ~roots:[ not_code ] "type Point(x: Int64)\n")))

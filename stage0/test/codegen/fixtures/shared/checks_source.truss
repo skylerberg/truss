@@ -1,4 +1,4 @@
-use standard::intrinsic
+use standard.intrinsic
 
 capability Ticker {
   fn next() -> Int64
@@ -6,34 +6,34 @@ capability Ticker {
   fn key_in_a_parallel_branch() -> UInt64
 }
 
-type Clockwork(ticks: intrinsic::Shared[Int64])
+type Clockwork(ticks: intrinsic.Shared[Int64])
 
 impl Ticker for Clockwork {
   fn next(self) -> Int64 {
-    intrinsic::shared_update(self.ticks, input: 1, change: fn(ticks, by) {
+    intrinsic.shared_update(self.ticks, input: 1, change: fn(ticks, by) {
       ticks += by
       ticks
     })
   }
 
   fn key_in_a_lambda(self) -> UInt64 {
-    let key: fn() -> UInt64 = fn() { intrinsic::shared_key(self.ticks) }
+    let key: fn() -> UInt64 = fn() { intrinsic.shared_key(self.ticks) }
     key()
   }
 
   fn key_in_a_parallel_branch(self) -> UInt64 {
     parallel {
-      let key = intrinsic::shared_key(self.ticks)
+      let key = intrinsic.shared_key(self.ticks)
     }
     key
   }
 }
 
-type Flag(raised: intrinsic::Shared[Bool])
+type Flag(raised: intrinsic.Shared[Bool])
 
 impl Tasks for Flag {
   fn open(self) -> UInt64 {
-    intrinsic::shared_key(self.raised)
+    intrinsic.shared_key(self.raised)
   }
 
   fn spawn(self, task_group: UInt64, work: own fn(UInt64), item: UInt64) -> Bool {
@@ -44,7 +44,7 @@ impl Tasks for Flag {
   fn join(self, task_group: UInt64) {}
 
   fn cancel(self, task_group: UInt64) -> Bool {
-    intrinsic::shared_update(self.raised, input: true, change: fn(raised, now) {
+    intrinsic.shared_update(self.raised, input: true, change: fn(raised, now) {
       let first = !raised
       raised = now
       first
@@ -70,18 +70,18 @@ impl Tasks for Flag {
   fn yield_now(self) {}
 }
 
-fn with_tasks(ticks: intrinsic::Shared[Int64]) -> UInt64
+fn with_tasks(ticks: intrinsic.Shared[Int64]) -> UInt64
   uses Tasks
 {
-  intrinsic::shared_key(ticks)
+  intrinsic.shared_key(ticks)
 }
 
-fn without_tasks(ticks: intrinsic::Shared[Int64]) -> UInt64 {
-  intrinsic::shared_key(ticks)
+fn without_tasks(ticks: intrinsic.Shared[Int64]) -> UInt64 {
+  intrinsic.shared_key(ticks)
 }
 
-fn of_a_view(numbers: intrinsic::Shared[Slice[Int64]]) -> UInt64
+fn of_a_view(numbers: intrinsic.Shared[Slice[Int64]]) -> UInt64
   uses Tasks
 {
-  intrinsic::shared_key(numbers)
+  intrinsic.shared_key(numbers)
 }

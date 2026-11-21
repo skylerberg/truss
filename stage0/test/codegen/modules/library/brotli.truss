@@ -1,8 +1,8 @@
-use standard::compression::brotli
-use standard::hex
+use standard.compression.brotli
+use standard.hex
 
 fn bytes_of(text: StringSlice) -> List[UInt8] {
-  match hex::decode(text) {
+  match hex.decode(text) {
     Ok(bytes) => own bytes
     Err(_) => []
   }
@@ -697,23 +697,23 @@ test "streams that the reference Brotli compressed decompress to their input" {
   ]
   for index in 0..names.length() {
     let stream = joined(streams[index].slice())
-    assert brotli::decompress(stream) == Ok(input_of(names[index]))
+    assert brotli.decompress(stream) == Ok(input_of(names[index]))
   }
 }
 
 test "decompress rejects damaged and truncated streams, trailing data, and output past its limit" {
   let stream = bytes_of("0b0b8048656c6c6f2c207a73746420616e642042726f746c692103")
-  assert brotli::decompress(stream[..stream.length() - 1]) is Err(Malformed(_))
+  assert brotli.decompress(stream[..stream.length() - 1]) is Err(Malformed(_))
   var trailing = stream.copy()
   mut trailing.push(0)
-  assert brotli::decompress(trailing) is Err(Malformed(_))
-  assert brotli::decompress([]) is Err(Malformed(_))
+  assert brotli.decompress(trailing) is Err(Malformed(_))
+  assert brotli.decompress([]) is Err(Malformed(_))
   let text = joined(["1bb70b0004aab5754bba5c6f60f0055f052f2d7cd9e427b4a77b57498290088b306f669684eeaff9b50275118e4d417038f0feae6dd324", "bf7ffdfeeb7e9fc3e97afd387bef2e7b7f550e6bf3e3ea93c5f15571f866c6f177fedf9dd6ba729f66fd1c32aea381e6efb1d93ad492b5", "aa3af5d8315555c05c83f04c25fc6351c91c7700cae2803c9ec539d48e79428cb150cad51a9567822cc816272d5c18d7696c0fec10ab9e", "d3d3d630deba645bcce0f5118a2e44d935a582dc5241e84894b3069ea83652b2a79d642b6a9611110342e1522a8e395a08bacc84288873", "833284ea67925886194bc114b89ad34598b47b62ae201d4136927b0e937a9c8f4fe3c4c18e22fb9f241b17e28cc281f3962bc80b6441be", "21fe86208c089e368315d5f619e56c3958aa6b2992165b35b0faf70d3f9ebc0b1d5db0f52867022480eadb5d9831930a43f7e6c8fbab1f", "6bae283031548c684bfc3a7a7a853b6ad08082f9851fa7c11075ce506821374126e5214a30c927b171ce27bce7653ca60dfe225fdc1bae", "f5160c2c266fec0d0ea6343d47574b538dafed77249310a49e3357eeff4a2f5dbc1002234263fc407aa052e246da2b5d8d9d3c36df2eb3", "51de40374daccf8dac2d6f9c94fe62f6a4a89042d1862031328008c4572b69f83dcb01"].slice())
-  assert brotli::decompress(text, limit: 2999) == Err(brotli::Error.TooLarge(limit: 2999))
-  assert brotli::decompress(text, limit: 3000) == Ok(words(3000))
+  assert brotli.decompress(text, limit: 2999) == Err(brotli.Error.TooLarge(limit: 2999))
+  assert brotli.decompress(text, limit: 3000) == Ok(words(3000))
   for index in 0..text.length() {
     var damaged = text.copy()
     damaged[index] = damaged[index] ^ 0x55
-    assert brotli::decompress(damaged) != Ok(words(3000))
+    assert brotli.decompress(damaged) != Ok(words(3000))
   }
 }

@@ -1,4 +1,4 @@
-use standard::text
+use standard.text
 
 public opaque type Html(text: String)
   derives Equal, Copyable
@@ -365,7 +365,7 @@ fn place_of(scanner: Scanner) -> Place
   }
 }
 
-fn places(literals: Slice[text::Literal]) -> List[Place]
+fn places(literals: Slice[text.Literal]) -> List[Place]
 {
   var scanner = Scanner.new()
   var found: List[Place] = []
@@ -378,7 +378,7 @@ fn places(literals: Slice[text::Literal]) -> List[Place]
   found
 }
 
-public fn is_valid_template(literals: Slice[text::Literal]) -> Bool
+public fn is_valid_template(literals: Slice[text.Literal]) -> Bool
 {
   for place in places(literals) {
     if place == Place.Unsafe {

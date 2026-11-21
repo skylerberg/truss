@@ -1,5 +1,5 @@
-use tools::shapes
+use tools.shapes
 
-fn f(shape: shapes::Shape) -> UInt64 {
+fn f(shape: shapes.Shape) -> UInt64 {
   shape.side_count()
 }

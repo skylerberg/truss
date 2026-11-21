@@ -1,6 +1,6 @@
-use app::shapes
-use other::shapes
+use app.shapes
+use other.shapes
 
 fn f() -> Int64 {
-  shapes::area()
+  shapes.area()
 }

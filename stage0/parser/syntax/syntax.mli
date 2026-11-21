@@ -98,7 +98,7 @@ and expression_kind =
   | Continue
   | Self_value
   | Self_type_value
-  | Name of path
+  | Name of name
   | Member of expression * name
   | Bracket of expression * bracket_item list
   | Call of expression * argument list

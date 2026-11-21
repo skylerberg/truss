@@ -1,4 +1,4 @@
-use standard::core
+use standard.core
 
 type Tree =
   | Leaf
@@ -88,7 +88,7 @@ theorem below_raised[Key: Ordered](
   match tree {
     Leaf => {}
     Node(left, position, right, height: _) => {
-      core::less_is_transitive(keys[position], second: bound, third: higher)
+      core.less_is_transitive(keys[position], second: bound, third: higher)
       below_raised(left, keys: keys, bound: bound, higher: higher)
       below_raised(right, keys: keys, bound: bound, higher: higher)
     }
@@ -108,7 +108,7 @@ theorem above_lowered[Key: Ordered](
   match tree {
     Leaf => {}
     Node(left, position, right, height: _) => {
-      core::less_is_transitive(lower, second: bound, third: keys[position])
+      core.less_is_transitive(lower, second: bound, third: keys[position])
       above_lowered(left, keys: keys, bound: bound, lower: lower)
       above_lowered(right, keys: keys, bound: bound, lower: lower)
     }
@@ -608,7 +608,7 @@ fn Tree.find[Key: Ordered](self, keys: Slice[Key], key: Key) -> UInt64
           assert position < keys.length()
           members_above(right, keys: keys.model(), bound: keys.model()[position])
           assert forall other: UInt64 => right.holds(other) ==> {
-            core::less_is_transitive(key, second: keys.model()[position], third: keys.model()[other])
+            core.less_is_transitive(key, second: keys.model()[position], third: keys.model()[other])
             !(keys.model()[other] == key)
           }
         }
@@ -619,7 +619,7 @@ fn Tree.find[Key: Ordered](self, keys: Slice[Key], key: Key) -> UInt64
           assert position < keys.length()
           members_below(left, keys: keys.model(), bound: keys.model()[position])
           assert forall other: UInt64 => left.holds(other) ==> {
-            core::less_is_transitive(keys.model()[other], second: keys.model()[position], third: key)
+            core.less_is_transitive(keys.model()[other], second: keys.model()[position], third: key)
             !(keys.model()[other] == key)
           }
         }

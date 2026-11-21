@@ -361,7 +361,7 @@ let walk_names ~on_name (definition : Syntax.definition) =
     List.iter (fun (value, _) -> walk_expression value) literal.rest
   and walk_expression (value : Syntax.expression) =
     match value.kind with
-    | Name path -> walk_path path
+    | Name name -> on_name name
     | Member (base, name) ->
         walk_expression base;
         on_name name

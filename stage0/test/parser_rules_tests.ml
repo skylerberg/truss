@@ -5,8 +5,8 @@ let () =
          {}"
         "(fn List[Element: Ordered].least (mut self (by: Order (= (. Order Ascending)))) lends mut \
          Element (block))";
-      Parse_support.expect_definition "fn hourly::Forecast.summary(self) -> String { todo }"
-        "(fn hourly::Forecast.summary (self) -> String (block todo))");
+      Parse_support.expect_definition "fn hourly.Forecast.summary(self) -> String { todo }"
+        "(fn hourly.Forecast.summary (self) -> String (block todo))");
   Harness.test "clauses in the order written" (fun () ->
       Parse_support.expect_definition Fixtures.Parser_rules.clauses_in_the_order_written
         "(fn f ((x: Int64)) -> Int64 (ensures (> result x)) (requires (> x 0)) (decreases x 1) \
@@ -158,8 +158,8 @@ let () =
       Parse_support.expect_definition "impl Add[Element] for Vector[Element] {}"
         "(impl Add[Element] for Vector[Element])";
       Parse_support.expect_definition
-        "impl From[List[map::Entry[Key, Value]]] for Table[Key, Value] {}"
-        "(impl From[List[map::Entry[Key, Value]]] for Table[Key, Value])";
+        "impl From[List[map.Entry[Key, Value]]] for Table[Key, Value] {}"
+        "(impl From[List[map.Entry[Key, Value]]] for Table[Key, Value])";
       Parse_support.expect_definition "impl Add[Self] for Meters {}" "(impl Add[Self] for Meters)";
       Parse_support.expect_definition "impl From[any Display] for Report {}"
         "(impl From[(any Display)] for Report)";
@@ -503,30 +503,27 @@ let () =
       in
       if Support.list_codes diagnostics <> [ "parser.angle_brackets" ] then
         Harness.fail "got [%s]" (String.concat "; " (Support.list_codes diagnostics)));
-  Harness.test "Shape::Circle" (fun () ->
-      Parse_support.expect_body_error "let shape = Shape::Circle(radius: 1.0)" ~code:Path_separator
-        ~at:"::" ~fixed:"let shape = Shape.Circle(radius: 1.0)";
-      Parse_support.expect_body_error "let items = List::new()" ~code:Path_separator ~at:"::"
-        ~fixed:"let items = List.new()");
-  Harness.test "Shape::Circle is parsed as the member it means" (fun () ->
+  Harness.test "a path written with `::` is parsed as the members it means" (fun () ->
       Parse_support.expect_recovered_statements "let shape = geometry::Shape::Circle"
-        [ "(let shape (. geometry::Shape Circle))" ]);
+        [ "(let shape (. (. geometry Shape) Circle))" ];
+      Parse_support.expect_recovered_statements "let items = List::<Int64>::new()"
+        [ "(let items (call (. error new)))" ]);
   Harness.test "a variant with its type in a pattern" (fun () ->
       Parse_support.expect_body_error Fixtures.Parser_rules.match_on_a_type_qualified_variant
         ~code:Qualified_variant ~at:"Shape."
         ~fixed:Fixtures.Parser_rules.match_on_a_type_qualified_variant_fixed;
-      Parse_support.expect_body_error "let empty = shape is geometry::Shape::Empty"
-        ~code:Qualified_variant ~at:"geometry::Shape::" ~fixed:"let empty = shape is Empty");
+      Parse_support.expect_body_error "let empty = shape is geometry.Shape.Empty"
+        ~code:Qualified_variant ~at:"geometry.Shape." ~fixed:"let empty = shape is Empty");
   Harness.test "a variant with its module in a pattern" (fun () ->
-      Parse_support.expect_body_error "let round = shape is geometry::Circle(radius)"
-        ~code:Qualified_variant ~at:"geometry::" ~fixed:"let round = shape is Circle(radius)");
+      Parse_support.expect_body_error "let round = shape is geometry.Circle(radius)"
+        ~code:Qualified_variant ~at:"geometry." ~fixed:"let round = shape is Circle(radius)");
   Harness.test "a constant of a type in a pattern is not a variant" (fun () ->
       List.iter
         (fun text ->
           let _, diagnostics = Parse_support.parse_body text in
           if Support.list_codes diagnostics <> [] then
             Harness.fail "got [%s]" (String.concat "; " (Support.list_codes diagnostics)))
-        [ "let teapot = status is Status.teapot"; "let teapot = status is http::Status.teapot" ]);
+        [ "let teapot = status is Status.teapot"; "let teapot = status is http.Status.teapot" ]);
   Harness.test "vec![...]" (fun () ->
       Parse_support.expect_body_error "let items = vec![1, 2]" ~code:Macro_call ~at:"!"
         ~fixed:"let items = [1, 2]");
@@ -554,8 +551,8 @@ let () =
   Harness.test "value |> function" (fun () ->
       Parse_support.expect_body_error "let total = items |> sum" ~code:Pipe_operator ~at:"|>"
         ~fixed:"let total = sum(items)";
-      Parse_support.expect_body_error "let total = items\n  |> list::sum" ~code:Pipe_operator
-        ~at:"|>" ~fixed:"let total = list::sum(items)";
+      Parse_support.expect_body_error "let total = items\n  |> list.sum" ~code:Pipe_operator
+        ~at:"|>" ~fixed:"let total = list.sum(items)";
       Parse_support.expect_body_error "let total = items |> take(3)" ~code:Pipe_operator ~at:"|>");
   Harness.test "a lambda with annotations" (fun () ->
       Parse_support.expect_body_error "let double = fn(x: Int64) { x * 2 }" ~code:Lambda_annotation

@@ -256,8 +256,8 @@ let () =
         (Printf.sprintf "%s cannot be used after its source is mutated or moved" maker.maker)
         (fun () ->
           let text, functions = generate maker in
-          let packages = Support.setup [ ("app::main", text) ] in
-          let diagnostics = Support.run_check ~check packages "app::main" in
+          let packages = Support.setup [ ("app.main", text) ] in
+          let diagnostics = Support.run_check ~check packages "app.main" in
           let check_generated (generated : generated) =
             List.filter
               (fun (diagnostic : Diagnostic.t) ->

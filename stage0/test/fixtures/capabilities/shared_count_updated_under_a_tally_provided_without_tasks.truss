@@ -1,9 +1,9 @@
-fn f(count: intrinsic::Shared[Int64]) -> Int64 {
+fn f(count: intrinsic.Shared[Int64]) -> Int64 {
   var tally = Tally(count: 0)
   let scheduler = Scheduler(turn: 0)
   provide mut tally {
     provide scheduler {
-      intrinsic::shared_update(count, input: 1, change: fn(held, by) {
+      intrinsic.shared_update(count, input: 1, change: fn(held, by) {
         held = held.saturating_add(by)
         held
       })

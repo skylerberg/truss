@@ -1,7 +1,7 @@
-use standard::streams
-use standard::url
+use standard.streams
+use standard.url
 
-public opaque type Form(fields: List[url::Parameter])
+public opaque type Form(fields: List[url.Parameter])
   derives Equal, Copyable
 
 public fn Form.new() -> Form {
@@ -9,7 +9,7 @@ public fn Form.new() -> Form {
 }
 
 public fn Form.parse(text: StringSlice) -> Result[Form, Error] {
-  match url::decode_query(text) {
+  match url.decode_query(text) {
     Ok(fields) => Ok(Form(fields: own fields))
     Err(_) => Err(malformed("a form whose percent-encoding is not valid"))
   }
@@ -34,16 +34,16 @@ public fn Form.all(self, name: StringSlice) -> List[StringSlice] {
   values
 }
 
-public fn Form.entries(self) -> Slice[url::Parameter] {
+public fn Form.entries(self) -> Slice[url.Parameter] {
   self.fields.slice()
 }
 
 public fn Form.add(mut self, name: StringSlice, value: StringSlice) {
-  mut self.fields.push(url::Parameter(name: name.to_string(), value: value.to_string()))
+  mut self.fields.push(url.Parameter(name: name.to_string(), value: value.to_string()))
 }
 
 public fn Form.encode(self) -> String {
-  url::encode_query(self.fields.slice())
+  url.encode_query(self.fields.slice())
 }
 
 fn media_type(headers: Headers) -> String {
@@ -97,7 +97,7 @@ type Section = Preamble | Between | Body | Finished
 public opaque type Multipart(
   body: Body,
   delimiter: List[UInt8],
-  buffer: streams::ByteQueue,
+  buffer: streams.ByteQueue,
   section: Section,
   header_limit: UInt64,
 )
@@ -293,7 +293,7 @@ public fn Multipart.read_all(mut self, limit: UInt64 = 8388608) -> Result[List[U
   Ok(own bytes)
 }
 
-public fn Multipart.copy_to[Sink: streams::Writer](mut self, sink: mut Sink) -> Result[UInt64, Error]
+public fn Multipart.copy_to[Sink: streams.Writer](mut self, sink: mut Sink) -> Result[UInt64, Error]
   uses Handles, Tasks, RunForever
 {
   var copied: UInt64 = 0

@@ -1,5 +1,5 @@
-use app::shapes
+use app.shapes
 
-fn f() -> shapes::Shape {
-  shapes::Shape.hidden_maker()
+fn f() -> shapes.Shape {
+  shapes.Shape.hidden_maker()
 }

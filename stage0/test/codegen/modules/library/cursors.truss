@@ -1,4 +1,4 @@
-use standard::simulation
+use standard.simulation
 
 type Counter(next: Int64, stop: Int64)
 
@@ -203,8 +203,8 @@ fn Typed.line_lengths(self) -> LineLengths {
   LineLengths(most: self.most, read_count: 0)
 }
 
-fn typing(lines: own List[String]) -> simulation::World {
-  simulation::World.from(simulation::Setup.new().with_input(own lines))
+fn typing(lines: own List[String]) -> simulation.World {
+  simulation.World.from(simulation.Setup.new().with_input(own lines))
 }
 
 test "the adapters work on a cursor that uses a capability" uses Panic, RunForever {

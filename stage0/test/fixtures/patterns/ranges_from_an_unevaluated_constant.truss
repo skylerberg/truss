@@ -2,8 +2,8 @@ let low: Int64 = 3 << 0
 
 fn f(n: Int64) -> Int64 {
   match n {
-    app::main::low..=10 => 1
-    app::main::low..=20 => 2
+    app.main.low..=10 => 1
+    app.main.low..=20 => 2
     _ => 3
   }
 }

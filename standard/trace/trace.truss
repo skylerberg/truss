@@ -1,5 +1,5 @@
-use standard::hex
-use standard::random
+use standard.hex
+use standard.random
 
 public type Context(trace_id: List[UInt8], span_id: List[UInt8], is_sampled: Bool)
   derives Equal
@@ -49,9 +49,9 @@ public fn Context.parse(header: StringSlice) -> Option[Context] {
   if text.length() > 55 && bytes[55] != 45 {
     return None
   }
-  let trace_id = hex::decode(field(text, from: 3, length: 32)?).ok()?
-  let span_id = hex::decode(field(text, from: 36, length: 16)?).ok()?
-  let flags = hex::decode(field(text, from: 53, length: 2)?).ok()?
+  let trace_id = hex.decode(field(text, from: 3, length: 32)?).ok()?
+  let span_id = hex.decode(field(text, from: 36, length: 16)?).ok()?
+  let flags = hex.decode(field(text, from: 53, length: 2)?).ok()?
   if is_zero(trace_id.slice()) || is_zero(span_id.slice()) || flags.is_empty() {
     return None
   }
@@ -61,7 +61,7 @@ public fn Context.parse(header: StringSlice) -> Option[Context] {
 fn nonzero_bytes(count: UInt64) -> List[UInt8]
   uses Random
 {
-  var bytes = random::bytes(count)
+  var bytes = random.bytes(count)
   if is_zero(bytes.slice()) && !bytes.is_empty() {
     bytes[0] = 1
   }
@@ -81,13 +81,13 @@ public fn Context.child(self) -> Context
 }
 
 public fn Context.header(self) -> String {
-  "00-${hex::encode(self.trace_id.slice())}-${hex::encode(self.span_id.slice())}-${if self.is_sampled { "01" } else { "00" }}"
+  "00-${hex.encode(self.trace_id.slice())}-${hex.encode(self.span_id.slice())}-${if self.is_sampled { "01" } else { "00" }}"
 }
 
 public fn Context.trace_text(self) -> String {
-  hex::encode(self.trace_id.slice())
+  hex.encode(self.trace_id.slice())
 }
 
 public fn Context.span_text(self) -> String {
-  hex::encode(self.span_id.slice())
+  hex.encode(self.span_id.slice())
 }

@@ -1,10 +1,10 @@
-use standard::files
-use standard::simulation
-use standard::tasks
+use standard.files
+use standard.simulation
+use standard.tasks
 
 type Connection(serial: Int64)
 
-fn borrow(pool: tasks::Pool[Connection], opened: tasks::Counter, fails: Bool) -> String
+fn borrow(pool: tasks.Pool[Connection], opened: tasks.Counter, fails: Bool) -> String
   uses Tasks, Clock, RunForever
 {
   let outcome = pool.using(open: fn() {
@@ -21,9 +21,9 @@ fn borrow(pool: tasks::Pool[Connection], opened: tasks::Counter, fails: Bool) ->
 }
 
 test "a pool reuses an idle resource, discards one whose work failed, and forgets one that idled too long" uses Panic, RunForever {
-  provide simulation::World.new() {
-    let opened = tasks::Counter.new()
-    let pool = tasks::Pool[Connection].new(tasks::PoolOptions(maximum: 2, idle_seconds: 60))
+  provide simulation.World.new() {
+    let opened = tasks.Counter.new()
+    let pool = tasks.Pool[Connection].new(tasks.PoolOptions(maximum: 2, idle_seconds: 60))
     assert borrow(pool, opened: opened, fails: false) == "1"
     assert borrow(pool, opened: opened, fails: false) == "1"
     assert pool.idle_count() == 1
@@ -36,7 +36,7 @@ test "a pool reuses an idle resource, discards one whose work failed, and forget
   }
 }
 
-fn hold(pool: tasks::Pool[Connection], opened: tasks::Counter, active: tasks::Counter, peak: tasks::Counter)
+fn hold(pool: tasks.Pool[Connection], opened: tasks.Counter, active: tasks.Counter, peak: tasks.Counter)
   uses Tasks, Clock, RunForever
 {
   let _ = pool.using(open: fn() {
@@ -54,11 +54,11 @@ fn hold(pool: tasks::Pool[Connection], opened: tasks::Counter, active: tasks::Co
 }
 
 test "a pool lends at most its maximum at once, and the others wait for one to come back" uses Panic, RunForever {
-  provide simulation::World.new() {
-    let opened = tasks::Counter.new()
-    let active = tasks::Counter.new()
-    let peak = tasks::Counter.new()
-    let pool = tasks::Pool[Connection].new(tasks::PoolOptions(maximum: 2))
+  provide simulation.World.new() {
+    let opened = tasks.Counter.new()
+    let active = tasks.Counter.new()
+    let peak = tasks.Counter.new()
+    let pool = tasks.Pool[Connection].new(tasks.PoolOptions(maximum: 2))
     concurrent {
       hold(pool, opened: opened, active: active, peak: peak)
       hold(pool, opened: opened, active: active, peak: peak)
@@ -74,8 +74,8 @@ test "a pool lends at most its maximum at once, and the others wait for one to c
 type Seen(checks: String, path: String)
 
 test "a temporary directory is writable while the work runs and is removed afterwards" uses Panic, RunForever {
-  provide simulation::World.from(simulation::Setup.new().with_file(Path.new("/tmp/.keep"), contents: "")) {
-    let outcome = files::with_temporary_directory(fn(directory) {
+  provide simulation.World.from(simulation.Setup.new().with_file(Path.new("/tmp/.keep"), contents: "")) {
+    let outcome = files.with_temporary_directory(fn(directory) {
       let file = directory.join("note.txt")
       let is_written = FileWrite.write_text(file, contents: "hello") is Ok(_)
       let is_read = FileRead.read_text(file).ok() == Some("hello")
@@ -84,12 +84,12 @@ test "a temporary directory is writable while the work runs and is removed after
     let seen = own outcome.expect("a temporary directory")
     assert seen.checks == "true true"
     assert seen.path.slice().starts_with("/tmp/truss-")
-    assert !files::is_present(Path.new(seen.path.slice()))
-    let file_outcome = files::with_temporary_file(fn(path) {
+    assert !files.is_present(Path.new(seen.path.slice()))
+    let file_outcome = files.with_temporary_file(fn(path) {
       Seen(checks: "${FileRead.read_text(path).ok() == Some("")}", path: "${path}")
     })
     let file_seen = own file_outcome.expect("a temporary file")
     assert file_seen.checks == "true"
-    assert !files::is_present(Path.new(file_seen.path.slice()))
+    assert !files.is_present(Path.new(file_seen.path.slice()))
   }
 }

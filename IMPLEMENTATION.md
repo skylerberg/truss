@@ -196,7 +196,7 @@ Every stage of stage0 is tested the same way:
   the tests of every module in its share into one program, and runs it. The
   `runtest` alias runs two shares in parallel. A new test therefore adds
   its code to one build and starts no build of its own. A test of a panic
-  goes in the module `library::panics`: each of its tests must panic with a
+  goes in the module `library.panics`: each of its tests must panic with a
   message that contains the test's name. A test written in OCaml that
   compiles a program of its own is for what a passing test cannot show: a
   diagnostic, the generated code, a reported source location, or a whole
@@ -215,7 +215,7 @@ Every stage of stage0 is tested the same way:
   or "every example in the documents lexes cleanly".
 - **One test can be run alone.** With `TRUSS_TEST` set, a test executable
   runs only the tests whose names contain it, for working on one:
-  `TRUSS_TEST=standard::text _build/default/stage0/test/standard_library_tests.exe`.
+  `TRUSS_TEST=standard.text _build/default/stage0/test/standard_library_tests.exe`.
   A test must not depend on what an earlier test did, since `TRUSS_TEST`
   and `TRUSS_TEST_SHARE` run it without the tests before it. The harness
   restores the environment after each test, so a test sets or unsets the

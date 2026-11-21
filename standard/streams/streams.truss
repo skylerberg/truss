@@ -1,16 +1,16 @@
-use standard::console
-use standard::files
-use standard::intrinsic
-use standard::map
-use standard::network
-use standard::processes
+use standard.console
+use standard.files
+use standard.intrinsic
+use standard.map
+use standard.network
+use standard.processes
 
-public opaque type Handle(descriptor: intrinsic::Handle, number: UInt64)
+public opaque type Handle(descriptor: intrinsic.Handle, number: UInt64)
 
 public fn Handle.simulated(number: UInt64) -> Handle
   ensures result.number() == number
 {
-  Handle(descriptor: intrinsic::handle_from(-1), number: number)
+  Handle(descriptor: intrinsic.handle_from(-1), number: number)
 }
 
 public fn Handle.number(self) -> UInt64
@@ -304,7 +304,7 @@ public fn ByteQueue.take_all(mut self) -> List[UInt8]
   cost allocations <= 1
 {
   if self.start == 0 {
-    return map::exchange(mut self.storage, value: [])
+    return map.exchange(mut self.storage, value: [])
   }
   let taken = self.storage[self.start..].to_list()
   self.start = self.storage.length()
@@ -666,7 +666,7 @@ impl Handles for NoHandles {
     Err(SystemError.Closed)
   }
 
-  fn metadata(self, handle: Handle) -> Result[files::Metadata, SystemError] {
+  fn metadata(self, handle: Handle) -> Result[files.Metadata, SystemError] {
     Err(SystemError.Closed)
   }
 
@@ -674,20 +674,20 @@ impl Handles for NoHandles {
     Err(SystemError.Closed)
   }
 
-  fn shut_down(self, handle: Handle, direction: network::Direction) -> Result[Unit, SystemError] {
+  fn shut_down(self, handle: Handle, direction: network.Direction) -> Result[Unit, SystemError] {
     Err(SystemError.Closed)
   }
 
   fn set_timeout(
     self,
     handle: Handle,
-    direction: network::Direction,
+    direction: network.Direction,
     timeout: Option[Duration],
   ) -> Result[Unit, SystemError] {
     Err(SystemError.Closed)
   }
 
-  fn accept(self, listener: Handle) -> Result[network::Accepted, SystemError] {
+  fn accept(self, listener: Handle) -> Result[network.Accepted, SystemError] {
     Err(SystemError.Closed)
   }
 
@@ -695,7 +695,7 @@ impl Handles for NoHandles {
     Err(SystemError.Closed)
   }
 
-  fn configure(self, socket: Handle, option: network::SocketOption) -> Result[Unit, SystemError] {
+  fn configure(self, socket: Handle, option: network.SocketOption) -> Result[Unit, SystemError] {
     Err(SystemError.Closed)
   }
 
@@ -703,7 +703,7 @@ impl Handles for NoHandles {
     self,
     socket: Handle,
     bytes: Slice[UInt8],
-    address: network::SocketAddress,
+    address: network.SocketAddress,
   ) -> Result[UInt64, SystemError] {
     Err(SystemError.Closed)
   }
@@ -713,19 +713,19 @@ impl Handles for NoHandles {
     socket: Handle,
     buffer: mut List[UInt8],
     limit: UInt64,
-  ) -> Result[network::Datagram, SystemError] {
+  ) -> Result[network.Datagram, SystemError] {
     Err(SystemError.Closed)
   }
 
-  fn wait(self, process: Handle) -> Result[processes::ExitStatus, SystemError] {
+  fn wait(self, process: Handle) -> Result[processes.ExitStatus, SystemError] {
     Err(SystemError.Closed)
   }
 
-  fn signal(self, process: Handle, signal: processes::Signal) -> Result[Unit, SystemError] {
+  fn signal(self, process: Handle, signal: processes.Signal) -> Result[Unit, SystemError] {
     Err(SystemError.Closed)
   }
 
-  fn terminal_size(self, terminal: Handle) -> Result[console::Size, SystemError] {
+  fn terminal_size(self, terminal: Handle) -> Result[console.Size, SystemError] {
     Err(SystemError.Closed)
   }
 

@@ -1,5 +1,5 @@
-use standard::serialization
+use standard.serialization
 
 type Level(value: UInt8)
   invariant value <= 300
-  derives serialization::Deserialize
+  derives serialization.Deserialize

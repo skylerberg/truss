@@ -1,6 +1,6 @@
-use standard::core
-use standard::intrinsic
-use standard::list
+use standard.core
+use standard.intrinsic
+use standard.list
 
 public opaque type Map[Key: Hash + Ordered, Value](keys: List[Key], values: List[Value], index: HashIndex)
   invariant values.length() == keys.length()
@@ -246,7 +246,7 @@ internal fn Map[Key: Hash + Ordered, Value].push_entry(mut self, key: own Key, v
   cost amortized time O(16 + time(Key.hash) + (1 + log(old(self.keys.length()))) * (1 + time(Key.compare)))
 {
   if self.keys.length() >= 1152921504606846976 {
-    intrinsic::crash("a map cannot hold that many entries")
+    intrinsic.crash("a map cannot hold that many entries")
   }
   proof {
     overflow_within_log(self)
@@ -794,7 +794,7 @@ impl IndexMut for Map[Key: Hash + Ordered, Value] {
   }
 }
 
-impl core::IndexAssign for Map[Key: Hash + Ordered, Value] {
+impl core.IndexAssign for Map[Key: Hash + Ordered, Value] {
   fn accepts_key(self, key: Key) -> Bool
     ensures result
     cost time O(1)
@@ -821,7 +821,7 @@ impl core::IndexAssign for Map[Key: Hash + Ordered, Value] {
   }
 }
 
-public opaque type EntryCursor[Key, Value](keys: list::ListCursor[Key], values: list::ListCursor[Value])
+public opaque type EntryCursor[Key, Value](keys: list.ListCursor[Key], values: list.ListCursor[Value])
   invariant keys.remaining() == values.remaining()
 
 impl Model for EntryCursor[Key, Value] {
@@ -1241,25 +1241,25 @@ impl FromEntries for Map[Key: Hash + Ordered, Value] {
   {
     let count = entries.length()
     if count > 1152921504606846976 {
-      intrinsic::crash("a map cannot hold that many entries")
+      intrinsic.crash("a map cannot hold that many entries")
     }
-    var keys: intrinsic::Storage[Key] = intrinsic::storage_with_capacity(count)
-    var values: intrinsic::Storage[Value] = intrinsic::storage_with_capacity(count)
+    var keys: intrinsic.Storage[Key] = intrinsic.storage_with_capacity(count)
+    var values: intrinsic.Storage[Value] = intrinsic.storage_with_capacity(count)
     var cursor = own entries.cursor()
     while mut cursor.next() is Some(entry)
-      invariant intrinsic::storage_length(keys) == intrinsic::storage_length(values)
-      invariant intrinsic::storage_length(keys) + cursor.remaining() == count
-      invariant intrinsic::storage_capacity(keys) == count && intrinsic::storage_capacity(values) == count
-      invariant forall i in 0..intrinsic::storage_length(keys) =>
-        identical(intrinsic::storage_model(keys)[i], entries.model()[i].key)
-          && identical(intrinsic::storage_model(values)[i], entries.model()[i].value)
+      invariant intrinsic.storage_length(keys) == intrinsic.storage_length(values)
+      invariant intrinsic.storage_length(keys) + cursor.remaining() == count
+      invariant intrinsic.storage_capacity(keys) == count && intrinsic.storage_capacity(values) == count
+      invariant forall i in 0..intrinsic.storage_length(keys) =>
+        identical(intrinsic.storage_model(keys)[i], entries.model()[i].key)
+          && identical(intrinsic.storage_model(values)[i], entries.model()[i].value)
       invariant forall i in 0..cursor.remaining() =>
-        identical(cursor.model()[i], entries.model()[intrinsic::storage_length(keys) + i])
+        identical(cursor.model()[i], entries.model()[intrinsic.storage_length(keys) + i])
       decreases cursor.remaining()
       cost time O(count - cursor.remaining())
     {
-      intrinsic::storage_push(mut keys, value: own entry.key)
-      intrinsic::storage_push(mut values, value: own entry.value)
+      intrinsic.storage_push(mut keys, value: own entry.key)
+      intrinsic.storage_push(mut values, value: own entry.value)
     }
     let key_list = List(storage: own keys)
     let value_list = List(storage: own values)

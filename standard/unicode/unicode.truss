@@ -1,6 +1,6 @@
-use standard::core
-use standard::text::string_slice
-use standard::text::unicode_tables
+use standard.core
+use standard.text.string_slice
+use standard.text.unicode_tables
 
 public type Form = Composed | Decomposed | CompatibilityComposed | CompatibilityDecomposed
   derives Equal
@@ -76,10 +76,10 @@ fn append_decomposition(codes: mut List[UInt32], code: UInt32, compatible: Bool)
   } else {
     var decomposed = false
     if compatible {
-      decomposed = unicode_tables::append_compatibility_decomposition(mut codes, code: code)
+      decomposed = unicode_tables.append_compatibility_decomposition(mut codes, code: code)
     }
     if !decomposed {
-      decomposed = unicode_tables::append_canonical_decomposition(mut codes, code: code)
+      decomposed = unicode_tables.append_canonical_decomposition(mut codes, code: code)
     }
     if !decomposed {
       mut codes.push(code)
@@ -92,7 +92,7 @@ fn with_combining_classes(codes: Slice[UInt32]) -> List[UInt32]
   var entries: List[UInt32] = []
   for index in 0..codes.length() {
     let code = codes[index] % 2097152
-    mut entries.push(unicode_tables::combining_class_of(code) % 256 * 2097152 + code)
+    mut entries.push(unicode_tables.combining_class_of(code) % 256 * 2097152 + code)
   }
   entries
 }
@@ -100,7 +100,7 @@ fn with_combining_classes(codes: Slice[UInt32]) -> List[UInt32]
 fn reorder(entries: mut List[UInt32])
   ensures entries.length() == old(entries.length())
 {
-  var run: List[core::Pair[core::Pair[UInt32, UInt64], UInt32]] = []
+  var run: List[core.Pair[core.Pair[UInt32, UInt64], UInt32]] = []
   var start: UInt64 = 0
   while start < entries.length()
     invariant entries.length() == old(entries.length())
@@ -121,7 +121,7 @@ fn reorder(entries: mut List[UInt32])
         invariant run.length() == index - start
         invariant entries.length() == old(entries.length())
       {
-        mut run.push(core::Pair(first: core::Pair(first: entries[index] / 2097152, second: index - start), second: entries[index]))
+        mut run.push(core.Pair(first: core.Pair(first: entries[index] / 2097152, second: index - start), second: entries[index]))
       }
       mut run.sort()
       for offset in 0..stop - start
@@ -143,7 +143,7 @@ fn composite_of(first: UInt32, second: UInt32) -> Option[UInt32]
   } else if first >= 44032 && first < 55204 && (first - 44032) % 28 == 0 && second > 4519 && second < 4547 {
     Some(first + (second - 4519))
   } else {
-    unicode_tables::composition_of(first, second: second)
+    unicode_tables.composition_of(first, second: second)
   }
 }
 
@@ -184,7 +184,7 @@ fn encoded(codes: Slice[UInt32]) -> String
 {
   var output = ""
   for index in 0..codes.length() {
-    string_slice::push_scalar(mut output, code: codes[index] % 2097152)
+    string_slice.push_scalar(mut output, code: codes[index] % 2097152)
   }
   output
 }
@@ -219,9 +219,9 @@ public fn fold_case(text: StringSlice) -> String
   var output = ""
   for character in text.characters() {
     let code = character.code()
-    match unicode_tables::fold_expansion_of(code) {
-      Some(expansion) => string_slice::push_expansion(mut output, expansion: expansion)
-      None => mut output.push_character(character.or_scalar(unicode_tables::folded_of(code)))
+    match unicode_tables.fold_expansion_of(code) {
+      Some(expansion) => string_slice.push_expansion(mut output, expansion: expansion)
+      None => mut output.push_character(character.or_scalar(unicode_tables.folded_of(code)))
     }
   }
   output
@@ -235,7 +235,7 @@ public fn equal_ignoring_case(first: StringSlice, second: StringSlice) -> Bool
 public fn category(character: Character) -> Category
   cost time O(1)
 {
-  match unicode_tables::category_number_of(character.code()) {
+  match unicode_tables.category_number_of(character.code()) {
     0 => Category.Letter
     1 => Category.Mark
     2 => Category.Number
@@ -255,9 +255,9 @@ public fn display_width(character: Character) -> UInt64
   cost time O(1)
 {
   let code = character.code()
-  if unicode_tables::is_zero_width(code) {
+  if unicode_tables.is_zero_width(code) {
     0
-  } else if unicode_tables::is_wide(code) {
+  } else if unicode_tables.is_wide(code) {
     2
   } else {
     1

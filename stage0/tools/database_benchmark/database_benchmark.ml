@@ -34,24 +34,24 @@ internal fn leaf(value: Int64) -> Int64 {
 
 let make_callee index place =
   if place > 0 then make_function_name index (place - 1)
-  else if index = 0 then "core::leaf"
+  else if index = 0 then "core.leaf"
   else
-    make_module_name (compute_parent index) ^ "::" ^ make_function_name (compute_parent index) last
+    make_module_name (compute_parent index) ^ "." ^ make_function_name (compute_parent index) last
 
-let make_body index place = Printf.sprintf "core::leaf(value) + %s(value)" (make_callee index place)
+let make_body index place = Printf.sprintf "core.leaf(value) + %s(value)" (make_callee index place)
 
 let make_module_text index =
   let buffer = Buffer.create 2048 in
-  Buffer.add_string buffer "use demo::core\n";
-  if index > 0 then Printf.bprintf buffer "use demo::%s\n" (make_module_name (compute_parent index));
+  Buffer.add_string buffer "use demo.core\n";
+  if index > 0 then Printf.bprintf buffer "use demo.%s\n" (make_module_name (compute_parent index));
   for place = 0 to last do
     Printf.bprintf buffer "\ninternal fn %s(value: Int64) -> Int64 {\n  %s\n}\n"
       (make_function_name index place) (make_body index place)
   done;
   Printf.bprintf buffer
-    "\ninternal fn measured_%d(point: core::Point) -> Int64 {\n  point.measure() + point.x\n}\n"
+    "\ninternal fn measured_%d(point: core.Point) -> Int64 {\n  point.measure() + point.x\n}\n"
     index;
-  Printf.bprintf buffer "\ntest \"%s\" {\n  assert %s(1) + measured_%d(core::origin()) > 0\n}\n"
+  Printf.bprintf buffer "\ntest \"%s\" {\n  assert %s(1) + measured_%d(core.origin()) > 0\n}\n"
     (make_module_name index) (make_function_name index last) index;
   Buffer.contents buffer
 

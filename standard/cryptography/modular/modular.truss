@@ -1,4 +1,4 @@
-use standard::intrinsic
+use standard.intrinsic
 
 let low_mask: UInt64 = 4294967295
 
@@ -29,7 +29,7 @@ internal fn limbs_from_bytes(bytes: Slice[UInt8], count: UInt64) -> List[UInt64]
     let from_end = bytes.length() - 1 - index
     let limb = from_end / 4
     if limb < limbs.length() {
-      let byte: UInt64 = intrinsic::convert(bytes[index])
+      let byte: UInt64 = intrinsic.convert(bytes[index])
       limbs[limb] = limbs[limb] | (byte << (8 * (from_end % 4)))
     }
   }
@@ -41,7 +41,7 @@ internal fn limbs_to_bytes(limbs: Slice[UInt64], length: UInt64) -> List[UInt8] 
   for index in 0..length {
     let from_end = length - 1 - index
     let limb = limb_at(limbs, index: from_end / 4)
-    mut bytes.push(intrinsic::convert((limb >> (8 * (from_end % 4))) & 255))
+    mut bytes.push(intrinsic.convert((limb >> (8 * (from_end % 4))) & 255))
   }
   bytes
 }

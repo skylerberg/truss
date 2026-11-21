@@ -6,7 +6,7 @@ let check packages file =
   | [] -> Support.list_proof_diagnostics database file
   | errors -> errors
 
-let expect_proven text = Support.expect_no_diagnostics ~check [ ("app::main", text) ]
+let expect_proven text = Support.expect_no_diagnostics ~check [ ("app.main", text) ]
 
 let () =
   Harness.test "a map that was inserted into holds the key" (fun () ->

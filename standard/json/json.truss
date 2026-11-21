@@ -1,8 +1,8 @@
-use standard::intrinsic
-use standard::numbers::float_math
-use standard::serialization
-use standard::streams
-use standard::text
+use standard.intrinsic
+use standard.numbers.float_math
+use standard.serialization
+use standard.streams
+use standard.text
 
 public type Value =
   | Null
@@ -175,10 +175,10 @@ fn parse_hex4(text: StringSlice, from: UInt64) -> Option[UInt32]
   if text.length() - from < 4 {
     return None
   }
-  let first: UInt32 = intrinsic::convert(text.byte(from).digit_value())
-  let second: UInt32 = intrinsic::convert(text.byte(from + 1).digit_value())
-  let third: UInt32 = intrinsic::convert(text.byte(from + 2).digit_value())
-  let fourth: UInt32 = intrinsic::convert(text.byte(from + 3).digit_value())
+  let first: UInt32 = intrinsic.convert(text.byte(from).digit_value())
+  let second: UInt32 = intrinsic.convert(text.byte(from + 1).digit_value())
+  let third: UInt32 = intrinsic.convert(text.byte(from + 2).digit_value())
+  let fourth: UInt32 = intrinsic.convert(text.byte(from + 3).digit_value())
   if first >= 16 || second >= 16 || third >= 16 || fourth >= 16 {
     return None
   }
@@ -230,7 +230,7 @@ fn parse_unicode_escape(text: StringSlice, from: UInt64, output: mut String) -> 
         return Err(Failure(kind: ParseErrorKind.InvalidUnicode, offset: from))
       }
       if code < 55296 || code > 56319 {
-        mut output.push_character(intrinsic::convert(code))
+        mut output.push_character(intrinsic.convert(code))
         return Ok(from + 6)
       }
       let pair = text.length() - from >= 8 && text.byte(from + 6) == 92 && text.byte(from + 7) == 117
@@ -243,7 +243,7 @@ fn parse_unicode_escape(text: StringSlice, from: UInt64, output: mut String) -> 
           if low < 56320 || low > 57343 {
             return Err(Failure(kind: ParseErrorKind.InvalidUnicode, offset: from))
           }
-          mut output.push_character(intrinsic::convert(65536 + (code - 55296) * 1024 + (low - 56320)))
+          mut output.push_character(intrinsic.convert(65536 + (code - 55296) * 1024 + (low - 56320)))
           Ok(from + 12)
         }
       }
@@ -325,7 +325,7 @@ fn parse_number(text: StringSlice, from: UInt64) -> Result[ParsedValue, Failure]
   if whole && Int64.parse_radix(written, radix: 10) is Ok(integer) && !(negative && integer == 0) {
     return Ok(ParsedValue(value: Value.Number(value: Number(whole: true, integer: integer, fraction: 0.0)), end: end))
   }
-  if float_math::parse_float64(written) is Ok(read) && Number.from_float64(read) is Some(number) {
+  if float_math.parse_float64(written) is Ok(read) && Number.from_float64(read) is Some(number) {
     return Ok(ParsedValue(value: Value.Number(value: number), end: end))
   }
   Err(Failure(kind: ParseErrorKind.InvalidNumber, offset: from))
@@ -576,7 +576,7 @@ public fn quote(text: StringSlice) -> String
   cost time O(text.length())
 {
   if text.length() > UInt64.maximum / 8 {
-    intrinsic::crash("a string cannot hold that many bytes")
+    intrinsic.crash("a string cannot hold that many bytes")
   }
   var extra: UInt64 = 0
   for index in 0..text.length()
@@ -585,19 +585,19 @@ public fn quote(text: StringSlice) -> String
     extra += escape_overhead(text.byte(index))
   }
   let capacity = text.length() + extra + 2
-  var output: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(capacity)
-  intrinsic::storage_push(mut output, value: 34)
+  var output: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(capacity)
+  intrinsic.storage_push(mut output, value: 34)
   var budget = extra
   for index in 0..text.length()
-    invariant intrinsic::storage_length(output) + (text.length() - index) + budget + 1 <= capacity
-    invariant intrinsic::storage_capacity(output) == capacity
+    invariant intrinsic.storage_length(output) + (text.length() - index) + budget + 1 <= capacity
+    invariant intrinsic.storage_capacity(output) == capacity
   {
     let byte = text.byte(index)
     let needed = escape_overhead(byte)
     if needed == 0 || budget < needed {
-      intrinsic::storage_push(mut output, value: byte)
+      intrinsic.storage_push(mut output, value: byte)
     } else if needed == 1 {
-      intrinsic::storage_push(mut output, value: 92)
+      intrinsic.storage_push(mut output, value: 92)
       let letter: UInt8 = if byte == 8 {
         98
       } else if byte == 9 {
@@ -611,19 +611,19 @@ public fn quote(text: StringSlice) -> String
       } else {
         byte
       }
-      intrinsic::storage_push(mut output, value: letter)
+      intrinsic.storage_push(mut output, value: letter)
       budget -= 1
     } else {
-      intrinsic::storage_push(mut output, value: 92)
-      intrinsic::storage_push(mut output, value: 117)
-      intrinsic::storage_push(mut output, value: 48)
-      intrinsic::storage_push(mut output, value: 48)
-      intrinsic::storage_push(mut output, value: (byte / 16).digit_byte(uppercase: false))
-      intrinsic::storage_push(mut output, value: (byte % 16).digit_byte(uppercase: false))
+      intrinsic.storage_push(mut output, value: 92)
+      intrinsic.storage_push(mut output, value: 117)
+      intrinsic.storage_push(mut output, value: 48)
+      intrinsic.storage_push(mut output, value: 48)
+      intrinsic.storage_push(mut output, value: (byte / 16).digit_byte(uppercase: false))
+      intrinsic.storage_push(mut output, value: (byte % 16).digit_byte(uppercase: false))
       budget -= 5
     }
   }
-  intrinsic::storage_push(mut output, value: 34)
+  intrinsic.storage_push(mut output, value: 34)
   String(storage: own output)
 }
 
@@ -980,7 +980,7 @@ impl Display for Value {
   }
 }
 
-impl text::Parse for Value {
+impl text.Parse for Value {
   type Error = ParseError
 
   fn parse(text: StringSlice) -> Result[Value, ParseError]
@@ -1012,7 +1012,7 @@ impl FromTemplate for Value {
   }
 }
 
-fn template_text(literals: Slice[text::Literal]) -> Option[String]
+fn template_text(literals: Slice[text.Literal]) -> Option[String]
 {
   var joined = ""
   var index: UInt64 = 0
@@ -1033,7 +1033,7 @@ fn template_text(literals: Slice[text::Literal]) -> Option[String]
   Some(own joined)
 }
 
-public fn is_valid_template(literals: Slice[text::Literal]) -> Bool
+public fn is_valid_template(literals: Slice[text.Literal]) -> Bool
 {
   match template_text(literals) {
     Some(text) => {
@@ -1081,7 +1081,7 @@ impl From[Map[String, Value]] for Value {
 
 public type Error =
   | Parse(error: ParseError)
-  | Deserialize(error: serialization::Error)
+  | Deserialize(error: serialization.Error)
   derives Equal
 
 impl Display for Error {
@@ -1109,7 +1109,7 @@ impl Display for ReadError {
   }
 }
 
-public fn read_from[Source: streams::Reader](source: mut Source, maximum_depth: UInt64 = 128) -> Result[Value, ReadError]
+public fn read_from[Source: streams.Reader](source: mut Source, maximum_depth: UInt64 = 128) -> Result[Value, ReadError]
   uses Handles, RunForever
 {
   var bytes: List[UInt8] = []
@@ -1122,22 +1122,22 @@ public fn read_from[Source: streams::Reader](source: mut Source, maximum_depth: 
   }
 }
 
-public fn write_to[Sink: streams::Writer](value: Value, sink: mut Sink) -> Result[Unit, SystemError]
+public fn write_to[Sink: streams.Writer](value: Value, sink: mut Sink) -> Result[Unit, SystemError]
   uses Handles
 {
   let text = value.to_text()
   mut sink.write_all(text.bytes())
 }
 
-impl serialization::Tree for Value {
-  fn kind(self) -> serialization::Kind {
+impl serialization.Tree for Value {
+  fn kind(self) -> serialization.Kind {
     match self {
-      Null => serialization::Kind.Null
-      Bool(_) => serialization::Kind.Bool
-      Number(number) => if number.is_whole() { serialization::Kind.Integer } else { serialization::Kind.Float }
-      String(_) => serialization::Kind.Text
-      Array(_) => serialization::Kind.List
-      Object(_) => serialization::Kind.Record
+      Null => serialization.Kind.Null
+      Bool(_) => serialization.Kind.Bool
+      Number(number) => if number.is_whole() { serialization.Kind.Integer } else { serialization.Kind.Float }
+      String(_) => serialization.Kind.Text
+      Array(_) => serialization.Kind.List
+      Object(_) => serialization.Kind.Record
     }
   }
 
@@ -1225,11 +1225,11 @@ impl serialization::Tree for Value {
   }
 }
 
-public fn to_value[Item: serialization::Serialize](
+public fn to_value[Item: serialization.Serialize](
   item: Item,
-  names: serialization::Names = serialization::Names.AsWritten,
+  names: serialization.Names = serialization.Names.AsWritten,
 ) -> Value {
-  var writer: serialization::TreeWriter[Value] = serialization::TreeWriter.new(names: names)
+  var writer: serialization.TreeWriter[Value] = serialization.TreeWriter.new(names: names)
   item.serialize(mut writer)
   match own writer.finish() {
     Ok(value) => own value
@@ -1237,34 +1237,34 @@ public fn to_value[Item: serialization::Serialize](
   }
 }
 
-public fn from_value[Item: serialization::Deserialize](
+public fn from_value[Item: serialization.Deserialize](
   value: own Value,
-  names: serialization::Names = serialization::Names.AsWritten,
-) -> Result[Item, serialization::Error]
+  names: serialization.Names = serialization.Names.AsWritten,
+) -> Result[Item, serialization.Error]
   uses RunForever
 {
-  var reader = serialization::TreeReader.new(own value, names: names)
+  var reader = serialization.TreeReader.new(own value, names: names)
   Item.deserialize(mut reader)
 }
 
-public fn encode[Item: serialization::Serialize](
+public fn encode[Item: serialization.Serialize](
   item: Item,
-  names: serialization::Names = serialization::Names.AsWritten,
+  names: serialization.Names = serialization.Names.AsWritten,
 ) -> String {
   to_value(item, names: names).to_text()
 }
 
-public fn encode_pretty[Item: serialization::Serialize](
+public fn encode_pretty[Item: serialization.Serialize](
   item: Item,
   indent: UInt64 = 2,
-  names: serialization::Names = serialization::Names.AsWritten,
+  names: serialization.Names = serialization.Names.AsWritten,
 ) -> String {
   to_value(item, names: names).to_pretty_text(indent: indent)
 }
 
-public fn decode[Item: serialization::Deserialize](
+public fn decode[Item: serialization.Deserialize](
   text: StringSlice,
-  names: serialization::Names = serialization::Names.AsWritten,
+  names: serialization.Names = serialization.Names.AsWritten,
 ) -> Result[Item, Error]
   uses RunForever
 {
@@ -1277,8 +1277,8 @@ public fn decode[Item: serialization::Deserialize](
   }
 }
 
-impl serialization::Serialize for Value {
-  fn serialize[Sink: serialization::Serializer](self, sink: mut Sink) {
+impl serialization.Serialize for Value {
+  fn serialize[Sink: serialization.Serializer](self, sink: mut Sink) {
     match self {
       Null => mut sink.null()
       Bool(value) => mut sink.bool(value)
@@ -1306,8 +1306,8 @@ impl serialization::Serialize for Value {
   }
 }
 
-impl serialization::Deserialize for Value {
-  fn deserialize[Source: serialization::Deserializer](source: mut Source) -> Result[Value, serialization::Error]
+impl serialization.Deserialize for Value {
+  fn deserialize[Source: serialization.Deserializer](source: mut Source) -> Result[Value, serialization.Error]
     uses RunForever
   {
     match source.kind() {

@@ -24,7 +24,7 @@ let files =
 
 let name_of (path : Path.t) =
   match path with
-  | Test { module_; name } -> Printf.sprintf "%s: %s" (String.concat "::" module_.modules) name
+  | Test { module_; name } -> Printf.sprintf "%s: %s" (String.concat "." module_.modules) name
   | _ -> Path.show path
 
 let fail_unbuilt message =

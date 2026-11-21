@@ -131,7 +131,7 @@ let resolve_parameter context (name : Syntax.name) =
   | _ -> raise_bug "`%s` is not resolved as a generic parameter" name.text
 
 let show_path (path : Syntax.path) =
-  String.concat "::"
+  String.concat "."
     (List.map (fun (name : Syntax.name) -> name.text) (path.modules @ [ path.last ]))
 
 let find_literal_bound (bound : Syntax.bound) : Types.cost_bound option =
@@ -682,13 +682,12 @@ let list_cost_operands context (bound : Syntax.expression) =
   let operands = ref [] in
   let rec visit (value : Syntax.expression) =
     (match value.kind with
-    | Call ({ kind = Name { modules = []; last = cost_function }; _ }, arguments) -> (
+    | Call ({ kind = Name cost_function; _ }, arguments) -> (
         match find_target context cost_function with
         | Some (Specification_function (Call_cost metric)) ->
             let callee =
               match arguments with
-              | [ { value = { kind = Name { modules = []; last }; _ }; _ } ] ->
-                  Function_parameter last
+              | [ { value = { kind = Name last; _ }; _ } ] -> Function_parameter last
               | [ { value = { kind = Member (type_, method_); _ }; _ } ] ->
                   Bound_method { type_; method_ }
               | _ -> Not_a_callee
@@ -745,7 +744,7 @@ let rec find_bounded_type context (written : Syntax.expression) =
       match context.self_type with
       | Some (Types.Parameter _ as self) -> Some self
       | Some _ | None -> None)
-  | Name { modules = []; last } -> (
+  | Name last -> (
       match find_target context last with
       | Some (Type_parameter parameter) -> Some (Types.Parameter parameter)
       | Some _ | None -> None)

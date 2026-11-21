@@ -1,18 +1,18 @@
-use standard::compression::zstd
-use standard::http
-use standard::network
-use standard::simulation
+use standard.compression.zstd
+use standard.http
+use standard.network
+use standard.simulation
 
-fn site(request: own http::Request, responder: mut http::Responder)
+fn site(request: own http.Request, responder: mut http.Responder)
   uses FileRead, Handles, Tasks, RunForever
 {
-  let _ = http::serve_directory(request, responder: mut responder, root: Path.new("/site"), prefix: "/static")
+  let _ = http.serve_directory(request, responder: mut responder, root: Path.new("/site"), prefix: "/static")
 }
 
 fn exchange_bytes(raw: StringSlice) -> List[UInt8]
   uses NetworkClient, Handles, Tasks, Panic, RunForever
 {
-  let connection = network::connect("localhost", port: 8092).expect("the server accepts")
+  let connection = network.connect("localhost", port: 8092).expect("the server accepts")
   let _ = connection.send_all(raw.bytes())
   var reply: List[UInt8] = []
   let _ = connection.receive_to_end(mut reply)
@@ -59,9 +59,9 @@ fn body_of(reply: StringSlice) -> String {
 fn browse() -> List[String]
   uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Panic, RunForever
 {
-  var listener = NetworkServer.listen(network::SocketAddress(address: network::IpAddress.loopback, port: 8092)).expect("the port is free")
+  var listener = NetworkServer.listen(network.SocketAddress(address: network.IpAddress.loopback, port: 8092)).expect("the port is free")
   concurrent {
-    http::serve(mut listener, handler: site)
+    http.serve(mut listener, handler: site)
     {
       var seen: List[String] = []
       let index = get("/static/")
@@ -82,7 +82,7 @@ fn browse() -> List[String]
       mut seen.push("${header_of(packed.slice(), name: "Content-Encoding")} ${body_of(packed.slice())}, ${header_of(brotli.slice(), name: "Content-Encoding")} ${body_of(brotli.slice())}, ${header_of(preferred.slice(), name: "Content-Encoding")}")
       let styles_reply = exchange_bytes("GET /static/site.css HTTP/1.1\r\nHost: x\r\nAccept-Encoding: zstd\r\nConnection: close\r\n\r\n")
       let styles = String.from_utf8_lossy(styles_reply.slice())
-      let unpacked = match zstd::decompress(body_bytes_of(styles_reply.slice())) {
+      let unpacked = match zstd.decompress(body_bytes_of(styles_reply.slice())) {
         Ok(bytes) => String.from_utf8_lossy(bytes)
         Err(_) => "not zstd"
       }
@@ -99,7 +99,7 @@ fn browse() -> List[String]
 
 test "a directory is served with index pages, validators, ranges, compressed siblings, and no escapes" uses Panic, RunForever {
   let data = "0123456789".slice().repeated(100)
-  let setup = simulation::Setup.new()
+  let setup = simulation.Setup.new()
     .with_file(Path.new("/site/index.html"), contents: "<h1>home</h1>")
     .with_file(Path.new("/site/docs/index.html"), contents: "<h1>docs</h1>")
     .with_file(Path.new("/site/data.bin"), contents: data.slice())
@@ -108,7 +108,7 @@ test "a directory is served with index pages, validators, ranges, compressed sib
     .with_file(Path.new("/site/app.js.br"), contents: "BROTLI")
     .with_file(Path.new("/site/site.css"), contents: "p { margin: 0 }\n".slice().repeated(100).slice())
     .with_file(Path.new("/secret.txt"), contents: "secret")
-  provide simulation::World.from(own setup) {
+  provide simulation.World.from(own setup) {
     let seen = browse()
     assert seen.length() == 10
     assert seen[0] == "true text/html; charset=utf-8 <h1>home</h1>"

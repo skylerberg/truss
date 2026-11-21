@@ -1,9 +1,9 @@
-use frontend::source
-use frontend::token
+use frontend.source
+use frontend.token
 
 let maximum_nesting: UInt64 = 32
 
-type Pending(text: token::Text, interpolation: token::Interpolation)
+type Pending(text: token.Text, interpolation: token.Interpolation)
 
 type Builder(buffer: String, text_start: UInt64, pairs: List[Pending])
 
@@ -11,15 +11,15 @@ fn make_builder(start: UInt64) -> Builder {
   Builder(buffer: "", text_start: start, pairs: [])
 }
 
-fn take_text(builder: mut Builder, stop: UInt64) -> token::Text
+fn take_text(builder: mut Builder, stop: UInt64) -> token.Text
   uses Panic
 {
   let value = own builder.buffer
   builder.buffer = ""
-  token::Text(own value, span: source::make_span(builder.text_start, stop))
+  token.Text(own value, span: source.make_span(builder.text_start, stop))
 }
 
-fn add_interpolation(builder: mut Builder, interpolation: token::Interpolation)
+fn add_interpolation(builder: mut Builder, interpolation: token.Interpolation)
   uses Panic
 {
   let text = take_text(mut builder, stop: interpolation.span.start)
@@ -27,7 +27,7 @@ fn add_interpolation(builder: mut Builder, interpolation: token::Interpolation)
   builder.text_start = interpolation.span.stop
 }
 
-type Finished(first: token::Text, rest: List[token::Segment])
+type Finished(first: token.Text, rest: List[token.Segment])
 
 fn finish(builder: mut Builder, stop: UInt64) -> Finished
   uses Panic
@@ -38,33 +38,33 @@ fn finish(builder: mut Builder, stop: UInt64) -> Finished
   if pairs.is_empty() {
     return Finished(first: own last, rest: [])
   }
-  var texts: List[token::Text] = []
-  var interpolations: List[token::Interpolation] = []
+  var texts: List[token.Text] = []
+  var interpolations: List[token.Interpolation] = []
   for pair in own pairs {
     mut texts.push(own pair.text)
     mut interpolations.push(pair.interpolation)
   }
   mut texts.push(own last)
   let first = mut texts.remove_at(0)
-  var rest: List[token::Segment] = []
+  var rest: List[token.Segment] = []
   for entry in own texts.cursor().enumerate() {
     let interpolation = interpolations.get(entry.index).expect("an interpolation before each later text")
-    mut rest.push(token::Segment(interpolation, text: own entry.element))
+    mut rest.push(token.Segment(interpolation, text: own entry.element))
   }
   Finished(own first, own rest)
 }
 
-fn store_literal(scanner: mut Scanner, literal: own token::StringLiteral) -> token::Kind {
+fn store_literal(scanner: mut Scanner, literal: own token.StringLiteral) -> token.Kind {
   let index = scanner.tables.literals.length()
   mut scanner.tables.literals.push(own literal)
-  token::Kind.String(index)
+  token.Kind.String(index)
 }
 
-fn make_literal(scanner: mut Scanner, tag: Option[token::Tag], form: token::Form, builder: mut Builder, stop: UInt64) -> token::Kind
+fn make_literal(scanner: mut Scanner, tag: Option[token.Tag], form: token.Form, builder: mut Builder, stop: UInt64) -> token.Kind
   uses Panic
 {
   let finished = finish(mut builder, stop)
-  store_literal(mut scanner, literal: token::StringLiteral(tag: tag.copy(), form, first: own finished.first, rest: own finished.rest))
+  store_literal(mut scanner, literal: token.StringLiteral(tag: tag.copy(), form, first: own finished.first, rest: own finished.rest))
 }
 
 fn opens_raw_string(scanner: Scanner, index: UInt64) -> Bool
@@ -113,7 +113,7 @@ fn read_interpolation_input(scanner: mut Scanner, state: mut InterpolationState)
       report(
         mut scanner,
         code: "lexer.line_break_in_interpolation",
-        span: source::make_span(state.start, stop: scanner.position),
+        span: source.make_span(state.start, stop: scanner.position),
         message: "An interpolation cannot contain a line break. Move the expression into a `let` before the string.",
       )
       state.is_finished = true
@@ -121,14 +121,14 @@ fn read_interpolation_input(scanner: mut Scanner, state: mut InterpolationState)
       finish_input(scanner.position, ending: state.ending)
     }
     Lexed(scanned) => {
-      if scanned.kind == token::Kind.Punctuation(token::Punctuation.Close(token::Bracket.Curly)) && state.braces == 0 {
+      if scanned.kind == token.Kind.Punctuation(token.Punctuation.Close(token.Bracket.Curly)) && state.braces == 0 {
         state.is_finished = true
         state.is_closed = true
         return finish_input(scanned.start, ending: state.ending)
       }
-      if scanned.kind == token::Kind.Punctuation(token::Punctuation.Open(token::Bracket.Curly)) {
+      if scanned.kind == token.Kind.Punctuation(token.Punctuation.Open(token.Bracket.Curly)) {
         state.braces += 1
-      } else if scanned.kind == token::Kind.Punctuation(token::Punctuation.Close(token::Bracket.Curly)) {
+      } else if scanned.kind == token.Kind.Punctuation(token.Punctuation.Close(token.Bracket.Curly)) {
         state.braces -= 1
       }
       state.count += 1
@@ -138,7 +138,7 @@ fn read_interpolation_input(scanner: mut Scanner, state: mut InterpolationState)
       }
       LayoutInput.Next(
         kind: scanned.kind,
-        span: source::make_span(scanned.start, stop: scanned.stop),
+        span: source.make_span(scanned.start, stop: scanned.stop),
         first_line_break: None,
         blank_line: false,
         unterminated_string: scanned.ending == Ending.Unterminated,
@@ -147,7 +147,7 @@ fn read_interpolation_input(scanner: mut Scanner, state: mut InterpolationState)
   }
 }
 
-type InterpolationResult(interpolation: token::Interpolation, ending: Ending)
+type InterpolationResult(interpolation: token.Interpolation, ending: Ending)
 
 fn scan_interpolation(scanner: mut Scanner, nesting: UInt64, delimiter_length: UInt64) -> InterpolationResult
   uses Panic, RunForever
@@ -157,14 +157,14 @@ fn scan_interpolation(scanner: mut Scanner, nesting: UInt64, delimiter_length: U
     report(
       mut scanner,
       code: "lexer.interpolation_too_deep",
-      span: source::make_span(start, stop: start + delimiter_length),
+      span: source.make_span(start, stop: start + delimiter_length),
       message: "Interpolations can nest at most ${maximum_nesting} deep.",
     )
     scanner.position = scanner.compute_end_of_line(start)
     let first = scanner.tables.tokens.length()
-    mut scanner.tables.tokens.push(token::make_token(token::Kind.EndOfFile, span: source::make_zero_width(scanner.position)))
+    mut scanner.tables.tokens.push(token.make_token(token.Kind.EndOfFile, span: source.make_zero_width(scanner.position)))
     return InterpolationResult(
-      interpolation: token::Interpolation(first, stop: first + 1, span: source::make_span(start, stop: scanner.position), is_closed: false),
+      interpolation: token.Interpolation(first, stop: first + 1, span: source.make_span(start, stop: scanner.position), is_closed: false),
       ending: Ending.Unterminated,
     )
   }
@@ -180,7 +180,7 @@ fn scan_interpolation(scanner: mut Scanner, nesting: UInt64, delimiter_length: U
     ending: Ending.Closed,
   )
   let range = lex_interpolation(mut scanner, mut state)
-  let interpolation_span = source::make_span(start, stop: scanner.position)
+  let interpolation_span = source.make_span(start, stop: scanner.position)
   if state.is_closed && state.count == 0 {
     var is_blank = true
     var position = start + delimiter_length
@@ -191,7 +191,7 @@ fn scan_interpolation(scanner: mut Scanner, nesting: UInt64, delimiter_length: U
       position += 1
     }
     let fixes = if is_blank {
-      [source::make_fix("Remove the empty interpolation", edits: [source::delete(interpolation_span)])]
+      [source.make_fix("Remove the empty interpolation", edits: [source.delete(interpolation_span)])]
     } else {
       []
     }
@@ -204,14 +204,14 @@ fn scan_interpolation(scanner: mut Scanner, nesting: UInt64, delimiter_length: U
     )
   }
   InterpolationResult(
-    interpolation: token::Interpolation(first: range.first, stop: range.stop, span: interpolation_span, is_closed: state.is_closed),
+    interpolation: token.Interpolation(first: range.first, stop: range.stop, span: interpolation_span, is_closed: state.is_closed),
     ending: state.ending,
   )
 }
 
-type ScannedString(kind: token::Kind, ending: Ending)
+type ScannedString(kind: token.Kind, ending: Ending)
 
-fn scan_string(scanner: mut Scanner, tag: Option[token::Tag], nesting: UInt64) -> ScannedString
+fn scan_string(scanner: mut Scanner, tag: Option[token.Tag], nesting: UInt64) -> ScannedString
   uses Panic, RunForever
 {
   let start = scanner.position
@@ -222,10 +222,10 @@ fn scan_string(scanner: mut Scanner, tag: Option[token::Tag], nesting: UInt64) -
   }
   if dollars == 0 && quotes == 2 {
     scanner.position = start + 2
-    let literal = token::StringLiteral(
+    let literal = token.StringLiteral(
       tag: tag.copy(),
-      form: token::Form.Ordinary,
-      first: token::Text(value: "", span: source::make_span(start + 1, stop: start + 1)),
+      form: token.Form.Ordinary,
+      first: token.Text(value: "", span: source.make_span(start + 1, stop: start + 1)),
       rest: [],
     )
     return ScannedString(kind: store_literal(mut scanner, own literal), ending: Ending.Closed)
@@ -236,7 +236,7 @@ fn scan_string(scanner: mut Scanner, tag: Option[token::Tag], nesting: UInt64) -
 type EscapeResult = ContinueString | EndOfLine
   derives Equal
 
-fn scan_ordinary(scanner: mut Scanner, tag: Option[token::Tag], nesting: UInt64, closing: UInt8 = 34) -> ScannedString
+fn scan_ordinary(scanner: mut Scanner, tag: Option[token.Tag], nesting: UInt64, closing: UInt8 = 34) -> ScannedString
   uses Panic, RunForever
 {
   let open_quote = scanner.position
@@ -257,17 +257,17 @@ fn scan_ordinary(scanner: mut Scanner, tag: Option[token::Tag], nesting: UInt64,
         let fixes = if ends_in_closer(scanner, text_start: literal_start + 1, stop: position) {
           []
         } else {
-          [source::make_fix("Close the string", edits: [source::insert(source::make_zero_width(position), replacement: "\"")])]
+          [source.make_fix("Close the string", edits: [source.insert(source.make_zero_width(position), replacement: "\"")])]
         }
         report(
           mut scanner,
           code: "lexer.unterminated_string",
-          span: source::make_span(literal_start, stop: position),
+          span: source.make_span(literal_start, stop: position),
           message: message,
           fixes: own fixes,
         )
       } else {
-        report(mut scanner, code: "lexer.unterminated_string", span: source::make_span(literal_start, stop: position), message: message)
+        report(mut scanner, code: "lexer.unterminated_string", span: source.make_span(literal_start, stop: position), message: message)
       }
       ending = Ending.Unterminated
       stop = position
@@ -303,7 +303,7 @@ fn scan_ordinary(scanner: mut Scanner, tag: Option[token::Tag], nesting: UInt64,
     }
     read_character(mut scanner, buffer: mut builder.buffer, context: Context.OrdinaryString)
   }
-  ScannedString(kind: make_literal(mut scanner, tag, form: token::Form.Ordinary, builder: mut builder, stop: stop), ending)
+  ScannedString(kind: make_literal(mut scanner, tag, form: token.Form.Ordinary, builder: mut builder, stop: stop), ending)
 }
 
 fn scan_escape(scanner: mut Scanner, buffer: mut String) -> EscapeResult
@@ -314,7 +314,7 @@ fn scan_escape(scanner: mut Scanner, buffer: mut String) -> EscapeResult
     report(
       mut scanner,
       code: "lexer.invalid_escape",
-      span: source::make_span(start, stop: start + 1),
+      span: source.make_span(start, stop: start + 1),
       message: "A `\\` at the end of a line does not continue the string. Text that spans lines goes in a raw string, between `\"\"\"`s.",
     )
     scanner.position = start + 1
@@ -425,11 +425,11 @@ fn hexadecimal_value(byte: UInt8) -> UInt8
 fn report_escape_problem(scanner: mut Scanner, start: UInt64, stop: UInt64, message: StringSlice)
   uses Panic
 {
-  report(mut scanner, code: "lexer.invalid_escape", span: source::make_span(start, stop), message: message)
+  report(mut scanner, code: "lexer.invalid_escape", span: source.make_span(start, stop), message: message)
   scanner.position = stop
 }
 
-fn scan_raw(scanner: mut Scanner, tag: Option[token::Tag], nesting: UInt64, dollars: UInt64, quotes: UInt64) -> ScannedString
+fn scan_raw(scanner: mut Scanner, tag: Option[token.Tag], nesting: UInt64, dollars: UInt64, quotes: UInt64) -> ScannedString
   uses Panic, RunForever
 {
   let delimiter_start = scanner.position
@@ -440,7 +440,7 @@ fn scan_raw(scanner: mut Scanner, tag: Option[token::Tag], nesting: UInt64, doll
   let delimiter_stop = delimiter_start + dollars + quotes
   let line_end = scanner.compute_end_of_line(delimiter_stop)
   let is_multi_line = scanner.skip_spaces(delimiter_stop) == line_end
-  let form = token::Form.Raw(quotes, dollars, multi_line: is_multi_line)
+  let form = token.Form.Raw(quotes, dollars, multi_line: is_multi_line)
   if !is_multi_line {
     scanner.position = delimiter_stop
     return scan_one_line_raw(mut scanner, tag, form, nesting, literal_start, dollars, quotes)
@@ -449,7 +449,7 @@ fn scan_raw(scanner: mut Scanner, tag: Option[token::Tag], nesting: UInt64, doll
     report(
       mut scanner,
       code: "lexer.line_break_in_interpolation",
-      span: source::make_span(literal_start, stop: line_end),
+      span: source.make_span(literal_start, stop: line_end),
       message: "An interpolation cannot contain a line break, so it cannot hold a multi-line string. Move the expression into a `let` before the string.",
     )
     scanner.position = line_end
@@ -494,15 +494,15 @@ fn report_too_many_quotes(scanner: mut Scanner, start: UInt64, run: UInt64, quot
   report(
     mut scanner,
     code: "lexer.raw_string_quotes",
-    span: source::make_span(start, stop: start + run),
+    span: source.make_span(start, stop: start + run),
     message: "A run of ${run} `\"`s is longer than this string's delimiter of ${quotes}.${advice}",
   )
 }
 
 fn scan_one_line_raw(
   scanner: mut Scanner,
-  tag: Option[token::Tag],
-  form: token::Form,
+  tag: Option[token.Tag],
+  form: token.Form,
   nesting: UInt64,
   literal_start: UInt64,
   dollars: UInt64,
@@ -522,9 +522,9 @@ fn scan_one_line_raw(
         && !ends_in_closer(scanner, text_start: builder.text_start, stop: position)
       {
         [
-          source::make_fix(
+          source.make_fix(
             "Close the string with `${delimiter}`",
-            edits: [source::insert(source::make_zero_width(position), replacement: delimiter)],
+            edits: [source.insert(source.make_zero_width(position), replacement: delimiter)],
           ),
         ]
       } else {
@@ -533,7 +533,7 @@ fn scan_one_line_raw(
       report(
         mut scanner,
         code: "lexer.unterminated_string",
-        span: source::make_span(literal_start, stop: position),
+        span: source.make_span(literal_start, stop: position),
         message: "This raw string is not closed on its line. A raw string with text after its opening `${delimiter}` is a one-line string. For several lines, start the text on the line after the opening `${delimiter}`.",
         fixes: own fixes,
       )
@@ -576,14 +576,14 @@ type RawLines(lines: List[Finished], closing: Option[Closing])
 
 fn scan_multi_line_raw(
   scanner: mut Scanner,
-  tag: Option[token::Tag],
-  form: token::Form,
+  tag: Option[token.Tag],
+  form: token.Form,
   literal_start: UInt64,
   dollars: UInt64,
   quotes: UInt64,
   delimiter_stop: UInt64,
   line_end: UInt64,
-) -> token::Kind
+) -> token.Kind
   uses Panic, RunForever
 {
   let read = read_raw_lines(mut scanner, dollars, quotes, line_end)
@@ -592,24 +592,24 @@ fn scan_multi_line_raw(
   }
   scanner.unterminated_at_end = true
   let delimiter = "\"".repeated(quotes)
-  var notes: List[source::Note] = []
+  var notes: List[source.Note] = []
   if guess_raw_string_end(scanner, literal_start, line_end) is Some(line_start) {
     mut notes.push(
-      source::Note(
-        span: source::make_zero_width(line_start),
+      source.Note(
+        span: source.make_zero_width(line_start),
         message: "The string may have been meant to end with `${delimiter}` before this line.",
       ),
     )
   }
   if quotes == 6 && dollars == 0 {
     mut notes.push(
-      source::Note(span: source::make_span(delimiter_stop - quotes, stop: delimiter_stop), message: "For an empty string, write `\"\"`."),
+      source.Note(span: source.make_span(delimiter_stop - quotes, stop: delimiter_stop), message: "For an empty string, write `\"\"`."),
     )
   }
   report(
     mut scanner,
     code: "lexer.unterminated_string",
-    span: source::make_span(literal_start, stop: delimiter_stop),
+    span: source.make_span(literal_start, stop: delimiter_stop),
     message: "This raw string is never closed, so it runs to the end of the file. Close it with `${delimiter}` on a line of its own.",
     notes: own notes,
   )
@@ -775,13 +775,13 @@ fn describe_whitespace(whitespace: StringSlice) -> String
 
 fn build_multi_line(
   scanner: mut Scanner,
-  tag: Option[token::Tag],
-  form: token::Form,
+  tag: Option[token.Tag],
+  form: token.Form,
   quotes: UInt64,
   delimiter_stop: UInt64,
   lines: Slice[Finished],
   closing: own Closing,
-) -> token::Kind
+) -> token.Kind
   uses Panic, RunForever
 {
   var indentation = ""
@@ -796,12 +796,12 @@ fn build_multi_line(
       report(
         mut scanner,
         code: "lexer.raw_string_closing_not_alone",
-        span: source::make_span(start, stop: start + quotes),
+        span: source.make_span(start, stop: start + quotes),
         message: "The closing delimiter of a multi-line raw string goes on a line of its own.",
         fixes: [
-          source::make_fix(
+          source.make_fix(
             "Move the closing delimiter to its own line",
-            edits: [source::insert(source::make_zero_width(start), replacement: "\n${indentation}")],
+            edits: [source.insert(source.make_zero_width(start), replacement: "\n${indentation}")],
           ),
         ],
       )
@@ -842,12 +842,12 @@ fn build_multi_line(
       report(
         mut scanner,
         code: "lexer.raw_string_indentation",
-        span: source::make_span(source_at, stop: source_at + 1),
+        span: source.make_span(source_at, stop: source_at + 1),
         message: "Every line of a multi-line raw string starts with the indentation of its closing delimiter, which is ${describe_whitespace(indentation)}. This line starts with ${describe_whitespace(line_whitespace)}.",
         fixes: [
-          source::make_fix(
+          source.make_fix(
             "Indent the line like the closing delimiter",
-            edits: [source::replace(source::make_span(line.first.span.start, stop: whitespace_stop), replacement: indentation)],
+            edits: [source.replace(source.make_span(line.first.span.start, stop: whitespace_stop), replacement: indentation)],
           ),
         ],
       )

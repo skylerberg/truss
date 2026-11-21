@@ -457,7 +457,7 @@ let translate_primitive_operation context (frame : State.frame) ~(site : Invocat
   let location = Facts.locate context frame.source site.origin in
   (match List.find_opt (function Types.Parameter _ | Projection _ -> true | _ -> false) types with
   | Some parameter ->
-      Facts.raise_unsupported location "`intrinsic::%s` at the type parameter `%s`"
+      Facts.raise_unsupported location "`intrinsic.%s` at the type parameter `%s`"
         (Intrinsic.show_operation (Scalar operation))
         (Types.show parameter)
   | None -> ());

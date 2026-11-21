@@ -3,17 +3,17 @@ let check packages =
     (Support.make_database packages)
 
 let expect_one_diagnostic = Support.expect_one_diagnostic ~check
-let expect_fine text = Support.expect_no_diagnostics ~check [ ("app::main", text) ]
+let expect_fine text = Support.expect_no_diagnostics ~check [ ("app.main", text) ]
 
 let list_core_expressions text ~of_function =
-  let module_ = Support.parse_module "app::main" in
+  let module_ = Support.parse_module "app.main" in
   (Support.collect_core_nodes
-     (Support.setup [ ("app::main", text) ])
+     (Support.setup [ ("app.main", text) ])
      { module_; path = Top { module_; name = of_function }; ordinal = 0 })
     .expressions
 
 let expect_not_available text ~message =
-  match check (Support.setup [ ("app::main", text) ]) (Support.parse_file "app::main") with
+  match check (Support.setup [ ("app.main", text) ]) (Support.parse_file "app.main") with
   | [ diagnostic ]
     when Diagnostic.Code.name diagnostic.code = "capabilities.not_available"
          && diagnostic.message = message ->
@@ -114,7 +114,7 @@ let () =
              ~of_function:"f")
       with
       | [ [ [ { capability; impl = Impl _; arguments } ] ] ]
-        when Path.equal capability (Support.make_top_path "standard::capabilities" "Clock")
+        when Path.equal capability (Support.make_top_path "standard.capabilities" "Clock")
              &&
              match Types.For_testing.list_arguments arguments with
              | [ (_, Type tag) ] -> Types.show tag = "Bool"
@@ -249,15 +249,15 @@ let () =
       let packages =
         Support.setup
           [
-            ("app::main", Fixtures.Capabilities.call_of_a_dependencys_stamp);
-            ("clock_library::time", Fixtures.Capabilities.time_stamp_using_clock);
+            ("app.main", Fixtures.Capabilities.call_of_a_dependencys_stamp);
+            ("clock_library.time", Fixtures.Capabilities.time_stamp_using_clock);
           ]
       in
       let packages =
         Support.with_dependencies packages { owner = None; name = "app" }
           [ { package = { owner = None; name = "clock_library" }; capabilities = [] } ]
       in
-      match Support.list_codes (check packages (Support.parse_file "app::main")) with
+      match Support.list_codes (check packages (Support.parse_file "app.main")) with
       | [ "capabilities.not_granted" ] -> ()
       | actual -> Harness.fail "found [%s]" (String.concat "; " actual))
 
@@ -267,17 +267,17 @@ let () =
       Support.with_dependencies (Support.setup files) { owner = None; name = "app" }
         [ { package = { owner = None; name = "clock_library" }; capabilities = granted } ]
     in
-    Support.list_codes (check packages (Support.parse_file "app::main"))
+    Support.list_codes (check packages (Support.parse_file "app.main"))
   in
-  let library = ("clock_library::time", Fixtures.Capabilities.library_time) in
+  let library = ("clock_library.time", Fixtures.Capabilities.library_time) in
   Harness.test "a dependency's trait method can use only the granted capabilities" (fun () ->
-      match with_grant [ ("app::main", Fixtures.Capabilities.wall_stamp_call); library ] [] with
+      match with_grant [ ("app.main", Fixtures.Capabilities.wall_stamp_call); library ] [] with
       | "capabilities.not_granted" :: _ -> ()
       | actual -> Harness.fail "found [%s]" (String.concat "; " actual));
   Harness.test "a dependency's trait method can use a granted capability" (fun () ->
       match
         with_grant
-          [ ("app::main", Fixtures.Capabilities.wall_stamp_call); library ]
+          [ ("app.main", Fixtures.Capabilities.wall_stamp_call); library ]
           [ Grant.Prelude "Clock" ]
       with
       | [] -> ()
@@ -286,7 +286,7 @@ let () =
     (fun () ->
       match
         with_grant
-          [ ("app::main", Fixtures.Capabilities.provide_of_a_dependencys_fixed_clock); library ]
+          [ ("app.main", Fixtures.Capabilities.provide_of_a_dependencys_fixed_clock); library ]
           []
       with
       | [ "capabilities.not_granted" ] -> ()
@@ -306,19 +306,19 @@ let list_codes_with_grants files grants =
       { owner = None; name = "app" }
       (List.map (fun (package, capabilities) -> { Manifest.package; capabilities }) grants)
   in
-  (packages, Support.list_codes (check packages (Support.parse_file "app::main")))
+  (packages, Support.list_codes (check packages (Support.parse_file "app.main")))
 
 let expect_codes ~expected (_, actual) =
   if actual <> expected then
     Harness.fail "found [%s], expected [%s]" (String.concat "; " actual)
       (String.concat "; " expected)
 
-let time = ("clock_library::time", Fixtures.Capabilities.time_stamp_using_clock)
-let sources = ("framework::sources", Fixtures.Capabilities.sources_sources)
-let timers = ("plugins::timers", Fixtures.Capabilities.timers_timers)
+let time = ("clock_library.time", Fixtures.Capabilities.time_stamp_using_clock)
+let sources = ("framework.sources", Fixtures.Capabilities.sources_sources)
+let timers = ("plugins.timers", Fixtures.Capabilities.timers_timers)
 
 let () =
-  let value = ("app::main", Fixtures.Capabilities.dependencys_function_as_a_value) in
+  let value = ("app.main", Fixtures.Capabilities.dependencys_function_as_a_value) in
   Harness.test "a function value of a dependency's function can use only the granted capabilities"
     (fun () ->
       expect_codes ~expected:[ "capabilities.not_granted" ]
@@ -327,7 +327,7 @@ let () =
       expect_codes ~expected:[]
         (list_codes_with_grants [ value; time ]
            [ ({ owner = None; name = "clock_library" }, [ Grant.Prelude "Clock" ]) ]));
-  let bound = ("app::main", Fixtures.Capabilities.bound) in
+  let bound = ("app.main", Fixtures.Capabilities.bound) in
   Harness.test
     "an impl of a dependency that satisfies a bound can use only the granted capabilities"
     (fun () ->
@@ -349,14 +349,14 @@ let () =
     (fun () ->
       expect_codes ~expected:[ "capabilities.not_granted" ]
         (list_codes_with_grants
-           [ ("app::main", Fixtures.Capabilities.any_timer_from_plugins); sources; timers ]
+           [ ("app.main", Fixtures.Capabilities.any_timer_from_plugins); sources; timers ]
            [
              ({ owner = None; name = "framework" }, [ Grant.Prelude "Clock" ]);
              ({ owner = None; name = "plugins" }, []);
            ]))
 
-let ledger = ("store::ledger", Fixtures.Capabilities.ledger_ledger)
-let pays = ("app::main", Fixtures.Capabilities.pays)
+let ledger = ("store.ledger", Fixtures.Capabilities.ledger_ledger)
+let pays = ("app.main", Fixtures.Capabilities.pays)
 
 let list_problems packages =
   let app : Path.package = { owner = None; name = "app" } in
@@ -393,7 +393,7 @@ let () =
   Harness.test "a dependency that nothing in the package names is reported" (fun () ->
       let packages, _ =
         list_codes_with_grants
-          [ ("app::main", Fixtures.Capabilities.function_returning_one); time ]
+          [ ("app.main", Fixtures.Capabilities.function_returning_one); time ]
           [ ({ Path.owner = None; name = "clock_library" }, []) ]
       in
       match list_problems packages with
@@ -412,8 +412,8 @@ let () =
       let packages, actual =
         list_codes_with_grants
           [
-            ("app::main", Fixtures.Capabilities.call_of_doubled);
-            ("shapes::sizes", Fixtures.Capabilities.doubled_trait_for_int64);
+            ("app.main", Fixtures.Capabilities.call_of_doubled);
+            ("shapes.sizes", Fixtures.Capabilities.doubled_trait_for_int64);
           ]
           [ ({ Path.owner = None; name = "shapes" }, []) ]
       in
@@ -423,7 +423,7 @@ let () =
     (fun () ->
       let packages, actual =
         list_codes_with_grants
-          [ ("app::main", Fixtures.Capabilities.package_of_every_kind_of_definition); time ]
+          [ ("app.main", Fixtures.Capabilities.package_of_every_kind_of_definition); time ]
           [ ({ Path.owner = None; name = "clock_library" }, []) ]
       in
       expect_codes ~expected:[] (packages, actual);
@@ -433,7 +433,7 @@ let () =
   Harness.test "an unused dependency is not reported for a package with an error" (fun () ->
       let packages, _ =
         list_codes_with_grants
-          [ ("app::main", Fixtures.Capabilities.function_returning_true_as_int64); time ]
+          [ ("app.main", Fixtures.Capabilities.function_returning_true_as_int64); time ]
           [ ({ Path.owner = None; name = "clock_library" }, []) ]
       in
       if list_problems packages <> [] then Harness.fail "reported");
@@ -443,9 +443,9 @@ let () =
       let packages, actual =
         list_codes_with_grants
           [
-            ("app::main", Fixtures.Capabilities.doubling_with_a_test_of_bounds);
-            ("shapes::sizes", Fixtures.Capabilities.doubled_trait_for_int64);
-            ("limits::bounds", Fixtures.Capabilities.bounds_most);
+            ("app.main", Fixtures.Capabilities.doubling_with_a_test_of_bounds);
+            ("shapes.sizes", Fixtures.Capabilities.doubled_trait_for_int64);
+            ("limits.bounds", Fixtures.Capabilities.bounds_most);
           ]
           [ (shapes, []); (limits, []) ]
       in
@@ -940,14 +940,14 @@ let () =
       (Support.extend_standard_library packages)
   in
   let expect_one_in_standard =
-    Support.expect_one_diagnostic ~setup:make_standard_packages ~file:"standard::probe"
+    Support.expect_one_diagnostic ~setup:make_standard_packages ~file:"standard.probe"
       ~check:check_in_standard
   in
   let expect_fine_in_standard text =
     match
       check_in_standard
-        (make_standard_packages [ ("standard::probe", text) ])
-        (Support.parse_file "standard::probe")
+        (make_standard_packages [ ("standard.probe", text) ])
+        (Support.parse_file "standard.probe")
     with
     | [] -> ()
     | reported -> Harness.fail "found [%s]" (String.concat "; " (Support.list_codes reported))
@@ -956,7 +956,7 @@ let () =
       expect_one_in_standard Fixtures.Capabilities.shared_count_updated_without_tasks
         "capabilities.not_available"
         ~says:"This call uses `Tasks`, which is not available here. Declare it with `uses Tasks`"
-        ~at:("intrinsic::shared_update", 1);
+        ~at:("intrinsic.shared_update", 1);
       expect_fine_in_standard Fixtures.Capabilities.shared_count_updated_using_tasks);
   Harness.test
     "a call of an intrinsic that reaches the operating system needs `System`, which nothing can \
@@ -964,7 +964,7 @@ let () =
       expect_one_in_standard Fixtures.Capabilities.error_number_read_without_system
         "capabilities.not_available"
         ~says:"This call uses `System`, which is not available here. Declare it with `uses System`."
-        ~at:("intrinsic::libc_errno", 1);
+        ~at:("intrinsic.libc_errno", 1);
       expect_fine_in_standard Fixtures.Capabilities.error_number_read_using_system);
   Harness.test "the runtime does not grant `System` to a test" (fun () ->
       expect_one_in_standard Fixtures.Capabilities.test_using_system "types.no_real_implementation"
@@ -980,7 +980,7 @@ let () =
     (fun () ->
       expect_one_in_standard
         Fixtures.Capabilities.error_number_read_by_an_implementation_of_a_capability
-        "capabilities.not_available" ~says:"This call uses `System`" ~at:("intrinsic::libc_errno", 1));
+        "capabilities.not_available" ~says:"This call uses `System`" ~at:("intrinsic.libc_errno", 1));
   Harness.test "nothing can implement `System`" (fun () ->
       expect_one_in_standard Fixtures.Capabilities.system_implemented
         "types.implements_built_in_capability" ~says:"Nothing can implement `System`");
@@ -994,10 +994,10 @@ let () =
     (fun () ->
       expect_one_in_standard
         Fixtures.Capabilities.shared_key_named_as_a_value_of_a_type_without_uses "types.mismatch"
-        ~says:"found `(fn(Shared[Int64]) -> UInt64 uses Tasks)`" ~at:("intrinsic::shared_key", 1));
+        ~says:"found `(fn(Shared[Int64]) -> UInt64 uses Tasks)`" ~at:("intrinsic.shared_key", 1));
   Harness.test "a monitor needs `Tasks` where its body calls an intrinsic that uses `Tasks`"
     (fun () ->
       expect_one_in_standard
-        ("use standard::intrinsic\n\n" ^ Fixtures.Infer.tally
+        ("use standard.intrinsic\n\n" ^ Fixtures.Infer.tally
        ^ Fixtures.Capabilities.shared_count_updated_under_a_tally_provided_without_tasks)
         "capabilities.monitor_needs_tasks" ~at:("mut tally {", 1))

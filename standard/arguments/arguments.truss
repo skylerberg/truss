@@ -1,4 +1,4 @@
-use standard::text
+use standard.text
 
 type Kind = Flag | Option | Positional | Rest
   derives Equal
@@ -655,7 +655,7 @@ public fn Parsed.values(self, name: StringSlice) -> Slice[String]
   self.options[position].values.slice()
 }
 
-public fn Parsed.value_as[Target: text::Parse](self, name: StringSlice) -> Result[Option[Target], Error] {
+public fn Parsed.value_as[Target: text.Parse](self, name: StringSlice) -> Result[Option[Target], Error] {
   match self.value(name) {
     Some(text) => match Target.parse(text) {
       Ok(parsed) => Ok(Some(own parsed))

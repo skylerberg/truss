@@ -88,7 +88,7 @@ let () =
       let linked =
         Emit_c.list_linked ~lookup:(lookup program) [ Codegen_support.code_item "start" ]
       in
-      Codegen_support.expect_string ~expected:"test::start test::helper"
+      Codegen_support.expect_string ~expected:"test.start test.helper"
         (String.concat " "
            (List.map (fun fragment -> Lowered.Item.to_string (Emit_c.item fragment)) linked)));
   Codegen_support.test "a drop reaches the type's drop function" (fun () ->
@@ -142,7 +142,7 @@ let () =
   Codegen_support.test "items that call each other are one component, after the ones they reach"
     (fun () ->
       Harness.expect_strings
-        ~expected:[ "test::helper"; "test::ping test::pong"; "test::start" ]
+        ~expected:[ "test.helper"; "test.ping test.pong"; "test.start" ]
         (show_components (make_ping_pong 1) "start"));
   Codegen_support.test "an item that calls only itself is a component of its own" (fun () ->
       let again =
@@ -156,7 +156,7 @@ let () =
                  (Return (Some (Codegen_support.copy 0)));
              ])
       in
-      Harness.expect_strings ~expected:[ "test::again" ] (show_components [ again ] "again"));
+      Harness.expect_strings ~expected:[ "test.again" ] (show_components [ again ] "again"));
   Codegen_support.test "a test that reaches items that call each other has a key" (fun () ->
       if
         derive_test_key (make_ping_pong 1) (Codegen_support.code_item "start")

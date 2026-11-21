@@ -1,7 +1,7 @@
-use frontend::token
-use standard::math
+use frontend.token
+use standard.math
 
-type NumberValue = IntegerValue(digits: String) | FloatValue(value: token::Decimal)
+type NumberValue = IntegerValue(digits: String) | FloatValue(value: token.Decimal)
   derives Equal
 
 type NumberProblem(code: String, message: String, start: UInt64, stop: UInt64)
@@ -44,10 +44,10 @@ fn parse_digits(digits: StringSlice, radix: UInt32) -> String
     }
     return "${value}"
   }
-  "${math::BigInteger.parse_radix(digits, radix).expect("the digits were checked")}"
+  "${math.BigInteger.parse_radix(digits, radix).expect("the digits were checked")}"
 }
 
-fn parse_exponent(digits: StringSlice) -> math::BigInteger
+fn parse_exponent(digits: StringSlice) -> math.BigInteger
   uses Panic
 {
   if digits.length() <= 18 {
@@ -55,9 +55,9 @@ fn parse_exponent(digits: StringSlice) -> math::BigInteger
     for byte in digits.bytes() {
       value = value * 10 + UInt64.from_integer(byte - 48)
     }
-    return math::BigInteger.from(value)
+    return math.BigInteger.from(value)
   }
-  math::BigInteger.parse_radix(digits, radix: 10).expect("the exponent digits were checked")
+  math.BigInteger.parse_radix(digits, radix: 10).expect("the exponent digits were checked")
 }
 
 fn is_name_byte_or_continue(text: StringSlice, position: UInt64) -> UInt64
@@ -384,17 +384,17 @@ fn check_decimal(text: StringSlice) -> CheckedNumber
       Some(written) => {
         let exponent_digits = remove_underscores(written.digits.text)
         if exponent_digits.is_empty() {
-          math::BigInteger.zero()
+          math.BigInteger.zero()
         } else {
           let magnitude = parse_exponent(exponent_digits)
           if written.sign == "-" { -magnitude } else { magnitude }
         }
       }
-      None => math::BigInteger.zero()
+      None => math.BigInteger.zero()
     }
     let significand = parse_digits("${whole_digits}${fraction_digits}", radix: 10)
     NumberValue.FloatValue(
-      token::normalize_decimal(significand, exponent: exponent_value - math::BigInteger.from(fraction_digits.length())),
+      token.normalize_decimal(significand, exponent: exponent_value - math.BigInteger.from(fraction_digits.length())),
     )
   }
   choose_problem(own value, issues, fixed)
@@ -626,7 +626,7 @@ fn lex_foreign_number(text: StringSlice) -> Option[CheckedNumber]
     let checked = check_number(number)
     let value = match checked.value {
       IntegerValue(digits) => if is_float_suffix(lowered_suffix) {
-        NumberValue.FloatValue(token::normalize_decimal(digits, exponent: math::BigInteger.zero()))
+        NumberValue.FloatValue(token.normalize_decimal(digits, exponent: math.BigInteger.zero()))
       } else {
         NumberValue.IntegerValue(digits.copy())
       }

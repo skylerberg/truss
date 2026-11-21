@@ -174,8 +174,8 @@ let show =
       non_empty & pos_all string []
       & info [] ~docv:"PATH"
           ~doc:
-            "A package, module, or definition: its full path, such as $(b,weather::forecast) or \
-             $(b,weather::forecast::Forecast.summary); a name in scope in every module, such as \
+            "A package, module, or definition: its full path, such as $(b,weather.forecast) or \
+             $(b,weather.forecast.Forecast.summary); a name in scope in every module, such as \
              $(b,Int64); or a suffix of a definition's path, such as $(b,Forecast.summary).")
   in
   let body = Cmdliner.Arg.(value & flag & info [ "body" ] ~doc:"Print whole definitions.") in
@@ -254,7 +254,7 @@ let add =
        Cmdliner.Term.(
          const (fun names () -> Outcome.Exit (Add_command.run ~names))
          $ make_packages_argument
-             ~doc:"A package, such as $(b,acme::geometry) or $(b,acme::geometry@1.4.2)."))
+             ~doc:"A package, such as $(b,acme.geometry) or $(b,acme.geometry@1.4.2)."))
 
 let upgrade =
   make_command "upgrade"
@@ -265,7 +265,7 @@ let upgrade =
        Cmdliner.Term.(
          const (fun names () -> Outcome.Exit (Upgrade_command.run ~names))
          $ make_packages_argument
-             ~doc:"A package, such as $(b,acme::geometry) or $(b,acme::geometry@1.4.2)."))
+             ~doc:"A package, such as $(b,acme.geometry) or $(b,acme.geometry@1.4.2)."))
 
 let publish =
   let version =

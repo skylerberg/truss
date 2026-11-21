@@ -1,20 +1,20 @@
-use app::shapes
+use app.shapes
 
 trait Gauged {
   fn measure(self) -> UInt64
   fn sample() -> Self
 }
 
-impl Gauged for shapes::Shape {
+impl Gauged for shapes.Shape {
   fn measure(self) -> UInt64 {
     self.sides + 1
   }
 
-  fn sample() -> shapes::Shape {
-    shapes::Shape(sides: 5)
+  fn sample() -> shapes.Shape {
+    shapes.Shape(sides: 5)
   }
 }
 
-fn f(shape: shapes::Shape) -> UInt64 {
-  shape.measure() + shapes::Shape.measure(shape) + shapes::Shape.sample().sides
+fn f(shape: shapes.Shape) -> UInt64 {
+  shape.measure() + shapes.Shape.measure(shape) + shapes.Shape.sample().sides
 }

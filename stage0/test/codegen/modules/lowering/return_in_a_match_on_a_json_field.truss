@@ -1,6 +1,6 @@
-use standard::json
+use standard.json
 
-fn first(value: json::Value) -> Result[String, String] {
+fn first(value: json.Value) -> Result[String, String] {
   let name = match value.get("alg") {
     Some(member) => match member.as_text() {
       Some(text) => text.to_string()
@@ -12,7 +12,7 @@ fn first(value: json::Value) -> Result[String, String] {
 }
 
 fn first_of(text: StringSlice) -> Result[String, String] {
-  match json::parse(text) {
+  match json.parse(text) {
     Ok(value) => first(value)
     Err(_) => Err("no json")
   }

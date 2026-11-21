@@ -220,9 +220,9 @@ let check_deserialized_invariants state (elaborated : Interface.Environment.elab
           if not invariant.executable then
             State.report state Cannot_derive
               (State.read_span state (Core_walk.locate_origin invariant.value.origin))
-              "This invariant cannot be checked at run time, so `serialization::Deserialize` \
-               cannot be derived: a value read from data might break it. Write the `impl`, which \
-               checks the value another way.")
+              "This invariant cannot be checked at run time, so `serialization.Deserialize` cannot \
+               be derived: a value read from data might break it. Write the `impl`, which checks \
+               the value another way.")
         invariants
   | _ -> ()
 

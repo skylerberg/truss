@@ -2,7 +2,7 @@ let lucky: Int64 = 7
 
 fn f(value: Int64) -> Int64 {
   match value {
-    app::main::lucky => 1
+    app.main.lucky => 1
     _ => 0
   }
 }

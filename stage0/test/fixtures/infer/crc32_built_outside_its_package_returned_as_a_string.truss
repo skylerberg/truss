@@ -1,5 +1,5 @@
-use standard::checksum
+use standard.checksum
 
 fn f() -> String {
-  checksum::Crc32(state: 0)
+  checksum.Crc32(state: 0)
 }

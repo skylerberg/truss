@@ -1,4 +1,4 @@
-use standard::intrinsic
+use standard.intrinsic
 
 public type ByteOrder = BigEndian | LittleEndian
   derives Equal
@@ -192,7 +192,7 @@ public fn Decoder.variable_uint64(mut self) -> Result[UInt64, DecodeError]
     if index == 9 && byte > 1 {
       return Err(DecodeError.Overlong)
     }
-    let group: UInt64 = intrinsic::convert(byte % 128)
+    let group: UInt64 = intrinsic.convert(byte % 128)
     value = value | (group << (7 * index))
     if byte < 128 {
       return Ok(value)
@@ -353,7 +353,7 @@ public fn Encoder.variable_uint64(mut self, value: UInt64)
   {
     let group = (value >> (7 * count)) % 128
     more = count < 9 && (value >> (7 * count + 7)) != 0
-    groups[count] = intrinsic::convert(if more { group + 128 } else { group })
+    groups[count] = intrinsic.convert(if more { group + 128 } else { group })
     count += 1
   }
   mut self.bytes(groups[..count])

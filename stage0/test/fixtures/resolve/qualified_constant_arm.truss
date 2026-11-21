@@ -2,7 +2,7 @@ let limit: Int64 = 10
 
 fn f(value: Int64) -> Bool {
   match value {
-    app::main::limit => true
+    app.main.limit => true
     _ => false
   }
 }

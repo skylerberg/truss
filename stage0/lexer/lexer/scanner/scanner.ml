@@ -22,7 +22,7 @@ let lex_punctuation (cursor : Cursor.t) current =
   | ',' -> take Comma 1
   | '?' -> take Question 1
   | '~' -> take Tilde 1
-  | ':' -> find_following_kind [ (':', Colon_colon, 2) ] Colon
+  | ':' -> take Colon 1
   | '.' ->
       if is 1 '.' then if is 2 '=' then take Dot_dot_equal 3 else take Dot_dot 2 else take Dot 1
   | '-' -> find_following_kind [ ('>', Arrow, 2); ('=', Minus_equal, 2) ] Minus

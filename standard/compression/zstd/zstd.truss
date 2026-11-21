@@ -1,5 +1,5 @@
-use standard::checksum
-use standard::intrinsic
+use standard.checksum
+use standard.intrinsic
 
 public type Error =
   | Malformed(message: String)
@@ -86,7 +86,7 @@ fn highest_bit(value: UInt32) -> UInt32
 fn byte_at(bytes: Slice[UInt8], at: UInt64) -> UInt64
   ensures result <= UInt8.maximum
 {
-  if at < bytes.length() { intrinsic::convert(bytes[at]) } else { 0 }
+  if at < bytes.length() { intrinsic.convert(bytes[at]) } else { 0 }
 }
 
 fn little_endian(bytes: Slice[UInt8], at: UInt64, count: UInt64) -> UInt64 {
@@ -119,17 +119,17 @@ fn Forward.read(mut self, count: UInt32) -> UInt32
 {
   var value: UInt32 = 0
   for index in 0..count {
-    let position = self.bit.saturating_add(intrinsic::convert[UInt32, UInt64](index))
+    let position = self.bit.saturating_add(intrinsic.convert[UInt32, UInt64](index))
     let byte = byte_at(self.bytes.slice(), at: position / 8)
-    let bit: UInt32 = intrinsic::convert((byte >> (position % 8)) & 1)
+    let bit: UInt32 = intrinsic.convert((byte >> (position % 8)) & 1)
     value = value | (bit << index)
   }
-  self.bit = self.bit.saturating_add(intrinsic::convert[UInt32, UInt64](count))
+  self.bit = self.bit.saturating_add(intrinsic.convert[UInt32, UInt64](count))
   value & 0xFFFFFF
 }
 
 fn Forward.rewind(mut self, count: UInt32) {
-  self.bit = self.bit.saturating_subtract(intrinsic::convert[UInt32, UInt64](count))
+  self.bit = self.bit.saturating_subtract(intrinsic.convert[UInt32, UInt64](count))
 }
 
 type Backward(bytes: List[UInt8], remaining: UInt64, overrun: UInt64)
@@ -150,7 +150,7 @@ fn backward_of(bytes: Slice[UInt8]) -> Result[Backward, Error] {
   if last == 0 {
     return malformed("a bit stream without its end marker")
   }
-  let marker: UInt64 = intrinsic::convert(highest_bit(intrinsic::convert(last)))
+  let marker: UInt64 = intrinsic.convert(highest_bit(intrinsic.convert(last)))
   let whole = bytes.length() - 1
   Ok(Backward(bytes: bytes.to_list(), remaining: whole.saturating_multiply(8).saturating_add(marker), overrun: 0))
 }
@@ -158,20 +158,20 @@ fn backward_of(bytes: Slice[UInt8]) -> Result[Backward, Error] {
 fn Backward.peek(self, count: UInt32) -> UInt32
   requires count <= 32
 {
-  let wanted: UInt64 = intrinsic::convert(count)
-  let mask: UInt64 = (1 << intrinsic::convert[UInt32, UInt64](count)) - 1
+  let wanted: UInt64 = intrinsic.convert(count)
+  let mask: UInt64 = (1 << intrinsic.convert[UInt32, UInt64](count)) - 1
   if wanted <= self.remaining {
     let at = self.remaining - wanted
     let word = little_endian(self.bytes.slice(), at: at / 8, count: 8)
-    return intrinsic::convert((word >> (at % 8)) & mask & 0xFFFFFFFF)
+    return intrinsic.convert((word >> (at % 8)) & mask & 0xFFFFFFFF)
   }
   let available: UInt64 = self.remaining
   let low = little_endian(self.bytes.slice(), at: 0, count: 8) & ((1 << available) - 1)
-  intrinsic::convert((low << (intrinsic::convert[UInt32, UInt64](count) - available)) & mask & 0xFFFFFFFF)
+  intrinsic.convert((low << (intrinsic.convert[UInt32, UInt64](count) - available)) & mask & 0xFFFFFFFF)
 }
 
 fn Backward.skip(mut self, count: UInt32) {
-  let wanted: UInt64 = intrinsic::convert(count)
+  let wanted: UInt64 = intrinsic.convert(count)
   if wanted <= self.remaining {
     self.remaining = self.remaining - wanted
   } else {
@@ -197,13 +197,13 @@ internal type FseTable(log: UInt32, entries: List[FseEntry])
 internal fn spread_symbols(counts: Slice[Int16], log: UInt32) -> Result[List[UInt16], Error]
   requires log <= 9
 {
-  let size: UInt64 = 1 << intrinsic::convert[UInt32, UInt64](log)
+  let size: UInt64 = 1 << intrinsic.convert[UInt32, UInt64](log)
   var symbols: List[UInt16] = List.filled(0, count: size)
   var high = size - 1
   for symbol in 0..counts.length() {
     if counts[symbol] == -1 {
       if high < symbols.length() && symbol < 65536 {
-        symbols[high] = intrinsic::convert(symbol)
+        symbols[high] = intrinsic.convert(symbol)
       }
       if high == 0 {
         return malformed("an FSE table with too many low-probability symbols")
@@ -217,10 +217,10 @@ internal fn spread_symbols(counts: Slice[Int16], log: UInt32) -> Result[List[UIn
   for symbol in 0..counts.length() {
     let count = counts[symbol]
     if count > 0 {
-      let repeats: UInt64 = intrinsic::convert(count)
+      let repeats: UInt64 = intrinsic.convert(count)
       for _ in 0..repeats {
         if position < symbols.length() && symbol < 65536 {
-          symbols[position] = intrinsic::convert(symbol)
+          symbols[position] = intrinsic.convert(symbol)
         }
         position = position.saturating_add(step) & mask
         var guard: UInt64 = 0
@@ -244,15 +244,15 @@ internal fn build_fse(counts: Slice[Int16], log: UInt32) -> Result[FseTable, Err
     return malformed("an FSE table too large")
   }
   let symbols = spread_symbols(counts, log: log)?
-  let size: UInt64 = 1 << intrinsic::convert[UInt32, UInt64](log)
+  let size: UInt64 = 1 << intrinsic.convert[UInt32, UInt64](log)
   var next: List[UInt64] = []
   for count in counts {
-    mut next.push(if count == -1 { 1 } else if count > 0 { intrinsic::convert(count) } else { 0 })
+    mut next.push(if count == -1 { 1 } else if count > 0 { intrinsic.convert(count) } else { 0 })
   }
   var entries: List[FseEntry] = []
   for state in 0..symbols.length() {
     let symbol = symbols[state]
-    let index: UInt64 = intrinsic::convert(symbol)
+    let index: UInt64 = intrinsic.convert(symbol)
     if index >= counts.length() || index >= next.length() {
       return malformed("an FSE symbol out of range")
     }
@@ -264,16 +264,16 @@ internal fn build_fse(counts: Slice[Int16], log: UInt32) -> Result[FseTable, Err
         return malformed("an FSE state with no count")
       }
       next[index] = value + 1
-      let top = highest_bit(intrinsic::convert(value))
+      let top = highest_bit(intrinsic.convert(value))
       if top > log {
         return malformed("an FSE count above its table")
       }
       let bits = log - top
-      let shifted = value << intrinsic::convert[UInt32, UInt64](bits)
+      let shifted = value << intrinsic.convert[UInt32, UInt64](bits)
       if shifted < size || shifted - size > 65535 {
         return malformed("an FSE baseline out of range")
       }
-      mut entries.push(FseEntry(symbol: symbol, bits: bits, baseline: intrinsic::convert(shifted - size)))
+      mut entries.push(FseEntry(symbol: symbol, bits: bits, baseline: intrinsic.convert(shifted - size)))
     }
   }
   Ok(FseTable(log: log, entries: own entries))
@@ -289,7 +289,7 @@ fn read_counts(bytes: Slice[UInt8], maximum_symbol: UInt64, maximum_log: UInt32)
     return malformed("an FSE accuracy above its maximum")
   }
   var bits: UInt32 = log + 1
-  var remaining: Int32 = thresholds[intrinsic::convert[UInt32, UInt64](bits)] + 1
+  var remaining: Int32 = thresholds[intrinsic.convert[UInt32, UInt64](bits)] + 1
   var values: List[Int16] = []
   var previous_zero = false
   while remaining > 1 && values.length() <= maximum_symbol
@@ -297,7 +297,7 @@ fn read_counts(bytes: Slice[UInt8], maximum_symbol: UInt64, maximum_log: UInt32)
     invariant bits >= 1 && bits <= 10
     decreases maximum_symbol + 2 - values.length()
   {
-    let threshold = thresholds[intrinsic::convert[UInt32, UInt64](bits)]
+    let threshold = thresholds[intrinsic.convert[UInt32, UInt64](bits)]
     if previous_zero {
       var zeros: UInt64 = 0
       var rounds: UInt64 = 0
@@ -306,7 +306,7 @@ fn read_counts(bytes: Slice[UInt8], maximum_symbol: UInt64, maximum_log: UInt32)
         decreases maximum_symbol + 1 - rounds
       {
         let repeat = mut reader.read(2) & 3
-        zeros = zeros + intrinsic::convert[UInt32, UInt64](repeat)
+        zeros = zeros + intrinsic.convert[UInt32, UInt64](repeat)
         rounds += 1
         if repeat != 3 {
           break
@@ -325,13 +325,13 @@ fn read_counts(bytes: Slice[UInt8], maximum_symbol: UInt64, maximum_log: UInt32)
       }
     }
     let maximum = 2 * threshold - 1 - remaining
-    let low: Int32 = intrinsic::convert(mut reader.read(bits - 1) & 1023)
+    let low: Int32 = intrinsic.convert(mut reader.read(bits - 1) & 1023)
     var count: Int32 = 0
     if low < maximum {
       count = low
     } else {
       mut reader.rewind(bits - 1)
-      let full: Int32 = intrinsic::convert(mut reader.read(bits) & 1023)
+      let full: Int32 = intrinsic.convert(mut reader.read(bits) & 1023)
       count = if full >= threshold { full - maximum } else { full }
     }
     count = count - 1
@@ -340,9 +340,9 @@ fn read_counts(bytes: Slice[UInt8], maximum_symbol: UInt64, maximum_log: UInt32)
       return malformed("an FSE distribution that overflows its table")
     }
     remaining = remaining - magnitude
-    mut values.push(intrinsic::convert(count))
+    mut values.push(intrinsic.convert(count))
     previous_zero = count == 0
-    while bits > 1 && remaining < thresholds[intrinsic::convert[UInt32, UInt64](bits)]
+    while bits > 1 && remaining < thresholds[intrinsic.convert[UInt32, UInt64](bits)]
       invariant bits >= 1 && bits <= 10
       decreases bits
     {
@@ -361,14 +361,14 @@ internal type Huffman(bits: UInt32, symbols: List[UInt8], lengths: List[UInt8])
 type Weights(values: List[UInt8], consumed: UInt64)
 
 fn next_state(table: FseTable, entry: FseEntry, stream: mut Backward) -> UInt64 {
-  intrinsic::convert[UInt32, UInt64](entry.baseline) + intrinsic::convert[UInt32, UInt64](mut stream.read(entry.bits))
+  intrinsic.convert[UInt32, UInt64](entry.baseline) + intrinsic.convert[UInt32, UInt64](mut stream.read(entry.bits))
 }
 
 fn decode_weights(bytes: Slice[UInt8], at: UInt64) -> Result[Weights, Error] {
   if at >= bytes.length() {
     return malformed("a missing Huffman header")
   }
-  let header: UInt64 = intrinsic::convert(bytes[at])
+  let header: UInt64 = intrinsic.convert(bytes[at])
   var weights: List[UInt8] = []
   if header >= 128 {
     let count = header - 127
@@ -378,7 +378,7 @@ fn decode_weights(bytes: Slice[UInt8], at: UInt64) -> Result[Weights, Error] {
     }
     for index in 0..count {
       let byte = byte_at(bytes, at: at + 1 + index / 2)
-      mut weights.push(intrinsic::convert(if index % 2 == 0 { byte >> 4 } else { byte & 15 }))
+      mut weights.push(intrinsic.convert(if index % 2 == 0 { byte >> 4 } else { byte & 15 }))
     }
     return Ok(Weights(values: own weights, consumed: 1 + size))
   }
@@ -393,8 +393,8 @@ fn decode_weights(bytes: Slice[UInt8], at: UInt64) -> Result[Weights, Error] {
   }
   var stream = backward_of(section[counts.consumed..])?
   let states = table.entries.length()
-  var first: UInt64 = intrinsic::convert(mut stream.read(table.log))
-  var second: UInt64 = intrinsic::convert(mut stream.read(table.log))
+  var first: UInt64 = intrinsic.convert(mut stream.read(table.log))
+  var second: UInt64 = intrinsic.convert(mut stream.read(table.log))
   while weights.length() < 255
     decreases 255 - weights.length()
   {
@@ -402,18 +402,18 @@ fn decode_weights(bytes: Slice[UInt8], at: UInt64) -> Result[Weights, Error] {
       return malformed("a Huffman weight state out of range")
     }
     let first_entry = table.entries[first]
-    mut weights.push(intrinsic::convert(first_entry.symbol & 255))
+    mut weights.push(intrinsic.convert(first_entry.symbol & 255))
     first = next_state(table, entry: first_entry, stream: mut stream)
     if stream.is_overrun() {
-      mut weights.push(intrinsic::convert(table.entries[second].symbol & 255))
+      mut weights.push(intrinsic.convert(table.entries[second].symbol & 255))
       break
     }
     let second_entry = table.entries[second]
-    mut weights.push(intrinsic::convert(second_entry.symbol & 255))
+    mut weights.push(intrinsic.convert(second_entry.symbol & 255))
     second = next_state(table, entry: second_entry, stream: mut stream)
     if stream.is_overrun() {
       if first < states {
-        mut weights.push(intrinsic::convert(table.entries[first].symbol & 255))
+        mut weights.push(intrinsic.convert(table.entries[first].symbol & 255))
       }
       break
     }
@@ -432,7 +432,7 @@ fn read_huffman(bytes: Slice[UInt8], at: UInt64) -> Result[HuffmanRead, Error] {
       return malformed("a Huffman weight above 11")
     }
     if weight > 0 {
-      total = total.saturating_add(1 << intrinsic::convert[UInt8, UInt32](weight - 1))
+      total = total.saturating_add(1 << intrinsic.convert[UInt8, UInt32](weight - 1))
     }
   }
   if total == 0 || total >= 2048 {
@@ -450,14 +450,14 @@ fn read_huffman(bytes: Slice[UInt8], at: UInt64) -> Result[HuffmanRead, Error] {
   if (left & (left - 1)) != 0 {
     return malformed("Huffman weights that do not complete a tree")
   }
-  mut weights.push(intrinsic::convert(highest_bit(left) + 1))
-  let size: UInt64 = 1 << intrinsic::convert[UInt32, UInt64](bits)
+  mut weights.push(intrinsic.convert(highest_bit(left) + 1))
+  let size: UInt64 = 1 << intrinsic.convert[UInt32, UInt64](bits)
   var symbols: List[UInt8] = List.filled(0, count: size)
   var lengths: List[UInt8] = List.filled(0, count: size)
   var starts: List[UInt64] = List.filled(0, count: 13)
   var ranks: List[UInt64] = List.filled(0, count: 13)
   for weight in weights {
-    let index: UInt64 = intrinsic::convert(weight)
+    let index: UInt64 = intrinsic.convert(weight)
     if index < ranks.length() {
       ranks[index] = ranks[index].saturating_add(1)
     }
@@ -471,15 +471,15 @@ fn read_huffman(bytes: Slice[UInt8], at: UInt64) -> Result[HuffmanRead, Error] {
     }
   }
   for symbol in 0..weights.length() {
-    let weight: UInt64 = intrinsic::convert(weights[symbol])
+    let weight: UInt64 = intrinsic.convert(weights[symbol])
     if weight > 0 && weight < starts.length() && weight <= 12 {
       let length: UInt64 = 1 << (weight - 1)
       let start = starts[weight]
       for offset in 0..length {
         let slot = start.saturating_add(offset)
         if slot < symbols.length() && slot < lengths.length() {
-          symbols[slot] = intrinsic::convert(symbol % 256)
-          lengths[slot] = intrinsic::convert((bits + 1).saturating_subtract(intrinsic::convert[UInt64, UInt32](weight)) & 255)
+          symbols[slot] = intrinsic.convert(symbol % 256)
+          lengths[slot] = intrinsic.convert((bits + 1).saturating_subtract(intrinsic.convert[UInt64, UInt32](weight)) & 255)
         }
       }
       starts[weight] = start.saturating_add(length)
@@ -491,12 +491,12 @@ fn read_huffman(bytes: Slice[UInt8], at: UInt64) -> Result[HuffmanRead, Error] {
 fn decode_huffman_stream(table: Huffman, stream: Slice[UInt8], count: UInt64, output: mut List[UInt8]) -> Result[Unit, Error] {
   var reader = backward_of(stream)?
   for _ in 0..count {
-    let index: UInt64 = intrinsic::convert(reader.peek(table.bits))
+    let index: UInt64 = intrinsic.convert(reader.peek(table.bits))
     if index >= table.symbols.length() || index >= table.lengths.length() {
       return malformed("a Huffman code out of range")
     }
     mut output.push(table.symbols[index])
-    mut reader.skip(intrinsic::convert(table.lengths[index]))
+    mut reader.skip(intrinsic.convert(table.lengths[index]))
   }
   if !reader.is_exhausted() {
     return malformed("a Huffman stream with bits left over")
@@ -518,7 +518,7 @@ fn decode_literals(block: Slice[UInt8], state: mut FrameState) -> Result[Literal
   if block.is_empty() {
     return malformed("a block without literals")
   }
-  let first: UInt64 = intrinsic::convert(block[0])
+  let first: UInt64 = intrinsic.convert(block[0])
   let kind = first & 3
   let format = (first >> 2) & 3
   let second: UInt64 = byte_at(block, at: 1)
@@ -608,7 +608,7 @@ fn read_table(block: Slice[UInt8], at: UInt64, mode: UInt64, defaults: Slice[Int
     return malformed("a sequence table past the block")
   }
   if mode == 1 {
-    let symbol: UInt16 = intrinsic::convert(block[at])
+    let symbol: UInt16 = intrinsic.convert(block[at])
     return Ok(TableRead(table: FseTable(log: 0, entries: [FseEntry(symbol: symbol, bits: 0, baseline: 0)]), consumed: 1))
   }
   if mode == 2 {
@@ -629,7 +629,7 @@ fn decode_sequences(block: Slice[UInt8], literals: Slice[UInt8], state: mut Fram
   if block.is_empty() {
     return malformed("a block without a sequences section")
   }
-  let first: UInt64 = intrinsic::convert(block[0])
+  let first: UInt64 = intrinsic.convert(block[0])
   var count: UInt64 = 0
   var at: UInt64 = 1
   if first < 128 {
@@ -651,7 +651,7 @@ fn decode_sequences(block: Slice[UInt8], literals: Slice[UInt8], state: mut Fram
   if at >= block.length() {
     return malformed("sequences without their modes")
   }
-  let modes: UInt64 = intrinsic::convert(block[at])
+  let modes: UInt64 = intrinsic.convert(block[at])
   at += 1
   let literal_read = read_table(block, at: at, mode: (modes >> 6) & 3, defaults: literal_length_default[..], default_log: 6, maximum_symbol: 35, maximum_log: 9, previous: state.literal_lengths.copy())?
   at = at.saturating_add(literal_read.consumed)
@@ -669,9 +669,9 @@ fn decode_sequences(block: Slice[UInt8], literals: Slice[UInt8], state: mut Fram
   let literal_table = literal_read.table
   let offset_table = offset_read.table
   let match_table = match_read.table
-  var literal_state: UInt64 = intrinsic::convert(mut stream.read(literal_table.log))
-  var offset_state: UInt64 = intrinsic::convert(mut stream.read(offset_table.log))
-  var match_state: UInt64 = intrinsic::convert(mut stream.read(match_table.log))
+  var literal_state: UInt64 = intrinsic.convert(mut stream.read(literal_table.log))
+  var offset_state: UInt64 = intrinsic.convert(mut stream.read(offset_table.log))
+  var match_state: UInt64 = intrinsic.convert(mut stream.read(match_table.log))
   var literal_at: UInt64 = 0
   for sequence in 0..count
     invariant literal_at <= literals.length()
@@ -679,15 +679,15 @@ fn decode_sequences(block: Slice[UInt8], literals: Slice[UInt8], state: mut Fram
     let literal_entry = entry_of(literal_table, state: literal_state)?
     let offset_entry = entry_of(offset_table, state: offset_state)?
     let match_entry = entry_of(match_table, state: match_state)?
-    let offset_code: UInt32 = intrinsic::convert(offset_entry.symbol)
-    let match_code: UInt64 = intrinsic::convert(match_entry.symbol)
-    let literal_code: UInt64 = intrinsic::convert(literal_entry.symbol)
+    let offset_code: UInt32 = intrinsic.convert(offset_entry.symbol)
+    let match_code: UInt64 = intrinsic.convert(match_entry.symbol)
+    let literal_code: UInt64 = intrinsic.convert(literal_entry.symbol)
     if offset_code > 31 || match_code >= 53 || literal_code >= 36 {
       return malformed("a sequence code out of range")
     }
-    let offset_value: UInt64 = (1 << intrinsic::convert[UInt32, UInt64](offset_code)) + intrinsic::convert[UInt32, UInt64](mut stream.read(offset_code))
-    let match_length: UInt64 = intrinsic::convert[UInt32, UInt64](match_length_baselines[match_code]) + intrinsic::convert[UInt32, UInt64](mut stream.read(match_length_bits[match_code]))
-    let literal_length: UInt64 = intrinsic::convert[UInt32, UInt64](literal_length_baselines[literal_code]) + intrinsic::convert[UInt32, UInt64](mut stream.read(literal_length_bits[literal_code]))
+    let offset_value: UInt64 = (1 << intrinsic.convert[UInt32, UInt64](offset_code)) + intrinsic.convert[UInt32, UInt64](mut stream.read(offset_code))
+    let match_length: UInt64 = intrinsic.convert[UInt32, UInt64](match_length_baselines[match_code]) + intrinsic.convert[UInt32, UInt64](mut stream.read(match_length_bits[match_code]))
+    let literal_length: UInt64 = intrinsic.convert[UInt32, UInt64](literal_length_baselines[literal_code]) + intrinsic.convert[UInt32, UInt64](mut stream.read(literal_length_bits[literal_code]))
     var offset: UInt64 = 0
     if offset_value > 3 {
       offset = offset_value - 3
@@ -749,7 +749,7 @@ fn decode_frame(input: Slice[UInt8], at: UInt64, output: mut List[UInt8], limit:
     return malformed("a frame without its header")
   }
   var index = at + 4
-  let descriptor: UInt64 = intrinsic::convert(input[index])
+  let descriptor: UInt64 = intrinsic.convert(input[index])
   index += 1
   let content_flag = descriptor >> 6
   let is_single_segment = (descriptor & 32) != 0
@@ -835,7 +835,7 @@ fn decode_frame(input: Slice[UInt8], at: UInt64, output: mut List[UInt8], limit:
           return malformed("a frame without its checksum")
         }
         let expected = u32_at(input, at: index)
-        if start <= output.length() && (checksum::xxh64(output[start..]) & 0xFFFFFFFF) != expected {
+        if start <= output.length() && (checksum.xxh64(output[start..]) & 0xFFFFFFFF) != expected {
           return Err(Error.ChecksumMismatch)
         }
         index += 4
@@ -855,7 +855,7 @@ public fn decompress(input: Slice[UInt8], limit: UInt64 = 268435456) -> Result[L
   while index < input.length()
     decreases input.length() - index
   {
-    let magic: UInt32 = intrinsic::convert(u32_at(input, at: index))
+    let magic: UInt32 = intrinsic.convert(u32_at(input, at: index))
     if magic == frame_magic {
       let next = decode_frame(input, at: index, output: mut output, limit: limit)?
       if next <= index {

@@ -1,6 +1,6 @@
-use standard::map
-use standard::streams
-use standard::text
+use standard.map
+use standard.streams
+use standard.text
 
 public opaque type Command(
   program: String,
@@ -56,7 +56,7 @@ fn is_separator(byte: UInt8) -> Bool
 }
 
 fn finish_word(words: mut List[String], word: mut String) {
-  mut words.push(map::exchange(mut word, value: ""))
+  mut words.push(map.exchange(mut word, value: ""))
 }
 
 fn split_into_words(words: mut List[String], word: mut String, in_word: Bool, text: StringSlice) -> Bool {
@@ -128,7 +128,7 @@ impl FromTemplate for Command {
   }
 }
 
-public fn is_valid_command(literals: Slice[text::Literal]) -> Bool
+public fn is_valid_command(literals: Slice[text.Literal]) -> Bool
 {
   if literals.length() == 0 {
     return false
@@ -272,7 +272,7 @@ public fn Signal.from_number(number: Int32) -> Signal
 public type Output(status: ExitStatus, output: List[UInt8], error_output: List[UInt8])
   derives Equal
 
-public fn Output.text(self) -> Result[String, text::Utf8Error]
+public fn Output.text(self) -> Result[String, text.Utf8Error]
   cost time O(self.output.length())
 {
   let copied = StringSlice(bytes: self.output.slice().elements).to_string()
@@ -280,7 +280,7 @@ public fn Output.text(self) -> Result[String, text::Utf8Error]
 }
 
 public opaque type Child(
-  handle: streams::Handle,
+  handle: streams.Handle,
   identifier: UInt32,
   input: Option[ChildInput],
   output: Option[ChildOutput],
@@ -323,9 +323,9 @@ public fn Child.signal(mut self, signal: Signal) -> Result[Unit, SystemError]
   Handles.signal(self.handle, signal: signal)
 }
 
-public opaque type ChildInput(handle: streams::Handle)
+public opaque type ChildInput(handle: streams.Handle)
 
-impl streams::Writer for ChildInput {
+impl streams.Writer for ChildInput {
   fn write(mut self, bytes: Slice[UInt8]) -> Result[UInt64, SystemError]
     uses Handles
   {
@@ -345,9 +345,9 @@ public fn ChildInput.close(own self) -> Result[Unit, SystemError]
   Handles.close(own self.handle)
 }
 
-public opaque type ChildOutput(handle: streams::Handle)
+public opaque type ChildOutput(handle: streams.Handle)
 
-impl streams::Reader for ChildOutput {
+impl streams.Reader for ChildOutput {
   fn read(mut self, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError]
     uses Handles
   {

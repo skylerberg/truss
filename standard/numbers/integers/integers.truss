@@ -1,6 +1,6 @@
-use standard::core
-use standard::intrinsic
-use standard::numbers::integer_text
+use standard.core
+use standard.intrinsic
+use standard.numbers.integer_text
 
 public trait FixedWidthInteger:
   Ordered
@@ -40,18 +40,18 @@ public trait FixedWidthInteger:
     ensures result == value
     cost time O(1)
   {
-    if !intrinsic::fits[Source, Self](value) {
+    if !intrinsic.fits[Source, Self](value) {
       Panic.crash("conversion out of range")
     }
-    intrinsic::convert(value)
+    intrinsic.convert(value)
   }
 
-  fn try_from_integer[Source: FixedWidthInteger](value: Source) -> Result[Self, core::ConversionError]
+  fn try_from_integer[Source: FixedWidthInteger](value: Source) -> Result[Self, core.ConversionError]
     ensures (result is Ok(_)) == (Self.minimum_value() <= value && value <= Self.maximum_value())
     ensures !(result is Ok(converted) && converted != value)
     cost time O(1)
   {
-    if intrinsic::fits[Source, Self](value) { Ok(intrinsic::convert(value)) } else { Err(core::ConversionError()) }
+    if intrinsic.fits[Source, Self](value) { Ok(intrinsic.convert(value)) } else { Err(core.ConversionError()) }
   }
 
   fn checked_power(self, exponent: UInt32) -> Option[Self]
@@ -93,49 +93,49 @@ public trait FixedWidthInteger:
   }
 
   fn to_float64(self) -> Float64
-    ensures identical(result, intrinsic::convert[Self, Float64](self))
+    ensures identical(result, intrinsic.convert[Self, Float64](self))
     cost time O(1)
   {
-    intrinsic::convert(self)
+    intrinsic.convert(self)
   }
 
   fn to_float32(self) -> Float32
-    ensures identical(result, intrinsic::convert[Self, Float32](self))
+    ensures identical(result, intrinsic.convert[Self, Float32](self))
     cost time O(1)
   {
-    intrinsic::convert(self)
+    intrinsic.convert(self)
   }
 
-  fn try_from_float64(value: Float64) -> Result[Self, core::ConversionError]
-    ensures (result is Ok(_)) == (value == intrinsic::truncate(value) && intrinsic::fits[Float64, Self](value))
-    ensures !(result is Ok(converted) && converted != intrinsic::convert[Float64, Self](value))
+  fn try_from_float64(value: Float64) -> Result[Self, core.ConversionError]
+    ensures (result is Ok(_)) == (value == intrinsic.truncate(value) && intrinsic.fits[Float64, Self](value))
+    ensures !(result is Ok(converted) && converted != intrinsic.convert[Float64, Self](value))
     cost time O(1)
   {
-    if value == intrinsic::truncate(value) && intrinsic::fits[Float64, Self](value) {
-      Ok(intrinsic::convert(value))
+    if value == intrinsic.truncate(value) && intrinsic.fits[Float64, Self](value) {
+      Ok(intrinsic.convert(value))
     } else {
-      Err(core::ConversionError())
+      Err(core.ConversionError())
     }
   }
 
-  fn try_from_float32(value: Float32) -> Result[Self, core::ConversionError]
-    ensures (result is Ok(_)) == (value == intrinsic::truncate(value) && intrinsic::fits[Float32, Self](value))
-    ensures !(result is Ok(converted) && converted != intrinsic::convert[Float32, Self](value))
+  fn try_from_float32(value: Float32) -> Result[Self, core.ConversionError]
+    ensures (result is Ok(_)) == (value == intrinsic.truncate(value) && intrinsic.fits[Float32, Self](value))
+    ensures !(result is Ok(converted) && converted != intrinsic.convert[Float32, Self](value))
     cost time O(1)
   {
-    if value == intrinsic::truncate(value) && intrinsic::fits[Float32, Self](value) {
-      Ok(intrinsic::convert(value))
+    if value == intrinsic.truncate(value) && intrinsic.fits[Float32, Self](value) {
+      Ok(intrinsic.convert(value))
     } else {
-      Err(core::ConversionError())
+      Err(core.ConversionError())
     }
   }
 
   fn saturating_from_float64(value: Float64) -> Self
     cost time O(1)
   {
-    if intrinsic::fits[Float64, Self](value) {
-      intrinsic::convert(value)
-    } else if intrinsic::is_nan(value) {
+    if intrinsic.fits[Float64, Self](value) {
+      intrinsic.convert(value)
+    } else if intrinsic.is_nan(value) {
       0
     } else if value < 0.0 {
       Self.minimum_value()
@@ -193,53 +193,53 @@ public trait FixedWidthInteger:
 
   fn count_ones(self) -> UInt64
     ensures result <= Self.bit_width()
-    ensures result == intrinsic::count_ones(self)
+    ensures result == intrinsic.count_ones(self)
     cost time O(1)
   {
-    intrinsic::count_ones(self)
+    intrinsic.count_ones(self)
   }
 
   fn count_zeros(self) -> UInt64
     ensures result <= Self.bit_width()
     cost time O(1)
   {
-    Self.bit_width() - intrinsic::count_ones(self)
+    Self.bit_width() - intrinsic.count_ones(self)
   }
 
   fn leading_zeros(self) -> UInt64
     ensures result <= Self.bit_width()
-    ensures result == intrinsic::leading_zeros(self)
+    ensures result == intrinsic.leading_zeros(self)
     cost time O(1)
   {
-    intrinsic::leading_zeros(self)
+    intrinsic.leading_zeros(self)
   }
 
   fn trailing_zeros(self) -> UInt64
     ensures result <= Self.bit_width()
-    ensures result == intrinsic::trailing_zeros(self)
+    ensures result == intrinsic.trailing_zeros(self)
     cost time O(1)
   {
-    intrinsic::trailing_zeros(self)
+    intrinsic.trailing_zeros(self)
   }
 
   fn rotate_left(self, amount: UInt64) -> Self
     cost time O(1)
     cost allocations == 0
   {
-    intrinsic::rotate_left(self, amount: amount)
+    intrinsic.rotate_left(self, amount: amount)
   }
 
   fn rotate_right(self, amount: UInt64) -> Self
     cost time O(1)
     cost allocations == 0
   {
-    intrinsic::rotate_right(self, amount: amount)
+    intrinsic.rotate_right(self, amount: amount)
   }
 
   fn swap_bytes(self) -> Self
     cost time O(1)
   {
-    intrinsic::swap_bytes(self)
+    intrinsic.swap_bytes(self)
   }
 
   fn checked_shift_left(self, amount: UInt64) -> Option[Self]
@@ -275,7 +275,7 @@ public trait FixedWidthInteger:
     ensures !(result is Some(sum) && sum != self + other)
     cost time O(1)
   {
-    if intrinsic::add_overflows(self, right: other) { None } else { Some(intrinsic::add(self, right: other)) }
+    if intrinsic.add_overflows(self, right: other) { None } else { Some(intrinsic.add(self, right: other)) }
   }
 
   fn checked_subtract(self, other: Self) -> Option[Self]
@@ -283,7 +283,7 @@ public trait FixedWidthInteger:
     ensures !(result is Some(difference) && difference != self - other)
     cost time O(1)
   {
-    if intrinsic::subtract_overflows(self, right: other) { None } else { Some(intrinsic::subtract(self, right: other)) }
+    if intrinsic.subtract_overflows(self, right: other) { None } else { Some(intrinsic.subtract(self, right: other)) }
   }
 
   fn checked_multiply(self, other: Self) -> Option[Self]
@@ -291,7 +291,7 @@ public trait FixedWidthInteger:
     ensures !(result is Some(product) && product != self * other)
     cost time O(1)
   {
-    if intrinsic::multiply_overflows(self, right: other) { None } else { Some(intrinsic::multiply(self, right: other)) }
+    if intrinsic.multiply_overflows(self, right: other) { None } else { Some(intrinsic.multiply(self, right: other)) }
   }
 
   fn wrapping_add(self, other: Self) -> Self
@@ -299,7 +299,7 @@ public trait FixedWidthInteger:
     cost time O(1)
     cost allocations == 0
   {
-    intrinsic::wrapping_add(self, right: other)
+    intrinsic.wrapping_add(self, right: other)
   }
 
   fn wrapping_subtract(self, other: Self) -> Self
@@ -307,7 +307,7 @@ public trait FixedWidthInteger:
     cost time O(1)
     cost allocations == 0
   {
-    intrinsic::wrapping_subtract(self, right: other)
+    intrinsic.wrapping_subtract(self, right: other)
   }
 
   fn wrapping_multiply(self, other: Self) -> Self
@@ -315,7 +315,7 @@ public trait FixedWidthInteger:
     cost time O(1)
     cost allocations == 0
   {
-    intrinsic::wrapping_multiply(self, right: other)
+    intrinsic.wrapping_multiply(self, right: other)
   }
 
   fn saturating_add(self, other: Self) -> Self
@@ -324,10 +324,10 @@ public trait FixedWidthInteger:
     ensures Self.minimum_value() <= self + other && self + other <= Self.maximum_value() ==> result == self + other
     cost time O(1)
   {
-    if intrinsic::add_overflows(self, right: other) {
+    if intrinsic.add_overflows(self, right: other) {
       if other < 0 { Self.minimum_value() } else { Self.maximum_value() }
     } else {
-      intrinsic::add(self, right: other)
+      intrinsic.add(self, right: other)
     }
   }
 
@@ -370,10 +370,10 @@ public trait FixedWidthInteger:
     ensures Self.minimum_value() <= self - other && self - other <= Self.maximum_value() ==> result == self - other
     cost time O(1)
   {
-    if intrinsic::subtract_overflows(self, right: other) {
+    if intrinsic.subtract_overflows(self, right: other) {
       if other > 0 { Self.minimum_value() } else { Self.maximum_value() }
     } else {
-      intrinsic::subtract(self, right: other)
+      intrinsic.subtract(self, right: other)
     }
   }
 
@@ -383,10 +383,10 @@ public trait FixedWidthInteger:
     ensures Self.minimum_value() <= self * other && self * other <= Self.maximum_value() ==> result == self * other
     cost time O(1)
   {
-    if intrinsic::multiply_overflows(self, right: other) {
+    if intrinsic.multiply_overflows(self, right: other) {
       if (self < 0) != (other < 0) { Self.minimum_value() } else { Self.maximum_value() }
     } else {
-      intrinsic::multiply(self, right: other)
+      intrinsic.multiply(self, right: other)
     }
   }
 
@@ -429,26 +429,26 @@ public trait FixedWidthInteger:
   fn reverse_bits(self) -> Self
     cost time O(1)
 
-  fn parse_radix(text: StringSlice, radix: UInt32) -> Result[Self, core::ParseIntegerError]
+  fn parse_radix(text: StringSlice, radix: UInt32) -> Result[Self, core.ParseIntegerError]
     uses Panic unless 2 <= radix && radix <= 36
     cost time O(text.length())
   {
     if radix < 2 || radix > 36 {
       Panic.crash("the radix is not between 2 and 36")
     }
-    let most: UInt64 = intrinsic::convert(Self.maximum_value())
+    let most: UInt64 = intrinsic.convert(Self.maximum_value())
     if Self.minimum_value() < 0 && text.length() > 0 && text.byte(0) == 45 {
-      let magnitude = integer_text::parse_magnitude(text, start: 1, radix: radix, limit: most + 1)?
+      let magnitude = integer_text.parse_magnitude(text, start: 1, radix: radix, limit: most + 1)?
       if magnitude == 0 {
         Ok(0)
       } else {
-        let below: Self = intrinsic::convert(magnitude - 1)
+        let below: Self = intrinsic.convert(magnitude - 1)
         Ok(0 - below - 1)
       }
     } else {
       let start: UInt64 = if text.length() > 0 && text.byte(0) == 43 { 1 } else { 0 }
-      let magnitude = integer_text::parse_magnitude(text, start: start, radix: radix, limit: most)?
-      Ok(intrinsic::convert(magnitude))
+      let magnitude = integer_text.parse_magnitude(text, start: start, radix: radix, limit: most)?
+      Ok(intrinsic.convert(magnitude))
     }
   }
 
@@ -462,8 +462,8 @@ public trait FixedWidthInteger:
       Panic.crash("the radix is not between 2 and 36")
     }
     let magnitude: UInt64 =
-      if self < 0 { intrinsic::convert[Self, UInt64](0 - (self + 1)) + 1 } else { intrinsic::convert(self) }
-    integer_text::format_magnitude(
+      if self < 0 { intrinsic.convert[Self, UInt64](0 - (self + 1)) + 1 } else { intrinsic.convert(self) }
+    integer_text.format_magnitude(
       magnitude,
       negative: self < 0,
       radix: radix,
@@ -484,9 +484,9 @@ public trait SignedInteger: FixedWidthInteger + Negate[Output = Self] {
     let high = if self >= other { self } else { other }
     let low = if self >= other { other } else { self }
     if low >= 0 || high < 0 {
-      intrinsic::convert(high - low)
+      intrinsic.convert(high - low)
     } else {
-      let above: Self.Unsigned = intrinsic::convert(high)
+      let above: Self.Unsigned = intrinsic.convert(high)
       above + low.unsigned_absolute()
     }
   }
@@ -513,9 +513,9 @@ public trait SignedInteger: FixedWidthInteger + Negate[Output = Self] {
     cost time O(1)
   {
     if self >= 0 {
-      intrinsic::convert(self)
+      intrinsic.convert(self)
     } else {
-      let below: Self.Unsigned = intrinsic::convert(-(self + 1))
+      let below: Self.Unsigned = intrinsic.convert(-(self + 1))
       below + 1
     }
   }
@@ -533,7 +533,7 @@ public trait SignedInteger: FixedWidthInteger + Negate[Output = Self] {
     ensures self != Self.minimum_value() ==> result == -self
     cost time O(1)
   {
-    intrinsic::wrapping_subtract(0, right: self)
+    intrinsic.wrapping_subtract(0, right: self)
   }
 
   fn sign(self) -> Self
@@ -565,10 +565,10 @@ public trait SignedInteger: FixedWidthInteger + Negate[Output = Self] {
     cost time O(1)
   {
     if self >= 0 {
-      intrinsic::convert(self)
+      intrinsic.convert(self)
     } else {
-      let below: Self.Unsigned = intrinsic::convert(-(self + 1))
-      let half: Self.Unsigned = intrinsic::convert(Self.maximum_value())
+      let below: Self.Unsigned = intrinsic.convert(-(self + 1))
+      let half: Self.Unsigned = intrinsic.convert(Self.maximum_value())
       half - below + half + 1
     }
   }
@@ -602,7 +602,7 @@ public trait UnsignedInteger: FixedWidthInteger {
     if self <= 1 {
       return Some(1)
     }
-    let used = Self.bit_width().saturating_subtract(intrinsic::leading_zeros(self - 1))
+    let used = Self.bit_width().saturating_subtract(intrinsic.leading_zeros(self - 1))
     if used >= Self.bit_width() {
       None
     } else {
@@ -650,9 +650,9 @@ public trait UnsignedInteger: FixedWidthInteger {
   {
     let limit = Self.maximum_value() / 2
     if self <= limit {
-      intrinsic::convert(self)
+      intrinsic.convert(self)
     } else {
-      let below: Self.Signed = intrinsic::convert(Self.maximum_value() - self)
+      let below: Self.Signed = intrinsic.convert(Self.maximum_value() - self)
       -below - 1
     }
   }
@@ -667,5 +667,5 @@ internal fn reverse_uint64_bits(value: UInt64) -> UInt64
   let halves = ((value & (nibbles << 4)) >> 4) | ((value & nibbles) << 4)
   let quarters = ((halves & (twos << 2)) >> 2) | ((halves & twos) << 2)
   let pairs = ((quarters & (ones << 1)) >> 1) | ((quarters & ones) << 1)
-  intrinsic::swap_bytes(pairs)
+  intrinsic.swap_bytes(pairs)
 }

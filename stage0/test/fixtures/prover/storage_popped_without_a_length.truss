@@ -1,5 +1,5 @@
-use standard::intrinsic
+use standard.intrinsic
 
-fn last(storage: mut intrinsic::Storage[UInt8]) -> UInt8 {
-  intrinsic::storage_pop(mut storage)
+fn last(storage: mut intrinsic.Storage[UInt8]) -> UInt8 {
+  intrinsic.storage_pop(mut storage)
 }

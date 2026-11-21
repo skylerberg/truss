@@ -1,8 +1,8 @@
-use standard::text
+use standard.text
 
 type Shout(text: String)
 
-fn is_quiet(literals: List[text::Literal]) -> Bool
+fn is_quiet(literals: List[text.Literal]) -> Bool
 {
   var quiet = true
   for literal in literals {

@@ -143,11 +143,7 @@ let explain_at ~path (spans : Source.Definition_span.t array) (definition : Synt
       (Syntax_walk.collect_names spans definition)
   in
   let is_written_in (value : Syntax.expression) (name : Syntax.name) =
-    match value.kind with
-    | Name written ->
-        List.exists (fun (part : Syntax.name) -> part.id = name.id) (written.last :: written.modules)
-    | Member (_, member) -> member.id = name.id
-    | _ -> false
+    match value.kind with Name written | Member (_, written) -> written.id = name.id | _ -> false
   in
   match (!innermost, name_at) with
   | Some value, Some name when not (is_written_in value name) ->
@@ -158,7 +154,7 @@ let explain_at ~path (spans : Source.Definition_span.t array) (definition : Synt
       let written = Source.Definition_span.quote text spans.(value.id) in
       let meaning, refers_to =
         match value.kind with
-        | Name path -> explain_resolved resolved path.last
+        | Name name -> explain_resolved resolved name
         | _ -> (
             match tables with
             | Some tables -> (

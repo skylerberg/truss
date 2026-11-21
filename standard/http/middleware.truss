@@ -1,7 +1,7 @@
-use standard::collections
-use standard::intrinsic
-use standard::log
-use standard::tasks
+use standard.collections
+use standard.intrinsic
+use standard.log
+use standard.tasks
 
 public type CorsPolicy(
   origins: List[String] = ["*"],
@@ -173,20 +173,20 @@ public fn log_requests(
   next(own request, mut responder)
   let elapsed = Clock.monotonic() - started
   let code: Int64 = match responder.status() {
-    Some(status) => intrinsic::convert(status.code)
+    Some(status) => intrinsic.convert(status.code)
     None => 200
   }
-  var fields: List[log::Field] = [
-    log::Field.string("method", value: method),
-    log::Field.string("path", value: path),
-    log::Field.integer("status", value: code),
-    log::Field.integer("bytes", value: intrinsic::convert(responder.bytes_sent() & 9223372036854775807)),
-    log::Field.duration("duration", value: elapsed),
+  var fields: List[log.Field] = [
+    log.Field.string("method", value: method),
+    log.Field.string("path", value: path),
+    log.Field.integer("status", value: code),
+    log.Field.integer("bytes", value: intrinsic.convert(responder.bytes_sent() & 9223372036854775807)),
+    log.Field.duration("duration", value: elapsed),
   ]
   if !id.is_empty() {
-    mut fields.push(log::Field.string("request_id", value: id))
+    mut fields.push(log.Field.string("request_id", value: id))
   }
-  log::information("request", fields: own fields)
+  log.information("request", fields: own fields)
 }
 
 public fn Request.with_body_limit(own self, bytes: UInt64) -> Request {
@@ -206,7 +206,7 @@ fn saturate_to_int64(count: UInt64) -> Int64
   ensures count <= Int64.maximum ==> result == count
   ensures count > Int64.maximum ==> result == Int64.maximum
 {
-  if intrinsic::fits[UInt64, Int64](count) { intrinsic::convert(count) } else { Int64.maximum }
+  if intrinsic.fits[UInt64, Int64](count) { intrinsic.convert(count) } else { Int64.maximum }
 }
 
 fn rates_of(policy: RateLimit) -> Rates
@@ -228,11 +228,11 @@ public type Decision =
   | Limited(retry_after_seconds: Int64)
   derives Equal
 
-public opaque type RateLimiter(policy: RateLimit, buckets: tasks::Cell[collections::LruCache[String, Bucket]])
+public opaque type RateLimiter(policy: RateLimit, buckets: tasks.Cell[collections.LruCache[String, Bucket]])
 
 public fn RateLimiter.new(policy: RateLimit = RateLimit()) -> RateLimiter {
   let keys = if policy.keys < 1 { 1 } else { policy.keys }
-  RateLimiter(policy: policy, buckets: tasks::Cell.new(collections::LruCache[String, Bucket].new(keys)))
+  RateLimiter(policy: policy, buckets: tasks.Cell.new(collections.LruCache[String, Bucket].new(keys)))
 }
 
 public fn RateLimiter.copy(self) -> RateLimiter {
@@ -272,7 +272,7 @@ public fn RateLimiter.take(self, key: StringSlice) -> Decision
     if current.milli_tokens >= 1000 {
       let left = current.milli_tokens - 1000
       let _ = mut buckets.insert(name.copy(), value: Bucket(milli_tokens: left, updated_milliseconds: now))
-      let whole: UInt64 = intrinsic::convert(left / 1000)
+      let whole: UInt64 = intrinsic.convert(left / 1000)
       Decision.Allowed(remaining: whole)
     } else {
       let _ = mut buckets.insert(name.copy(), value: current)

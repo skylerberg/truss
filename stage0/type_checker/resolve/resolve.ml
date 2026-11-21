@@ -66,10 +66,8 @@ type head = {
 
 let rec find_head resolved (value : Syntax.expression) =
   match value.kind with
-  | Name path ->
-      Option.map
-        (fun target -> { name = path.last; target; type_arguments = None })
-        resolved.names.(path.last.id)
+  | Name name | Member (_, name) ->
+      Option.map (fun target -> { name; target; type_arguments = None }) resolved.names.(name.id)
   | Parenthesized inner -> find_head resolved inner
   | Bracket (base, items) when resolved.brackets.(value.id) = Some Type_arguments ->
       Option.map
@@ -137,6 +135,17 @@ let resolve (lookups : Names.lookups) (key : Names.key) section =
       (Printf.sprintf "%s is already defined in %s, so this definition is never used."
          (Path.show key.path) first)
   end;
+  (match definition.kind with
+  | Constant { name = Plain_name name; _ } ->
+      let submodule : Path.module_ = { module_ with modules = module_.modules @ [ name.text ] } in
+      if lookups.module_exists submodule then
+        Walk.report state Duplicate_definition spans.(name.id)
+          (Printf.sprintf
+             "`%s` is a module, so a constant of `%s` cannot be named `%s`: `%s.%s.x` would name \
+              the definition `x` of the module, never a field of the constant."
+             (Path.show_module submodule) (Path.show_module module_) name.text
+             (Path.show_module module_) name.text)
+  | _ -> ());
   let compute_outcome () =
     let walked = Walk.lookup_section_names state section in
     let resolved =

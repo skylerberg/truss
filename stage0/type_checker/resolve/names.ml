@@ -194,7 +194,7 @@ module Scope = struct
   let is_restricted_module ~(from : Path.module_) (module_ : Path.module_) =
     module_ = Well_known.intrinsic_module && from.package <> Path.standard_package
 
-  let restricted_module_message = "Only the `standard` package can use `standard::intrinsic`."
+  let restricted_module_message = "Only the `standard` package can use `standard.intrinsic`."
 
   let describe_path_start (module_ : Path.module_) =
     Printf.sprintf
@@ -224,8 +224,8 @@ module Scope = struct
     | _ when exists package ->
         if is_restricted_module ~from package then Restricted_module else Found_module package
     | None when not (is_visible_package lookups ~from package.package) ->
-        No_package (String.concat "::" (first :: rest))
-    | _ -> No_module (String.concat "::" (first :: rest))
+        No_package (String.concat "." (first :: rest))
+    | _ -> No_module (String.concat "." (first :: rest))
 
   let make_top_path module_ name : Path.t = Top { module_; name }
 

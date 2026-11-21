@@ -18,7 +18,7 @@ let parse_wanted text =
     | _ ->
         Outcome.raise_cannot_run
           "`%s` is not a registry package's name, which is an owner and a name, such as \
-           `acme::geometry`."
+           `acme.geometry`."
           written
   in
   (name, Option.map read_version version)

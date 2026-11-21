@@ -28,7 +28,7 @@ let parse_entry line text =
         | Some ({ owner = Some _; _ } as name) -> name
         | _ ->
             raise_malformed line
-              "`%s` is not a registry package's name, which is an owner and a name joined by `::`."
+              "`%s` is not a registry package's name, which is an owner and a name joined by `.`."
               written
       in
       let version =

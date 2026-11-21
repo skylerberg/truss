@@ -18,6 +18,12 @@ let scan (cursor : Cursor.t) =
     make_lexed kind length
   in
   if is 0 ':' && is 1 '=' then make_lexed (Foreign Colon_equal) 2
+  else if is 0 ':' && is 1 ':' && is 2 '<' then make_lexed (Foreign Colon_colon) 2
+  else if is 0 ':' && is 1 ':' then begin
+    replace cursor ~start ~length:2 ~replacements:[ "." ] ~code:Path_separator
+      "Truss separates the names of a path with `.`, as in `json.parse` and `Shape.Circle`.";
+    make_lexed (Punctuation Dot) 2
+  end
   else if is 0 '-' && is 1 '-' then make_lexed (Foreign Minus_minus) 2
   else if is 0 '+' && is 1 '+' then make_lexed (Foreign Plus_plus) 2
   else if is 0 '*' && is 1 '*' then make_lexed (Foreign Star_star) 2

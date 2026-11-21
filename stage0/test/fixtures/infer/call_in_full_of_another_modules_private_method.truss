@@ -1,5 +1,5 @@
-use app::shapes
+use app.shapes
 
-fn f(shape: shapes::Shape) -> UInt64 {
-  shapes::Shape.secret(shape)
+fn f(shape: shapes.Shape) -> UInt64 {
+  shapes.Shape.secret(shape)
 }

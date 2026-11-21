@@ -1,4 +1,4 @@
-use standard::core
+use standard.core
 
 test "a string's bytes are its UTF-8 encoding" {
   let text = "h\u{e9}llo"
@@ -44,10 +44,10 @@ test "characters decodes each UTF-8 sequence" {
 
 test "characters_with_offsets gives the byte offset of each character" uses RunForever {
   assert "a\u{e9}\u{20ac}z".characters_with_offsets().to_list() == [
-    core::Indexed(index: 0, element: Character"a"),
-    core::Indexed(index: 1, element: Character"\u{e9}"),
-    core::Indexed(index: 3, element: Character"\u{20ac}"),
-    core::Indexed(index: 6, element: Character"z"),
+    core.Indexed(index: 0, element: Character"a"),
+    core.Indexed(index: 1, element: Character"\u{e9}"),
+    core.Indexed(index: 3, element: Character"\u{20ac}"),
+    core.Indexed(index: 6, element: Character"z"),
   ]
 }
 
@@ -242,11 +242,11 @@ test "split_at_most stops splitting when it has the parts asked for" {
 }
 
 test "split_once splits at the first separator and split_once_last at the last" {
-  assert "key=value=more".split_once("=") == Some(core::Pair(first: "key", second: "value=more"))
-  assert "key=value=more".split_once_last("=") == Some(core::Pair(first: "key=value", second: "more"))
+  assert "key=value=more".split_once("=") == Some(core.Pair(first: "key", second: "value=more"))
+  assert "key=value=more".split_once_last("=") == Some(core.Pair(first: "key=value", second: "more"))
   assert "none".split_once("=") is None
   assert "none".split_once_last("=") is None
-  assert "=".split_once("=") == Some(core::Pair(first: "", second: ""))
+  assert "=".split_once("=") == Some(core.Pair(first: "", second: ""))
 }
 
 test "find_character gives the byte offset of the first character that matches" {

@@ -1,9 +1,9 @@
-use standard::network
+use standard.network
 
 fn accept_or_time_out() -> String
   uses Tasks, Clock, Console, NetworkServer, Handles
 {
-  let loopback = network::SocketAddress(address: network::IpAddress.loopback, port: 0)
+  let loopback = network.SocketAddress(address: network.IpAddress.loopback, port: 0)
   if NetworkServer.listen(loopback) is Ok(opened) {
     var listener = own opened
     concurrent {

@@ -1,16 +1,16 @@
-use standard::base64
-use standard::http::date
-use standard::network
-use standard::streams
-use standard::tls
-use standard::x509
+use standard.base64
+use standard.http.date
+use standard.network
+use standard.streams
+use standard.tls
+use standard.x509
 
 public type Error =
   | Malformed(message: String)
   | Rejected(code: UInt16, message: String)
   | Unsupported(message: String)
   | System(error: SystemError)
-  | Tls(error: tls::Error)
+  | Tls(error: tls.Error)
   derives Equal
 
 impl Display for Error {
@@ -93,7 +93,7 @@ fn encoded_word(text: StringSlice) -> String {
   if is_ascii(text) {
     return text.to_string()
   }
-  "=?UTF-8?B?${base64::encode(text.bytes())}?="
+  "=?UTF-8?B?${base64.encode(text.bytes())}?="
 }
 
 fn quoted_name(name: StringSlice) -> String {
@@ -177,7 +177,7 @@ fn quoted_printable(text: StringSlice) -> String {
 }
 
 fn wrapped_base64(bytes: Slice[UInt8]) -> String {
-  let encoded = base64::encode(bytes)
+  let encoded = base64.encode(bytes)
   var output = ""
   var start: UInt64 = 0
   let length = encoded.length()
@@ -240,7 +240,7 @@ fn domain_of(email: StringSlice) -> String {
 }
 
 fn message_date(now: Instant) -> String {
-  let stamp = date::format(now)
+  let stamp = date.format(now)
   match stamp.slice().strip_suffix(" GMT") {
     Some(prefix) => "${prefix} +0000"
     None => own stamp
@@ -324,12 +324,12 @@ public type SmtpOptions(
   password: Option[String] = None,
   client_name: String = "localhost",
   timeout_seconds: Int64 = 30,
-  roots: Option[List[x509::Certificate]] = None,
+  roots: Option[List[x509.Certificate]] = None,
 )
 
 type Reply(code: UInt16, lines: List[String])
 
-fn read_line[Stream: streams::Duplex](stream: Stream, inbox: mut streams::ByteQueue) -> Result[String, Error]
+fn read_line[Stream: streams.Duplex](stream: Stream, inbox: mut streams.ByteQueue) -> Result[String, Error]
   uses Handles, Tasks, RunForever
 {
   var searched: UInt64 = 0
@@ -371,7 +371,7 @@ fn line_end(bytes: Slice[UInt8]) -> Option[UInt64]
   None
 }
 
-fn read_reply[Stream: streams::Duplex](stream: Stream, inbox: mut streams::ByteQueue) -> Result[Reply, Error]
+fn read_reply[Stream: streams.Duplex](stream: Stream, inbox: mut streams.ByteQueue) -> Result[Reply, Error]
   uses Handles, Tasks, RunForever
 {
   var lines: List[String] = []
@@ -392,7 +392,7 @@ fn read_reply[Stream: streams::Duplex](stream: Stream, inbox: mut streams::ByteQ
   }
 }
 
-fn expect[Stream: streams::Duplex](stream: Stream, inbox: mut streams::ByteQueue, lowest: UInt16, highest: UInt16) -> Result[Reply, Error]
+fn expect[Stream: streams.Duplex](stream: Stream, inbox: mut streams.ByteQueue, lowest: UInt16, highest: UInt16) -> Result[Reply, Error]
   uses Handles, Tasks, RunForever
 {
   let reply = read_reply(stream, inbox: mut inbox)?
@@ -403,7 +403,7 @@ fn expect[Stream: streams::Duplex](stream: Stream, inbox: mut streams::ByteQueue
   Ok(own reply)
 }
 
-fn command[Stream: streams::Duplex](stream: Stream, inbox: mut streams::ByteQueue, line: StringSlice, lowest: UInt16, highest: UInt16) -> Result[Reply, Error]
+fn command[Stream: streams.Duplex](stream: Stream, inbox: mut streams.ByteQueue, line: StringSlice, lowest: UInt16, highest: UInt16) -> Result[Reply, Error]
   uses Handles, Tasks, RunForever
 {
   system(stream.send_all("${line}\r\n".slice().bytes()))?
@@ -453,7 +453,7 @@ fn dot_stuffed(body: StringSlice) -> String {
   output
 }
 
-fn authenticate[Stream: streams::Duplex](stream: Stream, inbox: mut streams::ByteQueue, features: Reply, options: SmtpOptions) -> Result[Unit, Error]
+fn authenticate[Stream: streams.Duplex](stream: Stream, inbox: mut streams.ByteQueue, features: Reply, options: SmtpOptions) -> Result[Unit, Error]
   uses Handles, Tasks, RunForever
 {
   let username = match options.username {
@@ -466,19 +466,19 @@ fn authenticate[Stream: streams::Duplex](stream: Stream, inbox: mut streams::Byt
     mut credentials.append_slice(username.slice().bytes())
     mut credentials.push(0)
     mut credentials.append_slice(password.slice().bytes())
-    let _ = command(stream, inbox: mut inbox, line: "AUTH PLAIN ${base64::encode(credentials.slice())}", lowest: 235, highest: 235)?
+    let _ = command(stream, inbox: mut inbox, line: "AUTH PLAIN ${base64.encode(credentials.slice())}", lowest: 235, highest: 235)?
     return Ok(Unit)
   }
   if offers_mechanism(features, mechanism: "LOGIN") {
     let _ = command(stream, inbox: mut inbox, line: "AUTH LOGIN", lowest: 334, highest: 334)?
-    let _ = command(stream, inbox: mut inbox, line: base64::encode(username.slice().bytes()), lowest: 334, highest: 334)?
-    let _ = command(stream, inbox: mut inbox, line: base64::encode(password.slice().bytes()), lowest: 235, highest: 235)?
+    let _ = command(stream, inbox: mut inbox, line: base64.encode(username.slice().bytes()), lowest: 334, highest: 334)?
+    let _ = command(stream, inbox: mut inbox, line: base64.encode(password.slice().bytes()), lowest: 235, highest: 235)?
     return Ok(Unit)
   }
   Err(Error.Unsupported(message: "a mail server that offers neither AUTH PLAIN nor AUTH LOGIN"))
 }
 
-fn deliver[Stream: streams::Duplex](stream: Stream, inbox: mut streams::ByteQueue, features: Reply, message: Message, encoded: StringSlice, options: SmtpOptions) -> Result[Unit, Error]
+fn deliver[Stream: streams.Duplex](stream: Stream, inbox: mut streams.ByteQueue, features: Reply, message: Message, encoded: StringSlice, options: SmtpOptions) -> Result[Unit, Error]
   uses Handles, Tasks, RunForever
 {
   authenticate(stream, inbox: mut inbox, features: features, options: options)?
@@ -495,7 +495,7 @@ fn deliver[Stream: streams::Duplex](stream: Stream, inbox: mut streams::ByteQueu
   Ok(Unit)
 }
 
-fn quit_after[Stream: streams::Duplex, Value](stream: Stream, outcome: own Result[Value, Error]) -> Result[Value, Error]
+fn quit_after[Stream: streams.Duplex, Value](stream: Stream, outcome: own Result[Value, Error]) -> Result[Value, Error]
   uses Handles, Tasks, RunForever
 {
   if outcome is Err(_) {
@@ -505,14 +505,14 @@ fn quit_after[Stream: streams::Duplex, Value](stream: Stream, outcome: own Resul
   outcome
 }
 
-fn client_config(options: SmtpOptions) -> Result[tls::ClientConfig, Error]
+fn client_config(options: SmtpOptions) -> Result[tls.ClientConfig, Error]
   uses FileRead, Panic
 {
   let roots = match options.roots {
     Some(roots) => roots.copy()
-    None => system(x509::system_roots())?
+    None => system(x509.system_roots())?
   }
-  Ok(tls::ClientConfig(roots: own roots))
+  Ok(tls.ClientConfig(roots: own roots))
 }
 
 public fn send(message: Message, options: SmtpOptions) -> Result[Unit, Error]
@@ -520,29 +520,29 @@ public fn send(message: Message, options: SmtpOptions) -> Result[Unit, Error]
 {
   let encoded = message.encode()?
   let timeout = if options.timeout_seconds > 0 && options.timeout_seconds <= 1000000000 { Some(Duration.seconds(options.timeout_seconds)) } else { None }
-  var connection = system(network::connect(options.host, port: options.port, timeout: timeout))?
+  var connection = system(network.connect(options.host, port: options.port, timeout: timeout))?
   let _ = mut connection.set_read_timeout(timeout)
   let _ = mut connection.set_write_timeout(timeout)
   let greeting = "EHLO ${options.client_name}"
   match options.security {
     Plain => {
-      var inbox: streams::ByteQueue = []
+      var inbox: streams.ByteQueue = []
       let _ = expect(connection, inbox: mut inbox, lowest: 220, highest: 220)?
       let features = quit_after(connection, outcome: command(connection, inbox: mut inbox, line: greeting, lowest: 250, highest: 250))?
       quit_after(connection, outcome: deliver(connection, inbox: mut inbox, features: features, message: message, encoded: encoded, options: options))
     }
     Implicit => {
-      let secured = match tls::connect(own connection, host: options.host, config: client_config(options)?) {
+      let secured = match tls.connect(own connection, host: options.host, config: client_config(options)?) {
         Ok(secured) => own secured
         Err(error) => return Err(Error.Tls(error: own error))
       }
-      var inbox: streams::ByteQueue = []
+      var inbox: streams.ByteQueue = []
       let _ = expect(secured, inbox: mut inbox, lowest: 220, highest: 220)?
       let features = quit_after(secured, outcome: command(secured, inbox: mut inbox, line: greeting, lowest: 250, highest: 250))?
       quit_after(secured, outcome: deliver(secured, inbox: mut inbox, features: features, message: message, encoded: encoded, options: options))
     }
     StartTls => {
-      var inbox: streams::ByteQueue = []
+      var inbox: streams.ByteQueue = []
       let _ = expect(connection, inbox: mut inbox, lowest: 220, highest: 220)?
       let offered = quit_after(connection, outcome: command(connection, inbox: mut inbox, line: greeting, lowest: 250, highest: 250))?
       if !has_extension(offered, name: "STARTTLS") {
@@ -552,11 +552,11 @@ public fn send(message: Message, options: SmtpOptions) -> Result[Unit, Error]
       if !inbox.is_empty() {
         return Err(malformed("a mail server that sent bytes before the TLS handshake"))
       }
-      let secured = match tls::connect(own connection, host: options.host, config: client_config(options)?) {
+      let secured = match tls.connect(own connection, host: options.host, config: client_config(options)?) {
         Ok(secured) => own secured
         Err(error) => return Err(Error.Tls(error: own error))
       }
-      var secured_inbox: streams::ByteQueue = []
+      var secured_inbox: streams.ByteQueue = []
       let features = quit_after(secured, outcome: command(secured, inbox: mut secured_inbox, line: greeting, lowest: 250, highest: 250))?
       quit_after(secured, outcome: deliver(secured, inbox: mut secured_inbox, features: features, message: message, encoded: encoded, options: options))
     }

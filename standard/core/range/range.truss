@@ -1,4 +1,4 @@
-use standard::core
+use standard.core
 
 public fn Range[Value: Ordered].is_empty(self) -> Bool
   ensures result == (if self.inclusive { self.start > self.stop } else { self.start >= self.stop })
@@ -12,7 +12,7 @@ public fn Range[Value: Ordered].contains(self, value: Value) -> Bool
   self.start <= value && (if self.inclusive { value <= self.stop } else { value < self.stop })
 }
 
-impl Iterable for Range[Value: core::Countable] {
+impl Iterable for Range[Value: core.Countable] {
   type Element = Value
 
   fn count(self) -> UInt64
@@ -47,7 +47,7 @@ impl Iterable for Range[Value: core::Countable] {
   }
 }
 
-impl Equal for Range[Value: core::Countable] {
+impl Equal for Range[Value: core.Countable] {
   fn equal(self, other: Range[Value]) -> Bool
     ensures result == (if self.is_empty() || other.is_empty() {
       self.is_empty() && other.is_empty()
@@ -63,15 +63,15 @@ impl Equal for Range[Value: core::Countable] {
   }
 }
 
-public opaque type Reversed[Value: core::Countable](range: Range[Value])
+public opaque type Reversed[Value: core.Countable](range: Range[Value])
 
-public fn Range[Value: core::Countable].reversed(self) -> Reversed[Value]
+public fn Range[Value: core.Countable].reversed(self) -> Reversed[Value]
   cost time O(1)
 {
   Reversed(range: Range(start: self.start, stop: self.stop, inclusive: self.inclusive))
 }
 
-impl Iterable for Reversed[Value: core::Countable] {
+impl Iterable for Reversed[Value: core.Countable] {
   type Element = Value
 
   fn count(self) -> UInt64
@@ -88,10 +88,10 @@ impl Iterable for Reversed[Value: core::Countable] {
   }
 }
 
-public opaque type Stepped[Value: core::Countable](range: Range[Value], step: UInt64)
+public opaque type Stepped[Value: core.Countable](range: Range[Value], step: UInt64)
   invariant step > 0
 
-public fn Range[Value: core::Countable].step_by(self, step: UInt64) -> Stepped[Value]
+public fn Range[Value: core.Countable].step_by(self, step: UInt64) -> Stepped[Value]
   uses Panic unless step > 0
   cost time O(1)
 {
@@ -101,7 +101,7 @@ public fn Range[Value: core::Countable].step_by(self, step: UInt64) -> Stepped[V
   Stepped(range: Range(start: self.start, stop: self.stop, inclusive: self.inclusive), step: step)
 }
 
-impl Iterable for Stepped[Value: core::Countable] {
+impl Iterable for Stepped[Value: core.Countable] {
   type Element = Value
 
   fn count(self) -> UInt64
@@ -120,7 +120,7 @@ impl Iterable for Stepped[Value: core::Countable] {
   }
 }
 
-public fn Range[Value: core::Countable].length(self) -> Option[UInt64]
+public fn Range[Value: core.Countable].length(self) -> Option[UInt64]
   cost time O(1)
 {
   match self.start.steps_to(self.stop) {

@@ -1,5 +1,5 @@
-use standard::intrinsic
-use standard::specification
+use standard.intrinsic
+use standard.specification
 
 public opaque type Generator(state: Array[UInt64, 4])
   derives Plain
@@ -194,7 +194,7 @@ public fn Generator.fill(mut self, buffer: mut Slice[UInt8])
     if index % 8 == 0 {
       word = mut self.next()
     }
-    buffer[index] = intrinsic::convert(word % 256)
+    buffer[index] = intrinsic.convert(word % 256)
     word = word / 256
   }
 }
@@ -216,7 +216,7 @@ public fn Generator.shuffle[Element](mut self, items: mut Slice[Element])
     mut items.swap(chosen, second: remaining)
   }
   proof {
-    specification::elements_of_a_permutation(items.model(), original: old(items.model()))
+    specification.elements_of_a_permutation(items.model(), original: old(items.model()))
   }
 }
 
@@ -272,7 +272,7 @@ public fn bytes(count: UInt64) -> List[UInt8]
     if index % 8 == 0 {
       word = Random.next()
     }
-    mut output.push(intrinsic::convert(word % 256))
+    mut output.push(intrinsic.convert(word % 256))
     word = word / 256
   }
   output

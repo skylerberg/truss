@@ -1,26 +1,26 @@
-use standard::capabilities
-use standard::environment
-use standard::intrinsic
-use standard::system::calls
-use standard::system::handles
+use standard.capabilities
+use standard.environment
+use standard.intrinsic
+use standard.system.calls
+use standard.system.handles
 
 internal type SystemEnvironment()
 
 impl Environment for SystemEnvironment
-  uses RunForever, capabilities::System
+  uses RunForever, capabilities.System
 {
   fn variable(self, name: StringSlice) -> Option[String] {
     variable(name)
   }
 
-  fn variables(self) -> List[environment::Variable] {
-    var all: List[environment::Variable] = []
+  fn variables(self) -> List[environment.Variable] {
+    var all: List[environment.Variable] = []
     var index: UInt64 = 0
     var is_present = true
     while is_present {
-      let entry = intrinsic::environment_entry(index, is_present: mut is_present)
+      let entry = intrinsic.environment_entry(index, is_present: mut is_present)
       proof {
-        assert forall k in 0..intrinsic::view_length(entry) => intrinsic::view_at(entry, index: k) != 0
+        assert forall k in 0..intrinsic.view_length(entry) => intrinsic.view_at(entry, index: k) != 0
       }
       if is_present {
         mut all.push(variable_from(entry))
@@ -31,27 +31,27 @@ impl Environment for SystemEnvironment
   }
 
   fn current_directory(self) -> Result[Path, SystemError] {
-    let path = handles::with_file_error(calls::current_directory())?
+    let path = handles.with_file_error(calls.current_directory())?
     Ok(Path(text: String.from_bytes(own path)))
   }
 
-  fn platform(self) -> environment::Platform {
-    let online = intrinsic::libc_sysconf(intrinsic::libc_sc_nprocessors_onln())
-    let process = intrinsic::libc_getpid()
-    environment::Platform(
+  fn platform(self) -> environment.Platform {
+    let online = intrinsic.libc_sysconf(intrinsic.libc_sc_nprocessors_onln())
+    let process = intrinsic.libc_getpid()
+    environment.Platform(
       operating_system: operating_system(),
       architecture: architecture(),
-      processor_count: if online > 0 { intrinsic::convert(online) } else { 1 },
-      host_name: String.from_bytes(calls::host_name()),
-      process_identifier: if process > 0 { intrinsic::convert(process) } else { 0 },
+      processor_count: if online > 0 { intrinsic.convert(online) } else { 1 },
+      host_name: String.from_bytes(calls.host_name()),
+      process_identifier: if process > 0 { intrinsic.convert(process) } else { 0 },
     )
   }
 
-  fn location(self, location: environment::Location) -> Option[Path] {
+  fn location(self, location: environment.Location) -> Option[Path] {
     match location {
       Home => home()
       Temporary => Some(set_or(variable("TMPDIR"), otherwise: "/tmp"))
-      Executable => match calls::executable() {
+      Executable => match calls.executable() {
         Ok(path) => Some(Path(text: String.from_bytes(own path)))
         Err(_) => None
       }
@@ -76,11 +76,11 @@ impl Environment for SystemEnvironment
   fn local_zone(self) -> Option[String] {
     if variable("TZ") is Some(zone) && !zone.is_empty() {
       let bytes = zone.slice().bytes
-      let start: UInt64 = if intrinsic::view_at(bytes, index: 0) == 58 { 1 } else { 0 }
-      return Some(calls::text_copied_from(intrinsic::view_slice(bytes, start: start, stop: intrinsic::view_length(bytes))))
+      let start: UInt64 = if intrinsic.view_at(bytes, index: 0) == 58 { 1 } else { 0 }
+      return Some(calls.text_copied_from(intrinsic.view_slice(bytes, start: start, stop: intrinsic.view_length(bytes))))
     }
-    match calls::read_link("/etc/localtime".slice().bytes) {
-      Ok(target) => after_last(intrinsic::storage_view(target), marker: "zoneinfo/".slice().bytes)
+    match calls.read_link("/etc/localtime".slice().bytes) {
+      Ok(target) => after_last(intrinsic.storage_view(target), marker: "zoneinfo/".slice().bytes)
       Err(_) => None
     }
   }
@@ -97,64 +97,64 @@ impl Environment for SystemEnvironment
 }
 
 fn variable(name: StringSlice) -> Option[String]
-  uses capabilities::System
+  uses capabilities.System
 {
-  match calls::ended_with_zero_byte(name.bytes) {
+  match calls.ended_with_zero_byte(name.bytes) {
     Ok(name_for_c) => {
       var is_present = false
-      let value = intrinsic::libc_getenv(intrinsic::storage_view(name_for_c), is_present: mut is_present)
-      if is_present { Some(calls::text_copied_from(value)) } else { None }
+      let value = intrinsic.libc_getenv(intrinsic.storage_view(name_for_c), is_present: mut is_present)
+      if is_present { Some(calls.text_copied_from(value)) } else { None }
     }
     Err(_) => None
   }
 }
 
-fn variable_from(entry: intrinsic::View[UInt8]) -> environment::Variable
+fn variable_from(entry: intrinsic.View[UInt8]) -> environment.Variable
   uses RunForever
 {
-  let length = intrinsic::view_length(entry)
+  let length = intrinsic.view_length(entry)
   var split: UInt64 = 0
-  while split < length && intrinsic::view_at(entry, index: split) != 61
+  while split < length && intrinsic.view_at(entry, index: split) != 61
     invariant split <= length
   {
     split += 1
   }
   let value_start = if split < length { split + 1 } else { length }
-  environment::Variable(
-    name: calls::text_copied_from(intrinsic::view_slice(entry, start: 0, stop: split)),
-    value: calls::text_copied_from(intrinsic::view_slice(entry, start: value_start, stop: length)),
+  environment.Variable(
+    name: calls.text_copied_from(intrinsic.view_slice(entry, start: 0, stop: split)),
+    value: calls.text_copied_from(intrinsic.view_slice(entry, start: value_start, stop: length)),
   )
 }
 
 theorem one_system_for_the_run()
-  ensures intrinsic::system_is_linux() == intrinsic::system_is_linux()
-  ensures !(intrinsic::system_is_linux() && intrinsic::system_is_macos())
-  ensures !(intrinsic::system_is_x86_64() && intrinsic::system_is_arm64())
+  ensures intrinsic.system_is_linux() == intrinsic.system_is_linux()
+  ensures !(intrinsic.system_is_linux() && intrinsic.system_is_macos())
+  ensures !(intrinsic.system_is_x86_64() && intrinsic.system_is_arm64())
 {
 }
 
 theorem a_handle_keeps_its_descriptor(descriptor: Int32)
-  ensures intrinsic::handle_descriptor(intrinsic::handle_from(descriptor)) == descriptor
+  ensures intrinsic.handle_descriptor(intrinsic.handle_from(descriptor)) == descriptor
 {
 }
 
-fn operating_system() -> environment::OperatingSystem {
-  if intrinsic::system_is_linux() {
-    environment::OperatingSystem.Linux
-  } else if intrinsic::system_is_macos() {
-    environment::OperatingSystem.MacOs
+fn operating_system() -> environment.OperatingSystem {
+  if intrinsic.system_is_linux() {
+    environment.OperatingSystem.Linux
+  } else if intrinsic.system_is_macos() {
+    environment.OperatingSystem.MacOs
   } else {
-    environment::OperatingSystem.Other
+    environment.OperatingSystem.Other
   }
 }
 
-fn architecture() -> environment::Architecture {
-  if intrinsic::system_is_x86_64() {
-    environment::Architecture.X86With64Bits
-  } else if intrinsic::system_is_arm64() {
-    environment::Architecture.Arm64
+fn architecture() -> environment.Architecture {
+  if intrinsic.system_is_x86_64() {
+    environment.Architecture.X86With64Bits
+  } else if intrinsic.system_is_arm64() {
+    environment.Architecture.Arm64
   } else {
-    environment::Architecture.Other
+    environment.Architecture.Other
   }
 }
 
@@ -167,7 +167,7 @@ fn set_or(value: Option[String], otherwise: StringSlice) -> Path {
 }
 
 fn home() -> Option[Path]
-  uses capabilities::System
+  uses capabilities.System
 {
   if variable("HOME") is Some(text) && !text.is_empty() {
     Some(Path.new(text))
@@ -177,23 +177,23 @@ fn home() -> Option[Path]
 }
 
 fn for_this_user(name: StringSlice, on_linux: StringSlice, on_macos: StringSlice) -> Option[Path]
-  uses capabilities::System
+  uses capabilities.System
 {
-  if intrinsic::system_is_linux() && variable(name) is Some(text) && !text.is_empty() {
+  if intrinsic.system_is_linux() && variable(name) is Some(text) && !text.is_empty() {
     return Some(Path.new(text))
   }
-  let under_home = if intrinsic::system_is_macos() { on_macos } else { on_linux }
+  let under_home = if intrinsic.system_is_macos() { on_macos } else { on_linux }
   match home() {
     Some(directory) => Some(Path(text: "${directory.text}/${under_home}"))
     None => None
   }
 }
 
-fn after_last(bytes: intrinsic::View[UInt8], marker: intrinsic::View[UInt8]) -> Option[String]
+fn after_last(bytes: intrinsic.View[UInt8], marker: intrinsic.View[UInt8]) -> Option[String]
   uses RunForever
 {
-  let length = intrinsic::view_length(bytes)
-  let size = intrinsic::view_length(marker)
+  let length = intrinsic.view_length(bytes)
+  let size = intrinsic.view_length(marker)
   if size > length {
     return None
   }
@@ -202,8 +202,8 @@ fn after_last(bytes: intrinsic::View[UInt8], marker: intrinsic::View[UInt8]) -> 
   while looking
     invariant start + size <= length
   {
-    if intrinsic::compare_bytes(intrinsic::view_slice(bytes, start: start, stop: start + size), right: marker) == 0 {
-      return Some(calls::text_copied_from(intrinsic::view_slice(bytes, start: start + size, stop: length)))
+    if intrinsic.compare_bytes(intrinsic.view_slice(bytes, start: start, stop: start + size), right: marker) == 0 {
+      return Some(calls.text_copied_from(intrinsic.view_slice(bytes, start: start + size, stop: length)))
     }
     if start == 0 {
       looking = false
@@ -214,14 +214,14 @@ fn after_last(bytes: intrinsic::View[UInt8], marker: intrinsic::View[UInt8]) -> 
   None
 }
 
-fn names_a_zone(name: intrinsic::View[UInt8]) -> Bool {
-  let length = intrinsic::view_length(name)
-  if length == 0 || intrinsic::view_at(name, index: 0) == 47 {
+fn names_a_zone(name: intrinsic.View[UInt8]) -> Bool {
+  let length = intrinsic.view_length(name)
+  if length == 0 || intrinsic.view_at(name, index: 0) == 47 {
     return false
   }
   var before: UInt8 = 0
   for index in 0..length {
-    let byte = intrinsic::view_at(name, index: index)
+    let byte = intrinsic.view_at(name, index: index)
     if byte == 0 || (byte == 46 && before == 46) {
       return false
     }
@@ -231,9 +231,9 @@ fn names_a_zone(name: intrinsic::View[UInt8]) -> Bool {
 }
 
 fn zone_file(name: StringSlice) -> Result[List[UInt8], SystemError]
-  uses RunForever, capabilities::System
+  uses RunForever, capabilities.System
 {
-  var handle = handles::open_to_read(Path(text: "/usr/share/zoneinfo/${name}"))?
-  let rules = handles::read_all(mut handle)?
+  var handle = handles.open_to_read(Path(text: "/usr/share/zoneinfo/${name}"))?
+  let rules = handles.read_all(mut handle)?
   Ok(List.from_storage(own rules))
 }

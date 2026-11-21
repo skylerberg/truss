@@ -1,14 +1,14 @@
-use standard::capabilities
-use standard::intrinsic
-use standard::log
-use standard::system::calls
+use standard.capabilities
+use standard.intrinsic
+use standard.log
+use standard.system.calls
 
 internal type SystemLog()
 
 impl Log for SystemLog
-  uses RunForever, capabilities::System
+  uses RunForever, capabilities.System
 {
-  fn record(self, record: log::Record) {
+  fn record(self, record: log.Record) {
     var line = ""
     mut line.push("level=")
     match record.level {
@@ -36,19 +36,19 @@ impl Log for SystemLog
       }
     }
     mut line.push("\n")
-    let _ = calls::write_fully(2, bytes: line.slice().bytes)
+    let _ = calls.write_fully(2, bytes: line.slice().bytes)
   }
 
-  fn enabled(self, level: log::Level) -> Bool {
-    level >= log::Level.Information
+  fn enabled(self, level: log.Level) -> Bool {
+    level >= log.Level.Information
   }
 }
 
 fn quoted(line: mut String, text: StringSlice) {
   mut line.push_byte(34)
   let bytes = text.bytes
-  for index in 0..intrinsic::view_length(bytes) {
-    let byte = intrinsic::view_at(bytes, index: index)
+  for index in 0..intrinsic.view_length(bytes) {
+    let byte = intrinsic.view_at(bytes, index: index)
     if byte == 34 || byte == 92 {
       mut line.push_byte(92)
       mut line.push_byte(byte)

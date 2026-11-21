@@ -1,6 +1,6 @@
-use framework::sources
-use plugins::timers
+use framework.sources
+use plugins.timers
 
-fn f() -> any sources::Source {
-  any timers::Timer()
+fn f() -> any sources.Source {
+  any timers.Timer()
 }

@@ -1,5 +1,5 @@
-use standard::core
-use standard::intrinsic
+use standard.core
+use standard.intrinsic
 
 public type Value =
   | Boolean(value: Bool)
@@ -43,14 +43,14 @@ fn read_header(bytes: Slice[UInt8], at: UInt64) -> Result[Header, Error]
   var length: UInt64 = 0
   var start = at + 2
   if first < 128 {
-    length = intrinsic::convert(first)
+    length = intrinsic.convert(first)
   } else {
-    let count: UInt64 = intrinsic::convert(first & 127)
+    let count: UInt64 = intrinsic.convert(first & 127)
     if count == 0 || count > 4 || bytes.length() - start < count {
       return Err(Error(offset: at))
     }
     for index in 0..count {
-      length = (length << 8) | intrinsic::convert[UInt8, UInt64](bytes[start + index])
+      length = (length << 8) | intrinsic.convert[UInt8, UInt64](bytes[start + index])
     }
     if (count == 1 && length < 128) || bytes[start] == 0 {
       return Err(Error(offset: at))
@@ -63,7 +63,7 @@ fn read_header(bytes: Slice[UInt8], at: UInt64) -> Result[Header, Error]
   Ok(Header(tag: tag, start: start, end: start + length))
 }
 
-fn read_value(bytes: Slice[UInt8], at: UInt64, depth: UInt64) -> Result[core::Pair[Value, UInt64], Error]
+fn read_value(bytes: Slice[UInt8], at: UInt64, depth: UInt64) -> Result[core.Pair[Value, UInt64], Error]
   decreases 65 - depth
 {
   if depth > 64 {
@@ -117,7 +117,7 @@ fn read_value(bytes: Slice[UInt8], at: UInt64, depth: UInt64) -> Result[core::Pa
   } else {
     Value.Other(tag: tag, bytes: own content)
   }
-  Ok(core::Pair(first: own value, second: header.end))
+  Ok(core.Pair(first: own value, second: header.end))
 }
 
 public fn parse(bytes: Slice[UInt8]) -> Result[Value, Error] {
@@ -142,16 +142,16 @@ public fn parse_tagged(value: Value) -> Result[Value, Error] {
 
 fn push_length(output: mut List[UInt8], length: UInt64) {
   if length < 128 {
-    mut output.push(intrinsic::convert(length))
+    mut output.push(intrinsic.convert(length))
     return
   }
   var digits: List[UInt8] = []
   var rest = length
   while rest > 0 {
-    mut digits.push(intrinsic::convert(rest & 255))
+    mut digits.push(intrinsic.convert(rest & 255))
     rest = rest >> 8
   }
-  mut output.push(128 | intrinsic::convert[UInt64, UInt8](digits.length()))
+  mut output.push(128 | intrinsic.convert[UInt64, UInt8](digits.length()))
   mut digits.reverse()
   mut output.append(own digits)
 }

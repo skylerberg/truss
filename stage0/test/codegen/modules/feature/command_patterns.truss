@@ -1,4 +1,4 @@
-use example::feature::command_patterns
+use example.feature.command_patterns
 
 let limit: Int64 = 10
 let origin: Int64 = 0
@@ -13,8 +13,8 @@ fn command(text: String) -> Int64 {
 
 fn sized(value: Int64) -> String {
   match value {
-    command_patterns::origin => "origin"
-    1..command_patterns::limit => "small"
+    command_patterns.origin => "origin"
+    1..command_patterns.limit => "small"
     _ => "large"
   }
 }

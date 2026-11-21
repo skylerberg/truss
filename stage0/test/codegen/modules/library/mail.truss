@@ -1,9 +1,9 @@
-use standard::mail
-use standard::network
-use standard::simulation
-use standard::tasks
+use standard.mail
+use standard.network
+use standard.simulation
+use standard.tasks
 
-fn read_line(connection: network::Connection, inbox: mut List[UInt8]) -> Option[String]
+fn read_line(connection: network.Connection, inbox: mut List[UInt8]) -> Option[String]
   uses Handles, Tasks, RunForever
 {
   while true {
@@ -22,13 +22,13 @@ fn read_line(connection: network::Connection, inbox: mut List[UInt8]) -> Option[
   }
 }
 
-fn reply(connection: network::Connection, text: StringSlice)
+fn reply(connection: network.Connection, text: StringSlice)
   uses Handles, Tasks, RunForever
 {
   let _ = connection.send_all("${text}\r\n".slice().bytes())
 }
 
-fn serve_once(listener: mut network::Listener, transcript: tasks::Cell[List[String]])
+fn serve_once(listener: mut network.Listener, transcript: tasks.Cell[List[String]])
   uses Handles, Tasks, RunForever
 {
   let connection = match mut listener.accept() {
@@ -79,26 +79,26 @@ fn serve_once(listener: mut network::Listener, transcript: tasks::Cell[List[Stri
 fn sent() -> List[String]
   uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic, RunForever
 {
-  var listener = NetworkServer.listen(network::SocketAddress(address: network::IpAddress.loopback, port: 2525)).expect("the port is free")
-  let transcript = tasks::Cell[List[String]].new([])
+  var listener = NetworkServer.listen(network.SocketAddress(address: network.IpAddress.loopback, port: 2525)).expect("the port is free")
+  let transcript = tasks.Cell[List[String]].new([])
   var outcome = ""
   concurrent {
     serve_once(mut listener, transcript: transcript)
     {
-      let message = mail::Message(
-        from: mail::Address(email: "ada@example.test", name: Some("Ada Lovelace")),
-        to: [mail::Address(email: "grace@example.test")],
+      let message = mail.Message(
+        from: mail.Address(email: "ada@example.test", name: Some("Ada Lovelace")),
+        to: [mail.Address(email: "grace@example.test")],
         subject: "Résumé attached",
         text: Some("Hello Grace,\n.hidden line\nSee the attachment."),
         html: Some("<p>Hello Grace</p>"),
-        cc: [mail::Address(email: "alan@example.test", name: Some("Zoë"))],
-        bcc: [mail::Address(email: "hidden@example.test")],
-        attachments: [mail::Attachment(filename: "notes.txt", content_type: "text/plain", bytes: "plain notes".bytes().to_list())],
+        cc: [mail.Address(email: "alan@example.test", name: Some("Zoë"))],
+        bcc: [mail.Address(email: "hidden@example.test")],
+        attachments: [mail.Attachment(filename: "notes.txt", content_type: "text/plain", bytes: "plain notes".bytes().to_list())],
       )
-      outcome = match mail::send(message, options: mail::SmtpOptions(
+      outcome = match mail.send(message, options: mail.SmtpOptions(
         host: "localhost",
         port: 2525,
-        security: mail::Security.Plain,
+        security: mail.Security.Plain,
         username: Some("ada"),
         password: Some("secret"),
       )) {
@@ -115,7 +115,7 @@ fn sent() -> List[String]
 }
 
 test "send speaks SMTP: AUTH PLAIN, every recipient including Bcc, and a dot-stuffed MIME message" uses Panic, RunForever {
-  provide simulation::World.new() {
+  provide simulation.World.new() {
     let seen = sent()
     assert seen.length() == 10
     assert seen[9] == "QUIT"
@@ -143,17 +143,17 @@ test "send speaks SMTP: AUTH PLAIN, every recipient including Bcc, and a dot-stu
 }
 
 test "a message refuses a line break in a header field, which would let a caller add headers" uses Panic, RunForever {
-  provide simulation::World.new() {
-    let injected = mail::Message(
-      from: mail::Address(email: "ada@example.test"),
-      to: [mail::Address(email: "grace@example.test")],
+  provide simulation.World.new() {
+    let injected = mail.Message(
+      from: mail.Address(email: "ada@example.test"),
+      to: [mail.Address(email: "grace@example.test")],
       subject: "Hello\r\nBcc: victim@example.test",
       text: Some("hi"),
     )
     assert injected.encode() is Err(Malformed(_))
-    let bad_address = mail::Message(from: mail::Address(email: "not an address"), to: [mail::Address(email: "grace@example.test")], subject: "Hi")
+    let bad_address = mail.Message(from: mail.Address(email: "not an address"), to: [mail.Address(email: "grace@example.test")], subject: "Hi")
     assert bad_address.encode() is Err(Malformed(_))
-    let nobody = mail::Message(from: mail::Address(email: "ada@example.test"), to: [], subject: "Hi")
+    let nobody = mail.Message(from: mail.Address(email: "ada@example.test"), to: [], subject: "Hi")
     assert nobody.encode() is Err(Malformed(_))
   }
 }

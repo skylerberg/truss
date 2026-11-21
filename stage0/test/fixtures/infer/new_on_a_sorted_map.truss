@@ -1,5 +1,5 @@
-use standard::collections
+use standard.collections
 
 fn f() {
-  let ports: collections::SortedMap[String, Int64] = collections::SortedMap.new()
+  let ports: collections.SortedMap[String, Int64] = collections.SortedMap.new()
 }

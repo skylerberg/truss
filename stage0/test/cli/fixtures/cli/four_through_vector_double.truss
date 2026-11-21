@@ -1,6 +1,6 @@
-use acme::geometry::vector
+use acme.geometry.vector
 
 public fn four() -> Int64 {
-  let _ = vector::double(1)
-  acme::geometry::vector::double(2)
+  let _ = vector.double(1)
+  acme.geometry.vector.double(2)
 }

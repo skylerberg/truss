@@ -1,5 +1,5 @@
-use two::numbers
+use two.numbers
 
 public fn four() -> Int64 {
-  numbers::two() * 2
+  numbers.two() * 2
 }

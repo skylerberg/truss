@@ -74,9 +74,9 @@ let () =
         | { package = Some { dependencies = [ { capabilities; _ } ]; _ }; _ } -> capabilities
         | _ -> failwith "the grant is read differently"
       in
-      if read_grant "Clock" <> read_grant "standard::capabilities::Clock" then
+      if read_grant "Clock" <> read_grant "standard.capabilities.Clock" then
         Harness.fail "the two are different grants";
-      if read_grant "acme::store::Ledger" = read_grant "Ledger" then
+      if read_grant "acme.store.Ledger" = read_grant "Ledger" then
         Harness.fail "a capability outside the prelude is its name alone");
   Harness.test "the toolchain builds a package written for its own Truss or an older one" (fun () ->
       if not (Manifest.toolchain_builds Manifest.truss_version) then Harness.fail "refuses its own";
@@ -93,14 +93,14 @@ let () =
   Harness.test "a name is one lower_snake_case part or an owner and a name" (fun () ->
       List.iter
         (fun name -> if not (Manifest.is_valid_name name) then Harness.fail "%s is refused" name)
-        [ "weather"; "weather_report"; "acme::geometry"; "acme::geometry_v2" ];
+        [ "weather"; "weather_report"; "acme.geometry"; "acme.geometry_v2" ];
       List.iter
         (fun name -> if Manifest.is_valid_name name then Harness.fail "%s is accepted" name)
-        [ ""; "Weather"; "a::b::c"; "a:b"; "::b"; "a::"; "a__b"; "9a"; "a-b" ]);
+        [ ""; "Weather"; "a.b.c"; "a:b"; ".b"; "a."; "a__b"; "9a"; "a-b" ]);
   Harness.test "a package's name that is not one is malformed, at its line" (fun () ->
       expect_malformed_at 2 "[package]\nname = \"Weather\"\n");
-  Harness.test "a dependency's name with :: is written in quotes" (fun () ->
-      expect_malformed_at 4 "[package]\nname = \"a\"\n[dependencies]\ntruss::json = []\n");
+  Harness.test "a dependency's name with an owner is written in quotes" (fun () ->
+      expect_malformed_at 4 "[package]\nname = \"a\"\n[dependencies]\ntruss.json = []\n");
   Harness.test "a version, as other languages' manifests have, is malformed, with the replacement"
     (fun () ->
       (match Manifest.parse "[package]\nname = \"a\"\nversion = \"1.0\"\n" with
@@ -153,23 +153,29 @@ let () =
           ()
       | _ -> Harness.fail "read differently");
   Harness.test "comments are read past, but not a # in quotes" (fun () ->
-      match
-        Manifest.parse
-          "# The app\n[package]\nname = \"a\" # its name\n[dependencies]\nb = [\"c#d\"] # one\n"
-      with
+      (match
+         Manifest.parse
+           "# The app\n[package]\nname = \"a\" # its name\n[dependencies]\nb = [\"Clock\"] # one\n"
+       with
       | {
        package =
          Some
            {
              name = { Path.owner = None; name = "a" };
              dependencies =
-               [ { package = { Path.owner = None; name = "b" }; capabilities = [ Prelude "c#d" ] } ];
+               [
+                 { package = { Path.owner = None; name = "b" }; capabilities = [ Prelude "Clock" ] };
+               ];
              _;
            };
        _;
       } ->
           ()
       | _ -> Harness.fail "read differently");
+      match Manifest.parse "[package]\nname = \"a\"\n[dependencies]\nb = [\"c#d\"]\n" with
+      | exception Manifest.Malformed { line = 4; message } ->
+          if not (String.includes ~affix:"`c#d`" message) then Harness.fail "said %s" message
+      | _ -> Harness.fail "accepted a capability named `c#d`");
   Harness.test "a grant that is neither a capability's name nor a path is malformed, at its line"
     (fun () -> expect_malformed_at 4 "[package]\nname = \"a\"\n[dependencies]\nb = [\"a:b\"]\n");
   Harness.test "the first malformed line is reported, whatever the mistake on a later line"
@@ -186,11 +192,11 @@ let () =
      http = [\n\
     \  \"NetworkClient\",\n\
      ]\n\
-     \"truss::toml\" = []\n"
+     \"truss.toml\" = []\n"
   in
   Harness.test "a manifest without a dependency loses that entry's lines and no others" (fun () ->
       let without = Manifest.remove_dependency text { Path.owner = None; name = "http" } in
-      if without <> "[package]\nname = \"a\"\n\n[dependencies]\njson = []\n\"truss::toml\" = []\n"
+      if without <> "[package]\nname = \"a\"\n\n[dependencies]\njson = []\n\"truss.toml\" = []\n"
       then Harness.fail "wrote %S" without;
       let without = Manifest.remove_dependency text { Path.owner = Some "truss"; name = "toml" } in
       if
@@ -222,7 +228,7 @@ let () =
             json = [\n\
            \  \"Clock\",\n\
             ]\n\
-            \"acme::geometry\" = []\n\n\
+            \"acme.geometry\" = []\n\n\
             [test]\n\
             time_limit = 3\n"
       then Harness.fail "wrote %S" added;

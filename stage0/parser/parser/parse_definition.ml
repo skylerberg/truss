@@ -46,7 +46,7 @@ let parse_type_head cursor : Syntax.type_head =
 
 let parse_definition_name cursor =
   match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
-  | Upper _, _ | Lower _, Punctuation Colon_colon ->
+  | Upper _, _ | Lower _, Punctuation Dot ->
       let head = parse_type_head cursor in
       Cursor.expect_punctuation cursor Dot;
       Syntax.Member_name (head, Atoms.lower_name cursor "a method name after `.`")

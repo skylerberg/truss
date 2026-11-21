@@ -7,21 +7,21 @@ let () =
         "(fn first () (uses Clock) (block todo))");
   Harness.test "use lines are kept apart from definitions" (fun () ->
       let file, diagnostics =
-        Parse_support.parse "use standard::json\nuse weather::forecast::hourly\nfn f() {}"
+        Parse_support.parse "use standard.json\nuse weather.forecast.hourly\nfn f() {}"
       in
       Parse_support.expect_no_diagnostics "" diagnostics;
       if
         List.map
           (fun (item : Syntax.path Syntax.item) -> Syntax_print.show_path item.value)
           file.uses
-        <> [ "standard::json"; "weather::forecast::hourly" ]
+        <> [ "standard.json"; "weather.forecast.hourly" ]
       then Harness.fail "wrong use lines");
   Harness.test "a use line after a definition moves up" (fun () ->
-      Parse_support.expect_error "use a::b\n\nfn f() {}\nuse c::d\n" ~code:Use_after_definition
-        ~at:"use c::d" ~fixed:"use a::b\nuse c::d\n\nfn f() {}\n");
+      Parse_support.expect_error "use a.b\n\nfn f() {}\nuse c.d\n" ~code:Use_after_definition
+        ~at:"use c.d" ~fixed:"use a.b\nuse c.d\n\nfn f() {}\n");
   Harness.test "a use line after the first definition moves above it" (fun () ->
-      Parse_support.expect_error "fn f() {}\nuse c::d\n" ~code:Use_after_definition ~at:"use c::d"
-        ~fixed:"use c::d\nfn f() {}\n");
+      Parse_support.expect_error "fn f() {}\nuse c.d\n" ~code:Use_after_definition ~at:"use c.d"
+        ~fixed:"use c.d\nfn f() {}\n");
   Harness.test "a statement at the top level is one error" (fun () ->
       Parse_support.expect_error "fn f() {}\nx = 1\nfn g() {}" ~code:Statement_at_top_level ~at:"x");
   Harness.test "a definition records where its syntax errors are" (fun () ->
@@ -467,8 +467,7 @@ let () =
       ("(fn f ((value: " ^ expected ^ ")) (block))")
   in
   Harness.test "a path type with arguments" (fun () ->
-      expect_type "standard::json::Map[String, List[Int64]]"
-        "standard::json::Map[String, List[Int64]]");
+      expect_type "standard.json.Map[String, List[Int64]]" "standard.json.Map[String, List[Int64]]");
   Harness.test "a count argument and a count parameter" (fun () ->
       expect_type "Array[UInt8, 32]" "Array[UInt8, 32]";
       expect_type "Array[Int64, count]" "Array[Int64, count]");
@@ -595,9 +594,9 @@ let () =
   Harness.test "a variant pattern" (fun () ->
       expect_arm "Some(Circle(radius, ..))" "(Some (Circle radius ..))");
   Harness.test "qualified constants" (fun () ->
-      expect_arm "http::ok" "http::ok";
+      expect_arm "http.ok" "http.ok";
       expect_arm "Status.teapot" "Status.teapot";
-      expect_arm "http::Status.teapot" "http::Status.teapot");
+      expect_arm "http.Status.teapot" "http.Status.teapot");
   Harness.test "literals" (fun () ->
       expect_arm "-1" "-1";
       expect_arm "\"GET\"" "\"GET\"";
@@ -605,7 +604,7 @@ let () =
   Harness.test "alternatives" (fun () -> expect_arm "301 | 302 | Low" "(| 301 302 Low)");
   Harness.test "ranges" (fun () ->
       expect_arm "500..=599" "(..= 500 599)";
-      expect_arm "0..=network::max_port" "(..= 0 network::max_port)";
+      expect_arm "0..=network.max_port" "(..= 0 network.max_port)";
       expect_arm "UInt16.minimum..=UInt16.maximum" "(..= UInt16.minimum UInt16.maximum)";
       expect_arm "Character\"a\"..=Character\"z\"" "(..= Character\"a\" Character\"z\")");
   Harness.test "a guard" (fun () -> expect_arm "code if code >= 400" "code (if (>= code 400))");
@@ -718,7 +717,7 @@ let () =
       expect_expression "echo player.wins * 3" "(echo (* (. player wins) 3))");
   Harness.test "strings, tagged strings, and interpolations" (fun () ->
       expect_expression "\"a${b + 1}c\"" "\"a${(+ b 1)}c\"";
-      expect_expression "database::SqlQuery\"select ${id}\"" "database::SqlQuery\"select ${id}\"";
+      expect_expression "database.SqlQuery\"select ${id}\"" "database.SqlQuery\"select ${id}\"";
       expect_expression "\"${names.join(\", \")}\"" "\"${(call (. names join) \", \")}\"");
   Harness.test "no missing token is reported at the end of an interpolation that a line break ended"
     (fun () ->
@@ -737,8 +736,8 @@ let () =
   Harness.test "constants and names" (fun () ->
       expect_expression "true" "true";
       expect_expression "Self.Key" "(. Self Key)";
-      expect_expression "geometry::Shape.Circle" "(. geometry::Shape Circle)";
-      expect_expression "json::parse" "json::parse");
+      expect_expression "geometry.Shape.Circle" "(. (. geometry Shape) Circle)";
+      expect_expression "json.parse" "(. json parse)");
   Harness.test "quantifiers in a specification" (fun () ->
       Parse_support.expect_definition
         "fn f() requires count > 0 && forall i in 0..count => items[i] > 0 || done {}"

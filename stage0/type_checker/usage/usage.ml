@@ -69,7 +69,7 @@ let collect_bindings context (definition : Syntax.definition) =
     | Let { pattern = written_pattern; is_var; else_; _ } ->
         visit_pattern ~site:{ is_var; is_refutable_position = Option.is_some else_ } written_pattern
     | For { pattern = written_pattern; _ } -> visit_pattern ~site:irrefutable written_pattern
-    | Assignment { target = { kind = Name { modules = []; last }; _ }; operator = Assign; _ } ->
+    | Assignment { target = { kind = Name last; _ }; operator = Assign; _ } ->
         assigned := last.id :: !assigned
     | _ -> ());
     Syntax_walk.visit_statement_parts ~on_expression:visit_expression ~on_statement:visit_statement
@@ -254,15 +254,19 @@ type place =
 
 and index_key = Literal_key of Z.t | Place_key of place
 
+let find_named_place context (value : Syntax.expression) (name : Syntax.name) =
+  match (context.tables.resolutions.(value.id), context.resolved.names.(name.id)) with
+  | Some (Local_value id), _ -> Some (Local_place id)
+  | _, Some (Definition (Constant, constant)) -> Some (Constant_place constant)
+  | _ -> None
+
 let rec find_place context (value : Syntax.expression) =
   match value.kind with
   | Parenthesized inner -> find_place context inner
   | Self_value -> Some Self_place
-  | Name path -> (
-      match (context.tables.resolutions.(value.id), context.resolved.names.(path.last.id)) with
-      | Some (Local_value id), _ -> Some (Local_place id)
-      | _, Some (Definition (Constant, constant)) -> Some (Constant_place constant)
-      | _ -> None)
+  | Name name -> find_named_place context value name
+  | Member (_, name) when Option.is_some context.resolved.names.(name.id) ->
+      find_named_place context value name
   | Member (base, _) -> (
       match context.tables.resolutions.(value.id) with
       | Some (Field_access { field; _ }) ->

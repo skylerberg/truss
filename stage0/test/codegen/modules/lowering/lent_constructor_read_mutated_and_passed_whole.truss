@@ -1,4 +1,4 @@
-use standard::list
+use standard.list
 
 type Big(label: String, numbers: Array[Int64, 64])
 
@@ -10,7 +10,7 @@ fn Holder.tagged(mut self) lends mut Tagged {
   Tagged(tag: 7, value: mut self.name)
 }
 
-fn Holder.split(self) lends Option[list::SplitFirst[Big]] {
+fn Holder.split(self) lends Option[list.SplitFirst[Big]] {
   self.bigs.split_first()
 }
 

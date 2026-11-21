@@ -1,25 +1,28 @@
 type immutable = Read_only of string | Captured of string | Lent_read_only | Not_a_place
 
+let find_immutable_name state (name : Syntax.name) =
+  match State.find_target state name with
+  | Some (Local id) -> (
+      let captured =
+        match state.lambdas with
+        | (lambda : Source.Definition_span.t) :: _ ->
+            let binding = State.read_span state id in
+            binding.start < lambda.start || binding.start >= lambda.stop
+        | [] -> false
+      in
+      match Hashtbl.find_opt state.locals id with
+      | _ when captured -> Some (Captured name.text)
+      | Some local ->
+          if local.binding = Var || local.mode = Mut then None else Some (Read_only name.text)
+      | None -> None)
+  | Some (Definition _ | Law_parameter _) -> Some (Read_only name.text)
+  | _ -> None
+
 let rec find_immutable state (env : State.env) (value : Syntax.expression) : immutable option =
   match value.kind with
-  | Name path -> (
-      match State.find_target state path.last with
-      | Some (Local id) -> (
-          let captured =
-            match state.lambdas with
-            | (lambda : Source.Definition_span.t) :: _ ->
-                let binding = State.read_span state id in
-                binding.start < lambda.start || binding.start >= lambda.stop
-            | [] -> false
-          in
-          match Hashtbl.find_opt state.locals id with
-          | _ when captured -> Some (Captured path.last.text)
-          | Some local ->
-              if local.binding = Var || local.mode = Mut then None
-              else Some (Read_only path.last.text)
-          | None -> None)
-      | Some (Definition _ | Law_parameter _) -> Some (Read_only path.last.text)
-      | _ -> None)
+  | Name name -> find_immutable_name state name
+  | Member (_, name) when Option.is_some (State.find_target state name) ->
+      find_immutable_name state name
   | Self_value ->
       if state.lambdas <> [] then Some (Captured "self")
       else if env.self_mode = Language.Mode.Mut then None
@@ -108,16 +111,20 @@ let has_slice_type (state : State.state) (value : Syntax.expression) =
 
 type stored_slice = Held_by of string | In_field | In_element | Lent_by_a_call
 
+let find_named_slice state (name : Syntax.name) =
+  match State.find_target state name with
+  | Some (Local id) -> (
+      match Hashtbl.find_opt state.locals id with
+      | Some { binding = Parameter; mode = Mut; _ } | None -> None
+      | Some { name; _ } -> Some (Held_by name))
+  | _ -> None
+
 let rec find_stored_slice state (slice : Syntax.expression) =
   match slice.kind with
   | Parenthesized inner | Mode (_, inner) -> find_stored_slice state inner
-  | Name path -> (
-      match State.find_target state path.last with
-      | Some (Local id) -> (
-          match Hashtbl.find_opt state.locals id with
-          | Some { binding = Parameter; mode = Mut; _ } | None -> None
-          | Some { name; _ } -> Some (Held_by name))
-      | _ -> None)
+  | Name name -> find_named_slice state name
+  | Member (_, name) when Option.is_some (State.find_target state name) ->
+      find_named_slice state name
   | Bracket (base, [ Item { kind = Range _; _ } ]) -> find_slice_written_through state base
   | Member _ -> Some In_field
   | Bracket _ -> Some In_element
@@ -141,7 +148,7 @@ let rec find_assigned_slice_parameter state (target : Syntax.expression) =
   | _ -> None
 
 let show_slice_parameter (parameter : Syntax.expression) =
-  match parameter.kind with Name path -> path.last.text | _ -> "self"
+  match parameter.kind with Name name -> name.text | _ -> "self"
 
 let describe_stored_slice = function
   | Held_by name -> Printf.sprintf "`%s` holds a slice" name

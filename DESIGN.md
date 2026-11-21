@@ -191,6 +191,7 @@ Rules: [Scope](SPECIFICATION.md#scope).
 |---|---|---|
 | A local or a parameter of an enclosing scope | No | The inner binding loses an update or reads a stale value, as an inner `err :=` does in Go. C# and Java reject it too. |
 | A function, a constant, or a theorem of its module | Yes | The shadowing is safe: a call of the shadowed function no longer type-checks. Rejecting it would make it an error to add a definition to one file when another file of the module has a local of that name. Two correct edits could then merge into a broken build (*parallel agents*). |
+| A module | Yes | The local is declared in the enclosing function, and a use of the module through it no longer type-checks. Rejecting it would forbid a local named `text` or `list` in every file that imports the module of that name. |
 | A type, a trait, or a capability of its module, shadowed by a generic parameter | No | The head of an `impl` declares the names in its brackets, so `impl Shown for Box[Marker]` would mean every `Box` where the type `Marker` was meant. |
 
 ## Types
@@ -1029,7 +1030,7 @@ can call `main` with fake arguments and fake implementations.
 Rules: [Grants](PACKAGES.md#grants).
 
 A signature does not limit a dependency whose caller already holds the
-capability. If a package uses `NetworkClient` and calls `json::parse`, a new
+capability. If a package uses `NetworkClient` and calls `json.parse`, a new
 release of `json` could start using the network, and the package would still
 compile, because it has the capability to pass along. So a manifest grants
 each dependency its capabilities.
@@ -1394,7 +1395,7 @@ then ensures `identical(self.model(), old(self.model()).append(item))`.
 |---|---|
 | The equality of the mathematical types is identity. | The prover substitutes through a model where the collection's own `Equal` is hand-written. |
 | An opaque type has a model. | Other packages reason about the type through its model, without its fields. |
-| `standard::specification` trusts only the structure of its types. Its `todo` bodies are its axioms: `Sequence`'s constructors `empty` and `append`, with `length` and indexing, and the operations of `FiniteSet` and `FiniteMap`. Every other function there has a body, so its `ensures` are proven. | An axiom is trusted, not proven, and a false one would let every program be proven. Proving each fact that follows from others keeps the axioms few enough to check by reading. A proven `ensures` reaches each call as an axiom's does, so callers lose nothing. |
+| `standard.specification` trusts only the structure of its types. Its `todo` bodies are its axioms: `Sequence`'s constructors `empty` and `append`, with `length` and indexing, and the operations of `FiniteSet` and `FiniteMap`. Every other function there has a body, so its `ensures` are proven. | An axiom is trusted, not proven, and a false one would let every program be proven. Proving each fact that follows from others keeps the axioms few enough to check by reading. A proven `ensures` reaches each call as an axiom's does, so callers lose nothing. |
 | `identical(a, b)` is identity, and is separate from `==`. | A generic contract must say that an element is a given value, whatever its type. `==` cannot say that: it is the type's `Equal`, which `List[Element]` does not require, and which is an equivalence and not identity for a set stored as an unsorted list. `==` therefore keeps one meaning everywhere. |
 
 ### What proofs do not model
@@ -1460,7 +1461,9 @@ keeps its own `use` lines, so a file shows the modules that it depends on.
 |---|---|
 | Every path starts with a package name, even inside the package. | A path is written the same everywhere and is found by a text search. A relative path gives one module a different spelling at each place that names it. |
 | Modules can depend on each other in a cycle. | Dependencies are tracked between definitions, not between files. |
-| Module names have a namespace of their own, marked by `::`. | If a module name were an ordinary name, a variable called `url` would shadow the module for the rest of its scope, and an import could change the meaning of a name in unrelated code. |
+| `.` separates every name of a path: a module's, a type's, and a value's. | Agents predict `.`, which Go, Python, Java, and Swift write for a module, and `:` is left to labels, fields, and map entries, so a call's labels do not look like its paths. |
+| In an expression, a name before `.` is looked up among the locals, then the file's imports, then the module's definitions, then the packages. | A local is declared in the enclosing function, where a reader finds it. A `use` is in the file, and a definition may be in another file of the module, so adding a definition to one file never changes what a path in another file names (*parallel agents*). |
+| A constant cannot have the name of a submodule of its module. | Inside the module, `limits.max` would be the constant's field, and outside it `app.limits.max` would be a definition of the submodule. |
 
 ### The prelude
 
@@ -1549,7 +1552,7 @@ clause can promise. This is why a key is `Ordered` as well as `Hash`.
 | A capability declares only primitive operations. | A narrowing implementation or a fake has few methods to write. |
 | A callback that receives an element of the receiver states so in its function type's `requires`. | A lambda knows a fact about its argument only where the callee states it, so a caller's fact about every element reaches the lambda only through that `requires`. |
 | Every failure of the operating system is a `SystemError`. | Code that reads a file and sends it over a connection handles one error type. |
-| Text in an embedded language is a tagged template, and a `processes::Command` is a program and a list of arguments. | Neither is a string that is passed to an interpreter, so neither allows an injection. |
+| Text in an embedded language is a tagged template, and a `processes.Command` is a program and a list of arguments. | Neither is a string that is passed to an interpreter, so neither allows an injection. |
 
 ## Packages
 
@@ -1564,7 +1567,7 @@ and `opaque`, the homes of methods and `impl`s, grants, and versions.
 | A project lists no members. | A list is one more file that every agent that adds a package must edit, and so one more place for a merge conflict (*parallel agents*). |
 | A dependency names a package, never a path to it. | Moving a directory breaks no dependency. |
 | A project's package replaces the registry's package of the same name. | This is how a dependency is patched before its owner releases a fix, with the patched copy in the repository for a reviewer to see. |
-| A registry package is named `owner::name`. | Much malware arrives by typosquatting. LLMs make it worse by inventing package names, which attackers then publish. With an owner in the name, every path that uses the code says who published it. |
+| A registry package is named `owner.name`. | Much malware arrives by typosquatting. LLMs make it worse by inventing package names, which attackers then publish. With an owner in the name, every path that uses the code says who published it. |
 
 ### Versions
 

@@ -1,8 +1,8 @@
-use app::shapes
+use app.shapes
 
 fn f(sides: UInt64) -> Bool {
   match sides {
-    shapes::Shape.private_default => true
+    shapes.Shape.private_default => true
     _ => false
   }
 }

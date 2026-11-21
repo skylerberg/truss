@@ -1,5 +1,5 @@
-use standard::intrinsic
+use standard.intrinsic
 
 fn shifted(value: UInt64, amount: UInt64) -> UInt64 {
-  intrinsic::shift_left(value, amount: amount)
+  intrinsic.shift_left(value, amount: amount)
 }

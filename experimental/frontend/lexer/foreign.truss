@@ -1,5 +1,5 @@
-use frontend::source
-use frontend::token
+use frontend.source
+use frontend.token
 
 type Confusable = SpaceConfusable | Spelled(spelling: StringSlice) | OpeningQuote(closing: StringSlice)
   derives Equal
@@ -33,31 +33,31 @@ fn find_confusable(code: UInt32) -> Option[Confusable] {
   }
 }
 
-fn find_punctuation(spelling: StringSlice) -> Option[token::Punctuation] {
+fn find_punctuation(spelling: StringSlice) -> Option[token.Punctuation] {
   match spelling {
-    "(" => Some(token::Punctuation.Open(token::Bracket.Paren))
-    ")" => Some(token::Punctuation.Close(token::Bracket.Paren))
-    "[" => Some(token::Punctuation.Open(token::Bracket.Square))
-    "]" => Some(token::Punctuation.Close(token::Bracket.Square))
-    "{" => Some(token::Punctuation.Open(token::Bracket.Curly))
-    "}" => Some(token::Punctuation.Close(token::Bracket.Curly))
-    "," => Some(token::Punctuation.Comma)
-    ":" => Some(token::Punctuation.Colon)
-    "=" => Some(token::Punctuation.Equal)
-    "-" => Some(token::Punctuation.Minus)
-    "<=" => Some(token::Punctuation.LessEqual)
-    ">=" => Some(token::Punctuation.GreaterEqual)
-    "!=" => Some(token::Punctuation.NotEqual)
-    "->" => Some(token::Punctuation.Arrow)
-    "=>" => Some(token::Punctuation.FatArrow)
+    "(" => Some(token.Punctuation.Open(token.Bracket.Paren))
+    ")" => Some(token.Punctuation.Close(token.Bracket.Paren))
+    "[" => Some(token.Punctuation.Open(token.Bracket.Square))
+    "]" => Some(token.Punctuation.Close(token.Bracket.Square))
+    "{" => Some(token.Punctuation.Open(token.Bracket.Curly))
+    "}" => Some(token.Punctuation.Close(token.Bracket.Curly))
+    "," => Some(token.Punctuation.Comma)
+    ":" => Some(token.Punctuation.Colon)
+    "=" => Some(token.Punctuation.Equal)
+    "-" => Some(token.Punctuation.Minus)
+    "<=" => Some(token.Punctuation.LessEqual)
+    ">=" => Some(token.Punctuation.GreaterEqual)
+    "!=" => Some(token.Punctuation.NotEqual)
+    "->" => Some(token.Punctuation.Arrow)
+    "=>" => Some(token.Punctuation.FatArrow)
     _ => None
   }
 }
 
-fn find_confusable_token(spelling: StringSlice) -> Option[token::Kind] {
+fn find_confusable_token(spelling: StringSlice) -> Option[token.Kind] {
   match find_punctuation(spelling) {
-    Some(punctuation_kind) => Some(token::Kind.Punctuation(punctuation_kind))
-    None => token::find_word(spelling)
+    Some(punctuation_kind) => Some(token.Kind.Punctuation(punctuation_kind))
+    None => token.find_word(spelling)
   }
 }
 
@@ -73,7 +73,7 @@ fn follows_joining_confusable(scanner: Scanner, start: UInt64, replacement: Stri
   }
   match find_confusable(scanner.decode(index).code) {
     Some(confusable) => match confusable {
-      Spelled(spelling) => token::joins(spelling.byte(spelling.length() - 1), right: replacement.byte(0))
+      Spelled(spelling) => token.joins(spelling.byte(spelling.length() - 1), right: replacement.byte(0))
       SpaceConfusable | OpeningQuote(_) => false
     }
     None => false
@@ -83,7 +83,7 @@ fn follows_joining_confusable(scanner: Scanner, start: UInt64, replacement: Stri
 fn report_confusable(scanner: mut Scanner, start: UInt64, length: UInt64, replacement: StringSlice, name: StringSlice)
   uses Panic
 {
-  let span = source::make_span(start, stop: start + length)
+  let span = source.make_span(start, stop: start + length)
   let fixes = if follows_joining_confusable(scanner, start, replacement) {
     []
   } else {
@@ -156,9 +156,9 @@ fn report_foreign_escape(scanner: mut Scanner, buffer: mut String, start: UInt64
   report(
     mut scanner,
     code: "lexer.invalid_escape",
-    span: source::make_span(start, stop),
+    span: source.make_span(start, stop),
     message: "`${written}` is not an escape in Truss. A character is written by its code point: `${replacement}`.",
-    fixes: [source::make_fix("Write `${replacement}`", edits: [source::replace(source::make_span(start, stop), replacement)])],
+    fixes: [source.make_fix("Write `${replacement}`", edits: [source.replace(source.make_span(start, stop), replacement)])],
   )
   match Character.try_from_code(value) {
     Ok(character) => mut buffer.push_character(character)
@@ -226,14 +226,14 @@ fn scan_foreign_escape(scanner: mut Scanner, buffer: mut String) -> Bool
     report(
       mut scanner,
       code: "lexer.invalid_escape",
-      span: source::make_span(start, stop: close + 1),
+      span: source.make_span(start, stop: close + 1),
       message: "A string interpolates with `\${...}`.",
       fixes: [
-        source::make_fix(
+        source.make_fix(
           "Write `\${...}`",
           edits: [
-            source::replace(source::make_span(start, stop: content), replacement: "\${"),
-            source::replace(source::make_span(close, stop: close + 1), replacement: "}"),
+            source.replace(source.make_span(start, stop: content), replacement: "\${"),
+            source.replace(source.make_span(close, stop: close + 1), replacement: "}"),
           ],
         ),
       ],
@@ -246,9 +246,9 @@ fn scan_foreign_escape(scanner: mut Scanner, buffer: mut String) -> Bool
     report(
       mut scanner,
       code: "lexer.invalid_escape",
-      span: source::make_span(start, stop: start + 2),
+      span: source.make_span(start, stop: start + 2),
       message: "`'` needs no escape in a string.",
-      fixes: [source::make_fix("Write `'`", edits: [source::replace(source::make_span(start, stop: start + 2), replacement: "'")])],
+      fixes: [source.make_fix("Write `'`", edits: [source.replace(source.make_span(start, stop: start + 2), replacement: "'")])],
     )
     mut buffer.push("'")
     scanner.position = start + 2
@@ -374,7 +374,7 @@ fn decode_character_escape(content: StringSlice) -> String
   }
 }
 
-fn lex_character_literal(scanner: mut Scanner, tag: StringSlice, literal_start: UInt64, stop: UInt64) -> token::Kind
+fn lex_character_literal(scanner: mut Scanner, tag: StringSlice, literal_start: UInt64, stop: UInt64) -> token.Kind
   uses Panic
 {
   let start = scanner.position
@@ -386,17 +386,17 @@ fn lex_character_literal(scanner: mut Scanner, tag: StringSlice, literal_start: 
   report(
     mut scanner,
     code: "lexer.character_literal",
-    span: source::make_span(literal_start, stop),
+    span: source.make_span(literal_start, stop),
     message: "Truss has no ${noun} literals. A single ${noun} is a tagged string: `${replacement}`.",
-    fixes: [source::make_fix("Write `${replacement}`", edits: [source::replace(source::make_span(literal_start, stop), replacement)])],
+    fixes: [source.make_fix("Write `${replacement}`", edits: [source.replace(source.make_span(literal_start, stop), replacement)])],
   )
   scanner.position = stop
   store_literal(
     mut scanner,
-    literal: token::StringLiteral(
-      tag: Some(token::Tag(name: tag.to_string(), span: source::make_zero_width(literal_start))),
-      form: token::Form.Ordinary,
-      first: token::Text(own value, span: source::make_span(start + 1, stop: stop - 1)),
+    literal: token.StringLiteral(
+      tag: Some(token.Tag(name: tag.to_string(), span: source.make_zero_width(literal_start))),
+      form: token.Form.Ordinary,
+      first: token.Text(own value, span: source.make_span(start + 1, stop: stop - 1)),
       rest: [],
     ),
   )
@@ -407,10 +407,10 @@ fn is_format_plain(byte: UInt8) -> Bool {
     || byte == 43 || byte == 45 || byte == 42 || byte == 47
 }
 
-fn format_field_edits(scanner: Scanner, start: UInt64, stop: UInt64) -> Option[List[source::Edit]]
+fn format_field_edits(scanner: Scanner, start: UInt64, stop: UInt64) -> Option[List[source.Edit]]
   uses Panic, RunForever
 {
-  var edits: List[source::Edit] = []
+  var edits: List[source.Edit] = []
   var position = start
   while position < stop {
     let current = scanner.lookup(position)
@@ -418,7 +418,7 @@ fn format_field_edits(scanner: Scanner, start: UInt64, stop: UInt64) -> Option[L
       position += 2
     } else if (current == 123 || current == 125) && scanner.is_at(position + 1, byte: current) {
       let single = if current == 123 { "{" } else { "}" }
-      mut edits.push(source::replace(source::make_span(position, stop: position + 2), replacement: single))
+      mut edits.push(source.replace(source.make_span(position, stop: position + 2), replacement: single))
       position += 2
     } else if current == 123 {
       var field_end = position + 1
@@ -435,7 +435,7 @@ fn format_field_edits(scanner: Scanner, start: UInt64, stop: UInt64) -> Option[L
       }
       match field_close {
         Some(close) => if scanner.skip_spaces(position + 1) < close {
-          mut edits.push(source::insert(source::make_zero_width(position), replacement: "$"))
+          mut edits.push(source.insert(source.make_zero_width(position), replacement: "$"))
           position = close + 1
         } else {
           return None
@@ -467,13 +467,13 @@ fn lex_prefixed_string(scanner: mut Scanner, prefix: StringSlice, start: UInt64,
   let quotes = scanner.run_length(quote_start, byte: 34)
   let is_empty = quotes == 2
   let kind_of_prefix = classify_prefix(prefix)
-  let remove_prefix = source::replace(source::make_span(start, stop: quote_start), replacement: "")
+  let remove_prefix = source.replace(source.make_span(start, stop: quote_start), replacement: "")
   let scanned = if kind_of_prefix == PrefixKind.RawTextPrefix && quotes == 1 {
     scanner.position = quote_start + 1
     scan_one_line_raw(
       mut scanner,
       tag: None,
-      form: token::Form.Raw(quotes: 3, dollars: 0, multi_line: false),
+      form: token.Form.Raw(quotes: 3, dollars: 0, multi_line: false),
       nesting: nesting,
       literal_start: start,
       dollars: 0,
@@ -502,19 +502,19 @@ fn lex_prefixed_string(scanner: mut Scanner, prefix: StringSlice, start: UInt64,
     contains_quote_at_end = true
   }
   var message = ""
-  var fixes: List[source::Fix] = []
+  var fixes: List[source.Fix] = []
   match kind_of_prefix {
     FormatPrefix => {
       message = "Truss has no `${prefix}` strings. Every string interpolates with `\${...}`, as in `\"Hello \${name}\"`."
       if is_closed && !has_interpolations {
         if is_empty {
-          mut fixes.push(source::make_fix("Remove the prefix", edits: [remove_prefix.copy()]))
+          mut fixes.push(source.make_fix("Remove the prefix", edits: [remove_prefix.copy()]))
         } else if !(quotes >= 3 && contains_backslash) {
           if format_field_edits(scanner, start: text_start, stop: text_stop) is Some(edits) {
             var all_edits = [remove_prefix.copy()]
             mut all_edits.append(edits.copy())
             let title = if quotes == 1 { "Write an ordinary string" } else { "Write a raw string" }
-            mut fixes.push(source::make_fix(title, edits: own all_edits))
+            mut fixes.push(source.make_fix(title, edits: own all_edits))
           }
         }
       }
@@ -523,14 +523,14 @@ fn lex_prefixed_string(scanner: mut Scanner, prefix: StringSlice, start: UInt64,
       message = "Truss has no `${prefix}` strings. A raw string, which has no escapes, is written between `\"\"\"`s, as in `\"\"\"\\d+\"\"\"`."
       if is_closed && !has_interpolations {
         if is_empty || quotes >= 3 {
-          mut fixes.push(source::make_fix("Remove the prefix", edits: [remove_prefix.copy()]))
+          mut fixes.push(source.make_fix("Remove the prefix", edits: [remove_prefix.copy()]))
         } else if !contains_quote_at_end && !closes_on_doubled_quote {
           mut fixes.push(
-            source::make_fix(
+            source.make_fix(
               "Write a raw string",
               edits: [
-                source::replace(source::make_span(start, stop: text_start), replacement: "\"\"\""),
-                source::replace(source::make_span(text_stop, stop: text_stop + 1), replacement: "\"\"\""),
+                source.replace(source.make_span(start, stop: text_start), replacement: "\"\"\""),
+                source.replace(source.make_span(text_stop, stop: text_stop + 1), replacement: "\"\"\""),
               ],
             ),
           )
@@ -545,7 +545,7 @@ fn lex_prefixed_string(scanner: mut Scanner, prefix: StringSlice, start: UInt64,
   report(
     mut scanner,
     code: "lexer.string_prefix",
-    span: source::make_span(start, stop: quote_start),
+    span: source.make_span(start, stop: quote_start),
     message: message,
     fixes: own reported_fixes,
   )
@@ -566,7 +566,7 @@ fn read_hash_raw_text(scanner: mut Scanner, text_start: UInt64, text_stop: UInt6
   buffer
 }
 
-fn hash_raw_string(scanner: mut Scanner, start: UInt64) -> Option[token::Kind]
+fn hash_raw_string(scanner: mut Scanner, start: UInt64) -> Option[token.Kind]
   uses Panic, RunForever
 {
   let hashes = scanner.run_length(scanner.position, byte: 35)
@@ -605,11 +605,11 @@ fn hash_raw_string(scanner: mut Scanner, start: UInt64) -> Option[token::Kind]
     []
   } else {
     [
-      source::make_fix(
+      source.make_fix(
         "Write a raw string",
         edits: [
-          source::replace(source::make_span(start, stop: text_start), replacement: delimiter),
-          source::replace(source::make_span(text_stop, stop), replacement: delimiter),
+          source.replace(source.make_span(start, stop: text_start), replacement: delimiter),
+          source.replace(source.make_span(text_stop, stop), replacement: delimiter),
         ],
       ),
     ]
@@ -617,7 +617,7 @@ fn hash_raw_string(scanner: mut Scanner, start: UInt64) -> Option[token::Kind]
   report(
     mut scanner,
     code: "lexer.string_prefix",
-    span: source::make_span(start, stop: text_start),
+    span: source.make_span(start, stop: text_start),
     message: "Truss has no `r#` strings. A raw string is written between `\"\"\"`s, or between more quotes when its text has `\"\"\"` in it.",
     fixes: own fixes,
   )
@@ -626,10 +626,10 @@ fn hash_raw_string(scanner: mut Scanner, start: UInt64) -> Option[token::Kind]
   Some(
     store_literal(
       mut scanner,
-      literal: token::StringLiteral(
+      literal: token.StringLiteral(
         tag: None,
-        form: token::Form.Raw(quotes, dollars: 0, multi_line: false),
-        first: token::Text(own value, span: source::make_span(text_start, stop: text_stop)),
+        form: token.Form.Raw(quotes, dollars: 0, multi_line: false),
+        first: token.Text(own value, span: source.make_span(text_start, stop: text_stop)),
         rest: [],
       ),
     ),
@@ -658,13 +658,13 @@ fn lex_quoted_string(scanner: mut Scanner, nesting: UInt64, delimiter: UInt8) ->
   let start = scanner.position
   let scanned = scan_ordinary(mut scanner, tag: None, nesting: nesting, closing: delimiter)
   let stop = scanner.position
-  var interpolation_spans: List[source::Span] = []
+  var interpolation_spans: List[source.Span] = []
   if scanned.kind is String(literal) {
     for segment in scanner.tables.literals.get(literal).expect("a literal").rest {
       mut interpolation_spans.push(segment.interpolation.span)
     }
   }
-  var edits: List[source::Edit] = [source::replace(source::make_span(start, stop: start + 1), replacement: "\"")]
+  var edits: List[source.Edit] = [source.replace(source.make_span(start, stop: start + 1), replacement: "\"")]
   var position = start + 1
   while position + 1 < stop {
     if scanner.is_at(position, byte: 92) {
@@ -679,15 +679,15 @@ fn lex_quoted_string(scanner: mut Scanner, nesting: UInt64, delimiter: UInt8) ->
         }
       }
       if !is_inside {
-        mut edits.push(source::insert(source::make_zero_width(position), replacement: "\\"))
+        mut edits.push(source.insert(source.make_zero_width(position), replacement: "\\"))
       }
     }
     position += 1
   }
-  mut edits.push(source::replace(source::make_span(stop - 1, stop), replacement: "\""))
+  mut edits.push(source.replace(source.make_span(stop - 1, stop), replacement: "\""))
   let is_template = delimiter == 96
   let fixes = if scanned.ending == Ending.Closed && !quote_joins_before(scanner, index: start) {
-    [source::make_fix("Write the string between `\"`s", own edits)]
+    [source.make_fix("Write the string between `\"`s", own edits)]
   } else {
     []
   }
@@ -696,11 +696,11 @@ fn lex_quoted_string(scanner: mut Scanner, nesting: UInt64, delimiter: UInt8) ->
   } else {
     "A string is written between `\"`s."
   }
-  report(mut scanner, code: "lexer.string_delimiter", span: source::make_span(start, stop: start + 1), message: message, fixes: own fixes)
+  report(mut scanner, code: "lexer.string_delimiter", span: source.make_span(start, stop: start + 1), message: message, fixes: own fixes)
   scanned
 }
 
-fn lex_curly_quoted_string(scanner: mut Scanner, opening_length: UInt64, closing: StringSlice) -> Option[token::Kind]
+fn lex_curly_quoted_string(scanner: mut Scanner, opening_length: UInt64, closing: StringSlice) -> Option[token.Kind]
   uses Panic, RunForever
 {
   let start = scanner.position
@@ -718,11 +718,11 @@ fn lex_curly_quoted_string(scanner: mut Scanner, opening_length: UInt64, closing
     []
   } else {
     [
-      source::make_fix(
+      source.make_fix(
         "Write the string between `\"`s",
         edits: [
-          source::replace(source::make_span(start, stop: text_start), replacement: "\""),
-          source::replace(source::make_span(text_stop, stop), replacement: "\""),
+          source.replace(source.make_span(start, stop: text_start), replacement: "\""),
+          source.replace(source.make_span(text_stop, stop), replacement: "\""),
         ],
       ),
     ]
@@ -730,7 +730,7 @@ fn lex_curly_quoted_string(scanner: mut Scanner, opening_length: UInt64, closing
   report(
     mut scanner,
     code: "lexer.confusable_character",
-    span: source::make_span(start, stop: text_start),
+    span: source.make_span(start, stop: text_start),
     message: "A string is written between straight quotes, `\"`. This is a curly quote.",
     fixes: own fixes,
   )
@@ -738,10 +738,10 @@ fn lex_curly_quoted_string(scanner: mut Scanner, opening_length: UInt64, closing
   Some(
     store_literal(
       mut scanner,
-      literal: token::StringLiteral(
+      literal: token.StringLiteral(
         tag: None,
-        form: token::Form.Ordinary,
-        first: token::Text(own value, span: source::make_span(text_start, stop: text_stop)),
+        form: token.Form.Ordinary,
+        first: token.Text(own value, span: source.make_span(text_start, stop: text_stop)),
         rest: [],
       ),
     ),
@@ -800,7 +800,7 @@ fn scan_string_form(scanner: mut Scanner, nesting: UInt64) -> Option[StringFormS
   None
 }
 
-fn lex_after_name(scanner: mut Scanner, nesting: UInt64, start: UInt64, name: token::Kind) -> Option[ScannedString]
+fn lex_after_name(scanner: mut Scanner, nesting: UInt64, start: UInt64, name: token.Kind) -> Option[ScannedString]
   uses Panic, RunForever
 {
   let Lower(_) = name else {
