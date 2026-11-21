@@ -261,6 +261,20 @@ let () =
   Harness.test "echo as an operand needs parentheses" (fun () ->
       Parse_support.expect_body_error "let x = count + echo x" ~code:Needs_parentheses ~at:"echo"
         ~fixed:"let x = count + (echo x)");
+  Harness.test "a fix's title spells the fixed expression only when it is short" (fun () ->
+      let list_titles text =
+        List.concat_map
+          (fun (diagnostic : Diagnostic.t) ->
+            List.map (fun (fix : Source.span Diagnostic.fix) -> fix.title) diagnostic.fixes)
+          (snd (Parse_support.parse_body text))
+      in
+      Harness.expect_strings ~expected:[ "Write `a < b && b < c`" ]
+        (list_titles "let x = a < b < c");
+      Harness.expect_strings
+        ~expected:[ "Join the comparisons with `&&`" ]
+        (list_titles
+           "let x = first_operand_with_a_long_name < second_operand_with_a_long_name < \
+            third_operand_with_a_long_name"));
   Harness.test "each combination in a chain is reported" (fun () ->
       let _, diagnostics = Parse_support.parse_body "let x = a < b < c < d" in
       if List.length diagnostics <> 2 then
@@ -592,6 +606,13 @@ let () =
   Harness.test "it in an interpolation is renamed too" (fun () ->
       Parse_support.expect_body_error "let x = items.map { \"${it.name}\" }" ~code:Trailing_lambda
         ~at:"{ \"" ~fixed:"let x = items.map(fn(item) { \"${item.name}\" })");
+  Harness.test "a trailing lambda followed by more of its line has no fix" (fun () ->
+      let _, diagnostics = Parse_support.parse_body "let total = items.map { it.size }.sum()" in
+      Harness.expect_strings
+        ~expected:[ "parser.trailing_lambda"; "parser.unexpected_token" ]
+        (Support.list_codes diagnostics);
+      if List.exists (fun (diagnostic : Diagnostic.t) -> diagnostic.fixes <> []) diagnostics then
+        Harness.fail "a diagnostic has a fix");
   Harness.test "the lambda's parameter is a plain singular, or element" (fun () ->
       Parse_support.expect_body_error "let x = entries.map { it.key }" ~code:Trailing_lambda
         ~at:"{ it" ~fixed:"let x = entries.map(fn(entry) { entry.key })";

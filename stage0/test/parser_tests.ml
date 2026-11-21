@@ -280,6 +280,9 @@ let () =
   Harness.test "a chain of postfix operations longer than the limit is one error" (fun () ->
       let text = make_chain ~first:"fn f() {\n  let x = a" ~link:".b" ~last:"\n}" in
       if list_too_deep text <> [ "parser.nesting_too_deep" ] then Harness.fail "no nesting error");
+  Harness.test "a chain of path separators longer than the limit is one error" (fun () ->
+      let text = make_chain ~first:"fn f() {\n  let x = A" ~link:"::B" ~last:"\n}" in
+      if list_too_deep text <> [ "parser.nesting_too_deep" ] then Harness.fail "no nesting error");
   Harness.test "a chain of else if branches longer than the limit is one error" (fun () ->
       let text = make_chain ~first:"fn f() {\n  if a {}" ~link:" else if a {}" ~last:"\n}" in
       if list_too_deep text <> [ "parser.nesting_too_deep" ] then Harness.fail "no nesting error");

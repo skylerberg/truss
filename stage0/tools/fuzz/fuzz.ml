@@ -471,6 +471,16 @@ let mistakes =
     "\u{2126}";
   |]
 
+let spellings =
+  Array.concat
+    [
+      mistakes;
+      Array.of_list (List.map fst Token.For_testing.keywords);
+      Array.of_list (List.map fst Token.For_testing.reserved_words);
+      Array.of_list (List.map fst Token.punctuation);
+      Array.of_list Parser.For_testing.contextual_keywords;
+    ]
+
 let round_trip random =
   let pick array = array.(Random.State.int random (Array.length array)) in
   let names =
@@ -585,6 +595,16 @@ let () =
     in
     String.sub text 0 at ^ piece ^ String.sub text (at + removed) (length - at - removed)
   in
+  let insert_token_run text =
+    let at = Random.State.int random (String.length text + 1) in
+    let run =
+      List.init
+        (1 + Random.State.int random 24)
+        (fun _ -> spellings.(Random.State.int random (Array.length spellings)))
+    in
+    String.sub text 0 at ^ " " ^ String.concat " " run ^ " "
+    ^ String.sub text at (String.length text - at)
+  in
   for _ = 1 to !count do
     check_robust (make_random_text ());
     let several = ref (pick_example ()) in
@@ -593,6 +613,9 @@ let () =
     done;
     check_robust !several;
     check_parse_robust !several;
+    let with_token_run = insert_token_run (pick_example ()) in
+    check_robust with_token_run;
+    check_parse_robust with_token_run;
     check_parsers_agree !several;
     let one = mutate (pick_example ()) in
     check_fixes_work one;

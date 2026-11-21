@@ -557,7 +557,7 @@ fn parse_impl(cursor: mut TokenCursor) -> Result[Parsed, Failure]
   uses Panic, RunForever
 {
   advance(mut cursor)
-  let closer = if cursor.is_punctuation(token::Punctuation.Less) { find_angle_closer(cursor) } else { None }
+  let closer = if cursor.is_punctuation(token::Punctuation.Less) { cursor.find_angle_closer() } else { None }
   if closer is Some(closer_index) {
     let opening = cursor.peek()
     var has_bounds = false

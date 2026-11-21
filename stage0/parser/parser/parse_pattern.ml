@@ -163,9 +163,10 @@ and parse_pattern_fields cursor =
           id = Cursor.allocate_id cursor span;
         })
   in
+  let last_index = List.length fields - 1 in
   List.iteri
     (fun index (field : Syntax.pattern_field) ->
-      if field.kind = Rest && index < List.length fields - 1 then
+      if field.kind = Rest && index < last_index then
         Cursor.report cursor Unexpected_token
           (Cursor.read_file_span cursor field.id)
           "`..` must be the last field of a pattern.")

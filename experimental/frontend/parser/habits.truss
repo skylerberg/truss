@@ -495,10 +495,16 @@ fn report_trailing_lambda(
   parameter: StringSlice,
   opening: token::Token,
   closing: token::Token,
+  next: token::Token,
   uses_of_it: Slice[token::Token],
 )
   uses Panic, RunForever
 {
+  let message = "A lambda is passed inside the parentheses, with a named parameter: `fn(${parameter}) { ... }`."
+  if !ends_statement(next.kind) {
+    report(mut cursor, code: "parser.trailing_lambda", span: opening.span, message: message)
+    return
+  }
   let callee_stop = cursor.read_file_span(callee.id).stop
   var edits: List[source::Edit] = [
     source::replace(source::make_span(callee_stop, stop: opening.span.start), replacement: "(fn(${parameter}) "),
@@ -511,7 +517,7 @@ fn report_trailing_lambda(
     mut cursor,
     code: "parser.trailing_lambda",
     span: opening.span,
-    message: "A lambda is passed inside the parentheses, with a named parameter: `fn(${parameter}) { ... }`.",
+    message: message,
     fix_title: "Pass a lambda",
     edits: own edits,
   )
