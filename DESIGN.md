@@ -206,6 +206,15 @@ Rules: [Built-in types](SPECIFICATION.md#built-in-types).
 | A size, a length, and an index are `UInt64`, and an offset is `Int64`. | A length is never negative, and a bounds check is one comparison. A subtraction that may go below zero is a compile error, so an unsigned index does not wrap. |
 | A `Character` is a Unicode scalar value. | It has a fixed size, so it is `Plain`, and its definition does not change between Unicode versions. A grapheme cluster has no fixed size, and its boundaries change as Unicode adds rules, so a grapheme is a slice of its string. |
 
+### Type definitions
+
+Rules: [Type definitions](SPECIFICATION.md#type-definitions).
+
+| Rule | Reason |
+|---|---|
+| A type keeps its fields in the order they are declared. | Messages, fixes, a derived `Ordered`, and a derived `Serialize` show fields in the order their author wrote, and all of them read one list. Moving a field re-checks every reader of the type, but a move that changes nothing else is rare, and adding or changing a field re-checks them under any order. |
+| The compiler chooses a record's layout in memory: fields of larger alignment first, and fields of equal alignment in declared order. | Less padding fits more values in a cache line. No program depends on where a field sits, so a later compiler can change the layout, as Rust's and Zig's can. A type shared with C will need a declared layout, as Rust's `repr(C)` gives. |
+
 ### Tuple types
 
 Rules: [Tuple types](SPECIFICATION.md#tuple-types).

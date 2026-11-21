@@ -408,7 +408,9 @@ let answer = Some(3)
   are written bare.
 - A `type_clause` after the last variant belongs to the whole type.
 - The order of a record's fields has no meaning, except in a tuple type and
-  to a derived `Ordered`.
+  to a derived `Ordered` or `serialization::Serialize`, which follow the
+  order the fields are declared in. The compiler chooses a record's layout in
+  memory.
 - A record with one field has none of its field's methods or operators:
   `type UserId(number: UInt64)` is a type of its own.
 

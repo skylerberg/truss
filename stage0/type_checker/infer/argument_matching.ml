@@ -1,14 +1,14 @@
 type site =
   | Call
-  | Construction of { owner : string; declared_order : string list Lazy.t }
+  | Construction of string
   | Tuple_construction of string
-  | Pattern of { owner : string; declared_order : string list Lazy.t; is_tuple_type : bool }
+  | Pattern of { owner : string; is_tuple_type : bool }
 
 type entry = { label : Syntax.name option; punned : string option; span : Source.Definition_span.t }
 
 let find_owner = function
   | Call -> None
-  | Construction { owner; _ } | Tuple_construction owner | Pattern { owner; _ } -> Some owner
+  | Construction owner | Tuple_construction owner | Pattern { owner; _ } -> Some owner
 
 let show_names names = String.concat ", " (List.map (fun name -> "`" ^ name ^ "`") names)
 let find_index names name = List.find_index (String.equal name) names
@@ -28,35 +28,29 @@ let list_claims ~parameter_names entries =
           | None -> if position = 0 && has_one_field then Some 0 else None))
     entries
 
-let list_fix_labels ~parameter_names ~declared_order entries claims =
+let list_fix_labels ~parameter_names entries claims =
   let is_unclaimed =
     List.map2 (fun entry claim -> Option.is_none entry.label && Option.is_none claim) entries claims
   in
   let unclaimed_count = List.length (List.filter Fun.id is_unclaimed) in
   if unclaimed_count = 0 then List.map (fun _ -> None) entries
   else
-    let declared_order = Lazy.force declared_order in
     let is_complete_positional_list =
       unclaimed_count = List.length entries && unclaimed_count = List.length parameter_names
     in
     let open_fields =
-      List.filter
-        (fun name ->
-          match find_index parameter_names name with
-          | Some index -> not (List.mem (Some index) claims)
-          | None -> false)
-        declared_order
+      List.filteri (fun index _ -> not (List.mem (Some index) claims)) parameter_names
     in
     List.mapi
       (fun position is_unclaimed ->
         if not is_unclaimed then None
-        else if is_complete_positional_list then List.nth_opt declared_order position
+        else if is_complete_positional_list then List.nth_opt parameter_names position
         else match open_fields with [ field ] when unclaimed_count = 1 -> Some field | _ -> None)
       is_unclaimed
 
-let find_labeled_form state ~parameter_names ~declared_order entries =
+let find_labeled_form state ~parameter_names entries =
   let claims = list_claims ~parameter_names entries in
-  let fix_labels = list_fix_labels ~parameter_names ~declared_order entries claims in
+  let fix_labels = list_fix_labels ~parameter_names entries claims in
   let fields =
     List.filter_map Fun.id
       (List.map2
@@ -154,9 +148,9 @@ let list_indexes state site ~parameter_names entries =
     in
     list_from 0 ~follows_label:false ~is_aligned:true entries
   in
-  let list_named_indexes ~declared_order =
+  let list_named_indexes () =
     let describe_bare_value () =
-      let names = Lazy.force declared_order in
+      let names = parameter_names in
       match site with
       | Pattern { owner; is_tuple_type; _ } ->
           Printf.sprintf
@@ -167,7 +161,7 @@ let list_indexes state site ~parameter_names entries =
                " A list of patterns without parentheses, after `let`, `var`, or `for`, matches the \
                 fields of this tuple type by position."
              else "")
-      | Construction { owner; _ } ->
+      | Construction owner ->
           Printf.sprintf
             "`%s` has %d fields: %s. Fields have no order, so every argument needs a label, or a \
              variable with its field's name."
@@ -176,7 +170,7 @@ let list_indexes state site ~parameter_names entries =
           State.raise_bug "arguments matched by position were matched by name"
     in
     let claims = list_claims ~parameter_names entries in
-    let fix_labels = list_fix_labels ~parameter_names ~declared_order entries claims in
+    let fix_labels = list_fix_labels ~parameter_names entries claims in
     List.map2
       (fun (entry, claim) fix_label ->
         match (entry.label, claim) with
@@ -193,8 +187,7 @@ let list_indexes state site ~parameter_names entries =
     match site with
     | Call -> list_positional_indexes ~tuple_owner:None
     | Tuple_construction owner -> list_positional_indexes ~tuple_owner:(Some owner)
-    | Construction { declared_order; _ } | Pattern { declared_order; _ } ->
-        list_named_indexes ~declared_order
+    | Construction _ | Pattern _ -> list_named_indexes ()
   in
   let assigned = Hashtbl.create 8 in
   List.map2

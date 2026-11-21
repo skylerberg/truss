@@ -341,11 +341,6 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   node result
                     (Construct { variant = Some (Well_known.show_variant variant); fields = [] })
                 in
-                let list_declared variant fields =
-                  Interface.Definition.sort_in_declared_order lookups.interface type_ ~variant
-                    ~name_of:(fun ((field : Types.field), _) -> field.field_name)
-                    fields
-                in
                 let rec compare_in_turn mine theirs =
                   match (mine, theirs) with
                   | [], _ | _, [] -> make_ordering Ordering_equal
@@ -388,9 +383,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                     of_self result (fun variant _ mine ->
                         make_giving_block
                           (of_other other result variant mine
-                             ~build_same:(fun theirs ->
-                               compare_in_turn (list_declared variant mine)
-                                 (list_declared variant theirs))
+                             ~build_same:(fun theirs -> compare_in_turn mine theirs)
                              ~build_different:(fun () -> make_ordering Ordering_equal)))
                 | Some variants ->
                     let theirs = make_local () in
@@ -429,9 +422,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                       of_self result (fun variant index mine ->
                           make_giving_block
                             (of_other other result variant mine
-                               ~build_same:(fun theirs ->
-                                 compare_in_turn (list_declared variant mine)
-                                   (list_declared variant theirs))
+                               ~build_same:(fun theirs -> compare_in_turn mine theirs)
                                ~build_different:(fun () -> compare_by_number index)))
                     in
                     {
@@ -502,11 +493,6 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                 [ text_argument variant; count_argument (List.length mine) ];
                             ],
                             Serializer_end_variant )
-                    in
-                    let mine =
-                      Interface.Definition.sort_in_declared_order lookups.interface type_ ~variant
-                        ~name_of:(fun ((field : Types.field), _) -> field.field_name)
-                        mine
                     in
                     {
                       statements = begin_ @ List.concat_map serialize_field mine @ [ call end_ [] ];

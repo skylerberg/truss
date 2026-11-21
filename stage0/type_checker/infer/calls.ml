@@ -319,13 +319,9 @@ and construct state env ?expected ?type_arguments (value : Syntax.expression) ty
               (Types.show (Types.Named { path = type_path; arguments = [] }))
         | _ ->
             Argument_matching.Construction
-              {
-                owner =
-                  (match variant with
-                  | Some variant -> variant
-                  | None -> Types.show (Types.Named { path = type_path; arguments = [] }));
-                declared_order = list_declared_order state type_path ~variant fields;
-              }
+              (match variant with
+              | Some variant -> variant
+              | None -> Types.show (Types.Named { path = type_path; arguments = [] }))
       in
       match
         ( check_arguments state env site value parameters ~declared:parameters
@@ -346,12 +342,6 @@ and construct state env ?expected ?type_arguments (value : Syntax.expression) ty
                  lends = None;
                });
           type_)
-
-and list_declared_order state path ~variant (fields : Types.field list) =
-  lazy
-    (Interface.Definition.sort_in_declared_order state.lookups.interface path ~variant
-       ~name_of:Fun.id
-       (List.map (fun (field : Types.field) -> field.field_name) fields))
 
 and find_record_fields state span type_ =
   match State.normalize state type_ with
@@ -420,11 +410,7 @@ and check_updates state env (value : Syntax.expression) ~at record_type
       let groups = group_updates updates in
       let { matched; unmatched; error; _ } =
         match_arguments state
-          (Construction
-             {
-               owner = State.show state record_type;
-               declared_order = list_declared_order state path ~variant:None fields;
-             })
+          (Construction (State.show state record_type))
           value parameters (List.map fst groups)
       in
       Option.iter (fun error -> ignore (check_arguments_alone state env unmatched error)) error;

@@ -110,9 +110,6 @@ and check_pattern_with ?(accepts_tuple_pattern = false) state env (written : Syn
                     check_pattern_fields state env written declared
                       (Option.value ~default:[] fields) ~binding:part_binding ~mode
                       ~owner:variant.variant_name ~is_tuple_type:false
-                      ~declared_order:
-                        (list_declared_names state path ~variant:(Some variant.variant_name)
-                           declared)
                   in
                   state.tables.patterns.(written.id) <-
                     Some
@@ -183,7 +180,6 @@ and check_pattern_with ?(accepts_tuple_pattern = false) state env (written : Syn
                   let matched =
                     check_pattern_fields state env written record_fields fields
                       ~binding:part_binding ~mode ~owner:(Types.show type_) ~is_tuple_type
-                      ~declared_order:(list_declared_names state path ~variant:None record_fields)
                   in
                   state.tables.patterns.(written.id) <-
                     Some (Record_pattern { type_; fields = order_fields record_fields matched }))
@@ -230,11 +226,9 @@ and check_pattern_with ?(accepts_tuple_pattern = false) state env (written : Syn
       | Types.Named { path; arguments } -> (
           match Members.find_fields state.lookups path arguments with
           | Some fields ->
-              let declared_order = list_declared_names state path ~variant:None fields in
+              let field_names = List.map (fun (field : Types.field) -> field.field_name) fields in
               let labeled_form =
-                Argument_matching.find_labeled_form state
-                  ~parameter_names:(List.map (fun (field : Types.field) -> field.field_name) fields)
-                  ~declared_order
+                Argument_matching.find_labeled_form state ~parameter_names:field_names
                   (List.map
                      (fun (inner : Syntax.pattern) ->
                        {
@@ -263,7 +257,7 @@ and check_pattern_with ?(accepts_tuple_pattern = false) state env (written : Syn
                          "`%s` is not a tuple type, so its fields, %s, match by name, in \
                           parentheses."
                          (Types.show type_)
-                         (Argument_matching.show_names (Lazy.force declared_order))))
+                         (Argument_matching.show_names field_names)))
           | None -> check_each (report_no_tuple_type ()))
       | _ -> check_each (report_no_tuple_type ()))
   | Alternatives alternatives ->
@@ -301,12 +295,6 @@ and find_parenthesized_tuple (declared : Types.field list)
             positions)
   then Some patterns
   else None
-
-and list_declared_names (state : State.state) path ~variant (fields : Types.field list) =
-  lazy
-    (Interface.Definition.sort_in_declared_order state.lookups.interface path ~variant
-       ~name_of:Fun.id
-       (List.map (fun (field : Types.field) -> field.field_name) fields))
 
 and check_tuple_fields state env (written : Syntax.pattern) type_ (declared : Types.field list)
     (patterns : Syntax.pattern list) ~binding ~mode =
@@ -362,8 +350,7 @@ and check_tuple_fields state env (written : Syntax.pattern) type_ (declared : Ty
          })
 
 and check_pattern_fields state env (written : Syntax.pattern) (fields : Types.field list)
-    (written_fields : Syntax.pattern_field list) ~binding ~mode ~owner ~is_tuple_type
-    ~declared_order =
+    (written_fields : Syntax.pattern_field list) ~binding ~mode ~owner ~is_tuple_type =
   let entries =
     List.filter_map
       (fun (field : Syntax.pattern_field) ->
@@ -389,7 +376,7 @@ and check_pattern_fields state env (written : Syntax.pattern) (fields : Types.fi
   in
   let indexes =
     Argument_matching.list_indexes state
-      (Pattern { owner; declared_order; is_tuple_type })
+      (Pattern { owner; is_tuple_type })
       ~parameter_names:(List.map (fun (field : Types.field) -> field.field_name) fields)
       (List.map fst entries)
   in
@@ -403,7 +390,9 @@ and check_pattern_fields state env (written : Syntax.pattern) (fields : Types.fi
          indexes
      in
      match
-       List.filter (fun name -> not (List.mem name matched_names)) (Lazy.force declared_order)
+       List.filter
+         (fun name -> not (List.mem name matched_names))
+         (List.map (fun (field : Types.field) -> field.field_name) fields)
      with
      | [] -> ()
      | missing ->
