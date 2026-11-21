@@ -482,6 +482,16 @@ let () =
         ~says:
           "No module `main` is imported or exists. Every path starts with a package name, even \
            inside the package. This file's module is `app.main`.");
+  Harness.test
+    "a type's path that starts with a module of the file's package names the file's module"
+    (fun () ->
+      expect_one_diagnostic ~others "fn f(shape: shapes.Shape) {}\n" "resolve.unknown_module"
+        ~says:
+          "No module `shapes` is imported or exists. Every path starts with a package name, even \
+           inside the package. This file's module is `app.main`.");
+  Harness.test "a type's path that starts with no module says only that it is missing" (fun () ->
+      expect_one_diagnostic "fn f(value: jsn.Value) {}\n" "resolve.unknown_module"
+        ~says:"No module `jsn` is imported or exists.");
   Harness.test "an import that starts with no package names the file's module" (fun () ->
       expect_one_diagnostic "use shapes\n\nfn f() {}\n" "resolve.unknown_module"
         ~says:

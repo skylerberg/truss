@@ -152,43 +152,6 @@ let note_import_use state text =
     && not (List.mem text names.used_imports)
   then names.used_imports <- text :: names.used_imports
 
-let resolve_module_names state (first : Syntax.name) (rest : Syntax.name list) =
-  let make_failure report =
-    set_target state first (Unknown report);
-    Error report
-  in
-  note_import_use state first.text;
-  begin match
-    Names.Scope.lookup_module state.lookups ~from:state.key.module_
-      ~imports:(state.lookups.list_imports state.key)
-      first.text
-      (List.map (fun (name : Syntax.name) -> name.text) rest)
-  with
-  | Found_module module_ ->
-      set_target state first (Module module_);
-      Ok module_
-  | Restricted_module ->
-      make_failure
-        (add_diagnostic state Intrinsic_import (read_span state first.id)
-           Names.Scope.restricted_module_message)
-  | Ambiguous_module (imported, package) ->
-      make_failure
-        (add_diagnostic state Ambiguous_module (read_span state first.id)
-           (Printf.sprintf
-              "`%s` could be the imported module `%s` or the module `%s`. Write the imported one's \
-               full path, or remove its `use`."
-              first.text (Path.show_module imported) (Path.show_module package)))
-  | No_module text ->
-      make_failure
-        (add_diagnostic state Unknown_module (read_span state first.id)
-           (Printf.sprintf "No module `%s` is imported or exists." text))
-  | No_package text ->
-      make_failure
-        (add_diagnostic state Unknown_module (read_span state first.id)
-           (Printf.sprintf "No module `%s` is imported or exists. %s" text
-              (Names.Scope.describe_path_start state.key.module_)))
-  end
-
 let find_in_module state module_ (name : Syntax.name) ~types =
   let is_kind = if types then Names.Scope.is_type_kind else Names.Scope.is_value_kind in
   match Names.Scope.lookup_in state.lookups ~from:state.key.module_ module_ name.text ~is_kind with
@@ -215,6 +178,77 @@ let find_in_module state module_ (name : Syntax.name) ~types =
       in
       report_unknown state name ~expected:("in `" ^ Path.show_module module_ ^ "`") candidates;
       None
+
+let report_unresolved_path_start state scope (first : Syntax.name) ~may_start_with_value =
+  let span = read_span state first.id in
+  let module_ = state.key.module_ in
+  function
+  | Names.Scope.Found_module _ ->
+      Compiler_bug.raise_bug ~stage:"Resolve" "`%s` starts a path to a module and is reported"
+        first.text
+  | Restricted_module ->
+      add_diagnostic state Intrinsic_import span Names.Scope.restricted_module_message
+  | Ambiguous_module (imported, package) ->
+      add_diagnostic state Ambiguous_module span
+        (Printf.sprintf
+           "`%s` could be the imported module `%s` or the module `%s`. Write the imported one's \
+            full path, or remove its `use`."
+           first.text (Path.show_module imported) (Path.show_module package))
+  | No_module text ->
+      add_diagnostic state Unknown_module span
+        (Printf.sprintf "No module `%s` is imported or exists." text)
+  | No_package text ->
+      if state.lookups.module_exists { package = module_.package; modules = [ first.text ] } then
+        add_diagnostic state Unknown_module span
+          (Printf.sprintf "No module `%s` is imported or exists. %s" text
+             (Names.Scope.describe_path_start module_))
+      else if may_start_with_value then
+        let candidates =
+          List.map fst (String_map.bindings scope.values)
+          @ List.filter_map
+              (fun (item : Names.entry) ->
+                if Names.Scope.is_value_kind item.kind then Some item.name else None)
+              (state.lookups.list_entries module_)
+          @ List.map fst (state.lookups.list_imports state.key)
+          @ Names.list_package_roots state.lookups module_.package
+        in
+        add_diagnostic state Unknown_name span
+          ~fixes:(Diagnostic.list_spelling_fixes span ~written:first.text candidates)
+          (Printf.sprintf "Nothing named `%s` is a value or a module here." first.text)
+      else
+        add_diagnostic state Unknown_module span
+          (Printf.sprintf "No module `%s` is imported or exists." text)
+
+let resolve_path state scope (first : Syntax.name) (rest : Syntax.name list) ~module_lengths
+    ~may_start_with_value =
+  note_import_use state first.text;
+  let lookup length =
+    Names.Scope.lookup_module state.lookups ~from:state.key.module_
+      ~imports:(state.lookups.list_imports state.key)
+      first.text
+      (List.map (fun (name : Syntax.name) -> name.text) (List.take length rest))
+  in
+  let rec search ~longest_failure = function
+    | [] ->
+        Compiler_bug.raise_bug ~stage:"Resolve" "the path at `%s` has no length to try" first.text
+    | length :: shorter -> (
+        match lookup length with
+        | Found_module module_ -> Ok (module_, length)
+        | (No_module _ | No_package _) as failure ->
+            let longest_failure = Option.value longest_failure ~default:failure in
+            if shorter = [] then Error (longest_failure, length)
+            else search ~longest_failure:(Some longest_failure) shorter
+        | failure -> Error (failure, length))
+  in
+  match search ~longest_failure:None module_lengths with
+  | Ok (module_, length) ->
+      let item = List.nth rest length in
+      set_target state first (Module module_);
+      ignore (find_in_module state module_ item ~types:(item.case = Upper))
+  | Error (failure, length) ->
+      let report = report_unresolved_path_start state scope first ~may_start_with_value failure in
+      set_target state first (Unknown report);
+      set_target state (List.nth rest length) (Unknown report)
 
 let list_type_candidates state scope =
   List.map fst (String_map.bindings scope.types)
@@ -261,12 +295,15 @@ let report_bare_variant state (name : Syntax.name) owners =
              (String.concat " and " (List.map (fun owner -> "`" ^ owner ^ "`") owners))
              (written (List.hd owners)))))
 
+let resolve_written_path state scope (first : Syntax.name) (rest : Syntax.name list)
+    (last : Syntax.name) =
+  resolve_path state scope first (rest @ [ last ])
+    ~module_lengths:[ List.length rest ]
+    ~may_start_with_value:false
+
 let resolve_type_name state scope ?(variants = false) (path : Syntax.path) =
   match path.modules with
-  | first :: rest -> (
-      match resolve_module_names state first rest with
-      | Ok module_ -> ignore (find_in_module state module_ path.last ~types:true)
-      | Error report -> set_target state path.last (Unknown report))
+  | first :: rest -> resolve_written_path state scope first rest path.last
   | [] -> (
       let text = path.last.text in
       match String_map.find_opt text scope.types with
@@ -501,7 +538,7 @@ and resolve_member_chain state scope (value : Syntax.expression) =
   match flatten value [] with
   | ({ kind = Name ({ case = Lower; _ } as first); _ } as head), (member :: _ as members) -> (
       match classify_path_head state scope first.text with
-      | `Module -> resolve_qualified_name state scope first members
+      | `Module -> resolve_expression_path state scope first members
       | `Ambiguous ->
           let report =
             add_diagnostic state Ambiguous_module (read_span state first.id)
@@ -518,75 +555,15 @@ and resolve_member_chain state scope (value : Syntax.expression) =
       | `Value -> resolve_expression state scope head)
   | head, _ -> resolve_expression state scope head
 
-and resolve_qualified_name state scope (first : Syntax.name) (members : Syntax.name list) =
-  let imports = state.lookups.list_imports state.key in
-  note_import_use state first.text;
-  let rec take_lower : Syntax.name list -> Syntax.name list = function
-    | ({ case = Lower; _ } as name) :: rest -> name :: take_lower rest
-    | _ -> []
+and resolve_expression_path state scope (first : Syntax.name) (members : Syntax.name list) =
+  let rec count_lower : Syntax.name list -> int = function
+    | { case = Lower; _ } :: rest -> 1 + count_lower rest
+    | _ -> 0
   in
-  let segments = take_lower members in
-  let lookup count =
-    Names.Scope.lookup_module state.lookups ~from:state.key.module_ ~imports first.text
-      (List.map (fun (name : Syntax.name) -> name.text) (List.take count segments))
-  in
-  let rec find_longest_module count ~longest_failure =
-    match lookup count with
-    | (No_module _ | No_package _) as failure ->
-        let longest_failure = Option.value longest_failure ~default:failure in
-        if count > 0 then find_longest_module (count - 1) ~longest_failure:(Some longest_failure)
-        else (count, longest_failure)
-    | lookup_result -> (count, lookup_result)
-  in
-  let count, lookup_result =
-    find_longest_module (min (List.length segments) (List.length members - 1)) ~longest_failure:None
-  in
-  let item = List.nth members count in
-  let fail report =
-    set_target state first (Unknown report);
-    set_target state item (Unknown report)
-  in
-  match lookup_result with
-  | Found_module module_ ->
-      set_target state first (Module module_);
-      ignore (find_in_module state module_ item ~types:(item.case = Upper))
-  | Restricted_module ->
-      fail
-        (add_diagnostic state Intrinsic_import (read_span state first.id)
-           Names.Scope.restricted_module_message)
-  | Ambiguous_module (imported, package) ->
-      fail
-        (add_diagnostic state Ambiguous_module (read_span state first.id)
-           (Printf.sprintf
-              "`%s` could be the imported module `%s` or the module `%s`. Write the imported one's \
-               full path, or remove its `use`."
-              first.text (Path.show_module imported) (Path.show_module package)))
-  | No_module text ->
-      fail
-        (add_diagnostic state Unknown_module (read_span state first.id)
-           (Printf.sprintf "No module `%s` is imported or exists." text))
-  | No_package _ -> fail (report_unknown_qualifier state scope first)
-
-and report_unknown_qualifier state scope (first : Syntax.name) =
-  let span = read_span state first.id in
-  let module_ = state.key.module_ in
-  if state.lookups.module_exists { package = module_.package; modules = [ first.text ] } then
-    add_diagnostic state Unknown_module span
-      (Printf.sprintf "No module `%s` is imported or exists. %s" first.text
-         (Names.Scope.describe_path_start module_))
-  else
-    let candidates =
-      List.map fst (String_map.bindings scope.values)
-      @ List.filter_map
-          (fun (item : Names.entry) ->
-            if Names.Scope.is_value_kind item.kind then Some item.name else None)
-          (state.lookups.list_entries module_)
-      @ List.map fst (state.lookups.list_imports state.key)
-      @ Names.list_package_roots state.lookups module_.package
-    in
-    add_diagnostic state Unknown_name span
-      ~fixes:(Diagnostic.list_spelling_fixes span ~written:first.text candidates)
-      (Printf.sprintf "Nothing named `%s` is a value or a module here." first.text)
+  let longest = min (count_lower members) (List.length members - 1) in
+  resolve_path state scope first members
+    ~module_lengths:(List.init (longest + 1) (fun shorter -> longest - shorter))
+    ~may_start_with_value:true
 
 and find_name_target state (value : Syntax.expression) =
   match value.kind with
@@ -869,10 +846,8 @@ and resolve_literal_pattern state scope = function
 and resolve_qualified_constant state scope = function
   | Module_constant { modules = []; last } ->
       report_unknown state last ~expected:"a constant in a module here" []
-  | Module_constant { modules = first :: rest; last } -> (
-      match resolve_module_names state first rest with
-      | Ok module_ -> ignore (find_in_module state module_ last ~types:false)
-      | Error report -> set_target state last (Unknown report))
+  | Module_constant { modules = first :: rest; last } ->
+      resolve_written_path state scope first rest last
   | Type_constant (path, _) -> resolve_type_name state scope path
 
 and resolve_range_end state scope (end_ : Syntax.range_end) =
