@@ -45,12 +45,12 @@ type _ stored =
   | Body_mir : Resolve.Names.key -> Mir.body_part stored
   | Contract_mir : Resolve.Names.key -> Mir.contract_part stored
   | Generated_mir : Path.t -> (Mir.body_part * Mir.contract_part) stored
-  | Mir_call_edges : Path.t -> Path.t list stored
+  | Call_edges : Path.t -> Mir.Call_edges.node stored
   | Usage : Resolve.Names.key -> unit stored
   | Ownership : Resolve.Names.key -> (Core.id list * Core.id list) list stored
   | Import_check : Path.file -> Diagnostic.t list stored
   | Package_check : Path.package * Package_checks.check -> Package_checks.outcome stored
-  | Call_edges : Path.t * Path.package -> Path.t list stored
+  | Implementations : Path.t * Path.package -> unit stored
   | Recursion_group : Path.t -> Path.t list stored
   | Proof : Resolve.Names.key -> Prover.proof stored
   | Lowered : Lowered.Item.t -> (Lowering.lowered, Lowering.unsupported) result stored

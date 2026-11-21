@@ -13,10 +13,10 @@ type t =
   | Contracts
   | Checked_bodies
   | Mir
-  | Mir_call_edges
+  | Call_edges
   | Body_checks
   | Package_checks
-  | Call_edges
+  | Implementations
   | Recursion_groups
   | Proofs
   | Lowered_code
@@ -38,10 +38,10 @@ let all =
     Contracts;
     Checked_bodies;
     Mir;
-    Mir_call_edges;
+    Call_edges;
     Body_checks;
     Package_checks;
-    Call_edges;
+    Implementations;
     Recursion_groups;
     Proofs;
     Lowered_code;
@@ -60,13 +60,13 @@ let is_lowering = function
   | Lowered_code | Test_keys -> true
   | Parse | Namespaces | Resolution | Import_checks | Trait_headers | Constant_values | Headers
   | Interfaces | Derived_interfaces | Type_facts | Signature_checks | Contracts | Checked_bodies
-  | Mir | Mir_call_edges | Body_checks | Package_checks | Call_edges | Recursion_groups | Proofs ->
+  | Mir | Call_edges | Body_checks | Package_checks | Implementations | Recursion_groups | Proofs ->
       false
 
 let drains ~through stage =
   precedes stage through
   && ((not (is_lowering through))
-     || is_lowering stage || precedes stage Mir_call_edges || stage = Call_edges)
+     || is_lowering stage || precedes stage Call_edges || stage = Implementations)
 
 let of_part (Part.Any part) =
   match part with
@@ -84,10 +84,10 @@ let of_part (Part.Any part) =
   | Contract _ -> Contracts
   | Checked_body _ -> Checked_bodies
   | Body_mir _ | Contract_mir _ | Generated_mir _ -> Mir
-  | Mir_call_edges _ -> Mir_call_edges
+  | Call_edges _ -> Call_edges
   | Usage _ | Ownership _ -> Body_checks
   | Package_check _ -> Package_checks
-  | Call_edges _ -> Call_edges
+  | Implementations _ -> Implementations
   | Recursion_group _ -> Recursion_groups
   | Proof _ -> Proofs
   | Lowered _ -> Lowered_code
