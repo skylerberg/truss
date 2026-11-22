@@ -779,15 +779,12 @@ and lend_part state ~(mode : Language.Mode.t) (part : Mir.yielded) =
             | _ -> [])
         in
         let field_values = List.map snd built in
+        let needs_no_drop =
+          mode = Read && (not is_indirect)
+          && List.for_all (fun value -> list_deferred value = []) field_values
+        in
         if List.for_all (function Owned _ -> true | Holds_lent_places _ -> false) field_values
-        then
-          Owned
-            {
-              dropped_as =
-                (if is_indirect || List.exists (fun value -> list_deferred value <> []) field_values
-                 then Some ty
-                 else None);
-            }
+        then if needs_no_drop then Owned { dropped_as = None } else make_owned state ty
         else
           Holds_lent_places
             ((match variant with

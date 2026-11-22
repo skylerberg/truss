@@ -32,6 +32,16 @@ fn Shelf.labeled(self, index: UInt64) lends Labeled {
   Labeled(book: self.books[index], label: "book ${index}")
 }
 
+fn Shelf.scratch(mut self) lends mut Option[String] {
+  None
+}
+
+type Slot(book: String, note: Option[String])
+
+fn Shelf.slot(mut self, index: UInt64) lends mut Slot {
+  Slot(book: mut self.books[index], note: None)
+}
+
 test "a lent constructor of values that the method made" {
   let empty = Shelf(books: [])
   assert empty.first() is None
@@ -49,4 +59,12 @@ test "a lent constructor of values that the method made" {
   assert shelf.report().note is None
   assert shelf.labeled(1).book.length() == 3
   assert shelf.labeled(1).label.length() == 6
+}
+
+test "a caller fills a value that the method made and lent `mut`" {
+  var shelf = Shelf(books: ["${1}st"])
+  mut shelf.scratch() = Some("${2} left behind")
+  mut shelf.slot(0).note = Some("${3} noted")
+  mut shelf.slot(0).book = "${4}th"
+  assert shelf.books[0].length() == 3
 }
