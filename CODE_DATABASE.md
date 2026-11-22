@@ -280,6 +280,7 @@ runs the evaluation again.
 | A definition's dependents and its dependencies | `graph`, a review of a change | `edge` with `reads`, by target or by source |
 | The signatures a change impacts | An agent after an edit | The closure of `reads` edges from the rows that changed, kept to sources that are `interface` units |
 | Where a definition is named | `rename`, the editor | `edge` with `references` into it, then `Inspect.References` on each source |
+| Where a module is named | `rename` | `edge` with `reads` into the module's lookup: the definitions whose names were resolved through it, and the files whose `use` items name it. `Inspect.References` then runs on those definitions and on the definitions of those files. |
 | The functions and constants nothing uses | Check packages | The `references` edges of the package, handed to the pure check |
 | The holes and the obligations not yet proven | `holes`, an agent proving | `hole`, and `verdict` rows that are not proven |
 | The tests a change can affect | `test` | The `test_key` rows whose key changed |

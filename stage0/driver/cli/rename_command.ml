@@ -101,15 +101,22 @@ let list_definition_occurrences database (names : Resolve.Names.lookups) (key : 
            (names.read_definition key) resolved tables)
   | None -> []
 
-let list_occurrences database snapshot packages =
+let list_module_occurrences database snapshot packages (module_ : Path.module_) =
   let names = Database.make_name_lookups database in
-  List.concat_map
-    (fun file ->
-      List.concat_map
-        (fun (declaration : Resolve.Names.declaration) ->
-          list_definition_occurrences database names declaration.key)
-        (names.list_declarations_in file))
-    (Command_packages.list_files snapshot packages)
+  let definitions, importing_files = Database.list_readers_of_module database module_ in
+  let project_files = Command_packages.list_files snapshot packages in
+  let importing_files = List.filter (fun file -> List.mem file project_files) importing_files in
+  let definitions =
+    List.filter (fun (key : Resolve.Names.key) -> List.mem key.module_.package packages) definitions
+    @ List.concat_map
+        (fun file ->
+          List.map
+            (fun (declaration : Resolve.Names.declaration) -> declaration.key)
+            (names.list_declarations_in file))
+        importing_files
+  in
+  ( List.concat_map (list_definition_occurrences database names) (List.sort_uniq compare definitions),
+    importing_files )
 
 let plan_definition database packages path name =
   let names = Database.make_name_lookups database in
@@ -169,6 +176,9 @@ let plan_module database snapshot packages (old_module : Path.module_) to_ =
   if has_module snapshot packages new_module then
     Outcome.raise_cannot_run "`%s` already exists." to_;
   let full = Path.show_module new_module in
+  let occurrences, importing_files =
+    list_module_occurrences database snapshot packages old_module
+  in
   let edits =
     List.filter_map
       (fun (file, (span : Source.span), (target : Inspect.References.target)) ->
@@ -178,7 +188,7 @@ let plan_module database snapshot packages (old_module : Path.module_) to_ =
               (fun replacement -> (file, Diagnostic.replace span replacement))
               (find_module_replacement ~old_module ~new_module written imported)
         | Definition _ -> None)
-      (list_occurrences database snapshot packages)
+      occurrences
     @ List.concat_map
         (fun (file : Path.file) ->
           List.filter_map
@@ -190,7 +200,7 @@ let plan_module database snapshot packages (old_module : Path.module_) to_ =
                     (Database.make_name_lookups database)
                     ~from:file.module_)
                (Database.read_parsed database file).uses))
-        (Command_packages.list_files snapshot packages)
+        importing_files
   in
   { edits = group_by_file edits; moved = Some (old_module, new_module) }
 

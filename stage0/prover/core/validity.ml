@@ -367,26 +367,17 @@ let make_callee_substitution (frame : State.frame) (signature : Types.signature)
   Types.make_signature_substitution signature
     (Types.substitute_instantiation frame.substitution instantiation)
 
-let find_callee_declaration (context : State.context) frame (invocation : Invocation.t) :
-    State.declared_callee option =
-  let declare path ~substitute =
-    Option.map
-      (fun signature : State.declared_callee ->
-        {
-          declared_signature = signature;
-          declared_substitution = substitute signature;
-          declared_clauses = lazy (Contracts.find_callee_clauses context path);
-        })
-      (Contracts.read_signature context path)
-  in
+let find_callee_declaration (context : State.context) frame (invocation : Invocation.t) =
+  let read path = Contracts.read_signature context path in
   match invocation.callee with
   | Function { path; instantiation } ->
-      declare path ~substitute:(fun signature ->
-          make_callee_substitution frame signature instantiation)
+      Option.map
+        (fun signature -> (path, signature, make_callee_substitution frame signature instantiation))
+        (read path)
   | Trait_method { trait; name; receiver; self_type; instantiation; _ } ->
-      declare
-        (Path.Method { owner = trait.trait; name; receiver })
-        ~substitute:(fun signature ->
+      let path = Path.Method { owner = trait.trait; name; receiver } in
+      Option.map
+        (fun signature ->
           let trait =
             {
               trait with
@@ -394,16 +385,20 @@ let find_callee_declaration (context : State.context) frame (invocation : Invoca
                 List.map (Types.substitute_argument frame.substitution) trait.trait_arguments;
             }
           in
-          Types.combine_substitutions
-            (Contracts.make_trait_substitution context.lookups trait
-               (Facts.substitute_type context frame self_type))
-            (make_callee_substitution frame signature instantiation))
+          ( path,
+            signature,
+            Types.combine_substitutions
+              (Contracts.make_trait_substitution context.lookups trait
+                 (Facts.substitute_type context frame self_type))
+              (make_callee_substitution frame signature instantiation) ))
+        (read path)
   | Capability_method _ | Intrinsic _ | Indirect _ -> None
 
-let read_callee_callback frame (declared : State.declared_callee option) position known read =
-  match declared with
-  | Some { declared_substitution = substitution; declared_clauses; _ } -> (
-      match Lazy.force declared_clauses with
+let read_callee_callback (context : State.context) frame (invocation : Invocation.t) position known
+    read =
+  match find_callee_declaration context frame invocation with
+  | Some (path, _, substitution) -> (
+      match Contracts.find_callee_clauses context path with
       | Some clauses -> (
           match List.assoc_opt position clauses.callbacks with
           | Some callback ->
@@ -414,16 +409,16 @@ let read_callee_callback frame (declared : State.declared_callee option) positio
       | None -> [])
   | None -> []
 
-let list_callback_facts context frame declared position known arguments =
-  read_callee_callback frame declared position known
+let list_callback_facts context frame invocation position known arguments =
+  read_callee_callback context frame invocation position known
     (fun _ inside ({ inputs; requires; _ } : Mir.callback) ->
       if List.length inputs <> List.length arguments then []
       else
         let inside = make_callback_contract_frame inside inputs arguments in
         List.map (fun clause -> snd (read_specification context inside clause)) requires)
 
-let list_callback_promises context frame declared position known ~entries ~exits ~result =
-  read_callee_callback frame declared position known
+let list_callback_promises context frame invocation position known ~entries ~exits ~result =
+  read_callee_callback context frame invocation position known
     (fun callee inside ({ inputs; ensures; _ } : Mir.callback) ->
       if List.length inputs <> List.length entries then []
       else
@@ -461,34 +456,32 @@ let declare_callback_results context frame (function_type : Types.function_type)
   assume_valid context frame output result;
   (exits, result)
 
-let find_parameter_type (declared : State.declared_callee option) index =
-  Option.bind declared
-    (fun
-      ({ declared_signature = signature; declared_substitution = substitution; _ } :
-        State.declared_callee)
-    ->
+let find_parameter_type (context : State.context) frame (invocation : Invocation.t) index =
+  Option.bind (find_callee_declaration context frame invocation)
+    (fun (_, (signature : Types.signature), substitution) ->
       let types =
         (match signature.receiver with Some (_, ty) -> [ ty ] | None -> [])
         @ List.map (fun (info : Types.parameter_info) -> info.type_) signature.parameters
       in
       Option.map (Types.substitute substitution) (List.nth_opt types index))
 
-let has_callback_promises frame declared position =
-  read_callee_callback frame declared position [] (fun _ _ ({ ensures; _ } : Mir.callback) ->
-      ensures)
+let has_callback_promises context frame invocation position =
+  read_callee_callback context frame invocation position []
+    (fun _ _ ({ ensures; _ } : Mir.callback) -> ensures)
   <> []
 
-let check_callback_promises context frame ~location (declared : State.declared_callee option)
+let check_callback_promises context frame ~location (invocation : Invocation.t)
     (passed : State.passed) ~described ~assume values =
-  match find_parameter_type declared passed.position with
-  | Some (Types.Function expected) when has_callback_promises frame declared passed.position ->
+  match find_parameter_type context frame invocation passed.position with
+  | Some (Types.Function expected)
+    when has_callback_promises context frame invocation passed.position ->
       let entries = declare_callback_arguments context frame expected.inputs in
       let known = List.map (fun (passed : State.passed) -> (passed.position, passed.term)) values in
       let exits, result = declare_callback_results context frame expected entries in
       let at_call =
         Facts.restrict frame
           (Logic.conjunction
-             (list_callback_facts context frame declared passed.position known entries))
+             (list_callback_facts context frame invocation passed.position known entries))
       in
       assume at_call expected ~entries ~exits ~result;
       List.iter
@@ -500,16 +493,17 @@ let check_callback_promises context frame ~location (declared : State.declared_c
               Text ("` of each result of the function passed for it, " ^ described);
             ]
             promise)
-        (list_callback_promises context frame declared passed.position known ~entries ~exits ~result)
+        (list_callback_promises context frame invocation passed.position known ~entries ~exits
+           ~result)
   | _ -> ()
 
 let assume_nothing _ _ ~entries:_ ~exits:_ ~result:_ = ()
 
-let check_forwarded_callback context frame (site : Invocation.site)
-    (declared : State.declared_callee option) (passed : State.passed) local values =
+let check_forwarded_callback context frame (site : Invocation.site) (invocation : Invocation.t)
+    (passed : State.passed) local values =
   (match find_own_callback context local with
   | Some (name, ({ inputs; requires = _ :: _ as requires; _ } : Mir.callback)) -> (
-      match find_parameter_type declared passed.position with
+      match find_parameter_type context frame invocation passed.position with
       | Some (Types.Function expected) when List.length expected.inputs = List.length inputs ->
           let arguments = declare_callback_arguments context frame expected.inputs in
           let known =
@@ -520,19 +514,19 @@ let check_forwarded_callback context frame (site : Invocation.site)
             ~name inputs requires arguments
             ~promised:
               (Logic.conjunction
-                 (list_callback_facts context frame declared passed.position known arguments))
+                 (list_callback_facts context frame invocation passed.position known arguments))
             ~why:"is passed for a parameter that may not promise its `requires`"
       | _ -> check_escaping_callback context frame local)
   | _ -> ());
   let location = Facts.locate context frame.source site.origin in
   match find_own_callback context local with
   | Some (name, _) ->
-      check_callback_promises context frame ~location declared passed
+      check_callback_promises context frame ~location invocation passed
         ~described:(Printf.sprintf "and the type of `%s` may not promise it." name)
         ~assume:(fun at_call _ -> assume_own_callback_ensures context at_call local)
         values
   | None ->
-      check_callback_promises context frame ~location declared passed
+      check_callback_promises context frame ~location invocation passed
         ~described:
           (match local with
           | Declared { name; _ } ->

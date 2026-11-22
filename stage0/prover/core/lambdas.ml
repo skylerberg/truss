@@ -773,16 +773,15 @@ let make_passed_values context frame (invocation : Invocation.t)
         | Lambda_argument _ -> None)
       arguments
   in
-  let declared = lazy (Validity.find_callee_declaration context frame invocation) in
   List.map
     (function
       | State.Value_argument passed -> passed
       | Lambda_argument { position; mode; site; lambda = written } ->
-          let declared = Lazy.force declared in
           let _, term =
             translate_lambda context frame ~site written
-              ~list_facts:(Validity.list_callback_facts context frame declared position known)
-              ~list_promises:(Validity.list_callback_promises context frame declared position known)
+              ~list_facts:(Validity.list_callback_facts context frame invocation position known)
+              ~list_promises:
+                (Validity.list_callback_promises context frame invocation position known)
           in
           {
             position;

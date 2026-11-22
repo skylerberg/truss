@@ -19,18 +19,11 @@ type contract = {
   restated_clauses : clauses list;
   is_logic_function : bool;
   result_kind : [ `Returns | `Lends ];
-  signature : Types.signature option;
 }
 
 type known_callee = {
   known_signature : Types.signature option Lazy.t;
   known_clauses : (Interface.form_origin * clauses option) option Lazy.t;
-}
-
-type declared_callee = {
-  declared_signature : Types.signature;
-  declared_substitution : Types.substitution;
-  declared_clauses : clauses option Lazy.t;
 }
 
 type frame = {
