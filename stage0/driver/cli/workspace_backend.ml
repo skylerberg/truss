@@ -9,20 +9,15 @@ let make_results cache : Backend.results =
     add = (fun key value -> Cache.add_result cache ~kind:Test_result ~key value);
   }
 
-let make_debug_prefix_map snapshot package =
-  let probe : Path.file = { module_ = { package; modules = [] }; name = "" } in
-  let remove_file_name path = String.sub path 0 (String.length path - String.length ".truss") in
-  (remove_file_name (Path.show_file probe), remove_file_name (Workspace.locate_file snapshot probe))
+let make_debug_prefix_map (directory, package) =
+  (Path.show_package_directory package ^ "/", Filename.concat directory "")
 
 let create snapshot lookups (profile : Backend.profile) =
   let cache = Workspace.open_cache () in
   let c_compiler =
     match
       C_compiler.find
-        ~debug_prefix_maps:
-          (List.map
-             (fun (_, package) -> make_debug_prefix_map snapshot package)
-             (Workspace.list_packages snapshot))
+        ~debug_prefix_maps:(List.map make_debug_prefix_map (Workspace.list_packages snapshot))
         ~objects:(Cache.make_objects_directory cache)
         ()
     with
