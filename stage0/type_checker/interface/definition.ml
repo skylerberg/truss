@@ -1,5 +1,4 @@
-let find_interface (lookups : Lookups.t) path =
-  Option.map lookups.read_interface (lookups.names.find_key path)
+let find_interface (lookups : Lookups.t) path = lookups.find_interface path
 
 let make_builtin_shape (builtin : Language.Builtin_type.t) : Types.type_interface =
   let bounds : Types.trait_reference list =

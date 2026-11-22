@@ -37,8 +37,15 @@ let make_interface (database : Tracker.t) (recorder : Tracker.recorder) ~is_chec
   let of_path view path read =
     read database recorder view (Path.locate_package path) ~id:(Ids.of_path path)
   in
-  let read_interface key =
-    of_key (if is_checked then Facts.checked_interface else Facts.interface) key Tracker.read_value
+  let interface = if is_checked then Facts.checked_interface else Facts.interface in
+  let read_interface key = of_key interface key Tracker.read_value in
+  let find_interface (path : Path.t) =
+    match path with
+    | Top { module_; _ } | Impl { module_; _ } | Test { module_; _ } | Law_proof { module_; _ } ->
+        if module_ = Well_known.intrinsic_module then None
+        else of_key interface { module_; path; ordinal = 0 } Tracker.find_value
+    | Method _ | Member_constant _ -> Option.map read_interface (names.find_key path)
+    | Derived _ | Unresolved _ -> None
   in
   {
     names;
@@ -52,6 +59,7 @@ let make_interface (database : Tracker.t) (recorder : Tracker.recorder) ~is_chec
       (fun path -> Option.join (of_path Facts.constant_value.whole path Tracker.find_value));
     find_header = (fun key -> of_key Facts.header.whole key Tracker.find_value);
     read_interface;
+    find_interface;
     read_elaborated_interface =
       (fun key ->
         of_key
