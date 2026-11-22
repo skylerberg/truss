@@ -28,6 +28,9 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       definitions = Tables.Symbol_table.create 8;
       datatypes = Tables.Type_table.create 16;
       visible_types = Tables.Type_table.create 16;
+      signatures = Tables.Path_table.create 16;
+      declared_clauses = Tables.Path_table.create 16;
+      type_clauses = Tables.Path_table.create 16;
       stated = Tables.Stated_table.create 64;
       facts = [];
       scopes = [];
@@ -845,7 +848,7 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
             Types.bind_argument parameter argument substitution)
           fixed unbound generic_arguments
       in
-      match Contracts.find_method_contract lookups declared name receiver evidence with
+      match Contracts.find_method_contract context declared name receiver evidence with
       | None -> Facts.raise_bug "`%s` has no contract" (Path.show method_path)
       | Some contract ->
           let read_place (parameter : Mir.parameter) (frame : State.frame) =

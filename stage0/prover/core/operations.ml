@@ -175,9 +175,7 @@ let find_written_equal context ty left right =
   match find_concrete_impl context trait ty with
   | Some (((Impl _ : Path.t) as impl), substitution) -> (
       let evidence : Core.evidence = Impl { impl; substitution } in
-      match
-        Contracts.find_method_contract context.lookups trait equal.name equal.receiver evidence
-      with
+      match Contracts.find_method_contract context trait equal.name equal.receiver evidence with
       | Some contract when contract.is_logic_function ->
           let symbol =
             Logic.Symbol.Function

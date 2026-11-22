@@ -105,7 +105,7 @@ let is_datatype ty = match ty with Types.Named _ -> Types.find_builtin ty = None
 let calls_update_step (context : State.context) (invocation : Invocation.t) =
   match invocation.callee with
   | Function { path; _ } -> (
-      match Interface.Impls.read_signature context.lookups.interface path with
+      match Facts.read_signature context path with
       | Some signature -> signature.is_update_step
       | None -> false)
   | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _ -> false
@@ -155,7 +155,7 @@ let add_restated_clauses (context : State.context) ~self_type ~bind trait name r
             clauses with
             bindings = bind subtrait (Path.Method { owner = subtrait.trait; name; receiver });
           })
-        (Contracts.list_restated_clauses context.lookups ~list_bounds:context.bounds
+        (Contracts.list_restated_clauses context
            ~packages:(Operations.list_impl_packages context self_type)
            ~self_type trait name receiver);
   }
@@ -904,8 +904,7 @@ let make_callback_cost (context : State.context) frame (metric : Language.Metric
       (match term with
       | Logic.Symbol (Function_value { callee; _ }) ->
           Option.iter state_value
-            (Option.bind (Interface.Impls.read_signature context.lookups.interface callee)
-               (fun (signature : Types.signature) ->
+            (Option.bind (Facts.read_signature context callee) (fun (signature : Types.signature) ->
                  Costs.find_stated_operand signature.costs metric))
       | _ -> ());
       (match List.assoc_opt (term, metric) context.lambda_costs with
@@ -978,7 +977,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
     (fun (passed : State.passed) ->
       match passed.shape with
       | Named_function { origin; path; _ } -> (
-          match Contracts.find_function_contract context.lookups path with
+          match Contracts.find_function_contract context path with
           | Some contract ->
               Laws.check_named_callback context frame invocation passed ~origin path contract values
           | None -> ())
@@ -1026,7 +1025,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
   in
   let bind_callee path arguments capability_arguments ~fixed =
     let generics, capability_parameters =
-      match Interface.Impls.read_signature context.lookups.interface path with
+      match Facts.read_signature context path with
       | Some (signature : Types.signature) ->
           ( List.map (fun (generic : Types.generic) -> generic.generic) signature.generics,
             signature.capability_parameters )
@@ -1075,7 +1074,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
         with_contract
           ~substitution_of:(fun _ -> substitution)
           ~type_arguments:arguments path
-          (Contracts.find_function_contract context.lookups path)
+          (Contracts.find_function_contract context path)
     | Trait_method { trait; name; receiver; evidence; self_type; instantiation } -> (
         let arguments = list_arguments instantiation.type_arguments in
         let capability_arguments = list_capability_arguments instantiation in
@@ -1140,7 +1139,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
               (Option.map
                  (add_restated_clauses context ~self_type ~bind:bind_restated trait.trait name
                     receiver)
-                 (Contracts.find_method_contract context.lookups trait name receiver evidence)))
+                 (Contracts.find_method_contract context trait name receiver evidence)))
     | Indirect () ->
         Laws.check_callback_requires context frame site through values;
         let frame = havoc_mut frame in
@@ -1197,7 +1196,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
     | Capability_method { capability; name } ->
         with_contract
           (Path.make_capability_method capability name)
-          (Contracts.find_capability_contract context.lookups capability name)
+          (Contracts.find_capability_contract context capability name)
     | Intrinsic { operation; type_arguments } ->
         let frame =
           match operation with

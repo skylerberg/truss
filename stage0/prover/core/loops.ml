@@ -710,8 +710,7 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
   let cursor_next = Well_known.locate_method Cursor_next in
   let contract =
     match
-      Contracts.find_method_contract context.lookups trait cursor_next.name cursor_next.receiver
-        evidence
+      Contracts.find_method_contract context trait cursor_next.name cursor_next.receiver evidence
     with
     | Some contract ->
         Calls.add_restated_clauses context ~self_type

@@ -110,6 +110,9 @@ type context = {
   definitions : unit Tables.Symbol_table.t;
   datatypes : unit Tables.Type_table.t;
   visible_types : (Types.type_interface * Types.substitution) option Tables.Type_table.t;
+  signatures : Types.signature option Tables.Path_table.t;
+  declared_clauses : (Interface.form_origin * clauses option) option Tables.Path_table.t;
+  type_clauses : (source * Mir.type_clauses option Lazy.t) option Tables.Path_table.t;
   stated : unit Tables.Stated_table.t;
   mutable facts : Logic.term list;
   mutable obligations : Obligation.t list;

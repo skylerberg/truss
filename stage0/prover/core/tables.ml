@@ -23,6 +23,8 @@ module Type_table = Hashtbl.Make (Structural_key.Make (struct
   type t = Types.ty
 end))
 
+module Path_table = Hashtbl.Make (Path)
+
 module Local_table = Hashtbl.Make (Structural_key.Make (struct
   type t = Locals.local
 end))

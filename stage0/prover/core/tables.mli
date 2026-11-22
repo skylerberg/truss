@@ -14,6 +14,7 @@ type stated =
 module Symbol_table : Hashtbl.S with type key = Logic.symbol
 module Term_table : Hashtbl.S with type key = Logic.term
 module Type_table : Hashtbl.S with type key = Types.ty
+module Path_table : Hashtbl.S with type key = Path.t
 module Local_table : Hashtbl.S with type key = Locals.local
 module Stated_table : Hashtbl.S with type key = stated
 module Model_table : Hashtbl.S with type key = Types.ty * Types.ty
