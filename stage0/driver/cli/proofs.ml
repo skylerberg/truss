@@ -14,15 +14,16 @@ let make_solver () =
 
 type t = { database : Database.t; proofs : Database.proofs; decided : unit Lazy.t }
 
-let list_runs database snapshot packages proofs =
+let evaluate database snapshot packages proofs =
   match Database.list_evaluations proofs with
-  | [] -> []
-  | evaluations ->
-      Evaluations.run
-        (Workspace_backend.create snapshot
-           (Workspace_backend.require_lowered_lookups database packages)
-           Development)
-        evaluations
+  | [] -> ()
+  | evaluated ->
+      ignore
+        (Backend.evaluate
+           (Workspace_backend.create snapshot
+              (Workspace_backend.require_lowered_lookups database packages)
+              Development)
+           evaluated)
 
 let check database snapshot packages files =
   let proofs = Database.prove database files in
@@ -31,9 +32,8 @@ let check database snapshot packages files =
     proofs;
     decided =
       lazy
-        (Database.decide proofs
-           ~runs:(list_runs database snapshot packages proofs)
-           (lazy (make_solver ())));
+        (evaluate database snapshot packages proofs;
+         Database.decide proofs (lazy (make_solver ())));
   }
 
 let list_diagnostics checked file =

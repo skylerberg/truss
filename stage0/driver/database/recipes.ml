@@ -565,11 +565,14 @@ let run_check_dependencies (database : Tracker.t) package =
   ignore (Tracker.write database Facts.unused_dependencies ~id:unit (Some outcome))
 
 let item_kind = Kind.rank_target (Entity Item)
-let item_stages : Kind.stage list = [ Lower; Key_tests; Render Development; Render Release ]
+
+let item_stages : Kind.stage list =
+  [ Lower; Key_tests; Evaluate; Render Development; Render Release ]
 
 let item_graph : Store.item_graph =
   {
     lower_kind = Kind.rank_stage Lower;
+    evaluate_kind = Kind.rank_stage Evaluate;
     item_kind;
     references = Kind.encode_markers [ References ];
     claims = Kind.encode_markers [ Claims ];
@@ -621,6 +624,13 @@ let follow_item_edges database ~items (changes : Store.edge_change list) =
          end)
        changes)
 
+let read_host_system () =
+  match Libc.host with
+  | Ok system -> system
+  | Error _ ->
+      Compiler_bug.raise_bug ~stage:"Database"
+        "code is lowered on a host that Stage0 does not build for"
+
 let make_evaluation_root : Prover.Obligation.evaluation -> Lowered.Item.t = function
   | Constant_value path -> Constant path
   | Assertion { definition; condition } -> Assertion { definition; condition }
@@ -662,25 +672,58 @@ let run_prove (database : Tracker.t) (row : Store.definition) =
 
 type posed_unit = { posed : Prover.posed; has_unfinished_run : bool }
 
-let pose_unit (database : Tracker.t) (recorder : Tracker.recorder) ~runs (row : Store.definition) =
+let rec make_value : Lowered.static_value -> Prover.Obligation.value = function
+  | Static_scalar (Bool holds) -> Boolean holds
+  | Static_scalar (Integer (_, number)) -> Integer number
+  | Static_scalar (Character scalar) -> Integer (Z.of_int scalar)
+  | Static_scalar (Float32 bits) -> Float (Int32.float_of_bits bits)
+  | Static_scalar (Float64 bits) -> Float (Int64.float_of_bits bits)
+  | Static_scalar _ ->
+      Compiler_bug.raise_bug ~stage:"Database" "an evaluation gave a scalar that is no value"
+  | Static_record fields -> Constructed { variant = None; fields = make_fields fields }
+  | Static_variant (variant, fields) ->
+      Constructed { variant = Some variant; fields = make_fields fields }
+  | Static_array elements | Static_storage { elements; _ } | Static_view { elements; _ } ->
+      Elements (List.map make_value elements)
+
+and make_fields fields = List.map (fun (name, value) -> (name, make_value value)) fields
+
+let find_run (database : Tracker.t) (recorder : Tracker.recorder) (lookups : Prover.Lookups.t)
+    evaluation : Prover.Obligation.run option =
+  let id = Ids.of_item (make_evaluation_root evaluation) in
+  let find_settled view =
+    Tracker.find_settled database recorder view (Lookups.locate_items database) ~id
+  in
+  recorder.note Reads (Fact Test_key) id "";
+  match (find_settled Facts.lowered.whole, find_settled Facts.evaluation.whole) with
+  | Some (Value (Ok (Folded (data, _)))), _ -> Some (Evaluated (make_value data.value))
+  | Some (Value (Ok (Evaluate (_, ty)))), Some (Value (Ran encoded)) ->
+      let env = Lowering.make_env (read_host_system ()) lookups.interface in
+      Some (Evaluated (make_value (Lowering.Encoding.decode env ty encoded)))
+  | _, Some (Value (Unfinished report)) -> Some (Unfinished report)
+  | _, Some (Value (Stopped report)) -> Some (Failed report)
+  | _, (Some (Value (Ran _) | Failed | Blocked) | None) -> None
+
+let list_runs database recorder lookups proof =
+  List.filter_map
+    (fun evaluation ->
+      Option.map (fun run -> (evaluation, run)) (find_run database recorder lookups evaluation))
+    (Prover.list_evaluations proof)
+
+let pose_unit (database : Tracker.t) (recorder : Tracker.recorder) (row : Store.definition) =
   let key = Declarations.decode_key row.key in
   match Tracker.find database recorder Facts.proof.whole key.module_.package ~id:row.id with
   | Some (Value proof) ->
-      let evaluations = Prover.list_evaluations proof in
-      List.iter
-        (fun evaluation ->
-          recorder.note Reads (Fact Test_key) (Ids.of_item (make_evaluation_root evaluation)) "")
-        evaluations;
+      let lookups = Lookups.make_proof database recorder in
+      let runs = list_runs database recorder lookups proof in
       Some
         {
-          posed = Prover.pose (Lookups.make_proof database recorder) ~runs key proof;
+          posed = Prover.pose lookups ~runs key proof;
           has_unfinished_run =
             List.exists
-              (fun evaluation ->
-                match List.assoc_opt evaluation runs with
-                | Some (Prover.Obligation.Unfinished _ | Failed _) -> true
-                | Some (Evaluated _) | None -> false)
-              evaluations;
+              (function
+                | _, (Prover.Obligation.Unfinished _ | Failed _) -> true | _, Evaluated _ -> false)
+              runs;
         }
   | Some (Failed | Blocked) | None -> None
 
@@ -702,7 +745,7 @@ let split_by_counts counts values =
       own)
     counts
 
-let solve_units (database : Tracker.t) ~runs solver (rows : Store.definition list) =
+let solve_units (database : Tracker.t) solver (rows : Store.definition list) =
   let posed =
     List.map
       (fun (row : Store.definition) ->
@@ -710,7 +753,7 @@ let solve_units (database : Tracker.t) ~runs solver (rows : Store.definition lis
         let recorder : Tracker.recorder =
           { note = (fun marker target id name -> notes := (marker, target, id, name) :: !notes) }
         in
-        match pose_unit database recorder ~runs row with
+        match pose_unit database recorder row with
         | unit -> (row.id, Ok (unit, List.rev !notes))
         | exception ((Compiler_bug.Bug _ | Interface.Properties.Recursion_limit _) as raised) ->
             (row.id, Error raised))
@@ -815,13 +858,6 @@ let run_claim_roots (database : Tracker.t) (row : Store.definition) =
   in
   follow_item_edges database ~items:roots changes
 
-let read_host_system () =
-  match Libc.host with
-  | Ok system -> system
-  | Error _ ->
-      Compiler_bug.raise_bug ~stage:"Database"
-        "code is lowered on a host that Stage0 does not build for"
-
 let read_item (database : Tracker.t) id : Lowered.Item.t =
   match Store.find_item_key database.store ~id with
   | Some key -> Marshal.from_string key 0
@@ -914,15 +950,46 @@ let render_unit (database : Tracker.t) recorder profile item =
     | Some (Value (Ok lowered)) -> Some lowered
     | Some (Value (Error _) | Failed | Blocked) | None -> None
   in
-  match find_lowered item with
-  | Some (Compiled fragment | Folded (_, fragment)) ->
-      Some
-        (Lowering.render_unit (read_host_system ())
-           (Lookups.make_interface database recorder ~is_checked:true)
-           profile
-           ~read_source:(Lookups.read_source database recorder)
-           ~is_worked_on:(Lookups.is_worked_on database) ~find_lowered fragment)
-  | Some (Evaluate _) | None -> None
+  let interface = Lookups.make_interface database recorder ~is_checked:true in
+  Option.map
+    (Lowering.render_unit (read_host_system ()) interface profile
+       ~read_source:(Lookups.read_source database recorder)
+       ~is_worked_on:(Lookups.is_worked_on database) ~find_lowered)
+    (match find_lowered item with
+    | Some (Compiled fragment | Folded (_, fragment)) -> Some fragment
+    | Some (Evaluate (_, ty)) -> (
+        match
+          Tracker.find database recorder Facts.evaluation.whole project ~id:(Ids.of_item item)
+        with
+        | Some (Value (Ran encoded)) ->
+            Some
+              (Lowering.make_data
+                 (Lowering.make_env (read_host_system ()) interface)
+                 item ty encoded)
+        | Some (Value (Unfinished _ | Stopped _) | Failed | Blocked) | None -> None)
+    | None -> None)
+
+let record_evaluation (database : Tracker.t) item (result : Lowering.evaluation) =
+  let id = Ids.of_item item in
+  ignore (Store.unmark_stale database.store ~stage:(Kind.rank_stage Evaluate) ~id);
+  Tracker.record database Evaluate id (fun recorder ->
+      match
+        ( Tracker.read database recorder Facts.lowered.whole (Lookups.locate_items database) ~id,
+          result )
+      with
+      | Value (Ok (Evaluate (evaluator, ty))), Ran encoded ->
+          recorder.note Reads (Fact Test_key) (Ids.of_item evaluator) "";
+          let env =
+            Lowering.make_env (read_host_system ())
+              (Lookups.make_interface database recorder ~is_checked:true)
+          in
+          List.iter
+            (fun referenced -> recorder.note References (Entity Item) (Ids.of_item referenced) "")
+            (Lowering.list_references (Compiled (Lowering.make_data env item ty encoded)))
+      | Value (Ok (Evaluate (evaluator, _))), (Unfinished _ | Stopped _) ->
+          recorder.note Reads (Fact Test_key) (Ids.of_item evaluator) ""
+      | (Value (Ok (Compiled _ | Folded _) | Error _) | Failed | Blocked), _ -> ());
+  ignore (Tracker.write database Facts.evaluation ~id (Some (Value result)))
 
 let run_render profile (database : Tracker.t) id =
   let item = read_item database id in
@@ -1327,7 +1394,7 @@ let list_definition_facts () =
 
 let locate_entity (stage : Kind.stage) : Store.unit_entity =
   match stage with
-  | Lower | Key_tests | Render _ -> Item_unit
+  | Lower | Key_tests | Evaluate | Render _ -> Item_unit
   | Parse | Check_imports -> File_unit
   | Declare -> Module_unit
   | Resolve_grant -> Dependency_unit
@@ -1367,7 +1434,7 @@ let guard_units (database : Tracker.t) ?on_bug (stage : Kind.stage) ids run =
           doing = [];
         }
 
-let drain_decide (database : Tracker.t) ?on_bug ~scope ~runs solver =
+let drain_decide (database : Tracker.t) ?on_bug ~scope solver =
   match
     List.filter_map
       (fun id -> Store.find_definition database.store Main ~id)
@@ -1375,7 +1442,7 @@ let drain_decide (database : Tracker.t) ?on_bug ~scope ~runs solver =
   with
   | [] -> ()
   | rows ->
-      let answered = solve_units database ~runs (Lazy.force solver) rows in
+      let answered = solve_units database (Lazy.force solver) rows in
       List.iter
         (fun (row : Store.definition) ->
           if Store.unmark_stale database.store ~stage:(Kind.rank_stage Decide) ~id:row.id then
@@ -1441,9 +1508,10 @@ let drain_stage (database : Tracker.t) ?on_bug (stage : Kind.stage) ~scope =
   | Lower -> run_each run_lower
   | Key_tests -> if stale <> [] then drain_test_keys database ~guard stale
   | Render profile -> run_each (run_render profile)
-  | Decide ->
+  | Evaluate ->
       Compiler_bug.raise_bug ~stage:"Database"
-        "Decide is drained with the results of its evaluations and a solver"
+        "an evaluation is recorded by the command that runs it"
+  | Decide -> Compiler_bug.raise_bug ~stage:"Database" "Decide is drained with a solver"
   | Resolve | Read_trait_header | Evaluate_constant | Elaborate_header | Elaborate
   | Derive_interface | Check_signature | Check_body | Build_body_mir | Build_contract_mir
   | Generate_mir | List_calls | Check_usage | Check_ownership | Check_sealed | Check_impl

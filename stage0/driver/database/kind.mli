@@ -32,6 +32,7 @@ type stage =
   | Prove
   | Lower
   | Key_tests
+  | Evaluate
   | Render of Profile.t
   | Decide
 
@@ -66,6 +67,7 @@ type fact =
   | Proof
   | Lowered
   | Test_key
+  | Evaluation
   | Unit of Profile.t
 
 type lookup =

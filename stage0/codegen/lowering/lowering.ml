@@ -9,10 +9,12 @@ type lowered =
   | Evaluate of Lowered.Item.t * Ground.ty
 
 type unbuildable = Unsupported of unsupported | Todo_types of Path.t list
+type 'value ran = Ran of 'value | Unfinished of string | Stopped of string
+type evaluation = string ran
 
 type linked =
   | Unit of { item : Lowered.Item.t; text_hash : string; sites : Lowered.site list }
-  | Evaluated of { item : Lowered.Item.t; evaluator : Lowered.Item.t; ty : Ground.ty }
+  | Evaluated of { item : Lowered.Item.t; evaluator : Lowered.Item.t }
   | Unbuildable of unbuildable
 
 type lowered_lookups = {
@@ -20,6 +22,8 @@ type lowered_lookups = {
   read_source : Path.file -> Source.t;
   interface : Interface.Lookups.t;
   find_lowered : Lowered.Item.t -> (lowered, unbuildable) result option;
+  find_evaluation : Lowered.Item.t -> evaluation option;
+  record_evaluation : Lowered.Item.t -> evaluation -> unit;
   read_test_key : Lowered.Item.t -> (string, unbuildable) result;
   list_linked : Profile.t -> Lowered.Item.t list -> linked list;
   render_unit : Profile.t -> Lowered.Item.t -> string;
@@ -74,6 +78,9 @@ let list_sites = function
   | Evaluate _ -> []
 
 let is_evaluated = function Evaluate _ -> true | Compiled _ | Folded _ -> false
+
+let make_data env item ty encoded =
+  Emit_c.make_data_fragment env { data_item = item; ty; value = Encoding.decode env ty encoded }
 
 let render_unit system (interface : Interface.Lookups.t) profile ~read_source ~is_worked_on
     ~find_lowered fragment =

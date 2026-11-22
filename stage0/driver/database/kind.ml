@@ -32,6 +32,7 @@ type stage =
   | Prove
   | Lower
   | Key_tests
+  | Evaluate
   | Render of Profile.t
   | Decide
 
@@ -70,6 +71,7 @@ let stages =
     Prove;
     Lower;
     Key_tests;
+    Evaluate;
     Render Development;
     Render Release;
     Decide;
@@ -114,6 +116,7 @@ type fact =
   | Proof
   | Lowered
   | Test_key
+  | Evaluation
   | Unit of Profile.t
 
 let facts =
@@ -147,6 +150,7 @@ let facts =
     Proof;
     Lowered;
     Test_key;
+    Evaluation;
     Unit Development;
     Unit Release;
   ]
@@ -273,6 +277,7 @@ let show_stage = function
   | Prove -> "proof"
   | Lower -> "lowered code"
   | Key_tests -> "test key"
+  | Evaluate -> "evaluation"
   | Render Development -> "development unit"
   | Render Release -> "release unit"
   | Decide -> "verdicts"
@@ -302,6 +307,7 @@ let show_fact = function
   | Proof -> "proof"
   | Lowered -> "lowered code"
   | Test_key -> "test key"
+  | Evaluation -> "evaluation"
   | Unit Development -> "development unit"
   | Unit Release -> "release unit"
 
@@ -334,7 +340,7 @@ let is_signature = function
       true
   | Resolved _ | Grant | Body_form | Body_tables | Run_forever | Ownership_modes | Body_mir
   | Generated_mir | Call_node | Callees | Recursion_group | Usage_check | Ownership
-  | Unused_dependencies | Proof | Lowered | Test_key | Unit _ ->
+  | Unused_dependencies | Proof | Lowered | Test_key | Evaluation | Unit _ ->
       false
 
 let lookups_of_definition = [ Imports; Declaration; Tree; Text; Place; Container; Contained ]

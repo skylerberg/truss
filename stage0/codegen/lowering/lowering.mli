@@ -9,10 +9,12 @@ type lowered =
   | Evaluate of Lowered.Item.t * Ground.ty
 
 type unbuildable = Unsupported of unsupported | Todo_types of Path.t list
+type 'value ran = Ran of 'value | Unfinished of string | Stopped of string
+type evaluation = string ran
 
 type linked =
   | Unit of { item : Lowered.Item.t; text_hash : string; sites : Lowered.site list }
-  | Evaluated of { item : Lowered.Item.t; evaluator : Lowered.Item.t; ty : Ground.ty }
+  | Evaluated of { item : Lowered.Item.t; evaluator : Lowered.Item.t }
   | Unbuildable of unbuildable
 
 type lowered_lookups = {
@@ -20,6 +22,8 @@ type lowered_lookups = {
   read_source : Path.file -> Source.t;
   interface : Interface.Lookups.t;
   find_lowered : Lowered.Item.t -> (lowered, unbuildable) result option;
+  find_evaluation : Lowered.Item.t -> evaluation option;
+  record_evaluation : Lowered.Item.t -> evaluation -> unit;
   read_test_key : Lowered.Item.t -> (string, unbuildable) result;
   list_linked : Profile.t -> Lowered.Item.t list -> linked list;
   render_unit : Profile.t -> Lowered.Item.t -> string;
@@ -31,6 +35,7 @@ val make_env : Libc.system -> Interface.Lookups.t -> Memory_layout.env
 val lower : Libc.system -> Lookups.t -> Lowered.Item.t -> (lowered, unbuildable) result
 val list_references : lowered -> Lowered.Item.t list
 val list_sites : lowered -> Lowered.site list
+val make_data : Memory_layout.env -> Lowered.Item.t -> Ground.ty -> string -> Emit_c.fragment
 val is_evaluated : lowered -> bool
 
 val render_unit :
