@@ -392,15 +392,18 @@ let print_database_counts (counts : Database.counts list) =
            :: List.map2 (fun width cell -> Printf.sprintf "%*s" width cell) cell_widths cells)))
     (heading :: rows)
 
-let print_statement_counts statements =
+let print_statement_counts (statements : Database.statement_count list) =
   let width =
     List.fold_left
-      (fun width (_, count) -> max width (String.length (string_of_int count)))
+      (fun width (count : Database.statement_count) ->
+        max width (String.length (string_of_int count.runs)))
       (String.length "runs") statements
   in
-  Output.eprint_line (Printf.sprintf "%*s  statement" width "runs");
+  Output.eprint_line (Printf.sprintf "%*s  %9s  statement" width "runs" "seconds");
   List.iter
-    (fun (statement, count) -> Output.eprint_line (Printf.sprintf "%*d  %s" width count statement))
+    (fun (count : Database.statement_count) ->
+      Output.eprint_line
+        (Printf.sprintf "%*d  %9.3f  %s" width count.runs count.seconds count.statement))
     statements
 
 let with_database_counts run =

@@ -871,22 +871,29 @@ let count run =
          (fun (rank, _) (other_rank, _) -> Int.compare rank other_rank)
          (List.of_seq (Hashtbl.to_seq_values counts_by_kind))) )
 
+type statement_count = { statement : string; runs : int; seconds : float }
+
 let count_statements run =
   let counts = Hashtbl.create 64 in
   let result =
     Sql.with_observer
-      (fun statement ->
+      (fun statement ~seconds ->
+        let count =
+          Option.value
+            (Hashtbl.find_opt counts statement)
+            ~default:{ statement; runs = 0; seconds = 0.0 }
+        in
         Hashtbl.replace counts statement
-          (1 + Option.value (Hashtbl.find_opt counts statement) ~default:0))
+          { count with runs = count.runs + 1; seconds = count.seconds +. seconds })
       run
   in
   ( result,
     List.sort
-      (fun (statement, count) (other_statement, other_count) ->
-        match Int.compare other_count count with
-        | 0 -> String.compare statement other_statement
+      (fun count other ->
+        match Float.compare other.seconds count.seconds with
+        | 0 -> String.compare count.statement other.statement
         | order -> order)
-      (List.of_seq (Hashtbl.to_seq counts)) )
+      (List.of_seq (Hashtbl.to_seq_values counts)) )
 
 type change = { changed : Path.t; kind : string; is_signature : bool }
 

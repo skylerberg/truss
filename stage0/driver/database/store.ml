@@ -553,13 +553,13 @@ let list_call_pairs store graph ~nodes =
                  Printf.sprintf
                    "SELECT scope.node, e.target FROM scope CROSS JOIN %s.edge e ON e.source_kind = \
                     ?1 AND e.source = scope.node AND e.target_kind = ?2 WHERE (e.markers & ?3) != \
-                    0 AND e.target IN (SELECT node FROM scope)"
+                    0 AND +e.target IN (SELECT node FROM scope)"
                    schema;
                  Printf.sprintf
                    "SELECT scope.node, e.source FROM scope CROSS JOIN %s.edge e ON e.target_kind = \
                     ?2 AND e.target = scope.node AND e.name = '' CROSS JOIN %s.definition d ON \
                     d.path = e.source WHERE e.source_kind = ?1 AND (e.markers & ?4) != 0 AND \
-                    d.package IN (SELECT value FROM json_each(?5)) AND e.source IN (SELECT node \
+                    d.package IN (SELECT value FROM json_each(?5)) AND +e.source IN (SELECT node \
                     FROM scope)"
                    schema schema;
                ])

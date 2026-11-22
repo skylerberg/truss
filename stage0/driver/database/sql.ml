@@ -83,21 +83,27 @@ let bind database sql statement arguments =
         | Null -> Sqlite3.bind statement (index + 1) Sqlite3.Data.NULL))
     arguments
 
-let observer : (string -> unit) ref = ref ignore
+let observer : (string -> seconds:float -> unit) option ref = ref None
 
 let with_observer observe run =
   let previous = !observer in
-  observer := observe;
+  observer := Some observe;
   Fun.protect ~finally:(fun () -> observer := previous) run
 
 let with_statement database sql arguments step_through =
-  !observer sql;
   let statement = obtain_statement database sql in
-  Fun.protect
-    ~finally:(fun () -> ignore (Sqlite3.reset statement))
-    (fun () ->
-      bind database sql statement arguments;
-      step_through statement)
+  let run () =
+    Fun.protect
+      ~finally:(fun () -> ignore (Sqlite3.reset statement))
+      (fun () ->
+        bind database sql statement arguments;
+        step_through statement)
+  in
+  match !observer with
+  | None -> run ()
+  | Some observe ->
+      let start = Unix.gettimeofday () in
+      Fun.protect ~finally:(fun () -> observe sql ~seconds:(Unix.gettimeofday () -. start)) run
 
 let run database sql arguments =
   with_statement database sql arguments (fun statement ->

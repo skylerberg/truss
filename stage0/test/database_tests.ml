@@ -1573,7 +1573,9 @@ let () =
         if List.length diagnostics <> definitions then
           Harness.fail "listed %d diagnostics for %d definitions" (List.length diagnostics)
             definitions;
-        List.fold_left (fun total (_, count) -> total + count) 0 statements
+        List.fold_left
+          (fun total (count : Database.statement_count) -> total + count.runs)
+          0 statements
       in
       let for_one = count_statements 1 and for_twenty = count_statements 20 in
       if for_one <> for_twenty then
@@ -1592,7 +1594,9 @@ let () =
           let database = build (List.init modules (fun index -> make_part index "1")) in
           prepare database;
           let (), statements = Database.count_statements (fun () -> ask database) in
-          List.fold_left (fun total (_, count) -> total + count) 0 statements
+          List.fold_left
+            (fun total (count : Database.statement_count) -> total + count.runs)
+            0 statements
         in
         let for_four = count_statements 4 and for_forty = count_statements 40 in
         if for_four <> for_forty then

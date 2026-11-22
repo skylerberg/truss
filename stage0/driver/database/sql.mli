@@ -21,7 +21,7 @@ val read_text : row -> int -> string
 val read_integer : row -> int -> int
 val is_null : row -> int -> bool
 val read_cell : row -> int -> argument
-val with_observer : (string -> unit) -> (unit -> 'result) -> 'result
+val with_observer : (string -> seconds:float -> unit) -> (unit -> 'result) -> 'result
 val begin_transaction : t -> unit
 val commit_transaction : t -> unit
 val roll_back_transaction : t -> unit

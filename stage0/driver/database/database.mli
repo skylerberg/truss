@@ -85,7 +85,10 @@ type counts = {
 }
 
 val count : (unit -> 'result) -> 'result * counts list
-val count_statements : (unit -> 'result) -> 'result * (string * int) list
+
+type statement_count = { statement : string; runs : int; seconds : float }
+
+val count_statements : (unit -> 'result) -> 'result * statement_count list
 
 type change = { changed : Path.t; kind : string; is_signature : bool }
 
