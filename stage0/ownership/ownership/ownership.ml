@@ -35,6 +35,7 @@ let check_definition (lookups : Lookups.t) (key : Resolve.Names.key) : result =
       types = Context.Local_table.create 32;
       parameters = [];
       implements_capability = implements_capability lookups key;
+      is_constant = (match elaborated.interface with Constant_interface _ -> true | _ -> false);
       mutable_locals = [];
       diagnostics = [];
       must_be_disjoint = [];
@@ -51,7 +52,9 @@ let check_definition (lookups : Lookups.t) (key : Resolve.Names.key) : result =
         (fun (origin, needs) -> Hashtbl.replace context.places_without_keyword origin needs)
         (lookups.list_places_without_keyword key);
       let returns_to_caller =
-        match elaborated.interface with Function_interface _ -> true | _ -> false
+        match elaborated.interface with
+        | Function_interface _ | Constant_interface _ -> true
+        | _ -> false
       in
       let move_analyses =
         List.map

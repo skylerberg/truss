@@ -959,7 +959,11 @@ let make_recording_usage_lookups database note : Usage.Lookups.t =
 
 let make_recording_ownership_lookups database note : Ownership.Lookups.t =
   {
-    find_graph = (fun key -> Mir.find_graph (read_body_mir database note key));
+    find_graph =
+      (fun key ->
+        match read_body_mir database note key with
+        | Body code | Initializer code -> Some code.graph
+        | No_code -> None);
     list_places_without_keyword =
       (fun key -> (read_checked database note key).places_without_keyword);
     list_mode_keywords = (fun key -> (read_checked database note key).mode_keywords);

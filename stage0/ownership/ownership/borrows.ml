@@ -48,8 +48,9 @@ let describe_loan context (loan : Actions.loan) ~is_through_view (place : Place.
       Printf.sprintf "`%s` cannot %s while it is lent to %s%s." (Context.show context place) verb
         lender through
 
-let report_dangling_view context at ~views ~doing ~fix =
+let report_dangling_view (context : Context.context) at ~views ~doing ~fix =
   let report_view = Context.report context View_escapes at in
+  let scope_end = if context.is_constant then "its evaluation ends" else "the function returns" in
   match
     Option.map Actions.extract_viewed_place (List.find_opt (lifetime_ends_at_return context) views)
   with
@@ -63,9 +64,8 @@ let report_dangling_view context at ~views ~doing ~fix =
   | Some { root = Temporary _; _ } ->
       report_view
         (Printf.sprintf
-           "This %s a view of a temporary, which is dropped before the function returns, so the \
-            view would dangle. %s"
-           doing fix);
+           "This %s a view of a temporary, which is dropped before %s, so the view would dangle. %s"
+           doing scope_end fix);
       true
   | Some place ->
       report_view
@@ -331,8 +331,12 @@ let check_body context (actions : Actions.t) moves =
           let views = resolve here.views views in
           if
             (not
-               (report_dangling_view context at ~views ~doing:"returns"
-                  ~fix:"A function returns a view only of its parameters."))
+               (if context.is_constant then
+                  report_dangling_view context at ~views ~doing:"is"
+                    ~fix:"A constant is a view only of another constant."
+                else
+                  report_dangling_view context at ~views ~doing:"returns"
+                    ~fix:"A function returns a view only of its parameters."))
             && context.implements_capability
             && List.exists (is_borrow_of_root (Local Self)) views
           then

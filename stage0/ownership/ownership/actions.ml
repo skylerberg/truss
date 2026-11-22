@@ -306,6 +306,9 @@ let evaluate builder ~is_returned (use : Moves.use) =
   match use.operand with
   | Some (Use { place; type_; origin; _ } | Borrow { place; type_; origin; _ }) when use.moves -> (
       match track_place builder place with
+      | Some ({ root = Constant _; _ } as tracked)
+        when builder.context.is_constant && Option.is_none use.passed ->
+          emit builder (Read tracked) origin
       | Some tracked ->
           emit builder
             (Move { place = tracked; type_; is_returned; is_captured = is_captured builder tracked })
