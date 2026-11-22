@@ -1,3 +1,0 @@
-(library
- (name evaluations)
- (libraries compiler_bug path lowered backend prover zarith))

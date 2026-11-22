@@ -114,6 +114,7 @@ val remove_item : t -> id:int -> unit
 
 type item_graph = {
   lower_kind : int;
+  evaluate_kind : int;
   item_kind : int;
   references : int;
   claims : int;
@@ -127,6 +128,7 @@ type linked = {
   linked_key : string;
   sites : string option;
   text_hash : string option;
+  is_unevaluated : bool;
 }
 
 val list_linked : t -> item_graph -> profile:int -> roots:int list -> linked list

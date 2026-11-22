@@ -256,6 +256,9 @@ let test_key : (string, Lowering.unbuildable) result Tracker.fact =
     ~encode:(fun key -> [ Tracker.marshal key ])
     ~decode:(fun cells -> Tracker.unmarshal cells.(0))
 
+let evaluation : Lowering.evaluation Tracker.fact =
+  make_marshaled ~stage:Evaluate ~table:"evaluation" ~id_column:"item" Evaluation
+
 let rank_profile : Profile.t -> int = function Development -> 0 | Release -> 1
 
 let unit =

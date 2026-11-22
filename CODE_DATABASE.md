@@ -153,6 +153,7 @@ dependency_use (package, state, unused)
 item           (id, definition, key)
 lowered        (item, state, code, is_evaluated, sites)
 test_key       (item, state, key)
+evaluation     (item, state, value)
 unit           (item, profile, state, text_hash)
 ```
 
@@ -246,7 +247,8 @@ The orchestrator runs the stages in this order. Each row is one recipe.
 | Decide | Definition | `Prover.pose`, the solver, `Prover.list_states` | The proof, the results of running its evaluations, and the solver's answers | `verdict` |
 | Lower | Item | `Lowering.lower`, `Lowering.check_calls` | MIR and interfaces; the callees of the item's definition and of each callee | `lowered`, `references` edges to the items its code names |
 | Key tests | Item, with the items of its reference cycle | `Lowering.derive_test_keys` | `lowered`, and the test keys of the items it references | `test_key` |
-| Render, once for each profile | Item | `Lowering.render_unit` | The item's `lowered` code and the interfaces of the types that the unit defines. A development unit: the `lowered` code of each small callee that it copies. A release unit: the place of each definition whose lines it names, and that definition's file. | `unit` |
+| Evaluate | Evaluated item | None: the command runs the item's evaluator, which is compiled code, and records the result | The item's `lowered` code, the test key of its evaluator, and the layout of its type | `evaluation`, `references` edges to the items that its value names |
+| Render, once for each profile | Item | `Lowering.render_unit` | The item's `lowered` code, or the `evaluation` of an evaluated item, and the interfaces of the types that the unit defines. A development unit: the `lowered` code of each small callee that it copies. A release unit: the place of each definition whose lines it names, and that definition's file. | `unit` |
 
 A unit reads facts of earlier stages. Where a unit reads a fact of its own
 stage, the orchestrator orders that stage's units: packages in dependency
@@ -268,15 +270,18 @@ and Key tests drain the items that the claims of those packages reach, and
 Prove and Decide the definitions of the files a command names. A build drains
 Render of its profile for the items that its roots reach.
 
-Decide takes two inputs that no pass computes. The command runs the
-evaluations of the stale Decide units, which are compiled code, and hands
-their results to the stage. The stage asks the solver about the queries of
-all its stale units at once, so that the solver answers them in parallel,
-and then computes each unit from the solver's answers. A Decide unit reads
-its proof and the test key of each of its evaluations, so it is stale when
-the proof changes or when the code that an evaluation runs changes. An
-evaluation can stop without a value, because it reaches its limit of CPU
-time. A unit that was given such a result stays stale, so the next command
+Evaluate and Decide each take an input that no pass computes. A command
+runs the evaluations that its Decide units or its program need, which are
+compiled code, and records each result as the `evaluation` of its item.
+Decide asks the solver about the queries of all its stale units at once, so
+that the solver answers them in parallel, and then computes each unit from
+the solver's answers. A Decide unit reads its proof, and the test key and
+the `evaluation` of each item that the proof evaluates, so it is stale when
+the proof changes, when the code that an evaluation runs changes, or when a
+result changes. Where an evaluation has not run, Decide poses its queries
+without the result. An evaluation can stop without a value: it reaches a
+`todo`, it panics, or it reaches its limit of CPU time. A Decide unit that
+read such a result stays stale, and the next command that needs the value
 runs the evaluation again.
 
 ## Questions
@@ -293,7 +298,7 @@ runs the evaluation again.
 | The holes and the obligations not yet proven | `holes`, an agent proving | `hole`, and `verdict` rows that are not proven |
 | The tests a change can affect | `test` | The `test_key` rows whose key changed |
 | A definition's callees and its recursion group | `graph`, lowering | `edge` with `calls`, `recursion_group` |
-| The translation units of a program | `run`, `build`, `test`, a check that runs an evaluation | One recursive query over the `references` edges from the program's roots, joined with `lowered` and `unit`. The query does not follow the edges of an evaluated item. |
+| The translation units of a program | `run`, `build`, `test`, a check that runs an evaluation | One recursive query over the `references` edges from the program's roots, joined with `lowered` and `unit`. From an evaluated item the query follows the edges of its evaluation, which name the items in its value, and not those of its lowered code, which name its evaluator. |
 | The rows that differ between two databases | `upgrade`, two agents' worktrees | Each table of one attached database minus the same table of the other |
 
 ## Costs
@@ -328,7 +333,7 @@ runs the evaluation again.
 | A development unit copies a small callee only where the callee's package is outside the project. | An edit to a small function of the project leaves its callers' units unchanged. When the project gains or loses a package, every development unit is rendered again. |
 | A release unit names a file by its package and its path in the package. The C compiler's `-fdebug-prefix-map` puts the package's directory in the project in place of the package's name. | The line table of a release build names each file by its path in the project, which the workspace knows and the database does not. With the directory in the compiler's flags, it is part of the object's name, and a unit's text is a function of the database alone. |
 | A release unit reads the whole text of each file whose lines it names. | A line number is a count of the lines above it. An edit to a file therefore renders again the release units of the file's items, and a unit whose lines did not move comes out unchanged. |
-| An evaluated item has no unit. A build takes the result of its evaluation from the user's cache, or runs the evaluation, and renders the value as data. | The value is the result of running code, which no pass computes. |
+| The result of an evaluation is a fact of its item. | Decide and Render read it as they read any fact, so no command hands results to a stage, and the back end renders no unit of its own. The user's cache still holds each value under the key of its evaluator's code, so another worktree takes the value without running the evaluator. |
 | A recursion group is found by two recursive queries: the definitions a changed definition reaches over `calls` and `implements` edges, intersected with the definitions that reach it. The strongly connected components of that set are computed in memory and written as `recursion_group` rows. | Every cycle through a changed definition lies inside that set, so no component is kept between commands. The two queries walk the changed definition's callees and callers inside SQLite, and only run when its `calls` or `implements` edges change. |
 | The edge from a trait's method to a method that implements it is stored once, by the implementing method, in its own package's database. | Which impls a caller can reach depends on the packages the caller can see. With the edge stored by the implementer, each package's view is the edges of the databases it attaches, and no unit exists for each pair of a trait method and a calling package. |
 | When a dependency's file is replaced, a differing row of `definition`, `entry`, `impl`, or another table of names marks the readers of every lookup that the row backs, under the row's own name: the entry `name` of its module, the members `member` of its owner. A differing fact row marks the readers of each of its facts. | The old file and the new one are attached together, so the rows that differ are one query for each table. Marking by row and name leaves a reader of one function untouched when another function of the same module changes. A lookup that reads only some columns of a differing row is recomputed once and found unchanged, which costs one unit and can never leave a stale read. |
@@ -354,6 +359,7 @@ runs the evaluation again.
 | `proof.value` | Decide |
 | `verdict.failure` | The listing of a file's proof diagnostics |
 | `lowered.code` | Key tests, Render, and the trace of the code that a root reaches, for `holes` and for a release build's refusal of a `todo` |
+| `evaluation.value` | Decide, Render |
 | `definition.path`, `item.key` | The orchestrator, to give a pass the key it names |
 
 ## Checks of the build

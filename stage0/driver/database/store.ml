@@ -697,6 +697,7 @@ let remove_item store ~id = Sql.run store.sql "DELETE FROM main.item WHERE id = 
 
 type item_graph = {
   lower_kind : int;
+  evaluate_kind : int;
   item_kind : int;
   references : int;
   claims : int;
@@ -712,22 +713,25 @@ type linked = {
   linked_key : string;
   sites : string option;
   text_hash : string option;
+  is_unevaluated : bool;
 }
 
 let list_linked store graph ~profile ~roots =
   Sql.list_rows store.sql
     "WITH RECURSIVE down(node) AS (SELECT value FROM json_each(?4) UNION SELECT e.target FROM down \
-     CROSS JOIN main.lowered l ON l.item = down.node CROSS JOIN main.edge e ON e.source_kind = ?2 \
-     AND e.source = down.node AND e.target_kind = ?1 WHERE l.is_evaluated IS NOT 1 AND (e.markers \
-     & ?3) != 0) SELECT down.node, i.key, l.sites, u.state, u.text_hash FROM down CROSS JOIN \
-     main.item i ON i.id = down.node LEFT JOIN main.lowered l ON l.item = down.node LEFT JOIN \
-     main.unit u ON u.item = down.node AND u.profile = ?5"
+     CROSS JOIN main.lowered l ON l.item = down.node CROSS JOIN main.edge e ON e.source_kind = \
+     CASE WHEN l.is_evaluated = 1 THEN ?6 ELSE ?2 END AND e.source = down.node AND e.target_kind = \
+     ?1 WHERE (e.markers & ?3) != 0) SELECT down.node, i.key, l.sites, u.state, u.text_hash, \
+     l.is_evaluated = 1 AND EXISTS (SELECT 1 FROM main.stale s WHERE s.stage = ?6 AND s.id = \
+     down.node) FROM down CROSS JOIN main.item i ON i.id = down.node LEFT JOIN main.lowered l ON \
+     l.item = down.node LEFT JOIN main.unit u ON u.item = down.node AND u.profile = ?5"
     [
       Integer graph.item_kind;
       Integer graph.lower_kind;
       Integer graph.references;
       Text (encode_integers roots);
       Integer profile;
+      Integer graph.evaluate_kind;
     ]
     (fun row ->
       {
@@ -737,6 +741,7 @@ let list_linked store graph ~profile ~roots =
         text_hash =
           (if Sql.is_null row 3 || Sql.read_integer row 3 <> 0 then None
            else Some (Sql.read_blob row 4));
+        is_unevaluated = (not (Sql.is_null row 5)) && Sql.read_integer row 5 = 1;
       })
 
 let is_item_claimed store graph ~item =

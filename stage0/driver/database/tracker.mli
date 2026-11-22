@@ -92,6 +92,7 @@ val describe : any_fact -> description
 val marshal : 'value -> Store.cell
 val unmarshal : Store.cell -> 'value
 val find : t -> recorder -> 'value view -> Path.package -> id:int -> 'value outcome option
+val find_settled : t -> recorder -> 'value view -> Path.package -> id:int -> 'value outcome option
 val read : t -> recorder -> 'value view -> Path.package -> id:int -> 'value outcome
 val read_value : t -> recorder -> 'value view -> Path.package -> id:int -> 'value
 val find_value : t -> recorder -> 'value view -> Path.package -> id:int -> 'value option

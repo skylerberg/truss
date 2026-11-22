@@ -311,8 +311,8 @@ let find_checker (stage : Kind.stage) : checker option =
   | Check_unexported -> Some Unexported
   | Declare | Supply | Claim_roots | Resolve_grant | Read_trait_header | Evaluate_constant
   | Derive_interface | Compute_type_facts | Build_body_mir | Build_contract_mir | Generate_mir
-  | List_calls | Group_recursion | Check_dependencies | Prove | Lower | Key_tests | Render _
-  | Decide ->
+  | List_calls | Group_recursion | Check_dependencies | Prove | Lower | Key_tests | Evaluate
+  | Render _ | Decide ->
       None
 
 let list_staged (database : t) (file : Path.file) ~is_selected : Diagnostic.t list =
@@ -530,18 +530,15 @@ let list_evaluations proofs =
   | evaluations ->
       drain_lowering database (list_proof_packages proofs);
       List.filter
-        (fun evaluation ->
-          match
-            find_item_outcome proofs.database Facts.test_key
-              (Recipes.make_evaluation_root evaluation)
-          with
+        (fun root ->
+          match find_item_outcome proofs.database Facts.test_key root with
           | Some (Blocked | Value (Error (Todo_types _))) -> false
           | Some (Value (Ok _ | Error (Unsupported _)) | Failed) | None -> true)
-        evaluations
+        (List.map Recipes.make_evaluation_root evaluations)
 
-let decide ?on_bug proofs ~runs solver =
+let decide ?on_bug proofs solver =
   run_past_bugs proofs.database ?on_bug (fun ~on_bug ->
-      Recipes.drain_decide proofs.database ~on_bug ~scope:(scope_proofs proofs) ~runs solver)
+      Recipes.drain_decide proofs.database ~on_bug ~scope:(scope_proofs proofs) solver)
 
 type proof_site = { code : string; span : Source.span; shows : string }
 type proof_state = { site : proof_site; is_proven : bool; trusts_compiled_code : bool }
@@ -687,7 +684,12 @@ let list_linked (database : t) profile roots : Lowering.linked list =
   run_past_bugs database (fun ~on_bug ->
       has_rendered :=
         Recipes.drain_stage database ~on_bug (Render profile)
-          ~scope:(Items (List.map (fun (row : Store.linked) -> row.linked_id) rows)));
+          ~scope:
+            (Items
+               (List.filter_map
+                  (fun (row : Store.linked) ->
+                    if row.is_unevaluated then None else Some row.linked_id)
+                  rows)));
   let rows = if !has_rendered then list_rows () else rows in
   List.iter
     (fun root ->
@@ -709,7 +711,7 @@ let list_linked (database : t) profile roots : Lowering.linked list =
             }
       | _ -> (
           match find_item_outcome database Facts.lowered item with
-          | Some (Value (Ok (Evaluate (evaluator, ty)))) -> Evaluated { item; evaluator; ty }
+          | Some (Value (Ok (Evaluate (evaluator, _)))) -> Evaluated { item; evaluator }
           | Some (Value (Error unbuildable)) -> Unbuildable unbuildable
           | Some (Value (Ok (Compiled _ | Folded _)) | Failed | Blocked) | None ->
               Compiler_bug.raise_bug ~stage:"Database" "%s is linked from code with errors"
@@ -733,6 +735,15 @@ let find_lowered_lookups (database : t) packages : (Lowering.lowered_lookups, st
           system;
           read_source = read_source database;
           interface = make_interface_lookups database;
+          find_evaluation =
+            (fun item ->
+              match
+                Tracker.find_settled database Tracker.untracked Facts.evaluation.whole
+                  (Lookups.locate_items database) ~id:(Ids.of_item item)
+              with
+              | Some (Value evaluation) -> Some evaluation
+              | Some (Failed | Blocked) | None -> None);
+          record_evaluation = Recipes.record_evaluation database;
           find_lowered =
             (fun item ->
               match find_item_outcome database Facts.lowered item with
@@ -1087,7 +1098,7 @@ module For_testing = struct
 
   let make_proof_lookups = make_proof_lookups
 
-  let list_queries proofs ~runs =
+  let list_queries proofs =
     let database = proofs.database in
     let lookups = make_proof_lookups database in
     List.sort
@@ -1105,7 +1116,10 @@ module For_testing = struct
                        shows;
                      },
                      input ))
-                 (Prover.For_testing.list_queries (Prover.pose lookups ~runs key proof))
+                 (Prover.For_testing.list_queries
+                    (Prover.pose lookups
+                       ~runs:(Recipes.list_runs database Tracker.untracked lookups proof)
+                       key proof))
            | Some (Failed | Blocked) | None -> [])
          (list_proof_keys proofs))
 

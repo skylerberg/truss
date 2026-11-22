@@ -119,6 +119,7 @@ let tables =
       ("item INTEGER PRIMARY KEY, " ^ state ^ ", code BLOB, is_evaluated INTEGER, sites BLOB")
       [];
     keyed_by_id "test_key" ("item INTEGER PRIMARY KEY, " ^ state ^ ", key BLOB") [];
+    keyed_by_id "evaluation" ("item INTEGER PRIMARY KEY, " ^ state ^ ", value BLOB") [];
     keyed_by_columns "unit"
       ("item INTEGER NOT NULL, profile INTEGER NOT NULL, " ^ state
      ^ ", text_hash BLOB, PRIMARY KEY (item, profile)")

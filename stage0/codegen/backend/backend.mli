@@ -1,7 +1,7 @@
 type profile = Profile.t = Development | Release
 type t
 type results = { find : string -> string option; add : string -> string -> unit }
-type 'a ran = Ran of 'a | Unfinished of string | Stopped of string
+type 'value ran = 'value Lowering.ran = Ran of 'value | Unfinished of string | Stopped of string
 
 val create :
   ?show_file:(Path.file -> string) ->

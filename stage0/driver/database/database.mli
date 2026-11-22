@@ -42,14 +42,8 @@ val read_source : t -> Path.file -> Source.t
 type proofs
 
 val prove : ?on_bug:(Compiler_bug.t -> unit) -> t -> Path.file list -> proofs
-val list_evaluations : proofs -> Prover.Obligation.evaluation list
-
-val decide :
-  ?on_bug:(Compiler_bug.t -> unit) ->
-  proofs ->
-  runs:(Prover.Obligation.evaluation * Prover.Obligation.run) list ->
-  Solver.t Lazy.t ->
-  unit
+val list_evaluations : proofs -> Lowered.Item.t list
+val decide : ?on_bug:(Compiler_bug.t -> unit) -> proofs -> Solver.t Lazy.t -> unit
 
 type proof_site = { code : string; span : Source.span; shows : string }
 type proof_state = { site : proof_site; is_proven : bool; trusts_compiled_code : bool }
@@ -128,12 +122,7 @@ module For_testing : sig
   val list_unread : t -> string list
   val make_proof_lookups : t -> Prover.Lookups.t
   val find_proof : proofs -> Resolve.Names.key -> Prover.proof outcome option
-
-  val list_queries :
-    proofs ->
-    runs:(Prover.Obligation.evaluation * Prover.Obligation.run) list ->
-    (proof_site * string) list
-
+  val list_queries : proofs -> (proof_site * string) list
   val lower_roots : ?on_bug:(Compiler_bug.t -> unit) -> t -> unit
   val propagate : ?on_bug:(Compiler_bug.t -> unit) -> t -> unit
 
