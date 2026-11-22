@@ -4,7 +4,6 @@ type definition_stage = {
   stage : Kind.stage;
   unit_id : unit_id;
   applies : Store.definition -> bool;
-  facts : Tracker.any_fact list;
   run : Tracker.t -> Store.definition -> unit;
 }
 
@@ -86,7 +85,7 @@ let remove_file (database : Tracker.t) (file : Path.file) =
     Store.remove_file database.store ~id;
     ignore (replace_entries database ~source:id file.module_ ~file_name:file.name []);
     Store.replace_imports database.store ~file:id [];
-    List.iter (fun stage -> Tracker.forget database stage id ~facts:[]) file_stages;
+    List.iter (fun stage -> Tracker.forget database stage id) file_stages;
     Tracker.mark_stale database Declare module_id;
     Tracker.mark_readers database (Lookup Source) id "";
     Tracker.mark_readers database (Lookup Files) module_id "";
@@ -566,6 +565,7 @@ let run_check_dependencies (database : Tracker.t) package =
   ignore (Tracker.write database Facts.unused_dependencies ~id:unit (Some outcome))
 
 let item_kind = Kind.rank_target (Entity Item)
+let item_stages : Kind.stage list = [ Lower; Key_tests; Render Development; Render Release ]
 
 let item_graph : Store.item_graph =
   {
@@ -586,10 +586,7 @@ let ensure_item (database : Tracker.t) (item : Lowered.Item.t) =
         label = Lowered.Item.to_string item;
         definition = Option.map Ids.of_path (Lowered.Item.find_definition item);
       }
-  then
-    List.iter
-      (fun stage -> Tracker.mark_stale database stage id)
-      [ Kind.Lower; Key_tests; Render Development; Render Release ]
+  then List.iter (fun stage -> Tracker.mark_stale database stage id) item_stages
 
 let list_item_targets (database : Tracker.t) stage id =
   List.filter_map
@@ -604,12 +601,7 @@ let rec collect_items (database : Tracker.t) candidates =
         && not (Store.is_item_claimed database.store item_graph ~item:id)
       then begin
         let referenced = list_item_targets database Lower id in
-        Tracker.forget database Lower id ~facts:[ Any Facts.lowered ];
-        Tracker.forget database Key_tests id ~facts:[ Any Facts.test_key ];
-        List.iter
-          (fun profile ->
-            Tracker.forget database (Render profile) id ~facts:[ Any (Facts.unit profile) ])
-          [ Profile.Development; Release ];
+        List.iter (fun stage -> Tracker.forget database stage id) item_stages;
         Store.remove_item database.store ~id;
         collect_items database referenced
       end)
@@ -945,25 +937,12 @@ let has_call_node (row : Store.definition) =
 
 let definition_stages =
   [
-    {
-      stage = Claim_roots;
-      unit_id = Of_definition;
-      applies = is_root;
-      facts = [];
-      run = run_claim_roots;
-    };
-    {
-      stage = Resolve;
-      unit_id = Of_definition;
-      applies = is_written;
-      facts = List.map (fun section -> Tracker.Any (Facts.resolved section)) Resolve.sections;
-      run = run_resolve;
-    };
+    { stage = Claim_roots; unit_id = Of_definition; applies = is_root; run = run_claim_roots };
+    { stage = Resolve; unit_id = Of_definition; applies = is_written; run = run_resolve };
     {
       stage = Read_trait_header;
       unit_id = Of_definition;
       applies = (fun row -> is_written row && decode_kind row = Trait);
-      facts = [ Any Facts.trait_header ];
       run = run_trait_header;
     };
     {
@@ -973,7 +952,6 @@ let definition_stages =
         (fun row ->
           is_written row && is_first row
           && match decode_kind row with Constant | Member_constant -> true | _ -> false);
-      facts = [ Any Facts.constant_value ];
       run = run_constant_value;
     };
     {
@@ -983,129 +961,86 @@ let definition_stages =
         (fun row ->
           is_written row
           && match decode_kind row with Trait | Impl | Capability -> true | _ -> false);
-      facts = [ Any Facts.header ];
       run = run_header;
     };
-    {
-      stage = Elaborate;
-      unit_id = Of_definition;
-      applies = is_written;
-      facts = [ Any Facts.elaborated ];
-      run = run_elaborate;
-    };
+    { stage = Elaborate; unit_id = Of_definition; applies = is_written; run = run_elaborate };
     {
       stage = Derive_interface;
       unit_id = Of_path;
       applies = (fun row -> row.origin = Declarations.derived_impl_origin);
-      facts = [ Any Facts.derived_interface ];
       run = run_derive_interface;
     };
     {
       stage = Compute_type_facts;
       unit_id = Of_path;
       applies = (fun row -> is_written row && is_first row && decode_kind row = Type);
-      facts = [ Any Facts.type_facts ];
       run = (fun database row -> run_type_facts database [ (Declarations.decode_key row.key).path ]);
     };
     {
       stage = Check_signature;
       unit_id = Of_definition;
       applies = is_written;
-      facts = [ Any Facts.signature_check ];
       run = run_check_signature;
     };
     {
       stage = Check_contract;
       unit_id = Of_definition;
       applies = is_written;
-      facts = [ Any Facts.contract ];
       run = run_check_contract;
     };
-    {
-      stage = Check_body;
-      unit_id = Of_definition;
-      applies = is_written;
-      facts = [ Any Facts.body ];
-      run = run_check_body;
-    };
+    { stage = Check_body; unit_id = Of_definition; applies = is_written; run = run_check_body };
     {
       stage = Build_body_mir;
       unit_id = Of_definition;
       applies = is_written;
-      facts = [ Any Facts.body_mir ];
       run = run_build_body_mir;
     };
     {
       stage = Build_contract_mir;
       unit_id = Of_definition;
       applies = is_written;
-      facts = [ Any Facts.contract_mir ];
       run = run_build_contract_mir;
     };
     {
       stage = Generate_mir;
       unit_id = Of_path;
       applies = (fun row -> row.origin = Declarations.derived_method_origin);
-      facts = [ Any Facts.generated_mir ];
       run = run_generate_mir;
     };
-    {
-      stage = List_calls;
-      unit_id = Of_path;
-      applies = has_call_node;
-      facts = [ Any Facts.call_node ];
-      run = run_list_calls;
-    };
+    { stage = List_calls; unit_id = Of_path; applies = has_call_node; run = run_list_calls };
     {
       stage = Group_recursion;
       unit_id = Of_path;
       applies = has_call_node;
-      facts = [ Any Facts.recursion_group ];
       run =
         (fun database row -> group_recursion database ~is_node:(fun ~package:_ _ -> false) [ row ]);
     };
-    {
-      stage = Check_usage;
-      unit_id = Of_definition;
-      applies = is_written;
-      facts = [ Any Facts.usage_check ];
-      run = run_check_usage;
-    };
+    { stage = Check_usage; unit_id = Of_definition; applies = is_written; run = run_check_usage };
     {
       stage = Check_ownership;
       unit_id = Of_definition;
       applies = is_written;
-      facts = [ Any Facts.ownership ];
       run = run_check_ownership;
     };
     {
       stage = Check_sealed;
       unit_id = Of_definition;
       applies = (fun row -> is_written row && is_first row && decode_kind row = Impl);
-      facts = [];
       run = run_definition_check Check_sealed (fun key -> Sealed key);
     };
     {
       stage = Check_impl;
       unit_id = Of_definition;
       applies = (fun row -> is_written row && is_first row && decode_kind row = Impl);
-      facts = [];
       run = run_definition_check Check_impl (fun key -> Impl key);
     };
     {
       stage = Check_type;
       unit_id = Of_definition;
       applies = (fun row -> is_written row && is_first row && decode_kind row = Type);
-      facts = [];
       run = run_definition_check Check_type (fun key -> Type key);
     };
-    {
-      stage = Prove;
-      unit_id = Of_definition;
-      applies = is_proven_definition;
-      facts = [ Any Facts.proof ];
-      run = run_prove;
-    };
+    { stage = Prove; unit_id = Of_definition; applies = is_proven_definition; run = run_prove };
   ]
 
 let identify_unit recipe (row : Store.definition) =
@@ -1128,11 +1063,10 @@ let rec forget_definition (database : Tracker.t) (row : Store.definition) =
   in
   List.iter
     (fun recipe ->
-      if recipe.applies row then
-        Tracker.forget database recipe.stage (identify_unit recipe row) ~facts:recipe.facts)
+      if recipe.applies row then Tracker.forget database recipe.stage (identify_unit recipe row))
     definition_stages;
   if is_proven_definition row then begin
-    Tracker.forget database Decide row.id ~facts:[];
+    Tracker.forget database Decide row.id;
     Store.replace_holes database.store ~definition:row.id [];
     ignore (Store.replace_verdicts database.store ~definition:row.id []);
     Tracker.mark_readers database (Selection Unchecked_bodies) (Store.identify row.package) ""
@@ -1144,7 +1078,7 @@ let rec forget_definition (database : Tracker.t) (row : Store.definition) =
         Store.remove_definition database.store ~id:supplied.id;
         forget_definition database supplied)
       (list_supplied_methods database row);
-    Tracker.forget database Supply row.id ~facts:[]
+    Tracker.forget database Supply row.id
   end
 
 let create_units database (row : Store.definition) =
@@ -1238,7 +1172,7 @@ let run_declare (database : Tracker.t) id =
     ~is_changed:(written.changes <> [] || written.added <> [] || written.removed <> []);
   if files = [] then begin
     Store.remove_module database.store ~id;
-    Tracker.forget database Declare id ~facts:[]
+    Tracker.forget database Declare id
   end
 
 let run_grant (database : Tracker.t) id =
@@ -1262,7 +1196,7 @@ let run_grant (database : Tracker.t) id =
   in
   ignore (Tracker.write database Facts.grant ~id (Some (Value grant)))
 
-let forget_grant database id = Tracker.forget database Resolve_grant id ~facts:[ Any Facts.grant ]
+let forget_grant database id = Tracker.forget database Resolve_grant id
 
 let read_first_definition (database : Tracker.t) recipe id =
   let row =
@@ -1328,11 +1262,7 @@ let package_stages : Kind.stage list =
   [ Check_instantiations; Check_tests; Check_unexported; Check_dependencies ]
 
 let forget_package (database : Tracker.t) package =
-  List.iter
-    (fun stage ->
-      Tracker.forget database stage (Ids.of_package package)
-        ~facts:(if stage = Kind.Check_dependencies then [ Any Facts.unused_dependencies ] else []))
-    package_stages
+  List.iter (fun stage -> Tracker.forget database stage (Ids.of_package package)) package_stages
 
 let run_package_stage (database : Tracker.t) (stage : Kind.stage) id =
   let package =
@@ -1378,7 +1308,9 @@ let list_claimed_items (database : Tracker.t) packages =
     ~packages:(Option.map (List.map Path.show_package) packages)
 
 let list_definition_facts () =
-  List.concat_map (fun recipe -> List.map Tracker.describe recipe.facts) definition_stages
+  List.concat_map
+    (fun recipe -> List.map Tracker.describe (Tracker.list_facts recipe.stage))
+    definition_stages
 
 let locate_entity (stage : Kind.stage) : Store.unit_entity =
   match stage with
