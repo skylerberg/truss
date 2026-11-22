@@ -17,13 +17,15 @@ let make_impl_method ?(module_ = "app.main") ~trait ~for_type name receiver =
        })
     name receiver
 
-let make_code_item name : Lowered.Item.t =
+let make_code_item_of path : Lowered.Item.t =
   Code
     {
-      path = make_main_path name;
+      path;
       instantiation = { type_arguments = []; capability_arguments = [] };
       assumes_condition = false;
     }
+
+let make_code_item name = make_code_item_of (make_main_path name)
 
 type part =
   | Parsed of Path.file
@@ -44,6 +46,7 @@ type part =
   | Verdicts of Resolve.Names.key
   | Lowered of Lowered.Item.t
   | Test_key of Lowered.Item.t
+  | Unit of Profile.t * Lowered.Item.t
 
 type name =
   | Tree of Resolve.Names.key
@@ -83,6 +86,7 @@ let locate (part : part) : Database.For_testing.computed =
   | Verdicts key -> of_key Decide key
   | Lowered item -> of_item Lower item
   | Test_key item -> of_item Key_tests item
+  | Unit (profile, item) -> of_item (Render profile) item
 
 let list_targets : read -> (Database.Kind.target * int * string) list = function
   | Name (Tree key) -> [ (Lookup Tree, Database.For_testing.identify_key key, "") ]
@@ -113,6 +117,7 @@ let list_targets : read -> (Database.Kind.target * int * string) list = function
       | Proof _ -> of_facts [ Proof ]
       | Lowered _ -> of_facts [ Lowered ]
       | Test_key _ -> of_facts [ Test_key ]
+      | Unit (profile, _) -> of_facts [ Unit profile ]
       | Parsed _ | Declared _ | Import_check _ | Type_check _ | Verdicts _ -> [])
 
 let show_computed ({ stage; id } : Database.For_testing.computed) =
@@ -121,6 +126,7 @@ let show_computed ({ stage; id } : Database.For_testing.computed) =
 let show_parts computed = String.concat ", " (List.map show_computed computed)
 let make_lowered name = Lowered (make_code_item name)
 let make_test_key name = Test_key (make_code_item name)
+let make_unit profile name = Unit (profile, make_code_item name)
 
 let rec locate_module : Path.t -> Path.module_ = function
   | Top { module_; _ } | Impl { module_; _ } | Test { module_; _ } | Law_proof { module_; _ } ->
@@ -206,6 +212,43 @@ let propagate ?roots hot ~before ~after =
       Harness.fail "the propagated database differs from a cold build in %s"
         (show_differences differences));
   observed
+
+let list_linked database profile roots =
+  match Database.find_lowered_lookups database [ app ] with
+  | Ok lookups -> lookups.list_linked profile roots
+  | Error message -> Harness.fail "%s" message
+
+let render_units database roots =
+  List.iter
+    (fun profile ->
+      List.iter
+        (function
+          | Lowering.Unit _ -> ()
+          | Evaluated { item; _ } ->
+              Harness.fail "%s is evaluated, and has no unit" (Lowered.Item.to_string item)
+          | Unsupported { construct; _ } -> Harness.fail "stage0 does not build %s" construct)
+        (list_linked database profile (List.map make_code_item roots)))
+    [ Profile.Development; Release ]
+
+let list_rendered_after_edit ~roots ~before ~after profile =
+  let hot = build ~roots before in
+  render_units hot roots;
+  let (), observed =
+    Database.For_testing.observe (fun () ->
+        Database.update hot (list_changes ~before ~after);
+        Database.For_testing.propagate hot;
+        render_units hot roots)
+  in
+  let cold = build ~roots after in
+  render_units cold roots;
+  (match Database.For_testing.list_differences hot cold with
+  | [] -> ()
+  | differences ->
+      Harness.fail "the propagated database differs from a cold build in %s"
+        (show_differences differences));
+  List.filter
+    (fun (computed : Database.For_testing.computed) -> computed.stage = Render profile)
+    observed.recomputed
 
 let list_propagated ~before ~after = (propagate (build before) ~before ~after).recomputed
 
@@ -1020,6 +1063,90 @@ let () =
       expect_included recomputed
         ~parts:[ make_lowered "callee"; make_test_key "callee"; make_test_key "caller" ];
       expect_untouched recomputed ~is_excluded:(( = ) (locate (make_lowered "caller"))));
+  let edited_callee =
+    [
+      ( "app.main",
+        "fn callee(x: Int64) -> Int64 { x + 2 }\npublic fn caller() -> Int64 { callee(1) }\n" );
+      ("app.other", "public fn other() -> Int64 { 1 }\n");
+    ]
+  and callee_caller_and_other =
+    [ ("app.main", callee_and_caller); ("app.other", "public fn other() -> Int64 { 1 }\n") ]
+  in
+  let other = Unit (Release, make_code_item_of (Support.make_top_path "app.other" "other")) in
+  Harness.test
+    "an edit to a callee's body renders the callee's development unit and not its caller's"
+    (fun () ->
+      expect_recomputed
+        (list_rendered_after_edit ~roots:[ "caller" ] ~before:callee_caller_and_other
+           ~after:edited_callee Development)
+        ~exactly:[ make_unit Development "callee" ]);
+  Harness.test "an edit to a file renders the release units of that file's items and of no other"
+    (fun () ->
+      let hot = build ~roots:[ "caller" ] callee_caller_and_other in
+      Database.For_testing.add_root hot
+        (make_code_item_of (Support.make_top_path "app.other" "other"));
+      Database.For_testing.propagate hot;
+      let list_release () =
+        ignore
+          (list_linked hot Release
+             [
+               make_code_item "caller";
+               make_code_item_of (Support.make_top_path "app.other" "other");
+             ])
+      in
+      list_release ();
+      let (), observed =
+        Database.For_testing.observe (fun () ->
+            Database.update hot (list_changes ~before:callee_caller_and_other ~after:edited_callee);
+            Database.For_testing.propagate hot;
+            list_release ())
+      in
+      let rendered =
+        List.filter
+          (fun (computed : Database.For_testing.computed) -> computed.stage = Render Release)
+          observed.recomputed
+      in
+      expect_included rendered ~parts:[ make_unit Release "callee"; make_unit Release "caller" ];
+      expect_untouched rendered ~is_excluded:(( = ) (locate other)));
+  Harness.test "listing the linked items of a program again renders no unit" (fun () ->
+      let files = [ ("app.main", callee_and_caller) ] in
+      List.iter
+        (fun profile ->
+          expect_recomputed
+            (list_rendered_after_edit ~roots:[ "caller" ] ~before:files ~after:files profile)
+            ~exactly:[])
+        [ Profile.Development; Release ]);
+  Harness.test "a field added to a type renders the development units that define the type"
+    (fun () ->
+      let make_program fields =
+        [
+          ( "app.main",
+            "type Pair(" ^ fields
+            ^ ")\n\
+               fn pass(pair: Pair) -> Pair { pair }\n\
+               fn unrelated() -> Int64 { 1 }\n\
+               fn caller(pair: Pair) -> Int64 { unrelated() + pass(pair).first }\n" );
+        ]
+      in
+      let rendered =
+        list_rendered_after_edit ~roots:[ "caller" ] ~before:(make_program "first: Int64")
+          ~after:(make_program "first: Int64, second: Int64")
+          Development
+      in
+      expect_included rendered ~parts:[ make_unit Development "pass" ];
+      expect_untouched rendered ~is_excluded:(( = ) (locate (make_unit Development "unrelated"))));
+  Harness.test "a callee that leaves a program leaves the development units of the items that stay"
+    (fun () ->
+      expect_recomputed
+        (list_rendered_after_edit ~roots:[ "caller" ]
+           ~before:[ ("app.main", callee_and_caller) ]
+           ~after:
+             [
+               ( "app.main",
+                 "fn callee(x: Int64) -> Int64 { x + 1 }\npublic fn caller() -> Int64 { 1 }\n" );
+             ]
+           Development)
+        ~exactly:[ make_unit Development "caller" ]);
   Harness.test "a call that is removed with its callee collects the callee's lowered code"
     (fun () ->
       expect_untouched
@@ -1625,6 +1752,45 @@ let () =
   expect_the_same_work_at_two_sizes "an edit to one body" (fun database ->
       Database.update database [ (first_part, Some (snd (make_part 0 "1 + 1"))) ];
       Database.For_testing.propagate database);
+  Harness.test
+    "listing the linked items of a program after an edit to one body runs as many statements for \
+     forty modules as for four" (fun () ->
+      let count_runs_of_listing modules =
+        let roots =
+          List.init modules (fun index ->
+              make_code_item_of
+                (Support.make_top_path
+                   (Printf.sprintf "app.part%d" index)
+                   (Printf.sprintf "second%d" index)))
+        in
+        let database =
+          Support.make_database
+            (Support.setup (List.init modules (fun index -> make_part index "1")))
+        in
+        List.iter (Database.For_testing.add_root database) roots;
+        Database.For_testing.propagate database;
+        let list_linked () =
+          match Database.find_lowered_lookups database [ app ] with
+          | Ok lookups -> lookups.list_linked Development roots
+          | Error message -> Harness.fail "%s" message
+        in
+        if List.length (list_linked ()) <> 2 * modules then
+          Harness.fail "the program of %d modules does not link two items of each" modules;
+        Database.update database [ (first_part, Some (snd (make_part 0 "1 + 1"))) ];
+        Database.For_testing.propagate database;
+        let (_, observed), statements =
+          Database.count_statements (fun () -> Database.For_testing.observe list_linked)
+        in
+        expect_recomputed
+          (List.filter
+             (fun (computed : Database.For_testing.computed) -> computed.stage = Render Development)
+             observed.recomputed)
+          ~exactly:[ Unit (Development, make_code_item_of first_of_first_part) ];
+        total count_runs statements
+      in
+      let for_four = count_runs_of_listing 4 and for_forty = count_runs_of_listing 40 in
+      if for_four <> for_forty then
+        Harness.fail "ran %d statements for four modules and %d for forty" for_four for_forty);
   expect_the_same_work_at_two_sizes "listing the diagnostics of one file" (fun database ->
       ignore (Database.list_file_diagnostics database first_part));
   expect_the_same_work_at_two_sizes "listing the readers of one module" (fun database ->

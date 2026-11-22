@@ -240,8 +240,14 @@ let unused_dependencies : Path.package list Tracker.fact =
 
 let lowered : (Lowering.lowered, Lowering.unsupported) result Tracker.fact =
   Tracker.make_fact ~stage:Lower ~table:"lowered" ~id_column:"item" ~fixed:[]
-    ~groups:[ (Lowered, [ "code" ]) ]
-    ~encode:(fun code -> [ Tracker.marshal code ])
+    ~groups:[ (Lowered, [ "code"; "is_evaluated"; "sites" ]) ]
+    ~encode:(fun code ->
+      let is_evaluated, sites =
+        match code with
+        | Ok lowered -> (Lowering.is_evaluated lowered, Lowering.list_sites lowered)
+        | Error _ -> (false, [])
+      in
+      [ Tracker.marshal code; Integer (Bool.to_int is_evaluated); Tracker.marshal sites ])
     ~decode:(fun cells -> Tracker.unmarshal cells.(0))
 
 let test_key : (string, Lowering.unsupported) result Tracker.fact =
@@ -249,3 +255,16 @@ let test_key : (string, Lowering.unsupported) result Tracker.fact =
     ~groups:[ (Test_key, [ "key" ]) ]
     ~encode:(fun key -> [ Tracker.marshal key ])
     ~decode:(fun cells -> Tracker.unmarshal cells.(0))
+
+let rank_profile : Profile.t -> int = function Development -> 0 | Release -> 1
+
+let unit =
+  let make profile : string Tracker.fact =
+    Tracker.make_fact ~stage:(Render profile) ~table:"unit" ~id_column:"item"
+      ~fixed:[ ("profile", Integer (rank_profile profile)) ]
+      ~groups:[ (Unit profile, [ "text_hash" ]) ]
+      ~encode:(fun text_hash -> [ Tracker.marshal text_hash ])
+      ~decode:(fun cells -> Tracker.unmarshal cells.(0))
+  in
+  let development = make Development and release = make Release in
+  function Profile.Development -> development | Release -> release

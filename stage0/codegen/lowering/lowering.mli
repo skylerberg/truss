@@ -1,4 +1,5 @@
 module Lookups = Lookups
+module Positions = Positions
 
 type unsupported = { construct : string; at : Lowered.site option }
 
@@ -7,6 +8,11 @@ type lowered =
   | Folded of Lowered.data * Emit_c.fragment
   | Evaluate of Lowered.Item.t * Ground.ty
 
+type linked =
+  | Unit of { item : Lowered.Item.t; text_hash : string; sites : Lowered.site list }
+  | Evaluated of { item : Lowered.Item.t; evaluator : Lowered.Item.t; ty : Ground.ty }
+  | Unsupported of unsupported
+
 type lowered_lookups = {
   system : Libc.system;
   read_source : Path.file -> Source.t;
@@ -14,14 +20,28 @@ type lowered_lookups = {
   find_lowered : Lowered.Item.t -> (lowered, unsupported) result option;
   read_test_key : Lowered.Item.t -> (string, unsupported) result;
   list_reached_todo_types : Lowered.Item.t -> Path.t list;
+  list_linked : Profile.t -> Lowered.Item.t list -> linked list;
+  render_unit : Profile.t -> Lowered.Item.t -> string;
 }
 
 exception Todo_type of Ground.ty
 exception Infinite_size of Ground.ty
 
-val make_monomorphic_context : Interface.Lookups.t -> Monomorphic.context
+val make_env : Libc.system -> Interface.Lookups.t -> Memory_layout.env
 val lower : Libc.system -> Lookups.t -> Lowered.Item.t -> (lowered, unsupported) result
 val list_references : lowered -> Lowered.Item.t list
+val list_sites : lowered -> Lowered.site list
+val is_evaluated : lowered -> bool
+
+val render_unit :
+  Libc.system ->
+  Interface.Lookups.t ->
+  Profile.t ->
+  read_source:(Path.file -> Source.t) ->
+  is_worked_on:(Path.package -> bool) ->
+  find_lowered:(Lowered.Item.t -> lowered option) ->
+  Emit_c.fragment ->
+  string
 
 val check_calls :
   Interface.Lookups.t ->

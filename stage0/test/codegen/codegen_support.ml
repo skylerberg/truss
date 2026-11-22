@@ -135,7 +135,7 @@ let scratch = lazy (Harness.make_scratch_directory "codegen")
 
 let c_compiler =
   lazy
-    (match C_compiler.find ~objects:(Cache.make_objects_directory (Workspace.open_cache ())) with
+    (match C_compiler.find ~objects:(Cache.make_objects_directory (Workspace.open_cache ())) () with
     | Ok c_compiler -> C_compiler.For_testing.reject_warnings c_compiler
     | Error message -> failwith message)
 
@@ -158,15 +158,17 @@ let run_program ?(extra = []) ?env ?input ?(profile = Backend.Development)
   let fragments = List.map (fun program_fragment -> program_fragment env) program in
   match
     C_compiler.build_executable (Lazy.force c_compiler) Development
-      ~units:
+      ~sources:
         [
-          ("the runtime", Startup.render_runtime ~tests:false);
-          ( "the program",
-            Emit_c.render_file env profile ~resolve_position:test_position
-              (List.map (fun fragment -> (fragment, Emit_c.External)) fragments) );
-          ("main", Startup.For_testing.render_main_start (Emit_c.make_symbol (code_item "entry")));
-          ("sites", Emit_c.render_sites_file ~resolve_position:test_position fragments);
-          ("capabilities", Emit_c.render_capabilities_file fragments);
+          C_compiler.make_source ~name:"the runtime" (Startup.render_runtime ~tests:false);
+          C_compiler.make_source ~name:"the program"
+            (Emit_c.render_file env profile ~resolve_position:test_position
+               (List.map (fun fragment -> (fragment, Emit_c.External)) fragments));
+          C_compiler.make_source ~name:"main"
+            (Startup.For_testing.render_main_start (Emit_c.make_symbol (code_item "entry")));
+          C_compiler.make_source ~name:"sites"
+            (Emit_c.render_sites_file ~resolve_position:test_position
+               (List.concat_map Emit_c.sites fragments));
         ]
       ~output
   with

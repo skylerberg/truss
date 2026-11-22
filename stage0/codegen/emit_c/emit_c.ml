@@ -15,12 +15,13 @@ type fragment = Fragment.t
 let item (fragment : fragment) = fragment.item
 let references (fragment : fragment) = fragment.references
 let called (fragment : fragment) = fragment.called
+let sites (fragment : fragment) = fragment.sites
 let failures (fragment : fragment) = fragment.failures
 let hash (fragment : fragment) = fragment.hash
 
 module Item_table = Hashtbl.Make (Lowered.Item)
 
-let walk ~lookup ~follows_only_called_entries roots =
+let trace_reachable ~lookup roots =
   let visited = Item_table.create 256 in
   let queue = Queue.create () in
   List.iter (fun root -> Queue.add (root, []) queue) roots;
@@ -42,15 +43,12 @@ let walk ~lookup ~follows_only_called_entries roots =
       | Some (fragment : fragment) -> (
           let chain = item :: chain in
           reachable := (fragment, List.rev chain) :: !reachable;
-          let enqueue_references () =
-            List.iter (fun reference -> Queue.add (reference, chain) queue) fragment.references
-          in
           match fragment.kind with
-          | Table_entries (Some capability) when follows_only_called_entries ->
+          | Table_entries (Some capability) ->
               Path_table.add tables capability fragment;
               List.iter (enqueue_entry fragment)
                 (List.rev (Path_table.find_all called_slots capability))
-          | _ when follows_only_called_entries ->
+          | Functions _ | Static_data | Table_entries None ->
               List.iter
                 (fun (capability, slot) ->
                   if not (List.mem_assoc slot (Path_table.find_all called_slots capability)) then begin
@@ -60,17 +58,11 @@ let walk ~lookup ~follows_only_called_entries roots =
                       (List.rev (Path_table.find_all tables capability))
                   end)
                 fragment.calls;
-              enqueue_references ()
-          | _ -> enqueue_references ())
+              List.iter (fun reference -> Queue.add (reference, chain) queue) fragment.references)
     end
   done;
   List.rev !reachable
 
-let list_linked ~lookup roots =
-  List.map fst
-    (walk ~lookup:(fun item -> Some (lookup item)) ~follows_only_called_entries:false roots)
-
-let trace_reachable ~lookup roots = walk ~lookup ~follows_only_called_entries:true roots
 let small = 24
 
 let is_small (fragment : fragment) =
@@ -302,7 +294,7 @@ let render_file env (profile : Profile.t) ~resolve_position (fragments : (fragme
   List.iter
     (fun capability ->
       Buffer.add_string buffer
-        (Printf.sprintf "extern const uint8_t %s;\n"
+        (Printf.sprintf "__attribute__((weak)) const uint8_t %s = 0;\n"
            (C_runtime.render_capability_symbol capability)))
     (List.sort_uniq Path.compare
        (List.concat_map (fun ((fragment : fragment), _) -> fragment.capabilities) fragments));
@@ -338,13 +330,32 @@ let render_file env (profile : Profile.t) ~resolve_position (fragments : (fragme
       List.iter (fun text -> List.iter (write_segment writer) (list_segments text)) function_texts;
       Buffer.contents writer.buffer
 
-let render_sites_file ~resolve_position:resolve fragments =
-  let positions =
-    List.map
-      (fun site -> (site, resolve site))
-      (List.sort_uniq compare
-         (List.concat_map (fun (fragment : fragment) -> fragment.sites) fragments))
+let list_copies ~is_worked_on ~find_fragment (fragment : fragment) =
+  match fragment.item with
+  | Code _ as caller ->
+      List.filter_map
+        (fun (called : Lowered.Item.t) ->
+          match called with
+          | Code { path; _ }
+            when (not (Lowered.Item.equal called caller))
+                 && not (is_worked_on (Path.locate_package path)) ->
+              Option.bind (find_fragment called) (fun copy ->
+                  if is_small copy then Some copy else None)
+          | _ -> None)
+        (List.sort_uniq Lowered.Item.compare fragment.called)
+  | _ -> []
+
+let render_unit env (profile : Profile.t) ~resolve_position ~is_worked_on ~find_fragment fragment =
+  let copies =
+    match profile with
+    | Development -> list_copies ~is_worked_on ~find_fragment fragment
+    | Release -> []
   in
+  render_file env profile ~resolve_position
+    ((fragment, External) :: List.map (fun copy -> (copy, Internal)) copies)
+
+let render_sites_file ~resolve_position:resolve sites =
+  let positions = List.map (fun site -> (site, resolve site)) (List.sort_uniq compare sites) in
   let file_symbols =
     List.mapi
       (fun index file -> (file, Printf.sprintf "truss_file_%d" index))
@@ -365,15 +376,6 @@ let render_sites_file ~resolve_position:resolve fragments =
             (List.assoc position.file file_symbols)
             (String.length position.file) position.line position.column)
         positions)
-
-let render_capabilities_file fragments =
-  String.concat ""
-    (C_runtime.runtime_declarations
-    :: List.map
-         (fun capability ->
-           Printf.sprintf "const uint8_t %s = 0;\n" (C_runtime.render_capability_symbol capability))
-         (List.sort_uniq Path.compare
-            (List.concat_map (fun (fragment : fragment) -> fragment.capabilities) fragments)))
 
 module For_testing = struct
   let render_c (fragment : fragment) =

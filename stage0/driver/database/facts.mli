@@ -30,3 +30,5 @@ val unused_dependencies : Path.package list Tracker.fact
 val proof : Prover.proof Tracker.fact
 val lowered : (Lowering.lowered, Lowering.unsupported) result Tracker.fact
 val test_key : (string, Lowering.unsupported) result Tracker.fact
+val rank_profile : Profile.t -> int
+val unit : Profile.t -> string Tracker.fact

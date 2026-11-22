@@ -1,5 +1,12 @@
-type t = { command : string; identity : string; added_flags : string list; objects : string }
+type t = {
+  command : string;
+  identity : string;
+  added_flags : string list;
+  debug_prefix_maps : (string * string) list;
+  objects : string;
+}
 
+let raise_bug format = Compiler_bug.raise_bug ~stage:"C compiler" format
 let command_variable = "TRUSS_CC"
 let flags_variable = "TRUSS_CFLAGS"
 let kept_source_variable = "TRUSS_KEEP_C"
@@ -14,7 +21,7 @@ let identify command =
   | _ -> Error (command ^ " --version failed")
   | exception Unix.Unix_error _ -> Error ("cannot run " ^ command)
 
-let find ~objects =
+let find ?(debug_prefix_maps = []) ~objects () =
   let added_flags =
     match find_variable flags_variable with
     | Some flags -> List.filter (( <> ) "") (String.split_on_char ' ' flags)
@@ -24,7 +31,7 @@ let find ~objects =
     | [] -> Error ("no C compiler found: " ^ String.concat "; " (List.rev errors))
     | command :: rest -> (
         match identify command with
-        | Ok identity -> Ok { command; identity; added_flags; objects }
+        | Ok identity -> Ok { command; identity; added_flags; debug_prefix_maps; objects }
         | Error error -> identify_first (error :: errors) rest)
   in
   identify_first []
@@ -54,13 +61,17 @@ let list_link_flags compiler : Profile.t -> string list = function
   | Release ->
       "-O3" :: (if is_clang compiler then "-flto=thin" else "-flto") :: compiler.added_flags
 
-let list_profile_flags : Profile.t -> string list = function
+let list_profile_flags compiler : Profile.t -> string list = function
   | Development -> [ "-O1" ]
   | Release ->
       [ "-g1"; "-gno-column-info"; "-fno-omit-frame-pointer"; "-mno-omit-leaf-frame-pointer" ]
+      @ List.map
+          (fun (prefix, replacement) ->
+            Printf.sprintf "-fdebug-prefix-map=%s=%s" prefix replacement)
+          compiler.debug_prefix_maps
 
 let list_compile_flags compiler profile =
-  list_profile_flags profile @ required_flags @ list_link_flags compiler profile
+  list_profile_flags compiler profile @ required_flags @ list_link_flags compiler profile
 
 let list_compilation_directory_flags : Profile.t -> string list = function
   | Development -> []
@@ -77,10 +88,15 @@ let make_fingerprint compiler profile =
             Cbor.Array (List.map (fun flag -> Cbor.Text flag) (list_compile_flags compiler profile));
           ]))
 
-let derive_object_key = Blake3.derive_key ~context:"truss 2026-11-17 object key"
+type source = { name : string; text_hash : string; render : unit -> string }
 
-let make_object_key ~fingerprint text =
-  Blake3.to_hex (derive_object_key (Cbor.encode (Cbor.Array [ Bytes fingerprint; Bytes text ])))
+let hash_text = Blake3.derive_key ~context:"truss 2026-11-22 translation unit text"
+let make_source ~name text = { name; text_hash = hash_text text; render = (fun () -> text) }
+let derive_object_key = Blake3.derive_key ~context:"truss 2026-11-22 object key"
+
+let make_object_key ~fingerprint text_hash =
+  Blake3.to_hex
+    (derive_object_key (Cbor.encode (Cbor.Array [ Bytes fingerprint; Bytes text_hash ])))
 
 let make_object_path compiler key = Filename.concat compiler.objects (key ^ ".o")
 
@@ -91,29 +107,45 @@ let compile compiler flags ~text ~output =
   | 0, _, _ -> Ok ()
   | _, out, err -> Error (out ^ err)
 
-let compile_unit compiler flags ~on_compiled (name, text, key) =
-  let output = make_object_path compiler key in
-  if Sys.file_exists output then begin
-    (try Unix.utimes output 0. 0. with Unix.Unix_error _ -> ());
-    Ok output
-  end
-  else
-    let base = Filename.concat compiler.objects (Printf.sprintf "%s.%d" key (Unix.getpid ())) in
-    let partial = base ^ ".o" in
-    let result =
-      match compile compiler flags ~text ~output:partial with
-      | Ok () ->
-          Sys.rename partial output;
-          if Option.is_some (find_variable kept_source_variable) then
-            File_system.write (Filename.concat compiler.objects (key ^ ".c")) text;
-          Ok output
-      | Error message ->
-          let source = base ^ ".c" in
-          File_system.write source text;
-          Error (Printf.sprintf "%s does not compile (kept as %s):\n%s" name source message)
-    in
-    on_compiled ();
-    result
+type job = { source : source; object_path : string; missing_text : string option }
+
+let render_text source =
+  let text = source.render () in
+  if not (String.equal (hash_text text) source.text_hash) then
+    raise_bug "%s renders to a text that its hash does not name" source.name;
+  text
+
+let make_job compiler ~fingerprint source =
+  let key = make_object_key ~fingerprint source.text_hash in
+  let object_path = make_object_path compiler key in
+  {
+    source;
+    object_path;
+    missing_text = (if Sys.file_exists object_path then None else Some (render_text source));
+  }
+
+let compile_job compiler flags ~on_compiled { source; object_path; missing_text } =
+  match missing_text with
+  | None ->
+      (try Unix.utimes object_path 0. 0. with Unix.Unix_error _ -> ());
+      Ok object_path
+  | Some text ->
+      let base = Printf.sprintf "%s.%d" (Filename.remove_extension object_path) (Unix.getpid ()) in
+      let partial = base ^ ".o" in
+      let result =
+        match compile compiler flags ~text ~output:partial with
+        | Ok () ->
+            Sys.rename partial object_path;
+            if Option.is_some (find_variable kept_source_variable) then
+              File_system.write (Filename.remove_extension object_path ^ ".c") text;
+            Ok object_path
+        | Error message ->
+            let kept = base ^ ".c" in
+            File_system.write kept text;
+            Error (Printf.sprintf "%s does not compile (kept as %s):\n%s" source.name kept message)
+      in
+      on_compiled ();
+      result
 
 let run_parallel jobs run_job =
   let jobs = Array.of_list jobs in
@@ -133,16 +165,11 @@ let run_parallel jobs run_job =
   List.iter Domain.join domains;
   Array.to_list (Array.map Option.get results)
 
-let compile_objects ?report_progress compiler profile units =
+let compile_objects ?report_progress compiler profile sources =
   File_system.make_directory compiler.objects;
   let fingerprint = make_fingerprint compiler profile in
-  let keyed =
-    List.map (fun (name, text) -> (name, text, make_object_key ~fingerprint text)) units
-  in
-  let missing =
-    List.length
-      (List.filter (fun (_, _, key) -> not (Sys.file_exists (make_object_path compiler key))) keyed)
-  in
+  let jobs = List.map (make_job compiler ~fingerprint) sources in
+  let missing = List.length (List.filter (fun job -> Option.is_some job.missing_text) jobs) in
   let compiled = Atomic.make 0 in
   let lock = Mutex.create () in
   let report () =
@@ -153,8 +180,8 @@ let compile_objects ?report_progress compiler profile units =
   in
   if missing > 0 then report ();
   let results =
-    run_parallel keyed
-      (compile_unit compiler
+    run_parallel jobs
+      (compile_job compiler
          (list_compile_flags compiler profile @ list_compilation_directory_flags profile)
          ~on_compiled:(fun () ->
            Atomic.incr compiled;
@@ -207,8 +234,8 @@ let link_with_dsym_bundle compiler flags ~objects ~output ~bundle =
   File_system.remove lto_objects;
   result
 
-let build_executable ?report_progress ?dsym_bundle compiler profile ~units ~output =
-  match compile_objects ?report_progress compiler profile units with
+let build_executable ?report_progress ?dsym_bundle compiler profile ~sources ~output =
+  match compile_objects ?report_progress compiler profile sources with
   | Error message -> Error message
   | Ok objects -> (
       let flags = list_link_flags compiler profile in
@@ -242,5 +269,5 @@ module For_testing = struct
       (list_compile_flags compiler profile @ list_compilation_directory_flags profile)
       ~text ~output
 
-  let compile_objects compiler profile units = compile_objects compiler profile units
+  let compile_objects compiler profile sources = compile_objects compiler profile sources
 end

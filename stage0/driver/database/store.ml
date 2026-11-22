@@ -703,6 +703,42 @@ type item_graph = {
   claim_kinds : int list;
 }
 
+let mark_items_stale store ~stage =
+  Sql.run store.sql "INSERT OR IGNORE INTO main.stale (stage, id) SELECT ?1, id FROM main.item"
+    [ Integer stage ]
+
+type linked = {
+  linked_id : int;
+  linked_key : string;
+  sites : string option;
+  text_hash : string option;
+}
+
+let list_linked store graph ~profile ~roots =
+  Sql.list_rows store.sql
+    "WITH RECURSIVE down(node) AS (SELECT value FROM json_each(?4) UNION SELECT e.target FROM down \
+     CROSS JOIN main.lowered l ON l.item = down.node CROSS JOIN main.edge e ON e.source_kind = ?2 \
+     AND e.source = down.node AND e.target_kind = ?1 WHERE l.is_evaluated IS NOT 1 AND (e.markers \
+     & ?3) != 0) SELECT down.node, i.key, l.sites, u.state, u.text_hash FROM down CROSS JOIN \
+     main.item i ON i.id = down.node LEFT JOIN main.lowered l ON l.item = down.node LEFT JOIN \
+     main.unit u ON u.item = down.node AND u.profile = ?5"
+    [
+      Integer graph.item_kind;
+      Integer graph.lower_kind;
+      Integer graph.references;
+      Text (encode_integers roots);
+      Integer profile;
+    ]
+    (fun row ->
+      {
+        linked_id = Sql.read_integer row 0;
+        linked_key = Sql.read_blob row 1;
+        sites = (if Sql.is_null row 2 then None else Some (Sql.read_blob row 2));
+        text_hash =
+          (if Sql.is_null row 3 || Sql.read_integer row 3 <> 0 then None
+           else Some (Sql.read_blob row 4));
+      })
+
 let is_item_claimed store graph ~item =
   Sql.has_row store.sql
     "WITH RECURSIVE up(node) AS (VALUES (?1) UNION SELECT e.source FROM up CROSS JOIN main.edge e \

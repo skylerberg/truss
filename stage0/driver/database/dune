@@ -27,6 +27,8 @@
   package_checks
   lowering
   lowered
+  c_compiler
+  profile
   ground
   libc
   prover

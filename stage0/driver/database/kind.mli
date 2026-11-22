@@ -32,6 +32,7 @@ type stage =
   | Prove
   | Lower
   | Key_tests
+  | Render of Profile.t
   | Decide
 
 val stages : stage list
@@ -65,6 +66,7 @@ type fact =
   | Proof
   | Lowered
   | Test_key
+  | Unit of Profile.t
 
 type lookup =
   | Source

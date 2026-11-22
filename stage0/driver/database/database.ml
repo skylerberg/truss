@@ -189,6 +189,8 @@ let record_layout (database : t) ~loaded (packages : Project.package list) =
     (Store.list_attached database.store);
   attach_loaded database loaded;
   Store.replace_project database.store project;
+  if project <> project_before then
+    Store.mark_items_stale database.store ~stage:(Kind.rank_stage (Render Development));
   List.iter
     (fun (package : Project.package) ->
       if List.mem package.name project_before then begin
@@ -309,7 +311,8 @@ let find_checker (stage : Kind.stage) : checker option =
   | Check_unexported -> Some Unexported
   | Declare | Supply | Claim_roots | Resolve_grant | Read_trait_header | Evaluate_constant
   | Derive_interface | Compute_type_facts | Build_body_mir | Build_contract_mir | Generate_mir
-  | List_calls | Group_recursion | Check_dependencies | Prove | Lower | Key_tests | Decide ->
+  | List_calls | Group_recursion | Check_dependencies | Prove | Lower | Key_tests | Render _
+  | Decide ->
       None
 
 let list_staged (database : t) (file : Path.file) ~is_selected : Diagnostic.t list =
@@ -351,15 +354,7 @@ let list_blocking_diagnostics database file =
           Option.is_some located.base && not located.is_in_test
       | Package_checks | Unexported -> false)
 
-let read_source (database : t) (file : Path.file) =
-  match
-    Store.find_file database.store
-      (Store.locate_schema database.store file.module_.package)
-      ~id:(Ids.of_file file)
-  with
-  | Some row -> Source.create ~path:(Path.show_file file) row.text
-  | None ->
-      Compiler_bug.raise_bug ~stage:"Database" "%s is not a file of the build" (Path.show_file file)
+let read_source (database : t) = Lookups.read_source database Tracker.untracked
 
 let require_package (database : t) package =
   if
@@ -732,6 +727,49 @@ let list_reached_todo_types (database : t) item =
   in
   List.sort_uniq Path.compare (visit [] Key_tests (Ids.of_item item))
 
+let list_linked (database : t) profile roots : Lowering.linked list =
+  let list_rows () = Recipes.list_linked database profile ~roots in
+  let rows = list_rows () in
+  let has_rendered = ref false in
+  run_past_bugs database (fun ~on_bug ->
+      has_rendered :=
+        Recipes.drain_stage database ~on_bug (Render profile)
+          ~scope:(Items (List.map (fun (row : Store.linked) -> row.linked_id) rows)));
+  let rows = if !has_rendered then list_rows () else rows in
+  List.iter
+    (fun root ->
+      let id = Ids.of_item root in
+      if not (List.exists (fun (row : Store.linked) -> row.linked_id = id) rows) then
+        Compiler_bug.raise_bug ~stage:"Database" "%s is linked, and no root of lowering reaches it"
+          (Lowered.Item.to_string root))
+    roots;
+  List.map
+    (fun (row : Store.linked) : Lowering.linked ->
+      let item : Lowered.Item.t = Marshal.from_string row.linked_key 0 in
+      match (row.text_hash, row.sites) with
+      | Some text_hash, Some sites ->
+          Unit
+            {
+              item;
+              text_hash = Marshal.from_string text_hash 0;
+              sites = Marshal.from_string sites 0;
+            }
+      | _ -> (
+          match find_item_outcome database Facts.lowered item with
+          | Some (Value (Ok (Evaluate (evaluator, ty)))) -> Evaluated { item; evaluator; ty }
+          | Some (Value (Error unsupported)) -> Unsupported unsupported
+          | Some (Value (Ok (Compiled _ | Folded _)) | Failed | Blocked) | None ->
+              Compiler_bug.raise_bug ~stage:"Database" "%s is linked from code with errors"
+                (Lowered.Item.to_string item)))
+    rows
+
+let render_unit (database : t) profile item =
+  match Recipes.render_unit database Tracker.untracked profile item with
+  | Some text -> text
+  | None ->
+      Compiler_bug.raise_bug ~stage:"Database" "%s is rendered, and has no code"
+        (Lowered.Item.to_string item)
+
 let find_lowered_lookups (database : t) packages : (Lowering.lowered_lookups, string) result =
   match Libc.host with
   | Error message -> Error message
@@ -752,6 +790,8 @@ let find_lowered_lookups (database : t) packages : (Lowering.lowered_lookups, st
                     "%s is read, and no root of lowering reaches it" (Lowered.Item.to_string item));
           read_test_key = read_reached database Facts.test_key;
           list_reached_todo_types = list_reached_todo_types database;
+          list_linked = list_linked database;
+          render_unit = render_unit database;
         }
 
 type read = {
@@ -771,7 +811,9 @@ let describe_target rank =
 
 let list_reads (database : t) paths ~is_source =
   let reads = Kind.encode_markers [ Reads ] in
-  let lowering = [ Kind.rank_stage Lower; Kind.rank_stage Key_tests ] in
+  let lowering =
+    List.map Kind.rank_stage [ Kind.Lower; Key_tests; Render Development; Render Release ]
+  in
   let stages_of_definitions =
     List.filter (fun stage -> not (List.mem stage lowering)) (List.map Kind.rank_stage Kind.stages)
   in

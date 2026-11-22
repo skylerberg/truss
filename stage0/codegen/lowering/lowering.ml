@@ -1,4 +1,5 @@
 module Lookups = Lookups
+module Positions = Positions
 
 type unsupported = Lower.unsupported = { construct : string; at : Lowered.site option }
 
@@ -7,6 +8,11 @@ type lowered =
   | Folded of Lowered.data * Emit_c.fragment
   | Evaluate of Lowered.Item.t * Ground.ty
 
+type linked =
+  | Unit of { item : Lowered.Item.t; text_hash : string; sites : Lowered.site list }
+  | Evaluated of { item : Lowered.Item.t; evaluator : Lowered.Item.t; ty : Ground.ty }
+  | Unsupported of unsupported
+
 type lowered_lookups = {
   system : Libc.system;
   read_source : Path.file -> Source.t;
@@ -14,12 +20,12 @@ type lowered_lookups = {
   find_lowered : Lowered.Item.t -> (lowered, unsupported) result option;
   read_test_key : Lowered.Item.t -> (string, unsupported) result;
   list_reached_todo_types : Lowered.Item.t -> Path.t list;
+  list_linked : Profile.t -> Lowered.Item.t list -> linked list;
+  render_unit : Profile.t -> Lowered.Item.t -> string;
 }
 
 exception Todo_type = Monomorphic.Todo_type
 exception Infinite_size = Memory_layout.Infinite_size
-
-let make_monomorphic_context = Lower.make_monomorphic_context
 
 let make (context : Lower.context) (item : Lowered.Item.t) : lowered =
   let env = Lower.env context in
@@ -41,11 +47,12 @@ let make (context : Lower.context) (item : Lowered.Item.t) : lowered =
   | Encode ty -> Compiled (Encoding.encode env ty)
   | Evaluator evaluated -> Compiled (Lower.lower_evaluator context evaluated)
 
+let make_env system interface =
+  Memory_layout.create system
+    ~compute_shape:(Monomorphic.compute_shape (Lower.make_monomorphic_context interface))
+
 let lower system (lookups : Lookups.t) item =
-  let env =
-    Memory_layout.create system
-      ~compute_shape:(Monomorphic.compute_shape (Lower.make_monomorphic_context lookups.interface))
-  in
+  let env = make_env system lookups.interface in
   match
     Compiler_bug.run_while_doing ~stage:"Lowering"
       ("lowering " ^ Lowered.Item.to_string item)
@@ -60,6 +67,26 @@ let test_runner : Lowered.Item.t =
 let list_references = function
   | Compiled fragment | Folded (_, fragment) -> Emit_c.references fragment
   | Evaluate (evaluator, _) -> [ evaluator; test_runner ]
+
+let list_sites = function
+  | Compiled fragment | Folded (_, fragment) -> Emit_c.sites fragment
+  | Evaluate _ -> []
+
+let is_evaluated = function Evaluate _ -> true | Compiled _ | Folded _ -> false
+
+let render_unit system (interface : Interface.Lookups.t) profile ~read_source ~is_worked_on
+    ~find_lowered fragment =
+  let positions = Positions.create interface.names ~read_source in
+  Emit_c.render_unit (make_env system interface) profile
+    ~resolve_position:(fun site ->
+      let { Positions.file; line; column } = Positions.locate_site positions site in
+      { file = Path.show_file file; line; column })
+    ~is_worked_on
+    ~find_fragment:(fun called ->
+      match find_lowered called with
+      | Some (Compiled copy | Folded (_, copy)) -> Some copy
+      | Some (Evaluate _) | None -> None)
+    fragment
 
 let check_calls interface ~find_call_edges item = function
   | Compiled fragment -> Call_edge_check.check interface ~find_call_edges item fragment

@@ -151,9 +151,15 @@ of the groups whose columns changed.
 grant          (dependency, state, capabilities, unknown)
 dependency_use (package, state, unused)
 item           (id, definition, key)
-lowered        (item, state, code)
+lowered        (item, state, code, is_evaluated, sites)
 test_key       (item, state, key)
+unit           (item, profile, state, text_hash)
 ```
+
+A build lists its linked items by `lowered.is_evaluated` and `lowered.sites`,
+and reads the `code` of none of them. `unit.text_hash` is the hash of the text
+of the item's translation unit in a build of that profile, and it names the
+unit's object in the user's cache.
 
 ### Diagnostics
 
@@ -240,6 +246,7 @@ The orchestrator runs the stages in this order. Each row is one recipe.
 | Decide | Definition | `Prover.pose`, the solver, `Prover.list_states` | The proof, the results of running its evaluations, and the solver's answers | `verdict` |
 | Lower | Item | `Lowering.lower`, `Lowering.check_calls` | MIR and interfaces; the callees of the item's definition and of each callee | `lowered`, `references` edges to the items its code names |
 | Key tests | Item, with the items of its reference cycle | `Lowering.derive_test_keys` | `lowered`, and the test keys of the items it references | `test_key` |
+| Render, once for each profile | Item | `Lowering.render_unit` | The item's `lowered` code and the interfaces of the types that the unit defines. A development unit: the `lowered` code of each small callee that it copies. A release unit: the place of each definition whose lines it names, and that definition's file. | `unit` |
 
 A unit reads facts of earlier stages. Where a unit reads a fact of its own
 stage, the orchestrator orders that stage's units: packages in dependency
@@ -258,7 +265,8 @@ A command says how far to drain: `check` drains through Decide, and `test`
 and `build` through Key tests, for the packages they name and the packages
 those depend on. Saving a file drains through the checks of packages. Lower
 and Key tests drain the items that the claims of those packages reach, and
-Prove and Decide the definitions of the files a command names.
+Prove and Decide the definitions of the files a command names. A build drains
+Render of its profile for the items that its roots reach.
 
 Decide takes two inputs that no pass computes. The command runs the
 evaluations of the stale Decide units, which are compiled code, and hands
@@ -285,6 +293,7 @@ runs the evaluation again.
 | The holes and the obligations not yet proven | `holes`, an agent proving | `hole`, and `verdict` rows that are not proven |
 | The tests a change can affect | `test` | The `test_key` rows whose key changed |
 | A definition's callees and its recursion group | `graph`, lowering | `edge` with `calls`, `recursion_group` |
+| The translation units of a program | `run`, `build`, `test`, a check that runs an evaluation | One recursive query over the `references` edges from the program's roots, joined with `lowered` and `unit`. The query does not follow the edges of an evaluated item. |
 | The rows that differ between two databases | `upgrade`, two agents' worktrees | Each table of one attached database minus the same table of the other |
 
 ## Costs
@@ -296,6 +305,8 @@ runs the evaluation again.
 | Edit one body | Parse the file. Declare its module, which rewrites the `syntax` row of the edited definition and the `base` of those after it. Run Resolve through Decide for that definition. Rewrite its fact rows that differ. A check of the package runs only if a fact it reads as a set changed. |
 | Edit a signature, or add a definition | As above, and the units whose `reads` edges name the rows that changed. |
 | Build from nothing | Every unit once. Each read is a statement and an unmarshal: there is no cache of decoded values. |
+| A build with no change | One query lists the linked items. Each item's object is found in the user's cache by its stored hash. The sites of the linked items are rendered as one unit, and the objects are linked. |
+| A build after an edit to one body | As above, and Lower through Render for the edited item, whose unit is compiled. In a development build the units of its callers are unchanged. In a release build the units of the other items of its file are rendered again, and compiled where a line they name moved. |
 | Replace a dependency | Each table of the new file minus the old one, and the old one minus the new, gives the rows that differ. One statement marks the readers of the facts and the lookups that those rows back. Recursion groups are recomputed for the callers of the definitions whose `calls` or `implements` edges differ. |
 
 ## Further decisions
@@ -309,6 +320,13 @@ runs the evaluation again.
 | A proof's obligations stay in the `proof` value, and no `obligation` table holds them. | A query states the result of running each evaluation that it names, so it is known only when Decide runs, and Decide is the one reader of an obligation. The rows an editor or an agent reads are the `verdict` rows: a site, its message, and whether it is proven. |
 | A `verdict` row holds its failure as a diagnostic relative to its definition, and the clause that the failure cites as a definition and a span in it. The listing places both in their files. | A diagnostic placed in a file would be stale after every edit above it. Placed by `definition.base` when it is listed, a verdict is computed again only when its proof or the spans it names change. |
 | The call graphs and the references between items are `edge` rows, and no graph is held in memory between commands. | Opening a database rebuilds nothing, and `graph` reads the same rows as the orchestrator. |
+| An object is named by the hash of its translation unit's text, and the hash is a fact. | A build that renders each unit to learn its object's name does work for every linked item, changed or not. With the hash stored, a build reads one row for each linked item, and asks for a unit's text only where the user's cache holds no object for it. One function renders the text for the stage and for that request, and the C compiler checks the text against the hash. The hash is still a hash of the text, so a read that Render did not record shows as a differing `unit` row when a propagated database is compared with one built from nothing. |
+| A development unit holds no position. It names each site by a symbol, and one unit of the program defines every site with its file, line, and column. | An edit that moves a definition changes that one unit and no other. The sites of a program are the `sites` of its linked items. |
+| A capability's symbol is a weak definition in each unit that names it. | The linker keeps one definition, so the symbol has one address in the program, and no unit lists the capabilities of every linked item. |
+| A development unit copies a small callee only where the callee's package is outside the project. | An edit to a small function of the project leaves its callers' units unchanged. When the project gains or loses a package, every development unit is rendered again. |
+| A release unit names a file by its package and its path in the package. The C compiler's `-fdebug-prefix-map` puts the package's directory in the project in place of the package's name. | The line table of a release build names each file by its path in the project, which the workspace knows and the database does not. With the directory in the compiler's flags, it is part of the object's name, and a unit's text is a function of the database alone. |
+| A release unit reads the whole text of each file whose lines it names. | A line number is a count of the lines above it. An edit to a file therefore renders again the release units of the file's items, and a unit whose lines did not move comes out unchanged. |
+| An evaluated item has no unit. A build takes the result of its evaluation from the user's cache, or runs the evaluation, and renders the value as data. | The value is the result of running code, which no pass computes. |
 | A recursion group is found by two recursive queries: the definitions a changed definition reaches over `calls` and `implements` edges, intersected with the definitions that reach it. The strongly connected components of that set are computed in memory and written as `recursion_group` rows. | Every cycle through a changed definition lies inside that set, so no component is kept between commands. The two queries walk the changed definition's callees and callers inside SQLite, and only run when its `calls` or `implements` edges change. |
 | The edge from a trait's method to a method that implements it is stored once, by the implementing method, in its own package's database. | Which impls a caller can reach depends on the packages the caller can see. With the edge stored by the implementer, each package's view is the edges of the databases it attaches, and no unit exists for each pair of a trait method and a calling package. |
 | When a dependency's file is replaced, a differing row of `definition`, `entry`, `impl`, or another table of names marks the readers of every lookup that the row backs, under the row's own name: the entry `name` of its module, the members `member` of its owner. A differing fact row marks the readers of each of its facts. | The old file and the new one are attached together, so the rows that differ are one query for each table. Marking by row and name leaves a reader of one function untouched when another function of the same module changes. A lookup that reads only some columns of a differing row is recomputed once and found unchanged, which costs one unit and can never leave a stale read. |
@@ -333,7 +351,7 @@ runs the evaluation again.
 | `body_mir.graph`, `contract_mir.graph` | Check bodies, Prove, Lower |
 | `proof.value` | Decide |
 | `verdict.failure` | The listing of a file's proof diagnostics |
-| `lowered.code` | Key tests, the backend |
+| `lowered.code` | Key tests, Render, and the trace of the code that a root reaches, for `holes` and for a release build's refusal of a `todo` |
 | `definition.path`, `item.key` | The orchestrator, to give a pass the key it names |
 
 ## Checks of the build
@@ -341,7 +359,8 @@ runs the evaluation again.
 | Claim | Evidence |
 |---|---|
 | A local change costs the same at every project size. | `database_tests` counts the statements and the virtual machine steps of an edit to one body, and of proving and deciding one file, in four modules and in forty. `stage0/tools/database_benchmark` times the same edits at each size. |
-| A command with no change computes nothing. | `database_tests`: deciding a file again decides no definition, and a database opened again recomputes no unit. |
+| A command with no change computes nothing. | `database_tests`: deciding a file again decides no definition, and a database opened again recomputes no unit. `build_tests`: a development build and a release build of a program that was built before render no unit. |
+| A build renders the units of the items that an edit changes. | `database_tests`: after an edit to one body, listing the linked items of a program renders the development unit of that item alone, with as many statements in forty modules as in four, and the release units of that item's file and of no other. |
 | A question costs the same at every project size. | `database_tests` counts the statements and the steps of listing a file's diagnostics, a definition's dependents and dependencies, and the definitions that name it, in four modules and in forty. |
 | A propagated database equals one built from nothing. | `database_tests` compares every table after each of seventeen edits, and `stage0/tools/database_fuzz` compares them after random edits. |
 | No pass sees the database. | No library under `stage0/type_checker`, `stage0/mir`, `stage0/prover`, or `stage0/codegen` depends on the store or the orchestrator, and the store depends on no pass. |

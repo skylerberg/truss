@@ -83,14 +83,6 @@ let make_ping_pong ?(ping = "ping") ?(pong = "pong") returned =
   ]
 
 let () =
-  Codegen_support.test "a build reaches each called item once, in order" (fun () ->
-      let program = make_named_program ~entry_name:"start" ~helper_name:"helper" 1 in
-      let linked =
-        Emit_c.list_linked ~lookup:(lookup program) [ Codegen_support.code_item "start" ]
-      in
-      Codegen_support.expect_string ~expected:"test.start test.helper"
-        (String.concat " "
-           (List.map (fun fragment -> Lowered.Item.to_string (Emit_c.item fragment)) linked)));
   Codegen_support.test "a drop reaches the type's drop function" (fun () ->
       let dropping_function =
         Codegen_support.define_function "f"
@@ -278,17 +270,46 @@ let () =
             | Error message -> message))
 
 let () =
+  List.iter
+    (fun (name, profile) ->
+      Codegen_support.test
+        (Printf.sprintf "a %s build of a program that was built before renders no unit" name)
+        (fun () ->
+          let _, backend =
+            Codegen_support.load ~profile
+              "fn double(value: Int64) -> Int64\n\
+              \  requires value >= 0 && value <= 100\n\
+               {\n\
+              \  value * 2\n\
+               }\n\
+               fn main(arguments: List[String]) -> ExitCode {\n\
+              \  if double(21) == 42 { ExitCode.success } else { ExitCode.failure }\n\
+               }\n"
+          in
+          let build () =
+            match Codegen_support.build_program backend ~main:Codegen_support.example_main with
+            | Ok _ -> ()
+            | Error message -> Codegen_support.fail "%s" message
+          in
+          build ();
+          let rendered = Backend.For_testing.count_rendered_units () in
+          build ();
+          Codegen_support.expect_int ~expected:rendered
+            (Backend.For_testing.count_rendered_units ())))
+    [ ("development", Backend.Development); ("release", Release) ]
+
+let () =
   Codegen_support.test "an object that a build finds again is as new as that build" (fun () ->
       let directory = Filename.concat (Lazy.force Codegen_support.scratch) "aged-objects" in
       let c_compiler =
-        match C_compiler.find ~objects:directory with
+        match C_compiler.find ~objects:directory () with
         | Ok c_compiler -> c_compiler
         | Error message -> failwith message
       in
       let compile_objects () =
         match
           C_compiler.For_testing.compile_objects c_compiler Development
-            [ ("one", "int one(void) { return 1; }\n") ]
+            [ C_compiler.make_source ~name:"one" "int one(void) { return 1; }\n" ]
         with
         | Ok [ path ] -> path
         | Ok _ -> failwith "one source made several objects"
@@ -307,13 +328,16 @@ let () =
     (fun () ->
       let directory = Filename.concat (Lazy.force Codegen_support.scratch) "release-objects" in
       let c_compiler =
-        match C_compiler.find ~objects:directory with
+        match C_compiler.find ~objects:directory () with
         | Ok c_compiler -> c_compiler
         | Error message -> failwith message
       in
       match
         C_compiler.For_testing.compile_objects c_compiler Release
-          [ ("one", "#line 3 \"example/main.truss\"\nint one(void) { return 1; }\n") ]
+          [
+            C_compiler.make_source ~name:"one"
+              "#line 3 \"example/main.truss\"\nint one(void) { return 1; }\n";
+          ]
       with
       | Ok [ path ] ->
           let object_bytes = In_channel.with_open_bin path In_channel.input_all in
@@ -328,17 +352,44 @@ let () =
       | Error message -> failwith message)
 
 let () =
-  Codegen_support.test "a release object of the program's start attributes its code to <runtime>"
-    (fun () ->
-      let directory = Filename.concat (Lazy.force Codegen_support.scratch) "startup-objects" in
+  Codegen_support.test
+    "a release object names a file of a project's package by its path in the project" (fun () ->
+      let directory = Filename.concat (Lazy.force Codegen_support.scratch) "placed-objects" in
       let c_compiler =
-        match C_compiler.find ~objects:directory with
+        match
+          C_compiler.find
+            ~debug_prefix_maps:[ ("example/", "packages/example/") ]
+            ~objects:directory ()
+        with
         | Ok c_compiler -> c_compiler
         | Error message -> failwith message
       in
       match
         C_compiler.For_testing.compile_objects c_compiler Release
-          [ ("startup", Startup.render_program_start "truss_entry") ]
+          [
+            C_compiler.make_source ~name:"one"
+              "#line 3 \"example/main.truss\"\nint one(void) { return 1; }\n";
+          ]
+      with
+      | Ok [ path ] ->
+          let object_bytes = In_channel.with_open_bin path In_channel.input_all in
+          if not (String.includes ~affix:"packages/example" object_bytes) then
+            Codegen_support.fail "the object does not name packages/example"
+      | Ok _ -> failwith "one source made several objects"
+      | Error message -> failwith message)
+
+let () =
+  Codegen_support.test "a release object of the program's start attributes its code to <runtime>"
+    (fun () ->
+      let directory = Filename.concat (Lazy.force Codegen_support.scratch) "startup-objects" in
+      let c_compiler =
+        match C_compiler.find ~objects:directory () with
+        | Ok c_compiler -> c_compiler
+        | Error message -> failwith message
+      in
+      match
+        C_compiler.For_testing.compile_objects c_compiler Release
+          [ C_compiler.make_source ~name:"startup" (Startup.render_program_start "truss_entry") ]
       with
       | Ok [ path ] ->
           let object_bytes = In_channel.with_open_bin path In_channel.input_all in

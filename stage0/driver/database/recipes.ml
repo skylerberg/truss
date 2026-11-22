@@ -586,10 +586,10 @@ let ensure_item (database : Tracker.t) (item : Lowered.Item.t) =
         label = Lowered.Item.to_string item;
         definition = Option.map Ids.of_path (Lowered.Item.find_definition item);
       }
-  then begin
-    Tracker.mark_stale database Lower id;
-    Tracker.mark_stale database Key_tests id
-  end
+  then
+    List.iter
+      (fun stage -> Tracker.mark_stale database stage id)
+      [ Kind.Lower; Key_tests; Render Development; Render Release ]
 
 let list_item_targets (database : Tracker.t) stage id =
   List.filter_map
@@ -606,6 +606,10 @@ let rec collect_items (database : Tracker.t) candidates =
         let referenced = list_item_targets database Lower id in
         Tracker.forget database Lower id ~facts:[ Any Facts.lowered ];
         Tracker.forget database Key_tests id ~facts:[ Any Facts.test_key ];
+        List.iter
+          (fun profile ->
+            Tracker.forget database (Render profile) id ~facts:[ Any (Facts.unit profile) ])
+          [ Profile.Development; Release ];
         Store.remove_item database.store ~id;
         collect_items database referenced
       end)
@@ -902,6 +906,37 @@ let run_key_tests (database : Tracker.t) ids =
       in
       ignore (Tracker.write database Facts.test_key ~id (Some key)))
     items
+
+let render_unit (database : Tracker.t) recorder profile item =
+  let project = Lookups.locate_items database in
+  let find_lowered read =
+    match Tracker.find database recorder Facts.lowered.whole project ~id:(Ids.of_item read) with
+    | Some (Value (Ok lowered)) -> Some lowered
+    | Some (Value (Error _) | Failed | Blocked) | None -> None
+  in
+  match find_lowered item with
+  | Some (Compiled fragment | Folded (_, fragment)) ->
+      Some
+        (Lowering.render_unit (read_host_system ())
+           (Lookups.make_interface database recorder ~is_checked:true)
+           profile
+           ~read_source:(Lookups.read_source database recorder)
+           ~is_worked_on:(Lookups.is_worked_on database) ~find_lowered fragment)
+  | Some (Evaluate _) | None -> None
+
+let run_render profile (database : Tracker.t) id =
+  let item = read_item database id in
+  let outcome =
+    Tracker.record database (Render profile) id (fun recorder ->
+        match render_unit database recorder profile item with
+        | text -> Option.map (fun text -> Tracker.Value (C_compiler.hash_text text)) text
+        | exception Tracker.Reads_failed_fact -> Some Blocked)
+  in
+  ignore (Tracker.write database (Facts.unit profile) ~id outcome)
+
+let list_linked (database : Tracker.t) profile ~roots =
+  Store.list_linked database.store item_graph ~profile:(Facts.rank_profile profile)
+    ~roots:(List.map Ids.of_item roots)
 
 let decode_kind (row : Store.definition) = Declarations.decode_kind row.kind
 let is_written (row : Store.definition) = row.origin = Declarations.written_origin
@@ -1352,7 +1387,7 @@ let list_definition_facts () =
 
 let locate_entity (stage : Kind.stage) : Store.unit_entity =
   match stage with
-  | Lower | Key_tests -> Item_unit
+  | Lower | Key_tests | Render _ -> Item_unit
   | Parse | Check_imports -> File_unit
   | Declare -> Module_unit
   | Resolve_grant -> Dependency_unit
@@ -1465,6 +1500,7 @@ let drain_stage (database : Tracker.t) ?on_bug (stage : Kind.stage) ~scope =
       run_each (fun database id -> run_package_stage database stage id)
   | Lower -> run_each run_lower
   | Key_tests -> if stale <> [] then drain_test_keys database ~guard stale
+  | Render profile -> run_each (run_render profile)
   | Decide ->
       Compiler_bug.raise_bug ~stage:"Database"
         "Decide is drained with the results of its evaluations and a solver"

@@ -115,8 +115,14 @@ let tables =
     keyed_by_id "item"
       "id INTEGER PRIMARY KEY, definition INTEGER, key BLOB NOT NULL, label TEXT NOT NULL"
       [ ("item_definition", "definition") ];
-    keyed_by_id "lowered" ("item INTEGER PRIMARY KEY, " ^ state ^ ", code BLOB") [];
+    keyed_by_id "lowered"
+      ("item INTEGER PRIMARY KEY, " ^ state ^ ", code BLOB, is_evaluated INTEGER, sites BLOB")
+      [];
     keyed_by_id "test_key" ("item INTEGER PRIMARY KEY, " ^ state ^ ", key BLOB") [];
+    keyed_by_columns "unit"
+      ("item INTEGER NOT NULL, profile INTEGER NOT NULL, " ^ state
+     ^ ", text_hash BLOB, PRIMARY KEY (item, profile)")
+      [];
     keyed_by_columns "diagnostic"
       "stage INTEGER NOT NULL, unit INTEGER NOT NULL, position INTEGER NOT NULL, package TEXT NOT \
        NULL, definition INTEGER, file INTEGER, severity TEXT NOT NULL, code TEXT NOT NULL, start \
