@@ -1627,6 +1627,30 @@ let () =
       Database.For_testing.propagate database);
   expect_the_same_work_at_two_sizes "listing the diagnostics of one file" (fun database ->
       ignore (Database.list_file_diagnostics database first_part));
+  expect_the_same_work_at_two_sizes "listing the readers of one module" (fun database ->
+      ignore (Database.list_readers_of_module database first_part.module_));
+  Harness.test "the readers of a module are the definitions and the files that name it" (fun () ->
+      let database =
+        build
+          [
+            ("app.util", "public fn one() -> Int64 { 1 }\n");
+            ("app.full", "fn by_path() -> Int64 { app.util.one() }\n");
+            ("app.used", "use app.util\nfn by_import() -> Int64 { util.one() }\n");
+            ("app.other", "fn unrelated() -> Int64 { 2 }\n");
+          ]
+      in
+      let definitions, files =
+        Database.list_readers_of_module database (Support.parse_file "app.util").module_
+      in
+      let names path =
+        List.exists (fun (key : Resolve.Names.key) -> Path.equal key.path path) definitions
+      in
+      if not (names (Support.make_top_path "app.full" "by_path")) then
+        Harness.fail "the definition that names the module by its full path is not listed";
+      if names (Support.make_top_path "app.other" "unrelated") then
+        Harness.fail "a definition that does not name the module is listed";
+      if files <> [ Support.parse_file "app.used" ] then
+        Harness.fail "listed %d files that import the module" (List.length files));
   expect_the_same_work_at_two_sizes "listing the dependents of one definition" (fun database ->
       ignore (Database.list_dependents database [ first_of_first_part ]));
   expect_the_same_work_at_two_sizes "listing the dependencies of one definition" (fun database ->

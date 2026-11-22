@@ -1002,6 +1002,31 @@ let list_definitions_naming (database : t) (path : Path.t) =
                ~markers:(Kind.encode_markers [ References ])))
        paths)
 
+let list_readers_of_module (database : t) (module_ : Path.module_) =
+  let edges =
+    Store.list_edges_into database.store
+      ~target_kinds:[ Kind.rank_target (Lookup Module) ]
+      ~targets:[ Ids.of_module module_ ]
+      ~markers:(Kind.encode_markers [ Reads ])
+  in
+  let list_units stage =
+    List.filter_map
+      (fun (edge : Store.read_edge) ->
+        if edge.source_kind = Kind.rank_stage stage then Some edge.source else None)
+      edges
+  in
+  ( List.sort_uniq compare
+      (List.map
+         (fun (_, _, key) -> Declarations.decode_key key)
+         (Store.list_definitions_identified database.store ~ids:(list_units Resolve))),
+    List.sort_uniq compare
+      (List.filter_map
+         (fun id ->
+           Option.map
+             (fun (row : Store.file) -> Declarations.decode_file row.key)
+             (Store.find_file database.store Main ~id))
+         (list_units Check_imports)) )
+
 module Kind = Kind
 
 module For_testing = struct
