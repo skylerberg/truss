@@ -1,0 +1,8 @@
+fn lies() -> Bool
+  ensures result
+{
+  proof {
+    assert lies() by evaluation
+  }
+  false
+}

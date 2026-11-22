@@ -2275,6 +2275,35 @@ let () =
       match check 86401 with
       | 1, output when String.includes ~affix:"prover.ensures" output -> ()
       | _, output -> fail "accepted another value: %s" output);
+  test "check evaluates an assertion by evaluation, and proves or refutes it" (fun () ->
+      let check accepted =
+        let root =
+          make_package
+            [
+              ( "main.truss",
+                Printf.sprintf
+                  "fn is_accepted(value: UInt64) -> Bool {\n\
+                  \  value %% 7 == 6\n\
+                   }\n\n\
+                   public fn accept() -> UInt64\n\
+                  \  ensures is_accepted(result)\n\
+                   {\n\
+                  \  proof {\n\
+                  \    assert is_accepted(%d) by evaluation\n\
+                  \  }\n\
+                  \  %d\n\
+                   }\n"
+                  accepted accepted );
+            ]
+        in
+        capture (fun () -> Cli.Main.run_client [ "truss"; "--no-server"; "check"; "-C"; root ])
+      in
+      (match check 97 with
+      | 0, _ -> ()
+      | _, output -> fail "did not prove the assertion: %s" output);
+      match check 98 with
+      | 1, output when String.includes ~affix:"prover.assertion" output -> ()
+      | _, output -> fail "accepted a false assertion: %s" output);
   test "check rejects an HTML template that interpolates into an event handler or a script"
     (fun () ->
       List.iter

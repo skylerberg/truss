@@ -14,6 +14,11 @@ let rec make_value : Lowered.static_value -> Prover.Obligation.value = function
 
 and make_fields fields = List.map (fun (name, value) -> (name, make_value value)) fields
 
+let make_run : (Lowered.static_value Backend.ran, string) result -> Prover.Obligation.run = function
+  | Ok (Ran value) -> Evaluated (make_value value)
+  | Ok (Reached_todo report) -> Unfinished report
+  | Ok (Stopped report) | Error report -> Failed report
+
 let run_one backend (evaluation : Prover.Obligation.evaluation) :
     (Prover.Obligation.run, string) result =
   match evaluation with
@@ -23,11 +28,9 @@ let run_one backend (evaluation : Prover.Obligation.evaluation) :
       | Ok (Error report) -> Ok (Failed report)
       | Error message ->
           Error (Printf.sprintf "The check of a template's text could not be built: %s" message))
-  | Constant_value path -> (
-      match Backend.evaluate_constant backend path with
-      | Ok (Ran value) -> Ok (Evaluated (make_value value))
-      | Ok (Reached_todo report) -> Ok (Unfinished report)
-      | Ok (Stopped report) | Error report -> Ok (Failed report))
+  | Constant_value path -> Ok (make_run (Backend.evaluate_constant backend path))
+  | Assertion { definition; condition } ->
+      Ok (make_run (Backend.evaluate_assertion backend ~definition ~condition))
 
 let run backend evaluations =
   List.fold_right

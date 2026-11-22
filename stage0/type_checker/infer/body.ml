@@ -151,7 +151,7 @@ let check_defaults state env (written : Syntax.parameter list) (signature : Type
                   let actual = Expressions.check_expression state env ~expected:info.type_ value in
                   Conversions.coerce state env ~argument:info.mode value ~actual
                     ~expected:info.type_);
-              Constant.check state ~default:true value
+              Constant.check state Default value
           | Some { has_default = true; _ }, None ->
               State.raise_bug "`%s` has no default, and its signature has one" name.text
           | (Some _ | None), _ -> ())
@@ -205,7 +205,7 @@ let check_bit_vector_names state (form : Core.t) =
          Core_walk.ignore_all with
          statement =
            (function
-           | { kind = Assert { condition; by_bit_vector = true }; _ } -> check_names condition.value
+           | { kind = Assert { condition; by = Some Bit_vector }; _ } -> check_names condition.value
            | _ -> ());
        })
     form.definition
@@ -277,7 +277,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                       Solver.run_in_statement state constant_expression
                         (State.read_span state value.id) (fun () ->
                           Expressions.check state constant_expression value elaborated.field_type);
-                      Constant.check state ~default:true value
+                      Constant.check state Default value
                   | None -> ())
               | _ -> ())
             fields
@@ -336,7 +336,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
           in
           Solver.run_in_statement state env (State.read_span state value.id) (fun () ->
               Expressions.check state env value constant.constant_type);
-          Constant.check state ~default:false value
+          Constant.check state Value value
         end
     | Test { body = written; _ }, _ ->
         if not (is_broken Body) then

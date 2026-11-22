@@ -164,7 +164,7 @@ and statement_kind =
   | Parallel of statement list
   | Concurrent of statement list
   | Proof of block
-  | Assert of { condition : condition; by_bit_vector : bool }
+  | Assert of { condition : condition; by : Language.Proof_method.t option }
   | Yield of { mode : Language.Mode.t; part : operand }
 
 and iteration =

@@ -2591,6 +2591,30 @@ let () =
         (make_helper_source "internal " ^ Fixtures.Infer.public_function_calling_a_private_one))
 
 let () =
+  let expect_not_constant ?says text ~at =
+    expect_one_diagnostic text "types.condition_not_constant" ?says ~at
+  in
+  Harness.test "an assertion by evaluation takes calls, constants, quantifiers, and literals"
+    (fun () -> expect_fine Fixtures.Infer.assertions_by_evaluation);
+  Harness.test "an assertion by evaluation cannot name a parameter" (fun () ->
+      expect_not_constant Fixtures.Infer.assertion_by_evaluation_naming_a_parameter
+        ~says:"before any variable has a value" ~at:("count", 2));
+  Harness.test "an assertion by evaluation cannot name a local variable" (fun () ->
+      expect_not_constant Fixtures.Infer.assertion_by_evaluation_naming_a_local ~at:("chosen", 2));
+  Harness.test "an assertion by evaluation cannot mention a type parameter" (fun () ->
+      expect_not_constant Fixtures.Infer.assertion_by_evaluation_naming_a_type_parameter
+        ~says:"cannot mention a type parameter" ~at:("[]", 1));
+  Harness.test "an assertion by evaluation cannot branch" (fun () ->
+      expect_not_constant Fixtures.Infer.assertion_by_evaluation_that_branches
+        ~says:"Move this into a function"
+        ~at:("if true { true } else { false }", 1));
+  Harness.test "the condition of an assertion by evaluation is code, in a theorem too" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.assertion_by_evaluation_with_an_implication
+        "types.specification_only");
+  Harness.test "a constant's value takes a quantifier over a range or a collection" (fun () ->
+      expect_fine Fixtures.Infer.constants_with_quantifiers)
+
+let () =
   Harness.test "a bit-vector assertion names only integers and booleans" (fun () ->
       expect_one_diagnostic Fixtures.Infer.bit_vector_assertion_naming_a_list "types.not_bit_vector")
 

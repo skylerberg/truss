@@ -1,5 +1,10 @@
 type sort = Int | Bool | Float of int * int | Type_sort of Types.ty | Function_sort of int
 
+type evaluation =
+  | Template_check of { function_ : Path.t; literals : string list }
+  | Constant_value of Path.t
+  | Assertion of { definition : Path.t; condition : int }
+
 module Symbol = struct
   type 'term t =
     | Variable of { label : string; numbers : int list }
@@ -7,10 +12,9 @@ module Symbol = struct
     | Limited of { callee : Path.t; type_arguments : Types.argument list }
     | Function_value of { callee : Path.t; type_arguments : Types.argument list }
     | Constant of Path.t
-    | Evaluated_constant of Path.t
+    | Evaluated of evaluation
     | Generic_value of { owner : Path.t; name : string }
     | Text_literal of { type_ : Types.ty; text : string }
-    | Template_check of { function_ : Path.t; literals : string list }
     | Named_term of 'term
     | Lambda of { sorts : sort list; definition : 'term }
     | Lifted of 'term t
@@ -227,12 +231,14 @@ let rec show_symbol : symbol -> string = function
   | Function_value { callee; type_arguments } ->
       "named." ^ Path.show callee ^ show_type_arguments type_arguments
   | Constant path -> "constant." ^ Path.show path
-  | Evaluated_constant path -> "evaluated_constant." ^ Path.show path
   | Generic_value { owner; name } -> Printf.sprintf "generic.%s.%s" (Path.show owner) name
   | Text_literal { type_; text } -> Printf.sprintf "text_literal.%s.%S" (Types.show type_) text
-  | Template_check { function_; literals } ->
+  | Evaluated (Template_check { function_; literals }) ->
       Printf.sprintf "template_check.%s(%s)" (Path.show function_)
         (String.concat ", " (List.map (Printf.sprintf "%S") literals))
+  | Evaluated (Constant_value path) -> "evaluated_constant." ^ Path.show path
+  | Evaluated (Assertion { definition; condition }) ->
+      Printf.sprintf "evaluated_assertion.%s.%d" (Path.show definition) condition
   | Named_term term -> "named_term(" ^ show_term term ^ ")"
   | Lambda { definition; _ } -> "lambda(" ^ show_term definition ^ ")"
   | Lifted symbol -> show_symbol symbol ^ ".lifted"

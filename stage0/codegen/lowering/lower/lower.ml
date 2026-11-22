@@ -13,6 +13,8 @@ type constant = Constants.constant = Folded of Lowered.data | Run of Ground.ty
 
 let lower_constant = Constants.compile_constant
 let lower_evaluator = Constants.build_evaluator
+let lower_assertion = Constants.compile_assertion
+let lower_assertion_evaluator = Constants.build_assertion_evaluator
 let lower_generated = Generated.lower
 let lower_table = Generated.lower_table
 

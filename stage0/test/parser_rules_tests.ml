@@ -316,6 +316,11 @@ let () =
       Parse_support.expect_body_error "assert true" ~code:Misplaced_assert ~at:"assert");
   Harness.test "assert in a proof block" (fun () ->
       Parse_support.expect_statement "proof {\n  assert true\n}" "(proof (block (assert true)))");
+  Harness.test "assert by evaluation and by bit_vector name how the assertion is proven" (fun () ->
+      Parse_support.expect_statement "proof {\n  assert ready by evaluation\n}"
+        "(proof (block (assert ready by evaluation)))";
+      Parse_support.expect_statement "proof {\n  assert ready by bit_vector\n}"
+        "(proof (block (assert ready by bit_vector)))");
   Harness.test "assert in a lambda in a test" (fun () ->
       Parse_support.expect_error Fixtures.Parser_rules.assert_in_a_lambda_in_a_test
         ~code:Misplaced_assert ~at:"assert");

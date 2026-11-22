@@ -550,6 +550,18 @@ let evaluate_constant backend path =
   | Evaluate (path, ty) -> run_evaluator backend path ty
   | Compiled _ -> raise_bug "the constant %s is lowered to code" (Path.show path)
 
+let evaluate_assertion backend ~definition ~condition =
+  capture_failure @@ fun () ->
+  let item = Lowered.Item.Assertion { definition; condition } in
+  match read_lowered backend item with
+  | Folded (data, _) -> Ran data.value
+  | Compiled _ ->
+      run_while_compiling backend item ~read:(fun encoded ->
+          Lowering.Encoding.decode (make_env backend)
+            (Monomorphic.ground backend.monomorphic Types.no_substitution Types.bool)
+            encoded)
+  | Evaluate _ -> raise_bug "%s is lowered to a constant" (Lowered.Item.to_string item)
+
 let create ?(show_file = Path.show_file) ?results ?(evaluation_cpu_time_limit_ms = 10_000)
     ?(programs = Filename.get_temp_dir_name ())
     ?(is_worked_on = fun package -> package <> Path.standard_package) lookups c_compiler profile =

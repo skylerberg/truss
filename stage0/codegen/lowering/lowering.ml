@@ -40,6 +40,10 @@ let make (context : Lower.context) (item : Lowered.Item.t) : lowered =
   | Debug ty -> Compiled (Debug_output.build_debug env ty)
   | Encode ty -> Compiled (Encoding.encode env ty)
   | Evaluator path -> Compiled (Lower.lower_evaluator context path)
+  | Assertion { definition; condition } -> (
+      match Lower.lower_assertion context ~definition ~condition with
+      | Folded data -> Folded (data, Emit_c.make_data_fragment env data)
+      | Run _ -> Compiled (Lower.lower_assertion_evaluator context ~definition ~condition))
   | Call_evaluation { function_; arguments } ->
       Compiled (Lower.lower_call_evaluation context ~function_ ~arguments)
 

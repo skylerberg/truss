@@ -142,7 +142,8 @@ let outlives_call ~(owns : Mir.local -> bool) ~(is_view : Types.ty -> bool) (bod
           if holds_view then list_viewed_by call else raise Made
       | Basic
           ( Assign _ | Lend _ | Call _ | Template _ | Live _ | Dead _ | Assert _ | Echo _
-          | Loan_start _ | Loan_end _ | Ghost_assert _ | Path_note _ | Proof _ )
+          | Loan_start _ | Loan_end _ | Ghost_assert _ | Path_note _ | Proof _ | Evaluated_assert _
+            )
       | Provide_start _ | Provide_end ->
           []
     in

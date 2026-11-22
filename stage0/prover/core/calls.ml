@@ -25,7 +25,7 @@ let list_required_fixes (context : State.context) (frame : State.frame) (clauses
     List.mem name context.entry
     ||
     match name with
-    | Logic.Symbol.Constant _ | Evaluated_constant _ | Text_literal _ -> true
+    | Logic.Symbol.Constant _ | Evaluated (Constant_value _) | Text_literal _ -> true
     | _ -> false
   in
   let is_simple text =
@@ -1274,8 +1274,8 @@ let assume_template_check context (frame : State.frame) ~origin (from_template :
       Option.iter
         (fun (_, holds) ->
           let symbol =
-            Logic.Symbol.Template_check
-              { function_ = Path.Method { owner = impl; name; receiver }; literals }
+            Logic.Symbol.Evaluated
+              (Template_check { function_ = Path.Method { owner = impl; name; receiver }; literals })
           in
           Facts.declare context (Logic.Constant (symbol, Logic.Bool));
           Facts.assume context frame (Logic.equal (Logic.Symbol symbol) holds))

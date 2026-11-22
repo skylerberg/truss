@@ -111,7 +111,7 @@ and collect_effects : Mir.basic -> Mir.local list * Mir.local list * Mir.local l
   | Dead locals -> ([], [], locals)
   | Assert value | Echo value -> (list_operand_locals value, [], [])
   | Loan_start { borrowed; _ } -> (list_operand_locals borrowed, [], [])
-  | Loan_end _ | Ghost_assert _ | Path_note _ | Proof _ -> ([], [], [])
+  | Loan_end _ | Ghost_assert _ | Path_note _ | Proof _ | Evaluated_assert _ -> ([], [], [])
 
 let collect_graph_effects :
     Mir.Graph.statement_kind -> Mir.local list * Mir.local list * Mir.local list = function
@@ -1238,7 +1238,7 @@ let () =
           | None -> Harness.fail "the loop's condition is no comparison")
       | loops -> Harness.fail "%d `while` loops with one invariant" (List.length loops));
       match !proofs with
-      | [ proof ] -> validate "the proof block" (Mir.For_testing.expand proof).body
+      | [ proof ] -> validate "the proof block" (Mir.expand proof).body
       | proofs -> Harness.fail "%d proof blocks" (List.length proofs));
   Harness.test "an early exit from concurrent code ends the tasks it leaves" (fun () ->
       let mir = lower_graph Fixtures.Mir.early_return_from_a_concurrent_loop in
@@ -1510,6 +1510,33 @@ let () =
       | [ { path; omitted_field = Some "size"; _ } ] ->
           expect_paths ~expected:[ "app.main.limit" ] [ path ]
       | dependencies -> Harness.fail "%d reads" (List.length dependencies))
+
+let () =
+  let lookups = lazy (make_call_edge_lookups Fixtures.Mir.code_asserting_by_evaluation) in
+  let expect_edges path ~expected =
+    expect_paths ~expected (Mir.Call_edges.list_path_edges (Lazy.force lookups) path)
+  in
+  Harness.test "code has an edge to each function and constant of its assertions by evaluation"
+    (fun () ->
+      expect_edges
+        (Support.make_top_path "app.main" "f")
+        ~expected:[ "app.main.is_small"; "app.main.limit" ]);
+  Harness.test "a theorem has an edge to each function of its assertions by evaluation" (fun () ->
+      expect_edges (Support.make_top_path "app.main" "tiny") ~expected:[ "app.main.is_tiny" ]);
+  Harness.test "the assertions by evaluation of a definition are listed with their conditions"
+    (fun () ->
+      let { Mir.form = code; _ } =
+        Option.get (Mir.read_code (Lazy.force lookups).mir (Support.make_top_path "app.main" "f"))
+      in
+      match Mir.list_evaluated_asserts code with
+      | [ (_, condition) ] ->
+          expect_paths
+            ~expected:[ "app.main.is_small"; "app.main.limit" ]
+            (List.map
+               (fun (dependency : Mir.Call_edges.dependency) -> dependency.path)
+               (Mir.Call_edges.list_dependencies (Lazy.force lookups) Types.no_substitution
+                  condition))
+      | evaluated -> Harness.fail "%d assertions by evaluation" (List.length evaluated))
 
 let () =
   let lookups = lazy (make_call_edge_lookups Fixtures.Mir.impls_inheriting_a_provided_method) in

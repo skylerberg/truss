@@ -31,7 +31,7 @@ let list_nested_blocks (statement : Tree.statement) : Tree.block list =
             _;
           }
       | Call _ | Lend _ | Template _ | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _
-      | Loan_end _ | Ghost_assert _ | Path_note _ | Proof _ )
+      | Loan_end _ | Ghost_assert _ | Path_note _ | Proof _ | Evaluated_assert _ )
   | Yield _
   | Jump (Return _ | Break | Continue | Cancel _ | Unreachable | Written_unreachable | Todo) ->
       []
@@ -135,7 +135,8 @@ let visit_statement_places visit (statement : Tree.statement) =
   | Jump (Return returned) -> Option.iter visit_operand returned
   | Jump (Cancel { returned; _ }) -> Option.iter (fun (value, _) -> visit_operand value) returned
   | Jump (Break | Continue | Unreachable | Written_unreachable | Todo)
-  | Basic (Live _ | Dead _ | Loan_end _ | Ghost_assert _ | Path_note _ | Proof _)
+  | Basic
+      (Live _ | Dead _ | Loan_end _ | Ghost_assert _ | Path_note _ | Proof _ | Evaluated_assert _)
   | While _ | Fork _ | Resume _ ->
       ()
 
@@ -145,7 +146,7 @@ let rec visit_block ~on_value visit (block : Tree.block) =
       visit statement;
       (match statement.kind with
       | Basic (Ghost_assert { condition; _ }) -> visit_formula ~on_value visit condition
-      | Basic (Proof code) -> visit_code ~on_value visit code
+      | Basic (Proof code | Evaluated_assert code) -> visit_code ~on_value visit code
       | While { loop; _ } | For { loop; _ } -> visit_loop ~on_value visit loop
       | Basic
           ( Assign _ | Call _ | Lend _ | Template _ | Live _ | Dead _ | Assert _ | Echo _
@@ -184,13 +185,24 @@ let iter_places visit code =
 let iter_formula_places visit formula =
   visit_formula ~on_value:(visit_operand visit) (visit_statement_places visit) formula
 
+let list_evaluated_asserts (code : Tree.t) =
+  let evaluated = ref [] in
+  iter_code
+    (fun statement ->
+      match statement.kind with
+      | Basic (Evaluated_assert asserted) ->
+          evaluated := (Core_walk.locate_origin statement.origin, asserted) :: !evaluated
+      | _ -> ())
+    code;
+  List.rev !evaluated
+
 let find_callee (statement : Tree.statement) : Tree.callee option =
   match statement.kind with
   | Basic (Call { call; _ } | Lend { call; _ } | Template { call; _ }) -> Some call.callee
   | For { iteration = Pull { next; _ }; _ } -> Some next
   | Basic
       ( Assign _ | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _ | Loan_end _ | Ghost_assert _
-      | Path_note _ | Proof _ )
+      | Path_note _ | Proof _ | Evaluated_assert _ )
   | For { iteration = Range _; _ }
   | Choose _ | Assert_by_bit_vector _ | While _ | Fork _ | Provide _ | Resume _ | Yield _ | Jump _
     ->

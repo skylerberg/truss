@@ -1,9 +1,24 @@
 let read_final_type (state : State.state) (value : Syntax.expression) =
   Option.map (State.finalize_type state) state.tables.types.(value.id)
 
-let rec find_offending_expression (state : State.state) ~may_call (value : Syntax.expression) :
-    Syntax.expression option =
-  let find_first = List.find_map (find_offending_expression state ~may_call) in
+type site = Value | Default | Evaluated_condition
+
+let rec list_bound_locals (pattern : Syntax.pattern) : Syntax.id list =
+  let list_field (field : Syntax.pattern_field) =
+    match field.kind with
+    | Named_field (_, pattern) | Field pattern -> list_bound_locals pattern
+    | Rest -> []
+  in
+  match pattern.kind with
+  | Binding name -> [ name.id ]
+  | Variant { fields; _ } -> List.concat_map list_field (Option.value fields ~default:[])
+  | Record fields -> List.concat_map list_field fields
+  | Tuple patterns | Alternatives patterns -> List.concat_map list_bound_locals patterns
+  | Wildcard | Qualified_constant _ | Literal _ | Pattern_range _ | Pattern_error -> []
+
+let rec find_offending_expression (state : State.state) ~may_call ~bound (value : Syntax.expression)
+    : Syntax.expression option =
+  let find_first = List.find_map (find_offending_expression state ~may_call ~bound) in
   let is_built_in (operand : Syntax.expression) =
     match read_final_type state operand with
     | Some type_ ->
@@ -17,6 +32,7 @@ let rec find_offending_expression (state : State.state) ~may_call (value : Synta
   let find_in_resolved () =
     match (state.tables.resolutions.(value.id), value.kind) with
     | Some (Global _ | Variant_value _ | Type_name _), _ -> None
+    | Some (Local_value local), _ when List.mem local bound -> None
     | Some (Field_access _), Member (base, _) -> find_first [ base ]
     | _ -> Some value
   in
@@ -42,6 +58,13 @@ let rec find_offending_expression (state : State.state) ~may_call (value : Synta
                | Item index -> [ index ]
                | Item_constraint _ -> [])
              items)
+  | Range { start; stop; _ } when may_call -> find_first (Option.to_list start @ Option.to_list stop)
+  | Quantified { binder = Binder_in (pattern, collection); body; _ } when may_call -> (
+      match find_first [ collection ] with
+      | Some _ as offending -> offending
+      | None ->
+          find_offending_expression state ~may_call ~bound:(list_bound_locals pattern @ bound) body)
+  | Quantified { binder = Binder_type _; _ } when may_call -> None
   | Name _ | Member _ | Bracket _ -> find_in_resolved ()
   | Call (_, arguments) -> (
       match Tables.find_call state.tables value.id with
@@ -55,6 +78,38 @@ let rec find_offending_expression (state : State.state) ~may_call (value : Synta
   | List items -> find_first items
   | Map entries -> find_first (List.concat_map (fun (key, item) -> [ key; item ]) entries)
   | _ -> Some value
+
+let mentions_type_parameter state type_ =
+  Types.exists ~resolve:(State.finalize_type state)
+    (function Types.Parameter _ | Projection _ -> true | _ -> false)
+    type_
+
+let rec find_use_of_a_type_parameter (state : State.state) (value : Syntax.expression) :
+    Syntax.expression option =
+  let uses_one =
+    (match read_final_type state value with
+      | Some type_ -> mentions_type_parameter state type_
+      | None -> false)
+    ||
+    let instantiates_with_one (instantiation : Types.instantiation) =
+      List.exists
+        (function
+          | Types.Type type_ -> mentions_type_parameter state type_
+          | Value (Value_parameter _) -> true
+          | Value (Known _ | Value_variable _) -> false)
+        instantiation.type_arguments
+    in
+    match Tables.find_call state.tables value.id with
+    | Some { callee = Function { instantiation; _ }; _ } -> instantiates_with_one instantiation
+    | Some { callee = Trait_method { instantiation; self_type; _ }; _ } ->
+        instantiates_with_one instantiation || mentions_type_parameter state self_type
+    | Some _ | None -> false
+  in
+  let found = ref None in
+  Syntax_walk.visit_children
+    (fun part -> if Option.is_none !found then found := find_use_of_a_type_parameter state part)
+    value;
+  match !found with Some _ as part -> part | None -> if uses_one then Some value else None
 
 let rec check_arithmetic (state : State.state) (value : Syntax.expression) =
   let evaluate part =
@@ -77,21 +132,37 @@ let rec check_arithmetic (state : State.state) (value : Syntax.expression) =
   Syntax_walk.visit_expression_parts ~on_expression:(check_arithmetic state) ~on_statement:ignore
     value
 
-let check state ~default (value : Syntax.expression) =
+let check state (site : site) (value : Syntax.expression) =
   State.check_when_final state @@ fun () ->
-  (match find_offending_expression state ~may_call:(not default) value with
-  | Some part ->
-      if default then
-        State.report state Default_not_constant (State.read_span state part.id)
-          "A default must be a constant expression: literals, arithmetic, constants, and records, \
-           variants, and collections built from them. It cannot call a function or name a \
-           parameter."
-      else
-        State.report state Not_constant (State.read_span state part.id)
-          "The value of a constant is made of literals, other constants, operators, calls, and the \
-           records, variants, collections, and strings built from them. Move this into a function, \
-           and call the function here."
-  | None -> ());
+  (match find_offending_expression state ~may_call:(site <> Default) ~bound:[] value with
+  | Some part -> (
+      let span = State.read_span state part.id in
+      match site with
+      | Default ->
+          State.report state Default_not_constant span
+            "A default must be a constant expression: literals, arithmetic, constants, and \
+             records, variants, and collections built from them. It cannot call a function or name \
+             a parameter."
+      | Value ->
+          State.report state Not_constant span
+            "The value of a constant is made of literals, other constants, operators, calls, \
+             quantifiers over ranges and collections, and the records, variants, collections, and \
+             strings built from them. Move this into a function, and call the function here."
+      | Evaluated_condition ->
+          State.report state Condition_not_constant span
+            "An assertion `by evaluation` is evaluated when the code is checked, before any \
+             variable has a value. Its condition is made of literals, constants, operators, calls, \
+             quantifiers over ranges and collections, and the records, variants, collections, and \
+             strings built from them. Move this into a function, and call the function here.")
+  | None ->
+      if site = Evaluated_condition then
+        Option.iter
+          (fun (part : Syntax.expression) ->
+            State.report state Condition_not_constant (State.read_span state part.id)
+              "An assertion `by evaluation` is evaluated once, when the code is checked, so its \
+               condition cannot mention a type parameter or a value parameter of the code around \
+               it.")
+          (find_use_of_a_type_parameter state value));
   check_arithmetic state value
 
 let rec find_part_that_is_not_data (state : State.state) ~visited (type_ : Types.ty) =

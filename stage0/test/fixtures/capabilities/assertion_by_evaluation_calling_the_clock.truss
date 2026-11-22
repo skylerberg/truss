@@ -1,0 +1,6 @@
+fn f() -> UInt64 uses Clock {
+  proof {
+    assert Clock.now() == Clock.now() by evaluation
+  }
+  1
+}

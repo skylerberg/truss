@@ -173,6 +173,7 @@ module Code = struct
     | Not_constant
     | Constant_overflow
     | Constant_not_data
+    | Condition_not_constant
     | Main_signature
     | No_real_implementation
     | Duplicate_field
@@ -455,6 +456,7 @@ module Code = struct
     | Not_constant -> "not_constant"
     | Constant_overflow -> "constant_overflow"
     | Constant_not_data -> "constant_not_data"
+    | Condition_not_constant -> "condition_not_constant"
     | Main_signature -> "main_signature"
     | No_real_implementation -> "no_real_implementation"
     | Duplicate_field -> "duplicate_field"

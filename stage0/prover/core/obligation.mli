@@ -1,6 +1,7 @@
-type evaluation =
+type evaluation = Logic.evaluation =
   | Template_check of { function_ : Path.t; literals : string list }
   | Constant_value of Path.t
+  | Assertion of { definition : Path.t; condition : int }
 
 type value =
   | Boolean of bool

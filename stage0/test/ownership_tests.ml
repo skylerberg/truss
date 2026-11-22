@@ -686,6 +686,10 @@ let () =
   Harness.test "a constant's value cannot pass a constant to an `own` parameter" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.constant_passing_a_constant_to_an_own_parameter
         "ownership.not_owned" ~fixed:Fixtures.Ownership.constant_passing_a_copy_of_a_constant_fixed);
+  Harness.test "the condition of an assertion by evaluation cannot move a constant" (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.assertion_by_evaluation_moving_a_constant
+        "ownership.not_owned"
+        ~fixed:Fixtures.Ownership.assertion_by_evaluation_moving_a_constant_fixed);
   Harness.test "a constant's value may pass a copy of a constant, hold one, and name one" (fun () ->
       expect_fine Fixtures.Ownership.constant_passing_a_copy_of_a_constant);
   List.iter

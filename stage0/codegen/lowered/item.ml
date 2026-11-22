@@ -8,6 +8,7 @@ type t =
   | Any_copy of Ground.ty
   | Encode of Ground.ty
   | Evaluator of Path.t
+  | Assertion of { definition : Path.t; condition : int }
   | Call_evaluation of { function_ : Path.t; arguments : argument list }
   | Generated of generated
   | Table of table
@@ -67,6 +68,8 @@ let rec to_string = function
   | Any_drop ty -> "any drop " ^ Ground.to_string ty
   | Any_copy ty -> "any copy " ^ Ground.to_string ty
   | Evaluator path -> "evaluator " ^ Path.show path
+  | Assertion { definition; condition } ->
+      Printf.sprintf "assertion %d of %s" condition (Path.show definition)
   | Call_evaluation { function_; arguments } ->
       "evaluation " ^ Path.show function_ ^ "("
       ^ String.concat ", " (List.map show_argument arguments)

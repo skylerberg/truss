@@ -1,0 +1,3 @@
+let limits: List[UInt64] = [1, 2, 3]
+let all_are_small: Bool = forall limit in limits => limit < 10
+let holds_two: Bool = exists index in 0..3 => limits[index] == 2

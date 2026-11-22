@@ -4349,8 +4349,68 @@ test "proofs" {
 - `assert condition by bit_vector` proves a fact about bitwise operations,
   treating the integers it names as bits. It names only integers and
   booleans, and states as a hypothesis any fact it needs from around it.
+- `assert condition by evaluation` proves a fact by running it, as the
+  next section shows.
 - A theorem is called only in specifications and proofs. It has no compiled
   body.
+
+### Proving a fact by running it
+
+Some facts are about data that code computes, and no contract states them.
+`assert condition by evaluation` asks the compiler to run the condition when
+it checks the code. If the result is `true`, the proof can use the fact:
+
+```truss
+fn build_squares() -> List[UInt64] {
+  var squares: List[UInt64] = []
+  for index in 0..16
+    invariant squares.length() == index
+  {
+    mut squares.push(index * index)
+  }
+  squares
+}
+
+let squares: List[UInt64] = build_squares()
+
+fn square_of_five() -> UInt64
+  ensures result == 25
+{
+  proof {
+    assert squares.length() == 16 by evaluation
+    assert forall index in 0..16 => squares[index] == index * index by evaluation
+  }
+  squares[5]
+}
+
+test "a fact proven by evaluation" {
+  assert square_of_five() == 25
+}
+```
+
+- **`build_squares` has no `ensures`,** so without the two assertions the
+  prover knows nothing about the table, not even that `squares[5]` is in
+  bounds. The first assertion gives its length, and the second gives every
+  element.
+- **The condition is what the value of a constant can be:** literals,
+  constants, operators, calls, and quantifiers over ranges and collections.
+  It names no variable and no parameter, because it is run before the
+  program is. A fact about a variable is a `requires` or an ordinary
+  `assert`.
+- **The condition is code.** It calls only functions that use no
+  capability, as a constant's value does, and each call must meet its
+  callee's `requires`.
+- **It costs nothing when the program runs.** The compiler runs it once, and
+  again only when the code it reaches changes.
+- **A condition that is false is an error:**
+
+  ```text
+  main.truss:17:12: error[prover.assertion]: `squares.length() == 17` may not hold. This fails every time the code reaches it.
+    |     assert squares.length() == 17 by evaluation
+    |            ^^^^^^^^^^^^^^^^^^^^^^
+
+  1 error
+  ```
 
 ### When the prover needs help
 
@@ -4865,7 +4925,7 @@ elsewhere:
 | `visited` | The values a loop has visited, in a loop's clauses |
 | `final(result)` | The lent part as the caller left it, in a lending method's `ensures` |
 | `log(n)`, `power(base, exponent)` | Functions on exact integers, in a specification |
-| `by bit_vector` | After an `assert`'s condition |
+| `by bit_vector`, `by evaluation` | After an `assert`'s condition |
 | `generic` | In a `uses` list, before the name of a capability parameter |
 
 ## Appendix B: Operators

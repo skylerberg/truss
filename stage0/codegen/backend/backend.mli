@@ -72,6 +72,9 @@ val evaluate_predicate :
 
 val evaluate_constant : t -> Path.t -> (Lowered.static_value ran, string) result
 
+val evaluate_assertion :
+  t -> definition:Path.t -> condition:int -> (Lowered.static_value ran, string) result
+
 module For_testing : sig
   val is_folded : t -> Path.t -> bool
 

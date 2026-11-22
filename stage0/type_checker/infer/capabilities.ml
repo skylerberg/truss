@@ -377,7 +377,15 @@ and check_statement checking scope (statement : Core.statement) =
       check_loop_clauses checking clauses;
       check_block checking scope body
   | Proof body -> check_block checking (make_no_capabilities_scope "a proof") body
-  | Let _ | Evaluate _ | Assign _ | Compound_assign _ | Assert _ | Yield _ ->
+  | Assert { condition; by = Some Evaluation } ->
+      check_expression checking
+        (make_restricted_scope ~is_within_code:false ~allowed:Types.no_capabilities
+           ~reason:"It is evaluated when the code is checked, and a check has no capabilities."
+           "the condition of an assertion `by evaluation`")
+        condition.value
+  | Let _ | Evaluate _ | Assign _ | Compound_assign _
+  | Assert { by = Some Bit_vector | None; _ }
+  | Yield _ ->
       check_children checking scope (`Statement statement)
 
 and check_loop_clauses checking (clauses : Core.loop_clause Core.conditional list) =

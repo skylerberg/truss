@@ -46,6 +46,9 @@ internal type Metric = Time | Allocations | AllocatedBytes
 internal type Quantifier = Forall | Exists
   derives Equal
 
+internal type ProofMethod = BitVector | Evaluation
+  derives Equal
+
 internal type LoopMode = Sequential | Parallel | Concurrent
   derives Equal
 
@@ -222,7 +225,7 @@ internal type StatementKind =
   | Parallel(body: Block)
   | Concurrent(body: Block)
   | Proof(body: Block)
-  | Assert(value: Expression, by_bit_vector: Bool)
+  | Assert(value: Expression, by: Option[ProofMethod])
   | StatementError
   derives Equal
 

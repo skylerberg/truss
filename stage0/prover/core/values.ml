@@ -421,7 +421,7 @@ let evaluate_constant (context : State.context) frame path =
   with
   | Some (constant_source, _, _), Some { form = code; _ } ->
       let symbol : Logic.symbol =
-        if Facts.is_evaluated_constant context path code then Evaluated_constant path
+        if Facts.is_evaluated_constant context path code then Evaluated (Constant_value path)
         else Constant path
       in
       let empty =

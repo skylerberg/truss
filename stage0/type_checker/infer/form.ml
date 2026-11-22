@@ -1713,9 +1713,9 @@ and build_statement_kind form env (written : Syntax.statement) : Core.statement_
       let branches = List.map (build_statement form env) body.statements in
       Concurrent branches
   | Proof body -> Proof (build_block form env body)
-  | Assert { value; by_bit_vector } ->
+  | Assert { value; by } ->
       let value = build_expression form env value in
-      Assert { condition = { value; executable = is_executable form value }; by_bit_vector }
+      Assert { condition = { value; executable = is_executable form value }; by }
   | Statement_error -> raise_bug "an erroneous statement is built"
 
 and build_block form env (written : Syntax.block) : Core.block =

@@ -959,10 +959,10 @@ let make_recording_usage_lookups database note : Usage.Lookups.t =
 
 let make_recording_ownership_lookups database note : Ownership.Lookups.t =
   {
-    find_graph =
+    find_code =
       (fun key ->
         match read_body_mir database note key with
-        | Body code | Initializer code -> Some code.graph
+        | Body code | Initializer code -> Some code
         | No_code -> None);
     list_places_without_keyword =
       (fun key -> (read_checked database note key).places_without_keyword);
@@ -1102,6 +1102,7 @@ let make_evaluation_root : Prover.Obligation.evaluation -> Lowered.Item.t = func
   | Template_check { function_; literals } ->
       Call_evaluation { function_; arguments = [ Literals literals ] }
   | Constant_value path -> Constant path
+  | Assertion { definition; condition } -> Assertion { definition; condition }
 
 let find_entry_point (names : Resolve.Names.lookups) package =
   List.find_map

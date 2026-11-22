@@ -114,7 +114,7 @@ says, and is an ordinary name elsewhere:
 | `identical(a, b)` | Whether two values of one type are the same value, inside a specification |
 | `visited` | In a `for` loop's clauses, the `Sequence` of the values of the iterations before |
 | `final(result)` | In a lending method's `ensures`, the lent part as the caller left it |
-| `by`, `bit_vector` | After an `assert`'s condition: `assert condition by bit_vector` |
+| `by`, `bit_vector`, `evaluation` | After an `assert`'s condition: `assert condition by bit_vector`, `assert condition by evaluation` |
 | `generic` | In a `uses` list, before the name of a capability parameter |
 | `tuple` | Before `type`: a tuple type (see [Tuple types](#tuple-types)) |
 
@@ -737,8 +737,9 @@ public let word: Regex = Regex"[a-z]+"
   `from_entries` of a collection literal.
 - The value of a constant is a constant expression whose parts may also be
   calls: a call of a function or a method, an operator or an index of any
-  type, a tagged template, and an interpolated string. Other code, such as
-  an `if`, a `match`, or a lambda, goes in a function that the value calls.
+  type, a tagged template, an interpolated string, and a quantifier over a
+  range or a collection. Other code, such as an `if`, a `match`, or a
+  lambda, goes in a function that the value calls.
 - The value uses no capability, so each call in it terminates and cannot
   panic. Each call meets its callee's `requires`.
 - The value is evaluated when the code is checked, and the program holds
@@ -1653,7 +1654,7 @@ statement = "let" binding_pattern "=" expression [ "else" block ]
           | "concurrent" block
           | "concurrent" "for" binding_pattern "in" expression { loop_clause } block
           | "proof" block
-          | "assert" expression [ "by" "bit_vector" ] ;
+          | "assert" expression [ "by" ( "bit_vector" | "evaluation" ) ] ;
 
 binding_pattern = pattern [ ":" type ] | tuple_pattern ;
 assignment_operator = "=" | "+=" | "-=" | "*=" | "/=" | "%="
@@ -1698,6 +1699,15 @@ fn summarize(scores: List[Int64]) -> Result[Summary, SummaryError] {
   holds where it is written. It names only integers and booleans. A fact it
   needs from the proof around it is a hypothesis it states:
   `assert used < 64 ==> (word >> used) == 0 by bit_vector`.
+- `assert condition by evaluation` is proven by evaluating its condition
+  when the code is checked, and then holds where it is written. The
+  condition is an expression that the value of a constant can be (see
+  [Constants](#constants)), so it names no variable and no parameter, and it
+  mentions no type parameter of the code around it. It is code, in a theorem
+  too: it uses no capability, and each call in it meets its callee's
+  `requires`. It is not evaluated when the program or a test runs. An
+  evaluation that gives `false`, that reaches a `todo`, or that uses more
+  than 10 seconds of CPU time is an error.
 
 ### Patterns
 

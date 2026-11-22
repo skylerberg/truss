@@ -427,9 +427,7 @@ let explain_unknown = function
         reason
 
 let find_declared_evaluation : Logic.declaration -> Obligation.evaluation option = function
-  | Constant (Template_check { function_; literals }, _) ->
-      Some (Template_check { function_; literals })
-  | Constant (Evaluated_constant path, _) -> Some (Constant_value path)
+  | Constant (Evaluated evaluation, _) -> Some evaluation
   | Constant _ | Function _ | Datatype _ | Definition _ -> None
 
 let list_evaluations = function
@@ -577,9 +575,9 @@ let pose_proof (lookups : Lookups.t) runs key proof =
                             report;
                       }
                 | Constant_value _, (Some (Evaluated _ | Unfinished _) | None) -> None
-                | Template_check _, _ ->
+                | (Template_check _ | Assertion _), _ ->
                     Compiler_bug.raise_bug ~stage:"Prover"
-                      "a definition's own evaluation is a template check");
+                      "a definition's own evaluation is not of a constant");
         }
 
 let pose_proofs ~runs lookups proofs =
@@ -599,7 +597,9 @@ let explain_failed_runs failed_runs =
                (Facts.show_callee function_) (String.concat "${...}" literals) report
          | Constant_value path ->
              Printf.sprintf " The evaluation of `%s` stopped, so its value is not known: %s"
-               (Path.show path) report)
+               (Path.show path) report
+         | Assertion _ ->
+             Printf.sprintf " Its evaluation stopped, so its result is not known: %s" report)
        failed_runs)
 
 let make_state (lookups : Lookups.t) (posed : posed) answer ~is_refuted =

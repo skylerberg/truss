@@ -97,7 +97,9 @@ let list_uses ~is_moving (statement : Mir.Graph.statement) =
         (fun (provided : Mir.provided) ->
           list_operand_uses ~is_moving ~by_value:false provided.value)
         provided
-  | Basic (Live _ | Dead _ | Loan_start _ | Loan_end _ | Ghost_assert _ | Path_note _ | Proof _)
+  | Basic
+      ( Live _ | Dead _ | Loan_start _ | Loan_end _ | Ghost_assert _ | Path_note _ | Proof _
+      | Evaluated_assert _ )
   | Provide_end ->
       []
 
@@ -148,7 +150,7 @@ let list_inits (statement : Mir.Graph.statement) : Mir.place list =
   | Basic (Template { destination; _ }) -> [ destination ]
   | Basic
       ( Live _ | Dead _ | Assert _ | Echo _ | Loan_start _ | Loan_end _ | Ghost_assert _
-      | Path_note _ | Proof _ )
+      | Path_note _ | Proof _ | Evaluated_assert _ )
   | Provide_start _ | Provide_end ->
       []
 

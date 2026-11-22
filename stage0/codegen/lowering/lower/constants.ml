@@ -136,6 +136,15 @@ let fold_literal_value (state : Lowering.state) ty text =
       Some (Lowered.Static_record [ (field, Static_view { element; elements }) ])
   | _ -> None
 
+let enter_evaluated (context : Definitions.context) ~item ~(source : Resolve.Names.key) =
+  Lowering.enter_item context ~item
+    {
+      (Definitions.make_unwritten_code ~definition:source.path ~substitution:Types.no_substitution
+         ~result:(Returns Types.unit))
+      with
+      written = Some (Definitions.read_written context source);
+    }
+
 let make_constant_state (context : Definitions.context) path =
   let ({ source; form = mir } : Mir.Graph.t Mir.sourced) =
     match Mir.read_initializer_graph context.lookups.mir path with
@@ -146,16 +155,20 @@ let make_constant_state (context : Definitions.context) path =
     Monomorphic.ground context.monomorphic Types.no_substitution
       (Interface.Definition.read_constant_type context.lookups.interface path)
   in
-  let code =
-    {
-      (Definitions.make_unwritten_code ~definition:source.path ~substitution:Types.no_substitution
-         ~result:(Returns Types.unit))
-      with
-      written = Some (Definitions.read_written context source);
-    }
-  in
-  let state = Lowering.enter_item context ~item:(Evaluator path) code in
-  (state, mir, ty)
+  (enter_evaluated context ~item:(Evaluator path) ~source, mir, ty)
+
+let make_assertion_state (context : Definitions.context) ~definition ~condition =
+  match Mir.read_code context.lookups.mir definition with
+  | Some { source; form = code } -> (
+      match List.assoc_opt condition (Mir.list_evaluated_asserts code) with
+      | Some asserted ->
+          ( enter_evaluated context ~item:(Assertion { definition; condition }) ~source,
+            Mir.expand asserted,
+            Ground.make_builtin Bool )
+      | None ->
+          Definitions.raise_bug "%s has no assertion by evaluation at %d" (Path.show definition)
+            condition)
+  | None -> Definitions.raise_bug "%s has no code" (Path.show definition)
 
 let rec fold_initializer context ~visiting path =
   let state, mir, ty = make_constant_state context path in
@@ -305,8 +318,9 @@ and fold_body ~visiting ~depth ~steps state (mir : Mir.Graph.t)
     | Basic (Call { destination; call = called }) -> fold_call destination called
     | Basic (Assert condition) -> (
         match fold_operand condition with Some (Static_scalar (Bool true)) -> Some () | _ -> None)
-    | Basic (Live _ | Dead _ | Loan_start _ | Loan_end _ | Path_note _ | Ghost_assert _ | Proof _)
-      ->
+    | Basic
+        ( Live _ | Dead _ | Loan_start _ | Loan_end _ | Path_note _ | Ghost_assert _ | Proof _
+        | Evaluated_assert _ ) ->
         Some ()
     | Basic (Assign _ | Lend _ | Template _ | Echo _) | Provide_start _ | Provide_end -> None
   in
@@ -339,6 +353,12 @@ let compile_constant context path =
   | ty, Some value -> Folded { data_item = Constant path; ty; value }
   | ty, None -> Run ty
 
+let compile_assertion context ~definition ~condition =
+  let state, mir, ty = make_assertion_state context ~definition ~condition in
+  match fold_body ~visiting:[] ~depth:call_depth ~steps:(ref step_limit) state mir [] with
+  | Some value -> Folded { data_item = Assertion { definition; condition }; ty; value }
+  | None -> Run ty
+
 let write_fully = Well_known.make_path Write_fully
 
 let write_output (state : Lowering.state) output =
@@ -367,8 +387,8 @@ let write_output (state : Lowering.state) output =
     ~destination:(Lowering.allocate_temporary state result)
     ~site:None ()
 
-let build_evaluator context path : Emit_c.fragment =
-  let state, mir, ty = make_constant_state context path in
+let build_evaluator_of (context : Definitions.context) ((state : Lowering.state), mir, ty) :
+    Emit_c.fragment =
   Emit_c.Ir_builder.start state.builder (Emit_c.Ir_builder.allocate_block state.builder);
   Lowering.run_in_scope state (fun () ->
       let place = Lowering.allocate_temporary state ty in
@@ -379,3 +399,8 @@ let build_evaluator context path : Emit_c.fragment =
         ty place;
       write_output state output);
   Lowering.finish_item state ~rest:[] ()
+
+let build_evaluator context path = build_evaluator_of context (make_constant_state context path)
+
+let build_assertion_evaluator context ~definition ~condition =
+  build_evaluator_of context (make_assertion_state context ~definition ~condition)

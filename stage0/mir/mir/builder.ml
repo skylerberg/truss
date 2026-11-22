@@ -1283,11 +1283,13 @@ and lower_statement builder (node : Core.statement) =
           Emitter.emit builder
             (Basic (Proof (of_proof ~entry_locals:(Emitter.entry_locals builder) ~origin proof)))
             origin
-      | Assert { condition = { value; executable = true }; by_bit_vector = false } -> (
+      | Assert { condition = { value; _ }; by = Some Evaluation } ->
+          Emitter.emit builder (Basic (Evaluated_assert (of_expression value))) value.origin
+      | Assert { condition = { value; executable = true }; by = None } -> (
           match lower_expression builder value with
           | Some condition -> Emitter.emit builder (Basic (Assert condition)) value.origin
           | None -> ())
-      | Assert { condition = { value; executable = true }; by_bit_vector = true } -> (
+      | Assert { condition = { value; executable = true }; by = Some Bit_vector } -> (
           let code = Emitter.build_block builder (fun () -> lower_expression builder value) in
           match code.value with
           | Some condition ->
@@ -1299,10 +1301,14 @@ and lower_statement builder (node : Core.statement) =
               in
               Emitter.emit builder (Assert_by_bit_vector { condition; names; code }) value.origin
           | None -> ())
-      | Assert { condition = { value; executable = false }; by_bit_vector } ->
+      | Assert { condition = { value; executable = false }; by = (Some Bit_vector | None) as by } ->
           Emitter.emit builder
             (Basic
-               (Ghost_assert { condition = lower_attached_formula builder value; by_bit_vector }))
+               (Ghost_assert
+                  {
+                    condition = lower_attached_formula builder value;
+                    by_bit_vector = Option.is_some by;
+                  }))
             origin
       | Yield { mode; part = written } -> (
           match lower_yielded builder mode written with
@@ -1641,7 +1647,7 @@ and lower_loop_clauses builder (clauses : Core.loop_clause Core.conditional list
           Cost { origin; amortized; resource; bound = lower_bound written; holds_when })
     clauses
 
-let of_expression (written : Core.expression) =
+and of_expression (written : Core.expression) =
   let builder = Emitter.create ~entry_locals:[] () in
   Emitter.run_in_scope builder written.origin (fun () ->
       Emitter.run_in_statement builder written.origin (fun () ->

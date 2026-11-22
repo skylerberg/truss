@@ -8,6 +8,7 @@ type t =
   | Any_copy of Ground.ty
   | Encode of Ground.ty
   | Evaluator of Path.t
+  | Assertion of { definition : Path.t; condition : int }
   | Call_evaluation of { function_ : Path.t; arguments : argument list }
   | Generated of generated
   | Table of table

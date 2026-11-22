@@ -1,0 +1,10 @@
+fn unfinished() -> Bool {
+  todo
+}
+
+fn f() -> UInt64 {
+  proof {
+    assert unfinished() by evaluation
+  }
+  1
+}

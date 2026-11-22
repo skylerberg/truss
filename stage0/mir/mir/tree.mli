@@ -206,6 +206,7 @@ and basic =
   | Ghost_assert of { condition : formula; by_bit_vector : bool }
   | Path_note of path_note
   | Proof of t
+  | Evaluated_assert of t
 
 and statement_kind =
   | Basic of basic

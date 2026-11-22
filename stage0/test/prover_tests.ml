@@ -297,7 +297,8 @@ let list_evaluated_constants text =
   List.map
     (function
       | Prover.Obligation.Constant_value path -> Path.show path
-      | Template_check { function_; _ } -> Path.show function_)
+      | Template_check { function_; _ } -> Path.show function_
+      | Assertion { definition; _ } -> Path.show definition)
     (Database.list_evaluations (Support.prove database (Support.parse_file "app.main")))
 
 let () =
@@ -353,6 +354,73 @@ let () =
         "prover.ensures"
         ~says:
           "The evaluation of `app.main.unfinished` stopped, so its value is not known: todo reached");
+  Harness.test "an assertion by evaluation that holds proves the fact that it asserts" (fun () ->
+      expect_proven Fixtures.Prover.requires_proven_by_evaluation);
+  Harness.test "an assertion by evaluation trusts compiled code" (fun () ->
+      let database =
+        Support.make_database
+          (Support.setup [ ("app.main", Fixtures.Prover.requires_proven_by_evaluation) ])
+      in
+      match
+        List.filter
+          (fun (state : Source.span Prover.state) ->
+            Diagnostic.Code.name (Prover state.site.code) = "prover.assertion")
+          (Support.list_proof_states database (Support.parse_file "app.main"))
+      with
+      | [ asserted ] ->
+          if asserted.failure <> None || not asserted.trusts_compiled_code then
+            Harness.fail "the assertion is not proven by its evaluation"
+      | asserted -> Harness.fail "%d assertion states" (List.length asserted));
+  Harness.test "an assertion by evaluation that is false fails every time" (fun () ->
+      Support.expect_one_diagnostic ~check Fixtures.Prover.assertion_by_evaluation_that_is_false
+        "prover.assertion"
+        ~says:"`is_accepted(98)` may not hold. This fails every time the code reaches it."
+        ~at:("is_accepted(98)", 1));
+  Harness.test "assertions by evaluation over a table give its length and its elements" (fun () ->
+      expect_proven Fixtures.Prover.table_known_by_evaluation);
+  Harness.test "a call in the condition of an assertion by evaluation meets its requires" (fun () ->
+      expect_not_proven Fixtures.Prover.assertion_by_evaluation_outside_a_requires "prover.requires");
+  Harness.test "a function cannot assert its own result by evaluation" (fun () ->
+      match
+        List.sort compare
+          (list_codes Fixtures.Prover.function_asserting_its_own_result_by_evaluation)
+      with
+      | [ "prover.ensures"; "prover.termination" ] -> ()
+      | codes -> Harness.fail "codes [%s]" (String.concat "; " codes));
+  Harness.test "a constant cannot be asserted by evaluation in the function that computes it"
+    (fun () ->
+      match
+        List.sort compare
+          (list_codes Fixtures.Prover.constant_asserted_by_the_function_that_computes_it)
+      with
+      | [ "prover.constant_cycle"; "prover.ensures" ] -> ()
+      | codes -> Harness.fail "codes [%s]" (String.concat "; " codes));
+  Harness.test "an assertion by evaluation that reaches a todo says where" (fun () ->
+      Support.expect_one_diagnostic ~check Fixtures.Prover.assertion_by_evaluation_reaching_a_todo
+        "prover.assertion" ~says:"Its evaluation stopped, so its result is not known: todo reached");
+  Harness.test "an assertion by evaluation is proven in a theorem, a provided method, and a lambda"
+    (fun () ->
+      expect_proven Fixtures.Prover.assertions_by_evaluation_in_a_theorem_a_trait_and_a_lambda);
+  Harness.test
+    "an assertion by evaluation is proven in a law proof, a quantifier's body, and generic code"
+    (fun () ->
+      expect_proven
+        Fixtures.Prover.assertions_by_evaluation_in_a_law_proof_a_quantifier_and_generic_code);
+  Harness.test "a constant for specifications only is not evaluated" (fun () ->
+      match
+        list_evaluated_constants
+          "fn twice(value: Integer) -> Integer {\n\
+          \  value * 2\n\
+           }\n\n\
+           let big: Integer = twice(1_000_000_000_000_000_000_000)\n\n\
+           fn f(value: Int64) -> Int64\n\
+          \  requires value < big\n\
+           {\n\
+          \  value\n\
+           }\n"
+      with
+      | [] -> ()
+      | evaluated -> Harness.fail "evaluates [%s]" (String.concat "; " evaluated));
   Harness.test "a constant computed from an unfinished constant is unfinished, and no error"
     (fun () -> expect_proven Fixtures.Prover.constant_computed_from_an_unfinished_constant);
   Harness.test "a constant computed from a cyclic constant cannot be computed" (fun () ->

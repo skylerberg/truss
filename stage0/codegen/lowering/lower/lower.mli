@@ -22,6 +22,8 @@ type constant = Folded of Lowered.data | Run of Ground.ty
 
 val lower_constant : context -> Path.t -> constant
 val lower_evaluator : context -> Path.t -> Emit_c.fragment
+val lower_assertion : context -> definition:Path.t -> condition:int -> constant
+val lower_assertion_evaluator : context -> definition:Path.t -> condition:int -> Emit_c.fragment
 val lower_table : context -> Lowered.Item.table -> Lowered.table
 
 val lower_call_evaluation :

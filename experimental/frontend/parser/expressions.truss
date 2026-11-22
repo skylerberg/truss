@@ -1213,13 +1213,19 @@ fn parse_statement(cursor: mut TokenCursor) -> Result[syntax.Statement, Failure]
       Assert => {
         advance(mut cursor)
         let value = parse_expression(mut cursor)?
-        let by_bit_vector = cursor.contextual(cursor.peek_kind()) == Some(ContextualKeyword.By)
-          && cursor.contextual(cursor.peek_ahead(1)) == Some(ContextualKeyword.BitVector)
-        if by_bit_vector {
+        var by: Option[syntax.ProofMethod] = None
+        if cursor.contextual(cursor.peek_kind()) == Some(ContextualKeyword.By) {
+          by = match cursor.contextual(cursor.peek_ahead(1)) {
+            Some(BitVector) => Some(syntax.ProofMethod.BitVector)
+            Some(Evaluation) => Some(syntax.ProofMethod.Evaluation)
+            _ => None
+          }
+        }
+        if by is Some(_) {
           advance(mut cursor)
           advance(mut cursor)
         }
-        return Ok(make_statement_node(mut cursor, start, kind: syntax.StatementKind.Assert(own value, by_bit_vector)))
+        return Ok(make_statement_node(mut cursor, start, kind: syntax.StatementKind.Assert(own value, by)))
       }
       _ => {}
     }

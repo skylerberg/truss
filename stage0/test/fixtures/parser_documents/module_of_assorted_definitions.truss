@@ -8,4 +8,5 @@ theorem shifted_out(word: UInt64, used: Int64)
   requires used >= 0
 {
   assert used < 64 ==> (word >> used) <= word by bit_vector
+  assert f() == 1 by evaluation
 }

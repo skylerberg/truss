@@ -120,6 +120,42 @@ let () =
             diagnostic.message
       | actual ->
           Codegen_support.fail "%d diagnostics: %s" (List.length actual) (show_messages actual));
+  Codegen_support.test
+    "an assertion by evaluation whose evaluation uses too much CPU time is not proven" (fun () ->
+      let database, _ =
+        Codegen_support.load
+          "fn spin() -> UInt64 {\n\
+          \  var state: UInt64 = 1\n\
+          \  for round in 0..30_000_000\n\
+          \    invariant state < 1_000_003\n\
+          \  {\n\
+          \    state = (state * 3 + round) % 1_000_003\n\
+          \  }\n\
+          \  state\n\
+           }\n\n\
+           theorem spun() {\n\
+          \  assert spin() == 915_721 by evaluation\n\
+           }\n"
+      in
+      (match
+         list_diagnostics
+           (Codegen_support.make_backend ~evaluation_cpu_time_limit_ms:5 database)
+           database
+       with
+      | [ diagnostic ] ->
+          Codegen_support.expect_string ~expected:"prover.assertion"
+            (Diagnostic.Code.name diagnostic.code);
+          if
+            not
+              (String.includes
+                 ~affix:
+                   "Its evaluation stopped, so its result is not known: it used more than 5 ms of \
+                    CPU time"
+                 diagnostic.message)
+          then Codegen_support.fail "%s" diagnostic.message
+      | actual ->
+          Codegen_support.fail "%d diagnostics: %s" (List.length actual) (show_messages actual));
+      expect_proven (list_diagnostics (Codegen_support.make_backend database) database));
   Codegen_support.test "a constant whose evaluation reaches a todo is no error of its check"
     (fun () ->
       expect_proven

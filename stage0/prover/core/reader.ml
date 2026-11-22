@@ -370,7 +370,7 @@ let compute_changes ?(also = []) run (frame : State.frame) (blocks : Mir.block l
             Option.iter (fun (_, local) -> note { root = Local local; projections = [] }) returned
         | Basic
             ( Live _ | Dead _ | Assert _ | Echo _ | Loan_start _ | Loan_end _ | Ghost_assert _
-            | Path_note _ | Proof _ )
+            | Path_note _ | Proof _ | Evaluated_assert _ )
         | Assert_by_bit_vector _ | While _ | Fork _ | Resume _
         | For { iteration = Range _; _ }
         | Yield { mode = Read | Own; _ }
@@ -1466,6 +1466,26 @@ and read_basic context frame run (statement : Mir.statement) (basic : Mir.basic)
       Some frame
   | Proof code ->
       Some (Facts.restrict frame (Logic.not_ (Values.run_ghost_code context frame code)))
+  | Evaluated_assert code ->
+      let symbol =
+        Logic.Symbol.Evaluated
+          (Assertion
+             {
+               definition = frame.source.key.path;
+               condition = Core_walk.locate_origin statement.origin;
+             })
+      in
+      Facts.declare context (Logic.Constant (symbol, Logic.Bool));
+      let _, holds =
+        Validity.run_as_specification context (fun () ->
+            Amounts.run_code context frame code ~type_:Types.bool)
+      in
+      Facts.assume context frame (Logic.equal (Logic.Symbol symbol) holds);
+      Facts.oblige context frame Assertion
+        (Facts.locate context frame.source statement.origin)
+        [ Text "`"; Facts.quote frame.source statement.origin; Text "` may not hold." ]
+        holds;
+      Some frame
   | Path_note note ->
       note_path context frame note;
       Some frame

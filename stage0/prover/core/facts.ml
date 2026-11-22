@@ -586,7 +586,11 @@ let is_constant_expression (code : Mir.t) =
   not !calls_function
 
 let is_evaluated_constant (context : State.context) path code =
-  (not (is_constant_expression code)) && context.lookups.list_recursion_group path = []
+  (not (is_constant_expression code))
+  && context.lookups.list_recursion_group path = []
+  && Option.is_none
+       (Types.find_specification_only_type
+          (Interface.Definition.read_constant_type context.lookups.interface path))
 
 let describe_constant_cycle ~cyclic (dependency : Mir.Call_edges.dependency) =
   let cyclic_name = Path.show cyclic in

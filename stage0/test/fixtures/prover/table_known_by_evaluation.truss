@@ -1,0 +1,21 @@
+fn build() -> List[UInt64] {
+  var squares: List[UInt64] = []
+  for index in 0..16
+    invariant squares.length() == index
+  {
+    mut squares.push(index * index)
+  }
+  squares
+}
+
+let squares: List[UInt64] = build()
+
+fn f() -> UInt64
+  ensures result == 25
+{
+  proof {
+    assert squares.length() == 16 by evaluation
+    assert forall index in 0..16 => squares[index] == index * index by evaluation
+  }
+  squares[5]
+}

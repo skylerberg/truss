@@ -130,6 +130,9 @@ let rec mangle : Lowered.Item.t -> string = function
   | Any_drop ty -> render_marker "AnyDrop" ^ mangle_ty ty
   | Any_copy ty -> render_marker "AnyCopy" ^ mangle_ty ty
   | Evaluator path -> render_marker "Evaluator" ^ mangle_path path
+  | Assertion { definition; condition } ->
+      render_marker "Assertion" ^ mangle_path definition ^ render_marker "Value"
+      ^ mangle_text (string_of_int condition)
   | Call_evaluation { function_; arguments } ->
       render_marker "Evaluate" ^ mangle_path function_
       ^ String.concat ""

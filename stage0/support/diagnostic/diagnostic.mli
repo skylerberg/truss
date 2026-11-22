@@ -173,6 +173,7 @@ module Code : sig
     | Not_constant
     | Constant_overflow
     | Constant_not_data
+    | Condition_not_constant
     | Main_signature
     | No_real_implementation
     | Duplicate_field
