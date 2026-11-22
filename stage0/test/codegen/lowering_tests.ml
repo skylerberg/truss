@@ -124,7 +124,7 @@ let () =
         |> String.split_on_char ' '
         |> List.filter (String.starts_with ~prefix:"truss_lend")
       in
-      Codegen_support.expect_string ~expected:"truss_lend, truss_lend_release"
+      Codegen_support.expect_string ~expected:"truss_lend, truss_lend_arena, truss_lend_release"
         (String.concat ", " (List.sort_uniq String.compare lend_names));
       Codegen_support.expect_int ~expected:1
         (List.length (List.filter (String.equal "truss_lend") lend_names)));

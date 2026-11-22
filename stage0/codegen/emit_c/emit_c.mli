@@ -39,4 +39,5 @@ val render_capabilities_file : fragment list -> string
 
 module For_testing : sig
   val render_c : fragment -> string
+  val lend_runtime : string
 end

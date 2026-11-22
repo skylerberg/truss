@@ -18,6 +18,7 @@ type lending = {
   slot : Lowered.place option;
   part : Ground.ty;
   record : Lowered.operand;
+  arena : Lowered.operand;
   site : Lowered.operand;
 }
 
@@ -73,6 +74,7 @@ type state = {
   mutable evidence : (Path.t * Lowered.operand) list;
   mutable tasks : task list;
   mutable moved : Lowered.place list;
+  mutable lend_arena : Lowered.operand option;
 }
 
 val make_frame : Definitions.code -> frame

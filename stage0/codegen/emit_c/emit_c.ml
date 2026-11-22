@@ -383,4 +383,6 @@ module For_testing = struct
            text.header :: List.map (fun ({ text; _ } : C_text.segment) -> text) text.body)
          fragment.functions
       @ [ fragment.definition ])
+
+  let lend_runtime = C_runtime.runtime_declarations ^ List.assoc C_runtime.Lend C_runtime.helpers
 end

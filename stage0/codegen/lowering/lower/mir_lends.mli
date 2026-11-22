@@ -1,4 +1,5 @@
 val obtain_lend_record : Lowering.state -> Mir.local -> Lowered.operand
+val obtain_lend_arena : Lowering.state -> Lowered.operand
 val end_lend : Lowering.state -> Mir.local -> unit
 val transfer_lends : Lowering.state -> Lowering.lending -> unit
 val find_forwarded_call : Lowering.state -> Mir.call -> Forwarded.t option

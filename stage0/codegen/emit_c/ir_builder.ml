@@ -382,8 +382,8 @@ let list_statement_written_or_addressed : Lowered.statement -> Lowered.local lis
       list_operands_addressed (list_target_operands target @ arguments)
       @ list_destination_written_or_addressed result
   | Drop place | Free_block { place; _ } -> list_place_written_or_addressed place
-  | Defer_free_block { lend; place; _ } ->
-      list_operand_addressed lend @ list_place_written_or_addressed place
+  | Defer_free_block { lend; arena; place; _ } ->
+      list_operands_addressed [ lend; arena ] @ list_place_written_or_addressed place
   | Echo { text; length; _ } -> list_operands_addressed [ text; length ]
   | Fail_obligation_when { test = _, left, right; message; length; reported; trace; _ } ->
       list_operands_addressed
@@ -500,7 +500,7 @@ let list_captures functions ~home ~mentioned ~written_or_addressed ~is_scalar ~i
 let is_scalar_type (emission : Emission.t) : Lowered.ty -> bool = function
   | Pointer _ | Raw _ -> true
   | Value ty -> not (C_types.is_struct emission.types ty)
-  | Environment _ | Evidence _ | Capabilities _ | Trace | Lend -> false
+  | Environment _ | Evidence _ | Capabilities _ | Trace | Lend | Lend_arena -> false
 
 let make_address_type builder local : Lowered.ty =
   Pointer { target = lookup_local_type builder local; writable = true }
@@ -554,21 +554,22 @@ let render_local_declarations builder (emission : Emission.t) ~locals ~parameter
          let ty = lookup_local_type builder local in
          if List.mem local parameters || Lowered.is_erased emission.types.env ty then None
          else
-           let initializer_ =
-             if not (Dynarray.get builder.locals local).is_zeroed then ""
+           let name : C_text.t = Name (Local local) in
+           let initializer_ : C_text.t =
+             if not (Dynarray.get builder.locals local).is_zeroed then Text ""
              else
                match ty with
-               | Value ty when C_types.is_struct emission.types ty -> " = {0}"
-               | Value _ | Pointer _ | Raw _ -> " = 0"
-               | Lend -> " = {0}"
+               | Value ty when C_types.is_struct emission.types ty -> Text " = {0}"
+               | Value _ | Pointer _ | Raw _ -> Text " = 0"
+               | Lend -> Text " = {0}"
+               | Lend_arena -> Text "; " ++ name ++ Text ".used = 0; " ++ name ++ Text ".top = 0"
                | Environment _ | Evidence _ | Capabilities _ | Trace ->
                    raise_bug "a zeroed environment, evidence slot, table, or link of the call chain"
            in
            Some
              (Text "  "
              ++ C_types.render_type emission.types ty
-             ++ Text " " ++ Name (Local local)
-             ++ Text (initializer_ ^ ";\n")))
+             ++ Text " " ++ name ++ initializer_ ++ Text ";\n"))
        locals)
 
 let render_blocks builder number (function_ : function_) ~reached ~jump_targets ~texts =

@@ -81,12 +81,13 @@ let lower_source_code context ~path ~instantiation ~assumes_condition : Emit_c.f
   in
   let lending : Lowering.lending option =
     match (code.result, List.rev lending_locals) with
-    | Lends (_, ty), site :: record :: slot ->
+    | Lends (_, ty), site :: arena :: record :: slot ->
         Some
           {
             slot = (match slot with [ slot ] -> Some (Lowered.make_local_place slot) | _ -> None);
             part = Lowering.ground state ty;
             record = Copy (Lowered.make_local_place record);
+            arena = Copy (Lowered.make_local_place arena);
             site = Copy (Lowered.make_local_place site);
           }
     | _ -> None

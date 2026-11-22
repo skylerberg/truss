@@ -628,6 +628,7 @@ and lend ?(forwards = 0) state part (call : Mir.call) ~origin =
            ])
         @ [
             Mir_lends.obtain_lend_record state part;
+            Mir_lends.obtain_lend_arena state;
             Option.value
               (Mir_places.find_reported_site state)
               ~default:(Constant (Site (Mir_places.locate_site state origin)));
@@ -800,7 +801,7 @@ and lend_part state ~(mode : Language.Mode.t) (part : Mir.yielded) =
       (Call
          {
            target = Intrinsic intrinsic;
-           arguments = lending.record :: arguments;
+           arguments = lending.record :: lending.arena :: arguments;
            result = Discarded;
          })
   in
@@ -815,7 +816,8 @@ and lend_part state ~(mode : Language.Mode.t) (part : Mir.yielded) =
           [ take_address source; take_address target; Constant (Size_of ty) ]
     | Deferred_free variant ->
         Emit_c.Ir_builder.emit state.builder
-          (Defer_free_block { lend = lending.record; place = target; variant })
+          (Defer_free_block
+             { lend = lending.record; arena = lending.arena; place = target; variant })
   in
   Mir_lends.transfer_lends state lending;
   match lending.slot with
@@ -832,12 +834,16 @@ and lend_part state ~(mode : Language.Mode.t) (part : Mir.yielded) =
                 Emit_c.Ir_builder.emit state.builder
                   (Call
                      {
-                       target = Intrinsic Allocate;
+                       target = Intrinsic Lend_allocate;
                        arguments =
-                         [ Constant (Size_of lending.part); Constant (Alignment_of lending.part) ];
+                         [
+                           lending.record;
+                           lending.arena;
+                           Constant (Size_of lending.part);
+                           Constant (Alignment_of lending.part);
+                         ];
                        result = Returned slot_pointer;
-                     });
-                defer_call Lend_defer_free [ Copy slot_pointer ]);
+                     }));
             let slot = Lowered.project slot_pointer Deref in
             List.iter (defer slot) (list_deferred (write part slot));
             Address { place = slot; writable = mode = Mut }
@@ -1071,6 +1077,7 @@ let lower_code (state : Lowering.state) path ~parameters ?lending () =
       ?lending ~lambdas:code_mir.lambdas code_mir.body
   in
   state.frame <- { state.frame with mir = Some frame };
+  Option.iter (fun (lending : Lowering.lending) -> state.lend_arena <- Some lending.arena) lending;
   List.iter2 (Mir_places.bind_local state) code_mir.body.parameters parameters;
   Mir_lends.make_owned_locals state;
   lower_body state frame

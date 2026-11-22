@@ -13,6 +13,22 @@ let obtain_lend_record (state : Lowering.state) part : Lowered.operand =
   in
   Address { place = record; writable = true }
 
+let obtain_lend_arena (state : Lowering.state) : Lowered.operand =
+  match state.lend_arena with
+  | Some arena -> arena
+  | None ->
+      let arena : Lowered.operand =
+        Address
+          {
+            place =
+              Lowered.make_local_place
+                (Emit_c.Ir_builder.allocate_local state.builder ~is_zeroed:true Lend_arena);
+            writable = true;
+          }
+      in
+      state.lend_arena <- Some arena;
+      arena
+
 let emit_lend_call (state : Lowering.state) (intrinsic : Lowered.intrinsic) arguments =
   Emit_c.Ir_builder.emit state.builder
     (Call { target = Intrinsic intrinsic; arguments; result = Discarded })
@@ -27,7 +43,8 @@ let transfer_lends (state : Lowering.state) (lending : Lowering.lending) =
   List.iter
     (fun part ->
       if List.mem part frame.ended_after_lend && not (Hashtbl.mem frame.placed_parts part) then
-        emit_lend_call state Lend_transfer [ lending.record; obtain_lend_record state part ])
+        emit_lend_call state Lend_transfer
+          [ lending.record; lending.arena; obtain_lend_record state part ])
     frame.called_parts
 
 let find_forwarded_call state (call : Mir.call) : Forwarded.t option =

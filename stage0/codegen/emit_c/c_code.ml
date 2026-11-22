@@ -125,15 +125,15 @@ let render_intrinsic (emission : Emission.t) (intrinsic : Lowered.intrinsic)
         (Text (Printf.sprintf "void %s(void);\n" symbol));
       render_runtime_call symbol []
   | Report_tests_to -> render_runtime_call "truss_runtime_report_tests_to" all
-  | (Lend_release | Lend_transfer | Lend_defer_drop | Lend_defer_write_back | Lend_defer_free) as
-    lend ->
+  | (Lend_release | Lend_transfer | Lend_allocate | Lend_defer_drop | Lend_defer_write_back) as lend
+    ->
       let name =
         match lend with
         | Lend_release -> "_release"
         | Lend_transfer -> "_transfer"
+        | Lend_allocate -> "_allocate"
         | Lend_defer_drop -> "_defer"
-        | Lend_defer_write_back -> "_defer_write_back"
-        | _ -> "_defer_free"
+        | _ -> "_defer_write_back"
       in
       render_application (Emission.use_helper emission Lend ++ Text name) all
   | Live_blocks -> render_runtime_call "truss_runtime_live_blocks" []
@@ -368,13 +368,17 @@ let render_statement (emission : Emission.t) fc (statement : Lowered.statement) 
             (render_runtime_call "truss_runtime_free"
                [ C_values.render_block_pointer emission text sum variant ])
       | _ -> C_runtime.raise_bug "a block of a place that is not a sum type")
-  | Defer_free_block { lend; place; variant } -> (
-      match (C_values.render_operand emission fc lend, C_values.render_place emission fc place) with
-      | Some (lend, _), Some (text, Value sum) ->
+  | Defer_free_block { lend; arena; place; variant } -> (
+      match
+        ( C_values.render_operand emission fc lend,
+          C_values.render_operand emission fc arena,
+          C_values.render_place emission fc place )
+      with
+      | Some (lend, _), Some (arena, _), Some (text, Value sum) ->
           render_call_statement
             (render_application
                (Emission.use_helper emission Lend ++ Text "_defer_free")
-               [ lend; C_values.render_block_pointer emission text sum variant ])
+               [ lend; arena; C_values.render_block_pointer emission text sum variant ])
       | _ -> C_runtime.raise_bug "a block of a place that is not a sum type")
   | Fork { branches } ->
       let render_branch (nested, environment) =

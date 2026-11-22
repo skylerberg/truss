@@ -52,9 +52,15 @@ let is_signed : Memory_layout.integer -> bool = function
   | Int8 | Int16 | Int32 | Int64 -> true
   | UInt8 | UInt16 | UInt32 | UInt64 -> false
 
-let lend_structs = {|struct truss_lend {
+let lend_structs =
+  {|struct truss_lend {
   void (*release)(void *);
   void *context;
+};
+struct truss_lend_arena {
+  uint64_t used;
+  uint64_t top;
+  _Alignas(16) uint8_t storage[256];
 };
 |}
 
@@ -116,7 +122,12 @@ let render_helper_name = function
 let helpers =
   [
     ( Lend,
-      {|struct truss_lend_both {
+      {|struct truss_lend_held {
+  struct truss_lend_arena *arena;
+  uint32_t below;
+  uint32_t is_free;
+};
+struct truss_lend_both {
   struct truss_lend first;
   struct truss_lend second;
 };
@@ -126,35 +137,70 @@ struct truss_lend_write_back {
   uint64_t size;
   struct truss_lend next;
 };
+__attribute__((unused, noinline)) static void *truss_lend_arena_allocate(struct truss_lend_arena *arena, uint64_t size, uint64_t alignment) {
+  uint64_t end = arena->used + sizeof(struct truss_lend_held) + ((size + 15) & ~(uint64_t)15);
+  if (alignment <= 16 && end <= sizeof arena->storage) {
+    struct truss_lend_held *held = (struct truss_lend_held *)(arena->storage + arena->used);
+    held->arena = arena;
+    held->below = (uint32_t)arena->top;
+    held->is_free = 0;
+    arena->top = arena->used + 1;
+    arena->used = end;
+    return held + 1;
+  }
+  uint64_t block_alignment = alignment < 16 ? 16 : alignment;
+  uint8_t *block = truss_runtime_allocate(block_alignment + size, block_alignment);
+  struct truss_lend_held *held = (struct truss_lend_held *)(block + block_alignment) - 1;
+  held->arena = 0;
+  held->below = (uint32_t)block_alignment;
+  return held + 1;
+}
+__attribute__((unused, noinline)) static void truss_lend_arena_free(void *allocation) {
+  struct truss_lend_held *held = (struct truss_lend_held *)allocation - 1;
+  struct truss_lend_arena *arena = held->arena;
+  if (!arena) {
+    truss_runtime_free((uint8_t *)allocation - held->below);
+    return;
+  }
+  held->is_free = 1;
+  while (arena->top) {
+    struct truss_lend_held *top = (struct truss_lend_held *)(arena->storage + arena->top - 1);
+    if (!top->is_free) break;
+    arena->used = arena->top - 1;
+    arena->top = top->below;
+  }
+}
 __attribute__((unused)) static void truss_lend_release_both(void *context) {
   struct truss_lend_both both = *(struct truss_lend_both *)context;
-  truss_runtime_free(context);
+  truss_lend_arena_free(context);
   both.first.release(both.first.context);
   both.second.release(both.second.context);
 }
-__attribute__((unused)) static inline void truss_lend_defer(struct truss_lend *lend, void *release, void *context) {
+__attribute__((unused, noinline)) static void truss_lend_defer_before(struct truss_lend *lend, struct truss_lend_arena *arena,
+                                                 struct truss_lend deferred) {
+  struct truss_lend_both *both =
+    truss_lend_arena_allocate(arena, sizeof(struct truss_lend_both), _Alignof(struct truss_lend_both));
+  both->first = deferred;
+  both->second = *lend;
+  lend->release = truss_lend_release_both;
+  lend->context = both;
+}
+__attribute__((unused)) static inline void truss_lend_defer(struct truss_lend *lend, struct truss_lend_arena *arena, void *release,
+                                    void *context) {
   struct truss_lend deferred = { (void (*)(void *))release, context };
-  if (lend->release) {
-    struct truss_lend_both *both =
-      truss_runtime_allocate(sizeof(struct truss_lend_both), _Alignof(struct truss_lend_both));
-    both->first = deferred;
-    both->second = *lend;
-    lend->release = truss_lend_release_both;
-    lend->context = both;
-  } else {
-    *lend = deferred;
-  }
+  if (lend->release) truss_lend_defer_before(lend, arena, deferred);
+  else *lend = deferred;
 }
 __attribute__((unused)) static void truss_lend_write_back(void *context) {
   struct truss_lend_write_back write_back = *(struct truss_lend_write_back *)context;
-  truss_runtime_free(context);
+  truss_lend_arena_free(context);
   __builtin_memcpy(write_back.destination, write_back.source, write_back.size);
   if (write_back.next.release) write_back.next.release(write_back.next.context);
 }
-__attribute__((unused)) static inline void truss_lend_defer_write_back(struct truss_lend *lend, void *destination,
-                                           const void *source, uint64_t size) {
-  struct truss_lend_write_back *write_back =
-    truss_runtime_allocate(sizeof(struct truss_lend_write_back), _Alignof(struct truss_lend_write_back));
+__attribute__((unused, noinline)) static void truss_lend_defer_write_back(struct truss_lend *lend, struct truss_lend_arena *arena,
+                                                     void *destination, const void *source, uint64_t size) {
+  struct truss_lend_write_back *write_back = truss_lend_arena_allocate(
+    arena, sizeof(struct truss_lend_write_back), _Alignof(struct truss_lend_write_back));
   write_back->destination = destination;
   write_back->source = source;
   write_back->size = size;
@@ -162,8 +208,14 @@ __attribute__((unused)) static inline void truss_lend_defer_write_back(struct tr
   lend->release = truss_lend_write_back;
   lend->context = write_back;
 }
-__attribute__((unused)) static inline void truss_lend_defer_free(struct truss_lend *lend, void *block) {
-  truss_lend_defer(lend, (void *)truss_runtime_free, block);
+__attribute__((unused)) static inline void truss_lend_defer_free(struct truss_lend *lend, struct truss_lend_arena *arena, void *block) {
+  truss_lend_defer(lend, arena, (void *)truss_runtime_free, block);
+}
+__attribute__((unused, noinline)) static void *truss_lend_allocate(struct truss_lend *lend, struct truss_lend_arena *arena, uint64_t size,
+                                              uint64_t alignment) {
+  void *slot = truss_lend_arena_allocate(arena, size, alignment);
+  truss_lend_defer(lend, arena, (void *)truss_lend_arena_free, slot);
+  return slot;
 }
 __attribute__((unused)) static inline void truss_lend_release(struct truss_lend *lend) {
   if (lend->release) {
@@ -172,9 +224,10 @@ __attribute__((unused)) static inline void truss_lend_release(struct truss_lend 
     released.release(released.context);
   }
 }
-__attribute__((unused)) static inline void truss_lend_transfer(struct truss_lend *caller, struct truss_lend *lend) {
+__attribute__((unused)) static inline void truss_lend_transfer(struct truss_lend *caller, struct truss_lend_arena *arena,
+                                       struct truss_lend *lend) {
   if (lend->release) {
-    truss_lend_defer(caller, (void *)lend->release, lend->context);
+    truss_lend_defer(caller, arena, (void *)lend->release, lend->context);
     lend->release = 0;
   }
 }

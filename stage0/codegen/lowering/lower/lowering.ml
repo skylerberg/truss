@@ -18,6 +18,7 @@ type lending = {
   slot : Lowered.place option;
   part : Ground.ty;
   record : Lowered.operand;
+  arena : Lowered.operand;
   site : Lowered.operand;
 }
 
@@ -73,6 +74,7 @@ type state = {
   mutable evidence : (Path.t * Lowered.operand) list;
   mutable tasks : task list;
   mutable moved : Lowered.place list;
+  mutable lend_arena : Lowered.operand option;
 }
 
 let make_frame code = { code; self_place = None; exit = None; mir = None }
@@ -89,6 +91,7 @@ let enter context ?(nested = ref 0) ~builder frame =
     evidence = [];
     tasks = [];
     moved = [];
+    lend_arena = None;
   }
 
 let enter_item context ~item (code : Definitions.code) =
@@ -105,7 +108,10 @@ let allocate_local state ?name ty : Lowered.place =
 let outline state ~parts body =
   let nested = !(state.nested) in
   incr state.nested;
+  let enclosing = state.lend_arena in
+  state.lend_arena <- None;
   let holder = Emit_c.Ir_builder.outline state.builder ~index:nested ~parts body in
+  state.lend_arena <- enclosing;
   (nested, Lowered.Address { place = Lowered.make_local_place holder; writable = false })
 
 let ground state ty = Monomorphic.ground state.context.monomorphic state.frame.code.substitution ty
