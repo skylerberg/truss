@@ -343,18 +343,11 @@ let read_value tracker recorder view package ~id =
 let find_value tracker recorder view package ~id =
   Option.map require_value (find tracker recorder view package ~id)
 
-let is_equal_cell (before : Store.cell) (after : Store.cell) =
-  match (before, after) with
-  | Blob before, Blob after ->
-      String.equal before after
-      || compare (Marshal.from_string before 0 : Obj.t) (Marshal.from_string after 0 : Obj.t) = 0
-  | _ -> before = after
-
 let rec list_changed_groups groups before after =
   match groups with
   | [] -> []
   | (target, width) :: rest ->
-      let is_equal = List.for_all2 is_equal_cell (List.take width before) (List.take width after) in
+      let is_equal = List.take width before = List.take width after in
       let changed = list_changed_groups rest (List.drop width before) (List.drop width after) in
       if is_equal then changed else target :: changed
 
