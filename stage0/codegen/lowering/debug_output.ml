@@ -61,7 +61,7 @@ let build_debug env ty =
   in
   let value : Lowered.place =
     match parameter with
-    | Some parameter_local -> { root = Local parameter_local; projections = [ Deref ] }
+    | Some parameter_local -> Lowered.make_deref_place parameter_local
     | None -> Lowered.make_local_place 0
   in
   let output_pointer =

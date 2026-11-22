@@ -764,15 +764,9 @@ and lend_part state ~(mode : Language.Mode.t) (part : Mir.yielded) =
         in
         Emit_c.Ir_builder.emit state.builder
           (Assign (destination, Build { ty; variant; fields = List.map fst built }));
-        let is_indirect variant =
-          List.exists
-            (fun (shape : Memory_layout.variant_shape) -> shape.name = variant && shape.indirect)
-            (match Memory_layout.compute_shape state.context.env ty with
-            | Sum shapes -> shapes
-            | _ -> [])
-        in
         (match variant with
-          | Some variant when is_indirect variant -> [ ([], Deferred_free variant) ]
+          | Some variant when Memory_layout.is_indirect state.context.env ty variant ->
+              [ ([], Deferred_free variant) ]
           | _ -> [])
         @ List.concat_map snd built
   in

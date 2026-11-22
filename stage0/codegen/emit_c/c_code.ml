@@ -457,6 +457,11 @@ let render_terminator (emission : Emission.t) fc (terminator : Lowered.terminato
                    cases)
                 ~default:(render_default otherwise)
           | Tests tests ->
+              let tests, otherwise =
+                match (otherwise, List.rev tests) with
+                | None, (_, last) :: earlier -> (List.rev earlier, Some last)
+                | _ -> (tests, otherwise)
+              in
               Concat
                 (List.map
                    (fun (discriminant, block) ->

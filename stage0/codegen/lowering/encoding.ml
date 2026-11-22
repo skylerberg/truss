@@ -15,7 +15,7 @@ let encode_call env builder ~output ty (place : Lowered.place) =
 let encode env ty =
   let builder = Emit_c.Ir_builder.create env ~item:(Encode ty) in
   let parameter = Emit_c.Ir_builder.allocate_local builder (Writing.make_value_parameter ty) in
-  let value : Lowered.place = { root = Local parameter; projections = [ Deref ] } in
+  let value = Lowered.make_deref_place parameter in
   let output_pointer =
     Emit_c.Ir_builder.allocate_local builder (Writing.make_output_parameter env)
   in
