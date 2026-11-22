@@ -5,6 +5,8 @@ module References : sig
 
   type occurrence = References.occurrence = { span : Source.Definition_span.t; target : target }
 
+  val list_named_members : Infer.tables -> Syntax.definition -> Path.t list
+
   val list_occurrences :
     path:Path.t ->
     Source.Definition_span.t array ->

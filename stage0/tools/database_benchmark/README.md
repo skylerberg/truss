@@ -1,6 +1,6 @@
 # Database benchmark
 
-`database_benchmark` measures the code database on generated packages of several sizes. It times a first build into a cache that holds only the standard library, a series of edits, a reopen in a new process, and a copy opened as a new worktree, and counts the parts that each step computes and collects.
+`database_benchmark` measures the code database on generated packages of several sizes. It times a first build into a cache that holds only the standard library, a series of edits, a reopen in a new process, and a copy opened as a new worktree, and counts the units that each step computes and the items it collects.
 
 ## Rules for agents
 
@@ -69,11 +69,11 @@ Each step takes a snapshot of the project, which applies the change set and prop
 | Collected | Parts of instances and layouts of ground types collected, since no root of lowering reaches them any more |
 | Written KB | The bytes that the step added to the cache and to the project's `.truss` |
 
-The update propagates the change set through the checks, so the check only reads parts, and computing the test keys computes the lowering that the tests reach. Without the background process's watcher, a snapshot reads every file of the project again and compares it with the text the database holds. Opening a database reads every segment, unmarshals every part, and rebuilds the namespaces and the references between instances. A commit compacts the segments into one once they number more than 32 or the later segments outgrow the first.
+The update propagates the change set through the checks, so the check only reads rows, and computing the test keys computes the lowering that the tests reach. Without the background process's watcher, a snapshot reads every file of the project again and compares it with the text the database holds. Opening a database opens its SQLite file and attaches the package databases it depends on; nothing is rebuilt. A commit ends the SQLite transaction that holds the change set.
 
-The counts are deterministic: the benchmark exits with an error when two runs of a size count different parts. Compare counts exactly. Times vary with what else the machine runs, so compare them only between runs on liquid that other processes left quiet.
+The counts are deterministic: the benchmark exits with an error when two runs of a size count different units. Compare counts exactly. Times vary with what else the machine runs, so compare them only between runs on liquid that other processes left quiet.
 
-A step whose change is local should count the same parts at every size. A step whose counts grow with the package, apart from those that edit a definition every module reads, means a change's cost no longer follows the change.
+A step whose change is local should count the same units at every size. A step whose counts grow with the package, apart from those that edit a definition every module reads, means a change's cost no longer follows the change.
 
 ## Baseline
 

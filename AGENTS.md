@@ -124,7 +124,7 @@ entry module of an executable needs none: dune gives it an empty one.
 Test through the public interface. A test is not a user for this rule: an
 export that only tests read hides dead code from the compiler as surely as
 a missing `.mli`. When a test needs an internal value, such as the
-database's log of computed parts or a printer of an intermediate form,
+database's log of computed units or a printer of an intermediate form,
 export that value in a `For_testing` submodule, and only the values the
 tests read, never a whole module. CI rejects a use of `For_testing` outside
 `stage0/test` and `stage0/tools`.

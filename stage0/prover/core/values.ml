@@ -422,7 +422,7 @@ let translate_named_function (context : State.context) (frame : State.frame)
 
 let translate_global_value (context : State.context) frame (site : Invocation.site) path
     type_arguments ~is_argument =
-  match Contracts.find_function_contract context.lookups path with
+  match Contracts.find_function_contract context path with
   | Some contract ->
       translate_named_function context frame site path type_arguments contract ~is_argument
   | None ->

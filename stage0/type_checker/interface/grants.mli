@@ -2,6 +2,7 @@ val resolve_grant :
   Resolve.Names.lookups -> package:Path.package -> Grant.capability list -> Environment.grant
 
 val describe_not_a_capability : dependency:Path.package -> Grant.capability -> string
+val needs_grant : package:Path.package -> of_:Path.package -> bool
 
 val list_missing :
   Lookups.t -> package:Path.package -> of_:Path.package -> Types.capability_set -> Path.t list

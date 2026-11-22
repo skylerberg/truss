@@ -102,13 +102,10 @@ let evaluate_default_value (context : State.context) frame (clauses : State.clau
 
 let is_datatype ty = match ty with Types.Named _ -> Types.find_builtin ty = None | _ -> false
 
-let calls_update_step (context : State.context) (invocation : Invocation.t) =
-  match invocation.callee with
-  | Function { path; _ } -> (
-      match Interface.Impls.read_signature context.lookups.interface path with
-      | Some signature -> signature.is_update_step
-      | None -> false)
-  | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _ -> false
+let is_update_step (invocation : Invocation.t) (signature : Types.signature option) =
+  match (invocation.callee, signature) with
+  | Function _, Some signature -> signature.is_update_step
+  | Function _, None | (Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _), _ -> false
 
 let list_structural_parameters context (frame : State.frame) (clauses : State.clauses) =
   List.concat
@@ -155,7 +152,7 @@ let add_restated_clauses (context : State.context) ~self_type ~bind trait name r
             clauses with
             bindings = bind subtrait (Path.Method { owner = subtrait.trait; name; receiver });
           })
-        (Contracts.list_restated_clauses context.lookups ~list_bounds:context.bounds
+        (Contracts.list_restated_clauses context
            ~packages:(Operations.list_impl_packages context self_type)
            ~self_type trait name receiver);
   }
@@ -542,7 +539,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
           ~when_:"when the lend of this part ends"
     | None -> ()
   in
-  let is_update_step = calls_update_step context invocation in
+  let is_update_step = is_update_step invocation contract.signature in
   List.iter
     (fun (passed : State.passed) ->
       if passed.mode = Language.Mode.Mut && not (is_update_step && passed.position = 0) then
@@ -864,7 +861,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
             Amounts.compute_step_amount context after invocation values counter
         | _ ->
             let method_cost =
-              if Laws.has_method_cost context invocation.callee path then
+              if Laws.has_method_cost invocation.callee path contract.signature then
                 Some
                   (fun metric -> Amounts.compute_method_cost context frame metric invocation.callee)
               else None
@@ -904,7 +901,7 @@ let make_callback_cost (context : State.context) frame (metric : Language.Metric
       (match term with
       | Logic.Symbol (Function_value { callee; _ }) ->
           Option.iter state_value
-            (Option.bind (Interface.Impls.read_signature context.lookups.interface callee)
+            (Option.bind (Contracts.read_signature context callee)
                (fun (signature : Types.signature) ->
                  Costs.find_stated_operand signature.costs metric))
       | _ -> ());
@@ -974,24 +971,36 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
         @ [ Text "` holds, which the function's `uses Panic unless` rules out." ])
         (Logic.Boolean false)
   | Some _ | None -> ());
+  let declared = lazy (Validity.find_callee_declaration context frame invocation) in
+  let read_declared_signature () =
+    Option.map
+      (fun (declared : State.declared_callee) -> declared.declared_signature)
+      (Lazy.force declared)
+  in
   List.iter
     (fun (passed : State.passed) ->
       match passed.shape with
       | Named_function { origin; path; _ } -> (
-          match Contracts.find_function_contract context.lookups path with
+          match Contracts.find_function_contract context path with
           | Some contract ->
-              Laws.check_named_callback context frame invocation passed ~origin path contract values
+              Laws.check_named_callback context frame (Lazy.force declared) passed ~origin path
+                contract values
           | None -> ())
       | Forwarded local ->
-          Validity.check_forwarded_callback context frame site invocation passed local values
+          Validity.check_forwarded_callback context frame site (Lazy.force declared) passed local
+            values
       | Other ->
-          Validity.check_callback_promises context frame ~location invocation passed
+          Validity.check_callback_promises context frame ~location (Lazy.force declared) passed
             ~described:"and nothing promises it of the function passed here."
             ~assume:Validity.assume_nothing values
       | Lambda -> ())
     values;
   let result_type = Facts.substitute_type context frame site.type_ in
-  let is_update_step = calls_update_step context invocation in
+  let is_update_step =
+    match invocation.callee with
+    | Function _ -> is_update_step invocation (read_declared_signature ())
+    | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _ -> false
+  in
   (match invocation.callee with
   | Intrinsic _ -> ()
   | _ ->
@@ -1024,30 +1033,27 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
       (fun (name, argument) -> (name, Types.substitute_capabilities frame.substitution argument))
       instantiation.capability_arguments
   in
-  let read_signature path = Interface.Impls.read_signature context.lookups.interface path in
-  let list_generics path =
-    match read_signature path with
-    | Some (signature : Types.signature) ->
-        List.map (fun (generic : Types.generic) -> generic.generic) signature.generics
-    | None -> []
-  in
-  let list_capability_parameters path =
-    match read_signature path with
-    | Some (signature : Types.signature) -> signature.capability_parameters
-    | None -> []
-  in
-  let bind_parameters parameters arguments ~fixed =
+  let bind_generics (signature : Types.signature option) arguments capability_arguments ~fixed =
+    let generics, capability_parameters =
+      match signature with
+      | Some signature ->
+          ( List.map (fun (generic : Types.generic) -> generic.generic) signature.generics,
+            signature.capability_parameters )
+      | None -> ([], [])
+    in
     let rec bind_remaining substitution parameters arguments =
       match (parameters, arguments) with
       | parameter :: parameters, argument :: arguments ->
           bind_remaining (Types.bind_argument parameter argument substitution) parameters arguments
       | _ -> substitution
     in
-    bind_remaining fixed
-      (List.filter
-         (fun parameter -> Option.is_none (Types.find_argument parameter fixed))
-         parameters)
-      arguments
+    Types.combine_substitutions
+      (bind_remaining fixed
+         (List.filter
+            (fun parameter -> Option.is_none (Types.find_argument parameter fixed))
+            generics)
+         arguments)
+      (Types.make_capability_substitution capability_parameters capability_arguments)
   in
   let resolution, recursive_callee =
     Facts.find_recursive_callee context frame location invocation.callee
@@ -1070,16 +1076,16 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
     match invocation.callee with
     | Function { path; instantiation } ->
         let arguments = list_arguments instantiation.type_arguments in
+        let signature = read_declared_signature () in
         let substitution =
-          Types.combine_substitutions
-            (bind_parameters (list_generics path) arguments ~fixed:Types.no_substitution)
-            (Types.make_capability_substitution (list_capability_parameters path)
-               (list_capability_arguments instantiation))
+          bind_generics signature arguments
+            (list_capability_arguments instantiation)
+            ~fixed:Types.no_substitution
         in
         with_contract
           ~substitution_of:(fun _ -> substitution)
           ~type_arguments:arguments path
-          (Contracts.find_function_contract context.lookups path)
+          (Contracts.find_function_contract context path)
     | Trait_method { trait; name; receiver; evidence; self_type; instantiation } -> (
         let arguments = list_arguments instantiation.type_arguments in
         let capability_arguments = list_capability_arguments instantiation in
@@ -1118,37 +1124,28 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
               (Some (frame, Operations.make_equality context frame self_type left right))
         | _ ->
             let trait_substitution =
-              Types.combine_substitutions
-                (bind_parameters (list_generics trait_path) arguments
-                   ~fixed:(Contracts.make_trait_substitution context.lookups trait self_type))
-                (Types.make_capability_substitution
-                   (list_capability_parameters trait_path)
-                   capability_arguments)
+              bind_generics (read_declared_signature ()) arguments capability_arguments
+                ~fixed:(Contracts.make_trait_substitution context.lookups trait self_type)
             in
+            let contract = Contracts.find_method_contract context trait name receiver evidence in
             let path, callee_substitution =
               match evidence with
               | Impl { impl; substitution } ->
-                  let impl_substitution =
-                    Types.substitute_substitution frame.substitution substitution
-                  in
-                  let path = Path.Method { owner = impl; name; receiver } in
-                  ( path,
-                    Types.combine_substitutions
-                      (bind_parameters (list_generics path) arguments ~fixed:impl_substitution)
-                      (Types.make_capability_substitution (list_capability_parameters path)
-                         capability_arguments) )
+                  ( Path.Method { owner = impl; name; receiver },
+                    bind_generics
+                      (Option.bind contract (fun (contract : State.contract) -> contract.signature))
+                      arguments capability_arguments
+                      ~fixed:(Types.substitute_substitution frame.substitution substitution) )
               | _ -> (trait_path, trait_substitution)
             in
             let compute_substitution (clauses : State.clauses) =
               if clauses.inherited then trait_substitution else callee_substitution
             in
             let bind_restated subtrait restated =
-              Types.combine_substitutions
-                (bind_parameters (list_generics restated) arguments
-                   ~fixed:(Contracts.make_trait_substitution context.lookups subtrait self_type))
-                (Types.make_capability_substitution
-                   (list_capability_parameters restated)
-                   capability_arguments)
+              bind_generics
+                (Contracts.read_signature context restated)
+                arguments capability_arguments
+                ~fixed:(Contracts.make_trait_substitution context.lookups subtrait self_type)
             in
             with_contract ~substitution_of:compute_substitution
               ~type_arguments:(Facts.list_method_type_arguments ~self_type arguments)
@@ -1156,7 +1153,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
               (Option.map
                  (add_restated_clauses context ~self_type ~bind:bind_restated trait.trait name
                     receiver)
-                 (Contracts.find_method_contract context.lookups trait name receiver evidence)))
+                 contract))
     | Indirect () ->
         Laws.check_callback_requires context frame site through values;
         let frame = havoc_mut frame in
@@ -1213,7 +1210,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
     | Capability_method { capability; name } ->
         with_contract
           (Path.make_capability_method capability name)
-          (Contracts.find_capability_contract context.lookups capability name)
+          (Contracts.find_capability_contract context capability name)
     | Intrinsic { operation; type_arguments } ->
         let frame =
           match operation with

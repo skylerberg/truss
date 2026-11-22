@@ -84,28 +84,34 @@ let check_grant checking (origin : Core.origin) ~subject package (uses : Types.c
 
 let check_callee_grants checking (origin : Core.origin) (callee : Core.operand Core.target) =
   let state = checking.state in
+  let needs_grant path =
+    Interface.Grants.needs_grant ~package:state.package ~of_:(Path.locate_package path)
+  in
   match callee with
   | Function { path; _ } ->
-      Option.iter
-        (fun (signature : Types.signature) ->
-          check_grant checking origin
-            ~subject:(Printf.sprintf "`%s`" (Path.show path))
-            (Path.locate_package path) signature.uses)
-        (Interface.Impls.read_signature state.lookups.interface path)
+      if needs_grant path then
+        Option.iter
+          (fun (signature : Types.signature) ->
+            check_grant checking origin
+              ~subject:(Printf.sprintf "`%s`" (Path.show path))
+              (Path.locate_package path) signature.uses)
+          (Signatures.read state.signatures state.lookups.interface path)
   | Trait_method { trait; name; receiver; evidence; _ } -> (
-      (match
-         Interface.Definition.find_trait_method state.lookups.interface trait.trait ~name ~receiver
-       with
-      | Some method_ ->
-          check_grant checking origin
-            ~subject:(Printf.sprintf "`%s.%s`" (Path.show trait.trait) name)
-            (Path.locate_package trait.trait)
-            (Interface.Definition.read_method_signature state.lookups.interface ~owner:trait.trait
-               method_)
-              .uses
-      | None -> ());
+      (if needs_grant trait.trait then
+         match
+           Interface.Definition.find_trait_method state.lookups.interface trait.trait ~name
+             ~receiver
+         with
+         | Some method_ ->
+             check_grant checking origin
+               ~subject:(Printf.sprintf "`%s.%s`" (Path.show trait.trait) name)
+               (Path.locate_package trait.trait)
+               (Signatures.read_of_method state.signatures state.lookups.interface
+                  ~owner:trait.trait method_)
+                 .uses
+         | None -> ());
       match evidence with
-      | Impl { impl; _ } -> (
+      | Impl { impl; _ } when needs_grant impl -> (
           match Interface.Definition.find_impl_interface state.lookups.interface impl with
           | Some interface when List.mem (name, receiver) interface.impl_methods ->
               Option.iter
@@ -116,10 +122,10 @@ let check_callee_grants checking (origin : Core.origin) (callee : Core.operand C
                          (Types.show_trait interface.implements)
                          (Types.show interface.for_type))
                     (Path.locate_package impl) signature.uses)
-                (Interface.Impls.read_signature state.lookups.interface
+                (Signatures.read state.signatures state.lookups.interface
                    (Method { owner = impl; name; receiver }))
           | Some _ | None -> ())
-      | Bound | Dynamic -> ())
+      | Impl _ | Bound | Dynamic -> ())
   | Capability_method _ | Intrinsic _ | Indirect _ -> ()
 
 let add_alternative ~sentence_start alternative =
@@ -528,7 +534,7 @@ let solve (state : State.state) =
 let rec can_call_capability_code (state : State.state) ~list_bounds ?(seen = []) (type_ : Types.ty)
     =
   let can_call_inside = can_call_capability_code state ~list_bounds ~seen in
-  let trait_uses (trait : Types.trait_reference) =
+  let has_a_method_that_uses (bound : Types.trait_reference) =
     let can_hold_a_capability : Types.capability -> bool = function
       | Capability_projection _ -> ( match type_ with Types.Any _ -> false | _ -> true)
       | Built_in _ -> false
@@ -537,19 +543,16 @@ let rec can_call_capability_code (state : State.state) ~list_bounds ?(seen = [])
       | Capability_unless _ | Capability_unless_values _ ->
           State.raise_bug "a capability's base has a condition"
     in
-    List.exists
-      (fun (bound : Types.trait_reference) ->
-        match Interface.Definition.find_trait_interface state.lookups.interface bound.trait with
-        | Some interface ->
-            List.exists
-              (fun (method_ : Types.trait_method) ->
-                Types.exists_capability can_hold_a_capability
-                  (Interface.Definition.read_method_signature state.lookups.interface
-                     ~owner:bound.trait method_)
-                    .uses)
-              interface.methods
-        | None -> false)
-      (trait :: Interface.Properties.list_bound_closure state.lookups.interface ~self:type_ trait)
+    match Interface.Definition.find_trait_interface state.lookups.interface bound.trait with
+    | Some interface ->
+        List.exists
+          (fun (method_ : Types.trait_method) ->
+            Types.exists_capability can_hold_a_capability
+              (Signatures.read_of_method state.signatures state.lookups.interface ~owner:bound.trait
+                 method_)
+                .uses)
+          interface.methods
+    | None -> false
   in
   let can_call_arguments =
     List.exists (function
@@ -569,8 +572,11 @@ let rec can_call_capability_code (state : State.state) ~list_bounds ?(seen = [])
         uses
       || List.exists (fun (_, input) -> can_call_inside input) inputs
       || can_call_inside output
-  | Types.Any trait -> trait_uses trait
-  | Types.Parameter parameter -> List.exists trait_uses (list_bounds parameter)
+  | Types.Any trait ->
+      List.exists has_a_method_that_uses
+        (Interface.Properties.list_bound_closure state.lookups.interface ~self:type_ trait)
+  | Types.Parameter parameter ->
+      List.exists has_a_method_that_uses (Interface.Properties.Bounds.list list_bounds parameter)
   | Types.Named { path; arguments = type_arguments } -> (
       can_call_arguments type_arguments
       || (not (List.exists (Path.equal path) seen))
@@ -638,10 +644,13 @@ let check_monitor_callbacks checking implementations =
                 List.iter
                   (fun (method_ : Types.trait_method) ->
                     let signature =
-                      Interface.Definition.read_method_signature state.lookups.interface
+                      Signatures.read_of_method state.signatures state.lookups.interface
                         ~owner:provided.capability method_
                     in
-                    let list_bounds = Types.list_bounds signature.generics in
+                    let list_bounds =
+                      Interface.Properties.Bounds.close state.lookups.interface
+                        (Types.list_bounds signature.generics)
+                    in
                     match
                       List.find_opt
                         (fun (parameter : Types.parameter_info) ->
@@ -725,7 +734,7 @@ let check (state : State.state) (elaborated : Interface.Environment.elaborated_i
   | Function { body = Some body; _ }, (Function _ | Method_declaration _), Function_interface _
   | Test (Some body), _, Test_interface _ ->
       let signature =
-        match Interface.Impls.read_signature state.lookups.interface state.key.path with
+        match Signatures.read state.signatures state.lookups.interface state.key.path with
         | Some signature -> signature
         | None -> State.raise_bug "a checked function or test has no signature"
       in

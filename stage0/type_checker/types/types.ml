@@ -857,6 +857,7 @@ type restated_method = {
 type trait_interface = {
   trait_generics : generic list;
   requires : trait_reference list;
+  supertraits : trait_reference list;
   associated_types : associated_type list;
   associated_capabilities : string list;
   methods : trait_method list;

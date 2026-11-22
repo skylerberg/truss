@@ -27,8 +27,7 @@ let make_database packages =
 
 let extend_standard_library (packages : Project.package list) =
   Database.For_testing.extend_package
-    ~loaded:[ Lazy.force standard_package_database ]
-    ~package:Path.standard_package
+    ~loaded:(Lazy.force standard_package_database)
     (List.concat_map
        (fun (package : Project.package) ->
          if package.name <> Path.standard_package then
@@ -274,23 +273,23 @@ let run_evaluations database (file : Path.file) proofs =
       in
       Evaluations.run backend evaluations
 
-let compute_verdicts database file =
+let decide database file =
   let proofs = prove database file in
-  Prover.decide
-    ~runs:(run_evaluations database file proofs)
-    (Database.make_proof_lookups database)
-    (Lazy.force solver) (Database.list_proofs proofs)
+  Database.decide proofs ~runs:(run_evaluations database file proofs) solver
 
 let list_proof_diagnostics database file =
-  Prover.list_diagnostics (compute_verdicts database file) file
+  decide database file;
+  Database.list_proof_diagnostics database file
 
-let list_proof_states database file = Prover.list_states (compute_verdicts database file) file
+let list_proof_states database file =
+  decide database file;
+  Database.list_proof_states database file
 
 let read_proofs database file =
   let proofs = prove database file in
   fun key ->
     match Database.For_testing.find_proof proofs key with
     | Some (Value proof) -> proof
-    | Some (Failed _ | Blocked) ->
+    | Some (Failed | Blocked) ->
         failwith ("the proof of " ^ Resolve.Names.show_key key ^ " is blocked")
     | None -> failwith (Resolve.Names.show_key key ^ " is not proven")

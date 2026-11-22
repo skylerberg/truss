@@ -10,8 +10,7 @@ type state = {
 let report state ?fixes code span message =
   ignore (Elaborator.record_diagnostic state.diagnostics ?fixes code span message)
 
-let list_bounds state parameter =
-  Option.value ~default:[] (List.assoc_opt parameter state.elaborated.scope.bounds)
+let list_bounds state = Properties.Bounds.of_known state.elaborated.scope.bounds
 
 let find_evidence state type_ trait =
   Impls.find_evidence state.lookups ~list_bounds:(list_bounds state) type_ trait

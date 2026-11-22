@@ -4,6 +4,8 @@ type t = {
   find_trait_header : Path.t -> Resolve.trait_header option;
   find_constant_value : Path.t -> Z.t option;
   find_header : Resolve.Names.key -> Environment.header option;
+  read_interface : Resolve.Names.key -> Environment.interface;
+  find_interface : Path.t -> Environment.interface option;
   read_elaborated_interface : Resolve.Names.key -> Environment.elaborated_interface;
   find_derived_interface : type_:Path.t -> trait:Path.t -> Types.impl_interface option;
   read_type_facts : Path.t -> Environment.type_facts;

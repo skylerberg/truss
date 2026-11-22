@@ -21,11 +21,43 @@ let list_bound_closure_over ~find_requirements ~self (bound : Types.trait_refere
   visit [] bound;
   List.rev !closure
 
-let list_bound_closure lookups =
-  list_bound_closure_over ~find_requirements:(fun trait ->
-      Option.map
-        (fun (interface : Types.trait_interface) -> (interface.trait_generics, interface.requires))
-        (Definition.find_trait_interface lookups trait))
+let list_bound_closure lookups ~self (bound : Types.trait_reference) =
+  match Definition.find_trait_interface lookups bound.trait with
+  | Some interface ->
+      let substitution =
+        Types.bind_argument
+          (Types.make_self_parameter bound.trait)
+          (Types.Type self)
+          (Types.make_substitution interface.trait_generics bound.trait_arguments)
+      in
+      List.fold_left
+        (fun closure supertrait ->
+          let supertrait = Types.substitute_trait substitution supertrait in
+          if List.mem supertrait closure then closure else closure @ [ supertrait ])
+        [ bound ] interface.supertraits
+  | None -> [ bound ]
+
+module Bounds = struct
+  type t = Types.parameter -> Types.trait_reference list
+
+  let none : t = fun _ -> []
+
+  let of_known (known : (Types.parameter * Types.trait_reference list) list) : t =
+   fun parameter -> Option.value ~default:[] (List.assoc_opt parameter known)
+
+  let close lookups (declared : Types.parameter -> Types.trait_reference list) : t =
+   fun parameter ->
+    List.concat_map
+      (list_bound_closure lookups ~self:(Types.Parameter parameter))
+      (declared parameter)
+
+  let append (first : t) (second : t) : t = fun parameter -> first parameter @ second parameter
+
+  let override (outer : t) ~for_ (inner : t) : t =
+   fun parameter -> if List.mem parameter for_ then inner parameter else outer parameter
+
+  let list (bounds : t) parameter = bounds parameter
+end
 
 let find_declaring_trait lookups ~base (trait : Types.trait_reference) ~is_declared =
   List.find_opt
@@ -68,8 +100,7 @@ let list_associated_bounds lookups ~base trait name =
 
 let list_known_bounds lookups ~list_bounds (type_ : Types.ty) =
   match type_ with
-  | Types.Parameter parameter ->
-      List.concat_map (list_bound_closure lookups ~self:type_) (list_bounds parameter)
+  | Types.Parameter parameter -> Bounds.list list_bounds parameter
   | Types.Projection { base; trait; name } ->
       List.concat_map
         (list_bound_closure lookups ~self:type_)
@@ -98,6 +129,7 @@ let compose_occurrences outer inner =
 
 let empty : Environment.type_facts =
   {
+    generics = [];
     copyable = Requires [];
     plain = Requires [];
     view = If_any [];
@@ -119,8 +151,8 @@ let find_stored_conditions (facts : Environment.type_facts) = function
 let list_type_arguments arguments =
   List.filter_map (function Types.Type type_ -> Some type_ | _ -> None) arguments
 
-let instantiate ~resolve (interface : Types.type_interface) arguments conditions =
-  let substitution = Types.make_substitution interface.type_generics arguments in
+let instantiate ~resolve generics arguments conditions =
+  let substitution = Types.make_substitution generics arguments in
   List.map (fun condition -> resolve (Types.substitute substitution condition)) conditions
 
 let combine_conditions find_conditions types =
@@ -194,19 +226,17 @@ let rec compute_conditions lookups ~facts_of ~resolve ~compute_leaf ?(in_progres
       | Some (Storage | Array), _ -> combine_each (list_type_arguments arguments)
       | Some _, _ -> Some []
       | None, _ ->
-          let interface = Definition.read_type_interface lookups path in
           if List.exists (Types.equal type_) in_progress then Some []
           else if List.length in_progress > recursion_limit then
             fail_at_recursion_limit
               (Printf.sprintf "Deciding whether `%s` %s" (Types.show type_) (show_property property))
           else
-            Option.bind
-              (find_stored_conditions (facts_of path) property)
-              (fun arguments_conditions ->
+            let (facts : Environment.type_facts) = facts_of path in
+            Option.bind (find_stored_conditions facts property) (fun arguments_conditions ->
                 combine_conditions
                   (compute_conditions lookups ~facts_of ~resolve ~compute_leaf
                      ~in_progress:(type_ :: in_progress) property)
-                  (instantiate ~resolve interface arguments arguments_conditions)))
+                  (instantiate ~resolve facts.generics arguments arguments_conditions)))
 
 type recursion = { recursive : Types.ty; occurrence : occurrence; defining : Path.t list }
 type contents = { contained : (Types.ty * occurrence) list; recursions : recursion list }
@@ -319,10 +349,18 @@ let compute_facts lookups ~facts_of (interface : Types.type_interface) : Environ
     else find_conditions property field_types
   in
   match interface.shape with
-  | Builtin_type _ -> empty
-  | Todo_type -> { empty with copyable = Never; plain = Never; holds_function = Always }
+  | Builtin_type _ -> { empty with generics = interface.type_generics }
+  | Todo_type ->
+      {
+        empty with
+        generics = interface.type_generics;
+        copyable = Never;
+        plain = Never;
+        holds_function = Always;
+      }
   | Record _ | Sum _ ->
       {
+        generics = interface.type_generics;
         copyable = to_requirement (find_owned_conditions Copyable);
         plain = to_requirement (find_owned_conditions Plain);
         view = to_exposure (find_conditions View field_types);
@@ -377,7 +415,10 @@ let compute_component_facts (lookups : Lookups.t) interfaces =
     let next = map_each (fun _ interface -> compute_facts lookups ~facts_of interface) in
     if Path.Map.equal ( = ) next assumed then next else settle next
   in
-  Path.Map.bindings (settle (map_each (fun _ _ -> empty)))
+  Path.Map.bindings
+    (settle
+       (map_each (fun _ (interface : Types.type_interface) ->
+            { empty with generics = interface.type_generics })))
 
 type decision = Holds | Fails | Depends_on of Types.ty
 

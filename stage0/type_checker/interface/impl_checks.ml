@@ -57,7 +57,7 @@ let signatures_agree (expected : Types.signature) (written : Types.signature) =
 type conformance = {
   implementation : Impls.implementation;
   shown_trait : string;
-  list_impl_bounds : Types.parameter -> Types.trait_reference list;
+  list_impl_bounds : Impls.bounds;
   missing_associated : Diagnostic.in_definition list;
 }
 
@@ -88,7 +88,7 @@ let find_conformance lookups ~list_bounds ~(trait_span : Source.Definition_span.
         {
           implementation;
           shown_trait;
-          list_impl_bounds = Impls.Conformance.list_impl_bounds impl ~list_bounds;
+          list_impl_bounds = Impls.Conformance.list_impl_bounds lookups impl ~list_bounds;
           missing_associated =
             List.filter_map
               (fun (associated : Types.associated_type) ->

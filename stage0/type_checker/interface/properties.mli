@@ -11,23 +11,27 @@ val list_bound_closure_over :
 val list_bound_closure :
   Lookups.t -> self:Types.ty -> Types.trait_reference -> Types.trait_reference list
 
+module Bounds : sig
+  type t
+
+  val none : t
+  val of_known : (Types.parameter * Types.trait_reference list) list -> t
+  val close : Lookups.t -> (Types.parameter -> Types.trait_reference list) -> t
+  val append : t -> t -> t
+  val override : t -> for_:Types.parameter list -> t -> t
+  val list : t -> Types.parameter -> Types.trait_reference list
+end
+
 val find_trait_declaring_type :
   Lookups.t -> base:Types.ty -> Types.trait_reference -> string -> Types.trait_reference option
 
 val find_trait_declaring_capability_set :
   Lookups.t -> base:Types.ty -> Types.trait_reference -> string -> Types.trait_reference option
 
-val list_known_bounds :
-  Lookups.t ->
-  list_bounds:(Types.parameter -> Types.trait_reference list) ->
-  Types.ty ->
-  Types.trait_reference list
+val list_known_bounds : Lookups.t -> list_bounds:Bounds.t -> Types.ty -> Types.trait_reference list
 
 val list_rigid_members :
-  Lookups.t ->
-  list_bounds:(Types.parameter -> Types.trait_reference list) ->
-  Types.ty ->
-  Language.Builtin_type.t list
+  Lookups.t -> list_bounds:Bounds.t -> Types.ty -> Language.Builtin_type.t list
 
 type property = Copyable | Plain | View | Holds_function
 
@@ -49,18 +53,14 @@ type decision = Holds | Fails | Depends_on of Types.ty
 
 val decide_property :
   Lookups.t ->
-  list_bounds:(Types.parameter -> Types.trait_reference list) ->
+  list_bounds:Bounds.t ->
   normalize:(Types.ty -> Types.ty) ->
   property ->
   Types.ty ->
   decision
 
 val decide_storable :
-  Lookups.t ->
-  list_bounds:(Types.parameter -> Types.trait_reference list) ->
-  normalize:(Types.ty -> Types.ty) ->
-  Types.ty ->
-  decision
+  Lookups.t -> list_bounds:Bounds.t -> normalize:(Types.ty -> Types.ty) -> Types.ty -> decision
 
 val collect_contents :
   Lookups.t -> normalize:(Types.ty -> Types.ty * Path.t list) -> Types.ty -> contents

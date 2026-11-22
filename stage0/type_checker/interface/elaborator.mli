@@ -1,10 +1,14 @@
 type t
 
 val create :
-  Lookups.t -> Resolve.resolved -> spans:Source.Definition_span.t array -> Environment.scope -> t
+  Lookups.t ->
+  Resolve.resolved ->
+  spans:Source.Definition_span.t array ->
+  Environment.known_bounds Environment.scope ->
+  t
 
 val read_span : t -> Syntax.id -> Source.Definition_span.t
-val list_bounds : t -> Types.parameter -> Types.trait_reference list
+val list_known_bounds : t -> Properties.Bounds.t
 val find_self_type : t -> Types.ty option
 val list_diagnostics : t -> Diagnostic.in_definition list
 val list_named_types : t -> (Syntax.id * Types.ty) list

@@ -4,6 +4,7 @@ type counters = { mutable next_node_id : int; mutable next_synthetic_local : int
 
 type t = {
   lookups : Lookups.t;
+  signatures : Signatures.t;
   resolved : Resolve.resolved;
   tables : Tables.t;
   tables_with_holes : Tables.t option;
@@ -73,7 +74,7 @@ let rewrite_origin : Core.origin -> Core.origin = function
 let make_place (node : Core.expression) : Core.place =
   match node.kind with Use place -> place | _ -> Temporary node
 
-let list_bounds form = Interface.Elaborator.list_bounds form.context
+let list_bounds form = Interface.Elaborator.list_known_bounds form.context
 
 let with_condition form condition =
   { form with context = Interface.Elaborator.add_condition form.context condition }
@@ -87,11 +88,12 @@ let find_evidence form type_ trait =
     (Types.map_trait (normalize form) trait)
 
 let make_callee form (target : Core.operand Core.target) =
-  Callee_uses.make_callee form.lookups.interface ~list_bounds:(list_bounds form) target
+  Callee_uses.make_callee form.signatures form.lookups.interface ~list_bounds:(list_bounds form)
+    target
 
 let make_call form ~callee ~arguments ~lends =
-  Callee_uses.make_call form.lookups.interface ~list_bounds:(list_bounds form) ~callee ~arguments
-    ~lends
+  Callee_uses.make_call form.signatures form.lookups.interface ~list_bounds:(list_bounds form)
+    ~callee ~arguments ~lends
 
 let is_plain form type_ =
   Interface.Impls.is_plain form.lookups.interface ~list_bounds:(list_bounds form) type_
@@ -434,14 +436,15 @@ let is_executable form (condition : Core.expression) =
   let is_specification_only (callee : Core.callee) =
     match callee.target with
     | Function { path; _ } -> (
-        match Instantiation.find_function_signature form.lookups path with
+        match Instantiation.find_function_signature form.signatures form.lookups path with
         | Some signature -> signature.specification_only
         | _ -> false)
     | Trait_method { trait; name; receiver; _ } ->
         List.exists
           (fun (method_ : Types.trait_method) ->
             method_.method_receiver = receiver
-            && (Members.read_method_signature form.lookups trait.trait method_).specification_only)
+            && (Members.read_method_signature form.signatures form.lookups trait.trait method_)
+                 .specification_only)
           (Members.list_trait_methods form.lookups trait.trait name)
     | Capability_method _ | Intrinsic _ | Indirect _ -> false
   in
@@ -2035,13 +2038,14 @@ let build_law_proof form ~holds_body (written : Syntax.block) : Core.definition 
     }
 
 let build_definition form ~(key : Resolve.Names.key) ~(definition : Syntax.definition)
-    ~(elaborated : Interface.Environment.elaborated_interface) ~checks_body : Core.definition =
+    ~(elaborated : Interface.Environment.elaborated_interface) ~checks_body ~has_syntax_error :
+    Core.definition =
   let is_broken (part : Resolve.Parts.part) =
-    Resolve.Names.is_broken form.lookups.interface.names key part || (part = Body && not checks_body)
+    has_syntax_error part || (part = Body && not checks_body)
   in
   let holds_body = checks_body in
   let read_effective_signature () =
-    match Interface.Impls.read_signature form.lookups.interface key.path with
+    match Signatures.read form.signatures form.lookups.interface key.path with
     | Some signature -> signature
     | None -> raise_bug "a function with an interface has no signature"
   in
@@ -2092,8 +2096,8 @@ let rec replace_holes type_ =
 and replace_capability_holes capabilities =
   Types.map_capability_types replace_holes (Types.map_trait replace_holes) capabilities
 
-let build lookups ~resolved ~tables ~context ~package ~text ~key ~definition ~elaborated
-    ~law_parameters ~checks_body : Core.t =
+let build lookups ~signatures ~resolved ~tables ~context ~package ~text ~key ~definition ~elaborated
+    ~law_parameters ~checks_body ~has_syntax_error : Core.t =
   let tables_with_holes =
     if Tables.exists_type (function Types.Hole -> true | _ -> false) tables then Some tables
     else None
@@ -2101,6 +2105,7 @@ let build lookups ~resolved ~tables ~context ~package ~text ~key ~definition ~el
   let form =
     {
       lookups;
+      signatures;
       resolved;
       tables =
         (match tables_with_holes with
@@ -2118,7 +2123,7 @@ let build lookups ~resolved ~tables ~context ~package ~text ~key ~definition ~el
     }
   in
   {
-    definition = build_definition form ~key ~definition ~elaborated ~checks_body;
+    definition = build_definition form ~key ~definition ~elaborated ~checks_body ~has_syntax_error;
     origin = Written definition.id;
   }
 

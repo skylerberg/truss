@@ -27,6 +27,9 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       declared = Tables.Symbol_table.create 64;
       definitions = Tables.Symbol_table.create 8;
       datatypes = Tables.Type_table.create 16;
+      visible_types = Tables.Type_table.create 16;
+      type_clauses = Tables.Path_table.create 16;
+      callees = Tables.Path_table.create 16;
       stated = Tables.Stated_table.create 64;
       facts = [];
       scopes = [];
@@ -794,7 +797,10 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
   let lookups = context.State.lookups in
   let name = restated.restated_name and receiver = restated.restated_receiver in
   let restated_path = Path.Method { owner = trait.Types.trait; name; receiver } in
-  let list_bounds = Types.list_bounds impl_interface.Types.impl_generics in
+  let list_bounds =
+    Interface.Properties.Bounds.close lookups.interface
+      (Types.list_bounds impl_interface.Types.impl_generics)
+  in
   let declared =
     match
       List.find_opt
@@ -844,7 +850,7 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
             Types.bind_argument parameter argument substitution)
           fixed unbound generic_arguments
       in
-      match Contracts.find_method_contract lookups declared name receiver evidence with
+      match Contracts.find_method_contract context declared name receiver evidence with
       | None -> Facts.raise_bug "`%s` has no contract" (Path.show method_path)
       | Some contract ->
           let read_place (parameter : Mir.parameter) (frame : State.frame) =

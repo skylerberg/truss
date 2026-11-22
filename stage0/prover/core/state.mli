@@ -19,6 +19,18 @@ type contract = {
   restated_clauses : clauses list;
   is_logic_function : bool;
   result_kind : [ `Returns | `Lends ];
+  signature : Types.signature option;
+}
+
+type known_callee = {
+  known_signature : Types.signature option Lazy.t;
+  known_clauses : (Interface.form_origin * clauses option) option Lazy.t;
+}
+
+type declared_callee = {
+  declared_signature : Types.signature;
+  declared_substitution : Types.substitution;
+  declared_clauses : clauses option Lazy.t;
 }
 
 type frame = {
@@ -109,6 +121,9 @@ type context = {
   declared : Logic.sort list Tables.Symbol_table.t;
   definitions : unit Tables.Symbol_table.t;
   datatypes : unit Tables.Type_table.t;
+  visible_types : (Types.type_interface * Types.substitution) option Tables.Type_table.t;
+  type_clauses : (source * Mir.type_clauses option Lazy.t) option Tables.Path_table.t;
+  callees : known_callee Tables.Path_table.t;
   stated : unit Tables.Stated_table.t;
   mutable facts : Logic.term list;
   mutable obligations : Obligation.t list;
