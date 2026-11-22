@@ -1,0 +1,11 @@
+type Wrapper(items: List[Int64])
+
+fn keep(items: own List[Int64]) -> Wrapper {
+  Wrapper(items: own items)
+}
+
+let first: List[Int64] = [1, 2]
+
+theorem kept_has_two() {
+  assert keep(first).items.length() == 2 by evaluation
+}

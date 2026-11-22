@@ -1,4 +1,15 @@
-type template_check = { function_ : Path.t; literals : string list }
+type evaluation = Logic.evaluation =
+  | Constant_value of Path.t
+  | Assertion of { definition : Path.t; condition : int }
+
+type value =
+  | Boolean of bool
+  | Integer of Z.t
+  | Float of float
+  | Constructed of { variant : string option; fields : (string * value) list }
+  | Elements of value list
+
+type run = Evaluated of value | Unfinished of string | Failed of string
 
 type piece =
   | Text of string
@@ -33,4 +44,5 @@ type outcome = {
   obligations : t list;
   holes : (Resolve.Names.key * location) list;
   warnings : Source.Definition_span.t Diagnostic.diagnostic list;
+  evaluation : evaluation option;
 }

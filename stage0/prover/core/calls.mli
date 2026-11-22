@@ -35,13 +35,3 @@ val apply_call :
   through:(Types.ty * Logic.term * Invocation.shape) option ->
   State.passed list ->
   (State.frame * Logic.term) option
-
-val assume_template_check :
-  State.context ->
-  State.frame ->
-  origin:Core.origin ->
-  Invocation.callee ->
-  literals:string list ->
-  template_type:Types.ty ->
-  Logic.term ->
-  unit

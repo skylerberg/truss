@@ -1,0 +1,17 @@
+trait Weighted {
+  fn weight(self) -> UInt64
+}
+
+type Coin(value: UInt64)
+
+impl Weighted for Coin {
+  fn weight(self) -> UInt64 {
+    heaviest.value
+  }
+}
+
+fn weigh[Item: Weighted](item: Item) -> UInt64 {
+  item.weight()
+}
+
+let heaviest: Coin = Coin(value: weigh(Coin(value: 2)))

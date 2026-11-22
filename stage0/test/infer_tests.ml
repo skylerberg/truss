@@ -2442,18 +2442,42 @@ let () =
     (fun () -> expect_fine Fixtures.Infer.constants_of_literals_and_operators);
   Harness.test "a constant builds records, variants, and collections of constants" (fun () ->
       expect_fine (point ^ Fixtures.Infer.constants_of_records_variants_and_collections));
-  Harness.test "a constant cannot call a function" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.constant_calling_a_function "types.not_constant");
-  Harness.test "a constant cannot call a capability" (fun () ->
-      expect_one_diagnostic "let started: Instant = Clock.now()\n" "types.not_constant");
-  Harness.test "a constant cannot call a method" (fun () ->
-      expect_one_diagnostic "let length: UInt64 = \"four\".length()\n" "types.not_constant");
-  Harness.test "a constant cannot index a collection" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.constant_indexing_a_list "types.not_constant");
+  Harness.test
+    "a constant calls functions, methods, operators, indexing, quantifiers, and templates"
+    (fun () -> expect_fine Fixtures.Infer.constants_calling_functions);
   Harness.test "a constant cannot branch" (fun () ->
-      expect_one_diagnostic "let chosen: Int64 = if true { 1 } else { 2 }\n" "types.not_constant");
-  Harness.test "a constant cannot use an operator that a type defines" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.constant_comparing_strings "types.not_constant");
+      expect_one_diagnostic "let chosen: Int64 = if true { 1 } else { 2 }\n" "types.not_constant"
+        ~says:"Move this into a function");
+  Harness.test "a constant cannot hold a lambda" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.constant_calling_a_function_value "types.not_constant"
+        ~at:("fn(value) { value }", 1));
+  Harness.test
+    "a constant's type cannot be or hold a function type, an `any` type, a handle, or state that \
+     tasks share" (fun () ->
+      let reported =
+        List.map
+          (fun (diagnostic : Diagnostic.t) ->
+            (Diagnostic.Code.name diagnostic.code, diagnostic.message))
+          (check
+             (Support.setup [ ("app.main", Fixtures.Infer.constants_that_are_not_data) ])
+             (Support.parse_file "app.main"))
+      in
+      let expected =
+        List.map
+          (fun part ->
+            ( "types.constant_not_data",
+              "A constant is stored in the compiled program as data, so its type cannot be or hold "
+              ^ part ^ "." ))
+          [
+            "a function type";
+            "a function type";
+            "an `any` type";
+            "a handle";
+            "state that tasks share";
+          ]
+      in
+      if reported <> expected then
+        Harness.fail "reported [%s]" (String.concat "; " (List.map snd reported)));
   Harness.test "a constant's arithmetic must stay within its type" (fun () ->
       expect_one_diagnostic "let size: UInt64 = 0 - 1\n" "types.constant_overflow");
   Harness.test "each step of a constant's arithmetic must stay within its type" (fun () ->
@@ -2578,6 +2602,26 @@ let () =
   Harness.test "a function's body can call a function that other packages cannot" (fun () ->
       expect_fine
         (make_helper_source "internal " ^ Fixtures.Infer.public_function_calling_a_private_one))
+
+let () =
+  let expect_not_constant ?says text ~at =
+    expect_one_diagnostic text "types.condition_not_constant" ?says ~at
+  in
+  Harness.test "an assertion by evaluation takes calls, constants, quantifiers, and literals"
+    (fun () -> expect_fine Fixtures.Infer.assertions_by_evaluation);
+  Harness.test "an assertion by evaluation cannot name a local variable" (fun () ->
+      expect_not_constant Fixtures.Infer.assertion_by_evaluation_naming_a_local
+        ~says:"before any variable has a value" ~at:("chosen", 2));
+  Harness.test "an assertion by evaluation cannot mention a type parameter" (fun () ->
+      expect_not_constant Fixtures.Infer.assertion_by_evaluation_naming_a_type_parameter
+        ~says:"cannot mention a type parameter" ~at:("[]", 1));
+  Harness.test "an assertion by evaluation cannot branch" (fun () ->
+      expect_not_constant Fixtures.Infer.assertion_by_evaluation_that_branches
+        ~says:"Move this into a function"
+        ~at:("if true { true } else { false }", 1));
+  Harness.test "the condition of an assertion by evaluation is code, in a theorem too" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.assertion_by_evaluation_with_an_implication
+        "types.specification_only")
 
 let () =
   Harness.test "a bit-vector assertion names only integers and booleans" (fun () ->

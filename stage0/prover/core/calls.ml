@@ -23,7 +23,10 @@ let list_required_fixes (context : State.context) (frame : State.frame) (clauses
   let clause = requirement.clause in
   let is_fixed name =
     List.mem name context.entry
-    || match name with Logic.Symbol.Constant _ | Logic.Symbol.Text_literal _ -> true | _ -> false
+    ||
+    match name with
+    | Logic.Symbol.Constant _ | Evaluated (Constant_value _) | Literal _ -> true
+    | _ -> false
   in
   let is_simple text =
     String.for_all
@@ -1250,51 +1253,3 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
           ^ " may not end: it calls back here, and the prover reads the call without the callee's \
              `decreases` clause.");
       result
-
-let assume_template_check context (frame : State.frame) ~origin (from_template : Invocation.callee)
-    ~literals ~template_type template =
-  match from_template with
-  | Trait_method ({ evidence = Impl { impl; substitution }; _ } as trait_method)
-    when Types.is_empty_substitution substitution ->
-      let { Well_known.name; receiver; _ } =
-        Well_known.locate_method From_template_is_valid_template
-      in
-      let literals_type =
-        Types.make_named (Well_known.make_path List)
-          [ Types.make_named (Well_known.make_path Literal) [] ]
-      in
-      let literals_term =
-        Validity.select_field context template_type None
-          (Well_known.show_field Template_literals)
-          (name_term context template_type template)
-      in
-      Option.iter
-        (fun (_, holds) ->
-          let symbol =
-            Logic.Symbol.Template_check
-              { function_ = Path.Method { owner = impl; name; receiver }; literals }
-          in
-          Facts.declare context (Logic.Constant (symbol, Logic.Bool));
-          Facts.assume context frame (Logic.equal (Logic.Symbol symbol) holds))
-        (Validity.run_as_specification context (fun () ->
-             apply_call context
-               { frame with makes_obligations = false }
-               { origin; type_ = Types.bool }
-               {
-                 callee = Trait_method { trait_method with name; receiver };
-                 lends = None;
-                 uses = Types.no_capabilities;
-               }
-               ~through:None
-               [
-                 {
-                   position = 0;
-                   mode = Read;
-                   shape = Other;
-                   origin = None;
-                   passed_place = None;
-                   type_ = literals_type;
-                   term = literals_term;
-                 };
-               ]))
-  | Trait_method _ | Function _ | Capability_method _ | Intrinsic _ | Indirect _ -> ()

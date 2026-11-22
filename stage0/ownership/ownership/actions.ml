@@ -306,6 +306,9 @@ let evaluate builder ~is_returned (use : Moves.use) =
   match use.operand with
   | Some (Use { place; type_; origin; _ } | Borrow { place; type_; origin; _ }) when use.moves -> (
       match track_place builder place with
+      | Some ({ root = Constant _; _ } as tracked)
+        when builder.context.is_constant && Option.is_none use.passed ->
+          emit builder (Read tracked) origin
       | Some tracked ->
           emit builder
             (Move { place = tracked; type_; is_returned; is_captured = is_captured builder tracked })
@@ -642,10 +645,6 @@ let emit_statement builder (statement : Mir.Graph.statement) =
             (fun destination ->
               hold builder destination (make_value (list_result_views builder called)))
             destination
-      | Template { destination; call = called; _ } ->
-          read_uses builder uses;
-          emit_call builder called origin;
-          hold builder destination (make_value (list_result_views builder called))
       | Lend { part; call = called } ->
           read_uses builder uses;
           emit_call builder called origin;
@@ -662,7 +661,7 @@ let emit_statement builder (statement : Mir.Graph.statement) =
             Hashtbl.replace builder.loop_body_starts builder.position.block
               (builder.position.index + 1)
       | Loan_end loans -> emit builder (End_loans loans) origin
-      | Ghost_assert _ | Path_note _ | Proof _ -> ())
+      | Ghost_assert _ | Path_note _ | Proof _ | Evaluated_assert _ -> ())
 
 let pull builder (iteration : Mir.iteration) origin =
   match iteration with

@@ -1,0 +1,25 @@
+let limit: UInt64 = 10
+let offsets: List[UInt64] = [1, 2]
+
+type Window(start: UInt64, size: UInt64 = limit)
+
+fn pass_limit() -> UInt64 {
+  limit
+}
+
+fn read_an_offset() -> UInt64 {
+  offsets[0]
+}
+
+fn match_limit(value: UInt64) -> Bool {
+  match value {
+    app.main.limit => true
+    _ => false
+  }
+}
+
+fn build_window() -> Window {
+  Window(start: 0)
+}
+
+let doubled: UInt64 = pass_limit() + limit

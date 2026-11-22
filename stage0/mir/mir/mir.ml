@@ -203,6 +203,4 @@ let make_contract_part ~find_type_interface path (form : Core.t) : contract_part
     type_clauses = find_type_clauses ~find_type_interface path form.definition;
   }
 
-module For_testing = struct
-  let expand = Expansion.expand
-end
+let expand = Expansion.expand

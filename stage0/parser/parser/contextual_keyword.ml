@@ -1,9 +1,24 @@
-type t = Amortized | Metric of Language.Metric.t | Calls | O | Potential | By | Bit_vector
+type t =
+  | Amortized
+  | Metric of Language.Metric.t
+  | Calls
+  | O
+  | Potential
+  | By
+  | Bit_vector
+  | Evaluation
 
 let spellings =
   ("amortized", Amortized)
   :: List.map (fun metric -> (Language.Metric.show metric, Metric metric)) Language.Metric.all
-  @ [ ("calls", Calls); ("O", O); ("potential", Potential); ("by", By); ("bit_vector", Bit_vector) ]
+  @ [
+      ("calls", Calls);
+      ("O", O);
+      ("potential", Potential);
+      ("by", By);
+      ("bit_vector", Bit_vector);
+      ("evaluation", Evaluation);
+    ]
 
 let spell word = fst (List.find (fun (_, candidate) -> candidate = word) spellings)
 

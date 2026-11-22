@@ -168,7 +168,7 @@ and statement_kind =
   | Parallel of block
   | Concurrent of block
   | Proof of block
-  | Assert of { value : expression; by_bit_vector : bool }
+  | Assert of { value : expression; by : Language.Proof_method.t option }
   | Statement_error
 
 and loop_clause = { kind : loop_clause_kind; condition : condition option; id : id }

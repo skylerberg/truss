@@ -1,0 +1,59 @@
+fn is_small(value: UInt64) -> Bool {
+  value < 10
+}
+
+theorem three_is_small()
+  ensures is_small(3)
+{
+  assert is_small(3) by evaluation
+}
+
+theorem every_index_is_small(count: UInt64)
+  ensures forall index in 0..count => is_small(4) || index >= 0
+{
+  assert forall index in 0..count => {
+    assert is_small(4) by evaluation
+    is_small(4) || index >= 0
+  }
+}
+
+trait Tagged {
+  fn tag(self) -> UInt64
+
+  fn is_tagged(self) -> Bool
+    ensures result
+  {
+    proof {
+      assert is_small(5) by evaluation
+    }
+    is_small(5)
+  }
+
+  law tag_is_stable(value: Self) {
+    value.tag() == value.tag()
+  }
+}
+
+type Box(value: UInt64)
+
+impl Tagged for Box {
+  fn tag(self) -> UInt64 {
+    self.value
+  }
+}
+
+proof Tagged.tag_is_stable for Box {
+  assert is_small(6) by evaluation
+}
+
+fn count_of[Item](items: List[Item]) -> List[Bool] {
+  proof {
+    assert is_small(7) by evaluation
+  }
+  items.map(fn(_) {
+    proof {
+      assert is_small(8) by evaluation
+    }
+    is_small(8)
+  })
+}

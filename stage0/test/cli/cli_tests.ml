@@ -2248,6 +2248,33 @@ let () =
         capture (fun () -> Cli.Main.run_client [ "truss"; "--no-server"; "check"; "-C"; root ])
       in
       if status <> 0 then fail "did not succeed: %s" output);
+  test "check evaluates a computed constant, and its proofs know the value" (fun () ->
+      let check ensured =
+        let root =
+          make_package
+            [
+              ( "main.truss",
+                Printf.sprintf
+                  "fn to_seconds(hours: UInt64) -> UInt64\n\
+                  \  requires hours <= 24\n\
+                   {\n\
+                  \  hours * 60 * 60\n\
+                   }\n\n\
+                   let seconds_per_day: UInt64 = to_seconds(24)\n\n\
+                   public fn read() -> UInt64\n\
+                  \  ensures result == %d\n\
+                   {\n\
+                  \  seconds_per_day\n\
+                   }\n"
+                  ensured );
+            ]
+        in
+        capture (fun () -> Cli.Main.run_client [ "truss"; "--no-server"; "check"; "-C"; root ])
+      in
+      (match check 86400 with 0, _ -> () | _, output -> fail "did not prove the value: %s" output);
+      match check 86401 with
+      | 1, output when String.includes ~affix:"prover.ensures" output -> ()
+      | _, output -> fail "accepted another value: %s" output);
   test "check rejects an HTML template that interpolates into an event handler or a script"
     (fun () ->
       List.iter

@@ -1,12 +1,12 @@
 type profile = Profile.t = Development | Release
 type t
 type results = { find : string -> string option; add : string -> string -> unit }
-type 'a ran = Ran of 'a | Ran_too_long | Stopped of string
+type 'a ran = Ran of 'a | Reached_todo of string | Stopped of string
 
 val create :
   ?show_file:(Path.file -> string) ->
   ?results:results ->
-  ?evaluation_time_limit_ms:int ->
+  ?evaluation_cpu_time_limit_ms:int ->
   ?programs:string ->
   ?is_worked_on:(Path.package -> bool) ->
   Lowering.lowered_lookups ->
@@ -63,12 +63,7 @@ val list_reached_definitions : Lowering.lowered_lookups -> Path.t -> Path.t list
 val list_reached_todo_types : Lowering.lowered_lookups -> Path.t -> Path.t list
 val make_program_path : t -> string
 val build_program : t -> main:Path.t -> output:string -> is_kept:bool -> (unit, string) result
-
-val evaluate_predicate :
-  t ->
-  function_:Path.t ->
-  arguments:Lowered.Item.argument list ->
-  ((bool, string) result, string) result
+val evaluate : t -> Lowered.Item.t -> (Lowered.static_value ran, string) result
 
 module For_testing : sig
   val is_folded : t -> Path.t -> bool
@@ -82,10 +77,4 @@ module For_testing : sig
 
   val compile_fragment : t -> Lowered.Item.t -> Emit_c.fragment
   val render_unit : t -> Lowered.Item.t -> string
-
-  val evaluate_call :
-    t ->
-    function_:Path.t ->
-    arguments:Lowered.Item.argument list ->
-    (Lowered.static_value ran, string) result
 end

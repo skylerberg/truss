@@ -17,6 +17,7 @@ type context = {
   types : Types.ty Local_table.t;
   mutable parameters : Core.local list;
   implements_capability : bool;
+  is_constant : bool;
   mutable mutable_locals : Core.local list;
   mutable diagnostics : Diagnostic.in_definition list;
   mutable must_be_disjoint : (Core.id list * Core.id list) list;

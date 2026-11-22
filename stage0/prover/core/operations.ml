@@ -5,6 +5,20 @@ let make_float_of_integer (exponent, significand) rounding_mode integer =
     ( To_fp { exponent; significand; rounding_mode = Some rounding_mode },
       [ Logic.Operation (To_real, [ integer ]) ] )
 
+let make_float_literal (exponent, significand) value =
+  let bits =
+    if exponent = 8 then Z.extract (Z.of_int32 (Int32.bits_of_float value)) 0 32
+    else Z.extract (Z.of_int64 (Int64.bits_of_float value)) 0 64
+  in
+  let fraction = significand - 1 in
+  Logic.Operation
+    ( Fp,
+      [
+        Logic.Bits (1, Z.extract bits (exponent + fraction) 1);
+        Logic.Bits (exponent, Z.extract bits fraction exponent);
+        Logic.Bits (fraction, Z.extract bits 0 fraction);
+      ] )
+
 let make_float_equal left right =
   Logic.(Operation (Fp_eq, [ left; right ]) ||| (is_nan left &&& is_nan right))
 

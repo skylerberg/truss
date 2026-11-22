@@ -1,7 +1,9 @@
+let status_of_signal signal = 128 + Sys.signal_to_int signal
+
 let exit_code (status : Unix.process_status) =
   match status with
   | WEXITED code -> code
-  | WSIGNALED signal | WSTOPPED signal -> 128 + Sys.signal_to_int signal
+  | WSIGNALED signal | WSTOPPED signal -> status_of_signal signal
 
 type reader = {
   descriptor : Unix.file_descr;

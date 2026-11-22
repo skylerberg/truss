@@ -64,11 +64,10 @@ let find_type_definition : Ground.ty -> Path.t option = function
   | Any { trait; _ } -> Some trait
   | Function _ | Never -> None
 
-let find_item_definition : Lowered.Item.t -> Path.t option = function
+let rec find_item_definition : Lowered.Item.t -> Path.t option = function
   | Code { path; _ }
   | Constant path
-  | Evaluator path
-  | Call_evaluation { function_ = path; _ }
+  | Assertion { definition = path; _ }
   | Generated
       ( Locked_entry { capability = path; _ }
       | Adapter { function_ = path; _ }
@@ -76,6 +75,7 @@ let find_item_definition : Lowered.Item.t -> Path.t option = function
       | Test_main path )
   | Table (Impl_table { impl = path; _ } | Any_table { impl = path; _ } | Locked_table path) ->
       Some path
+  | Evaluator evaluated -> find_item_definition evaluated
   | Drop ty | Copy ty | Debug ty | Any_drop ty | Any_copy ty | Encode ty -> find_type_definition ty
   | Generated (Entry impl_method | Any_entry impl_method) ->
       Some (Lowered.Item.make_method_path impl_method)
@@ -238,7 +238,6 @@ let show_stored : type a. a stored -> string =
         | Sealed declared -> "sealed " ^ show_key declared
         | Impl declared -> "impl " ^ show_key declared
         | Type declared -> "type " ^ show_key declared
-        | Constant declared -> "constant " ^ show_key declared
         | Instantiations -> "instantiations"
         | Tests -> "tests"
         | Unexported -> "unexported"
@@ -285,7 +284,7 @@ let find_stored_definition : type a. a stored -> Path.t option = function
   | Usage key
   | Ownership key
   | Proof key
-  | Package_check (_, (Sealed key | Impl key | Type key | Constant key)) ->
+  | Package_check (_, (Sealed key | Impl key | Type key)) ->
       Some key.path
   | Constant_value path
   | Type_facts path

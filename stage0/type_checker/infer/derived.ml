@@ -171,7 +171,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
           in
           let text_argument text =
             Operands.build_argument Read
-              (node (Types.make_named (Well_known.make_path String_slice) []) (String text))
+              (node (Types.make_named (Well_known.make_path String_slice) []) (Literal (Text text)))
           in
           let count_argument count =
             Operands.build_argument Read

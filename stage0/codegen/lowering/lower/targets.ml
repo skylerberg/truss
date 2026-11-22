@@ -567,23 +567,31 @@ let lower_literal state ty (literal : literal) : Lowered.operand =
   | Float_value value, Float32 -> Constant (Float32 (Int32.bits_of_float value))
   | _ -> Definitions.raise_bug "a literal of type %s" (Ground.to_string ty)
 
-let lower_literal_place state (ty : Ground.ty) text =
-  let bytes : Lowered.operand = Constant (Bytes text) in
-  let length = Lowered.make_uint64_constant (String.length text) in
-  let build part_ty value =
-    let built = Lowering.allocate_local state (Value part_ty) in
-    Emit_c.Ir_builder.emit state.builder (Assign (built, value));
-    built
+let rec make_static_literal monomorphic (ty : Ground.ty) (literal : Language.Literal.t) :
+    Lowered.static_value =
+  let make_elements element : Lowered.static_value list =
+    match literal with
+    | Text text ->
+        List.init (String.length text) (fun index ->
+            Lowered.Static_scalar (Integer (UInt8, Z.of_int (Char.code text.[index]))))
+    | Elements elements -> List.map (make_static_literal monomorphic element) elements
   in
-  let field, part =
-    match (ty, Monomorphic.compute_shape state.context.monomorphic ty) with
-    | Named { path; _ }, Record [ (field, Typed storage) ] when Well_known.is String path ->
-        (field, build storage (Storage.build_borrowed storage ~buffer:bytes ~length))
-    | _, Record [ (field, Typed view) ] ->
-        (field, build view (Storage.build_view view ~buffer:bytes ~length))
-    | _ -> Definitions.raise_bug "a string literal of type %s" (Ground.to_string ty)
-  in
-  build ty (Build { ty; variant = None; fields = [ (field, Copy part) ] })
+  match (Storage.find_storage_element ty, Storage.find_view_element ty) with
+  | Some element, _ ->
+      let elements = make_elements element in
+      Static_storage { element; elements; capacity = List.length elements }
+  | None, Some element -> Static_view { element; elements = make_elements element }
+  | None, None -> (
+      match Monomorphic.compute_shape monomorphic ty with
+      | Record [ (field, Typed part) ] ->
+          Static_record [ (field, make_static_literal monomorphic part literal) ]
+      | _ -> Definitions.raise_bug "a literal of type %s" (Ground.to_string ty))
+
+let lower_literal_place (state : Lowering.state) (ty : Ground.ty) literal =
+  let built = Lowering.allocate_local state (Value ty) in
+  Emit_c.Ir_builder.emit state.builder
+    (Assign (built, Data { ty; value = make_static_literal state.context.monomorphic ty literal }));
+  built
 
 let lower_owner_of_view (state : Lowering.state) ~(owner : Ground.ty) ~(view : Ground.ty)
     (viewed : Lowered.place) (destination : Lowered.place) =
@@ -621,52 +629,6 @@ let read_list_parts monomorphic ty =
       | Some element -> (field, storage, element)
       | None -> Definitions.raise_bug "%s is not a list" (Ground.to_string ty))
   | _ -> Definitions.raise_bug "%s is not a list" (Ground.to_string ty)
-
-let lower_list_into (state : Lowering.state) ty destination ~site fills =
-  let field, _, element = read_list_parts state.context.monomorphic ty in
-  let storage_place = Lowered.project destination (Field field) in
-  let lower operation arguments destination =
-    ignore
-      (Intrinsics.lower state.context.env state.builder state.context.types operation
-         ~type_arguments:[ element ] arguments ~destination ~site
-         ~trace:(Lowering.find_panic_trace state))
-  in
-  lower (Buffer Storage_with_capacity)
-    [ Value (Lowered.make_uint64_constant (List.length fills)) ]
-    (Some storage_place);
-  List.iter
-    (fun fill ->
-      let value = Lowering.allocate_temporary state element in
-      fill value;
-      lower (Buffer Storage_push)
-        [ Place storage_place; Value (Lowering.make_owned_operand state value element) ]
-        None)
-    fills
-
-let lower_literals_into (state : Lowering.state) literals_ty destination ~site literals =
-  let _, _, literal_ty = read_list_parts state.context.monomorphic literals_ty in
-  let text_field = Well_known.show_field Literal_text in
-  let text_ty =
-    match Monomorphic.compute_shape state.context.monomorphic literal_ty with
-    | Record fields -> (
-        match List.assoc_opt text_field fields with
-        | Some (Memory_layout.Typed ty) -> ty
-        | _ -> Definitions.raise_bug "%s has no field %s" (Ground.to_string literal_ty) text_field)
-    | _ -> Definitions.raise_bug "%s is not a record" (Ground.to_string literal_ty)
-  in
-  lower_list_into state literals_ty destination ~site
-    (List.map
-       (fun text value ->
-         Emit_c.Ir_builder.emit state.builder
-           (Assign
-              ( value,
-                Build
-                  {
-                    ty = literal_ty;
-                    variant = None;
-                    fields = [ (text_field, Copy (lower_literal_place state text_ty text)) ];
-                  } )))
-       literals)
 
 let pull_loop state ~(option : Ground.ty) ~(call_next : Lowered.place -> unit)
     ~(body : Lowered.place -> unit) =

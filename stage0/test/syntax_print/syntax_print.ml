@@ -310,9 +310,14 @@ and show_statement (statement : Syntax.statement) =
   | Parallel body -> make_form "parallel" [ show_block body ]
   | Concurrent body -> make_form "concurrent" [ show_block body ]
   | Proof body -> make_form "proof" [ show_block body ]
-  | Assert { value; by_bit_vector } ->
+  | Assert { value; by } ->
       make_form "assert"
-        (show_expression value :: (if by_bit_vector then [ "by"; "bit_vector" ] else []))
+        (show_expression value
+        ::
+        (match by with
+        | Some Bit_vector -> [ "by"; "bit_vector" ]
+        | Some Evaluation -> [ "by"; "evaluation" ]
+        | None -> []))
   | Statement_error -> "error"
 
 and show_constant = function

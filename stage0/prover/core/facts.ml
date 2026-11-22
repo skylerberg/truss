@@ -567,6 +567,65 @@ let reject_uncompared_recursion (context : State.context) frame location recursi
           (Logic.Boolean false))
       recursive_callee
 
+let is_constant_expression (code : Mir.t) =
+  let is_made_for_a_literal : Mir.operand Core.target -> bool = function
+    | Function { path; _ } -> Path.equal path (Well_known.make_method_path List_from_storage)
+    | Trait_method { trait; _ } ->
+        Path.equal trait.trait (Well_known.make_path From_elements)
+        || Path.equal trait.trait (Well_known.make_path From_entries)
+    | Intrinsic _ -> true
+    | Capability_method _ | Indirect _ -> false
+  in
+  let calls_function = ref false in
+  Mir.iter_code
+    (fun statement ->
+      match Mir.find_callee statement with
+      | Some callee when not (is_made_for_a_literal callee.target) -> calls_function := true
+      | Some _ | None -> ())
+    code;
+  not !calls_function
+
+let is_evaluated_constant (context : State.context) path code =
+  (not (is_constant_expression code))
+  && context.lookups.list_recursion_group path = []
+  && Option.is_none
+       (Types.find_specification_only_type
+          (Interface.Definition.read_constant_type context.lookups.interface path))
+
+let describe_constant_cycle ~cyclic (dependency : Mir.Call_edges.dependency) =
+  let cyclic_name = Path.show cyclic in
+  let consequence = Printf.sprintf "so `%s` would be computed from itself." cyclic_name in
+  let verb, name, part =
+    match dependency.kind with
+    | Read -> ("reads", Path.show dependency.path, "value")
+    | Direct_call -> ("calls", show_callee dependency.path, "code")
+    | Supplied _ -> ("uses", show_callee dependency.path, "code")
+  in
+  match (dependency.omitted_field, Path.equal dependency.path cyclic) with
+  | None, true -> Printf.sprintf "This %s `%s` in its own value, %s" verb name consequence
+  | None, false ->
+      Printf.sprintf "This %s `%s`, whose %s depends on `%s`, %s" verb name part cyclic_name
+        consequence
+  | Some field, true ->
+      Printf.sprintf "This leaves out the field `%s`, whose default %s `%s`, %s" field verb name
+        consequence
+  | Some field, false ->
+      Printf.sprintf
+        "This leaves out the field `%s`, whose default %s `%s`. The %s of `%s` depends on `%s`, %s"
+        field verb name part name cyclic_name consequence
+
+let reject_constant_cycle (context : State.context) (frame : State.frame) (code : Mir.t) =
+  if context.lookups.list_recursion_group context.node <> [] then
+    List.iter
+      (fun (dependency : Mir.Call_edges.dependency) ->
+        if is_in_recursion_group context dependency.path then
+          oblige context frame Constant_cycle (Node dependency.origin)
+            [ Text (describe_constant_cycle ~cyclic:context.node dependency) ]
+            (Logic.Boolean false))
+      (Mir.Call_edges.list_dependencies
+         { interface = context.lookups.interface; mir = context.lookups.mir }
+         Types.no_substitution code)
+
 let quote (source : State.source) origin = Obligation.Quote (source.key, origin)
 
 let quote_origin (context : State.context) (frame : State.frame) origin =

@@ -90,14 +90,16 @@ let list_uses ~is_moving (statement : Mir.Graph.statement) =
   | Basic (Call { destination; call }) ->
       list_call_uses ~is_moving call
       @ Option.fold ~none:[] ~some:(list_index_uses ~is_moving) destination
-  | Basic (Lend { call; _ } | Template { call; _ }) -> list_call_uses ~is_moving call
+  | Basic (Lend { call; _ }) -> list_call_uses ~is_moving call
   | Basic (Assert operand | Echo operand) -> list_operand_uses ~is_moving ~by_value:false operand
   | Provide_start { provided; _ } ->
       List.concat_map
         (fun (provided : Mir.provided) ->
           list_operand_uses ~is_moving ~by_value:false provided.value)
         provided
-  | Basic (Live _ | Dead _ | Loan_start _ | Loan_end _ | Ghost_assert _ | Path_note _ | Proof _)
+  | Basic
+      ( Live _ | Dead _ | Loan_start _ | Loan_end _ | Ghost_assert _ | Path_note _ | Proof _
+      | Evaluated_assert _ )
   | Provide_end ->
       []
 
@@ -145,10 +147,9 @@ let list_inits (statement : Mir.Graph.statement) : Mir.place list =
   | Basic (Assign { target; _ }) -> [ target ]
   | Basic (Call { destination; _ }) -> Option.to_list destination
   | Basic (Lend { part; _ }) -> [ { root = Local part; projections = [] } ]
-  | Basic (Template { destination; _ }) -> [ destination ]
   | Basic
       ( Live _ | Dead _ | Assert _ | Echo _ | Loan_start _ | Loan_end _ | Ghost_assert _
-      | Path_note _ | Proof _ )
+      | Path_note _ | Proof _ | Evaluated_assert _ )
   | Provide_start _ | Provide_end ->
       []
 

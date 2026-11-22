@@ -22,6 +22,7 @@
   emit_c
   unicode
   backend
+  evaluations
   lowering
   database
   solver

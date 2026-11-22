@@ -14,7 +14,8 @@ val apply_map_literal :
   (Core.origin option * Logic.term * Logic.term) list ->
   State.frame * Logic.term
 
-val make_text_value : State.context -> State.frame -> Types.ty -> string -> Logic.term
+val make_literal_value :
+  State.context -> State.frame -> Types.ty -> Language.Literal.t -> Logic.term
 
 val make_owner_of_view :
   State.context -> State.frame -> view:Types.ty -> owner:Types.ty -> Logic.term -> Logic.term
@@ -62,4 +63,9 @@ val apply_specification_function :
   State.frame * Logic.term
 
 val copy_value :
-  ?literal:string -> State.context -> State.frame -> Types.ty -> Logic.term -> State.frame
+  ?literal:Language.Literal.t ->
+  State.context ->
+  State.frame ->
+  Types.ty ->
+  Logic.term ->
+  State.frame

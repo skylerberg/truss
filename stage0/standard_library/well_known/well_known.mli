@@ -161,7 +161,6 @@ type field =
   | Range_inclusive
   | Template_literals
   | Template_parts
-  | Literal_text
   | Entry_key
   | Entry_value
   | Option_some_value

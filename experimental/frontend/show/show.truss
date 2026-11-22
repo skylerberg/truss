@@ -562,10 +562,10 @@ fn show_statement(statement: syntax.Statement) -> String
     Parallel(body) => make_form("parallel", parts: [show_block(body)])
     Concurrent(body) => make_form("concurrent", parts: [show_block(body)])
     Proof(body) => make_form("proof", parts: [show_block(body)])
-    Assert(value, by_bit_vector) => if by_bit_vector {
-      make_form("assert", parts: [show_expression(value), "by", "bit_vector"])
-    } else {
-      make_form("assert", parts: [show_expression(value)])
+    Assert(value, by) => match by {
+      Some(BitVector) => make_form("assert", parts: [show_expression(value), "by", "bit_vector"])
+      Some(Evaluation) => make_form("assert", parts: [show_expression(value), "by", "evaluation"])
+      None => make_form("assert", parts: [show_expression(value)])
     }
     StatementError => "error"
   }

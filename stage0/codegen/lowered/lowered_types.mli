@@ -139,6 +139,14 @@ type target =
   | Evidence_call of { evidence : operand; capability : Path.t; slot : int; signature : signature }
   | Table_call of { table : operand; value : operand; slot : int; signature : signature }
 
+type static_value =
+  | Static_scalar of constant
+  | Static_record of (string * static_value) list
+  | Static_variant of string * (string * static_value) list
+  | Static_array of static_value list
+  | Static_storage of { element : Ground.ty; elements : static_value list; capacity : int }
+  | Static_view of { element : Ground.ty; elements : static_value list }
+
 type rvalue =
   | Use of operand
   | Unary of unary * operand
@@ -148,6 +156,7 @@ type rvalue =
   | Build of { ty : Ground.ty; variant : string option; fields : (string * operand) list }
   | Is_variant of place * string
   | Function_value of { code : function_ref; environment : operand option }
+  | Data of { ty : Ground.ty; value : static_value }
 
 type failure = Panic | Assertion | Todo
 type destination = Discarded | Returned of place | Written of place
@@ -185,14 +194,6 @@ type terminator =
       reported : operand option;
       trace : operand option;
     }
-
-type static_value =
-  | Static_scalar of constant
-  | Static_record of (string * static_value) list
-  | Static_variant of string * (string * static_value) list
-  | Static_array of static_value list
-  | Static_storage of { element : Ground.ty; elements : static_value list }
-  | Static_view of { element : Ground.ty; elements : static_value list }
 
 type data = { data_item : Item.t; ty : Ground.ty; value : static_value }
 

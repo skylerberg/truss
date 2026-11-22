@@ -13,10 +13,6 @@ module Grown_node_table = Hashtbl.Make (Structural_key.Make (struct
   type t = (Path.t * int) * bool
 end))
 
-module Field_default_table = Hashtbl.Make (Structural_key.Make (struct
-  type t = Path.t * string option * string
-end))
-
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Package_checks" format
 
 type placed = { key : Resolve.Names.key; diagnostic : Diagnostic.in_definition }
@@ -633,122 +629,6 @@ let check_type lookups ~list_contained (declaration : Resolve.Names.declaration)
   let definition, spans = read_definition lookups declaration in
   check_recursion lookups ~list_contained declaration spans definition
 
-let read_constant_value (lookups : Lookups.t) path =
-  match Option.map lookups.read_core (lookups.interface.names.find_key path) with
-  | Some { definition = Constant (Some value); _ } -> Some value
-  | _ -> None
-
-let find_field_default (lookups : Lookups.t) (type_ : Types.ty) variant field =
-  match type_ with
-  | Named { path; _ } -> (
-      match Option.map lookups.read_core (lookups.interface.names.find_key path) with
-      | Some { definition = Type { defaults; _ }; _ } ->
-          List.find_map
-            (fun (default_variant, default_field, value) ->
-              if
-                Option.equal String.equal default_variant variant
-                && String.equal default_field field
-              then Some (path, value)
-              else None)
-            defaults
-      | _ -> None)
-  | _ -> None
-
-type named_constant = { origin : Core.origin; constant : Path.t; omitted_field : string option }
-
-let list_named_constants (lookups : Lookups.t) (value : Core.expression) =
-  let named = ref [] in
-  let entered_defaults = Field_default_table.create 8 in
-  let rec visit ~through (value : Core.expression) =
-    Core_walk.walk_expression
-      {
-        Core_walk.ignore_all with
-        place =
-          (function
-          | Constant { path; origin; _ } ->
-              let origin, omitted_field =
-                match through with
-                | Some (origin, field) -> (origin, Some field)
-                | None -> (origin, None)
-              in
-              named := { origin; constant = path; omitted_field } :: !named
-          | Local _ | Field _ | Element _ | Range _ | Lent _ | Temporary _ -> ());
-        expression =
-          (fun (node : Core.expression) ->
-            match node.kind with
-            | Construct { variant; fields } ->
-                List.iter
-                  (fun (field, operand) ->
-                    if Option.is_none operand then
-                      match find_field_default lookups node.type_ variant field with
-                      | Some (type_path, default) ->
-                          let entered = (type_path, variant, field) in
-                          if not (Field_default_table.mem entered_defaults entered) then begin
-                            Field_default_table.replace entered_defaults entered ();
-                            let through =
-                              match through with
-                              | Some _ -> through
-                              | None -> Some (node.origin, field)
-                            in
-                            visit ~through default
-                          end
-                      | None -> ())
-                  fields
-            | _ -> ());
-      }
-      value
-  in
-  visit ~through:None value;
-  List.sort_uniq compare !named
-
-let describe_constant_cycle ~cyclic (named : named_constant) =
-  let is_itself = Path.equal named.constant cyclic in
-  let constant = Path.show named.constant and cyclic = Path.show cyclic in
-  let consequence = Printf.sprintf "so `%s` would be computed from itself." cyclic in
-  match (named.omitted_field, is_itself) with
-  | None, true -> Printf.sprintf "This reads `%s` in its own value, %s" constant consequence
-  | None, false ->
-      Printf.sprintf "This reads `%s`, whose value depends on `%s`, %s" constant cyclic consequence
-  | Some field, true ->
-      Printf.sprintf "This leaves out the field `%s`, whose default reads `%s`, %s" field constant
-        consequence
-  | Some field, false ->
-      Printf.sprintf
-        "This leaves out the field `%s`, whose default reads `%s`. The value of `%s` depends on \
-         `%s`, %s"
-        field constant constant cyclic consequence
-
-let check_constant (lookups : Lookups.t) (declaration : Resolve.Names.declaration) =
-  let path = declaration.key.path in
-  match read_constant_value lookups path with
-  | None -> []
-  | Some value ->
-      let visited = Path_table.create 16 in
-      let rec depends_on_constant named =
-        Path.equal named path
-        || (not (Path_table.mem visited named))
-           && begin
-             Path_table.replace visited named ();
-             match read_constant_value lookups named with
-             | Some named_value ->
-                 List.exists
-                   (fun (further : named_constant) -> depends_on_constant further.constant)
-                   (list_named_constants lookups named_value)
-             | None -> false
-           end
-      in
-      let key = declaration.key in
-      let spans = lookups.interface.names.read_spans key in
-      List.filter_map
-        (fun (named : named_constant) ->
-          if depends_on_constant named.constant then
-            Some
-              (make_diagnostic key Constant_cycle
-                 spans.(Core_walk.locate_origin named.origin)
-                 (describe_constant_cycle ~cyclic:path named))
-          else None)
-        (list_named_constants lookups value)
-
 let must_be_used (lookups : Lookups.t) (declaration : Resolve.Names.declaration) =
   (match declaration.visibility with Private | Internal -> true | Public | Public_opaque -> false)
   && declaration.key.ordinal = 0
@@ -875,7 +755,6 @@ type check =
   | Sealed of Resolve.Names.key
   | Impl of Resolve.Names.key
   | Type of Resolve.Names.key
-  | Constant of Resolve.Names.key
   | Instantiations
   | Tests
   | Unexported
@@ -889,7 +768,6 @@ let list_checks (declarations : Resolve.Names.declaration list) =
         match declaration.kind with
         | Impl -> [ Sealed declaration.key; Impl declaration.key ]
         | Type -> [ Type declaration.key ]
-        | Constant | Member_constant -> [ Constant declaration.key ]
         | _ -> [])
     declarations
   @ [ Instantiations; Tests; Unexported; Dependencies ]
@@ -932,7 +810,6 @@ let run (lookups : Lookups.t) package check =
   | Sealed key -> check_definition lookups key (check_sealed lookups)
   | Impl key -> check_definition lookups key (check_impl lookups ~list_contained)
   | Type key -> check_definition lookups key (check_type lookups ~list_contained)
-  | Constant key -> check_definition lookups key (check_constant lookups)
   | Instantiations -> Placed (check_instantiation lookups package)
   | Tests -> Placed (check_tests lookups package)
   | Unexported -> Placed (check_unexported lookups package)

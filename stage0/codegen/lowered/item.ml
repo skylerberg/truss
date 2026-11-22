@@ -7,8 +7,8 @@ type t =
   | Any_drop of Ground.ty
   | Any_copy of Ground.ty
   | Encode of Ground.ty
-  | Evaluator of Path.t
-  | Call_evaluation of { function_ : Path.t; arguments : argument list }
+  | Evaluator of t
+  | Assertion of { definition : Path.t; condition : int }
   | Generated of generated
   | Table of table
 
@@ -28,8 +28,6 @@ and table =
   | Impl_table of { impl : Path.t; type_arguments : Ground.argument list }
   | Any_table of { impl : Path.t; type_arguments : Ground.argument list }
   | Locked_table of Path.t
-
-and argument = Integer of Z.t | Literals of string list
 
 and impl_method = {
   impl : Path.t;
@@ -66,11 +64,9 @@ let rec to_string = function
   | Encode ty -> "encode " ^ Ground.to_string ty
   | Any_drop ty -> "any drop " ^ Ground.to_string ty
   | Any_copy ty -> "any copy " ^ Ground.to_string ty
-  | Evaluator path -> "evaluator " ^ Path.show path
-  | Call_evaluation { function_; arguments } ->
-      "evaluation " ^ Path.show function_ ^ "("
-      ^ String.concat ", " (List.map show_argument arguments)
-      ^ ")"
+  | Evaluator evaluated -> "evaluator " ^ to_string evaluated
+  | Assertion { definition; condition } ->
+      Printf.sprintf "assertion %d of %s" condition (Path.show definition)
   | Generated (Adapter { function_; instantiation; _ }) ->
       "adapter " ^ to_string (make_code function_ instantiation)
   | Generated (Any_entry impl_method) -> "any entry " ^ to_string (make_method_code impl_method)
@@ -84,10 +80,6 @@ let rec to_string = function
   | Table (Locked_table capability) -> "locked table " ^ Path.show capability
   | Table (Impl_table { impl; type_arguments }) ->
       "table " ^ Path.show impl ^ show_arguments type_arguments
-
-and show_argument = function
-  | Integer value -> Z.to_string value
-  | Literals literals -> "[" ^ String.concat ", " (List.map (Printf.sprintf "%S") literals) ^ "]"
 
 and show_arguments = function
   | [] -> ""

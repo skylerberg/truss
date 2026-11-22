@@ -7,8 +7,8 @@ type t =
   | Any_drop of Ground.ty
   | Any_copy of Ground.ty
   | Encode of Ground.ty
-  | Evaluator of Path.t
-  | Call_evaluation of { function_ : Path.t; arguments : argument list }
+  | Evaluator of t
+  | Assertion of { definition : Path.t; condition : int }
   | Generated of generated
   | Table of table
 
@@ -28,8 +28,6 @@ and table =
   | Impl_table of { impl : Path.t; type_arguments : Ground.argument list }
   | Any_table of { impl : Path.t; type_arguments : Ground.argument list }
   | Locked_table of Path.t
-
-and argument = Integer of Z.t | Literals of string list
 
 and impl_method = {
   impl : Path.t;

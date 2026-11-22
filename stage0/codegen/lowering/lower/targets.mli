@@ -134,16 +134,17 @@ val lower_item_call :
 type literal = Integer_value of Z.t | Float_value of float
 
 val lower_literal : Lowering.state -> Ground.ty -> literal -> Lowered.operand
-val lower_literal_place : Lowering.state -> Ground.ty -> string -> Lowered.place
+
+val make_static_literal :
+  Monomorphic.context -> Ground.ty -> Language.Literal.t -> Lowered.static_value
+
+val lower_literal_place : Lowering.state -> Ground.ty -> Language.Literal.t -> Lowered.place
 
 val lower_owner_of_view :
   Lowering.state -> owner:Ground.ty -> view:Ground.ty -> Lowered.place -> Lowered.place -> unit
 
 val lower_static_constant : Lowering.state -> Path.t -> Lowered.place
 val read_list_parts : Monomorphic.context -> Ground.ty -> string * Ground.ty * Ground.ty
-
-val lower_literals_into :
-  Lowering.state -> Ground.ty -> Lowered.place -> site:Lowered.site -> string list -> unit
 
 val pull_loop :
   Lowering.state ->

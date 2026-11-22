@@ -1,3 +1,0 @@
-let numbers: List[Int64] = [1, 2]
-
-let first: Int64 = numbers[0]

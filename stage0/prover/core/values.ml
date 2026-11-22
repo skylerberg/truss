@@ -201,35 +201,50 @@ let apply_map_literal context frame ~(ty : Types.ty) ~location terms =
 
 let literal_bytes_limit = 256
 
-let make_text_value context frame (ty : Types.ty) text =
-  let symbol = Logic.Symbol.Text_literal { type_ = ty; text } in
+let rec make_literal_value context frame (ty : Types.ty) (value : Language.Literal.t) =
+  let symbol = Logic.Symbol.Literal { type_ = ty; value } in
   let literal = Logic.Symbol symbol in
   Facts.run_once context (Value_of symbol) (fun () ->
       Facts.declare context (Logic.Constant (symbol, Facts.declare_sort context ty));
       Validity.assume_valid context
         { frame with condition = Logic.Boolean true; bound = []; binders = [] }
         ty literal;
-      let byte = Types.make_builtin UInt8 in
+      let element, count, elements =
+        match (value, ty) with
+        | Text text, _ ->
+            ( Types.make_builtin UInt8,
+              String.length text,
+              if String.length text <= literal_bytes_limit then
+                List.init (String.length text) (fun index -> Logic.int (Char.code text.[index]))
+              else [] )
+        | Elements elements, Types.Named { arguments = [ Types.Type element ]; _ } ->
+            ( element,
+              List.length elements,
+              List.map (make_literal_value context frame element) elements )
+        | Elements _, _ -> Facts.raise_bug "a literal of elements has the type `%s`" (Types.show ty)
+      in
       let assume_holds model =
         Facts.add_fact context
-          (Logic.equal
-             (Models.make_sequence_length context byte model)
-             (Logic.int (String.length text)));
-        if String.length text <= literal_bytes_limit then
-          String.iteri
-            (fun index character ->
-              match Models.index_sequence context byte model (Logic.int index) with
-              | Some at -> Facts.add_fact context (Logic.equal at (Logic.int (Char.code character)))
-              | None -> ())
-            text
+          (Logic.equal (Models.make_sequence_length context element model) (Logic.int count));
+        List.iteri
+          (fun index at_index ->
+            match Models.index_sequence context element model (Logic.int index) with
+            | Some at -> Facts.add_fact context (Logic.equal at at_index)
+            | None -> ())
+          elements
       in
-      Option.iter assume_holds (Models.find_model context ty literal ~element:byte);
+      Option.iter assume_holds (Models.find_model context ty literal ~element);
       match Facts.find_constructors context ty with
-      | Some [ (None, [ (field, Types.Named { path; arguments = [ Types.Type element ] }) ]) ]
-        when Well_known.find_builtin_type path = Some Storage && Types.equal element byte ->
-          assume_holds
-            (Intrinsics.make_buffer_model context Storage byte
-               (Logic.Apply (Facts.make_selector_symbol ty None field, [ literal ])))
+      | Some [ (None, [ (field, field_type) ]) ] -> (
+          let part = Logic.Apply (Facts.make_selector_symbol ty None field, [ literal ]) in
+          match field_type with
+          | Types.Named { path; arguments = [ Types.Type stored ] }
+            when Option.is_some (Well_known.find_builtin_type path) ->
+              if Well_known.find_builtin_type path = Some Storage && Types.equal stored element then
+                assume_holds (Intrinsics.make_buffer_model context Storage element part)
+          | _ ->
+              Facts.add_fact context
+                (Logic.equal part (make_literal_value context frame field_type value)))
       | _ -> ());
   literal
 
@@ -420,7 +435,10 @@ let evaluate_constant (context : State.context) frame path =
     (Contracts.find_source context.lookups path, Mir.read_initializer context.lookups.mir path)
   with
   | Some (constant_source, _, _), Some { form = code; _ } ->
-      let symbol = Logic.Symbol.Constant path in
+      let symbol : Logic.symbol =
+        if Facts.is_evaluated_constant context path code then Evaluated (Constant_value path)
+        else Constant path
+      in
       let empty =
         {
           frame with
@@ -610,6 +628,15 @@ let apply_specification_function context frame ~location (measure : Core.specifi
   | _ -> Facts.raise_unsupported location "this specification function"
 
 let copy_value ?literal (context : State.context) frame ty term =
+  let literal =
+    match (literal, ty) with
+    | Some (Language.Literal.Elements _), Types.Named { arguments = [ Types.Type element ]; _ }
+      when not
+             (Interface.Impls.is_plain context.lookups.interface ~list_bounds:context.bounds element)
+      ->
+        None
+    | literal, _ -> literal
+  in
   if
     context.counters = []
     || Interface.Impls.is_plain context.lookups.interface ~list_bounds:context.bounds ty
@@ -630,10 +657,13 @@ let copy_value ?literal (context : State.context) frame ty term =
               with Facts.Unsupported _ -> Costs.zero
             in
             Costs.minus (Costs.plus time (Logic.int 1)) copy_potential
-        | Some text, Metric (Allocations | Allocated_bytes), Units
-        | Some text, Metric Allocations, _ ->
-            Logic.int (if text = "" then 0 else 1)
-        | Some text, Metric Allocated_bytes, (At_most | Exactly) -> Logic.int (String.length text)
+        | Some literal, Metric (Allocations | Allocated_bytes), Units
+        | Some literal, Metric Allocations, _ ->
+            Logic.int (match literal with Text "" | Elements [] -> 0 | Text _ | Elements _ -> 1)
+        | Some (Text text), Metric Allocated_bytes, (At_most | Exactly) ->
+            Logic.int (String.length text)
+        | Some (Elements _), Metric Allocated_bytes, (At_most | Exactly) ->
+            Operations.declare_unknown_amount context frame counter
         | Some _, Calls _, _ -> Costs.zero
         | None, Metric ((Allocations | Allocated_bytes) as metric), _ ->
             Amounts.compute_amount_within context frame counter (declare_copy_cost metric)

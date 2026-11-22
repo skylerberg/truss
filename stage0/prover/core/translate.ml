@@ -82,6 +82,7 @@ let make_outcome (context : State.context) =
     Obligation.obligations = List.rev context.obligations;
     holes = List.rev context.holes;
     warnings = [];
+    evaluation = None;
   }
 
 let make_empty_frame source =
@@ -701,6 +702,7 @@ let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_sub
       List.sort_uniq compare
         (List.concat_map (fun (outcome : Obligation.outcome) -> outcome.holes) outcomes);
     warnings = [];
+    evaluation = None;
   }
 
 let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~for_type ~proofs ~at
@@ -1091,12 +1093,19 @@ let translate_constant (lookups : Lookups.t) (source : State.source) ~path =
     make_context lookups ~home ~current:path ~terminates:false ~measures:[]
       ~inherits_precondition:false
   in
-  (match Mir.read_initializer lookups.mir path with
+  match Mir.read_initializer lookups.mir path with
   | Some { form = code; _ } ->
+      let frame = make_empty_frame source in
+      Facts.reject_constant_cycle context frame code;
       ignore
-        (Amounts.run_code context (make_empty_frame source) code
-           ~type_:(Interface.Definition.read_constant_type context.lookups.interface path))
-  | None -> Facts.raise_bug "the constant `%s` has no MIR" (Path.show path));
-  make_outcome context
+        (Amounts.run_code context frame code
+           ~type_:(Interface.Definition.read_constant_type context.lookups.interface path));
+      {
+        (make_outcome context) with
+        evaluation =
+          (if Facts.is_evaluated_constant context path code then Some (Constant_value path)
+           else None);
+      }
+  | None -> Facts.raise_bug "the constant `%s` has no MIR" (Path.show path)
 
 let translate_theorem lookups source ~path = translate_function ~proof:true lookups source ~path

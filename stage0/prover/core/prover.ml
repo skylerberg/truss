@@ -5,8 +5,8 @@ module Key_table = Hashtbl.Make (Structural_key.Make (struct
   type t = Resolve.Names.key
 end))
 
-module Template_check_table = Hashtbl.Make (Structural_key.Make (struct
-  type t = Obligation.template_check
+module Evaluation_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Obligation.evaluation
 end))
 
 type proof =
@@ -26,7 +26,7 @@ let translate_impl (lookups : Lookups.t) (key : Resolve.Names.key) source =
   match Contracts.list_impl_holes lookups key with
   | _ :: _ as holes ->
       if Contracts.has_impl_obligations lookups interface.implements.trait then
-        [ { Obligation.obligations = []; holes; warnings = [] } ]
+        [ { Obligation.obligations = []; holes; warnings = []; evaluation = None } ]
       else []
   | [] ->
       Translate.translate_laws lookups source ~impl:key.path ~trait:interface.implements
@@ -159,8 +159,10 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
                   List.sort_uniq compare
                     (List.concat_map (fun (outcome : Obligation.outcome) -> outcome.holes) outcomes);
                 warnings;
+                evaluation = None;
               })
-    | Constant -> Obligations (Translate.translate_constant lookups source ~path:key.path)
+    | Constant | Member_constant ->
+        Obligations (Translate.translate_constant lookups source ~path:key.path)
     | Impl ->
         let outcomes = translate_impl lookups key source in
         Obligations
@@ -169,6 +171,7 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
               List.concat_map (fun (outcome : Obligation.outcome) -> outcome.obligations) outcomes;
             holes = List.concat_map (fun (outcome : Obligation.outcome) -> outcome.holes) outcomes;
             warnings = [];
+            evaluation = None;
           }
     | Type -> (
         let has_defaults () =
@@ -187,7 +190,7 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
         | Some { form = { potential; _ }; _ } when Option.is_some potential || has_defaults () ->
             Obligations (Translate.translate_type lookups source ~path:key.path)
         | Some _ | None -> Not_proven_here)
-    | Trait | Capability | Member_constant | Law_proof -> Not_proven_here
+    | Trait | Capability | Law_proof -> Not_proven_here
   with Facts.Unsupported { location; construct; foreign_definition } ->
     Unsupported
       ( location,
@@ -423,18 +426,18 @@ let explain_unknown = function
          proof or a counterexample. Z3 gives the reason `%s`."
         reason
 
-let list_template_checks = function
+let find_declared_evaluation : Logic.declaration -> Obligation.evaluation option = function
+  | Constant (Evaluated evaluation, _) -> Some evaluation
+  | Constant _ | Function _ | Datatype _ | Definition _ -> None
+
+let list_evaluations = function
   | Obligations outcome ->
       List.sort_uniq compare
-        (List.concat_map
-           (fun (obligation : Obligation.t) ->
-             List.filter_map
-               (function
-                 | Logic.Constant (Template_check { function_; literals }, _) ->
-                     Some { Obligation.function_; literals }
-                 | _ -> None)
-               obligation.query.declarations)
-           outcome.obligations)
+        (Option.to_list outcome.evaluation
+        @ List.concat_map
+            (fun (obligation : Obligation.t) ->
+              List.filter_map find_declared_evaluation obligation.query.declarations)
+            outcome.obligations)
   | Unsupported _ | Not_proven_here -> []
 
 type posed = {
@@ -442,30 +445,73 @@ type posed = {
   obligation : Obligation.t;
   query : Logic.query;
   has_run_result : bool;
-  failed_runs : (Obligation.template_check * string) list;
+  failed_runs : (Obligation.evaluation * string) list;
 }
+
+let rec state_value (declarations : Logic.declaration list) (term : Logic.term) (sort : Logic.sort)
+    (value : Obligation.value) : Logic.term list =
+  let raise_bug format = Compiler_bug.raise_bug ~stage:"Prover" format in
+  match (sort, value) with
+  | Bool, Boolean holds -> [ Logic.equal term (Boolean holds) ]
+  | Int, Integer number -> [ Logic.equal term (Integer number) ]
+  | Float (exponent, significand), Float number ->
+      [ Logic.equal term (Operations.make_float_literal (exponent, significand) number) ]
+  | Type_sort _, Elements _ -> []
+  | Type_sort ty, Constructed { variant; fields } -> (
+      match
+        List.find_map
+          (function
+            | Logic.Datatype (declared, constructors) when Types.equal declared ty ->
+                Some constructors
+            | Datatype _ | Constant _ | Function _ | Definition _ -> None)
+          declarations
+      with
+      | None | Some [ (Unit, []) ] -> []
+      | Some constructors -> (
+          match
+            List.find_opt
+              (fun ((constructor : Logic.symbol), _) ->
+                match constructor with
+                | Constructor { variant = declared; _ } -> declared = variant
+                | _ -> false)
+              constructors
+          with
+          | Some (constructor, selectors) ->
+              Logic.Is (constructor, term)
+              :: List.concat_map
+                   (fun ((selector : Logic.symbol), field_sort) ->
+                     match selector with
+                     | Field { field; _ } -> (
+                         match List.assoc_opt field fields with
+                         | Some field_value ->
+                             state_value declarations
+                               (Logic.Apply (selector, [ term ]))
+                               field_sort field_value
+                         | None -> raise_bug "an evaluation gave no value for the field %s" field)
+                     | _ -> raise_bug "a datatype's selector is not a field")
+                   selectors
+          | None -> raise_bug "an evaluation gave a variant that `%s` does not have" (Types.show ty)
+          ))
+  | (Int | Bool | Float _ | Type_sort _ | Function_sort _), _ ->
+      raise_bug "an evaluation gave a value of another sort"
 
 let pose_obligation runs site (obligation : Obligation.t) =
   List.fold_left
     (fun posed (declaration : Logic.declaration) ->
-      match declaration with
-      | Constant ((Template_check { function_; literals } as symbol), _) -> (
-          let check = { Obligation.function_; literals } in
-          match Template_check_table.find_opt runs check with
-          | Some (Ok holds) ->
-              {
-                posed with
-                query =
+      match (declaration, find_declared_evaluation declaration) with
+      | Constant (symbol, sort), Some evaluation -> (
+          match Evaluation_table.find_opt runs evaluation with
+          | Some (Obligation.Evaluated value) -> (
+              match state_value obligation.query.declarations (Logic.Symbol symbol) sort value with
+              | [] -> posed
+              | facts ->
                   {
-                    posed.query with
-                    facts =
-                      posed.query.facts
-                      @ [ Logic.equal (Logic.Symbol symbol) (Logic.Boolean holds) ];
-                  };
-                has_run_result = true;
-              }
-          | Some (Error report) ->
-              { posed with failed_runs = posed.failed_runs @ [ (check, report) ] }
+                    posed with
+                    query = { posed.query with facts = posed.query.facts @ facts };
+                    has_run_result = true;
+                  })
+          | Some (Unfinished report | Failed report) ->
+              { posed with failed_runs = posed.failed_runs @ [ (evaluation, report) ] }
           | None -> posed)
       | _ -> posed)
     { site; obligation; query = obligation.query; has_run_result = false; failed_runs = [] }
@@ -485,12 +531,14 @@ let make_refutation_request ({ query; _ } : posed) =
   let refutation = { query with goal = Logic.not_ query.goal } in
   (Solver.make_request refutation, refutation)
 
-type posed_proof = Unreadable of Source.Definition_span.t site | Posed of posed list
+type posed_proof =
+  | Unreadable of Source.Definition_span.t site
+  | Posed of { obligations : posed list; failed_evaluation : Source.Definition_span.t site option }
 
 let pose_proof (lookups : Lookups.t) runs key proof =
   let resolve location = resolve_location lookups.interface.names key location in
   match proof with
-  | Not_proven_here -> Posed []
+  | Not_proven_here -> Posed { obligations = []; failed_evaluation = None }
   | Unsupported (location, construct) ->
       Unreadable
         {
@@ -502,30 +550,52 @@ let pose_proof (lookups : Lookups.t) runs key proof =
         }
   | Obligations outcome ->
       Posed
-        (List.map
-           (fun (obligation : Obligation.t) ->
-             pose_obligation runs
-               {
-                 code = obligation.code;
-                 span = resolve obligation.location;
-                 shows = render lookups obligation.message;
-               }
-               obligation)
-           outcome.obligations)
+        {
+          obligations =
+            List.map
+              (fun (obligation : Obligation.t) ->
+                pose_obligation runs
+                  {
+                    code = obligation.code;
+                    span = resolve obligation.location;
+                    shows = render lookups obligation.message;
+                  }
+                  obligation)
+              outcome.obligations;
+          failed_evaluation =
+            Option.bind outcome.evaluation (fun (evaluation : Obligation.evaluation) ->
+                match (evaluation, Evaluation_table.find_opt runs evaluation) with
+                | Constant_value path, Some (Failed report) ->
+                    Some
+                      {
+                        code = Evaluation;
+                        span = resolve Whole_definition;
+                        shows =
+                          Printf.sprintf "The value of `%s` cannot be computed: %s" (Path.show path)
+                            report;
+                      }
+                | Constant_value _, (Some (Evaluated _ | Unfinished _) | None) -> None
+                | Assertion _, _ ->
+                    Compiler_bug.raise_bug ~stage:"Prover"
+                      "a definition's own evaluation is not of a constant");
+        }
 
 let pose_proofs ~runs lookups proofs =
-  let runs = Template_check_table.of_seq (List.to_seq runs) in
+  let runs = Evaluation_table.of_seq (List.to_seq runs) in
   List.map (fun (key, proof) -> (key, pose_proof lookups runs key proof)) proofs
 
-let list_posed = function Unreadable _ -> [] | Posed posed -> posed
+let list_posed = function Unreadable _ -> [] | Posed { obligations; _ } -> obligations
 
 let explain_failed_runs failed_runs =
   String.concat ""
     (List.map
-       (fun (({ function_; literals } : Obligation.template_check), report) ->
-         Printf.sprintf
-           " Running `%s` on the template text `%s` failed, so its result is not known: %s"
-           (Facts.show_callee function_) (String.concat "${...}" literals) report)
+       (fun ((evaluation : Obligation.evaluation), report) ->
+         match evaluation with
+         | Constant_value path ->
+             Printf.sprintf " The evaluation of `%s` stopped, so its value is not known: %s"
+               (Path.show path) report
+         | Assertion _ ->
+             Printf.sprintf " Its evaluation stopped, so its result is not known: %s" report)
        failed_runs)
 
 let make_state (lookups : Lookups.t) (posed : posed) answer ~is_refuted =
@@ -629,12 +699,21 @@ let decide ~runs lookups solver proofs =
                 },
                 None );
             ]
-        | Posed posed ->
+        | Posed { obligations; failed_evaluation } ->
             List.map
               (fun _ ->
                 let posed, answer, is_refuted = Queue.pop decided in
                 make_state lookups posed answer ~is_refuted)
-              posed))
+              obligations
+            @ List.map
+                (fun site ->
+                  ( {
+                      site;
+                      failure = Some (make_diagnostic site.code site.span site.shows);
+                      trusts_compiled_code = false;
+                    },
+                    None ))
+                (Option.to_list failed_evaluation)))
     posed_proofs;
   { lookups; verdicts; warnings }
 

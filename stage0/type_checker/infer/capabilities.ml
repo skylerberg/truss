@@ -19,7 +19,12 @@ type function_body = { path : Path.t; implementation : Interface.Impls.implement
 type scope_kind =
   | Function_body of function_body
   | Lambda_body of { origin : Core.origin; enclosing_panic : Types.capability option }
-  | Restricted of { description : string; reason : string; enclosing : scope option }
+  | Restricted of {
+      description : string;
+      reason : string;
+      enclosing : scope option;
+      is_within_code : bool;
+    }
 
 and scope = { allowed : Types.capability_set; provided : Types.capability_set; kind : scope_kind }
 
@@ -39,8 +44,8 @@ let value_reason =
   "Its meaning must be a value. A function that fails on some inputs says so with `requires` \
    instead."
 
-let make_restricted_scope ?enclosing ~allowed ~reason description =
-  make_scope ~allowed (Restricted { description; reason; enclosing })
+let make_restricted_scope ?enclosing ?(is_within_code = true) ~allowed ~reason description =
+  make_scope ~allowed (Restricted { description; reason; enclosing; is_within_code })
 
 let make_parallel_scope ~enclosing description =
   make_restricted_scope ~enclosing
@@ -151,12 +156,12 @@ let rec require_available checking scope (origin : Core.origin) ~subject ?altern
             report checking Not_available origin
               (Printf.sprintf "%s uses `RunForever`, but %s must terminate.%s" subject description
                  (add_alternative ~sentence_start:true alternative))
-        | Restricted { description; reason; _ } ->
+        | Restricted { description; reason; is_within_code; _ } ->
             report checking Not_available origin
-              (Printf.sprintf
-                 "%s uses `%s`, but %s may use no capability%s, even one that is available outside \
-                  it. %s"
-                 subject shown description (show_exceptions scope.allowed) reason)
+              (Printf.sprintf "%s uses `%s`, but %s may use no capability%s%s. %s" subject shown
+                 description (show_exceptions scope.allowed)
+                 (if is_within_code then ", even one that is available outside it" else "")
+                 reason)
         | Function_body { path; _ } ->
             let can_provide =
               match Types.find_base capability with
@@ -372,7 +377,15 @@ and check_statement checking scope (statement : Core.statement) =
       check_loop_clauses checking clauses;
       check_block checking scope body
   | Proof body -> check_block checking (make_no_capabilities_scope "a proof") body
-  | Let _ | Evaluate _ | Assign _ | Compound_assign _ | Assert _ | Yield _ ->
+  | Assert { condition; by = Some Evaluation } ->
+      check_expression checking
+        (make_restricted_scope ~is_within_code:false ~allowed:Types.no_capabilities
+           ~reason:"It is evaluated when the code is checked, and a check has no capabilities."
+           "the condition of an assertion `by evaluation`")
+        condition.value
+  | Let _ | Evaluate _ | Assign _ | Compound_assign _
+  | Assert { by = Some Bit_vector | None; _ }
+  | Yield _ ->
       check_children checking scope (`Statement statement)
 
 and check_loop_clauses checking (clauses : Core.loop_clause Core.conditional list) =
@@ -723,6 +736,13 @@ let check (state : State.state) (elaborated : Interface.Environment.elaborated_i
         body
   | Function { body = Some body; _ }, Theorem _, _ | Law_proof { body = Some body; _ }, _, _ ->
       check_block checking (make_no_capabilities_scope "a proof") body
+  | Constant (Some value), _, _ ->
+      check_expression checking
+        (make_restricted_scope ~is_within_code:false ~allowed:Types.no_capabilities
+           ~reason:
+             "A constant is computed when the program is compiled, and a build has no capabilities."
+           "the value of a constant")
+        value
   | _ -> ());
   solve state;
   let read_solved variable =

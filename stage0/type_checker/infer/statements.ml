@@ -195,7 +195,19 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
               check_statement state env branch ~last:false))
         body.statements
   | Proof body -> check_loop_body state { env with specification = true } body
-  | Assert { value; _ } -> Hooks.check state env value Types.bool
+  | Assert { value; by = Some Evaluation } ->
+      Hooks.check state
+        {
+          env with
+          specification = false;
+          compile_time = true;
+          in_quantifier = false;
+          loop_element = None;
+          output = None;
+        }
+        value Types.bool;
+      Constant.check state Evaluated_condition value
+  | Assert { value; by = Some Bit_vector | None } -> Hooks.check state env value Types.bool
   | Statement_error -> ()
 
 and assigns_through_index state env (written : Syntax.statement) (target : Syntax.expression)

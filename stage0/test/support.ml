@@ -261,10 +261,10 @@ let c_compiler =
         prerr_endline message;
         exit 1)
 
-let run_template_checks database (file : Path.file) proofs =
-  match Database.list_template_checks proofs with
+let run_evaluations database (file : Path.file) proofs =
+  match Database.list_evaluations proofs with
   | [] -> []
-  | checks ->
+  | evaluations ->
       let backend =
         Backend.create
           (match Database.find_lowered_lookups database [ file.module_.package ] with
@@ -272,17 +272,12 @@ let run_template_checks database (file : Path.file) proofs =
           | Error message -> failwith message)
           (Lazy.force c_compiler) Development
       in
-      List.map
-        (fun ({ function_; literals } as check : Prover.Obligation.template_check) ->
-          match Backend.evaluate_predicate backend ~function_ ~arguments:[ Literals literals ] with
-          | Ok run -> (check, run)
-          | Error message -> failwith message)
-        checks
+      Evaluations.run backend evaluations
 
 let compute_verdicts database file =
   let proofs = prove database file in
   Prover.decide
-    ~runs:(run_template_checks database file proofs)
+    ~runs:(run_evaluations database file proofs)
     (Database.make_proof_lookups database)
     (Lazy.force solver) (Database.list_proofs proofs)
 

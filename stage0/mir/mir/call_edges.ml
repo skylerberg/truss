@@ -232,16 +232,24 @@ let list_statement_edges interface instance (statement : Tree.statement) =
               | Convert _ | Copy _ | Lambda _ | Value_parameter _ | Specification _ );
             _;
           }
-      | Call _ | Lend _ | Template _ | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _
-      | Loan_end _ | Ghost_assert _ | Path_note _ | Proof _ )
+      | Call _ | Lend _ | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _ | Loan_end _
+      | Ghost_assert _ | Path_note _ | Proof _ | Evaluated_assert _ )
   | For _
   | Jump (Return _ | Break | Continue | Cancel _ | Unreachable | Written_unreachable | Todo)
   | Choose _ | Assert_by_bit_vector _ | While _ | Fork _ | Resume _ | Yield _ ->
       []
 
-let list_edges (lookups : lookups) instance (code : Tree.t) =
-  let callees = ref [] in
-  let add paths = callees := List.rev_append paths !callees in
+type dependency_kind = Read | Direct_call | Supplied of supplier
+
+type dependency = {
+  path : Path.t;
+  kind : dependency_kind;
+  origin : Core.origin;
+  omitted_field : string option;
+}
+
+let list_dependencies (lookups : lookups) instance (code : Tree.t) =
+  let dependencies = ref [] in
   let entered = Entered_table.create 4 in
   let enters code =
     if Entered_table.mem entered code then false
@@ -249,21 +257,39 @@ let list_edges (lookups : lookups) instance (code : Tree.t) =
       Entered_table.replace entered code ();
       true)
   in
-  let rec visit_statement (statement : Tree.statement) =
+  let add ~through origin kind path =
+    let origin, omitted_field =
+      match through with Some (origin, field) -> (origin, Some field) | None -> (origin, None)
+    in
+    dependencies := { path; kind; origin; omitted_field } :: !dependencies
+  in
+  let add_constant ~through origin (place : Tree.place) =
+    match place.root with
+    | Constant path -> add ~through origin Read path
+    | Local _ | Literal _ -> ()
+  in
+  let rec visit_code ~through (code : Tree.t) =
+    Walk.iter_places (add_constant ~through) code;
+    Walk.iter_code (visit_statement ~through) code
+  and visit_statement ~through (statement : Tree.statement) =
     List.iter
-      (function Calls target -> add [ target ] | Supplies { code; _ } -> add code)
+      (function
+        | Calls target -> add ~through statement.origin Direct_call target
+        | Supplies { supplier; code } ->
+            List.iter (add ~through statement.origin (Supplied supplier)) code)
       (list_statement_edges lookups.interface instance statement);
     match statement.kind with
-    | Basic (Call { call; _ } | Lend { call; _ } | Template { call; _ }) -> add_invariant_check call
+    | Basic (Call { call; _ } | Lend { call; _ }) -> add_invariant_check ~through call
     | Basic (Assign { value = Construct { variant; fields; type_ }; _ }) -> (
         match find_head type_ with
         | Some head ->
-            let omitted =
-              List.filter_map
-                (fun (field, value) -> if Option.is_none value then Some field else None)
-                fields
-            in
-            if omitted <> [] then visit_field_defaults head variant omitted
+            List.iter
+              (fun (field, value) ->
+                if Option.is_none value then
+                  visit_field_default
+                    ~through:(Some (Option.value through ~default:(statement.origin, field)))
+                    head variant field)
+              fields
         | None -> ())
     | Basic
         ( Assign
@@ -275,23 +301,23 @@ let list_edges (lookups : lookups) instance (code : Tree.t) =
               _;
             }
         | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _ | Loan_end _ | Ghost_assert _
-        | Path_note _ | Proof _ )
+        | Path_note _ | Proof _ | Evaluated_assert _ )
     | For _
     | Jump (Return _ | Break | Continue | Cancel _ | Unreachable | Written_unreachable | Todo)
     | Choose _ | Assert_by_bit_vector _ | While _ | Fork _ | Provide _ | Resume _ | Yield _ ->
         ()
-  and visit_field_defaults type_ variant omitted =
+  and visit_field_default ~through type_ variant field =
     match Parts.read_defaults lookups.mir type_ with
     | Some { form = Field_defaults defaults; _ } ->
         List.iter
           (fun (default : Tree.t Tree.field_default) ->
             if
-              default.variant = variant && List.mem default.field omitted
-              && enters (`Default (type_, variant, default.field))
-            then Walk.iter_code visit_statement default.value)
+              default.variant = variant && default.field = field
+              && enters (`Default (type_, variant, field))
+            then visit_code ~through default.value)
           defaults
     | Some { form = Parameter_defaults _; _ } | None -> ()
-  and add_invariant_check (call : Tree.call) =
+  and add_invariant_check ~through (call : Tree.call) =
     match (call.callee.target, call.arguments) with
     | ( Intrinsic { operation = Runtime Holds_invariant; type_arguments = [ Type checked ] },
         [ _; Passed { value = Immediate { value = Integer index; _ }; _ } ] ) -> (
@@ -301,13 +327,14 @@ let list_edges (lookups : lookups) instance (code : Tree.t) =
         | Some type_, Some { form = clauses; _ } -> (
             match List.nth_opt clauses.invariants (Z.to_int index) with
             | Some { clause; is_executable = true; _ } when enters (`Invariant (type_, index)) ->
-                Walk.iter_formula visit_statement clause
+                Walk.iter_formula_places (add_constant ~through) clause;
+                Walk.iter_formula (visit_statement ~through) clause
             | Some _ | None -> ())
         | _ -> ())
     | _ -> ()
   in
-  Walk.iter_code visit_statement code;
-  List.rev !callees
+  visit_code ~through:None code;
+  List.rev !dependencies
 
 let list_path_edges (lookups : lookups) path =
   let defaults =
@@ -325,7 +352,13 @@ let list_path_edges (lookups : lookups) path =
     | Some (_, substitution) -> substitution
     | None -> Types.no_substitution
   in
-  List.sort_uniq Path.compare (List.concat_map (list_edges lookups instance) (code @ defaults))
+  List.sort_uniq Path.compare
+    (List.concat_map
+       (fun code ->
+         List.map
+           (fun (dependency : dependency) -> dependency.path)
+           (list_dependencies lookups instance code))
+       (code @ defaults))
 
 type node = Definition | Trait_method_declaration
 

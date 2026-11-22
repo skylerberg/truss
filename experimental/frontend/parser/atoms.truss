@@ -194,6 +194,7 @@ type ContextualKeyword =
   | Potential
   | By
   | BitVector
+  | Evaluation
   derives Equal
 
 fn spell_contextual(word: ContextualKeyword) -> StringSlice {
@@ -205,6 +206,7 @@ fn spell_contextual(word: ContextualKeyword) -> StringSlice {
     Potential => "potential"
     By => "by"
     BitVector => "bit_vector"
+    Evaluation => "evaluation"
   }
 }
 
@@ -227,6 +229,7 @@ fn find_contextual(text: StringSlice) -> Option[ContextualKeyword] {
     "potential" => Some(ContextualKeyword.Potential)
     "by" => Some(ContextualKeyword.By)
     "bit_vector" => Some(ContextualKeyword.BitVector)
+    "evaluation" => Some(ContextualKeyword.Evaluation)
     _ => None
   }
 }
