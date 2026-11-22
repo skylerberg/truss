@@ -210,7 +210,9 @@ let name_argument =
 
 let dependents =
   make_command "dependents"
-    ~doc:"List the parts of other definitions that read a part of a definition, by kind of part."
+    ~doc:
+      "List the units of other definitions that read a fact of a definition, with the stage of \
+       each unit and the fact that it reads."
     (make_project_term
        Cmdliner.Term.(
          const (fun name () -> Outcome.Exit (Graph_command.run ~direction:Dependents ~name))
@@ -218,7 +220,9 @@ let dependents =
 
 let dependencies =
   make_command "dependencies"
-    ~doc:"List the parts of other definitions that a definition's parts read, by kind of part."
+    ~doc:
+      "List the facts of other definitions that the units of a definition read, with the stage of \
+       each unit and the fact that it reads."
     (make_project_term
        Cmdliner.Term.(
          const (fun name () -> Outcome.Exit (Graph_command.run ~direction:Dependencies ~name))
@@ -388,10 +392,22 @@ let print_database_counts (counts : Database.counts list) =
            :: List.map2 (fun width cell -> Printf.sprintf "%*s" width cell) cell_widths cells)))
     (heading :: rows)
 
+let print_statement_counts statements =
+  let width =
+    List.fold_left
+      (fun width (_, count) -> max width (String.length (string_of_int count)))
+      (String.length "runs") statements
+  in
+  Output.eprint_line (Printf.sprintf "%*s  statement" width "runs");
+  List.iter
+    (fun (statement, count) -> Output.eprint_line (Printf.sprintf "%*d  %s" width count statement))
+    statements
+
 let with_database_counts run =
   if Sys.getenv_opt database_counts_variable = Some "1" then begin
-    let outcome, counts = Database.count run in
+    let (outcome, counts), statements = Database.count_statements (fun () -> Database.count run) in
     print_database_counts counts;
+    print_statement_counts statements;
     outcome
   end
   else run ()
@@ -417,6 +433,9 @@ let execute ~doing run =
               Outcome.Exit 1
           | exception (Outcome.Cannot_run message | Workspace.Unusable_cache message) ->
               Output.eprint_line message;
+              Outcome.Exit 2
+          | exception Database.Unusable message ->
+              Output.eprint_line ("The code database cannot be used: " ^ message ^ ".");
               Outcome.Exit 2
           | exception Compiler_bug.Bug bug ->
               Output.eprint_line
@@ -562,14 +581,15 @@ let truss =
            `P
              ("$(b," ^ database_counts_variable
             ^ "=1) writes a table to standard error after the command. The table has a row for \
-               each kind of part that the database computed or wrote during the command. A row \
-               counts the parts computed, the computed parts whose value came out unchanged, the \
-               writes, the reads that the computations made, and the distinct parts that each \
-               computation read. A write is a changed value or a removed part. A last row, \
-               untracked, counts the reads that no part records: the command's own reads of the \
-               database, and the reads that order the parts of a stage. The table omits the work \
-               that the background process did before the command, such as propagating a saved \
-               file.");
+               each stage whose units the database computed or wrote during the command. A row \
+               counts the units computed, the computed units whose facts came out unchanged, the \
+               writes, the reads that the units made, and the distinct targets that each unit \
+               read. A write is a changed fact or a removed one. A last row, untracked, counts the \
+               reads that no unit records: the command's own reads of the database, and the reads \
+               that order the units of a stage. A second table lists each SQL statement that the \
+               command ran on the database, with the number of times it ran. The tables omit the \
+               work that the background process did before the command, such as propagating a \
+               saved file.");
          ]
        ~doc:"Check, test, build, and change Truss code.")
     [

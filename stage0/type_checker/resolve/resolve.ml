@@ -47,22 +47,27 @@ type resolved = {
   names : target option array;
   brackets : bracket option array;
   holes : (Syntax.id * (string * value) list) list;
-  used_imports : string list;
 }
+
+type resolution = { resolved : resolved; used_imports : string list }
 
 let sections = [ Interface; Contract; Body ]
 
 let merge = function
-  | [] -> { names = [||]; brackets = [||]; holes = []; used_imports = [] }
+  | [] -> { names = [||]; brackets = [||]; holes = [] }
   | first :: _ as parts ->
       let pick select index = List.find_map (fun part -> (select part).(index)) parts in
       {
         names = Array.init (Array.length first.names) (pick (fun part -> part.names));
         brackets = Array.init (Array.length first.brackets) (pick (fun part -> part.brackets));
         holes = List.concat_map (fun part -> part.holes) parts;
-        used_imports =
-          List.sort_uniq compare (List.concat_map (fun part -> part.used_imports) parts);
       }
+
+let list_referenced_definitions resolved =
+  List.sort_uniq Path.compare
+    (List.filter_map
+       (function Some (Definition (_, path) | Variant (path, _)) -> Some path | _ -> None)
+       (Array.to_list resolved.names))
 
 type head = {
   name : Syntax.name;
@@ -164,15 +169,10 @@ let resolve (lookups : Names.lookups) (key : Names.key) section =
   let compute_outcome () =
     let walked = Walk.lookup_section_names state section in
     let resolved =
-      {
-        names = walked.names;
-        brackets = walked.brackets;
-        holes = List.rev walked.holes;
-        used_imports = List.sort compare walked.used_imports;
-      }
+      { names = walked.names; brackets = walked.brackets; holes = List.rev walked.holes }
     in
     match walked.diagnostics with
-    | [] -> Ok resolved
+    | [] -> Ok { resolved; used_imports = List.sort compare walked.used_imports }
     | diagnostics ->
         Error
           (List.sort

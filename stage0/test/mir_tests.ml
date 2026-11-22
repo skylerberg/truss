@@ -1023,29 +1023,27 @@ let () =
           }
       in
       let parts = make_mir_parts packages in
-      let read_form path =
+      let read_source path =
         match Mir.read_graph parts path with
-        | Some { form; _ } -> form
+        | Some { source; _ } -> source
         | None -> failwith (Path.show path ^ " has no MIR")
       in
       let default_method = make_method_path (Top { module_; name = "Shape" }) "doubled" in
-      let default_mir =
-        match
-          Option.bind ((Support.make_names packages).find_key default_method) (find_graph parts)
-        with
-        | Some mir -> mir
-        | None -> failwith "the default method has no MIR"
+      let default_key =
+        match (Support.make_names packages).find_key default_method with
+        | Some key -> key
+        | None -> failwith "the default method is not declared"
       in
       List.iter
         (fun type_name ->
-          if read_form (make_method_path (make_impl_path type_name) "doubled") != default_mir then
+          if read_source (make_method_path (make_impl_path type_name) "doubled") <> default_key then
             Harness.fail "`%s` has a MIR of its own for the method it inherits" type_name)
         [ "Square"; "Cube" ];
-      if read_form default_method != default_mir then
+      if read_source default_method <> default_key then
         Harness.fail "the default method's MIR by its path is not its definition's";
       if
-        read_form (make_method_path (make_impl_path "Square") "side")
-        == read_form (make_method_path (make_impl_path "Cube") "side")
+        read_source (make_method_path (make_impl_path "Square") "side")
+        = read_source (make_method_path (make_impl_path "Cube") "side")
       then Harness.fail "two written methods share one MIR");
   Harness.test "defaults have bodies of their own, apart from the MIR of any function's body"
     (fun () ->

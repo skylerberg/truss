@@ -21,7 +21,18 @@ develop as well as make it easier to bootstrap the compiler in parts.
 - **Dependencies** are declared in `dune-project`, which generates
   `truss.opam`. Install them with
   `opam install . --deps-only --with-test --with-dev-setup`. On macOS, Zarith
-  also needs GMP and `pkgconf` from Homebrew.
+  also needs GMP and `pkgconf` from Homebrew. The `sqlite3` bindings link the
+  system's SQLite library, which macOS ships and which Debian and Ubuntu
+  package as `libsqlite3-dev`.
+- **The code database is a SQLite file,** `.truss/database.sqlite` in a
+  project's root. [CODE_DATABASE.md](CODE_DATABASE.md) describes its tables
+  and stages. `sqlite3 .truss/database.sqlite` reads it while a background
+  process has it open: `SELECT name FROM definition WHERE kind = 0` lists
+  the functions, `SELECT code, message FROM diagnostic` lists every
+  diagnostic, `SELECT code, shows FROM verdict WHERE proven = 0` lists the
+  obligations that the last check did not prove, and
+  `SELECT stage, COUNT(*) FROM stale GROUP BY stage` counts the units that
+  wait for each stage.
 - **Z3 5.3.3** runs the prover's queries, and the prover refuses any other
   version, since another could answer differently. Install it with
   `brew install z3` on macOS, or from the release's archive, and put it on
@@ -180,13 +191,14 @@ Every stage of stage0 is tested the same way:
   `stage0/tools/` and are run by hand. Each problem a fuzzer finds becomes a
   focused test of its own.
 - **Tests share one checked standard library.** A test that needs the
-  standard library creates its database over the standard library's stored
-  package database, which a test executable loads once from the user's cache.
-  A test must not give a new database the library's sources: that parses
-  and checks the whole library again, so every such test gets slower each
-  time the library grows. A test whose probe module must be in the standard
-  package, such as one that calls an intrinsic, extends the stored package
-  with `Database.For_testing.extend_package`, which checks only the probe.
+  standard library creates its database over the standard library's package
+  database, a SQLite file in the user's cache that every test's database
+  attaches read-only. A test must not give a new database the library's
+  sources: that parses and checks the whole library again, so every such
+  test gets slower each time the library grows. A test whose probe module
+  must be in the standard package, such as one that calls an intrinsic,
+  extends a copy of that package database with
+  `Database.For_testing.extend_package`, which checks only the probe.
 - **A test whose only claim is that it passes is written in Truss.** Each
   file under `stage0/test/codegen/modules/` is a module of tests. A file of
   `modules/library/` tests one module of the standard library and is named

@@ -51,6 +51,19 @@ let make_impl_method trait_interface impl_interface impl (declared : Types.trait
           ~default:declared.method_receiver;
     }
 
+let find_implemented_declaration (interface : Interface.Lookups.t)
+    (impl_interface : Types.impl_interface) ~impl path =
+  let trait = impl_interface.implements.trait in
+  Option.bind (Interface.Definition.find_trait_interface interface trait) (fun trait_interface ->
+      List.find_map
+        (fun (declared : Types.trait_method) ->
+          if Path.equal (make_impl_method trait_interface impl_interface impl declared) path then
+            Some
+              (Path.Method
+                 { owner = trait; name = declared.method_name; receiver = declared.method_receiver })
+          else None)
+        trait_interface.methods)
+
 let list_impl_methods (interface : Interface.Lookups.t) impl =
   let impl_interface = Interface.Definition.read_impl_interface interface impl in
   let trait_interface =

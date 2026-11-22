@@ -254,7 +254,7 @@ let find_reopening root =
   | 0 | 1 -> Some ("commit and reopen", Workspace.flush)
   | 2 ->
       Some
-        ( "stop a commit before its rename",
+        ( "close the database before a commit",
           fun () -> Workspace.For_testing.interrupt_commit (Unix.realpath root) )
   | _ -> None
 
@@ -344,13 +344,13 @@ let () =
                      if !verbose then Printf.printf "  %s\n%!" description;
                      reopen ()
                  | None -> ())
-             | parts ->
+             | tables ->
                  report step edit
                    ("the propagated database differs from a cold build in "
                    ^ String.concat ", "
                        (List.map
-                          (fun part -> Database.Part.show (Stored part))
-                          (List.take 20 parts)));
+                          (fun (table, count) -> Printf.sprintf "%d rows of %s" count table)
+                          tables));
                  start_over ())
          | Error failure, Ok _ ->
              report step edit ("propagating it raised " ^ show_failure failure);

@@ -33,6 +33,9 @@ val list_dependencies : lookups -> Types.substitution -> Tree.t -> dependency li
 val resolve_node : lookups -> Path.t -> Types.substitution -> Path.t
 val list_path_edges : lookups -> Path.t -> Path.t list
 
+val find_implemented_declaration :
+  Interface.Lookups.t -> Types.impl_interface -> impl:Path.t -> Path.t -> Path.t option
+
 type node = Definition | Trait_method_declaration
 
 val find_node : lookups -> Path.t -> node

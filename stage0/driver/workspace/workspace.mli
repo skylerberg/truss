@@ -44,7 +44,7 @@ val open_cache : unit -> Cache.t
 val reset : unit -> unit
 
 module For_testing : sig
-  val load_standard_package_database : unit -> Database.package_database
+  val load_standard_package_database : unit -> string
   val copy_standard_package_database : into:string -> unit
   val build_cold_database : snapshot -> Database.t
   val collect_cache : unit -> unit

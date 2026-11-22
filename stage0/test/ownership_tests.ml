@@ -1093,7 +1093,7 @@ let count_disjoint_obligations text =
     (fun total (declaration : Resolve.Names.declaration) ->
       match Database.For_testing.read_ownership database declaration.key with
       | Value must_be_disjoint -> total + List.length must_be_disjoint
-      | Failed _ | Blocked -> total)
+      | Failed | Blocked -> total)
     0
     ((Support.make_names packages).list_declarations_in file)
 

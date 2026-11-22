@@ -58,5 +58,5 @@ val expect_one_diagnostic :
 
 val prove : Database.t -> Path.file -> Database.proofs
 val list_proof_diagnostics : Database.t -> Path.file -> Diagnostic.t list
-val list_proof_states : Database.t -> Path.file -> Source.span Prover.state list
+val list_proof_states : Database.t -> Path.file -> Database.proof_state list
 val read_proofs : Database.t -> Path.file -> Resolve.Names.key -> Prover.proof

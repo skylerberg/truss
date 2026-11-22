@@ -91,3 +91,23 @@ and show_capability_arguments arguments =
        (fun (name, set) ->
          Printf.sprintf " generic %s = {%s}" name (String.concat ", " (List.map Path.show_name set)))
        arguments)
+
+let find_type_definition : Ground.ty -> Path.t option = function
+  | Named { path; _ } -> Some path
+  | Any { trait; _ } -> Some trait
+  | Function _ | Never -> None
+
+let rec find_definition : t -> Path.t option = function
+  | Code { path; _ }
+  | Constant path
+  | Assertion { definition = path; _ }
+  | Generated
+      ( Locked_entry { capability = path; _ }
+      | Adapter { function_ = path; _ }
+      | Program_main path
+      | Test_main path )
+  | Table (Impl_table { impl = path; _ } | Any_table { impl = path; _ } | Locked_table path) ->
+      Some path
+  | Evaluator evaluated -> find_definition evaluated
+  | Drop ty | Copy ty | Debug ty | Any_drop ty | Any_copy ty | Encode ty -> find_type_definition ty
+  | Generated (Entry impl_method | Any_entry impl_method) -> Some (make_method_path impl_method)

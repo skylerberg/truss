@@ -57,11 +57,13 @@ type resolved = {
   names : target option array;
   brackets : bracket option array;
   holes : (Syntax.id * (string * value) list) list;
-  used_imports : string list;
 }
+
+type resolution = { resolved : resolved; used_imports : string list }
 
 val sections : section list
 val merge : resolved list -> resolved
+val list_referenced_definitions : resolved -> Path.t list
 
 type head = {
   name : Syntax.name;
@@ -72,7 +74,7 @@ type head = {
 val find_head : resolved -> Syntax.expression -> head option
 
 val resolve :
-  Names.lookups -> Names.key -> section -> (resolved, Diagnostic.in_definition list) result option
+  Names.lookups -> Names.key -> section -> (resolution, Diagnostic.in_definition list) result option
 
 val list_file_diagnostics :
   Names.lookups ->

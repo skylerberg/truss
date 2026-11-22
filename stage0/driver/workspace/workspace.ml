@@ -42,12 +42,7 @@ let collect () =
         ~finally:(fun () -> Lock_file.release lock)
         (fun () -> Cache.collect cache ~budget:(read_cache_budget ()))
 
-type loaded = {
-  package : Path.package;
-  hash : string;
-  key : string;
-  package_database : Database.package_database;
-}
+type loaded = { package : Path.package; hash : string; key : string; package_database : string }
 
 let loaded_package_databases : (string, loaded) Hashtbl.t = Hashtbl.create 8
 
@@ -67,35 +62,56 @@ let make_package_database_key ~hash ~visible =
 let run_exclusively name work =
   Lock_file.with_lock (Filename.concat (Cache.directory (open_cache ())) name) work
 
+let locate_package_database key =
+  Filename.concat
+    (Cache.make_package_databases_directory (open_cache ()))
+    (Digest.BLAKE128.to_hex (Digest.BLAKE128.string key) ^ ".sqlite")
+
+let obtain_package_database key ~build =
+  let path = locate_package_database key in
+  if not (Sys.file_exists path) then
+    run_exclusively "package-states.lock" (fun () ->
+        if not (Sys.file_exists path) then build ~into:path);
+  path
+
+let combine_package_databases (loaded : loaded list) =
+  let standard, others =
+    List.partition
+      (fun (loaded : loaded) -> loaded.package = Path.standard_package)
+      (List.sort (fun left right -> Path.compare_package left.package right.package) loaded)
+  in
+  List.map (fun (loaded : loaded) -> loaded.package_database) standard
+  @
+  match others with
+  | [] -> []
+  | [ only ] -> [ only.package_database ]
+  | several ->
+      [
+        obtain_package_database
+          (Cbor.encode
+             (Cbor.Array
+                (Cbor.Text "packages"
+                :: List.map (fun (loaded : loaded) -> Cbor.Bytes loaded.key) several)))
+          ~build:
+            (Database.merge_packages
+               (List.map (fun (loaded : loaded) -> loaded.package_database) several));
+      ]
+
 let load_package_database (package : Project.package) ~hash ~visible =
   let key = make_package_database_key ~hash ~visible in
   match Hashtbl.find_opt loaded_package_databases key with
   | Some loaded -> loaded
   | None ->
-      let find_stored () =
-        Option.map
-          (fun bytes -> (Marshal.from_string bytes 0 : Database.package_database))
-          (Cache.find_result (open_cache ()) ~kind:Package_database ~key)
+      let loaded =
+        {
+          package = package.name;
+          hash;
+          key;
+          package_database =
+            obtain_package_database key
+              ~build:(Database.build_package ~loaded:(combine_package_databases visible) package);
+        }
       in
-      let package_database =
-        match find_stored () with
-        | Some package_database -> package_database
-        | None ->
-            run_exclusively "package-states.lock" (fun () ->
-                match find_stored () with
-                | Some package_database -> package_database
-                | None ->
-                    let package_database =
-                      Database.build_package_database
-                        ~loaded:(List.map (fun visible -> visible.package_database) visible)
-                        package
-                    in
-                    Cache.add_result (open_cache ()) ~kind:Package_database ~key
-                      (Marshal.to_string package_database []);
-                    Cache.flush (open_cache ());
-                    package_database)
-      in
-      let loaded = { package = package.name; hash; key; package_database } in
       Hashtbl.replace loaded_package_databases key loaded;
       loaded
 
@@ -109,19 +125,25 @@ let standard_hash =
           (fun (file, text) -> (Project.make_file_path ~directory:"" file, text))
           Standard_library.files))
 
+let checked_standard_keys : (string, unit) Hashtbl.t = Hashtbl.create 1
+
 let load_standard_package () =
   let standard =
     load_package_database standard_package ~visible:[] ~hash:(Lazy.force standard_hash)
   in
-  match Database.list_package_diagnostics standard.package_database with
-  | [] -> standard
-  | failed ->
-      Compiler_bug.raise_bug ~stage:"Workspace" "the standard library has diagnostics:\n%s"
-        (String.concat ""
-           (List.concat_map
-              (fun (source, diagnostics) ->
-                List.map (Diagnostic.render ~is_colored:false source) diagnostics)
-              failed))
+  if not (Hashtbl.mem checked_standard_keys standard.key) then begin
+    (match Database.list_package_diagnostics standard.package_database Path.standard_package with
+    | [] -> ()
+    | failed ->
+        Compiler_bug.raise_bug ~stage:"Workspace" "the standard library has diagnostics:\n%s"
+          (String.concat ""
+             (List.concat_map
+                (fun (source, diagnostics) ->
+                  List.map (Diagnostic.render ~is_colored:false source) diagnostics)
+                failed)));
+    Hashtbl.replace checked_standard_keys standard.key ()
+  end;
+  standard
 
 let list_package_databases () =
   List.sort compare
@@ -339,78 +361,27 @@ let load_layout snapshot =
         not (List.exists (fun (candidate : loaded) -> candidate.package = package.name) loaded))
       snapshot.project.packages )
 
-let extract_package_databases loaded =
-  List.map (fun (loaded : loaded) -> loaded.package_database) loaded
-
 let build_cold_database snapshot =
   let loaded, packages = load_layout snapshot in
-  Database.create ~loaded:(extract_package_databases loaded) packages
+  Database.create ~loaded:(combine_package_databases loaded) packages
 
 let database_directory = ".truss"
 
-let encode_header loaded =
-  Cbor.encode
-    (Cbor.Array
-       [
-         Cbor.Text Compiler_version.digest;
-         Cbor.Array (List.map (fun (loaded : loaded) -> Cbor.Bytes loaded.key) loaded);
-       ])
+let locate_database root =
+  Filename.concat (Filename.concat root database_directory) "database.sqlite"
 
-let find_saved_package_database ~(current : loaded list) key =
-  match List.find_opt (fun (loaded : loaded) -> loaded.key = key) current with
-  | Some loaded -> Some loaded.package_database
-  | None -> (
-      match Hashtbl.find_opt loaded_package_databases key with
-      | Some loaded -> Some loaded.package_database
-      | None ->
-          Option.map
-            (fun bytes -> (Marshal.from_string bytes 0 : Database.package_database))
-            (Cache.find_result (open_cache ()) ~kind:Package_database ~key))
-
-let find_saved_package_databases segments ~current =
-  match Option.bind (Segments.header segments) Cbor.decode with
-  | Some (Cbor.Array [ Cbor.Text compiler; keys ]) when compiler = Compiler_version.digest ->
-      Cbor.find_list
-        (function Cbor.Bytes key -> find_saved_package_database ~current key | _ -> None)
-        keys
-  | Some _ | None -> None
-
-let make_text_lookup snapshot =
-  let texts = File_table.create 256 in
-  List.iter
-    (fun (package : Project.package) ->
-      List.iter (fun (file, text) -> File_table.replace texts file text) package.files)
-    snapshot.project.packages;
-  File_table.find_opt texts
-
-let restore_database segments snapshot =
+let restore_database root snapshot =
   let loaded, packages = load_layout snapshot in
-  let start_cold () =
-    Segments.discard segments;
-    Database.create ~loaded:(extract_package_databases loaded) packages
-  in
-  let database =
-    match find_saved_package_databases segments ~current:loaded with
-    | None -> start_cold ()
-    | Some saved -> (
-        match Segments.read_entries segments with
-        | None -> start_cold ()
-        | Some entries -> (
-            try
-              Database.restore ~saved ~find_text:(make_text_lookup snapshot)
-                ~loaded:(extract_package_databases loaded)
-                packages entries
-            with Failure _ | Invalid_argument _ | End_of_file -> start_cold ()))
-  in
-  (database, loaded)
+  Database.open_file (locate_database root) ~compiler:Compiler_version.digest
+    ~loaded:(combine_package_databases loaded)
+    packages
 
 type worktree = {
   root : string;
   watcher : Watcher.t option;
-  segments : Segments.t;
+  lock : Lock_file.t;
   mutable snapshot : snapshot;
   database : Database.t;
-  mutable loaded : loaded list;
 }
 
 let worktrees : (string, worktree) Hashtbl.t = Hashtbl.create 4
@@ -422,22 +393,18 @@ let log_bug bug =
   prerr_endline (Compiler_bug.to_string bug)
 
 let commit worktree =
-  match Database.list_unsaved worktree.database with
-  | entries -> (
-      match Segments.commit worktree.segments ~header:(encode_header worktree.loaded) entries with
-      | () -> Database.mark_saved worktree.database
-      | exception ((Unix.Unix_error _ | Sys_error _) as failure) ->
-          prerr_endline
-            (Printf.sprintf "Cannot save the database in %s: %s."
-               (Filename.concat worktree.root database_directory)
-               (match failure with
-               | Unix.Unix_error (error, _, _) -> Unix.error_message error
-               | failure -> Printexc.to_string failure)))
-  | exception Compiler_bug.Bug bug -> log_bug bug
+  match Database.commit worktree.database with
+  | () -> ()
+  | exception Database.Unusable message ->
+      prerr_endline
+        (Printf.sprintf "Cannot save the database in %s: %s."
+           (Filename.concat worktree.root database_directory)
+           message)
 
 let close worktree =
   Option.iter Watcher.stop worktree.watcher;
-  Segments.close worktree.segments;
+  (try Database.close worktree.database with Database.Unusable _ -> ());
+  Lock_file.release worktree.lock;
   Hashtbl.remove worktrees worktree.root
 
 let is_layout path =
@@ -470,19 +437,16 @@ let find_file_changes (before : snapshot) (after : snapshot) =
             previous []))
 
 let apply_changes ?on_bug database (after : snapshot) = function
-  | Some changes ->
-      Database.update ?on_bug database changes;
-      None
+  | Some changes -> Database.update ?on_bug database changes
   | None ->
       let loaded, packages = load_layout after in
-      Database.relayout ?on_bug database ~loaded:(extract_package_databases loaded) packages;
-      Some loaded
+      Database.relayout ?on_bug database ~loaded:(combine_package_databases loaded) packages
 
 let copy_database root (trial : snapshot) =
   match Hashtbl.find_opt worktrees root with
   | Some worktree ->
       let database = Database.copy worktree.database in
-      ignore (apply_changes database trial (find_file_changes worktree.snapshot trial));
+      apply_changes database trial (find_file_changes worktree.snapshot trial);
       database
   | None -> build_cold_database trial
 
@@ -540,9 +504,7 @@ let refresh ?on_bug ~(read : Watcher.t -> Watcher.changes) worktree =
     match find_file_changes before after with
     | Some [] -> `Unchanged
     | changes ->
-        Option.iter
-          (fun loaded -> worktree.loaded <- loaded)
-          (apply_changes ?on_bug worktree.database after changes);
+        apply_changes ?on_bug worktree.database after changes;
         `Changed
   in
   match Option.map read worktree.watcher with
@@ -551,19 +513,29 @@ let refresh ?on_bug ~(read : Watcher.t -> Watcher.changes) worktree =
   | Some (Changed []) -> `Unchanged
   | Some (Changed paths) -> update (list_changed_files root worktree.snapshot.files paths)
 
+let lock_database directory ~stop_holder =
+  (try Unix.mkdir directory 0o755 with Unix.Unix_error (EEXIST, _, _) -> ());
+  let ignored = Filename.concat directory ".gitignore" in
+  if not (Sys.file_exists ignored) then File_system.write ignored "*\n";
+  let lock_path = Filename.concat directory "lock" in
+  match Lock_file.acquire_if_free lock_path with
+  | Some lock -> Some lock
+  | None when stop_holder () -> Some (Lock_file.acquire lock_path)
+  | None -> None
+
 let open_worktree root =
   let directory = Filename.concat root database_directory in
   match
-    Segments.open_ directory ~stop_holder:(fun () -> Server.stop_servers ~key:root ~wait:false ())
+    lock_database directory ~stop_holder:(fun () -> Server.stop_servers ~key:root ~wait:false ())
   with
   | exception Unix.Unix_error (ENOENT, _, _) -> Error (root ^ ": no such directory.")
-  | Error `Open_elsewhere ->
+  | None ->
       Error
         (Printf.sprintf
            "The database in %s is open in another process, such as a command run with --no-server. \
             Wait for that process to end."
            directory)
-  | Ok segments -> (
+  | Some lock -> (
       let watcher =
         if !is_serving then
           Some
@@ -573,15 +545,15 @@ let open_worktree root =
       in
       match
         let snapshot = make_snapshot (Worktree root) (Registry.Content.list_input_files root) in
-        (snapshot, restore_database segments snapshot)
+        (snapshot, restore_database root snapshot)
       with
-      | snapshot, (database, loaded) ->
-          let worktree = { root; watcher; segments; snapshot; database; loaded } in
+      | snapshot, database ->
+          let worktree = { root; watcher; lock; snapshot; database } in
           Hashtbl.replace worktrees root worktree;
           Ok worktree
       | exception failure ->
           Option.iter Watcher.stop watcher;
-          Segments.close segments;
+          Lock_file.release lock;
           raise failure)
 
 let rec load_worktree_snapshot root =
@@ -774,13 +746,15 @@ module For_testing = struct
   let load_standard_package_database () = (load_standard_package ()).package_database
 
   let copy_standard_package_database ~into =
-    let standard = load_standard_package () in
+    let standard = (load_standard_package ()).package_database in
     match Cache.open_ into with
     | Error message -> raise (Unusable_cache message)
     | Ok cache ->
-        Cache.add_result cache ~kind:Package_database ~key:standard.key
-          (Marshal.to_string standard.package_database []);
-        Cache.flush cache;
+        File_system.write
+          (Filename.concat
+             (Cache.make_package_databases_directory cache)
+             (Filename.basename standard))
+          (File_system.read standard);
         Cache.close cache
 
   let build_cold_database = build_cold_database
@@ -793,10 +767,10 @@ module For_testing = struct
   let interrupt_commit root =
     match Hashtbl.find_opt worktrees root with
     | Some worktree ->
-        Segments.For_testing.interrupt_commit worktree.segments
-          ~header:(encode_header worktree.loaded)
-          (Database.list_unsaved worktree.database);
-        close worktree
+        Option.iter Watcher.stop worktree.watcher;
+        Database.close_uncommitted worktree.database;
+        Lock_file.release worktree.lock;
+        Hashtbl.remove worktrees root
     | None -> Compiler_bug.raise_bug ~stage:"Workspace" "%s has no open database" root
 
   let compiler_digest = Compiler_version.digest

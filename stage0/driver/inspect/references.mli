@@ -5,6 +5,7 @@ type target =
 type occurrence = { span : Source.Definition_span.t; target : target }
 
 val find_declared_name : Syntax.definition -> Syntax.name option
+val list_named_members : Infer.tables -> Syntax.definition -> Path.t list
 
 val list_occurrences :
   path:Path.t ->

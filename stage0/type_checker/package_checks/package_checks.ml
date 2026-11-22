@@ -1,6 +1,10 @@
 module Lookups = Lookups
 module Path_table = Hashtbl.Make (Path)
 
+module Key_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Resolve.Names.key
+end))
+
 module Parameter_table = Hashtbl.Make (Structural_key.Make (struct
   type t = Types.parameter
 end))
@@ -484,8 +488,7 @@ let check_associated_types (lookups : Lookups.t) ~list_contained
               (Interface.Impls.collect_contents lookups.interface ~list_bounds type_).recursions)))
     impl.implements.associated
 
-let list_instantiation_edges (lookups : Lookups.t) (key : Resolve.Names.key) =
-  let form = lookups.read_core key in
+let list_instantiations (key : Resolve.Names.key) (form : Core.t) =
   let grows = function
     | Types.Type (Types.Named { arguments; _ }) ->
         let mentions =
@@ -511,21 +514,20 @@ let list_instantiation_edges (lookups : Lookups.t) (key : Resolve.Names.key) =
     form.definition;
   List.rev !edges
 
+let is_checked_for_instantiation (declaration : Resolve.Names.declaration) =
+  declaration.generic && declaration.key.ordinal = 0
+  && (declaration.kind = Function || declaration.kind = Method)
+
 let check_instantiation (lookups : Lookups.t) (package : Path.package) =
   let generic =
-    List.filter
-      (fun (declaration : Resolve.Names.declaration) ->
-        declaration.generic && declaration.key.ordinal = 0
-        && (declaration.kind = Function || declaration.kind = Method))
+    List.filter is_checked_for_instantiation
       (lookups.interface.names.list_package_declarations package)
   in
   let edges = Path_table.create 64 in
   List.iter
-    (fun (declaration : Resolve.Names.declaration) ->
-      Path_table.replace edges declaration.key.path
-        (list_instantiation_edges lookups declaration.key))
-    generic;
-  let list_outgoing path = Option.value ~default:[] (Path_table.find_opt edges path) in
+    (fun (caller, callee, grows) -> Path_table.add edges caller (callee, grows))
+    (lookups.list_instantiations package);
+  let list_outgoing path = List.rev (Path_table.find_all edges path) in
   let component_index = Path_table.create 64 in
   List.iteri
     (fun index members ->
@@ -640,7 +642,7 @@ let must_be_used (lookups : Lookups.t) (declaration : Resolve.Names.declaration)
   | Function | Method | Constant | Member_constant -> true
   | Type | Trait | Capability | Theorem | Impl | Test | Law_proof -> false
 
-let list_used_paths (lookups : Lookups.t) key =
+let list_uses (form : Core.t) =
   let used = ref [] in
   let use path = used := path :: !used in
   let use_constant : Core.pattern_constant -> unit = function
@@ -676,7 +678,7 @@ let list_used_paths (lookups : Lookups.t) key =
               use_bound stop
           | Wildcard | Bind _ | Variant _ | Record _ | Alternatives _ -> ());
     }
-    (lookups.read_core key).definition;
+    form.definition;
   !used
 
 let locate_name (spans : Source.Definition_span.t array) (definition : Syntax.definition) =
@@ -714,10 +716,14 @@ let report_unused (lookups : Lookups.t) (declaration : Resolve.Names.declaration
   }
 
 let check_unexported (lookups : Lookups.t) package =
+  let used_by = Key_table.create 64 in
+  List.iter (fun (key, path) -> Key_table.add used_by key path) (lookups.list_uses package);
   let uses =
     List.map
-      (fun declaration ->
-        (declaration, must_be_used lookups declaration, list_used_paths lookups declaration.key))
+      (fun (declaration : Resolve.Names.declaration) ->
+        ( declaration,
+          must_be_used lookups declaration,
+          List.rev (Key_table.find_all used_by declaration.key) ))
       (lookups.interface.names.list_package_declarations package)
   in
   let uses_of_unexported = Path_table.create 64 in
@@ -777,11 +783,7 @@ let describe_unused_dependency ~package dependency =
     (Path.show_package dependency)
 
 let list_unused_dependencies (lookups : Lookups.t) package =
-  let used =
-    List.concat_map
-      (fun (declaration : Resolve.Names.declaration) -> lookups.list_used_packages declaration.key)
-      (lookups.interface.names.list_package_declarations package)
-  in
+  let used = lookups.list_used_packages package in
   List.filter
     (fun dependency -> not (List.mem dependency used))
     (lookups.interface.names.list_dependency_names package)

@@ -499,10 +499,7 @@ let check (state : Checking.state) =
         (Function { signature; _ } | Method_declaration signature),
         Function_interface written ) -> (
         let name = Resolve.Names.extract_signature_name signature in
-        match
-          ( lookups.names.read_definition container,
-            (lookups.read_elaborated_interface container).interface )
-        with
+        match (lookups.names.read_definition container, lookups.read_interface container) with
         | { kind = Trait _; _ }, Trait_interface trait ->
             check_restated state signature
               ~has_body:(match definition.kind with Function _ -> true | _ -> false)

@@ -19,6 +19,8 @@
    (>= 3.24))
   (zarith
    (>= 1.14))
+  (sqlite3
+   (>= 5.4.2))
   (cmdliner
    (>= 2.1.1))
   (menhir

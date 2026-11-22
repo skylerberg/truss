@@ -289,14 +289,13 @@ let expect_proven_trusting_compiled_code text ~code ~count =
   let database = Support.make_database (Support.setup [ ("app.main", text) ]) in
   let states =
     List.filter
-      (fun (state : Source.span Prover.state) ->
-        Diagnostic.Code.name (Prover state.site.code) = code)
+      (fun (state : Database.proof_state) -> state.site.code = code)
       (Support.list_proof_states database (Support.parse_file "app.main"))
   in
   if List.length states <> count then Harness.fail "%d %s states" (List.length states) code;
   List.iter
-    (fun (state : Source.span Prover.state) ->
-      if state.failure <> None || not state.trusts_compiled_code then
+    (fun (state : Database.proof_state) ->
+      if (not state.is_proven) || not state.trusts_compiled_code then
         Harness.fail "a %s state is not proven by an evaluation" code)
     states
 
@@ -620,7 +619,7 @@ let () =
               caller.key
           with
           | Some Blocked -> ()
-          | Some (Value _ | Failed _) -> Harness.fail "the proof is computed"
+          | Some (Value _ | Failed) -> Harness.fail "the proof is computed"
           | None -> Harness.fail "the caller has no proof"))
     [
       ("a type error", Fixtures.Prover.double_with_an_ill_typed_ensures);
@@ -658,7 +657,7 @@ let () =
           caller.key
       with
       | Some Blocked -> ()
-      | Some (Value _ | Failed _) -> Harness.fail "the proof is computed"
+      | Some (Value _ | Failed) -> Harness.fail "the proof is computed"
       | None -> Harness.fail "the caller has no proof");
   Harness.test "a function that passes a derived impl where a bound needs one is proven" (fun () ->
       expect_not_proven Fixtures.Prover.same_of_a_derived_version_ensured_false "prover.ensures");
@@ -698,7 +697,7 @@ let () =
       | Some (Value (Obligations _)) -> ()
       | Some (Value (Unsupported _ | Not_proven_here)) ->
           Harness.fail "the caller has no obligations"
-      | Some (Failed _ | Blocked) -> Harness.fail "the proof is blocked"
+      | Some (Failed | Blocked) -> Harness.fail "the proof is blocked"
       | None -> Harness.fail "the caller has no proof");
   Harness.test "a body that calls a broken signature blocks no caller's proof" (fun () ->
       let packages =
@@ -728,7 +727,7 @@ let () =
       | Some (Value (Obligations _)) -> ()
       | Some (Value (Unsupported _ | Not_proven_here)) ->
           Harness.fail "the caller has no obligations"
-      | Some (Failed _ | Blocked) -> Harness.fail "the proof is blocked"
+      | Some (Failed | Blocked) -> Harness.fail "the proof is blocked"
       | None -> Harness.fail "the caller has no proof")
 
 let () =
@@ -766,7 +765,7 @@ let () =
           | Some (Value (Obligations _)) -> ()
           | Some (Value (Unsupported _ | Not_proven_here)) ->
               Harness.fail "%s has no obligations" (Path.show declaration.key.path)
-          | Some (Failed _ | Blocked) ->
+          | Some (Failed | Blocked) ->
               Harness.fail "the proof of %s is blocked" (Path.show declaration.key.path)
           | None -> Harness.fail "%s has no proof" (Path.show declaration.key.path))
         ((Support.make_names packages).list_declarations_in main))
@@ -2578,9 +2577,7 @@ let () =
       let states =
         Support.list_proof_states (Support.make_database packages) (Support.parse_file "app.main")
       in
-      let failed =
-        List.filter (fun (state : Source.span Prover.state) -> state.failure <> None) states
-      in
+      let failed = List.filter (fun (state : Database.proof_state) -> not state.is_proven) states in
       if List.length failed <> 1 || List.length states < 2 then
         Harness.fail "%d states, %d failed" (List.length states) (List.length failed));
   Harness.test "a call's requires that may not hold has a note at the clause" (fun () ->
@@ -2860,14 +2857,8 @@ let () =
               (Support.setup [ ("app.main", Fixtures.Prover.addition_that_can_overflow) ])
           in
           let file = Support.parse_file "app.main" in
-          match
-            Prover.list_diagnostics
-              (Prover.decide ~runs:[]
-                 (Database.make_proof_lookups database)
-                 solver
-                 (Database.list_proofs (Support.prove database file)))
-              file
-          with
+          Database.decide (Support.prove database file) ~runs:[] (Lazy.from_val solver);
+          match Database.list_proof_diagnostics database file with
           | [ diagnostic ] ->
               if
                 not
