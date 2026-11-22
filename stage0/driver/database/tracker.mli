@@ -92,13 +92,15 @@ val describe : any_fact -> description
 val marshal : 'value -> Store.cell
 val unmarshal : Store.cell -> 'value
 val find : t -> recorder -> 'value view -> Path.package -> id:int -> 'value outcome option
+val find_settled : t -> recorder -> 'value view -> Path.package -> id:int -> 'value outcome option
 val read : t -> recorder -> 'value view -> Path.package -> id:int -> 'value outcome
 val read_value : t -> recorder -> 'value view -> Path.package -> id:int -> 'value
 val find_value : t -> recorder -> 'value view -> Path.package -> id:int -> 'value option
 val write : t -> 'value fact -> id:int -> 'value outcome option -> state option
 val report : Kind.stage -> int -> is_changed:bool -> unit
 val report_computed : Kind.stage -> int list -> unit
-val forget : t -> Kind.stage -> int -> facts:any_fact list -> unit
+val list_facts : Kind.stage -> any_fact list
+val forget : t -> Kind.stage -> int -> unit
 
 val replace_file_diagnostics :
   t -> Kind.stage -> package:Path.package -> file:int -> Diagnostic.t list -> bool

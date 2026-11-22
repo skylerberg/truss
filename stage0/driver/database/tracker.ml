@@ -212,24 +212,31 @@ type any_fact = Any : 'value fact -> any_fact
 let make_stored ~table ~id_column ~fixed ~columns =
   Store.make_fact ~table ~id_column ~fixed ~columns:("state" :: columns)
 
+let facts_of_stages : (Kind.stage, any_fact) Hashtbl.t = Hashtbl.create 32
+let list_facts stage = List.rev (Hashtbl.find_all facts_of_stages stage)
+
 let make_fact ~stage ~table ~id_column ~fixed ~groups ~encode ~decode =
   let columns = List.concat_map snd groups in
-  {
-    whole =
-      {
-        table;
-        stage;
-        targets = List.map fst groups;
-        stored = make_stored ~table ~id_column ~fixed ~columns;
-        width = List.length columns;
-        id_column;
-        is_keyed_by_path = id_column = "path";
-        decode;
-        guard = None;
-      };
-    groups = List.map (fun (target, columns) -> (target, List.length columns)) groups;
-    encode;
-  }
+  let fact =
+    {
+      whole =
+        {
+          table;
+          stage;
+          targets = List.map fst groups;
+          stored = make_stored ~table ~id_column ~fixed ~columns;
+          width = List.length columns;
+          id_column;
+          is_keyed_by_path = id_column = "path";
+          decode;
+          guard = None;
+        };
+      groups = List.map (fun (target, columns) -> (target, List.length columns)) groups;
+      encode;
+    }
+  in
+  Hashtbl.add facts_of_stages stage (Any fact);
+  fact
 
 let make_view ~stage ~table ~id_column ~fixed ~target ~columns ~decode =
   {
@@ -276,7 +283,7 @@ let encode fact : _ outcome -> Store.cell list = function
   | Failed -> Integer 1 :: List.init fact.whole.width (fun _ -> Store.Null)
   | Blocked -> Integer 2 :: List.init fact.whole.width (fun _ -> Store.Null)
 
-let find tracker recorder view package ~id =
+let find_row tracker recorder view package ~id =
   let guards = Option.to_list view.guard in
   List.iter
     (fun target -> recorder.note Reads (Fact target) id "")
@@ -286,37 +293,42 @@ let find tracker recorder view package ~id =
     Store.find_fact tracker.store schema view.stored ~id ~stages:(List.map Kind.rank_stage stages)
   in
   let schema = Store.locate_schema tracker.store package in
-  let row =
-    match find_in schema with
-    | Absent when view.is_keyed_by_path && schema <> Main -> find_in Main
-    | row -> row
-  in
-  match row with
-  | Current cells ->
-      List.iter
-        (fun guard ->
-          match cells.(Array.length cells - 1) with
-          | Integer 0 -> ()
-          | Integer _ -> raise Reads_failed_fact
-          | Null ->
-              Compiler_bug.raise_bug ~stage:"Database" "a row of %s is not computed"
-                guard.guard_table
-          | Blob _ | Text _ ->
-              Compiler_bug.raise_bug ~stage:"Database" "a row of %s holds no state"
-                guard.guard_table)
-        guards;
-      Some (decode view cells)
+  match find_in schema with
+  | Absent when view.is_keyed_by_path && schema <> Main -> find_in Main
+  | row -> row
+
+let decode_row view (cells : Store.cell array) =
+  List.iter
+    (fun guard ->
+      match cells.(Array.length cells - 1) with
+      | Integer 0 -> ()
+      | Integer _ -> raise Reads_failed_fact
+      | Null ->
+          Compiler_bug.raise_bug ~stage:"Database" "a row of %s is not computed" guard.guard_table
+      | Blob _ | Text _ ->
+          Compiler_bug.raise_bug ~stage:"Database" "a row of %s holds no state" guard.guard_table)
+    (Option.to_list view.guard);
+  decode view cells
+
+let find tracker recorder view package ~id =
+  match find_row tracker recorder view package ~id with
+  | Current cells -> Some (decode_row view cells)
   | Absent -> None
   | Stale -> (
       match
         List.find_map
           (fun stage -> Hashtbl.find_opt tracker.bugs (Kind.rank_stage stage, id))
-          stages
+          (view.stage :: List.map (fun guard -> guard.guard_stage) (Option.to_list view.guard))
       with
       | Some bug -> raise (Compiler_bug.Bug bug)
       | None ->
           Compiler_bug.raise_bug ~stage:"Database" "a row of %s is read while its unit is stale"
             view.table)
+
+let find_settled tracker recorder view package ~id =
+  match find_row tracker recorder view package ~id with
+  | Current cells -> Some (decode_row view cells)
+  | Absent | Stale -> None
 
 let read tracker recorder view package ~id =
   match find tracker recorder view package ~id with
@@ -371,8 +383,8 @@ let report stage id ~is_changed =
 
 let report_computed stage ids = !observer (Computed { stage; ids; reads = 0; distinct_reads = 0 })
 
-let forget tracker stage id ~facts =
-  List.iter (fun (Any fact) -> ignore (write tracker fact ~id None)) facts;
+let forget tracker stage id =
+  List.iter (fun (Any fact) -> ignore (write tracker fact ~id None)) (list_facts stage);
   remove_edges tracker stage id;
   ignore
     (Store.replace_diagnostics tracker.store ~stage:(Kind.rank_stage stage) ~unit:id ~package:"" []);

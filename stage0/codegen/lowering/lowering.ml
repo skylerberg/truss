@@ -8,23 +8,27 @@ type lowered =
   | Folded of Lowered.data * Emit_c.fragment
   | Evaluate of Lowered.Item.t * Ground.ty
 
+type unbuildable = Unsupported of unsupported | Todo_types of Path.t list
+type 'value ran = Ran of 'value | Unfinished of string | Stopped of string
+type evaluation = string ran
+
 type linked =
   | Unit of { item : Lowered.Item.t; text_hash : string; sites : Lowered.site list }
-  | Evaluated of { item : Lowered.Item.t; evaluator : Lowered.Item.t; ty : Ground.ty }
-  | Unsupported of unsupported
+  | Evaluated of { item : Lowered.Item.t; evaluator : Lowered.Item.t }
+  | Unbuildable of unbuildable
 
 type lowered_lookups = {
   system : Libc.system;
   read_source : Path.file -> Source.t;
   interface : Interface.Lookups.t;
-  find_lowered : Lowered.Item.t -> (lowered, unsupported) result option;
-  read_test_key : Lowered.Item.t -> (string, unsupported) result;
-  list_reached_todo_types : Lowered.Item.t -> Path.t list;
+  find_lowered : Lowered.Item.t -> (lowered, unbuildable) result option;
+  find_evaluation : Lowered.Item.t -> evaluation option;
+  record_evaluation : Lowered.Item.t -> evaluation -> unit;
+  read_test_key : Lowered.Item.t -> (string, unbuildable) result;
   list_linked : Profile.t -> Lowered.Item.t list -> linked list;
   render_unit : Profile.t -> Lowered.Item.t -> string;
 }
 
-exception Todo_type = Monomorphic.Todo_type
 exception Infinite_size = Memory_layout.Infinite_size
 
 let make (context : Lower.context) (item : Lowered.Item.t) : lowered =
@@ -59,7 +63,8 @@ let lower system (lookups : Lookups.t) item =
       (fun () -> make (Lower.make_context ~env lookups) item)
   with
   | lowered -> Ok lowered
-  | exception Lower.Unsupported unsupported -> Error unsupported
+  | exception Lower.Unsupported unsupported -> Error (Unsupported unsupported)
+  | exception Monomorphic.Todo_type path -> Error (Todo_types [ path ])
 
 let test_runner : Lowered.Item.t =
   Lowered.Item.make_code (Well_known.make_path Run_tests) Ground.no_instantiation
@@ -73,6 +78,9 @@ let list_sites = function
   | Evaluate _ -> []
 
 let is_evaluated = function Evaluate _ -> true | Compiled _ | Folded _ -> false
+
+let make_data env item ty encoded =
+  Emit_c.make_data_fragment env { data_item = item; ty; value = Encoding.decode env ty encoded }
 
 let render_unit system (interface : Interface.Lookups.t) profile ~read_source ~is_worked_on
     ~find_lowered fragment =
@@ -99,10 +107,39 @@ let hash_fragment = function
   | Compiled fragment | Folded (_, fragment) -> Emit_c.hash fragment
   | Evaluate _ -> evaluated_fragment_hash
 
-let derive_test_keys ~read_lowered ~read_known_key =
-  Test_keys.derive ~read_known_key ~read_hash_and_references:(fun item ->
-      let lowered = read_lowered item in
-      (hash_fragment lowered, list_references lowered))
+module Item_table = Hashtbl.Make (Lowered.Item)
+
+let merge_unbuildable failures =
+  match List.concat_map (function Todo_types types -> types | Unsupported _ -> []) failures with
+  | [] -> List.nth_opt failures 0
+  | types -> Some (Todo_types (List.sort_uniq Path.compare types))
+
+let derive_test_keys ~read_lowered ~read_known_key component =
+  let lowered = Item_table.create 8 and known = Item_table.create 8 and failures = ref [] in
+  let keep table item = function
+    | Ok value -> Item_table.replace table item value
+    | Error unbuildable -> failures := unbuildable :: !failures
+  in
+  List.iter (fun item -> keep lowered item (read_lowered item)) component;
+  let is_read reference =
+    List.exists (Lowered.Item.equal reference) component || Item_table.mem known reference
+  in
+  List.iter
+    (fun item ->
+      List.iter
+        (fun reference ->
+          if not (is_read reference) then keep known reference (read_known_key reference))
+        (Option.fold ~none:[] ~some:list_references (Item_table.find_opt lowered item)))
+    component;
+  match merge_unbuildable (List.rev !failures) with
+  | Some unbuildable -> Error unbuildable
+  | None ->
+      Ok
+        (Test_keys.derive ~read_known_key:(Item_table.find known)
+           ~read_hash_and_references:(fun item ->
+             let code = Item_table.find lowered item in
+             (hash_fragment code, list_references code))
+           component)
 
 let make_root (path : Path.t) : Lowered.Item.t =
   match path with Test _ -> Generated (Test_main path) | _ -> Generated (Program_main path)

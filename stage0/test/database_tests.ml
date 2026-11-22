@@ -226,7 +226,7 @@ let render_units database roots =
           | Lowering.Unit _ -> ()
           | Evaluated { item; _ } ->
               Harness.fail "%s is evaluated, and has no unit" (Lowered.Item.to_string item)
-          | Unsupported { construct; _ } -> Harness.fail "stage0 does not build %s" construct)
+          | Unbuildable _ -> Harness.fail "a linked item cannot be built")
         (list_linked database profile (List.map make_code_item roots)))
     [ Profile.Development; Release ]
 
@@ -1197,8 +1197,31 @@ let () =
       expect_untouched (propagate hot ~before ~after).recomputed ~is_excluded:(fun computed ->
           (computed.stage = Lower || computed.stage = Key_tests)
           && List.mem computed.id items_at_shape));
-  Harness.test "a test that reaches a type defined as todo is blocked until the type is defined"
+  Harness.test "the key of an item names every type defined as todo that the item reaches"
     (fun () ->
+      let database =
+        build ~roots:[ "both" ]
+          [
+            ( "app.main",
+              "type First = todo\n\
+               type Second = todo\n\
+               fn first() -> Option[First] { None }\n\
+               fn second() -> Option[Second] { None }\n\
+               fn has_first() -> Bool { first().is_none() }\n\
+               fn has_second() -> Bool { second().is_none() }\n\
+               fn both() -> Bool { has_first() && has_second() }\n" );
+          ]
+      in
+      match Database.find_lowered_lookups database [ app ] with
+      | Error message -> Harness.fail "%s" message
+      | Ok lookups -> (
+          match lookups.read_test_key (make_code_item "both") with
+          | Error (Todo_types types) ->
+              Harness.expect_strings
+                ~expected:[ "app.main.First"; "app.main.Second" ]
+                (List.map Path.show types)
+          | Ok _ | Error (Unsupported _) -> Harness.fail "the key names no type defined as todo"));
+  Harness.test "defining a type that was todo lowers the code that reaches it again" (fun () ->
       let make_program definition =
         [
           ( "app.main",

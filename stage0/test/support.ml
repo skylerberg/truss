@@ -262,8 +262,8 @@ let c_compiler =
 
 let run_evaluations database (file : Path.file) proofs =
   match Database.list_evaluations proofs with
-  | [] -> []
-  | evaluations ->
+  | [] -> ()
+  | evaluated ->
       let backend =
         Backend.create
           (match Database.find_lowered_lookups database [ file.module_.package ] with
@@ -271,11 +271,12 @@ let run_evaluations database (file : Path.file) proofs =
           | Error message -> failwith message)
           (Lazy.force c_compiler) Development
       in
-      Evaluations.run backend evaluations
+      ignore (Backend.evaluate backend evaluated)
 
 let decide database file =
   let proofs = prove database file in
-  Database.decide proofs ~runs:(run_evaluations database file proofs) solver
+  run_evaluations database file proofs;
+  Database.decide proofs solver
 
 let list_proof_diagnostics database file =
   decide database file;

@@ -90,7 +90,7 @@ let read_processor_time () =
   times.tms_utime +. times.tms_stime +. times.tms_cutime +. times.tms_cstime
 
 let prove_files database files =
-  Database.decide (Database.prove database files) ~runs:[] (Lazy.from_val solver)
+  Database.decide (Database.prove database files) (Lazy.from_val solver)
 
 let measure database ~is_measured =
   let measured =

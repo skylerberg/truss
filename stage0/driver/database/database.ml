@@ -311,8 +311,8 @@ let find_checker (stage : Kind.stage) : checker option =
   | Check_unexported -> Some Unexported
   | Declare | Supply | Claim_roots | Resolve_grant | Read_trait_header | Evaluate_constant
   | Derive_interface | Compute_type_facts | Build_body_mir | Build_contract_mir | Generate_mir
-  | List_calls | Group_recursion | Check_dependencies | Prove | Lower | Key_tests | Render _
-  | Decide ->
+  | List_calls | Group_recursion | Check_dependencies | Prove | Lower | Key_tests | Evaluate
+  | Render _ | Decide ->
       None
 
 let list_staged (database : t) (file : Path.file) ~is_selected : Diagnostic.t list =
@@ -530,18 +530,15 @@ let list_evaluations proofs =
   | evaluations ->
       drain_lowering database (list_proof_packages proofs);
       List.filter
-        (fun evaluation ->
-          match
-            find_item_outcome proofs.database Facts.test_key
-              (Recipes.make_evaluation_root evaluation)
-          with
-          | Some Blocked -> false
-          | Some (Value _ | Failed) | None -> true)
-        evaluations
+        (fun root ->
+          match find_item_outcome proofs.database Facts.test_key root with
+          | Some (Blocked | Value (Error (Todo_types _))) -> false
+          | Some (Value (Ok _ | Error (Unsupported _)) | Failed) | None -> true)
+        (List.map Recipes.make_evaluation_root evaluations)
 
-let decide ?on_bug proofs ~runs solver =
+let decide ?on_bug proofs solver =
   run_past_bugs proofs.database ?on_bug (fun ~on_bug ->
-      Recipes.drain_decide proofs.database ~on_bug ~scope:(scope_proofs proofs) ~runs solver)
+      Recipes.drain_decide proofs.database ~on_bug ~scope:(scope_proofs proofs) solver)
 
 type proof_site = { code : string; span : Source.span; shows : string }
 type proof_state = { site : proof_site; is_proven : bool; trusts_compiled_code : bool }
@@ -680,53 +677,6 @@ let read_reached database fact item =
       Compiler_bug.raise_bug ~stage:"Database" "%s is read, and no root of lowering reaches it"
         (Lowered.Item.to_string item)
 
-let list_reached_todo_types (database : t) item =
-  let lowered_kind = Kind.rank_target (Fact Lowered)
-  and key_kind = Kind.rank_target (Fact Test_key)
-  and interface_kind = Kind.rank_target (Fact Interface) in
-  let state fact id =
-    match
-      Tracker.find database Tracker.untracked fact.Tracker.whole (Lookups.locate_items database) ~id
-    with
-    | Some Failed -> `Failed
-    | Some Blocked -> `Blocked
-    | Some (Value _) | None -> `Settled
-  in
-  let visited = Hashtbl.create 16 in
-  let rec visit todo_types (stage : Kind.stage) id =
-    if Hashtbl.mem visited (stage, id) then todo_types
-    else begin
-      Hashtbl.replace visited (stage, id) ();
-      let targets = list_unit_targets database stage id in
-      let recurse () =
-        List.fold_left
-          (fun todo_types (target : Store.endpoint) ->
-            if target.kind = lowered_kind then visit todo_types Lower target.id
-            else if target.kind = key_kind then visit todo_types Key_tests target.id
-            else todo_types)
-          todo_types targets
-      in
-      match (stage, if stage = Lower then state Facts.lowered id else state Facts.test_key id) with
-      | Lower, `Failed ->
-          List.filter_map
-            (fun (target : Store.endpoint) ->
-              if target.kind <> interface_kind then None
-              else
-                Option.bind (Store.find_definition_key_anywhere database.store ~id:target.id)
-                  (fun key ->
-                    let key = Declarations.decode_key key in
-                    match find_value database Facts.elaborated key with
-                    | Some { interface = Type_interface { shape = Todo_type; _ }; _ } ->
-                        Some key.path
-                    | Some _ | None -> None))
-            targets
-          @ todo_types
-      | _, `Blocked -> recurse ()
-      | _, (`Failed | `Settled) -> todo_types
-    end
-  in
-  List.sort_uniq Path.compare (visit [] Key_tests (Ids.of_item item))
-
 let list_linked (database : t) profile roots : Lowering.linked list =
   let list_rows () = Recipes.list_linked database profile ~roots in
   let rows = list_rows () in
@@ -734,7 +684,12 @@ let list_linked (database : t) profile roots : Lowering.linked list =
   run_past_bugs database (fun ~on_bug ->
       has_rendered :=
         Recipes.drain_stage database ~on_bug (Render profile)
-          ~scope:(Items (List.map (fun (row : Store.linked) -> row.linked_id) rows)));
+          ~scope:
+            (Items
+               (List.filter_map
+                  (fun (row : Store.linked) ->
+                    if row.is_unevaluated then None else Some row.linked_id)
+                  rows)));
   let rows = if !has_rendered then list_rows () else rows in
   List.iter
     (fun root ->
@@ -756,8 +711,8 @@ let list_linked (database : t) profile roots : Lowering.linked list =
             }
       | _ -> (
           match find_item_outcome database Facts.lowered item with
-          | Some (Value (Ok (Evaluate (evaluator, ty)))) -> Evaluated { item; evaluator; ty }
-          | Some (Value (Error unsupported)) -> Unsupported unsupported
+          | Some (Value (Ok (Evaluate (evaluator, _)))) -> Evaluated { item; evaluator }
+          | Some (Value (Error unbuildable)) -> Unbuildable unbuildable
           | Some (Value (Ok (Compiled _ | Folded _)) | Failed | Blocked) | None ->
               Compiler_bug.raise_bug ~stage:"Database" "%s is linked from code with errors"
                 (Lowered.Item.to_string item)))
@@ -780,6 +735,15 @@ let find_lowered_lookups (database : t) packages : (Lowering.lowered_lookups, st
           system;
           read_source = read_source database;
           interface = make_interface_lookups database;
+          find_evaluation =
+            (fun item ->
+              match
+                Tracker.find_settled database Tracker.untracked Facts.evaluation.whole
+                  (Lookups.locate_items database) ~id:(Ids.of_item item)
+              with
+              | Some (Value evaluation) -> Some evaluation
+              | Some (Failed | Blocked) | None -> None);
+          record_evaluation = Recipes.record_evaluation database;
           find_lowered =
             (fun item ->
               match find_item_outcome database Facts.lowered item with
@@ -789,7 +753,6 @@ let find_lowered_lookups (database : t) packages : (Lowering.lowered_lookups, st
                   Compiler_bug.raise_bug ~stage:"Database"
                     "%s is read, and no root of lowering reaches it" (Lowered.Item.to_string item));
           read_test_key = read_reached database Facts.test_key;
-          list_reached_todo_types = list_reached_todo_types database;
           list_linked = list_linked database;
           render_unit = render_unit database;
         }
@@ -811,9 +774,7 @@ let describe_target rank =
 
 let list_reads (database : t) paths ~is_source =
   let reads = Kind.encode_markers [ Reads ] in
-  let lowering =
-    List.map Kind.rank_stage [ Kind.Lower; Key_tests; Render Development; Render Release ]
-  in
+  let lowering = List.map Kind.rank_stage Recipes.item_stages in
   let stages_of_definitions =
     List.filter (fun stage -> not (List.mem stage lowering)) (List.map Kind.rank_stage Kind.stages)
   in
@@ -1137,7 +1098,7 @@ module For_testing = struct
 
   let make_proof_lookups = make_proof_lookups
 
-  let list_queries proofs ~runs =
+  let list_queries proofs =
     let database = proofs.database in
     let lookups = make_proof_lookups database in
     List.sort
@@ -1155,7 +1116,10 @@ module For_testing = struct
                        shows;
                      },
                      input ))
-                 (Prover.For_testing.list_queries (Prover.pose lookups ~runs key proof))
+                 (Prover.For_testing.list_queries
+                    (Prover.pose lookups
+                       ~runs:(Recipes.list_runs database Tracker.untracked lookups proof)
+                       key proof))
            | Some (Failed | Blocked) | None -> [])
          (list_proof_keys proofs))
 
@@ -1216,6 +1180,10 @@ module For_testing = struct
            ({ Store.target = root; markers = Kind.encode_markers [ Claims ] } :: claimed));
       Recipes.ensure_item database item
     end
+
+  let supply_lowered (database : t) item lowered =
+    add_root database item;
+    Recipes.supply_lowered database item lowered
 
   let list_differences = list_differences
 

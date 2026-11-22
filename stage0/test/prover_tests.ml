@@ -280,9 +280,7 @@ let () =
 let list_evaluated_definitions text =
   let database = Support.make_database (Support.setup [ ("app.main", text) ]) in
   List.map
-    (function
-      | Prover.Obligation.Constant_value path -> Path.show path
-      | Assertion { definition; _ } -> Path.show definition)
+    (fun item -> Option.fold ~none:"" ~some:Path.show (Lowered.Item.find_definition item))
     (Database.list_evaluations (Support.prove database (Support.parse_file "app.main")))
 
 let expect_proven_trusting_compiled_code text ~code ~count =
@@ -2864,7 +2862,7 @@ let () =
               (Support.setup [ ("app.main", Fixtures.Prover.addition_that_can_overflow) ])
           in
           let file = Support.parse_file "app.main" in
-          Database.decide (Support.prove database file) ~runs:[] (Lazy.from_val solver);
+          Database.decide (Support.prove database file) (Lazy.from_val solver);
           match Database.list_proof_diagnostics database file with
           | [ diagnostic ] ->
               if
