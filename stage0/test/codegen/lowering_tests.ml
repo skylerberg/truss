@@ -103,6 +103,31 @@ let () =
             ~expected:(name ^ ": " ^ String.concat ", " expected_types)
             (name ^ ": " ^ String.concat ", " dropped_types))
         deferred_drops);
+  Codegen_support.test
+    "the caller of a lending method keeps one record for the lend, and only releases it" (fun () ->
+      let caller : Lowered.Item.t =
+        Code
+          {
+            path = Top { module_ = Codegen_support.example; name = "first_title_length" };
+            instantiation = Ground.no_instantiation;
+            assumes_condition = false;
+          }
+      in
+      let _, backend =
+        Codegen_support.load ~roots:[ caller ] Fixtures.Lowering.shelf_lending_values_it_makes
+      in
+      let c = Emit_c.For_testing.render_c (Backend.For_testing.compile_fragment backend caller) in
+      let lend_names =
+        String.map
+          (function ('A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_') as letter -> letter | _ -> ' ')
+          c
+        |> String.split_on_char ' '
+        |> List.filter (String.starts_with ~prefix:"truss_lend")
+      in
+      Codegen_support.expect_string ~expected:"truss_lend, truss_lend_release"
+        (String.concat ", " (List.sort_uniq String.compare lend_names));
+      Codegen_support.expect_int ~expected:1
+        (List.length (List.filter (String.equal "truss_lend") lend_names)));
   Codegen_support.test "a value that a lending method made is dropped once, as its caller left it"
     (fun () ->
       Codegen_support.expect_output Fixtures.Lowering.shelf_lending_values_it_makes

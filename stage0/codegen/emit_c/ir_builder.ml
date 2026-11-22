@@ -500,7 +500,7 @@ let list_captures functions ~home ~mentioned ~written_or_addressed ~is_scalar ~i
 let is_scalar_type (emission : Emission.t) : Lowered.ty -> bool = function
   | Pointer _ | Raw _ -> true
   | Value ty -> not (C_types.is_struct emission.types ty)
-  | Environment _ | Evidence _ | Capabilities _ | Trace | Lend | Lend_mark -> false
+  | Environment _ | Evidence _ | Capabilities _ | Trace | Lend -> false
 
 let make_address_type builder local : Lowered.ty =
   Pointer { target = lookup_local_type builder local; writable = true }
@@ -560,7 +560,7 @@ let render_local_declarations builder (emission : Emission.t) ~locals ~parameter
                match ty with
                | Value ty when C_types.is_struct emission.types ty -> " = {0}"
                | Value _ | Pointer _ | Raw _ -> " = 0"
-               | Lend | Lend_mark -> " = {0}"
+               | Lend -> " = {0}"
                | Environment _ | Evidence _ | Capabilities _ | Trace ->
                    raise_bug "a zeroed environment, evidence slot, table, or link of the call chain"
            in

@@ -1,0 +1,31 @@
+type Draft(title: String, count: Int64)
+
+type Holder(name: String, count: Int64)
+
+type Titled(title: String, count: Int64)
+
+fn Holder.draft(mut self) lends mut Draft {
+  Draft(title: "draft ${self.count}", count: self.count)
+}
+
+fn Draft.titled(mut self) lends mut Titled {
+  Titled(title: mut self.title, count: mut self.count)
+}
+
+fn Holder.draft_title(mut self) lends mut String {
+  mut self.draft().title
+}
+
+fn Holder.draft_titled(mut self) lends mut Titled {
+  mut self.draft().titled()
+}
+
+test "a place in a value that a called method made is written back before that value is dropped" {
+  var holder = Holder(name: "${1}st", count: 2)
+  assert mut holder.draft_title() == "draft 2"
+  mut holder.draft_title() = "${3}rd title"
+  mut holder.draft_titled().title = "${4}th title"
+  mut holder.draft_titled().count = 7
+  assert holder.count == 2
+  assert holder.name == "1st"
+}

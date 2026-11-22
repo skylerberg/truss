@@ -1,43 +1,34 @@
-let lend_record (state : Lowering.state) : Lowered.operand =
-  match state.lend_record with
-  | Some record -> record
-  | None ->
-      let record : Lowered.operand =
-        Address
-          {
-            place =
-              Lowered.make_local_place
-                (Emit_c.Ir_builder.allocate_local state.builder ~is_zeroed:true Lend);
-            writable = true;
-          }
-      in
-      state.lend_record <- Some record;
-      record
-
-let obtain_lent_call state part : Lowering.lent_call =
+let obtain_lend_record (state : Lowering.state) part : Lowered.operand =
   let frame = Mir_places.require_mir_frame state in
-  match Hashtbl.find_opt frame.lent_calls part with
-  | Some call -> call
-  | None ->
-      let call =
-        {
-          Lowering.mark =
-            Lowered.make_local_place
-              (Emit_c.Ir_builder.allocate_local state.builder ~is_zeroed:true Lend_mark);
-          record = lend_record state;
-        }
-      in
-      Hashtbl.replace frame.lent_calls part call;
-      call
+  let record =
+    match Hashtbl.find_opt frame.lend_records part with
+    | Some record -> record
+    | None ->
+        let record =
+          Lowered.make_local_place
+            (Emit_c.Ir_builder.allocate_local state.builder ~is_zeroed:true Lend)
+        in
+        Hashtbl.replace frame.lend_records part record;
+        record
+  in
+  Address { place = record; writable = true }
 
-let emit_mark (state : Lowering.state) (intrinsic : Lowered.intrinsic) (call : Lowering.lent_call) =
+let emit_lend_call (state : Lowering.state) (intrinsic : Lowered.intrinsic) arguments =
   Emit_c.Ir_builder.emit state.builder
-    (Call
-       {
-         target = Intrinsic intrinsic;
-         arguments = [ call.record; Address { place = call.mark; writable = true } ];
-         result = Discarded;
-       })
+    (Call { target = Intrinsic intrinsic; arguments; result = Discarded })
+
+let end_lend (state : Lowering.state) part =
+  let frame = Mir_places.require_mir_frame state in
+  if not frame.after_lend.(frame.block) then
+    emit_lend_call state Lend_release [ obtain_lend_record state part ]
+
+let transfer_lends (state : Lowering.state) (lending : Lowering.lending) =
+  let frame = Mir_places.require_mir_frame state in
+  List.iter
+    (fun part ->
+      if List.mem part frame.ended_after_lend && not (Hashtbl.mem frame.placed_parts part) then
+        emit_lend_call state Lend_transfer [ lending.record; obtain_lend_record state part ])
+    frame.called_parts
 
 let find_forwarded_call state (call : Mir.call) : Forwarded.t option =
   match Mir_calls.resolve_callee state call.callee with

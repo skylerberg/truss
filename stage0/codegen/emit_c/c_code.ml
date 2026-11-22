@@ -125,17 +125,15 @@ let render_intrinsic (emission : Emission.t) (intrinsic : Lowered.intrinsic)
         (Text (Printf.sprintf "void %s(void);\n" symbol));
       render_runtime_call symbol []
   | Report_tests_to -> render_runtime_call "truss_runtime_report_tests_to" all
-  | ( Lend_begin | Lend_called | Lend_release | Lend_transfer | Lend_allocate | Lend_defer_drop
-    | Lend_defer_write_back ) as lend ->
+  | (Lend_release | Lend_transfer | Lend_defer_drop | Lend_defer_write_back | Lend_defer_free) as
+    lend ->
       let name =
         match lend with
-        | Lend_begin -> "_begin"
-        | Lend_called -> "_called"
         | Lend_release -> "_release"
         | Lend_transfer -> "_transfer"
-        | Lend_allocate -> "_allocate"
-        | Lend_defer_drop -> "_defer_drop"
-        | _ -> "_defer_write_back"
+        | Lend_defer_drop -> "_defer"
+        | Lend_defer_write_back -> "_defer_write_back"
+        | _ -> "_defer_free"
       in
       render_application (Emission.use_helper emission Lend ++ Text name) all
   | Live_blocks -> render_runtime_call "truss_runtime_live_blocks" []

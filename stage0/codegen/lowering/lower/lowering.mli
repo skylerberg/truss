@@ -21,8 +21,6 @@ type lending = {
   site : Lowered.operand;
 }
 
-type lent_call = { mark : Lowered.place; record : Lowered.operand }
-
 type frame = {
   code : Definitions.code;
   mutable self_place : Lowered.place option;
@@ -44,7 +42,7 @@ and mir_frame = {
   mutable move_state : Moves.state;
   lending : lending option;
   called_parts : Mir.local list;
-  lent_calls : (Mir.local, lent_call) Hashtbl.t;
+  lend_records : (Mir.local, Lowered.place) Hashtbl.t;
   placed_parts : (Mir.local, unit) Hashtbl.t;
   mutable forwarded_locals : int;
   ended_after_lend : Mir.local list;
@@ -75,7 +73,6 @@ type state = {
   mutable evidence : (Path.t * Lowered.operand) list;
   mutable tasks : task list;
   mutable moved : Lowered.place list;
-  mutable lend_record : Lowered.operand option;
 }
 
 val make_frame : Definitions.code -> frame

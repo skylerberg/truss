@@ -10,7 +10,6 @@ type ty =
   | Capabilities of int
   | Trace
   | Lend
-  | Lend_mark
 
 type site = { definition : Path.t; offset : int }
 type root = Local of local | Static of { item : Item.t; ty : Ground.ty }
@@ -123,13 +122,11 @@ type intrinsic =
   | Shared_unlock
   | Blocking_begin
   | Blocking_end
-  | Lend_begin
-  | Lend_called
   | Lend_release
   | Lend_transfer
-  | Lend_allocate
   | Lend_defer_drop
   | Lend_defer_write_back
+  | Lend_defer_free
 
 type target =
   | Direct of { function_ : function_ref; signature : signature }

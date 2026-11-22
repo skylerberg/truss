@@ -42,6 +42,14 @@ fn Shelf.slot(mut self, index: UInt64) lends mut Slot {
   Slot(book: mut self.books[index], note: None)
 }
 
+fn first_title_length(shelf: Shelf) -> UInt64 {
+  if shelf.title() is Some(title) {
+    title.length()
+  } else {
+    0
+  }
+}
+
 test "a lent constructor of values that the method made" {
   let empty = Shelf(books: [])
   assert empty.first() is None
@@ -59,6 +67,8 @@ test "a lent constructor of values that the method made" {
   assert shelf.report().note is None
   assert shelf.labeled(1).book.length() == 3
   assert shelf.labeled(1).label.length() == 6
+  assert first_title_length(shelf) == 4
+  assert first_title_length(empty) == 0
 }
 
 test "a caller fills a value that the method made and lent `mut`" {
