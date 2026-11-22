@@ -233,7 +233,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
     has_syntax_error part || (part = Body && not checks_body)
   in
   let read_effective_signature () =
-    match Interface.Impls.read_signature state.lookups.interface state.key.path with
+    match Signatures.read state.signatures state.lookups.interface state.key.path with
     | Some signature -> signature
     | None -> State.raise_bug "a function with an interface has no signature"
   in
@@ -425,6 +425,7 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
       definition;
       resolved;
       text;
+      signatures = Signatures.create ();
       visible_packages =
         lazy (Resolve.Names.list_visible_packages lookups.interface.names module_.package);
       tables = Tables.create (definition.id + 1);
@@ -477,8 +478,9 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
     && not (Tables.exists_type Types.is_error tables)
   in
   let build tables =
-    Form.build lookups ~resolved ~tables ~context ~package:state.package ~text ~key ~definition
-      ~elaborated ~law_parameters:state.law_parameters ~checks_body ~has_syntax_error
+    Form.build lookups ~signatures:state.signatures ~resolved ~tables ~context
+      ~package:state.package ~text ~key ~definition ~elaborated ~law_parameters:state.law_parameters
+      ~checks_body ~has_syntax_error
   in
   let checked = if is_clean tables then Some (build tables) else None in
   let requires_run_forever =

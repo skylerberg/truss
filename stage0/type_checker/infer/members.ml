@@ -59,5 +59,5 @@ let list_trait_generics (lookups : Lookups.t) trait =
   | Some interface -> interface.trait_generics
   | None -> []
 
-let read_method_signature (lookups : Lookups.t) trait method_ =
-  Interface.Definition.read_method_signature lookups.interface ~owner:trait method_
+let read_method_signature signatures (lookups : Lookups.t) trait method_ =
+  Signatures.read_of_method signatures lookups.interface ~owner:trait method_

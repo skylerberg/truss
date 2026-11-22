@@ -1,5 +1,6 @@
 val build :
   Lookups.t ->
+  signatures:Signatures.t ->
   resolved:Resolve.resolved ->
   tables:Tables.t ->
   context:Interface.Elaborator.t ->

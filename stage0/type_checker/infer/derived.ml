@@ -44,12 +44,13 @@ let read_derives_entry (lookups : Lookups.t) ~(type_ : Path.t) ~(trait : Path.t)
         (Path.show trait)
 
 let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
+  let signatures = Signatures.create () in
   match (path, find_derived_method path) with
   | Method { owner = Derived { type_; trait } as impl; _ }, Some derived_method -> (
       match
         ( Interface.Definition.find_impl_interface lookups.interface impl,
           Interface.Definition.find_type_interface lookups.interface type_,
-          Interface.Impls.read_signature lookups.interface path )
+          Signatures.read signatures lookups.interface path )
       with
       | _, Some { shape = Todo_type; _ }, _ -> None
       | Some interface, Some { shape; _ }, Some signature ->
@@ -134,7 +135,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
             in
             node type_
               (Call
-                 (Callee_uses.make_call lookups.interface ~list_bounds
+                 (Callee_uses.make_call signatures lookups.interface ~list_bounds
                     ~callee:
                       (Trait_method
                          {
@@ -151,7 +152,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
             let { Well_known.owner; name; receiver } = Well_known.locate_method method_ in
             node type_
               (Call
-                 (Callee_uses.make_call lookups.interface ~list_bounds
+                 (Callee_uses.make_call signatures lookups.interface ~list_bounds
                     ~callee:
                       (Trait_method
                          {
@@ -315,7 +316,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                 let write state number =
                   node hasher_type
                     (Call
-                       (Callee_uses.make_call lookups.interface ~list_bounds
+                       (Callee_uses.make_call signatures lookups.interface ~list_bounds
                           ~callee:
                             (Function
                                {
@@ -586,7 +587,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   make_attempt ok
                     (node (make_result_type ok)
                        (Call
-                          (Callee_uses.make_call lookups.interface ~list_bounds
+                          (Callee_uses.make_call signatures lookups.interface ~list_bounds
                              ~callee:
                                (Function
                                   {
@@ -629,7 +630,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                   let holds =
                     node bool
                       (Call
-                         (Callee_uses.make_call lookups.interface ~list_bounds
+                         (Callee_uses.make_call signatures lookups.interface ~list_bounds
                             ~callee:
                               (Intrinsic
                                  {
@@ -857,7 +858,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                           reference
                       with
                       | Some (From_impl { impl; substitution }) ->
-                          Callee_uses.make_callee lookups.interface ~list_bounds
+                          Callee_uses.make_callee signatures lookups.interface ~list_bounds
                             (Trait_method
                                {
                                  trait = reference;
@@ -884,8 +885,8 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                               (Core.Value
                                                  (node error_type
                                                     (Call
-                                                       (Callee_uses.make_call lookups.interface
-                                                          ~list_bounds
+                                                       (Callee_uses.make_call signatures
+                                                          lookups.interface ~list_bounds
                                                           ~callee:
                                                             (Function
                                                                {

@@ -41,7 +41,7 @@ let rec check_name (state : State.state) (env : State.env) (value : Syntax.expre
         (Printf.sprintf
            "`%s` is a theorem, so it is not a value. Call it in a proof to use its `ensures`." text)
   | Definition (Function, path) -> (
-      match Instantiation.find_function_signature state.lookups path with
+      match Instantiation.find_function_signature state.signatures state.lookups path with
       | Some signature -> (
           let instance =
             Instantiation.instantiate state (State.read_span state value.id) signature
@@ -214,7 +214,9 @@ and check_static_member state (value : Syntax.expression) type_ (member : Syntax
               Some (Global { path = constant; instantiation = Types.no_instantiation });
             Interface.Definition.read_constant_type state.lookups.interface constant
         | Visible method_path -> (
-            match Instantiation.find_function_signature state.lookups method_path with
+            match
+              Instantiation.find_function_signature state.signatures state.lookups method_path
+            with
             | Some signature ->
                 let instance =
                   Instantiation.instantiate state (State.read_span state value.id) signature
@@ -506,7 +508,9 @@ and find_method_version state (span : Source.Definition_span.t) type_ name
   | Ok (Visible overloads) -> (
       match List.assoc_opt receiver overloads with
       | Some (Type_overload method_path) -> (
-          match Instantiation.find_function_signature state.lookups method_path with
+          match
+            Instantiation.find_function_signature state.signatures state.lookups method_path
+          with
           | Some signature ->
               let instance = Instantiation.instantiate state span signature in
               (match instance.signature.receiver with
@@ -532,7 +536,7 @@ and instantiate_trait_method state span ~self_type (trait : Types.trait_referenc
         (Types.make_trait_substitution
            (Members.list_trait_generics state.lookups trait.trait)
            ~self:self_type trait)
-      (Members.read_method_signature state.lookups trait.trait method_)
+      (Members.read_method_signature state.signatures state.lookups trait.trait method_)
   in
   ( instance,
     Tables.Trait_method

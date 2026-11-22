@@ -83,6 +83,7 @@ type state = {
   definition : Syntax.definition;
   resolved : Resolve.resolved;
   text : string Lazy.t;
+  signatures : Signatures.t;
   visible_packages : Path.package list Lazy.t;
   tables : Tables.t;
   mutable diagnostics : Diagnostic.in_definition list;

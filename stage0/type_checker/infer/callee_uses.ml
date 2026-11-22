@@ -1,13 +1,13 @@
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Infer" format
 
-let instantiate (interface : Interface.Lookups.t) (target : Core.operand Core.target) :
+let instantiate signatures (interface : Interface.Lookups.t) (target : Core.operand Core.target) :
     Types.capability_set =
   match target with
   | Function { path; instantiation } -> (
       let signature =
         match Intrinsic.find_operation path with
         | Some operation -> Some (Intrinsic_signatures.make_signature operation)
-        | None -> Interface.Impls.read_signature interface path
+        | None -> Signatures.read signatures interface path
       in
       match signature with
       | Some signature ->
@@ -23,7 +23,7 @@ let instantiate (interface : Interface.Lookups.t) (target : Core.operand Core.ta
       with
       | Some method_, Some trait_interface -> (
           let signature =
-            Interface.Definition.read_method_signature interface ~owner:trait.trait method_
+            Signatures.read_of_method signatures interface ~owner:trait.trait method_
           in
           let uses =
             Types.substitute_capabilities
@@ -47,7 +47,7 @@ let instantiate (interface : Interface.Lookups.t) (target : Core.operand Core.ta
       | Some method_ ->
           Types.union_capabilities
             (Types.make_capability_set [ Types.make_capability capability ])
-            (Interface.Definition.read_method_signature interface ~owner:capability method_).uses
+            (Signatures.read_of_method signatures interface ~owner:capability method_).uses
       | None -> raise_bug "`%s` has no method `%s`" (Path.show capability) name)
   | Intrinsic { operation; _ } -> (Intrinsic_signatures.make_signature operation).uses
   | Indirect function_value -> (
@@ -67,16 +67,18 @@ let instantiate (interface : Interface.Lookups.t) (target : Core.operand Core.ta
       | Types.Error _ -> Types.no_capabilities
       | other -> raise_bug "a call through a value of type `%s`" (Types.show other))
 
-let compute (interface : Interface.Lookups.t) ~list_bounds (target : Core.operand Core.target) :
-    Types.capability_set =
-  Interface.Impls.normalize_capabilities interface ~list_bounds (instantiate interface target)
+let compute signatures (interface : Interface.Lookups.t) ~list_bounds
+    (target : Core.operand Core.target) : Types.capability_set =
+  Interface.Impls.normalize_capabilities interface ~list_bounds
+    (instantiate signatures interface target)
 
-let make_callee interface ~list_bounds (target : Core.operand Core.target) : Core.callee =
-  { target; uses = compute interface ~list_bounds target }
+let make_callee signatures interface ~list_bounds (target : Core.operand Core.target) : Core.callee
+    =
+  { target; uses = compute signatures interface ~list_bounds target }
 
-let make_call interface ~list_bounds ~callee ~arguments ~lends : Core.call =
+let make_call signatures interface ~list_bounds ~callee ~arguments ~lends : Core.call =
   {
-    callee = make_callee interface ~list_bounds callee;
+    callee = make_callee signatures interface ~list_bounds callee;
     arguments;
     evaluation_order = List.init (List.length arguments) Fun.id;
     lends;

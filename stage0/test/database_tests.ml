@@ -1431,20 +1431,20 @@ let () =
         Harness.fail "counted %s" (show_counts import_check));
   Harness.test "a lookup that a computation repeats is a read and not another distinct read"
     (fun () ->
-      let count_checked_bodies caller_body =
+      let count_checked_bodies reader_body =
         extract_counts
           (count_cold_build
              [
                ( "app.main",
-                 "fn callee(x: Int64) -> Int64 { x + 1 }\nfn caller() -> Int64 { " ^ caller_body
+                 "type Point(x: Int64, y: Int64)\nfn reader(point: Point) -> Int64 { " ^ reader_body
                  ^ " }\n" );
              ])
           "checked body"
       in
-      let once = count_checked_bodies "callee(1)"
-      and twice = count_checked_bodies "callee(callee(1))" in
+      let once = count_checked_bodies "point.x + point.y"
+      and twice = count_checked_bodies "point.x + point.y + point.x" in
       if twice.distinct_reads <> once.distinct_reads || twice.reads <= once.reads then
-        Harness.fail "counted %s with one call and %s with two" (show_counts once)
+        Harness.fail "counted %s with two field reads and %s with three" (show_counts once)
           (show_counts twice));
   Harness.test "removing a definition counts the removal of its checked body as a write" (fun () ->
       let before = [ ("app.main", "fn unused() -> Int64 { 1 }\nfn kept() -> Int64 { 2 }\n") ] in

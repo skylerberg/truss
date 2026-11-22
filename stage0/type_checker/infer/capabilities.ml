@@ -95,7 +95,7 @@ let check_callee_grants checking (origin : Core.origin) (callee : Core.operand C
             check_grant checking origin
               ~subject:(Printf.sprintf "`%s`" (Path.show path))
               (Path.locate_package path) signature.uses)
-          (Interface.Impls.read_signature state.lookups.interface path)
+          (Signatures.read state.signatures state.lookups.interface path)
   | Trait_method { trait; name; receiver; evidence; _ } -> (
       (if needs_grant trait.trait then
          match
@@ -106,7 +106,7 @@ let check_callee_grants checking (origin : Core.origin) (callee : Core.operand C
              check_grant checking origin
                ~subject:(Printf.sprintf "`%s.%s`" (Path.show trait.trait) name)
                (Path.locate_package trait.trait)
-               (Interface.Definition.read_method_signature state.lookups.interface
+               (Signatures.read_of_method state.signatures state.lookups.interface
                   ~owner:trait.trait method_)
                  .uses
          | None -> ());
@@ -122,7 +122,7 @@ let check_callee_grants checking (origin : Core.origin) (callee : Core.operand C
                          (Types.show_trait interface.implements)
                          (Types.show interface.for_type))
                     (Path.locate_package impl) signature.uses)
-                (Interface.Impls.read_signature state.lookups.interface
+                (Signatures.read state.signatures state.lookups.interface
                    (Method { owner = impl; name; receiver }))
           | Some _ | None -> ())
       | Impl _ | Bound | Dynamic -> ())
@@ -550,7 +550,7 @@ let rec can_call_capability_code (state : State.state) ~list_bounds ?(seen = [])
             List.exists
               (fun (method_ : Types.trait_method) ->
                 Types.exists_capability can_hold_a_capability
-                  (Interface.Definition.read_method_signature state.lookups.interface
+                  (Signatures.read_of_method state.signatures state.lookups.interface
                      ~owner:bound.trait method_)
                     .uses)
               interface.methods
@@ -644,7 +644,7 @@ let check_monitor_callbacks checking implementations =
                 List.iter
                   (fun (method_ : Types.trait_method) ->
                     let signature =
-                      Interface.Definition.read_method_signature state.lookups.interface
+                      Signatures.read_of_method state.signatures state.lookups.interface
                         ~owner:provided.capability method_
                     in
                     let list_bounds = Types.list_bounds signature.generics in
@@ -731,7 +731,7 @@ let check (state : State.state) (elaborated : Interface.Environment.elaborated_i
   | Function { body = Some body; _ }, (Function _ | Method_declaration _), Function_interface _
   | Test (Some body), _, Test_interface _ ->
       let signature =
-        match Interface.Impls.read_signature state.lookups.interface state.key.path with
+        match Signatures.read state.signatures state.lookups.interface state.key.path with
         | Some signature -> signature
         | None -> State.raise_bug "a checked function or test has no signature"
       in
