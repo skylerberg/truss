@@ -305,4 +305,8 @@ let () =
   Printf.printf "%d mutants checked, %d functions that prove, run %d times\n" !checked !functions
     !runs;
   Printf.printf "%d proofs that should not have been made\n" !failures;
+  if !runs = 0 then begin
+    prerr_endline "No proven function was run, so nothing was checked.";
+    exit 2
+  end;
   exit (if !failures > 0 then 1 else 0)

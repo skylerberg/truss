@@ -53,6 +53,9 @@ jobs:
       - name: Check that code names each module by its path
         run: git ls-files -z '*.ml' '*.mli' | xargs -0 ./_build/default/stage0/tools/qualified_names/qualified_names.exe
 
+      - name: Run the proven functions of mutated seeds, and check that none fails
+        run: ./_build/default/stage0/tools/proof_fuzz/proof_fuzz.exe --count 20 stage0/tools/proof_fuzz/seeds.truss
+
       - if: github.event_name == 'push'
         run: opam exec -- dune cache trim --size=200MB
 
