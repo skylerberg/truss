@@ -4,7 +4,7 @@ let raise_bug format = Compiler_bug.raise_bug ~stage:"Backend" format
 
 module Item_table = Hashtbl.Make (Lowered.Item)
 
-type 'a ran = Ran of 'a | Reached_todo of string | Stopped of string
+type 'a ran = Ran of 'a | Unfinished of string | Stopped of string
 type results = { find : string -> string option; add : string -> string -> unit }
 
 type t = {
@@ -26,7 +26,7 @@ let make_env backend =
     ~compute_shape:(Monomorphic.compute_shape backend.monomorphic)
 
 exception Cannot_build of string
-exception Evaluation_reaches_todo of { evaluated : Lowered.Item.t; report : string }
+exception Unfinished_evaluation of { evaluated : Lowered.Item.t; report : string }
 
 let describe_stopped_evaluation evaluated report =
   Printf.sprintf "Evaluating %s stopped: %s" (Lowered.Item.to_string evaluated) report
@@ -189,14 +189,13 @@ and run_while_compiling : 'value. t -> Lowered.Item.t -> read:(string -> 'value)
   let ran =
     match Hashtbl.find_opt backend.runs key with
     | Some ran -> ran
+    | None when List.exists (Lowered.Item.equal root) !(backend.evaluating) -> (
+        match root with
+        | Evaluator (Constant path) ->
+            Unfinished (Printf.sprintf "the value of %s depends on itself" (Path.show path))
+        | _ ->
+            raise_bug "%s is evaluated by code that reads its result" (Lowered.Item.to_string root))
     | None ->
-        (if List.exists (Lowered.Item.equal root) !(backend.evaluating) then
-           match root with
-           | Evaluator (Constant path) ->
-               raise_cannot_build "the value of %s depends on itself" (Path.show path)
-           | _ ->
-               raise_bug "%s is evaluated by code that reads its result"
-                 (Lowered.Item.to_string root));
         backend.evaluating := root :: !(backend.evaluating);
         Fun.protect ~finally:(fun () -> backend.evaluating := List.tl !(backend.evaluating))
         @@ fun () ->
@@ -212,7 +211,7 @@ and run_while_compiling : 'value. t -> Lowered.Item.t -> read:(string -> 'value)
                     (Startup.render_evaluator_start ~cpu_time_limit_ms (Emit_c.make_symbol root))
                   (fun program -> Process.run_with_time_limit ~time_limit_ms program [])
               with
-              | exception Evaluation_reaches_todo { report; _ } -> Reached_todo report
+              | exception Unfinished_evaluation { report; _ } -> Unfinished report
               | None ->
                   Stopped
                     (Printf.sprintf
@@ -224,7 +223,7 @@ and run_while_compiling : 'value. t -> Lowered.Item.t -> read:(string -> 'value)
               | Some (status, _, _) when status = Process.status_of_signal Sys.sigprof ->
                   Stopped (Printf.sprintf "it used more than %d ms of CPU time" cpu_time_limit_ms)
               | Some (status, _, errors) when status = Startup.todo_status ->
-                  Reached_todo (String.trim errors)
+                  Unfinished (String.trim errors)
               | Some (status, _, errors) -> (
                   match String.trim errors with
                   | "" -> Stopped (Printf.sprintf "it ended with status %d" status)
@@ -235,7 +234,7 @@ and run_while_compiling : 'value. t -> Lowered.Item.t -> read:(string -> 'value)
   in
   match ran with
   | Ran output -> Ran (read output)
-  | Reached_todo report -> Reached_todo report
+  | Unfinished report -> Unfinished report
   | Stopped report -> Stopped report
 
 and run_evaluator backend evaluator ty =
@@ -249,7 +248,7 @@ and compile_fragment backend item =
     | Evaluate (evaluator, ty) -> (
         match run_evaluator backend evaluator ty with
         | Ran value -> Emit_c.make_data_fragment (make_env backend) { data_item = item; ty; value }
-        | Reached_todo report -> raise (Evaluation_reaches_todo { evaluated = item; report })
+        | Unfinished report -> raise (Unfinished_evaluation { evaluated = item; report })
         | Stopped report -> raise_cannot_build "%s" (describe_stopped_evaluation item report))
   in
   if not (Lowered.Item.equal (Emit_c.item compiled) item) then
@@ -261,7 +260,7 @@ let capture_failure work =
   match work () with
   | result -> Ok result
   | exception Cannot_build message -> Error message
-  | exception Evaluation_reaches_todo { evaluated; report } ->
+  | exception Unfinished_evaluation { evaluated; report } ->
       Error (describe_stopped_evaluation evaluated report)
   | exception Test_report.Malformed message -> Error message
 
@@ -372,7 +371,7 @@ let run_tests ?(rerun = false) ?(report_progress = ignore) backend ~time_limit_m
             ~report_progress:(fun compiled total -> report_progress (Compiling { compiled; total }))
         with
         | () -> Array.of_list missing
-        | exception Evaluation_reaches_todo { evaluated; report } ->
+        | exception Unfinished_evaluation { evaluated; report } ->
             let unfinished, runnable =
               List.partition
                 (fun (_, root, _, _) -> reaches_evaluator backend root evaluated)

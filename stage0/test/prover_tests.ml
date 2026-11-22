@@ -328,19 +328,26 @@ let () =
          \  value.saturating_add(value)\n\
           }\n\n\
           let twice: UInt64 = double(unfinished)\n"));
-  Harness.test "a constant computed from a cyclic constant cannot be computed" (fun () ->
+  Harness.test
+    "a constant computed from a cyclic constant is unfinished: only the cycle is an error, and a \
+     proof that needs the value says that it has none" (fun () ->
       match
         List.sort compare
           (List.map
              (fun (diagnostic : Diagnostic.t) ->
                (Diagnostic.Code.name diagnostic.code, diagnostic.message))
-             (list_diagnostics Fixtures.Prover.constant_computed_from_a_cyclic_constant))
+             (list_diagnostics
+                (Fixtures.Prover.constant_computed_from_a_cyclic_constant
+               ^ "\nfn f() -> UInt64\n  ensures result == 4\n{\n  twice\n}\n")))
       with
-      | [ ("prover.constant_cycle", _); ("prover.evaluation", message) ] ->
+      | [ ("prover.constant_cycle", _); ("prover.ensures", message) ] ->
           if
-            message
-            <> "The value of `app.main.twice` cannot be computed: the value of app.main.limit \
-                depends on itself"
+            not
+              (String.includes
+                 ~affix:
+                   "The evaluation of `app.main.twice` stopped, so its value is not known: the \
+                    value of app.main.limit depends on itself"
+                 message)
           then Harness.fail "%s" message
       | diagnostics ->
           Harness.fail "[%s]" (String.concat "; " (List.map (fun (code, _) -> code) diagnostics)));
