@@ -74,7 +74,7 @@ let rewrite_origin : Core.origin -> Core.origin = function
 let make_place (node : Core.expression) : Core.place =
   match node.kind with Use place -> place | _ -> Temporary node
 
-let list_bounds form = Interface.Elaborator.list_bounds form.context
+let list_bounds form = Interface.Elaborator.list_known_bounds form.context
 
 let with_condition form condition =
   { form with context = Interface.Elaborator.add_condition form.context condition }

@@ -238,8 +238,10 @@ let list_type_arguments arguments =
 let list_contained_types (lookups : Lookups.t) path =
   let list_bounds =
     match Interface.Definition.find_type_interface lookups.interface path with
-    | Some interface -> Types.list_bounds interface.type_generics
-    | None -> fun _ -> []
+    | Some interface ->
+        Interface.Properties.Bounds.close lookups.interface
+          (Types.list_bounds interface.type_generics)
+    | None -> Interface.Properties.Bounds.none
   in
   List.concat_map
     (fun (((variant : Types.variant option), (field : Types.field)) as written) ->
@@ -433,7 +435,9 @@ let check_associated_types (lookups : Lookups.t) ~list_contained
     (declaration : Resolve.Names.declaration) spans (definition : Syntax.definition)
     (impl : Types.impl_interface) =
   let key = declaration.key in
-  let list_bounds = Types.list_bounds impl.impl_generics in
+  let list_bounds =
+    Interface.Properties.Bounds.close lookups.interface (Types.list_bounds impl.impl_generics)
+  in
   let find_written name =
     match definition.kind with
     | Impl { members; _ } ->

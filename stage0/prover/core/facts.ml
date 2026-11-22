@@ -812,8 +812,9 @@ let list_definition_bounds (lookups : Lookups.t) ~(current : Path.t) ~(condition
         ]
     | None -> []
   in
-  Interface.Impls.add_condition_bounds
-    (fun parameter -> list_self_bounds parameter @ Types.list_bounds generics parameter)
+  Interface.Impls.add_condition_bounds lookups.interface
+    (Interface.Properties.Bounds.close lookups.interface (fun parameter ->
+         list_self_bounds parameter @ Types.list_bounds generics parameter))
     condition
 
 let substitute_type (context : State.context) (frame : State.frame) ty =

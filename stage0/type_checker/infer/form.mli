@@ -16,7 +16,7 @@ val build :
 
 val list_capability_impls :
   Lookups.t ->
-  list_bounds:(Types.parameter -> Types.trait_reference list) ->
+  list_bounds:Interface.Properties.Bounds.t ->
   package:Path.package ->
   Types.ty ->
   (Core.provided * Types.impl_interface) list

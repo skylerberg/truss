@@ -14,7 +14,10 @@ type interface =
     }
   | Error_interface of Diagnostic.reported
 
-type scope = {
+type declared_bounds
+type known_bounds
+
+type 'bounds scope = {
   self_type : Types.ty option;
   self_trait : Types.trait_reference option;
   self_associated : (string * Types.ty) list;
@@ -27,7 +30,7 @@ type elaborated_interface = {
   interface : interface;
   diagnostics : Diagnostic.in_definition list;
   named : (Syntax.id * Types.ty) list;
-  scope : scope;
+  scope : known_bounds scope;
 }
 
 type container =
@@ -49,7 +52,7 @@ type container =
 
 type header = {
   container : container;
-  container_scope : scope;
+  container_scope : declared_bounds scope;
   container_named : (Syntax.id * Types.ty) list;
 }
 

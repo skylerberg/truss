@@ -37,6 +37,28 @@ let list_bound_closure lookups ~self (bound : Types.trait_reference) =
         [ bound ] interface.supertraits
   | None -> [ bound ]
 
+module Bounds = struct
+  type t = Types.parameter -> Types.trait_reference list
+
+  let none : t = fun _ -> []
+
+  let of_known (known : (Types.parameter * Types.trait_reference list) list) : t =
+   fun parameter -> Option.value ~default:[] (List.assoc_opt parameter known)
+
+  let close lookups (declared : Types.parameter -> Types.trait_reference list) : t =
+   fun parameter ->
+    List.concat_map
+      (list_bound_closure lookups ~self:(Types.Parameter parameter))
+      (declared parameter)
+
+  let append (first : t) (second : t) : t = fun parameter -> first parameter @ second parameter
+
+  let override (outer : t) ~for_ (inner : t) : t =
+   fun parameter -> if List.mem parameter for_ then inner parameter else outer parameter
+
+  let list (bounds : t) parameter = bounds parameter
+end
+
 let find_declaring_trait lookups ~base (trait : Types.trait_reference) ~is_declared =
   List.find_opt
     (fun (reference : Types.trait_reference) ->
@@ -78,8 +100,7 @@ let list_associated_bounds lookups ~base trait name =
 
 let list_known_bounds lookups ~list_bounds (type_ : Types.ty) =
   match type_ with
-  | Types.Parameter parameter ->
-      List.concat_map (list_bound_closure lookups ~self:type_) (list_bounds parameter)
+  | Types.Parameter parameter -> Bounds.list list_bounds parameter
   | Types.Projection { base; trait; name } ->
       List.concat_map
         (list_bound_closure lookups ~self:type_)

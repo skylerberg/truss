@@ -8,7 +8,7 @@ type decided_type
 
 type context = {
   lookups : Lookups.t;
-  list_bounds : Types.parameter -> Types.trait_reference list;
+  list_bounds : Interface.Impls.bounds;
   spans : Source.Definition_span.t array Lazy.t;
   text : string Lazy.t;
   mode_keywords : (Syntax.id, Core.mode_keyword) Hashtbl.t;

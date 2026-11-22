@@ -506,7 +506,7 @@ let () =
   let read_method_core name =
     let packages = Support.setup [ ("app.main", text) ] in
     let parameter : Types.parameter = { owner = both; name = "Value" } in
-    let list_bounds (actual : Types.parameter) = if actual = parameter then [ described ] else [] in
+    let list_bounds = Interface.Properties.Bounds.of_known [ (parameter, [ described ]) ] in
     let owner =
       match
         Interface.Impls.find_evidence

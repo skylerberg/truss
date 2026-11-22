@@ -797,7 +797,10 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
   let lookups = context.State.lookups in
   let name = restated.restated_name and receiver = restated.restated_receiver in
   let restated_path = Path.Method { owner = trait.Types.trait; name; receiver } in
-  let list_bounds = Types.list_bounds impl_interface.Types.impl_generics in
+  let list_bounds =
+    Interface.Properties.Bounds.close lookups.interface
+      (Types.list_bounds impl_interface.Types.impl_generics)
+  in
   let declared =
     match
       List.find_opt

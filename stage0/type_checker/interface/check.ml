@@ -201,15 +201,15 @@ let list_field_names (fields : Syntax.field list) =
 let check_derives state (interface : Types.type_interface) (clauses : Syntax.type_clause list)
     resolved =
   let field_types = Types.list_field_types interface in
-  let list_derived_bounds trait parameter =
-    if
-      List.exists
-        (fun (generic : Types.generic) -> generic.generic = parameter)
-        interface.type_generics
-    then
-      Checking.list_bounds state parameter
-      @ [ { Types.trait; trait_arguments = []; associated = [] } ]
-    else Checking.list_bounds state parameter
+  let list_derived_bounds trait =
+    Properties.Bounds.append (Checking.list_bounds state)
+      (Properties.Bounds.close state.lookups (fun parameter ->
+           if
+             List.exists
+               (fun (generic : Types.generic) -> generic.generic = parameter)
+               interface.type_generics
+           then [ { Types.trait; trait_arguments = []; associated = [] } ]
+           else []))
   in
   List.iter
     (fun ((clause : Syntax.type_clause), (written : Syntax.path_type), trait) ->
@@ -435,7 +435,9 @@ let check_restated (state : Checking.state) (signature : Syntax.signature) ~has_
             (Types.substitute_signature substitution original)
         and written = name_signature_declaring_traits state.lookups written in
         let implies =
-          Impls.implies_condition state.lookups ~list_bounds:(Types.list_bounds expected.generics)
+          Impls.implies_condition state.lookups
+            ~list_bounds:
+              (Properties.Bounds.close state.lookups (Types.list_bounds expected.generics))
         in
         if
           not
@@ -458,7 +460,9 @@ let check_proof_bounds (state : Checking.state) (written : Syntax.type_head)
     let renaming =
       Types.make_substitution generics (Types.list_generic_arguments impl.impl_generics)
     in
-    let list_impl_bounds = Types.list_bounds impl.impl_generics in
+    let list_impl_bounds =
+      Properties.Bounds.close state.lookups (Types.list_bounds impl.impl_generics)
+    in
     List.iteri
       (fun index ((proof : Types.generic), (of_impl : Types.generic)) ->
         match proof.kind with

@@ -433,7 +433,7 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
       unifier =
         Unify.create ~context ~list_rigid_members:(fun context rigid ->
             Interface.Properties.list_rigid_members lookups.interface
-              ~list_bounds:(Interface.Elaborator.list_bounds context)
+              ~list_bounds:(Interface.Elaborator.list_known_bounds context)
               rigid);
       locals = Hashtbl.create 32;
       law_parameters = list_law_parameters lookups elaborated.interface;

@@ -76,7 +76,10 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
             { patterns = [ pattern ]; guard = None; body; origin }
           in
           let self_type = interface.for_type in
-          let list_bounds = Types.list_bounds interface.impl_generics in
+          let list_bounds =
+            Interface.Properties.Bounds.close lookups.interface
+              (Types.list_bounds interface.impl_generics)
+          in
           let make_binding type_ ~is_var ~mode local =
             pattern type_
               (Bind

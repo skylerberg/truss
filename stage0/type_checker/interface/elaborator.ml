@@ -6,6 +6,7 @@ type t = {
   lookups : Lookups.t;
   resolved : Resolve.resolved;
   bounds : Types.trait_reference list Parameter_table.t;
+  known_bounds : Properties.Bounds.t;
   condition : Types.condition;
   broken_parameters : Diagnostic.reported Parameter_table.t;
   self_type : Types.ty option;
@@ -18,7 +19,7 @@ type t = {
   spans : Source.Definition_span.t array;
 }
 
-let create lookups resolved ~spans (scope : Environment.scope) =
+let create_with lookups resolved ~spans (scope : _ Environment.scope) ~known_bounds =
   let bounds = Parameter_table.create 8 in
   List.iter
     (fun (parameter, traits) -> Parameter_table.replace bounds parameter traits)
@@ -31,6 +32,7 @@ let create lookups resolved ~spans (scope : Environment.scope) =
     lookups;
     resolved;
     bounds;
+    known_bounds;
     condition = [];
     broken_parameters;
     self_type = scope.self_type;
@@ -42,6 +44,13 @@ let create lookups resolved ~spans (scope : Environment.scope) =
     named = ref [];
     spans;
   }
+
+let create_declared lookups resolved ~spans (scope : Environment.declared_bounds Environment.scope)
+    =
+  create_with lookups resolved ~spans scope ~known_bounds:Properties.Bounds.none
+
+let create lookups resolved ~spans (scope : Environment.known_bounds Environment.scope) =
+  create_with lookups resolved ~spans scope ~known_bounds:(Properties.Bounds.of_known scope.bounds)
 
 let read_span context id = context.spans.(id)
 
@@ -58,6 +67,16 @@ let list_bounds context parameter =
   | [] -> declared
   | conditional -> declared @ conditional
 
+let list_known_bounds context =
+  Properties.Bounds.append context.known_bounds
+    (Properties.Bounds.close context.lookups (fun parameter ->
+         List.filter_map
+           (fun (bound : Types.bound_condition) ->
+             match bound.subject with
+             | Types.Parameter subject when subject = parameter -> Some bound.bound
+             | _ -> None)
+           context.condition))
+
 let find_self_type context = context.self_type
 
 let add_condition context condition =
@@ -66,7 +85,7 @@ let add_condition context condition =
 let list_diagnostics context = !(context.diagnostics)
 let list_named_types context = !(context.named)
 
-let make_scope context : Environment.scope =
+let make_scope context : Environment.declared_bounds Environment.scope =
   {
     self_type = context.self_type;
     self_trait = context.self_trait;
@@ -84,7 +103,7 @@ let make_scope context : Environment.scope =
            context.broken_parameters []);
   }
 
-let empty_scope : Environment.scope =
+let empty_scope : Environment.declared_bounds Environment.scope =
   {
     self_type = None;
     self_trait = None;
@@ -700,19 +719,35 @@ let list_cost_operands context (bound : Syntax.expression) =
   visit bound;
   List.rev !operands
 
-let find_trait_parts context trait =
-  match Option.bind (context.lookups.names.find_key trait) context.lookups.find_header with
+let find_trait_parts (lookups : Lookups.t) trait =
+  match Option.bind (lookups.names.find_key trait) lookups.find_header with
   | Some { container = Trait_parts { trait_generics; requires; associated_types; _ }; _ } ->
       Some (trait_generics, requires, associated_types)
   | Some { container = Capability_parts | Impl_parts _; _ } | None -> None
 
-let list_bound_closure context ~self (bound : Types.trait_reference) =
+let list_bound_closure lookups ~self (bound : Types.trait_reference) =
   Properties.list_bound_closure_over
     ~find_requirements:(fun trait ->
       Option.map
         (fun (trait_generics, requires, _) -> (trait_generics, requires))
-        (find_trait_parts context trait))
+        (find_trait_parts lookups trait))
     ~self bound
+
+let close_scope lookups (scope : Environment.declared_bounds Environment.scope) :
+    Environment.known_bounds Environment.scope =
+  {
+    self_type = scope.self_type;
+    self_trait = scope.self_trait;
+    self_associated = scope.self_associated;
+    self_capabilities = scope.self_capabilities;
+    bounds =
+      List.map
+        (fun (parameter, bounds) ->
+          ( parameter,
+            List.concat_map (list_bound_closure lookups ~self:(Types.Parameter parameter)) bounds ))
+        scope.bounds;
+    broken_parameters = scope.broken_parameters;
+  }
 
 let list_direct_bounds context (type_ : Types.ty) =
   match type_ with
@@ -720,7 +755,7 @@ let list_direct_bounds context (type_ : Types.ty) =
   | Types.Projection { base; trait; name } ->
       List.concat_map
         (fun (declaring : Types.trait_reference) ->
-          match find_trait_parts context declaring.trait with
+          match find_trait_parts context.lookups declaring.trait with
           | Some (trait_generics, _, associated_types) ->
               let substitution =
                 Types.bind_argument
@@ -735,7 +770,7 @@ let list_direct_bounds context (type_ : Types.ty) =
                   else [])
                 associated_types
           | None -> [])
-        (list_bound_closure context ~self:base trait)
+        (list_bound_closure context.lookups ~self:base trait)
   | _ -> []
 
 let rec find_bounded_type context (written : Syntax.expression) =
@@ -794,7 +829,7 @@ let list_bound_methods context (self_type : Types.ty) name =
         (context.lookups.names.list_members trait.trait name))
     []
     (List.concat_map
-       (list_bound_closure context ~self:self_type)
+       (list_bound_closure context.lookups ~self:self_type)
        (list_direct_bounds context self_type))
 
 let find_operand_method (overloads : bound_method list) =
@@ -1143,7 +1178,7 @@ let elaborate_header (lookups : Lookups.t) (key : Resolve.Names.key) =
   else
     match
       elaborate_container
-        (create lookups resolved ~spans:(lookups.names.read_spans key) empty_scope)
+        (create_declared lookups resolved ~spans:(lookups.names.read_spans key) empty_scope)
         key.path definition
     with
     | _, context when !(context.diagnostics) <> [] -> Error (List.rev !(context.diagnostics))
@@ -1161,7 +1196,7 @@ let make_elaborated_interface context interface : Environment.elaborated_interfa
     interface;
     diagnostics = List.rev !(context.diagnostics);
     named = List.rev !(context.named);
-    scope = make_scope context;
+    scope = close_scope context.lookups (make_scope context);
   }
 
 let list_methods (lookups : Lookups.t) key =
@@ -1283,11 +1318,16 @@ let make_container_interface lookups (key : Resolve.Names.key) (header : Environ
                 methods;
           }
   in
-  { interface; diagnostics = []; named = header.container_named; scope = header.container_scope }
+  {
+    interface;
+    diagnostics = [];
+    named = header.container_named;
+    scope = close_scope lookups header.container_scope;
+  }
 
 let elaborate_member (lookups : Lookups.t) ~path ~spans resolved (definition : Syntax.definition)
     (header : Environment.header) =
-  let context = create lookups resolved ~spans header.container_scope in
+  let context = create_declared lookups resolved ~spans header.container_scope in
   match definition.kind with
   | Function { signature; _ } | Method_declaration signature ->
       let is_in_capability =
@@ -1308,7 +1348,7 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
   let spans = lookups.names.read_spans key in
   let path = key.path in
   Compiler_bug.run_while_doing ~stage:"Interface" (Resolve.Names.show_key key) (fun () ->
-      let context = create lookups resolved ~spans empty_scope in
+      let context = create_declared lookups resolved ~spans empty_scope in
       let make_error_interface () =
         make_elaborated_interface context (Error_interface Diagnostic.reported_elsewhere)
       in

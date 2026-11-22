@@ -161,7 +161,7 @@ val resolve : state -> Types.ty -> Types.ty
 val zonk : state -> Types.ty -> Types.ty
 val make_fresh_type : state -> Types.ty
 val make_fresh_generic_arguments : state -> Types.generic list -> Types.argument list
-val lookup_bounds : state -> Types.parameter -> Types.trait_reference list
+val lookup_bounds : state -> Interface.Properties.Bounds.t
 val normalize : state -> Types.ty -> Types.ty
 val find_domain : state -> Types.ty -> Language.Builtin_type.t list option
 val is_float_domain : Language.Builtin_type.t list -> bool

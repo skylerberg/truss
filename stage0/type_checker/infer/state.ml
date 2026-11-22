@@ -228,7 +228,7 @@ let make_fresh_generic_arguments state (generics : Types.generic list) =
       | Type_generic _ -> Types.Type (make_fresh_type state))
     generics
 
-let lookup_bounds state parameter = Interface.Elaborator.list_bounds (read_context state) parameter
+let lookup_bounds state = Interface.Elaborator.list_known_bounds (read_context state)
 
 let reduce_condition state (condition : Types.condition) =
   Interface.Impls.decide_condition state.lookups.interface ~list_bounds:(lookup_bounds state)

@@ -534,7 +534,7 @@ let solve (state : State.state) =
 let rec can_call_capability_code (state : State.state) ~list_bounds ?(seen = []) (type_ : Types.ty)
     =
   let can_call_inside = can_call_capability_code state ~list_bounds ~seen in
-  let trait_uses (trait : Types.trait_reference) =
+  let has_a_method_that_uses (bound : Types.trait_reference) =
     let can_hold_a_capability : Types.capability -> bool = function
       | Capability_projection _ -> ( match type_ with Types.Any _ -> false | _ -> true)
       | Built_in _ -> false
@@ -543,19 +543,16 @@ let rec can_call_capability_code (state : State.state) ~list_bounds ?(seen = [])
       | Capability_unless _ | Capability_unless_values _ ->
           State.raise_bug "a capability's base has a condition"
     in
-    List.exists
-      (fun (bound : Types.trait_reference) ->
-        match Interface.Definition.find_trait_interface state.lookups.interface bound.trait with
-        | Some interface ->
-            List.exists
-              (fun (method_ : Types.trait_method) ->
-                Types.exists_capability can_hold_a_capability
-                  (Signatures.read_of_method state.signatures state.lookups.interface
-                     ~owner:bound.trait method_)
-                    .uses)
-              interface.methods
-        | None -> false)
-      (trait :: Interface.Properties.list_bound_closure state.lookups.interface ~self:type_ trait)
+    match Interface.Definition.find_trait_interface state.lookups.interface bound.trait with
+    | Some interface ->
+        List.exists
+          (fun (method_ : Types.trait_method) ->
+            Types.exists_capability can_hold_a_capability
+              (Signatures.read_of_method state.signatures state.lookups.interface ~owner:bound.trait
+                 method_)
+                .uses)
+          interface.methods
+    | None -> false
   in
   let can_call_arguments =
     List.exists (function
@@ -575,8 +572,11 @@ let rec can_call_capability_code (state : State.state) ~list_bounds ?(seen = [])
         uses
       || List.exists (fun (_, input) -> can_call_inside input) inputs
       || can_call_inside output
-  | Types.Any trait -> trait_uses trait
-  | Types.Parameter parameter -> List.exists trait_uses (list_bounds parameter)
+  | Types.Any trait ->
+      List.exists has_a_method_that_uses
+        (Interface.Properties.list_bound_closure state.lookups.interface ~self:type_ trait)
+  | Types.Parameter parameter ->
+      List.exists has_a_method_that_uses (Interface.Properties.Bounds.list list_bounds parameter)
   | Types.Named { path; arguments = type_arguments } -> (
       can_call_arguments type_arguments
       || (not (List.exists (Path.equal path) seen))
@@ -647,7 +647,10 @@ let check_monitor_callbacks checking implementations =
                       Signatures.read_of_method state.signatures state.lookups.interface
                         ~owner:provided.capability method_
                     in
-                    let list_bounds = Types.list_bounds signature.generics in
+                    let list_bounds =
+                      Interface.Properties.Bounds.close state.lookups.interface
+                        (Types.list_bounds signature.generics)
+                    in
                     match
                       List.find_opt
                         (fun (parameter : Types.parameter_info) ->
