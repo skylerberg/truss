@@ -85,9 +85,11 @@ let derived_interface : Types.impl_interface Tracker.fact =
 
 let type_facts : Interface.Environment.type_facts Tracker.fact =
   Tracker.make_fact ~stage:Compute_type_facts ~table:"type_facts" ~id_column:"path" ~fixed:[]
-    ~groups:[ (Type_facts, [ "copyable"; "plain"; "view"; "holds_function"; "contains" ]) ]
+    ~groups:
+      [ (Type_facts, [ "generics"; "copyable"; "plain"; "view"; "holds_function"; "contains" ]) ]
     ~encode:(fun (facts : Interface.Environment.type_facts) ->
       [
+        Tracker.marshal facts.generics;
         Tracker.marshal facts.copyable;
         Tracker.marshal facts.plain;
         Tracker.marshal facts.view;
@@ -96,11 +98,12 @@ let type_facts : Interface.Environment.type_facts Tracker.fact =
       ])
     ~decode:(fun cells ->
       {
-        copyable = Tracker.unmarshal cells.(0);
-        plain = Tracker.unmarshal cells.(1);
-        view = Tracker.unmarshal cells.(2);
-        holds_function = Tracker.unmarshal cells.(3);
-        contains = Tracker.unmarshal cells.(4);
+        generics = Tracker.unmarshal cells.(0);
+        copyable = Tracker.unmarshal cells.(1);
+        plain = Tracker.unmarshal cells.(2);
+        view = Tracker.unmarshal cells.(3);
+        holds_function = Tracker.unmarshal cells.(4);
+        contains = Tracker.unmarshal cells.(5);
       })
 
 let signature_check : unit Tracker.fact =

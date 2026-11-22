@@ -104,8 +104,8 @@ let run_resolve (database : Tracker.t) (row : Store.definition) =
     Tracker.record database Resolve row.id (fun recorder ->
         let names = Lookups.make_names database recorder in
         List.map
-          (fun section ->
-            match Resolve.resolve names key section with
+          (fun (section, outcome) ->
+            match (outcome : (Resolve.resolution, _) result option) with
             | Some (Ok { resolved; used_imports }) ->
                 List.iter
                   (fun path ->
@@ -119,7 +119,7 @@ let run_resolve (database : Tracker.t) (row : Store.definition) =
                 (section, Tracker.Value resolved, [])
             | Some (Error diagnostics) -> (section, Failed, diagnostics)
             | None -> (section, Blocked, []))
-          Resolve.sections)
+          (Resolve.resolve names key))
   in
   let states_before =
     List.map

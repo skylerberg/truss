@@ -84,10 +84,10 @@ type state = {
   lookups : Names.lookups;
   key : Names.key;
   spans : Source.Definition_span.t array;
+  syntax_errors : Source.Definition_span.t list;
   interface : section_names;
   contract : section_names;
   body : section_names;
-  walked : section;
   mutable section : section;
 }
 
@@ -100,16 +100,16 @@ let make_section_names size =
     used_imports = [];
   }
 
-let create lookups key ~spans ~walked =
+let create lookups key ~spans ~syntax_errors =
   let size = Array.length spans in
   {
     lookups;
     key;
     spans;
+    syntax_errors;
     interface = make_section_names size;
     contract = make_section_names size;
     body = make_section_names size;
-    walked;
     section = Interface;
   }
 
@@ -122,12 +122,10 @@ let lookup_current_names state = lookup_section_names state state.section
 let read_span state id = state.spans.(id)
 
 let run_in_section state section walk =
-  if section = state.walked then begin
-    let enclosing = state.section in
-    state.section <- section;
-    walk ();
-    state.section <- enclosing
-  end
+  let enclosing = state.section in
+  state.section <- section;
+  walk ();
+  state.section <- enclosing
 
 let add_diagnostic state ?fixes code (span : Source.Definition_span.t) message =
   let diagnostic = Diagnostic.make ?fixes ~code:(Resolve code) span message in
@@ -1186,7 +1184,11 @@ let resolve_inherited scope ~(owner : Path.t) (generics : Syntax.generic_paramet
 
 let resolve_definition state ~(path : Path.t) ?(container : (Path.t * Syntax.definition) option)
     (definition_ : Syntax.definition) =
-  let is_broken part = Names.is_broken state.lookups state.key part in
+  let is_broken part =
+    Option.is_some
+      (Parts.find_syntax_error ~spans:state.spans ~syntax_errors:state.syntax_errors definition_
+         part)
+  in
   let header_broken = is_broken Header and body_broken = is_broken Body in
   let scope =
     match container with

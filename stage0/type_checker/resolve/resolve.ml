@@ -108,19 +108,25 @@ let find_value_name (definition : Syntax.definition) : Syntax.name option =
       Some name
   | _ -> None
 
-let resolve (lookups : Names.lookups) (key : Names.key) section =
-  let definition = lookups.read_definition key and spans = lookups.read_spans key in
+let resolve (lookups : Names.lookups) (key : Names.key) =
+  let definition = lookups.read_definition key
+  and spans = lookups.read_spans key
+  and syntax_errors = lookups.list_syntax_errors key in
+  let is_broken part =
+    Option.is_some (Parts.find_syntax_error ~spans ~syntax_errors definition part)
+  in
   let module_ = key.module_ in
-  let state = Walk.create lookups key ~spans ~walked:section in
+  let state = Walk.create lookups key ~spans ~syntax_errors in
+  let container_key = lookups.find_container key in
   let container =
     Option.map
       (fun (container : Names.key) -> (container.path, lookups.read_definition container))
-      (lookups.find_container key)
+      container_key
   in
   let is_walked =
-    (not (Names.is_broken lookups key Header))
+    (not (is_broken Header))
     &&
-    match lookups.find_container key with
+    match container_key with
     | Some container -> not (Names.is_broken lookups container Header)
     | None -> true
   in
@@ -166,7 +172,7 @@ let resolve (lookups : Names.lookups) (key : Names.key) section =
              (Path.show_module submodule) (Path.show_module module_) name.text
              (Path.show_module submodule))
   | Some _ | None -> ());
-  let compute_outcome () =
+  let compute_outcome section =
     let walked = Walk.lookup_section_names state section in
     let resolved =
       { names = walked.names; brackets = walked.brackets; holes = List.rev walked.holes }
@@ -180,14 +186,18 @@ let resolve (lookups : Names.lookups) (key : Names.key) section =
                compare left.span right.span)
              diagnostics)
   in
-  let is_parsed =
-    match section with
-    | Interface | Contract -> is_walked
-    | Body -> is_walked && not (Names.is_broken lookups key Body)
-  in
-  if is_parsed || (Walk.lookup_section_names state section).diagnostics <> [] then
-    Some (compute_outcome ())
-  else None
+  List.map
+    (fun section ->
+      let is_parsed =
+        match section with
+        | Interface | Contract -> is_walked
+        | Body -> is_walked && not (is_broken Body)
+      in
+      ( section,
+        if is_parsed || (Walk.lookup_section_names state section).diagnostics <> [] then
+          Some (compute_outcome section)
+        else None ))
+    sections
 
 let list_file_diagnostics (lookups : Names.lookups) (path : Path.file) (file : Syntax.file) ~text
     ~(used : string list option) =

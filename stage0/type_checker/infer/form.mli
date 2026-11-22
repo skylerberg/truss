@@ -10,6 +10,7 @@ val build :
   elaborated:Interface.Environment.elaborated_interface ->
   law_parameters:(string * Types.ty) list ->
   checks_body:bool ->
+  has_syntax_error:(Resolve.Parts.part -> bool) ->
   Core.t
 
 val list_capability_impls :

@@ -58,6 +58,7 @@ type requirement = Never | Requires of Types.ty list
 type exposure = Always | If_any of Types.ty list
 
 type type_facts = {
+  generics : Types.generic list;
   copyable : requirement;
   plain : requirement;
   view : exposure;

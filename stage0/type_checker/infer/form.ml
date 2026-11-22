@@ -2035,9 +2035,10 @@ let build_law_proof form ~holds_body (written : Syntax.block) : Core.definition 
     }
 
 let build_definition form ~(key : Resolve.Names.key) ~(definition : Syntax.definition)
-    ~(elaborated : Interface.Environment.elaborated_interface) ~checks_body : Core.definition =
+    ~(elaborated : Interface.Environment.elaborated_interface) ~checks_body ~has_syntax_error :
+    Core.definition =
   let is_broken (part : Resolve.Parts.part) =
-    Resolve.Names.is_broken form.lookups.interface.names key part || (part = Body && not checks_body)
+    has_syntax_error part || (part = Body && not checks_body)
   in
   let holds_body = checks_body in
   let read_effective_signature () =
@@ -2093,7 +2094,7 @@ and replace_capability_holes capabilities =
   Types.map_capability_types replace_holes (Types.map_trait replace_holes) capabilities
 
 let build lookups ~resolved ~tables ~context ~package ~text ~key ~definition ~elaborated
-    ~law_parameters ~checks_body : Core.t =
+    ~law_parameters ~checks_body ~has_syntax_error : Core.t =
   let tables_with_holes =
     if Tables.exists_type (function Types.Hole -> true | _ -> false) tables then Some tables
     else None
@@ -2118,7 +2119,7 @@ let build lookups ~resolved ~tables ~context ~package ~text ~key ~definition ~el
     }
   in
   {
-    definition = build_definition form ~key ~definition ~elaborated ~checks_body;
+    definition = build_definition form ~key ~definition ~elaborated ~checks_body ~has_syntax_error;
     origin = Written definition.id;
   }
 

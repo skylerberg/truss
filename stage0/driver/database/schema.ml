@@ -75,7 +75,7 @@ let tables =
     fact_of_definition "signature_check" state;
     keyed_by_id "type_facts"
       ("path INTEGER PRIMARY KEY, " ^ state
-     ^ ", copyable BLOB, plain BLOB, view BLOB, holds_function BLOB, contains BLOB")
+     ^ ", generics BLOB, copyable BLOB, plain BLOB, view BLOB, holds_function BLOB, contains BLOB")
       [];
     keyed_by_id "constant_value" ("path INTEGER PRIMARY KEY, " ^ state ^ ", value TEXT") [];
     keyed_by_id "derived_interface" ("path INTEGER PRIMARY KEY, " ^ state ^ ", value BLOB") [];

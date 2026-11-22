@@ -111,7 +111,7 @@ header          (definition, state, value)
 interface       (definition, state, value, named, scope)
 derived_interface (definition, state, value)
 signature_check (definition, state)
-type_facts      (definition, state, copyable, plain, view, holds_function, contains)
+type_facts      (definition, state, generics, copyable, plain, view, holds_function, contains)
 constant_value  (definition, state, value)
 contract        (definition, state, form)
 body            (definition, state, form, tables, requires_run_forever,
@@ -215,7 +215,7 @@ The orchestrator runs the stages in this order. Each row is one recipe.
 | Declare | Module | The declaring half of `Resolve.Namespace` | The parsed files of the module; lookups of entries, modules, and dependencies | `definition`, `syntax`, `import`, `impl`, with a row for each derived impl |
 | Supply | Impl | The trait's methods that the impl does not write | Name lookups | A `definition` row for each method the impl inherits or derives |
 | Claim roots | Test, or a package's `main` | `Lowering.make_root` | The definition's path | `claims` edges to the items that run it |
-| Resolve | Definition | `Resolve.resolve`, once for each section | The definition's tree; name lookups | A `resolved` row for each section, `references` edges |
+| Resolve | Definition | `Resolve.resolve`, which walks the definition once | The definition's tree; name lookups | A `resolved` row for each section, `references` edges |
 | Resolve grants | Dependency | `Interface.Grants.resolve_grant` | The capabilities the manifest grants; name lookups | `grant` |
 | Check imports | File | `Resolve.list_file_diagnostics` | The file's text; the imports that a `references` edge names; whether a `resolved` row of the file holds no value | Diagnostics |
 | Read trait headers | Trait | `Resolve.make_trait_header` | The tree and its resolved names | `trait_header` |
@@ -313,6 +313,8 @@ runs the evaluation again.
 | When a dependency's file is replaced, a differing row of `definition`, `entry`, `impl`, or another table of names marks the readers of every lookup that the row backs, under the row's own name: the entry `name` of its module, the members `member` of its owner. A differing fact row marks the readers of each of its facts. | The old file and the new one are attached together, so the rows that differ are one query for each table. Marking by row and name leaves a reader of one function untouched when another function of the same module changes. A lookup that reads only some columns of a differing row is recomputed once and found unchanged, which costs one unit and can never leave a stale read. |
 | A statement that joins names its driving table first and joins with `CROSS JOIN`, which SQLite never reorders. | The store's statements have no statistics to plan from, and the planner's choice differs between versions of SQLite. A newer planner made the edge table the outer loop of a recursive step, so each step read every edge, and CI's jobs took ten times as long as the same work on a machine with an older SQLite. |
 | A lookup's statement has an index on every column that it filters by. | A statement that filters a package's definitions by member name with an index on the package alone reads the whole package each time it runs. The count of statements does not show it. |
+| A fact holds everything that its reader needs to use it. `type_facts` holds the type's generic parameters beside the conditions written over them. | A reader that must fetch a second fact to interpret the first makes every question cost both reads. Deciding whether a type is plain read the type's facts and then its whole interface for the parameters' names, at every operand of every body. |
+| A pass reads its own definition's tree, spans, and syntax errors once, and passes the values to the functions that use them. | The lookups were free when they read hash tables, so each function fetched the tree where it needed it. Name resolution walked a definition three times, once for each section, and read its syntax in each walk. |
 | One `edge` table holds dependencies and the program's relations, with a set of markers on each edge. | A unit's edges are written and removed in one place, one index by target answers every question of the form "which units point at this", and a pair of units is stored once however many relations hold between them. |
 
 ## Marshaled values that remain
