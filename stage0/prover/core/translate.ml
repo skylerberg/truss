@@ -330,11 +330,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
       (fun frame (parameter : Mir.parameter) ->
         match parameter.local with
         | Self ->
-            let self_type =
-              match signature with
-              | Some { receiver = Some (_, ty); _ } -> ty
-              | _ -> Facts.raise_unsupported Whole_definition "`self` without a type"
-            in
+            let self_type = Facts.substitute_type context frame parameter.type_ in
             let self = Facts.arrive context frame "self" self_type in
             (match self with
             | Logic.Symbol symbol -> context.entry <- symbol :: context.entry
