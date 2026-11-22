@@ -122,15 +122,14 @@ let assume_laws (context : State.context) frame (trait : Types.trait_reference) 
       (Interface.Properties.list_bound_closure context.lookups.interface ~self:ty trait)
   end
 
-let has_method_cost (context : State.context) (callee : Invocation.callee) (path : Path.t) =
+let has_method_cost (callee : Invocation.callee) (path : Path.t)
+    (signature : Types.signature option) =
   match (callee, path) with
   | Trait_method { trait; evidence = Bound; _ }, Method { owner; _ }
     when Path.equal owner trait.trait ->
       true
   | Trait_method _, _ -> (
-      match Facts.read_signature context path with
-      | Some (signature : Types.signature) -> Types.terminates signature.uses
-      | None -> true)
+      match signature with Some signature -> Types.terminates signature.uses | None -> true)
   | (Function _ | Capability_method _ | Intrinsic _ | Indirect ()), _ -> false
 
 let read_named_ensures context (frame : State.frame) (clauses : State.clauses)
@@ -212,17 +211,17 @@ let add_named_relation context frame (expected : Types.function_type) callee_ter
         (Logic.forall ~trigger:[ holds ]
            (parameters, Logic.( ==> ) holds (Logic.conjunction ensures)))
 
-let check_named_callback context (frame : State.frame) (invocation : Invocation.t)
+let check_named_callback context (frame : State.frame) (declared : State.declared_callee option)
     (passed : State.passed) ~origin path (contract : State.contract) (values : State.passed list) =
   let location = Facts.locate context frame.source origin in
   let callee_clauses = contract.callee_clauses in
-  match Validity.find_parameter_type context frame invocation passed.position with
+  match Validity.find_parameter_type declared passed.position with
   | Some (Types.Function expected) ->
       let inputs = Validity.declare_callback_arguments context frame expected.inputs in
       let known = List.map (fun (passed : State.passed) -> (passed.position, passed.term)) values in
       let promised =
         Logic.conjunction
-          (Validity.list_callback_facts context frame invocation passed.position known inputs)
+          (Validity.list_callback_facts context frame declared passed.position known inputs)
       in
       let at_call = Facts.restrict frame promised in
       if List.length callee_clauses.parameters = List.length inputs then (
@@ -246,7 +245,7 @@ let check_named_callback context (frame : State.frame) (invocation : Invocation.
           (Facts.list_clauses callee_clauses.requires);
         if List.length callee_clauses.parameters = List.length expected.inputs then begin
           add_named_relation context frame expected passed.term callee_clauses;
-          Validity.check_callback_promises context frame ~location invocation passed
+          Validity.check_callback_promises context frame ~location declared passed
             ~described:
               (Printf.sprintf "and the `ensures` of `%s` may not promise it." (Path.show path))
             ~assume:(fun at_call expected ~entries ~exits ~result ->

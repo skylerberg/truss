@@ -28,6 +28,7 @@ val list_law_holes :
 val list_declared_clauses : State.contract -> State.clauses list
 val select_precondition_clauses : State.contract -> State.clauses
 val find_declared_clauses : Lookups.t -> Path.t -> State.clauses option
+val read_signature : State.context -> Path.t -> Types.signature option
 val find_callee_clauses : State.context -> Path.t -> State.clauses option
 val find_function_contract : State.context -> Path.t -> State.contract option
 val find_capability_contract : State.context -> Path.t -> string -> State.contract option

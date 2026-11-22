@@ -114,8 +114,31 @@ let list_law_holes (lookups : Lookups.t) (impl : Path.t) (trait : Types.trait_re
           (list_law_proofs lookups (Path.locate_package impl) trait for_type)
   | None -> []
 
-let make_contract ?trait_clauses (context : State.context) path callee_clauses =
-  let signature = Facts.read_signature context path in
+let find_callee (context : State.context) path : State.known_callee =
+  match Tables.Path_table.find_opt context.callees path with
+  | Some callee -> callee
+  | None ->
+      let lookups = context.lookups in
+      let callee : State.known_callee =
+        {
+          known_signature = lazy (Interface.Impls.read_signature lookups.interface path);
+          known_clauses =
+            lazy
+              (Option.map
+                 (fun (source, _, origin) -> (origin, find_clauses lookups path source))
+                 (find_source lookups path));
+        }
+      in
+      Tables.Path_table.replace context.callees path callee;
+      callee
+
+let read_signature context path = Lazy.force (find_callee context path).known_signature
+
+let find_callee_clauses context path =
+  Option.bind (Lazy.force (find_callee context path).known_clauses) snd
+
+let make_contract ?trait_clauses context path callee_clauses =
+  let signature = read_signature context path in
   let is_logic_function =
     match signature with
     | Some (signature : Types.signature) -> (
@@ -136,7 +159,14 @@ let make_contract ?trait_clauses (context : State.context) path callee_clauses =
     | None -> false
   in
   let result_kind = match signature with Some { output = Lends _; _ } -> `Lends | _ -> `Returns in
-  { State.callee_clauses; trait_clauses; restated_clauses = []; is_logic_function; result_kind }
+  {
+    State.callee_clauses;
+    trait_clauses;
+    restated_clauses = [];
+    is_logic_function;
+    result_kind;
+    signature;
+  }
 
 let list_declared_clauses (contract : State.contract) =
   (contract.callee_clauses :: Option.to_list contract.trait_clauses) @ contract.restated_clauses
@@ -148,20 +178,6 @@ let select_precondition_clauses (contract : State.contract) =
 
 let find_declared_clauses lookups path =
   Option.bind (find_source lookups path) (fun (callee, _, _) -> find_clauses lookups path callee)
-
-let find_declaration (context : State.context) path =
-  match Tables.Path_table.find_opt context.declared_clauses path with
-  | Some declaration -> declaration
-  | None ->
-      let declaration =
-        Option.map
-          (fun (callee, _, origin) -> (origin, find_clauses context.lookups path callee))
-          (find_source context.lookups path)
-      in
-      Tables.Path_table.replace context.declared_clauses path declaration;
-      declaration
-
-let find_callee_clauses context path = Option.bind (find_declaration context path) snd
 
 let find_function_contract context (path : Path.t) =
   Option.map (make_contract context path) (find_callee_clauses context path)
@@ -242,7 +258,7 @@ let find_method_contract context (trait : Types.trait_reference) name receiver
   match evidence with
   | Impl { impl; _ } -> (
       let path = Path.Method { owner = impl; name; receiver } in
-      match find_declaration context path with
+      match Lazy.force (find_callee context path).known_clauses with
       | Some ((Written _ | Derived _), clauses) ->
           Option.map (make_contract ?trait_clauses context path) clauses
       | Some (Inherited _, _) | None -> Option.map (make_contract context path) trait_clauses)

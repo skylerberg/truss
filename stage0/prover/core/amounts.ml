@@ -649,7 +649,7 @@ let find_method_cost_bound context (metric : Language.Metric.t) (method_ : Path.
         | Some (impl, substitution) -> (
             let path = Path.Method { owner = impl; name; receiver } in
             let makes_no_potential =
-              match Facts.read_signature context path with
+              match Contracts.read_signature context path with
               | Some (signature : Types.signature) -> (
                   List.for_all
                     (fun (parameter : Types.parameter_info) ->

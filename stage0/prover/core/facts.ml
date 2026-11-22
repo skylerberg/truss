@@ -653,14 +653,6 @@ let make_constructor_symbol (ty : Types.ty) variant =
 let make_selector_symbol ty variant field = Logic.Symbol.Field { type_ = ty; variant; field }
 let is_standard_equal = Well_known.is Equal
 
-let read_signature (context : State.context) path =
-  match Tables.Path_table.find_opt context.signatures path with
-  | Some signature -> signature
-  | None ->
-      let signature = Interface.Impls.read_signature context.lookups.interface path in
-      Tables.Path_table.replace context.signatures path signature;
-      signature
-
 let find_visible_type (context : State.context) (ty : Types.ty) =
   match ty with
   | Named { path; arguments } when Types.find_builtin ty = None -> (
