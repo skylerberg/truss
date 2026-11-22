@@ -60,7 +60,13 @@ type provided = {
   origin : Core.origin;
 }
 
-type loan_duration = Loop_body | Provide_body | Rest_of_statement | Operand_evaluation
+type loan_duration =
+  | Loop_body
+  | Provide_body
+  | Rest_of_statement
+  | Operand_evaluation
+  | Alias_scope of Core.local
+
 type task = Branch of { fork : Core.id; index : int } | Iteration of { loop : Core.id }
 
 type iteration =

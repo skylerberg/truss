@@ -136,18 +136,19 @@ let judge : Diagnostic.Code.t -> verdict = function
       ( Unexpected_token | Needs_parentheses | Reserved_word | Statement_at_top_level | Missing_body
       | Open_range | Float_pattern | Increment | Double_negation | Match_arm_comma
       | Conditional_operator | Let_mut | Address_of | Closure_bars | Brace_record | Turbofish
-      | Trailing_lambda | As_conversion | Elif | Angle_brackets | Path_separator | Qualified_variant
-      | Macro_call | Tuple | Power_operator | Short_declaration | Pipe_operator | Lambda_annotation
+      | Trailing_lambda | As_conversion | Elif | Angle_brackets | Qualified_variant | Macro_call
+      | Tuple | Power_operator | Short_declaration | Pipe_operator | Lambda_annotation
       | Impl_parameters | Null_coalescing | Misplaced_condition ) ->
       Grammar_rejects
   | Parser (Cost_word | Misplaced_potential | Interpolation_not_allowed) -> Unknown
   | Parser
       ( Use_after_definition | Let_else_brace | Nesting_too_deep | Misplaced_opaque
-      | Misplaced_visibility | Misplaced_self | Lends_own | Repeated_clause | Loop_cost_bound
-      | Function_type_cost_bound | Function_type_names | Misplaced_callback_contract
-      | Misplaced_function_type | Misplaced_associated_type | Misplaced_constraint
-      | Specification_only | Misplaced_assert | Misplaced_proof | Misplaced_loop_exit
-      | Exits_parallel | Echo_in_specification | Reserved_specification_name )
+      | Misplaced_tuple | Misplaced_visibility | Misplaced_self | Lends_own | Repeated_clause
+      | Loop_cost_bound | Function_type_cost_bound | Function_type_names
+      | Misplaced_callback_contract | Misplaced_function_type | Misplaced_associated_type
+      | Misplaced_constraint | Specification_only | Misplaced_assert | Misplaced_proof
+      | Misplaced_loop_exit | Exits_parallel | Echo_in_specification | Reserved_specification_name
+        )
   | Lexer _ | Resolve _ | Package _ | Prover _ | Capabilities _ | Ownership _ | Usage _ | Patterns _
   | Types _ | Too_many_diagnostics ->
       Grammar_accepts
@@ -470,6 +471,16 @@ let mistakes =
     "\u{2126}";
   |]
 
+let spellings =
+  Array.concat
+    [
+      mistakes;
+      Array.of_list (List.map fst Token.For_testing.keywords);
+      Array.of_list (List.map fst Token.For_testing.reserved_words);
+      Array.of_list (List.map fst Token.punctuation);
+      Array.of_list Parser.For_testing.contextual_keywords;
+    ]
+
 let round_trip random =
   let pick array = array.(Random.State.int random (Array.length array)) in
   let names =
@@ -584,6 +595,16 @@ let () =
     in
     String.sub text 0 at ^ piece ^ String.sub text (at + removed) (length - at - removed)
   in
+  let insert_token_run text =
+    let at = Random.State.int random (String.length text + 1) in
+    let run =
+      List.init
+        (1 + Random.State.int random 24)
+        (fun _ -> spellings.(Random.State.int random (Array.length spellings)))
+    in
+    String.sub text 0 at ^ " " ^ String.concat " " run ^ " "
+    ^ String.sub text at (String.length text - at)
+  in
   for _ = 1 to !count do
     check_robust (make_random_text ());
     let several = ref (pick_example ()) in
@@ -592,6 +613,9 @@ let () =
     done;
     check_robust !several;
     check_parse_robust !several;
+    let with_token_run = insert_token_run (pick_example ()) in
+    check_robust with_token_run;
+    check_parse_robust with_token_run;
     check_parsers_agree !several;
     let one = mutate (pick_example ()) in
     check_fixes_work one;

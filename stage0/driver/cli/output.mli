@@ -1,7 +1,8 @@
 type t = {
   print_out : string -> unit;
   print_err : string -> unit;
-  terminal : bool;
+  is_terminal : bool;
+  is_colored : bool;
   columns : int option;
   mutable json : bool;
 }
@@ -13,7 +14,8 @@ val printf : ('a, unit, string, unit) format4 -> 'a
 val eprint : string -> unit
 val eprint_line : string -> unit
 val eprintf : ('a, unit, string, unit) format4 -> 'a
-val terminal : unit -> bool
+val is_terminal : unit -> bool
+val is_colored : unit -> bool
 val columns : unit -> int option
 val json : unit -> bool
 val set_json : bool -> unit

@@ -1,4 +1,4 @@
-use standard::text::unicode_tables
+use standard.text.unicode_tables
 
 let carriage_return: UInt32 = 1
 let line_feed: UInt32 = 2
@@ -75,7 +75,7 @@ fn hangul_joins(before: UInt32, after: UInt32) -> Bool
 internal fn State.joins(self, code: UInt32) -> Bool
   cost time O(1)
 {
-  let properties = unicode_tables::grapheme_properties_of(code)
+  let properties = unicode_tables.grapheme_properties_of(code)
   let after = break_class_of(properties)
   if self.break_class == carriage_return && after == line_feed {
     true
@@ -119,7 +119,7 @@ fn follows_linker_after(follows_linker: Bool, properties: UInt32) -> Bool
 internal fn State.after(self, code: UInt32) -> State
   cost time O(1)
 {
-  let properties = unicode_tables::grapheme_properties_of(code)
+  let properties = unicode_tables.grapheme_properties_of(code)
   let break_class = break_class_of(properties)
   State(
     break_class: break_class,

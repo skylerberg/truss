@@ -1,4 +1,4 @@
-use standard::core
+use standard.core
 
 test "an integer steps forward and back by a count, unless it would leave its type" {
   let start: Int8 = -100
@@ -56,11 +56,11 @@ test "a collection folds, counts, and maps its elements" {
 }
 
 test "the errors of parsing and converting name the failure" {
-  assert "${core::ParseIntegerError.Empty}" == "the text has no digits"
-  assert "${core::ParseIntegerError.InvalidDigit(offset: 3)}" == "the byte at offset 3 is not a digit"
-  assert "${core::ParseIntegerError.OutOfRange}" == "the number does not fit the type"
-  assert "${core::ParseFloatError.InvalidCharacter(offset: 0)}" == "the byte at offset 0 is not part of a number"
-  assert "${core::ConversionError()}" == "the value does not fit the type"
+  assert "${core.ParseIntegerError.Empty}" == "the text has no digits"
+  assert "${core.ParseIntegerError.InvalidDigit(offset: 3)}" == "the byte at offset 3 is not a digit"
+  assert "${core.ParseIntegerError.OutOfRange}" == "the number does not fit the type"
+  assert "${core.ParseFloatError.InvalidCharacter(offset: 0)}" == "the byte at offset 0 is not part of a number"
+  assert "${core.ConversionError()}" == "the value does not fit the type"
 }
 
 test "take empties an option and replace fills it, each giving the old value" {
@@ -115,11 +115,11 @@ test "a derived Default builds each field from its default, or from its type's d
 }
 
 test "a pair is ordered by its first value, then its second, and keys a map" {
-  assert core::Pair(first: 1, second: 9) < core::Pair(first: 2, second: 0)
-  assert core::Pair(first: 1, second: 2) < core::Pair(first: 1, second: 3)
-  var cells: Map[core::Pair[Int64, Int64], String] = [:]
-  mut cells.insert(core::Pair(first: 0, second: 1), value: "a")
-  mut cells.insert(core::Pair(first: 1, second: 0), value: "b")
-  assert cells.get(core::Pair(first: 1, second: 0)) == Some("b")
-  assert cells.get(core::Pair(first: 1, second: 1)) is None
+  assert core.Pair(first: 1, second: 9) < core.Pair(first: 2, second: 0)
+  assert core.Pair(first: 1, second: 2) < core.Pair(first: 1, second: 3)
+  var cells: Map[core.Pair[Int64, Int64], String] = [:]
+  mut cells.insert(core.Pair(first: 0, second: 1), value: "a")
+  mut cells.insert(core.Pair(first: 1, second: 0), value: "b")
+  assert cells.get(core.Pair(first: 1, second: 0)) == Some("b")
+  assert cells.get(core.Pair(first: 1, second: 1)) is None
 }

@@ -1,4 +1,4 @@
-use standard::intrinsic
+use standard.intrinsic
 
 type Preference(name: String, quality: UInt16)
 
@@ -22,7 +22,7 @@ fn quality_value(text: StringSlice) -> Option[UInt16] {
     if digit < 48 || digit > 57 || scale == 0 {
       return None
     }
-    let amount: UInt16 = intrinsic::convert(digit - 48)
+    let amount: UInt16 = intrinsic.convert(digit - 48)
     value = value + amount * scale
     scale = scale / 10
   }
@@ -81,7 +81,7 @@ fn language_specificity(range: StringSlice, offered: StringSlice) -> Option[UInt
   }
   if offered.starts_with(range) && offered.length() > range.length() && offered.bytes()[range.length()] == 45 {
     let length = range.length()
-    return Some(if length >= 254 { 254 } else { intrinsic::convert(length) })
+    return Some(if length >= 254 { 254 } else { intrinsic.convert(length) })
   }
   None
 }

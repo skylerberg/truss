@@ -1087,7 +1087,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
           | Bound, Some (Impl _ as resolved) -> resolved
           | _ -> evidence
         in
-        Laws.assume_laws context frame ~at:location trait self_type;
+        Laws.assume_laws context frame trait self_type;
         let list_operands () = List.map (fun (passed : State.passed) -> passed.term) values in
         let trait_path = Path.Method { owner = trait.trait; name; receiver } in
         let method_ = Well_known.find_method trait_path in
@@ -1114,17 +1114,6 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
             Without_contract
               (Some (frame, Operations.make_equality context frame self_type left right))
         | _ ->
-            (match (method_, evidence) with
-            | Some From_template_from_template, (Bound | Dynamic) ->
-                Facts.oblige context frame Requires location
-                  [
-                    Text
-                      "A call of `from_template` through a bound or `any` cannot see the tag's \
-                       `requires` on its template: build the value with a template, where the tag \
-                       is known.";
-                  ]
-                  (Logic.Boolean false)
-            | _ -> ());
             let trait_substitution =
               Types.combine_substitutions
                 (bind_parameters (list_generics trait_path) arguments
@@ -1261,3 +1250,51 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
           ^ " may not end: it calls back here, and the prover reads the call without the callee's \
              `decreases` clause.");
       result
+
+let assume_template_check context (frame : State.frame) ~origin (from_template : Invocation.callee)
+    ~literals ~template_type template =
+  match from_template with
+  | Trait_method ({ evidence = Impl { impl; substitution }; _ } as trait_method)
+    when Types.is_empty_substitution substitution ->
+      let { Well_known.name; receiver; _ } =
+        Well_known.locate_method From_template_is_valid_template
+      in
+      let literals_type =
+        Types.make_named (Well_known.make_path List)
+          [ Types.make_named (Well_known.make_path Literal) [] ]
+      in
+      let literals_term =
+        Validity.select_field context template_type None
+          (Well_known.show_field Template_literals)
+          (name_term context template_type template)
+      in
+      Option.iter
+        (fun (_, holds) ->
+          let symbol =
+            Logic.Symbol.Template_check
+              { function_ = Path.Method { owner = impl; name; receiver }; literals }
+          in
+          Facts.declare context (Logic.Constant (symbol, Logic.Bool));
+          Facts.assume context frame (Logic.equal (Logic.Symbol symbol) holds))
+        (Validity.run_as_specification context (fun () ->
+             apply_call context
+               { frame with makes_obligations = false }
+               { origin; type_ = Types.bool }
+               {
+                 callee = Trait_method { trait_method with name; receiver };
+                 lends = None;
+                 uses = Types.no_capabilities;
+               }
+               ~through:None
+               [
+                 {
+                   position = 0;
+                   mode = Read;
+                   shape = Other;
+                   origin = None;
+                   passed_place = None;
+                   type_ = literals_type;
+                   term = literals_term;
+                 };
+               ]))
+  | Trait_method _ | Function _ | Capability_method _ | Intrinsic _ | Indirect _ -> ()

@@ -1,0 +1,23 @@
+tuple type Span(low: Int64, high: Int64)
+
+fn tally(counts: Map[String, Int64], words: Slice[String], amounts: Slice[Int64], bytes: Slice[UInt8]) -> UInt64 {
+  var total: UInt64 = 0
+  for name, count in counts {
+    if count > 0 {
+      total = total.saturating_add(name.length())
+    }
+  }
+  for index, word in words.enumerate() {
+    total = total.saturating_add(index).saturating_add(word.length())
+  }
+  for amount, byte in amounts.zip(bytes) {
+    if amount > 0 && byte > 0 {
+      total = total.saturating_add(1)
+    }
+  }
+  let low, high = Span(low: 1, high: 2)
+  if high.saturating_subtract(low) > 0 {
+    total = total.saturating_add(1)
+  }
+  total
+}

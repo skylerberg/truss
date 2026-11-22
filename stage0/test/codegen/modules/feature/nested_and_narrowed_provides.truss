@@ -1,4 +1,4 @@
-use standard::console
+use standard.console
 
 type Recorded(lines: List[String])
 
@@ -17,13 +17,13 @@ impl Console for Recorded {
 
   fn print(self, text: StringSlice) {}
 
-  fn input(self) -> console::Input { todo }
+  fn input(self) -> console.Input { todo }
 
-  fn output(self) -> console::Output { todo }
+  fn output(self) -> console.Output { todo }
 
-  fn error_output(self) -> console::Output { todo }
+  fn error_output(self) -> console.Output { todo }
 
-  fn terminal(self) -> console::Terminal { todo }
+  fn terminal(self) -> console.Terminal { todo }
 }
 
 type Quiet()
@@ -35,13 +35,13 @@ impl Console for Quiet {
 
   fn print(self, text: StringSlice) {}
 
-  fn input(self) -> console::Input { todo }
+  fn input(self) -> console.Input { todo }
 
-  fn output(self) -> console::Output { todo }
+  fn output(self) -> console.Output { todo }
 
-  fn error_output(self) -> console::Output { todo }
+  fn error_output(self) -> console.Output { todo }
 
-  fn terminal(self) -> console::Terminal { todo }
+  fn terminal(self) -> console.Terminal { todo }
 }
 
 type Prefixed(prefix: String)
@@ -65,19 +65,19 @@ impl Console for Prefixed
     Console.print(text)
   }
 
-  fn input(self) -> console::Input {
+  fn input(self) -> console.Input {
     Console.input()
   }
 
-  fn output(self) -> console::Output {
+  fn output(self) -> console.Output {
     Console.output()
   }
 
-  fn error_output(self) -> console::Output {
+  fn error_output(self) -> console.Output {
     Console.error_output()
   }
 
-  fn terminal(self) -> console::Terminal {
+  fn terminal(self) -> console.Terminal {
     Console.terminal()
   }
 }

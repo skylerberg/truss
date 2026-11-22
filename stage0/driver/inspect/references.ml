@@ -1,4 +1,7 @@
-type target = Definition of Path.t | Module of Path.module_
+type target =
+  | Definition of Path.t
+  | Module of { module_ : Path.module_; imported : Path.module_ option }
+
 type occurrence = { span : Source.Definition_span.t; target : target }
 
 let find_declared_name (definition : Syntax.definition) : Syntax.name option =
@@ -35,41 +38,20 @@ let list_member_targets (tables : Infer.tables) (definition : Syntax.definition)
 
 let list_occurrences ~(path : Path.t) (spans : Source.Definition_span.t array)
     (definition : Syntax.definition) (resolved : Resolve.resolved) (tables : Infer.tables option) =
-  let names = Syntax_walk.collect_names spans definition in
   let make_occurrence span target = { span; target } in
   let resolved_names =
-    List.concat
-      (List.mapi
-         (fun index (name : Syntax.name) ->
-           match
-             if name.id < Array.length resolved.names then resolved.names.(name.id) else None
-           with
-           | Some (Definition (_, path)) -> [ make_occurrence spans.(name.id) (Definition path) ]
-           | Some (Module module_) ->
-               let parts = Path.list_module_parts module_ in
-               let written_in_full =
-                 List.length parts > 1
-                 && List.for_all Fun.id
-                      (List.mapi
-                         (fun offset part ->
-                           match List.nth_opt names (index + offset) with
-                           | Some (written : Syntax.name) -> written.text = part
-                           | None -> false)
-                         parts)
-               in
-               let length = if written_in_full then List.length parts - 1 else 0 in
-               let last =
-                 match List.nth_opt names (index + length) with
-                 | Some (last : Syntax.name) -> last
-                 | None -> name
-               in
-               [
-                 make_occurrence
-                   (Source.Definition_span.make spans.(name.id).start spans.(last.id).stop)
-                   (Module module_);
-               ]
-           | _ -> [])
-         names)
+    List.concat_map
+      (fun (name : Syntax.name) ->
+        match if name.id < Array.length resolved.names then resolved.names.(name.id) else None with
+        | Some (Definition (_, path)) -> [ make_occurrence spans.(name.id) (Definition path) ]
+        | Some (Module { module_; imported; last_name }) ->
+            [
+              make_occurrence
+                (Source.Definition_span.make spans.(name.id).start spans.(last_name.id).stop)
+                (Module { module_; imported });
+            ]
+        | _ -> [])
+      (Syntax_walk.collect_names spans definition)
   in
   let declared =
     match find_declared_name definition with

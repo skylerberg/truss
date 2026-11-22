@@ -24,7 +24,5 @@ val lower_constant : context -> Path.t -> constant
 val lower_evaluator : context -> Path.t -> Emit_c.fragment
 val lower_table : context -> Lowered.Item.table -> Lowered.table
 
-val lower_template_check :
-  context -> from_template:Path.t -> literals:string list -> clauses:int list -> Emit_c.fragment
-
-val lower_call_evaluation : context -> function_:Path.t -> arguments:Z.t list -> Emit_c.fragment
+val lower_call_evaluation :
+  context -> function_:Path.t -> arguments:Lowered.Item.argument list -> Emit_c.fragment

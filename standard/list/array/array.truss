@@ -1,19 +1,19 @@
-use standard::intrinsic
-use standard::list::slice
+use standard.intrinsic
+use standard.list.slice
 
 public fn Array[Element: Copyable, count: UInt64].filled(value: Element) -> Array[Element, count]
   ensures forall i in 0..count => identical(result.model()[i], value)
   cost time O(count * time(Element.copy))
 {
-  var elements: intrinsic::Storage[Element] = intrinsic::storage_with_capacity(count)
+  var elements: intrinsic.Storage[Element] = intrinsic.storage_with_capacity(count)
   for index in 0..count
-    invariant intrinsic::storage_length(elements) == index
-    invariant intrinsic::storage_capacity(elements) == count
-    invariant forall i in 0..index => identical(intrinsic::storage_model(elements)[i], value)
+    invariant intrinsic.storage_length(elements) == index
+    invariant intrinsic.storage_capacity(elements) == count
+    invariant forall i in 0..index => identical(intrinsic.storage_model(elements)[i], value)
   {
-    intrinsic::storage_push(mut elements, value: value.copy())
+    intrinsic.storage_push(mut elements, value: value.copy())
   }
-  intrinsic::array_from_storage(own elements)
+  intrinsic.array_from_storage(own elements)
 }
 
 public fn Array[Element, count: UInt64].generate(
@@ -24,15 +24,15 @@ public fn Array[Element, count: UInt64].generate(
   cost calls(make) == count
   cost time O(count * time(make))
 {
-  var elements: intrinsic::Storage[Element] = intrinsic::storage_with_capacity(count)
+  var elements: intrinsic.Storage[Element] = intrinsic.storage_with_capacity(count)
   for index in 0..count
-    invariant intrinsic::storage_length(elements) == index
-    invariant intrinsic::storage_capacity(elements) == count
-    invariant forall i in 0..index => make.ensures(i, intrinsic::storage_model(elements)[i])
+    invariant intrinsic.storage_length(elements) == index
+    invariant intrinsic.storage_capacity(elements) == count
+    invariant forall i in 0..index => make.ensures(i, intrinsic.storage_model(elements)[i])
   {
-    intrinsic::storage_push(mut elements, value: make(index))
+    intrinsic.storage_push(mut elements, value: make(index))
   }
-  intrinsic::array_from_storage(own elements)
+  intrinsic.array_from_storage(own elements)
 }
 
 public fn Array[Element, count: UInt64].length(self) -> UInt64
@@ -48,16 +48,16 @@ public fn Array[Element, count: UInt64].slice(self) -> Slice[Element]
   cost time O(1)
   cost allocations == 0
 {
-  Slice(elements: intrinsic::array_view(self))
+  Slice(elements: intrinsic.array_view(self))
 }
 
 impl Model for Array[Element, count: UInt64] {
   type Value = Sequence[Element]
 
   fn model(self) -> Sequence[Element]
-    ensures identical(result, intrinsic::array_model(self))
+    ensures identical(result, intrinsic.array_model(self))
   {
-    intrinsic::array_model(self)
+    intrinsic.array_model(self)
   }
 }
 
@@ -141,20 +141,20 @@ public fn Array[Element, count: UInt64].map_each[Output](
 {
   var remaining = own self.to_list()
   mut remaining.reverse()
-  var outputs: intrinsic::Storage[Output] = intrinsic::storage_with_capacity(count)
+  var outputs: intrinsic.Storage[Output] = intrinsic.storage_with_capacity(count)
   for index in 0..count
     invariant remaining.length() + index == count
-    invariant intrinsic::storage_length(outputs) == index
-    invariant intrinsic::storage_capacity(outputs) == count
+    invariant intrinsic.storage_length(outputs) == index
+    invariant intrinsic.storage_capacity(outputs) == count
     invariant forall i in 0..remaining.length() =>
       identical(remaining.model()[i], old(self.model())[count - 1 - i])
     invariant forall i in 0..index =>
-      transform.ensures(old(self.model())[i], intrinsic::storage_model(outputs)[i])
+      transform.ensures(old(self.model())[i], intrinsic.storage_model(outputs)[i])
   {
-    var item = intrinsic::storage_pop(mut remaining.storage)
-    intrinsic::storage_push(mut outputs, value: transform(own item))
+    var item = intrinsic.storage_pop(mut remaining.storage)
+    intrinsic.storage_push(mut outputs, value: transform(own item))
   }
-  intrinsic::array_from_storage(own outputs)
+  intrinsic.array_from_storage(own outputs)
 }
 
 impl Equal for Array[Element: Equal, count: UInt64] {
@@ -169,7 +169,7 @@ impl Equal for Array[Element: Equal, count: UInt64] {
 
 impl Ordered for Array[Element: Ordered, count: UInt64] {
   fn compare(self, other: Array[Element, count]) -> Ordering
-    ensures result == slice::lexicographic(self.model(), second: other.model(), from: 0)
+    ensures result == slice.lexicographic(self.model(), second: other.model(), from: 0)
     cost time O(count * time(Element.compare))
     cost allocations <= count * allocations(Element.compare)
   {
@@ -178,20 +178,20 @@ impl Ordered for Array[Element: Ordered, count: UInt64] {
 }
 
 proof Ordered.agrees_with_equal for Array[Element: Ordered, count: UInt64] {
-  slice::lexicographic_agrees_with_equal(first.model(), second: second.model(), from: 0)
+  slice.lexicographic_agrees_with_equal(first.model(), second: second.model(), from: 0)
 }
 
 proof Ordered.antisymmetric for Array[Element: Ordered, count: UInt64] {
-  slice::lexicographic_is_antisymmetric(first.model(), second: second.model(), from: 0)
+  slice.lexicographic_is_antisymmetric(first.model(), second: second.model(), from: 0)
 }
 
 proof Ordered.transitive for Array[Element: Ordered, count: UInt64] {
-  slice::lexicographic_is_transitive(first.model(), second: second.model(), third: third.model(), from: 0)
+  slice.lexicographic_is_transitive(first.model(), second: second.model(), third: third.model(), from: 0)
 }
 
 impl Hash for Array[Element: Hash, count: UInt64] {
   fn hash(self, hasher: Hasher) -> Hasher
-    ensures identical(result, slice::hash_elements(hasher.write(count), items: self.model(), count: count))
+    ensures identical(result, slice.hash_elements(hasher.write(count), items: self.model(), count: count))
     cost time O(count * time(Element.hash))
     cost allocations <= count * allocations(Element.hash)
   {
@@ -200,7 +200,7 @@ impl Hash for Array[Element: Hash, count: UInt64] {
 }
 
 proof Hash.agrees_with_equal for Array[Element: Hash, count: UInt64] {
-  slice::elements_hash_alike(hasher.write(count), first: first.model(), second: second.model(), count: count)
+  slice.elements_hash_alike(hasher.write(count), first: first.model(), second: second.model(), count: count)
 }
 
 impl Display for Array[Element: Display, count: UInt64] {

@@ -1,29 +1,29 @@
-use standard::collections
-use standard::console
-use standard::environment
-use standard::files
-use standard::intrinsic
-use standard::log
-use standard::map
-use standard::network
-use standard::processes
-use standard::random
-use standard::streams
-use standard::tasks
+use standard.collections
+use standard.console
+use standard.environment
+use standard.files
+use standard.intrinsic
+use standard.log
+use standard.map
+use standard.network
+use standard.processes
+use standard.random
+use standard.streams
+use standard.tasks
 
 public type Operation = Open | Read | Write | Connect | Accept | Resolve | Spawn
   derives Equal, Hash, Ordered
 
 type Fault(operation: Operation, error: SystemError)
 
-type Host(name: String, address: network::IpAddress)
+type Host(name: String, address: network.IpAddress)
 
-type Program(name: String, arguments: List[String], output: processes::Output)
+type Program(name: String, arguments: List[String], output: processes.Output)
 
 public opaque type Setup(
   input: List[String],
-  environment: environment::FixedEnvironment,
-  files: files::MemoryFiles,
+  environment: environment.FixedEnvironment,
+  files: files.MemoryFiles,
   start: Instant,
   hosts: List[Host],
   programs: List[Program],
@@ -32,19 +32,19 @@ public opaque type Setup(
 public fn Setup.new() -> Setup {
   Setup(
     input: [],
-    environment: environment::FixedEnvironment.new(
-      environment::Platform(
-        operating_system: environment::OperatingSystem.Linux,
-        architecture: environment::Architecture.X86With64Bits,
+    environment: environment.FixedEnvironment.new(
+      environment.Platform(
+        operating_system: environment.OperatingSystem.Linux,
+        architecture: environment.Architecture.X86With64Bits,
         processor_count: 1,
         host_name: "simulation",
         process_identifier: 1,
       ),
       current_directory: Path.new("/"),
     ),
-    files: files::MemoryFiles.new(),
+    files: files.MemoryFiles.new(),
     start: Instant.epoch,
-    hosts: [Host(name: "localhost", address: network::IpAddress.loopback)],
+    hosts: [Host(name: "localhost", address: network.IpAddress.loopback)],
     programs: [],
   )
 }
@@ -69,7 +69,7 @@ public fn Setup.with_input(own self, lines: own List[String]) -> Setup {
   changed
 }
 
-public fn Setup.with_host(own self, name: StringSlice, address: network::IpAddress) -> Setup {
+public fn Setup.with_host(own self, name: StringSlice, address: network.IpAddress) -> Setup {
   var changed = own self
   mut changed.hosts.push(Host(name: name.to_string(), address: address))
   changed
@@ -79,7 +79,7 @@ public fn Setup.with_program(
   own self,
   name: StringSlice,
   arguments: own List[String] = [],
-  output: own processes::Output,
+  output: own processes.Output,
 ) -> Setup {
   var changed = own self
   mut changed.programs.push(Program(name: name.to_string(), arguments: own arguments, output: own output))
@@ -93,27 +93,27 @@ public fn Setup.with_time(own self, now: Instant) -> Setup {
 }
 
 type Listener(
-  local: network::SocketAddress,
+  local: network.SocketAddress,
   path: Option[Path],
-  waiting: collections::Deque[UInt64],
+  waiting: collections.Deque[UInt64],
   timeout: Option[Duration],
   open: Bool,
 )
 
 type Stream(
-  local: network::SocketAddress,
-  peer: network::SocketAddress,
+  local: network.SocketAddress,
+  peer: network.SocketAddress,
   other_end: UInt64,
-  unread: streams::ByteQueue,
+  unread: streams.ByteQueue,
   ended: Bool,
   receives: Bool,
   sends: Bool,
   timeout: Option[Duration],
 )
 
-type Packet(bytes: List[UInt8], from: network::SocketAddress)
+type Packet(bytes: List[UInt8], from: network.SocketAddress)
 
-type Socket(local: network::SocketAddress, packets: collections::Deque[Packet], timeout: Option[Duration], open: Bool)
+type Socket(local: network.SocketAddress, packets: collections.Deque[Packet], timeout: Option[Duration], open: Bool)
 
 type Endpoint =
   | Closed
@@ -123,36 +123,36 @@ type Endpoint =
   | Datagrams(socket: UInt64)
   | ChildOutput(pipe: UInt64)
   | ChildInput
-  | Child(status: processes::ExitStatus)
+  | Child(status: processes.ExitStatus)
 
 type Blocking =
   | Arriving(listener: UInt64)
   | Reading(endpoint: UInt64, limit: UInt64)
   | Receiving(endpoint: UInt64, limit: UInt64)
-  | Catching(signals: List[processes::Signal])
+  | Catching(signals: List[processes.Signal])
 
 type Completion =
-  | Arrival(endpoint: UInt64, peer: network::SocketAddress)
+  | Arrival(endpoint: UInt64, peer: network.SocketAddress)
   | Bytes(bytes: List[UInt8])
-  | Datagram(bytes: List[UInt8], from: network::SocketAddress)
-  | Caught(signal: processes::Signal)
+  | Datagram(bytes: List[UInt8], from: network.SocketAddress)
+  | Caught(signal: processes.Signal)
 
 type Attempt =
   | Finished(result: Result[Completion, SystemError])
   | Waiting
 
-type BoundEndpoint(endpoint: UInt64, local: network::SocketAddress)
+type BoundEndpoint(endpoint: UInt64, local: network.SocketAddress)
 
-type Started(status: processes::ExitStatus, output: List[UInt8], error_output: List[UInt8])
+type Started(status: processes.ExitStatus, output: List[UInt8], error_output: List[UInt8])
 
 type State(
-  console: console::CapturedConsole,
-  log: log::CapturedLog,
-  environment: environment::FixedEnvironment,
-  files: files::MemoryFiles,
-  generator: random::Generator,
+  console: console.CapturedConsole,
+  log: log.CapturedLog,
+  environment: environment.FixedEnvironment,
+  files: files.MemoryFiles,
+  generator: random.Generator,
   faults: List[Fault],
-  pending_signals: List[processes::Signal],
+  pending_signals: List[processes.Signal],
   hosts: List[Host],
   programs: List[Program],
   commands: List[List[String]],
@@ -160,8 +160,8 @@ type State(
   listeners: List[Listener],
   streams: List[Stream],
   sockets: List[Socket],
-  pipes: List[streams::ByteQueue],
-  unread_input: streams::ByteQueue,
+  pipes: List[streams.ByteQueue],
+  unread_input: streams.ByteQueue,
   raw_mode: Bool,
   ports_made: UInt16,
   processes_made: UInt32,
@@ -175,11 +175,11 @@ let output_endpoint: UInt64 = 1
 
 let errors_endpoint: UInt64 = 2
 
-fn handle_of(endpoint: UInt64) -> streams::Handle {
-  streams::Handle.simulated(world_handles.saturating_add(endpoint))
+fn handle_of(endpoint: UInt64) -> streams.Handle {
+  streams.Handle.simulated(world_handles.saturating_add(endpoint))
 }
 
-fn endpoint_of(handle: streams::Handle) -> Option[UInt64] {
+fn endpoint_of(handle: streams.Handle) -> Option[UInt64] {
   let number = handle.number()
   if number < world_handles {
     return None
@@ -187,12 +187,12 @@ fn endpoint_of(handle: streams::Handle) -> Option[UInt64] {
   Some(number - world_handles)
 }
 
-fn same_host(first: network::IpAddress, second: network::IpAddress) -> Bool
+fn same_host(first: network.IpAddress, second: network.IpAddress) -> Bool
 {
   first == second || first.is_unspecified() || second.is_unspecified()
 }
 
-fn take_first_bytes(queue: mut streams::ByteQueue, limit: UInt64) -> List[UInt8] {
+fn take_first_bytes(queue: mut streams.ByteQueue, limit: UInt64) -> List[UInt8] {
   let count = if queue.length() < limit { queue.length() } else { limit }
   mut queue.take(count)
 }
@@ -220,7 +220,7 @@ internal fn State.add_endpoint(mut self, endpoint: Endpoint) -> UInt64 {
   index
 }
 
-internal fn State.port_in_use(self, address: network::SocketAddress, datagrams: Bool) -> Bool {
+internal fn State.port_in_use(self, address: network.SocketAddress, datagrams: Bool) -> Bool {
   if datagrams {
     for socket in self.sockets {
       if socket.open && socket.local.port == address.port && same_host(socket.local.address, second: address.address) {
@@ -240,7 +240,7 @@ internal fn State.port_in_use(self, address: network::SocketAddress, datagrams: 
   false
 }
 
-internal fn State.claim_address(mut self, address: network::SocketAddress, datagrams: Bool) -> Result[network::SocketAddress, SystemError] {
+internal fn State.claim_address(mut self, address: network.SocketAddress, datagrams: Bool) -> Result[network.SocketAddress, SystemError] {
   if address.port != 0 {
     if self.port_in_use(address, datagrams: datagrams) {
       return Err(SystemError.AddressInUse)
@@ -249,7 +249,7 @@ internal fn State.claim_address(mut self, address: network::SocketAddress, datag
   }
   while self.ports_made < 16383 {
     self.ports_made += 1
-    let chosen = network::SocketAddress(address: address.address, port: 49151 + self.ports_made)
+    let chosen = network.SocketAddress(address: address.address, port: 49151 + self.ports_made)
     if !self.port_in_use(chosen, datagrams: datagrams) {
       return Ok(chosen)
     }
@@ -257,16 +257,16 @@ internal fn State.claim_address(mut self, address: network::SocketAddress, datag
   Err(SystemError.AddressNotAvailable)
 }
 
-internal fn State.resolve(mut self, host: StringSlice) -> Result[List[network::IpAddress], SystemError] {
+internal fn State.resolve(mut self, host: StringSlice) -> Result[List[network.IpAddress], SystemError] {
   match mut self.next_fault(Operation.Resolve) {
     Some(error) => return Err(error)
     None => {}
   }
-  match network::IpAddress.parse(host) {
+  match network.IpAddress.parse(host) {
     Ok(address) => return Ok([address])
     Err(_) => {}
   }
-  var addresses: List[network::IpAddress] = []
+  var addresses: List[network.IpAddress] = []
   for known in self.hosts {
     if known.name == host {
       mut addresses.push(known.address)
@@ -275,7 +275,7 @@ internal fn State.resolve(mut self, host: StringSlice) -> Result[List[network::I
   if addresses.is_empty() { Err(SystemError.HostNotFound) } else { Ok(own addresses) }
 }
 
-internal fn State.listen(mut self, address: network::SocketAddress) -> Result[BoundEndpoint, SystemError] {
+internal fn State.listen(mut self, address: network.SocketAddress) -> Result[BoundEndpoint, SystemError] {
   let local = mut self.claim_address(address, datagrams: false)?
   let listener = self.listeners.length()
   mut self.listeners.push(Listener(local: local, path: None, waiting: [], timeout: None, open: true))
@@ -287,7 +287,7 @@ internal fn State.listen_local(mut self, path: own Path) -> Result[UInt64, Syste
     return Err(SystemError.AddressInUse)
   }
   let listener = self.listeners.length()
-  let nowhere = network::SocketAddress(address: network::IpAddress.unspecified, port: 0)
+  let nowhere = network.SocketAddress(address: network.IpAddress.unspecified, port: 0)
   mut self.listeners.push(Listener(local: nowhere, path: Some(own path), waiting: [], timeout: None, open: true))
   Ok(mut self.add_endpoint(Endpoint.Listening(listener: listener)))
 }
@@ -305,27 +305,27 @@ internal fn State.connect_local(mut self, path: Path) -> Result[UInt64, SystemEr
   }
   match self.local_listener_at(path) {
     Some(listener) => {
-      let nowhere = network::SocketAddress(address: network::IpAddress.unspecified, port: 0)
+      let nowhere = network.SocketAddress(address: network.IpAddress.unspecified, port: 0)
       Ok(mut self.connect_to(listener, local: nowhere, peer: nowhere))
     }
     None => Err(SystemError.ConnectionRefused)
   }
 }
 
-internal fn State.bind_datagrams(mut self, address: network::SocketAddress) -> Result[BoundEndpoint, SystemError] {
+internal fn State.bind_datagrams(mut self, address: network.SocketAddress) -> Result[BoundEndpoint, SystemError] {
   let local = mut self.claim_address(address, datagrams: true)?
   let socket = self.sockets.length()
   mut self.sockets.push(Socket(local: local, packets: [], timeout: None, open: true))
   Ok(BoundEndpoint(endpoint: mut self.add_endpoint(Endpoint.Datagrams(socket: socket)), local: local))
 }
 
-internal fn State.listener_at(self, address: network::SocketAddress) -> Option[UInt64] {
+internal fn State.listener_at(self, address: network.SocketAddress) -> Option[UInt64] {
   self.listeners.slice().find_index(fn(listener) {
     listener.open && listener.local.port == address.port && same_host(listener.local.address, second: address.address)
   })
 }
 
-internal fn State.connect(mut self, address: network::SocketAddress) -> Result[BoundEndpoint, SystemError] {
+internal fn State.connect(mut self, address: network.SocketAddress) -> Result[BoundEndpoint, SystemError] {
   match mut self.next_fault(Operation.Connect) {
     Some(error) => return Err(error)
     None => {}
@@ -333,7 +333,7 @@ internal fn State.connect(mut self, address: network::SocketAddress) -> Result[B
   match self.listener_at(address) {
     Some(listener) => {
       let local = mut self.claim_address(
-        network::SocketAddress(address: network::IpAddress.loopback, port: 0),
+        network.SocketAddress(address: network.IpAddress.loopback, port: 0),
         datagrams: false,
       )?
       Ok(BoundEndpoint(endpoint: mut self.connect_to(listener, local: local, peer: address), local: local))
@@ -345,8 +345,8 @@ internal fn State.connect(mut self, address: network::SocketAddress) -> Result[B
 internal fn State.connect_to(
   mut self,
   listener: UInt64,
-  local: network::SocketAddress,
-  peer: network::SocketAddress,
+  local: network.SocketAddress,
+  peer: network.SocketAddress,
 ) -> UInt64 {
   let near = self.streams.length()
   mut self.streams.push(
@@ -378,7 +378,7 @@ internal fn State.end_receiving(mut self, stream: UInt64) {
   }
 }
 
-internal fn State.shut_down(mut self, endpoint: UInt64, direction: network::Direction) -> Result[Unit, SystemError] {
+internal fn State.shut_down(mut self, endpoint: UInt64, direction: network.Direction) -> Result[Unit, SystemError] {
   match self.endpoint(endpoint) {
     Connected(stream) => {
       match direction {
@@ -399,7 +399,7 @@ internal fn State.shut_down(mut self, endpoint: UInt64, direction: network::Dire
 internal fn State.set_timeout(
   mut self,
   endpoint: UInt64,
-  direction: network::Direction,
+  direction: network.Direction,
   timeout: Option[Duration],
 ) -> Result[Unit, SystemError] {
   let receiving = !(direction is Sending)
@@ -457,7 +457,7 @@ internal fn State.close(mut self, endpoint: UInt64) -> Result[Unit, SystemError]
     Listening(listener) => {
       if listener < self.listeners.length() {
         self.listeners[listener].open = false
-        let waiting = map::exchange(mut self.listeners[listener].waiting, value: [])
+        let waiting = map.exchange(mut self.listeners[listener].waiting, value: [])
         for unaccepted in waiting {
           let _ = mut self.close(unaccepted)
         }
@@ -513,7 +513,7 @@ internal fn State.send_to(
   mut self,
   endpoint: UInt64,
   bytes: Slice[UInt8],
-  address: network::SocketAddress,
+  address: network.SocketAddress,
 ) -> Result[UInt64, SystemError] {
   match self.endpoint(endpoint) {
     Datagrams(socket) => {
@@ -658,7 +658,7 @@ internal fn State.attempt(mut self, blocking: Blocking, cancelled: Bool) -> Atte
   if cancelled { Attempt.Finished(Err(SystemError.Cancelled)) } else { Attempt.Waiting }
 }
 
-internal fn State.program_for(self, command: processes::Command) -> Option[UInt64] {
+internal fn State.program_for(self, command: processes.Command) -> Option[UInt64] {
   var chosen: Option[UInt64] = None
   var most: UInt64 = 0
   for index in 0..self.programs.length() {
@@ -673,7 +673,7 @@ internal fn State.program_for(self, command: processes::Command) -> Option[UInt6
   chosen
 }
 
-internal fn State.start(mut self, command: processes::Command) -> Result[Started, SystemError] {
+internal fn State.start(mut self, command: processes.Command) -> Result[Started, SystemError] {
   match mut self.next_fault(Operation.Spawn) {
     Some(error) => return Err(error)
     None => {}
@@ -717,29 +717,29 @@ internal fn State.start(mut self, command: processes::Command) -> Result[Started
   }
 }
 
-internal fn State.spawn(mut self, command: processes::Command) -> Result[processes::Child, SystemError] {
+internal fn State.spawn(mut self, command: processes.Command) -> Result[processes.Child, SystemError] {
   let started = mut self.start(command)?
   self.processes_made = self.processes_made.saturating_add(1)
   let process = mut self.add_endpoint(Endpoint.Child(status: started.status))
-  var input: Option[processes::ChildInput] = None
+  var input: Option[processes.ChildInput] = None
   if command.input is Pipe {
-    input = Some(processes::ChildInput(handle: handle_of(mut self.add_endpoint(Endpoint.ChildInput))))
+    input = Some(processes.ChildInput(handle: handle_of(mut self.add_endpoint(Endpoint.ChildInput))))
   }
-  var output: Option[processes::ChildOutput] = None
+  var output: Option[processes.ChildOutput] = None
   if command.output is Pipe || command.output is Capture {
-    mut self.pipes.push(streams::ByteQueue.from_elements(own started.output))
+    mut self.pipes.push(streams.ByteQueue.from_elements(own started.output))
     let pipe = self.pipes.length() - 1
-    output = Some(processes::ChildOutput(handle: handle_of(mut self.add_endpoint(Endpoint.ChildOutput(pipe: pipe)))))
+    output = Some(processes.ChildOutput(handle: handle_of(mut self.add_endpoint(Endpoint.ChildOutput(pipe: pipe)))))
   }
-  var error_output: Option[processes::ChildOutput] = None
+  var error_output: Option[processes.ChildOutput] = None
   if command.error_output is Pipe || command.error_output is Capture {
-    mut self.pipes.push(streams::ByteQueue.from_elements(own started.error_output))
+    mut self.pipes.push(streams.ByteQueue.from_elements(own started.error_output))
     let pipe = self.pipes.length() - 1
     error_output = Some(
-      processes::ChildOutput(handle: handle_of(mut self.add_endpoint(Endpoint.ChildOutput(pipe: pipe)))),
+      processes.ChildOutput(handle: handle_of(mut self.add_endpoint(Endpoint.ChildOutput(pipe: pipe)))),
     )
   }
-  Ok(processes::Child(
+  Ok(processes.Child(
     handle: handle_of(process),
     identifier: self.processes_made,
     input: own input,
@@ -773,21 +773,21 @@ internal fn State.begin_file_operation(mut self, now: Instant, operations: Slice
   mut self.take_fault(operations)
 }
 
-public opaque type World(tasks: tasks::SeededTasks, state: intrinsic::Shared[State], start: Instant)
+public opaque type World(tasks: tasks.SeededTasks, state: intrinsic.Shared[State], start: Instant)
 
 public fn World.new(seed: UInt64 = 0) -> World {
   World.from(Setup.new(), seed: seed)
 }
 
 public fn World.from(setup: own Setup, seed: UInt64 = 0) -> World {
-  var generator = random::Generator.seeded(seed)
+  var generator = random.Generator.seeded(seed)
   let scheduling_seed = mut generator.next()
   World(
-    tasks: tasks::SeededTasks.new(scheduling_seed),
-    state: intrinsic::shared_new(
+    tasks: tasks.SeededTasks.new(scheduling_seed),
+    state: intrinsic.shared_new(
       State(
-        console: console::CapturedConsole.new(input: own setup.input),
-        log: log::CapturedLog(),
+        console: console.CapturedConsole.new(input: own setup.input),
+        log: log.CapturedLog(),
         environment: own setup.environment,
         files: own setup.files,
         generator: generator,
@@ -830,7 +830,7 @@ fn World.clock_time(self) -> Instant
 public fn World.output(self) -> String
   uses Tasks
 {
-  intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+  intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
     state.console.output().to_string()
   })
 }
@@ -838,15 +838,15 @@ public fn World.output(self) -> String
 public fn World.errors(self) -> String
   uses Tasks
 {
-  intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+  intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
     state.console.errors().to_string()
   })
 }
 
-public fn World.records(self) -> List[log::Record]
+public fn World.records(self) -> List[log.Record]
   uses Tasks
 {
-  intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+  intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
     state.log.records.copy()
   })
 }
@@ -854,7 +854,7 @@ public fn World.records(self) -> List[log::Record]
 public fn World.file_text(self, path: Path) -> Option[String]
   uses Tasks
 {
-  intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+  intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
     state.files.text(path)
   })
 }
@@ -862,7 +862,7 @@ public fn World.file_text(self, path: Path) -> Option[String]
 public fn World.file_bytes(self, path: Path) -> Option[List[UInt8]]
   uses Tasks
 {
-  intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+  intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
     state.files.contents(path)
   })
 }
@@ -885,24 +885,24 @@ public fn World.advance(self, by: Duration)
 public fn World.fail_next(self, operation: Operation, error: SystemError)
   uses Tasks
 {
-  intrinsic::shared_update(self.state, input: Fault(operation: operation, error: error.copy()), change: fn(state, fault) {
+  intrinsic.shared_update(self.state, input: Fault(operation: operation, error: error.copy()), change: fn(state, fault) {
     mut state.faults.push(fault)
   })
 }
 
-public fn World.deliver(self, signal: processes::Signal)
+public fn World.deliver(self, signal: processes.Signal)
   uses Tasks
 {
-  intrinsic::shared_update(self.state, input: signal.copy(), change: fn(state, delivered) {
+  intrinsic.shared_update(self.state, input: signal.copy(), change: fn(state, delivered) {
     mut state.pending_signals.push(delivered)
   })
-  Tasks.wake(intrinsic::shared_key(self.state))
+  Tasks.wake(intrinsic.shared_key(self.state))
 }
 
 public fn World.is_raw_mode(self) -> Bool
   uses Tasks
 {
-  intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+  intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
     state.raw_mode
   })
 }
@@ -910,7 +910,7 @@ public fn World.is_raw_mode(self) -> Bool
 public fn World.commands(self) -> List[List[String]]
   uses Tasks
 {
-  intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+  intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
     state.commands.copy()
   })
 }
@@ -919,7 +919,7 @@ fn World.wake(self)
   uses Panic, RunForever
 {
   provide self.tasks {
-    Tasks.wake(intrinsic::shared_key(self.state))
+    Tasks.wake(intrinsic.shared_key(self.state))
   }
 }
 
@@ -927,11 +927,11 @@ fn World.wait_until_done(self, blocking: Blocking, reason: StringSlice) -> Resul
   uses Panic, RunForever
 {
   provide self.tasks {
-    let key = intrinsic::shared_key(self.state)
+    let key = intrinsic.shared_key(self.state)
     while true {
       let ticket = Tasks.watch(key)
       let cancelled = Tasks.cancelled()
-      match intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      match intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
         mut state.attempt(blocking, cancelled: cancelled)
       }) {
         Finished(result) => {
@@ -949,7 +949,7 @@ fn World.perform(self, blocking: Blocking, reason: StringSlice) -> Result[Comple
 {
   self.preemption_point()
   provide self.tasks {
-    let timeout = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    let timeout = intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       state.timeout_of(blocking)
     })
     match timeout {
@@ -972,7 +972,7 @@ impl Console for World
 {
   fn print(self, text: StringSlice) {
     self.preemption_point()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       provide mut state.console {
         Console.print(text)
       }
@@ -981,7 +981,7 @@ impl Console for World
 
   fn print_line(self, text: StringSlice) {
     self.preemption_point()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       provide mut state.console {
         Console.print_line(text)
       }
@@ -990,7 +990,7 @@ impl Console for World
 
   fn print_error(self, text: StringSlice) {
     self.preemption_point()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       provide mut state.console {
         Console.print_error(text)
       }
@@ -999,29 +999,29 @@ impl Console for World
 
   fn read_line(self) -> Option[String] {
     self.preemption_point()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       mut state.read_line()
     })
   }
 
-  fn input(self) -> console::Input {
+  fn input(self) -> console.Input {
     self.preemption_point()
-    console::Input.from_handle(handle_of(input_endpoint))
+    console.Input.from_handle(handle_of(input_endpoint))
   }
 
-  fn output(self) -> console::Output {
+  fn output(self) -> console.Output {
     self.preemption_point()
-    console::Output.from_handle(handle_of(output_endpoint))
+    console.Output.from_handle(handle_of(output_endpoint))
   }
 
-  fn error_output(self) -> console::Output {
+  fn error_output(self) -> console.Output {
     self.preemption_point()
-    console::Output.from_handle(handle_of(errors_endpoint))
+    console.Output.from_handle(handle_of(errors_endpoint))
   }
 
-  fn terminal(self) -> console::Terminal {
+  fn terminal(self) -> console.Terminal {
     self.preemption_point()
-    console::Terminal.from_handle(handle_of(output_endpoint))
+    console.Terminal.from_handle(handle_of(output_endpoint))
   }
 }
 
@@ -1031,7 +1031,7 @@ impl FileRead for World
   fn read(self, file: Path) -> Result[List[UInt8], SystemError] {
     self.preemption_point()
     let now = self.clock_time()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       match mut state.begin_file_operation(now, operations: [Operation.Open, Operation.Read]) {
         Some(error) => Err(error)
         None => provide mut state.files {
@@ -1044,7 +1044,7 @@ impl FileRead for World
   fn read_text(self, file: Path) -> Result[String, SystemError] {
     self.preemption_point()
     let now = self.clock_time()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       match mut state.begin_file_operation(now, operations: [Operation.Open, Operation.Read]) {
         Some(error) => Err(error)
         None => provide mut state.files {
@@ -1054,22 +1054,22 @@ impl FileRead for World
     })
   }
 
-  fn open(self, file: Path) -> Result[files::FileReader, SystemError] {
+  fn open(self, file: Path) -> Result[files.FileReader, SystemError] {
     self.preemption_point()
     let now = self.clock_time()
-    let handle = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    let handle = intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       match mut state.begin_file_operation(now, operations: [Operation.Open]) {
         Some(error) => Err(error)
         None => mut state.files.open_to_read(file)
       }
     })?
-    Ok(files::FileReader.opened(handle))
+    Ok(files.FileReader.opened(handle))
   }
 
-  fn metadata(self, path: Path, follow_links: Bool) -> Result[files::Metadata, SystemError] {
+  fn metadata(self, path: Path, follow_links: Bool) -> Result[files.Metadata, SystemError] {
     self.preemption_point()
     let now = self.clock_time()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       match mut state.begin_file_operation(now, operations: []) {
         Some(error) => Err(error)
         None => provide mut state.files {
@@ -1079,10 +1079,10 @@ impl FileRead for World
     })
   }
 
-  fn list(self, directory: Path) -> Result[List[files::DirectoryEntry], SystemError] {
+  fn list(self, directory: Path) -> Result[List[files.DirectoryEntry], SystemError] {
     self.preemption_point()
     let now = self.clock_time()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       match mut state.begin_file_operation(now, operations: []) {
         Some(error) => Err(error)
         None => provide mut state.files {
@@ -1095,7 +1095,7 @@ impl FileRead for World
   fn read_link(self, link: Path) -> Result[Path, SystemError] {
     self.preemption_point()
     let now = self.clock_time()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       match mut state.begin_file_operation(now, operations: []) {
         Some(error) => Err(error)
         None => provide mut state.files {
@@ -1108,7 +1108,7 @@ impl FileRead for World
   fn resolve(self, path: Path) -> Result[Path, SystemError] {
     self.preemption_point()
     let now = self.clock_time()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       match mut state.begin_file_operation(now, operations: []) {
         Some(error) => Err(error)
         None => provide mut state.files {
@@ -1125,7 +1125,7 @@ impl FileWrite for World
   fn write(self, file: Path, contents: Slice[UInt8]) -> Result[Unit, SystemError] {
     self.preemption_point()
     let now = self.clock_time()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       match mut state.begin_file_operation(now, operations: [Operation.Open, Operation.Write]) {
         Some(error) => Err(error)
         None => provide mut state.files {
@@ -1138,7 +1138,7 @@ impl FileWrite for World
   fn write_text(self, file: Path, contents: StringSlice) -> Result[Unit, SystemError] {
     self.preemption_point()
     let now = self.clock_time()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       match mut state.begin_file_operation(now, operations: [Operation.Open, Operation.Write]) {
         Some(error) => Err(error)
         None => provide mut state.files {
@@ -1148,22 +1148,22 @@ impl FileWrite for World
     })
   }
 
-  fn open(self, file: Path, mode: files::WriteMode) -> Result[files::File, SystemError] {
+  fn open(self, file: Path, mode: files.WriteMode) -> Result[files.File, SystemError] {
     self.preemption_point()
     let now = self.clock_time()
-    let handle = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    let handle = intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       match mut state.begin_file_operation(now, operations: [Operation.Open]) {
         Some(error) => Err(error)
         None => mut state.files.open_to_write(file, mode: mode)
       }
     })?
-    Ok(files::File.opened(handle))
+    Ok(files.File.opened(handle))
   }
 
   fn create_directory(self, directory: Path) -> Result[Unit, SystemError] {
     self.preemption_point()
     let now = self.clock_time()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       match mut state.begin_file_operation(now, operations: []) {
         Some(error) => Err(error)
         None => provide mut state.files {
@@ -1176,7 +1176,7 @@ impl FileWrite for World
   fn remove(self, path: Path) -> Result[Unit, SystemError] {
     self.preemption_point()
     let now = self.clock_time()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       match mut state.begin_file_operation(now, operations: []) {
         Some(error) => Err(error)
         None => provide mut state.files {
@@ -1189,7 +1189,7 @@ impl FileWrite for World
   fn rename(self, from: Path, to: Path) -> Result[Unit, SystemError] {
     self.preemption_point()
     let now = self.clock_time()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       match mut state.begin_file_operation(now, operations: []) {
         Some(error) => Err(error)
         None => provide mut state.files {
@@ -1199,10 +1199,10 @@ impl FileWrite for World
     })
   }
 
-  fn link(self, target: Path, link: Path, kind: files::LinkKind) -> Result[Unit, SystemError] {
+  fn link(self, target: Path, link: Path, kind: files.LinkKind) -> Result[Unit, SystemError] {
     self.preemption_point()
     let now = self.clock_time()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       match mut state.begin_file_operation(now, operations: []) {
         Some(error) => Err(error)
         None => provide mut state.files {
@@ -1212,10 +1212,10 @@ impl FileWrite for World
     })
   }
 
-  fn set_permissions(self, path: Path, permissions: files::Permissions) -> Result[Unit, SystemError] {
+  fn set_permissions(self, path: Path, permissions: files.Permissions) -> Result[Unit, SystemError] {
     self.preemption_point()
     let now = self.clock_time()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       match mut state.begin_file_operation(now, operations: []) {
         Some(error) => Err(error)
         None => provide mut state.files {
@@ -1228,7 +1228,7 @@ impl FileWrite for World
   fn set_modified(self, path: Path, time: Instant) -> Result[Unit, SystemError] {
     self.preemption_point()
     let now = self.clock_time()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       match mut state.begin_file_operation(now, operations: []) {
         Some(error) => Err(error)
         None => provide mut state.files {
@@ -1242,69 +1242,69 @@ impl FileWrite for World
 impl NetworkClient for World
   uses Panic, RunForever
 {
-  fn resolve(self, host: StringSlice) -> Result[List[network::IpAddress], SystemError] {
+  fn resolve(self, host: StringSlice) -> Result[List[network.IpAddress], SystemError] {
     self.preemption_point()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       mut state.resolve(host)
     })
   }
 
-  fn connect(self, address: network::SocketAddress, timeout: Option[Duration]) -> Result[network::Connection, SystemError] {
+  fn connect(self, address: network.SocketAddress, timeout: Option[Duration]) -> Result[network.Connection, SystemError] {
     self.preemption_point()
-    let bound = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    let bound = intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       mut state.connect(address)
     })?
     self.wake()
-    Ok(network::Connection.from_handle(handle_of(bound.endpoint), local: bound.local, peer: address))
+    Ok(network.Connection.from_handle(handle_of(bound.endpoint), local: bound.local, peer: address))
   }
 
-  fn connect_local(self, path: Path) -> Result[network::LocalConnection, SystemError] {
+  fn connect_local(self, path: Path) -> Result[network.LocalConnection, SystemError] {
     self.preemption_point()
-    let endpoint = intrinsic::shared_update(self.state, input: path.copy(), change: fn(state, wanted) {
+    let endpoint = intrinsic.shared_update(self.state, input: path.copy(), change: fn(state, wanted) {
       mut state.connect_local(wanted)
     })?
     self.wake()
-    Ok(network::LocalConnection.from_handle(handle_of(endpoint)))
+    Ok(network.LocalConnection.from_handle(handle_of(endpoint)))
   }
 
-  fn open_datagram(self) -> Result[network::DatagramSocket, SystemError] {
+  fn open_datagram(self) -> Result[network.DatagramSocket, SystemError] {
     self.preemption_point()
-    let bound = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
-      mut state.bind_datagrams(network::SocketAddress(address: network::IpAddress.loopback, port: 0))
+    let bound = intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
+      mut state.bind_datagrams(network.SocketAddress(address: network.IpAddress.loopback, port: 0))
     })?
-    Ok(network::DatagramSocket.from_handle(handle_of(bound.endpoint), local: bound.local))
+    Ok(network.DatagramSocket.from_handle(handle_of(bound.endpoint), local: bound.local))
   }
 }
 
 impl NetworkServer for World
   uses Panic, RunForever
 {
-  fn listen(self, address: network::SocketAddress, options: network::ListenOptions) -> Result[network::Listener, SystemError] {
+  fn listen(self, address: network.SocketAddress, options: network.ListenOptions) -> Result[network.Listener, SystemError] {
     self.preemption_point()
-    let bound = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    let bound = intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       mut state.listen(address)
     })?
-    Ok(network::Listener.from_handle(handle_of(bound.endpoint), local: bound.local))
+    Ok(network.Listener.from_handle(handle_of(bound.endpoint), local: bound.local))
   }
 
-  fn listen_local(self, path: Path) -> Result[network::LocalListener, SystemError] {
+  fn listen_local(self, path: Path) -> Result[network.LocalListener, SystemError] {
     self.preemption_point()
-    let endpoint = intrinsic::shared_update(self.state, input: path.copy(), change: fn(state, wanted) {
+    let endpoint = intrinsic.shared_update(self.state, input: path.copy(), change: fn(state, wanted) {
       mut state.listen_local(own wanted)
     })?
-    Ok(network::LocalListener.from_handle(handle_of(endpoint), path: path.copy()))
+    Ok(network.LocalListener.from_handle(handle_of(endpoint), path: path.copy()))
   }
 
-  fn bind_datagram(self, address: network::SocketAddress) -> Result[network::DatagramSocket, SystemError] {
+  fn bind_datagram(self, address: network.SocketAddress) -> Result[network.DatagramSocket, SystemError] {
     self.preemption_point()
-    let bound = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    let bound = intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       mut state.bind_datagrams(address)
     })?
-    Ok(network::DatagramSocket.from_handle(handle_of(bound.endpoint), local: bound.local))
+    Ok(network.DatagramSocket.from_handle(handle_of(bound.endpoint), local: bound.local))
   }
 }
 
-fn World.arrival(self, listener: streams::Handle) -> Result[network::Accepted, SystemError]
+fn World.arrival(self, listener: streams.Handle) -> Result[network.Accepted, SystemError]
   uses Panic, RunForever
 {
   match endpoint_of(listener) {
@@ -1314,7 +1314,7 @@ fn World.arrival(self, listener: streams::Handle) -> Result[network::Accepted, S
         reason: "accepting a connection that no task has made",
       )?
       match completion {
-        Arrival(endpoint: accepted, peer) => Ok(network::Accepted(handle: handle_of(accepted), peer: peer))
+        Arrival(endpoint: accepted, peer) => Ok(network.Accepted(handle: handle_of(accepted), peer: peer))
         _ => Err(SystemError.InvalidData)
       }
     }
@@ -1325,7 +1325,7 @@ fn World.arrival(self, listener: streams::Handle) -> Result[network::Accepted, S
 impl Handles for World
   uses Panic, RunForever
 {
-  fn read(self, handle: streams::Handle, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError] {
+  fn read(self, handle: streams.Handle, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError] {
     match endpoint_of(handle) {
       Some(endpoint) => {
         let completion = self.perform(
@@ -1345,7 +1345,7 @@ impl Handles for World
     }
     self.preemption_point()
     let now = self.clock_time()
-    let read = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    let read = intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       match mut state.begin_file_operation(now, operations: [Operation.Read]) {
         Some(error) => Err(error)
         None => {
@@ -1364,11 +1364,11 @@ impl Handles for World
     Ok(count)
   }
 
-  fn write(self, handle: streams::Handle, bytes: Slice[UInt8]) -> Result[UInt64, SystemError] {
+  fn write(self, handle: streams.Handle, bytes: Slice[UInt8]) -> Result[UInt64, SystemError] {
     match endpoint_of(handle) {
       Some(endpoint) => {
         self.preemption_point()
-        let sent = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+        let sent = intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
           mut state.send(endpoint, bytes: bytes)
         })?
         self.wake()
@@ -1378,7 +1378,7 @@ impl Handles for World
     }
     self.preemption_point()
     let now = self.clock_time()
-    let written = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    let written = intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       match mut state.begin_file_operation(now, operations: [Operation.Write]) {
         Some(error) => Err(error)
         None => provide mut state.files {
@@ -1391,14 +1391,14 @@ impl Handles for World
 
   fn read_at(
     self,
-    handle: streams::Handle,
+    handle: streams.Handle,
     offset: UInt64,
     buffer: mut List[UInt8],
     limit: UInt64,
   ) -> Result[UInt64, SystemError] {
     self.preemption_point()
     let now = self.clock_time()
-    let read = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    let read = intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       match mut state.begin_file_operation(now, operations: [Operation.Read]) {
         Some(error) => Err(error)
         None => {
@@ -1417,10 +1417,10 @@ impl Handles for World
     Ok(count)
   }
 
-  fn write_at(self, handle: streams::Handle, offset: UInt64, bytes: Slice[UInt8]) -> Result[UInt64, SystemError] {
+  fn write_at(self, handle: streams.Handle, offset: UInt64, bytes: Slice[UInt8]) -> Result[UInt64, SystemError] {
     self.preemption_point()
     let now = self.clock_time()
-    let written = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    let written = intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       match mut state.begin_file_operation(now, operations: [Operation.Write]) {
         Some(error) => Err(error)
         None => provide mut state.files {
@@ -1431,10 +1431,10 @@ impl Handles for World
     Ok(if written < bytes.length() { written } else { bytes.length() })
   }
 
-  fn seek(self, handle: streams::Handle, to: streams::Position) -> Result[UInt64, SystemError] {
+  fn seek(self, handle: streams.Handle, to: streams.Position) -> Result[UInt64, SystemError] {
     self.preemption_point()
     let now = self.clock_time()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       match mut state.begin_file_operation(now, operations: []) {
         Some(error) => Err(error)
         None => provide mut state.files {
@@ -1444,10 +1444,10 @@ impl Handles for World
     })
   }
 
-  fn set_length(self, handle: streams::Handle, length: UInt64) -> Result[Unit, SystemError] {
+  fn set_length(self, handle: streams.Handle, length: UInt64) -> Result[Unit, SystemError] {
     self.preemption_point()
     let now = self.clock_time()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       match mut state.begin_file_operation(now, operations: [Operation.Write]) {
         Some(error) => Err(error)
         None => provide mut state.files {
@@ -1457,10 +1457,10 @@ impl Handles for World
     })
   }
 
-  fn synchronize(self, handle: streams::Handle) -> Result[Unit, SystemError] {
+  fn synchronize(self, handle: streams.Handle) -> Result[Unit, SystemError] {
     self.preemption_point()
     let now = self.clock_time()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       match mut state.begin_file_operation(now, operations: []) {
         Some(error) => Err(error)
         None => provide mut state.files {
@@ -1470,10 +1470,10 @@ impl Handles for World
     })
   }
 
-  fn metadata(self, handle: streams::Handle) -> Result[files::Metadata, SystemError] {
+  fn metadata(self, handle: streams.Handle) -> Result[files.Metadata, SystemError] {
     self.preemption_point()
     let now = self.clock_time()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       match mut state.begin_file_operation(now, operations: []) {
         Some(error) => Err(error)
         None => provide mut state.files {
@@ -1483,11 +1483,11 @@ impl Handles for World
     })
   }
 
-  fn close(self, handle: own streams::Handle) -> Result[Unit, SystemError] {
+  fn close(self, handle: own streams.Handle) -> Result[Unit, SystemError] {
     self.preemption_point()
     match endpoint_of(handle) {
       Some(endpoint) => {
-        let closed = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+        let closed = intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
           mut state.close(endpoint)
         })
         self.wake()
@@ -1495,18 +1495,18 @@ impl Handles for World
       }
       None => {}
     }
-    intrinsic::shared_update(self.state, input: own handle, change: fn(state, closing) {
+    intrinsic.shared_update(self.state, input: own handle, change: fn(state, closing) {
       provide mut state.files {
         Handles.close(own closing)
       }
     })
   }
 
-  fn shut_down(self, handle: streams::Handle, direction: network::Direction) -> Result[Unit, SystemError] {
+  fn shut_down(self, handle: streams.Handle, direction: network.Direction) -> Result[Unit, SystemError] {
     self.preemption_point()
     match endpoint_of(handle) {
       Some(endpoint) => {
-        let done = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+        let done = intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
           mut state.shut_down(endpoint, direction: direction)
         })
         self.wake()
@@ -1518,30 +1518,30 @@ impl Handles for World
 
   fn set_timeout(
     self,
-    handle: streams::Handle,
-    direction: network::Direction,
+    handle: streams.Handle,
+    direction: network.Direction,
     timeout: Option[Duration],
   ) -> Result[Unit, SystemError] {
     self.preemption_point()
     match endpoint_of(handle) {
-      Some(endpoint) => intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      Some(endpoint) => intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
         mut state.set_timeout(endpoint, direction: direction, timeout: timeout)
       })
       None => Err(SystemError.InvalidInput)
     }
   }
 
-  fn accept(self, listener: streams::Handle) -> Result[network::Accepted, SystemError] {
+  fn accept(self, listener: streams.Handle) -> Result[network.Accepted, SystemError] {
     self.arrival(listener)
   }
 
 
-  fn accept_local(self, listener: streams::Handle) -> Result[streams::Handle, SystemError] {
+  fn accept_local(self, listener: streams.Handle) -> Result[streams.Handle, SystemError] {
     let accepted = self.arrival(listener)?
     Ok(own accepted.handle)
   }
 
-  fn configure(self, socket: streams::Handle, option: network::SocketOption) -> Result[Unit, SystemError] {
+  fn configure(self, socket: streams.Handle, option: network.SocketOption) -> Result[Unit, SystemError] {
     match endpoint_of(socket) {
       Some(_) => Ok(Unit)
       None => Err(SystemError.InvalidInput)
@@ -1550,14 +1550,14 @@ impl Handles for World
 
   fn send_to(
     self,
-    socket: streams::Handle,
+    socket: streams.Handle,
     bytes: Slice[UInt8],
-    address: network::SocketAddress,
+    address: network.SocketAddress,
   ) -> Result[UInt64, SystemError] {
     self.preemption_point()
     match endpoint_of(socket) {
       Some(endpoint) => {
-        let sent = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+        let sent = intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
           mut state.send_to(endpoint, bytes: bytes, address: address)
         })
         self.wake()
@@ -1569,10 +1569,10 @@ impl Handles for World
 
   fn receive_from(
     self,
-    socket: streams::Handle,
+    socket: streams.Handle,
     buffer: mut List[UInt8],
     limit: UInt64,
-  ) -> Result[network::Datagram, SystemError] {
+  ) -> Result[network.Datagram, SystemError] {
     match endpoint_of(socket) {
       Some(endpoint) => {
         let completion = self.perform(
@@ -1583,7 +1583,7 @@ impl Handles for World
           Datagram(bytes, from) => {
             let count = if bytes.length() < limit { bytes.length() } else { limit }
             mut buffer.append_slice(bytes[..count])
-            Ok(network::Datagram(length: count, from: from))
+            Ok(network.Datagram(length: count, from: from))
           }
           _ => Err(SystemError.InvalidData)
         }
@@ -1592,10 +1592,10 @@ impl Handles for World
     }
   }
 
-  fn wait(self, process: streams::Handle) -> Result[processes::ExitStatus, SystemError] {
+  fn wait(self, process: streams.Handle) -> Result[processes.ExitStatus, SystemError] {
     self.preemption_point()
     match endpoint_of(process) {
-      Some(endpoint) => intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      Some(endpoint) => intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
         match state.endpoint(endpoint) {
           Child(status) => Ok(status)
           Closed => Err(SystemError.Closed)
@@ -1606,10 +1606,10 @@ impl Handles for World
     }
   }
 
-  fn signal(self, process: streams::Handle, signal: processes::Signal) -> Result[Unit, SystemError] {
+  fn signal(self, process: streams.Handle, signal: processes.Signal) -> Result[Unit, SystemError] {
     self.preemption_point()
     match endpoint_of(process) {
-      Some(endpoint) => intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      Some(endpoint) => intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
         match state.endpoint(endpoint) {
           Child(_) => Ok(Unit)
           Closed => Err(SystemError.Closed)
@@ -1620,12 +1620,12 @@ impl Handles for World
     }
   }
 
-  fn terminal_size(self, terminal: streams::Handle) -> Result[console::Size, SystemError] {
+  fn terminal_size(self, terminal: streams.Handle) -> Result[console.Size, SystemError] {
     self.preemption_point()
     match endpoint_of(terminal) {
-      Some(endpoint) => intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      Some(endpoint) => intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
         match state.endpoint(endpoint) {
-          Console(_) => Ok(console::Size(columns: 80, rows: 24))
+          Console(_) => Ok(console.Size(columns: 80, rows: 24))
           _ => Err(SystemError.Unsupported)
         }
       })
@@ -1633,10 +1633,10 @@ impl Handles for World
     }
   }
 
-  fn set_raw_mode(self, terminal: streams::Handle, enabled: Bool) -> Result[Unit, SystemError] {
+  fn set_raw_mode(self, terminal: streams.Handle, enabled: Bool) -> Result[Unit, SystemError] {
     self.preemption_point()
     match endpoint_of(terminal) {
-      Some(endpoint) => intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+      Some(endpoint) => intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
         match state.endpoint(endpoint) {
           Console(_) => {
             state.raw_mode = enabled
@@ -1679,7 +1679,7 @@ impl Random for World
 {
   fn next(self) -> UInt64 {
     self.preemption_point()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       mut state.generator.next()
     })
   }
@@ -1690,16 +1690,16 @@ impl Environment for World
 {
   fn variable(self, name: StringSlice) -> Option[String] {
     self.preemption_point()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       provide state.environment {
         Environment.variable(name)
       }
     })
   }
 
-  fn variables(self) -> List[environment::Variable] {
+  fn variables(self) -> List[environment.Variable] {
     self.preemption_point()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       provide state.environment {
         Environment.variables()
       }
@@ -1708,25 +1708,25 @@ impl Environment for World
 
   fn current_directory(self) -> Result[Path, SystemError] {
     self.preemption_point()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       provide state.environment {
         Environment.current_directory()
       }
     })
   }
 
-  fn platform(self) -> environment::Platform {
+  fn platform(self) -> environment.Platform {
     self.preemption_point()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       provide state.environment {
         Environment.platform()
       }
     })
   }
 
-  fn location(self, location: environment::Location) -> Option[Path] {
+  fn location(self, location: environment.Location) -> Option[Path] {
     self.preemption_point()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       provide state.environment {
         Environment.location(location)
       }
@@ -1735,7 +1735,7 @@ impl Environment for World
 
   fn local_zone(self) -> Option[String] {
     self.preemption_point()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       provide state.environment {
         Environment.local_zone()
       }
@@ -1744,7 +1744,7 @@ impl Environment for World
 
   fn zone_rules(self, name: StringSlice) -> Option[List[UInt8]] {
     self.preemption_point()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       provide state.environment {
         Environment.zone_rules(name)
       }
@@ -1755,17 +1755,17 @@ impl Environment for World
 impl Processes for World
   uses Panic, RunForever
 {
-  fn run(self, command: processes::Command) -> Result[processes::Output, SystemError] {
+  fn run(self, command: processes.Command) -> Result[processes.Output, SystemError] {
     self.preemption_point()
-    let started = intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    let started = intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       mut state.start(command)
     })?
-    Ok(processes::Output(status: started.status, output: own started.output, error_output: own started.error_output))
+    Ok(processes.Output(status: started.status, output: own started.output, error_output: own started.error_output))
   }
 
-  fn spawn(self, command: processes::Command) -> Result[processes::Child, SystemError] {
+  fn spawn(self, command: processes.Command) -> Result[processes.Child, SystemError] {
     self.preemption_point()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       mut state.spawn(command)
     })
   }
@@ -1774,7 +1774,7 @@ impl Processes for World
 impl Signals for World
   uses Panic, RunForever
 {
-  fn wait(self, signals: Slice[processes::Signal]) -> Option[processes::Signal] {
+  fn wait(self, signals: Slice[processes.Signal]) -> Option[processes.Signal] {
     match self.perform(
       Blocking.Catching(signals: signals.to_list()),
       reason: "waiting for a signal that has not been delivered",
@@ -1858,16 +1858,16 @@ impl Tasks for World
 impl Log for World
   uses Panic, RunForever
 {
-  fn record(self, record: log::Record) {
+  fn record(self, record: log.Record) {
     self.preemption_point()
-    intrinsic::shared_update(self.state, input: 0, change: fn(state, _) {
+    intrinsic.shared_update(self.state, input: 0, change: fn(state, _) {
       provide mut state.log {
         Log.record(record)
       }
     })
   }
 
-  fn enabled(self, level: log::Level) -> Bool {
+  fn enabled(self, level: log.Level) -> Bool {
     true
   }
 }

@@ -210,9 +210,6 @@ type function_ =
   | Getenv
   | Posix_spawnp
   | Waitpid
-  | Snprintf
-  | Strtod
-  | Strtof
   | Fork
   | Pipe
   | Poll
@@ -297,9 +294,6 @@ let functions =
     Getenv;
     Posix_spawnp;
     Waitpid;
-    Snprintf;
-    Strtod;
-    Strtof;
     Fork;
     Pipe;
     Poll;
@@ -384,9 +378,6 @@ let show_function = function
   | Getenv -> "getenv"
   | Posix_spawnp -> "posix_spawnp"
   | Waitpid -> "waitpid"
-  | Snprintf -> "snprintf"
-  | Strtod -> "strtod"
-  | Strtof -> "strtof"
   | Fork -> "fork"
   | Pipe -> "pipe"
   | Poll -> "poll"
@@ -619,42 +610,6 @@ let describe function_ =
           ("options", Value Int32, make_portable_type (Named "int"));
         ]
         ~headers:[ "sys/wait.h" ]
-  | Snprintf ->
-      make_row
-        (make_portable_type (Named "int"))
-        (Returns Int32) ~variadic_from:3
-        [
-          ("buffer", Room (UInt8, make_counted "size"), make_portable_type (Pointer (Named "char")));
-          ("size", Value UInt64, size);
-          ( "format",
-            Elements (UInt8, Through_zero),
-            make_portable_type (Pointer (Const (Named "char"))) );
-          ("precision", Value Int32, make_portable_type (Named "int"));
-          ("value", Value Float64, make_portable_type (Named "double"));
-        ]
-        ~headers:[ "stdio.h" ]
-  | Strtod ->
-      make_row
-        (make_portable_type (Named "double"))
-        (Returns Float64)
-        [
-          ( "text",
-            Elements (UInt8, Through_zero),
-            make_portable_type (Pointer (Const (Named "char"))) );
-          ("end", Always 0, make_portable_type (Pointer (Pointer (Named "char"))));
-        ]
-        ~headers:[ "stdlib.h" ]
-  | Strtof ->
-      make_row
-        (make_portable_type (Named "float"))
-        (Returns Float32)
-        [
-          ( "text",
-            Elements (UInt8, Through_zero),
-            make_portable_type (Pointer (Const (Named "char"))) );
-          ("end", Always 0, make_portable_type (Pointer (Pointer (Named "char"))));
-        ]
-        ~headers:[ "stdlib.h" ]
   | Fork -> make_row (make_portable_type (Named "int")) (Returns Int32) [] ~headers:[ "unistd.h" ]
   | Pipe ->
       make_row
@@ -1386,10 +1341,10 @@ let is_available system function_ = (describe function_).on system.os
 let is_blocking = function
   | Write | Read | Pread | Pwrite | Open | Fsync | Waitpid | Poll | Addresses_of_host -> true
   | Connect | Accept | Sendto | Recvfrom | Close | Dup2 | Errno | Clock_gettime | Getentropy
-  | Getenv | Posix_spawnp | Snprintf | Strtod | Strtof | Fork | Pipe | Kill | Sysconf | Exit | Lseek
-  | Ftruncate | Fstat | Stat | Lstat | Mkdir | Remove | Rename | Symlink | Link | Chmod | Utimensat
-  | Readlink | Realpath | Getcwd | Gethostname | Getpid | Proc_pidpath | Fcntl_dupfd_cloexec
-  | Fcntl_setfd_cloexec | Posix_spawn_file_actions_init | Posix_spawn_file_actions_destroy
+  | Getenv | Posix_spawnp | Fork | Pipe | Kill | Sysconf | Exit | Lseek | Ftruncate | Fstat | Stat
+  | Lstat | Mkdir | Remove | Rename | Symlink | Link | Chmod | Utimensat | Readlink | Realpath
+  | Getcwd | Gethostname | Getpid | Proc_pidpath | Fcntl_dupfd_cloexec | Fcntl_setfd_cloexec
+  | Posix_spawn_file_actions_init | Posix_spawn_file_actions_destroy
   | Posix_spawn_file_actions_adddup2 | Posix_spawn_file_actions_addopen
   | Posix_spawn_file_actions_addchdir | Getdents64 | Getattrlistbulk | Ioctl_tiocgwinsz | Tcgetattr
   | Tcsetattr | Socket | Bind | Listen | Getsockname | Getpeername | Shutdown | Setsockopt

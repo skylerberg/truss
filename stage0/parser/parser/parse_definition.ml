@@ -46,7 +46,7 @@ let parse_type_head cursor : Syntax.type_head =
 
 let parse_definition_name cursor =
   match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
-  | Upper _, _ | Lower _, Punctuation Colon_colon ->
+  | Upper _, _ | Lower _, Punctuation Dot ->
       let head = parse_type_head cursor in
       Cursor.expect_punctuation cursor Dot;
       Syntax.Member_name (head, Atoms.lower_name cursor "a method name after `.`")
@@ -352,7 +352,7 @@ let parse_type_clauses cursor =
   in
   gather []
 
-let parse_type_definition cursor ~name =
+let parse_type_definition cursor ~name ~(tuple : (Source.span * Source.span) option) =
   let generics = Parse_expression.parse_generics cursor in
   let body =
     if Cursor.is_punctuation cursor (Open Paren) then Syntax.Fields (parse_fields cursor)
@@ -360,7 +360,18 @@ let parse_type_definition cursor ~name =
       if Cursor.accept_keyword cursor Todo then Type_todo else Variants (parse_variants cursor)
     else Cursor.fail cursor "`(` to start the fields, or `=` before the variants"
   in
-  Syntax.Type_definition { name; generics; body; clauses = parse_type_clauses cursor }
+  let is_tuple =
+    match (tuple, body) with
+    | Some _, Fields (_ :: _ :: _) -> true
+    | None, _ -> false
+    | Some (word, removal), _ ->
+        Cursor.report cursor Misplaced_tuple word
+          "Only a record with two or more fields can be a tuple type. A record with one field \
+           already takes a bare pattern, and a sum type's fields belong to its variants."
+          ~fixes:[ Diagnostic.fix "Remove `tuple`" [ Diagnostic.delete removal ] ];
+        false
+  in
+  Syntax.Type_definition { is_tuple; name; generics; body; clauses = parse_type_clauses cursor }
 
 let parse_trait cursor ~name =
   let generics = Parse_expression.parse_generics cursor in
@@ -374,9 +385,7 @@ let parse_trait cursor ~name =
 
 let parse_impl cursor =
   Cursor.advance cursor;
-  (match
-     if Cursor.is_punctuation cursor Less then Parse_expression.find_angle_closer cursor else None
-   with
+  (match if Cursor.is_punctuation cursor Less then Cursor.find_angle_closer cursor else None with
   | Some closer ->
       let opening = Cursor.peek cursor in
       let has_bounds =
@@ -493,16 +502,37 @@ let parse_top_level cursor ~parse_function =
   in
   let make_plain name = Syntax.Plain_name name in
   let parse_upper expected () = Atoms.parse_upper_name cursor expected in
+  let parse_type tuple =
+    parse_named Intended_type ~parse_name:(parse_upper "the name of the type")
+      ~make_written_name:make_plain ~parse:(fun name ->
+        Either.Left (parse_type_definition cursor ~name ~tuple, []))
+  in
   let kind =
     match Cursor.peek_kind cursor with
     | Keyword Fn ->
         parse_named Intended_function
           ~parse_name:(fun () -> parse_definition_name cursor)
           ~make_written_name:Fun.id ~parse:(parse_function cursor)
-    | Keyword Type ->
-        parse_named Intended_type ~parse_name:(parse_upper "the name of the type")
-          ~make_written_name:make_plain ~parse:(fun name ->
-            Either.Left (parse_type_definition cursor ~name, []))
+    | Lower "tuple" when Cursor.peek_ahead cursor 1 = Keyword Type ->
+        let word = (Cursor.take cursor).span in
+        parse_type (Some (word, Source.make_span word.start (Cursor.peek cursor).span.start))
+    | Lower written when Cursor.peek_ahead cursor 1 = Keyword Type ->
+        let word = (Cursor.take cursor).span in
+        Cursor.report cursor Misplaced_tuple word
+          (Printf.sprintf "Only `tuple` can come before `type`, not `%s`." written)
+          ~fixes:
+            (if String.edit_distance written "tuple" <= 2 then
+               [ Diagnostic.fix "Write `tuple`" [ Diagnostic.replace word "tuple" ] ]
+             else
+               [
+                 Diagnostic.fix
+                   (Printf.sprintf "Remove `%s`" written)
+                   [
+                     Diagnostic.delete (Source.make_span word.start (Cursor.peek cursor).span.start);
+                   ];
+               ]);
+        parse_type None
+    | Keyword Type -> parse_type None
     | Keyword Trait ->
         parse_named Intended_trait ~parse_name:(parse_upper "the name of the trait")
           ~make_written_name:make_plain ~parse:(fun name -> Either.Left (parse_trait cursor ~name))

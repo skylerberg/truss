@@ -669,12 +669,9 @@ let refresh_place context frame ty (place : State.passed_place) =
   Validity.assume_valid context frame ty fresh_value;
   frame
 
-let record_todo (context : State.context) (frame : State.frame) location =
-  if frame.is_ghost then begin
-    if not (List.mem (context.home, location) context.holes) then
-      context.holes <- (context.home, location) :: context.holes;
-    context.unfinished <- frame.condition :: context.unfinished
-  end
+let record_todo (context : State.context) (frame : State.frame) origin =
+  Facts.add_hole context (frame.source.key, Obligation.Node origin);
+  if frame.is_ghost then context.unfinished <- frame.condition :: context.unfinished
 
 let oblige_unreachable context frame location =
   Facts.oblige context frame Unreachable location
@@ -1000,7 +997,7 @@ and read_statement context frame run (statement : Mir.statement) =
   let location = Facts.locate context frame.source statement.origin in
   Facts.reject_recursion_through_supplied_code context frame location statement;
   match statement.kind with
-  | Basic basic -> read_basic context frame run statement ~location basic
+  | Basic basic -> read_basic context frame run statement basic
   | Assert_by_bit_vector { names; code; _ } ->
       let named =
         List.map
@@ -1089,7 +1086,7 @@ and read_statement context frame run (statement : Mir.statement) =
               | None -> Facts.raise_bug "an early exit of an iteration that is not around it"))
       | Unreachable -> ()
       | Written_unreachable -> oblige_unreachable context frame location
-      | Todo -> record_todo context frame location);
+      | Todo -> record_todo context frame statement.origin);
       None
   | Fork { fork; concurrent; branches } ->
       let ended, exits =
@@ -1359,7 +1356,7 @@ and wait_for_tasks context frame =
       | Metric Time -> Operations.declare_unknown_amount context frame counter
       | Metric (Allocations | Allocated_bytes) | Calls _ -> Costs.zero)
 
-and read_basic context frame run (statement : Mir.statement) ~location (basic : Mir.basic) =
+and read_basic context frame run (statement : Mir.statement) (basic : Mir.basic) =
   match basic with
   | Assign
       {
@@ -1394,18 +1391,7 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
                 (Some (Validity.run_reading_callback context read))
           | None -> write_assignment context run target ~copied (Some (read ())))
       | _ -> write_assignment context run target ~copied (Some (read ())))
-  | Call { destination; call } -> (
-      let result_type =
-        match destination with
-        | Some destination -> compute_target_type context frame run destination
-        | None -> Types.unit
-      in
-      match read_call context frame run call ~result_type with
-      | Some (after, term) -> (
-          match destination with
-          | Some destination -> Some (write_place context after run destination term)
-          | None -> Some after)
-      | None -> None)
+  | Call { destination; call } -> read_call_statement context frame run ~destination call
   | Live _ | Loan_start _ | Loan_end _ | Echo _ -> Some frame
   | Dead locals ->
       if frame.makes_obligations then
@@ -1497,23 +1483,29 @@ and read_basic context frame run (statement : Mir.statement) ~location (basic : 
   | Path_note note ->
       note_path context frame note;
       Some frame
-  | Template { destination; literals; call } -> (
-      match (call.callee.target, call.arguments) with
-      | Trait_method { trait; name; receiver; evidence; _ }, [ Passed { value = template; _ } ] ->
-          Facts.reject_uncompared_recursion context frame location
-            (snd (Facts.find_recursive_callee context frame location call.callee.target))
-            ~describe:
-              (Printf.sprintf
-                 "This template calls `%s`, which calls back here, and a template passes no \
-                  arguments the prover can compare, so the recursion cannot be shown to end.");
-          let frame, tagged =
-            Values.apply_template context frame
-              { origin = call.origin; type_ = compute_target_type context frame run destination }
-              ~trait ~name ~receiver ~evidence ~literals
-              (read_operand context frame run template)
-          in
-          Some (write_place context frame run destination tagged)
-      | _ -> Facts.raise_unsupported location "a tagged template whose tag the prover cannot read")
+  | Template { destination; literals; call } ->
+      (match call.arguments with
+      | [ Passed { value = template; _ } ] ->
+          Calls.assume_template_check context frame ~origin:call.origin
+            (make_unit_callee call.callee.target)
+            ~literals
+            ~template_type:(compute_operand_type context frame template)
+            (read_operand context frame run template)
+      | _ -> Facts.raise_bug "a tagged template whose call does not pass one template");
+      read_call_statement context frame run ~destination:(Some destination) call
+
+and read_call_statement context frame run ~destination (call : Mir.call) =
+  let result_type =
+    match destination with
+    | Some destination -> compute_target_type context frame run destination
+    | None -> Types.unit
+  in
+  match read_call context frame run call ~result_type with
+  | Some (after, term) -> (
+      match destination with
+      | Some destination -> Some (write_place context after run destination term)
+      | None -> Some after)
+  | None -> None
 
 and write_assignment context run (target : Mir.place) ~(copied : Mir.operand list) read =
   let copied =

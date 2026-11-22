@@ -67,11 +67,17 @@ let report cursor id message fixes =
   Cursor.report cursor Needs_parentheses (Cursor.read_file_span cursor id) message
     ~fixes:(List.map (fun (title, edits) -> Diagnostic.fix title edits) fixes)
 
+let longest_titled_expression = 80
+
 let fix cursor ~fallback whole edits =
   let insertions =
     List.map (fun (edit : Source.span Diagnostic.edit) -> (edit.span.start, edit.replacement)) edits
   in
-  match Cursor.spell cursor ~insertions (Cursor.read_file_span cursor whole) with
+  let span = Cursor.read_file_span cursor whole in
+  match
+    if span.stop - span.start > longest_titled_expression then None
+    else Cursor.spell cursor ~insertions span
+  with
   | Some fixed -> (Printf.sprintf "Write `%s`" fixed, edits)
   | None -> (fallback, edits)
 

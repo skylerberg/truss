@@ -155,8 +155,8 @@ let list_declarations packages (module_ : Path.module_) =
   (make_names packages).list_declarations module_
 
 let collect_first_core_nodes text =
-  let packages = setup [ ("app::main", text) ] in
-  collect_core_nodes packages (List.hd (list_declarations packages (parse_module "app::main"))).key
+  let packages = setup [ ("app.main", text) ] in
+  collect_core_nodes packages (List.hd (list_declarations packages (parse_module "app.main"))).key
 
 let expect_no_diagnostics ~check files =
   let packages = setup files in
@@ -182,7 +182,7 @@ let expect_no_diagnostics ~check files =
            (parse_file name)))
     files
 
-let expect_one_diagnostic ~check ?(setup = fun files -> setup files) ?(file = "app::main")
+let expect_one_diagnostic ~check ?(setup = fun files -> setup files) ?(file = "app.main")
     ?(others = []) ?fixed ?says ?at ?notes text code =
   let packages = setup ((file, text) :: others) in
   match run_check ~check packages file with
@@ -273,8 +273,10 @@ let run_template_checks database (file : Path.file) proofs =
           (Lazy.force c_compiler) Development
       in
       List.map
-        (fun ({ from_template; literals; clauses } as check : Prover.Obligation.template_check) ->
-          (check, Backend.run_template_check backend ~from_template ~literals ~clauses))
+        (fun ({ function_; literals } as check : Prover.Obligation.template_check) ->
+          match Backend.evaluate_predicate backend ~function_ ~arguments:[ Literals literals ] with
+          | Ok run -> (check, run)
+          | Error message -> failwith message)
         checks
 
 let compute_verdicts database file =

@@ -13,8 +13,19 @@ val list_law_proofs :
   Types.ty ->
   (string * (State.source * Types.substitution)) list
 
-val is_impl_unfinished : Lookups.t -> Resolve.Names.key -> bool
-val is_law_unshown : Lookups.t -> Path.t -> Types.trait_reference -> Types.ty -> string -> bool
+val list_impl_holes :
+  Lookups.t -> Resolve.Names.key -> (Resolve.Names.key * Obligation.location) list
+
+val has_impl_obligations : Lookups.t -> Path.t -> bool
+
+val list_law_holes :
+  Lookups.t ->
+  Path.t ->
+  Types.trait_reference ->
+  Types.ty ->
+  string ->
+  (Resolve.Names.key * Obligation.location) list
+
 val list_declared_clauses : State.contract -> State.clauses list
 val select_precondition_clauses : State.contract -> State.clauses
 val find_function_contract : Lookups.t -> Path.t -> State.contract option

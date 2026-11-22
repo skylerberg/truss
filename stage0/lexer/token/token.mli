@@ -73,7 +73,6 @@ type punctuation =
   | Close of bracket
   | Comma
   | Colon
-  | Colon_colon
   | Dot
   | Dot_dot
   | Dot_dot_equal
@@ -113,7 +112,7 @@ type punctuation =
   | Shift_left
   | Shift_right
 
-type foreign = Plus_plus | Minus_minus | Star_star | Colon_equal | Pipe_greater
+type foreign = Plus_plus | Minus_minus | Star_star | Colon_equal | Colon_colon | Pipe_greater
 
 module Decimal : sig
   type t = private { significand : Z.t; exponent : Z.t }

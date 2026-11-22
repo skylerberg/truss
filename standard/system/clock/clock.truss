@@ -1,7 +1,7 @@
-use standard::capabilities
-use standard::intrinsic
+use standard.capabilities
+use standard.intrinsic
 
-use standard::system::calls
+use standard.system.calls
 
 internal fn nanoseconds_from(seconds: Int64, nanoseconds: Int64) -> Int64 {
   let whole = if seconds > 9223372035 { 9223372035 } else if seconds < -9223372035 { -9223372035 } else { seconds }
@@ -16,13 +16,13 @@ internal fn instant_from(seconds: Int64, nanoseconds: Int64) -> Instant {
 internal type SystemClock()
 
 impl Clock for SystemClock
-  uses capabilities::System
+  uses capabilities.System
 {
   fn now(self) -> Instant {
     var seconds: Int64 = 0
     var nanoseconds: Int64 = 0
-    let _ = intrinsic::libc_clock_gettime(
-      intrinsic::libc_clock_realtime(),
+    let _ = intrinsic.libc_clock_gettime(
+      intrinsic.libc_clock_realtime(),
       seconds: mut seconds,
       nanoseconds: mut nanoseconds,
     )
@@ -32,8 +32,8 @@ impl Clock for SystemClock
   fn monotonic(self) -> Duration {
     var seconds: Int64 = 0
     var nanoseconds: Int64 = 0
-    let _ = intrinsic::libc_clock_gettime(
-      intrinsic::libc_clock_monotonic(),
+    let _ = intrinsic.libc_clock_gettime(
+      intrinsic.libc_clock_monotonic(),
       seconds: mut seconds,
       nanoseconds: mut nanoseconds,
     )
@@ -42,7 +42,7 @@ impl Clock for SystemClock
 
   fn sleep(self, duration: Duration) {
     if duration.nanoseconds > 0 {
-      calls::sleep(duration.nanoseconds / 1000000000, nanoseconds: duration.nanoseconds % 1000000000)
+      calls.sleep(duration.nanoseconds / 1000000000, nanoseconds: duration.nanoseconds % 1000000000)
     }
   }
 }

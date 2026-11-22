@@ -1,4 +1,4 @@
-use standard::intrinsic
+use standard.intrinsic
 
 type Counter(count: Int64, label: String)
 
@@ -58,28 +58,28 @@ impl Tasks for InOrder {
   fn yield_now(self) {}
 }
 
-fn add(counter: intrinsic::Shared[Counter], amount: Int64) -> Int64
+fn add(counter: intrinsic.Shared[Counter], amount: Int64) -> Int64
   uses Tasks
 {
-  intrinsic::shared_update(counter, input: amount, change: fn(value, by) {
+  intrinsic.shared_update(counter, input: amount, change: fn(value, by) {
     value.count += by
     value.count
   })
 }
 
-fn push(texts: intrinsic::Shared[List[String]], text: own String) -> UInt64
+fn push(texts: intrinsic.Shared[List[String]], text: own String) -> UInt64
   uses Tasks
 {
-  intrinsic::shared_update(texts, input: own text, change: fn(list, added) {
+  intrinsic.shared_update(texts, input: own text, change: fn(list, added) {
     mut list.push(own added)
     list.length()
   })
 }
 
-fn pop(texts: intrinsic::Shared[List[String]]) -> Option[String]
+fn pop(texts: intrinsic.Shared[List[String]]) -> Option[String]
   uses Tasks
 {
-  intrinsic::shared_update(texts, input: 0, change: fn(list, _) {
+  intrinsic.shared_update(texts, input: 0, change: fn(list, _) {
     mut list.pop()
   })
 }
@@ -87,7 +87,7 @@ fn pop(texts: intrinsic::Shared[List[String]]) -> Option[String]
 test "a copy refers to the same value" {
   var tasks = InOrder(opened: 0, cancelled: [])
   provide mut tasks {
-    let counter = intrinsic::shared_new(Counter(count: 1, label: "a ${1}"))
+    let counter = intrinsic.shared_new(Counter(count: 1, label: "a ${1}"))
     let other = counter.copy()
     assert add(counter, amount: 2) == 3
     assert add(other, amount: 4) == 7
@@ -98,7 +98,7 @@ test "a copy refers to the same value" {
 test "an update moves its input into the value and a value out of it" {
   var tasks = InOrder(opened: 0, cancelled: [])
   provide mut tasks {
-    let texts: intrinsic::Shared[List[String]] = intrinsic::shared_new([])
+    let texts: intrinsic.Shared[List[String]] = intrinsic.shared_new([])
     let other = texts.copy()
     assert push(texts, text: "first ${1}") == 1
     assert push(other, text: "second ${2}") == 2
@@ -110,18 +110,18 @@ test "an update moves its input into the value and a value out of it" {
 test "every copy has the same key, and another shared value has another" {
   var tasks = InOrder(opened: 0, cancelled: [])
   provide mut tasks {
-    let first = intrinsic::shared_new(Counter(count: 0, label: "first"))
-    let second = intrinsic::shared_new(Counter(count: 0, label: "second"))
+    let first = intrinsic.shared_new(Counter(count: 0, label: "first"))
+    let second = intrinsic.shared_new(Counter(count: 0, label: "second"))
     let copy = first.copy()
-    assert intrinsic::shared_key(first) == intrinsic::shared_key(copy)
-    assert intrinsic::shared_key(first) != intrinsic::shared_key(second)
+    assert intrinsic.shared_key(first) == intrinsic.shared_key(copy)
+    assert intrinsic.shared_key(first) != intrinsic.shared_key(second)
   }
 }
 
 test "tasks update one value through their own references" {
   var tasks = InOrder(opened: 0, cancelled: [])
   provide mut tasks {
-    let counter = intrinsic::shared_new(Counter(count: 0, label: "tasks"))
+    let counter = intrinsic.shared_new(Counter(count: 0, label: "tasks"))
     concurrent for index in 1..=4 {
       let _ = add(counter, amount: index)
     }
@@ -136,18 +136,18 @@ test "tasks update one value through their own references" {
 test "a shared value of no size" {
   var tasks = InOrder(opened: 0, cancelled: [])
   provide mut tasks {
-    let nothing = intrinsic::shared_new(Nothing())
+    let nothing = intrinsic.shared_new(Nothing())
     let other = nothing.copy()
-    assert intrinsic::shared_key(nothing) == intrinsic::shared_key(other)
+    assert intrinsic.shared_key(nothing) == intrinsic.shared_key(other)
   }
 }
 
-fn release(reference: own intrinsic::Shared[Counter]) {}
+fn release(reference: own intrinsic.Shared[Counter]) {}
 
 fn main(arguments: List[String]) -> ExitCode
   uses Console
 {
-  let counter = intrinsic::shared_new(Counter(count: 0, label: "threads ${1}"))
+  let counter = intrinsic.shared_new(Counter(count: 0, label: "threads ${1}"))
   parallel for index in 0..20000 {
     if index % 2 == 0 {
       release(counter.copy())

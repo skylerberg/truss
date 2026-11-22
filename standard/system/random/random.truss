@@ -1,15 +1,15 @@
-use standard::capabilities
-use standard::intrinsic
+use standard.capabilities
+use standard.intrinsic
 
 internal type SystemRandom()
 
 impl Random for SystemRandom
-  uses capabilities::System
+  uses capabilities.System
 {
   fn next(self) -> UInt64 {
     var value: UInt64 = 0
-    if intrinsic::libc_getentropy(mut value) != 0 {
-      intrinsic::crash("the system gave no random bytes")
+    if intrinsic.libc_getentropy(mut value) != 0 {
+      intrinsic.crash("the system gave no random bytes")
     }
     value
   }

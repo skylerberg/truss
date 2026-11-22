@@ -98,7 +98,7 @@ and expression_kind =
   | Continue
   | Self_value
   | Self_type_value
-  | Name of path
+  | Name of name
   | Member of expression * name
   | Bracket of expression * bracket_item list
   | Call of expression * argument list
@@ -189,6 +189,7 @@ and pattern_kind =
   | Pattern_range of { start : range_end; stop : range_end; inclusive : bool }
   | Variant of { name : name; fields : pattern_field list option }
   | Record of pattern_field list
+  | Tuple of pattern list
   | Alternatives of pattern list
   | Pattern_error
 
@@ -276,6 +277,7 @@ type definition_kind =
   | Function of function_definition
   | Method_declaration of signature
   | Type_definition of {
+      is_tuple : bool;
       name : name;
       generics : generic_parameter list;
       body : type_body;

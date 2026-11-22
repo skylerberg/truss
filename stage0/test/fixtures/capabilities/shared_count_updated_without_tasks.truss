@@ -1,7 +1,7 @@
-use standard::intrinsic
+use standard.intrinsic
 
-fn add(count: intrinsic::Shared[Int64], amount: Int64) -> Int64 {
-  intrinsic::shared_update(count, input: amount, change: fn(held, by) {
+fn add(count: intrinsic.Shared[Int64], amount: Int64) -> Int64 {
+  intrinsic.shared_update(count, input: amount, change: fn(held, by) {
     held = held.saturating_add(by)
     held
   })

@@ -1,4 +1,4 @@
-use frontend::token
+use frontend.token
 
 fn is_upper(byte: UInt8) -> Bool {
   byte >= 65 && byte <= 90
@@ -188,10 +188,10 @@ fn check_name(name: StringSlice) -> NameCheck
   let is_fixable = corrected != name && !corrected.is_empty()
     && (is_upper(corrected.byte(0)) || is_lower(corrected.byte(0)))
     && find_case_problem(corrected).is_none()
-    && token::find_word(corrected).is_none()
+    && token.find_word(corrected).is_none()
   NameCheck(
     is_upper: is_upper_name,
-    problem: Some(NameProblem(code: "lexer.name_case", message: own message)),
+    problem: Some(NameProblem(code: "lexer.name_case", own message)),
     fix: if is_fixable { Some(own corrected) } else { None },
   )
 }

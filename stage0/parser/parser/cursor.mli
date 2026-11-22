@@ -46,6 +46,7 @@ val expect_keyword : t -> Token.keyword -> unit
 val run_nested : t -> (t -> 'a) -> 'a
 val check_chain_length : t -> chain_length:int -> unit
 val lookup_closer : t -> int -> int
+val find_angle_closer : t -> int option
 val skip_to : t -> int -> unit
 val skip_one : t -> unit
 val group : t -> Token.t array

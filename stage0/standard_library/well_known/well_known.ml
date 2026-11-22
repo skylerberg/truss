@@ -66,8 +66,8 @@ type t =
   | Writing_append
   | Writing_signed
   | Writing_unsigned
-  | Writing_float32
-  | Writing_float64
+  | Float_text_write_shortest_float32
+  | Float_text_write_shortest_float64
   | Writing_boolean
   | Writing_quoted_character
   | Writing_quoted_text
@@ -101,6 +101,7 @@ type method_ =
   | List_from_storage
   | String_push
   | From_template_from_template
+  | From_template_is_valid_template
   | From_elements_from_elements
   | From_entries_from_entries
   | Sequence_length
@@ -239,8 +240,8 @@ let items =
     (Writing_append, [ "writing" ], "append");
     (Writing_signed, [ "writing" ], "signed");
     (Writing_unsigned, [ "writing" ], "unsigned");
-    (Writing_float32, [ "writing" ], "float32");
-    (Writing_float64, [ "writing" ], "float64");
+    (Float_text_write_shortest_float32, [ "numbers"; "float_text" ], "write_shortest_float32");
+    (Float_text_write_shortest_float64, [ "numbers"; "float_text" ], "write_shortest_float64");
     (Writing_boolean, [ "writing" ], "boolean");
     (Writing_quoted_character, [ "writing" ], "quoted_character");
     (Writing_quoted_text, [ "writing" ], "quoted_text");
@@ -276,6 +277,7 @@ let methods =
     (List_from_storage, List, "from_storage", Static);
     (String_push, String, "push", Instance Mut);
     (From_template_from_template, From_template, "from_template", Static);
+    (From_template_is_valid_template, From_template, "is_valid_template", Static);
     (From_elements_from_elements, From_elements, "from_elements", Static);
     (From_entries_from_entries, From_entries, "from_entries", Static);
     (Sequence_length, Sequence, "length", Instance Read);

@@ -6,7 +6,7 @@
 %token SELF SELF_TYPE TEST THEOREM TODO TRAIT TRUE TYPE UNLESS UNREACHABLE USE USES
 %token VAR WHEN WHILE WITH
 
-%token LPAREN RPAREN LBRACKET RBRACKET LBRACE RBRACE COMMA COLON COLONCOLON
+%token LPAREN RPAREN LBRACKET RBRACKET LBRACE RBRACE COMMA COLON
 %token DOT DOTDOT DOTDOTEQ ARROW FATARROW QUESTION BAR
 %token EQ PLUSEQ MINUSEQ STAREQ SLASHEQ PERCENTEQ AMPEQ BAREQ CARETEQ SHLEQ SHREQ
 %token PLUS MINUS STAR SLASH PERCENT EQEQ NEQ LT LE GT GE ANDAND OROR IMPLIES
@@ -68,11 +68,11 @@ use_declaration:
 
 module_path:
   | LOWER { () }
-  | module_path COLONCOLON LOWER { () }
+  | module_path DOT LOWER { () }
 
 qualified_upper:
   | UPPER { () }
-  | module_path COLONCOLON UPPER { () }
+  | module_path DOT UPPER { () }
 
 definition:
   | visibility_opt function_definition { () }
@@ -191,6 +191,7 @@ marked_bound:
 
 type_definition:
   | TYPE UPPER generics_opt type_body list(type_clause) { () }
+  | LOWER TYPE UPPER generics_opt type_body list(type_clause) { () }
 
 type_body:
   | fields { () }
@@ -333,19 +334,23 @@ block:
   | LBRACE newline_separated(statement) RBRACE { () }
 
 statement:
-  | LET pattern annotation_opt EQ expression else_opt { () }
-  | VAR pattern annotation_opt EQ expression else_opt { () }
+  | LET binding_pattern EQ expression else_opt { () }
+  | VAR binding_pattern EQ expression else_opt { () }
   | expression { () }
   | expression assignment_operator expression { () }
-  | FOR pattern annotation_opt IN expression list(loop_clause) newline_opt block { () }
+  | FOR binding_pattern IN expression list(loop_clause) newline_opt block { () }
   | WHILE expression list(loop_clause) newline_opt block { () }
   | PARALLEL block { () }
-  | PARALLEL FOR pattern annotation_opt IN expression list(loop_clause) newline_opt block { () }
+  | PARALLEL FOR binding_pattern IN expression list(loop_clause) newline_opt block { () }
   | CONCURRENT block { () }
-  | CONCURRENT FOR pattern annotation_opt IN expression list(loop_clause) newline_opt block { () }
+  | CONCURRENT FOR binding_pattern IN expression list(loop_clause) newline_opt block { () }
   | PROOF block { () }
   | ASSERT expression { () }
   | ASSERT expression LOWER LOWER { () }
+
+binding_pattern:
+  | pattern annotation_opt { () }
+  | pattern COMMA separated_nonempty_list(COMMA, pattern) { () }
 
 annotation_opt:
   | { () }
@@ -488,6 +493,7 @@ postfix:
   | postfix DOT LOWER { () }
   | postfix DOT UPPER { () }
   | postfix DOT ENSURES { () }
+  | postfix DOT TAGGED { () }
   | postfix LBRACKET brackets RBRACKET { () }
   | postfix LPAREN comma_list(argument) RPAREN { () }
   | postfix QUESTION { () }
@@ -513,12 +519,11 @@ update:
   | expression COLON expression { () }
 
 primary:
-  | INTEGER { () } | FLOAT { () } | STRING { () } | tagged_string { () }
+  | INTEGER { () } | FLOAT { () } | STRING { () } | TAGGED { () }
   | TRUE { () } | FALSE { () } | TODO { () } | UNREACHABLE { () }
   | BREAK { () } | CONTINUE { () } | SELF { () } | SELF_TYPE { () }
   | LOWER { () }
-  | qualified_upper { () }
-  | module_path COLONCOLON LOWER { () }
+  | UPPER { () }
   | LPAREN expression RPAREN { () }
   | LBRACKET comma_list(expression) RBRACKET { () }
   | LBRACKET COLON RBRACKET { () }
@@ -561,7 +566,7 @@ provide_expression:
 
 tagged_string:
   | TAGGED { () }
-  | module_path COLONCOLON TAGGED { () }
+  | module_path DOT TAGGED { () }
 
 pattern:
   | separated_nonempty_list(BAR, pattern_primary) { () }
@@ -581,7 +586,7 @@ range_end:
   | constant_reference { () }
 
 constant_reference:
-  | module_path COLONCOLON LOWER { () }
+  | module_path DOT LOWER { () }
   | qualified_upper DOT LOWER { () }
 
 literal_pattern:

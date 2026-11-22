@@ -172,14 +172,3 @@ let decode env ty encoded : Lowered.static_value =
   let decoded = decode_value ty in
   if not (is_at_end reader) then raise_bug "a value written out while compiling has bytes left over";
   decoded
-
-let decode_booleans encoded =
-  let reader = { encoded; offset = 0 } in
-  let rec list_booleans () =
-    if is_at_end reader then []
-    else
-      match decode_scalar reader Bool with
-      | Bool holds -> holds :: list_booleans ()
-      | _ -> raise_bug "a Bool written out while compiling reads back as another scalar"
-  in
-  list_booleans ()

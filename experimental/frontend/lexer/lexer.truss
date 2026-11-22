@@ -1,19 +1,19 @@
-use frontend::source
-use frontend::token
+use frontend.source
+use frontend.token
 
-internal type LexResult(lexed: token::Lexed, diagnostics: List[source::Diagnostic], source: source::Source)
+internal type LexResult(lexed: token.Lexed, diagnostics: List[source.Diagnostic], source: source.Source)
 
 type Attempt(scanner: Scanner, range: TokenRange)
 
-fn attempt(source: own source::Source, recovery: Bool) -> Attempt
+fn attempt(source: own source.Source, recovery: Bool) -> Attempt
   uses Panic, RunForever
 {
   var scanner = Scanner.create(own source)
   let range = lex_file(mut scanner, recovery)
-  Attempt(scanner: own scanner, range)
+  Attempt(own scanner, range)
 }
 
-fn scan_source(source: own source::Source) -> Attempt
+fn scan_source(source: own source.Source) -> Attempt
   uses Panic, RunForever
 {
   let first_attempt = attempt(own source, recovery: false)
@@ -23,7 +23,7 @@ fn scan_source(source: own source::Source) -> Attempt
   first_attempt
 }
 
-fn mark_inserted_closers(tokens: mut List[token::Token])
+fn mark_inserted_closers(tokens: mut List[token.Token])
   uses Panic
 {
   for current in mut tokens {
@@ -43,7 +43,7 @@ fn mark_inserted_closers(tokens: mut List[token::Token])
 type Rename(spelling: String, renamed: String)
   derives Equal
 
-fn find_rename(text: StringSlice, diagnostic: source::Diagnostic) -> Option[Rename]
+fn find_rename(text: StringSlice, diagnostic: source.Diagnostic) -> Option[Rename]
   uses Panic
 {
   if diagnostic.code != "lexer.name_case" || diagnostic.fixes.length() != 1 {
@@ -57,7 +57,7 @@ fn find_rename(text: StringSlice, diagnostic: source::Diagnostic) -> Option[Rena
   Some(Rename(spelling: text.substring(diagnostic.span.start, to: diagnostic.span.stop).to_string(), renamed: edit.replacement.copy()))
 }
 
-fn remove_colliding_renames(scanner: Scanner, diagnostics: own List[source::Diagnostic]) -> List[source::Diagnostic]
+fn remove_colliding_renames(scanner: Scanner, diagnostics: own List[source.Diagnostic]) -> List[source.Diagnostic]
   uses Panic
 {
   var written = List.filled(false, count: scanner.tables.names.length())
@@ -78,7 +78,7 @@ fn remove_colliding_renames(scanner: Scanner, diagnostics: own List[source::Diag
   if renames.is_empty() {
     return diagnostics
   }
-  var checked: List[source::Diagnostic] = []
+  var checked: List[source.Diagnostic] = []
   for diagnostic in own diagnostics {
     let collides = match find_rename(scanner.source.text, diagnostic) {
       Some(rename) => {
@@ -126,7 +126,7 @@ fn count_starts_at_most(accepted: Slice[Accepted], position: UInt64) -> UInt64
   low
 }
 
-fn overlaps(accepted: Slice[Accepted], edit: source::Edit) -> Bool
+fn overlaps(accepted: Slice[Accepted], edit: source.Edit) -> Bool
   uses Panic
 {
   let start = edit.span.start
@@ -145,7 +145,7 @@ fn overlaps(accepted: Slice[Accepted], edit: source::Edit) -> Bool
   }
 }
 
-fn accept(accepted: mut List[Accepted], edit: source::Edit)
+fn accept(accepted: mut List[Accepted], edit: source.Edit)
   uses Panic
 {
   let start = edit.span.start
@@ -162,11 +162,11 @@ fn accept(accepted: mut List[Accepted], edit: source::Edit)
   mut accepted.insert_at(at_most, item: Accepted(start, stop, has_insertion: is_insertion))
 }
 
-fn list_machine_applicable_edits(diagnostics: Slice[source::Diagnostic]) -> List[source::Edit]
+fn list_machine_applicable_edits(diagnostics: Slice[source.Diagnostic]) -> List[source.Edit]
   uses Panic
 {
   var accepted: List[Accepted] = []
-  var edits: List[source::Edit] = []
+  var edits: List[source.Edit] = []
   for diagnostic in diagnostics {
     if diagnostic.fixes.length() != 1 {
       continue
@@ -191,7 +191,7 @@ fn list_machine_applicable_edits(diagnostics: Slice[source::Diagnostic]) -> List
 type Ranked(start: UInt64, sequence: UInt64)
   derives Equal, Ordered
 
-fn sort_edits(edits: Slice[source::Edit]) -> List[source::Edit]
+fn sort_edits(edits: Slice[source.Edit]) -> List[source.Edit]
   uses Panic
 {
   var ranked: List[Ranked] = []
@@ -199,14 +199,14 @@ fn sort_edits(edits: Slice[source::Edit]) -> List[source::Edit]
     mut ranked.push(Ranked(start: entry.element.span.start, sequence: entry.index))
   }
   mut ranked.sort()
-  var sorted: List[source::Edit] = []
+  var sorted: List[source.Edit] = []
   for rank in ranked {
     mut sorted.push(edits.get(rank.sequence).expect("a ranked edit").copy())
   }
   sorted
 }
 
-fn apply_edits(text: StringSlice, sorted: Slice[source::Edit]) -> String
+fn apply_edits(text: StringSlice, sorted: Slice[source.Edit]) -> String
   uses Panic
 {
   var buffer = String.with_capacity(text.length())
@@ -223,10 +223,10 @@ fn apply_edits(text: StringSlice, sorted: Slice[source::Edit]) -> String
   buffer
 }
 
-type Placed(original: source::Span, fixed_start: UInt64, fixed_stop: UInt64)
+type Placed(original: source.Span, fixed_start: UInt64, fixed_stop: UInt64)
   derives Equal
 
-fn place_edits(sorted: Slice[source::Edit]) -> List[Placed]
+fn place_edits(sorted: Slice[source.Edit]) -> List[Placed]
   uses Panic
 {
   var placed: List[Placed] = []
@@ -270,17 +270,17 @@ fn map_original_offset(placed: Slice[Placed], is_stop: Bool, offset: UInt64) -> 
   }
 }
 
-fn shift_span(placed: Slice[Placed], span: source::Span) -> source::Span
+fn shift_span(placed: Slice[Placed], span: source.Span) -> source.Span
   uses Panic
 {
   let stop = map_original_offset(placed, is_stop: true, offset: span.stop)
   if span.start == span.stop {
-    return source::make_zero_width(stop)
+    return source.make_zero_width(stop)
   }
-  source::make_span(map_original_offset(placed, is_stop: false, offset: span.start), stop)
+  source.make_span(map_original_offset(placed, is_stop: false, offset: span.start), stop)
 }
 
-fn map_to_original(tables: mut token::Tables, placed: Slice[Placed])
+fn map_to_original(tables: mut token.Tables, placed: Slice[Placed])
   uses Panic
 {
   for current in mut tables.tokens {
@@ -303,32 +303,32 @@ fn map_to_original(tables: mut token::Tables, placed: Slice[Placed])
   }
 }
 
-internal fn lex(source: own source::Source) -> LexResult
+internal fn lex(input: own source.Source) -> LexResult
   uses Panic, RunForever
 {
-  let scanned = scan_source(own source)
+  let scanned = scan_source(own input)
   var scanner = own scanned.scanner
-  let sorted_diagnostics = source::sort_by_start(own scanner.diagnostics)
+  let sorted_diagnostics = source.sort_by_start(own scanner.diagnostics)
   scanner.diagnostics = []
   let diagnostics = remove_colliding_renames(scanner, diagnostics: own sorted_diagnostics)
   let edits = list_machine_applicable_edits(diagnostics)
   if edits.is_empty() {
     mark_inserted_closers(mut scanner.tables.tokens)
     return LexResult(
-      lexed: token::Lexed(tables: own scanner.tables, first: scanned.range.first, stop: scanned.range.stop),
-      diagnostics: own diagnostics,
+      lexed: token.Lexed(tables: own scanner.tables, first: scanned.range.first, stop: scanned.range.stop),
+      own diagnostics,
       source: own scanner.source,
     )
   }
   let sorted_edits = sort_edits(edits)
   let fixed_text = apply_edits(scanner.source.text, sorted: sorted_edits)
-  let fixed = scan_source(source::Source.create(scanner.source.path, text: own fixed_text))
+  let fixed = scan_source(source.Source.create(scanner.source.path, text: own fixed_text))
   var tables = own fixed.scanner.tables
   map_to_original(mut tables, placed: place_edits(sorted_edits))
   mark_inserted_closers(mut tables.tokens)
   LexResult(
-    lexed: token::Lexed(tables: own tables, first: fixed.range.first, stop: fixed.range.stop),
-    diagnostics: own diagnostics,
+    lexed: token.Lexed(own tables, first: fixed.range.first, stop: fixed.range.stop),
+    own diagnostics,
     source: own scanner.source,
   )
 }

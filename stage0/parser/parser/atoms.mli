@@ -3,6 +3,7 @@ val make_type_node : Cursor.t -> int -> Syntax.type_kind -> Syntax.type_expressi
 val make_error_expression : Cursor.t -> int -> Syntax.expression
 val begins_expression : Token.kind -> bool
 val begins_statement : Token.kind -> bool
+val ends_statement : Token.kind -> bool
 val parse_mode : Cursor.t -> Syntax.mode option
 val make_name : Cursor.t -> Token.t -> Syntax.name
 val lower_name : Cursor.t -> string -> Syntax.name

@@ -20,8 +20,11 @@ type t = {
 
 let run_template_checks backend checks =
   List.map
-    (fun ({ from_template; literals; clauses } as check : Prover.Obligation.template_check) ->
-      (check, Backend.run_template_check backend ~from_template ~literals ~clauses))
+    (fun ({ function_; literals } as check : Prover.Obligation.template_check) ->
+      match Backend.evaluate_predicate backend ~function_ ~arguments:[ Literals literals ] with
+      | Ok run -> (check, run)
+      | Error message ->
+          Outcome.raise_cannot_run "The check of a template's text could not be built: %s" message)
     checks
 
 let list_runs database snapshot packages proofs =
@@ -52,7 +55,7 @@ let list_diagnostics checked file = Prover.list_diagnostics (Lazy.force checked.
 let list_warnings checked file = Prover.list_warnings (Lazy.force checked.warnings) file
 let list_states checked file = Prover.list_states (Lazy.force checked.verdicts) file
 
-let list_holes snapshot checked definition =
+let list_holes snapshot checked ~reached =
   List.map
-    (fun (file, line, column) -> (Workspace.locate_file snapshot file, line, column))
-    (Database.list_holes checked.proofs definition)
+    (fun (file, line, column, way) -> (Workspace.locate_file snapshot file, line, column, way))
+    (Database.list_holes checked.proofs ~reached)

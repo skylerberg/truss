@@ -8,9 +8,10 @@ let report_unmatched_receiver_mode state env arguments (member : Syntax.name) =
 
 let rec check_call state env ?expected (value : Syntax.expression) (callee : Syntax.expression)
     (arguments : Syntax.argument list) : Types.ty =
-  match callee.kind with
-  | Member (base, { text = "ensures"; _ }) -> check_callback_ensures state env value base arguments
-  | Member (base, member) -> (
+  match (callee.kind, State.find_head state callee) with
+  | Member (base, { text = "ensures"; _ }), None ->
+      check_callback_ensures state env value base arguments
+  | Member (base, member), None -> (
       match Instantiation.find_static state base with
       | Some (Static_type type_) ->
           check_static_call state env ?expected value type_ member arguments
@@ -20,14 +21,12 @@ let rec check_call state env ?expected (value : Syntax.expression) (callee : Syn
           check_capability_call state env value capability member arguments
       | None -> check_method_call state env ?expected value base member ~type_arguments:[] arguments
       )
-  | Bracket ({ kind = Member (base, member); _ }, items)
+  | Bracket ({ kind = Member (base, member); _ }, items), _
     when state.resolved.brackets.(callee.id) = Some Method_bracket ->
       check_method_call state env ?expected value base member ~type_arguments:items arguments
-  | _ -> (
-      match State.find_head state callee with
-      | Some resolution ->
-          check_named_method_call state env ?expected value callee resolution arguments
-      | None -> Calls.check_function_value_call state env value callee arguments)
+  | _, Some resolution ->
+      check_named_method_call state env ?expected value callee resolution arguments
+  | _, None -> Calls.check_function_value_call state env value callee arguments
 
 and check_named_method_call state env ?expected (value : Syntax.expression)
     (callee : Syntax.expression) ({ name; target; type_arguments } : Resolve.head) arguments =
@@ -45,7 +44,7 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
   | Final -> (
       let names_result (argument : Syntax.expression) =
         match argument.kind with
-        | Name path -> State.find_target state path.last = Some Result_value
+        | Name name -> State.find_target state name = Some Result_value
         | _ -> false
       in
       match (arguments, env.output) with
@@ -128,7 +127,7 @@ and check_callback_ensures state env (value : Syntax.expression) (base : Syntax.
   in
   let base_type = Conversions.read_actual_head state base (Hooks.check_expression state env base) in
   match (base.kind, base_type) with
-  | Name { modules = []; last }, Types.Function function_type
+  | Name last, Types.Function function_type
     when match State.find_local state last with
          | Some { binding = Parameter; _ } -> true
          | _ -> false -> (
@@ -179,7 +178,7 @@ and check_callback_ensures state env (value : Syntax.expression) (base : Syntax.
           State.elaborate state value.id
             (Specification_call (Specification_function Callback_ensures));
           Types.bool)
-  | Name { modules = []; last }, Types.Function _ ->
+  | Name last, Types.Function _ ->
       reject Not_callable
         (Printf.sprintf
            "`%s` is not a parameter of this definition, and `.ensures` names the postcondition of \
@@ -209,7 +208,7 @@ and check_callee_cost state env (value : Syntax.expression) (metric : Language.M
       match Interface.Elaborator.find_bounded_type (State.read_context state) base with
       | Some type_ -> check_method_cost state value metric type_ member
       | None -> report_not_a_callee "its operand is neither")
-  | [ { value = { kind = Name { modules = []; last }; _ } as operand; _ } ] -> (
+  | [ { value = { kind = Name last; _ } as operand; _ } ] -> (
       match
         ( State.find_target state last,
           Option.map (Conversions.read_actual_head state operand) (State.find_local_type state last)
@@ -322,9 +321,9 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
               | Some expected, Returns output -> State.unify_as_hint state output expected
               | _ -> ());
               match
-                Calls.check_arguments state env value instance.signature.parameters
-                  ~declared:instance.declared.parameters ~flatten:instance.flatten arguments
-                  ~has_receiver:false
+                Calls.check_arguments state env Argument_matching.Call value
+                  instance.signature.parameters ~declared:instance.declared.parameters
+                  ~flatten:instance.flatten arguments ~has_receiver:false
               with
               | Error error -> error
               | Ok (checked, left_out) ->
@@ -351,6 +350,8 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
                         (report_unknown_static_method state ?expected value type_ member arguments))
               | Ok (Visible overloads) -> (
                   match (arguments, List.assoc_opt wanted overloads) with
+                  | ([] | { Syntax.label = Some _; _ } :: _), _ ->
+                      report_missing_receiver state env value arguments
                   | receiver :: rest, Some (Type_overload method_path | View_overload method_path)
                     ->
                       let inner =
@@ -382,10 +383,7 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
                   | _ :: _, Some (Trait_overload (trait, method_)) ->
                       check_trait_method_through_type state env ?expected value type_ trait method_
                         arguments
-                  | _ :: _, None -> report_unmatched_receiver_mode state env arguments member
-                  | [], _ ->
-                      State.make_error_type state Missing_argument (State.read_span state value.id)
-                        "A method written in full takes its receiver as its first argument."))))
+                  | _ :: _, None -> report_unmatched_receiver_mode state env arguments member))))
   | Types.Parameter parameter -> (
       let without_self =
         List.fold_left
@@ -452,40 +450,47 @@ and check_trait_method_call state env (value : Syntax.expression) self_type
   let instance, callee =
     Name_lookup.instantiate_trait_method state ~written:value.id ~self_type reference method_
   in
-  let receiver_argument, arguments =
-    match instance.signature.receiver with
-    | Some (mode, receiver_type) -> (
-        match arguments with
-        | first :: rest ->
-            let parameter : Types.parameter_info =
-              { name = "self"; mode; type_ = receiver_type; has_default = false }
-            in
-            let mode =
-              Calls.check_argument state env first.value parameter ~has_generic_type:false
-            in
-            ([ { Tables.expression = first.value; core_argument_index = 0; mode } ], rest)
-        | [] -> ([], []))
-    | None -> ([], arguments)
+  let receiver_and_arguments =
+    match (instance.signature.receiver, arguments) with
+    | None, _ -> Ok ([], arguments)
+    | Some (mode, receiver_type), ({ Syntax.label = None; _ } as receiver) :: rest ->
+        let parameter : Types.parameter_info =
+          { name = "self"; mode; type_ = receiver_type; has_default = false }
+        in
+        let mode =
+          Calls.check_argument state env receiver.value parameter ~has_generic_type:false
+        in
+        Ok ([ { Tables.expression = receiver.value; core_argument_index = 0; mode } ], rest)
+    | Some _, ([] | { label = Some _; _ } :: _) ->
+        Error (report_missing_receiver state env value arguments)
   in
-  match
-    Calls.check_arguments state env value instance.signature.parameters
-      ~declared:instance.declared.parameters ~flatten:instance.flatten arguments
-      ~has_receiver:(Option.is_some instance.signature.receiver)
-  with
+  match receiver_and_arguments with
   | Error error -> error
-  | Ok (checked, left_out) ->
-      let result = Types.extract_result_type instance.signature.output in
-      State.elaborate state value.id
-        (Call
-           {
-             callee;
-             arguments = receiver_argument @ checked;
-             omitted_defaults = left_out;
-             callee_result = result;
-             lends = Types.find_lent_mode instance.signature.output;
-           });
-      Solver.require state (Method_call (State.read_span state value.id)) self_type reference;
-      State.normalize state result
+  | Ok (receiver_argument, arguments) -> (
+      match
+        Calls.check_arguments state env Argument_matching.Call value instance.signature.parameters
+          ~declared:instance.declared.parameters ~flatten:instance.flatten arguments
+          ~has_receiver:(Option.is_some instance.signature.receiver)
+      with
+      | Error error -> error
+      | Ok (checked, left_out) ->
+          let result = Types.extract_result_type instance.signature.output in
+          State.elaborate state value.id
+            (Call
+               {
+                 callee;
+                 arguments = receiver_argument @ checked;
+                 omitted_defaults = left_out;
+                 callee_result = result;
+                 lends = Types.find_lent_mode instance.signature.output;
+               });
+          Solver.require state (Method_call (State.read_span state value.id)) self_type reference;
+          State.normalize state result)
+
+and report_missing_receiver state env (value : Syntax.expression) arguments =
+  Calls.check_arguments_alone state env arguments
+    (State.make_error_type state Missing_argument (State.read_span state value.id)
+       "A method written in full takes its receiver as its first argument, without a label.")
 
 and check_trait_call_in_full state env (value : Syntax.expression) trait ~trait_arguments
     (member : Syntax.name) arguments =
@@ -546,7 +551,7 @@ and check_capability_call state env (value : Syntax.expression) capability (memb
           (Members.read_method_signature state.lookups capability method_)
       in
       match
-        Calls.check_arguments state env value instance.signature.parameters
+        Calls.check_arguments state env Argument_matching.Call value instance.signature.parameters
           ~declared:instance.declared.parameters ~flatten:instance.flatten arguments
           ~has_receiver:false
       with
@@ -748,9 +753,9 @@ and check_method_with_receiver state env ?expected ?(type_arguments = [])
           | Some expected, Returns output -> State.unify_as_hint state output expected
           | _ -> ());
           match
-            Calls.check_arguments state env value instance.signature.parameters
-              ~declared:instance.declared.parameters ~flatten:instance.flatten arguments
-              ~has_receiver:true
+            Calls.check_arguments state env Argument_matching.Call value
+              instance.signature.parameters ~declared:instance.declared.parameters
+              ~flatten:instance.flatten arguments ~has_receiver:true
           with
           | Error error -> error
           | Ok (checked, left_out) ->
@@ -805,9 +810,9 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
       | Error error -> Calls.check_arguments_alone state env arguments error
       | Ok () -> (
           match
-            Calls.check_arguments state env value instance.signature.parameters
-              ~declared:instance.declared.parameters ~flatten:instance.flatten arguments
-              ~has_receiver:true
+            Calls.check_arguments state env Argument_matching.Call value
+              instance.signature.parameters ~declared:instance.declared.parameters
+              ~flatten:instance.flatten arguments ~has_receiver:true
           with
           | Error error -> error
           | Ok (checked, left_out) ->

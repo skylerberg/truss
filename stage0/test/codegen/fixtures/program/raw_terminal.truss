@@ -1,4 +1,4 @@
-use standard::processes
+use standard.processes
 
 fn holds(bytes: List[UInt8], word: String) -> Bool {
   let wanted = word.bytes()
@@ -22,10 +22,10 @@ fn holds(bytes: List[UInt8], word: String) -> Bool {
 fn settings() -> List[UInt8]
   uses Processes
 {
-  let asked = processes::Command.new("sh")
+  let asked = processes.Command.new("sh")
     .argument("-c")
     .argument("stty -a < /dev/tty")
-    .output(processes::Redirect.Capture)
+    .output(processes.Redirect.Capture)
   match Processes.run(asked) {
     Ok(output) => output.output.copy()
     Err(_) => []

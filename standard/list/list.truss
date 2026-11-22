@@ -1,12 +1,12 @@
-use standard::core
-use standard::growth
-use standard::intrinsic
-use standard::list::slice
+use standard.core
+use standard.growth
+use standard.intrinsic
+use standard.list.slice
 
-public opaque type List[Element](storage: intrinsic::Storage[Element])
+public opaque type List[Element](storage: intrinsic.Storage[Element])
   derives Copyable
 
-public opaque type Slice[Element](elements: intrinsic::View[Element])
+public opaque type Slice[Element](elements: intrinsic.View[Element])
   derives Plain
 
 public trait FromElements {
@@ -24,7 +24,7 @@ public type SplitLast[Element](last: Element, rest: Slice[Element])
 public type Enumerated[Element](elements: Slice[Element])
 
 impl Iterable for Enumerated[Element] {
-  type Element = core::Indexed[Element]
+  type Element = core.Indexed[Element]
 
   fn count(self) -> UInt64
     ensures result == self.elements.length()
@@ -34,14 +34,14 @@ impl Iterable for Enumerated[Element] {
     self.elements.length()
   }
 
-  fn element(self, position: UInt64) lends core::Indexed[Element]
+  fn element(self, position: UInt64) lends core.Indexed[Element]
     requires position < self.count()
     ensures result.index == position
     ensures identical(result.element, self.elements.model()[position])
     cost time O(1)
     cost allocations == 0
   {
-    core::Indexed(index: position, element: self.elements[position])
+    core.Indexed(index: position, element: self.elements[position])
   }
 }
 
@@ -125,7 +125,7 @@ impl Iterable for Chunks[Element] {
 public type Zipped[Element, Other](first: Slice[Element], second: Slice[Other])
 
 impl Iterable for Zipped[Element, Other] {
-  type Element = core::Pair[Element, Other]
+  type Element = core.Pair[Element, Other]
 
   fn count(self) -> UInt64
     ensures result <= self.first.length()
@@ -136,14 +136,14 @@ impl Iterable for Zipped[Element, Other] {
     if self.first.length() < self.second.length() { self.first.length() } else { self.second.length() }
   }
 
-  fn element(self, position: UInt64) lends core::Pair[Element, Other]
+  fn element(self, position: UInt64) lends core.Pair[Element, Other]
     requires position < self.count()
     ensures identical(result.first, self.first.model()[position])
     ensures identical(result.second, self.second.model()[position])
     cost time O(1)
     cost allocations == 0
   {
-    core::Pair(first: self.first[position], second: self.second[position])
+    core.Pair(first: self.first[position], second: self.second[position])
   }
 }
 
@@ -151,9 +151,9 @@ impl Model for List[Element] {
   type Value = Sequence[Element]
 
   fn model(self) -> Sequence[Element]
-    ensures identical(result, intrinsic::storage_model(self.storage))
+    ensures identical(result, intrinsic.storage_model(self.storage))
   {
-    intrinsic::storage_model(self.storage)
+    intrinsic.storage_model(self.storage)
   }
 }
 
@@ -161,9 +161,9 @@ impl Model for Slice[Element] {
   type Value = Sequence[Element]
 
   fn model(self) -> Sequence[Element]
-    ensures identical(result, intrinsic::view_model(self.elements))
+    ensures identical(result, intrinsic.view_model(self.elements))
   {
-    intrinsic::view_model(self.elements)
+    intrinsic.view_model(self.elements)
   }
 }
 
@@ -171,11 +171,11 @@ public fn List[Element].with_capacity(capacity: UInt64) -> List[Element]
   ensures result.model().length() == 0
   cost time O(1)
 {
-  List(storage: intrinsic::storage_with_capacity(capacity))
+  List(storage: intrinsic.storage_with_capacity(capacity))
 }
 
-internal fn List[Element].from_storage(storage: own intrinsic::Storage[Element]) -> List[Element]
-  ensures identical(result.model(), intrinsic::storage_model(storage))
+internal fn List[Element].from_storage(storage: own intrinsic.Storage[Element]) -> List[Element]
+  ensures identical(result.model(), intrinsic.storage_model(storage))
   cost time O(1)
   cost allocations == 0
 {
@@ -187,14 +187,14 @@ public fn List[Element].length(self) -> UInt64
   cost time O(1)
   cost allocations == 0
 {
-  intrinsic::storage_length(self.storage)
+  intrinsic.storage_length(self.storage)
 }
 
 public fn List[Element].push(mut self, item: own Element)
   ensures identical(self.model(), old(self.model()).append(item))
   cost amortized time O(1)
 {
-  growth::push(mut self.storage, value: own item)
+  growth.push(mut self.storage, value: own item)
 }
 
 public fn List[Element].pop(mut self) -> Option[Element]
@@ -206,7 +206,7 @@ public fn List[Element].pop(mut self) -> Option[Element]
   cost amortized time O(1)
   cost allocations == 0
 {
-  if self.length() == 0 { None } else { Some(intrinsic::storage_pop(mut self.storage)) }
+  if self.length() == 0 { None } else { Some(intrinsic.storage_pop(mut self.storage)) }
 }
 
 public fn List[Element].insert_at(mut self, position: UInt64, item: own Element)
@@ -224,8 +224,8 @@ public fn List[Element].insert_at(mut self, position: UInt64, item: own Element)
   if position > self.length() {
     Panic.crash("index out of bounds")
   }
-  growth::reserve(mut self.storage, additional: 1)
-  intrinsic::storage_insert(mut self.storage, index: position, value: own item)
+  growth.reserve(mut self.storage, additional: 1)
+  intrinsic.storage_insert(mut self.storage, index: position, value: own item)
 }
 
 public fn List[Element].slice(self) -> Slice[Element]
@@ -233,7 +233,7 @@ public fn List[Element].slice(self) -> Slice[Element]
   cost time O(1)
   cost allocations == 0
 {
-  Slice(elements: intrinsic::storage_view(self.storage))
+  Slice(elements: intrinsic.storage_view(self.storage))
 }
 
 impl Iterable for List[Element] {
@@ -262,6 +262,7 @@ public fn List[Element].element(mut self, position: UInt64) lends mut Element
   ensures identical(result, old(self.model())[position])
   ensures identical(self.model(), old(self.model()).update(position, value: final(result)))
   ensures self.length() == old(self.length())
+  ensures self.capacity() == old(self.capacity())
   cost time O(1)
   cost amortized time O(1)
   cost allocations == 0
@@ -287,7 +288,7 @@ public fn List[Element].swap(mut self, first: UInt64, second: UInt64)
   if first >= self.length() || second >= self.length() {
     Panic.crash("index out of bounds")
   }
-  intrinsic::storage_swap(mut self.storage, first: first, second: second)
+  intrinsic.storage_swap(mut self.storage, first: first, second: second)
 }
 
 public fn List[Element].reverse(mut self)
@@ -310,11 +311,11 @@ public fn List[Element].reverse(mut self)
       identical(self.model()[i], old(self.model())[self.length() - 1 - i])
     invariant forall i in low..high => identical(self.model()[i], old(self.model())[i])
     invariant self.model().is_permutation_of(old(self.model()))
-    invariant intrinsic::storage_capacity(self.storage) == old(intrinsic::storage_capacity(self.storage))
+    invariant intrinsic.storage_capacity(self.storage) == old(intrinsic.storage_capacity(self.storage))
     decreases high - low
   {
     high -= 1
-    intrinsic::storage_swap(mut self.storage, first: low, second: high)
+    intrinsic.storage_swap(mut self.storage, first: low, second: high)
     low += 1
   }
 }
@@ -374,7 +375,7 @@ public fn Array[Element, count: UInt64].to_list(own self) -> List[Element]
   ensures identical(result.model(), self.model())
   cost time O(count)
 {
-  List(storage: intrinsic::storage_from_array(own self))
+  List(storage: intrinsic.storage_from_array(own self))
 }
 
 public fn Array[Element, count: UInt64].cursor(own self) -> ListCursor[Element]
@@ -432,7 +433,7 @@ public fn Slice[Element].length(self) -> UInt64
   cost time O(1)
   cost allocations == 0
 {
-  intrinsic::view_length(self.elements)
+  intrinsic.view_length(self.elements)
 }
 
 impl Iterable for Slice[Element] {
@@ -497,6 +498,7 @@ impl IndexMut for List[Element] {
     requires key < self.length()
     ensures identical(result, old(self.model())[key])
     ensures identical(self.model(), old(self.model()).update(key, value: final(result)))
+    ensures self.capacity() == old(self.capacity())
     cost time O(1)
     cost amortized time O(1)
     cost allocations == 0
@@ -543,13 +545,13 @@ public fn List[Element: Copyable].filled(value: Element, count: UInt64) -> List[
   ensures forall i in 0..count => identical(result.model()[i], value)
   cost time O(count * time(Element.copy))
 {
-  var elements: intrinsic::Storage[Element] = intrinsic::storage_with_capacity(count)
+  var elements: intrinsic.Storage[Element] = intrinsic.storage_with_capacity(count)
   for index in 0..count
-    invariant intrinsic::storage_length(elements) == index
-    invariant intrinsic::storage_capacity(elements) == count
-    invariant forall i in 0..index => identical(intrinsic::storage_model(elements)[i], value)
+    invariant intrinsic.storage_length(elements) == index
+    invariant intrinsic.storage_capacity(elements) == count
+    invariant forall i in 0..index => identical(intrinsic.storage_model(elements)[i], value)
   {
-    intrinsic::storage_push(mut elements, value: value.copy())
+    intrinsic.storage_push(mut elements, value: value.copy())
   }
   List(storage: own elements)
 }
@@ -564,13 +566,13 @@ public fn List[Element].generate(
   cost calls(make) == count
   cost time O(count * time(make))
 {
-  var elements: intrinsic::Storage[Element] = intrinsic::storage_with_capacity(count)
+  var elements: intrinsic.Storage[Element] = intrinsic.storage_with_capacity(count)
   for index in 0..count
-    invariant intrinsic::storage_length(elements) == index
-    invariant intrinsic::storage_capacity(elements) == count
-    invariant forall i in 0..index => make.ensures(i, intrinsic::storage_model(elements)[i])
+    invariant intrinsic.storage_length(elements) == index
+    invariant intrinsic.storage_capacity(elements) == count
+    invariant forall i in 0..index => make.ensures(i, intrinsic.storage_model(elements)[i])
   {
-    intrinsic::storage_push(mut elements, value: make(index))
+    intrinsic.storage_push(mut elements, value: make(index))
   }
   List(storage: own elements)
 }
@@ -585,11 +587,11 @@ public fn List[Element].collect[Source: Cursor[Element = Element]](source: own S
 
 public fn List[Element].capacity(self) -> UInt64
   ensures result >= self.length()
-  ensures result == (intrinsic::storage_capacity(self.storage))
+  ensures result == (intrinsic.storage_capacity(self.storage))
   cost time O(1)
   cost allocations == 0
 {
-  intrinsic::storage_capacity(self.storage)
+  intrinsic.storage_capacity(self.storage)
 }
 
 public fn List[Element].reserve(mut self, additional: UInt64)
@@ -597,14 +599,14 @@ public fn List[Element].reserve(mut self, additional: UInt64)
   ensures self.capacity() >= self.length() + additional
   cost amortized time O(additional)
 {
-  growth::reserve(mut self.storage, additional: additional)
+  growth.reserve(mut self.storage, additional: additional)
 }
 
 public fn List[Element].shrink_to_fit(mut self)
   ensures identical(self.model(), old(self.model()))
   cost time O(self.length())
 {
-  intrinsic::storage_set_capacity(mut self.storage, capacity: self.length())
+  intrinsic.storage_set_capacity(mut self.storage, capacity: self.length())
 }
 
 public fn List[Element].clear(mut self)
@@ -616,7 +618,7 @@ public fn List[Element].clear(mut self)
     decreases self.length()
     cost allocations == 0
   {
-    let _ = intrinsic::storage_pop(mut self.storage)
+    let _ = intrinsic.storage_pop(mut self.storage)
   }
 }
 
@@ -633,7 +635,7 @@ public fn List[Element].truncate(mut self, length: UInt64)
     decreases self.length()
     cost allocations == 0
   {
-    let _ = intrinsic::storage_pop(mut self.storage)
+    let _ = intrinsic.storage_pop(mut self.storage)
   }
 }
 
@@ -649,21 +651,25 @@ public fn List[Element].remove_at(mut self, index: UInt64) -> Element
   if index >= self.length() {
     Panic.crash("index out of bounds")
   }
-  intrinsic::storage_remove(mut self.storage, index: index)
+  intrinsic.storage_remove(mut self.storage, index: index)
 }
 
 public fn List[Element].swap_remove(mut self, index: UInt64) -> Element
   uses Panic unless index < self.length()
   ensures self.length() == old(self.length()) - 1
   ensures identical(result, old(self.model())[index])
+  ensures forall i in 0..self.length() => identical(
+    self.model()[i],
+    if i == index { old(self.model())[old(self.length()) - 1] } else { old(self.model())[i] },
+  )
   cost time O(1)
   cost allocations == 0
 {
   if index >= self.length() {
     Panic.crash("index out of bounds")
   }
-  intrinsic::storage_swap(mut self.storage, first: index, second: self.length() - 1)
-  intrinsic::storage_pop(mut self.storage)
+  intrinsic.storage_swap(mut self.storage, first: index, second: self.length() - 1)
+  intrinsic.storage_pop(mut self.storage)
 }
 
 public fn List[Element].remove_range(mut self, range: Range[UInt64])
@@ -687,7 +693,7 @@ public fn List[Element].remove_range(mut self, range: Range[UInt64])
     decreases self.length() - index
     cost allocations == 0
   {
-    intrinsic::storage_swap(mut self.storage, first: index - width, second: index)
+    intrinsic.storage_swap(mut self.storage, first: index - width, second: index)
     index += 1
   }
   var removed: UInt64 = 0
@@ -697,7 +703,7 @@ public fn List[Element].remove_range(mut self, range: Range[UInt64])
     decreases width - removed
     cost allocations == 0
   {
-    let _ = intrinsic::storage_pop(mut self.storage)
+    let _ = intrinsic.storage_pop(mut self.storage)
     removed += 1
   }
 }
@@ -710,19 +716,19 @@ public fn List[Element].split_off(mut self, at: UInt64) -> List[Element]
   cost amortized time O(result.length())
 {
   let count = self.length() - at
-  var tail: intrinsic::Storage[Element] = intrinsic::storage_with_capacity(count)
+  var tail: intrinsic.Storage[Element] = intrinsic.storage_with_capacity(count)
   proof {
-    assert identical(intrinsic::storage_model(tail), Sequence[Element].empty())
+    assert identical(intrinsic.storage_model(tail), Sequence[Element].empty())
   }
   for index in 0..count
-    invariant intrinsic::storage_length(tail) == index
-    invariant intrinsic::storage_capacity(tail) == count
+    invariant intrinsic.storage_length(tail) == index
+    invariant intrinsic.storage_capacity(tail) == count
     invariant self.length() == old(self.length()) - index
-    invariant intrinsic::storage_capacity(self.storage) == old(intrinsic::storage_capacity(self.storage))
+    invariant intrinsic.storage_capacity(self.storage) == old(intrinsic.storage_capacity(self.storage))
     invariant forall measure: fn(Element) -> Integer =>
-      self.model().sum(measure) + intrinsic::storage_model(tail).sum(measure) == old(self.model()).sum(measure)
+      self.model().sum(measure) + intrinsic.storage_model(tail).sum(measure) == old(self.model()).sum(measure)
   {
-    intrinsic::storage_push(mut tail, value: intrinsic::storage_pop(mut self.storage))
+    intrinsic.storage_push(mut tail, value: intrinsic.storage_pop(mut self.storage))
   }
   var moved = List(storage: own tail)
   mut moved.reverse()
@@ -736,8 +742,8 @@ public fn List[Element].append(mut self, other: own List[Element])
   var rest = own other
   mut rest.reverse()
   let count = rest.length()
-  growth::reserve(mut self.storage, additional: count)
-  let capacity = intrinsic::storage_capacity(self.storage)
+  growth.reserve(mut self.storage, additional: count)
+  let capacity = intrinsic.storage_capacity(self.storage)
   for index in 0..count
     invariant rest.length() == count - index
     invariant forall i in 0..rest.length() => identical(rest.model()[i], other.model()[count - 1 - i])
@@ -746,10 +752,10 @@ public fn List[Element].append(mut self, other: own List[Element])
       identical(self.model()[i], old(self.model())[i])
     invariant forall i in 0..index =>
       identical(self.model()[old(self.model()).length() + i], other.model()[i])
-    invariant intrinsic::storage_capacity(self.storage) == capacity
+    invariant intrinsic.storage_capacity(self.storage) == capacity
     invariant capacity >= old(self.model()).length() + count
   {
-    intrinsic::storage_push(mut self.storage, value: intrinsic::storage_pop(mut rest.storage))
+    intrinsic.storage_push(mut self.storage, value: intrinsic.storage_pop(mut rest.storage))
   }
 }
 
@@ -798,7 +804,7 @@ public fn List[Element].retain(
     invariant forall i in index..count => identical(self.model()[i], old(self.model())[i])
   {
     if keep(self[index]) {
-      intrinsic::storage_swap(mut self.storage, first: retained_count, second: index)
+      intrinsic.storage_swap(mut self.storage, first: retained_count, second: index)
       retained_count += 1
     }
   }
@@ -834,7 +840,7 @@ public fn List[Element: Equal].deduplicate(mut self)
     invariant unique_count <= index
   {
     if !(self[index] == self[unique_count - 1]) {
-      intrinsic::storage_swap(mut self.storage, first: unique_count, second: index)
+      intrinsic.storage_swap(mut self.storage, first: unique_count, second: index)
       unique_count += 1
     }
   }
@@ -861,7 +867,7 @@ impl FromElements for List[Element] {
 
 impl Ordered for List[Element: Ordered] {
   fn compare(self, other: List[Element]) -> Ordering
-    ensures result == slice::lexicographic(self.model(), second: other.model(), from: 0)
+    ensures result == slice.lexicographic(self.model(), second: other.model(), from: 0)
     cost time O(self.length() * time(Element.compare))
     cost allocations <= self.length() * allocations(Element.compare)
   {
@@ -870,20 +876,20 @@ impl Ordered for List[Element: Ordered] {
 }
 
 proof Ordered.agrees_with_equal for List[Element: Ordered] {
-  slice::lexicographic_agrees_with_equal(first.model(), second: second.model(), from: 0)
+  slice.lexicographic_agrees_with_equal(first.model(), second: second.model(), from: 0)
 }
 
 proof Ordered.antisymmetric for List[Element: Ordered] {
-  slice::lexicographic_is_antisymmetric(first.model(), second: second.model(), from: 0)
+  slice.lexicographic_is_antisymmetric(first.model(), second: second.model(), from: 0)
 }
 
 proof Ordered.transitive for List[Element: Ordered] {
-  slice::lexicographic_is_transitive(first.model(), second: second.model(), third: third.model(), from: 0)
+  slice.lexicographic_is_transitive(first.model(), second: second.model(), third: third.model(), from: 0)
 }
 
 impl Hash for List[Element: Hash] {
   fn hash(self, hasher: Hasher) -> Hasher
-    ensures identical(result, slice::hash_elements(hasher.write(self.length()), items: self.model(), count: self.length()))
+    ensures identical(result, slice.hash_elements(hasher.write(self.length()), items: self.model(), count: self.length()))
     cost time O(self.length() * time(Element.hash))
     cost allocations <= self.length() * allocations(Element.hash)
   {
@@ -892,7 +898,7 @@ impl Hash for List[Element: Hash] {
 }
 
 proof Hash.agrees_with_equal for List[Element: Hash] {
-  slice::elements_hash_alike(hasher.write(first.length()), first: first.model(), second: second.model(), count: first.length())
+  slice.elements_hash_alike(hasher.write(first.length()), first: first.model(), second: second.model(), count: first.length())
 }
 
 impl Display for List[Element: Display] {

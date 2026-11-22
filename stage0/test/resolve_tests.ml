@@ -3,10 +3,10 @@ let parse_file = Support.parse_file
 
 let standard =
   [
-    ("standard::option", "public type Option[Value] = Some(value: Value) | None\n");
-    ("standard::result", "public type Result[Value, Error] = Ok(value: Value) | Err(error: Error)\n");
-    ("standard::core", Fixtures.Resolve.standard_core);
-    ("standard::list", "public opaque type List[Element](length: UInt64)\n");
+    ("standard.option", "public type Option[Value] = Some(value: Value) | None\n");
+    ("standard.result", "public type Result[Value, Error] = Ok(value: Value) | Err(error: Error)\n");
+    ("standard.core", Fixtures.Resolve.standard_core);
+    ("standard.list", "public opaque type List[Element](length: UInt64)\n");
   ]
 
 let setup ?dependencies files = Support.setup ?dependencies (standard @ files)
@@ -66,7 +66,7 @@ let describe (spans : Source.Definition_span.t array) base (target : Resolve.tar
       Printf.sprintf "generic %s of %s" parameter.name (Path.show parameter.owner)
   | Some (Definition (_, path)) -> Path.show path
   | Some (Variant (type_, name)) -> Printf.sprintf "variant %s of %s" name (Path.show type_)
-  | Some (Module module_) -> "module " ^ Path.show_module module_
+  | Some (Module { module_; _ }) -> "module " ^ Path.show_module module_
   | Some (Field name) -> "field " ^ name
   | Some Result_value -> "result"
   | Some Old -> "old"
@@ -77,18 +77,18 @@ let describe (spans : Source.Definition_span.t array) base (target : Resolve.tar
   | Some (Unknown _) -> "unknown"
 
 let expect_reference ?(others = []) text ~name:(written, occurrence) expected =
-  let packages = setup (("app::main", text) :: others) in
-  let name, spans, base, resolved = locate_name packages "app::main" written occurrence in
+  let packages = setup (("app.main", text) :: others) in
+  let name, spans, base, resolved = locate_name packages "app.main" written occurrence in
   let actual = describe spans base resolved.names.(name.id) in
   if actual <> expected then
     Harness.fail "`%s` #%d is %s, not %s" written occurrence actual expected
 
 let expect_binding_reference text ~use ~binding =
-  let packages = setup [ ("app::main", text) ] in
+  let packages = setup [ ("app.main", text) ] in
   let binding_offset =
     Support.locate_occurrence ~sub:(fst binding) ~occurrence:(snd binding) text
   in
-  let name, spans, base, resolved = locate_name packages "app::main" (fst use) (snd use) in
+  let name, spans, base, resolved = locate_name packages "app.main" (fst use) (snd use) in
   let actual = describe spans base resolved.names.(name.id) in
   let expected = Printf.sprintf "local at %d" binding_offset in
   if actual <> expected then Harness.fail "`%s` is %s, not %s" (fst use) actual expected
@@ -151,8 +151,8 @@ let () =
   Harness.test "a local may shadow a definition in another file of its module" (fun () ->
       expect_no_diagnostics
         [
-          ("app::main", "fn f() -> Int64 {\n  let total = 2\n  total\n}\n");
-          ("app::main/sums", "fn total() -> Int64 { 0 }\n");
+          ("app.main", "fn f() -> Int64 {\n  let total = 2\n  total\n}\n");
+          ("app.main/sums", "fn total() -> Int64 { 0 }\n");
         ]);
   Harness.test "a let binds the name of a constant of its module, which its uses then name"
     (fun () ->
@@ -164,48 +164,46 @@ let () =
   Harness.test "a generic parameter cannot shadow a prelude type" (fun () ->
       expect_one_diagnostic "fn f[Option](value: Option) {}\n" "resolve.shadowed_name");
   Harness.test "locals in sibling blocks may share a name" (fun () ->
-      expect_no_diagnostics [ ("app::main", Fixtures.Resolve.lets_of_one_name_in_sibling_blocks) ])
+      expect_no_diagnostics [ ("app.main", Fixtures.Resolve.lets_of_one_name_in_sibling_blocks) ])
 
 let () =
   Harness.test "a file names a private definition of another file of its module without a module"
     (fun () ->
       expect_reference "fn f() -> Int64 {\n  size()\n}\n"
-        ~others:[ ("app::main/grid", "fn size() -> Int64 { 9 }\n") ]
-        ~name:("size", 1) "app::main::size");
+        ~others:[ ("app.main/grid", "fn size() -> Int64 { 9 }\n") ]
+        ~name:("size", 1) "app.main.size");
   Harness.test "two files of a module that define one name make a duplicate" (fun () ->
       expect_one_diagnostic "fn size() -> Int64 { 9 }\n"
-        ~others:[ ("app::main/grid", "fn size() -> Int64 { 3 }\n") ]
+        ~others:[ ("app.main/grid", "fn size() -> Int64 { 3 }\n") ]
         ~says:"already defined in app/main/grid.truss" "resolve.duplicate_definition");
   Harness.test
     "impls in two files that spell one trait the same but import different modules are two"
     (fun () ->
       expect_no_diagnostics
         [
-          ("app::one::codec", "public trait Marker {\n}\n");
-          ("app::two::codec", "public trait Marker {\n}\n");
-          ( "app::main",
-            "use app::one::codec\n\n\
-             public type Point(x: Int64)\n\n\
-             impl codec::Marker for Point {\n\
-             }\n" );
-          ("app::main/second", "use app::two::codec\n\nimpl codec::Marker for Point {\n}\n");
+          ("app.one.codec", "public trait Marker {\n}\n");
+          ("app.two.codec", "public trait Marker {\n}\n");
+          ( "app.main",
+            "use app.one.codec\n\npublic type Point(x: Int64)\n\nimpl codec.Marker for Point {\n}\n"
+          );
+          ("app.main/second", "use app.two.codec\n\nimpl codec.Marker for Point {\n}\n");
         ]);
   Harness.test "one impl written with two spellings of its trait is a duplicate" (fun () ->
       expect_one_diagnostic
-        "use app::one::codec\n\n\
+        "use app.one.codec\n\n\
          public type Point(x: Int64)\n\n\
-         impl codec::Marker for Point {\n\
+         impl codec.Marker for Point {\n\
          }\n\n\
-         impl app::one::codec::Marker for Point {\n\
+         impl app.one.codec.Marker for Point {\n\
          }\n"
-        ~others:[ ("app::one::codec", "public trait Marker {\n}\n") ]
+        ~others:[ ("app.one.codec", "public trait Marker {\n}\n") ]
         ~says:"already defined in this file" "resolve.duplicate_definition");
   Harness.test "a file names a module only through its own imports" (fun () ->
       expect_one_diagnostic Fixtures.Resolve.area_call_without_an_import
         ~others:
           [
-            ("app::shapes", "internal fn area() -> Int64 { 0 }\n");
-            ("app::main/other", Fixtures.Resolve.second_file_importing_shapes);
+            ("app.shapes", "internal fn area() -> Int64 { 0 }\n");
+            ("app.main/other", Fixtures.Resolve.second_file_importing_shapes);
           ]
         "resolve.unknown_module")
 
@@ -214,7 +212,7 @@ let () =
       expect_reference Fixtures.Resolve.bare_name_arm_named_like_a_constant ~name:("limit", 2)
         "binding");
   Harness.test "a constant of its own module in a pattern is written with its module" (fun () ->
-      expect_reference Fixtures.Resolve.qualified_constant_arm ~name:("limit", 2) "app::main::limit");
+      expect_reference Fixtures.Resolve.qualified_constant_arm ~name:("limit", 2) "app.main.limit");
   Harness.test "the alternatives of a pattern must bind the same names" (fun () ->
       expect_one_diagnostic Fixtures.Resolve.or_pattern_binding_different_names
         "resolve.alternative_bindings");
@@ -235,17 +233,17 @@ let () =
 let () =
   Harness.test "a prelude type is the standard library's" (fun () ->
       expect_reference "fn f(value: Option[Int64]) {}\n" ~name:("Option", 1)
-        "standard::option::Option");
+        "standard.option.Option");
   Harness.test "a built-in type is the intrinsic module's" (fun () ->
-      expect_reference "fn f(value: Int64) {}\n" ~name:("Int64", 1) "standard::intrinsic::Int64");
+      expect_reference "fn f(value: Int64) {}\n" ~name:("Int64", 1) "standard.intrinsic.Int64");
   Harness.test "a prelude variant is written bare" (fun () ->
       expect_reference Fixtures.Resolve.bare_some ~name:("Some", 1)
-        "variant Some of standard::option::Option")
+        "variant Some of standard.option.Option")
 
 let find_bracket text written occurrence =
-  let packages = setup [ ("app::main", text) ] in
+  let packages = setup [ ("app.main", text) ] in
   let offset = Support.locate_occurrence ~sub:written ~occurrence text in
-  let declarations = Support.list_declarations packages (Support.parse_module "app::main") in
+  let declarations = Support.list_declarations packages (Support.parse_module "app.main") in
   List.find_map
     (fun (declaration : Resolve.Names.declaration) ->
       let key = declaration.key in
@@ -306,7 +304,7 @@ let () =
       expect_one_diagnostic Fixtures.Resolve.body_naming_a_capability_parameter_of_no_signature
         "resolve.unknown_name");
   Harness.test "a body can name a capability parameter of its signature" (fun () ->
-      expect_no_diagnostics [ ("app::main", Fixtures.Resolve.body_naming_its_capability_parameter) ]);
+      expect_no_diagnostics [ ("app.main", Fixtures.Resolve.body_naming_its_capability_parameter) ]);
   Harness.test "a capability parameter without `generic` is an error with a fix that writes it"
     (fun () ->
       expect_one_diagnostic Fixtures.Resolve.capability_parameter_without_its_marker
@@ -323,9 +321,9 @@ let () =
       expect_one_diagnostic Fixtures.Resolve.mut_before_a_function_call "resolve.not_a_place"
         ~fixed:Fixtures.Resolve.mut_before_a_function_call_fixed);
   Harness.test "mut before a local's field and method call is a place" (fun () ->
-      expect_no_diagnostics [ ("app::main", Fixtures.Resolve.mut_push_onto_a_local) ]);
+      expect_no_diagnostics [ ("app.main", Fixtures.Resolve.mut_push_onto_a_local) ]);
   Harness.test "a ? after a call with a mode keyword works on its result" (fun () ->
-      expect_no_diagnostics [ ("app::main", Fixtures.Resolve.question_mark_after_a_mut_pop) ]);
+      expect_no_diagnostics [ ("app.main", Fixtures.Resolve.question_mark_after_a_mut_pop) ]);
   Harness.test "a ? before any method call does not make a place" (fun () ->
       expect_one_diagnostic Fixtures.Resolve.mut_call_through_a_question_mark "resolve.not_a_place")
 
@@ -354,7 +352,7 @@ let () =
   Harness.test "a function of the module named log takes precedence over log in a specification"
     (fun () ->
       expect_reference Fixtures.Resolve.requires_calling_a_function_named_log ~name:("log", 2)
-        "app::main::log");
+        "app.main.log");
   Harness.test "log in a specification is the specification function where it is not called"
     (fun () ->
       expect_reference Fixtures.Resolve.requires_naming_log_without_arguments ~name:("log", 1)
@@ -383,15 +381,73 @@ let () =
       expect_reference "type Range(low: Int64, high: Int64)\n  invariant low <= high\n"
         ~name:("low", 2) "field low")
 
-let others = [ ("app::shapes", Fixtures.Resolve.others_shapes) ]
+let others = [ ("app.shapes", Fixtures.Resolve.others_shapes) ]
 
 let () =
   Harness.test "a name after an imported module is that module's" (fun () ->
       expect_reference ~others Fixtures.Resolve.area_call_with_an_import ~name:("area", 1)
-        "app::shapes::area");
+        "app.shapes.area");
   Harness.test "a full path needs no use" (fun () ->
       expect_reference ~others Fixtures.Resolve.area_call_through_a_full_path ~name:("area", 1)
-        "app::shapes::area");
+        "app.shapes.area");
+  Harness.test "a local named like an imported module is the local in its scope" (fun () ->
+      let text =
+        "use app.shapes\n\n\
+         fn f(shapes: Int64) -> Int64 {\n\
+        \  shapes.abs()\n\
+         }\n\n\
+         fn g() -> Int64 {\n\
+        \  shapes.area()\n\
+         }\n"
+      in
+      expect_reference ~others text ~name:("abs", 1) "nothing";
+      expect_reference ~others text ~name:("shapes", 4) "module app.shapes";
+      expect_reference ~others text ~name:("area", 1) "app.shapes.area");
+  Harness.test "a local that shadows an imported module at every use leaves the import unused"
+    (fun () ->
+      expect_one_diagnostic ~others
+        "use app.shapes\n\nfn f(shapes: Int64) -> Int64 {\n  shapes.abs()\n}\n"
+        "resolve.unused_import");
+  Harness.test "a file cannot import a module named like a definition of its module" (fun () ->
+      let text =
+        "use app.shapes\n\n\
+         fn shapes() -> Int64 {\n\
+        \  0\n\
+         }\n\n\
+         fn f() -> Int64 {\n\
+        \  shapes.area() + shapes()\n\
+         }\n"
+      in
+      expect_one_diagnostic ~others text "resolve.duplicate_import";
+      expect_reference ~others text ~name:("area", 1) "app.shapes.area");
+  Harness.test "a path that starts with a definition's name and a package's is ambiguous" (fun () ->
+      expect_one_diagnostic
+        "type Point(x: Int64, y: Int64)\n\n\
+         let app: Point = Point(x: 0, y: 0)\n\n\
+         fn f() -> Int64 {\n\
+        \  app.x\n\
+         }\n"
+        "resolve.ambiguous_module");
+  Harness.test "a definition may have the first name of a package's path" (fun () ->
+      expect_no_diagnostics
+        [ ("app.main", "fn app() -> Int64 {\n  0\n}\n\nfn f() -> Int64 {\n  app()\n}\n") ]);
+  Harness.test "a path names the longest module it can and the definition after it" (fun () ->
+      let others =
+        [
+          ("app.shapes", "internal fn corners() -> Int64 { 4 }\n");
+          ("app.shapes.round", "internal fn area() -> Int64 { 0 }\n");
+        ]
+      in
+      let text = "fn f() -> Int64 {\n  app.shapes.round.area() + app.shapes.corners()\n}\n" in
+      expect_reference ~others text ~name:("area", 1) "app.shapes.round.area";
+      expect_reference ~others text ~name:("corners", 1) "app.shapes.corners";
+      expect_reference ~others text ~name:("app", 1) "module app.shapes.round";
+      expect_reference ~others text ~name:("app", 2) "module app.shapes");
+  Harness.test "a definition cannot have the name of a submodule of its module" (fun () ->
+      let others = [ ("app.main.limits", "internal let max: Int64 = 1\n") ] in
+      expect_one_diagnostic ~others "let limits: Int64 = 2\n" "resolve.duplicate_definition";
+      expect_one_diagnostic ~others "fn limits() -> Int64 {\n  2\n}\n"
+        "resolve.duplicate_definition");
   Harness.test "a private definition of another file is not visible" (fun () ->
       expect_one_diagnostic ~others Fixtures.Resolve.call_of_another_files_private_function
         "resolve.not_visible");
@@ -401,19 +457,18 @@ let () =
   Harness.test "an import used only in an interpolation is used" (fun () ->
       expect_no_diagnostics
         (others
-        @ [ ("app::main", "use app::shapes\n\nfn f() {\n  let text = \"${shapes::area()}\"\n}\n") ]
-        ));
-  Harness.test "a path through an import that names no module is that path's error alone" (fun () ->
+        @ [ ("app.main", "use app.shapes\n\nfn f() {\n  let text = \"${shapes.area()}\"\n}\n") ]));
+  Harness.test "a name missing from an imported module is that path's only error" (fun () ->
       expect_one_diagnostic ~others
-        "use app::shapes\n\nfn f() -> Int64 {\n  shapes::missing::area()\n}\n"
-        "resolve.unknown_module");
+        "use app.shapes\n\nfn f() -> Int64 {\n  shapes.missing.area()\n}\n" "resolve.unknown_name"
+        ~says:"Nothing named `missing` is in `app.shapes`.");
   Harness.test "a file with a syntax error reports no unused import" (fun () ->
       let packages =
         setup
           (others
-          @ [ ("app::main", "use app::shapes\n\nfn f() -> Int64 {\n  let = shapes::area()\n}\n") ])
+          @ [ ("app.main", "use app.shapes\n\nfn f() -> Int64 {\n  let = shapes.area()\n}\n") ])
       in
-      let file = parse_file "app::main" in
+      let file = parse_file "app.main" in
       let database = Database.create packages in
       if Database.For_testing.list_diagnostics [ Parse ] database file = [] then
         Harness.fail "parsed";
@@ -423,39 +478,47 @@ let () =
   Harness.test "an import of a module that does not exist is an error" (fun () ->
       expect_one_diagnostic Fixtures.Resolve.import_of_a_missing_module "resolve.unknown_module");
   Harness.test "a path that starts with no package or import names the file's module" (fun () ->
-      expect_one_diagnostic "fn f() -> Int64 {\n  main::lucky\n}\n" "resolve.unknown_module"
+      expect_one_diagnostic "fn f() -> Int64 {\n  main.lucky\n}\n" "resolve.unknown_module"
         ~says:
           "No module `main` is imported or exists. Every path starts with a package name, even \
-           inside the package. This file's module is `app::main`.");
+           inside the package. This file's module is `app.main`.");
+  Harness.test
+    "a type's path that starts with a module of the file's package names the file's module"
+    (fun () ->
+      expect_one_diagnostic ~others "fn f(shape: shapes.Shape) {}\n" "resolve.unknown_module"
+        ~says:
+          "No module `shapes` is imported or exists. Every path starts with a package name, even \
+           inside the package. This file's module is `app.main`.");
+  Harness.test "a type's path that starts with no module says only that it is missing" (fun () ->
+      expect_one_diagnostic "fn f(value: jsn.Value) {}\n" "resolve.unknown_module"
+        ~says:"No module `jsn` is imported or exists.");
   Harness.test "an import that starts with no package names the file's module" (fun () ->
       expect_one_diagnostic "use shapes\n\nfn f() {}\n" "resolve.unknown_module"
         ~says:
           "No module `shapes` exists. Every path starts with a package name, even inside the \
-           package. This file's module is `app::main`.");
+           package. This file's module is `app.main`.");
   Harness.test "a missing module under an import or a package says only that it is missing"
     (fun () ->
       List.iter
         (fun (text, expected) ->
-          match list_diagnostics (setup (("app::main", text) :: others)) "app::main" with
+          match list_diagnostics (setup (("app.main", text) :: others)) "app.main" with
           | [ diagnostic ] -> Harness.expect_string ~expected diagnostic.message
           | reported -> Harness.fail "found [%s]" (String.concat "; " (list_codes reported)))
         [
-          ( "use app::shapes\n\nfn f() -> Int64 {\n  shapes::missing::area()\n}\n",
-            "No module `shapes::missing` is imported or exists." );
-          ( "fn f() -> Int64 {\n  app::missing::area()\n}\n",
-            "No module `app::missing` is imported or exists." );
-          ("use app::missing\n\nfn f() {}\n", "No module `app::missing` exists.");
+          ( "fn f() -> Int64 {\n  app.missing.area()\n}\n",
+            "No module `app.missing` is imported or exists." );
+          ("use app.missing\n\nfn f() {}\n", "No module `app.missing` exists.");
         ]);
   Harness.test "two imports with one last name are an error at the second" (fun () ->
       Support.expect_one_diagnostic ~check
         ~setup:(setup ~dependencies:[ ("app", "other") ])
         ~others:
           [
-            ("app::shapes", "public fn area() -> Int64 { 0 }\n");
-            ("other::shapes", "public fn area() -> Int64 { 0 }\n");
+            ("app.shapes", "public fn area() -> Int64 { 0 }\n");
+            ("other.shapes", "public fn area() -> Int64 { 0 }\n");
           ]
         Fixtures.Resolve.two_imports_ending_in_shapes "resolve.duplicate_import");
-  Harness.test "only the standard package can import standard::intrinsic" (fun () ->
+  Harness.test "only the standard package can import standard.intrinsic" (fun () ->
       expect_one_diagnostic Fixtures.Resolve.import_of_standard_intrinsic "resolve.intrinsic_import")
 
 let () =
@@ -463,8 +526,8 @@ let () =
       expect_one_diagnostic Fixtures.Resolve.two_functions_of_one_name
         "resolve.duplicate_definition");
   Harness.test "a method's type head names its type" (fun () ->
-      let packages = setup [ ("app::main", Fixtures.Resolve.counter_method) ] in
-      let owner = Path.Top { module_ = parse_module "app::main"; name = "Counter" } in
+      let packages = setup [ ("app.main", Fixtures.Resolve.counter_method) ] in
+      let owner = Path.Top { module_ = parse_module "app.main"; name = "Counter" } in
       match (Support.make_names packages).list_members owner "get" with
       | [ { path = Method { receiver = Instance Read; _ }; _ } ] -> ()
       | reported -> Harness.fail "found %d members" (List.length reported));
@@ -472,17 +535,17 @@ let () =
       let packages =
         setup
           [
-            ("app::main", "public type Counter(count: Int64)\n");
-            ("app::extra", Fixtures.Resolve.counter_method_in_another_file);
+            ("app.main", "public type Counter(count: Int64)\n");
+            ("app.extra", Fixtures.Resolve.counter_method_in_another_file);
           ]
       in
-      let owner = Path.Top { module_ = parse_module "app::main"; name = "Counter" } in
+      let owner = Path.Top { module_ = parse_module "app.main"; name = "Counter" } in
       match (Support.make_names packages).list_members owner "get" with
       | [ _ ] -> ()
       | reported -> Harness.fail "found %d members" (List.length reported));
   Harness.test "a body the parser could not read is not resolved" (fun () ->
-      let packages = setup [ ("app::main", Fixtures.Resolve.body_with_a_broken_let) ] in
-      let file = parse_file "app::main" in
+      let packages = setup [ ("app.main", Fixtures.Resolve.body_with_a_broken_let) ] in
+      let file = parse_file "app.main" in
       let database = Database.create packages in
       if Database.For_testing.list_diagnostics [ Parse ] database file = [] then
         Harness.fail "parsed";
@@ -497,29 +560,29 @@ let () =
       let packages =
         setup
           [
-            ("app::main", "public type Counter(count: Int64)\n");
-            ("app::extra", Fixtures.Resolve.counter_method_in_another_file_reading_missing);
+            ("app.main", "public type Counter(count: Int64)\n");
+            ("app.extra", Fixtures.Resolve.counter_method_in_another_file_reading_missing);
           ]
       in
-      match list_codes (list_diagnostics packages "app::extra") with
+      match list_codes (list_diagnostics packages "app.extra") with
       | [ "resolve.unknown_name" ] -> ()
       | reported -> Harness.fail "found [%s]" (String.concat "; " reported));
   Harness.test "an import used only in a part the parser could not read is not unused" (fun () ->
       let packages =
         setup
           [
-            ("app::shapes", "public fn area() -> Int64 { 0 }\n");
-            ("app::main", Fixtures.Resolve.import_used_only_in_a_broken_let);
+            ("app.shapes", "public fn area() -> Int64 { 0 }\n");
+            ("app.main", Fixtures.Resolve.import_used_only_in_a_broken_let);
           ]
       in
       match
         Database.For_testing.list_diagnostics [ Resolve ] (Database.create packages)
-          (parse_file "app::main")
+          (parse_file "app.main")
       with
       | [] -> ()
       | reported -> Harness.fail "found [%s]" (String.concat "; " (list_codes reported)));
   Harness.test "an element of a field is a place" (fun () ->
-      expect_no_diagnostics [ ("app::main", Fixtures.Resolve.mut_element_of_a_field) ]);
+      expect_no_diagnostics [ ("app.main", Fixtures.Resolve.mut_element_of_a_field) ]);
   Harness.test "two parallel branches cannot bind one name" (fun () ->
       expect_one_diagnostic Fixtures.Resolve.parallel_lets_of_one_name "resolve.shadowed_name");
   Harness.test "two concurrent branches cannot bind one name" (fun () ->
@@ -534,10 +597,10 @@ let () =
   Harness.test "a generic parameter cannot take a prelude variant's name" (fun () ->
       expect_one_diagnostic "fn f[Some](value: Some) {}\n" "resolve.shadowed_name");
   Harness.test "a trait whose header did not parse is not resolved" (fun () ->
-      let packages = setup [ ("app::main", Fixtures.Resolve.trait_with_a_broken_header) ] in
+      let packages = setup [ ("app.main", Fixtures.Resolve.trait_with_a_broken_header) ] in
       match
         Database.For_testing.list_diagnostics [ Resolve ] (Database.create packages)
-          (parse_file "app::main")
+          (parse_file "app.main")
       with
       | [] -> ()
       | reported -> Harness.fail "found [%s]" (String.concat "; " (list_codes reported)))
@@ -548,7 +611,7 @@ let () =
   in
   let with_geometry ~dependencies text =
     Support.with_dependencies
-      (setup [ ("app::main", text) ]
+      (setup [ ("app.main", text) ]
       @ [
           {
             name = { Path.owner = Some "acme"; name = "geometry" };
@@ -564,14 +627,14 @@ let () =
       let packages =
         with_geometry ~dependencies:[ { Path.owner = Some "acme"; name = "geometry" } ] uses_both
       in
-      (match list_diagnostics packages "app::main" with
+      (match list_diagnostics packages "app.main" with
       | [] -> ()
       | reported -> Harness.fail "found [%s]" (String.concat "; " (list_codes reported)));
       match
         (Support.make_names packages).list_imports
           {
-            module_ = (parse_file "app::main").module_;
-            path = Top { module_ = (parse_file "app::main").module_; name = "f" };
+            module_ = (parse_file "app.main").module_;
+            path = Top { module_ = (parse_file "app.main").module_; name = "f" };
             ordinal = 0;
           }
       with
@@ -579,7 +642,7 @@ let () =
       | _ -> Harness.fail "imported differently");
   Harness.test "a package with an owner that the manifest does not list cannot be named" (fun () ->
       let packages = with_geometry ~dependencies:[] uses_both in
-      match list_codes (list_diagnostics packages "app::main") with
+      match list_codes (list_diagnostics packages "app.main") with
       | "resolve.unknown_module" :: _ -> ()
       | reported -> Harness.fail "found [%s]" (String.concat "; " reported));
   Harness.test "an owner alone names no package" (fun () ->
@@ -588,21 +651,21 @@ let () =
           ~dependencies:[ { Path.owner = Some "acme"; name = "geometry" } ]
           Fixtures.Resolve.import_of_an_owner_alone
       in
-      match list_codes (list_diagnostics packages "app::main") with
+      match list_codes (list_diagnostics packages "app.main") with
       | "resolve.unknown_module" :: _ -> ()
       | reported -> Harness.fail "found [%s]" (String.concat "; " reported))
 
 let () =
-  Harness.test "a name used through an import of standard::intrinsic is not an error of its own"
+  Harness.test "a name used through an import of standard.intrinsic is not an error of its own"
     (fun () ->
       expect_one_diagnostic Fixtures.Resolve.call_through_standard_intrinsic
         "resolve.intrinsic_import");
-  Harness.test "a type head through standard::intrinsic outside the standard package names no type"
+  Harness.test "a type head through standard.intrinsic outside the standard package names no type"
     (fun () ->
       let packages =
-        setup [ ("app::main", Fixtures.Resolve.method_of_standard_intrinsic_outside_standard) ]
+        setup [ ("app.main", Fixtures.Resolve.method_of_standard_intrinsic_outside_standard) ]
       in
-      (match Support.list_declarations packages (parse_module "app::main") with
+      (match Support.list_declarations packages (parse_module "app.main") with
       | [ { key = { path = Method { owner; _ }; _ }; _ } ] when not (Path.is_resolved owner) -> ()
       | declarations ->
           Harness.fail "declared [%s]"
@@ -610,7 +673,7 @@ let () =
                (List.map
                   (fun (declaration : Resolve.Names.declaration) -> Path.show declaration.key.path)
                   declarations)));
-      match list_codes (check packages (parse_file "app::main")) with
+      match list_codes (check packages (parse_file "app.main")) with
       | [ "resolve.intrinsic_import" ] -> ()
       | reported -> Harness.fail "reported [%s]" (String.concat "; " reported))
 
@@ -618,9 +681,9 @@ let () =
   Harness.test "impls rejected for different function type arguments are not duplicates" (fun () ->
       let packages =
         setup
-          [ ("app::main", Fixtures.Resolve.impls_rejected_for_different_function_type_arguments) ]
+          [ ("app.main", Fixtures.Resolve.impls_rejected_for_different_function_type_arguments) ]
       in
-      let file = parse_file "app::main" in
+      let file = parse_file "app.main" in
       let database = Database.create packages in
       if Database.For_testing.list_diagnostics [ Parse ] database file = [] then
         Harness.fail "parsed";
@@ -630,7 +693,7 @@ let () =
   Harness.test "impls rejected for different function type arguments have distinct keys" (fun () ->
       let packages =
         setup
-          [ ("app::main", Fixtures.Resolve.impls_rejected_for_different_function_type_arguments) ]
+          [ ("app.main", Fixtures.Resolve.impls_rejected_for_different_function_type_arguments) ]
       in
       match
         List.sort compare
@@ -639,11 +702,11 @@ let () =
                match declaration.key.path with
                | Impl _ -> Some (Path.show declaration.key.path, declaration.key.ordinal)
                | _ -> None)
-             (Support.list_declarations packages (parse_module "app::main")))
+             (Support.list_declarations packages (parse_module "app.main")))
       with
       | [
-       ("app::main::impl app::main::Wraps[fn(Bool) -> Int64] for app::main::Box", 0);
-       ("app::main::impl app::main::Wraps[fn(Int64) -> Int64] for app::main::Box", 0);
+       ("app.main.impl app.main.Wraps[fn(Bool) -> Int64] for app.main.Box", 0);
+       ("app.main.impl app.main.Wraps[fn(Int64) -> Int64] for app.main.Box", 0);
       ] ->
           ()
       | impls ->

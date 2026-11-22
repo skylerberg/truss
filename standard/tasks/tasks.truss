@@ -1,5 +1,5 @@
-use standard::intrinsic
-use standard::random
+use standard.intrinsic
+use standard.random
 
 public type SendError = Closed | Cancelled
   derives Equal
@@ -70,12 +70,12 @@ fn Queue[Message].check_offer(mut self, position: UInt64, withdraw: Bool) -> Off
   Offer.Withdrawn
 }
 
-public opaque type Channel[Message: Storable](queue: intrinsic::Shared[Queue[Message]])
+public opaque type Channel[Message: Storable](queue: intrinsic.Shared[Queue[Message]])
   derives Copyable
 
 public fn Channel[Message: Storable].new(capacity: UInt64 = 0) -> Channel[Message] {
   Channel(
-    queue: intrinsic::shared_new(
+    queue: intrinsic.shared_new(
       Queue(incoming: [], outgoing: [], capacity: capacity, enqueued_count: 0, dequeued_count: 0, closed: false),
     ),
   )
@@ -84,11 +84,11 @@ public fn Channel[Message: Storable].new(capacity: UInt64 = 0) -> Channel[Messag
 public fn Channel[Message: Storable].send(self, message: own Message) -> Result[Unit, SendError]
   uses Tasks, RunForever
 {
-  let key = intrinsic::shared_key(self.queue)
+  let key = intrinsic.shared_key(self.queue)
   var unsent = own message
   while true {
     let ticket = Tasks.watch(key)
-    match intrinsic::shared_update(self.queue, input: own unsent, change: fn(queue, offered) {
+    match intrinsic.shared_update(self.queue, input: own unsent, change: fn(queue, offered) {
       mut queue.enqueue(own offered)
     }) {
       Buffered => {
@@ -114,11 +114,11 @@ public fn Channel[Message: Storable].send(self, message: own Message) -> Result[
 fn Channel[Message: Storable].await_receiver(self, position: UInt64) -> Result[Unit, SendError]
   uses Tasks, RunForever
 {
-  let key = intrinsic::shared_key(self.queue)
+  let key = intrinsic.shared_key(self.queue)
   while true {
     let ticket = Tasks.watch(key)
     let cancelled = Tasks.cancelled()
-    match intrinsic::shared_update(self.queue, input: 0, change: fn(queue, _) {
+    match intrinsic.shared_update(self.queue, input: 0, change: fn(queue, _) {
       mut queue.check_offer(position, withdraw: cancelled)
     }) {
       Accepted => return Ok(Unit)
@@ -134,10 +134,10 @@ fn Channel[Message: Storable].await_receiver(self, position: UInt64) -> Result[U
 public fn Channel[Message: Storable].receive(self) -> Option[Message]
   uses Tasks, RunForever
 {
-  let key = intrinsic::shared_key(self.queue)
+  let key = intrinsic.shared_key(self.queue)
   while true {
     let ticket = Tasks.watch(key)
-    let dequeue = intrinsic::shared_update(self.queue, input: 0, change: fn(queue, _) {
+    let dequeue = intrinsic.shared_update(self.queue, input: 0, change: fn(queue, _) {
       mut queue.dequeue()
     })
     match own dequeue.message {
@@ -157,11 +157,11 @@ public fn Channel[Message: Storable].receive(self) -> Option[Message]
 public fn Channel[Message: Storable].try_receive(self) -> Option[Message]
   uses Tasks
 {
-  let dequeue = intrinsic::shared_update(self.queue, input: 0, change: fn(queue, _) {
+  let dequeue = intrinsic.shared_update(self.queue, input: 0, change: fn(queue, _) {
     mut queue.dequeue()
   })
   if dequeue.message is Some(_) {
-    Tasks.wake(intrinsic::shared_key(self.queue))
+    Tasks.wake(intrinsic.shared_key(self.queue))
   }
   own dequeue.message
 }
@@ -169,16 +169,16 @@ public fn Channel[Message: Storable].try_receive(self) -> Option[Message]
 public fn Channel[Message: Storable].close(self)
   uses Tasks
 {
-  intrinsic::shared_update(self.queue, input: 0, change: fn(queue, _) {
+  intrinsic.shared_update(self.queue, input: 0, change: fn(queue, _) {
     queue.closed = true
   })
-  Tasks.wake(intrinsic::shared_key(self.queue))
+  Tasks.wake(intrinsic.shared_key(self.queue))
 }
 
 public fn Channel[Message: Storable].is_closed(self) -> Bool
   uses Tasks
 {
-  intrinsic::shared_update(self.queue, input: 0, change: fn(queue, _) {
+  intrinsic.shared_update(self.queue, input: 0, change: fn(queue, _) {
     queue.closed
   })
 }
@@ -212,17 +212,17 @@ public fn with_timeout[Output](limit: Duration, work: (fn() -> Output uses gener
   }
 }
 
-public opaque type Cell[Value: Storable](state: intrinsic::Shared[Value])
+public opaque type Cell[Value: Storable](state: intrinsic.Shared[Value])
   derives Copyable
 
 public fn Cell[Value: Storable].new(value: own Value) -> Cell[Value] {
-  Cell(state: intrinsic::shared_new(own value))
+  Cell(state: intrinsic.shared_new(own value))
 }
 
 public fn Cell[Value: Storable].update[Output: Storable](self, change: fn(mut Value) -> Output) -> Output
   uses Tasks
 {
-  intrinsic::shared_update(self.state, input: 0, change: fn(value, _) {
+  intrinsic.shared_update(self.state, input: 0, change: fn(value, _) {
     change(mut value)
   })
 }
@@ -230,7 +230,7 @@ public fn Cell[Value: Storable].update[Output: Storable](self, change: fn(mut Va
 public fn Cell[Value: Storable].read[Output: Storable](self, view: fn(Value) -> Output) -> Output
   uses Tasks
 {
-  intrinsic::shared_update(self.state, input: 0, change: fn(value, _) {
+  intrinsic.shared_update(self.state, input: 0, change: fn(value, _) {
     view(value)
   })
 }
@@ -311,7 +311,7 @@ type Decision =
 let root_task: UInt64 = 0
 
 type Scheduler(
-  generator: random::Generator,
+  generator: random.Generator,
   tasks: List[Task],
   groups: List[TaskGroup],
   locked: List[UInt64],
@@ -326,7 +326,7 @@ type Scheduler(
 
 internal fn Scheduler.new(seed: UInt64) -> Scheduler {
   Scheduler(
-    generator: random::Generator.seeded(seed),
+    generator: random.Generator.seeded(seed),
     tasks: [
       Task(
         coroutine: 0,
@@ -603,22 +603,22 @@ internal fn Scheduler.return_to_root(mut self, suspended: Bool) {
   self.running = root_task
 }
 
-fn switch_task(scheduler: intrinsic::Shared[Scheduler])
+fn switch_task(scheduler: intrinsic.Shared[Scheduler])
   uses Tasks, Panic, RunForever
 {
   while true {
-    let decision = intrinsic::shared_update(scheduler, input: 0, change: fn(state, _) {
+    let decision = intrinsic.shared_update(scheduler, input: 0, change: fn(state, _) {
       mut state.choose_next()
     })
     match decision {
       Proceed => return
       Suspend => {
-        intrinsic::coroutine_suspend()
+        intrinsic.coroutine_suspend()
         return
       }
       Resume(coroutine) => {
-        let suspended = intrinsic::coroutine_resume(coroutine)
-        intrinsic::shared_update(scheduler, input: 0, change: fn(state, _) {
+        let suspended = intrinsic.coroutine_resume(coroutine)
+        intrinsic.shared_update(scheduler, input: 0, change: fn(state, _) {
           mut state.return_to_root(suspended)
         })
       }
@@ -627,16 +627,16 @@ fn switch_task(scheduler: intrinsic::Shared[Scheduler])
   }
 }
 
-public opaque type SeededTasks(scheduler: intrinsic::Shared[Scheduler])
+public opaque type SeededTasks(scheduler: intrinsic.Shared[Scheduler])
 
 public fn SeededTasks.new(seed: UInt64) -> SeededTasks {
-  SeededTasks(scheduler: intrinsic::shared_new(Scheduler.new(seed)))
+  SeededTasks(scheduler: intrinsic.shared_new(Scheduler.new(seed)))
 }
 
 internal fn SeededTasks.elapsed(self) -> Duration
   uses Tasks
 {
-  intrinsic::shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
+  intrinsic.shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
     scheduler.elapsed
   })
 }
@@ -644,7 +644,7 @@ internal fn SeededTasks.elapsed(self) -> Duration
 internal fn SeededTasks.advance(self, by: Duration)
   uses Tasks
 {
-  intrinsic::shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
+  intrinsic.shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
     mut scheduler.advance(by)
   })
 }
@@ -652,7 +652,7 @@ internal fn SeededTasks.advance(self, by: Duration)
 internal fn SeededTasks.sleep(self, duration: Duration)
   uses Tasks, Panic, RunForever
 {
-  let blocked = intrinsic::shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
+  let blocked = intrinsic.shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
     mut scheduler.sleep(duration)
   })
   if blocked {
@@ -664,20 +664,20 @@ impl Tasks for SeededTasks
   uses Panic, RunForever
 {
   fn open(self) -> UInt64 {
-    intrinsic::shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
+    intrinsic.shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
       mut scheduler.open()
     })
   }
 
   fn spawn(self, task_group: UInt64, work: own fn(UInt64), item: UInt64) -> Bool {
-    let accepted = intrinsic::shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
+    let accepted = intrinsic.shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
       scheduler.accepts_tasks(task_group)
     })
     if !accepted {
       return false
     }
-    let coroutine = intrinsic::coroutine_start(work, item: item)
-    intrinsic::shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
+    let coroutine = intrinsic.coroutine_start(work, item: item)
+    intrinsic.shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
       mut scheduler.add_task(task_group, coroutine: coroutine)
     })
     let switch = switch_task
@@ -687,7 +687,7 @@ impl Tasks for SeededTasks
 
   fn join(self, task_group: UInt64) {
     while true {
-      let joined = intrinsic::shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
+      let joined = intrinsic.shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
         mut scheduler.join(task_group)
       })
       if joined {
@@ -699,7 +699,7 @@ impl Tasks for SeededTasks
   }
 
   fn cancel(self, task_group: UInt64) -> Bool {
-    intrinsic::shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
+    intrinsic.shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
       mut scheduler.cancel(task_group)
     })
   }
@@ -707,7 +707,7 @@ impl Tasks for SeededTasks
   fn cancelled(self) -> Bool {
     let switch = switch_task
     switch(self.scheduler)
-    intrinsic::shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
+    intrinsic.shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
       scheduler.tasks[scheduler.running].cancelled
     })
   }
@@ -715,13 +715,13 @@ impl Tasks for SeededTasks
   fn watch(self, key: UInt64) -> UInt64 {
     let switch = switch_task
     switch(self.scheduler)
-    intrinsic::shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
+    intrinsic.shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
       mut scheduler.watch(key)
     })
   }
 
   fn wait(self, key: UInt64, ticket: UInt64, reason: StringSlice) {
-    let blocked = intrinsic::shared_update(
+    let blocked = intrinsic.shared_update(
       self.scheduler,
       input: reason.to_string(),
       change: fn(scheduler, description) {
@@ -735,7 +735,7 @@ impl Tasks for SeededTasks
   }
 
   fn wake(self, key: UInt64) {
-    intrinsic::shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
+    intrinsic.shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
       mut scheduler.wake(key)
     })
   }
@@ -744,7 +744,7 @@ impl Tasks for SeededTasks
     while true {
       let switch = switch_task
       switch(self.scheduler)
-      let locked = intrinsic::shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
+      let locked = intrinsic.shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
         mut scheduler.lock(mutex)
       })
       if locked {
@@ -754,7 +754,7 @@ impl Tasks for SeededTasks
   }
 
   fn unlock(self, mutex: UInt64) {
-    intrinsic::shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
+    intrinsic.shared_update(self.scheduler, input: 0, change: fn(scheduler, _) {
       mut scheduler.unlock(mutex)
     })
   }
@@ -836,7 +836,7 @@ public fn Pool[Resource: Storable].using[Output, Failure](
       Ok(output) => {
         let returned = Clock.now()
         let limit = options.idle_maximum
-        intrinsic::shared_update(idle.state, input: Idle(resource: own resource, returned: returned), change: fn(listed, entry) {
+        intrinsic.shared_update(idle.state, input: Idle(resource: own resource, returned: returned), change: fn(listed, entry) {
           if listed.length() < limit {
             mut listed.push(own entry)
           }

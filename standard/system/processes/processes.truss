@@ -1,56 +1,56 @@
-use standard::capabilities
-use standard::growth
-use standard::intrinsic
-use standard::processes
-use standard::system::calls
-use standard::system::handles
+use standard.capabilities
+use standard.growth
+use standard.intrinsic
+use standard.processes
+use standard.system.calls
+use standard.system.handles
 
 internal type SystemProcesses()
 
 type Started(process: Int32, input: Int32, output: Int32, error_output: Int32)
 
 impl Processes for SystemProcesses
-  uses RunForever, capabilities::System
+  uses RunForever, capabilities.System
 {
-  fn run(self, command: processes::Command) -> Result[processes::Output, SystemError] {
+  fn run(self, command: processes.Command) -> Result[processes.Output, SystemError] {
     let started = begin(command)?
-    calls::close_descriptor(started.input)
-    var output: intrinsic::Storage[UInt8] = intrinsic::storage_empty()
-    var error_output: intrinsic::Storage[UInt8] = intrinsic::storage_empty()
+    calls.close_descriptor(started.input)
+    var output: intrinsic.Storage[UInt8] = intrinsic.storage_empty()
+    var error_output: intrinsic.Storage[UInt8] = intrinsic.storage_empty()
     let collected = collect(
       started.output,
       into: mut output,
       error_output: started.error_output,
       error_into: mut error_output,
     )
-    calls::close_descriptor(started.output)
-    calls::close_descriptor(started.error_output)
-    let status = handles::with_file_error(calls::wait_for(started.process))?
-    handles::with_file_error(collected)?
-    Ok(processes::Output(
-      status: handles::exit_status_from(status),
+    calls.close_descriptor(started.output)
+    calls.close_descriptor(started.error_output)
+    let status = handles.with_file_error(calls.wait_for(started.process))?
+    handles.with_file_error(collected)?
+    Ok(processes.Output(
+      status: handles.exit_status_from(status),
       output: List.from_storage(own output),
       error_output: List.from_storage(own error_output),
     ))
   }
 
-  fn spawn(self, command: processes::Command) -> Result[processes::Child, SystemError] {
+  fn spawn(self, command: processes.Command) -> Result[processes.Child, SystemError] {
     let started = begin(command)?
-    Ok(processes::Child(
-      handle: handles::of_process(started.process),
-      identifier: if started.process > 0 { intrinsic::convert(started.process) } else { 0 },
+    Ok(processes.Child(
+      handle: handles.of_process(started.process),
+      identifier: if started.process > 0 { intrinsic.convert(started.process) } else { 0 },
       input: if started.input >= 0 {
-        Some(processes::ChildInput(handle: handles::of_descriptor(started.input)))
+        Some(processes.ChildInput(handle: handles.of_descriptor(started.input)))
       } else {
         None
       },
       output: if started.output >= 0 {
-        Some(processes::ChildOutput(handle: handles::of_descriptor(started.output)))
+        Some(processes.ChildOutput(handle: handles.of_descriptor(started.output)))
       } else {
         None
       },
       error_output: if started.error_output >= 0 {
-        Some(processes::ChildOutput(handle: handles::of_descriptor(started.error_output)))
+        Some(processes.ChildOutput(handle: handles.of_descriptor(started.error_output)))
       } else {
         None
       },
@@ -58,34 +58,34 @@ impl Processes for SystemProcesses
   }
 }
 
-fn begin(command: processes::Command) -> Result[Started, SystemError]
-  uses RunForever, capabilities::System
+fn begin(command: processes.Command) -> Result[Started, SystemError]
+  uses RunForever, capabilities.System
 {
-  var texts: intrinsic::Storage[UInt8] = intrinsic::storage_empty()
-  var starts: intrinsic::Storage[UInt64] = intrinsic::storage_empty()
-  handles::with_file_error(add_ended_with_zero_byte(command.program.slice().bytes, texts: mut texts, starts: mut starts))?
+  var texts: intrinsic.Storage[UInt8] = intrinsic.storage_empty()
+  var starts: intrinsic.Storage[UInt64] = intrinsic.storage_empty()
+  handles.with_file_error(add_ended_with_zero_byte(command.program.slice().bytes, texts: mut texts, starts: mut starts))?
   for argument in command.arguments
-    invariant calls::ends_with_zero_byte(intrinsic::storage_view(texts))
+    invariant calls.ends_with_zero_byte(intrinsic.storage_view(texts))
   {
-    handles::with_file_error(add_ended_with_zero_byte(argument.slice().bytes, texts: mut texts, starts: mut starts))?
+    handles.with_file_error(add_ended_with_zero_byte(argument.slice().bytes, texts: mut texts, starts: mut starts))?
   }
-  let arguments = addresses(intrinsic::storage_view(texts), starts: intrinsic::storage_view(starts))
-  var variables: intrinsic::Storage[UInt8] = intrinsic::storage_empty()
-  var variable_starts: intrinsic::Storage[UInt64] = intrinsic::storage_empty()
-  handles::with_file_error(add_variables(command, texts: mut variables, starts: mut variable_starts))?
-  let environment = addresses(intrinsic::storage_view(variables), starts: intrinsic::storage_view(variable_starts))
+  let arguments = addresses(intrinsic.storage_view(texts), starts: intrinsic.storage_view(starts))
+  var variables: intrinsic.Storage[UInt8] = intrinsic.storage_empty()
+  var variable_starts: intrinsic.Storage[UInt64] = intrinsic.storage_empty()
+  handles.with_file_error(add_variables(command, texts: mut variables, starts: mut variable_starts))?
+  let environment = addresses(intrinsic.storage_view(variables), starts: intrinsic.storage_view(variable_starts))
 
-  let size = intrinsic::libc_spawn_file_actions_size()
-  var actions: intrinsic::Storage[UInt8] = intrinsic::storage_with_capacity(size)
+  let size = intrinsic.libc_spawn_file_actions_size()
+  var actions: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(size)
   for index in 0..size
-    invariant intrinsic::storage_length(actions) == index
-    invariant intrinsic::storage_capacity(actions) == size
+    invariant intrinsic.storage_length(actions) == index
+    invariant intrinsic.storage_capacity(actions) == size
   {
-    intrinsic::storage_push(mut actions, value: 0)
+    intrinsic.storage_push(mut actions, value: 0)
   }
-  var failed = intrinsic::libc_posix_spawn_file_actions_init(mut actions)
+  var failed = intrinsic.libc_posix_spawn_file_actions_init(mut actions)
   if failed != 0 {
-    return Err(handles::file_error(failed))
+    return Err(handles.file_error(failed))
   }
   var input = Ends(ours: -1, theirs: -1)
   var output = Ends(ours: -1, theirs: -1)
@@ -98,30 +98,30 @@ fn begin(command: processes::Command) -> Result[Started, SystemError]
     failed = arrange(command.error_output, descriptor: 2, child_reads: false, actions: mut actions, ends: mut error_output)
   }
   if failed == 0 && command.directory is Some(directory) {
-    failed = match calls::ended_with_zero_byte(directory.text.slice().bytes) {
-      Ok(path) => intrinsic::libc_posix_spawn_file_actions_addchdir(mut actions, path: intrinsic::storage_view(path))
+    failed = match calls.ended_with_zero_byte(directory.text.slice().bytes) {
+      Ok(path) => intrinsic.libc_posix_spawn_file_actions_addchdir(mut actions, path: intrinsic.storage_view(path))
       Err(error) => error
     }
   }
   var process: Int32 = 0
   if failed == 0 {
-    failed = intrinsic::libc_posix_spawnp(
+    failed = intrinsic.libc_posix_spawnp(
       mut process,
-      program: intrinsic::storage_view(texts),
-      file_actions: intrinsic::storage_view(actions),
-      arguments: intrinsic::storage_view(arguments),
-      environment: intrinsic::storage_view(environment),
+      program: intrinsic.storage_view(texts),
+      file_actions: intrinsic.storage_view(actions),
+      arguments: intrinsic.storage_view(arguments),
+      environment: intrinsic.storage_view(environment),
     )
   }
-  let _ = intrinsic::libc_posix_spawn_file_actions_destroy(mut actions)
-  calls::close_descriptor(input.theirs)
-  calls::close_descriptor(output.theirs)
-  calls::close_descriptor(error_output.theirs)
+  let _ = intrinsic.libc_posix_spawn_file_actions_destroy(mut actions)
+  calls.close_descriptor(input.theirs)
+  calls.close_descriptor(output.theirs)
+  calls.close_descriptor(error_output.theirs)
   if failed != 0 {
-    calls::close_descriptor(input.ours)
-    calls::close_descriptor(output.ours)
-    calls::close_descriptor(error_output.ours)
-    return Err(handles::file_error(failed))
+    calls.close_descriptor(input.ours)
+    calls.close_descriptor(output.ours)
+    calls.close_descriptor(error_output.ours)
+    return Err(handles.file_error(failed))
   }
   Ok(Started(process: process, input: input.ours, output: output.ours, error_output: error_output.ours))
 }
@@ -129,79 +129,79 @@ fn begin(command: processes::Command) -> Result[Started, SystemError]
 type Ends(ours: Int32, theirs: Int32)
 
 fn arrange(
-  redirect: processes::Redirect,
+  redirect: processes.Redirect,
   descriptor: Int32,
   child_reads: Bool,
-  actions: mut intrinsic::Storage[UInt8],
+  actions: mut intrinsic.Storage[UInt8],
   ends: mut Ends,
 ) -> Int32
-  requires intrinsic::storage_length(actions) >= intrinsic::libc_spawn_file_actions_size()
-  ensures intrinsic::storage_length(actions) == old(intrinsic::storage_length(actions))
-  uses capabilities::System
+  requires intrinsic.storage_length(actions) >= intrinsic.libc_spawn_file_actions_size()
+  ensures intrinsic.storage_length(actions) == old(intrinsic.storage_length(actions))
+  uses capabilities.System
 {
   match redirect {
     Inherit => 0
-    Discard => intrinsic::libc_posix_spawn_file_actions_addopen(
+    Discard => intrinsic.libc_posix_spawn_file_actions_addopen(
       mut actions,
       descriptor: descriptor,
       path: "/dev/null\0".slice().bytes,
-      flags: if child_reads { intrinsic::libc_o_rdonly() } else { intrinsic::libc_o_wronly() },
+      flags: if child_reads { intrinsic.libc_o_rdonly() } else { intrinsic.libc_o_wronly() },
       mode: 0,
     )
     Capture | Pipe => {
       var read_end: Int32 = -1
       var write_end: Int32 = -1
-      if intrinsic::libc_pipe(mut read_end, write_end: mut write_end) != 0 {
-        return intrinsic::libc_errno()
+      if intrinsic.libc_pipe(mut read_end, write_end: mut write_end) != 0 {
+        return intrinsic.libc_errno()
       }
-      let _ = intrinsic::libc_fcntl_setfd_cloexec(read_end)
-      let _ = intrinsic::libc_fcntl_setfd_cloexec(write_end)
+      let _ = intrinsic.libc_fcntl_setfd_cloexec(read_end)
+      let _ = intrinsic.libc_fcntl_setfd_cloexec(write_end)
       if child_reads {
         ends = Ends(ours: write_end, theirs: read_end)
       } else {
         ends = Ends(ours: read_end, theirs: write_end)
       }
-      match calls::without_blocking(ends.ours) {
-        Ok(_) => intrinsic::libc_posix_spawn_file_actions_adddup2(mut actions, descriptor: ends.theirs, onto: descriptor)
+      match calls.without_blocking(ends.ours) {
+        Ok(_) => intrinsic.libc_posix_spawn_file_actions_adddup2(mut actions, descriptor: ends.theirs, onto: descriptor)
         Err(error) => error
       }
     }
   }
 }
 
-fn addresses(texts: intrinsic::View[UInt8], starts: intrinsic::View[UInt64]) -> intrinsic::Storage[UInt64]
-  ensures intrinsic::storage_length(result) > 0
-  ensures intrinsic::storage_model(result)[intrinsic::storage_length(result) - 1] == 0
+fn addresses(texts: intrinsic.View[UInt8], starts: intrinsic.View[UInt64]) -> intrinsic.Storage[UInt64]
+  ensures intrinsic.storage_length(result) > 0
+  ensures intrinsic.storage_model(result)[intrinsic.storage_length(result) - 1] == 0
 {
-  let first = intrinsic::view_address(texts)
+  let first = intrinsic.view_address(texts)
   proof {
-    assert intrinsic::view_length(texts) == 0 || first >= 1
+    assert intrinsic.view_length(texts) == 0 || first >= 1
   }
-  let count = intrinsic::view_length(starts)
-  var all: intrinsic::Storage[UInt64] = intrinsic::storage_with_capacity(count + 1)
+  let count = intrinsic.view_length(starts)
+  var all: intrinsic.Storage[UInt64] = intrinsic.storage_with_capacity(count + 1)
   for index in 0..count
-    invariant intrinsic::storage_length(all) == index
-    invariant intrinsic::storage_capacity(all) == count + 1
+    invariant intrinsic.storage_length(all) == index
+    invariant intrinsic.storage_capacity(all) == count + 1
   {
-    let start = intrinsic::view_at(starts, index: index)
-    intrinsic::storage_push(mut all, value: first.wrapping_add(start))
+    let start = intrinsic.view_at(starts, index: index)
+    intrinsic.storage_push(mut all, value: first.wrapping_add(start))
   }
-  intrinsic::storage_push(mut all, value: 0)
+  intrinsic.storage_push(mut all, value: 0)
   all
 }
 
 fn add_variables(
-  command: processes::Command,
-  texts: mut intrinsic::Storage[UInt8],
-  starts: mut intrinsic::Storage[UInt64],
+  command: processes.Command,
+  texts: mut intrinsic.Storage[UInt8],
+  starts: mut intrinsic.Storage[UInt64],
 ) -> Result[Unit, Int32]
-  uses RunForever, capabilities::System
+  uses RunForever, capabilities.System
 {
   if command.inherits_variables {
     var index: UInt64 = 0
     var is_present = true
     while is_present {
-      let entry = intrinsic::environment_entry(index, is_present: mut is_present)
+      let entry = intrinsic.environment_entry(index, is_present: mut is_present)
       if is_present {
         if !set_again(entry, by: command.variables.slice()) {
           add_ended_with_zero_byte(entry, texts: mut texts, starts: mut starts)?
@@ -212,29 +212,29 @@ fn add_variables(
   }
   for position in 0..command.variables.length() {
     let name = command.variables[position].name.slice().bytes
-    if intrinsic::view_length(name) == 0 || holds(name, byte: 61) {
-      return Err(intrinsic::libc_einval())
+    if intrinsic.view_length(name) == 0 || holds(name, byte: 61) {
+      return Err(intrinsic.libc_einval())
     }
     if !named_later(command.variables.slice(), position: position) {
-      growth::push(mut starts, value: intrinsic::storage_length(texts))
+      growth.push(mut starts, value: intrinsic.storage_length(texts))
       add_without_zero_byte(name, texts: mut texts)?
-      growth::push(mut texts, value: 61)
+      growth.push(mut texts, value: 61)
       add_without_zero_byte(command.variables[position].value.slice().bytes, texts: mut texts)?
-      growth::push(mut texts, value: 0)
+      growth.push(mut texts, value: 0)
     }
   }
   Ok(Unit)
 }
 
-fn names(entry: intrinsic::View[UInt8], name: intrinsic::View[UInt8]) -> Bool {
-  let length = intrinsic::view_length(name)
-  if intrinsic::view_length(entry) <= length || intrinsic::view_at(entry, index: length) != 61 {
+fn names(entry: intrinsic.View[UInt8], name: intrinsic.View[UInt8]) -> Bool {
+  let length = intrinsic.view_length(name)
+  if intrinsic.view_length(entry) <= length || intrinsic.view_at(entry, index: length) != 61 {
     return false
   }
-  intrinsic::compare_bytes(intrinsic::view_slice(entry, start: 0, stop: length), right: name) == 0
+  intrinsic.compare_bytes(intrinsic.view_slice(entry, start: 0, stop: length), right: name) == 0
 }
 
-fn set_again(entry: intrinsic::View[UInt8], by: Slice[processes::Variable]) -> Bool {
+fn set_again(entry: intrinsic.View[UInt8], by: Slice[processes.Variable]) -> Bool {
   for variable in by {
     if names(entry, name: variable.name.slice().bytes) {
       return true
@@ -243,7 +243,7 @@ fn set_again(entry: intrinsic::View[UInt8], by: Slice[processes::Variable]) -> B
   false
 }
 
-fn named_later(variables: Slice[processes::Variable], position: UInt64) -> Bool
+fn named_later(variables: Slice[processes.Variable], position: UInt64) -> Bool
   requires position < variables.length()
 {
   for later in position + 1..variables.length() {
@@ -254,9 +254,9 @@ fn named_later(variables: Slice[processes::Variable], position: UInt64) -> Bool
   false
 }
 
-fn holds(bytes: intrinsic::View[UInt8], byte: UInt8) -> Bool {
-  for index in 0..intrinsic::view_length(bytes) {
-    if intrinsic::view_at(bytes, index: index) == byte {
+fn holds(bytes: intrinsic.View[UInt8], byte: UInt8) -> Bool {
+  for index in 0..intrinsic.view_length(bytes) {
+    if intrinsic.view_at(bytes, index: index) == byte {
       return true
     }
   }
@@ -265,16 +265,16 @@ fn holds(bytes: intrinsic::View[UInt8], byte: UInt8) -> Bool {
 
 fn collect(
   output: Int32,
-  into: mut intrinsic::Storage[UInt8],
+  into: mut intrinsic.Storage[UInt8],
   error_output: Int32,
-  error_into: mut intrinsic::Storage[UInt8],
+  error_into: mut intrinsic.Storage[UInt8],
 ) -> Result[Unit, Int32]
-  uses RunForever, capabilities::System
+  uses RunForever, capabilities.System
 {
   var output_open = output >= 0
   var error_open = error_output >= 0
   while output_open || error_open {
-    let ticket = intrinsic::runtime_descriptors_watch()
+    let ticket = intrinsic.runtime_descriptors_watch()
     if output_open {
       output_open = drain(output, into: mut into)?
     }
@@ -282,29 +282,29 @@ fn collect(
       error_open = drain(error_output, into: mut error_into)?
     }
     if output_open || error_open {
-      var waited_for: intrinsic::Storage[Int32] = intrinsic::storage_with_capacity(2)
-      intrinsic::storage_push(mut waited_for, value: if output_open { output } else { -1 })
-      intrinsic::storage_push(mut waited_for, value: if error_open { error_output } else { -1 })
-      if intrinsic::runtime_descriptors_wait(intrinsic::storage_view(waited_for), count: 2, ticket: ticket) == 0 {
-        return Err(intrinsic::libc_errno())
+      var waited_for: intrinsic.Storage[Int32] = intrinsic.storage_with_capacity(2)
+      intrinsic.storage_push(mut waited_for, value: if output_open { output } else { -1 })
+      intrinsic.storage_push(mut waited_for, value: if error_open { error_output } else { -1 })
+      if intrinsic.runtime_descriptors_wait(intrinsic.storage_view(waited_for), count: 2, ticket: ticket) == 0 {
+        return Err(intrinsic.libc_errno())
       }
     }
   }
   Ok(Unit)
 }
 
-fn drain(pipe: Int32, into: mut intrinsic::Storage[UInt8]) -> Result[Bool, Int32]
-  uses RunForever, capabilities::System
+fn drain(pipe: Int32, into: mut intrinsic.Storage[UInt8]) -> Result[Bool, Int32]
+  uses RunForever, capabilities.System
 {
   var open = true
   var empty = false
   while open && !empty {
-    match calls::read_onto_end(pipe, buffer: mut into, count: 65536, waiting: false) {
+    match calls.read_onto_end(pipe, buffer: mut into, count: 65536, waiting: false) {
       Ok(got) => {
         open = got > 0
       }
       Err(error) => {
-        if error != intrinsic::libc_eagain() {
+        if error != intrinsic.libc_eagain() {
           return Err(error)
         }
         empty = true
@@ -315,34 +315,34 @@ fn drain(pipe: Int32, into: mut intrinsic::Storage[UInt8]) -> Result[Bool, Int32
 }
 
 fn add_ended_with_zero_byte(
-  bytes: intrinsic::View[UInt8],
-  texts: mut intrinsic::Storage[UInt8],
-  starts: mut intrinsic::Storage[UInt64],
+  bytes: intrinsic.View[UInt8],
+  texts: mut intrinsic.Storage[UInt8],
+  starts: mut intrinsic.Storage[UInt64],
 ) -> Result[Unit, Int32]
   ensures match result {
-    Ok(_) => calls::ends_with_zero_byte(intrinsic::storage_view(texts))
+    Ok(_) => calls.ends_with_zero_byte(intrinsic.storage_view(texts))
     Err(_) => true
   }
 {
-  growth::push(mut starts, value: intrinsic::storage_length(texts))
+  growth.push(mut starts, value: intrinsic.storage_length(texts))
   add_without_zero_byte(bytes, texts: mut texts)?
-  growth::push(mut texts, value: 0)
+  growth.push(mut texts, value: 0)
   Ok(Unit)
 }
 
-fn add_without_zero_byte(bytes: intrinsic::View[UInt8], texts: mut intrinsic::Storage[UInt8]) -> Result[Unit, Int32] {
-  let start = intrinsic::storage_length(texts)
-  let length = intrinsic::view_length(bytes)
-  growth::reserve(mut texts, additional: length + 1)
+fn add_without_zero_byte(bytes: intrinsic.View[UInt8], texts: mut intrinsic.Storage[UInt8]) -> Result[Unit, Int32] {
+  let start = intrinsic.storage_length(texts)
+  let length = intrinsic.view_length(bytes)
+  growth.reserve(mut texts, additional: length + 1)
   for index in 0..length
-    invariant intrinsic::storage_length(texts) == start + index
-    invariant intrinsic::storage_capacity(texts) >= start + length + 1
+    invariant intrinsic.storage_length(texts) == start + index
+    invariant intrinsic.storage_capacity(texts) >= start + length + 1
   {
-    let byte = intrinsic::view_at(bytes, index: index)
+    let byte = intrinsic.view_at(bytes, index: index)
     if byte == 0 {
-      return Err(intrinsic::libc_einval())
+      return Err(intrinsic.libc_einval())
     }
-    intrinsic::storage_push(mut texts, value: byte)
+    intrinsic.storage_push(mut texts, value: byte)
   }
   Ok(Unit)
 }

@@ -12,6 +12,7 @@ module Code : sig
     | String_delimiter
     | Attribute
     | Foreign_operator
+    | Path_separator
     | Confusable_character
     | Lifetime
     | Number_hexadecimal_float
@@ -50,6 +51,7 @@ module Code : sig
     | Let_else_brace
     | Nesting_too_deep
     | Misplaced_opaque
+    | Misplaced_tuple
     | Misplaced_visibility
     | Misplaced_self
     | Lends_own
@@ -77,7 +79,6 @@ module Code : sig
     | As_conversion
     | Elif
     | Angle_brackets
-    | Path_separator
     | Qualified_variant
     | Macro_call
     | Tuple
@@ -122,6 +123,7 @@ module Code : sig
     | Missing_label
     | Unknown_label
     | Out_of_order
+    | Positional_after_labeled
     | Missing_argument
     | Too_many_arguments
     | Repeated_argument
@@ -148,6 +150,7 @@ module Code : sig
     | Wrong_try
     | Lambda_needs_type
     | Not_a_record
+    | Not_a_tuple_type
     | Unknown_variant
     | Specification_only
     | Not_in_specification
@@ -326,7 +329,8 @@ module Collector : sig
 end
 
 val select_shown : t list -> t list
-val render : Source.t -> t -> string
+val paint_severity : is_colored:bool -> severity -> string -> string
+val render : is_colored:bool -> Source.t -> t -> string
 val to_json_object : Source.t -> t -> string
 val encode_json_string : string -> string
 val quote : string -> string

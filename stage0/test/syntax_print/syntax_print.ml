@@ -3,7 +3,7 @@ let show_optional print = function Some value -> print value | None -> ""
 let list print values = List.map print values
 
 let show_path (path : Syntax.path) =
-  String.concat "::"
+  String.concat "."
     (List.map (fun (name : Syntax.name) -> name.text) (path.modules @ [ path.last ]))
 
 let show_mode = function Syntax.Mut -> "mut" | Own -> "own"
@@ -185,7 +185,7 @@ and show_expression (value : Syntax.expression) =
   | Continue -> "continue"
   | Self_value -> "self"
   | Self_type_value -> "Self"
-  | Name name -> show_path name
+  | Name name -> name.text
   | Member (inner, name) -> make_form "." [ show_expression inner; name.text ]
   | Bracket (inner, items) -> make_form "[]" (show_expression inner :: list show_bracket_item items)
   | Call (callee, arguments) ->
@@ -341,6 +341,7 @@ and show_pattern (written : Syntax.pattern) =
   | Variant { name; fields = None } -> name.text
   | Variant { name; fields = Some fields } -> make_form name.text (list show_pattern_field fields)
   | Record fields -> make_form "record" (list show_pattern_field fields)
+  | Tuple patterns -> make_form "tuple" (list show_pattern patterns)
   | Alternatives alternatives -> make_form "|" (list show_pattern alternatives)
   | Pattern_error -> "error"
 
@@ -419,7 +420,7 @@ let show_definition ?(methods = []) (definition : Syntax.definition) =
     match definition.kind with
     | Function function_ -> show_function_definition function_
     | Method_declaration declared -> make_form "fn" (show_signature declared)
-    | Type_definition { name; generics = parameters; body; clauses } ->
+    | Type_definition { is_tuple; name; generics = parameters; body; clauses } ->
         let body =
           match body with
           | Fields list_ -> show_fields list_
@@ -445,7 +446,9 @@ let show_definition ?(methods = []) (definition : Syntax.definition) =
               | Potential value -> make_form "cost potential" [ show_expression value ])
             clauses
         in
-        make_form "type" ([ name.text ^ show_generics parameters; body ] @ clauses)
+        make_form
+          (if is_tuple then "tuple type" else "type")
+          ([ name.text ^ show_generics parameters; body ] @ clauses)
     | Trait { name; generics = parameters; requires; members = trait_members } ->
         make_form "trait"
           ([

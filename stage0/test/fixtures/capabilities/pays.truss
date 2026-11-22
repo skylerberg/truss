@@ -1,7 +1,7 @@
-use store::ledger
+use store.ledger
 
 fn f()
-  uses ledger::Ledger
+  uses ledger.Ledger
 {
-  ledger::pay(1)
+  ledger.pay(1)
 }

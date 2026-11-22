@@ -1,4 +1,4 @@
-use standard::url
+use standard.url
 
 fn trimmed(text: StringSlice) -> StringSlice {
   text.trim()
@@ -132,19 +132,19 @@ fn path_matches(request_path: StringSlice, cookie_path: StringSlice) -> Bool {
     && (cookie_path.ends_with("/") || request_path.bytes()[cookie_path.length()] == 47)
 }
 
-fn host_of(address: url::Url) -> String {
+fn host_of(address: url.Url) -> String {
   match address.host() {
     Some(host) => "${host}".slice().to_ascii_lowercase()
     None => ""
   }
 }
 
-fn request_path(address: url::Url) -> StringSlice {
+fn request_path(address: url.Url) -> StringSlice {
   let path = address.path()
   if path.is_empty() { "/".slice() } else { path }
 }
 
-internal fn CookieJar.store(mut self, address: url::Url, set_cookie: StringSlice, now: Int64) {
+internal fn CookieJar.store(mut self, address: url.Url, set_cookie: StringSlice, now: Int64) {
   let cookie = match Cookie.parse(set_cookie) {
     Ok(cookie) => own cookie
     Err(_) => return
@@ -206,7 +206,7 @@ internal fn CookieJar.store(mut self, address: url::Url, set_cookie: StringSlice
   ))
 }
 
-internal fn CookieJar.header_for(mut self, address: url::Url, now: Int64) -> Option[String] {
+internal fn CookieJar.header_for(mut self, address: url.Url, now: Int64) -> Option[String] {
   var index: UInt64 = 0
   while index < self.cookies.length() {
     if self.cookies[index].expires_at is Some(moment) && moment <= now {

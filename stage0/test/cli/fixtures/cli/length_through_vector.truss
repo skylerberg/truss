@@ -1,5 +1,5 @@
-use acme::geometry::vector
+use acme.geometry.vector
 
 public fn length() -> Int64 {
-  vector::length()
+  vector.length()
 }

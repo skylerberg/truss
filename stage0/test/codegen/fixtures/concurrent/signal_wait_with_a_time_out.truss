@@ -1,9 +1,9 @@
-use standard::processes
+use standard.processes
 
 fn signal_or_time_out() -> String
   uses Tasks, Clock, Console, Signals
 {
-  let wanted = [processes::Signal.User2]
+  let wanted = [processes.Signal.User2]
   concurrent {
     {
       if Signals.wait(wanted.slice()) is Some(_) {

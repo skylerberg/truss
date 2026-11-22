@@ -1,47 +1,47 @@
-use standard::http
-use standard::network
-use standard::simulation
+use standard.http
+use standard.network
+use standard.simulation
 
 test "a token bucket allows its burst, refills over time, and says how long to wait" uses Panic, RunForever {
-  provide simulation::World.new() {
-    let limiter = http::RateLimiter.new(http::RateLimit(requests: 2, per_seconds: 1))
-    assert limiter.take("a") == http::Decision.Allowed(remaining: 1)
-    assert limiter.take("a") == http::Decision.Allowed(remaining: 0)
-    assert limiter.take("a") == http::Decision.Limited(retry_after_seconds: 1)
-    assert limiter.take("b") == http::Decision.Allowed(remaining: 1)
+  provide simulation.World.new() {
+    let limiter = http.RateLimiter.new(http.RateLimit(requests: 2, per_seconds: 1))
+    assert limiter.take("a") == http.Decision.Allowed(remaining: 1)
+    assert limiter.take("a") == http.Decision.Allowed(remaining: 0)
+    assert limiter.take("a") == http.Decision.Limited(retry_after_seconds: 1)
+    assert limiter.take("b") == http.Decision.Allowed(remaining: 1)
     Clock.sleep(Duration.milliseconds(500))
-    assert limiter.take("a") == http::Decision.Allowed(remaining: 0)
-    assert limiter.take("a") == http::Decision.Limited(retry_after_seconds: 1)
+    assert limiter.take("a") == http.Decision.Allowed(remaining: 0)
+    assert limiter.take("a") == http.Decision.Limited(retry_after_seconds: 1)
     Clock.sleep(Duration.seconds(5))
-    assert limiter.take("a") == http::Decision.Allowed(remaining: 1)
-    let slow = http::RateLimiter.new(http::RateLimit(requests: 1, per_seconds: 60, burst: 3))
-    assert slow.take("x") == http::Decision.Allowed(remaining: 2)
-    assert slow.take("x") == http::Decision.Allowed(remaining: 1)
-    assert slow.take("x") == http::Decision.Allowed(remaining: 0)
-    assert slow.take("x") == http::Decision.Limited(retry_after_seconds: 60)
+    assert limiter.take("a") == http.Decision.Allowed(remaining: 1)
+    let slow = http.RateLimiter.new(http.RateLimit(requests: 1, per_seconds: 60, burst: 3))
+    assert slow.take("x") == http.Decision.Allowed(remaining: 2)
+    assert slow.take("x") == http.Decision.Allowed(remaining: 1)
+    assert slow.take("x") == http.Decision.Allowed(remaining: 0)
+    assert slow.take("x") == http.Decision.Limited(retry_after_seconds: 60)
   }
 }
 
 test "a policy keeps a large burst and a long window, and the integer limits overflow nothing" uses Panic, RunForever {
-  provide simulation::World.new() {
-    let large = http::RateLimiter.new(http::RateLimit(requests: 1, per_seconds: 60, burst: 2000000000))
-    assert large.take("a") == http::Decision.Allowed(remaining: 1999999999)
-    let yearly = http::RateLimiter.new(http::RateLimit(requests: 1, per_seconds: 63072000))
-    assert yearly.take("a") == http::Decision.Allowed(remaining: 0)
-    assert yearly.take("a") == http::Decision.Limited(retry_after_seconds: 63072000)
-    let unbounded = http::RateLimiter.new(http::RateLimit(requests: 18446744073709551615, per_seconds: 9223372036854775807))
+  provide simulation.World.new() {
+    let large = http.RateLimiter.new(http.RateLimit(requests: 1, per_seconds: 60, burst: 2000000000))
+    assert large.take("a") == http.Decision.Allowed(remaining: 1999999999)
+    let yearly = http.RateLimiter.new(http.RateLimit(requests: 1, per_seconds: 63072000))
+    assert yearly.take("a") == http.Decision.Allowed(remaining: 0)
+    assert yearly.take("a") == http.Decision.Limited(retry_after_seconds: 63072000)
+    let unbounded = http.RateLimiter.new(http.RateLimit(requests: 18446744073709551615, per_seconds: 9223372036854775807))
     assert unbounded.take("a") is Allowed(_)
     assert unbounded.take("a") is Allowed(_)
   }
 }
 
 test "a rate limiter forgets the least recently seen key when it holds too many" uses Panic, RunForever {
-  provide simulation::World.new() {
-    let limiter = http::RateLimiter.new(http::RateLimit(requests: 1, per_seconds: 60, keys: 2))
-    assert limiter.take("a") == http::Decision.Allowed(remaining: 0)
-    assert limiter.take("b") == http::Decision.Allowed(remaining: 0)
-    assert limiter.take("c") == http::Decision.Allowed(remaining: 0)
-    assert limiter.take("a") == http::Decision.Allowed(remaining: 0)
+  provide simulation.World.new() {
+    let limiter = http.RateLimiter.new(http.RateLimit(requests: 1, per_seconds: 60, keys: 2))
+    assert limiter.take("a") == http.Decision.Allowed(remaining: 0)
+    assert limiter.take("b") == http.Decision.Allowed(remaining: 0)
+    assert limiter.take("c") == http.Decision.Allowed(remaining: 0)
+    assert limiter.take("a") == http.Decision.Allowed(remaining: 0)
     assert limiter.take("c") is Limited(_)
   }
 }
@@ -49,17 +49,17 @@ test "a rate limiter forgets the least recently seen key when it holds too many"
 fn limited_statuses() -> List[String]
   uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic, RunForever
 {
-  var listener = NetworkServer.listen(network::SocketAddress(address: network::IpAddress.loopback, port: 8098)).expect("the port is free")
-  let limiter = http::RateLimiter.new(http::RateLimit(requests: 2, per_seconds: 10))
+  var listener = NetworkServer.listen(network.SocketAddress(address: network.IpAddress.loopback, port: 8098)).expect("the port is free")
+  let limiter = http.RateLimiter.new(http.RateLimit(requests: 2, per_seconds: 10))
   var seen: List[String] = []
   concurrent {
-    http::serve(mut listener, handler: fn(request, responder) {
-      http::rate_limit(own request, mut responder, limiter: limiter, key: http::peer_key, next: fn(inner, answering) {
-        let _ = mut answering.send(http::Response.text("from ${http::peer_key(inner)}"))
+    http.serve(mut listener, handler: fn(request, responder) {
+      http.rate_limit(own request, mut responder, limiter: limiter, key: http.peer_key, next: fn(inner, answering) {
+        let _ = mut answering.send(http.Response.text("from ${http.peer_key(inner)}"))
       })
     })
     {
-      var client = http::Client.new()
+      var client = http.Client.new()
       let count: UInt64 = 3
       for _ in 0..count {
         mut seen.push(match mut client.get("http://localhost:8098/") {
@@ -73,7 +73,7 @@ fn limited_statuses() -> List[String]
 }
 
 test "the rate_limit middleware answers 429 with Retry-After once a peer spends its burst" uses Panic, RunForever {
-  provide simulation::World.new() {
+  provide simulation.World.new() {
     let seen = limited_statuses()
     assert seen.length() == 3
     assert seen[0].slice().starts_with("200 - from ") && seen[0] != "200 - from "

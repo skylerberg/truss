@@ -1,5 +1,5 @@
-use standard::math
+use standard.math
 
-fn f(count: Int64) -> math::BigInteger {
-  math::BigInteger.from(count)
+fn f(count: Int64) -> math.BigInteger {
+  math.BigInteger.from(count)
 }

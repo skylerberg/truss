@@ -1,4 +1,4 @@
-use frontend::syntax
+use frontend.syntax
 
 fn make_form(head: StringSlice, parts: Slice[String]) -> String {
   var pieces: List[StringSlice] = []
@@ -13,7 +13,7 @@ fn make_form(head: StringSlice, parts: Slice[String]) -> String {
   "(${pieces.join(" ")})"
 }
 
-fn show_optional_type(value: Option[syntax::TypeExpression], prefix: StringSlice) -> String
+fn show_optional_type(value: Option[syntax.TypeExpression], prefix: StringSlice) -> String
   uses RunForever
 {
   match value {
@@ -22,23 +22,23 @@ fn show_optional_type(value: Option[syntax::TypeExpression], prefix: StringSlice
   }
 }
 
-internal fn show_path(path: syntax::NamePath) -> String {
+internal fn show_path(path: syntax.NamePath) -> String {
   var names: List[StringSlice] = []
   for name in path.modules {
     mut names.push(name.text)
   }
   mut names.push(path.last.text)
-  names.join("::")
+  names.join(".")
 }
 
-fn show_mode(mode: syntax::Mode) -> StringSlice {
+fn show_mode(mode: syntax.Mode) -> StringSlice {
   match mode {
     Mut => "mut"
     Own => "own"
   }
 }
 
-fn show_intended_keyword(intended: syntax::IntendedKind) -> StringSlice {
+fn show_intended_keyword(intended: syntax.IntendedKind) -> StringSlice {
   match intended {
     IntendedFunction => "fn"
     IntendedConstant => "let"
@@ -49,7 +49,7 @@ fn show_intended_keyword(intended: syntax::IntendedKind) -> StringSlice {
   }
 }
 
-fn show_operation(operation: syntax::Operation) -> StringSlice {
+fn show_operation(operation: syntax.Operation) -> StringSlice {
   match operation {
     Arithmetic(arithmetic) => match arithmetic {
       Multiply => "*"
@@ -70,7 +70,7 @@ fn show_operation(operation: syntax::Operation) -> StringSlice {
   }
 }
 
-fn show_binary(binary: syntax::Binary) -> StringSlice {
+fn show_binary(binary: syntax.Binary) -> StringSlice {
   match binary {
     Operation(operation) => show_operation(operation)
     Comparison(comparison) => match comparison {
@@ -89,7 +89,7 @@ fn show_binary(binary: syntax::Binary) -> StringSlice {
   }
 }
 
-fn show_assignment(assignment: syntax::Assignment) -> String {
+fn show_assignment(assignment: syntax.Assignment) -> String {
   match assignment {
     Assign => "="
     Compound(operation) => "${show_operation(operation)}="
@@ -112,7 +112,7 @@ fn escape(value: StringSlice) -> String {
   buffer
 }
 
-fn show_type_expression(written: syntax::TypeExpression) -> String
+fn show_type_expression(written: syntax.TypeExpression) -> String
   uses RunForever
 {
   match written.kind {
@@ -128,7 +128,7 @@ fn show_type_expression(written: syntax::TypeExpression) -> String
   }
 }
 
-fn show_path_type(path_type: syntax::PathType) -> String
+fn show_path_type(path_type: syntax.PathType) -> String
   uses RunForever
 {
   if path_type.arguments.is_empty() {
@@ -141,7 +141,7 @@ fn show_path_type(path_type: syntax::PathType) -> String
   "${show_path(path_type.path)}[${arguments.join(", ")}]"
 }
 
-fn show_type_argument(argument: syntax::TypeArgument) -> String
+fn show_type_argument(argument: syntax.TypeArgument) -> String
   uses RunForever
 {
   match argument {
@@ -152,7 +152,7 @@ fn show_type_argument(argument: syntax::TypeArgument) -> String
   }
 }
 
-fn show_function_type(function_type: syntax::FunctionType) -> String
+fn show_function_type(function_type: syntax.FunctionType) -> String
   uses RunForever
 {
   var inputs: List[String] = []
@@ -174,7 +174,7 @@ fn show_function_type(function_type: syntax::FunctionType) -> String
   make_form("fn", parts)
 }
 
-fn show_generic(parameter: syntax::GenericParameter) -> String
+fn show_generic(parameter: syntax.GenericParameter) -> String
   uses RunForever
 {
   match parameter.kind {
@@ -188,7 +188,7 @@ fn show_generic(parameter: syntax::GenericParameter) -> String
   }
 }
 
-fn show_path_types(path_types: Slice[syntax::PathType], separator: StringSlice) -> String
+fn show_path_types(path_types: Slice[syntax.PathType], separator: StringSlice) -> String
   uses RunForever
 {
   var shown: List[String] = []
@@ -198,7 +198,7 @@ fn show_path_types(path_types: Slice[syntax::PathType], separator: StringSlice) 
   shown.join(separator)
 }
 
-fn show_generics(parameters: Slice[syntax::GenericParameter]) -> String
+fn show_generics(parameters: Slice[syntax.GenericParameter]) -> String
   uses RunForever
 {
   if parameters.is_empty() {
@@ -211,7 +211,7 @@ fn show_generics(parameters: Slice[syntax::GenericParameter]) -> String
   "[${shown.join(", ")}]"
 }
 
-fn show_capability_reference(reference: syntax::CapabilityReference) -> String
+fn show_capability_reference(reference: syntax.CapabilityReference) -> String
   uses RunForever
 {
   match reference.kind {
@@ -222,7 +222,7 @@ fn show_capability_reference(reference: syntax::CapabilityReference) -> String
   }
 }
 
-fn show_condition(condition: Slice[syntax::BoundCondition]) -> String
+fn show_condition(condition: Slice[syntax.BoundCondition]) -> String
   uses RunForever
 {
   var shown: List[String] = []
@@ -232,7 +232,7 @@ fn show_condition(condition: Slice[syntax::BoundCondition]) -> String
   shown.join(" && ")
 }
 
-fn show_conditional(shown: own String, condition: Option[List[syntax::BoundCondition]]) -> String
+fn show_conditional(shown: own String, condition: Option[List[syntax.BoundCondition]]) -> String
   uses RunForever
 {
   match condition {
@@ -241,7 +241,7 @@ fn show_conditional(shown: own String, condition: Option[List[syntax::BoundCondi
   }
 }
 
-fn show_capability_use(capability_use: syntax::CapabilityUse) -> String
+fn show_capability_use(capability_use: syntax.CapabilityUse) -> String
   uses RunForever
 {
   if capability_use.unless_bounds.is_none() && capability_use.unless_values.is_empty() {
@@ -257,7 +257,7 @@ fn show_capability_use(capability_use: syntax::CapabilityUse) -> String
   make_form("unless", parts)
 }
 
-fn show_clause(clause: syntax::Clause) -> String
+fn show_clause(clause: syntax.Clause) -> String
   uses RunForever
 {
   let shown = match clause.kind {
@@ -277,7 +277,7 @@ fn show_clause(clause: syntax::Clause) -> String
   show_conditional(own shown, condition: clause.condition.copy())
 }
 
-fn show_expressions(values: Slice[syntax::Expression]) -> List[String]
+fn show_expressions(values: Slice[syntax.Expression]) -> List[String]
   uses RunForever
 {
   var shown: List[String] = []
@@ -287,7 +287,7 @@ fn show_expressions(values: Slice[syntax::Expression]) -> List[String]
   shown
 }
 
-fn show_metric(metric: syntax::Metric) -> StringSlice {
+fn show_metric(metric: syntax.Metric) -> StringSlice {
   match metric {
     Time => "time"
     Allocations => "allocations"
@@ -295,7 +295,7 @@ fn show_metric(metric: syntax::Metric) -> StringSlice {
   }
 }
 
-fn show_cost(cost_clause: syntax::CostClause) -> String
+fn show_cost(cost_clause: syntax.CostClause) -> String
   uses RunForever
 {
   let resource = match cost_clause.resource {
@@ -315,7 +315,7 @@ fn show_cost(cost_clause: syntax::CostClause) -> String
   make_form("cost", parts: [amortized.to_string(), own resource, own bound])
 }
 
-fn show_string_literal(literal: syntax::StringLiteral) -> String
+fn show_string_literal(literal: syntax.StringLiteral) -> String
   uses RunForever
 {
   var text = ""
@@ -334,7 +334,7 @@ fn show_string_literal(literal: syntax::StringLiteral) -> String
   text
 }
 
-fn show_expression(value: syntax::Expression) -> String
+fn show_expression(value: syntax.Expression) -> String
   uses RunForever
 {
   match value.kind {
@@ -349,7 +349,7 @@ fn show_expression(value: syntax::Expression) -> String
     Continue => "continue"
     SelfValue => "self"
     SelfTypeValue => "Self"
-    Name(path) => show_path(path)
+    Name(name) => name.text.copy()
     Member(base, name) => make_form(".", parts: [show_expression(base), name.text.copy()])
     Bracket(base, items) => {
       var parts: List[String] = [show_expression(base)]
@@ -451,7 +451,7 @@ fn show_expression(value: syntax::Expression) -> String
   }
 }
 
-fn show_bracket_item(item: syntax::BracketItem) -> String
+fn show_bracket_item(item: syntax.BracketItem) -> String
   uses RunForever
 {
   match item {
@@ -460,7 +460,7 @@ fn show_bracket_item(item: syntax::BracketItem) -> String
   }
 }
 
-fn show_argument(argument: syntax::Argument) -> String
+fn show_argument(argument: syntax.Argument) -> String
   uses RunForever
 {
   match argument.label {
@@ -469,7 +469,7 @@ fn show_argument(argument: syntax::Argument) -> String
   }
 }
 
-fn show_update(update: syntax::Update) -> String
+fn show_update(update: syntax.Update) -> String
   uses RunForever
 {
   match update.kind {
@@ -486,7 +486,7 @@ fn show_update(update: syntax::Update) -> String
   }
 }
 
-fn show_arm(arm: syntax::Arm) -> String
+fn show_arm(arm: syntax.Arm) -> String
   uses RunForever
 {
   var parts: List[String] = []
@@ -501,7 +501,7 @@ fn show_arm(arm: syntax::Arm) -> String
   make_form("=>", parts)
 }
 
-fn show_block(block: syntax::Block) -> String
+fn show_block(block: syntax.Block) -> String
   uses RunForever
 {
   var parts: List[String] = []
@@ -511,7 +511,7 @@ fn show_block(block: syntax::Block) -> String
   make_form("block", parts)
 }
 
-fn show_loop_clause(clause: syntax::LoopClause) -> String
+fn show_loop_clause(clause: syntax.LoopClause) -> String
   uses RunForever
 {
   let shown = match clause.kind {
@@ -522,7 +522,7 @@ fn show_loop_clause(clause: syntax::LoopClause) -> String
   show_conditional(own shown, condition: clause.condition.copy())
 }
 
-fn show_statement(statement: syntax::Statement) -> String
+fn show_statement(statement: syntax.Statement) -> String
   uses RunForever
 {
   match statement.kind {
@@ -571,14 +571,14 @@ fn show_statement(statement: syntax::Statement) -> String
   }
 }
 
-fn show_constant(constant: syntax::Constant) -> String {
+fn show_constant(constant: syntax.Constant) -> String {
   match constant {
     ModuleConstant(path) => show_path(path)
     TypeConstant(owner, name) => "${show_path(owner)}.${name.text}"
   }
 }
 
-fn show_literal(literal: syntax::Literal) -> String
+fn show_literal(literal: syntax.Literal) -> String
   uses RunForever
 {
   match literal {
@@ -589,7 +589,7 @@ fn show_literal(literal: syntax::Literal) -> String
   }
 }
 
-fn show_range_end(range_end: syntax::RangeEnd) -> String
+fn show_range_end(range_end: syntax.RangeEnd) -> String
   uses RunForever
 {
   match range_end.kind {
@@ -598,7 +598,7 @@ fn show_range_end(range_end: syntax::RangeEnd) -> String
   }
 }
 
-fn show_pattern(written: syntax::Pattern) -> String
+fn show_pattern(written: syntax.Pattern) -> String
   uses RunForever
 {
   match written.kind {
@@ -612,6 +612,13 @@ fn show_pattern(written: syntax::Pattern) -> String
       Some(written_fields) => make_form(name.text, parts: show_pattern_fields(written_fields))
     }
     Record(fields) => make_form("record", parts: show_pattern_fields(fields))
+    Tuple(patterns) => {
+      var parts: List[String] = []
+      for pattern in patterns {
+        mut parts.push(show_pattern(pattern))
+      }
+      make_form("tuple", parts)
+    }
     Alternatives(alternatives) => {
       var parts: List[String] = []
       for alternative in alternatives {
@@ -623,7 +630,7 @@ fn show_pattern(written: syntax::Pattern) -> String
   }
 }
 
-fn show_pattern_fields(fields: Slice[syntax::PatternField]) -> List[String]
+fn show_pattern_fields(fields: Slice[syntax.PatternField]) -> List[String]
   uses RunForever
 {
   var shown: List[String] = []
@@ -638,7 +645,7 @@ fn show_pattern_fields(fields: Slice[syntax::PatternField]) -> List[String]
   shown
 }
 
-fn show_visibility(visibility: Option[syntax::Visibility]) -> StringSlice {
+fn show_visibility(visibility: Option[syntax.Visibility]) -> StringSlice {
   match visibility {
     None => ""
     Some(written) => match written {
@@ -649,13 +656,13 @@ fn show_visibility(visibility: Option[syntax::Visibility]) -> StringSlice {
   }
 }
 
-fn show_type_head(head: syntax::TypeHead) -> String
+fn show_type_head(head: syntax.TypeHead) -> String
   uses RunForever
 {
   "${show_path(head.path)}${show_generics(head.generics)}"
 }
 
-fn show_definition_name(name: syntax::DefinitionName) -> String
+fn show_definition_name(name: syntax.DefinitionName) -> String
   uses RunForever
 {
   match name {
@@ -664,7 +671,7 @@ fn show_definition_name(name: syntax::DefinitionName) -> String
   }
 }
 
-fn show_parameter(parameter: syntax::Parameter) -> String
+fn show_parameter(parameter: syntax.Parameter) -> String
   uses RunForever
 {
   match parameter.kind {
@@ -687,7 +694,7 @@ fn show_parameter(parameter: syntax::Parameter) -> String
   }
 }
 
-fn show_parameters(parameters: Slice[syntax::Parameter]) -> String
+fn show_parameters(parameters: Slice[syntax.Parameter]) -> String
   uses RunForever
 {
   var shown: List[String] = []
@@ -697,7 +704,7 @@ fn show_parameters(parameters: Slice[syntax::Parameter]) -> String
   make_form("", parts: shown)
 }
 
-fn show_signature(signature: syntax::Signature) -> List[String]
+fn show_signature(signature: syntax.Signature) -> List[String]
   uses RunForever
 {
   let output = match signature.output {
@@ -721,7 +728,7 @@ fn show_signature(signature: syntax::Signature) -> List[String]
   parts
 }
 
-fn show_law(law_definition: syntax::LawDefinition) -> String
+fn show_law(law_definition: syntax.LawDefinition) -> String
   uses RunForever
 {
   var parts: List[String] = [law_definition.name.text.copy(), show_parameters(law_definition.parameters)]
@@ -732,7 +739,7 @@ fn show_law(law_definition: syntax::LawDefinition) -> String
   make_form("law", parts)
 }
 
-fn show_fields(fields: Slice[syntax::Field]) -> String
+fn show_fields(fields: Slice[syntax.Field]) -> String
   uses RunForever
 {
   var shown: List[String] = []
@@ -752,7 +759,7 @@ fn show_fields(fields: Slice[syntax::Field]) -> String
   make_form("", parts: shown)
 }
 
-fn show_capability_list(capabilities: Slice[syntax::CapabilityReference]) -> String
+fn show_capability_list(capabilities: Slice[syntax.CapabilityReference]) -> String
   uses RunForever
 {
   if capabilities.is_empty() {
@@ -765,7 +772,7 @@ fn show_capability_list(capabilities: Slice[syntax::CapabilityReference]) -> Str
   make_form("uses", parts: shown)
 }
 
-fn show_definition(definition: syntax::Definition, methods: Slice[String]) -> String
+fn show_definition(definition: syntax.Definition, methods: Slice[String]) -> String
   uses RunForever
 {
   let body = match definition.kind {
@@ -775,7 +782,7 @@ fn show_definition(definition: syntax::Definition, methods: Slice[String]) -> St
       make_form("fn", parts)
     }
     MethodDeclaration(signature) => make_form("fn", parts: show_signature(signature))
-    TypeDefinition(name, generics, body, clauses) => {
+    TypeDefinition(is_tuple, name, generics, body, clauses) => {
       let shown_body = match body {
         Fields(fields) => show_fields(fields)
         Variants(variants) => {
@@ -807,7 +814,7 @@ fn show_definition(definition: syntax::Definition, methods: Slice[String]) -> St
         }
         mut parts.push(own text)
       }
-      make_form("type", parts)
+      make_form(if is_tuple { "tuple type" } else { "type" }, parts)
     }
     Trait(name, generics, supertraits, members) => {
       let shown_requires = if supertraits.is_empty() { "" } else { ": ${show_path_types(supertraits, separator: " + ")}" }
@@ -899,7 +906,7 @@ fn show_definition(definition: syntax::Definition, methods: Slice[String]) -> St
   if visibility.is_empty() { body } else { make_form(visibility, parts: [own body]) }
 }
 
-internal fn show_file(file: syntax::File) -> String
+internal fn show_file(file: syntax.File) -> String
   uses RunForever
 {
   var lines: List[String] = []

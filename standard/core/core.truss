@@ -1,5 +1,5 @@
-use standard::cursors
-use standard::intrinsic
+use standard.cursors
+use standard.intrinsic
 
 public type Ordering = Less | Equal | Greater
   derives Equal
@@ -136,14 +136,14 @@ fn folded_multiply(first: UInt64, second: UInt64) -> UInt64
   cost time O(1)
   cost allocations == 0
 {
-  intrinsic::bit_xor(intrinsic::wrapping_multiply(first, right: second), right: intrinsic::multiply_high(first, right: second))
+  intrinsic.bit_xor(intrinsic.wrapping_multiply(first, right: second), right: intrinsic.multiply_high(first, right: second))
 }
 
 public fn Hasher.write(self, value: UInt64) -> Hasher
   cost time O(1)
   cost allocations == 0
 {
-  Hasher(state: folded_multiply(intrinsic::bit_xor(self.state, right: value), second: 0x9e37_79b9_7f4a_7c15))
+  Hasher(state: folded_multiply(intrinsic.bit_xor(self.state, right: value), second: 0x9e37_79b9_7f4a_7c15))
 }
 
 public fn Hasher.after_bytes(self, bytes: Sequence[UInt8], count: Integer) -> Hasher
@@ -152,14 +152,14 @@ public fn Hasher.after_bytes(self, bytes: Sequence[UInt8], count: Integer) -> Ha
   ensures identical(result, if count == 0 {
       self
     } else {
-      self.after_bytes(bytes, count: count - 1).write(intrinsic::convert(bytes[count - 1]))
+      self.after_bytes(bytes, count: count - 1).write(intrinsic.convert(bytes[count - 1]))
     })
   decreases count
 {
   if count == 0 {
     self
   } else {
-    self.after_bytes(bytes, count: count - 1).write(intrinsic::convert(bytes[count - 1]))
+    self.after_bytes(bytes, count: count - 1).write(intrinsic.convert(bytes[count - 1]))
   }
 }
 
@@ -173,7 +173,7 @@ public fn Hasher.write_bytes(self, bytes: Slice[UInt8]) -> Hasher
     invariant identical(hasher, self.after_bytes(bytes.model(), count: index))
     cost time O(index)
   {
-    hasher = hasher.write(intrinsic::convert(bytes[index]))
+    hasher = hasher.write(intrinsic.convert(bytes[index]))
   }
   hasher.write(bytes.length())
 }
@@ -495,50 +495,50 @@ public trait Cursor {
     None
   }
 
-  fn skip(own self, count: UInt64) -> cursors::Skip[Self]
+  fn skip(own self, count: UInt64) -> cursors.Skip[Self]
     cost time O(1)
   {
-    cursors::Skip(source: own self, left: count)
+    cursors.Skip(source: own self, left: count)
   }
 
-  fn take(own self, count: UInt64) -> cursors::Take[Self]
+  fn take(own self, count: UInt64) -> cursors.Take[Self]
     cost time O(1)
   {
-    cursors::Take(source: own self, left: count)
+    cursors.Take(source: own self, left: count)
   }
 
-  fn step_by(own self, step: UInt64) -> cursors::StepBy[Self]
+  fn step_by(own self, step: UInt64) -> cursors.StepBy[Self]
     uses Panic unless step > 0
     cost time O(1)
   {
     if step == 0 {
       Panic.crash("the step is zero")
     }
-    cursors::StepBy(source: own self, step: step, started: false)
+    cursors.StepBy(source: own self, step: step, started: false)
   }
 
-  fn chain[Other: Cursor[Element = Self.Element]](own self, other: own Other) -> cursors::Chain[Self, Other]
+  fn chain[Other: Cursor[Element = Self.Element]](own self, other: own Other) -> cursors.Chain[Self, Other]
     cost time O(1)
   {
-    cursors::Chain(first: own self, second: own other, first_ended: false)
+    cursors.Chain(first: own self, second: own other, first_ended: false)
   }
 
-  fn zip[Other: Cursor](own self, other: own Other) -> cursors::Zip[Self, Other]
+  fn zip[Other: Cursor](own self, other: own Other) -> cursors.Zip[Self, Other]
     cost time O(1)
   {
-    cursors::Zip(first: own self, second: own other)
+    cursors.Zip(first: own self, second: own other)
   }
 
-  fn enumerate(own self) -> cursors::Enumerate[Self]
+  fn enumerate(own self) -> cursors.Enumerate[Self]
     cost time O(1)
   {
-    cursors::Enumerate(source: own self, index: 0)
+    cursors.Enumerate(source: own self, index: 0)
   }
 
-  fn peekable(own self) -> cursors::Peekable[Self]
+  fn peekable(own self) -> cursors.Peekable[Self]
     cost time O(1)
   {
-    cursors::Peekable(source: own self, peeked: None)
+    cursors.Peekable(source: own self, peeked: None)
   }
 }
 
@@ -593,10 +593,10 @@ public trait Countable: Ordered + Plain {
 
 public type Range[Value](start: Value, stop: Value, inclusive: Bool)
 
-public type Indexed[Element](index: UInt64, element: Element)
+public tuple type Indexed[Element](index: UInt64, element: Element)
   derives Equal
 
-public type Pair[First, Second](first: First, second: Second)
+public tuple type Pair[First, Second](first: First, second: Second)
   derives Equal, Hash, Ordered
 
 public type ExitCode(code: UInt8)
@@ -611,7 +611,7 @@ impl Equal for Bool {
     cost time O(1)
     cost allocations == 0
   {
-    intrinsic::equal(self, right: other)
+    intrinsic.equal(self, right: other)
   }
 }
 
@@ -629,7 +629,7 @@ impl Equal for Character {
     cost time O(1)
     cost allocations == 0
   {
-    intrinsic::equal(self, right: other)
+    intrinsic.equal(self, right: other)
   }
 }
 
@@ -640,9 +640,9 @@ impl Ordered for Character {
     cost time O(1)
     cost allocations == 0
   {
-    if intrinsic::less(self, right: other) {
+    if intrinsic.less(self, right: other) {
       Ordering.Less
-    } else if intrinsic::equal(self, right: other) {
+    } else if intrinsic.equal(self, right: other) {
       Ordering.Equal
     } else {
       Ordering.Greater
@@ -655,7 +655,7 @@ impl Hash for Character {
     cost time O(1)
     cost allocations == 0
   {
-    hasher.write(intrinsic::convert(self))
+    hasher.write(intrinsic.convert(self))
   }
 }
 

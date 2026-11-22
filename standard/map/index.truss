@@ -1,0 +1,1806 @@
+type Slot(occupant: UInt64, hash: UInt64, reach: UInt64)
+
+type HashIndex(places: List[UInt64], slots: List[Slot], overflow: Tree)
+
+fn hash_of[Key: Hash](key: Key) -> UInt64
+  ensures result == key.hash(Hasher.new()).finish()
+  cost time O(1 + time(Key.hash))
+  cost allocations <= allocations(Key.hash)
+{
+  key.hash(Hasher.new()).finish()
+}
+
+theorem equal_keys_hash_alike[Key: Hash](first: Key, second: Key)
+  requires first == second
+  ensures hash_of(first) == hash_of(second)
+{
+}
+
+fn distance(home: Integer, slot: Integer, capacity: Integer) -> Integer
+  ensures result == (if home <= slot { slot - home } else { slot + capacity - home })
+{
+  if home <= slot { slot - home } else { slot + capacity - home }
+}
+
+fn home_of(hash: Integer, capacity: Integer) -> Integer
+  requires 0 < capacity
+  ensures result == hash % capacity
+{
+  hash % capacity
+}
+
+fn holds_slot[Key: Hash + Ordered](
+  slots: Sequence[Slot],
+  places: Sequence[UInt64],
+  keys: Sequence[Key],
+  count: Integer,
+  missing: Integer,
+  slot: Integer,
+) -> Bool
+  requires 0 <= slot && slot < slots.length()
+  requires count <= places.length() && count <= keys.length()
+  ensures result == (slots[slot].occupant == 0 || (
+    slots[slot].occupant <= count && slots[slot].occupant - 1 != missing
+      && places[slots[slot].occupant - 1] == slot + 1
+      && slots[slot].hash == hash_of(keys[slots[slot].occupant - 1])
+      && distance(home_of(slots[slot].hash, capacity: slots.length()), slot: slot, capacity: slots.length()) < 16
+      && distance(home_of(slots[slot].hash, capacity: slots.length()), slot: slot, capacity: slots.length())
+        < slots[home_of(slots[slot].hash, capacity: slots.length())].reach))
+{
+  slots[slot].occupant == 0 || (
+    slots[slot].occupant <= count && slots[slot].occupant - 1 != missing
+      && places[slots[slot].occupant - 1] == slot + 1
+      && slots[slot].hash == hash_of(keys[slots[slot].occupant - 1])
+      && distance(home_of(slots[slot].hash, capacity: slots.length()), slot: slot, capacity: slots.length()) < 16
+      && distance(home_of(slots[slot].hash, capacity: slots.length()), slot: slot, capacity: slots.length())
+        < slots[home_of(slots[slot].hash, capacity: slots.length())].reach)
+}
+
+fn holds_entry[Key: Hash + Ordered](
+  slots: Sequence[Slot],
+  places: Sequence[UInt64],
+  overflow: Tree,
+  keys: Sequence[Key],
+  position: Integer,
+) -> Bool
+  requires 0 <= position && position < places.length() && position < keys.length()
+  requires position <= UInt64.maximum && 0 < slots.length()
+  ensures result == (if places[position] == 0 {
+    overflow.holds(position)
+      && 16 < slots[home_of(hash_of(keys[position]), capacity: slots.length())].reach
+  } else {
+    places[position] <= slots.length()
+      && slots[places[position] - 1].occupant == position + 1
+  })
+{
+  if places[position] == 0 {
+    overflow.holds(position)
+      && 16 < slots[home_of(hash_of(keys[position]), capacity: slots.length())].reach
+  } else {
+    places[position] <= slots.length()
+      && slots[places[position] - 1].occupant == position + 1
+  }
+}
+
+fn in_overflow(place: UInt64) -> Integer
+  ensures result == (if place == 0 { 1 } else { 0 })
+{
+  if place == 0 { 1 } else { 0 }
+}
+
+fn HashIndex.indexes[Key: Hash + Ordered](
+  self,
+  keys: Sequence[Key],
+  count: Integer,
+  missing: Integer,
+) -> Bool
+  ensures result == (
+    0 <= count && count <= keys.length() && self.places.length() == count
+      && 0 <= missing && missing <= count
+      && (self.slots.length() == 0 ==> count == 0 && self.overflow.size() == 0)
+      && (self.slots.length() != 0 ==> 16 <= self.slots.length())
+      && self.slots.length() <= 4611686018427387904
+      && (forall slot in 0..self.slots.length() => self.slots.model()[slot].reach <= 17)
+      && (forall slot in 0..self.slots.length() =>
+        holds_slot(self.slots.model(), places: self.places.model(), keys: keys, count: count, missing: missing, slot: slot))
+      && (forall position in 0..count => position == missing || holds_entry(self.slots.model(), places: self.places.model(), overflow: self.overflow, keys: keys, position: position))
+      && (forall position: UInt64 => self.overflow.holds(position) ==>
+        position < count && position != missing && self.places.model()[position] == 0)
+      && self.overflow.balanced() && self.overflow.sorted(keys)
+      && self.overflow.size() + (if missing < count { in_overflow(self.places.model()[missing]) } else { 0 })
+        == self.places.model().sum(in_overflow)
+  )
+{
+  0 <= count && count <= keys.length() && self.places.length() == count
+    && 0 <= missing && missing <= count
+    && (self.slots.length() == 0 ==> count == 0 && self.overflow.size() == 0)
+    && (self.slots.length() != 0 ==> 16 <= self.slots.length())
+    && self.slots.length() <= 4611686018427387904
+    && (forall slot in 0..self.slots.length() => self.slots.model()[slot].reach <= 17)
+    && (forall slot in 0..self.slots.length() =>
+      holds_slot(self.slots.model(), places: self.places.model(), keys: keys, count: count, missing: missing, slot: slot))
+    && (forall position in 0..count => position == missing || holds_entry(self.slots.model(), places: self.places.model(), overflow: self.overflow, keys: keys, position: position))
+    && (forall position: UInt64 => self.overflow.holds(position) ==>
+      position < count && position != missing && self.places.model()[position] == 0)
+    && self.overflow.balanced() && self.overflow.sorted(keys)
+    && self.overflow.size() + (if missing < count { in_overflow(self.places.model()[missing]) } else { 0 })
+      == self.places.model().sum(in_overflow)
+}
+
+theorem distance_is_injective(home: Integer, first: Integer, second: Integer, capacity: Integer)
+  requires 0 <= home && home < capacity
+  requires 0 <= first && first < capacity && 0 <= second && second < capacity
+  requires distance(home, slot: first, capacity: capacity) == distance(home, slot: second, capacity: capacity)
+  ensures first == second
+{
+}
+
+theorem passes_unmatched_slot[Key: Hash + Ordered](
+  index: HashIndex,
+  keys: Sequence[Key],
+  key: Key,
+  home: Integer,
+  step: Integer,
+  slot: Integer,
+  position: Integer,
+)
+  requires index.indexes(keys, count: keys.length(), missing: keys.length())
+  requires 0 < index.slots.length() && home == home_of(hash_of(key), capacity: index.slots.length())
+  requires 0 <= slot && slot < index.slots.length()
+  requires 0 <= step && distance(home, slot: slot, capacity: index.slots.length()) == step
+  requires 0 <= position && position < keys.length() && 0 < index.places.model()[position]
+  requires keys[position] == key
+  requires step <= distance(home, slot: index.places.model()[position] - 1, capacity: index.slots.length())
+  requires !(index.slots.model()[slot].occupant != 0 && index.slots.model()[slot].occupant <= keys.length()
+    && index.slots.model()[slot].hash == hash_of(key)
+    && keys[index.slots.model()[slot].occupant - 1] == key)
+  ensures step + 1 <= distance(home, slot: index.places.model()[position] - 1, capacity: index.slots.length())
+{
+  assert holds_entry(
+    index.slots.model(),
+    places: index.places.model(),
+    overflow: index.overflow,
+    keys: keys,
+    position: position,
+  )
+  assert holds_slot(
+    index.slots.model(),
+    places: index.places.model(),
+    keys: keys,
+    count: keys.length(),
+    missing: keys.length(),
+    slot: index.places.model()[position] - 1,
+  )
+  equal_keys_hash_alike(keys[position], second: key)
+  let placed = index.places.model()[position] - 1
+  assert index.slots.model()[placed].occupant == position + 1
+  assert index.slots.model()[placed].hash == hash_of(key)
+  assert home_of(index.slots.model()[placed].hash, capacity: index.slots.length()) == home
+  if distance(home, slot: placed, capacity: index.slots.length()) == step {
+    distance_is_injective(home, first: placed, second: slot, capacity: index.slots.length())
+    assert placed == slot
+  }
+}
+
+theorem overflows_when_unmatched[Key: Hash + Ordered](
+  index: HashIndex,
+  keys: Sequence[Key],
+  key: Key,
+  home: Integer,
+  limit: Integer,
+  position: Integer,
+)
+  requires index.indexes(keys, count: keys.length(), missing: keys.length())
+  requires 0 < index.slots.length() && home == home_of(hash_of(key), capacity: index.slots.length())
+  requires limit == (if index.slots.model()[home].reach < 16 { index.slots.model()[home].reach } else { 16 })
+  requires 0 <= position && position < keys.length() && keys[position] == key
+  requires 0 < index.places.model()[position] ==>
+    limit <= distance(home, slot: index.places.model()[position] - 1, capacity: index.slots.length())
+  ensures 16 < index.slots.model()[home].reach && index.overflow.holds(position)
+{
+  assert holds_entry(
+    index.slots.model(),
+    places: index.places.model(),
+    overflow: index.overflow,
+    keys: keys,
+    position: position,
+  )
+  equal_keys_hash_alike(keys[position], second: key)
+  assert hash_of(keys[position]) == hash_of(key)
+  assert home_of(hash_of(keys[position]), capacity: index.slots.length()) == home
+  if 0 < index.places.model()[position] {
+    assert holds_slot(
+      index.slots.model(),
+      places: index.places.model(),
+      keys: keys,
+      count: keys.length(),
+      missing: keys.length(),
+      slot: index.places.model()[position] - 1,
+    )
+  }
+}
+
+fn HashIndex.find[Key: Hash + Ordered](self, keys: Slice[Key], key: Key) -> UInt64
+  requires self.indexes(keys.model(), count: keys.length(), missing: keys.length())
+  ensures result <= keys.length()
+  ensures result < keys.length() ==> keys.model()[result] == key
+  ensures result == keys.length() ==>
+    forall position in 0..keys.length() => !(keys.model()[position] == key)
+  cost time O(time(Key.hash) + 16 * (1 + time(Key.equal)) + (1 + self.overflow.height()) * (1 + time(Key.compare)))
+  cost allocations <= allocations(Key.hash) + 16 * allocations(Key.equal)
+    + (1 + self.overflow.height()) * allocations(Key.compare)
+{
+  let capacity = self.slots.length()
+  if capacity == 0 {
+    return keys.length()
+  }
+  proof {
+    assert self.slots.model().length() == capacity && self.places.model().length() == keys.length()
+  }
+  let hash = hash_of(key)
+  let home = hash % capacity
+  let reach = self.slots[home].reach
+  let limit = if reach < 16 { reach } else { 16 }
+  var step: UInt64 = 0
+  while step < limit
+    invariant step <= limit
+    invariant forall position in 0..keys.length() =>
+      0 < self.places.model()[position] && keys.model()[position] == key ==>
+        step <= distance(home, slot: self.places.model()[position] - 1, capacity: capacity)
+    decreases limit - step
+    cost time O(step * (1 + time(Key.equal)))
+    cost allocations <= step * allocations(Key.equal)
+  {
+    let slot = if home + step < capacity { home + step } else { home + step - capacity }
+    let occupant = self.slots[slot].occupant
+    proof {
+      assert holds_slot(self.slots.model(), places: self.places.model(), keys: keys.model(), count: keys.length(), missing: keys.length(), slot: slot)
+    }
+    if occupant != 0 && self.slots[slot].hash == hash && keys[occupant - 1] == key {
+      return occupant - 1
+    }
+    proof {
+      assert forall position in 0..keys.length() =>
+        0 < self.places.model()[position] && keys.model()[position] == key ==> {
+          passes_unmatched_slot(
+            self,
+            keys: keys.model(),
+            key: key,
+            home: home,
+            step: step,
+            slot: slot,
+            position: position,
+          )
+          step + 1 <= distance(home, slot: self.places.model()[position] - 1, capacity: capacity)
+        }
+    }
+    step += 1
+  }
+  proof {
+    assert forall position in 0..keys.length() => keys.model()[position] == key ==> {
+      overflows_when_unmatched(self, keys: keys.model(), key: key, home: home, limit: limit, position: position)
+      16 < reach && self.overflow.holds(position)
+    }
+  }
+  if reach > 16 {
+    self.overflow.find(keys, key: key)
+  } else {
+    keys.length()
+  }
+}
+
+theorem indexes_on_agreeing[Key: Hash + Ordered](
+  index: HashIndex,
+  keys: Sequence[Key],
+  other: Sequence[Key],
+  count: Integer,
+  missing: Integer,
+)
+  requires index.indexes(keys, count: count, missing: missing)
+  requires count <= other.length()
+  requires forall position in 0..count => identical(other[position], keys[position])
+  ensures index.indexes(other, count: count, missing: missing)
+{
+  assert forall slot in 0..index.slots.length() => {
+    assert holds_slot(index.slots.model(), places: index.places.model(), keys: keys, count: count, missing: missing, slot: slot)
+    holds_slot(index.slots.model(), places: index.places.model(), keys: other, count: count, missing: missing, slot: slot)
+  }
+  assert forall position in 0..count => position != missing ==> {
+    assert holds_entry(index.slots.model(), places: index.places.model(), overflow: index.overflow, keys: keys, position: position)
+    holds_entry(index.slots.model(), places: index.places.model(), overflow: index.overflow, keys: other, position: position)
+  }
+  sorted_transferred(index.overflow, first: keys, second: other)
+}
+
+theorem slot_kept_after_placing[Key: Hash + Ordered](
+  before: HashIndex,
+  after: HashIndex,
+  keys: Sequence[Key],
+  count: Integer,
+  other: Integer,
+)
+  requires 0 <= other && other < before.slots.length() && after.slots.length() == before.slots.length()
+  requires 0 <= count && count < keys.length()
+  requires before.places.length() == count && after.places.length() == count + 1
+  requires holds_slot(before.slots.model(), places: before.places.model(), keys: keys, count: count, missing: count, slot: other)
+  requires after.slots.model()[other].occupant == before.slots.model()[other].occupant
+  requires after.slots.model()[other].hash == before.slots.model()[other].hash
+  requires forall position in 0..count => after.places.model()[position] == before.places.model()[position]
+  requires forall slot in 0..before.slots.length() =>
+    before.slots.model()[slot].reach <= after.slots.model()[slot].reach
+  ensures holds_slot(after.slots.model(), places: after.places.model(), keys: keys, count: count + 1, missing: count + 1, slot: other)
+{
+  let occupant = before.slots.model()[other].occupant
+  if occupant != 0 {
+    assert occupant <= count && before.places.model()[occupant - 1] == other + 1
+    assert after.places.model()[occupant - 1] == other + 1
+    assert after.slots.model()[other].hash == hash_of(keys[occupant - 1])
+    let home = before.slots.model()[other].hash % before.slots.length()
+    assert distance(home, slot: other, capacity: before.slots.length()) < before.slots.model()[home].reach
+    assert before.slots.model()[home].reach <= after.slots.model()[home].reach
+  }
+}
+
+theorem indexes_after_slotting[Key: Hash + Ordered](
+  before: HashIndex,
+  after: HashIndex,
+  keys: Sequence[Key],
+  count: Integer,
+  home: Integer,
+  slot: Integer,
+  place: UInt64,
+  step: Integer,
+)
+  requires before.indexes(keys, count: count, missing: count)
+  requires place == slot + 1
+  requires count < keys.length() && count < UInt64.maximum
+  requires 0 < before.slots.length() && after.slots.length() == before.slots.length()
+  requires home == hash_of(keys[count]) % before.slots.length()
+  requires 0 <= slot && slot < before.slots.length() && 0 <= step && step < 16
+  requires distance(home, slot: slot, capacity: before.slots.length()) == step
+  requires before.slots.model()[slot].occupant == 0
+  requires identical(after.places.model(), before.places.model().append(place))
+  requires identical(after.overflow, before.overflow)
+  requires forall other in 0..before.slots.length() =>
+    other == slot || other == home || identical(after.slots.model()[other], before.slots.model()[other])
+  requires after.slots.model()[slot].occupant == count + 1
+  requires after.slots.model()[slot].hash == hash_of(keys[count])
+  requires slot != home ==> after.slots.model()[slot].reach == before.slots.model()[slot].reach
+  requires slot != home ==> after.slots.model()[home].occupant == before.slots.model()[home].occupant
+    && after.slots.model()[home].hash == before.slots.model()[home].hash
+  requires before.slots.model()[home].reach < step + 1 ==> after.slots.model()[home].reach == step + 1
+  requires step + 1 <= before.slots.model()[home].reach ==>
+    after.slots.model()[home].reach == before.slots.model()[home].reach
+  ensures after.indexes(keys, count: count + 1, missing: count + 1)
+{
+  assert before.slots.model().length() == before.slots.length() && after.slots.model().length() == after.slots.length()
+  assert before.places.model().length() == before.places.length() && after.places.model().length() == after.places.length()
+  assert forall other in 0..before.slots.length() =>
+    before.slots.model()[other].reach <= after.slots.model()[other].reach
+      && after.slots.model()[other].reach <= 17
+  assert forall position in 0..count => after.places.model()[position] == before.places.model()[position]
+  assert forall other in 0..before.slots.length() => other != slot ==>
+    after.slots.model()[other].occupant == before.slots.model()[other].occupant
+      && after.slots.model()[other].hash == before.slots.model()[other].hash
+  assert forall other in 0..before.slots.length() => other != slot ==> {
+    assert holds_slot(before.slots.model(), places: before.places.model(), keys: keys, count: count, missing: count, slot: other)
+    slot_kept_after_placing(before, after: after, keys: keys, count: count, other: other)
+    holds_slot(after.slots.model(), places: after.places.model(), keys: keys, count: count + 1, missing: count + 1, slot: other)
+  }
+  assert after.places.model().sum(in_overflow) == before.places.model().sum(in_overflow) + in_overflow(place)
+  assert holds_slot(after.slots.model(), places: after.places.model(), keys: keys, count: count + 1, missing: count + 1, slot: slot)
+  assert forall position in 0..count => {
+    assert holds_entry(before.slots.model(), places: before.places.model(), overflow: before.overflow, keys: keys, position: position)
+    holds_entry(after.slots.model(), places: after.places.model(), overflow: after.overflow, keys: keys, position: position)
+  }
+  assert holds_entry(after.slots.model(), places: after.places.model(), overflow: after.overflow, keys: keys, position: count)
+}
+
+theorem indexes_after_overflowing[Key: Hash + Ordered](
+  before: HashIndex,
+  after: HashIndex,
+  keys: Sequence[Key],
+  count: Integer,
+  home: Integer,
+)
+  requires before.indexes(keys, count: count, missing: count)
+  requires count < keys.length() && count < UInt64.maximum
+  requires 0 < before.slots.length() && after.slots.length() == before.slots.length()
+  requires home == hash_of(keys[count]) % before.slots.length()
+  requires identical(after.places.model(), before.places.model().append(0))
+  requires after.overflow.balanced() && after.overflow.sorted(keys)
+  requires after.overflow.size() == before.overflow.size() + 1
+  requires forall other: UInt64 => after.overflow.holds(other) == (other == count || before.overflow.holds(other))
+  requires forall other in 0..before.slots.length() =>
+    other == home || identical(after.slots.model()[other], before.slots.model()[other])
+  requires after.slots.model()[home].occupant == before.slots.model()[home].occupant
+  requires after.slots.model()[home].hash == before.slots.model()[home].hash
+  requires after.slots.model()[home].reach == 17
+  ensures after.indexes(keys, count: count + 1, missing: count + 1)
+{
+  assert before.slots.model().length() == before.slots.length() && after.slots.model().length() == after.slots.length()
+  assert before.places.model().length() == before.places.length() && after.places.model().length() == after.places.length()
+  assert forall other in 0..before.slots.length() =>
+    before.slots.model()[other].reach <= after.slots.model()[other].reach
+      && after.slots.model()[other].reach <= 17
+  assert forall position in 0..count => after.places.model()[position] == before.places.model()[position]
+  assert forall other in 0..before.slots.length() => {
+    assert holds_slot(before.slots.model(), places: before.places.model(), keys: keys, count: count, missing: count, slot: other)
+    slot_kept_after_placing(before, after: after, keys: keys, count: count, other: other)
+    holds_slot(after.slots.model(), places: after.places.model(), keys: keys, count: count + 1, missing: count + 1, slot: other)
+  }
+  assert after.places.model().sum(in_overflow) == before.places.model().sum(in_overflow) + 1
+  assert forall position in 0..count => {
+    assert holds_entry(before.slots.model(), places: before.places.model(), overflow: before.overflow, keys: keys, position: position)
+    holds_entry(after.slots.model(), places: after.places.model(), overflow: after.overflow, keys: keys, position: position)
+  }
+  assert holds_entry(after.slots.model(), places: after.places.model(), overflow: after.overflow, keys: keys, position: count)
+}
+
+fn HashIndex.place[Key: Hash + Ordered](mut self, keys: Slice[Key], hash: UInt64)
+  requires 0 < keys.length() && keys.length() < UInt64.maximum
+  requires self.indexes(keys.model(), count: keys.length() - 1, missing: keys.length() - 1)
+  requires 0 < self.slots.length()
+  requires hash == hash_of(keys.model()[keys.length() - 1])
+  requires forall position in 0..keys.length() - 1 =>
+    !(keys.model()[position] == keys.model()[keys.length() - 1])
+  requires self.overflow.height() < UInt64.maximum - 2
+  ensures self.indexes(keys.model(), count: keys.length(), missing: keys.length())
+  ensures self.slots.length() == old(self.slots.length())
+  ensures self.overflow.height() <= old(self.overflow.height()) + 1
+  cost time O(16 + self.places.length() + (1 + self.overflow.height()) * (1 + time(Key.compare)))
+  cost amortized time O(16 + (1 + self.overflow.height()) * (1 + time(Key.compare)))
+{
+  let capacity = self.slots.length()
+  let position = keys.length() - 1
+  let home = hash % capacity
+  var step: UInt64 = 0
+  var slot = home
+  while step < 16 && self.slots[slot].occupant != 0
+    invariant step <= 16
+    invariant slot < capacity
+    invariant step < 16 ==> distance(home, slot: slot, capacity: capacity) == step
+    decreases 16 - step
+    cost time O(step)
+  {
+    step += 1
+    slot = if slot + 1 < capacity { slot + 1 } else { 0 }
+  }
+  if step < 16 {
+    let slot_reach = self.slots[slot].reach
+    self.slots[slot] = Slot(occupant: position + 1, hash: hash, reach: slot_reach)
+    let home_slot = self.slots[home]
+    if home_slot.reach < step + 1 {
+      self.slots[home] = Slot(occupant: home_slot.occupant, hash: home_slot.hash, reach: step + 1)
+    }
+    mut self.places.push(slot + 1)
+    proof {
+      indexes_after_slotting(
+        old(self),
+        after: self,
+        keys: keys.model(),
+        count: position,
+        home: home,
+        slot: slot,
+        place: slot + 1,
+        step: step,
+      )
+    }
+  } else {
+    let tree = exchange(mut self.overflow, value: Tree.Leaf)
+    self.overflow = own tree.inserted(position, keys: keys)
+    let home_slot = self.slots[home]
+    self.slots[home] = Slot(occupant: home_slot.occupant, hash: home_slot.hash, reach: 17)
+    mut self.places.push(0)
+    proof {
+      indexes_after_overflowing(old(self), after: self, keys: keys.model(), count: position, home: home)
+    }
+  }
+}
+
+fn folded(target: Integer, capacity: Integer) -> Integer
+  ensures result == (if target < capacity { target } else { target - capacity })
+{
+  if target < capacity { target } else { target - capacity }
+}
+
+theorem homes_split(hash: Integer, capacity: Integer)
+  requires 0 <= hash && 0 < capacity
+  ensures hash % (2 * capacity) == hash % capacity || hash % (2 * capacity) == hash % capacity + capacity
+{
+}
+
+fn fills_target(
+  slots: Sequence[Slot],
+  grown: Sequence[Slot],
+  places: Sequence[UInt64],
+  moved: Integer,
+  target: Integer,
+) -> Bool
+  requires 0 <= target && target < grown.length() && grown.length() == 2 * slots.length()
+  ensures result == (grown[target].occupant == 0 || (
+    folded(target, capacity: slots.length()) < moved
+      && grown[target].occupant == slots[folded(target, capacity: slots.length())].occupant
+      && grown[target].hash == slots[folded(target, capacity: slots.length())].hash
+      && grown[target].occupant <= places.length()
+      && places[grown[target].occupant - 1] == target + 1
+      && distance(grown[target].hash % grown.length(), slot: target, capacity: grown.length()) < 16
+      && distance(grown[target].hash % grown.length(), slot: target, capacity: grown.length())
+        < grown[grown[target].hash % grown.length()].reach))
+{
+  grown[target].occupant == 0 || (
+    folded(target, capacity: slots.length()) < moved
+      && grown[target].occupant == slots[folded(target, capacity: slots.length())].occupant
+      && grown[target].hash == slots[folded(target, capacity: slots.length())].hash
+      && grown[target].occupant <= places.length()
+      && places[grown[target].occupant - 1] == target + 1
+      && distance(grown[target].hash % grown.length(), slot: target, capacity: grown.length()) < 16
+      && distance(grown[target].hash % grown.length(), slot: target, capacity: grown.length())
+        < grown[grown[target].hash % grown.length()].reach)
+}
+
+fn moves_slot(
+  slots: Sequence[Slot],
+  grown: Sequence[Slot],
+  places: Sequence[UInt64],
+  moved: Integer,
+  slot: Integer,
+) -> Bool
+  requires 0 <= slot && slot < slots.length() && grown.length() == 2 * slots.length()
+  ensures result == (slots[slot].occupant == 0 || places.length() < slots[slot].occupant || (
+    if slot < moved {
+      0 < places[slots[slot].occupant - 1]
+        && places[slots[slot].occupant - 1] <= grown.length()
+        && folded(places[slots[slot].occupant - 1] - 1, capacity: slots.length()) == slot
+        && grown[places[slots[slot].occupant - 1] - 1].occupant == slots[slot].occupant
+    } else {
+      places[slots[slot].occupant - 1] == slot + 1
+    }))
+{
+  slots[slot].occupant == 0 || places.length() < slots[slot].occupant || (
+    if slot < moved {
+      0 < places[slots[slot].occupant - 1]
+        && places[slots[slot].occupant - 1] <= grown.length()
+        && folded(places[slots[slot].occupant - 1] - 1, capacity: slots.length()) == slot
+        && grown[places[slots[slot].occupant - 1] - 1].occupant == slots[slot].occupant
+    } else {
+      places[slots[slot].occupant - 1] == slot + 1
+    })
+}
+
+fn regrown(
+  slots: Sequence[Slot],
+  overflow: Tree,
+  grown: Sequence[Slot],
+  places: Sequence[UInt64],
+  moved: Integer,
+  flagged: Integer,
+) -> Bool
+  ensures result == (
+    0 <= flagged && flagged <= moved && moved <= slots.length()
+      && grown.length() == 2 * slots.length() && places.length() < UInt64.maximum
+      && (forall target in 0..grown.length() => grown[target].reach <= 17)
+      && (forall target in 0..grown.length() => fills_target(slots, grown: grown, places: places, moved: moved, target: target))
+      && (forall slot in 0..slots.length() => moves_slot(slots, grown: grown, places: places, moved: moved, slot: slot))
+      && (forall slot in 0..flagged => 16 < slots[slot].reach ==>
+        16 < grown[slot].reach && 16 < grown[slot + slots.length()].reach)
+      && (forall position in 0..places.length() => (places[position] == 0) == overflow.holds(position))
+      && places.sum(in_overflow) == overflow.size()
+  )
+{
+  0 <= flagged && flagged <= moved && moved <= slots.length()
+    && grown.length() == 2 * slots.length() && places.length() < UInt64.maximum
+    && (forall target in 0..grown.length() => grown[target].reach <= 17)
+    && (forall target in 0..grown.length() => fills_target(slots, grown: grown, places: places, moved: moved, target: target))
+    && (forall slot in 0..slots.length() => moves_slot(slots, grown: grown, places: places, moved: moved, slot: slot))
+    && (forall slot in 0..flagged => 16 < slots[slot].reach ==>
+      16 < grown[slot].reach && 16 < grown[slot + slots.length()].reach)
+    && (forall position in 0..places.length() => (places[position] == 0) == overflow.holds(position))
+    && places.sum(in_overflow) == overflow.size()
+}
+
+theorem target_keeps_step(hash: Integer, slot: Integer, capacity: Integer, step: Integer, target: Integer)
+  requires 0 <= hash && 16 <= capacity && 0 <= slot && slot < capacity
+  requires step == distance(hash % capacity, slot: slot, capacity: capacity) && step < 16
+  requires target == (if hash % (2 * capacity) + step < 2 * capacity {
+    hash % (2 * capacity) + step
+  } else {
+    hash % (2 * capacity) + step - 2 * capacity
+  })
+  ensures 0 <= target && target < 2 * capacity
+  ensures folded(target, capacity: capacity) == slot
+  ensures distance(hash % (2 * capacity), slot: target, capacity: 2 * capacity) == step
+{
+  homes_split(hash, capacity: capacity)
+}
+
+theorem regrown_at_start[Key: Hash + Ordered](
+  index: HashIndex,
+  keys: Sequence[Key],
+  count: Integer,
+  grown: Sequence[Slot],
+)
+  requires index.indexes(keys, count: count, missing: count) && 0 < index.slots.length() && count < UInt64.maximum
+  requires grown.length() == 2 * index.slots.length()
+  requires forall target in 0..grown.length() => grown[target].occupant == 0 && grown[target].reach == 0
+  ensures regrown(index.slots.model(), overflow: index.overflow, grown: grown, places: index.places.model(), moved: 0, flagged: 0)
+{
+  assert forall slot in 0..index.slots.length() => {
+    assert holds_slot(index.slots.model(), places: index.places.model(), keys: keys, count: count, missing: count, slot: slot)
+    moves_slot(index.slots.model(), grown: grown, places: index.places.model(), moved: 0, slot: slot)
+  }
+  assert forall position in 0..count => {
+    assert holds_entry(index.slots.model(), places: index.places.model(), overflow: index.overflow, keys: keys, position: position)
+    (index.places.model()[position] == 0) == index.overflow.holds(position)
+  }
+}
+
+theorem regrown_after_empty_move(
+  slots: Sequence[Slot],
+  overflow: Tree,
+  grown: Sequence[Slot],
+  places: Sequence[UInt64],
+  moved: Integer,
+  flagged: Integer,
+)
+  requires regrown(slots, overflow: overflow, grown: grown, places: places, moved: moved, flagged: flagged)
+  requires moved < slots.length() && slots[moved].occupant == 0
+  ensures regrown(slots, overflow: overflow, grown: grown, places: places, moved: moved + 1, flagged: flagged)
+{
+  assert forall target in 0..grown.length() => {
+    assert fills_target(slots, grown: grown, places: places, moved: moved, target: target)
+    fills_target(slots, grown: grown, places: places, moved: moved + 1, target: target)
+  }
+  assert forall slot in 0..slots.length() => {
+    assert moves_slot(slots, grown: grown, places: places, moved: moved, slot: slot)
+    moves_slot(slots, grown: grown, places: places, moved: moved + 1, slot: slot)
+  }
+}
+
+theorem fills_moved_target(
+  slots: Sequence[Slot],
+  after: Sequence[Slot],
+  places: Sequence[UInt64],
+  moved: Integer,
+  step: Integer,
+  target: Integer,
+  target_home: Integer,
+)
+  requires 16 <= slots.length() && 0 <= moved && moved < slots.length() && after.length() == 2 * slots.length()
+  requires slots[moved].occupant != 0 && slots[moved].occupant <= places.length()
+  requires step == distance(slots[moved].hash % slots.length(), slot: moved, capacity: slots.length()) && step < 16
+  requires target_home == slots[moved].hash % (2 * slots.length())
+  requires target == (if target_home + step < 2 * slots.length() { target_home + step } else {
+    target_home + step - 2 * slots.length()
+  })
+  requires after[target].occupant == slots[moved].occupant && after[target].hash == slots[moved].hash
+  requires places[slots[moved].occupant - 1] == target + 1
+  requires step + 1 <= after[target_home].reach
+  ensures 0 <= target && target < after.length()
+  ensures fills_target(slots, grown: after, places: places, moved: moved + 1, target: target)
+{
+  target_keeps_step(slots[moved].hash, slot: moved, capacity: slots.length(), step: step, target: target)
+}
+
+theorem fills_kept_target(
+  slots: Sequence[Slot],
+  before: Sequence[Slot],
+  after: Sequence[Slot],
+  before_places: Sequence[UInt64],
+  after_places: Sequence[UInt64],
+  moved: Integer,
+  occupant: Integer,
+  other: Integer,
+)
+  requires 0 <= other && other < before.length() && before.length() == 2 * slots.length()
+  requires after.length() == before.length() && after_places.length() == before_places.length()
+  requires fills_target(slots, grown: before, places: before_places, moved: moved, target: other)
+  requires after[other].occupant == before[other].occupant && after[other].hash == before[other].hash
+  requires before[other].occupant != 0 ==> before[other].occupant != occupant
+  requires forall position in 0..before_places.length() => position != occupant - 1 ==>
+    after_places[position] == before_places[position]
+  requires forall slot in 0..before.length() => before[slot].reach <= after[slot].reach
+  ensures fills_target(slots, grown: after, places: after_places, moved: moved + 1, target: other)
+{
+}
+
+theorem slot_stays_moved(
+  slots: Sequence[Slot],
+  before: Sequence[Slot],
+  after: Sequence[Slot],
+  before_places: Sequence[UInt64],
+  after_places: Sequence[UInt64],
+  moved: Integer,
+  slot: Integer,
+  target: Integer,
+)
+  requires 0 <= slot && slot < slots.length() && 0 <= moved && moved < slots.length() && slot != moved
+  requires before.length() == 2 * slots.length() && after.length() == before.length()
+  requires after_places.length() == before_places.length()
+  requires slots[moved].occupant != 0 && slots[moved].occupant <= before_places.length()
+  requires before_places[slots[moved].occupant - 1] == moved + 1
+  requires moves_slot(slots, grown: before, places: before_places, moved: moved, slot: slot)
+  requires forall position in 0..before_places.length() => position != slots[moved].occupant - 1 ==>
+    after_places[position] == before_places[position]
+  requires 0 <= target && target < before.length() && before[target].occupant == 0
+  requires forall other in 0..before.length() => other != target ==> after[other].occupant == before[other].occupant
+  ensures moves_slot(slots, grown: after, places: after_places, moved: moved + 1, slot: slot)
+{
+  if slots[slot].occupant != 0 && slots[slot].occupant <= before_places.length() {
+    assert slots[slot].occupant != slots[moved].occupant
+    assert after_places[slots[slot].occupant - 1] == before_places[slots[slot].occupant - 1]
+  }
+}
+
+theorem regrown_after_occupied_move(
+  slots: Sequence[Slot],
+  overflow: Tree,
+  before: Sequence[Slot],
+  after: Sequence[Slot],
+  before_places: Sequence[UInt64],
+  after_places: Sequence[UInt64],
+  moved: Integer,
+  flagged: Integer,
+  step: Integer,
+  target: Integer,
+  target_home: Integer,
+  place: UInt64,
+)
+  requires regrown(slots, overflow: overflow, grown: before, places: before_places, moved: moved, flagged: flagged)
+  requires 16 <= slots.length() && 0 <= moved && moved < slots.length()
+  requires slots[moved].occupant != 0 && slots[moved].occupant <= before_places.length()
+  requires step == distance(slots[moved].hash % slots.length(), slot: moved, capacity: slots.length()) && step < 16
+  requires target_home == slots[moved].hash % (2 * slots.length())
+  requires target == (if target_home + step < 2 * slots.length() { target_home + step } else {
+    target_home + step - 2 * slots.length()
+  })
+  requires place == target + 1
+  requires identical(after_places, before_places.update(slots[moved].occupant - 1, value: place))
+  requires after.length() == before.length()
+  requires forall other in 0..before.length() =>
+    other == target || other == target_home || identical(after[other], before[other])
+  requires after[target].occupant == slots[moved].occupant && after[target].hash == slots[moved].hash
+  requires target != target_home ==> after[target].reach == before[target].reach
+  requires target != target_home ==>
+    after[target_home].occupant == before[target_home].occupant && after[target_home].hash == before[target_home].hash
+  requires before[target_home].reach < step + 1 ==> after[target_home].reach == step + 1
+  requires step + 1 <= before[target_home].reach ==> after[target_home].reach == before[target_home].reach
+  ensures regrown(slots, overflow: overflow, grown: after, places: after_places, moved: moved + 1, flagged: flagged)
+{
+  target_keeps_step(slots[moved].hash, slot: moved, capacity: slots.length(), step: step, target: target)
+  assert fills_target(slots, grown: before, places: before_places, moved: moved, target: target)
+  assert before[target].occupant == 0
+  assert moves_slot(slots, grown: before, places: before_places, moved: moved, slot: moved)
+  assert before_places[slots[moved].occupant - 1] == moved + 1
+  assert forall other in 0..before.length() =>
+    before[other].reach <= after[other].reach && after[other].reach <= 17
+  assert forall other in 0..before.length() => other != target ==>
+    after[other].occupant == before[other].occupant && after[other].hash == before[other].hash
+  assert after.length() == 2 * slots.length() && after_places.length() == before_places.length()
+  assert forall position in 0..before_places.length() => position != slots[moved].occupant - 1 ==>
+    after_places[position] == before_places[position]
+  assert forall other in 0..before.length() => {
+    assert fills_target(slots, grown: before, places: before_places, moved: moved, target: other)
+    other != target && before[other].occupant != 0 ==> before[other].occupant != slots[moved].occupant
+  }
+  assert forall other in 0..before.length() => other != target ==> {
+    fills_kept_target(
+      slots,
+      before: before,
+      after: after,
+      before_places: before_places,
+      after_places: after_places,
+      moved: moved,
+      occupant: slots[moved].occupant,
+      other: other,
+    )
+    fills_target(slots, grown: after, places: after_places, moved: moved + 1, target: other)
+  }
+  assert after_places[slots[moved].occupant - 1] == target + 1
+  assert after_places.sum(in_overflow) == before_places.sum(in_overflow)
+  fills_moved_target(slots, after: after, places: after_places, moved: moved, step: step, target: target, target_home: target_home)
+  assert forall slot in 0..slots.length() => slot != moved ==> {
+    assert moves_slot(slots, grown: before, places: before_places, moved: moved, slot: slot)
+    slot_stays_moved(
+      slots,
+      before: before,
+      after: after,
+      before_places: before_places,
+      after_places: after_places,
+      moved: moved,
+      slot: slot,
+      target: target,
+    )
+    moves_slot(slots, grown: after, places: after_places, moved: moved + 1, slot: slot)
+  }
+  assert 0 < after_places[slots[moved].occupant - 1] && after_places[slots[moved].occupant - 1] <= after.length()
+  assert folded(after_places[slots[moved].occupant - 1] - 1, capacity: slots.length()) == moved
+  assert after[after_places[slots[moved].occupant - 1] - 1].occupant == slots[moved].occupant
+  assert moves_slot(slots, grown: after, places: after_places, moved: moved + 1, slot: moved)
+}
+
+theorem regrown_after_flag(
+  slots: Sequence[Slot],
+  overflow: Tree,
+  before: Sequence[Slot],
+  after: Sequence[Slot],
+  places: Sequence[UInt64],
+  moved: Integer,
+  flagged: Integer,
+)
+  requires regrown(slots, overflow: overflow, grown: before, places: places, moved: moved, flagged: flagged)
+  requires flagged < moved
+  requires after.length() == before.length()
+  requires forall other in 0..before.length() =>
+    after[other].occupant == before[other].occupant && after[other].hash == before[other].hash
+      && before[other].reach <= after[other].reach && after[other].reach <= 17
+  requires 16 < slots[flagged].reach ==>
+    16 < after[flagged].reach && 16 < after[flagged + slots.length()].reach
+  ensures regrown(slots, overflow: overflow, grown: after, places: places, moved: moved, flagged: flagged + 1)
+{
+  assert forall target in 0..before.length() => {
+    assert fills_target(slots, grown: before, places: places, moved: moved, target: target)
+    fills_target(slots, grown: after, places: places, moved: moved, target: target)
+  }
+  assert forall slot in 0..slots.length() => {
+    assert moves_slot(slots, grown: before, places: places, moved: moved, slot: slot)
+    moves_slot(slots, grown: after, places: places, moved: moved, slot: slot)
+  }
+}
+
+theorem holds_regrown_slot[Key: Hash + Ordered](
+  slots: Sequence[Slot],
+  old_places: Sequence[UInt64],
+  grown: Sequence[Slot],
+  places: Sequence[UInt64],
+  keys: Sequence[Key],
+  count: Integer,
+  target: Integer,
+)
+  requires 16 <= slots.length() && grown.length() == 2 * slots.length()
+  requires 0 <= target && target < grown.length()
+  requires places.length() == count && old_places.length() == count && count <= keys.length()
+  requires fills_target(slots, grown: grown, places: places, moved: slots.length(), target: target)
+  requires grown[target].occupant != 0 ==> holds_slot(
+    slots,
+    places: old_places,
+    keys: keys,
+    count: count,
+    missing: count,
+    slot: folded(target, capacity: slots.length()),
+  )
+  ensures holds_slot(grown, places: places, keys: keys, count: count, missing: count, slot: target)
+{
+}
+
+theorem holds_regrown_entry[Key: Hash + Ordered](
+  slots: Sequence[Slot],
+  old_places: Sequence[UInt64],
+  overflow: Tree,
+  grown: Sequence[Slot],
+  places: Sequence[UInt64],
+  keys: Sequence[Key],
+  count: Integer,
+  position: Integer,
+)
+  requires 16 <= slots.length() && grown.length() == 2 * slots.length()
+  requires places.length() == count && old_places.length() == count && count <= keys.length()
+  requires 0 <= position && position < count && position <= UInt64.maximum
+  requires holds_entry(slots, places: old_places, overflow: overflow, keys: keys, position: position)
+  requires (places[position] == 0) == overflow.holds(position)
+  requires 16 < slots[home_of(hash_of(keys[position]), capacity: slots.length())].reach ==>
+    16 < grown[home_of(hash_of(keys[position]), capacity: slots.length())].reach
+      && 16 < grown[home_of(hash_of(keys[position]), capacity: slots.length()) + slots.length()].reach
+  requires 0 < old_places[position] ==> old_places[position] <= slots.length()
+    && moves_slot(slots, grown: grown, places: places, moved: slots.length(), slot: old_places[position] - 1)
+  ensures holds_entry(grown, places: places, overflow: overflow, keys: keys, position: position)
+{
+  if old_places[position] == 0 {
+    homes_split(hash_of(keys[position]), capacity: slots.length())
+    assert home_of(hash_of(keys[position]), capacity: grown.length())
+      == home_of(hash_of(keys[position]), capacity: slots.length())
+      || home_of(hash_of(keys[position]), capacity: grown.length())
+        == home_of(hash_of(keys[position]), capacity: slots.length()) + slots.length()
+  }
+}
+
+theorem indexes_after_regrowing[Key: Hash + Ordered](
+  before: HashIndex,
+  after: HashIndex,
+  keys: Sequence[Key],
+  count: Integer,
+)
+  requires before.indexes(keys, count: count, missing: count) && 0 < before.slots.length()
+  requires before.slots.length() <= 2305843009213693952
+  requires regrown(
+    before.slots.model(),
+    overflow: before.overflow,
+    grown: after.slots.model(),
+    places: after.places.model(),
+    moved: before.slots.length(),
+    flagged: before.slots.length(),
+  )
+  requires identical(after.overflow, before.overflow) && after.places.length() == count
+  ensures after.indexes(keys, count: count, missing: count)
+{
+  assert before.slots.model().length() == before.slots.length() && after.slots.model().length() == after.slots.length()
+  assert before.places.model().length() == before.places.length() && after.places.model().length() == after.places.length()
+  assert forall target in 0..after.slots.length() => {
+    assert fills_target(
+      before.slots.model(),
+      grown: after.slots.model(),
+      places: after.places.model(),
+      moved: before.slots.length(),
+      target: target,
+    )
+    if after.slots.model()[target].occupant != 0 {
+      assert holds_slot(
+        before.slots.model(),
+        places: before.places.model(),
+        keys: keys,
+        count: count,
+        missing: count,
+        slot: folded(target, capacity: before.slots.length()),
+      )
+    }
+    holds_regrown_slot(
+      before.slots.model(),
+      old_places: before.places.model(),
+      grown: after.slots.model(),
+      places: after.places.model(),
+      keys: keys,
+      count: count,
+      target: target,
+    )
+    holds_slot(after.slots.model(), places: after.places.model(), keys: keys, count: count, missing: count, slot: target)
+  }
+  assert forall position in 0..count => {
+    assert holds_entry(
+      before.slots.model(),
+      places: before.places.model(),
+      overflow: before.overflow,
+      keys: keys,
+      position: position,
+    )
+    if 0 < before.places.model()[position] {
+      assert moves_slot(
+        before.slots.model(),
+        grown: after.slots.model(),
+        places: after.places.model(),
+        moved: before.slots.length(),
+        slot: before.places.model()[position] - 1,
+      )
+    }
+    holds_regrown_entry(
+      before.slots.model(),
+      old_places: before.places.model(),
+      overflow: before.overflow,
+      grown: after.slots.model(),
+      places: after.places.model(),
+      keys: keys,
+      count: count,
+      position: position,
+    )
+    holds_entry(after.slots.model(), places: after.places.model(), overflow: after.overflow, keys: keys, position: position)
+  }
+  assert forall position: UInt64 => after.overflow.holds(position) ==> {
+    assert before.overflow.holds(position) ==> position < count
+    position < count && after.places.model()[position] == 0
+  }
+}
+
+fn HashIndex.move_slot(mut self, grown: mut List[Slot], slot: UInt64)
+  requires regrown(
+    self.slots.model(),
+    overflow: self.overflow,
+    grown: grown.model(),
+    places: self.places.model(),
+    moved: slot,
+    flagged: slot,
+  )
+  requires 16 <= self.slots.length() && slot < self.slots.length() && self.slots.length() <= 2305843009213693952
+  requires self.slots.model()[slot].occupant != 0 ==> self.slots.model()[slot].occupant <= self.places.length()
+    && distance(self.slots.model()[slot].hash % self.slots.length(), slot: slot, capacity: self.slots.length()) < 16
+  ensures regrown(
+    self.slots.model(),
+    overflow: self.overflow,
+    grown: grown.model(),
+    places: self.places.model(),
+    moved: slot + 1,
+    flagged: slot,
+  )
+  ensures identical(self.slots.model(), old(self.slots.model())) && identical(self.overflow, old(self.overflow))
+  ensures self.places.length() == old(self.places.length())
+  cost time O(1)
+{
+  let moving = self.slots[slot]
+  if moving.occupant == 0 {
+    proof {
+      regrown_after_empty_move(
+        self.slots.model(),
+        overflow: self.overflow,
+        grown: grown.model(),
+        places: self.places.model(),
+        moved: slot,
+        flagged: slot,
+      )
+    }
+    return
+  }
+  let capacity = self.slots.length()
+  let doubled = grown.length()
+  let home = moving.hash % capacity
+  let step = if home <= slot { slot - home } else { slot + capacity - home }
+  let target_home = moving.hash % doubled
+  let target = if target_home + step < doubled { target_home + step } else { target_home + step - doubled }
+  let target_reach = grown[target].reach
+  grown[target] = Slot(occupant: moving.occupant, hash: moving.hash, reach: target_reach)
+  let raised = grown[target_home]
+  if raised.reach < step + 1 {
+    grown[target_home] = Slot(occupant: raised.occupant, hash: raised.hash, reach: step + 1)
+  }
+  self.places[moving.occupant - 1] = target + 1
+  proof {
+    regrown_after_occupied_move(
+      self.slots.model(),
+      overflow: self.overflow,
+      before: old(grown.model()),
+      after: grown.model(),
+      before_places: old(self.places.model()),
+      after_places: self.places.model(),
+      moved: slot,
+      flagged: slot,
+      step: step,
+      target: target,
+      target_home: target_home,
+      place: target + 1,
+    )
+  }
+}
+
+fn HashIndex.flag_slot(self, grown: mut List[Slot], slot: UInt64)
+  requires regrown(
+    self.slots.model(),
+    overflow: self.overflow,
+    grown: grown.model(),
+    places: self.places.model(),
+    moved: slot + 1,
+    flagged: slot,
+  )
+  requires slot < self.slots.length() && self.slots.length() <= 2305843009213693952
+  ensures regrown(
+    self.slots.model(),
+    overflow: self.overflow,
+    grown: grown.model(),
+    places: self.places.model(),
+    moved: slot + 1,
+    flagged: slot + 1,
+  )
+  cost time O(1)
+{
+  if self.slots[slot].reach > 16 {
+    let lower = grown[slot]
+    grown[slot] = Slot(occupant: lower.occupant, hash: lower.hash, reach: 17)
+    let upper = grown[slot + self.slots.length()]
+    grown[slot + self.slots.length()] = Slot(occupant: upper.occupant, hash: upper.hash, reach: 17)
+  }
+  proof {
+    regrown_after_flag(
+      self.slots.model(),
+      overflow: self.overflow,
+      before: old(grown.model()),
+      after: grown.model(),
+      places: self.places.model(),
+      moved: slot + 1,
+      flagged: slot,
+    )
+  }
+}
+
+fn HashIndex.grow[Key: Hash + Ordered](mut self, keys: Slice[Key])
+  requires self.indexes(keys.model(), count: keys.length(), missing: keys.length())
+  requires self.slots.length() <= 2305843009213693952 && keys.length() < UInt64.maximum
+  ensures self.indexes(keys.model(), count: keys.length(), missing: keys.length())
+  ensures old(self.slots.length()) == 0 ==> self.slots.length() == 16
+  ensures 0 < old(self.slots.length()) ==> self.slots.length() == 2 * old(self.slots.length())
+  ensures identical(self.overflow, old(self.overflow))
+  ensures self.places.length() == old(self.places.length())
+  cost time O(16 + self.slots.length())
+{
+  let capacity = self.slots.length()
+  if capacity == 0 {
+    self.slots = List.filled(Slot(occupant: 0, hash: 0, reach: 0), count: 16)
+    proof {
+      assert identical(self.places, old(self.places))
+    }
+    return
+  }
+  var grown = List.filled(Slot(occupant: 0, hash: 0, reach: 0), count: 2 * capacity)
+  proof {
+    regrown_at_start(self, keys: keys.model(), count: keys.length(), grown: grown.model())
+  }
+  for slot in 0..capacity
+    invariant regrown(
+      self.slots.model(),
+      overflow: self.overflow,
+      grown: grown.model(),
+      places: self.places.model(),
+      moved: slot,
+      flagged: slot,
+    )
+    invariant identical(self.slots.model(), old(self.slots.model())) && identical(self.overflow, old(self.overflow))
+    invariant self.places.length() == keys.length()
+  {
+    proof {
+      assert holds_slot(old(self).slots.model(), places: old(self).places.model(), keys: keys.model(), count: keys.length(), missing: keys.length(), slot: slot)
+    }
+    mut self.move_slot(mut grown, slot: slot)
+    self.flag_slot(mut grown, slot: slot)
+  }
+  self.slots = own grown
+  proof {
+    indexes_after_regrowing(old(self), after: self, keys: keys.model(), count: keys.length())
+  }
+}
+
+fn swap_removed[Element](items: Sequence[Element], index: Integer) -> Sequence[Element]
+  requires 0 <= index && index < items.length()
+  ensures result.length() == items.length() - 1
+  ensures forall position in 0..items.length() - 1 =>
+    identical(result[position], if position == index { items[items.length() - 1] } else { items[position] })
+{
+  items.update(index, value: items[items.length() - 1])[..items.length() - 1]
+}
+
+theorem indexes_after_unslotting[Key: Hash + Ordered](
+  before: HashIndex,
+  after: HashIndex,
+  keys: Sequence[Key],
+  count: Integer,
+  position: Integer,
+)
+  requires before.indexes(keys, count: count, missing: count)
+  requires 0 <= position && position < count && 0 < before.places.model()[position]
+  requires before.places.model()[position] <= before.slots.length()
+  requires identical(after.places.model(), before.places.model()) && identical(after.overflow, before.overflow)
+  requires after.slots.length() == before.slots.length()
+  requires forall other in 0..before.slots.length() => other == before.places.model()[position] - 1
+    || identical(after.slots.model()[other], before.slots.model()[other])
+  requires after.slots.model()[before.places.model()[position] - 1].occupant == 0
+  requires after.slots.model()[before.places.model()[position] - 1].reach
+    == before.slots.model()[before.places.model()[position] - 1].reach
+  ensures after.indexes(keys, count: count, missing: position)
+{
+  assert holds_entry(before.slots.model(), places: before.places.model(), overflow: before.overflow, keys: keys, position: position)
+  assert forall other in 0..count => other != position && 0 < before.places.model()[other] ==> {
+    assert holds_entry(before.slots.model(), places: before.places.model(), overflow: before.overflow, keys: keys, position: other)
+    before.places.model()[other] != before.places.model()[position]
+  }
+  assert forall other in 0..before.slots.length() => {
+    assert holds_slot(before.slots.model(), places: before.places.model(), keys: keys, count: count, missing: count, slot: other)
+    holds_slot(after.slots.model(), places: after.places.model(), keys: keys, count: count, missing: position, slot: other)
+  }
+  assert forall other in 0..count => other != position ==> {
+    assert holds_entry(before.slots.model(), places: before.places.model(), overflow: before.overflow, keys: keys, position: other)
+    holds_entry(after.slots.model(), places: after.places.model(), overflow: after.overflow, keys: keys, position: other)
+  }
+}
+
+theorem slot_held_with_missing[Key: Hash + Ordered](
+  before: HashIndex,
+  after: HashIndex,
+  keys: Sequence[Key],
+  count: Integer,
+  missing: Integer,
+  slot: Integer,
+)
+  requires 0 <= slot && slot < before.slots.length()
+  requires count <= before.places.length() && count <= keys.length()
+  requires identical(after.slots.model(), before.slots.model()) && identical(after.places.model(), before.places.model())
+  requires after.slots.length() == before.slots.length() && after.places.length() == before.places.length()
+  requires holds_slot(before.slots.model(), places: before.places.model(), keys: keys, count: count, missing: count, slot: slot)
+  requires before.slots.model()[slot].occupant != 0 ==> before.slots.model()[slot].occupant - 1 != missing
+  ensures holds_slot(after.slots.model(), places: after.places.model(), keys: keys, count: count, missing: missing, slot: slot)
+{
+  let occupant = after.slots.model()[slot].occupant
+  if occupant != 0 {
+    let home = after.slots.model()[slot].hash % after.slots.length()
+    assert before.slots.model()[slot].hash % before.slots.length() == home
+    assert occupant == before.slots.model()[slot].occupant && occupant <= count && occupant - 1 != missing
+    assert after.places.model()[occupant - 1] == slot + 1
+    assert after.slots.model()[slot].hash == hash_of(keys[occupant - 1])
+    assert distance(home, slot: slot, capacity: after.slots.length()) < 16
+    assert distance(home, slot: slot, capacity: after.slots.length()) < after.slots.model()[home].reach
+  }
+}
+
+theorem indexes_after_unoverflowing[Key: Hash + Ordered](
+  before: HashIndex,
+  after: HashIndex,
+  keys: Sequence[Key],
+  count: Integer,
+  position: Integer,
+)
+  requires before.indexes(keys, count: count, missing: count)
+  requires 0 <= position && position < count && before.places.model()[position] == 0
+  requires identical(after.places.model(), before.places.model())
+  requires identical(after.slots.model(), before.slots.model())
+  requires after.overflow.balanced() && after.overflow.sorted(keys)
+  requires forall other: UInt64 => after.overflow.holds(other) == (before.overflow.holds(other) && other != position)
+  requires after.overflow.size() + 1 == before.overflow.size()
+  ensures after.indexes(keys, count: count, missing: position)
+{
+  assert forall other in 0..before.slots.length() => {
+    assert holds_slot(before.slots.model(), places: before.places.model(), keys: keys, count: count, missing: count, slot: other)
+    before.slots.model()[other].occupant != 0 ==> before.slots.model()[other].occupant - 1 != position
+  }
+  assert forall other in 0..before.slots.length() => {
+    slot_held_with_missing(before, after: after, keys: keys, count: count, missing: position, slot: other)
+    holds_slot(after.slots.model(), places: after.places.model(), keys: keys, count: count, missing: position, slot: other)
+  }
+  assert forall other in 0..count => other != position ==> {
+    assert holds_entry(before.slots.model(), places: before.places.model(), overflow: before.overflow, keys: keys, position: other)
+    holds_entry(after.slots.model(), places: after.places.model(), overflow: after.overflow, keys: keys, position: other)
+  }
+}
+
+theorem overflow_count_at_most_length(places: Sequence[UInt64])
+  ensures places.sum(in_overflow) <= places.length()
+  decreases places.length()
+{
+  if places.length() > 0 {
+    assert identical(places, places[..places.length() - 1].append(places[places.length() - 1]))
+    overflow_count_at_most_length(places[..places.length() - 1])
+  }
+}
+
+theorem overflow_within_count[Key: Hash + Ordered](
+  index: HashIndex,
+  keys: Sequence[Key],
+  count: Integer,
+  missing: Integer,
+)
+  requires index.indexes(keys, count: count, missing: missing)
+  ensures index.overflow.size() <= count
+  ensures index.overflow.height() <= count
+{
+  overflow_count_at_most_length(index.places.model())
+  height_at_most_size(index.overflow)
+}
+
+fn HashIndex.unplace[Key: Hash + Ordered](
+  mut self,
+  keys: Slice[Key],
+  position: UInt64,
+)
+  requires self.indexes(keys.model(), count: keys.length(), missing: keys.length())
+  requires position < keys.length() && keys.length() < UInt64.maximum
+  ensures self.indexes(keys.model(), count: keys.length(), missing: position)
+  ensures self.slots.length() == old(self.slots.length())
+  ensures self.overflow.height() <= old(self.overflow.height())
+  ensures identical(self.places.model(), old(self.places.model()))
+  cost time O((1 + self.overflow.height()) * (1 + time(Key.compare)))
+{
+  proof {
+    assert holds_entry(self.slots.model(), places: self.places.model(), overflow: self.overflow, keys: keys.model(), position: position)
+    overflow_within_count(self, keys: keys.model(), count: keys.length(), missing: keys.length())
+  }
+  let place = self.places[position]
+  if place != 0 {
+    let vacated = self.slots[place - 1]
+    self.slots[place - 1] = Slot(occupant: 0, hash: vacated.hash, reach: vacated.reach)
+    proof {
+      indexes_after_unslotting(old(self), after: self, keys: keys.model(), count: keys.length(), position: position)
+    }
+  } else {
+    let tree = exchange(mut self.overflow, value: Tree.Leaf)
+    self.overflow = own tree.without(position, keys: keys)
+    proof {
+      indexes_after_unoverflowing(
+        old(self),
+        after: self,
+        keys: keys.model(),
+        count: keys.length(),
+        position: position,
+      )
+    }
+  }
+}
+
+theorem slot_kept_after_dropping[Key: Hash + Ordered](
+  slots: Sequence[Slot],
+  before: Sequence[UInt64],
+  after: Sequence[UInt64],
+  keys: Sequence[Key],
+  count: Integer,
+  slot: Integer,
+)
+  requires 0 < count && count <= keys.length() && 0 <= slot && slot < slots.length()
+  requires before.length() == count && after.length() == count - 1
+  requires forall position in 0..count - 1 => after[position] == before[position]
+  requires holds_slot(slots, places: before, keys: keys, count: count, missing: count - 1, slot: slot)
+  ensures holds_slot(slots, places: after, keys: keys, count: count - 1, missing: count - 1, slot: slot)
+{
+}
+
+theorem indexes_after_dropping_last[Key: Hash + Ordered](
+  before: HashIndex,
+  after: HashIndex,
+  keys: Sequence[Key],
+  count: Integer,
+)
+  requires before.indexes(keys, count: count, missing: count - 1) && 0 < count
+  requires identical(after.slots.model(), before.slots.model()) && identical(after.overflow, before.overflow)
+  requires after.slots.length() == before.slots.length()
+  requires after.places.length() + 1 == before.places.length()
+  requires forall position in 0..count - 1 => after.places.model()[position] == before.places.model()[position]
+  ensures after.indexes(keys, count: count - 1, missing: count - 1)
+{
+  assert before.slots.model().length() == before.slots.length() && after.places.model().length() == after.places.length()
+  assert identical(before.places.model(), after.places.model().append(before.places.model()[count - 1]))
+  assert forall slot in 0..before.slots.length() => {
+    assert holds_slot(
+      before.slots.model(),
+      places: before.places.model(),
+      keys: keys,
+      count: count,
+      missing: count - 1,
+      slot: slot,
+    )
+    slot_kept_after_dropping(
+      before.slots.model(),
+      before: before.places.model(),
+      after: after.places.model(),
+      keys: keys,
+      count: count,
+      slot: slot,
+    )
+    holds_slot(after.slots.model(), places: after.places.model(), keys: keys, count: count - 1, missing: count - 1, slot: slot)
+  }
+  assert forall position in 0..count - 1 => {
+    assert holds_entry(
+      before.slots.model(),
+      places: before.places.model(),
+      overflow: before.overflow,
+      keys: keys,
+      position: position,
+    )
+    holds_entry(after.slots.model(), places: after.places.model(), overflow: after.overflow, keys: keys, position: position)
+  }
+}
+
+fn HashIndex.drop_last[Key: Hash + Ordered](mut self, keys: Slice[Key])
+  requires 0 < keys.length()
+  requires self.indexes(keys.model(), count: keys.length(), missing: keys.length() - 1)
+  ensures self.indexes(keys.model(), count: keys.length() - 1, missing: keys.length() - 1)
+  ensures self.slots.length() == old(self.slots.length()) && identical(self.overflow, old(self.overflow))
+  cost time O(1)
+{
+  let _ = mut self.places.pop()
+  proof {
+    indexes_after_dropping_last(old(self), after: self, keys: keys.model(), count: keys.length())
+  }
+}
+
+theorem slot_after_relabeling[Key: Hash + Ordered](
+  before_slots: Sequence[Slot],
+  after_slots: Sequence[Slot],
+  before_places: Sequence[UInt64],
+  after_places: Sequence[UInt64],
+  keys: Sequence[Key],
+  moved: Sequence[Key],
+  count: Integer,
+  hole: Integer,
+  slot: Integer,
+)
+  requires 1 < count && count == keys.length() && 0 <= hole && hole < count - 1
+  requires moved.length() == count - 1 && identical(moved[hole], keys[count - 1])
+  requires forall position in 0..count - 1 => position == hole || identical(moved[position], keys[position])
+  requires 0 <= slot && slot < before_slots.length() && after_slots.length() == before_slots.length()
+  requires before_places.length() == count && after_places.length() == count - 1
+  requires holds_slot(before_slots, places: before_places, keys: keys, count: count, missing: hole, slot: slot)
+  requires after_slots[slot].hash == before_slots[slot].hash
+  requires forall other in 0..before_slots.length() => after_slots[other].reach == before_slots[other].reach
+  requires after_places[hole] == before_places[count - 1]
+  requires forall position in 0..count - 1 => position != hole ==> after_places[position] == before_places[position]
+  requires before_slots[slot].occupant == count ==> after_slots[slot].occupant == hole + 1
+  requires before_slots[slot].occupant != count ==> after_slots[slot].occupant == before_slots[slot].occupant
+  ensures holds_slot(
+    after_slots,
+    places: after_places,
+    keys: moved,
+    count: count - 1,
+    missing: count - 1,
+    slot: slot,
+  )
+{
+  let occupant = before_slots[slot].occupant
+  let home = before_slots[slot].hash % before_slots.length()
+  if occupant != 0 {
+    assert after_slots[slot].hash % after_slots.length() == home
+    assert distance(home, slot: slot, capacity: after_slots.length()) < 16
+    assert distance(home, slot: slot, capacity: after_slots.length()) < after_slots[home].reach
+    assert before_places[occupant - 1] == slot + 1
+  }
+  if occupant == count {
+    assert after_slots[slot].occupant == hole + 1 && after_places[hole] == slot + 1
+    assert after_slots[slot].hash == hash_of(moved[hole])
+  } else if occupant != 0 {
+    assert after_slots[slot].occupant == occupant && occupant <= count - 1 && occupant - 1 != hole
+    assert after_places[occupant - 1] == slot + 1
+    assert after_slots[slot].hash == hash_of(moved[occupant - 1])
+  }
+}
+
+theorem entry_after_relabeling[Key: Hash + Ordered](
+  before: HashIndex,
+  after: HashIndex,
+  keys: Sequence[Key],
+  count: Integer,
+  hole: Integer,
+  place: UInt64,
+  position: Integer,
+)
+  requires 1 < count && count == keys.length() && 0 <= hole && hole < count - 1
+  requires 0 <= position && position < count - 1 && position <= UInt64.maximum
+  requires 0 < before.slots.length() && after.slots.length() == before.slots.length()
+  requires before.places.length() == count && after.places.length() == count - 1
+  requires place == before.places.model()[count - 1] && 0 < place && place <= before.slots.length()
+  requires position != hole ==> holds_entry(
+    before.slots.model(),
+    places: before.places.model(),
+    overflow: before.overflow,
+    keys: keys,
+    position: position,
+  )
+  requires position != hole && 0 < before.places.model()[position] ==> before.places.model()[position] != place
+  requires forall other in 0..before.slots.length() =>
+    other == place - 1 || identical(after.slots.model()[other], before.slots.model()[other])
+  requires after.slots.model()[place - 1].occupant == hole + 1
+  requires after.slots.model()[place - 1].reach == before.slots.model()[place - 1].reach
+  requires after.places.model()[hole] == place
+  requires position != hole ==> after.places.model()[position] == before.places.model()[position]
+  requires identical(after.overflow, before.overflow)
+  ensures holds_entry(
+    after.slots.model(),
+    places: after.places.model(),
+    overflow: after.overflow,
+    keys: swap_removed(keys, index: hole),
+    position: position,
+  )
+{
+  assert before.slots.model().length() == before.slots.length() && after.slots.model().length() == after.slots.length()
+  assert identical(swap_removed(keys, index: hole)[position], if position == hole { keys[count - 1] } else { keys[position] })
+}
+
+theorem indexes_after_relabeling[Key: Hash + Ordered](
+  before: HashIndex,
+  after: HashIndex,
+  keys: Sequence[Key],
+  count: Integer,
+  hole: Integer,
+  place: UInt64,
+)
+  requires before.indexes(keys, count: count, missing: hole) && 1 < count && 0 <= hole && hole < count - 1
+  requires count == keys.length()
+  requires place == before.places.model()[count - 1] && 0 < place && place <= before.slots.length()
+  requires after.slots.length() == before.slots.length()
+  requires forall other in 0..before.slots.length() =>
+    other == place - 1 || identical(after.slots.model()[other], before.slots.model()[other])
+  requires after.slots.model()[place - 1].occupant == hole + 1
+  requires after.slots.model()[place - 1].hash == before.slots.model()[place - 1].hash
+  requires after.slots.model()[place - 1].reach == before.slots.model()[place - 1].reach
+  requires after.places.length() == count - 1 && after.places.model()[hole] == place
+  requires forall position in 0..count - 1 => position != hole ==>
+    after.places.model()[position] == before.places.model()[position]
+  requires identical(after.overflow, before.overflow)
+  ensures after.indexes(swap_removed(keys, index: hole), count: count - 1, missing: count - 1)
+{
+  let moved = swap_removed(keys, index: hole)
+  assert before.slots.model().length() == before.slots.length() && after.slots.model().length() == after.slots.length()
+  assert before.places.model().length() == before.places.length() && after.places.model().length() == after.places.length()
+  assert holds_entry(before.slots.model(), places: before.places.model(), overflow: before.overflow, keys: keys, position: count - 1)
+  assert forall other in 0..before.slots.length() => {
+    assert holds_slot(before.slots.model(), places: before.places.model(), keys: keys, count: count, missing: hole, slot: other)
+    before.slots.model()[other].occupant == count ==> other == place - 1
+  }
+  assert forall other in 0..before.slots.length() => {
+    slot_after_relabeling(
+      before.slots.model(),
+      after_slots: after.slots.model(),
+      before_places: before.places.model(),
+      after_places: after.places.model(),
+      keys: keys,
+      moved: moved,
+      count: count,
+      hole: hole,
+      slot: other,
+    )
+    holds_slot(after.slots.model(), places: after.places.model(), keys: moved, count: count - 1, missing: count - 1, slot: other)
+  }
+  assert forall position in 0..count - 1 => {
+    if position != hole {
+      assert holds_entry(before.slots.model(), places: before.places.model(), overflow: before.overflow, keys: keys, position: position)
+      if 0 < before.places.model()[position] {
+        assert holds_slot(
+          before.slots.model(),
+          places: before.places.model(),
+          keys: keys,
+          count: count,
+          missing: hole,
+          slot: before.places.model()[position] - 1,
+        )
+      }
+    }
+    entry_after_relabeling(before, after: after, keys: keys, count: count, hole: hole, place: place, position: position)
+    holds_entry(after.slots.model(), places: after.places.model(), overflow: after.overflow, keys: moved, position: position)
+  }
+  assert forall position: UInt64 => after.overflow.holds(position) ==> position < count - 1 && position != hole
+  sorted_transferred(before.overflow, first: keys, second: moved)
+  assert identical(before.places.model().update(hole, value: place), after.places.model().append(place))
+}
+
+theorem slot_after_detaching[Key: Hash + Ordered](
+  slots: Sequence[Slot],
+  before_places: Sequence[UInt64],
+  after_places: Sequence[UInt64],
+  keys: Sequence[Key],
+  moved: Sequence[Key],
+  count: Integer,
+  hole: Integer,
+  slot: Integer,
+)
+  requires 1 < count && count == keys.length() && 0 <= hole && hole < count - 1
+  requires moved.length() == count - 1
+  requires forall position in 0..count - 1 => position == hole || identical(moved[position], keys[position])
+  requires 0 <= slot && slot < slots.length()
+  requires before_places.length() == count && after_places.length() == count - 1
+  requires forall position in 0..count - 1 => position != hole ==> after_places[position] == before_places[position]
+  requires holds_slot(slots, places: before_places, keys: keys, count: count, missing: hole, slot: slot)
+  requires slots[slot].occupant != count
+  ensures holds_slot(slots, places: after_places, keys: moved, count: count - 1, missing: hole, slot: slot)
+{
+  let occupant = slots[slot].occupant
+  if occupant != 0 {
+    assert identical(moved[occupant - 1], keys[occupant - 1])
+    assert after_places[occupant - 1] == slot + 1
+  }
+}
+
+theorem entry_after_detaching[Key: Hash + Ordered](
+  slots: Sequence[Slot],
+  before_places: Sequence[UInt64],
+  after_places: Sequence[UInt64],
+  before_overflow: Tree,
+  after_overflow: Tree,
+  keys: Sequence[Key],
+  moved: Sequence[Key],
+  count: Integer,
+  hole: Integer,
+  position: Integer,
+)
+  requires 1 < count && count == keys.length() && 0 <= hole && hole < count - 1
+  requires moved.length() == count - 1 && 0 < slots.length()
+  requires 0 <= position && position < count - 1 && position != hole && position <= UInt64.maximum
+  requires identical(moved[position], keys[position])
+  requires before_places.length() == count && after_places.length() == count - 1
+  requires after_places[position] == before_places[position]
+  requires after_overflow.holds(position) == before_overflow.holds(position)
+  requires holds_entry(slots, places: before_places, overflow: before_overflow, keys: keys, position: position)
+  ensures holds_entry(slots, places: after_places, overflow: after_overflow, keys: moved, position: position)
+{
+}
+
+theorem indexes_after_detaching[Key: Hash + Ordered](
+  before: HashIndex,
+  after: HashIndex,
+  keys: Sequence[Key],
+  count: Integer,
+  hole: Integer,
+)
+  requires before.indexes(keys, count: count, missing: hole) && 1 < count && count == keys.length()
+  requires 0 <= hole && hole < count - 1 && before.places.model()[count - 1] == 0
+  requires identical(after.slots.model(), before.slots.model()) && after.slots.length() == before.slots.length()
+  requires after.overflow.balanced() && after.overflow.sorted(keys)
+  requires forall other: UInt64 => after.overflow.holds(other) == (before.overflow.holds(other) && other != count - 1)
+  requires after.overflow.size() + 1 == before.overflow.size()
+  requires after.places.length() == count - 1 && after.places.model()[hole] == 0
+  requires forall position in 0..count - 1 => position != hole ==>
+    after.places.model()[position] == before.places.model()[position]
+  ensures after.indexes(swap_removed(keys, index: hole), count: count - 1, missing: hole)
+  ensures 0 < after.slots.length()
+  ensures 16 < after.slots.model()[home_of(hash_of(keys[count - 1]), capacity: after.slots.length())].reach
+{
+  let moved = swap_removed(keys, index: hole)
+  assert before.slots.model().length() == before.slots.length() && after.slots.model().length() == after.slots.length()
+  assert before.places.model().length() == before.places.length() && after.places.model().length() == after.places.length()
+  assert holds_entry(before.slots.model(), places: before.places.model(), overflow: before.overflow, keys: keys, position: count - 1)
+  assert forall other in 0..before.slots.length() => {
+    assert holds_slot(before.slots.model(), places: before.places.model(), keys: keys, count: count, missing: hole, slot: other)
+    slot_after_detaching(
+      before.slots.model(),
+      before_places: before.places.model(),
+      after_places: after.places.model(),
+      keys: keys,
+      moved: moved,
+      count: count,
+      hole: hole,
+      slot: other,
+    )
+    holds_slot(after.slots.model(), places: after.places.model(), keys: moved, count: count - 1, missing: hole, slot: other)
+  }
+  assert forall position in 0..count - 1 => position != hole ==> {
+    assert holds_entry(before.slots.model(), places: before.places.model(), overflow: before.overflow, keys: keys, position: position)
+    entry_after_detaching(
+      before.slots.model(),
+      before_places: before.places.model(),
+      after_places: after.places.model(),
+      before_overflow: before.overflow,
+      after_overflow: after.overflow,
+      keys: keys,
+      moved: moved,
+      count: count,
+      hole: hole,
+      position: position,
+    )
+    holds_entry(after.slots.model(), places: after.places.model(), overflow: after.overflow, keys: moved, position: position)
+  }
+  assert forall position: UInt64 => after.overflow.holds(position) ==>
+    position < count - 1 && position != hole && after.places.model()[position] == 0
+  sorted_transferred(after.overflow, first: keys, second: moved)
+  assert identical(before.places.model().update(hole, value: 0), after.places.model().append(0))
+}
+
+fn HashIndex.detach_last[Key: Hash + Ordered](
+  mut self,
+  keys: Slice[Key],
+  hole: UInt64,
+) -> Bool
+  requires 1 < keys.length() && hole < keys.length() - 1 && keys.length() < UInt64.maximum
+  requires self.indexes(keys.model(), count: keys.length(), missing: hole)
+  ensures !result ==> self.indexes(
+    swap_removed(keys.model(), index: hole),
+    count: keys.length() - 1,
+    missing: keys.length() - 1,
+  )
+  ensures result ==> self.indexes(swap_removed(keys.model(), index: hole), count: keys.length() - 1, missing: hole)
+    && self.places.model()[hole] == 0 && 0 < self.slots.length()
+    && 16 < self.slots.model()[home_of(hash_of(keys.model()[keys.length() - 1]), capacity: self.slots.length())].reach
+  ensures self.slots.length() == old(self.slots.length())
+  ensures self.overflow.height() <= old(self.overflow.height())
+  cost time O((1 + self.overflow.height()) * (1 + time(Key.compare)))
+{
+  let last = keys.length() - 1
+  proof {
+    assert holds_entry(self.slots.model(), places: self.places.model(), overflow: self.overflow, keys: keys.model(), position: last)
+    overflow_within_count(self, keys: keys.model(), count: keys.length(), missing: hole)
+  }
+  let place = self.places[last]
+  if place != 0 {
+    let relabeled = self.slots[place - 1]
+    self.slots[place - 1] = Slot(occupant: hole + 1, hash: relabeled.hash, reach: relabeled.reach)
+    self.places[hole] = place
+    let _ = mut self.places.pop()
+    proof {
+      indexes_after_relabeling(
+        old(self),
+        after: self,
+        keys: keys.model(),
+        count: keys.length(),
+        hole: hole,
+        place: place,
+      )
+    }
+    false
+  } else {
+    let tree = exchange(mut self.overflow, value: Tree.Leaf)
+    self.overflow = own tree.without(last, keys: keys)
+    self.places[hole] = 0
+    let _ = mut self.places.pop()
+    proof {
+      indexes_after_detaching(old(self), after: self, keys: keys.model(), count: keys.length(), hole: hole)
+    }
+    true
+  }
+}
+
+theorem slot_held_without_missing[Key: Hash + Ordered](
+  slots: Sequence[Slot],
+  places: Sequence[UInt64],
+  keys: Sequence[Key],
+  count: Integer,
+  missing: Integer,
+  slot: Integer,
+)
+  requires 0 <= slot && slot < slots.length() && count <= places.length() && count <= keys.length()
+  requires holds_slot(slots, places: places, keys: keys, count: count, missing: missing, slot: slot)
+  ensures holds_slot(slots, places: places, keys: keys, count: count, missing: count, slot: slot)
+{
+}
+
+theorem indexes_after_attaching[Key: Hash + Ordered](
+  before: HashIndex,
+  after: HashIndex,
+  keys: Sequence[Key],
+  count: Integer,
+  position: Integer,
+)
+  requires before.indexes(keys, count: count, missing: position) && 0 <= position && position < count
+  requires before.places.model()[position] == 0 && 0 < before.slots.length()
+  requires 16 < before.slots.model()[home_of(hash_of(keys[position]), capacity: before.slots.length())].reach
+  requires identical(after.slots.model(), before.slots.model()) && after.slots.length() == before.slots.length()
+  requires identical(after.places.model(), before.places.model()) && after.places.length() == before.places.length()
+  requires after.overflow.balanced() && after.overflow.sorted(keys)
+  requires forall other: UInt64 => after.overflow.holds(other) == (before.overflow.holds(other) || other == position)
+  requires after.overflow.size() == before.overflow.size() + 1
+  ensures after.indexes(keys, count: count, missing: count)
+{
+  assert before.slots.model().length() == before.slots.length() && after.slots.model().length() == after.slots.length()
+  assert forall other in 0..before.slots.length() => {
+    assert holds_slot(before.slots.model(), places: before.places.model(), keys: keys, count: count, missing: position, slot: other)
+    slot_held_without_missing(
+      before.slots.model(),
+      places: before.places.model(),
+      keys: keys,
+      count: count,
+      missing: position,
+      slot: other,
+    )
+    holds_slot(after.slots.model(), places: after.places.model(), keys: keys, count: count, missing: count, slot: other)
+  }
+  assert forall other in 0..count => other != position ==> {
+    assert holds_entry(before.slots.model(), places: before.places.model(), overflow: before.overflow, keys: keys, position: other)
+    holds_entry(after.slots.model(), places: after.places.model(), overflow: after.overflow, keys: keys, position: other)
+  }
+  assert holds_entry(after.slots.model(), places: after.places.model(), overflow: after.overflow, keys: keys, position: position)
+}
+
+fn HashIndex.attach[Key: Hash + Ordered](
+  mut self,
+  keys: Slice[Key],
+  position: UInt64,
+)
+  requires position < keys.length() && keys.length() < UInt64.maximum - 2
+  requires self.indexes(keys.model(), count: keys.length(), missing: position)
+  requires self.places.model()[position] == 0 && 0 < self.slots.length()
+  requires 16 < self.slots.model()[home_of(hash_of(keys.model()[position]), capacity: self.slots.length())].reach
+  requires forall other in 0..keys.length() => other != position ==>
+    !(keys.model()[other] == keys.model()[position])
+  ensures self.indexes(keys.model(), count: keys.length(), missing: keys.length())
+  ensures self.slots.length() == old(self.slots.length())
+  ensures self.overflow.height() <= old(self.overflow.height()) + 1
+  cost time O((1 + self.overflow.height()) * (1 + time(Key.compare)))
+{
+  proof {
+    overflow_within_count(self, keys: keys.model(), count: keys.length(), missing: position)
+  }
+  let tree = exchange(mut self.overflow, value: Tree.Leaf)
+  self.overflow = own tree.inserted(position, keys: keys)
+  proof {
+    indexes_after_attaching(old(self), after: self, keys: keys.model(), count: keys.length(), position: position)
+  }
+}
+
+fn HashIndex.has_room(self, hash: UInt64) -> Bool
+  cost time O(16)
+  cost allocations == 0
+{
+  let capacity = self.slots.length()
+  if capacity == 0 {
+    return false
+  }
+  var slot = hash % capacity
+  var step: UInt64 = 0
+  while step < 16
+    invariant step <= 16 && slot < capacity
+    decreases 16 - step
+    cost time O(step)
+  {
+    if self.slots[slot].occupant == 0 {
+      return true
+    }
+    step += 1
+    slot = if slot + 1 < capacity { slot + 1 } else { 0 }
+  }
+  false
+}

@@ -1,0 +1,11 @@
+type Player(name: String, score: Int64)
+
+fn best_is_highest(players: Slice[Player]) -> Bool
+  requires players.length() > 0
+  ensures result
+{
+  match players.max_by(fn(first, second) { first.score.compare(second.score) }) {
+    Some(best) => forall i in 0..players.length() => players[i].score <= best.score
+    None => false
+  }
+}

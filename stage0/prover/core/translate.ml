@@ -245,14 +245,6 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
         List.length clauses.parameters = List.length (pair_up parameters)
     | None -> false
   in
-  let inherits_precondition =
-    has_trait_frame
-    &&
-    match inherited with
-    | Some ({ callee = { key = { path = Method { owner; _ }; _ }; _ }; _ }, _) ->
-        not (Well_known.is From_template owner)
-    | Some _ | None -> true
-  in
   let home = source.key in
   let measures =
     List.filter
@@ -266,7 +258,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
         (Mir.Call_edges.resolve_node
            { interface = lookups.interface; mir = lookups.mir }
            path substitution)
-      ~terminates ~measures ~inherits_precondition
+      ~terminates ~measures ~inherits_precondition:has_trait_frame
   in
   List.iter
     (fun (measure : Mir.formula) ->
@@ -338,11 +330,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
       (fun frame (parameter : Mir.parameter) ->
         match parameter.local with
         | Self ->
-            let self_type =
-              match signature with
-              | Some { receiver = Some (_, ty); _ } -> ty
-              | _ -> Facts.raise_unsupported Whole_definition "`self` without a type"
-            in
+            let self_type = Facts.substitute_type context frame parameter.type_ in
             let self = Facts.arrive context frame "self" self_type in
             (match self with
             | Logic.Symbol symbol -> context.entry <- symbol :: context.entry

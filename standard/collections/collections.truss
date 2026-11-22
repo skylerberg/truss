@@ -1,4 +1,4 @@
-use standard::map
+use standard.map
 
 public opaque type Deque[Element](front: List[Element], back: List[Element])
   invariant front.length() <= UInt64.maximum - back.length()
@@ -10,10 +10,14 @@ public opaque type Heap[Element: Ordered](items: List[Element], largest_first: B
 
 public opaque type HeapCursor[Element: Ordered](heap: Heap[Element])
 
-public opaque type SortedMap[Key: Ordered, Value](entries: List[map::Entry[Key, Value]])
+public opaque type SortedMap[Key: Ordered, Value](entries: List[map.Entry[Key, Value]])
   invariant forall i in 0..entries.length() => forall j in 0..entries.length() =>
     i < j ==> entries.model()[i].key < entries.model()[j].key
   derives Copyable
+
+public type SortedMapKeys[Key, Value](entries: Slice[map.Entry[Key, Value]])
+
+public type SortedMapValues[Key, Value](entries: Slice[map.Entry[Key, Value]])
 
 public opaque type SortedSet[Element: Ordered](elements: List[Element])
   invariant forall i in 0..elements.length() => forall j in 0..elements.length() =>

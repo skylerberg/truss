@@ -1,4 +1,4 @@
-use standard::text
+use standard.text
 
 type Kind = Flag | Option | Positional | Rest
   derives Equal
@@ -330,18 +330,18 @@ fn Parser.parse_short_options(
   requires next <= arguments.length()
   ensures !(result is Ok(after) && (after < next || after > arguments.length()))
 {
-  for each in body.characters_with_offsets() {
-    let position = self.find_short(each.element)
+  for offset, letter in body.characters_with_offsets() {
+    let position = self.find_short(letter)
     if position == self.parameters.length() {
-      if each.element == Character"h" {
+      if letter == Character"h" {
         return Err(Error.HelpRequested)
       }
       var typed = "-"
-      mut typed.push_character(each.element)
+      mut typed.push_character(letter)
       return Err(Error.UnknownOption(name: own typed))
     }
     if self.parameters[position].kind != Kind.Flag {
-      let rest = body.get_substring(each.index + each.element.utf8_length(), to: body.length())
+      let rest = body.get_substring(offset + letter.utf8_length(), to: body.length())
       let attached: Option[StringSlice] = if rest is Some(text) && text.length() > 0 { Some(text) } else { None }
       return self.take_option_value(mut parsed, position: position, attached: attached, arguments: arguments, next: next)
     }
@@ -655,7 +655,7 @@ public fn Parsed.values(self, name: StringSlice) -> Slice[String]
   self.options[position].values.slice()
 }
 
-public fn Parsed.value_as[Target: text::Parse](self, name: StringSlice) -> Result[Option[Target], Error] {
+public fn Parsed.value_as[Target: text.Parse](self, name: StringSlice) -> Result[Option[Target], Error] {
   match self.value(name) {
     Some(text) => match Target.parse(text) {
       Ok(parsed) => Ok(Some(own parsed))

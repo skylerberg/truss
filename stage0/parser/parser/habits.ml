@@ -145,13 +145,6 @@ let report_angle_brackets cursor ~(angles : Token.t list) =
            | _ -> "]"))
        angles)
 
-let report_path_separator cursor ~(separator : Token.t) =
-  report cursor Path_separator separator.span
-    "`::` follows only the name of a module. A variant, a constant, or a function of a type is \
-     named with `.`, as in `Shape.Circle`."
-    "Write `.`"
-    [ Diagnostic.replace separator.span "." ]
-
 let report_qualified_variant cursor ~qualifier_start ~(variant : Syntax.name) =
   let variant_start = (Cursor.read_file_span cursor variant.id).start in
   report cursor Qualified_variant
@@ -196,8 +189,9 @@ let report_keyword_macro cursor ~(bang : Token.t) ~(closing : Token.t) ~has_argu
       [ Diagnostic.delete (Source.make_span bang.span.start closing.span.stop) ]
 
 let no_tuples =
-  "Truss has no tuples. Values that belong together go in a record, whose fields have names, such \
-   as `Pair(first: a, second: b)`."
+  "Parentheses do not make a tuple: every tuple type has a name and named fields. Values that \
+   belong together go in a record or a tuple type, such as `core.Pair`, built as `core.Pair(first: \
+   a, second: b)`."
 
 let report_tuple cursor ~(opening : Token.t) =
   Cursor.report cursor Tuple opening.span no_tuples;
@@ -205,7 +199,7 @@ let report_tuple cursor ~(opening : Token.t) =
 
 let report_tuple_field cursor ~(field : Token.t) =
   Cursor.report cursor Tuple field.span
-    "Truss has no tuples, so a value has no numbered fields. A record's fields have names, as in \
+    "A value has no numbered fields. Every field has a name, in a tuple type too, as in \
      `pair.first`.";
   raise Cursor.Failed
 
@@ -217,7 +211,7 @@ let report_power_operator cursor ~(operator : Token.t) =
 let report_short_declaration cursor ~(target : Syntax.expression) ~(operator : Token.t) =
   let message = "Truss has no `:=`. A new name is declared with `let name = value`." in
   match target.kind with
-  | Name { modules = []; _ } ->
+  | Name _ ->
       report cursor Short_declaration operator.span message "Declare the name with `let`"
         [
           Diagnostic.insert
@@ -303,27 +297,28 @@ let singularize word =
 let derive_parameter_name (callee : Syntax.expression) =
   let receiver = match callee.kind with Member (receiver, _) -> Some receiver | _ -> None in
   let candidate =
-    match receiver with
-    | Some { kind = Name { modules = []; last }; _ } -> singularize last.text
-    | _ -> None
+    match receiver with Some { kind = Name last; _ } -> singularize last.text | _ -> None
   in
   match candidate with
   | Some name when name <> "it" && Token.find_word name = None -> name
   | _ -> "element"
 
 let report_trailing_lambda cursor ~(callee : Syntax.expression) ~parameter ~(opening : Token.t)
-    ~(closing : Token.t) ~(uses : Token.t list) =
-  let callee_stop = (Cursor.read_file_span cursor callee.id).stop in
-  report cursor Trailing_lambda opening.span
-    (Printf.sprintf
-       "A lambda is passed inside the parentheses, with a named parameter: `fn(%s) { ... }`."
-       parameter)
-    "Pass a lambda"
-    (Diagnostic.replace
-       (Source.make_span callee_stop opening.span.start)
-       (Printf.sprintf "(fn(%s) " parameter)
-    :: Diagnostic.insert (Source.make_zero_width closing.span.stop) ")"
-    :: List.map (fun (token : Token.t) -> Diagnostic.replace token.span parameter) uses)
+    ~(closing : Token.t) ~(next : Token.t) ~(uses : Token.t list) =
+  let message =
+    Printf.sprintf
+      "A lambda is passed inside the parentheses, with a named parameter: `fn(%s) { ... }`."
+      parameter
+  in
+  if Atoms.ends_statement next.kind then
+    let callee_stop = (Cursor.read_file_span cursor callee.id).stop in
+    report cursor Trailing_lambda opening.span message "Pass a lambda"
+      (Diagnostic.replace
+         (Source.make_span callee_stop opening.span.start)
+         (Printf.sprintf "(fn(%s) " parameter)
+      :: Diagnostic.insert (Source.make_zero_width closing.span.stop) ")"
+      :: List.map (fun (token : Token.t) -> Diagnostic.replace token.span parameter) uses)
+  else Cursor.report cursor Trailing_lambda opening.span message
 
 let integer_type_names =
   [ "Int8"; "Int16"; "Int32"; "Int64"; "UInt8"; "UInt16"; "UInt32"; "UInt64" ]

@@ -1,7 +1,7 @@
 let make_pattern_node cursor start kind : Syntax.pattern =
   { kind; id = Cursor.allocate_id_from cursor start }
 
-let range_bound = "a literal or a constant with its module or type, such as `http::last`"
+let range_bound = "a literal or a constant with its module or type, such as `http.last`"
 
 let parse_string_literal cursor ~start ~modules literal =
   let string = Cursor.peek cursor in
@@ -118,12 +118,12 @@ and parse_name_pattern cursor start =
   | String ({ tag = Some _; _ } as literal), _ ->
       let literal = Syntax.Literal_string (parse_string_literal cursor ~start ~modules literal) in
       parse_range_or_single cursor start (End_literal literal) (Literal literal)
-  | _ -> Cursor.fail cursor "a name after `::`"
+  | _ -> Cursor.fail cursor "a name after `.`"
 
 and parse_unqualified_variant cursor start (path : Syntax.path) =
   let rec find_last_name (qualified : Token.t option) =
     match (Cursor.peek_kind cursor, Cursor.lookup_token cursor (Cursor.index cursor + 1)) with
-    | Punctuation (Dot | Colon_colon), ({ kind = Upper _; _ } as variant) ->
+    | Punctuation Dot, ({ kind = Upper _; _ } as variant) ->
         Cursor.advance cursor;
         Cursor.advance cursor;
         find_last_name (Some variant)
@@ -163,9 +163,10 @@ and parse_pattern_fields cursor =
           id = Cursor.allocate_id cursor span;
         })
   in
+  let last_index = List.length fields - 1 in
   List.iteri
     (fun index (field : Syntax.pattern_field) ->
-      if field.kind = Rest && index < List.length fields - 1 then
+      if field.kind = Rest && index < last_index then
         Cursor.report cursor Unexpected_token
           (Cursor.read_file_span cursor field.id)
           "`..` must be the last field of a pattern.")
@@ -179,3 +180,9 @@ and parse_alternatives cursor : Syntax.pattern =
   match Cursor.parse_separated cursor ~separator:Bar parse_primary with
   | [ single ] -> single
   | alternatives -> make_pattern_node cursor start (Alternatives alternatives)
+
+let parse_binding_pattern cursor : Syntax.pattern =
+  let start = Cursor.index cursor in
+  match Cursor.parse_separated cursor ~separator:Comma parse_pattern with
+  | [ single ] -> single
+  | patterns -> make_pattern_node cursor start (Tuple patterns)

@@ -1,6 +1,6 @@
-use standard::core
-use standard::intrinsic
-use standard::text::unicode_tables
+use standard.core
+use standard.intrinsic
+use standard.text.unicode_tables
 
 public let Character.replacement: Character = Character"\u{FFFD}"
 
@@ -9,11 +9,11 @@ public let Character.maximum: Character = Character"\u{10FFFF}"
 public fn Character.code(self) -> UInt32
   ensures result <= 1114111
   ensures result < 55296 || result > 57343
-  ensures result == (intrinsic::convert(self))
+  ensures result == (intrinsic.convert(self))
   cost time O(1)
   cost allocations == 0
 {
-  intrinsic::convert(self)
+  intrinsic.convert(self)
 }
 
 public fn Character.from_code(code: UInt32) -> Character
@@ -24,15 +24,15 @@ public fn Character.from_code(code: UInt32) -> Character
   if code > 1114111 || (code >= 55296 && code <= 57343) {
     Panic.crash("the code is not a Unicode scalar value")
   }
-  intrinsic::convert(code)
+  intrinsic.convert(code)
 }
 
-public fn Character.try_from_code(code: UInt32) -> Result[Character, core::ConversionError]
+public fn Character.try_from_code(code: UInt32) -> Result[Character, core.ConversionError]
   ensures (result is Ok(_)) == (code <= 1114111 && (code < 55296 || code > 57343))
   ensures !(result is Ok(character) && character.code() != code)
   cost time O(1)
 {
-  if code <= 1114111 && (code < 55296 || code > 57343) { Ok(Character.from_code(code)) } else { Err(core::ConversionError()) }
+  if code <= 1114111 && (code < 55296 || code > 57343) { Ok(Character.from_code(code)) } else { Err(core.ConversionError()) }
 }
 
 internal fn Character.scalar_index(self) -> UInt32
@@ -49,31 +49,31 @@ internal fn Character.at_scalar_index(index: UInt32) -> Character
   ensures result.scalar_index() == index
   cost time O(1)
 {
-  if index < 55296 { intrinsic::convert(index) } else { intrinsic::convert(index + 2048) }
+  if index < 55296 { intrinsic.convert(index) } else { intrinsic.convert(index + 2048) }
 }
 
-internal fn Character.encode_onto(self, output: mut intrinsic::Storage[UInt8])
-  requires intrinsic::storage_length(output) + self.utf8_length() <= intrinsic::storage_capacity(output)
-  ensures intrinsic::storage_length(output) == old(intrinsic::storage_length(output)) + self.utf8_length()
-  ensures intrinsic::storage_capacity(output) == old(intrinsic::storage_capacity(output))
+internal fn Character.encode_onto(self, output: mut intrinsic.Storage[UInt8])
+  requires intrinsic.storage_length(output) + self.utf8_length() <= intrinsic.storage_capacity(output)
+  ensures intrinsic.storage_length(output) == old(intrinsic.storage_length(output)) + self.utf8_length()
+  ensures intrinsic.storage_capacity(output) == old(intrinsic.storage_capacity(output))
   cost time O(1)
   cost allocations == 0
 {
   let code = self.code()
   if code < 128 {
-    intrinsic::storage_push(mut output, value: intrinsic::convert(code))
+    intrinsic.storage_push(mut output, value: intrinsic.convert(code))
   } else if code < 2048 {
-    intrinsic::storage_push(mut output, value: intrinsic::convert(192 + code / 64))
-    intrinsic::storage_push(mut output, value: intrinsic::convert(128 + code % 64))
+    intrinsic.storage_push(mut output, value: intrinsic.convert(192 + code / 64))
+    intrinsic.storage_push(mut output, value: intrinsic.convert(128 + code % 64))
   } else if code < 65536 {
-    intrinsic::storage_push(mut output, value: intrinsic::convert(224 + code / 4096))
-    intrinsic::storage_push(mut output, value: intrinsic::convert(128 + code / 64 % 64))
-    intrinsic::storage_push(mut output, value: intrinsic::convert(128 + code % 64))
+    intrinsic.storage_push(mut output, value: intrinsic.convert(224 + code / 4096))
+    intrinsic.storage_push(mut output, value: intrinsic.convert(128 + code / 64 % 64))
+    intrinsic.storage_push(mut output, value: intrinsic.convert(128 + code % 64))
   } else {
-    intrinsic::storage_push(mut output, value: intrinsic::convert(240 + code / 262144))
-    intrinsic::storage_push(mut output, value: intrinsic::convert(128 + code / 4096 % 64))
-    intrinsic::storage_push(mut output, value: intrinsic::convert(128 + code / 64 % 64))
-    intrinsic::storage_push(mut output, value: intrinsic::convert(128 + code % 64))
+    intrinsic.storage_push(mut output, value: intrinsic.convert(240 + code / 262144))
+    intrinsic.storage_push(mut output, value: intrinsic.convert(128 + code / 4096 % 64))
+    intrinsic.storage_push(mut output, value: intrinsic.convert(128 + code / 64 % 64))
+    intrinsic.storage_push(mut output, value: intrinsic.convert(128 + code % 64))
   }
 }
 
@@ -114,13 +114,13 @@ public fn Character.is_ascii(self) -> Bool
 public fn Character.is_alphabetic(self) -> Bool
   cost time O(1)
 {
-  if self.code() < 128 { self.is_ascii_alphabetic() } else { unicode_tables::is_alphabetic(self.code()) }
+  if self.code() < 128 { self.is_ascii_alphabetic() } else { unicode_tables.is_alphabetic(self.code()) }
 }
 
 public fn Character.is_numeric(self) -> Bool
   cost time O(1)
 {
-  if self.code() < 128 { self.is_ascii_digit() } else { unicode_tables::is_numeric(self.code()) }
+  if self.code() < 128 { self.is_ascii_digit() } else { unicode_tables.is_numeric(self.code()) }
 }
 
 public fn Character.is_alphanumeric(self) -> Bool
@@ -144,14 +144,14 @@ public fn Character.is_uppercase(self) -> Bool
   cost time O(1)
 {
   let code = self.code()
-  if code < 128 { code >= 65 && code <= 90 } else { unicode_tables::is_uppercase(code) }
+  if code < 128 { code >= 65 && code <= 90 } else { unicode_tables.is_uppercase(code) }
 }
 
 public fn Character.is_lowercase(self) -> Bool
   cost time O(1)
 {
   let code = self.code()
-  if code < 128 { code >= 97 && code <= 122 } else { unicode_tables::is_lowercase(code) }
+  if code < 128 { code >= 97 && code <= 122 } else { unicode_tables.is_lowercase(code) }
 }
 
 public fn Character.is_control(self) -> Bool
@@ -201,33 +201,33 @@ public fn Character.is_ascii_hexadecimal_digit(self) -> Bool
 internal fn Character.or_scalar(self, code: UInt32) -> Character
   cost time O(1)
 {
-  if code <= 1114111 && (code < 55296 || code > 57343) { intrinsic::convert(code) } else { self }
+  if code <= 1114111 && (code < 55296 || code > 57343) { intrinsic.convert(code) } else { self }
 }
 
 public fn Character.to_uppercase(self) -> Character
   cost time O(1)
 {
-  if self.code() < 128 { self.to_ascii_uppercase() } else { self.or_scalar(unicode_tables::uppercase_of(self.code())) }
+  if self.code() < 128 { self.to_ascii_uppercase() } else { self.or_scalar(unicode_tables.uppercase_of(self.code())) }
 }
 
 public fn Character.to_lowercase(self) -> Character
   cost time O(1)
 {
-  if self.code() < 128 { self.to_ascii_lowercase() } else { self.or_scalar(unicode_tables::lowercase_of(self.code())) }
+  if self.code() < 128 { self.to_ascii_lowercase() } else { self.or_scalar(unicode_tables.lowercase_of(self.code())) }
 }
 
 public fn Character.to_ascii_uppercase(self) -> Character
   cost time O(1)
 {
   let code = self.code()
-  if code >= 97 && code <= 122 { intrinsic::convert(code - 32) } else { self }
+  if code >= 97 && code <= 122 { intrinsic.convert(code - 32) } else { self }
 }
 
 public fn Character.to_ascii_lowercase(self) -> Character
   cost time O(1)
 {
   let code = self.code()
-  if code >= 65 && code <= 90 { intrinsic::convert(code + 32) } else { self }
+  if code >= 65 && code <= 90 { intrinsic.convert(code + 32) } else { self }
 }
 
 public fn Character.to_digit(self, radix: UInt32 = 10) -> Option[UInt32]
@@ -243,8 +243,8 @@ public fn Character.to_digit(self, radix: UInt32 = 10) -> Option[UInt32]
   }
   let code = self.code()
   let value: UInt32 = if code < 128 {
-    let byte: UInt8 = intrinsic::convert(code)
-    intrinsic::convert(byte.digit_value())
+    let byte: UInt8 = intrinsic.convert(code)
+    intrinsic.convert(byte.digit_value())
   } else {
     36
   }
@@ -262,12 +262,12 @@ public fn Character.from_digit(value: UInt32, radix: UInt32 = 10) -> Option[Char
   if value >= radix {
     None
   } else {
-    let digit: UInt8 = intrinsic::convert(value)
-    Some(intrinsic::convert(digit.digit_byte(uppercase: false)))
+    let digit: UInt8 = intrinsic.convert(value)
+    Some(intrinsic.convert(digit.digit_byte(uppercase: false)))
   }
 }
 
-impl core::Countable for Character {
+impl core.Countable for Character {
   fn successor(self) -> Option[Character]
     ensures (result is None) == (self.scalar_index() == 1112063)
     ensures !(result is Some(next) && next.scalar_index() != self.scalar_index() + 1)
@@ -291,8 +291,8 @@ impl core::Countable for Character {
     ensures !(result is Some(value) && value.scalar_index() != self.scalar_index() + by)
     cost time O(1)
   {
-    let index: UInt64 = intrinsic::convert(self.scalar_index())
-    if by > 1112063 - index { None } else { Some(Character.at_scalar_index(intrinsic::convert(index + by))) }
+    let index: UInt64 = intrinsic.convert(self.scalar_index())
+    if by > 1112063 - index { None } else { Some(Character.at_scalar_index(intrinsic.convert(index + by))) }
   }
 
   fn retreated(self, by: UInt64) -> Option[Character]
@@ -300,8 +300,8 @@ impl core::Countable for Character {
     ensures !(result is Some(value) && value.scalar_index() != self.scalar_index() - by)
     cost time O(1)
   {
-    let index: UInt64 = intrinsic::convert(self.scalar_index())
-    if by > index { None } else { Some(Character.at_scalar_index(intrinsic::convert(index - by))) }
+    let index: UInt64 = intrinsic.convert(self.scalar_index())
+    if by > index { None } else { Some(Character.at_scalar_index(intrinsic.convert(index - by))) }
   }
 
   fn steps_to(self, other: Character) -> Option[UInt64]
@@ -311,6 +311,6 @@ impl core::Countable for Character {
   {
     let from = self.scalar_index()
     let to = other.scalar_index()
-    if to < from { None } else { Some(intrinsic::convert(to - from)) }
+    if to < from { None } else { Some(intrinsic.convert(to - from)) }
   }
 }

@@ -1,6 +1,6 @@
-use frontend::source
-use frontend::syntax
-use frontend::token
+use frontend.source
+use frontend.syntax
+use frontend.token
 
 fn spell_node(cursor: TokenCursor, id: UInt64) -> Option[String]
   uses Panic, RunForever
@@ -8,7 +8,7 @@ fn spell_node(cursor: TokenCursor, id: UInt64) -> Option[String]
   cursor.spell(cursor.read_file_span(id))
 }
 
-fn report_habit(cursor: mut TokenCursor, code: StringSlice, span: source::Span, message: StringSlice, fix_title: StringSlice, edits: own List[source::Edit])
+fn report_habit(cursor: mut TokenCursor, code: StringSlice, span: source.Span, message: StringSlice, fix_title: StringSlice, edits: own List[source.Edit])
   uses Panic, RunForever
 {
   var joins = false
@@ -17,20 +17,20 @@ fn report_habit(cursor: mut TokenCursor, code: StringSlice, span: source::Span, 
       joins = true
     }
   }
-  let fixes = if joins { [] } else { [source::make_fix(fix_title, edits: own edits)] }
-  report(mut cursor, code, span, message, fixes: own fixes)
+  let fixes = if joins { [] } else { [source.make_fix(fix_title, own edits)] }
+  report(mut cursor, code, span, message, own fixes)
 }
 
-fn extend_with_trailing_space(written: token::Token, next: token::Token) -> source::Span
+fn extend_with_trailing_space(written: token.Token, next: token.Token) -> source.Span
   uses Panic
 {
-  source::make_span(written.span.start, stop: next.span.start)
+  source.make_span(written.span.start, stop: next.span.start)
 }
 
-fn increment(cursor: mut TokenCursor, target: syntax::Expression, operator: token::Token)
+fn increment(cursor: mut TokenCursor, target: syntax.Expression, operator: token.Token)
   uses Panic, RunForever
 {
-  let is_plus = operator.kind == token::Kind.Foreign(token::Foreign.PlusPlus)
+  let is_plus = operator.kind == token.Kind.Foreign(token.Foreign.PlusPlus)
   let replacement = if is_plus { " += 1" } else { " -= 1" }
   let sign = if is_plus { "+" } else { "-" }
   let written = match spell_node(cursor, id: target.id) {
@@ -43,11 +43,11 @@ fn increment(cursor: mut TokenCursor, target: syntax::Expression, operator: toke
     span: operator.span,
     message: "Truss has no `${sign}${sign}`; write `${written}`.",
     fix_title: "Write `${written}`",
-    edits: [source::replace(operator.span, replacement)],
+    edits: [source.replace(operator.span, replacement)],
   )
 }
 
-fn report_double_negation(cursor: mut TokenCursor, operator: token::Token, operand: syntax::Expression)
+fn report_double_negation(cursor: mut TokenCursor, operator: token.Token, operand: syntax.Expression)
   uses Panic, RunForever
 {
   let operand_span = cursor.read_file_span(operand.id)
@@ -57,20 +57,20 @@ fn report_double_negation(cursor: mut TokenCursor, operator: token::Token, opera
     span: operator.span,
     message: "Truss has no `--`; to negate twice, write `-(-x)`.",
     fix_title: "Write `-(-x)`",
-    edits: [source::replace(operator.span, replacement: "-(-"), source::insert(source::make_zero_width(operand_span.stop), replacement: ")")],
+    edits: [source.replace(operator.span, replacement: "-(-"), source.insert(source.make_zero_width(operand_span.stop), replacement: ")")],
   )
 }
 
-fn match_arm_comma(cursor: mut TokenCursor, comma: token::Token, next: token::Token)
+fn match_arm_comma(cursor: mut TokenCursor, comma: token.Token, next: token.Token)
   uses Panic, RunForever
 {
-  let is_arm_end = next.line_break_before || next.kind == token::Kind.Newline
-    || next.kind == token::Kind.Punctuation(token::Punctuation.Close(token::Bracket.Curly))
+  let is_arm_end = next.line_break_before || next.kind == token.Kind.Newline
+    || next.kind == token.Kind.Punctuation(token.Punctuation.Close(token.Bracket.Curly))
   let title = if is_arm_end { "Remove the comma" } else { "Put the next arm on its own line" }
   let edit = if is_arm_end {
-    source::delete(comma.span)
+    source.delete(comma.span)
   } else {
-    source::replace(source::make_span(comma.span.start, stop: next.span.start), replacement: "\n")
+    source.replace(source.make_span(comma.span.start, stop: next.span.start), replacement: "\n")
   }
   report_habit(
     mut cursor,
@@ -84,10 +84,10 @@ fn match_arm_comma(cursor: mut TokenCursor, comma: token::Token, next: token::To
 
 fn report_conditional(
   cursor: mut TokenCursor,
-  condition: syntax::Expression,
-  then_value: syntax::Expression,
-  else_value: syntax::Expression,
-  question: token::Token,
+  condition: syntax.Expression,
+  then_value: syntax.Expression,
+  else_value: syntax.Expression,
+  question: token.Token,
 )
   uses Panic, RunForever
 {
@@ -101,15 +101,15 @@ fn report_conditional(
     message: "Truss has no conditional operator; write `if x { a } else { b }`.",
     fix_title: "Write an `if` expression",
     edits: [
-      source::insert(source::make_zero_width(condition_span.start), replacement: "if "),
-      source::replace(source::make_span(condition_span.stop, stop: then_span.start), replacement: " { "),
-      source::replace(source::make_span(then_span.stop, stop: else_span.start), replacement: " } else { "),
-      source::insert(source::make_zero_width(else_span.stop), replacement: " }"),
+      source.insert(source.make_zero_width(condition_span.start), replacement: "if "),
+      source.replace(source.make_span(condition_span.stop, stop: then_span.start), replacement: " { "),
+      source.replace(source.make_span(then_span.stop, stop: else_span.start), replacement: " } else { "),
+      source.insert(source.make_zero_width(else_span.stop), replacement: " }"),
     ],
   )
 }
 
-fn report_let_mut(cursor: mut TokenCursor, let_token: token::Token, mut_token: token::Token)
+fn report_let_mut(cursor: mut TokenCursor, let_token: token.Token, mut_token: token.Token)
   uses Panic, RunForever
 {
   report_habit(
@@ -118,14 +118,14 @@ fn report_let_mut(cursor: mut TokenCursor, let_token: token::Token, mut_token: t
     span: mut_token.span,
     message: "A mutable variable is declared with `var`, not `let mut`.",
     fix_title: "Write `var`",
-    edits: [source::replace(source::make_span(let_token.span.start, stop: mut_token.span.stop), replacement: "var")],
+    edits: [source.replace(source.make_span(let_token.span.start, stop: mut_token.span.stop), replacement: "var")],
   )
 }
 
-fn report_address_of(cursor: mut TokenCursor, before: Option[token::Token], ampersand: token::Token, next: token::Token)
+fn report_address_of(cursor: mut TokenCursor, before: Option[token.Token], ampersand: token.Token, next: token.Token)
   uses Panic, RunForever
 {
-  let written = if next.kind == token::Kind.Keyword(token::Keyword.Mut) { "`mut x`" } else { "`x`" }
+  let written = if next.kind == token.Kind.Keyword(token.Keyword.Mut) { "`mut x`" } else { "`x`" }
   let separator = match before {
     Some(previous) => {
       let is_word = match previous.kind {
@@ -142,30 +142,30 @@ fn report_address_of(cursor: mut TokenCursor, before: Option[token::Token], ampe
     span: ampersand.span,
     message: "Truss has no `&`; write ${written}, with `mut` or `own` before a place only when it is mutated or moved.",
     fix_title: "Remove the `&`",
-    edits: [source::replace(extend_with_trailing_space(written: ampersand, next), replacement: separator)],
+    edits: [source.replace(extend_with_trailing_space(written: ampersand, next: next), replacement: separator)],
   )
 }
 
-fn report_closure_bars(cursor: mut TokenCursor, opening: token::Token, closing: token::Token, body: syntax::Expression, is_before_else: Bool)
+fn report_closure_bars(cursor: mut TokenCursor, opening: token.Token, closing: token.Token, body: syntax.Expression, is_before_else: Bool)
   uses Panic, RunForever
 {
   let body_span = cursor.read_file_span(body.id)
-  var edits: List[source::Edit] = []
+  var edits: List[source.Edit] = []
   if is_before_else {
-    mut edits.push(source::insert(source::make_zero_width(opening.span.start), replacement: "("))
+    mut edits.push(source.insert(source.make_zero_width(opening.span.start), replacement: "("))
   }
-  if opening.kind == token::Kind.Punctuation(token::Punctuation.OrOr) {
-    mut edits.push(source::replace(source::make_span(opening.span.start, stop: body_span.start), replacement: "fn() "))
+  if opening.kind == token.Kind.Punctuation(token.Punctuation.OrOr) {
+    mut edits.push(source.replace(source.make_span(opening.span.start, stop: body_span.start), replacement: "fn() "))
   } else {
-    mut edits.push(source::replace(opening.span, replacement: "fn("))
-    mut edits.push(source::replace(source::make_span(closing.span.start, stop: body_span.start), replacement: ") "))
+    mut edits.push(source.replace(opening.span, replacement: "fn("))
+    mut edits.push(source.replace(source.make_span(closing.span.start, stop: body_span.start), replacement: ") "))
   }
   if !(body.kind is Block(_)) {
-    mut edits.push(source::insert(source::make_zero_width(body_span.start), replacement: "{ "))
-    mut edits.push(source::insert(source::make_zero_width(body_span.stop), replacement: " }"))
+    mut edits.push(source.insert(source.make_zero_width(body_span.start), replacement: "{ "))
+    mut edits.push(source.insert(source.make_zero_width(body_span.stop), replacement: " }"))
   }
   if is_before_else {
-    mut edits.push(source::insert(source::make_zero_width(body_span.stop), replacement: ")"))
+    mut edits.push(source.insert(source.make_zero_width(body_span.stop), replacement: ")"))
   }
   report_habit(
     mut cursor,
@@ -177,7 +177,7 @@ fn report_closure_bars(cursor: mut TokenCursor, opening: token::Token, closing: 
   )
 }
 
-fn report_brace_record(cursor: mut TokenCursor, name_stop: UInt64, opening: token::Token, first: token::Token, last_stop: UInt64, closing: token::Token)
+fn report_brace_record(cursor: mut TokenCursor, name_stop: UInt64, opening: token.Token, first: token.Token, last_stop: UInt64, closing: token.Token)
   uses Panic, RunForever
 {
   report_habit(
@@ -187,13 +187,13 @@ fn report_brace_record(cursor: mut TokenCursor, name_stop: UInt64, opening: toke
     message: "Records are built with parentheses: `Point(x: 1.0, y: 2.0)`.",
     fix_title: "Use parentheses",
     edits: [
-      source::replace(source::make_span(name_stop, stop: first.span.start), replacement: "("),
-      source::replace(source::make_span(last_stop, stop: closing.span.stop), replacement: ")"),
+      source.replace(source.make_span(name_stop, stop: first.span.start), replacement: "("),
+      source.replace(source.make_span(last_stop, stop: closing.span.stop), replacement: ")"),
     ],
   )
 }
 
-fn report_turbofish(cursor: mut TokenCursor, colons: token::Token, less: token::Token, greater: token::Token)
+fn report_turbofish(cursor: mut TokenCursor, colons: token.Token, less: token.Token, greater: token.Token)
   uses Panic, RunForever
 {
   report_habit(
@@ -202,23 +202,23 @@ fn report_turbofish(cursor: mut TokenCursor, colons: token::Token, less: token::
     span: less.span,
     message: "Type arguments go in square brackets: `parse[Int64](text)`.",
     fix_title: "Use square brackets",
-    edits: [source::replace(source::make_span(colons.span.start, stop: less.span.stop), replacement: "["), source::replace(greater.span, replacement: "]")],
+    edits: [source.replace(source.make_span(colons.span.start, stop: less.span.stop), replacement: "["), source.replace(greater.span, replacement: "]")],
   )
 }
 
-fn report_angle_brackets(cursor: mut TokenCursor, angles: Slice[token::Token])
+fn report_angle_brackets(cursor: mut TokenCursor, angles: Slice[token.Token])
   uses Panic, RunForever
 {
-  var edits: List[source::Edit] = []
+  var edits: List[source.Edit] = []
   for angle in angles {
-    let replacement = if angle.kind == token::Kind.Punctuation(token::Punctuation.Less) {
+    let replacement = if angle.kind == token.Kind.Punctuation(token.Punctuation.Less) {
       "["
-    } else if angle.kind == token::Kind.Punctuation(token::Punctuation.ShiftRight) {
+    } else if angle.kind == token.Kind.Punctuation(token.Punctuation.ShiftRight) {
       "]]"
     } else {
       "]"
     }
-    mut edits.push(source::replace(angle.span, replacement))
+    mut edits.push(source.replace(angle.span, replacement))
   }
   report_habit(
     mut cursor,
@@ -230,31 +230,18 @@ fn report_angle_brackets(cursor: mut TokenCursor, angles: Slice[token::Token])
   )
 }
 
-fn report_path_separator(cursor: mut TokenCursor, separator: token::Token)
-  uses Panic, RunForever
-{
-  report_habit(
-    mut cursor,
-    code: "parser.path_separator",
-    span: separator.span,
-    message: "`::` follows only the name of a module. A variant, a constant, or a function of a type is named with `.`, as in `Shape.Circle`.",
-    fix_title: "Write `.`",
-    edits: [source::replace(separator.span, replacement: ".")],
-  )
-}
-
-fn report_qualified_variant(cursor: mut TokenCursor, qualifier_start: UInt64, variant: syntax::Name)
+fn report_qualified_variant(cursor: mut TokenCursor, qualifier_start: UInt64, variant: syntax.Name)
   uses Panic, RunForever
 {
   let variant_start = cursor.read_file_span(variant.id).start
-  let span = source::make_span(qualifier_start, stop: variant_start)
+  let span = source.make_span(qualifier_start, stop: variant_start)
   report_habit(
     mut cursor,
     code: "parser.qualified_variant",
-    span,
+    span: span,
     message: "A pattern names a variant alone: `${variant.text}`. The type of the scrutinee says which type's variant it is.",
     fix_title: "Remove the qualifier",
-    edits: [source::delete(span)],
+    edits: [source.delete(span)],
   )
 }
 
@@ -270,68 +257,68 @@ fn show_macro_advice(name: StringSlice) -> StringSlice {
   }
 }
 
-fn report_macro_call(cursor: mut TokenCursor, name: syntax::Name, bang: token::Token, opening: token::Token)
+fn report_macro_call(cursor: mut TokenCursor, name: syntax.Name, bang: token.Token, opening: token.Token)
   uses Panic, RunForever
 {
   let message = "Truss has no macros, so `${name.text}!` is not a call.${show_macro_advice(name.text)}"
-  if name.text == "vec" && opening.kind == token::Kind.Punctuation(token::Punctuation.Open(token::Bracket.Square)) {
+  if name.text == "vec" && opening.kind == token.Kind.Punctuation(token.Punctuation.Open(token.Bracket.Square)) {
     let name_start = cursor.read_file_span(name.id).start
     report_habit(
       mut cursor,
       code: "parser.macro_call",
       span: bang.span,
-      message,
+      message: message,
       fix_title: "Write a list",
-      edits: [source::delete(source::make_span(name_start, stop: bang.span.stop))],
+      edits: [source.delete(source.make_span(name_start, stop: bang.span.stop))],
     )
     return
   }
-  report(mut cursor, code: "parser.macro_call", span: bang.span, message)
+  report(mut cursor, code: "parser.macro_call", span: bang.span, message: message)
 }
 
-fn report_keyword_macro(cursor: mut TokenCursor, bang: token::Token, closing: token::Token, has_arguments: Bool)
+fn report_keyword_macro(cursor: mut TokenCursor, bang: token.Token, closing: token.Token, has_arguments: Bool)
   uses Panic, RunForever
 {
   let message = "Truss has no macros. `todo` and `unreachable` are written without `!()`."
   if has_arguments {
-    report(mut cursor, code: "parser.macro_call", span: bang.span, message)
+    report(mut cursor, code: "parser.macro_call", span: bang.span, message: message)
     return
   }
   report_habit(
     mut cursor,
     code: "parser.macro_call",
     span: bang.span,
-    message,
+    message: message,
     fix_title: "Remove `!()`",
-    edits: [source::delete(source::make_span(bang.span.start, stop: closing.span.stop))],
+    edits: [source.delete(source.make_span(bang.span.start, stop: closing.span.stop))],
   )
 }
 
-fn report_tuple(cursor: mut TokenCursor, opening: token::Token) -> Failure
+fn report_tuple(cursor: mut TokenCursor, opening: token.Token) -> Failure
   uses Panic
 {
   report(
     mut cursor,
     code: "parser.tuple",
     span: opening.span,
-    message: "Truss has no tuples. Values that belong together go in a record, whose fields have names, such as `Pair(first: a, second: b)`.",
+    message: "Parentheses do not make a tuple: every tuple type has a name and named fields. Values that belong together go in a record or a tuple type, such as `core.Pair`, built as `core.Pair(first: a, second: b)`.",
   )
   Failure.Failed
 }
 
-fn report_tuple_field(cursor: mut TokenCursor, field: token::Token) -> Failure
+fn report_tuple_field(cursor: mut TokenCursor, field: token.Token) -> Failure
   uses Panic
 {
   report(
     mut cursor,
     code: "parser.tuple",
     span: field.span,
-    message: "Truss has no tuples, so a value has no numbered fields. A record's fields have names, as in `pair.first`.",
+    message: "A value has no numbered fields. Every field has a name, in a tuple type too, as in `pair.first`.",
   )
   Failure.Failed
 }
 
-fn report_power_operator(cursor: mut TokenCursor, operator: token::Token)
+fn report_power_operator(cursor: mut TokenCursor, operator: token.Token)
   uses Panic
 {
   report(
@@ -342,12 +329,12 @@ fn report_power_operator(cursor: mut TokenCursor, operator: token::Token)
   )
 }
 
-fn report_short_declaration(cursor: mut TokenCursor, target: syntax::Expression, operator: token::Token)
+fn report_short_declaration(cursor: mut TokenCursor, target: syntax.Expression, operator: token.Token)
   uses Panic, RunForever
 {
   let message = "Truss has no `:=`. A new name is declared with `let name = value`."
   let is_plain_name = match target.kind {
-    Name(path) => path.modules.is_empty()
+    Name(_) => true
     _ => false
   }
   if is_plain_name {
@@ -356,16 +343,16 @@ fn report_short_declaration(cursor: mut TokenCursor, target: syntax::Expression,
       mut cursor,
       code: "parser.short_declaration",
       span: operator.span,
-      message,
+      message: message,
       fix_title: "Declare the name with `let`",
-      edits: [source::insert(source::make_zero_width(target_start), replacement: "let "), source::replace(operator.span, replacement: "=")],
+      edits: [source.insert(source.make_zero_width(target_start), replacement: "let "), source.replace(operator.span, replacement: "=")],
     )
     return
   }
-  report(mut cursor, code: "parser.short_declaration", span: operator.span, message)
+  report(mut cursor, code: "parser.short_declaration", span: operator.span, message: message)
 }
 
-fn is_path_expression(candidate: syntax::Expression) -> Bool
+fn is_path_expression(candidate: syntax.Expression) -> Bool
   uses RunForever
 {
   match candidate.kind {
@@ -375,7 +362,7 @@ fn is_path_expression(candidate: syntax::Expression) -> Bool
   }
 }
 
-fn pipe_operator(cursor: mut TokenCursor, value: syntax::Expression, operator: token::Token, callee: syntax::Expression)
+fn pipe_operator(cursor: mut TokenCursor, value: syntax.Expression, operator: token.Token, callee: syntax.Expression)
   uses Panic, RunForever
 {
   let message = "Truss has no `|>`. A function is called with its argument: `function(value)`."
@@ -387,51 +374,51 @@ fn pipe_operator(cursor: mut TokenCursor, value: syntax::Expression, operator: t
       mut cursor,
       code: "parser.pipe_operator",
       span: operator.span,
-      message,
+      message: message,
       fix_title: "Write the call",
       edits: [
-        source::insert(source::make_zero_width(value_span.start), replacement: "${callee_spelling}("),
-        source::replace(source::make_span(value_span.stop, stop: callee_span.stop), replacement: ")"),
+        source.insert(source.make_zero_width(value_span.start), replacement: "${callee_spelling}("),
+        source.replace(source.make_span(value_span.stop, stop: callee_span.stop), replacement: ")"),
       ],
     )
     return
   }
-  report(mut cursor, code: "parser.pipe_operator", span: operator.span, message)
+  report(mut cursor, code: "parser.pipe_operator", span: operator.span, message: message)
 }
 
 fn report_lambda_annotation(cursor: mut TokenCursor, from: UInt64, stop: UInt64)
   uses Panic, RunForever
 {
-  let span = source::make_span(from, stop)
+  let span = source.make_span(from, stop)
   report_habit(
     mut cursor,
     code: "parser.lambda_annotation",
-    span,
+    span: span,
     message: "A lambda's parameters and result have no annotations. Their types are inferred from where the lambda is passed.",
     fix_title: "Remove the annotation",
-    edits: [source::delete(span)],
+    edits: [source.delete(span)],
   )
 }
 
-fn report_impl_parameters(cursor: mut TokenCursor, opening: token::Token, closing: token::Token, has_bounds: Bool)
+fn report_impl_parameters(cursor: mut TokenCursor, opening: token.Token, closing: token.Token, has_bounds: Bool)
   uses Panic, RunForever
 {
   let message = "An `impl` has no parameters of its own. The type after `for` declares them, with their bounds: `impl Trait for Box[Item: Ordered]`."
   if has_bounds {
-    report(mut cursor, code: "parser.impl_parameters", span: opening.span, message)
+    report(mut cursor, code: "parser.impl_parameters", span: opening.span, message: message)
     return
   }
   report_habit(
     mut cursor,
     code: "parser.impl_parameters",
     span: opening.span,
-    message,
+    message: message,
     fix_title: "Remove the parameters",
-    edits: [source::delete(source::make_span(opening.span.start, stop: closing.span.stop))],
+    edits: [source.delete(source.make_span(opening.span.start, stop: closing.span.stop))],
   )
 }
 
-fn report_null_coalescing(cursor: mut TokenCursor, value: syntax::Expression, first: token::Token, second: token::Token, default: syntax::Expression)
+fn report_null_coalescing(cursor: mut TokenCursor, value: syntax.Expression, first: token.Token, second: token.Token, default: syntax.Expression)
   uses Panic, RunForever
 {
   let value_span = cursor.read_file_span(value.id)
@@ -440,14 +427,14 @@ fn report_null_coalescing(cursor: mut TokenCursor, value: syntax::Expression, fi
     Binary(..) | Is(..) | Range(..) | Prefix(..) | Mode(..) | Any(_) | Quantified(..) | Echo(_) | Return(_) => true
     _ => false
   }
-  let written = if second.kind == token::Kind.Punctuation(token::Punctuation.Colon) { "?:" } else { "??" }
-  var edits: List[source::Edit] = []
+  let written = if second.kind == token.Kind.Punctuation(token.Punctuation.Colon) { "?:" } else { "??" }
+  var edits: List[source.Edit] = []
   if needs_parentheses {
-    mut edits.push(source::insert(source::make_zero_width(value_span.start), replacement: "("))
+    mut edits.push(source.insert(source.make_zero_width(value_span.start), replacement: "("))
   }
   let call = if needs_parentheses { ").unwrap_or(" } else { ".unwrap_or(" }
-  mut edits.push(source::replace(source::make_span(value_span.stop, stop: default_span.start), replacement: call))
-  mut edits.push(source::insert(source::make_zero_width(default_span.stop), replacement: ")"))
+  mut edits.push(source.replace(source.make_span(value_span.stop, stop: default_span.start), replacement: call))
+  mut edits.push(source.insert(source.make_zero_width(default_span.stop), replacement: ")"))
   report_habit(
     mut cursor,
     code: "parser.null_coalescing",
@@ -473,45 +460,51 @@ fn singularize(word: StringSlice) -> Option[String]
   None
 }
 
-fn derive_parameter_name(callee: syntax::Expression) -> String
+fn derive_parameter_name(callee: syntax.Expression) -> String
   uses Panic
 {
   let candidate = match callee.kind {
     Member(base, ..) => match base.kind {
-      Name(path) => if path.modules.is_empty() { singularize(path.last.text) } else { None }
+      Name(name) => singularize(name.text)
       _ => None
     }
     _ => None
   }
   match candidate {
-    Some(name) => if name != "it" && token::find_word(name).is_none() { name.copy() } else { "element".to_string() }
+    Some(name) => if name != "it" && token.find_word(name).is_none() { name.copy() } else { "element".to_string() }
     None => "element".to_string()
   }
 }
 
 fn report_trailing_lambda(
   cursor: mut TokenCursor,
-  callee: syntax::Expression,
+  callee: syntax.Expression,
   parameter: StringSlice,
-  opening: token::Token,
-  closing: token::Token,
-  uses_of_it: Slice[token::Token],
+  opening: token.Token,
+  closing: token.Token,
+  next: token.Token,
+  uses_of_it: Slice[token.Token],
 )
   uses Panic, RunForever
 {
+  let message = "A lambda is passed inside the parentheses, with a named parameter: `fn(${parameter}) { ... }`."
+  if !ends_statement(next.kind) {
+    report(mut cursor, code: "parser.trailing_lambda", span: opening.span, message: message)
+    return
+  }
   let callee_stop = cursor.read_file_span(callee.id).stop
-  var edits: List[source::Edit] = [
-    source::replace(source::make_span(callee_stop, stop: opening.span.start), replacement: "(fn(${parameter}) "),
-    source::insert(source::make_zero_width(closing.span.stop), replacement: ")"),
+  var edits: List[source.Edit] = [
+    source.replace(source.make_span(callee_stop, stop: opening.span.start), replacement: "(fn(${parameter}) "),
+    source.insert(source.make_zero_width(closing.span.stop), replacement: ")"),
   ]
   for use_of_it in uses_of_it {
-    mut edits.push(source::replace(use_of_it.span, replacement: parameter))
+    mut edits.push(source.replace(use_of_it.span, replacement: parameter))
   }
   report_habit(
     mut cursor,
     code: "parser.trailing_lambda",
     span: opening.span,
-    message: "A lambda is passed inside the parentheses, with a named parameter: `fn(${parameter}) { ... }`.",
+    message: message,
     fix_title: "Pass a lambda",
     edits: own edits,
   )
@@ -524,14 +517,14 @@ fn is_integer_type_name(name: StringSlice) -> Bool {
   }
 }
 
-fn make_conversion_fix(target_spelling: StringSlice, name: StringSlice, value: source::Span, target: source::Span) -> source::Fix
+fn make_conversion_fix(target_spelling: StringSlice, name: StringSlice, value: source.Span, target: source.Span) -> source.Fix
   uses Panic
 {
-  source::make_fix(
+  source.make_fix(
     "Write `${target_spelling}.${name}(...)`",
     edits: [
-      source::insert(source::make_zero_width(value.start), replacement: "${target_spelling}.${name}("),
-      source::replace(source::make_span(value.stop, stop: target.stop), replacement: ")"),
+      source.insert(source.make_zero_width(value.start), replacement: "${target_spelling}.${name}("),
+      source.replace(source.make_span(value.stop, stop: target.stop), replacement: ")"),
     ],
   )
 }
@@ -546,7 +539,7 @@ fn is_simple_spelling(text: StringSlice) -> Bool {
   true
 }
 
-fn report_as_conversion(cursor: mut TokenCursor, value: syntax::Expression, as_token: token::Token, target: syntax::TypeExpression)
+fn report_as_conversion(cursor: mut TokenCursor, value: syntax.Expression, as_token: token.Token, target: syntax.TypeExpression)
   uses Panic, RunForever
 {
   let Some(target_spelling) = spell_node(cursor, id: target.id) else {
@@ -566,18 +559,18 @@ fn report_as_conversion(cursor: mut TokenCursor, value: syntax::Expression, as_t
       Some(value_text) => is_simple_spelling(value_text)
       None => false
     }
-    var edits: List[source::Edit] = []
+    var edits: List[source.Edit] = []
     if !is_simple {
-      mut edits.push(source::insert(source::make_zero_width(value_span.start), replacement: "("))
+      mut edits.push(source.insert(source.make_zero_width(value_span.start), replacement: "("))
     }
     let closing = if is_simple { "" } else { ")" }
-    mut edits.push(source::replace(source::make_span(value_span.stop, stop: target_span.stop), replacement: "${closing}.${method}()"))
+    mut edits.push(source.replace(source.make_span(value_span.stop, stop: target_span.stop), replacement: "${closing}.${method}()"))
     report(
       mut cursor,
       code: "parser.as_conversion",
       span: as_token.span,
       message: "Truss has no `as`; write `x.${method}()`.",
-      fixes: [source::make_fix("Write `.${method}()`", edits: own edits)],
+      fixes: [source.make_fix("Write `.${method}()`", own edits)],
     )
     return
   }
@@ -595,7 +588,7 @@ fn report_as_conversion(cursor: mut TokenCursor, value: syntax::Expression, as_t
   )
 }
 
-fn report_elif(cursor: mut TokenCursor, previous_stop: UInt64, elif_token: token::Token)
+fn report_elif(cursor: mut TokenCursor, previous_stop: UInt64, elif_token: token.Token)
   uses Panic, RunForever
 {
   report_habit(
@@ -604,11 +597,11 @@ fn report_elif(cursor: mut TokenCursor, previous_stop: UInt64, elif_token: token
     span: elif_token.span,
     message: "Truss writes `else if`, not `elif`.",
     fix_title: "Write `else if`",
-    edits: [source::replace(source::make_span(previous_stop, stop: elif_token.span.stop), replacement: " else if")],
+    edits: [source.replace(source.make_span(previous_stop, stop: elif_token.span.stop), replacement: " else if")],
   )
 }
 
-fn report_loop(cursor: mut TokenCursor, loop_token: token::Token)
+fn report_loop(cursor: mut TokenCursor, loop_token: token.Token)
   uses Panic, RunForever
 {
   report_habit(
@@ -617,15 +610,15 @@ fn report_loop(cursor: mut TokenCursor, loop_token: token::Token)
     span: loop_token.span,
     message: "Truss has no `loop`; write `while true`.",
     fix_title: "Write `while true`",
-    edits: [source::replace(loop_token.span, replacement: "while true")],
+    edits: [source.replace(loop_token.span, replacement: "while true")],
   )
 }
 
-fn report_constant_keyword(cursor: mut TokenCursor, written: token::Token)
+fn report_constant_keyword(cursor: mut TokenCursor, written: token.Token)
   uses Panic, RunForever
 {
   let word: StringSlice = match written.kind {
-    Reserved(reserved) => token::spell_reserved(reserved)
+    Reserved(reserved) => token.spell_reserved(reserved)
     _ => ""
   }
   report_habit(
@@ -634,6 +627,6 @@ fn report_constant_keyword(cursor: mut TokenCursor, written: token::Token)
     span: written.span,
     message: "Truss has no `${word}`; a constant is a `let` at the top level.",
     fix_title: "Write `let`",
-    edits: [source::replace(written.span, replacement: "let")],
+    edits: [source.replace(written.span, replacement: "let")],
   )
 }

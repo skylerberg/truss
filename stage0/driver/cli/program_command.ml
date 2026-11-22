@@ -22,22 +22,28 @@ let refuse_unshippable snapshot lookups main proofs =
           way ))
       (Backend.list_unshippable lookups ~main)
   in
+  let refused_positions = Hashtbl.create 16 in
+  List.iter
+    (fun (file, line, column, _, _) -> Hashtbl.replace refused_positions (file, line, column) ())
+    in_code;
   let in_proofs =
-    List.concat_map
-      (fun definition ->
-        List.map
-          (fun (file, line, column) -> (file, line, column, `Proof_hole, [ definition ]))
-          (Proofs.list_holes snapshot proofs definition))
-      (Backend.list_reached_definitions lookups main)
+    List.filter_map
+      (fun (file, line, column, way) ->
+        if Hashtbl.mem refused_positions (file, line, column) then None
+        else begin
+          Hashtbl.replace refused_positions (file, line, column) ();
+          Some (file, line, column, `Proof_hole, way)
+        end)
+      (Proofs.list_holes snapshot proofs ~reached:(Backend.list_reached_definitions lookups main))
   in
-  match List.sort_uniq compare (in_code @ in_proofs) with
+  match List.sort compare (in_code @ in_proofs) with
   | [] -> ()
   | refusals ->
       let show_kind = function `Todo -> "todo" | `Echo -> "echo" | `Proof_hole -> "proof hole" in
-      let show_hole_kind = function
-        | `Todo -> "`todo`"
-        | `Echo -> "`echo`"
-        | `Proof_hole -> "`todo` in a proof or a contract"
+      let describe_refusal = function
+        | `Todo -> "`todo` can be reached from `main`"
+        | `Echo -> "`echo` can be reached from `main`"
+        | `Proof_hole -> "`todo` leaves unfinished a proof that `main` relies on"
       in
       if Output.json () then
         Json.print
@@ -61,20 +67,21 @@ let refuse_unshippable snapshot lookups main proofs =
       else
         List.iter
           (fun (file, line, column, failure, way) ->
-            Output.eprintf
-              "%s:%d:%d: %s can be reached from `main`, so the program cannot be built.\n    %s\n"
-              file line column (show_hole_kind failure)
+            Output.eprintf "%s:%d:%d: %s, so the program cannot be built.\n    %s\n" file line
+              column (describe_refusal failure)
               (String.concat " -> " (List.map Path.show way)))
           refusals;
       raise (Outcome.Stop 1)
 
 let build_program ?output snapshot packages (profile : Backend.profile) ~is_kept =
   let database = Workspace.open_database snapshot in
-  let report = Report.gather ~proofs:(profile = Release) database snapshot packages in
+  let report = Report.gather ~proofs:true database snapshot packages in
   Report.require_no_errors report;
   let main = require_main database packages in
   let lookups = Workspace_backend.require_lowered_lookups database packages in
-  Option.iter (refuse_unshippable snapshot lookups main) (Report.force_proofs report);
+  (match profile with
+  | Release -> Option.iter (refuse_unshippable snapshot lookups main) (Report.force_proofs report)
+  | Development -> ());
   let backend = Workspace_backend.create snapshot lookups profile in
   let output = Option.value output ~default:(Backend.make_program_path backend) in
   match Backend.build_program backend ~main ~output ~is_kept with

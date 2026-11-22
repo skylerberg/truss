@@ -1,19 +1,25 @@
 type t = {
   print_out : string -> unit;
   print_err : string -> unit;
-  terminal : bool;
+  is_terminal : bool;
+  is_colored : bool;
   columns : int option;
   mutable json : bool;
 }
 
+let forbids_color () =
+  match Sys.getenv_opt "NO_COLOR" with Some value -> value <> "" | None -> false
+
 let make_output () =
+  let is_terminal = Unix.isatty Unix.stderr && Sys.getenv_opt "TERM" <> Some "dumb" in
   {
     print_out = print_string;
     print_err =
       (fun text ->
         prerr_string text;
         flush stderr);
-    terminal = Unix.isatty Unix.stderr && Sys.getenv_opt "TERM" <> Some "dumb";
+    is_terminal;
+    is_colored = is_terminal && not (forbids_color ());
     columns = Option.bind (Sys.getenv_opt "COLUMNS") int_of_string_opt;
     json = false;
   }
@@ -31,7 +37,8 @@ let printf format = Printf.ksprintf print format
 let eprint text = !current.print_err text
 let eprint_line text = eprint (text ^ "\n")
 let eprintf format = Printf.ksprintf eprint format
-let terminal () = !current.terminal
+let is_terminal () = !current.is_terminal
+let is_colored () = !current.is_colored
 let columns () = !current.columns
 let json () = !current.json
 let set_json json = !current.json <- json

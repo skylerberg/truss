@@ -3,5 +3,5 @@ fn apply_twice(value: Int64, transform: fn(Int64) -> Int64) -> Int64 {
 }
 
 fn f() -> Int64 {
-  apply_twice(1, "text" + 1)
+  apply_twice(value: 1, "text" + 1)
 }

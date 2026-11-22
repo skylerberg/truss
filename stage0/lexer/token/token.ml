@@ -73,7 +73,6 @@ type punctuation =
   | Close of bracket
   | Comma
   | Colon
-  | Colon_colon
   | Dot
   | Dot_dot
   | Dot_dot_equal
@@ -113,7 +112,7 @@ type punctuation =
   | Shift_left
   | Shift_right
 
-type foreign = Plus_plus | Minus_minus | Star_star | Colon_equal | Pipe_greater
+type foreign = Plus_plus | Minus_minus | Star_star | Colon_equal | Colon_colon | Pipe_greater
 
 module Decimal : sig
   type t = private { significand : Z.t; exponent : Z.t }
@@ -254,7 +253,6 @@ let punctuation =
     ("}", Close Curly);
     (",", Comma);
     (":", Colon);
-    ("::", Colon_colon);
     (".", Dot);
     ("..", Dot_dot);
     ("..=", Dot_dot_equal);
@@ -301,6 +299,7 @@ let foreign_sequences =
     ("--", Minus_minus);
     ("**", Star_star);
     (":=", Colon_equal);
+    ("::", Colon_colon);
     ("|>", Pipe_greater);
   ]
 
@@ -433,13 +432,13 @@ let can_end = function
     ->
       true
   | Foreign (Plus_plus | Minus_minus) -> true
-  | Foreign (Star_star | Colon_equal | Pipe_greater) -> false
+  | Foreign (Star_star | Colon_equal | Colon_colon | Pipe_greater) -> false
   | Keyword _ | Reserved _ | Punctuation _ | Newline | End_of_file -> false
 
 let can_begin = function
   | Upper _ | Lower _ | Underscore | Integer _ | Float _ | String _ | Reserved _ -> true
   | Foreign (Plus_plus | Minus_minus) -> true
-  | Foreign (Star_star | Colon_equal | Pipe_greater) -> false
+  | Foreign (Star_star | Colon_equal | Colon_colon | Pipe_greater) -> false
   | Punctuation (Open _ | Minus | Bang | Tilde) -> true
   | Keyword
       ( Any | Assert | Break | Capability | Concurrent | Continue | Echo | Exists | False | Fn | For

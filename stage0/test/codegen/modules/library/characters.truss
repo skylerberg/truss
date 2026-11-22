@@ -1,6 +1,6 @@
-use standard::core
+use standard.core
 
-fn scalar(code: UInt32) -> Result[Character, core::ConversionError] {
+fn scalar(code: UInt32) -> Result[Character, core.ConversionError] {
   Character.try_from_code(code)
 }
 

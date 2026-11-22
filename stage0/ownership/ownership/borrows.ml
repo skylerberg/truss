@@ -32,6 +32,9 @@ let describe_loan context (loan : Actions.loan) ~is_through_view (place : Place.
     | Provide_body -> "the `provide` block"
     | Rest_of_statement -> "a lending call until this statement ends"
     | Operand_evaluation -> "an earlier operand of this expression"
+    | Alias_scope name ->
+        Printf.sprintf "a lending call until `%s` goes out of scope"
+          (Context.show_root context (Local name))
   and through =
     if is_through_view then
       Printf.sprintf " through `%s`, which views it" (Context.show context loan.borrowed)

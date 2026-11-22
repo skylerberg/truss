@@ -55,6 +55,7 @@ module Make (Node : Strongly_connected.Node) = struct
 
   let list_keys table = Table.fold (fun key _ keys -> key :: keys) table []
   let is_node graph node = Table.mem graph.components node
+  let list_roots graph = list_keys graph.roots
   let read_component graph node = Table.find graph.components node
   let list_current_successors find_successors node = Option.value (find_successors node) ~default:[]
 

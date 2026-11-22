@@ -43,7 +43,14 @@ type 'indirect target =
   | Indirect of 'indirect
 
 type callee = { target : operand target; uses : Types.capability_set }
-and call = { callee : callee; arguments : argument list; lends : Language.Mode.t option }
+
+and call = {
+  callee : callee;
+  arguments : argument list;
+  evaluation_order : int list;
+  lends : Language.Mode.t option;
+}
+
 and argument = Passed of { mode : Language.Mode.t; value : operand } | Default
 and operand = Place of place | Value of expression
 

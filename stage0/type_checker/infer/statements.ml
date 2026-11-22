@@ -69,7 +69,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
         | None -> (
             let type_ = Hooks.check_expression state env value in
             match written_pattern.kind with
-            | Variant _ | Record _ | Literal (Literal_string _) ->
+            | Variant _ | Record _ | Tuple _ | Literal (Literal_string _) ->
                 Conversions.read_actual_head state value type_
             | _ -> type_)
       in
@@ -96,7 +96,8 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
       (match (annotation, written_pattern.kind) with
       | None, Binding name -> Hashtbl.replace state.annotatable name.id ()
       | _ -> ());
-      Pattern_typing.check_binding_pattern state env written_pattern type_ ~is_var ~mode
+      Pattern_typing.check_binding_pattern state env written_pattern type_ ~is_var
+        ~accepts_tuple_pattern:(Option.is_none annotation) ~mode
   | Assignment { target; operator = Assign; value }
     when assigns_through_index state env written target value ->
       ()
@@ -171,7 +172,7 @@ and check_statement state env (written : Syntax.statement) ~last : unit =
              | None -> ());
           if mode = Language.Mode.Mut then Modes.mutate state env ~by:Passed_mut inner;
           Pattern_typing.check_binding_pattern state env written_pattern element ~is_var:false
-            ~mode:variable_mode);
+            ~accepts_tuple_pattern:(Option.is_none annotation) ~mode:variable_mode);
       List.iter
         (check_loop_clause state
            { env with loop_element = Option.map (State.resolve state) !loop_element })

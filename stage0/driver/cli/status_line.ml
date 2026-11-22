@@ -1,6 +1,6 @@
 type t = { enabled : bool; mutable drawn : bool }
 
-let create ~enabled = { enabled = enabled && Output.terminal (); drawn = false }
+let create ~enabled = { enabled = enabled && Output.is_terminal (); drawn = false }
 
 let measure_width () =
   match Output.columns () with Some columns when columns > 10 -> columns - 1 | _ -> 79

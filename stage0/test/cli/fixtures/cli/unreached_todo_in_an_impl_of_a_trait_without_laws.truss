@@ -1,0 +1,27 @@
+trait Shape {
+  fn area(self) -> Int64
+  fn sides(self) -> Int64
+}
+
+type Square(side: Int64)
+
+impl Shape for Square {
+  fn area(self) -> Int64 {
+    todo
+  }
+
+  fn sides(self) -> Int64 {
+    4
+  }
+}
+
+fn count[Item: Shape](item: Item) -> Int64 {
+  item.sides()
+}
+
+fn main(arguments: List[String]) -> ExitCode {
+  proof {
+    todo
+  }
+  if count(Square(side: 2)) == 4 { ExitCode.success } else { ExitCode.failure }
+}

@@ -1,6 +1,6 @@
-use standard::capabilities
+use standard.capabilities
 
 type Granted()
 
-impl capabilities::System for Granted {
+impl capabilities.System for Granted {
 }

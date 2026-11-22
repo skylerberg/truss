@@ -119,6 +119,29 @@ let plan_definition database snapshot packages path name =
   in
   { edits = group_by_file edits; moved = None }
 
+let list_parts_below (ancestor : Path.module_) (module_ : Path.module_) =
+  let count = List.length ancestor.modules in
+  if
+    ancestor.package = module_.package
+    && List.length module_.modules > count
+    && List.take count module_.modules = ancestor.modules
+  then Some (List.drop count module_.modules)
+  else None
+
+let find_module_replacement ~(old_module : Path.module_) ~(new_module : Path.module_)
+    (written : Path.module_) (imported : Path.module_ option) =
+  let read_last_name module_ = List.nth (List.rev (Path.list_module_parts module_)) 0 in
+  match imported with
+  | None when written = old_module -> Some (Path.show_module new_module)
+  | Some imported when written = old_module && imported = old_module ->
+      Some (read_last_name new_module)
+  | Some imported when written = old_module -> (
+      match list_parts_below imported new_module with
+      | Some parts -> Some (String.concat "." (read_last_name imported :: parts))
+      | None -> Some (Path.show_module new_module))
+  | Some imported when imported = old_module -> Some (Path.show_module written)
+  | None | Some _ -> None
+
 let plan_module database snapshot packages (old_module : Path.module_) to_ =
   let package = old_module.package in
   let modules =
@@ -126,7 +149,7 @@ let plan_module database snapshot packages (old_module : Path.module_) to_ =
     | Some modules -> modules
     | None ->
         let package = Path.show_package package in
-        Outcome.raise_cannot_run "`%s` is not a module path in %s, such as `%s::name`." to_ package
+        Outcome.raise_cannot_run "`%s` is not a module path in %s, such as `%s.name`." to_ package
           package
   in
   List.iter
@@ -139,16 +162,15 @@ let plan_module database snapshot packages (old_module : Path.module_) to_ =
   if has_module snapshot packages new_module then
     Outcome.raise_cannot_run "`%s` already exists." to_;
   let full = Path.show_module new_module in
-  let last = List.nth modules (List.length modules - 1) in
   let edits =
     List.filter_map
       (fun (file, (span : Source.span), (target : Inspect.References.target)) ->
         match target with
-        | Module edit_module when edit_module = old_module ->
-            let text = Source.text (Database.read_source database file) in
-            let written = String.sub text span.start (span.stop - span.start) in
-            Some (file, Diagnostic.replace span (if String.contains written ':' then full else last))
-        | _ -> None)
+        | Module { module_ = written; imported } ->
+            Option.map
+              (fun replacement -> (file, Diagnostic.replace span replacement))
+              (find_module_replacement ~old_module ~new_module written imported)
+        | Definition _ -> None)
       (list_occurrences database snapshot packages)
     @ List.concat_map
         (fun (file : Path.file) ->
@@ -219,7 +241,7 @@ let run ~from_ ~to_ =
   let json = Output.json () in
   let snapshot, packages = Command_packages.load_worktree () in
   let database = Workspace.open_database snapshot in
-  let report = Report.gather database snapshot packages in
+  let report = Report.gather ~proofs:false database snapshot packages in
   Report.require_no_errors report;
   let plan =
     match resolve_target database packages from_ with

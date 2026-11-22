@@ -1,15 +1,15 @@
-use standard::collections
-use standard::core
-use standard::list
-use standard::map
+use standard.collections
+use standard.core
+use standard.list
+use standard.map
 
-fn strictly_ascending[Key: Ordered, Value](entries: Sequence[map::Entry[Key, Value]]) -> Bool
+fn strictly_ascending[Key: Ordered, Value](entries: Sequence[map.Entry[Key, Value]]) -> Bool
   ensures result == (forall first in 0..entries.length() => forall second in 0..entries.length() => first < second ==> entries[first].key < entries[second].key)
 {
   forall i in 0..entries.length() => forall j in 0..entries.length() => i < j ==> entries[i].key < entries[j].key
 }
 
-theorem ascending_below[Key: Ordered, Value](entries: Sequence[map::Entry[Key, Value]], key: Key, last: Integer)
+theorem ascending_below[Key: Ordered, Value](entries: Sequence[map.Entry[Key, Value]], key: Key, last: Integer)
   requires strictly_ascending(entries)
   requires 0 <= last
   requires last < entries.length()
@@ -18,7 +18,7 @@ theorem ascending_below[Key: Ordered, Value](entries: Sequence[map::Entry[Key, V
 {
 }
 
-theorem ascending_above[Key: Ordered, Value](entries: Sequence[map::Entry[Key, Value]], key: Key, first: Integer)
+theorem ascending_above[Key: Ordered, Value](entries: Sequence[map.Entry[Key, Value]], key: Key, first: Integer)
   requires strictly_ascending(entries)
   requires 0 <= first
   requires first < entries.length()
@@ -27,7 +27,7 @@ theorem ascending_above[Key: Ordered, Value](entries: Sequence[map::Entry[Key, V
 {
 }
 
-fn collections::SortedMap[Key: Ordered, Value].search(self, key: Key) -> Result[UInt64, UInt64]
+fn collections.SortedMap[Key: Ordered, Value].search(self, key: Key) -> Result[UInt64, UInt64]
   ensures match result {
     Ok(index) => index < self.entries.length()
       && self.entries.model()[index].key == key
@@ -74,7 +74,7 @@ fn collections::SortedMap[Key: Ordered, Value].search(self, key: Key) -> Result[
 }
 
 theorem present_where_equal[Key: Ordered, Value](
-  map: collections::SortedMap[Key, Value],
+  map: collections.SortedMap[Key, Value],
   key: Key,
   position: UInt64,
 )
@@ -85,7 +85,7 @@ theorem present_where_equal[Key: Ordered, Value](
 }
 
 theorem absent_where_split[Key: Ordered, Value](
-  map: collections::SortedMap[Key, Value],
+  map: collections.SortedMap[Key, Value],
   key: Key,
   split: UInt64,
 )
@@ -96,43 +96,43 @@ theorem absent_where_split[Key: Ordered, Value](
 {
 }
 
-theorem ascending_after_larger[Key: Ordered, Value](entries: Sequence[map::Entry[Key, Value]], entry: map::Entry[Key, Value])
+theorem ascending_after_larger[Key: Ordered, Value](entries: Sequence[map.Entry[Key, Value]], entry: map.Entry[Key, Value])
   requires strictly_ascending(entries)
   requires entries.length() == 0 || entries[entries.length() - 1].key < entry.key
   ensures strictly_ascending(entries.append(entry))
 {
   assert forall i in 0..entries.length() => {
     if i + 1 < entries.length() {
-      core::less_is_transitive(entries[i].key, second: entries[entries.length() - 1].key, third: entry.key)
+      core.less_is_transitive(entries[i].key, second: entries[entries.length() - 1].key, third: entry.key)
     }
     entries[i].key < entry.key
   }
 }
 
-fn ordered_entries[Key: Ordered, Value](entries: own List[map::Entry[Key, Value]]) -> List[map::Entry[Key, Value]]
+fn ordered_entries[Key: Ordered, Value](entries: own List[map.Entry[Key, Value]]) -> List[map.Entry[Key, Value]]
   ensures strictly_ascending(result.model())
   ensures result.length() <= entries.length()
   cost time O(entries.length() * (1 + log(entries.length())) * (1 + time(Key.compare)))
 {
   let count = entries.length()
-  var numbered: List[collections::Numbered[Key, Value]] = List.with_capacity(count)
+  var numbered: List[collections.Numbered[Key, Value]] = List.with_capacity(count)
   for entry in own entries
     invariant numbered.length() == visited.length()
     invariant numbered.length() <= count
     cost time O(visited.length())
   {
     let ordinal = count - numbered.length()
-    mut numbered.push(collections::Numbered(key: own entry.key, ordinal: ordinal, value: own entry.value))
+    mut numbered.push(collections.Numbered(key: own entry.key, ordinal: ordinal, value: own entry.value))
   }
-  let sorted = collections::sorted_by_key(own numbered)
-  var ascending: List[map::Entry[Key, Value]] = List.with_capacity(count)
+  let sorted = collections.sorted_by_key(own numbered)
+  var ascending: List[map.Entry[Key, Value]] = List.with_capacity(count)
   for item in own sorted
     invariant strictly_ascending(ascending.model())
     invariant ascending.length() <= visited.length()
     cost time O(visited.length() * (1 + time(Key.compare)))
   {
     if ascending.length() == 0 || ascending[ascending.length() - 1].key < item.key {
-      let entry = map::Entry(key: own item.key, value: own item.value)
+      let entry = map.Entry(key: own item.key, value: own item.value)
       proof {
         ascending_after_larger(ascending.model(), entry: entry)
       }
@@ -143,16 +143,16 @@ fn ordered_entries[Key: Ordered, Value](entries: own List[map::Entry[Key, Value]
 }
 
 fn merged[Key: Ordered, Value](
-  first: own List[map::Entry[Key, Value]],
-  second: own List[map::Entry[Key, Value]],
-) -> List[map::Entry[Key, Value]]
+  first: own List[map.Entry[Key, Value]],
+  second: own List[map.Entry[Key, Value]],
+) -> List[map.Entry[Key, Value]]
   requires strictly_ascending(first.model())
   requires strictly_ascending(second.model())
   ensures strictly_ascending(result.model())
 {
   var left = own first
   var right = own second
-  var descending: List[map::Entry[Key, Value]] = []
+  var descending: List[map.Entry[Key, Value]] = []
   while left.length() > 0 || right.length() > 0
     invariant strictly_ascending(left.model())
     invariant strictly_ascending(right.model())
@@ -211,15 +211,15 @@ fn merged[Key: Ordered, Value](
   descending
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].collect[Source: Cursor[Element = map::Entry[Key, Value]]](
+public fn collections.SortedMap[Key: Ordered, Value].collect[Source: Cursor[Element = map.Entry[Key, Value]]](
   source: own Source,
-) -> collections::SortedMap[Key, Value]
+) -> collections.SortedMap[Key, Value]
   uses Source.Uses, RunForever unless Source: FiniteCursor
 {
-  collections::SortedMap(entries: ordered_entries(List.collect(own source)))
+  collections.SortedMap(entries: ordered_entries(List.collect(own source)))
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].length(self) -> UInt64
+public fn collections.SortedMap[Key: Ordered, Value].length(self) -> UInt64
   ensures result == (self.entries.length())
   cost time O(1)
   cost allocations == 0
@@ -227,7 +227,7 @@ public fn collections::SortedMap[Key: Ordered, Value].length(self) -> UInt64
   self.entries.length()
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].is_empty(self) -> Bool
+public fn collections.SortedMap[Key: Ordered, Value].is_empty(self) -> Bool
   ensures result == (self.length() == 0)
   cost time O(1)
   cost allocations == 0
@@ -235,7 +235,7 @@ public fn collections::SortedMap[Key: Ordered, Value].is_empty(self) -> Bool
   self.length() == 0
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].contains(self, key: Key) -> Bool
+public fn collections.SortedMap[Key: Ordered, Value].contains(self, key: Key) -> Bool
   ensures result == (self.search(key) is Ok(_))
   cost time O(log(self.length()) * time(Key.compare))
   cost allocations <= log(self.length()) * allocations(Key.compare)
@@ -243,7 +243,7 @@ public fn collections::SortedMap[Key: Ordered, Value].contains(self, key: Key) -
   self.search(key) is Ok(_)
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].get(self, key: Key) lends Option[Value]
+public fn collections.SortedMap[Key: Ordered, Value].get(self, key: Key) lends Option[Value]
   ensures (result is Some(_)) == self.contains(key)
   cost time O(log(self.length()) * time(Key.compare))
   cost allocations <= log(self.length()) * allocations(Key.compare)
@@ -258,14 +258,14 @@ public fn collections::SortedMap[Key: Ordered, Value].get(self, key: Key) lends 
   }
 }
 
-fn collections::SortedMap[Key: Ordered, Value].replace_value_at(mut self, position: UInt64, value: own Value) -> Value
+fn collections.SortedMap[Key: Ordered, Value].replace_value_at(mut self, position: UInt64, value: own Value) -> Value
   requires position < self.entries.length()
   ensures self.entries.length() == old(self.entries.length())
   ensures forall i in 0..self.entries.length() =>
     identical(self.entries.model()[i].key, old(self.entries.model())[i].key)
   cost time O(1)
 {
-  let previous = map::exchange(mut self.entries[position].value, value: own value)
+  let previous = map.exchange(mut self.entries[position].value, value: own value)
   proof {
     assert forall i in 0..self.entries.length() =>
       identical(self.entries.model()[i].key, old(self.entries.model())[i].key)
@@ -273,7 +273,7 @@ fn collections::SortedMap[Key: Ordered, Value].replace_value_at(mut self, positi
   previous
 }
 
-fn collections::SortedMap[Key: Ordered, Value].find_or_insert(mut self, key: own Key, default: own Value) -> UInt64
+fn collections.SortedMap[Key: Ordered, Value].find_or_insert(mut self, key: own Key, default: own Value) -> UInt64
   requires strictly_ascending(self.entries.model())
   ensures strictly_ascending(self.entries.model())
   ensures result < self.entries.length()
@@ -289,7 +289,7 @@ fn collections::SortedMap[Key: Ordered, Value].find_or_insert(mut self, key: own
       index
     }
     Err(index) => {
-      mut self.entries.insert_at(index, item: map::Entry(key: own key, value: own default))
+      mut self.entries.insert_at(index, item: map.Entry(key: own key, value: own default))
       proof {
         present_where_equal(self, key: key, position: index)
       }
@@ -298,7 +298,7 @@ fn collections::SortedMap[Key: Ordered, Value].find_or_insert(mut self, key: own
   }
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].insert(mut self, key: own Key, value: own Value)
+public fn collections.SortedMap[Key: Ordered, Value].insert(mut self, key: own Key, value: own Value)
   ensures self.contains(key)
   ensures self.length() == old(self.length()) + (if old(self.contains(key)) { 0 } else { 1 })
   cost time O(old(self.length()) + log(old(self.length())) * time(Key.compare))
@@ -306,7 +306,7 @@ public fn collections::SortedMap[Key: Ordered, Value].insert(mut self, key: own 
   let _ = mut self.replace(own key, value: own value)
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].replace(mut self, key: own Key, value: own Value) -> Option[Value]
+public fn collections.SortedMap[Key: Ordered, Value].replace(mut self, key: own Key, value: own Value) -> Option[Value]
   ensures self.contains(key)
   ensures (result is Some(_)) == old(self.contains(key))
   ensures self.length() == old(self.length()) + (if result is Some(_) { 0 } else { 1 })
@@ -321,7 +321,7 @@ public fn collections::SortedMap[Key: Ordered, Value].replace(mut self, key: own
       Some(own previous)
     }
     Err(index) => {
-      mut self.entries.insert_at(index, item: map::Entry(key: own key, value: own value))
+      mut self.entries.insert_at(index, item: map.Entry(key: own key, value: own value))
       proof {
         present_where_equal(self, key: key, position: index)
       }
@@ -330,7 +330,7 @@ public fn collections::SortedMap[Key: Ordered, Value].replace(mut self, key: own
   }
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].get_or_insert(
+public fn collections.SortedMap[Key: Ordered, Value].get_or_insert(
   mut self,
   key: own Key,
   default: own Value,
@@ -341,7 +341,7 @@ public fn collections::SortedMap[Key: Ordered, Value].get_or_insert(
   mut self.entries[position].value
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].update(
+public fn collections.SortedMap[Key: Ordered, Value].update(
   mut self,
   key: own Key,
   default: own Value,
@@ -359,7 +359,7 @@ public fn collections::SortedMap[Key: Ordered, Value].update(
   }
 }
 
-fn collections::SortedMap[Key: Ordered, Value].take_entry(mut self, key: Key) -> Option[map::Entry[Key, Value]]
+fn collections.SortedMap[Key: Ordered, Value].take_entry(mut self, key: Key) -> Option[map.Entry[Key, Value]]
   requires strictly_ascending(self.entries.model())
   ensures strictly_ascending(self.entries.model())
   ensures self.search(key) is Err(_)
@@ -382,14 +382,14 @@ fn collections::SortedMap[Key: Ordered, Value].take_entry(mut self, key: Key) ->
   }
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].remove(mut self, key: Key)
+public fn collections.SortedMap[Key: Ordered, Value].remove(mut self, key: Key)
   ensures !self.contains(key)
   cost time O(old(self.length()) + log(old(self.length())) * time(Key.compare))
 {
   let _ = mut self.take_entry(key)
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].take(mut self, key: Key) -> Option[Value]
+public fn collections.SortedMap[Key: Ordered, Value].take(mut self, key: Key) -> Option[Value]
   ensures !self.contains(key)
   ensures (result is Some(_)) == old(self.contains(key))
   cost time O(old(self.length()) + log(old(self.length())) * time(Key.compare))
@@ -400,14 +400,14 @@ public fn collections::SortedMap[Key: Ordered, Value].take(mut self, key: Key) -
   }
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].clear(mut self)
+public fn collections.SortedMap[Key: Ordered, Value].clear(mut self)
   ensures self.length() == 0
   cost time O(old(self.length()))
 {
   mut self.entries.clear()
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].first(self) lends Option[map::Entry[Key, Value]]
+public fn collections.SortedMap[Key: Ordered, Value].first(self) lends Option[map.Entry[Key, Value]]
   ensures (result is None) == (self.length() == 0)
   cost time O(1)
 {
@@ -418,7 +418,7 @@ public fn collections::SortedMap[Key: Ordered, Value].first(self) lends Option[m
   }
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].last(self) lends Option[map::Entry[Key, Value]]
+public fn collections.SortedMap[Key: Ordered, Value].last(self) lends Option[map.Entry[Key, Value]]
   ensures (result is None) == (self.length() == 0)
   cost time O(1)
 {
@@ -429,7 +429,7 @@ public fn collections::SortedMap[Key: Ordered, Value].last(self) lends Option[ma
   }
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].pop_first(mut self) -> Option[map::Entry[Key, Value]]
+public fn collections.SortedMap[Key: Ordered, Value].pop_first(mut self) -> Option[map.Entry[Key, Value]]
   ensures (result is None) == (old(self.length()) == 0)
   cost time O(old(self.length()))
 {
@@ -439,14 +439,14 @@ public fn collections::SortedMap[Key: Ordered, Value].pop_first(mut self) -> Opt
   Some(mut self.entries.remove_at(0))
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].pop_last(mut self) -> Option[map::Entry[Key, Value]]
+public fn collections.SortedMap[Key: Ordered, Value].pop_last(mut self) -> Option[map.Entry[Key, Value]]
   ensures (result is None) == (old(self.length()) == 0)
   cost time O(1)
 {
   mut self.entries.pop()
 }
 
-fn collections::SortedMap[Key: Ordered, Value].index_at_or_after(self, key: Key) -> UInt64
+fn collections.SortedMap[Key: Ordered, Value].index_at_or_after(self, key: Key) -> UInt64
   ensures result <= self.entries.length()
   ensures forall i in 0..result => self.entries.model()[i].key < key
   ensures forall i in result..self.entries.length() => key <= self.entries.model()[i].key
@@ -464,7 +464,7 @@ fn collections::SortedMap[Key: Ordered, Value].index_at_or_after(self, key: Key)
   }
 }
 
-fn collections::SortedMap[Key: Ordered, Value].index_after(self, key: Key) -> UInt64
+fn collections.SortedMap[Key: Ordered, Value].index_after(self, key: Key) -> UInt64
   ensures result <= self.entries.length()
   ensures forall i in 0..result => self.entries.model()[i].key <= key
   ensures forall i in result..self.entries.length() => key < self.entries.model()[i].key
@@ -482,7 +482,7 @@ fn collections::SortedMap[Key: Ordered, Value].index_after(self, key: Key) -> UI
   }
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].at_or_before(self, key: Key) lends Option[map::Entry[Key, Value]]
+public fn collections.SortedMap[Key: Ordered, Value].at_or_before(self, key: Key) lends Option[map.Entry[Key, Value]]
   ensures !(result is Some(entry) && key < entry.key)
   cost time O(log(self.length()) * time(Key.compare))
 {
@@ -494,7 +494,7 @@ public fn collections::SortedMap[Key: Ordered, Value].at_or_before(self, key: Ke
   }
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].at_or_after(self, key: Key) lends Option[map::Entry[Key, Value]]
+public fn collections.SortedMap[Key: Ordered, Value].at_or_after(self, key: Key) lends Option[map.Entry[Key, Value]]
   ensures !(result is Some(entry) && entry.key < key)
   cost time O(log(self.length()) * time(Key.compare))
 {
@@ -506,7 +506,7 @@ public fn collections::SortedMap[Key: Ordered, Value].at_or_after(self, key: Key
   }
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].before(self, key: Key) lends Option[map::Entry[Key, Value]]
+public fn collections.SortedMap[Key: Ordered, Value].before(self, key: Key) lends Option[map.Entry[Key, Value]]
   ensures !(result is Some(entry) && !(entry.key < key))
   cost time O(log(self.length()) * time(Key.compare))
 {
@@ -518,7 +518,7 @@ public fn collections::SortedMap[Key: Ordered, Value].before(self, key: Key) len
   }
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].after(self, key: Key) lends Option[map::Entry[Key, Value]]
+public fn collections.SortedMap[Key: Ordered, Value].after(self, key: Key) lends Option[map.Entry[Key, Value]]
   ensures !(result is Some(entry) && !(key < entry.key))
   cost time O(log(self.length()) * time(Key.compare))
 {
@@ -530,7 +530,7 @@ public fn collections::SortedMap[Key: Ordered, Value].after(self, key: Key) lend
   }
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].in_range(self, range: Range[Key]) -> Slice[map::Entry[Key, Value]]
+public fn collections.SortedMap[Key: Ordered, Value].in_range(self, range: Range[Key]) -> Slice[map.Entry[Key, Value]]
   ensures forall i in 0..result.length() => range.contains(result.model()[i].key)
   cost time O(1 + log(self.length()) * time(Key.compare))
 {
@@ -539,18 +539,17 @@ public fn collections::SortedMap[Key: Ordered, Value].in_range(self, range: Rang
   if first < end { self.entries[first..end] } else { self.entries[first..first] }
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].retain(
+public fn collections.SortedMap[Key: Ordered, Value].retain(
   mut self,
-  keep: (fn(entry: map::Entry[Key, Value]) -> Bool uses generic Granted
-    requires self.model().contains_key(entry.key) && identical(self.model().get(entry.key), entry.value)),
+  keep: (fn(key: Key, value: Value) -> Bool uses generic Granted
+    requires self.model().contains_key(key) && identical(self.model().get(key), value)),
 )
   uses generic Granted
   ensures self.length() <= old(self.length())
-  ensures forall key: Key =>
-    self.model().contains_key(key) ==> keep.ensures(map::Entry(key: key, value: self.model().get(key)), true)
+  ensures forall key: Key => self.model().contains_key(key) ==> keep.ensures(key, self.model().get(key), true)
   cost time O(old(self.length()) * time(keep))
 {
-  var entries = map::exchange(mut self.entries, value: [])
+  var entries = map.exchange(mut self.entries, value: [])
   let count = entries.length()
   var retained: UInt64 = 0
   for index in 0..count
@@ -562,10 +561,10 @@ public fn collections::SortedMap[Key: Ordered, Value].retain(
       entries.model()[i].key < entries.model()[j].key
     invariant forall i in index..count => forall j in index..count =>
       i < j ==> entries.model()[i].key < entries.model()[j].key
-    invariant forall i in 0..retained => keep.ensures(entries.model()[i], true)
+    invariant forall i in 0..retained => keep.ensures(entries.model()[i].key, entries.model()[i].value, true)
     invariant forall i in index..count => identical(entries.model()[i], old(self.entries.model())[i])
   {
-    if keep(entries[index]) {
+    if keep(entries[index].key, entries[index].value) {
       mut entries.swap(retained, second: index)
       retained += 1
     }
@@ -574,7 +573,7 @@ public fn collections::SortedMap[Key: Ordered, Value].retain(
   self.entries = own entries
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].extend[Source: Cursor[Element = map::Entry[Key, Value]]](
+public fn collections.SortedMap[Key: Ordered, Value].extend[Source: Cursor[Element = map.Entry[Key, Value]]](
   mut self,
   entries: own Source,
 )
@@ -584,22 +583,22 @@ public fn collections::SortedMap[Key: Ordered, Value].extend[Source: Cursor[Elem
   if self.entries.is_empty() {
     self.entries = own added
   } else if !added.is_empty() {
-    let current = map::exchange(mut self.entries, value: [])
+    let current = map.exchange(mut self.entries, value: [])
     self.entries = merged(own current, second: own added)
   }
 }
 
-impl Model for collections::SortedMap[Key: Ordered, Value] {
+impl Model for collections.SortedMap[Key: Ordered, Value] {
   type Value = FiniteMap[Key, Value]
 
   fn model(self) -> FiniteMap[Key, Value]
-    ensures identical(result, map::entries_model(self.entries.model()))
+    ensures identical(result, map.entries_model(self.entries.model()))
   {
-    map::entries_model(self.entries.model())
+    map.entries_model(self.entries.model())
   }
 }
 
-impl Index for collections::SortedMap[Key: Ordered, Value] {
+impl Index for collections.SortedMap[Key: Ordered, Value] {
   type Key = Key
   type Output = Value
 
@@ -620,7 +619,7 @@ impl Index for collections::SortedMap[Key: Ordered, Value] {
   }
 }
 
-impl IndexMut for collections::SortedMap[Key: Ordered, Value] {
+impl IndexMut for collections.SortedMap[Key: Ordered, Value] {
   fn at(mut self, key: Key) lends mut Value
     requires self.contains(key)
     cost time O(log(self.length()) * time(Key.compare))
@@ -631,7 +630,7 @@ impl IndexMut for collections::SortedMap[Key: Ordered, Value] {
   }
 }
 
-fn collections::SortedMap[Key: Ordered, Value].position_of(self, key: Key) -> UInt64
+fn collections.SortedMap[Key: Ordered, Value].position_of(self, key: Key) -> UInt64
   requires self.search(key) is Ok(_)
   ensures result < self.entries.length()
   ensures result == (match self.search(key) {
@@ -647,7 +646,7 @@ fn collections::SortedMap[Key: Ordered, Value].position_of(self, key: Key) -> UI
   }
 }
 
-impl core::IndexAssign for collections::SortedMap[Key: Ordered, Value] {
+impl core.IndexAssign for collections.SortedMap[Key: Ordered, Value] {
   fn accepts_key(self, key: Key) -> Bool
     ensures result
     cost time O(1)
@@ -664,8 +663,8 @@ impl core::IndexAssign for collections::SortedMap[Key: Ordered, Value] {
   }
 }
 
-impl Iterable for collections::SortedMap[Key: Ordered, Value] {
-  type Element = map::Entry[Key, Value]
+impl Iterable for collections.SortedMap[Key: Ordered, Value] {
+  type Element = map.Entry[Key, Value]
 
   fn count(self) -> UInt64
     ensures result == self.length()
@@ -674,7 +673,7 @@ impl Iterable for collections::SortedMap[Key: Ordered, Value] {
     self.entries.length()
   }
 
-  fn element(self, position: UInt64) lends map::Entry[Key, Value]
+  fn element(self, position: UInt64) lends map.Entry[Key, Value]
     requires position < self.count()
     cost time O(1)
   {
@@ -682,7 +681,7 @@ impl Iterable for collections::SortedMap[Key: Ordered, Value] {
   }
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].cursor(own self) -> list::ListCursor[map::Entry[Key, Value]]
+public fn collections.SortedMap[Key: Ordered, Value].cursor(own self) -> list.ListCursor[map.Entry[Key, Value]]
   ensures result.remaining() == self.length()
   cost time O(self.length())
   cost amortized time O(self.length())
@@ -690,28 +689,28 @@ public fn collections::SortedMap[Key: Ordered, Value].cursor(own self) -> list::
   own self.entries.cursor()
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].reversed(self) -> list::Reversed[map::Entry[Key, Value]]
+public fn collections.SortedMap[Key: Ordered, Value].reversed(self) -> list.Reversed[map.Entry[Key, Value]]
   ensures result.count() == self.length()
   cost time O(1)
 {
   self.entries.slice().reversed()
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].keys(self) -> map::Keys[Key, Value]
+public fn collections.SortedMap[Key: Ordered, Value].keys(self) -> collections.SortedMapKeys[Key, Value]
   ensures result.count() == self.length()
   cost time O(1)
 {
-  map::Keys(entries: self.entries.slice())
+  collections.SortedMapKeys(entries: self.entries.slice())
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].values(self) -> map::Values[Key, Value]
+public fn collections.SortedMap[Key: Ordered, Value].values(self) -> collections.SortedMapValues[Key, Value]
   ensures result.count() == self.length()
   cost time O(1)
 {
-  map::Values(entries: self.entries.slice())
+  collections.SortedMapValues(entries: self.entries.slice())
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].value_at(mut self, position: UInt64) lends mut Value
+public fn collections.SortedMap[Key: Ordered, Value].value_at(mut self, position: UInt64) lends mut Value
   uses Panic unless position < self.length()
   ensures self.length() == old(self.length())
   cost time O(1)
@@ -722,7 +721,7 @@ public fn collections::SortedMap[Key: Ordered, Value].value_at(mut self, positio
   mut self.entries[position].value
 }
 
-public fn collections::SortedMap[Key: Ordered, Value].update_values(
+public fn collections.SortedMap[Key: Ordered, Value].update_values(
   mut self,
   change: (fn(mut Value) uses generic Granted),
 )
@@ -738,8 +737,46 @@ public fn collections::SortedMap[Key: Ordered, Value].update_values(
   }
 }
 
-impl Equal for collections::SortedMap[Key: Ordered, Value: Equal] {
-  fn equal(self, other: collections::SortedMap[Key, Value]) -> Bool
+impl Iterable for collections.SortedMapKeys[Key, Value] {
+  type Element = Key
+
+  fn count(self) -> UInt64
+    ensures result == self.entries.length()
+    cost time O(1)
+  {
+    self.entries.length()
+  }
+
+  fn element(self, position: UInt64) lends Key
+    requires position < self.count()
+    ensures identical(result, self.entries.model()[position].key)
+    cost time O(1)
+  {
+    self.entries[position].key
+  }
+}
+
+impl Iterable for collections.SortedMapValues[Key, Value] {
+  type Element = Value
+
+  fn count(self) -> UInt64
+    ensures result == self.entries.length()
+    cost time O(1)
+  {
+    self.entries.length()
+  }
+
+  fn element(self, position: UInt64) lends Value
+    requires position < self.count()
+    ensures identical(result, self.entries.model()[position].value)
+    cost time O(1)
+  {
+    self.entries[position].value
+  }
+}
+
+impl Equal for collections.SortedMap[Key: Ordered, Value: Equal] {
+  fn equal(self, other: collections.SortedMap[Key, Value]) -> Bool
     ensures result == (self.entries.length() == other.entries.length()
       && forall i in 0..self.entries.length() =>
         self.entries.model()[i].key == other.entries.model()[i].key
@@ -769,22 +806,22 @@ impl Equal for collections::SortedMap[Key: Ordered, Value: Equal] {
   }
 }
 
-impl Default for collections::SortedMap[Key: Ordered, Value] {
-  fn default() -> collections::SortedMap[Key, Value] {
+impl Default for collections.SortedMap[Key: Ordered, Value] {
+  fn default() -> collections.SortedMap[Key, Value] {
     [:]
   }
 }
 
-impl FromEntries for collections::SortedMap[Key: Ordered, Value] {
+impl FromEntries for collections.SortedMap[Key: Ordered, Value] {
   type Key = Key
   type Value = Value
 
-  fn from_entries(entries: own List[map::Entry[Key, Value]]) -> collections::SortedMap[Key, Value]
+  fn from_entries(entries: own List[map.Entry[Key, Value]]) -> collections.SortedMap[Key, Value]
     requires forall i in 0..entries.length() => forall j in 0..entries.length() =>
       i < j ==> !(entries.model()[i].key == entries.model()[j].key)
     ensures result.length() <= entries.length()
     cost time O(entries.length() * (1 + log(entries.length())) * (1 + time(Key.compare)))
   {
-    collections::SortedMap(entries: ordered_entries(own entries))
+    collections.SortedMap(entries: ordered_entries(own entries))
   }
 }

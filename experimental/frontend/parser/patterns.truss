@@ -1,21 +1,21 @@
-use frontend::source
-use frontend::syntax
-use frontend::token
+use frontend.source
+use frontend.syntax
+use frontend.token
 
-fn make_pattern_node(cursor: mut TokenCursor, start: UInt64, kind: own syntax::PatternKind) -> syntax::Pattern
+fn make_pattern_node(cursor: mut TokenCursor, start: UInt64, kind: own syntax.PatternKind) -> syntax.Pattern
   uses Panic
 {
-  syntax::Pattern(kind: own kind, id: allocate_id_from(mut cursor, start_index: start))
+  syntax.Pattern(own kind, id: allocate_id_from(mut cursor, start_index: start))
 }
 
 fn range_bound() -> StringSlice {
-  "a literal or a constant with its module or type, such as `http::last`"
+  "a literal or a constant with its module or type, such as `http.last`"
 }
 
-fn parse_pattern_string(cursor: mut TokenCursor, start: UInt64, modules: own List[syntax::Name], literal: UInt64) -> Result[syntax::StringLiteral, Failure]
+fn parse_pattern_string(cursor: mut TokenCursor, start: UInt64, modules: own List[syntax.Name], literal: UInt64) -> Result[syntax.StringLiteral, Failure]
   uses Panic, RunForever
 {
-  make_string_literal(mut cursor, start, modules: own modules, literal_index: literal, mode: InterpolationMode.RejectInterpolations)
+  make_string_literal(mut cursor, start, own modules, literal_index: literal, mode: InterpolationMode.RejectInterpolations)
 }
 
 fn TokenCursor.integer(self, literal: UInt64) -> String
@@ -28,7 +28,7 @@ fn negate_digits(digits: own String) -> String {
   if digits == "0" { digits } else { "-${digits}" }
 }
 
-fn parse_literal(cursor: mut TokenCursor) -> Result[Option[syntax::Literal], Failure]
+fn parse_literal(cursor: mut TokenCursor) -> Result[Option[syntax.Literal], Failure]
   uses Panic, RunForever
 {
   let start = cursor.index
@@ -36,10 +36,10 @@ fn parse_literal(cursor: mut TokenCursor) -> Result[Option[syntax::Literal], Fai
     Integer(literal) => {
       let value = cursor.integer(literal)
       advance(mut cursor)
-      Ok(Some(syntax::Literal.LiteralInteger(own value)))
+      Ok(Some(syntax.Literal.LiteralInteger(own value)))
     }
     Punctuation(punctuation) => {
-      if punctuation != token::Punctuation.Minus {
+      if punctuation != token.Punctuation.Minus {
         return Ok(None)
       }
       advance(mut cursor)
@@ -47,7 +47,7 @@ fn parse_literal(cursor: mut TokenCursor) -> Result[Option[syntax::Literal], Fai
         Integer(literal) => {
           let value = negate_digits(cursor.integer(literal))
           advance(mut cursor)
-          Ok(Some(syntax::Literal.LiteralInteger(own value)))
+          Ok(Some(syntax.Literal.LiteralInteger(own value)))
         }
         _ => Err(fail(mut cursor, expected: "a number after `-` in a pattern"))
       }
@@ -57,66 +57,66 @@ fn parse_literal(cursor: mut TokenCursor) -> Result[Option[syntax::Literal], Fai
       report(
         mut cursor,
         code: "parser.float_pattern",
-        span,
+        span: span,
         message: "A float literal cannot be a pattern, since `==` on floats treats `-0.0` and `0.0` as equal; match with a guard instead, as in `value if value == 0.0`.",
       )
       Err(Failure.Failed)
     }
-    Keyword(keyword) => if keyword == token::Keyword.True {
+    Keyword(keyword) => if keyword == token.Keyword.True {
       advance(mut cursor)
-      Ok(Some(syntax::Literal.LiteralTrue))
-    } else if keyword == token::Keyword.False {
+      Ok(Some(syntax.Literal.LiteralTrue))
+    } else if keyword == token.Keyword.False {
       advance(mut cursor)
-      Ok(Some(syntax::Literal.LiteralFalse))
+      Ok(Some(syntax.Literal.LiteralFalse))
     } else {
       Ok(None)
     }
-    String(literal) => Ok(Some(syntax::Literal.LiteralString(parse_pattern_string(mut cursor, start, modules: [], literal)?)))
+    String(literal) => Ok(Some(syntax.Literal.LiteralString(parse_pattern_string(mut cursor, start, modules: [], literal: literal)?)))
     _ => Ok(None)
   }
 }
 
-fn parse_variant_or_constant(cursor: mut TokenCursor, start: UInt64, path: own syntax::NamePath) -> Result[syntax::Pattern, Failure]
+fn parse_variant_or_constant(cursor: mut TokenCursor, start: UInt64, path: own syntax.NamePath) -> Result[syntax.Pattern, Failure]
   uses Panic, RunForever
 {
-  if cursor.is_punctuation(token::Punctuation.Dot) {
+  if cursor.is_punctuation(token.Punctuation.Dot) {
     advance(mut cursor)
     let name = lower_name(mut cursor, expected: "the name of a constant after `.`")?
-    let constant = syntax::Constant.TypeConstant(owner: own path, name: own name)
+    let constant = syntax.Constant.TypeConstant(owner: own path, own name)
     return parse_range_or_single(
       mut cursor,
       start,
-      end_kind: syntax::RangeEndKind.EndConstant(constant.copy()),
-      kind: syntax::PatternKind.QualifiedConstant(own constant),
+      end_kind: syntax.RangeEndKind.EndConstant(constant.copy()),
+      kind: syntax.PatternKind.QualifiedConstant(own constant),
     )
   }
-  let fields = if cursor.is_punctuation(token::Punctuation.Open(token::Bracket.Paren)) {
+  let fields = if cursor.is_punctuation(token.Punctuation.Open(token.Bracket.Paren)) {
     Some(parse_pattern_fields(mut cursor))
   } else {
     None
   }
-  Ok(make_pattern_node(mut cursor, start, kind: syntax::PatternKind.Variant(name: own path.last, fields: own fields)))
+  Ok(make_pattern_node(mut cursor, start, kind: syntax.PatternKind.Variant(name: own path.last, own fields)))
 }
 
 fn parse_range_or_single(
   cursor: mut TokenCursor,
   start: UInt64,
-  end_kind: own syntax::RangeEndKind,
-  kind: own syntax::PatternKind,
-) -> Result[syntax::Pattern, Failure]
+  end_kind: own syntax.RangeEndKind,
+  kind: own syntax.PatternKind,
+) -> Result[syntax.Pattern, Failure]
   uses Panic, RunForever
 {
-  let first = syntax::RangeEnd(kind: own end_kind, id: allocate_id_from(mut cursor, start_index: start))
+  let first = syntax.RangeEnd(kind: own end_kind, id: allocate_id_from(mut cursor, start_index: start))
   let operator = cursor.peek_kind()
-  let is_inclusive = operator == token::Kind.Punctuation(token::Punctuation.DotDotEqual)
-  if !is_inclusive && operator != token::Kind.Punctuation(token::Punctuation.DotDot) {
-    return Ok(make_pattern_node(mut cursor, start, kind: own kind))
+  let is_inclusive = operator == token.Kind.Punctuation(token.Punctuation.DotDotEqual)
+  if !is_inclusive && operator != token.Kind.Punctuation(token.Punctuation.DotDot) {
+    return Ok(make_pattern_node(mut cursor, start, own kind))
   }
   advance(mut cursor)
   let stop_start = cursor.index
   let stop = match parse_literal(mut cursor)? {
-    Some(literal) => syntax::RangeEnd(
-      kind: syntax::RangeEndKind.EndLiteral(own literal),
+    Some(literal) => syntax.RangeEnd(
+      kind: syntax.RangeEndKind.EndLiteral(own literal),
       id: allocate_id_from(mut cursor, start_index: stop_start),
     )
     None => match cursor.peek_kind() {
@@ -124,10 +124,10 @@ fn parse_range_or_single(
       _ => return Err(fail(mut cursor, expected: "the end of the range; a range pattern needs both ends"))
     }
   }
-  Ok(make_pattern_node(mut cursor, start, kind: syntax::PatternKind.PatternRange(start: own first, stop: own stop, is_inclusive)))
+  Ok(make_pattern_node(mut cursor, start, kind: syntax.PatternKind.PatternRange(start: own first, own stop, is_inclusive)))
 }
 
-fn parse_constant_end(cursor: mut TokenCursor, start: UInt64) -> Result[syntax::RangeEnd, Failure]
+fn parse_constant_end(cursor: mut TokenCursor, start: UInt64) -> Result[syntax.RangeEnd, Failure]
   uses Panic, RunForever
 {
   let modules = parse_module_prefix(mut cursor)
@@ -136,20 +136,20 @@ fn parse_constant_end(cursor: mut TokenCursor, start: UInt64) -> Result[syntax::
       if modules.is_empty() {
         return Err(fail(mut cursor, expected: range_bound()))
       }
-      syntax::RangeEndKind.EndConstant(syntax::Constant.ModuleConstant(syntax::NamePath(modules: own modules, last: take_name(mut cursor))))
+      syntax.RangeEndKind.EndConstant(syntax.Constant.ModuleConstant(syntax.NamePath(own modules, last: take_name(mut cursor))))
     }
     Upper(_) => {
-      let path = syntax::NamePath(modules: own modules, last: take_name(mut cursor))
-      expect_punctuation(mut cursor, punctuation: token::Punctuation.Dot)?
+      let path = syntax.NamePath(own modules, last: take_name(mut cursor))
+      expect_punctuation(mut cursor, punctuation: token.Punctuation.Dot)?
       let name = lower_name(mut cursor, expected: "the name of a constant")?
-      syntax::RangeEndKind.EndConstant(syntax::Constant.TypeConstant(owner: own path, name: own name))
+      syntax.RangeEndKind.EndConstant(syntax.Constant.TypeConstant(owner: own path, own name))
     }
     _ => return Err(fail(mut cursor, expected: "a constant"))
   }
-  Ok(syntax::RangeEnd(kind: own kind, id: allocate_id_from(mut cursor, start_index: start)))
+  Ok(syntax.RangeEnd(own kind, id: allocate_id_from(mut cursor, start_index: start)))
 }
 
-fn parse_primary_pattern(cursor: mut TokenCursor) -> Result[syntax::Pattern, Failure]
+fn parse_primary_pattern(cursor: mut TokenCursor) -> Result[syntax.Pattern, Failure]
   uses Panic, RunForever
 {
   let start = cursor.index
@@ -157,18 +157,18 @@ fn parse_primary_pattern(cursor: mut TokenCursor) -> Result[syntax::Pattern, Fai
     return parse_range_or_single(
       mut cursor,
       start,
-      end_kind: syntax::RangeEndKind.EndLiteral(literal.copy()),
-      kind: syntax::PatternKind.Literal(literal.copy()),
+      end_kind: syntax.RangeEndKind.EndLiteral(literal.copy()),
+      kind: syntax.PatternKind.Literal(literal.copy()),
     )
   }
   match cursor.peek_kind() {
     Underscore => {
       advance(mut cursor)
-      Ok(make_pattern_node(mut cursor, start, kind: syntax::PatternKind.Wildcard))
+      Ok(make_pattern_node(mut cursor, start, kind: syntax.PatternKind.Wildcard))
     }
-    Punctuation(punctuation) => if punctuation == token::Punctuation.Open(token::Bracket.Paren) {
+    Punctuation(punctuation) => if punctuation == token.Punctuation.Open(token.Bracket.Paren) {
       let fields = parse_pattern_fields(mut cursor)
-      Ok(make_pattern_node(mut cursor, start, kind: syntax::PatternKind.Record(own fields)))
+      Ok(make_pattern_node(mut cursor, start, kind: syntax.PatternKind.Record(own fields)))
     } else {
       Err(fail(mut cursor, expected: "a pattern"))
     }
@@ -177,11 +177,11 @@ fn parse_primary_pattern(cursor: mut TokenCursor) -> Result[syntax::Pattern, Fai
   }
 }
 
-fn is_range_operator(kind: token::Kind) -> Bool {
-  kind == token::Kind.Punctuation(token::Punctuation.DotDot) || kind == token::Kind.Punctuation(token::Punctuation.DotDotEqual)
+fn is_range_operator(kind: token.Kind) -> Bool {
+  kind == token.Kind.Punctuation(token.Punctuation.DotDot) || kind == token.Kind.Punctuation(token.Punctuation.DotDotEqual)
 }
 
-fn parse_name_pattern(cursor: mut TokenCursor, start: UInt64) -> Result[syntax::Pattern, Failure]
+fn parse_name_pattern(cursor: mut TokenCursor, start: UInt64) -> Result[syntax.Pattern, Failure]
   uses Panic, RunForever
 {
   let modules = parse_module_prefix(mut cursor)
@@ -192,48 +192,46 @@ fn parse_name_pattern(cursor: mut TokenCursor, start: UInt64) -> Result[syntax::
           return Err(fail(mut cursor, expected: range_bound()))
         }
         let name = take_name(mut cursor)
-        return Ok(make_pattern_node(mut cursor, start, kind: syntax::PatternKind.Binding(own name)))
+        return Ok(make_pattern_node(mut cursor, start, kind: syntax.PatternKind.Binding(own name)))
       }
-      let constant = syntax::Constant.ModuleConstant(syntax::NamePath(modules: own modules, last: take_name(mut cursor)))
+      let constant = syntax.Constant.ModuleConstant(syntax.NamePath(own modules, last: take_name(mut cursor)))
       parse_range_or_single(
         mut cursor,
         start,
-        end_kind: syntax::RangeEndKind.EndConstant(constant.copy()),
-        kind: syntax::PatternKind.QualifiedConstant(own constant),
+        end_kind: syntax.RangeEndKind.EndConstant(constant.copy()),
+        kind: syntax.PatternKind.QualifiedConstant(own constant),
       )
     }
     Upper(_) => {
-      let path = syntax::NamePath(modules: own modules, last: take_name(mut cursor))
-      let variant = parse_unqualified_variant(mut cursor, start, path: own path)
+      let path = syntax.NamePath(own modules, last: take_name(mut cursor))
+      let variant = parse_unqualified_variant(mut cursor, start, own path)
       parse_variant_or_constant(mut cursor, start, path: own variant)
     }
     String(literal) => {
       let has_tag = cursor.tables.literal(literal).tag.is_some()
       if !has_tag {
-        return Err(fail(mut cursor, expected: "a name after `::`"))
+        return Err(fail(mut cursor, expected: "a name after `.`"))
       }
-      let parsed = syntax::Literal.LiteralString(parse_pattern_string(mut cursor, start, modules: own modules, literal)?)
+      let parsed = syntax.Literal.LiteralString(parse_pattern_string(mut cursor, start, own modules, literal)?)
       parse_range_or_single(
         mut cursor,
         start,
-        end_kind: syntax::RangeEndKind.EndLiteral(parsed.copy()),
-        kind: syntax::PatternKind.Literal(own parsed),
+        end_kind: syntax.RangeEndKind.EndLiteral(parsed.copy()),
+        kind: syntax.PatternKind.Literal(own parsed),
       )
     }
-    _ => Err(fail(mut cursor, expected: "a name after `::`"))
+    _ => Err(fail(mut cursor, expected: "a name after `.`"))
   }
 }
 
-fn parse_unqualified_variant(cursor: mut TokenCursor, start: UInt64, path: own syntax::NamePath) -> syntax::NamePath
+fn parse_unqualified_variant(cursor: mut TokenCursor, start: UInt64, path: own syntax.NamePath) -> syntax.NamePath
   uses Panic, RunForever
 {
-  var qualified: Option[token::Token] = None
+  var qualified: Option[token.Token] = None
   while true {
     let separator = cursor.peek_kind()
     let following = cursor.lookup_token(cursor.index + 1)
-    let is_separator = separator == token::Kind.Punctuation(token::Punctuation.Dot)
-      || separator == token::Kind.Punctuation(token::Punctuation.ColonColon)
-    if is_separator && following.kind is Upper(_) {
+    if separator == token.Kind.Punctuation(token.Punctuation.Dot) && following.kind is Upper(_) {
       advance(mut cursor)
       advance(mut cursor)
       qualified = Some(following)
@@ -245,52 +243,52 @@ fn parse_unqualified_variant(cursor: mut TokenCursor, start: UInt64, path: own s
   if qualified is Some(variant_token) {
     let variant = make_name(mut cursor, written: variant_token)
     report_qualified_variant(mut cursor, qualifier_start, variant)
-    return syntax::NamePath(modules: [], last: own variant)
+    return syntax.NamePath(modules: [], last: own variant)
   }
-  if !path.modules.is_empty() && !cursor.is_punctuation(token::Punctuation.Dot) {
+  if !path.modules.is_empty() && !cursor.is_punctuation(token.Punctuation.Dot) {
     report_qualified_variant(mut cursor, qualifier_start, variant: path.last)
-    return syntax::NamePath(modules: [], last: own path.last)
+    return syntax.NamePath(modules: [], last: own path.last)
   }
   path
 }
 
-fn parse_pattern_field(cursor: mut TokenCursor) -> Result[syntax::PatternField, Failure]
+fn parse_pattern_field(cursor: mut TokenCursor) -> Result[syntax.PatternField, Failure]
   uses Panic, RunForever
 {
   let start = cursor.index
-  let kind = if cursor.is_punctuation(token::Punctuation.DotDot) {
+  let kind = if cursor.is_punctuation(token.Punctuation.DotDot) {
     advance(mut cursor)
-    syntax::PatternFieldKind.Rest
-  } else if cursor.peek_kind() is Lower(_) && cursor.peek_ahead(1) == token::Kind.Punctuation(token::Punctuation.Colon) {
+    syntax.PatternFieldKind.Rest
+  } else if cursor.peek_kind() is Lower(_) && cursor.peek_ahead(1) == token.Kind.Punctuation(token.Punctuation.Colon) {
     let name = take_name(mut cursor)
     advance(mut cursor)
-    syntax::PatternFieldKind.NamedField(name: own name, pattern: parse_pattern(mut cursor)?)
+    syntax.PatternFieldKind.NamedField(own name, pattern: parse_pattern(mut cursor)?)
   } else {
-    syntax::PatternFieldKind.Field(parse_pattern(mut cursor)?)
+    syntax.PatternFieldKind.Field(parse_pattern(mut cursor)?)
   }
-  Ok(syntax::PatternField(kind: own kind, id: allocate_id_from(mut cursor, start_index: start)))
+  Ok(syntax.PatternField(own kind, id: allocate_id_from(mut cursor, start_index: start)))
 }
 
-fn recover_pattern_field(cursor: mut TokenCursor, span: source::Span) -> syntax::PatternField {
-  let inner = syntax::Pattern(kind: syntax::PatternKind.PatternError, id: allocate_id(mut cursor, span))
-  syntax::PatternField(kind: syntax::PatternFieldKind.Field(own inner), id: allocate_id(mut cursor, span))
+fn recover_pattern_field(cursor: mut TokenCursor, span: source.Span) -> syntax.PatternField {
+  let inner = syntax.Pattern(kind: syntax.PatternKind.PatternError, id: allocate_id(mut cursor, span))
+  syntax.PatternField(kind: syntax.PatternFieldKind.Field(own inner), id: allocate_id(mut cursor, span))
 }
 
-fn parse_pattern_fields(cursor: mut TokenCursor) -> List[syntax::PatternField]
+fn parse_pattern_fields(cursor: mut TokenCursor) -> List[syntax.PatternField]
   uses Panic, RunForever
 {
   let fields = parse_bracketed(mut cursor, parse_item: parse_pattern_field, recover: recover_pattern_field)
   let count = fields.length()
   for entry in fields.enumerate() {
-    if entry.element.kind == syntax::PatternFieldKind.Rest && entry.index + 1 < count {
+    if entry.element.kind == syntax.PatternFieldKind.Rest && entry.index + 1 < count {
       let span = cursor.read_file_span(entry.element.id)
-      report(mut cursor, code: "parser.unexpected_token", span, message: "`..` must be the last field of a pattern.")
+      report(mut cursor, code: "parser.unexpected_token", span: span, message: "`..` must be the last field of a pattern.")
     }
   }
   fields
 }
 
-fn parse_pattern(cursor: mut TokenCursor) -> Result[syntax::Pattern, Failure]
+fn parse_pattern(cursor: mut TokenCursor) -> Result[syntax.Pattern, Failure]
   uses Panic, RunForever
 {
   enter_nested(mut cursor)?
@@ -299,13 +297,24 @@ fn parse_pattern(cursor: mut TokenCursor) -> Result[syntax::Pattern, Failure]
   result
 }
 
-fn parse_alternatives(cursor: mut TokenCursor) -> Result[syntax::Pattern, Failure]
+fn parse_alternatives(cursor: mut TokenCursor) -> Result[syntax.Pattern, Failure]
   uses Panic, RunForever
 {
   let start = cursor.index
-  var alternatives = parse_separated(mut cursor, separator: token::Punctuation.Bar, parse_item: parse_primary_pattern)?
+  var alternatives = parse_separated(mut cursor, separator: token.Punctuation.Bar, parse_item: parse_primary_pattern)?
   if alternatives.length() == 1 {
     return Ok(mut alternatives.remove_at(0))
   }
-  Ok(make_pattern_node(mut cursor, start, kind: syntax::PatternKind.Alternatives(own alternatives)))
+  Ok(make_pattern_node(mut cursor, start, kind: syntax.PatternKind.Alternatives(own alternatives)))
+}
+
+fn parse_binding_pattern(cursor: mut TokenCursor) -> Result[syntax.Pattern, Failure]
+  uses Panic, RunForever
+{
+  let start = cursor.index
+  var patterns = parse_separated(mut cursor, token.Punctuation.Comma, parse_pattern)?
+  if patterns.length() == 1 {
+    return Ok(mut patterns.remove_at(0))
+  }
+  Ok(make_pattern_node(mut cursor, start, syntax.PatternKind.Tuple(own patterns)))
 }

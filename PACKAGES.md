@@ -19,7 +19,7 @@ capabilities to, and the unit that is published and versioned.
 |---|---|---|---|
 | The standard library | `standard` | Part of the toolchain | The toolchain's |
 | A project's own | Its manifest's name | Under the project's directory | None |
-| From the registry | `owner::name` | Fetched, and kept by the hash of its content | In the project's lock file |
+| From the registry | `owner.name` | Fetched, and kept by the hash of its content | In the project's lock file |
 
 A package's program starts at the `main` of its root module, the files
 beside the manifest, such as `main.truss`. A package whose root module has
@@ -27,15 +27,15 @@ no `main` is a library.
 
 ### Package names
 
-- A package's name is a `lower_snake_case` name, or two joined by `::`, an
-  owner and a name, as in `acme::geometry`. An owner is an account on the
+- A package's name is a `lower_snake_case` name, or two joined by `.`, an
+  owner and a name, as in `acme.geometry`. An owner is an account on the
   registry, and only its owner publishes under it.
 - A package has an owner in its name to be published. A project's own
   package may have a name of one part, such as `weather`. A name of one part
   cannot be the owner of another package of the build.
 - `standard` is the standard library. The owner `truss` is the Truss
   project's, and its packages are the approved packages, such as
-  `truss::postgres`.
+  `truss.postgres`.
 - A name in code is the registry's name: a package cannot be given another
   name.
 - The registry never hands a name, or an owner, to another account, and never
@@ -54,7 +54,7 @@ truss = "0.1"
 
 [dependencies]
 forecast = []
-"truss::postgres" = ["NetworkClient", "Handles", "Clock"]
+"truss.postgres" = ["NetworkClient", "Handles", "Clock"]
 ```
 
 - **`name`** is the package's name.
@@ -63,9 +63,11 @@ forecast = []
   the version it names, so packages written for different versions build
   together.
 - **Each entry of `[dependencies]`** is a package's name and the list of
-  capabilities it is granted. A prelude capability is written by its name,
+  capabilities it is granted. A name with an owner is written in quotes, as
+  in `"truss.postgres"`, since TOML reads a bare `truss.postgres` as a table
+  `truss` that holds `postgres`. A prelude capability is written by its name,
   and any other by its full path, as in
-  `"acme::store::connection::ReadDatabase"`.
+  `"acme.store.connection.ReadDatabase"`.
 - **A dependency is a package of the project** if the project has one by
   that name, and otherwise a package of the registry, at the version in the
   project's lock file. A manifest holds no versions and no paths to other
@@ -127,8 +129,8 @@ time_limit = 10
 
 Every release under one name is compatible with the releases before it. A
 change that is not compatible is published under a new name, the old one
-with `_v2` after it, as in `acme::geometry_v2`. `acme::geometry` and
-`acme::geometry_v2` are two packages, and both can be in one build.
+with `_v2` after it, as in `acme.geometry_v2`. `acme.geometry` and
+`acme.geometry_v2` are two packages, and both can be in one build.
 
 A release is compatible with the one before when:
 
@@ -136,8 +138,9 @@ A release is compatible with the one before when:
 - a function, method, or theorem has the same parameters and result, no
   capability more in its `uses`, a `requires` that the old one implies, an
   `ensures` that implies the old one, and no cost greater than before
-- a type that shows its fields has the same fields, variants, and invariant;
-  an opaque type may change everything inside it
+- a type that shows its fields has the same fields, variants, and invariant,
+  and a tuple type stays one, with its fields in the same order; an opaque
+  type may change everything inside it
 - a trait or capability has the same methods, associated types, required
   traits, and laws, and gains at most methods that have bodies
 - every `impl` is still there, and its associated capability sets gain no
@@ -167,8 +170,8 @@ kept in version control.
 
 ```text
 format 1
-acme::geometry_v2 2.1.3 6f1c2f0f8f0b7a1e3d9c4a5b6e7d8c9f0a1b2c3d4e5f60718293a4b5c6d7e8f9
-truss::postgres 1.12.0 0d4e8a1b7c3f2e6d5a9b8c7f1e0d3a2b4c6e8f0a1c3e5a7b9d1f3e5c7a9b0d2f holds Clock, Handles, NetworkClient
+acme.geometry_v2 2.1.3 6f1c2f0f8f0b7a1e3d9c4a5b6e7d8c9f0a1b2c3d4e5f60718293a4b5c6d7e8f9
+truss.postgres 1.12.0 0d4e8a1b7c3f2e6d5a9b8c7f1e0d3a2b4c6e8f0a1c3e5a7b9d1f3e5c7a9b0d2f holds Clock, Handles, NetworkClient
 ```
 
 - The first line names the format. Each line after it is one package: its
@@ -200,8 +203,8 @@ and those that they use in turn. This lock file is the package's *record*.
 - **A build holds one version of each package.**
 - **The packages of a build cannot depend on each other in a cycle,** a
   project's own packages included. A cycle is one of names, since a build
-  holds one version of each package: if `acme::a` 1.1.0 depends on
-  `acme::b` 1.0.0, and `acme::b` 1.0.0 depends on `acme::a`, a build that
+  holds one version of each package: if `acme.a` 1.1.0 depends on
+  `acme.b` 1.0.0, and `acme.b` 1.0.0 depends on `acme.a`, a build that
   holds both has a cycle.
 - **The version of a package in a build is the highest version that the
   project's lock file or the record of any package of the build names.**

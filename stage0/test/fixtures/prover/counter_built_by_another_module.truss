@@ -1,0 +1,5 @@
+use app.counter
+
+fn forged() -> counter.Counter {
+  counter.Counter(count: 50)
+}

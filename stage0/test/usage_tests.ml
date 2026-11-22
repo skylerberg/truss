@@ -4,10 +4,10 @@ let check packages =
     (Support.make_database packages)
 
 let expect_one_diagnostic = Support.expect_one_diagnostic ~check
-let expect_fine text = Support.expect_no_diagnostics ~check [ ("app::main", text) ]
+let expect_fine text = Support.expect_no_diagnostics ~check [ ("app.main", text) ]
 
 let list_diagnostics text =
-  Support.run_check ~check (Support.setup [ ("app::main", text) ]) "app::main"
+  Support.run_check ~check (Support.setup [ ("app.main", text) ]) "app.main"
 
 let apply_machine_fixes text =
   Diagnostic.apply_edits text
@@ -23,7 +23,7 @@ let () =
       expect_one_diagnostic text "usage.unused_variable"
         ~says:
           "`lucky` is never used. A bare name in a pattern binds a variable, which matches every \
-           value. To match the constant, write `app::main::lucky`.";
+           value. To match the constant, write `app.main.lucky`.";
       Support.expect_error ~list_diagnostics text ~code:(Usage Unused_variable) ~at:"lucky"
         ~occurrence:2 ~fixed:Fixtures.Usage.is_test_of_a_name_like_a_constant_fixed
         ~alternatives:[ Fixtures.Usage.is_test_of_a_name_like_a_constant_as_wildcard ]);
@@ -67,6 +67,10 @@ let () =
       expect_one_diagnostic Fixtures.Usage.record_pattern_with_unused_field "usage.unused_variable"
         ~says:"`second` is never used. Match its field with `second: _`."
         ~fixed:Fixtures.Usage.record_pattern_with_unused_field_fixed);
+  Harness.test "an unused name in a tuple pattern is replaced with _" (fun () ->
+      expect_one_diagnostic Fixtures.Usage.tuple_pattern_with_an_unused_name "usage.unused_variable"
+        ~says:"`name` is never used. Replace it with `_`."
+        ~fixed:Fixtures.Usage.tuple_pattern_with_an_unused_name_fixed);
   Harness.test "a binding of the only field of a variant is replaced with _" (fun () ->
       expect_one_diagnostic Fixtures.Usage.match_arm_with_unused_binding "usage.unused_variable"
         ~says:"`value` is never used. Replace it with `_`."

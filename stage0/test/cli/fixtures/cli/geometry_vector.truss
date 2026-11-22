@@ -1,5 +1,5 @@
-use acme::units::lengths
+use acme.units.lengths
 
 public fn length() -> Int64 {
-  lengths::meter()
+  lengths.meter()
 }

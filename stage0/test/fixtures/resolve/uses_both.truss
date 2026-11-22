@@ -1,5 +1,5 @@
-use acme::geometry::vector
+use acme.geometry.vector
 
 fn f() -> Int64 {
-  vector::length(1) + acme::geometry::vector::length(2)
+  vector.length(1) + acme.geometry.vector.length(2)
 }

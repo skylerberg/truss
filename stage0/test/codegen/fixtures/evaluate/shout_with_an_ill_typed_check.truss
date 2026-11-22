@@ -1,18 +1,17 @@
-use standard::text
+use standard.text
 
 type Shout(text: String)
-
-fn is_quiet(literals: List[text::Literal]) -> Bool
-{
-  let broken: UInt8 = "x"
-  true
-}
 
 impl FromTemplate for Shout {
   type Part = String
 
+  fn is_valid_template(literals: List[text.Literal]) -> Bool
+  {
+    let broken: UInt8 = "x"
+    true
+  }
+
   fn from_template(template: Template[String]) -> Shout
-    requires is_quiet(template.literals)
   {
     Shout(text: "")
   }

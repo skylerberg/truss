@@ -5,8 +5,8 @@ let () =
          {}"
         "(fn List[Element: Ordered].least (mut self (by: Order (= (. Order Ascending)))) lends mut \
          Element (block))";
-      Parse_support.expect_definition "fn hourly::Forecast.summary(self) -> String { todo }"
-        "(fn hourly::Forecast.summary (self) -> String (block todo))");
+      Parse_support.expect_definition "fn hourly.Forecast.summary(self) -> String { todo }"
+        "(fn hourly.Forecast.summary (self) -> String (block todo))");
   Harness.test "clauses in the order written" (fun () ->
       Parse_support.expect_definition Fixtures.Parser_rules.clauses_in_the_order_written
         "(fn f ((x: Int64)) -> Int64 (ensures (> result x)) (requires (> x 0)) (decreases x 1) \
@@ -158,8 +158,8 @@ let () =
       Parse_support.expect_definition "impl Add[Element] for Vector[Element] {}"
         "(impl Add[Element] for Vector[Element])";
       Parse_support.expect_definition
-        "impl From[List[map::Entry[Key, Value]]] for Table[Key, Value] {}"
-        "(impl From[List[map::Entry[Key, Value]]] for Table[Key, Value])";
+        "impl From[List[map.Entry[Key, Value]]] for Table[Key, Value] {}"
+        "(impl From[List[map.Entry[Key, Value]]] for Table[Key, Value])";
       Parse_support.expect_definition "impl Add[Self] for Meters {}" "(impl Add[Self] for Meters)";
       Parse_support.expect_definition "impl From[any Display] for Report {}"
         "(impl From[(any Display)] for Report)";
@@ -171,6 +171,23 @@ let () =
   Harness.test "a law's proof takes no visibility" (fun () ->
       Parse_support.expect_error "public proof A.b for C {}" ~code:Misplaced_visibility ~at:"public"
         ~fixed:"proof A.b for C {}");
+  Harness.test "a tuple type" (fun () ->
+      Parse_support.expect_definition "tuple type Span(start: UInt64, end: UInt64)"
+        "(tuple type Span ((start: UInt64) (end: UInt64)))";
+      Parse_support.expect_definition "public tuple type Span(start: UInt64, end: UInt64)"
+        "(public (tuple type Span ((start: UInt64) (end: UInt64))))");
+  Harness.test "only a record with two or more fields is a tuple type" (fun () ->
+      Parse_support.expect_error "tuple type Id(number: UInt64)" ~code:Misplaced_tuple ~at:"tuple"
+        ~fixed:"type Id(number: UInt64)";
+      Parse_support.expect_error "tuple type Bit = Zero | One" ~code:Misplaced_tuple ~at:"tuple"
+        ~fixed:"type Bit = Zero | One");
+  Harness.test "only `tuple` comes before `type`" (fun () ->
+      Parse_support.expect_error "tupel type Span(start: UInt64, end: UInt64)" ~code:Misplaced_tuple
+        ~at:"tupel" ~fixed:"tuple type Span(start: UInt64, end: UInt64)";
+      Parse_support.expect_error "record type Span(start: UInt64, end: UInt64)"
+        ~code:Misplaced_tuple ~at:"record" ~fixed:"type Span(start: UInt64, end: UInt64)");
+  Harness.test "a tuple pattern takes no type annotation" (fun () ->
+      Parse_support.expect_body_error "let low, high: Span = span" ~code:Unexpected_token ~at:":");
   Harness.test "only a type is opaque" (fun () ->
       Parse_support.expect_error "public opaque fn f() {}" ~code:Misplaced_opaque ~at:"opaque"
         ~fixed:"public fn f() {}");
@@ -244,6 +261,20 @@ let () =
   Harness.test "echo as an operand needs parentheses" (fun () ->
       Parse_support.expect_body_error "let x = count + echo x" ~code:Needs_parentheses ~at:"echo"
         ~fixed:"let x = count + (echo x)");
+  Harness.test "a fix's title spells the fixed expression only when it is short" (fun () ->
+      let list_titles text =
+        List.concat_map
+          (fun (diagnostic : Diagnostic.t) ->
+            List.map (fun (fix : Source.span Diagnostic.fix) -> fix.title) diagnostic.fixes)
+          (snd (Parse_support.parse_body text))
+      in
+      Harness.expect_strings ~expected:[ "Write `a < b && b < c`" ]
+        (list_titles "let x = a < b < c");
+      Harness.expect_strings
+        ~expected:[ "Join the comparisons with `&&`" ]
+        (list_titles
+           "let x = first_operand_with_a_long_name < second_operand_with_a_long_name < \
+            third_operand_with_a_long_name"));
   Harness.test "each combination in a chain is reported" (fun () ->
       let _, diagnostics = Parse_support.parse_body "let x = a < b < c < d" in
       if List.length diagnostics <> 2 then
@@ -392,9 +423,7 @@ let () =
             (snd (Parse_support.parse ("fn example() {\n" ^ text ^ "\n}")))
         with
         | Some diagnostic -> diagnostic.fixes
-        | None ->
-            Harness.fail "no %s for %S" (Diagnostic.Code.name (Parser code)) text;
-            []
+        | None -> Harness.fail "no %s for %S" (Diagnostic.Code.name (Parser code)) text
       in
       if list_fixes "count :=== 0" Short_declaration <> [] then Harness.fail "offered the `let` fix");
   Harness.test "a comma between arms on one line becomes a line break" (fun () ->
@@ -474,30 +503,27 @@ let () =
       in
       if Support.list_codes diagnostics <> [ "parser.angle_brackets" ] then
         Harness.fail "got [%s]" (String.concat "; " (Support.list_codes diagnostics)));
-  Harness.test "Shape::Circle" (fun () ->
-      Parse_support.expect_body_error "let shape = Shape::Circle(radius: 1.0)" ~code:Path_separator
-        ~at:"::" ~fixed:"let shape = Shape.Circle(radius: 1.0)";
-      Parse_support.expect_body_error "let items = List::new()" ~code:Path_separator ~at:"::"
-        ~fixed:"let items = List.new()");
-  Harness.test "Shape::Circle is parsed as the member it means" (fun () ->
+  Harness.test "a path written with `::` is parsed as the members it means" (fun () ->
       Parse_support.expect_recovered_statements "let shape = geometry::Shape::Circle"
-        [ "(let shape (. geometry::Shape Circle))" ]);
+        [ "(let shape (. (. geometry Shape) Circle))" ];
+      Parse_support.expect_recovered_statements "let items = List::<Int64>::new()"
+        [ "(let items (call (. error new)))" ]);
   Harness.test "a variant with its type in a pattern" (fun () ->
       Parse_support.expect_body_error Fixtures.Parser_rules.match_on_a_type_qualified_variant
         ~code:Qualified_variant ~at:"Shape."
         ~fixed:Fixtures.Parser_rules.match_on_a_type_qualified_variant_fixed;
-      Parse_support.expect_body_error "let empty = shape is geometry::Shape::Empty"
-        ~code:Qualified_variant ~at:"geometry::Shape::" ~fixed:"let empty = shape is Empty");
+      Parse_support.expect_body_error "let empty = shape is geometry.Shape.Empty"
+        ~code:Qualified_variant ~at:"geometry.Shape." ~fixed:"let empty = shape is Empty");
   Harness.test "a variant with its module in a pattern" (fun () ->
-      Parse_support.expect_body_error "let round = shape is geometry::Circle(radius)"
-        ~code:Qualified_variant ~at:"geometry::" ~fixed:"let round = shape is Circle(radius)");
+      Parse_support.expect_body_error "let round = shape is geometry.Circle(radius)"
+        ~code:Qualified_variant ~at:"geometry." ~fixed:"let round = shape is Circle(radius)");
   Harness.test "a constant of a type in a pattern is not a variant" (fun () ->
       List.iter
         (fun text ->
           let _, diagnostics = Parse_support.parse_body text in
           if Support.list_codes diagnostics <> [] then
             Harness.fail "got [%s]" (String.concat "; " (Support.list_codes diagnostics)))
-        [ "let teapot = status is Status.teapot"; "let teapot = status is http::Status.teapot" ]);
+        [ "let teapot = status is Status.teapot"; "let teapot = status is http.Status.teapot" ]);
   Harness.test "vec![...]" (fun () ->
       Parse_support.expect_body_error "let items = vec![1, 2]" ~code:Macro_call ~at:"!"
         ~fixed:"let items = [1, 2]");
@@ -525,8 +551,8 @@ let () =
   Harness.test "value |> function" (fun () ->
       Parse_support.expect_body_error "let total = items |> sum" ~code:Pipe_operator ~at:"|>"
         ~fixed:"let total = sum(items)";
-      Parse_support.expect_body_error "let total = items\n  |> list::sum" ~code:Pipe_operator
-        ~at:"|>" ~fixed:"let total = list::sum(items)";
+      Parse_support.expect_body_error "let total = items\n  |> list.sum" ~code:Pipe_operator
+        ~at:"|>" ~fixed:"let total = list.sum(items)";
       Parse_support.expect_body_error "let total = items |> take(3)" ~code:Pipe_operator ~at:"|>");
   Harness.test "a lambda with annotations" (fun () ->
       Parse_support.expect_body_error "let double = fn(x: Int64) { x * 2 }" ~code:Lambda_annotation
@@ -575,6 +601,13 @@ let () =
   Harness.test "it in an interpolation is renamed too" (fun () ->
       Parse_support.expect_body_error "let x = items.map { \"${it.name}\" }" ~code:Trailing_lambda
         ~at:"{ \"" ~fixed:"let x = items.map(fn(item) { \"${item.name}\" })");
+  Harness.test "a trailing lambda followed by more of its line has no fix" (fun () ->
+      let _, diagnostics = Parse_support.parse_body "let total = items.map { it.size }.sum()" in
+      Harness.expect_strings
+        ~expected:[ "parser.trailing_lambda"; "parser.unexpected_token" ]
+        (Support.list_codes diagnostics);
+      if List.exists (fun (diagnostic : Diagnostic.t) -> diagnostic.fixes <> []) diagnostics then
+        Harness.fail "a diagnostic has a fix");
   Harness.test "the lambda's parameter is a plain singular, or element" (fun () ->
       Parse_support.expect_body_error "let x = entries.map { it.key }" ~code:Trailing_lambda
         ~at:"{ it" ~fixed:"let x = entries.map(fn(entry) { entry.key })";

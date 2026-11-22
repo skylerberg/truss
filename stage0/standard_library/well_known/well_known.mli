@@ -66,8 +66,8 @@ type t =
   | Writing_append
   | Writing_signed
   | Writing_unsigned
-  | Writing_float32
-  | Writing_float64
+  | Float_text_write_shortest_float32
+  | Float_text_write_shortest_float64
   | Writing_boolean
   | Writing_quoted_character
   | Writing_quoted_text
@@ -101,6 +101,7 @@ type method_ =
   | List_from_storage
   | String_push
   | From_template_from_template
+  | From_template_is_valid_template
   | From_elements_from_elements
   | From_entries_from_entries
   | Sequence_length

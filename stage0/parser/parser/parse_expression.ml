@@ -63,24 +63,8 @@ let find_assignment_operator = function
   | Punctuation Shift_right_equal -> Some (Compound (Shift Shift_right))
   | _ -> None
 
-let find_angle_closer cursor =
-  let rec scan index depth =
-    match (Cursor.lookup_token cursor index).kind with
-    | Punctuation Less -> scan (index + 1) (depth + 1)
-    | Punctuation Greater -> if depth = 1 then Some index else scan (index + 1) (depth - 1)
-    | Punctuation Shift_right ->
-        if depth = 2 then Some index else if depth > 2 then scan (index + 1) (depth - 2) else None
-    | Punctuation (Open _) -> scan (Cursor.lookup_closer cursor index + 1) depth
-    | Upper _ | Lower _ | Integer _
-    | Punctuation (Comma | Colon | Colon_colon | Dot | Equal | Plus | Arrow)
-    | Keyword (Self_type | Any | Fn | Mut | Own | Capability) ->
-        scan (index + 1) depth
-    | _ -> None
-  in
-  scan (Cursor.index cursor) 0
-
 let skip_angle_brackets cursor =
-  match find_angle_closer cursor with
+  match Cursor.find_angle_closer cursor with
   | None -> ()
   | Some closer ->
       let rec collect_angles index =
@@ -184,7 +168,7 @@ and parse_type_argument cursor =
   | Integer value, _ ->
       let token = Cursor.take cursor in
       Count (value, Cursor.allocate_id cursor (Cursor.make_definition_span cursor token.span))
-  | Lower _, next when next <> Punctuation Colon_colon ->
+  | Lower _, next when next <> Punctuation Dot ->
       Count_name (Atoms.make_name cursor (Cursor.take cursor))
   | Upper _, Punctuation Equal ->
       let name = Atoms.make_name cursor (Cursor.take cursor) in
@@ -516,7 +500,7 @@ and parse_call_target cursor =
   Cursor.advance cursor;
   let target =
     match (Cursor.peek_kind cursor, Cursor.peek_ahead cursor 1) with
-    | Lower _, next when next <> Punctuation Colon_colon ->
+    | Lower _, next when next <> Punctuation Dot ->
         Syntax.Call_parameter (Atoms.make_name cursor (Cursor.take cursor))
     | _ ->
         let capability = parse_path_type cursor in
@@ -753,9 +737,14 @@ and parse_postfix cursor : Syntax.expression =
     | Punctuation Dot -> (
         Cursor.advance cursor;
         match Cursor.peek_kind cursor with
-        | Lower _ | Upper _ | Keyword Ensures ->
+        | Lower _ | Keyword Ensures ->
             let name = Atoms.make_name cursor (Cursor.take cursor) in
             with_postfixes (Atoms.make_expression_node cursor start (Member (value, name)))
+        | Upper _ ->
+            let name = Atoms.make_name cursor (Cursor.take cursor) in
+            with_postfixes
+              (parse_type_name_habits cursor start
+                 (Atoms.make_expression_node cursor start (Member (value, name))))
         | Integer _ | Float _ -> Habits.report_tuple_field cursor ~field:(Cursor.peek cursor)
         | _ -> Cursor.fail cursor "a name after `.`")
     | Punctuation (Open Square) ->
@@ -800,6 +789,9 @@ and parse_postfix cursor : Syntax.expression =
     | Punctuation (Open Paren) ->
         let arguments = parse_arguments cursor in
         with_postfixes (Atoms.make_expression_node cursor start (Call (value, arguments)))
+    | Foreign Colon_colon ->
+        Cursor.advance cursor;
+        with_postfixes (parse_turbofish cursor start)
     | Punctuation Question when coalescing_follows cursor -> value
     | Punctuation Question when not (conditional_follows (Cursor.peek_ahead cursor 1)) ->
         Cursor.advance cursor;
@@ -856,7 +848,7 @@ and update cursor : Syntax.update =
   let first = parse_expression cursor in
   let rec read_path (written : Syntax.expression) =
     match written.kind with
-    | Name { modules = []; last } -> Some [ last ]
+    | Name last -> Some [ last ]
     | Member (base, field) -> Option.map (fun path -> path @ [ field ]) (read_path base)
     | _ -> None
   in
@@ -923,45 +915,45 @@ and parse_primary cursor : Syntax.expression =
   | _ -> Cursor.fail cursor "an expression"
 
 and parse_name_expression cursor start =
-  let modules = Atoms.parse_module_prefix cursor in
   match Cursor.peek_kind cursor with
+  | Lower _ when tagged_string_follows_path cursor ->
+      let modules = Atoms.parse_module_prefix cursor in
+      let literal =
+        match Cursor.peek_kind cursor with
+        | String literal -> literal
+        | _ -> Cursor.fail cursor "a tagged string after its module path"
+      in
+      Atoms.make_expression_node cursor start
+        (String (parse_string_literal cursor ~start ~modules literal))
   | Lower _ ->
       let token = Cursor.take cursor in
       let name = Atoms.make_name cursor token in
-      if modules = [] && macro_follows cursor ~name_stop:token.span.stop then
-        parse_macro cursor start name
-      else Atoms.make_expression_node cursor start (Name { modules; last = name })
-  | Upper _ ->
-      let name = Atoms.make_name cursor (Cursor.take cursor) in
-      let value =
-        parse_path_separators cursor start
-          (Atoms.make_expression_node cursor start (Name { modules; last = name }))
-      in
-      let value = parse_path_separators cursor start (parse_angle_arguments cursor start value) in
-      if brace_record_follows cursor then parse_brace_record cursor start value else value
-  | String ({ tag = Some _; _ } as literal) ->
-      Atoms.make_expression_node cursor start
-        (String (parse_string_literal cursor ~start ~modules literal))
-  | Punctuation Less -> parse_turbofish cursor start
-  | _ -> Cursor.fail cursor "a name after `::`"
+      if macro_follows cursor ~name_stop:token.span.stop then parse_macro cursor start name
+      else Atoms.make_expression_node cursor start (Name name)
+  | _ ->
+      let name = Atoms.parse_upper_name cursor "a name" in
+      parse_type_name_habits cursor start (Atoms.make_expression_node cursor start (Name name))
 
-and parse_path_separators cursor start (value : Syntax.expression) =
-  match (Cursor.peek cursor, Cursor.peek_ahead cursor 1) with
-  | ({ kind = Punctuation Colon_colon; _ } as separator), (Upper _ | Lower _) ->
-      Habits.report_path_separator cursor ~separator;
-      Cursor.advance cursor;
-      let name = Atoms.make_name cursor (Cursor.take cursor) in
-      parse_path_separators cursor start
-        (Atoms.make_expression_node cursor start (Member (value, name)))
-  | _ -> value
+and tagged_string_follows_path cursor =
+  let rec scan offset =
+    match (Cursor.peek_ahead cursor offset, Cursor.peek_ahead cursor (offset + 1)) with
+    | Punctuation Dot, Lower _ -> scan (offset + 2)
+    | Punctuation Dot, String { tag = Some _; _ } -> true
+    | _ -> false
+  in
+  scan 1
+
+and parse_type_name_habits cursor start (type_name : Syntax.expression) =
+  let value = parse_angle_arguments cursor start type_name in
+  if brace_record_follows cursor then parse_brace_record cursor start value else value
 
 and parse_angle_arguments cursor start (value : Syntax.expression) =
   let follows_closer closer =
     match (Cursor.lookup_token cursor (closer + 1)).kind with
-    | Punctuation (Dot | Open Paren | Colon_colon) -> true
+    | Punctuation (Dot | Open Paren) -> true
     | _ -> false
   in
-  match if Cursor.is_punctuation cursor Less then find_angle_closer cursor else None with
+  match if Cursor.is_punctuation cursor Less then Cursor.find_angle_closer cursor else None with
   | Some closer when follows_closer closer ->
       skip_angle_brackets cursor;
       Atoms.make_error_expression cursor start
@@ -1217,9 +1209,7 @@ and parse_statement_line cursor ~previous : Syntax.statement =
 and parse_trailing_habits cursor (statement : Syntax.statement) =
   match (Cursor.peek_kind cursor, statement.kind) with
   | Foreign (Plus_plus | Minus_minus), Expression target
-    when match Cursor.peek_ahead cursor 1 with
-         | Newline | End_of_file | Punctuation (Close _) -> true
-         | _ -> false ->
+    when Atoms.ends_statement (Cursor.peek_ahead cursor 1) ->
       let operator = Cursor.take cursor in
       Habits.increment cursor ~target ~operator;
       parse_statement_error_through cursor statement
@@ -1261,12 +1251,15 @@ and list_uses_of_it (tokens : Token.t array) =
 
 and parse_trailing_lambda cursor (statement : Syntax.statement) =
   let opening = Cursor.peek cursor in
-  let closing = Cursor.lookup_token cursor (Cursor.lookup_closer cursor (Cursor.index cursor)) in
+  let closer = Cursor.lookup_closer cursor (Cursor.index cursor) in
+  let closing = Cursor.lookup_token cursor closer in
   match (list_uses_of_it (Cursor.group cursor), find_trailing_callee statement) with
   | (_ :: _ as uses), Some callee ->
       Habits.report_trailing_lambda cursor ~callee
         ~parameter:(Habits.derive_parameter_name callee)
-        ~opening ~closing ~uses;
+        ~opening ~closing
+        ~next:(Cursor.lookup_token cursor (closer + 1))
+        ~uses;
       ignore (parse_block cursor);
       parse_statement_error_through cursor statement
         (Cursor.make_definition_span cursor closing.span)
@@ -1343,11 +1336,19 @@ and parse_statement cursor : Syntax.statement =
             (Assignment { target; operator = Assign; value = parse_expression cursor })
       | None, _ -> make_statement_node (Expression target))
 
+and parse_binding_annotation cursor (pattern : Syntax.pattern) =
+  match (pattern.kind, Cursor.peek cursor) with
+  | Tuple _, ({ kind = Punctuation Colon; _ } as colon) ->
+      Cursor.report cursor Unexpected_token colon.span
+        "A tuple pattern takes no type annotation: the value's tuple type gives each pattern the \
+         type of its field.";
+      raise Cursor.Failed
+  | _ ->
+      if Cursor.accept_punctuation cursor Colon then Some (parse_type_expression cursor) else None
+
 and parse_binding cursor ~is_var =
-  let pattern = Parse_pattern.parse_pattern cursor in
-  let annotation =
-    if Cursor.accept_punctuation cursor Colon then Some (parse_type_expression cursor) else None
-  in
+  let pattern = Parse_pattern.parse_binding_pattern cursor in
+  let annotation = parse_binding_annotation cursor pattern in
   Cursor.expect_punctuation cursor Equal;
   let value = parse_expression cursor in
   let else_ =
@@ -1375,10 +1376,8 @@ and parse_binding cursor ~is_var =
   Let { is_var; pattern; annotation; value; else_ }
 
 and parse_for_loop cursor ~mode =
-  let pattern = Parse_pattern.parse_pattern cursor in
-  let annotation =
-    if Cursor.accept_punctuation cursor Colon then Some (parse_type_expression cursor) else None
-  in
+  let pattern = Parse_pattern.parse_binding_pattern cursor in
+  let annotation = parse_binding_annotation cursor pattern in
   Cursor.expect_keyword cursor In;
   let iterable = parse_expression cursor in
   (match iterable.kind with

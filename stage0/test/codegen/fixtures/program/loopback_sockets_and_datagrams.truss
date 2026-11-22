@@ -1,4 +1,4 @@
-use standard::network
+use standard.network
 
 fn say(text: String) uses Console {
   Console.print_line(text.slice())
@@ -7,7 +7,7 @@ fn say(text: String) uses Console {
 fn main(arguments: List[String]) -> ExitCode
   uses Console, NetworkServer, NetworkClient, Handles
 {
-  let loopback = network::SocketAddress(address: network::IpAddress.loopback, port: 0)
+  let loopback = network.SocketAddress(address: network.IpAddress.loopback, port: 0)
   var unused: UInt16 = 0
   if NetworkServer.listen(loopback) is Ok(opened) {
     var listener = own opened
@@ -27,7 +27,7 @@ fn main(arguments: List[String]) -> ExitCode
           say("the server read ${count}, first ${heard[0]}")
         }
         let _ = mut server.write(heard.slice())
-        let _ = mut server.shut_down(network::Direction.Sending)
+        let _ = mut server.shut_down(network.Direction.Sending)
         var answer: List[UInt8] = []
         if mut client.read(mut answer, limit: 100) is Ok(count) {
           say("the client read ${count}")
@@ -42,7 +42,7 @@ fn main(arguments: List[String]) -> ExitCode
       }
     }
   }
-  let closed = network::SocketAddress(address: network::IpAddress.loopback, port: unused)
+  let closed = network.SocketAddress(address: network.IpAddress.loopback, port: unused)
   if NetworkClient.connect(closed, timeout: None) is Err(error) {
     say("refused ${error == SystemError.ConnectionRefused}")
   }
@@ -55,7 +55,7 @@ fn main(arguments: List[String]) -> ExitCode
     }
     var packet: List[UInt8] = []
     if mut receiver.receive_from(mut packet, limit: 100) is Ok(datagram) {
-      say("received ${datagram.length} from loopback ${datagram.from.address == network::IpAddress.loopback}")
+      say("received ${datagram.length} from loopback ${datagram.from.address == network.IpAddress.loopback}")
     }
     let _ = mut receiver.set_read_timeout(Some(Duration.nanoseconds(50000000)))
     if mut receiver.receive_from(mut packet, limit: 100) is Err(error) {

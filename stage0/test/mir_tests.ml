@@ -455,9 +455,7 @@ let () =
               let definition = Resolve.Names.show_key key in
               match
                 try find_graph (Lazy.force parts) key
-                with Compiler_bug.Bug bug ->
-                  Harness.fail "%s: %s" definition bug.message;
-                  None
+                with Compiler_bug.Bug bug -> Harness.fail "%s: %s" definition bug.message
               with
               | Some mir ->
                   incr built;
@@ -470,15 +468,15 @@ let () =
       if !built < 500 then Harness.fail "only %d of its definitions have MIR" !built)
 
 let lower_tree_and_graph text =
-  let packages = Support.setup [ ("app::main", text) ] in
+  let packages = Support.setup [ ("app.main", text) ] in
   match
     List.find_map
       (fun (declaration : Resolve.Names.declaration) ->
         let key = declaration.key in
-        if key.path = Path.Top { module_ = Support.parse_module "app::main"; name = "g" } then
+        if key.path = Path.Top { module_ = Support.parse_module "app.main"; name = "g" } then
           Some key
         else None)
-      (Support.list_declarations packages (Support.parse_module "app::main"))
+      (Support.list_declarations packages (Support.parse_module "app.main"))
   with
   | Some key -> (
       let parts = make_mir_parts packages in
@@ -1015,9 +1013,9 @@ let () =
       | lambdas -> Harness.fail "%d lambdas" (Array.length lambdas));
   Harness.test "a method an impl inherits shares its trait's default method's MIR" (fun () ->
       let packages =
-        Support.setup [ ("app::main", Fixtures.Mir.impls_inheriting_a_default_method) ]
+        Support.setup [ ("app.main", Fixtures.Mir.impls_inheriting_a_default_method) ]
       in
-      let module_ = Support.parse_module "app::main" in
+      let module_ = Support.parse_module "app.main" in
       let make_method_path owner name : Path.t = Method { owner; name; receiver = Instance Read } in
       let make_impl_path type_name : Path.t =
         Impl
@@ -1055,9 +1053,9 @@ let () =
   Harness.test "defaults have bodies of their own, apart from the MIR of any function's body"
     (fun () ->
       let packages =
-        Support.setup [ ("app::main", Fixtures.Mir.defaults_of_a_capability_a_type_and_a_method) ]
+        Support.setup [ ("app.main", Fixtures.Mir.defaults_of_a_capability_a_type_and_a_method) ]
       in
-      let module_ = Support.parse_module "app::main" in
+      let module_ = Support.parse_module "app.main" in
       let make_top_path name : Path.t = Top { module_; name } in
       let parts = make_mir_parts packages in
       let read_defaults path =
@@ -1099,9 +1097,9 @@ let () =
   Harness.test "a contract's clauses are formulas that take the function's parameters" (fun () ->
       let packages =
         Support.setup
-          [ ("app::main", Fixtures.Mir.contract_with_quantified_and_conditional_clauses) ]
+          [ ("app.main", Fixtures.Mir.contract_with_quantified_and_conditional_clauses) ]
       in
-      let g : Path.t = Top { module_ = Support.parse_module "app::main"; name = "g" } in
+      let g : Path.t = Top { module_ = Support.parse_module "app.main"; name = "g" } in
       let list_parameters (clause : Mir.formula) =
         List.map
           (fun parameter ->
@@ -1188,9 +1186,9 @@ let () =
   Harness.test "a clause that quantifies over a range and can run holds the quantifier as a loop"
     (fun () ->
       let packages =
-        Support.setup [ ("app::main", Fixtures.Mir.contract_with_a_quantified_clause_that_runs) ]
+        Support.setup [ ("app.main", Fixtures.Mir.contract_with_a_quantified_clause_that_runs) ]
       in
-      let f : Path.t = Top { module_ = Support.parse_module "app::main"; name = "f" } in
+      let f : Path.t = Top { module_ = Support.parse_module "app.main"; name = "f" } in
       match Mir.read_contract (make_mir_parts packages) f with
       | Some { form = { requires = [ quantified ]; _ }; _ } ->
           if not quantified.is_executable then Harness.fail "the quantified clause cannot run";
@@ -1207,9 +1205,9 @@ let () =
   Harness.test "a loop holds its clauses as formulas, and a `proof` block's statement its body"
     (fun () ->
       let packages =
-        Support.setup [ ("app::main", Fixtures.Mir.while_loop_with_an_invariant_and_a_proof_block) ]
+        Support.setup [ ("app.main", Fixtures.Mir.while_loop_with_an_invariant_and_a_proof_block) ]
       in
-      let module_ = Support.parse_module "app::main" in
+      let module_ = Support.parse_module "app.main" in
       let g : Path.t = Top { module_; name = "g" } in
       let key =
         match (Support.make_names packages).find_key g with
@@ -1390,8 +1388,8 @@ let () =
               { local = locate_named body "both"; projections = [ Field "first" ] })))
 
 let make_call_edge_lookups text : Mir.Call_edges.lookups =
-  let database = Support.make_database (Support.setup [ ("app::main", text) ]) in
-  let file = Support.parse_file "app::main" in
+  let database = Support.make_database (Support.setup [ ("app.main", text) ]) in
+  let file = Support.parse_file "app.main" in
   (match
      Support.list_codes
        (Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers database file)
@@ -1404,8 +1402,7 @@ let make_call_edge_lookups text : Mir.Call_edges.lookups =
   }
 
 let make_derived_impl type_name trait : Path.t =
-  Derived
-    { type_ = Support.make_top_path "app::main" type_name; trait = Well_known.make_path trait }
+  Derived { type_ = Support.make_top_path "app.main" type_name; trait = Well_known.make_path trait }
 
 let expect_paths ~expected paths =
   let actual = List.sort compare (List.map Path.show paths) in
@@ -1425,7 +1422,7 @@ let () =
   and default_of type_name =
     Well_known.make_impl_method_path Default_default ~impl:(make_derived_impl type_name Default)
   in
-  let meters_equal = "app::main::impl standard::core::Equal for app::main::Meters.equal" in
+  let meters_equal = "app.main.impl standard.core.Equal for app.main.Meters.equal" in
   Harness.test "a derived method of a record calls the method of each field's impl" (fun () ->
       expect_edges (equal_of "Span") ~expected:[ meters_equal ]);
   Harness.test "a derived method of a sum type calls the methods of every variant's fields"
@@ -1435,42 +1432,42 @@ let () =
         (Method { owner = make_derived_impl "Shape" Hash; name = "hash"; receiver = Instance Read })
         ~expected:
           [
-            "app::main::impl standard::core::Hash for app::main::Meters.hash";
-            "standard::core::Hasher.write";
+            "app.main.impl standard.core.Hash for app.main.Meters.hash";
+            "standard.core.Hasher.write";
           ]);
   Harness.test "a derived method of a type that holds itself calls itself" (fun () ->
       expect_edges (equal_of "Tree")
-        ~expected:[ "derived standard::core::Equal for app::main::Tree.equal"; meters_equal ]);
+        ~expected:[ "derived standard.core.Equal for app.main.Tree.equal"; meters_equal ]);
   Harness.test
     "a derived method of a type that holds a list of itself calls the list's method and gives it \
      the type's impl" (fun () ->
       expect_edges (equal_of "Forest")
         ~expected:
           [
-            "standard::list::impl standard::core::Equal for standard::list::List.equal";
-            "derived standard::core::Equal for app::main::Forest.equal";
-            "derived standard::core::Equal for app::main::Forest.not_equal";
+            "standard.list.impl standard.core.Equal for standard.list.List.equal";
+            "derived standard.core.Equal for app.main.Forest.equal";
+            "derived standard.core.Equal for app.main.Forest.not_equal";
           ]);
   Harness.test "a derived method has no call edge for a field of a type parameter's type" (fun () ->
       expect_edges (equal_of "Pair") ~expected:[ meters_equal ]);
   Harness.test "a derived method calls the derived method of a field whose type derives the trait"
     (fun () ->
       expect_edges (equal_of "Outer")
-        ~expected:[ "derived standard::core::Equal for app::main::Span.equal" ]);
+        ~expected:[ "derived standard.core.Equal for app.main.Span.equal" ]);
   Harness.test "a derived default calls the default of each field that has no written default"
     (fun () ->
       expect_edges (default_of "Limits") ~expected:[];
       expect_edges (default_of "Config")
-        ~expected:[ "derived standard::core::Default for app::main::Limits.default" ]);
+        ~expected:[ "derived standard.core.Default for app.main.Limits.default" ]);
   Harness.test "a call resolved to a derived method is a call edge to that method" (fun () ->
       expect_edges
-        (Support.make_top_path "app::main" "make")
-        ~expected:[ "derived standard::core::Default for app::main::Config.default" ]);
+        (Support.make_top_path "app.main" "make")
+        ~expected:[ "derived standard.core.Default for app.main.Config.default" ]);
   Harness.test "a trait's method reaches the derived methods of the trait's impls" (fun () ->
       let implementations =
         List.map Path.show
           (Mir.Call_edges.list_implementations (Lazy.force lookups)
-             ~calling_package:(Support.parse_module "app::main").package
+             ~calling_package:(Support.parse_module "app.main").package
              (Well_known.make_method_path Equal_equal))
       in
       List.iter
@@ -1478,14 +1475,14 @@ let () =
           if not (List.mem expected implementations) then
             Harness.fail "the implementations lack %s: [%s]" expected
               (String.concat "; " implementations))
-        [ meters_equal; "derived standard::core::Equal for app::main::Span.equal" ])
+        [ meters_equal; "derived standard.core.Equal for app.main.Span.equal" ])
 
 let () =
   let lookups = lazy (make_call_edge_lookups Fixtures.Mir.impls_inheriting_a_provided_method) in
   let list_edges path = Mir.Call_edges.list_path_edges (Lazy.force lookups) path in
-  let level = Support.make_top_path "app::main" "Level" in
+  let level = Support.make_top_path "app.main" "Level" in
   let method_of type_name name =
-    "app::main::impl app::main::Level for app::main::" ^ type_name ^ "." ^ name
+    "app.main.impl app.main.Level for app.main." ^ type_name ^ "." ^ name
   in
   let find_edge ~ending edges =
     match List.filter (fun edge -> String.ends_with ~suffix:ending (Path.show edge)) edges with
@@ -1493,13 +1490,13 @@ let () =
     | matching -> failwith (Printf.sprintf "%d edges end with %s" (List.length matching) ending)
   in
   let raised_of_shelf () =
-    find_edge ~ending:"Shelf.raised" (list_edges (Support.make_top_path "app::main" "raise"))
+    find_edge ~ending:"Shelf.raised" (list_edges (Support.make_top_path "app.main" "raise"))
   in
   Harness.test "a call of a method that an impl inherits is a call edge to the impl's method"
     (fun () ->
       expect_paths
         ~expected:[ method_of "Shelf" "raised" ]
-        (list_edges (Support.make_top_path "app::main" "raise")));
+        (list_edges (Support.make_top_path "app.main" "raise")));
   Harness.test "an inherited method calls its own impl's method where its body calls through Self"
     (fun () ->
       expect_paths
@@ -1512,14 +1509,14 @@ let () =
       expect_paths
         ~expected:
           [
-            "standard::numbers::signed::impl standard::core::Ordered for \
-             standard::intrinsic::Int64.compare";
-            "derived standard::core::Equal for standard::core::Ordering.equal";
+            "standard.numbers.signed.impl standard.core.Ordered for \
+             standard.intrinsic.Int64.compare";
+            "derived standard.core.Equal for standard.core.Ordering.equal";
           ]
         (list_edges (find_edge ~ending:"Int64.max(own self)" (list_edges (raised_of_shelf ())))));
   Harness.test "the body of a provided method calls its trait's method where it calls through Self"
     (fun () ->
-      expect_paths ~expected:[ "app::main::Level.height" ]
+      expect_paths ~expected:[ "app.main.Level.height" ]
         (List.filter
            (fun edge -> Path.locate_package edge <> Path.standard_package)
            (list_edges (Method { owner = level; name = "raised"; receiver = Instance Read }))));
@@ -1528,7 +1525,7 @@ let () =
         ~expected:
           [ method_of "Shelf" "raised"; method_of "Stair" "raised"; method_of "Pot" "raised" ]
         (Mir.Call_edges.list_implementations (Lazy.force lookups)
-           ~calling_package:(Support.parse_module "app::main").package
+           ~calling_package:(Support.parse_module "app.main").package
            (Method { owner = level; name = "raised"; receiver = Instance Read })));
   Harness.test "a call of a generic impl's method has edges to the impl of the type argument"
     (fun () ->
@@ -1540,28 +1537,28 @@ let () =
             method_of "Stair" "raised";
             method_of "Stair" "picked";
           ]
-        (list_edges (Support.make_top_path "app::main" "measure")));
+        (list_edges (Support.make_top_path "app.main" "measure")));
   Harness.test "a generic function named as a value has edges to the impl of its type argument"
     (fun () ->
       expect_paths
         ~expected:
           [
-            "app::main::pick";
+            "app.main.pick";
             method_of "Stair" "height";
             method_of "Stair" "raised";
             method_of "Stair" "picked";
           ]
-        (list_edges (Support.make_top_path "app::main" "name_pick")));
+        (list_edges (Support.make_top_path "app.main" "name_pick")));
   Harness.test
     "the body of a provided method that gives its receiver to a bound has edges to its trait's \
      methods" (fun () ->
       expect_paths
         ~expected:
           [
-            "app::main::pick";
-            "app::main::Level.height";
-            "app::main::Level.raised";
-            "app::main::Level.picked";
+            "app.main.pick";
+            "app.main.Level.height";
+            "app.main.Level.raised";
+            "app.main.Level.picked";
           ]
         (list_edges (Method { owner = level; name = "picked"; receiver = Instance Read })));
   Harness.test
@@ -1575,7 +1572,7 @@ let () =
       expect_paths
         ~expected:
           [
-            "app::main::pick";
+            "app.main.pick";
             method_of "Shelf" "height";
             method_of "Shelf" "raised";
             method_of "Shelf" "picked";
@@ -1619,8 +1616,8 @@ let () =
       expect_shown (List.rev !carried)
         ~expected:
           [
-            "a loop carries standard::core::Cursor.next uses {Meter}";
-            "a pattern carries standard::core::Equal.equal uses {}";
+            "a loop carries standard.core.Cursor.next uses {Meter}";
+            "a pattern carries standard.core.Equal.equal uses {}";
           ]);
   Harness.test "the callee that a statement invokes is found for a call and a pull" (fun () ->
       let built, _ = lower_tree_and_graph program in
@@ -1634,19 +1631,18 @@ let () =
       expect_shown (List.rev !invoked)
         ~expected:
           [
-            "standard::core::Cursor.next uses {Meter}";
-            "standard::core::Equal.equal uses {}";
-            "standard::list::Slice.length uses {}";
+            "standard.core.Cursor.next uses {Meter}";
+            "standard.core.Equal.equal uses {}";
+            "standard.list.Slice.length uses {}";
           ]);
   Harness.test "a loop over a cursor is a call edge to the cursor's `next`" (fun () ->
       expect_paths
-        ~expected:
-          [ "app::main::impl standard::core::Cursor for app::main::Countdown.next(mut self)" ]
+        ~expected:[ "app.main.impl standard.core.Cursor for app.main.Countdown.next(mut self)" ]
         (List.filter
            (fun (path : Path.t) ->
              match path with Method { name = "next"; _ } -> true | _ -> false)
            (Mir.Call_edges.list_path_edges (make_call_edge_lookups program)
-              (Support.make_top_path "app::main" "g"))));
+              (Support.make_top_path "app.main" "g"))));
   Harness.test
     "a `provide` whose body uses `Tasks` only through a pulled `next` can use tasks, so it locks \
      what it provides `mut`" (fun () ->

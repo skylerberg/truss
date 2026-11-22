@@ -1,18 +1,18 @@
-use standard::binary
-use standard::cryptography
-use standard::hex
-use standard::map
-use standard::network
-use standard::intrinsic
-use standard::streams
-use standard::tasks
-use standard::x509
+use standard.binary
+use standard.cryptography
+use standard.hex
+use standard.map
+use standard.network
+use standard.intrinsic
+use standard.streams
+use standard.tasks
+use standard.x509
 
 public type Error =
   | Closed
   | Alert(description: UInt8)
   | Protocol(message: String)
-  | Certificate(error: x509::VerifyError)
+  | Certificate(error: x509.VerifyError)
   | System(error: SystemError)
   derives Equal
 
@@ -46,7 +46,7 @@ fn system[Value](outcome: own Result[Value, SystemError]) -> Result[Value, Error
   }
 }
 
-fn decoded[Value](outcome: own Result[Value, binary::DecodeError]) -> Result[Value, Error] {
+fn decoded[Value](outcome: own Result[Value, binary.DecodeError]) -> Result[Value, Error] {
   match own outcome {
     Ok(value) => Ok(own value)
     Err(_) => Err(protocol_error("a message that ends early"))
@@ -76,10 +76,10 @@ fn Suite.from_code(code: UInt16) -> Option[Suite] {
   }
 }
 
-fn Suite.hash(self) -> cryptography::HashFunction {
+fn Suite.hash(self) -> cryptography.HashFunction {
   match self {
-    Aes256GcmSha384 => cryptography::HashFunction.Sha384
-    _ => cryptography::HashFunction.Sha256
+    Aes256GcmSha384 => cryptography.HashFunction.Sha384
+    _ => cryptography.HashFunction.Sha256
   }
 }
 
@@ -90,28 +90,28 @@ fn Suite.key_length(self) -> UInt64 {
   }
 }
 
-fn keyed_hash(function: cryptography::HashFunction, key: Slice[UInt8], message: Slice[UInt8]) -> List[UInt8] {
+fn keyed_hash(function: cryptography.HashFunction, key: Slice[UInt8], message: Slice[UInt8]) -> List[UInt8] {
   match function {
     Sha384 => {
-      let code = cryptography::hmac_sha384(key, message: message)
+      let code = cryptography.hmac_sha384(key, message: message)
       code[..].to_list()
     }
     Sha512 => {
-      let code = cryptography::hmac_sha512(key, message: message)
+      let code = cryptography.hmac_sha512(key, message: message)
       code[..].to_list()
     }
     Sha256 => {
-      let code = cryptography::hmac_sha256(key, message: message)
+      let code = cryptography.hmac_sha256(key, message: message)
       code[..].to_list()
     }
   }
 }
 
-fn extract(function: cryptography::HashFunction, salt: Slice[UInt8], input: Slice[UInt8]) -> List[UInt8] {
+fn extract(function: cryptography.HashFunction, salt: Slice[UInt8], input: Slice[UInt8]) -> List[UInt8] {
   keyed_hash(function, key: salt, message: input)
 }
 
-fn expand(function: cryptography::HashFunction, secret: Slice[UInt8], information: Slice[UInt8], length: UInt64) -> List[UInt8] {
+fn expand(function: cryptography.HashFunction, secret: Slice[UInt8], information: Slice[UInt8], length: UInt64) -> List[UInt8] {
   var output: List[UInt8] = []
   var previous: List[UInt8] = []
   var counter: UInt8 = 1
@@ -130,17 +130,17 @@ fn expand(function: cryptography::HashFunction, secret: Slice[UInt8], informatio
 }
 
 fn push_u16(bytes: mut List[UInt8], value: UInt64) {
-  mut bytes.push(intrinsic::convert((value >> 8) & 255))
-  mut bytes.push(intrinsic::convert(value & 255))
+  mut bytes.push(intrinsic.convert((value >> 8) & 255))
+  mut bytes.push(intrinsic.convert(value & 255))
 }
 
 fn push_u24(bytes: mut List[UInt8], value: UInt64) {
-  mut bytes.push(intrinsic::convert((value >> 16) & 255))
+  mut bytes.push(intrinsic.convert((value >> 16) & 255))
   push_u16(mut bytes, value: value)
 }
 
 fn push_vector8(bytes: mut List[UInt8], content: Slice[UInt8]) {
-  mut bytes.push(intrinsic::convert(content.length() & 255))
+  mut bytes.push(intrinsic.convert(content.length() & 255))
   mut bytes.append_slice(content)
 }
 
@@ -155,7 +155,7 @@ fn push_vector24(bytes: mut List[UInt8], content: Slice[UInt8]) {
 }
 
 fn expand_label(
-  function: cryptography::HashFunction,
+  function: cryptography.HashFunction,
   secret: Slice[UInt8],
   label: StringSlice,
   context: Slice[UInt8],
@@ -170,7 +170,7 @@ fn expand_label(
   expand(function, secret: secret, information: information.slice(), length: length)
 }
 
-fn derive_secret(function: cryptography::HashFunction, secret: Slice[UInt8], label: StringSlice, transcript: Slice[UInt8]) -> List[UInt8] {
+fn derive_secret(function: cryptography.HashFunction, secret: Slice[UInt8], label: StringSlice, transcript: Slice[UInt8]) -> List[UInt8] {
   let context = function.digest(transcript)
   expand_label(function, secret: secret, label: label, context: context.slice(), length: function.length())
 }
@@ -192,7 +192,7 @@ fn nonce_of(keys: Keys) -> Array[UInt8, 12] {
   let width: UInt64 = 12
   for index in 0..width {
     let iv = if index < keys.iv.length() { keys.iv[index] } else { 0 }
-    let counter: UInt8 = if index >= 4 { intrinsic::convert((keys.sequence >> (8 * (11 - index))) & 255) } else { 0 }
+    let counter: UInt8 = if index >= 4 { intrinsic.convert((keys.sequence >> (8 * (11 - index))) & 255) } else { 0 }
     nonce[index] = iv ^ counter
   }
   nonce
@@ -228,17 +228,17 @@ fn seal_record(keys: mut Keys, content_type: UInt8, content: Slice[UInt8]) -> Li
   let nonce = nonce_of(keys)
   let sealed = match keys.suite {
     Aes128GcmSha256 => if inner.length() < 16777216 {
-      cryptography::aes128_gcm_seal(array_of_16(keys.key.slice()), nonce: nonce, plaintext: inner.slice(), associated_data: header.slice())
+      cryptography.aes128_gcm_seal(array_of_16(keys.key.slice()), nonce: nonce, plaintext: inner.slice(), associated_data: header.slice())
     } else {
       []
     }
     Aes256GcmSha384 => if inner.length() < 16777216 {
-      cryptography::aes256_gcm_seal(array_of_32(keys.key.slice()), nonce: nonce, plaintext: inner.slice(), associated_data: header.slice())
+      cryptography.aes256_gcm_seal(array_of_32(keys.key.slice()), nonce: nonce, plaintext: inner.slice(), associated_data: header.slice())
     } else {
       []
     }
     ChaCha20Poly1305Sha256 => if inner.length() < 16777216 {
-      cryptography::chacha20_poly1305_seal(array_of_32(keys.key.slice()), nonce: nonce, plaintext: inner.slice(), associated_data: header.slice())
+      cryptography.chacha20_poly1305_seal(array_of_32(keys.key.slice()), nonce: nonce, plaintext: inner.slice(), associated_data: header.slice())
     } else {
       []
     }
@@ -256,9 +256,9 @@ fn open_record(keys: mut Keys, header: Slice[UInt8], sealed: Slice[UInt8]) -> Re
   }
   let nonce = nonce_of(keys)
   let opened = match keys.suite {
-    Aes128GcmSha256 => cryptography::aes128_gcm_open(array_of_16(keys.key.slice()), nonce: nonce, sealed: sealed, associated_data: header)
-    Aes256GcmSha384 => cryptography::aes256_gcm_open(array_of_32(keys.key.slice()), nonce: nonce, sealed: sealed, associated_data: header)
-    ChaCha20Poly1305Sha256 => cryptography::chacha20_poly1305_open(array_of_32(keys.key.slice()), nonce: nonce, sealed: sealed, associated_data: header)
+    Aes128GcmSha256 => cryptography.aes128_gcm_open(array_of_16(keys.key.slice()), nonce: nonce, sealed: sealed, associated_data: header)
+    Aes256GcmSha384 => cryptography.aes256_gcm_open(array_of_32(keys.key.slice()), nonce: nonce, sealed: sealed, associated_data: header)
+    ChaCha20Poly1305Sha256 => cryptography.chacha20_poly1305_open(array_of_32(keys.key.slice()), nonce: nonce, sealed: sealed, associated_data: header)
   }
   keys.sequence = keys.sequence.saturating_add(1)
   var inner = match own opened {
@@ -276,38 +276,38 @@ fn open_record(keys: mut Keys, header: Slice[UInt8], sealed: Slice[UInt8]) -> Re
   }
 }
 
-public type Identity(chain: List[x509::Certificate], key: x509::PrivateKey)
+public type Identity(chain: List[x509.Certificate], key: x509.PrivateKey)
 
 public type ClientCertificates = Ignored | Verified | Required
   derives Equal
 
 public type ClientConfig(
-  roots: List[x509::Certificate],
+  roots: List[x509.Certificate],
   protocols: List[String] = [],
   verify: Bool = true,
   identity: Option[Identity] = None,
 )
 
 public type ServerConfig(
-  chain: List[x509::Certificate],
-  key: x509::PrivateKey,
+  chain: List[x509.Certificate],
+  key: x509.PrivateKey,
   protocols: List[String] = [],
   client_certificates: ClientCertificates = ClientCertificates.Ignored,
-  client_roots: List[x509::Certificate] = [],
+  client_roots: List[x509.Certificate] = [],
 )
 
 type Message(kind: UInt8, body: List[UInt8], raw: List[UInt8])
 
-type Wire[Stream: streams::Duplex](
+type Wire[Stream: streams.Duplex](
   stream: Stream,
-  raw: streams::ByteQueue,
+  raw: streams.ByteQueue,
   receiving: Option[Keys],
   sending: Option[Keys],
-  buffered: streams::ByteQueue,
+  buffered: streams.ByteQueue,
   transcript: List[UInt8],
 )
 
-fn read_exactly[Stream: streams::Duplex](wire: mut Wire[Stream], count: UInt64) -> Result[List[UInt8], Error]
+fn read_exactly[Stream: streams.Duplex](wire: mut Wire[Stream], count: UInt64) -> Result[List[UInt8], Error]
   uses Handles, Tasks, RunForever
   ensures !(result is Ok(bytes) && bytes.length() != count)
 {
@@ -323,11 +323,11 @@ fn read_exactly[Stream: streams::Duplex](wire: mut Wire[Stream], count: UInt64) 
 
 type Record(content_type: UInt8, content: List[UInt8])
 
-fn read_record[Stream: streams::Duplex](wire: mut Wire[Stream]) -> Result[Record, Error]
+fn read_record[Stream: streams.Duplex](wire: mut Wire[Stream]) -> Result[Record, Error]
   uses Handles, Tasks, RunForever
 {
   let header = read_exactly(mut wire, count: 5)?
-  let length = intrinsic::convert[UInt8, UInt64](header[3]) * 256 + intrinsic::convert[UInt8, UInt64](header[4])
+  let length = intrinsic.convert[UInt8, UInt64](header[3]) * 256 + intrinsic.convert[UInt8, UInt64](header[4])
   if length > 16640 {
     return Err(protocol_error("a record longer than TLS allows"))
   }
@@ -364,7 +364,7 @@ fn alert_of(content: Slice[UInt8]) -> Error {
   }
 }
 
-fn write_record[Stream: streams::Duplex](wire: mut Wire[Stream], content_type: UInt8, content: Slice[UInt8]) -> Result[Unit, Error]
+fn write_record[Stream: streams.Duplex](wire: mut Wire[Stream], content_type: UInt8, content: Slice[UInt8]) -> Result[Unit, Error]
   uses Handles, Tasks, RunForever
 {
   var bytes: List[UInt8] = []
@@ -388,14 +388,14 @@ fn write_record[Stream: streams::Duplex](wire: mut Wire[Stream], content_type: U
   system(wire.stream.send_all(bytes.slice()))
 }
 
-fn read_message[Stream: streams::Duplex](wire: mut Wire[Stream]) -> Result[Message, Error]
+fn read_message[Stream: streams.Duplex](wire: mut Wire[Stream]) -> Result[Message, Error]
   uses Handles, Tasks, RunForever
 {
   while true {
     if wire.buffered.length() >= 4 {
       let header = wire.buffered.bytes()
-      let length = intrinsic::convert[UInt8, UInt64](header[1]) * 65536
-        + intrinsic::convert[UInt8, UInt64](header[2]) * 256 + intrinsic::convert[UInt8, UInt64](header[3])
+      let length = intrinsic.convert[UInt8, UInt64](header[1]) * 65536
+        + intrinsic.convert[UInt8, UInt64](header[2]) * 256 + intrinsic.convert[UInt8, UInt64](header[3])
       if length > 262144 {
         return Err(protocol_error("a handshake message that is too long"))
       }
@@ -415,7 +415,7 @@ fn read_message[Stream: streams::Duplex](wire: mut Wire[Stream]) -> Result[Messa
   }
 }
 
-fn write_message[Stream: streams::Duplex](wire: mut Wire[Stream], kind: UInt8, body: Slice[UInt8]) -> Result[Unit, Error]
+fn write_message[Stream: streams.Duplex](wire: mut Wire[Stream], kind: UInt8, body: Slice[UInt8]) -> Result[Unit, Error]
   uses Handles, Tasks, RunForever
 {
   var message: List[UInt8] = [kind]
@@ -433,7 +433,7 @@ fn random_bytes(count: UInt64) -> List[UInt8]
     let width: UInt64 = 8
     for index in 0..width {
       if bytes.length() < count {
-        mut bytes.push(intrinsic::convert((word >> (8 * index)) & 255))
+        mut bytes.push(intrinsic.convert((word >> (8 * index)) & 255))
       }
     }
   }
@@ -452,13 +452,13 @@ fn retry_random() -> List[UInt8] {
 
 type Share(
   group: UInt64,
-  private_x25519: Option[cryptography::AgreementKey],
-  private_p256: Option[cryptography::EcdhKey],
-  private_kem: Option[cryptography::DecapsulationKey],
+  private_x25519: Option[cryptography.AgreementKey],
+  private_p256: Option[cryptography.EcdhKey],
+  private_kem: Option[cryptography.DecapsulationKey],
   public_key: List[UInt8],
 )
 
-fn x25519_public(key: cryptography::AgreementKey) -> List[UInt8] {
+fn x25519_public(key: cryptography.AgreementKey) -> List[UInt8] {
   let point = key.public_key()
   point.bytes[..].to_list()
 }
@@ -467,13 +467,13 @@ fn new_share(group: UInt64) -> Share
   uses Random, Panic, RunForever
 {
   if group == p256_group {
-    let key = cryptography::EcdhKey.generate(cryptography::Curve.P256)
+    let key = cryptography.EcdhKey.generate(cryptography.Curve.P256)
     let public_key = key.public_key()
     return Share(group: group, private_x25519: None, private_p256: Some(own key), private_kem: None, public_key: own public_key)
   }
-  let key = cryptography::AgreementKey.generate()
+  let key = cryptography.AgreementKey.generate()
   if group == hybrid_group {
-    let kem = cryptography::DecapsulationKey.generate()
+    let kem = cryptography.DecapsulationKey.generate()
     let encapsulation = kem.encapsulation_key()
     var public_key = encapsulation.bytes().to_list()
     mut public_key.append(x25519_public(key))
@@ -483,11 +483,11 @@ fn new_share(group: UInt64) -> Share
   Share(group: x25519_group, private_x25519: Some(own key), private_p256: None, private_kem: None, public_key: own public_key)
 }
 
-fn x25519_secret(key: own cryptography::AgreementKey, peer: Slice[UInt8]) -> Result[List[UInt8], Error] {
+fn x25519_secret(key: own cryptography.AgreementKey, peer: Slice[UInt8]) -> Result[List[UInt8], Error] {
   if peer.length() != 32 {
     return Err(protocol_error("an X25519 key share that is not 32 bytes"))
   }
-  match own key.agree(cryptography::AgreementPublicKey(bytes: array_of_32(peer))) {
+  match own key.agree(cryptography.AgreementPublicKey(bytes: array_of_32(peer))) {
     Some(secret) => {
       let exposed = secret.expose()
       Ok(exposed[..].to_list())
@@ -545,12 +545,12 @@ fn respond(group: UInt64, peer: Slice[UInt8]) -> Result[Response, Error]
   if peer.length() != 1216 {
     return Err(Error.Alert(description: 47))
   }
-  let encapsulation = match cryptography::EncapsulationKey.from_bytes(peer[0..1184]) {
+  let encapsulation = match cryptography.EncapsulationKey.from_bytes(peer[0..1184]) {
     Some(encapsulation) => own encapsulation
     None => return Err(Error.Alert(description: 47))
   }
   let sealed = encapsulation.encapsulate()
-  let key = cryptography::AgreementKey.generate()
+  let key = cryptography.AgreementKey.generate()
   var public_key = sealed.ciphertext.copy()
   mut public_key.append(x25519_public(key))
   let kem_secret = sealed.shared.expose()
@@ -589,7 +589,7 @@ fn client_hello(random: Slice[UInt8], session: Slice[UInt8], server_name: String
   push_vector16(mut body, content: suites.slice())
   push_vector8(mut body, content: [0])
   var extensions: List[UInt8] = []
-  if !server_name.is_empty() && network::IpAddress.parse(server_name) is Err(_) {
+  if !server_name.is_empty() && network.IpAddress.parse(server_name) is Err(_) {
     var name: List[UInt8] = [0]
     push_vector16(mut name, content: server_name.bytes())
     var list: List[UInt8] = []
@@ -606,12 +606,12 @@ fn client_hello(random: Slice[UInt8], session: Slice[UInt8], server_name: String
   var schemes: List[UInt8] = []
   var scheme_list: List[UInt8] = []
   for scheme in signature_schemes {
-    push_u16(mut scheme_list, value: intrinsic::convert(scheme))
+    push_u16(mut scheme_list, value: intrinsic.convert(scheme))
   }
   push_vector16(mut schemes, content: scheme_list.slice())
   extension(mut extensions, kind: 13, content: schemes.slice())
   for scheme in certificate_only_schemes {
-    push_u16(mut scheme_list, value: intrinsic::convert(scheme))
+    push_u16(mut scheme_list, value: intrinsic.convert(scheme))
   }
   var certificate_schemes: List[UInt8] = []
   push_vector16(mut certificate_schemes, content: scheme_list.slice())
@@ -640,19 +640,19 @@ fn client_hello(random: Slice[UInt8], session: Slice[UInt8], server_name: String
 
 type Extension(kind: UInt64, content: List[UInt8])
 
-fn read_extensions(decoder: mut binary::Decoder) -> Result[List[Extension], Error]
+fn read_extensions(decoder: mut binary.Decoder) -> Result[List[Extension], Error]
   uses RunForever
 {
   var extensions: List[Extension] = []
   if decoder.is_at_end() {
     return Ok(own extensions)
   }
-  let length: UInt64 = intrinsic::convert(decoded(mut decoder.uint16())?)
+  let length: UInt64 = intrinsic.convert(decoded(mut decoder.uint16())?)
   let block = decoded(mut decoder.bytes(length))?
-  var inner = binary::Decoder.new(block)
+  var inner = binary.Decoder.new(block)
   while !inner.is_at_end() {
-    let kind: UInt64 = intrinsic::convert(decoded(mut inner.uint16())?)
-    let size: UInt64 = intrinsic::convert(decoded(mut inner.uint16())?)
+    let kind: UInt64 = intrinsic.convert(decoded(mut inner.uint16())?)
+    let size: UInt64 = intrinsic.convert(decoded(mut inner.uint16())?)
     let content = decoded(mut inner.bytes(size))?.to_list()
     for known in extensions {
       if known.kind == kind {
@@ -678,12 +678,12 @@ type ServerHello(random: List[UInt8], suite: Suite, extensions: List[Extension])
 fn parse_server_hello(body: Slice[UInt8], session: Slice[UInt8]) -> Result[ServerHello, Error]
   uses RunForever
 {
-  var decoder = binary::Decoder.new(body)
+  var decoder = binary.Decoder.new(body)
   if decoded(mut decoder.uint16())? != 771 {
     return Err(protocol_error("a ServerHello with the wrong legacy version"))
   }
   let random = decoded(mut decoder.bytes(32))?.to_list()
-  let echoed_length: UInt64 = intrinsic::convert(decoded(mut decoder.uint8())?)
+  let echoed_length: UInt64 = intrinsic.convert(decoded(mut decoder.uint8())?)
   let echoed = decoded(mut decoder.bytes(echoed_length))?
   if echoed != session {
     return Err(protocol_error("a ServerHello that does not echo the session"))
@@ -709,25 +709,25 @@ fn parse_server_hello(body: Slice[UInt8], session: Slice[UInt8]) -> Result[Serve
 
 fn u16_at(bytes: Slice[UInt8], at: UInt64) -> Option[UInt64] {
   if at < bytes.length() && bytes.length() - at >= 2 {
-    Some(intrinsic::convert[UInt8, UInt64](bytes[at]) * 256 + intrinsic::convert[UInt8, UInt64](bytes[at + 1]))
+    Some(intrinsic.convert[UInt8, UInt64](bytes[at]) * 256 + intrinsic.convert[UInt8, UInt64](bytes[at + 1]))
   } else {
     None
   }
 }
 
-fn scheme_algorithm(scheme: UInt64) -> Option[x509::SignatureAlgorithm] {
+fn scheme_algorithm(scheme: UInt64) -> Option[x509.SignatureAlgorithm] {
   if scheme == 1027 {
-    Some(x509::SignatureAlgorithm.EcdsaSha256)
+    Some(x509.SignatureAlgorithm.EcdsaSha256)
   } else if scheme == 1283 {
-    Some(x509::SignatureAlgorithm.EcdsaSha384)
+    Some(x509.SignatureAlgorithm.EcdsaSha384)
   } else if scheme == 2052 {
-    Some(x509::SignatureAlgorithm.RsaPss(function: cryptography::HashFunction.Sha256))
+    Some(x509.SignatureAlgorithm.RsaPss(function: cryptography.HashFunction.Sha256))
   } else if scheme == 2053 {
-    Some(x509::SignatureAlgorithm.RsaPss(function: cryptography::HashFunction.Sha384))
+    Some(x509.SignatureAlgorithm.RsaPss(function: cryptography.HashFunction.Sha384))
   } else if scheme == 2054 {
-    Some(x509::SignatureAlgorithm.RsaPss(function: cryptography::HashFunction.Sha512))
+    Some(x509.SignatureAlgorithm.RsaPss(function: cryptography.HashFunction.Sha512))
   } else if scheme == 2055 {
-    Some(x509::SignatureAlgorithm.Ed25519Signature)
+    Some(x509.SignatureAlgorithm.Ed25519Signature)
   } else {
     None
   }
@@ -741,7 +741,7 @@ fn signed_content(context: StringSlice, digest: Slice[UInt8]) -> List[UInt8] {
   content
 }
 
-fn finished_data(function: cryptography::HashFunction, base: Slice[UInt8], transcript: Slice[UInt8]) -> List[UInt8] {
+fn finished_data(function: cryptography.HashFunction, base: Slice[UInt8], transcript: Slice[UInt8]) -> List[UInt8] {
   let key = expand_label(function, secret: base, label: "finished", context: [], length: function.length())
   let digest = function.digest(transcript)
   keyed_hash(function, key: key.slice(), message: digest.slice())
@@ -750,47 +750,47 @@ fn finished_data(function: cryptography::HashFunction, base: Slice[UInt8], trans
 type Incoming(
   keys: Keys,
   secret: List[UInt8],
-  raw: streams::ByteQueue,
-  unread: streams::ByteQueue,
-  handshake: streams::ByteQueue,
+  raw: streams.ByteQueue,
+  unread: streams.ByteQueue,
+  handshake: streams.ByteQueue,
   is_closed: Bool,
 )
 
 type Outgoing(keys: Keys, secret: List[UInt8], must_update: Bool, is_closed: Bool)
 
-public opaque type Connection[Stream: streams::Duplex](
+public opaque type Connection[Stream: streams.Duplex](
   stream: Stream,
   suite: Suite,
-  incoming: tasks::Cell[Incoming],
-  outgoing: tasks::Cell[Outgoing],
-  reading: tasks::Limiter,
-  writing: tasks::Limiter,
+  incoming: tasks.Cell[Incoming],
+  outgoing: tasks.Cell[Outgoing],
+  reading: tasks.Limiter,
+  writing: tasks.Limiter,
   protocol: Option[String],
-  peer: List[x509::Certificate],
+  peer: List[x509.Certificate],
 )
 
-public fn Connection[Stream: streams::Duplex].protocol(self) -> Option[StringSlice] {
+public fn Connection[Stream: streams.Duplex].protocol(self) -> Option[StringSlice] {
   match self.protocol {
     Some(name) => Some(name.slice())
     None => None
   }
 }
 
-public fn Connection[Stream: streams::Duplex].peer_certificates(self) -> Slice[x509::Certificate] {
+public fn Connection[Stream: streams.Duplex].peer_certificates(self) -> Slice[x509.Certificate] {
   self.peer.slice()
 }
 
-public fn Connection[Stream: streams::Duplex].stream(self) lends Stream {
+public fn Connection[Stream: streams.Duplex].stream(self) lends Stream {
   self.stream
 }
 
-fn established[Stream: streams::Duplex](
+fn established[Stream: streams.Duplex](
   wire: own Wire[Stream],
   suite: Suite,
   receiving_secret: own List[UInt8],
   sending_secret: own List[UInt8],
   protocol: own Option[String],
-  peer: own List[x509::Certificate],
+  peer: own List[x509.Certificate],
 ) -> Connection[Stream] {
   var opened = own wire
   let incoming = Incoming(
@@ -810,56 +810,56 @@ fn established[Stream: streams::Duplex](
   Connection(
     stream: own opened.stream,
     suite: suite,
-    incoming: tasks::Cell.new(own incoming),
-    outgoing: tasks::Cell.new(own outgoing),
-    reading: tasks::Limiter.new(1),
-    writing: tasks::Limiter.new(1),
+    incoming: tasks.Cell.new(own incoming),
+    outgoing: tasks.Cell.new(own outgoing),
+    reading: tasks.Limiter.new(1),
+    writing: tasks.Limiter.new(1),
     protocol: own protocol,
     peer: own peer,
   )
 }
 
-fn key_schedule(function: cryptography::HashFunction, shared: Slice[UInt8]) -> List[UInt8] {
+fn key_schedule(function: cryptography.HashFunction, shared: Slice[UInt8]) -> List[UInt8] {
   let zeros: List[UInt8] = List.filled(0, count: function.length())
   let early = extract(function, salt: zeros.slice(), input: zeros.slice())
   let derived = derive_secret(function, secret: early.slice(), label: "derived", transcript: [])
   extract(function, salt: derived.slice(), input: shared)
 }
 
-fn master_secret(function: cryptography::HashFunction, handshake: Slice[UInt8]) -> List[UInt8] {
+fn master_secret(function: cryptography.HashFunction, handshake: Slice[UInt8]) -> List[UInt8] {
   let zeros: List[UInt8] = List.filled(0, count: function.length())
   let derived = derive_secret(function, secret: handshake, label: "derived", transcript: [])
   extract(function, salt: derived.slice(), input: zeros.slice())
 }
 
-fn read_u24(decoder: mut binary::Decoder) -> Result[UInt64, Error] {
-  let high: UInt64 = intrinsic::convert(decoded(mut decoder.uint8())?)
-  let low: UInt64 = intrinsic::convert(decoded(mut decoder.uint16())?)
+fn read_u24(decoder: mut binary.Decoder) -> Result[UInt64, Error] {
+  let high: UInt64 = intrinsic.convert(decoded(mut decoder.uint8())?)
+  let low: UInt64 = intrinsic.convert(decoded(mut decoder.uint16())?)
   Ok(high * 65536 + low)
 }
 
-fn parse_certificates(body: Slice[UInt8]) -> Result[List[x509::Certificate], Error]
+fn parse_certificates(body: Slice[UInt8]) -> Result[List[x509.Certificate], Error]
   uses Panic, RunForever
 {
-  var decoder = binary::Decoder.new(body)
-  let context_length: UInt64 = intrinsic::convert(decoded(mut decoder.uint8())?)
+  var decoder = binary.Decoder.new(body)
+  let context_length: UInt64 = intrinsic.convert(decoded(mut decoder.uint8())?)
   let _ = decoded(mut decoder.bytes(context_length))?
   let _ = read_u24(mut decoder)?
-  var chain: List[x509::Certificate] = []
+  var chain: List[x509.Certificate] = []
   while !decoder.is_at_end() {
     let length = read_u24(mut decoder)?
     let encoded = decoded(mut decoder.bytes(length))?
-    match x509::Certificate.parse(encoded) {
+    match x509.Certificate.parse(encoded) {
       Ok(certificate) => mut chain.push(own certificate)
       Err(error) => return Err(Error.Protocol(message: "${error}"))
     }
-    let extensions_length: UInt64 = intrinsic::convert(decoded(mut decoder.uint16())?)
+    let extensions_length: UInt64 = intrinsic.convert(decoded(mut decoder.uint16())?)
     let _ = decoded(mut decoder.bytes(extensions_length))?
   }
   Ok(own chain)
 }
 
-fn expect_message[Stream: streams::Duplex](wire: mut Wire[Stream], kind: UInt8) -> Result[Message, Error]
+fn expect_message[Stream: streams.Duplex](wire: mut Wire[Stream], kind: UInt8) -> Result[Message, Error]
   uses Handles, Tasks, RunForever
 {
   let message = read_message(mut wire)?
@@ -869,14 +869,14 @@ fn expect_message[Stream: streams::Duplex](wire: mut Wire[Stream], kind: UInt8) 
   Ok(own message)
 }
 
-fn retry_transcript(function: cryptography::HashFunction, first_hello: Slice[UInt8]) -> List[UInt8] {
-  var transcript: List[UInt8] = [254, 0, 0, intrinsic::convert(function.length() & 255)]
+fn retry_transcript(function: cryptography.HashFunction, first_hello: Slice[UInt8]) -> List[UInt8] {
+  var transcript: List[UInt8] = [254, 0, 0, intrinsic.convert(function.length() & 255)]
   mut transcript.append(function.digest(first_hello))
   transcript
 }
 
 fn hex_bytes(text: StringSlice) -> List[UInt8] {
-  match hex::decode(text) {
+  match hex.decode(text) {
     Ok(bytes) => own bytes
     Err(_) => []
   }
@@ -895,7 +895,7 @@ fn traffic(suite: Suite, secret: Slice[UInt8]) -> Option[Keys] {
   Some(Keys.from_secret(suite, secret: secret))
 }
 
-fn require_record_boundary[Stream: streams::Duplex](wire: Wire[Stream]) -> Result[Unit, Error] {
+fn require_record_boundary[Stream: streams.Duplex](wire: Wire[Stream]) -> Result[Unit, Error] {
   if wire.buffered.is_empty() {
     Ok(Unit)
   } else {
@@ -903,7 +903,7 @@ fn require_record_boundary[Stream: streams::Duplex](wire: Wire[Stream]) -> Resul
   }
 }
 
-public fn connect[Stream: streams::Duplex](stream: own Stream, host: StringSlice, config: ClientConfig) -> Result[Connection[Stream], Error]
+public fn connect[Stream: streams.Duplex](stream: own Stream, host: StringSlice, config: ClientConfig) -> Result[Connection[Stream], Error]
   uses Handles, Tasks, Random, Clock, Panic, RunForever
 {
   var wire = Wire(
@@ -924,7 +924,7 @@ public fn connect[Stream: streams::Duplex](stream: own Stream, host: StringSlice
   let marker = retry_random()
   if hello.random == marker {
     let function = hello.suite.hash()
-    let retry = map::exchange(mut wire.transcript, value: [])
+    let retry = map.exchange(mut wire.transcript, value: [])
     var transcript = retry_transcript(function, first_hello: retry.slice())
     mut transcript.append_slice(reply.raw.slice())
     wire.transcript = own transcript
@@ -994,12 +994,12 @@ public fn connect[Stream: streams::Duplex](stream: own Stream, host: StringSlice
   wire.sending = traffic(suite, secret: client_handshake.slice())
 
   let encrypted = expect_message(mut wire, kind: 8)?
-  var decoder = binary::Decoder.new(encrypted.body.slice())
+  var decoder = binary.Decoder.new(encrypted.body.slice())
   let extensions = read_extensions(mut decoder)?
   var protocol: Option[String] = None
   match find_extension(extensions.slice(), kind: 16) {
     Some(content) => {
-      if content.length() < 3 || intrinsic::convert[UInt8, UInt64](content[2]) != content.length() - 3 {
+      if content.length() < 3 || intrinsic.convert[UInt8, UInt64](content[2]) != content.length() - 3 {
         return Err(protocol_error("a malformed application protocol"))
       }
       let name = match String.from_utf8(content[3..].to_list()) {
@@ -1025,8 +1025,8 @@ public fn connect[Stream: streams::Duplex](stream: own Stream, host: StringSlice
   var request_context: Option[List[UInt8]] = None
   var requested_schemes: List[Extension] = []
   if message.kind == 13 {
-    var request_decoder = binary::Decoder.new(message.body.slice())
-    let length: UInt64 = intrinsic::convert(decoded(mut request_decoder.uint8())?)
+    var request_decoder = binary.Decoder.new(message.body.slice())
+    let length: UInt64 = intrinsic.convert(decoded(mut request_decoder.uint8())?)
     request_context = Some(decoded(mut request_decoder.bytes(length))?.to_list())
     requested_schemes = read_extensions(mut request_decoder)?
     mut wire.transcript.append_slice(message.raw.slice())
@@ -1037,10 +1037,10 @@ public fn connect[Stream: streams::Duplex](stream: own Stream, host: StringSlice
   }
   let chain = parse_certificates(message.body.slice())?
   if chain.is_empty() {
-    return Err(Error.Certificate(error: x509::VerifyError.Empty))
+    return Err(Error.Certificate(error: x509.VerifyError.Empty))
   }
   if config.verify {
-    match x509::verify_chain(chain.slice(), roots: config.roots.slice(), host: host, now: Clock.now()) {
+    match x509.verify_chain(chain.slice(), roots: config.roots.slice(), host: host, now: Clock.now()) {
       Ok(_) => {}
       Err(error) => return Err(Error.Certificate(error: error))
     }
@@ -1054,7 +1054,7 @@ public fn connect[Stream: streams::Duplex](stream: own Stream, host: StringSlice
 
   let finished = expect_message(mut wire, kind: 20)?
   let expected = finished_data(function, base: server_handshake.slice(), transcript: wire.transcript.slice())
-  if !cryptography::constant_time_equal(finished.body.slice(), second: expected.slice()) {
+  if !cryptography.constant_time_equal(finished.body.slice(), second: expected.slice()) {
     return Err(Error.Alert(description: 51))
   }
   mut wire.transcript.append_slice(finished.raw.slice())
@@ -1106,14 +1106,14 @@ type ClientHello(
 fn parse_client_hello(body: Slice[UInt8]) -> Result[ClientHello, Error]
   uses RunForever
 {
-  var decoder = binary::Decoder.new(body)
+  var decoder = binary.Decoder.new(body)
   let _ = decoded(mut decoder.uint16())?
   let random = decoded(mut decoder.bytes(32))?.to_list()
-  let session_length: UInt64 = intrinsic::convert(decoded(mut decoder.uint8())?)
+  let session_length: UInt64 = intrinsic.convert(decoded(mut decoder.uint8())?)
   let session = decoded(mut decoder.bytes(session_length))?.to_list()
-  let suites_length: UInt64 = intrinsic::convert(decoded(mut decoder.uint16())?)
+  let suites_length: UInt64 = intrinsic.convert(decoded(mut decoder.uint16())?)
   let suites = decoded(mut decoder.bytes(suites_length))?.to_list()
-  let compression_length: UInt64 = intrinsic::convert(decoded(mut decoder.uint8())?)
+  let compression_length: UInt64 = intrinsic.convert(decoded(mut decoder.uint8())?)
   let _ = decoded(mut decoder.bytes(compression_length))?
   let extensions = read_extensions(mut decoder)?
   let versions = match find_extension(extensions.slice(), kind: 43) {
@@ -1142,7 +1142,7 @@ fn choose_suite(suites: Slice[UInt8]) -> Option[Suite] {
     decreases suites.length() - at
   {
     match u16_at(suites, at: at) {
-      Some(code) => match Suite.from_code(intrinsic::convert(code)) {
+      Some(code) => match Suite.from_code(intrinsic.convert(code)) {
         Some(suite) => return Some(suite)
         None => {}
       }
@@ -1204,14 +1204,14 @@ fn supported_group(extensions: Slice[Extension]) -> Option[UInt64] {
 
 fn check_certificate_verify(
   verify: Message,
-  chain: Slice[x509::Certificate],
+  chain: Slice[x509.Certificate],
   label: StringSlice,
   digest: Slice[UInt8],
 ) -> Result[Unit, Error]
   uses Panic
 {
   if chain.is_empty() {
-    return Err(Error.Certificate(error: x509::VerifyError.Empty))
+    return Err(Error.Certificate(error: x509.VerifyError.Empty))
   }
   let scheme = match u16_at(verify.body.slice(), at: 0) {
     Some(scheme) => scheme
@@ -1235,7 +1235,7 @@ fn check_certificate_verify(
   Ok(Unit)
 }
 
-fn certificate_body(context: Slice[UInt8], chain: Slice[x509::Certificate]) -> List[UInt8] {
+fn certificate_body(context: Slice[UInt8], chain: Slice[x509.Certificate]) -> List[UInt8] {
   var entries: List[UInt8] = []
   for certificate in chain {
     push_vector24(mut entries, content: certificate.encoded())
@@ -1250,14 +1250,14 @@ fn certificate_body(context: Slice[UInt8], chain: Slice[x509::Certificate]) -> L
 fn signature_algorithms() -> List[UInt8] {
   var listed: List[UInt8] = []
   for scheme in signature_schemes {
-    push_u16(mut listed, value: intrinsic::convert(scheme))
+    push_u16(mut listed, value: intrinsic.convert(scheme))
   }
   var encoded: List[UInt8] = []
   push_vector16(mut encoded, content: listed.slice())
   encoded
 }
 
-fn signing_scheme(key: x509::PrivateKey, extensions: Slice[Extension]) -> Option[UInt64]
+fn signing_scheme(key: x509.PrivateKey, extensions: Slice[Extension]) -> Option[UInt64]
   uses Panic
 {
   let offered = find_extension(extensions, kind: 13)?
@@ -1272,15 +1272,15 @@ fn signing_scheme(key: x509::PrivateKey, extensions: Slice[Extension]) -> Option
   if lists_u16(offered.slice(), value: scheme) { Some(scheme) } else { None }
 }
 
-fn sign(key: x509::PrivateKey, content: Slice[UInt8]) -> List[UInt8]
+fn sign(key: x509.PrivateKey, content: Slice[UInt8]) -> List[UInt8]
   uses Random, Panic, RunForever
 {
   match key {
     Ecdsa(signing) => {
       let raw = signing.sign(content)
-      x509::ecdsa_signature_to_der(raw.slice())
+      x509.ecdsa_signature_to_der(raw.slice())
     }
-    Rsa(signing) => signing.sign_pss(cryptography::HashFunction.Sha256, message: content)
+    Rsa(signing) => signing.sign_pss(cryptography.HashFunction.Sha256, message: content)
     Ed25519(signing) => {
       let signature = signing.sign(content)
       signature.bytes[..].to_list()
@@ -1299,7 +1299,7 @@ fn choose_protocol(server: Slice[String], extensions: Slice[Extension]) -> Resul
   for protocol in server {
     var at: UInt64 = 2
     while at < offered.length() {
-      let length: UInt64 = intrinsic::convert(offered[at])
+      let length: UInt64 = intrinsic.convert(offered[at])
       if offered.length() - at - 1 < length {
         return Err(protocol_error("a malformed application protocol list"))
       }
@@ -1316,7 +1316,7 @@ fn server_hello(random: Slice[UInt8], session: Slice[UInt8], suite: Suite, share
   var body: List[UInt8] = [3, 3]
   mut body.append_slice(random)
   push_vector8(mut body, content: session)
-  push_u16(mut body, value: intrinsic::convert(suite.code()))
+  push_u16(mut body, value: intrinsic.convert(suite.code()))
   mut body.push(0)
   var extensions: List[UInt8] = []
   extension(mut extensions, kind: 43, content: [3, 4])
@@ -1330,7 +1330,7 @@ fn server_hello(random: Slice[UInt8], session: Slice[UInt8], suite: Suite, share
   body
 }
 
-public fn accept[Stream: streams::Duplex](stream: own Stream, config: ServerConfig) -> Result[Connection[Stream], Error]
+public fn accept[Stream: streams.Duplex](stream: own Stream, config: ServerConfig) -> Result[Connection[Stream], Error]
   uses Handles, Tasks, Random, Clock, Panic, RunForever
 {
   var wire = Wire(
@@ -1355,7 +1355,7 @@ public fn accept[Stream: streams::Duplex](stream: own Stream, config: ServerConf
       None => return Err(Error.Alert(description: 40))
     }
     var transcript = retry_transcript(function, first_hello: message.raw.slice())
-    wire.transcript = map::exchange(mut transcript, value: [])
+    wire.transcript = map.exchange(mut transcript, value: [])
     let marker = retry_random()
     let retry = server_hello(marker.slice(), session: hello.session.slice(), suite: suite, share: Extension(kind: group, content: []))
     write_message(mut wire, kind: 2, body: retry.slice())?
@@ -1437,7 +1437,7 @@ public fn accept[Stream: streams::Duplex](stream: own Stream, config: ServerConf
   let server_application = derive_secret(function, secret: master.slice(), label: "s ap traffic", transcript: wire.transcript.slice())
   wire.sending = traffic(suite, secret: server_application.slice())
 
-  var peer: List[x509::Certificate] = []
+  var peer: List[x509.Certificate] = []
   if requests_certificate {
     let presented = expect_message(mut wire, kind: 11)?
     peer = parse_certificates(presented.body.slice())?
@@ -1447,7 +1447,7 @@ public fn accept[Stream: streams::Duplex](stream: own Stream, config: ServerConf
         return Err(Error.Alert(description: 116))
       }
     } else {
-      match x509::verify_client_chain(peer.slice(), roots: config.client_roots.slice(), now: Clock.now()) {
+      match x509.verify_client_chain(peer.slice(), roots: config.client_roots.slice(), now: Clock.now()) {
         Ok(_) => {}
         Err(error) => return Err(Error.Certificate(error: error))
       }
@@ -1460,7 +1460,7 @@ public fn accept[Stream: streams::Duplex](stream: own Stream, config: ServerConf
 
   let finished = expect_message(mut wire, kind: 20)?
   let expected = finished_data(function, base: client_handshake.slice(), transcript: wire.transcript.slice())
-  if !cryptography::constant_time_equal(finished.body.slice(), second: expected.slice()) {
+  if !cryptography.constant_time_equal(finished.body.slice(), second: expected.slice()) {
     return Err(Error.Alert(description: 51))
   }
   require_record_boundary(wire)?
@@ -1474,7 +1474,7 @@ public fn accept[Stream: streams::Duplex](stream: own Stream, config: ServerConf
   ))
 }
 
-fn update_secret(function: cryptography::HashFunction, secret: Slice[UInt8]) -> List[UInt8] {
+fn update_secret(function: cryptography.HashFunction, secret: Slice[UInt8]) -> List[UInt8] {
   expand_label(function, secret: secret, label: "traffic upd", context: [], length: function.length())
 }
 
@@ -1484,7 +1484,7 @@ fn absorb(incoming: mut Incoming, suite: Suite) -> Result[Bool, Error] {
     decreases incoming.raw.length()
   {
     let header = incoming.raw.bytes()
-    let length = intrinsic::convert[UInt8, UInt64](header[3]) * 256 + intrinsic::convert[UInt8, UInt64](header[4])
+    let length = intrinsic.convert[UInt8, UInt64](header[3]) * 256 + intrinsic.convert[UInt8, UInt64](header[4])
     if length > 16640 {
       return Err(protocol_error("a record longer than TLS allows"))
     }
@@ -1515,9 +1515,9 @@ fn absorb(incoming: mut Incoming, suite: Suite) -> Result[Bool, Error] {
         decreases incoming.handshake.length()
       {
         let pending = incoming.handshake.bytes()
-        let size = intrinsic::convert[UInt8, UInt64](pending[1]) * 65536
-          + intrinsic::convert[UInt8, UInt64](pending[2]) * 256
-          + intrinsic::convert[UInt8, UInt64](pending[3])
+        let size = intrinsic.convert[UInt8, UInt64](pending[1]) * 65536
+          + intrinsic.convert[UInt8, UInt64](pending[2]) * 256
+          + intrinsic.convert[UInt8, UInt64](pending[3])
         if size > 262144 {
           return Err(protocol_error("a handshake message that is too long"))
         }
@@ -1595,7 +1595,7 @@ fn absorb_and_take(incoming: mut Incoming, suite: Suite, chunk: Slice[UInt8], li
   Received(bytes: own taken.bytes, is_closed: taken.is_closed, wants_update: wants_update, failure: None)
 }
 
-fn receive_locked[Stream: streams::Duplex](connection: Connection[Stream], limit: UInt64) -> Result[List[UInt8], SystemError]
+fn receive_locked[Stream: streams.Duplex](connection: Connection[Stream], limit: UInt64) -> Result[List[UInt8], SystemError]
   uses Handles, Tasks, RunForever
 {
   let suite = connection.suite
@@ -1620,7 +1620,7 @@ fn receive_locked[Stream: streams::Duplex](connection: Connection[Stream], limit
   }
 }
 
-fn send_sealed[Stream: streams::Duplex](connection: Connection[Stream], content_type: UInt8, content: Slice[UInt8]) -> Result[Unit, SystemError]
+fn send_sealed[Stream: streams.Duplex](connection: Connection[Stream], content_type: UInt8, content: Slice[UInt8]) -> Result[Unit, SystemError]
   uses Handles, Tasks, RunForever
 {
   let suite = connection.suite
@@ -1631,7 +1631,7 @@ fn send_sealed[Stream: streams::Duplex](connection: Connection[Stream], content_
   }
 }
 
-impl streams::Duplex for Connection[Stream: streams::Duplex] {
+impl streams.Duplex for Connection[Stream: streams.Duplex] {
   fn receive(self, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError]
     uses Handles, Tasks, RunForever
   {

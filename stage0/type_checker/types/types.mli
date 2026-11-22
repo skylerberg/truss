@@ -217,6 +217,7 @@ type type_interface = {
   type_generics : generic list;
   shape : shape;
   opaque : bool;
+  is_tuple : bool;
   derives : Path.t list;
 }
 

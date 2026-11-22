@@ -130,20 +130,21 @@ let rec mangle : Lowered.Item.t -> string = function
   | Any_drop ty -> render_marker "AnyDrop" ^ mangle_ty ty
   | Any_copy ty -> render_marker "AnyCopy" ^ mangle_ty ty
   | Evaluator path -> render_marker "Evaluator" ^ mangle_path path
-  | Template_check { from_template; literals; clauses } ->
-      render_marker "Check" ^ mangle_path from_template
-      ^ String.concat ""
-          (List.map
-             (fun literal -> render_marker "Text" ^ mangle_text literal ^ render_marker "End")
-             literals)
-      ^ String.concat ""
-          (List.map (fun clause -> render_marker "Clause" ^ string_of_int clause) clauses)
-      ^ render_marker "End"
   | Call_evaluation { function_; arguments } ->
       render_marker "Evaluate" ^ mangle_path function_
       ^ String.concat ""
           (List.map
-             (fun number -> render_marker "Value" ^ mangle_text (Z.to_string number))
+             (function
+               | Lowered.Item.Integer number ->
+                   render_marker "Value" ^ mangle_text (Z.to_string number)
+               | Literals literals ->
+                   render_marker "Literals"
+                   ^ String.concat ""
+                       (List.map
+                          (fun literal ->
+                            render_marker "Text" ^ mangle_text literal ^ render_marker "End")
+                          literals)
+                   ^ render_marker "End")
              arguments)
       ^ render_marker "End"
   | Generated (Adapter { function_; instantiation; ty }) ->

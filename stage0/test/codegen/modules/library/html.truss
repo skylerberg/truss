@@ -1,35 +1,35 @@
-use standard::html
+use standard.html
 
 test "text interpolated into a template is escaped, and markup is kept" {
   let name = "<script>alert('x')</script> & co"
-  let page = html::Html"<p class=\"greeting\">Hello, ${name.copy()}!</p>"
+  let page = html.Html"<p class=\"greeting\">Hello, ${name.copy()}!</p>"
   assert page.text() == "<p class=\"greeting\">Hello, &lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt; &amp; co!</p>"
   let three: Int64 = 3
-  let item = html::Html"<li>${three}</li>"
-  let items: List[html::Html] = [item.copy(), html::Html"<li>${true}</li>"]
-  let list = html::Html"<ul>${own items}</ul>"
+  let item = html.Html"<li>${three}</li>"
+  let items: List[html.Html] = [item.copy(), html.Html"<li>${true}</li>"]
+  let list = html.Html"<ul>${own items}</ul>"
   assert list.text() == "<ul><li>3</li><li>true</li></ul>"
-  assert html::escape("a\"b'c<d>&") == "a&quot;b&#39;c&lt;d&gt;&amp;"
+  assert html.escape("a\"b'c<d>&") == "a&quot;b&#39;c&lt;d&gt;&amp;"
 }
 
 test "a value in a quoted attribute is escaped, and a URL with an unsafe scheme is replaced" {
   let title = "say \"hi\""
-  let attribute = html::Html"<abbr title='${title.copy()}'>x</abbr>"
+  let attribute = html.Html"<abbr title='${title.copy()}'>x</abbr>"
   assert attribute.text() == "<abbr title='say &quot;hi&quot;'>x</abbr>"
   let unsafe_url = "javascript:alert(1)"
-  let unsafe_link = html::Html"<a href=\"${unsafe_url.copy()}\">x</a>"
+  let unsafe_link = html.Html"<a href=\"${unsafe_url.copy()}\">x</a>"
   assert unsafe_link.text() == "<a href=\"about:invalid\">x</a>"
   let relative_url = "/users/7?tab=a&b"
-  let relative_link = html::Html"<a href=\"${relative_url.copy()}\">x</a>"
+  let relative_link = html.Html"<a href=\"${relative_url.copy()}\">x</a>"
   assert relative_link.text() == "<a href=\"/users/7?tab=a&amp;b\">x</a>"
-  let markup = html::Html"<b>bold</b>"
-  let in_attribute = html::Html"<div title=\"${own markup}\"></div>"
+  let markup = html.Html"<b>bold</b>"
+  let in_attribute = html.Html"<div title=\"${own markup}\"></div>"
   assert in_attribute.text() == "<div title=\"&lt;b&gt;bold&lt;/b&gt;\"></div>"
 }
 
 test "text after a comment or a closed script is text again" {
   let value = "<x>"
-  let after = html::Html"<!-- a > b --><script>let a = 1 < 2</script><p>${value.copy()}</p>"
+  let after = html.Html"<!-- a > b --><script>let a = 1 < 2</script><p>${value.copy()}</p>"
   assert after.text() == "<!-- a > b --><script>let a = 1 < 2</script><p>&lt;x&gt;</p>"
-  assert html::Html.joined([html::Html"<i>a</i>", html::Html"<i>b</i>"], separator: ", ").text() == "<i>a</i>, <i>b</i>"
+  assert html.Html.joined([html.Html"<i>a</i>", html.Html"<i>b</i>"], separator: ", ").text() == "<i>a</i>, <i>b</i>"
 }

@@ -1,5 +1,5 @@
-use standard::intrinsic
+use standard.intrinsic
 
 fn character(code: UInt32) -> Character {
-  intrinsic::convert(code)
+  intrinsic.convert(code)
 }

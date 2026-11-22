@@ -1,5 +1,5 @@
-use standard::files
-use standard::streams
+use standard.files
+use standard.streams
 
 fn report(label: String, outcome: Result[UInt64, SystemError]) uses Console {
   match outcome {
@@ -12,7 +12,7 @@ fn main(arguments: List[String]) -> ExitCode
   uses Console, FileRead, FileWrite, Handles
 {
   let path = Path.new(arguments[1].slice())
-  var file = match FileWrite.open(path, mode: files::WriteMode.Update) {
+  var file = match FileWrite.open(path, mode: files.WriteMode.Update) {
     Ok(file) => own file
     Err(_) => {
       return ExitCode(1)
@@ -26,7 +26,7 @@ fn main(arguments: List[String]) -> ExitCode
   report("read at", outcome: mut file.read_at(0, buffer: mut read, limit: 5))
   report("read at again", outcome: mut file.read_at(6, buffer: mut read, limit: 100))
   Console.print_line("${read.length()} bytes read".slice())
-  if mut file.seek(streams::Position.FromEnd(offset: -5)) is Ok(position) {
+  if mut file.seek(streams.Position.FromEnd(offset: -5)) is Ok(position) {
     Console.print_line("at ${position}".slice())
   }
   var tail: List[UInt8] = []
@@ -40,10 +40,10 @@ fn main(arguments: List[String]) -> ExitCode
   if FileRead.read_text(path) is Ok(text) {
     Console.print_line("now ${text}".slice())
   }
-  if FileWrite.open(path, mode: files::WriteMode.CreateNew) is Err(AlreadyExists) {
+  if FileWrite.open(path, mode: files.WriteMode.CreateNew) is Err(AlreadyExists) {
     Console.print_line("exists".slice())
   }
-  match FileWrite.open(path, mode: files::WriteMode.Append) {
+  match FileWrite.open(path, mode: files.WriteMode.Append) {
     Ok(appended) => {
       var appending = own appended
       let mark: List[UInt8] = [33]

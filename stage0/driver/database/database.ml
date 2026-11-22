@@ -38,11 +38,10 @@ module References = Graph.Make (Lowered.Item)
 module Entry = struct
   type t =
     | Value of Part.any
-    | Reads of Part.any
+    | Edges of Part.t
     | Stale of Part.any
     | Package of Path.package
     | File of Path.file
-    | Claimed of Part.t
 end
 
 module Entry_table = Make_table (Entry)
@@ -56,6 +55,7 @@ type package_database = {
   mutable files : Path.file list;
   sources : Source.t File_table.t;
   values : binding Stored_table.t;
+  edges : Edge.t list Part_table.t;
   diagnostics : (Source.t * Diagnostic.t list) list;
 }
 
@@ -63,15 +63,13 @@ type t = {
   package_databases : package_database Package_table.t;
   mutable project : Path.package list;
   absent : package_database Package_table.t;
-  reads : Part.t list Stored_table.t;
-  readers : unit Stored_table.t Part_table.t;
+  incoming : Edge.reason list Part_table.t Part_table.t;
   stale : unit Stored_table.t Package_stage_table.t;
   implied : Part.any list Package_table.t;
   graphs : Call_graph.t Package_table.t;
   item_values : binding Stored_table.t;
+  item_edges : Edge.t list Part_table.t;
   references : References.t;
-  claimants : Part.t list Item_table.t;
-  claimed_roots : Lowered.Item.t list Part_table.t;
   unsaved : unit Entry_table.t;
   bugs : Compiler_bug.t Stored_table.t;
 }
@@ -92,6 +90,7 @@ let make_empty_package_database name ~dependencies =
     files = [];
     sources = File_table.create 64;
     values = Stored_table.create 4096;
+    edges = Part_table.create 4096;
     diagnostics = [];
   }
 
@@ -132,6 +131,9 @@ let is_saved_part database (Part.Any typed as part) =
   | Namespace _ -> false
   | Lowered _ | Test_key _ -> true
   | _ -> List.mem (Part.Storage.locate_package part) database.project
+
+let is_saved_source database (source : Part.t) =
+  match source with Stored part -> is_saved_part database part | Input _ -> true | Name _ -> false
 
 let mark_package_database_unsaved database (package_database : package_database) =
   mark_unsaved database (Package package_database.name);
@@ -185,15 +187,13 @@ let make ?(loaded = []) (packages : Project.package list) =
       package_databases;
       project = List.map (fun (package : Project.package) -> package.name) packages;
       absent = Package_table.create 4;
-      reads = Stored_table.create 4096;
-      readers = Part_table.create 4096;
+      incoming = Part_table.create 4096;
       stale = Package_stage_table.create 64;
       implied = Package_table.create 8;
       graphs = Package_table.create 8;
       item_values = Stored_table.create 2048;
+      item_edges = Part_table.create 2048;
       references = References.create ~tracks_blocked:false;
-      claimants = Item_table.create 64;
-      claimed_roots = Part_table.create 64;
       unsaved = Entry_table.create 4096;
       bugs = Stored_table.create 8;
     }
@@ -218,6 +218,7 @@ let copy_package_database (package_database : package_database) =
     files = package_database.files;
     sources = File_table.copy package_database.sources;
     values = Stored_table.copy package_database.values;
+    edges = Part_table.copy package_database.edges;
     diagnostics = package_database.diagnostics;
   }
 
@@ -229,8 +230,8 @@ let copy database =
         (if List.mem name database.project then copy_package_database package_database
          else package_database))
     package_databases;
-  let readers = Part_table.copy database.readers in
-  Part_table.filter_map_inplace (fun _ parts -> Some (Stored_table.copy parts)) readers;
+  let incoming = Part_table.copy database.incoming in
+  Part_table.filter_map_inplace (fun _ sources -> Some (Part_table.copy sources)) incoming;
   let stale = Package_stage_table.copy database.stale in
   Package_stage_table.filter_map_inplace (fun _ parts -> Some (Stored_table.copy parts)) stale;
   let graphs = Package_table.copy database.graphs in
@@ -239,94 +240,16 @@ let copy database =
     package_databases;
     project = database.project;
     absent = Package_table.copy database.absent;
-    reads = Stored_table.copy database.reads;
-    readers;
+    incoming;
     stale;
     implied = Package_table.copy database.implied;
     graphs;
     item_values = Stored_table.copy database.item_values;
+    item_edges = Part_table.copy database.item_edges;
     references = References.copy database.references;
-    claimants = Item_table.copy database.claimants;
-    claimed_roots = Part_table.copy database.claimed_roots;
     unsaved = Entry_table.create 64;
     bugs = Stored_table.copy database.bugs;
   }
-
-let add_reads database part read_parts =
-  Stored_table.replace database.reads part read_parts;
-  List.iter
-    (fun read ->
-      let readers =
-        match Part_table.find_opt database.readers read with
-        | Some readers -> readers
-        | None ->
-            let readers = Stored_table.create 4 in
-            Part_table.replace database.readers read readers;
-            readers
-      in
-      Stored_table.replace readers part ())
-    read_parts
-
-let record database parts reads =
-  let read_parts =
-    Part_table.fold
-      (fun (read : Part.t) () read_parts ->
-        match read with
-        | Stored read when List.mem read parts -> read_parts
-        | _ -> read :: read_parts)
-      reads []
-  in
-  List.iter
-    (fun part ->
-      let before = Stored_table.find_opt database.reads part in
-      let is_unchanged =
-        match before with
-        | Some before ->
-            List.length before = List.length read_parts
-            && List.for_all (Part_table.mem reads) before
-        | None -> false
-      in
-      if not is_unchanged then mark_unsaved database (Reads part);
-      Option.iter
-        (List.iter (fun read ->
-             Option.iter
-               (fun readers -> Stored_table.remove readers part)
-               (Part_table.find_opt database.readers read)))
-        before;
-      add_reads database part read_parts)
-    parts
-
-let compute_and_record database parts compute =
-  let reads = Part_table.create 16 in
-  let read_count = ref 0 in
-  let result =
-    compute (fun part ->
-        incr read_count;
-        Part_table.replace reads part ())
-  in
-  record database parts reads;
-  !observer (Computation { parts; reads = !read_count; distinct_reads = Part_table.length reads });
-  result
-
-let mark_readers ?(is_selected = fun _ -> true) database part =
-  Option.iter
-    (Stored_table.iter (fun reader () -> if is_selected reader then mark_stale database reader))
-    (Part_table.find_opt database.readers part)
-
-let mark_written database (part : Part.any) ~is_removal =
-  !observer (Write { part; is_removal });
-  if is_saved_part database part then mark_unsaved database (Value part);
-  mark_readers database (Stored part)
-
-let store database part slot value =
-  if slot.stored = value then !observer (Unchanged part)
-  else begin
-    (match value with Some value -> slot.replace value | None -> slot.remove ());
-    mark_written database part ~is_removal:(Option.is_none value)
-  end
-
-let compute_into database part slot compute =
-  store database part slot (compute_and_record database [ part ] compute)
 
 let obtain_owner database package =
   match Package_table.find_opt database.package_databases package with
@@ -352,6 +275,122 @@ let locate_values database (Part.Any typed as part) =
   | Lowered _ | Test_key _ -> database.item_values
   | _ -> (obtain_owner database (Part.Storage.locate_package part)).values
 
+let locate_edges database (source : Part.t) =
+  match source with
+  | Stored (Any (Lowered _ | Test_key _)) | Input _ | Name _ -> database.item_edges
+  | Stored part -> (obtain_owner database (Part.Storage.locate_package part)).edges
+
+let find_edges database source =
+  Option.value (Part_table.find_opt (locate_edges database source) source) ~default:[]
+
+let list_sources database reason target =
+  match Part_table.find_opt database.incoming target with
+  | Some sources ->
+      Part_table.fold
+        (fun source reasons sources ->
+          if List.mem reason reasons then source :: sources else sources)
+        sources []
+  | None -> []
+
+let index_edges database source edges =
+  List.iter
+    (fun ({ target; reasons } : Edge.t) ->
+      let sources =
+        match Part_table.find_opt database.incoming target with
+        | Some sources -> sources
+        | None ->
+            let sources = Part_table.create 4 in
+            Part_table.replace database.incoming target sources;
+            sources
+      in
+      Part_table.replace sources source reasons)
+    edges
+
+let unindex_edges database source edges =
+  List.iter
+    (fun ({ target; _ } : Edge.t) ->
+      Option.iter
+        (fun sources ->
+          Part_table.remove sources source;
+          if Part_table.length sources = 0 then Part_table.remove database.incoming target)
+        (Part_table.find_opt database.incoming target))
+    edges
+
+let is_equal_edges before after =
+  List.length before = List.length after
+  &&
+  let reasons = Part_table.create (List.length after) in
+  List.iter
+    (fun ({ target; reasons = noted } : Edge.t) -> Part_table.replace reasons target noted)
+    after;
+  List.for_all
+    (fun ({ target; reasons = noted } : Edge.t) -> Part_table.find_opt reasons target = Some noted)
+    before
+
+let replace_edges database source edges =
+  let table = locate_edges database source in
+  let before = Part_table.find_opt table source in
+  let before_edges = Option.value before ~default:[] in
+  if not (Option.is_some before && is_equal_edges before_edges edges) then begin
+    mark_unsaved database (Edges source);
+    unindex_edges database source before_edges;
+    index_edges database source edges;
+    Part_table.replace table source edges
+  end;
+  before_edges
+
+let remove_edges database source =
+  let table = locate_edges database source in
+  match Part_table.find_opt table source with
+  | Some before ->
+      mark_unsaved database (Edges source);
+      unindex_edges database source before;
+      Part_table.remove table source;
+      before
+  | None -> []
+
+let note_computation parts compute =
+  let noted = Part_table.create 16 in
+  let read_count = ref 0 in
+  let note_edge (reason : Edge.reason) (target : Part.t) =
+    (match reason with Read -> incr read_count | Call | Reference | Claim -> ());
+    match target with
+    | Stored read when reason = Read && List.mem read parts -> ()
+    | _ ->
+        Part_table.replace noted target
+          (Edge.add reason (Option.value (Part_table.find_opt noted target) ~default:[]))
+  in
+  let result = compute note_edge in
+  let edges =
+    Part_table.fold (fun target reasons edges -> { Edge.target; reasons } :: edges) noted []
+  in
+  !observer
+    (Computation
+       { parts; reads = !read_count; distinct_reads = List.length (Edge.list_targets Read edges) });
+  (result, edges)
+
+let compute_and_record database parts compute =
+  let result, edges = note_computation parts (fun note_edge -> compute (note_edge Read)) in
+  List.iter (fun part -> ignore (replace_edges database (Stored part) edges)) parts;
+  result
+
+let compute_and_record_part database part compute =
+  let result, edges = note_computation [ part ] compute in
+  (result, replace_edges database (Stored part) edges)
+
+let mark_readers ?(is_selected = fun _ -> true) database part =
+  List.iter
+    (fun (reader : Part.t) ->
+      match reader with
+      | Stored reader when is_selected reader -> mark_stale database reader
+      | Stored _ | Input _ | Name _ -> ())
+    (list_sources database Read part)
+
+let mark_written database (part : Part.any) ~is_removal =
+  !observer (Write { part; is_removal });
+  if is_saved_part database part then mark_unsaved database (Value part);
+  mark_readers database (Stored part)
+
 let find_stored (type a) database (typed : a Part.stored) : a part option =
   let part = Part.Any typed in
   match Stored_table.find_opt (locate_values database part) part with
@@ -372,40 +411,48 @@ let create_item database item =
         mark_stale database part)
     (list_item_parts item)
 
-let list_call_edges = function
-  | Some (Value edges) -> edges
-  | Some (Failed _ | Blocked) | None -> []
+let list_call_targets edges =
+  List.sort_uniq Path.compare
+    (List.filter_map
+       (function Part.Stored (Any (Call_edges path)) -> Some path | _ -> None)
+       (Edge.list_targets Call edges))
 
-let list_lowered_references = function
-  | Some (Value (Ok lowered)) ->
-      List.sort_uniq Lowered.Item.compare (Lowering.list_references lowered)
-  | Some (Value (Error _) | Failed _ | Blocked) | None -> []
+let list_item_targets reason edges =
+  List.sort_uniq Lowered.Item.compare
+    (List.filter_map
+       (function Part.Stored (Any (Lowered item)) -> Some item | _ -> None)
+       (Edge.list_targets reason edges))
 
-let update_indexes (type a) database (part : a Part.stored) ~(before : a part option)
-    ~(after : a part option) =
-  match part with
-  | Call_edges (path, calling_package) ->
-      List.iter
-        (fun node -> mark_stale database (Any (Call_edges (node, calling_package))))
-        (Call_graph.change_successors
-           (obtain_call_graph database calling_package)
-           path ~before:(list_call_edges before) ~after:(list_call_edges after))
-  | Lowered key ->
-      List.iter (create_item database)
-        (References.change_successors database.references key
-           ~before:(list_lowered_references before) ~after:(list_lowered_references after))
-  | _ -> ()
+let list_item_edges database item =
+  list_item_targets Reference (find_edges database (Stored (Any (Lowered item))))
+
+let list_callees database path =
+  list_call_targets (find_edges database (Stored (Any (Call_edges path))))
+
+let list_implementation_paths database path package =
+  list_call_targets (find_edges database (Stored (Any (Implementations (path, package)))))
+
+let list_claimants database root = list_sources database Claim (Stored (Any (Lowered root)))
+
+let find_call_successors database calling_package node =
+  match find_stored database (Call_edges node) with
+  | None -> None
+  | Some kind -> (
+      let callees = list_callees database node in
+      match kind with
+      | Value Trait_method_declaration -> (
+          match find_stored database (Implementations (node, calling_package)) with
+          | Some (Value ()) ->
+              Some (callees @ list_implementation_paths database node calling_package)
+          | Some (Failed _ | Blocked) | None -> None)
+      | Value Definition | Failed _ | Blocked -> Some callees)
 
 let write_value database typed value =
   let part = Part.Any typed in
   let values = locate_values database part in
-  let before = find_stored database typed in
-  (match value with
+  match value with
   | Some value -> Stored_table.replace values part (Binding (typed, value))
-  | None -> Stored_table.remove values part);
-  update_indexes database typed ~before ~after:value
-
-let list_item_edges database item = list_lowered_references (find_stored database (Lowered item))
+  | None -> Stored_table.remove values part
 
 let make_value_slot database typed =
   {
@@ -413,6 +460,171 @@ let make_value_slot database typed =
     replace = (fun value -> write_value database typed (Some value));
     remove = (fun () -> write_value database typed None);
   }
+
+type stored = {
+  has_value : bool;
+  is_failed : bool;
+  failures : Diagnostic.in_definition list;
+  remove : unit -> unit;
+  is_equal_in : t -> bool;
+  marshal : unit -> string option;
+  restore : string -> unit;
+}
+
+let marshal value = Marshal.to_string value []
+
+let make_stored database (part : Part.any) =
+  let values = locate_values database part in
+  let binding = Stored_table.find_opt values part in
+  let failures =
+    match binding with
+    | Some (Binding (_, Failed diagnostics)) -> Some diagnostics
+    | Some (Binding (_, (Value _ | Blocked))) | None -> None
+  in
+  {
+    has_value = Option.is_some binding;
+    is_failed = Option.is_some failures;
+    failures = Option.value failures ~default:[];
+    remove =
+      (fun () ->
+        match binding with
+        | Some (Binding (stored, _)) -> write_value database stored None
+        | None -> ());
+    is_equal_in =
+      (fun other -> compare (Stored_table.find_opt (locate_values other part) part) binding = 0);
+    marshal = (fun () -> Option.map marshal binding);
+    restore = (fun bytes -> Stored_table.replace values part (Marshal.from_string bytes 0));
+  }
+
+let rec subtract_sorted compare left right =
+  match (left, right) with
+  | [], _ -> []
+  | left, [] -> left
+  | item :: rest, other :: others ->
+      let order = compare item other in
+      if order = 0 then subtract_sorted compare rest others
+      else if order < 0 then item :: subtract_sorted compare rest right
+      else subtract_sorted compare left others
+
+let rec store ?edges_before database part slot value =
+  let edges_after = find_edges database (Stored part) in
+  let is_value_changed = slot.stored <> value in
+  let is_edges_changed =
+    match edges_before with
+    | Some before -> not (Edge.is_equal_beyond_reads before edges_after)
+    | None -> false
+  in
+  if is_value_changed || is_edges_changed then begin
+    (if is_value_changed then
+       match value with Some value -> slot.replace value | None -> slot.remove ());
+    mark_written database part ~is_removal:(Option.is_none value);
+    follow_change database part
+      ~before:(Option.value edges_before ~default:edges_after)
+      ~after:edges_after
+  end
+  else !observer (Unchanged part)
+
+and forget database parts =
+  List.iter
+    (fun part ->
+      let stored = make_stored database part in
+      if stored.has_value then begin
+        stored.remove ();
+        mark_written database part ~is_removal:true
+      end;
+      unmark database part;
+      follow_change database part ~before:(remove_edges database (Stored part)) ~after:[])
+    parts
+
+and follow_change database (Part.Any typed) ~before ~after =
+  follow_claims database ~before ~after;
+  match typed with
+  | Call_edges path ->
+      let callees_before = list_call_targets before and callees_after = list_call_targets after in
+      Package_table.iter
+        (fun package graph ->
+          if Call_graph.is_node graph path then begin
+            if callees_before <> callees_after then begin
+              let implementations = list_implementation_paths database path package in
+              add_call_nodes database package graph
+                (Call_graph.change_successors graph path
+                   ~before:(callees_before @ implementations)
+                   ~after:(callees_after @ implementations))
+            end;
+            update_implementations database package path
+          end)
+        database.graphs
+  | Implementations (path, package) -> (
+      match Package_table.find_opt database.graphs package with
+      | Some graph when Call_graph.is_node graph path ->
+          let callees = list_callees database path in
+          add_call_nodes database package graph
+            (Call_graph.change_successors graph path
+               ~before:(callees @ list_call_targets before)
+               ~after:(callees @ list_call_targets after))
+      | Some _ | None -> ())
+  | Lowered item ->
+      let references_before = list_item_targets Reference before
+      and references_after = list_item_targets Reference after in
+      if references_before <> references_after then
+        List.iter (create_item database)
+          (References.change_successors database.references item ~before:references_before
+             ~after:references_after)
+  | _ -> ()
+
+and follow_claims database ~before ~after =
+  let before = list_item_targets Claim before and after = list_item_targets Claim after in
+  if before <> after then begin
+    List.iter
+      (fun root ->
+        if list_claimants database root = [] then References.remove_root database.references root)
+      (subtract_sorted Lowered.Item.compare before after);
+    List.iter
+      (fun root -> if References.add_root database.references root then create_item database root)
+      (subtract_sorted Lowered.Item.compare after before);
+    settle_references database
+  end
+
+and update_implementations database package path =
+  let part = Part.Any (Implementations (path, package)) in
+  let is_present =
+    is_stale database part
+    || Option.is_some (find_stored database (Implementations (path, package)))
+  in
+  match find_stored database (Call_edges path) with
+  | Some (Value Trait_method_declaration) -> if not is_present then mark_stale database part
+  | Some (Value Definition | Failed _ | Blocked) | None ->
+      if is_present then forget database [ part ]
+
+and add_call_nodes database package graph nodes =
+  let pending = Queue.of_seq (List.to_seq nodes) in
+  while not (Queue.is_empty pending) do
+    let node = Queue.pop pending in
+    update_implementations database package node;
+    if Option.is_some (find_stored database (Call_edges node)) then
+      List.iter
+        (fun added -> Queue.add added pending)
+        (Call_graph.change_successors graph node ~before:[]
+           ~after:(list_callees database node @ list_implementation_paths database node package))
+  done
+
+and settle_references database =
+  if References.has_changes database.references then
+    collect database
+      (References.update database.references ~find_successors:(fun item ->
+           Some (list_item_edges database item)))
+        .removed
+
+and collect database items = forget database (List.concat_map list_item_parts items)
+
+let add_call_roots database package graph parts =
+  add_call_nodes database package graph
+    (List.filter (Call_graph.add_root graph)
+       (List.filter_map (function Part.Any (Call_edges root) -> Some root | _ -> None) parts))
+
+let compute_into database part slot compute =
+  let value, edges_before = compute_and_record_part database part compute in
+  store database part slot value ~edges_before
 
 let report_uncomputed (part : Part.any) =
   Compiler_bug.raise_bug ~stage:"Database" "%s is not computed" (Part.show (Stored part))
@@ -692,7 +904,7 @@ let list_package_parts database (names : Resolve.Names.lookups) package : Part.a
       (fun path -> Part.Any (Generated_mir path))
       (List.filter Infer.is_derived_method unwritten_methods)
   @ List.concat_map
-      (fun path -> [ Part.Any (Mir_call_edges path); Any (Call_edges (path, package)) ])
+      (fun path -> [ Part.Any (Call_edges path) ])
       (List.sort_uniq Path.compare (paths @ unwritten_methods))
   @ List.map
       (fun dependency -> Part.Any (Grant (package, dependency)))
@@ -783,28 +995,6 @@ let list_import_diagnostics database note (file : Path.file) =
     ~text:(Source.text (read_source database file))
     ~used:(find_used_imports database note file)
 
-type node_edges = Of_definition of Path.t list part | Of_removed_definition
-
-let read_node_edges database note ~calling_package path ~had_edges =
-  match find_part database note (Mir_call_edges path) with
-  | Some (Value mir_call_edges) ->
-      Of_definition
-        (make_part
-           (fun path ->
-             List.sort_uniq Path.compare
-               (mir_call_edges
-               @ Mir.Call_edges.list_implementations
-                   (make_recording_call_edge_lookups database note)
-                   ~calling_package path))
-           path)
-  | Some (Failed _ | Blocked) -> Of_definition (Value [])
-  | None when had_edges -> Of_removed_definition
-  | None ->
-      Compiler_bug.raise_bug ~stage:"Database"
-        "%s is a node of the call graph of %s, and no definition registers its call edges"
-        (Path.show path)
-        (Path.show_package calling_package)
-
 let read_recursion_group database note path =
   Option.value (find_value database note (Recursion_group path)) ~default:[]
 
@@ -860,109 +1050,8 @@ let compute_test_keys database items =
            | Failed _ | Blocked -> Blocked)))
     items
 
-type stored = {
-  has_value : bool;
-  is_failed : bool;
-  failures : Diagnostic.in_definition list;
-  remove : unit -> unit;
-  is_equal_in : t -> bool;
-  marshal : unit -> string option;
-  restore : string -> unit;
-}
-
-let marshal value = Marshal.to_string value []
-
-let make_stored database (part : Part.any) =
-  let values = locate_values database part in
-  let binding = Stored_table.find_opt values part in
-  let failures =
-    match binding with
-    | Some (Binding (_, Failed diagnostics)) -> Some diagnostics
-    | Some (Binding (_, (Value _ | Blocked))) | None -> None
-  in
-  {
-    has_value = Option.is_some binding;
-    is_failed = Option.is_some failures;
-    failures = Option.value failures ~default:[];
-    remove =
-      (fun () ->
-        match binding with
-        | Some (Binding (stored, _)) -> write_value database stored None
-        | None -> ());
-    is_equal_in =
-      (fun other -> compare (Stored_table.find_opt (locate_values other part) part) binding = 0);
-    marshal = (fun () -> Option.map marshal binding);
-    restore = (fun bytes -> Stored_table.replace values part (Marshal.from_string bytes 0));
-  }
-
-let discard database part =
-  unmark database part;
-  record database [ part ] (Part_table.create 0);
-  Stored_table.remove database.reads part;
-  mark_unsaved database (Reads part)
-
 let is_current database part =
   (not (is_stale database part)) && Stored_table.mem database.item_values part
-
-let rec subtract_sorted compare left right =
-  match (left, right) with
-  | [], _ -> []
-  | left, [] -> left
-  | item :: rest, other :: others ->
-      let order = compare item other in
-      if order = 0 then subtract_sorted compare rest others
-      else if order < 0 then item :: subtract_sorted compare rest right
-      else subtract_sorted compare left others
-
-let rec forget database parts =
-  List.iter
-    (fun part ->
-      let stored = make_stored database part in
-      if stored.has_value then begin
-        stored.remove ();
-        mark_written database part ~is_removal:true
-      end)
-    parts;
-  List.iter (discard database) parts;
-  List.iter
-    (function
-      | Part.Any (Proof _) as claimant -> claim_roots database (Part.Stored claimant) [] | _ -> ())
-    parts
-
-and claim_roots database claimant roots =
-  let before = Option.value (Part_table.find_opt database.claimed_roots claimant) ~default:[] in
-  let roots = List.sort_uniq Lowered.Item.compare roots in
-  if roots <> before then begin
-    if roots = [] then Part_table.remove database.claimed_roots claimant
-    else Part_table.replace database.claimed_roots claimant roots;
-    mark_unsaved database (Claimed claimant);
-    let list_claimants root =
-      Option.value (Item_table.find_opt database.claimants root) ~default:[]
-    in
-    List.iter
-      (fun root ->
-        match List.filter (fun other -> other <> claimant) (list_claimants root) with
-        | [] ->
-            Item_table.remove database.claimants root;
-            References.remove_root database.references root
-        | others -> Item_table.replace database.claimants root others)
-      (subtract_sorted Lowered.Item.compare before roots);
-    List.iter
-      (fun root ->
-        Item_table.replace database.claimants root (claimant :: list_claimants root);
-        if References.add_root database.references root then create_item database root)
-      (subtract_sorted Lowered.Item.compare roots before);
-    settle_references database
-  end
-
-and settle_references database =
-  if References.has_changes database.references then
-    collect database
-      (References.update database.references ~find_successors:(fun item ->
-           Some (list_item_edges database item)))
-        .removed
-
-and collect database items = forget database (List.concat_map list_item_parts items)
 
 let list_current_edges database item =
   if is_stale database (Any (Lowered item)) then [] else list_item_edges database item
@@ -981,9 +1070,9 @@ let collect_ready_items database =
     | Stored claimant -> not (is_stale database claimant)
     | Input _ | Name _ -> true
   in
-  Item_table.iter
-    (fun root claimants -> if List.exists is_current_claimant claimants then reach root)
-    database.claimants;
+  List.iter
+    (fun root -> if List.exists is_current_claimant (list_claimants database root) then reach root)
+    (References.list_roots database.references);
   while not (Queue.is_empty pending) do
     List.iter reach (list_current_edges database (Queue.pop pending))
   done;
@@ -1002,24 +1091,11 @@ let read_host_system () =
         "code is lowered on a host that Stage0 does not build for"
 
 let list_proof_template_checks : Prover.proof part -> _ = function
-  | Value (Obligations { obligations; _ }) ->
-      List.filter_map
-        (fun (obligation : Prover.Obligation.t) ->
-          Option.map
-            (fun (template_clause : Prover.Obligation.template_clause) -> template_clause.check)
-            obligation.template_clause)
-        obligations
-  | Value (Unsupported _ | Not_proven_here) | Failed _ | Blocked -> []
+  | Value proof -> Prover.list_template_checks proof
+  | Failed _ | Blocked -> []
 
-let make_template_check_root
-    ({ from_template; literals; clauses } : Prover.Obligation.template_check) =
-  Lowered.Item.Template_check { from_template; literals; clauses }
-
-let claim_template_check_roots database (key : Resolve.Names.key) =
-  if Result.is_ok Libc.host then
-    claim_roots database (Stored (Any (Proof key)))
-      (List.map make_template_check_root
-         (list_proof_template_checks (read_stored database (Proof key))))
+let make_template_check_root ({ function_; literals } : Prover.Obligation.template_check) =
+  Lowered.Item.Call_evaluation { function_; arguments = [ Literals literals ] }
 
 let find_entry_point (names : Resolve.Names.lookups) package =
   List.find_map
@@ -1031,16 +1107,14 @@ let find_entry_point (names : Resolve.Names.lookups) package =
       else None)
     (names.list_declarations { package; modules = [] })
 
-let claim_lowering_roots database (names : Resolve.Names.lookups) package =
-  if Result.is_ok Libc.host then
-    claim_roots database (Stored (Any (Namespace package)))
-      (Lowering.list_roots
-         ~tests:
-           (List.filter_map
-              (fun (declaration : Resolve.Names.declaration) ->
-                match declaration.key.path with Test _ -> Some declaration.key.path | _ -> None)
-              (names.list_package_declarations package))
-         ~mains:(Option.to_list (find_entry_point names package)))
+let list_lowering_roots (names : Resolve.Names.lookups) package =
+  Lowering.list_roots
+    ~tests:
+      (List.filter_map
+         (fun (declaration : Resolve.Names.declaration) ->
+           match declaration.key.path with Test _ -> Some declaration.key.path | _ -> None)
+         (names.list_package_declarations package))
+    ~mains:(Option.to_list (find_entry_point names package))
 
 let holds_position database (Part.Any typed as part) =
   match typed with
@@ -1082,27 +1156,33 @@ let is_package_namespace_part package (part : Part.t) =
 
 let compute_namespace_and_implied database (package_database : package_database) =
   let package = package_database.name in
-  let namespace, implied =
-    compute_and_record database [ Part.Any (Namespace package) ] (fun note ->
-        let note part = if not (is_package_namespace_part package part) then note part in
+  let (namespace, implied), edges_before =
+    compute_and_record_part database (Part.Any (Namespace package)) (fun note_edge ->
+        let note part = if not (is_package_namespace_part package part) then note_edge Read part in
         let package_namespace = make_namespace database note package_database in
         let names =
-          make_name_lookups_over database ~read_namespace:(fun name ->
-              if name = package then package_namespace else read_namespace database name)
+          add_recording
+            (make_name_lookups_over database ~read_namespace:(fun name ->
+                 if name = package then package_namespace else read_namespace database name))
+            note
         in
-        (package_namespace, list_package_parts database (add_recording names note) package))
+        if Result.is_ok Libc.host then
+          List.iter
+            (fun root -> note_edge Claim (Stored (Any (Lowered root))))
+            (list_lowering_roots names package);
+        (package_namespace, list_package_parts database names package))
   in
   Package_table.replace database.implied package implied;
-  (namespace, implied)
+  (namespace, implied, edges_before)
 
 let compute_namespace database (package_database : package_database) =
   let package = package_database.name in
   let before = find_package_namespace package_database in
   let implied_before = Option.value ~default:[] (Package_table.find_opt database.implied package) in
-  let after, implied = compute_namespace_and_implied database package_database in
+  let after, implied, edges_before = compute_namespace_and_implied database package_database in
   store database (Any (Namespace package))
     (make_value_slot database (Namespace package))
-    (Some (Value after));
+    (Some (Value after)) ~edges_before;
   let make_membership_test parts =
     let members = Stored_table.create 256 in
     List.iter (fun part -> Stored_table.replace members part ()) parts;
@@ -1113,20 +1193,14 @@ let compute_namespace database (package_database : package_database) =
   let graph = obtain_call_graph database package in
   List.iter
     (function
-      | Part.Any (Call_edges (root, _)) as part when not (is_implied part) ->
+      | Part.Any (Call_edges root) as part when not (is_implied part) ->
           Call_graph.remove_root graph root
       | _ -> ())
     implied_before;
-  List.iter
-    (function
-      | Part.Any (Call_edges (root, _)) as part when not (was_implied part) ->
-          ignore (Call_graph.add_root graph root)
-      | _ -> ())
-    implied;
+  add_call_roots database package graph (List.filter (fun part -> not (was_implied part)) implied);
   List.iter (mark_change database package) (Resolve.Namespace.list_changes before after);
   List.iter (fun part -> if not (was_implied part) then mark_stale database part) implied;
-  forget database (List.filter (fun part -> not (is_implied part)) implied_before);
-  claim_lowering_roots database (make_untracked_name_lookups database) package
+  forget database (List.filter (fun part -> not (is_implied part)) implied_before)
 
 let compute_type_facts database paths =
   let facts =
@@ -1162,7 +1236,11 @@ let compute_part database (Part.Any typed as part) =
   let package_database = obtain_owner database (Part.Storage.locate_package part) in
   let compute_into slot compute = compute_into database part slot compute in
   let compute_value typed compute =
-    compute_into (make_value_slot database typed) (fun note -> Some (compute note))
+    compute_into (make_value_slot database typed) (fun note_edge -> Some (compute (note_edge Read)))
+  in
+  let compute_with_edges typed compute =
+    compute_into (make_value_slot database typed) (fun note_edge ->
+        Some (compute (note_edge Read) note_edge))
   in
   match typed with
   | Parsed file ->
@@ -1294,7 +1372,8 @@ let compute_part database (Part.Any typed as part) =
                    key.path form)
           | Failed _ | Blocked -> Blocked)
   | Generated_mir path ->
-      compute_into (make_value_slot database (Generated_mir path)) (fun note ->
+      compute_into (make_value_slot database (Generated_mir path)) (fun note_edge ->
+          let note = note_edge Read in
           match Infer.derive_form (make_recording_infer_lookups database note) path with
           | None -> None
           | Some form ->
@@ -1309,10 +1388,15 @@ let compute_part database (Part.Any typed as part) =
                          path form ))
                    form)
           | exception Reads_failed_part -> Some Blocked)
-  | Mir_call_edges path ->
-      compute_value (Mir_call_edges path) (fun note ->
+  | Call_edges path ->
+      compute_with_edges (Call_edges path) (fun note note_edge ->
           make_part
-            (Mir.Call_edges.list_path_edges (make_recording_call_edge_lookups database note))
+            (fun path ->
+              let lookups = make_recording_call_edge_lookups database note in
+              let callees = Mir.Call_edges.list_path_edges lookups path in
+              let node = Mir.Call_edges.find_node lookups path in
+              List.iter (fun callee -> note_edge Call (Stored (Any (Call_edges callee)))) callees;
+              node)
             path)
   | Usage key ->
       compute_value (Usage key) (fun note ->
@@ -1333,28 +1417,41 @@ let compute_part database (Part.Any typed as part) =
           make_part
             (Package_checks.run (make_recording_package_checks_lookups database note) package)
             check)
-  | Call_edges (path, calling_package) ->
-      let slot = make_value_slot database (Call_edges (path, calling_package)) in
-      compute_into slot (fun note ->
-          match
-            read_node_edges database note ~calling_package path
-              ~had_edges:(Option.is_some slot.stored)
-          with
-          | Of_definition edges -> Some edges
-          | Of_removed_definition -> None)
+  | Implementations (path, calling_package) ->
+      compute_with_edges
+        (Implementations (path, calling_package))
+        (fun note note_edge ->
+          make_part
+            (fun path ->
+              List.iter
+                (fun implementation -> note_edge Call (Stored (Any (Call_edges implementation))))
+                (Mir.Call_edges.list_implementations
+                   (make_recording_call_edge_lookups database note)
+                   ~calling_package path))
+            path)
   | Recursion_group _ ->
       Compiler_bug.raise_bug ~stage:"Database" "%s is computed by its call graph, not by a stage"
         (Part.show (Stored part))
   | Proof key ->
-      compute_value (Proof key) (fun note ->
-          make_part (Prover.prove (make_recording_proof_lookups database note)) key);
-      claim_template_check_roots database key
+      compute_with_edges (Proof key) (fun note note_edge ->
+          let proof = make_part (Prover.prove (make_recording_proof_lookups database note)) key in
+          if Result.is_ok Libc.host then
+            List.iter
+              (fun check ->
+                note_edge Claim (Stored (Any (Lowered (make_template_check_root check)))))
+              (list_proof_template_checks proof);
+          proof)
   | Lowered key ->
-      compute_value (Lowered key) (fun note ->
+      compute_with_edges (Lowered key) (fun note note_edge ->
           match
             Lowering.lower (read_host_system ()) (make_recording_lowering_lookups database note) key
           with
-          | lowered -> Value lowered
+          | Ok lowered as result ->
+              List.iter
+                (fun item -> note_edge Reference (Stored (Any (Lowered item))))
+                (Lowering.list_references lowered);
+              Value result
+          | Error _ as result -> Value result
           | exception Reads_failed_part -> Blocked
           | exception (Lowering.Todo_type _ | Lowering.Infinite_size _) -> Failed []);
       settle_references database
@@ -1435,25 +1532,29 @@ let list_test_key_components database parts =
          List.filter (Item_table.mem in_closure) (list_item_edges database item))
        items)
 
-let find_call_successors database calling_package node =
-  match find_stored database (Call_edges (node, calling_package)) with
-  | Some (Value edges) -> Some edges
-  | Some (Failed _ | Blocked) | None -> None
-
 let update_groups database package =
   match Package_table.find_opt database.graphs package with
   | Some graph when Call_graph.has_changes graph ->
+      if
+        List.exists
+          (fun stage -> list_stale_parts database package stage <> [])
+          [ Stage.Call_edges; Implementations ]
+      then
+        Compiler_bug.raise_bug ~stage:"Database"
+          "the call graph of %s is updated while some of its call edges or implementations are \
+           stale"
+          (Path.show_package package);
       let find_successors = find_call_successors database package in
       let { Call_graph.touched; removed } = Call_graph.update graph ~find_successors in
       List.iter
         (fun node ->
-          if Option.is_none (find_stored database (Call_edges (node, package))) then
+          if Option.is_none (find_stored database (Call_edges node)) then
             Compiler_bug.raise_bug ~stage:"Database"
               "%s is a node of the call graph of %s after the graph's update, and its definition \
                is removed"
               (Path.show node) (Path.show_package package))
         touched;
-      forget database (List.map (fun node -> Part.Any (Call_edges (node, package))) removed);
+      forget database (List.map (fun node -> Part.Any (Implementations (node, package))) removed);
       let make_group_slot node = make_value_slot database (Recursion_group node) in
       let is_package_node node = Path.locate_package node = package in
       List.iter
@@ -1495,14 +1596,16 @@ let drain_stage database ~is_drained ~on_raise (stage : Stage.t) packages =
       let rec close part =
         if not (Stored_table.mem closure part) then begin
           Stored_table.replace closure part ();
-          Option.iter
-            (Stored_table.iter (fun reader () ->
-                 if
-                   Stage.of_part reader = stage
-                   && List.mem (Part.Storage.locate_package reader) packages
-                   && is_drained reader
-                 then close reader))
-            (Part_table.find_opt database.readers (Stored part))
+          List.iter
+            (fun (reader : Part.t) ->
+              match reader with
+              | Stored reader
+                when Stage.of_part reader = stage
+                     && List.mem (Part.Storage.locate_package reader) packages
+                     && is_drained reader ->
+                  close reader
+              | Stored _ | Input _ | Name _ -> ())
+            (list_sources database Read (Stored part))
         end
       in
       List.iter
@@ -1607,37 +1710,46 @@ let is_of_other definition part =
 
 let is_checked part = not (Stage.is_lowering (Stage.of_part part))
 
+let fold_recorded_edges database fold initial =
+  List.fold_left
+    (fun accumulated package ->
+      match find_package database package with
+      | Some package_database -> Part_table.fold fold package_database.edges accumulated
+      | None -> accumulated)
+    (Part_table.fold fold database.item_edges initial)
+    database.project
+
 let list_dependencies database paths =
   let wanted = make_definition_set paths in
-  Stored_table.fold
-    (fun dependent dependencies found ->
-      let dependent_part = Part.Stored dependent in
-      match Part.find_definition dependent_part with
-      | Some definition when is_checked dependent && Path_table.mem wanted definition ->
+  fold_recorded_edges database
+    (fun (dependent : Part.t) edges found ->
+      match (dependent, Part.find_definition dependent) with
+      | Stored part, Some definition when is_checked part && Path_table.mem wanted definition ->
           List.fold_left
             (fun found dependency ->
-              if is_of_other definition dependency then
-                { dependent = dependent_part; dependency } :: found
+              if is_of_other definition dependency then { dependent; dependency } :: found
               else found)
-            found dependencies
-      | Some _ | None -> found)
-    database.reads []
+            found (Edge.list_targets Read edges)
+      | _ -> found)
+    []
 
 let list_dependents database paths =
   let wanted = make_definition_set paths in
   Part_table.fold
-    (fun dependency readers found ->
+    (fun dependency sources found ->
       match Part.find_definition dependency with
       | Some definition when Path_table.mem wanted definition ->
-          Stored_table.fold
-            (fun dependent () found ->
-              let dependent_part = Part.Stored dependent in
-              if is_checked dependent && is_of_other definition dependent_part then
-                { dependent = dependent_part; dependency } :: found
-              else found)
-            readers found
+          Part_table.fold
+            (fun (dependent : Part.t) reasons found ->
+              match dependent with
+              | Stored part
+                when List.mem Edge.Read reasons && is_checked part
+                     && is_of_other definition dependent ->
+                  { dependent; dependency } :: found
+              | Stored _ | Input _ | Name _ -> found)
+            sources found
       | Some _ | None -> found)
-    database.readers []
+    database.incoming []
 
 let list_changes database other =
   let parts = Stored_table.create 1024 in
@@ -1650,11 +1762,11 @@ let list_changes database other =
   in
   List.iter
     (fun database ->
-      Stored_table.iter (fun part _ -> add part) database.reads;
-      Part_table.iter
-        (fun (part : Part.t) _ ->
-          match part with Stored part -> add part | Input _ | Name _ -> ())
-        database.readers;
+      let add_part (part : Part.t) =
+        match part with Stored part -> add part | Input _ | Name _ -> ()
+      in
+      fold_recorded_edges database (fun source _ () -> add_part source) ();
+      Part_table.iter (fun target _ -> add_part target) database.incoming;
       List.iter
         (fun package -> List.iter add (list_stored_parts (obtain_owner database package)))
         database.project)
@@ -1727,32 +1839,32 @@ let mark_differences database name ~(before : package_database option)
     mark_readers database (Input (Dependencies name));
   let parts = Stored_table.copy before.values in
   Stored_table.iter (fun part binding -> Stored_table.replace parts part binding) after.values;
+  let find_edges (package_database : package_database) part =
+    Option.value (Part_table.find_opt package_database.edges (Stored part)) ~default:[]
+  in
   Stored_table.iter
     (fun part _ ->
       let after_binding = Stored_table.find_opt after.values part in
-      if compare (Stored_table.find_opt before.values part) after_binding <> 0 then
-        mark_written database part ~is_removal:(Option.is_none after_binding))
+      let edges_before = find_edges before part and edges_after = find_edges after part in
+      if
+        compare (Stored_table.find_opt before.values part) after_binding <> 0
+        || not (Edge.is_equal_beyond_reads edges_before edges_after)
+      then begin
+        mark_written database part ~is_removal:(Option.is_none after_binding);
+        follow_change database part ~before:edges_before ~after:edges_after
+      end)
     parts
 
 let retire database (package_database : package_database) =
   let package = package_database.name in
-  claim_roots database (Stored (Any (Namespace package))) [];
-  List.iter
-    (function
-      | Part.Any (Proof _) as claimant -> claim_roots database (Stored claimant) [] | _ -> ())
-    (list_stored_parts package_database);
-  let is_package_part part =
-    (not (Stage.is_lowering (Stage.of_part part))) && Part.Storage.locate_package part = package
-  in
   mark_package_database_unsaved database package_database;
   List.iter (fun part -> mark_unsaved database (Value part)) (list_stored_parts package_database);
-  List.iter
-    (fun part ->
-      mark_unsaved database (Value part);
-      discard database part)
-    (Stored_table.fold
-       (fun part _ parts -> if is_package_part part then part :: parts else parts)
-       database.reads []);
+  Part_table.iter
+    (fun (source : Part.t) edges ->
+      (match source with Stored part -> unmark database part | Input _ | Name _ -> ());
+      mark_unsaved database (Edges source);
+      unindex_edges database source edges)
+    package_database.edges;
   Package_stage_table.filter_map_inplace
     (fun (stage_package, stage) parts ->
       if stage_package = package && not (Stage.is_lowering stage) then begin
@@ -1785,17 +1897,17 @@ let record_layout database ~(loaded : package_database list) (packages : Project
       in
       if not is_kept then begin
         let after = if List.mem name project then None else find_loaded name in
-        mark_differences database name ~before:(Some before) ~after;
         retire database before;
-        Option.iter (Package_table.replace database.package_databases name) after
+        Option.iter (Package_table.replace database.package_databases name) after;
+        mark_differences database name ~before:(Some before) ~after
       end)
     names_before;
   List.iter
     (fun (package_database : package_database) ->
       if not (Package_table.mem database.package_databases package_database.name) then begin
-        mark_differences database package_database.name ~before:None ~after:(Some package_database);
         Package_table.remove database.absent package_database.name;
-        Package_table.replace database.package_databases package_database.name package_database
+        Package_table.replace database.package_databases package_database.name package_database;
+        mark_differences database package_database.name ~before:None ~after:(Some package_database)
       end)
     loaded;
   List.iter
@@ -1841,9 +1953,9 @@ let find_saved_value database (entry : Entry.t) =
   match entry with
   | Value part ->
       if is_saved_part database part then (make_stored database part).marshal () else None
-  | Reads part ->
-      if is_saved_part database part then
-        Option.map marshal (Stored_table.find_opt database.reads part)
+  | Edges source ->
+      if is_saved_source database source then
+        Option.map marshal (Part_table.find_opt (locate_edges database source) source)
       else None
   | Stale part -> if is_saved_part database part && is_stale database part then Some "" else None
   | Package name ->
@@ -1860,10 +1972,8 @@ let find_saved_value database (entry : Entry.t) =
               (fun source -> fingerprint (Source.text source))
               (File_table.find_opt package_database.sources file))
       else None
-  | Claimed claimant -> Option.map marshal (Part_table.find_opt database.claimed_roots claimant)
 
 let list_unsaved database =
-  List.iter (update_groups database) database.project;
   Entry_table.fold
     (fun entry () entries ->
       (Marshal.to_string entry [ No_sharing ], find_saved_value database entry) :: entries)
@@ -1907,12 +2017,12 @@ let restore_parts database entries =
     (fun ((entry : Entry.t), bytes) ->
       match entry with
       | Value part when is_saved_part database part -> (make_stored database part).restore bytes
-      | Reads part when is_saved_part database part ->
-          add_reads database part (Marshal.from_string bytes 0)
+      | Edges source when is_saved_source database source ->
+          let edges = Marshal.from_string bytes 0 in
+          Part_table.replace (locate_edges database source) source edges;
+          index_edges database source edges
       | Stale part when is_saved_part database part -> mark_stale database part
-      | Claimed claimant ->
-          Part_table.replace database.claimed_roots claimant (Marshal.from_string bytes 0)
-      | Value _ | Reads _ | Stale _ | Package _ | File _ -> ())
+      | Value _ | Edges _ | Stale _ | Package _ | File _ -> ())
     entries
 
 let restore_namespaces database =
@@ -1920,42 +2030,37 @@ let restore_namespaces database =
     (fun name ->
       if List.mem name database.project then begin
         let package_database = Package_table.find database.package_databases name in
-        let namespace, implied = compute_namespace_and_implied database package_database in
+        let namespace, implied, _ = compute_namespace_and_implied database package_database in
         (make_value_slot database (Namespace name)).replace (Value namespace);
         let graph = obtain_call_graph database name in
-        List.iter
-          (function
-            | Part.Any (Call_edges (root, _)) -> ignore (Call_graph.add_root graph root) | _ -> ())
-          implied;
-        Stored_table.iter
-          (fun _ -> function
-            | Binding (Call_edges (path, _), value) ->
-                ignore (Call_graph.add_node graph path);
-                ignore
-                  (Call_graph.change_successors graph path ~before:[]
-                     ~after:(list_call_edges (Some value)))
-            | Binding _ -> ())
-          package_database.values
+        add_call_roots database name graph implied;
+        forget database
+          (Stored_table.fold
+             (fun part _ unreached ->
+               match part with
+               | Part.Any (Implementations (node, _) | Recursion_group node)
+                 when not (Call_graph.is_node graph node) ->
+                   part :: unreached
+               | _ -> unreached)
+             package_database.values [])
       end)
     (sort_in_dependency_order database database.project)
 
 let restore_references database =
   Part_table.iter
-    (fun claimant roots ->
-      List.iter
-        (fun root ->
-          Item_table.replace database.claimants root
-            (claimant :: Option.value (Item_table.find_opt database.claimants root) ~default:[]);
-          ignore (References.add_root database.references root))
-        roots)
-    database.claimed_roots;
+    (fun (target : Part.t) _ ->
+      match target with
+      | Stored (Any (Lowered root)) when list_claimants database root <> [] ->
+          ignore (References.add_root database.references root)
+      | _ -> ())
+    database.incoming;
   Stored_table.iter
     (fun _ -> function
-      | Binding (Lowered key, value) ->
+      | Binding (Lowered key, _) ->
           ignore (References.add_node database.references key);
           ignore
             (References.change_successors database.references key ~before:[]
-               ~after:(list_lowered_references (Some value)))
+               ~after:(list_item_edges database key))
       | Binding _ -> ())
     database.item_values;
   settle_references database
@@ -1969,7 +2074,6 @@ let restore ?on_bug ~saved ~find_text ~loaded packages entries =
   restore_parts database entries;
   restore_namespaces database;
   restore_references database;
-  List.iter (update_groups database) database.project;
   mark_saved database;
   record_layout database ~loaded packages;
   propagate_checks ?on_bug database;
@@ -2143,7 +2247,12 @@ let build_package_database ~loaded (package : Project.package) =
   drain database ~through:Recursion_groups [ package.name ];
   match Package_table.find_opt database.package_databases package.name with
   | Some package_database ->
-      { package_database with diagnostics = list_dependency_diagnostics database package.name }
+      let diagnostics = list_dependency_diagnostics database package.name in
+      Part_table.filter_map_inplace
+        (fun _ edges ->
+          match Edge.keep_reasons (( = ) Edge.Call) edges with [] -> None | calls -> Some calls)
+        package_database.edges;
+      { package_database with diagnostics }
   | None ->
       Compiler_bug.raise_bug ~stage:"Database" "%s is missing from the database built for it"
         (Path.show_package package.name)
@@ -2187,8 +2296,7 @@ let prove database files =
       if is_stale database part || Option.is_none (find_stored database (Proof key)) then begin
         unmark database part;
         compute_part database part
-      end
-      else claim_template_check_roots database key)
+      end)
     keys;
   require_diagnostics_for_blocked_proofs database packages keys;
   { database; keys }
@@ -2196,22 +2304,65 @@ let prove database files =
 let find_proof proofs key =
   find_part proofs.database (note_untracked_read proofs.database) (Proof key)
 
-let list_holes proofs path =
-  let names = make_untracked_name_lookups proofs.database in
-  match Option.bind (names.find_key path) (find_proof proofs) with
-  | Some (Value (Obligations { holes; _ })) ->
-      List.map
-        (fun ((home : Resolve.Names.key), location) ->
-          let ({ file; base } : Resolve.Names.place) = names.read_place home in
-          let span = Prover.resolve_location names home location in
-          let line, column =
-            Source.compute_position
-              (read_source proofs.database file)
-              (Source.Definition_span.to_file ~base span).start
-          in
-          (file, line, column))
-        holes
-  | Some (Value (Unsupported _ | Not_proven_here) | Failed _ | Blocked) | None -> []
+let list_holes proofs ~reached =
+  let database = proofs.database in
+  let note = note_untracked_read database in
+  let names = make_untracked_name_lookups database in
+  let proven = Path_table.create (List.length proofs.keys) in
+  List.iter (fun (key : Resolve.Names.key) -> Path_table.replace proven key.path key) proofs.keys;
+  let list_read_contracts key =
+    List.filter_map
+      (fun (read : Part.t) ->
+        match read with
+        | Stored (Any (Contract_mir contract)) -> Some contract.path
+        | Input _ | Name _ | Stored _ -> None)
+      (Edge.list_targets Read (find_edges database (Stored (Any (Proof key)))))
+  in
+  let list_impls_of_callees (key : Resolve.Names.key) =
+    note_read database note (Any (Call_edges key.path));
+    List.filter_map
+      (fun (callee : Path.t) ->
+        match callee with Method { owner = Impl _ as impl; _ } -> Some impl | _ -> None)
+      (list_callees database key.path)
+  in
+  let list_proof_holes key =
+    match find_proof proofs key with
+    | Some (Value (Obligations { holes; _ })) -> holes
+    | Some (Value (Unsupported _ | Not_proven_here) | Failed _ | Blocked) | None -> []
+  in
+  let locate ((home : Resolve.Names.key), location) =
+    let ({ file; base } : Resolve.Names.place) = names.read_place home in
+    let span = Prover.resolve_location names home location in
+    let line, column =
+      Source.compute_position (read_source database file)
+        (Source.Definition_span.to_file ~base span).start
+    in
+    (file, line, column)
+  in
+  let visited = Path_table.create 64 and pending = Queue.create () in
+  let visit way path =
+    match Path_table.find_opt proven path with
+    | Some key when not (Path_table.mem visited path) ->
+        Path_table.replace visited path ();
+        Queue.add (key, way @ [ path ]) pending
+    | Some _ | None -> ()
+  in
+  List.iter (visit []) reached;
+  let rec collect holes =
+    match Queue.take_opt pending with
+    | None -> List.rev holes
+    | Some (key, way) ->
+        List.iter (visit way) (list_read_contracts key @ list_impls_of_callees key);
+        collect
+          (List.rev_append
+             (List.map
+                (fun hole ->
+                  let file, line, column = locate hole in
+                  (file, line, column, way))
+                (list_proof_holes key))
+             holes)
+  in
+  collect []
 
 let list_template_checks (proofs : proofs) =
   let database = proofs.database in
@@ -2282,21 +2433,22 @@ let check_calls database interface viewers key = function
   | Ok lowered ->
       List.iter
         (fun calling_package ->
-          if Package_table.mem database.graphs calling_package then
-            Lowering.check_calls interface
-              ~find_call_edges:(fun path ->
-                match
-                  find_part database (note_untracked_read database)
-                    (Call_edges (path, calling_package))
-                with
-                | Some (Value edges) -> Some edges
-                | Some (Failed _ | Blocked) | None -> None)
-              key lowered)
+          match Package_table.find_opt database.graphs calling_package with
+          | Some graph ->
+              Lowering.check_calls interface
+                ~find_call_edges:(fun path ->
+                  if Call_graph.is_node graph path then begin
+                    note_read database (note_untracked_read database) (Any (Call_edges path));
+                    find_call_successors database calling_package path
+                  end
+                  else None)
+                key lowered
+          | None -> ())
         viewers
   | Error _ -> ()
 
 let list_reached_todo_types database key =
-  let list_reads part = Option.value (Stored_table.find_opt database.reads part) ~default:[] in
+  let list_reads part = Edge.list_targets Read (find_edges database (Stored part)) in
   let note = note_untracked_read database in
   let is_stored_blocked = function
     | Some Blocked -> true
@@ -2412,25 +2564,30 @@ module For_testing = struct
   let make_mir_lookups database = make_recording_mir_lookups database (note_untracked_read database)
 
   let list_reads database part =
-    match Stored_table.find_opt database.reads part with
-    | Some reads -> reads
+    match Part_table.find_opt (locate_edges database (Stored part)) (Stored part) with
+    | Some edges -> Edge.list_targets Read edges
     | None ->
         Compiler_bug.raise_bug ~stage:"Database" "%s is not computed" (Part.show (Stored part))
 
   let list_unread_parts database packages =
     drain database ~through:Recursion_groups packages;
-    Stored_table.fold
-      (fun part _ unread ->
-        match Part_table.find_opt database.readers (Part.Stored part) with
-        | Some readers when Stored_table.length readers > 0 -> unread
-        | Some _ | None -> part :: unread)
-      database.reads []
+    fold_recorded_edges database
+      (fun (source : Part.t) _ unread ->
+        match source with
+        | Stored part when list_sources database Read source = [] -> part :: unread
+        | Stored _ | Input _ | Name _ -> unread)
+      []
 
   let list_differences hot cold =
     let parts = Stored_table.create 1024 in
     List.iter
       (fun database ->
-        Stored_table.iter (fun part _ -> Stored_table.replace parts part ()) database.reads;
+        fold_recorded_edges database
+          (fun (source : Part.t) _ () ->
+            match source with
+            | Stored part -> Stored_table.replace parts part ()
+            | Input _ | Name _ -> ())
+          ();
         Package_table.iter
           (fun _ package_database ->
             Stored_table.iter
@@ -2441,14 +2598,15 @@ module For_testing = struct
               package_database.values)
           database.package_databases)
       [ hot; cold ];
-    let find_reads database part =
-      Option.map (List.sort compare) (Stored_table.find_opt database.reads part)
+    let find_edges database part =
+      Option.map (List.sort compare)
+        (Part_table.find_opt (locate_edges database (Stored part)) (Stored part))
     in
     List.sort compare
       (Stored_table.fold
          (fun part () differences ->
            if
-             find_reads hot part <> find_reads cold part
+             find_edges hot part <> find_edges cold part
              || not ((make_stored hot part).is_equal_in cold)
            then part :: differences
            else differences)
@@ -2480,9 +2638,14 @@ module For_testing = struct
     failing_part := Some part;
     Fun.protect ~finally:(fun () -> failing_part := None) run
 
-  let add_root database key =
-    claim_roots database (Input Packages)
-      (key :: Option.value (Part_table.find_opt database.claimed_roots (Input Packages)) ~default:[])
+  let add_root database item =
+    let source = Part.Input Packages and target = Part.Stored (Any (Lowered item)) in
+    let before = find_edges database source in
+    if not (List.exists (fun (edge : Edge.t) -> edge.target = target) before) then begin
+      let after = { Edge.target; reasons = [ Claim ] } :: before in
+      ignore (replace_edges database source after);
+      follow_claims database ~before ~after
+    end
 
   let find_proof = find_proof
 

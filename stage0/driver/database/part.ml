@@ -45,12 +45,12 @@ type _ stored =
   | Body_mir : Resolve.Names.key -> Mir.body_part stored
   | Contract_mir : Resolve.Names.key -> Mir.contract_part stored
   | Generated_mir : Path.t -> (Mir.body_part * Mir.contract_part) stored
-  | Mir_call_edges : Path.t -> Path.t list stored
+  | Call_edges : Path.t -> Mir.Call_edges.node stored
   | Usage : Resolve.Names.key -> unit stored
   | Ownership : Resolve.Names.key -> (Core.id list * Core.id list) list stored
   | Import_check : Path.file -> Diagnostic.t list stored
   | Package_check : Path.package * Package_checks.check -> Package_checks.outcome stored
-  | Call_edges : Path.t * Path.package -> Path.t list stored
+  | Implementations : Path.t * Path.package -> unit stored
   | Recursion_group : Path.t -> Path.t list stored
   | Proof : Resolve.Names.key -> Prover.proof stored
   | Lowered : Lowered.Item.t -> (Lowering.lowered, Lowering.unsupported) result stored
@@ -68,7 +68,6 @@ let find_item_definition : Lowered.Item.t -> Path.t option = function
   | Code { path; _ }
   | Constant path
   | Evaluator path
-  | Template_check { from_template = path; _ }
   | Call_evaluation { function_ = path; _ }
   | Generated
       ( Locked_entry { capability = path; _ }
@@ -101,12 +100,12 @@ module Storage = struct
     | Body_mir _, Body_mir _ -> Some Equal
     | Contract_mir _, Contract_mir _ -> Some Equal
     | Generated_mir _, Generated_mir _ -> Some Equal
-    | Mir_call_edges _, Mir_call_edges _ -> Some Equal
+    | Call_edges _, Call_edges _ -> Some Equal
     | Usage _, Usage _ -> Some Equal
     | Ownership _, Ownership _ -> Some Equal
     | Import_check _, Import_check _ -> Some Equal
     | Package_check _, Package_check _ -> Some Equal
-    | Call_edges _, Call_edges _ -> Some Equal
+    | Implementations _, Implementations _ -> Some Equal
     | Recursion_group _, Recursion_group _ -> Some Equal
     | Proof _, Proof _ -> Some Equal
     | Lowered _, Lowered _ -> Some Equal
@@ -115,8 +114,10 @@ module Storage = struct
 
   let locate_stored_package : type a. a stored -> Path.package = function
     | Parsed file | Import_check file -> file.module_.package
-    | Namespace package | Grant (package, _) | Package_check (package, _) | Call_edges (_, package)
-      ->
+    | Namespace package
+    | Grant (package, _)
+    | Package_check (package, _)
+    | Implementations (_, package) ->
         package
     | Resolved (key, _)
     | Trait_header key
@@ -134,7 +135,7 @@ module Storage = struct
     | Constant_value path
     | Type_facts path
     | Generated_mir path
-    | Mir_call_edges path
+    | Call_edges path
     | Recursion_group path
     | Derived_interface { type_ = path; _ } ->
         Path.locate_package path
@@ -227,7 +228,7 @@ let show_stored : type a. a stored -> string =
   | Body_mir declared -> "body mir " ^ show_key declared
   | Contract_mir declared -> "contract mir " ^ show_key declared
   | Generated_mir path -> "generated mir " ^ Path.show path
-  | Mir_call_edges path -> "MIR call edges " ^ Path.show path
+  | Call_edges path -> "call edges " ^ Path.show path
   | Usage declared -> "usage " ^ show_key declared
   | Ownership declared -> "ownership " ^ show_key declared
   | Import_check file -> "import check " ^ Path.show_file file
@@ -242,8 +243,8 @@ let show_stored : type a. a stored -> string =
         | Tests -> "tests"
         | Unexported -> "unexported"
         | Dependencies -> "dependencies")
-  | Call_edges (path, package) ->
-      Printf.sprintf "call edges %s %s" (Path.show_package package) (Path.show path)
+  | Implementations (path, package) ->
+      Printf.sprintf "implementations %s %s" (Path.show_package package) (Path.show path)
   | Recursion_group path -> "recursion group " ^ Path.show path
   | Proof declared -> "proof " ^ show_key declared
   | Lowered item -> "lowered " ^ Lowered.Item.to_string item
@@ -289,8 +290,8 @@ let find_stored_definition : type a. a stored -> Path.t option = function
   | Constant_value path
   | Type_facts path
   | Generated_mir path
-  | Mir_call_edges path
-  | Call_edges (path, _)
+  | Call_edges path
+  | Implementations (path, _)
   | Recursion_group path ->
       Some path
   | Derived_interface { type_; trait } -> Some (Derived { type_; trait })
@@ -342,12 +343,12 @@ let show_stored_kind : type a. a stored -> string = function
   | Body_mir _ -> "MIR of the body"
   | Generated_mir _ -> "generated MIR"
   | Contract_mir _ -> "MIR of the contract"
-  | Mir_call_edges _ -> "MIR call edges"
+  | Call_edges _ -> "call edges"
   | Usage _ -> "usage check"
   | Ownership _ -> "ownership check"
   | Import_check _ -> "import check"
   | Package_check _ -> "package check"
-  | Call_edges _ -> "call edges"
+  | Implementations _ -> "implementations"
   | Recursion_group _ -> "recursion group"
   | Proof _ -> "proof"
   | Lowered _ -> "lowered code"

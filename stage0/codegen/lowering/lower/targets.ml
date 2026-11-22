@@ -643,30 +643,18 @@ let lower_list_into (state : Lowering.state) ty destination ~site fills =
         None)
     fills
 
-let lower_template_value (state : Lowering.state) template_ty literals ~site ~parts =
-  let read_field_type ty name =
-    match Monomorphic.compute_shape state.context.monomorphic ty with
+let lower_literals_into (state : Lowering.state) literals_ty destination ~site literals =
+  let _, _, literal_ty = read_list_parts state.context.monomorphic literals_ty in
+  let text_field = Well_known.show_field Literal_text in
+  let text_ty =
+    match Monomorphic.compute_shape state.context.monomorphic literal_ty with
     | Record fields -> (
-        match List.assoc_opt name fields with
+        match List.assoc_opt text_field fields with
         | Some (Memory_layout.Typed ty) -> ty
-        | _ -> Definitions.raise_bug "%s has no field %s" (Ground.to_string ty) name)
-    | _ -> Definitions.raise_bug "%s is not a record" (Ground.to_string ty)
+        | _ -> Definitions.raise_bug "%s has no field %s" (Ground.to_string literal_ty) text_field)
+    | _ -> Definitions.raise_bug "%s is not a record" (Ground.to_string literal_ty)
   in
-  let read_element_type list_ty =
-    let _, _, element = read_list_parts state.context.monomorphic list_ty in
-    element
-  in
-  let literals_field = Well_known.show_field Template_literals
-  and parts_field = Well_known.show_field Template_parts
-  and text_field = Well_known.show_field Literal_text in
-  let literals_ty = read_field_type template_ty literals_field in
-  let parts_ty = read_field_type template_ty parts_field in
-  let literal_ty = read_element_type literals_ty in
-  let slice_ty = read_field_type literal_ty text_field in
-  let built = Lowering.allocate_temporary state template_ty in
-  lower_list_into state literals_ty
-    (Lowered.project built (Field literals_field))
-    ~site
+  lower_list_into state literals_ty destination ~site
     (List.map
        (fun text value ->
          Emit_c.Ir_builder.emit state.builder
@@ -676,11 +664,9 @@ let lower_template_value (state : Lowering.state) template_ty literals ~site ~pa
                   {
                     ty = literal_ty;
                     variant = None;
-                    fields = [ (text_field, Copy (lower_literal_place state slice_ty text)) ];
+                    fields = [ (text_field, Copy (lower_literal_place state text_ty text)) ];
                   } )))
-       literals);
-  lower_list_into state parts_ty (Lowered.project built (Field parts_field)) ~site parts;
-  built
+       literals)
 
 let pull_loop state ~(option : Ground.ty) ~(call_next : Lowered.place -> unit)
     ~(body : Lowered.place -> unit) =

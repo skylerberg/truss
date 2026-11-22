@@ -1,6 +1,6 @@
-use standard::checksum
-use standard::core
-use standard::intrinsic
+use standard.checksum
+use standard.core
+use standard.intrinsic
 
 public type Format = Deflate | Zlib | Gzip
   derives Equal
@@ -69,7 +69,7 @@ fn read_bits(reader: mut BitReader, input: Slice[UInt8], wanted: UInt64) -> Resu
     if reader.position >= input.length() {
       return Err(Error.Malformed(offset: reader.position))
     }
-    let byte: UInt64 = intrinsic::convert(input[reader.position])
+    let byte: UInt64 = intrinsic.convert(input[reader.position])
     reader.bits = reader.bits | (byte << reader.count)
     reader.position += 1
     reader.count += 8
@@ -185,7 +185,7 @@ fn inflate_codes(
   while true {
     let symbol = decode_symbol(mut reader, input: input, code: lengths)?
     if symbol < 256 {
-      push_limited(mut output, byte: intrinsic::convert(symbol), limit: limit)?
+      push_limited(mut output, byte: intrinsic.convert(symbol), limit: limit)?
     } else if symbol == 256 {
       return Ok(Unit)
     } else {
@@ -216,17 +216,17 @@ fn inflate_codes(
   }
 }
 
-fn fixed_codes() -> Result[core::Pair[Huffman, Huffman], Error] {
+fn fixed_codes() -> Result[core.Pair[Huffman, Huffman], Error] {
   var lengths: List[UInt64] = List.with_capacity(288)
   let symbols: UInt64 = 288
   for symbol in 0..symbols {
     mut lengths.push(if symbol < 144 { 8 } else if symbol < 256 { 9 } else if symbol < 280 { 7 } else { 8 })
   }
   let distances: List[UInt64] = List.filled(5, count: 30)
-  Ok(core::Pair(first: Huffman.from_lengths(lengths.slice(), at: 0)?, second: Huffman.from_lengths(distances.slice(), at: 0)?))
+  Ok(core.Pair(first: Huffman.from_lengths(lengths.slice(), at: 0)?, second: Huffman.from_lengths(distances.slice(), at: 0)?))
 }
 
-fn dynamic_codes(reader: mut BitReader, input: Slice[UInt8]) -> Result[core::Pair[Huffman, Huffman], Error]
+fn dynamic_codes(reader: mut BitReader, input: Slice[UInt8]) -> Result[core.Pair[Huffman, Huffman], Error]
   uses RunForever
 {
   let at = reader.position
@@ -283,13 +283,13 @@ fn dynamic_codes(reader: mut BitReader, input: Slice[UInt8]) -> Result[core::Pai
   }
   let literal_lengths = lengths[..literal_count]
   let distance_lengths = lengths[literal_count..]
-  Ok(core::Pair(
+  Ok(core.Pair(
     first: Huffman.from_lengths(literal_lengths, at: at)?,
     second: Huffman.from_lengths(distance_lengths, at: at)?,
   ))
 }
 
-fn inflate_from(input: Slice[UInt8], start: UInt64, limit: UInt64, is_flushed: Bool = false) -> Result[core::Pair[List[UInt8], UInt64], Error]
+fn inflate_from(input: Slice[UInt8], start: UInt64, limit: UInt64, is_flushed: Bool = false) -> Result[core.Pair[List[UInt8], UInt64], Error]
   uses RunForever
 {
   var reader = BitReader.new(start)
@@ -306,7 +306,7 @@ fn inflate_from(input: Slice[UInt8], start: UInt64, limit: UInt64, is_flushed: B
         return Err(Error.Malformed(offset: reader.position))
       }
       for _ in 0..length {
-        let byte: UInt8 = intrinsic::convert(read_bits(mut reader, input: input, wanted: 8)?)
+        let byte: UInt8 = intrinsic.convert(read_bits(mut reader, input: input, wanted: 8)?)
         push_limited(mut output, byte: byte, limit: limit)?
       }
     } else if kind == 1 {
@@ -321,7 +321,7 @@ fn inflate_from(input: Slice[UInt8], start: UInt64, limit: UInt64, is_flushed: B
   }
   align_to_byte(mut reader)
   let consumed = reader.position.saturating_subtract(reader.count / 8)
-  Ok(core::Pair(first: own output, second: consumed))
+  Ok(core.Pair(first: own output, second: consumed))
 }
 
 fn number_at(input: Slice[UInt8], offset: UInt64, size: UInt64, big_endian: Bool) -> Option[UInt32] {
@@ -330,7 +330,7 @@ fn number_at(input: Slice[UInt8], offset: UInt64, size: UInt64, big_endian: Bool
   }
   var value: UInt32 = 0
   for index in 0..size {
-    let byte: UInt32 = intrinsic::convert(input[offset + index])
+    let byte: UInt32 = intrinsic.convert(input[offset + index])
     if big_endian {
       value = (value << 8) | byte
     } else {
@@ -361,14 +361,14 @@ public fn decompress(input: Slice[UInt8], format: Format = Format.Gzip, limit: U
       }
       let method = input[0]
       let flags = input[1]
-      let header: UInt32 = intrinsic::convert[UInt8, UInt32](method) * 256 + intrinsic::convert[UInt8, UInt32](flags)
+      let header: UInt32 = intrinsic.convert[UInt8, UInt32](method) * 256 + intrinsic.convert[UInt8, UInt32](flags)
       if (method & 15) != 8 || header % 31 != 0 || (flags & 32) != 0 {
         return Err(Error.Malformed(offset: 0))
       }
       let inflated = inflate_from(input, start: 2, limit: limit)?
       match number_at(input, offset: inflated.second, size: 4, big_endian: true) {
         Some(expected) => {
-          if checksum::adler32(inflated.first.slice()) != expected {
+          if checksum.adler32(inflated.first.slice()) != expected {
             return Err(Error.ChecksumMismatch)
           }
           Ok(own inflated.first)
@@ -405,7 +405,7 @@ fn skip_text(input: Slice[UInt8], from: UInt64) -> Result[UInt64, Error] {
   Ok(at + 1)
 }
 
-fn gunzip_member(input: Slice[UInt8], start: UInt64, limit: UInt64) -> Result[core::Pair[List[UInt8], UInt64], Error]
+fn gunzip_member(input: Slice[UInt8], start: UInt64, limit: UInt64) -> Result[core.Pair[List[UInt8], UInt64], Error]
   uses RunForever
 {
   if start > input.length() || input.length() - start < 18 || input[start] != 31 || input[start + 1] != 139 || input[start + 2] != 8 {
@@ -415,7 +415,7 @@ fn gunzip_member(input: Slice[UInt8], start: UInt64, limit: UInt64) -> Result[co
   var at = start + 10
   if (flags & 4) != 0 {
     match number_at(input, offset: at, size: 2, big_endian: false) {
-      Some(extra) => at = at.saturating_add(2).saturating_add(intrinsic::convert(extra))
+      Some(extra) => at = at.saturating_add(2).saturating_add(intrinsic.convert(extra))
       None => return Err(Error.Malformed(offset: at))
     }
   }
@@ -435,16 +435,16 @@ fn gunzip_member(input: Slice[UInt8], start: UInt64, limit: UInt64) -> Result[co
   let end = inflated.second
   match number_at(input, offset: end, size: 4, big_endian: false) {
     Some(expected) => {
-      if checksum::crc32(inflated.first.slice()) != expected {
+      if checksum.crc32(inflated.first.slice()) != expected {
         return Err(Error.ChecksumMismatch)
       }
       match number_at(input, offset: end.saturating_add(4), size: 4, big_endian: false) {
         Some(size) => {
-          let length: UInt32 = intrinsic::convert(inflated.first.length() % 4294967296)
+          let length: UInt32 = intrinsic.convert(inflated.first.length() % 4294967296)
           if size != length {
             return Err(Error.ChecksumMismatch)
           }
-          Ok(core::Pair(first: own inflated.first, second: end.saturating_add(8)))
+          Ok(core.Pair(first: own inflated.first, second: end.saturating_add(8)))
         }
         None => Err(Error.Malformed(offset: end))
       }
@@ -469,7 +469,7 @@ fn write_bits(writer: mut BitWriter, value: UInt64, count: UInt64) {
   writer.bits = writer.bits | (bits << writer.count)
   writer.count += count
   while writer.count >= 8 {
-    mut writer.bytes.push(intrinsic::convert(writer.bits & 255))
+    mut writer.bytes.push(intrinsic.convert(writer.bits & 255))
     writer.bits = writer.bits >> 8
     writer.count -= 8
   }
@@ -477,7 +477,7 @@ fn write_bits(writer: mut BitWriter, value: UInt64, count: UInt64) {
 
 fn finish_byte(writer: mut BitWriter) {
   if writer.count > 0 {
-    mut writer.bytes.push(intrinsic::convert(writer.bits & 255))
+    mut writer.bytes.push(intrinsic.convert(writer.bits & 255))
   }
   writer.bits = 0
   writer.count = 0
@@ -495,9 +495,9 @@ fn hash_at(input: Slice[UInt8], position: UInt64) -> UInt64 {
   if position >= input.length() || input.length() - position < 3 {
     return 0
   }
-  let first: UInt64 = intrinsic::convert(input[position])
-  let second: UInt64 = intrinsic::convert(input[position + 1])
-  let third: UInt64 = intrinsic::convert(input[position + 2])
+  let first: UInt64 = intrinsic.convert(input[position])
+  let second: UInt64 = intrinsic.convert(input[position + 1])
+  let third: UInt64 = intrinsic.convert(input[position + 2])
   ((first << 10) ^ (second << 5) ^ third) % 32768
 }
 
@@ -808,7 +808,7 @@ fn write_block(writer: mut BitWriter, input: Slice[UInt8], tokens: Slice[Token],
   for token in tokens {
     match token {
       Literal(byte) => {
-        let symbol: UInt64 = intrinsic::convert(byte)
+        let symbol: UInt64 = intrinsic.convert(byte)
         add_at(mut literal_frequencies, index: symbol, amount: 1)
       }
       Match(length, distance) => {
@@ -869,7 +869,7 @@ fn write_block(writer: mut BitWriter, input: Slice[UInt8], tokens: Slice[Token],
   for token in tokens {
     match token {
       Literal(byte) => {
-        let symbol: UInt64 = intrinsic::convert(byte)
+        let symbol: UInt64 = intrinsic.convert(byte)
         bits_needed = bits_needed.saturating_add(value_at(literal_lengths.slice(), index: symbol))
       }
       Match(length, distance) => {
@@ -911,7 +911,7 @@ fn write_block(writer: mut BitWriter, input: Slice[UInt8], tokens: Slice[Token],
   for token in tokens {
     match token {
       Literal(byte) => {
-        let symbol: UInt64 = intrinsic::convert(byte)
+        let symbol: UInt64 = intrinsic.convert(byte)
         write_bits(mut writer, value: value_at(literal_codes.slice(), index: symbol), count: value_at(literal_lengths.slice(), index: symbol))
       }
       Match(length, distance) => {
@@ -995,7 +995,7 @@ fn push_number(output: mut List[UInt8], value: UInt32, big_endian: Bool) {
   let width: UInt32 = 4
   for index in 0..width {
     let shift: UInt32 = if big_endian { 24 - 8 * index } else { 8 * index }
-    mut output.push(intrinsic::convert((value >> shift) & 255))
+    mut output.push(intrinsic.convert((value >> shift) & 255))
   }
 }
 
@@ -1008,14 +1008,14 @@ public fn compress(input: Slice[UInt8], format: Format = Format.Gzip, level: Lev
     Zlib => {
       var output: List[UInt8] = [120, 156]
       mut output.append(own deflated)
-      push_number(mut output, value: checksum::adler32(input), big_endian: true)
+      push_number(mut output, value: checksum.adler32(input), big_endian: true)
       output
     }
     Gzip => {
       var output: List[UInt8] = [31, 139, 8, 0, 0, 0, 0, 0, 0, 255]
       mut output.append(own deflated)
-      push_number(mut output, value: checksum::crc32(input), big_endian: false)
-      push_number(mut output, value: intrinsic::convert(input.length() % 4294967296), big_endian: false)
+      push_number(mut output, value: checksum.crc32(input), big_endian: false)
+      push_number(mut output, value: intrinsic.convert(input.length() % 4294967296), big_endian: false)
       output
     }
   }

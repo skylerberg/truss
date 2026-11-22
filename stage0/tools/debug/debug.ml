@@ -61,7 +61,10 @@ let show_diagnostics ~json source diagnostics =
   if json then
     print_string
       ("[" ^ String.concat ",\n" (List.map (Diagnostic.to_json_object source) shown) ^ "]\n")
-  else List.iter (fun diagnostic -> prerr_string (Diagnostic.render source diagnostic)) shown;
+  else
+    List.iter
+      (fun diagnostic -> prerr_string (Diagnostic.render ~is_colored:false source diagnostic))
+      shown;
   if diagnostics = [] then 0 else 1
 
 let read file =

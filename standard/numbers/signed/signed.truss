@@ -1,11 +1,11 @@
-use standard::intrinsic
+use standard.intrinsic
 
 impl Equal for Int8 {
   fn equal(self, other: Int8) -> Bool
     cost time O(1)
     cost allocations == 0
   {
-    intrinsic::equal(self, right: other)
+    intrinsic.equal(self, right: other)
   }
 }
 
@@ -15,9 +15,9 @@ impl Ordered for Int8 {
     cost time O(1)
     cost allocations == 0
   {
-    if intrinsic::less(self, right: other) {
+    if intrinsic.less(self, right: other) {
       Ordering.Less
-    } else if intrinsic::equal(self, right: other) {
+    } else if intrinsic.equal(self, right: other) {
       Ordering.Equal
     } else {
       Ordering.Greater
@@ -35,7 +35,7 @@ impl Default for Int8 {
 
 impl Display for Int8 {
   fn display(self, output: mut String) {
-    mut output.push_signed(intrinsic::convert(self))
+    mut output.push_signed(intrinsic.convert(self))
   }
 }
 
@@ -46,7 +46,7 @@ impl Add[Int8] for Int8 {
     ensures result == (Int8.minimum <= self + right && self + right <= Int8.maximum)
     cost time O(1)
   {
-    !intrinsic::add_overflows(self, right: right)
+    !intrinsic.add_overflows(self, right: right)
   }
 
   fn add(self, right: Int8) -> Int8
@@ -54,7 +54,7 @@ impl Add[Int8] for Int8 {
     ensures result == self + right
     cost time O(1)
   {
-    intrinsic::add(self, right)
+    intrinsic.add(self, right)
   }
 }
 
@@ -65,7 +65,7 @@ impl Subtract[Int8] for Int8 {
     ensures result == (Int8.minimum <= self - right && self - right <= Int8.maximum)
     cost time O(1)
   {
-    !intrinsic::subtract_overflows(self, right: right)
+    !intrinsic.subtract_overflows(self, right: right)
   }
 
   fn subtract(self, right: Int8) -> Int8
@@ -73,7 +73,7 @@ impl Subtract[Int8] for Int8 {
     ensures result == self - right
     cost time O(1)
   {
-    intrinsic::subtract(self, right)
+    intrinsic.subtract(self, right)
   }
 }
 
@@ -84,7 +84,7 @@ impl Multiply[Int8] for Int8 {
     ensures result == (Int8.minimum <= self * right && self * right <= Int8.maximum)
     cost time O(1)
   {
-    !intrinsic::multiply_overflows(self, right: right)
+    !intrinsic.multiply_overflows(self, right: right)
   }
 
   fn multiply(self, right: Int8) -> Int8
@@ -92,7 +92,7 @@ impl Multiply[Int8] for Int8 {
     ensures result == self * right
     cost time O(1)
   {
-    intrinsic::multiply(self, right)
+    intrinsic.multiply(self, right)
   }
 }
 
@@ -111,7 +111,7 @@ impl Divide[Int8] for Int8 {
     ensures result == self / right
     cost time O(1)
   {
-    intrinsic::divide(self, right)
+    intrinsic.divide(self, right)
   }
 }
 
@@ -130,7 +130,7 @@ impl Remainder[Int8] for Int8 {
     ensures result == self % right
     cost time O(1)
   {
-    intrinsic::remainder(self, right)
+    intrinsic.remainder(self, right)
   }
 }
 
@@ -149,7 +149,7 @@ impl Negate for Int8 {
     ensures result == -self
     cost time O(1)
   {
-    intrinsic::negate(self)
+    intrinsic.negate(self)
   }
 }
 
@@ -158,7 +158,7 @@ impl Hash for Int8 {
     cost time O(1)
     cost allocations == 0
   {
-    hasher.write(intrinsic::convert(self))
+    hasher.write(intrinsic.convert(self))
   }
 }
 
@@ -171,7 +171,7 @@ impl Equal for Int16 {
     cost time O(1)
     cost allocations == 0
   {
-    intrinsic::equal(self, right: other)
+    intrinsic.equal(self, right: other)
   }
 }
 
@@ -181,9 +181,9 @@ impl Ordered for Int16 {
     cost time O(1)
     cost allocations == 0
   {
-    if intrinsic::less(self, right: other) {
+    if intrinsic.less(self, right: other) {
       Ordering.Less
-    } else if intrinsic::equal(self, right: other) {
+    } else if intrinsic.equal(self, right: other) {
       Ordering.Equal
     } else {
       Ordering.Greater
@@ -201,7 +201,7 @@ impl Default for Int16 {
 
 impl Display for Int16 {
   fn display(self, output: mut String) {
-    mut output.push_signed(intrinsic::convert(self))
+    mut output.push_signed(intrinsic.convert(self))
   }
 }
 
@@ -212,7 +212,7 @@ impl Add[Int16] for Int16 {
     ensures result == (Int16.minimum <= self + right && self + right <= Int16.maximum)
     cost time O(1)
   {
-    !intrinsic::add_overflows(self, right: right)
+    !intrinsic.add_overflows(self, right: right)
   }
 
   fn add(self, right: Int16) -> Int16
@@ -220,7 +220,7 @@ impl Add[Int16] for Int16 {
     ensures result == self + right
     cost time O(1)
   {
-    intrinsic::add(self, right)
+    intrinsic.add(self, right)
   }
 }
 
@@ -231,7 +231,7 @@ impl Subtract[Int16] for Int16 {
     ensures result == (Int16.minimum <= self - right && self - right <= Int16.maximum)
     cost time O(1)
   {
-    !intrinsic::subtract_overflows(self, right: right)
+    !intrinsic.subtract_overflows(self, right: right)
   }
 
   fn subtract(self, right: Int16) -> Int16
@@ -239,7 +239,7 @@ impl Subtract[Int16] for Int16 {
     ensures result == self - right
     cost time O(1)
   {
-    intrinsic::subtract(self, right)
+    intrinsic.subtract(self, right)
   }
 }
 
@@ -250,7 +250,7 @@ impl Multiply[Int16] for Int16 {
     ensures result == (Int16.minimum <= self * right && self * right <= Int16.maximum)
     cost time O(1)
   {
-    !intrinsic::multiply_overflows(self, right: right)
+    !intrinsic.multiply_overflows(self, right: right)
   }
 
   fn multiply(self, right: Int16) -> Int16
@@ -258,7 +258,7 @@ impl Multiply[Int16] for Int16 {
     ensures result == self * right
     cost time O(1)
   {
-    intrinsic::multiply(self, right)
+    intrinsic.multiply(self, right)
   }
 }
 
@@ -277,7 +277,7 @@ impl Divide[Int16] for Int16 {
     ensures result == self / right
     cost time O(1)
   {
-    intrinsic::divide(self, right)
+    intrinsic.divide(self, right)
   }
 }
 
@@ -296,7 +296,7 @@ impl Remainder[Int16] for Int16 {
     ensures result == self % right
     cost time O(1)
   {
-    intrinsic::remainder(self, right)
+    intrinsic.remainder(self, right)
   }
 }
 
@@ -315,7 +315,7 @@ impl Negate for Int16 {
     ensures result == -self
     cost time O(1)
   {
-    intrinsic::negate(self)
+    intrinsic.negate(self)
   }
 }
 
@@ -324,7 +324,7 @@ impl Hash for Int16 {
     cost time O(1)
     cost allocations == 0
   {
-    hasher.write(intrinsic::convert(self))
+    hasher.write(intrinsic.convert(self))
   }
 }
 
@@ -337,7 +337,7 @@ impl Equal for Int32 {
     cost time O(1)
     cost allocations == 0
   {
-    intrinsic::equal(self, right: other)
+    intrinsic.equal(self, right: other)
   }
 }
 
@@ -347,9 +347,9 @@ impl Ordered for Int32 {
     cost time O(1)
     cost allocations == 0
   {
-    if intrinsic::less(self, right: other) {
+    if intrinsic.less(self, right: other) {
       Ordering.Less
-    } else if intrinsic::equal(self, right: other) {
+    } else if intrinsic.equal(self, right: other) {
       Ordering.Equal
     } else {
       Ordering.Greater
@@ -367,7 +367,7 @@ impl Default for Int32 {
 
 impl Display for Int32 {
   fn display(self, output: mut String) {
-    mut output.push_signed(intrinsic::convert(self))
+    mut output.push_signed(intrinsic.convert(self))
   }
 }
 
@@ -378,7 +378,7 @@ impl Add[Int32] for Int32 {
     ensures result == (Int32.minimum <= self + right && self + right <= Int32.maximum)
     cost time O(1)
   {
-    !intrinsic::add_overflows(self, right: right)
+    !intrinsic.add_overflows(self, right: right)
   }
 
   fn add(self, right: Int32) -> Int32
@@ -386,7 +386,7 @@ impl Add[Int32] for Int32 {
     ensures result == self + right
     cost time O(1)
   {
-    intrinsic::add(self, right)
+    intrinsic.add(self, right)
   }
 }
 
@@ -397,7 +397,7 @@ impl Subtract[Int32] for Int32 {
     ensures result == (Int32.minimum <= self - right && self - right <= Int32.maximum)
     cost time O(1)
   {
-    !intrinsic::subtract_overflows(self, right: right)
+    !intrinsic.subtract_overflows(self, right: right)
   }
 
   fn subtract(self, right: Int32) -> Int32
@@ -405,7 +405,7 @@ impl Subtract[Int32] for Int32 {
     ensures result == self - right
     cost time O(1)
   {
-    intrinsic::subtract(self, right)
+    intrinsic.subtract(self, right)
   }
 }
 
@@ -416,7 +416,7 @@ impl Multiply[Int32] for Int32 {
     ensures result == (Int32.minimum <= self * right && self * right <= Int32.maximum)
     cost time O(1)
   {
-    !intrinsic::multiply_overflows(self, right: right)
+    !intrinsic.multiply_overflows(self, right: right)
   }
 
   fn multiply(self, right: Int32) -> Int32
@@ -424,7 +424,7 @@ impl Multiply[Int32] for Int32 {
     ensures result == self * right
     cost time O(1)
   {
-    intrinsic::multiply(self, right)
+    intrinsic.multiply(self, right)
   }
 }
 
@@ -443,7 +443,7 @@ impl Divide[Int32] for Int32 {
     ensures result == self / right
     cost time O(1)
   {
-    intrinsic::divide(self, right)
+    intrinsic.divide(self, right)
   }
 }
 
@@ -462,7 +462,7 @@ impl Remainder[Int32] for Int32 {
     ensures result == self % right
     cost time O(1)
   {
-    intrinsic::remainder(self, right)
+    intrinsic.remainder(self, right)
   }
 }
 
@@ -481,7 +481,7 @@ impl Negate for Int32 {
     ensures result == -self
     cost time O(1)
   {
-    intrinsic::negate(self)
+    intrinsic.negate(self)
   }
 }
 
@@ -490,7 +490,7 @@ impl Hash for Int32 {
     cost time O(1)
     cost allocations == 0
   {
-    hasher.write(intrinsic::convert(self))
+    hasher.write(intrinsic.convert(self))
   }
 }
 
@@ -503,7 +503,7 @@ impl Equal for Int64 {
     cost time O(1)
     cost allocations == 0
   {
-    intrinsic::equal(self, right: other)
+    intrinsic.equal(self, right: other)
   }
 }
 
@@ -513,9 +513,9 @@ impl Ordered for Int64 {
     cost time O(1)
     cost allocations == 0
   {
-    if intrinsic::less(self, right: other) {
+    if intrinsic.less(self, right: other) {
       Ordering.Less
-    } else if intrinsic::equal(self, right: other) {
+    } else if intrinsic.equal(self, right: other) {
       Ordering.Equal
     } else {
       Ordering.Greater
@@ -544,7 +544,7 @@ impl Add[Int64] for Int64 {
     ensures result == (Int64.minimum <= self + right && self + right <= Int64.maximum)
     cost time O(1)
   {
-    !intrinsic::add_overflows(self, right: right)
+    !intrinsic.add_overflows(self, right: right)
   }
 
   fn add(self, right: Int64) -> Int64
@@ -552,7 +552,7 @@ impl Add[Int64] for Int64 {
     ensures result == self + right
     cost time O(1)
   {
-    intrinsic::add(self, right)
+    intrinsic.add(self, right)
   }
 }
 
@@ -563,7 +563,7 @@ impl Subtract[Int64] for Int64 {
     ensures result == (Int64.minimum <= self - right && self - right <= Int64.maximum)
     cost time O(1)
   {
-    !intrinsic::subtract_overflows(self, right: right)
+    !intrinsic.subtract_overflows(self, right: right)
   }
 
   fn subtract(self, right: Int64) -> Int64
@@ -571,7 +571,7 @@ impl Subtract[Int64] for Int64 {
     ensures result == self - right
     cost time O(1)
   {
-    intrinsic::subtract(self, right)
+    intrinsic.subtract(self, right)
   }
 }
 
@@ -582,7 +582,7 @@ impl Multiply[Int64] for Int64 {
     ensures result == (Int64.minimum <= self * right && self * right <= Int64.maximum)
     cost time O(1)
   {
-    !intrinsic::multiply_overflows(self, right: right)
+    !intrinsic.multiply_overflows(self, right: right)
   }
 
   fn multiply(self, right: Int64) -> Int64
@@ -590,7 +590,7 @@ impl Multiply[Int64] for Int64 {
     ensures result == self * right
     cost time O(1)
   {
-    intrinsic::multiply(self, right)
+    intrinsic.multiply(self, right)
   }
 }
 
@@ -609,7 +609,7 @@ impl Divide[Int64] for Int64 {
     ensures result == self / right
     cost time O(1)
   {
-    intrinsic::divide(self, right)
+    intrinsic.divide(self, right)
   }
 }
 
@@ -628,7 +628,7 @@ impl Remainder[Int64] for Int64 {
     ensures result == self % right
     cost time O(1)
   {
-    intrinsic::remainder(self, right)
+    intrinsic.remainder(self, right)
   }
 }
 
@@ -647,7 +647,7 @@ impl Negate for Int64 {
     ensures result == -self
     cost time O(1)
   {
-    intrinsic::negate(self)
+    intrinsic.negate(self)
   }
 }
 
@@ -656,7 +656,7 @@ impl Hash for Int64 {
     cost time O(1)
     cost allocations == 0
   {
-    hasher.write(intrinsic::convert(self))
+    hasher.write(intrinsic.convert(self))
   }
 }
 

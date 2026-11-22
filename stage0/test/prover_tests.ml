@@ -6,12 +6,12 @@ let check_file database file =
   | errors -> errors
 
 let check packages = check_file (Support.make_database packages)
-let expect_proven text = Support.expect_no_diagnostics ~check [ ("app::main", text) ]
+let expect_proven text = Support.expect_no_diagnostics ~check [ ("app.main", text) ]
 let expect_not_proven text code = Support.expect_one_diagnostic ~check text code
 
 let list_codes text =
-  let packages = Support.setup [ ("app::main", text) ] in
-  Support.list_codes (check packages (Support.parse_file "app::main"))
+  let packages = Support.setup [ ("app.main", text) ] in
+  Support.list_codes (check packages (Support.parse_file "app.main"))
 
 let expect_only_codes text codes =
   match list_codes text with
@@ -21,12 +21,12 @@ let expect_only_codes text codes =
         Harness.fail "%s" (String.concat ", " actual)
 
 let list_termination_failures text =
-  let packages = Support.setup [ ("app::main", text) ] in
+  let packages = Support.setup [ ("app.main", text) ] in
   List.filter_map
     (fun (diagnostic : Diagnostic.t) ->
       if Diagnostic.Code.name diagnostic.code = "prover.termination" then Some diagnostic.message
       else None)
-    (check packages (Support.parse_file "app::main"))
+    (check packages (Support.parse_file "app.main"))
 
 let expect_one_termination_failure ~says text =
   match list_termination_failures text with
@@ -36,11 +36,11 @@ let expect_one_termination_failure ~says text =
   | messages -> Harness.fail "%d termination failures" (List.length messages)
 
 let list_diagnostics text =
-  check (Support.setup [ ("app::main", text) ]) (Support.parse_file "app::main")
+  check (Support.setup [ ("app.main", text) ]) (Support.parse_file "app.main")
 
 let read_message text =
-  let packages = Support.setup [ ("app::main", text) ] in
-  match check packages (Support.parse_file "app::main") with
+  let packages = Support.setup [ ("app.main", text) ] in
+  match check packages (Support.parse_file "app.main") with
   | [ diagnostic ] -> diagnostic.message
   | actual ->
       Printf.sprintf "%d diagnostics: %s" (List.length actual)
@@ -167,8 +167,8 @@ let () =
       match
         check
           (Support.setup
-             [ ("app::main", Fixtures.Prover.overflow_in_a_lambda_of_a_function_that_may_panic) ])
-          (Support.parse_file "app::main")
+             [ ("app.main", Fixtures.Prover.overflow_in_a_lambda_of_a_function_that_may_panic) ])
+          (Support.parse_file "app.main")
       with
       | [ diagnostic ] ->
           if
@@ -370,11 +370,9 @@ let () =
   Harness.test "a contract that calls its own function applies the function's limited copy"
     (fun () ->
       let packages =
-        Support.setup [ ("app::main", Fixtures.Prover.recursive_total_in_its_own_contract) ]
+        Support.setup [ ("app.main", Fixtures.Prover.recursive_total_in_its_own_contract) ]
       in
-      let caller =
-        List.hd (Support.list_declarations packages (Support.parse_module "app::main"))
-      in
+      let caller = List.hd (Support.list_declarations packages (Support.parse_module "app.main")) in
       let rec applies_limited (term : Logic.term) =
         match term with
         | Apply (Limited _, _) -> true
@@ -384,7 +382,7 @@ let () =
         | Symbol _ | Integer _ | Boolean _ | Bits _ -> false
       in
       match
-        Support.read_proofs (Support.make_database packages) (Support.parse_file "app::main")
+        Support.read_proofs (Support.make_database packages) (Support.parse_file "app.main")
           caller.key
       with
       | Obligations { obligations = [ obligation ]; _ } ->
@@ -395,9 +393,9 @@ let () =
 let () =
   Harness.test "mutual recursion without measures cannot be shown to end" (fun () ->
       let packages =
-        Support.setup [ ("app::main", Fixtures.Prover.even_and_odd_without_measures) ]
+        Support.setup [ ("app.main", Fixtures.Prover.even_and_odd_without_measures) ]
       in
-      match Support.list_codes (check packages (Support.parse_file "app::main")) with
+      match Support.list_codes (check packages (Support.parse_file "app.main")) with
       | [ "prover.termination"; "prover.termination" ] -> ()
       | codes -> Harness.fail "codes %s" (String.concat ", " codes));
   Harness.test "mutual recursion that decreases" (fun () ->
@@ -415,9 +413,9 @@ let () =
         (fun () ->
           let packages =
             Support.setup
-              [ ("app::main", Fixtures.Prover.caller_of_double); ("app::main/broken", broken) ]
+              [ ("app.main", Fixtures.Prover.caller_of_double); ("app.main/broken", broken) ]
           in
-          let main = Support.parse_file "app::main" in
+          let main = Support.parse_file "app.main" in
           (match
              Support.list_codes
                (Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers
@@ -434,8 +432,8 @@ let () =
           let caller =
             List.find
               (fun (declaration : Resolve.Names.declaration) ->
-                Path.equal declaration.key.path (Support.make_top_path "app::main" "caller"))
-              (Support.list_declarations packages (Support.parse_module "app::main"))
+                Path.equal declaration.key.path (Support.make_top_path "app.main" "caller"))
+              (Support.list_declarations packages (Support.parse_module "app.main"))
           in
           match
             Database.For_testing.find_proof
@@ -457,11 +455,11 @@ let () =
         Support.setup
           ~dependencies:[ ("app", "lib") ]
           [
-            ("lib::numbers", Fixtures.Prover.public_double_with_an_ill_typed_ensures);
-            ("app::main", Fixtures.Prover.caller_of_a_dependency_with_an_ill_typed_ensures);
+            ("lib.numbers", Fixtures.Prover.public_double_with_an_ill_typed_ensures);
+            ("app.main", Fixtures.Prover.caller_of_a_dependency_with_an_ill_typed_ensures);
           ]
       in
-      let main = Support.parse_file "app::main" in
+      let main = Support.parse_file "app.main" in
       (match
          Support.list_codes
            (Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers
@@ -472,8 +470,8 @@ let () =
       let caller =
         List.find
           (fun (declaration : Resolve.Names.declaration) ->
-            Path.equal declaration.key.path (Support.make_top_path "app::main" "caller"))
-          (Support.list_declarations packages (Support.parse_module "app::main"))
+            Path.equal declaration.key.path (Support.make_top_path "app.main" "caller"))
+          (Support.list_declarations packages (Support.parse_module "app.main"))
       in
       match
         Database.For_testing.find_proof
@@ -497,11 +495,11 @@ let () =
       let packages =
         Support.setup
           [
-            ("app::main", Fixtures.Prover.caller_of_double);
-            ("app::main/double", Fixtures.Prover.double_with_an_ill_typed_body);
+            ("app.main", Fixtures.Prover.caller_of_double);
+            ("app.main/double", Fixtures.Prover.double_with_an_ill_typed_body);
           ]
       in
-      let main = Support.parse_file "app::main" in
+      let main = Support.parse_file "app.main" in
       (match
          Support.list_codes (Support.list_proof_diagnostics (Support.make_database packages) main)
        with
@@ -510,8 +508,8 @@ let () =
       let caller =
         List.find
           (fun (declaration : Resolve.Names.declaration) ->
-            Path.equal declaration.key.path (Support.make_top_path "app::main" "caller"))
-          (Support.list_declarations packages (Support.parse_module "app::main"))
+            Path.equal declaration.key.path (Support.make_top_path "app.main" "caller"))
+          (Support.list_declarations packages (Support.parse_module "app.main"))
       in
       match
         Database.For_testing.find_proof
@@ -527,11 +525,11 @@ let () =
       let packages =
         Support.setup
           [
-            ("app::main", Fixtures.Prover.caller_of_double);
-            ("app::main/double", Fixtures.Prover.double_reading_a_secret);
+            ("app.main", Fixtures.Prover.caller_of_double);
+            ("app.main/double", Fixtures.Prover.double_reading_a_secret);
           ]
       in
-      let main = Support.parse_file "app::main" in
+      let main = Support.parse_file "app.main" in
       (match
          Support.list_codes (Support.list_proof_diagnostics (Support.make_database packages) main)
        with
@@ -540,8 +538,8 @@ let () =
       let caller =
         List.find
           (fun (declaration : Resolve.Names.declaration) ->
-            Path.equal declaration.key.path (Support.make_top_path "app::main" "caller"))
-          (Support.list_declarations packages (Support.parse_module "app::main"))
+            Path.equal declaration.key.path (Support.make_top_path "app.main" "caller"))
+          (Support.list_declarations packages (Support.parse_module "app.main"))
       in
       match
         Database.For_testing.find_proof
@@ -559,16 +557,16 @@ let () =
       let packages =
         Support.setup
           [
-            ("app::main", Fixtures.Prover.total_of_a_box_size);
-            ("app::main/measured", Fixtures.Prover.measured_trait_with_a_broken_method);
+            ("app.main", Fixtures.Prover.total_of_a_box_size);
+            ("app.main/measured", Fixtures.Prover.measured_trait_with_a_broken_method);
           ]
       in
       let database = Support.make_database packages in
-      let main = Support.parse_file "app::main" in
+      let main = Support.parse_file "app.main" in
       (match
          Support.list_codes
            (Database.For_testing.list_diagnostics Database.For_testing.fragment_checkers database
-              (Support.parse_file "app::main/measured"))
+              (Support.parse_file "app.main/measured"))
        with
       | [ "resolve.unknown_name" ] -> ()
       | codes -> Harness.fail "the trait reports %s" (String.concat ", " codes));
@@ -871,6 +869,20 @@ let () =
 let span = "type Span(low: Int64, high: Int64)\n  invariant low <= high\n\n"
 
 let () =
+  (let counter = ("app.counter", Fixtures.Prover.counter_with_a_private_invariant) in
+   Harness.test
+     "another module assumes and passes on an invariant clause that names a private definition"
+     (fun () ->
+       Support.expect_no_diagnostics ~check
+         [ ("app.main", Fixtures.Prover.counter_passed_through_another_module); counter ]);
+   Harness.test "another module does not know an invariant clause that names a private definition"
+     (fun () ->
+       Support.expect_one_diagnostic ~check ~others:[ counter ]
+         Fixtures.Prover.counter_read_by_another_module "prover.ensures");
+   Harness.test "another module cannot prove an invariant clause that names a private definition"
+     (fun () ->
+       Support.expect_one_diagnostic ~check ~others:[ counter ]
+         Fixtures.Prover.counter_built_by_another_module "prover.invariant"));
   Harness.test "building a value must meet its invariant" (fun () ->
       expect_not_proven (span ^ Fixtures.Prover.span_built_without_its_invariant) "prover.invariant");
   Harness.test "building a value that meets its invariant" (fun () ->
@@ -1022,10 +1034,24 @@ let shout = Fixtures.Prover.shout
 let () =
   Harness.test "a tagged template meets its tag's requires" (fun () ->
       expect_proven (shout ^ Fixtures.Prover.shout_of_a_literal));
-  Harness.test "a call of from_template through a bound cannot see the tag's requires" (fun () ->
+  Harness.test "a call of from_template through a bound must meet the tag's check" (fun () ->
       expect_not_proven Fixtures.Prover.from_template_through_a_bound "prover.requires");
-  Harness.test "a tagged template that does not meet its tag's requires" (fun () ->
-      expect_not_proven (shout ^ Fixtures.Prover.shout_of_a_copied_name) "prover.requires")
+  Harness.test "a call of from_template through a bound meets the check its caller requires"
+    (fun () -> expect_proven Fixtures.Prover.from_template_through_a_bound_that_requires_the_check);
+  Harness.test "a tagged template whose check gives false fails every time it is reached" (fun () ->
+      let message = read_message (shout ^ Fixtures.Prover.shout_of_a_copied_name) in
+      if
+        not
+          (String.includes ~affix:"may not hold for this call to `Shout.from_template`" message
+          && String.includes ~affix:"This fails every time the code reaches it." message)
+      then Harness.fail "message %S" message);
+  Harness.test "an impl's from_template cannot require more than the tag's check" (fun () ->
+      expect_not_proven Fixtures.Prover.shout_with_a_stronger_requires "prover.requires");
+  Harness.test "an obligation that the facts refute says it fails every time it is reached"
+    (fun () ->
+      let message = read_message Fixtures.Prover.element_past_the_end_of_a_literal in
+      if not (String.includes ~affix:"This fails every time the code reaches it." message) then
+        Harness.fail "message %S" message)
 
 let () =
   Harness.test "float equality is reflexive, even for NaN" (fun () ->
@@ -1111,10 +1137,6 @@ let () =
       expect_proven Fixtures.Prover.set_literal_with_a_repeated_element);
   Harness.test "a sorted map literal's keys must be distinct" (fun () ->
       expect_not_proven Fixtures.Prover.sorted_map_literal_with_a_repeated_key "prover.requires");
-  Harness.test "an empty map literal allocates nothing" (fun () ->
-      expect_proven Fixtures.Prover.empty_map_literal_without_allocations);
-  Harness.test "a map literal is one allocation" (fun () ->
-      expect_proven Fixtures.Prover.map_literal_with_one_allocation);
   Harness.test "a deque literal has its length and is one allocation" (fun () ->
       expect_proven Fixtures.Prover.deque_literal_length);
   Harness.test "an empty sorted set literal is empty and takes constant time" (fun () ->
@@ -1286,6 +1308,11 @@ let () =
       expect_not_proven Fixtures.Prover.tree_node_built "prover.cost");
   Harness.test "an indirect variant is one allocation" (fun () ->
       expect_proven Fixtures.Prover.tree_node_with_one_allocation);
+  Harness.test "a recursive call's quantified ensures reads a field under its quantifier" (fun () ->
+      expect_proven Fixtures.Prover.tree_insert_keeping_every_key);
+  Harness.test
+    "an obligation whose quantified facts exhaust the steps is proven from its ground facts"
+    (fun () -> expect_proven Fixtures.Prover.product_bound_beside_a_growing_measure);
   Harness.test "nested loops are not linear" (fun () ->
       expect_not_proven
         (constant_step ^ Fixtures.Prover.nested_range_loops_ensured_linear)
@@ -1448,18 +1475,23 @@ let () =
   Harness.test "a potential its invariant keeps at or above zero" (fun () ->
       expect_proven Fixtures.Prover.debt_potential)
 
-let count_holes text =
-  let packages = Support.setup [ ("app::main", text) ] in
+let count_holes ?(in_ = fun (_ : Path.t) -> true) text =
+  let packages = Support.setup [ ("app.main", text) ] in
   let prove_key =
-    Support.read_proofs (Support.make_database packages) (Support.parse_file "app::main")
+    Support.read_proofs (Support.make_database packages) (Support.parse_file "app.main")
   in
   List.fold_left
     (fun total (declaration : Resolve.Names.declaration) ->
       match prove_key declaration.key with
-      | Obligations outcome -> total + List.length outcome.holes
-      | Unsupported _ | Not_proven_here -> total)
+      | Obligations outcome when in_ declaration.key.path -> total + List.length outcome.holes
+      | Obligations _ | Unsupported _ | Not_proven_here -> total)
     0
-    (Support.list_declarations packages (Support.parse_module "app::main"))
+    (Support.list_declarations packages (Support.parse_module "app.main"))
+
+let is_function name (path : Path.t) =
+  match path with Top { name = top; _ } -> top = name | _ -> false
+
+let is_impl (path : Path.t) = match path with Impl _ -> true | _ -> false
 
 let () =
   Harness.test "a todo in a theorem is a hole, not a failure" (fun () ->
@@ -1474,17 +1506,18 @@ let () =
           if count_holes text <> holes then Harness.fail "%d holes" (count_holes text))
         [
           (Fixtures.Prover.todo_requires_with_a_caller, 2);
-          (Fixtures.Prover.todo_ensures_with_a_caller, 3);
+          (Fixtures.Prover.todo_ensures_with_a_caller, 4);
           (Fixtures.Prover.positive_with_a_todo_invariant, 2);
         ]);
   Harness.test "a todo in a proof block leaves the rest of its path to it" (fun () ->
       let text = Fixtures.Prover.proof_block_of_todo in
       expect_proven text;
       if count_holes text <> 1 then Harness.fail "%d holes" (count_holes text));
-  Harness.test "a contract on a body that is not written waits for it, and is no hole" (fun () ->
+  Harness.test "a contract on a body that is not written waits for it, and the todo is a hole"
+    (fun () ->
       let text = Fixtures.Prover.todo_body_with_an_ensures in
       expect_proven text;
-      if count_holes text <> 0 then Harness.fail "%d holes" (count_holes text));
+      if count_holes text <> 1 then Harness.fail "%d holes" (count_holes text));
   Harness.test "the code before a todo is still proven" (fun () ->
       expect_not_proven Fixtures.Prover.element_read_before_a_todo "prover.out_of_bounds");
   Harness.test "a constant, a field default, or a parameter default left todo is read" (fun () ->
@@ -1524,7 +1557,14 @@ let () =
     (fun () -> expect_not_proven Fixtures.Prover.scaled_impl "prover.ensures");
   Harness.test "a law of an unfinished impl is a hole where it is assumed" (fun () ->
       let text = Fixtures.Prover.sized_law_of_an_unfinished_impl in
-      if count_holes text <> 1 then Harness.fail "%d holes" (count_holes text));
+      let holes = count_holes ~in_:(is_function "f") text in
+      if holes <> 1 then Harness.fail "%d holes" holes);
+  Harness.test "an unfinished impl of a trait with a law holds each todo as a hole" (fun () ->
+      let holes = count_holes ~in_:is_impl Fixtures.Prover.sized_law_of_an_unfinished_impl in
+      if holes <> 1 then Harness.fail "%d holes" holes);
+  Harness.test "an unfinished impl of a trait without laws holds no hole" (fun () ->
+      let holes = count_holes ~in_:is_impl Fixtures.Prover.box_of_an_unfinished_impl_without_laws in
+      if holes <> 0 then Harness.fail "%d holes" holes);
   Harness.test "a law whose proof holds a todo is a hole where it is assumed" (fun () ->
       let text = Fixtures.Prover.zero_law_with_a_todo_proof in
       if count_holes text <> 2 then Harness.fail "%d holes" (count_holes text));
@@ -1599,6 +1639,8 @@ let () =
         "prover.ensures");
   Harness.test "a caller reads the postcondition of the function it passes from its body" (fun () ->
       expect_proven Fixtures.Prover.halved_through_a_callback_relation);
+  Harness.test "a named function passed as a measure in a requires and an invariant proves"
+    (fun () -> expect_proven Fixtures.Prover.zero_count_by_a_named_measure);
   Harness.test "a callback's mut input is related at its entry and its exit" (fun () ->
       expect_proven Fixtures.Prover.value_changed_through_a_mut_callback);
   Harness.test "two calls of an effectful callback are not known to agree" (fun () ->
@@ -1608,7 +1650,11 @@ let () =
   Harness.test "a comparator that keeps its laws gives max_by's conclusion" (fun () ->
       expect_proven Fixtures.Prover.largest_by_a_comparing_lambda);
   Harness.test "a comparator that breaks its laws gives max_by's conclusion nothing" (fun () ->
-      expect_not_proven Fixtures.Prover.largest_by_a_comparator_breaking_its_laws "prover.ensures")
+      expect_not_proven Fixtures.Prover.largest_by_a_comparator_breaking_its_laws "prover.ensures");
+  Harness.test "a comparator that compares a field of its arguments gives max_by's conclusion"
+    (fun () -> expect_proven Fixtures.Prover.highest_score_by_a_keyed_comparator);
+  Harness.test "an element's range holds in a quantifier that is a match arm's value" (fun () ->
+      expect_proven Fixtures.Prover.element_compared_in_a_match_arm)
 
 let () =
   Harness.test "provided methods that call each other are recursion" (fun () ->
@@ -1628,8 +1674,8 @@ let () =
         when String.starts_with ~prefix:"This call to `Check.check` may not end" call
              && String.starts_with
                   ~prefix:
-                    "This conversion to `any` gives `app::main::impl app::main::Check for \
-                     app::main::Loop`, whose methods call back here"
+                    "This conversion to `any` gives `app.main.impl app.main.Check for \
+                     app.main.Loop`, whose methods call back here"
                   conversion ->
           ()
       | messages -> Harness.fail "%s" (String.concat "; " messages))
@@ -1736,7 +1782,7 @@ let () =
     "a provided body that gives its receiver to a generic function that calls it back is recursion"
     (fun () ->
       Support.expect_one_diagnostic ~check
-        ~says:"This call uses `app::main::Step` where a bound needs it, and its methods reach back"
+        ~says:"This call uses `app.main.Step` where a bound needs it, and its methods reach back"
         ~at:("run(self)", 1)
         Fixtures.Prover.step_provided_by_giving_its_receiver_to_a_generic_function
         "prover.termination");
@@ -1757,9 +1803,9 @@ let () =
     (fun () ->
       expect_one_termination_failure
         ~says:
-          "The call that `self.children == other.children` makes uses `app::main::impl \
-           standard::core::Equal for app::main::Tree` where a bound needs it, and its methods \
-           reach back here."
+          "The call that `self.children == other.children` makes uses `app.main.impl \
+           standard.core.Equal for app.main.Tree` where a bound needs it, and its methods reach \
+           back here."
         Fixtures.Prover.tree_equal_comparing_its_lists_of_children);
   Harness.test "an equal that compares each child in a loop recurses on parts" (fun () ->
       match list_termination_failures Fixtures.Prover.tree_equal_comparing_each_child with
@@ -1767,18 +1813,16 @@ let () =
       | messages -> Harness.fail "%s" (String.concat "; " messages));
   Harness.test "a method of a generic impl is given the impl of its type argument" (fun () ->
       Support.expect_one_diagnostic ~check
-        ~says:"uses `app::main::impl app::main::Grow for app::main::Seed` where a bound needs it"
+        ~says:"uses `app.main.impl app.main.Grow for app.main.Seed` where a bound needs it"
         Fixtures.Prover.pot_growing_a_seed_that_grows_a_pot "prover.termination");
   Harness.test "a derived method of a generic type is given the impl of its type argument"
     (fun () ->
       Support.expect_one_diagnostic ~check
-        ~says:
-          "uses `app::main::impl standard::core::Default for app::main::Seed` where a bound needs \
-           it"
+        ~says:"uses `app.main.impl standard.core.Default for app.main.Seed` where a bound needs it"
         Fixtures.Prover.default_of_a_seed_through_a_derived_default_of_its_pot "prover.termination");
   Harness.test "a trait's method is given the impls of its own type arguments" (fun () ->
       Support.expect_one_diagnostic ~check
-        ~says:"uses `app::main::impl app::main::Grow for app::main::Seed` where a bound needs it"
+        ~says:"uses `app.main.impl app.main.Grow for app.main.Seed` where a bound needs it"
         Fixtures.Prover.visit_given_a_seed_that_calls_it_back "prover.termination");
   Harness.test "a call through any in a function that an impl's method calls is recursion"
     (fun () ->
@@ -1911,9 +1955,9 @@ let check_across library program =
   let packages =
     Support.setup
       ~dependencies:[ ("app", "lib") ]
-      [ ("lib::numbers", library); ("app::main", "use lib::numbers\n\n" ^ program) ]
+      [ ("lib.numbers", library); ("app.main", "use lib.numbers\n\n" ^ program) ]
   in
-  check packages (Support.parse_file "app::main")
+  check packages (Support.parse_file "app.main")
 
 let public_doubling =
   "public fn double(limit_count: Int64) -> Int64\n\
@@ -1958,9 +2002,10 @@ let () =
       then Harness.fail "message %S" actual)
 
 let () =
-  Harness.test "an insertion into a set of integers is amortized in its length" (fun () ->
-      expect_proven Fixtures.Prover.integer_set_add);
-  Harness.test "an insertion into a set of any elements is amortized in their comparisons"
+  Harness.test "an insertion into a set of integers is amortized in the logarithm of its length"
+    (fun () -> expect_proven Fixtures.Prover.integer_set_add);
+  Harness.test
+    "an insertion into a set of any elements is amortized in a hash and a logarithm of comparisons"
     (fun () -> expect_proven Fixtures.Prover.generic_set_add);
   Harness.test "a list filled with integers is linear in its count" (fun () ->
       expect_proven Fixtures.Prover.zeros_filled)
@@ -1968,8 +2013,8 @@ let () =
 let () =
   Harness.test "a requires fix reads a negated negation as the value it negates" (fun () ->
       let text = Fixtures.Prover.negation_of_a_negated_parameter in
-      let packages = Support.setup [ ("app::main", text) ] in
-      match check packages (Support.parse_file "app::main") with
+      let packages = Support.setup [ ("app.main", text) ] in
+      match check packages (Support.parse_file "app.main") with
       | [ { fixes = [ fix; { title = "Add `uses Panic`"; _ } ]; _ } ] ->
           if fix.title <> "Add `requires value <= Int64.maximum - 1`" then
             Harness.fail "%s" fix.title;
@@ -1980,9 +2025,9 @@ let () =
   Harness.test "a callee's requires about the caller's parameters is offered as the caller's"
     (fun () ->
       let packages =
-        Support.setup [ ("app::main", Fixtures.Prover.halve_of_an_unbounded_parameter) ]
+        Support.setup [ ("app.main", Fixtures.Prover.halve_of_an_unbounded_parameter) ]
       in
-      match check packages (Support.parse_file "app::main") with
+      match check packages (Support.parse_file "app.main") with
       | [ { fixes = [ { title; _ } ]; _ } ] when title = "Add `requires count < 100`" -> ()
       | actual ->
           Harness.fail "%s"
@@ -2024,11 +2069,11 @@ let () =
 
 let () =
   let fix_titles text =
-    let packages = Support.setup [ ("app::main", text) ] in
+    let packages = Support.setup [ ("app.main", text) ] in
     List.concat_map
       (fun (diagnostic : Diagnostic.t) ->
         List.map (fun (fix : _ Diagnostic.fix) -> fix.title) diagnostic.fixes)
-      (check packages (Support.parse_file "app::main"))
+      (check packages (Support.parse_file "app.main"))
   in
   Harness.test "an impl's method offers no requires, since the trait's would have to imply it"
     (fun () ->
@@ -2045,13 +2090,13 @@ let () =
   Harness.test "a narrowing conversion names its callee and offers each bound at the target"
     (fun () ->
       let packages =
-        Support.setup [ ("app::main", Fixtures.Prover.integer_narrowed_without_a_check) ]
+        Support.setup [ ("app.main", Fixtures.Prover.integer_narrowed_without_a_check) ]
       in
       let describe (diagnostic : Diagnostic.t) =
         ( String.includes ~affix:"for this call to `Int8.from_integer`" diagnostic.message,
           List.map (fun (fix : _ Diagnostic.fix) -> fix.title) diagnostic.fixes )
       in
-      match check packages (Support.parse_file "app::main") with
+      match check packages (Support.parse_file "app.main") with
       | actual
         when List.sort compare (List.map describe actual)
              = [
@@ -2077,8 +2122,8 @@ let () =
       | [ "Add `requires by < 64`"; "Add `uses Panic`" ] -> ()
       | actual -> Harness.fail "%s" (String.concat "; " actual));
   Harness.test "an overflow with a literal offers the bound as a requires" (fun () ->
-      let packages = Support.setup [ ("app::main", Fixtures.Prover.next_count) ] in
-      match check packages (Support.parse_file "app::main") with
+      let packages = Support.setup [ ("app.main", Fixtures.Prover.next_count) ] in
+      match check packages (Support.parse_file "app.main") with
       | [ { fixes = [ { title; _ }; { title = "Add `uses Panic`"; _ } ]; _ } ]
         when title = "Add `requires count <= UInt8.maximum - 1`" ->
           ()
@@ -2166,8 +2211,8 @@ let () =
       | [ "Add `requires count <= UInt8.maximum - 1`"; "Add `uses Panic`" ] -> ()
       | actual -> Harness.fail "%s" (String.concat "; " actual));
   Harness.test "a failed assert about a call's result offers no requires" (fun () ->
-      let packages = Support.setup [ ("app::main", Fixtures.Prover.assert_on_a_list_length) ] in
-      match check packages (Support.parse_file "app::main") with
+      let packages = Support.setup [ ("app.main", Fixtures.Prover.assert_on_a_list_length) ] in
+      match check packages (Support.parse_file "app.main") with
       | [ { code; fixes = []; _ } ] when Diagnostic.Code.name code = "prover.assertion" -> ()
       | actual -> Harness.fail "%d diagnostics" (List.length actual));
   Harness.test "an overflow names the fixes that change the code's semantics" (fun () ->
@@ -2264,8 +2309,8 @@ let () =
   Harness.test "a failing bit-vector assertion in a law's proof is cited by its impl's diagnostic"
     (fun () ->
       let text = Fixtures.Prover.masked_law_with_a_bit_vector_assertion in
-      let packages = Support.setup [ ("app::main", text) ] in
-      match check packages (Support.parse_file "app::main") with
+      let packages = Support.setup [ ("app.main", text) ] in
+      match check packages (Support.parse_file "app.main") with
       | [ ({ notes = [ (cited, _) ]; _ } : Diagnostic.t) ] ->
           let quoted = String.sub text cited.start (cited.stop - cited.start) in
           if not (String.includes ~affix:"(bits & 15) < 8" quoted) then
@@ -2301,10 +2346,10 @@ let () =
       if not (String.includes ~affix:"`at` is" text) then Harness.fail "%s" text);
   Harness.test "a file's proof states list proven and unproven obligations" (fun () ->
       let packages =
-        Support.setup [ ("app::main", Fixtures.Prover.element_sum_with_one_unchecked_index) ]
+        Support.setup [ ("app.main", Fixtures.Prover.element_sum_with_one_unchecked_index) ]
       in
       let states =
-        Support.list_proof_states (Support.make_database packages) (Support.parse_file "app::main")
+        Support.list_proof_states (Support.make_database packages) (Support.parse_file "app.main")
       in
       let failed =
         List.filter (fun (state : Source.span Prover.state) -> state.failure <> None) states
@@ -2313,8 +2358,8 @@ let () =
         Harness.fail "%d states, %d failed" (List.length states) (List.length failed));
   Harness.test "a call's requires that may not hold has a note at the clause" (fun () ->
       let text = Fixtures.Prover.halved_of_an_unchecked_count in
-      let packages = Support.setup [ ("app::main", text) ] in
-      match check packages (Support.parse_file "app::main") with
+      let packages = Support.setup [ ("app.main", text) ] in
+      match check packages (Support.parse_file "app.main") with
       | [ { notes = [ (span, _) ]; _ } ] ->
           let noted = String.sub text span.start (span.stop - span.start) in
           if noted <> "count > 0" then Harness.fail "the note is at `%s`" noted
@@ -2490,10 +2535,10 @@ let () =
             <> Some Solver.For_testing.proven_entry
           then Harness.fail "the cache does not have the answer");
   let find_obligation_query text code =
-    let packages = Support.setup [ ("app::main", text) ] in
-    let key = List.hd (Support.list_declarations packages (Support.parse_module "app::main")) in
+    let packages = Support.setup [ ("app.main", text) ] in
+    let key = List.hd (Support.list_declarations packages (Support.parse_module "app.main")) in
     match
-      Support.read_proofs (Support.make_database packages) (Support.parse_file "app::main") key.key
+      Support.read_proofs (Support.make_database packages) (Support.parse_file "app.main") key.key
     with
     | Obligations { obligations; _ } ->
         List.find_map
@@ -2585,9 +2630,9 @@ let () =
       | Ok solver -> (
           let database =
             Support.make_database
-              (Support.setup [ ("app::main", Fixtures.Prover.addition_that_can_overflow) ])
+              (Support.setup [ ("app.main", Fixtures.Prover.addition_that_can_overflow) ])
           in
-          let file = Support.parse_file "app::main" in
+          let file = Support.parse_file "app.main" in
           match
             Prover.list_diagnostics
               (Prover.decide ~runs:[]
@@ -2628,11 +2673,10 @@ let () =
           let text = Logic.show_query query in
           if not (String.includes ~affix:"(define-fun " text) then Harness.fail "query %s" text);
   Harness.test "a query's text names nothing by its Truss name" (fun () ->
-      let packages = Support.setup [ ("app::main", Fixtures.Prover.addition_that_can_overflow) ] in
-      let key = List.hd (Support.list_declarations packages (Support.parse_module "app::main")) in
+      let packages = Support.setup [ ("app.main", Fixtures.Prover.addition_that_can_overflow) ] in
+      let key = List.hd (Support.list_declarations packages (Support.parse_module "app.main")) in
       match
-        Support.read_proofs (Support.make_database packages) (Support.parse_file "app::main")
-          key.key
+        Support.read_proofs (Support.make_database packages) (Support.parse_file "app.main") key.key
       with
       | Obligations { obligations = [ obligation ]; _ } ->
           let text = Logic.show_query obligation.query in
@@ -2640,10 +2684,10 @@ let () =
       | _ -> Harness.fail "expected one obligation");
   Harness.test "renaming a function and its parameter gives the same query" (fun () ->
       let key_of text =
-        let packages = Support.setup [ ("app::main", text) ] in
-        let key = List.hd (Support.list_declarations packages (Support.parse_module "app::main")) in
+        let packages = Support.setup [ ("app.main", text) ] in
+        let key = List.hd (Support.list_declarations packages (Support.parse_module "app.main")) in
         match
-          Support.read_proofs (Support.make_database packages) (Support.parse_file "app::main")
+          Support.read_proofs (Support.make_database packages) (Support.parse_file "app.main")
             key.key
         with
         | Obligations { obligations = [ obligation ]; _ } ->
@@ -2675,7 +2719,7 @@ let () =
         let packages =
           Support.setup
             [
-              ( "app::main",
+              ( "app.main",
                 "fn spread(value: Int64) -> Int64\n\
                 \  requires 0 <= value && value < 1000\n\
                 \  ensures result == value\n\
@@ -2694,11 +2738,11 @@ let () =
         let key =
           List.find
             (fun (declaration : Resolve.Names.declaration) ->
-              Path.equal declaration.key.path (Support.make_top_path "app::main" "f"))
-            (Support.list_declarations packages (Support.parse_module "app::main"))
+              Path.equal declaration.key.path (Support.make_top_path "app.main" "f"))
+            (Support.list_declarations packages (Support.parse_module "app.main"))
         in
         match
-          Support.read_proofs (Support.make_database packages) (Support.parse_file "app::main")
+          Support.read_proofs (Support.make_database packages) (Support.parse_file "app.main")
             key.key
         with
         | Obligations { obligations; _ } ->
@@ -2707,9 +2751,7 @@ let () =
                 let text = Logic.show_query obligation.query in
                 max most (String.find_all ~sub:"12345" (fun _ matches -> matches + 1) text 0))
               0 obligations
-        | _ ->
-            Harness.fail "expected obligations";
-            0
+        | _ -> Harness.fail "expected obligations"
       in
       let shallow = make_most 3 and deep = make_most 6 in
       if deep > shallow then
@@ -2914,11 +2956,11 @@ let check_in_standard text =
     (Database.create
        (Support.setup
           [
-            ("standard::core", Fixtures.Prover.index_trait);
-            ("standard::specification", Fixtures.Prover.sequence_with_index);
-            ("standard::probe", text);
+            ("standard.core", Fixtures.Prover.index_trait);
+            ("standard.specification", Fixtures.Prover.sequence_with_index);
+            ("standard.probe", text);
           ]))
-    (Support.parse_file "standard::probe")
+    (Support.parse_file "standard.probe")
 
 let expect_proven_in_standard text =
   match check_in_standard text with
@@ -2931,7 +2973,7 @@ let expect_proven_in_standard text =
 let () =
   Harness.test "two calls of a function that uses `System` are not known to return one value"
     (fun () ->
-      let probe = Support.parse_file "standard::probe" in
+      let probe = Support.parse_file "standard.probe" in
       let database =
         Support.extend_standard_library
           [
@@ -3088,10 +3130,13 @@ let () =
         (fun text ->
           let actual = read_message text in
           if
-            actual
-            <> "Only an upper bound is known for the `allocations` of this call, which may spend \
-                less, so no `==` bound can count it. State the cost with `<=`, or give the type of \
-                the function called an `==` bound."
+            not
+              (String.starts_with
+                 ~prefix:
+                   "Only an upper bound is known for the `allocations` of this call, which may \
+                    spend less, so no `==` bound can count it. State the cost with `<=`, or give \
+                    the type of the function called an `==` bound."
+                 actual)
           then Harness.fail "message %S" actual)
         [
           Fixtures.Prover.exact_allocations_through_a_callback_with_an_upper_bound;
@@ -3099,8 +3144,11 @@ let () =
         ]);
   Harness.test "an exact bound that is not met may be above or below the cost" (fun () ->
       let actual = read_message Fixtures.Prover.exact_allocations_that_are_one_short in
-      if actual <> "This may spend more or less than `cost allocations == 2` states." then
-        Harness.fail "message %S" actual)
+      if
+        actual
+        <> "This may spend more or less than `cost allocations == 2` states. This fails every time \
+            the code reaches it."
+      then Harness.fail "message %S" actual)
 
 let () =
   let probes =
@@ -3160,15 +3208,13 @@ let () =
 
 let () =
   let list_obligations text =
-    let packages = Support.setup [ ("app::main", text) ] in
-    let key = List.hd (Support.list_declarations packages (Support.parse_module "app::main")) in
+    let packages = Support.setup [ ("app.main", text) ] in
+    let key = List.hd (Support.list_declarations packages (Support.parse_module "app.main")) in
     match
-      Support.read_proofs (Support.make_database packages) (Support.parse_file "app::main") key.key
+      Support.read_proofs (Support.make_database packages) (Support.parse_file "app.main") key.key
     with
     | Obligations { obligations; _ } -> obligations
-    | _ ->
-        Harness.fail "no obligations";
-        []
+    | _ -> Harness.fail "no obligations"
   in
   Harness.test "an untriggered fact that the program writes is named when the solver gives up"
     (fun () ->

@@ -9,6 +9,7 @@ module Symbol = struct
     | Constant of Path.t
     | Generic_value of { owner : Path.t; name : string }
     | Text_literal of { type_ : Types.ty; text : string }
+    | Template_check of { function_ : Path.t; literals : string list }
     | Named_term of 'term
     | Lambda of { sorts : sort list; definition : 'term }
     | Lifted of 'term t
@@ -227,6 +228,9 @@ let rec show_symbol : symbol -> string = function
   | Constant path -> "constant." ^ Path.show path
   | Generic_value { owner; name } -> Printf.sprintf "generic.%s.%s" (Path.show owner) name
   | Text_literal { type_; text } -> Printf.sprintf "text_literal.%s.%S" (Types.show type_) text
+  | Template_check { function_; literals } ->
+      Printf.sprintf "template_check.%s(%s)" (Path.show function_)
+        (String.concat ", " (List.map (Printf.sprintf "%S") literals))
   | Named_term term -> "named_term(" ^ show_term term ^ ")"
   | Lambda { definition; _ } -> "lambda(" ^ show_term definition ^ ")"
   | Lifted symbol -> show_symbol symbol ^ ".lifted"
@@ -399,6 +403,14 @@ let rec has_quantifier = function
   | Symbol _ | Integer _ | Boolean _ | Bits _ -> false
   | Apply (_, arguments) | Operation (_, arguments) -> List.exists has_quantifier arguments
   | Is (_, argument) -> has_quantifier argument
+
+let remove_quantified_facts query =
+  let rec list_ground_parts = function
+    | Operation (And, parts) -> List.concat_map list_ground_parts parts
+    | fact when has_quantifier fact -> []
+    | fact -> [ fact ]
+  in
+  { query with facts = List.concat_map list_ground_parts query.facts }
 
 let rec replace ~from ~into term =
   if term = from then into

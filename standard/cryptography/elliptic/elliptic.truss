@@ -1,8 +1,8 @@
-use standard::cryptography::modular
+use standard.cryptography.modular
 
 internal type Point(x: List[UInt64], y: List[UInt64], z: List[UInt64])
 
-internal type Curve(field: modular::Field, scalars: modular::Field, b: List[UInt64], base: Point, size: UInt64)
+internal type Curve(field: modular.Field, scalars: modular.Field, b: List[UInt64], base: Point, size: UInt64)
   invariant size <= 64
 
 fn hex_limbs(text: StringSlice, count: UInt64) -> List[UInt64] {
@@ -17,7 +17,7 @@ fn hex_limbs(text: StringSlice, count: UInt64) -> List[UInt64] {
     mut bytes.push(if high < 16 && low < 16 { high * 16 + low } else { 0 })
     index += 2
   }
-  modular::limbs_from_bytes(bytes.slice(), count: count)
+  modular.limbs_from_bytes(bytes.slice(), count: count)
 }
 
 fn make_curve(
@@ -31,8 +31,8 @@ fn make_curve(
   requires size <= 64
 {
   let count = size / 4
-  let field = modular::Field.new(hex_limbs(prime, count: count))?
-  let scalars = modular::Field.new(hex_limbs(order, count: count))?
+  let field = modular.Field.new(hex_limbs(prime, count: count))?
+  let scalars = modular.Field.new(hex_limbs(order, count: count))?
   let base = Point(
     x: field.to_montgomery(hex_limbs(x, count: count).slice()),
     y: field.to_montgomery(hex_limbs(y, count: count).slice()),
@@ -70,7 +70,7 @@ internal fn Curve.size(self) -> UInt64
   self.size
 }
 
-internal fn Curve.scalars(self) -> modular::Field {
+internal fn Curve.scalars(self) -> modular.Field {
   self.scalars.copy()
 }
 
@@ -136,12 +136,12 @@ internal fn Curve.add(self, first: Point, second: Point) -> Point {
 }
 
 fn swap_points(first: mut Point, second: mut Point, bit: Bool) {
-  let x = modular::select(bit, first: first.x.slice(), second: second.x.slice())
-  let y = modular::select(bit, first: first.y.slice(), second: second.y.slice())
-  let z = modular::select(bit, first: first.z.slice(), second: second.z.slice())
-  second.x = modular::select(bit, first: second.x.slice(), second: first.x.slice())
-  second.y = modular::select(bit, first: second.y.slice(), second: first.y.slice())
-  second.z = modular::select(bit, first: second.z.slice(), second: first.z.slice())
+  let x = modular.select(bit, first: first.x.slice(), second: second.x.slice())
+  let y = modular.select(bit, first: first.y.slice(), second: second.y.slice())
+  let z = modular.select(bit, first: first.z.slice(), second: second.z.slice())
+  second.x = modular.select(bit, first: second.x.slice(), second: first.x.slice())
+  second.y = modular.select(bit, first: second.y.slice(), second: first.y.slice())
+  second.z = modular.select(bit, first: second.z.slice(), second: first.z.slice())
   first.x = own x
   first.y = own y
   first.z = own z
@@ -180,8 +180,8 @@ internal fn Curve.affine(self, point: Point) -> Option[Affine] {
 
 internal fn Curve.encode(self, affine: Affine) -> List[UInt8] {
   var bytes: List[UInt8] = [4]
-  mut bytes.append(modular::limbs_to_bytes(affine.x.slice(), length: self.size))
-  mut bytes.append(modular::limbs_to_bytes(affine.y.slice(), length: self.size))
+  mut bytes.append(modular.limbs_to_bytes(affine.x.slice(), length: self.size))
+  mut bytes.append(modular.limbs_to_bytes(affine.y.slice(), length: self.size))
   bytes
 }
 
@@ -192,9 +192,9 @@ internal fn Curve.decode(self, bytes: Slice[UInt8]) -> Option[Point] {
     return None
   }
   let count = self.field.length()
-  let x = modular::limbs_from_bytes(bytes[first..first + size], count: count)
-  let y = modular::limbs_from_bytes(bytes[first + size..], count: count)
-  if !modular::is_less(x.slice(), second: self.field.modulus_limbs()) || !modular::is_less(y.slice(), second: self.field.modulus_limbs()) {
+  let x = modular.limbs_from_bytes(bytes[first..first + size], count: count)
+  let y = modular.limbs_from_bytes(bytes[first + size..], count: count)
+  if !modular.is_less(x.slice(), second: self.field.modulus_limbs()) || !modular.is_less(y.slice(), second: self.field.modulus_limbs()) {
     return None
   }
   let field = self.field
@@ -212,5 +212,5 @@ internal fn Curve.decode(self, bytes: Slice[UInt8]) -> Option[Point] {
 }
 
 internal fn Curve.is_valid_scalar(self, scalar: Slice[UInt64]) -> Bool {
-  !self.scalars.is_zero(scalar) && modular::is_less(scalar, second: self.scalars.modulus_limbs())
+  !self.scalars.is_zero(scalar) && modular.is_less(scalar, second: self.scalars.modulus_limbs())
 }

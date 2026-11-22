@@ -1,7 +1,7 @@
 type package = { owner : string option; name : string }
 
 let list_package_parts package = Option.to_list package.owner @ [ package.name ]
-let show_package package = String.concat "::" (list_package_parts package)
+let show_package package = String.concat "." (list_package_parts package)
 
 let compare_package left right =
   match Option.compare String.compare left.owner right.owner with
@@ -13,20 +13,23 @@ let parse_package_parts = function
   | [ owner; name ] -> Some { owner = Some owner; name }
   | _ -> None
 
+let is_name text =
+  text <> ""
+  && (match text.[0] with 'a' .. 'z' | 'A' .. 'Z' | '_' -> true | _ -> false)
+  && String.for_all
+       (function 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> true | _ -> false)
+       text
+
 let parse_names text =
-  let rec split_names = function
-    | [ last ] when last <> "" -> Some [ last ]
-    | name :: "" :: rest when name <> "" -> Option.map (fun rest -> name :: rest) (split_names rest)
-    | _ -> None
-  in
-  split_names (String.split_on_char ':' text)
+  let names = String.split_on_char '.' text in
+  if List.for_all is_name names then Some names else None
 
 let parse_package text = Option.bind (parse_names text) parse_package_parts
 
 type module_ = { package : package; modules : string list }
 
 let list_module_parts module_ = list_package_parts module_.package @ module_.modules
-let show_module module_ = String.concat "::" (list_module_parts module_)
+let show_module module_ = String.concat "." (list_module_parts module_)
 
 let split_module ~is_package = function
   | owner :: name :: modules when is_package { owner = Some owner; name } ->
@@ -106,12 +109,12 @@ let rec show_name = function
   | Impl { trait; for_type; _ } -> show_name trait.path ^ " for " ^ show_name for_type
   | Law_proof { trait; law; for_type; _ } ->
       show_name trait.path ^ "." ^ law ^ " for " ^ show_name for_type
-  | Unresolved { names; _ } -> String.concat "::" names
+  | Unresolved { names; _ } -> String.concat "." names
   | Method { name; _ } | Member_constant { name; _ } -> name
   | Derived { trait; _ } -> show_name trait
 
 let rec show = function
-  | Top { module_; name } -> show_module module_ ^ "::" ^ name
+  | Top { module_; name } -> show_module module_ ^ "." ^ name
   | Method { owner; name; receiver } -> (
       let base = show owner ^ "." ^ name in
       match receiver with
@@ -119,14 +122,14 @@ let rec show = function
       | Instance mode -> base ^ "(" ^ Language.Mode.show_prefix mode ^ "self)")
   | Member_constant { owner; name } -> show owner ^ "." ^ name
   | Impl { module_; trait; for_type } ->
-      Printf.sprintf "%s::impl %s for %s" (show_module module_) (show_reference trait)
+      Printf.sprintf "%s.impl %s for %s" (show_module module_) (show_reference trait)
         (show for_type)
   | Derived { type_; trait } -> Printf.sprintf "derived %s for %s" (show trait) (show type_)
-  | Test { module_; name } -> Printf.sprintf "%s::test %S" (show_module module_) name
+  | Test { module_; name } -> Printf.sprintf "%s.test %S" (show_module module_) name
   | Law_proof { module_; trait; law; for_type } ->
-      Printf.sprintf "%s::proof %s.%s for %s" (show_module module_) (show_reference trait) law
+      Printf.sprintf "%s.proof %s.%s for %s" (show_module module_) (show_reference trait) law
         (show for_type)
-  | Unresolved { names; _ } -> String.concat "::" names
+  | Unresolved { names; _ } -> String.concat "." names
 
 and show_reference { path; arguments; associated } =
   match

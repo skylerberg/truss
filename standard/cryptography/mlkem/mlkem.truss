@@ -1,5 +1,5 @@
-use standard::cryptography::keccak
-use standard::intrinsic
+use standard.cryptography.keccak
+use standard.intrinsic
 
 let zetas: Array[UInt64, 128] = [
   1, 1729, 2580, 3289, 2642, 630, 1897, 848, 1062, 1919, 193, 797, 2786, 3260, 569, 1746,
@@ -150,7 +150,7 @@ fn encode(output: mut List[UInt8], coefficients: Array[UInt64, 256], bits: UInt6
     while filled >= 8
       invariant filled <= 19
     {
-      mut output.push(intrinsic::convert(buffer & 255))
+      mut output.push(intrinsic.convert(buffer & 255))
       buffer = buffer >> 8
       filled -= 8
     }
@@ -175,7 +175,7 @@ fn decode(bytes: Slice[UInt8], bits: UInt64) -> Array[UInt64, 256] {
       invariant filled <= 19
       decreases bytes.length() - at
     {
-      buffer = buffer | (intrinsic::convert[UInt8, UInt64](bytes[at]) << filled)
+      buffer = buffer | (intrinsic.convert[UInt8, UInt64](bytes[at]) << filled)
       filled += 8
       at += 1
     }
@@ -230,22 +230,22 @@ fn sample_ntt(rho: Slice[UInt8], column: UInt8, row: UInt8) -> Array[UInt64, 256
   var seed = rho.to_list()
   mut seed.push(column)
   mut seed.push(row)
-  var sponge = keccak::absorb(168, message: seed.slice(), suffix: 31)
+  var sponge = keccak.absorb(168, message: seed.slice(), suffix: 31)
   var coefficients: Array[UInt64, 256] = Array.filled(0)
   var count: UInt64 = 0
   var stream: List[UInt8] = []
   var at: UInt64 = 0
   while count < 256 {
     if at >= stream.length() || stream.length() - at < 3 {
-      stream = keccak::squeeze(mut sponge, count: 168)
+      stream = keccak.squeeze(mut sponge, count: 168)
       at = 0
       if stream.length() < 3 {
         return coefficients
       }
     }
-    let first: UInt64 = intrinsic::convert(stream[at])
-    let second: UInt64 = intrinsic::convert(stream[at + 1])
-    let third: UInt64 = intrinsic::convert(stream[at + 2])
+    let first: UInt64 = intrinsic.convert(stream[at])
+    let second: UInt64 = intrinsic.convert(stream[at + 1])
+    let third: UInt64 = intrinsic.convert(stream[at + 2])
     at += 3
     let low = first + 256 * (second % 16)
     let high = second / 16 + 16 * third
@@ -264,11 +264,11 @@ fn sample_ntt(rho: Slice[UInt8], column: UInt8, row: UInt8) -> Array[UInt64, 256
 fn sample_noise(seed: Slice[UInt8], nonce: UInt8) -> Array[UInt64, 256] {
   var input = seed.to_list()
   mut input.push(nonce)
-  let bytes = keccak::hash(136, message: input.slice(), suffix: 31, count: 128)
+  let bytes = keccak.hash(136, message: input.slice(), suffix: 31, count: 128)
   var coefficients: Array[UInt64, 256] = Array.filled(0)
   let count: UInt64 = 256
   for index in 0..count {
-    let byte: UInt64 = if index / 2 < bytes.length() { intrinsic::convert(bytes[index / 2]) } else { 0 }
+    let byte: UInt64 = if index / 2 < bytes.length() { intrinsic.convert(bytes[index / 2]) } else { 0 }
     let bits = (byte >> (4 * (index % 2))) & 15
     let positive = (bits & 1) + ((bits >> 1) & 1)
     let negative = ((bits >> 2) & 1) + ((bits >> 3) & 1)
@@ -286,18 +286,18 @@ fn matrix(rho: Slice[UInt8]) -> Matrix
   let rank: UInt64 = 3
   for row in 0..rank {
     for column in 0..rank {
-      rows[row][column] = sample_ntt(rho, column: intrinsic::convert(column), row: intrinsic::convert(row))
+      rows[row][column] = sample_ntt(rho, column: intrinsic.convert(column), row: intrinsic.convert(row))
     }
   }
   Matrix(rows: rows)
 }
 
 fn split_512(input: Slice[UInt8]) -> List[UInt8] {
-  keccak::hash(72, message: input, suffix: 6, count: 64)
+  keccak.hash(72, message: input, suffix: 6, count: 64)
 }
 
 internal fn hash_256(input: Slice[UInt8]) -> List[UInt8] {
-  keccak::hash(136, message: input, suffix: 6, count: 32)
+  keccak.hash(136, message: input, suffix: 6, count: 32)
 }
 
 internal type KeyPair(encapsulation: List[UInt8], decapsulation: List[UInt8])
@@ -318,11 +318,11 @@ fn generate_pke(seed: Slice[UInt8]) -> KeyPair
   var secret: Array[Array[UInt64, 256], 3] = Array.filled(Array.filled(0))
   var error: Array[Array[UInt64, 256], 3] = Array.filled(Array.filled(0))
   for index in 0..rank {
-    secret[index] = sample_noise(sigma, nonce: intrinsic::convert(index))
+    secret[index] = sample_noise(sigma, nonce: intrinsic.convert(index))
     ntt(mut secret[index])
   }
   for index in 0..rank {
-    error[index] = sample_noise(sigma, nonce: intrinsic::convert(index + 3))
+    error[index] = sample_noise(sigma, nonce: intrinsic.convert(index + 3))
     ntt(mut error[index])
   }
   var encapsulation: List[UInt8] = List.with_capacity(encapsulation_key_length)
@@ -355,7 +355,7 @@ fn encrypt(encapsulation: Slice[UInt8], message: Slice[UInt8], randomness: Slice
   let a = matrix(encapsulation[1152..1184])
   var y: Array[Array[UInt64, 256], 3] = Array.filled(Array.filled(0))
   for index in 0..rank {
-    y[index] = sample_noise(randomness, nonce: intrinsic::convert(index))
+    y[index] = sample_noise(randomness, nonce: intrinsic.convert(index))
     ntt(mut y[index])
   }
   var ciphertext: List[UInt8] = List.with_capacity(ciphertext_length)
@@ -365,7 +365,7 @@ fn encrypt(encapsulation: Slice[UInt8], message: Slice[UInt8], randomness: Slice
       accumulated = add_polynomials(accumulated, second: multiply_ntt(a.rows[row][column], second: y[row]))
     }
     inverse_ntt(mut accumulated)
-    let noise = sample_noise(randomness, nonce: intrinsic::convert(column + 3))
+    let noise = sample_noise(randomness, nonce: intrinsic.convert(column + 3))
     encode(mut ciphertext, coefficients: compressed(add_polynomials(accumulated, second: noise), bits: 10), bits: 10)
   }
   var inner: Array[UInt64, 256] = Array.filled(0)
@@ -445,7 +445,7 @@ internal fn decapsulate(decapsulation: Slice[UInt8], ciphertext: Slice[UInt8]) -
   }
   var rejection_input = decapsulation[2368..2400].to_list()
   mut rejection_input.append_slice(ciphertext)
-  let rejected = keccak::hash(136, message: rejection_input.slice(), suffix: 31, count: 32)
+  let rejected = keccak.hash(136, message: rejection_input.slice(), suffix: 31, count: 32)
   let again = encrypt(decapsulation[1152..2336], message: message.slice(), randomness: expanded[32..64])
   var difference: UInt8 = 0
   if again.length() != ciphertext.length() {
@@ -456,8 +456,8 @@ internal fn decapsulate(decapsulation: Slice[UInt8], ciphertext: Slice[UInt8]) -
     difference = difference | (again[index] ^ ciphertext[index])
   }
   let zero: UInt64 = 0
-  let differs = (zero.wrapping_subtract(intrinsic::convert[UInt8, UInt64](difference)) >> 63) & 1
-  let mask: UInt8 = intrinsic::convert(zero.wrapping_subtract(differs) & 255)
+  let differs = (zero.wrapping_subtract(intrinsic.convert[UInt8, UInt64](difference)) >> 63) & 1
+  let mask: UInt8 = intrinsic.convert(zero.wrapping_subtract(differs) & 255)
   var shared: List[UInt8] = List.with_capacity(32)
   let width: UInt64 = 32
   for index in 0..width {

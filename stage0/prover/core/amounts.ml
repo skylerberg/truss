@@ -19,9 +19,10 @@ let mentions_result (clause : Mir.formula) =
 let mentions_history (clause : Mir.formula) =
   holds_specification clause (function Yielded -> true | _ -> false)
 
-let assume_typed context frame term =
-  match Operations.find_innermost_axiom context frame term with
-  | Some axiom -> axiom.hypotheses <- Logic.( ==> ) frame.condition term :: axiom.hypotheses
+let assume_typed context (frame : State.frame) term =
+  let guarded = Logic.( ==> ) frame.condition term in
+  match Operations.find_innermost_axiom context frame guarded with
+  | Some axiom -> axiom.hypotheses <- guarded :: axiom.hypotheses
   | None -> Facts.assume context frame term
 
 let rec compare_lexicographically before after =

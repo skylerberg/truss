@@ -1,4 +1,4 @@
-use standard::text
+use standard.text
 
 public opaque type Html(text: String)
   derives Equal, Copyable
@@ -365,7 +365,7 @@ fn place_of(scanner: Scanner) -> Place
   }
 }
 
-fn places(literals: Slice[text::Literal]) -> List[Place]
+fn places(literals: Slice[text.Literal]) -> List[Place]
 {
   var scanner = Scanner.new()
   var found: List[Place] = []
@@ -376,16 +376,6 @@ fn places(literals: Slice[text::Literal]) -> List[Place]
     }
   }
   found
-}
-
-public fn is_valid_template(literals: Slice[text::Literal]) -> Bool
-{
-  for place in places(literals) {
-    if place == Place.Unsafe {
-      return false
-    }
-  }
-  true
 }
 
 fn is_safe_url(text: StringSlice) -> Bool {
@@ -411,8 +401,17 @@ fn is_safe_url(text: StringSlice) -> Bool {
 impl FromTemplate for Html {
   type Part = Part
 
+  fn is_valid_template(literals: List[text.Literal]) -> Bool
+  {
+    for place in places(literals) {
+      if place == Place.Unsafe {
+        return false
+      }
+    }
+    true
+  }
+
   fn from_template(template: Template[Part]) -> Html
-    requires is_valid_template(template.literals)
   {
     let kinds = places(template.literals.slice())
     var output = ""

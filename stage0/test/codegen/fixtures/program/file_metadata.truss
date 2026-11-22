@@ -1,4 +1,4 @@
-use standard::files
+use standard.files
 
 fn main(arguments: List[String]) -> ExitCode
   uses Console, FileRead, FileWrite, Handles
@@ -26,7 +26,7 @@ fn main(arguments: List[String]) -> ExitCode
   if FileRead.metadata(Path.new("/nonexistent/truss".slice()), follow_links: true) is Err(NotFound) {
     Console.print_line("missing".slice())
   }
-  match FileWrite.open(file, mode: files::WriteMode.Update) {
+  match FileWrite.open(file, mode: files.WriteMode.Update) {
     Ok(opened) => {
       if opened.metadata() is Ok(metadata) {
         Console.print_line("open ${metadata.length}".slice())

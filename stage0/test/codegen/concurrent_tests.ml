@@ -172,7 +172,7 @@ let () =
     "on threads, tasks connect, accept, read, and write on sockets with any number of threads"
     (fun () ->
       expect_with_each_thread_count ~expected:"echoed 16\n"
-        ({|use standard::network
+        ({|use standard.network
 
 |} ^ tally ^ Fixtures.Concurrent.socket_echo_tasks));
   Codegen_support.test "on threads, a read in a task ends at the socket's time limit" (fun () ->

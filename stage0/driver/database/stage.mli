@@ -13,10 +13,10 @@ type t =
   | Contracts
   | Checked_bodies
   | Mir
-  | Mir_call_edges
+  | Call_edges
   | Body_checks
   | Package_checks
-  | Call_edges
+  | Implementations
   | Recursion_groups
   | Proofs
   | Lowered_code

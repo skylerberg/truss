@@ -1,5 +1,4 @@
-use standard::map
-use standard::random
+use standard.map
 
 fn order(map: Map[String, Int64]) -> String {
   var text = ""
@@ -88,7 +87,7 @@ test "remove, take, clear, and retain take entries out of a map" {
   assert mut table.take("a") is None
   assert table.length() == 1 && order(table) == "c "
   var filtered = sample()
-  mut filtered.retain(fn(entry) { entry.value != 1 })
+  mut filtered.retain(fn(_, value) { value != 1 })
   assert order(filtered) == "b c "
   mut filtered.clear()
   assert filtered.is_empty() && !filtered.contains("b")
@@ -100,16 +99,16 @@ test "a map's entries, keys, and values are walked, and its values changed in pl
   var table = sample()
   var seen = ""
   var sum: Int64 = 0
-  for entry in table {
-    mut seen.push(entry.key.slice())
-    sum += entry.value
+  for key, value in table {
+    mut seen.push(key.slice())
+    sum += value
   }
   assert seen == "bac" && sum == 6
   mut table.update_values(fn(value) { value *= 2 })
   assert total(table) == 12 && table.get("c") == Some(6)
   var owned = ""
-  for entry in own table {
-    mut owned.push(entry.key.slice())
+  for key, _ in own table {
+    mut owned.push(key.slice())
   }
   assert owned == "bac"
 }
@@ -128,14 +127,14 @@ test "maps are equal when they hold equal values under equal keys, in any order"
 }
 
 test "a map is made from a cursor of entries, the last of a key winning" uses RunForever {
-  let entries: List[map::Entry[String, Int64]] = [
-    map::Entry(key: "a", value: 1),
-    map::Entry(key: "b", value: 2),
-    map::Entry(key: "a", value: 3),
+  let entries: List[map.Entry[String, Int64]] = [
+    map.Entry(key: "a", value: 1),
+    map.Entry(key: "b", value: 2),
+    map.Entry(key: "a", value: 3),
   ]
   var collected: Map[String, Int64] = Map.collect(entries.copy().cursor())
   assert collected.length() == 2 && collected.get("a") == Some(3) && order(collected) == "a b "
-  let more: List[map::Entry[String, Int64]] = [map::Entry(key: "c", value: 4), map::Entry(key: "b", value: 5)]
+  let more: List[map.Entry[String, Int64]] = [map.Entry(key: "c", value: 4), map.Entry(key: "b", value: 5)]
   mut collected.extend(more.copy().cursor())
   assert order(collected) == "a b c " && collected.get("b") == Some(5)
 }
@@ -157,15 +156,67 @@ test "a map takes keys of other types" {
     mut squares.insert(number, value: number * number)
   }
   assert squares.length() == 20 && squares[7] == 49 && squares.get(20) is None
-  mut squares.retain(fn(entry) { entry.key % 2 == 0 })
+  mut squares.retain(fn(key, _) { key % 2 == 0 })
   assert squares.length() == 10 && squares.contains(18) && !squares.contains(7)
 }
 
-test "a seeded map starts empty and holds its inserted entries" {
-  provide random::SeededRandom.new(11) {
-    var seeded: Map[String, Int64] = Map.seeded()
-    assert seeded.is_empty()
-    mut seeded.insert("one", value: 1)
-    assert seeded.contains("one") && seeded.length() == 1
+test "a removal moves the last entry into the removed entry's place" {
+  var table = sample()
+  mut table.remove("b")
+  assert order(table) == "c a "
+  mut table.insert("d", value: 4)
+  mut table.remove("a")
+  assert order(table) == "c d "
+}
+
+test "a map holds many keys, and finds each after removals" {
+  var squares: Map[Int64, Int64] = [:]
+  for number in 0..20000 {
+    mut squares.insert(number, value: number * number)
   }
+  assert squares.length() == 20000 && squares[19999] == 19999 * 19999
+  for number in 0..10000 {
+    mut squares.remove(number * 2)
+  }
+  assert squares.length() == 10000
+  for number in 0..20000 {
+    assert squares.contains(number) == (number % 2 == 1)
+  }
+  for number in 0..10000 {
+    mut squares.insert(number * 2, value: 0)
+  }
+  assert squares.length() == 20000 && squares[2] == 0 && squares[3] == 9
+}
+
+type Colliding(value: Int64)
+  derives Equal, Ordered
+
+impl Hash for Colliding {
+  fn hash(self, hasher: Hasher) -> Hasher {
+    hasher
+  }
+}
+
+test "keys whose hashes collide are all found, removed, and found again" {
+  var table: Map[Colliding, Int64] = [:]
+  for number in 0..300 {
+    mut table.insert(Colliding(value: number), value: number)
+  }
+  assert table.length() == 300
+  for number in 0..300 {
+    assert table.get(Colliding(value: number)) == Some(number)
+  }
+  for number in 0..150 {
+    assert mut table.take(Colliding(value: number * 2)) == Some(number * 2)
+  }
+  assert table.length() == 150
+  for number in 0..300 {
+    assert table.contains(Colliding(value: number)) == (number % 2 == 1)
+  }
+  for number in 0..150 {
+    mut table.insert(Colliding(value: number * 2), value: -1)
+  }
+  assert table.length() == 300 && table.get(Colliding(value: 4)) == Some(-1) && table.get(Colliding(value: 5)) == Some(5)
+  mut table.retain(fn(key, _) { key.value < 100 })
+  assert table.length() == 100 && table.contains(Colliding(value: 99)) && !table.contains(Colliding(value: 100))
 }

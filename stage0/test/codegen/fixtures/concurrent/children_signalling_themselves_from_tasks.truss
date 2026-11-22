@@ -1,8 +1,8 @@
-use standard::processes
+use standard.processes
 
 type Endings(terminated: String, piped: String)
 
-fn shown(status: processes::ExitStatus) -> String {
+fn shown(status: processes.ExitStatus) -> String {
   match status {
     Exited(code) => "exited ${code}"
     Signaled(signal) => match signal {
@@ -16,10 +16,10 @@ fn shown(status: processes::ExitStatus) -> String {
 fn run_script(script: StringSlice) -> String
   uses Processes
 {
-  let command = processes::Command.new("sh")
+  let command = processes.Command.new("sh")
     .argument("-c")
     .argument(script)
-    .output(processes::Redirect.Capture)
+    .output(processes.Redirect.Capture)
   match Processes.run(command) {
     Ok(output) => shown(output.status)
     Err(_) => "did not start".copy()

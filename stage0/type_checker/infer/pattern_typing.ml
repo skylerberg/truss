@@ -6,8 +6,13 @@ let order_fields (declared : Types.field list) (matched : (string * Syntax.patte
         (List.assoc_opt field.field_name matched))
     declared
 
-let rec check_binding_pattern state env written type_ ~is_var ~mode =
-  check_pattern_with state env written type_ ~binding:(if is_var then State.Var else Let) ~mode
+let find_bare_name (inner : Syntax.pattern) =
+  match inner.kind with Binding name -> Some name.text | _ -> None
+
+let rec check_binding_pattern state env written type_ ~is_var ~accepts_tuple_pattern ~mode =
+  check_pattern_with state env written type_
+    ~binding:(if is_var then State.Var else Let)
+    ~accepts_tuple_pattern ~mode
 
 and check_pattern state env written type_ ~mode =
   check_pattern_with state env written type_ ~binding:Let ~mode
@@ -15,7 +20,8 @@ and check_pattern state env written type_ ~mode =
 and check_parameter_pattern state env written type_ ~mode =
   check_pattern_with state env written type_ ~binding:Parameter ~mode
 
-and check_pattern_with state env (written : Syntax.pattern) type_ ~(binding : State.binding) ~mode =
+and check_pattern_with ?(accepts_tuple_pattern = false) state env (written : Syntax.pattern) type_
+    ~(binding : State.binding) ~mode =
   let is_var = binding = Var in
   let part_binding : State.binding = match binding with Parameter -> Let | Var | Let -> binding in
   let type_ = State.normalize state type_ in
@@ -79,11 +85,7 @@ and check_pattern_with state env (written : Syntax.pattern) type_ ~(binding : St
       | Types.Named { path; arguments } -> (
           match Members.find_variants state.lookups path arguments with
           | Some variants -> (
-              if not (Members.are_fields_visible state.lookups ~package:state.package path) then
-                State.report state Private_field
-                  (State.read_span state written.id)
-                  (Printf.sprintf "`%s` is opaque, so only its own package can match on it."
-                     (Types.show type_));
+              check_fields_visible state (State.read_span state written.id) path type_;
               match
                 List.find_opt
                   (fun (variant : Types.variant) -> variant.variant_name = variant_name.text)
@@ -107,6 +109,7 @@ and check_pattern_with state env (written : Syntax.pattern) type_ ~(binding : St
                   let matched =
                     check_pattern_fields state env written declared
                       (Option.value ~default:[] fields) ~binding:part_binding ~mode
+                      ~owner:variant.variant_name ~is_tuple_type:false
                   in
                   state.tables.patterns.(written.id) <-
                     Some
@@ -144,18 +147,42 @@ and check_pattern_with state env (written : Syntax.pattern) type_ ~(binding : St
       match type_ with
       | Types.Named { path; arguments } -> (
           match Members.find_fields state.lookups path arguments with
-          | Some record_fields ->
-              if not (Members.are_fields_visible state.lookups ~package:state.package path) then
-                State.report state Private_field
-                  (State.read_span state written.id)
-                  (Printf.sprintf "`%s` is opaque, so only its own package can match on it."
-                     (Types.show type_));
-              let matched =
-                check_pattern_fields state env written record_fields fields ~binding:part_binding
-                  ~mode
-              in
-              state.tables.patterns.(written.id) <-
-                Some (Record_pattern { type_; fields = order_fields record_fields matched })
+          | Some record_fields -> (
+              check_fields_visible state (State.read_span state written.id) path type_;
+              let is_tuple_type = Members.is_tuple_type state.lookups path in
+              match
+                if accepts_tuple_pattern && is_tuple_type then
+                  find_parenthesized_tuple record_fields fields
+                else None
+              with
+              | Some patterns ->
+                  let span = State.read_span state written.id in
+                  State.report state Missing_label span
+                    ~fixes:
+                      [
+                        State.fix "Remove the parentheses."
+                          [
+                            State.replace
+                              (Source.Definition_span.make span.start (span.start + 1))
+                              "";
+                            State.replace (Source.Definition_span.make (span.stop - 1) span.stop) "";
+                          ];
+                      ]
+                    (Printf.sprintf
+                       "`%s` is a tuple type, so a list of patterns without parentheses matches \
+                        its fields by position, as in `%s`. In parentheses, fields match by name."
+                       (Types.show type_)
+                       (State.quote_span state
+                          (Source.Definition_span.make (span.start + 1) (span.stop - 1))));
+                  check_tuple_fields state env written type_ record_fields patterns
+                    ~binding:part_binding ~mode
+              | None ->
+                  let matched =
+                    check_pattern_fields state env written record_fields fields
+                      ~binding:part_binding ~mode ~owner:(Types.show type_) ~is_tuple_type
+                  in
+                  state.tables.patterns.(written.id) <-
+                    Some (Record_pattern { type_; fields = order_fields record_fields matched }))
           | None ->
               check_unknown
                 (State.make_error_type state Not_a_record
@@ -169,98 +196,227 @@ and check_pattern_with state env (written : Syntax.pattern) type_ ~(binding : St
                (State.read_span state written.id)
                (Printf.sprintf "%s is not a record."
                   (String.capitalize_ascii (State.describe state type_)))))
+  | Tuple patterns -> (
+      let check_each type_ = List.iter (fun inner -> recurse inner type_) patterns in
+      let span = State.read_span state written.id in
+      let report_no_tuple_type () =
+        State.make_error_type state Not_a_tuple_type span
+          (Printf.sprintf "%s is not a tuple type, so a list of patterns cannot match it."
+             (String.capitalize_ascii (State.describe state type_)))
+      in
+      match type_ with
+      | Types.Error _ | Types.Hole -> check_each type_
+      | Types.Named { path; arguments } when Members.is_tuple_type state.lookups path -> (
+          match Members.find_fields state.lookups path arguments with
+          | Some declared when List.length declared = List.length patterns ->
+              check_fields_visible state span path type_;
+              check_tuple_fields state env written type_ declared patterns ~binding:part_binding
+                ~mode
+          | Some declared ->
+              check_each
+                (State.make_error_type state Arity span
+                   (Printf.sprintf
+                      "`%s` has %d fields, %s, so its tuple pattern has %d patterns, not %d. `_` \
+                       skips a field."
+                      (Types.show type_) (List.length declared)
+                      (Argument_matching.show_names
+                         (List.map (fun (field : Types.field) -> field.field_name) declared))
+                      (List.length declared) (List.length patterns)))
+          | None -> State.raise_bug "the tuple type `%s` has no fields" (Types.show type_))
+      | Types.Named { path; arguments } -> (
+          match Members.find_fields state.lookups path arguments with
+          | Some fields ->
+              let field_names = List.map (fun (field : Types.field) -> field.field_name) fields in
+              let labeled_form =
+                Argument_matching.find_labeled_form state ~parameter_names:field_names
+                  (List.map
+                     (fun (inner : Syntax.pattern) ->
+                       {
+                         Argument_matching.label = None;
+                         punned = find_bare_name inner;
+                         span = State.read_span state inner.id;
+                       })
+                     patterns)
+              in
+              check_each
+                (match labeled_form with
+                | Some form ->
+                    State.make_error_type state Not_a_tuple_type span
+                      ~fixes:
+                        [
+                          State.fix "Match its fields by name, in parentheses."
+                            [ State.replace span form ];
+                        ]
+                      (Printf.sprintf
+                         "`%s` is not a tuple type, so its fields match by name, in parentheses, \
+                          as in `%s`."
+                         (Types.show type_) form)
+                | None ->
+                    State.make_error_type state Not_a_tuple_type span
+                      (Printf.sprintf
+                         "`%s` is not a tuple type, so its fields, %s, match by name, in \
+                          parentheses."
+                         (Types.show type_)
+                         (Argument_matching.show_names field_names)))
+          | None -> check_each (report_no_tuple_type ()))
+      | _ -> check_each (report_no_tuple_type ()))
   | Alternatives alternatives ->
       List.iter (fun alternative -> recurse alternative type_) alternatives
 
-and check_pattern_fields state env (written : Syntax.pattern) (fields : Types.field list)
-    (written_fields : Syntax.pattern_field list) ~binding ~mode =
-  let find_bare_name (inner : Syntax.pattern) =
-    match inner.kind with Binding name -> Some name.text | _ -> None
+and check_fields_visible (state : State.state) span path type_ =
+  if not (Members.are_fields_visible state.lookups ~package:state.package path) then
+    State.report state Private_field span
+      (Printf.sprintf "`%s` is opaque, so only its own package can match on it." (Types.show type_))
+
+and find_parenthesized_tuple (declared : Types.field list)
+    (written_fields : Syntax.pattern_field list) =
+  let patterns =
+    List.filter_map
+      (fun (field : Syntax.pattern_field) ->
+        match field.kind with Field inner -> Some inner | Named_field _ | Rest -> None)
+      written_fields
   in
-  let named =
+  let positions =
+    List.map
+      (fun (inner : Syntax.pattern) ->
+        match inner.kind with
+        | Binding name ->
+            List.find_index (fun (field : Types.field) -> field.field_name = name.text) declared
+        | _ -> None)
+      patterns
+  in
+  if
+    List.length patterns = List.length written_fields
+    && List.length patterns = List.length declared
+    && List.exists Option.is_none positions
+    && List.for_all Fun.id
+         (List.mapi
+            (fun index position -> match position with Some field -> field = index | None -> true)
+            positions)
+  then Some patterns
+  else None
+
+and check_tuple_fields state env (written : Syntax.pattern) type_ (declared : Types.field list)
+    (patterns : Syntax.pattern list) ~binding ~mode =
+  let is_field_name name =
+    List.exists (fun (field : Types.field) -> field.field_name = name) declared
+  in
+  let misplaced =
+    List.find_map
+      (fun ((inner : Syntax.pattern), (field : Types.field)) ->
+        match find_bare_name inner with
+        | Some name when name <> field.field_name && is_field_name name ->
+            Some (name, field.field_name)
+        | _ -> None)
+      (List.combine patterns declared)
+  in
+  Option.iter
+    (fun (name, bound_field) ->
+      let field_names = List.map (fun (field : Types.field) -> field.field_name) declared in
+      let bare_names = List.filter_map find_bare_name patterns in
+      State.report state Out_of_order
+        (State.read_span state written.id)
+        ~fixes:
+          (if List.sort compare bare_names = List.sort compare field_names then
+             [
+               State.fix "Put the patterns in the order of the fields."
+                 [
+                   State.replace (State.read_span state written.id) (String.concat ", " field_names);
+                 ];
+             ]
+           else [])
+        (Printf.sprintf
+           "The patterns name the fields of `%s` out of order. A tuple pattern matches each field \
+            by its position, so `%s` here would bind the field `%s`."
+           (Types.show type_) name bound_field))
+    misplaced;
+  List.iter2
+    (fun (inner : Syntax.pattern) (field : Types.field) ->
+      check_pattern_with state env inner
+        (Solver.flatten state
+           (Bound { at = State.read_span state inner.id; of_type = None })
+           field.field_type)
+        ~binding ~mode)
+    patterns declared;
+  state.tables.patterns.(written.id) <-
+    Some
+      (Record_pattern
+         {
+           type_;
+           fields =
+             List.map2
+               (fun (field : Types.field) inner -> (field.field_name, inner))
+               declared patterns;
+         })
+
+and check_pattern_fields state env (written : Syntax.pattern) (fields : Types.field list)
+    (written_fields : Syntax.pattern_field list) ~binding ~mode ~owner ~is_tuple_type =
+  let entries =
     List.filter_map
       (fun (field : Syntax.pattern_field) ->
         match field.kind with
-        | Named_field (name, _) -> Some name.text
-        | Field inner -> (
-            match find_bare_name inner with
-            | Some name
-              when List.exists (fun (declared : Types.field) -> declared.field_name = name) fields
-              ->
-                Some name
-            | _ -> ( match fields with [ only ] -> Some only.field_name | _ -> None))
+        | Named_field (name, inner) ->
+            Some
+              ( {
+                  Argument_matching.label = Some name;
+                  punned = None;
+                  span = State.read_span state inner.id;
+                },
+                inner )
+        | Field inner ->
+            Some
+              ( {
+                  Argument_matching.label = None;
+                  punned = find_bare_name inner;
+                  span = State.read_span state inner.id;
+                },
+                inner )
         | Rest -> None)
       written_fields
   in
-  let rest = List.exists (fun (field : Syntax.pattern_field) -> field.kind = Rest) written_fields in
-  let flatten (inner : Syntax.pattern) (declared : Types.field) =
-    Solver.flatten state
-      (Bound { at = State.read_span state inner.id; of_type = None })
-      declared.field_type
+  let indexes =
+    Argument_matching.list_indexes state
+      (Pattern { owner; is_tuple_type })
+      ~parameter_names:(List.map (fun (field : Types.field) -> field.field_name) fields)
+      (List.map fst entries)
   in
-  let all_matched =
-    List.length named
-    = List.length
-        (List.filter (fun (field : Syntax.pattern_field) -> field.kind <> Rest) written_fields)
+  let has_rest =
+    List.exists (fun (field : Syntax.pattern_field) -> field.kind = Rest) written_fields
   in
-  (if (not rest) && all_matched then
+  (if (not has_rest) && List.for_all Result.is_ok indexes then
+     let matched_names =
+       List.filter_map
+         (function Ok index -> Some (List.nth fields index).field_name | Error _ -> None)
+         indexes
+     in
      match
-       List.filter (fun (declared : Types.field) -> not (List.mem declared.field_name named)) fields
+       List.filter
+         (fun name -> not (List.mem name matched_names))
+         (List.map (fun (field : Types.field) -> field.field_name) fields)
      with
      | [] -> ()
      | missing ->
          State.report state Missing_argument
            (State.read_span state written.id)
            (Printf.sprintf "This pattern does not match %s. Name %s, or write `..` for the rest."
-              (String.concat ", "
-                 (List.map
-                    (fun (declared : Types.field) -> "`" ^ declared.field_name ^ "`")
-                    missing))
+              (Argument_matching.show_names missing)
               (match missing with [ _ ] -> "it" | _ -> "them")));
-  List.filter_map
-    (fun (field : Syntax.pattern_field) ->
-      match field.kind with
-      | Rest -> None
-      | Named_field (name, inner) -> (
-          match
-            List.find_opt (fun (declared : Types.field) -> declared.field_name = name.text) fields
-          with
-          | Some declared ->
-              check_pattern_with state env inner (flatten inner declared) ~binding ~mode;
-              Some (declared.field_name, inner)
-          | None ->
-              check_pattern_with state env inner ~binding ~mode
-              @@ State.make_error_type state Unknown_member (State.read_span state name.id)
-                   ~fixes:
-                     (Diagnostic.list_spelling_fixes (State.read_span state name.id)
-                        ~written:name.text
-                        (List.map (fun (declared : Types.field) -> declared.field_name) fields))
-                   (Printf.sprintf "There is no field `%s` here." name.text);
-              None)
-      | Field inner -> (
-          let named =
-            Option.bind (find_bare_name inner) (fun name ->
-                List.find_opt (fun (declared : Types.field) -> declared.field_name = name) fields)
-          in
-          match (named, fields) with
-          | Some declared, _ | None, [ declared ] ->
-              check_pattern_with state env inner (flatten inner declared) ~binding ~mode;
-              Some (declared.field_name, inner)
-          | None, _ ->
-              let names =
-                String.concat ", "
-                  (List.map
-                     (fun (declared : Types.field) -> "`" ^ declared.field_name ^ "`")
-                     fields)
-              in
-              check_pattern_with state env inner ~binding ~mode
-                (State.make_error_type state Unknown_member (State.read_span state inner.id)
-                   (Printf.sprintf
-                      "A bare pattern must name a field, since this has %d fields: %s. Truss has \
-                       no tuples, so fields match by name."
-                      (List.length fields) names));
-              None))
-    written_fields
+  List.filter_map Fun.id
+    (List.map2
+       (fun (_, (inner : Syntax.pattern)) index ->
+         match index with
+         | Ok index ->
+             let declared = List.nth fields index in
+             check_pattern_with state env inner
+               (Solver.flatten state
+                  (Bound { at = State.read_span state inner.id; of_type = None })
+                  declared.field_type)
+               ~binding ~mode;
+             Some (declared.field_name, inner)
+         | Error error ->
+             check_pattern_with state env inner error ~binding ~mode;
+             None)
+       entries indexes)
 
 and check_unknown_pattern state env (written : Syntax.pattern) unknown ~binding ~mode =
   state.tables.scrutinee_types.(written.id) <- Some unknown;

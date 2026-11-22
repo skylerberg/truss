@@ -25,10 +25,10 @@ The generated package `demo` has a module `core` and `MODULES` modules `m0`, `m1
 
 | Definition | Reads |
 |---|---|
-| `core::Point`, a type with fields `x` and `y` | nothing |
-| `core::Measured`, a trait that `Point` implements | `Point` |
-| `core::leaf` | nothing |
-| Each of the 25 functions `f<i>_<k>` of module `m<i>` | `core::leaf`, and the function before it; the first reads the last function of module `m<(i - 1) / 2>` |
+| `core.Point`, a type with fields `x` and `y` | nothing |
+| `core.Measured`, a trait that `Point` implements | `Point` |
+| `core.leaf` | nothing |
+| Each of the 25 functions `f<i>_<k>` of module `m<i>` | `core.leaf`, and the function before it; the first reads the last function of module `m<(i - 1) / 2>` |
 | `measured_<i>` in `m<i>` | `Point`, through `Measured` and a field |
 | The test of `m<i>` | the module's last function and `measured_<i>` |
 
@@ -41,9 +41,9 @@ Every function reads `leaf`, every module reads `Point`, and the modules call ea
 | First build | Opens the project with an empty database |
 | Edit one function's body | Appends `+ 0` to a body in the last module, which no module calls |
 | Undo that edit | Restores the earlier text |
-| Edit the body of the function every function calls | Changes the body of `core::leaf` |
+| Edit the body of the function every function calls | Changes the body of `core.leaf` |
 | Edit the body of a function every test reaches | Changes the body of the last function of `m0` |
-| Change the signature of the function every function calls | Gives `core::leaf` a parameter with a default |
+| Change the signature of the function every function calls | Gives `core.leaf` a parameter with a default |
 | Add a field to the type every module reads | Adds a field to `Point` and to its one construction |
 | Add a function to one module | Appends a public function to the middle module, since an unused internal one is an error |
 | Rename a function and its callers | Renames the last function of `m0` in `m0`, `m1`, and `m2` |

@@ -1,0 +1,6 @@
+type Triple(first: Int64, second: Int64, third: Int64)
+
+fn f(triple: Triple) -> Int64 {
+  let (a, b, ..) = triple
+  a.saturating_add(b)
+}

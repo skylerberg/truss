@@ -641,6 +641,8 @@ and build_kind form env (value : Syntax.expression) : Core.kind =
   | Continue -> Continue
   | Self_value -> Use (build_self_local env ~origin:(Written value.id))
   | Name _ -> build_name form env value
+  | Member _ when Option.is_some (Resolve.find_head form.resolved value) ->
+      build_name form env value
   | Member (base, member) -> build_member form env value base member
   | Bracket (base, items) -> (
       match form.resolved.brackets.(value.id) with
@@ -1009,12 +1011,23 @@ and build_arguments form env (call : Tables.call) : Core.argument list =
       | None -> Default)
 
 and build_call form env ~lends ?function_value (call : Tables.call) : Core.call =
-  make_call form
-    ~callee:
-      (match (call.callee, function_value) with
-      | Indirect, Some function_value -> Indirect (Operands.build Read function_value)
-      | direct, _ -> convert_callee form direct)
-    ~arguments:(build_arguments form env call) ~lends
+  let core_call =
+    make_call form
+      ~callee:
+        (match (call.callee, function_value) with
+        | Indirect, Some function_value -> Indirect (Operands.build Read function_value)
+        | direct, _ -> convert_callee form direct)
+      ~arguments:(build_arguments form env call) ~lends
+  in
+  let written_order =
+    List.map (fun (argument : Tables.argument) -> argument.core_argument_index) call.arguments
+  in
+  {
+    core_call with
+    evaluation_order =
+      written_order
+      @ List.filter (fun index -> not (List.mem index written_order)) core_call.evaluation_order;
+  }
 
 and build_argument_expressions form env (call : Tables.call) =
   List.map
@@ -1754,9 +1767,10 @@ and build_pattern_kind form type_ (written : Syntax.pattern) : Core.pattern_kind
       Range { start = build_range_bound form start; stop = build_range_bound form stop; inclusive }
   | Variant _, Some (Variant_pattern { variant; fields; _ }) ->
       Variant { variant; fields = build_pattern_fields form fields }
-  | Record _, Some (Record_pattern { fields; _ }) -> Record (build_pattern_fields form fields)
+  | (Record _ | Tuple _), Some (Record_pattern { fields; _ }) ->
+      Record (build_pattern_fields form fields)
   | Alternatives alternatives, _ -> Alternatives (List.map (build_pattern form) alternatives)
-  | (Binding _ | Qualified_constant _ | Variant _ | Record _), _ ->
+  | (Binding _ | Qualified_constant _ | Variant _ | Record _ | Tuple _), _ ->
       raise_bug "`%s` is a pattern the checker did not record" (quote form written.id)
 
 and build_pattern_fields form (fields : (string * Syntax.pattern) list) =

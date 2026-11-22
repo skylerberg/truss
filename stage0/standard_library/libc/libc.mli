@@ -181,9 +181,6 @@ type function_ =
   | Getenv
   | Posix_spawnp
   | Waitpid
-  | Snprintf
-  | Strtod
-  | Strtof
   | Fork
   | Pipe
   | Poll

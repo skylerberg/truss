@@ -131,7 +131,7 @@ let resolve_parameter context (name : Syntax.name) =
   | _ -> raise_bug "`%s` is not resolved as a generic parameter" name.text
 
 let show_path (path : Syntax.path) =
-  String.concat "::"
+  String.concat "."
     (List.map (fun (name : Syntax.name) -> name.text) (path.modules @ [ path.last ]))
 
 let find_literal_bound (bound : Syntax.bound) : Types.cost_bound option =
@@ -682,13 +682,12 @@ let list_cost_operands context (bound : Syntax.expression) =
   let operands = ref [] in
   let rec visit (value : Syntax.expression) =
     (match value.kind with
-    | Call ({ kind = Name { modules = []; last = cost_function }; _ }, arguments) -> (
+    | Call ({ kind = Name cost_function; _ }, arguments) -> (
         match find_target context cost_function with
         | Some (Specification_function (Call_cost metric)) ->
             let callee =
               match arguments with
-              | [ { value = { kind = Name { modules = []; last }; _ }; _ } ] ->
-                  Function_parameter last
+              | [ { value = { kind = Name last; _ }; _ } ] -> Function_parameter last
               | [ { value = { kind = Member (type_, method_); _ }; _ } ] ->
                   Bound_method { type_; method_ }
               | _ -> Not_a_callee
@@ -745,7 +744,7 @@ let rec find_bounded_type context (written : Syntax.expression) =
       match context.self_type with
       | Some (Types.Parameter _ as self) -> Some self
       | Some _ | None -> None)
-  | Name { modules = []; last } -> (
+  | Name last -> (
       match find_target context last with
       | Some (Type_parameter parameter) -> Some (Types.Parameter parameter)
       | Some _ | None -> None)
@@ -925,32 +924,25 @@ let elaborate_type_head context owner (head : Syntax.type_head) =
   | _ -> raise_bug "the type head `%s` is not resolved" (show_path head.path)
 
 let elaborate_fields context (written : Syntax.field list) =
-  List.stable_sort
-    (fun (left : Types.field) (right : Types.field) ->
-      String.compare left.field_name right.field_name)
-    (List.filter_map
-       (fun (field : Syntax.field) ->
-         match field.kind with
-         | Field_declaration { name; type_; default } ->
-             let field_type = elaborate_type context type_ in
-             let field_type =
-               match Types.find_specification_only_type field_type with
-               | None -> field_type
-               | Some specification_type ->
-                   report_error_type context Specification_only context.spans.(type_.id)
-                     (Printf.sprintf
-                        "`%s` exists only in specifications and has no representation in code that \
-                         runs, so it is not the type of a field."
-                        (Types.show specification_type))
-             in
-             Some
-               {
-                 Types.field_name = name.text;
-                 field_type;
-                 field_has_default = Option.is_some default;
-               }
-         | Field_error -> None)
-       written)
+  List.filter_map
+    (fun (field : Syntax.field) ->
+      match field.kind with
+      | Field_declaration { name; type_; default } ->
+          let field_type = elaborate_type context type_ in
+          let field_type =
+            match Types.find_specification_only_type field_type with
+            | None -> field_type
+            | Some specification_type ->
+                report_error_type context Specification_only context.spans.(type_.id)
+                  (Printf.sprintf
+                     "`%s` exists only in specifications and has no representation in code that \
+                      runs, so it is not the type of a field."
+                     (Types.show specification_type))
+          in
+          Some
+            { Types.field_name = name.text; field_type; field_has_default = Option.is_some default }
+      | Field_error -> None)
+    written
 
 let elaborate_container (context : t) (path : Path.t) (definition : Syntax.definition) :
     (Environment.container, Diagnostic.reported) Stdlib.result * t =
@@ -1336,7 +1328,7 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
                      is_update_step =
                        takes_mut_self && (lookups.names.read_declaration key).visibility = Private;
                    })
-          | Type_definition { generics; body; clauses; _ } ->
+          | Type_definition { is_tuple; generics; body; clauses; _ } ->
               let type_generics = elaborate_generics context path generics in
               let self =
                 Types.Named { path; arguments = Types.list_generic_arguments type_generics }
@@ -1368,6 +1360,7 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
                      type_generics;
                      shape;
                      opaque = (lookups.names.read_declaration key).visibility = Public_opaque;
+                     is_tuple;
                      derives;
                    })
           | Constant { name; type_; _ } ->

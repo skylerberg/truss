@@ -1,6 +1,6 @@
-use standard::base64
-use standard::cryptography
-use standard::intrinsic
+use standard.base64
+use standard.cryptography
+use standard.intrinsic
 
 public type SameSite = Strict | Lax | Cross
   derives Equal
@@ -125,15 +125,15 @@ public fn Response.with_cookie(own self, cookie: Cookie) -> Result[Response, Err
   Ok(own response)
 }
 
-public opaque type CookieKey(signing: List[UInt8], sealing: cryptography::SecretKey)
+public opaque type CookieKey(signing: List[UInt8], sealing: cryptography.SecretKey)
   derives Copyable
 
 public fn CookieKey.new(secret: Slice[UInt8]) -> Option[CookieKey] {
   if secret.length() < 32 {
     return None
   }
-  let signing = cryptography::hkdf_sha256(secret, salt: [], information: "truss cookie signing".bytes(), length: 32)
-  let sealing = cryptography::hkdf_sha256(secret, salt: [], information: "truss cookie sealing".bytes(), length: 32)
+  let signing = cryptography.hkdf_sha256(secret, salt: [], information: "truss cookie signing".bytes(), length: 32)
+  let sealing = cryptography.hkdf_sha256(secret, salt: [], information: "truss cookie sealing".bytes(), length: 32)
   var bytes: Array[UInt8, 32] = Array.filled(0)
   let width: UInt64 = 32
   for index in 0..width {
@@ -141,7 +141,7 @@ public fn CookieKey.new(secret: Slice[UInt8]) -> Option[CookieKey] {
       bytes[index] = sealing[index]
     }
   }
-  Some(CookieKey(signing: own signing, sealing: cryptography::SecretKey.from_bytes(bytes)))
+  Some(CookieKey(signing: own signing, sealing: cryptography.SecretKey.from_bytes(bytes)))
 }
 
 public fn CookieKey.generate() -> CookieKey
@@ -153,12 +153,12 @@ public fn CookieKey.generate() -> CookieKey
     let word = Random.next()
     let width: UInt64 = 8
     for index in 0..width {
-      mut secret.push(intrinsic::convert((word >> (8 * index)) & 255))
+      mut secret.push(intrinsic.convert((word >> (8 * index)) & 255))
     }
   }
   match CookieKey.new(secret.slice()) {
     Some(key) => own key
-    None => CookieKey(signing: own secret, sealing: cryptography::SecretKey.generate())
+    None => CookieKey(signing: own secret, sealing: cryptography.SecretKey.generate())
   }
 }
 
@@ -166,13 +166,13 @@ fn signature_of(key: CookieKey, name: StringSlice, value: StringSlice) -> String
   var message = name.to_string()
   mut message.push("=")
   mut message.push(value)
-  let code = cryptography::hmac_sha256(key.signing.slice(), message: message.slice().bytes())
-  base64::encode(code[..], alphabet: base64::Alphabet.UrlSafe, padding: false)
+  let code = cryptography.hmac_sha256(key.signing.slice(), message: message.slice().bytes())
+  base64.encode(code[..], alphabet: base64.Alphabet.UrlSafe, padding: false)
 }
 
 public fn CookieKey.sign(self, cookie: own Cookie) -> Cookie {
   var signed = own cookie
-  let encoded = base64::encode(signed.value.slice().bytes(), alphabet: base64::Alphabet.UrlSafe, padding: false)
+  let encoded = base64.encode(signed.value.slice().bytes(), alphabet: base64.Alphabet.UrlSafe, padding: false)
   let signature = signature_of(self, name: signed.name, value: encoded)
   var value = own encoded
   mut value.push(".")
@@ -186,10 +186,10 @@ fn verify_with(key: CookieKey, name: StringSlice, value: StringSlice) -> Option[
   let encoded = value.part(0, to: dot)
   let signature = value.part(dot + 1, to: value.length())
   let expected = signature_of(key, name: name, value: encoded)
-  if !cryptography::constant_time_equal(expected.slice().bytes(), second: signature.bytes()) {
+  if !cryptography.constant_time_equal(expected.slice().bytes(), second: signature.bytes()) {
     return None
   }
-  let bytes = base64::decode(encoded, alphabet: base64::Alphabet.UrlSafe).ok()?
+  let bytes = base64.decode(encoded, alphabet: base64.Alphabet.UrlSafe).ok()?
   String.from_utf8(own bytes).ok()
 }
 
@@ -207,16 +207,16 @@ public fn CookieKey.seal(self, cookie: own Cookie) -> Cookie
   uses Random
 {
   var sealed = own cookie
-  let nonce = cryptography::Nonce.generate()
-  let ciphertext = cryptography::seal(self.sealing, nonce: nonce, plaintext: sealed.value.slice().bytes(), associated_data: sealed.name.slice().bytes())
+  let nonce = cryptography.Nonce.generate()
+  let ciphertext = cryptography.seal(self.sealing, nonce: nonce, plaintext: sealed.value.slice().bytes(), associated_data: sealed.name.slice().bytes())
   var bytes = nonce.bytes[..].to_list()
   mut bytes.append(own ciphertext)
-  sealed.value = base64::encode(bytes.slice(), alphabet: base64::Alphabet.UrlSafe, padding: false)
+  sealed.value = base64.encode(bytes.slice(), alphabet: base64.Alphabet.UrlSafe, padding: false)
   sealed
 }
 
 fn open_with(key: CookieKey, name: StringSlice, value: StringSlice) -> Option[String] {
-  let bytes = base64::decode(value, alphabet: base64::Alphabet.UrlSafe).ok()?
+  let bytes = base64.decode(value, alphabet: base64.Alphabet.UrlSafe).ok()?
   if bytes.length() < 28 {
     return None
   }
@@ -225,7 +225,7 @@ fn open_with(key: CookieKey, name: StringSlice, value: StringSlice) -> Option[St
   for index in 0..width {
     nonce[index] = bytes[index]
   }
-  let plain = cryptography::open(key.sealing, nonce: cryptography::Nonce(bytes: nonce), sealed: bytes[12..], associated_data: name.bytes()).ok()?
+  let plain = cryptography.open(key.sealing, nonce: cryptography.Nonce(bytes: nonce), sealed: bytes[12..], associated_data: name.bytes()).ok()?
   String.from_utf8(own plain).ok()
 }
 

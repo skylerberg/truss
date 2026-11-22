@@ -144,101 +144,6 @@ let apply_list_literal context frame (site : Invocation.site) values =
   in
   (frame, literal)
 
-let reads_only_literals (parameter : Core.local) (clause : Mir.formula) =
-  let is_parameter local =
-    match clause.locals.(local).kind with
-    | Source { local = core; _ } -> core = parameter
-    | Temporary | Lent _ -> false
-  in
-  let is_literal_only = ref true in
-  Mir.iter_places_read
-    (fun (place : Mir.place) ->
-      match place with
-      | { root = Local local; projections = Field field :: _ }
-        when is_parameter local && field = Well_known.show_field Template_literals ->
-          ()
-      | { root = Local local; _ } when is_parameter local -> is_literal_only := false
-      | _ -> ())
-    clause.value;
-  !is_literal_only
-
-let apply_template context (frame : State.frame) (site : Invocation.site) ~trait ~name ~receiver
-    ~evidence ~literals value_ =
-  let location = Facts.locate context frame.source site.origin in
-  let tag_type = Facts.substitute_type context frame site.type_ in
-  match evidence with
-  | Core.Impl { impl; _ } -> (
-      let path = Path.Method { owner = impl; name; receiver } in
-      match Contracts.find_method_contract context.lookups trait name receiver evidence with
-      | Some contract ->
-          let callee_clauses = contract.callee_clauses in
-          let entry =
-            Validity.bind_arguments frame callee_clauses
-              ~arguments:[ (0, value_) ]
-              ~substitution:Types.no_substitution
-          in
-          let is_evaluable (requirement : Mir.requirement) =
-            match (evidence, callee_clauses.parameters) with
-            | Impl { substitution; _ }, [ parameter ] when Types.is_empty_substitution substitution
-              ->
-                requirement.is_executable && reads_only_literals parameter.local requirement.clause
-            | _ -> false
-          in
-          let template_check =
-            {
-              Obligation.from_template = path;
-              literals;
-              clauses =
-                List.filter_map Fun.id
-                  (List.mapi
-                     (fun index requirement ->
-                       if is_evaluable requirement then Some index else None)
-                     callee_clauses.requires);
-            }
-          in
-          List.iteri
-            (fun index (requirement : Mir.requirement) ->
-              let template_clause =
-                if List.mem index template_check.clauses then
-                  Some { Obligation.check = template_check; clause = index }
-                else None
-              in
-              Facts.oblige ?template_clause context frame Requires location
-                [
-                  Text "This template may not meet `";
-                  Facts.quote callee_clauses.callee requirement.clause.origin;
-                  Text "`, which its tag requires.";
-                ]
-                (snd (Validity.read_specification context entry requirement.clause)))
-            callee_clauses.requires;
-          let result = Facts.arrive context frame "tagged" tag_type in
-          Validity.assume_valid context frame tag_type result;
-          List.iter
-            (fun (clause : Mir.formula) ->
-              Facts.assume context frame
-                (snd
-                   (Validity.read_specification context { entry with result = Some result } clause)))
-            callee_clauses.ensures;
-          let frame =
-            Operations.spend context frame
-              (Amounts.compute_callee_amount context frame ~is_recursive:false
-                 ~clauses:(Contracts.list_declared_clauses contract)
-                 ~bind_frame:(fun clauses ->
-                   {
-                     (Validity.bind_arguments frame clauses
-                        ~arguments:[ (0, value_) ]
-                        ~substitution:Types.no_substitution)
-                     with
-                     result = Some result;
-                   })
-                 ~uses:Types.no_capabilities ~values:[] ~change:None)
-          in
-          (frame, result)
-      | None ->
-          Facts.raise_unsupported location "a tagged template whose tag the prover cannot read")
-  | Bound | Dynamic ->
-      Facts.raise_unsupported location "a tagged template whose tag the prover cannot read"
-
 let apply_map_literal context frame ~(ty : Types.ty) ~location terms =
   let key_type, value_type =
     match ty with
@@ -349,9 +254,48 @@ let make_owner_of_view context frame ~(view : Types.ty) ~(owner : Types.ty) view
         (Types.show view));
   converted
 
-let project_field context frame ty variant field field_type term =
+let rec find_abstracted_selection context term =
+  match term with
+  | Logic.Apply ((Logic.Symbol.Field _ as selector), [ whole ]) ->
+      Option.map
+        (fun (parameters, abstracted) -> (parameters, Logic.Apply (selector, [ abstracted ])))
+        (find_abstracted_selection context whole)
+  | Logic.Apply ((Logic.Symbol.Function _ as callee), _) ->
+      Option.map
+        (fun sorts ->
+          let parameters =
+            List.mapi
+              (fun index sort ->
+                (Logic.Symbol.Variable { label = "ranged"; numbers = [ index ] }, sort))
+              sorts
+          in
+          ( parameters,
+            Logic.Apply (callee, List.map (fun (name, _) -> Logic.Symbol name) parameters) ))
+        (Facts.find_argument_sorts context callee)
+  | _ -> None
+
+let assume_field_range_of_every_result context ty variant field field_type term =
+  match find_abstracted_selection context term with
+  | Some (parameters, abstracted) -> (
+      let selection = Validity.select_field context ty variant field abstracted in
+      match Facts.make_in_range field_type selection with
+      | Logic.Boolean true -> ()
+      | range ->
+          Facts.run_once context (Field_in_range selection) (fun () ->
+              let range =
+                match variant with
+                | Some name ->
+                    Logic.(Is (Facts.make_constructor_symbol ty (Some name), abstracted) ==> range)
+                | None -> range
+              in
+              Facts.add_fact context (Logic.forall ~trigger:[ selection ] (parameters, range))))
+  | None -> ()
+
+let project_field context (frame : State.frame) ty variant field field_type term =
   let part = Validity.select_field context ty variant field term in
   Amounts.assume_typed context frame (Facts.make_in_range field_type part);
+  if Logic.mentions (List.map (fun (name, _, _) -> name) frame.binders) term then
+    assume_field_range_of_every_result context ty variant field field_type term;
   if context.ranking then begin
     Facts.assume context frame
       (Logic.less (Models.rank context field_type part) (Models.rank context ty term))

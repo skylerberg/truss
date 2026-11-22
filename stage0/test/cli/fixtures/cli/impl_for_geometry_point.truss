@@ -1,4 +1,4 @@
-impl Display for demo::geometry::Point {
+impl Display for demo.geometry.Point {
   fn display(self, output: mut String)
   {
     mut output.push("a point of the plane")

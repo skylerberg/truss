@@ -1,32 +1,32 @@
-use standard::capabilities
-use standard::console
-use standard::system::calls
-use standard::system::handles
-use standard::system::lines
+use standard.capabilities
+use standard.console
+use standard.system.calls
+use standard.system.handles
+use standard.system.lines
 
-internal type SystemConsole(input: lines::LineInput)
+internal type SystemConsole(input: lines.LineInput)
 
 impl Default for SystemConsole {
   fn default() -> SystemConsole {
-    SystemConsole(input: lines::LineInput.new())
+    SystemConsole(input: lines.LineInput.new())
   }
 }
 
 impl Console for SystemConsole
-  uses RunForever, capabilities::System
+  uses RunForever, capabilities.System
 {
   fn print(self, text: StringSlice) {
-    let _ = calls::write_fully(1, bytes: text.bytes)
+    let _ = calls.write_fully(1, bytes: text.bytes)
   }
 
   fn print_line(self, text: StringSlice) {
-    let _ = calls::write_fully(1, bytes: text.bytes)
-    let _ = calls::write_fully(1, bytes: "\n".slice().bytes)
+    let _ = calls.write_fully(1, bytes: text.bytes)
+    let _ = calls.write_fully(1, bytes: "\n".slice().bytes)
   }
 
   fn print_error(self, text: StringSlice) {
-    let _ = calls::write_fully(2, bytes: text.bytes)
-    let _ = calls::write_fully(2, bytes: "\n".slice().bytes)
+    let _ = calls.write_fully(2, bytes: text.bytes)
+    let _ = calls.write_fully(2, bytes: "\n".slice().bytes)
   }
 
   fn read_line(mut self) -> Option[String] {
@@ -36,19 +36,19 @@ impl Console for SystemConsole
     }
   }
 
-  fn input(self) -> console::Input {
-    console::Input.from_handle(handles::duplicate(0))
+  fn input(self) -> console.Input {
+    console.Input.from_handle(handles.duplicate(0))
   }
 
-  fn output(self) -> console::Output {
-    console::Output.from_handle(handles::duplicate(1))
+  fn output(self) -> console.Output {
+    console.Output.from_handle(handles.duplicate(1))
   }
 
-  fn error_output(self) -> console::Output {
-    console::Output.from_handle(handles::duplicate(2))
+  fn error_output(self) -> console.Output {
+    console.Output.from_handle(handles.duplicate(2))
   }
 
-  fn terminal(self) -> console::Terminal {
-    console::Terminal.from_handle(handles::controlling_terminal())
+  fn terminal(self) -> console.Terminal {
+    console.Terminal.from_handle(handles.controlling_terminal())
   }
 }

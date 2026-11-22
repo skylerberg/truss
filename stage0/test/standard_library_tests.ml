@@ -97,11 +97,11 @@ let prove_files database files =
 
 let is_always_read_kind : type a. a Database.Part.stored -> bool = function
   | Parsed _ | Resolved _ | Trait_header _ | Interface _ | Signature_check _ | Contract _
-  | Checked_body _ | Body_mir _ | Contract_mir _ | Mir_call_edges _ ->
+  | Checked_body _ | Body_mir _ | Contract_mir _ ->
       true
   | Namespace _ | Constant_value _ | Header _ | Derived_interface _ | Type_facts _ | Grant _
-  | Generated_mir _ | Usage _ | Ownership _ | Import_check _ | Package_check _ | Call_edges _
-  | Recursion_group _ | Proof _ | Lowered _ | Test_key _ ->
+  | Generated_mir _ | Call_edges _ | Usage _ | Ownership _ | Import_check _ | Package_check _
+  | Implementations _ | Recursion_group _ | Proof _ | Lowered _ | Test_key _ ->
       false
 
 let is_always_read (Database.Part.Any part) = is_always_read_kind part
@@ -184,7 +184,8 @@ let () =
                       (List.assoc file Standard_library.files)
                   in
                   List.iter
-                    (fun diagnostic -> Harness.fail "%s" (Diagnostic.render source diagnostic))
+                    (fun diagnostic ->
+                      Harness.fail "%s" (Diagnostic.render ~is_colored:false source diagnostic))
                     (match errors with
                     | [] -> Prover.list_diagnostics verdicts file
                     | errors -> errors))

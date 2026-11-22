@@ -112,7 +112,7 @@ let () =
       let source = Source.create ~path:"test.truss" text in
       match snd (Lexer.lex source) with
       | [ diagnostic ] ->
-          let rendered = Diagnostic.render source diagnostic in
+          let rendered = Diagnostic.render ~is_colored:false source diagnostic in
           if not (String.starts_with ~prefix:"test.truss:1:10:" rendered) then
             Harness.fail "expected the position 1:10, got %s" rendered;
           if String.contains rendered '\xEF' then
@@ -321,6 +321,17 @@ let () =
       expect_error "r#\"caf\u{E9}\"#" ~code:String_prefix ~at:"r" ~fixed:"\"\"\"caf\u{E9}\"\"\"");
   Harness.test "a Rust raw string that ends with a quote has no fix" (fun () ->
       expect_error {|r#"say "hi""#|} ~code:String_prefix ~at:"r");
+  Harness.test "a Rust raw string reports invalid UTF-8 in its text, as its fix would" (fun () ->
+      expect_equal_lists Fun.id "codes"
+        [ "lexer.string_prefix"; "lexer.invalid_utf8" ]
+        (list_codes "r#\"a\xFFb\"#");
+      expect_equal_lists Fun.id "codes" [ "lexer.invalid_utf8" ]
+        (list_codes (apply_machine_fixes "r#\"a\xFFb\"#"));
+      expect_equal_lists Fun.id "tokens" [ {|"ab"|}; "NL" ] (list_tokens "r#\"a\xFFb\"#"));
+  Harness.test "a Rust raw string reports a bidirectional control in its text" (fun () ->
+      expect_equal_lists Fun.id "codes"
+        [ "lexer.string_prefix"; "lexer.forbidden_character" ]
+        (list_codes "r#\"a\xE2\x80\xAEb\"#"));
   Harness.test "a Python string with three quotes loses its prefix" (fun () ->
       expect_error "f\"\"\"\n  Hello {name}\n  \"\"\"" ~code:String_prefix ~at:"f"
         ~fixed:"\"\"\"\n  Hello ${name}\n  \"\"\"";
@@ -461,7 +472,7 @@ let () =
   Harness.test "the longest match" (fun () ->
       expect_tokens "a<<=b" [ "a"; "<<="; "b"; "NL" ];
       expect_tokens "a==>b" [ "a"; "==>"; "b"; "NL" ];
-      expect_tokens "a::b" [ "a"; "::"; "b"; "NL" ])
+      expect_tokens "a..=b" [ "a"; "..="; "b"; "NL" ])
 
 let () =
   Harness.test "a float with no digit on one side of its point" (fun () ->
@@ -493,6 +504,13 @@ let () =
       expect_error "a <> b" ~code:Foreign_operator ~at:"<>" ~fixed:"a != b";
       expect_error "0..<count" ~code:Foreign_operator ~at:"..<" ~fixed:"0..count";
       expect_equal_lists Fun.id "tokens" [ "a"; "!="; "b"; "NL" ] (list_tokens "a <> b"));
+  Harness.test "a path written with `::` becomes a path written with `.`" (fun () ->
+      expect_error "json::parse(text)" ~code:Path_separator ~at:"::" ~fixed:"json.parse(text)";
+      expect_error "Shape::Circle" ~code:Path_separator ~at:"::" ~fixed:"Shape.Circle";
+      expect_equal_lists Fun.id "tokens" [ "json"; "."; "parse"; "NL" ] (list_tokens "json::parse");
+      expect_equal_lists Fun.id "tokens"
+        [ "parse"; "::"; "<"; "Int64"; ">" ]
+        (list_tokens "parse::<Int64>"));
   Harness.test "three dots between operands are either range" (fun () ->
       expect_error "1...5" ~code:Foreign_operator ~at:"..." ~fixed:"1..5" ~alternatives:[ "1..=5" ];
       expect_equal_lists Fun.id "tokens" [ "a"; "..="; "b"; "NL" ] (list_tokens "a...b"));
@@ -730,6 +748,75 @@ let () =
       match Diagnostic.apply_edits "abc" fix.edits with
       | _ -> Harness.fail "expected Invalid_argument"
       | exception Invalid_argument _ -> ())
+
+let semicolon_source = Source.create ~path:"test.truss" "let a = 1;\n"
+
+let make_semicolon_diagnostic severity =
+  let semicolon = Source.make_span 9 10 in
+  Diagnostic.make ~severity ~code:(Lexer Semicolon)
+    ~notes:[ (Source.make_span 0 3, "The statement starts here.") ]
+    ~fixes:[ Diagnostic.fix "Delete the semicolon." [ Diagnostic.delete semicolon ] ]
+    semicolon "A semicolon ends no statement."
+
+let remove_escapes text =
+  let buffer = Buffer.create (String.length text) in
+  let rec scan index =
+    if index < String.length text then
+      if text.[index] = '\027' then scan (String.index_from text index 'm' + 1)
+      else begin
+        Buffer.add_char buffer text.[index];
+        scan (index + 1)
+      end
+  in
+  scan 0;
+  Buffer.contents buffer
+
+let has_line_ending_in_color text =
+  let rec scan index ~is_open =
+    if index >= String.length text then false
+    else
+      match text.[index] with
+      | '\n' when is_open -> true
+      | '\027' ->
+          let stop = String.index_from text index 'm' in
+          scan (stop + 1) ~is_open:(String.sub text index (stop + 1 - index) <> "\027[0m")
+      | _ -> scan (index + 1) ~is_open
+  in
+  scan 0 ~is_open:false
+
+let () =
+  Harness.test "a diagnostic renders as its header, line, notes, and fixes, then a blank line"
+    (fun () ->
+      Harness.expect_string
+        ~expected:
+          (String.concat "\n"
+             [
+               "test.truss:1:10: error[lexer.semicolon]: A semicolon ends no statement.";
+               "  | let a = 1;";
+               "  |          ^";
+               "  note: test.truss:1:1: The statement starts here.";
+               "  fix: Delete the semicolon.";
+               "    delete \";\" at test.truss:1:10";
+               "";
+               "";
+             ])
+        (Diagnostic.render ~is_colored:false semicolon_source (make_semicolon_diagnostic Error)));
+  Harness.test "a colored diagnostic is the plain one with escapes that close on every line"
+    (fun () ->
+      List.iter
+        (fun (severity, painted_severity) ->
+          let diagnostic = make_semicolon_diagnostic severity in
+          let plain = Diagnostic.render ~is_colored:false semicolon_source diagnostic
+          and colored = Diagnostic.render ~is_colored:true semicolon_source diagnostic in
+          Harness.expect_string ~expected:plain (remove_escapes colored);
+          if not (String.includes ~affix:painted_severity colored) then
+            Harness.fail "expected %S in %S" painted_severity colored;
+          if has_line_ending_in_color colored then
+            Harness.fail "a line ends inside a colored span in %S" colored)
+        [
+          (Diagnostic.Error, "\027[1;31merror[lexer.semicolon]\027[0m");
+          (Warning, "\027[1;33mwarning[lexer.semicolon]\027[0m");
+        ])
 
 let () =
   Harness.test "the fixes for errors in two definitions each remove only their own error" (fun () ->

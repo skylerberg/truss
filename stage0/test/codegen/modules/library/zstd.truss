@@ -1,8 +1,8 @@
-use standard::compression::zstd
-use standard::hex
+use standard.compression.zstd
+use standard.hex
 
 fn bytes_of(text: StringSlice) -> List[UInt8] {
-  match hex::decode(text) {
+  match hex.decode(text) {
     Ok(bytes) => own bytes
     Err(_) => []
   }
@@ -674,39 +674,39 @@ test "frames that the reference zstd compressed decompress to their input" {
   ]
   for index in 0..names.length() {
     let frame = joined(frames[index].slice())
-    assert zstd::decompress(frame) == Ok(input_of(names[index]))
+    assert zstd.decompress(frame) == Ok(input_of(names[index]))
   }
 }
 
 test "compress's output decompresses to its input" {
   let inputs: List[List[UInt8]] = [[], "a".bytes().to_list(), words(3000), noise(1000), List.filled(7, count: 200000), words(140000)]
   for input in inputs {
-    assert zstd::decompress(zstd::compress(input)) == Ok(input.copy())
+    assert zstd.decompress(zstd.compress(input)) == Ok(input.copy())
   }
-  assert zstd::compress(words(140000)).length() < 30000
+  assert zstd.compress(words(140000)).length() < 30000
 }
 
 test "decompress reads concatenated frames and skips skippable frames" {
-  var stream = zstd::compress("first ".bytes())
+  var stream = zstd.compress("first ".bytes())
   mut stream.append_slice(bytes_of("5a2a4d1803000000010203").slice())
-  mut stream.append_slice(zstd::compress("second".bytes()).slice())
-  assert zstd::decompress(stream) is Ok(bytes) && String.from_utf8_lossy(bytes) == "first second"
+  mut stream.append_slice(zstd.compress("second".bytes()).slice())
+  assert zstd.decompress(stream) is Ok(bytes) && String.from_utf8_lossy(bytes) == "first second"
 }
 
 test "decompress rejects a wrong checksum, damaged and truncated frames, and output past its limit" {
   let frame = bytes_of("28b52ffd2417b9000048656c6c6f2c207a73746420616e642042726f746c6921e30d8308")
   var wrong = frame.copy()
   wrong[frame.length() - 1] = wrong[frame.length() - 1] ^ 1
-  assert zstd::decompress(wrong) == Err(zstd::Error.ChecksumMismatch)
-  assert zstd::decompress(frame[..frame.length() - 5]) is Err(Malformed(_))
-  assert zstd::decompress("not zstd".bytes()) is Err(Malformed(_))
-  assert zstd::decompress([]) is Err(Malformed(_))
-  let packed = zstd::compress(words(3000))
-  assert zstd::decompress(packed, limit: 2999) == Err(zstd::Error.TooLarge(limit: 2999))
-  assert zstd::decompress(packed, limit: 3000) == Ok(words(3000))
+  assert zstd.decompress(wrong) == Err(zstd.Error.ChecksumMismatch)
+  assert zstd.decompress(frame[..frame.length() - 5]) is Err(Malformed(_))
+  assert zstd.decompress("not zstd".bytes()) is Err(Malformed(_))
+  assert zstd.decompress([]) is Err(Malformed(_))
+  let packed = zstd.compress(words(3000))
+  assert zstd.decompress(packed, limit: 2999) == Err(zstd.Error.TooLarge(limit: 2999))
+  assert zstd.decompress(packed, limit: 3000) == Ok(words(3000))
   for index in 0..packed.length() {
     var damaged = packed.copy()
     damaged[index] = damaged[index] ^ 0x55
-    assert zstd::decompress(damaged) != Ok(words(3000))
+    assert zstd.decompress(damaged) != Ok(words(3000))
   }
 }

@@ -1,28 +1,28 @@
-use standard::console
-use standard::environment
-use standard::files
-use standard::log
-use standard::network
-use standard::processes
-use standard::streams
+use standard.console
+use standard.environment
+use standard.files
+use standard.log
+use standard.network
+use standard.processes
+use standard.streams
 
 public capability Console {
   fn print(text: StringSlice)
   fn print_line(text: StringSlice)
   fn print_error(text: StringSlice)
   fn read_line() -> Option[String]
-  fn input() -> console::Input
-  fn output() -> console::Output
-  fn error_output() -> console::Output
-  fn terminal() -> console::Terminal
+  fn input() -> console.Input
+  fn output() -> console.Output
+  fn error_output() -> console.Output
+  fn terminal() -> console.Terminal
 }
 
 public capability FileRead {
   fn read(file: Path) -> Result[List[UInt8], SystemError]
   fn read_text(file: Path) -> Result[String, SystemError]
-  fn open(file: Path) -> Result[files::FileReader, SystemError]
-  fn metadata(path: Path, follow_links: Bool = true) -> Result[files::Metadata, SystemError]
-  fn list(directory: Path) -> Result[List[files::DirectoryEntry], SystemError]
+  fn open(file: Path) -> Result[files.FileReader, SystemError]
+  fn metadata(path: Path, follow_links: Bool = true) -> Result[files.Metadata, SystemError]
+  fn list(directory: Path) -> Result[List[files.DirectoryEntry], SystemError]
   fn read_link(link: Path) -> Result[Path, SystemError]
   fn resolve(path: Path) -> Result[Path, SystemError]
 }
@@ -30,75 +30,75 @@ public capability FileRead {
 public capability FileWrite {
   fn write(file: Path, contents: Slice[UInt8]) -> Result[Unit, SystemError]
   fn write_text(file: Path, contents: StringSlice) -> Result[Unit, SystemError]
-  fn open(file: Path, mode: files::WriteMode) -> Result[files::File, SystemError]
+  fn open(file: Path, mode: files.WriteMode) -> Result[files.File, SystemError]
   fn create_directory(directory: Path) -> Result[Unit, SystemError]
   fn remove(path: Path) -> Result[Unit, SystemError]
   fn rename(from: Path, to: Path) -> Result[Unit, SystemError]
-  fn link(target: Path, link: Path, kind: files::LinkKind) -> Result[Unit, SystemError]
-  fn set_permissions(path: Path, permissions: files::Permissions) -> Result[Unit, SystemError]
+  fn link(target: Path, link: Path, kind: files.LinkKind) -> Result[Unit, SystemError]
+  fn set_permissions(path: Path, permissions: files.Permissions) -> Result[Unit, SystemError]
   fn set_modified(path: Path, time: Instant) -> Result[Unit, SystemError]
 }
 
 public capability NetworkClient {
-  fn resolve(host: StringSlice) -> Result[List[network::IpAddress], SystemError]
-  fn connect(address: network::SocketAddress, timeout: Option[Duration]) -> Result[network::Connection, SystemError]
-  fn connect_local(path: Path) -> Result[network::LocalConnection, SystemError]
-  fn open_datagram() -> Result[network::DatagramSocket, SystemError]
+  fn resolve(host: StringSlice) -> Result[List[network.IpAddress], SystemError]
+  fn connect(address: network.SocketAddress, timeout: Option[Duration]) -> Result[network.Connection, SystemError]
+  fn connect_local(path: Path) -> Result[network.LocalConnection, SystemError]
+  fn open_datagram() -> Result[network.DatagramSocket, SystemError]
 }
 
 public capability NetworkServer {
   fn listen(
-    address: network::SocketAddress,
-    options: network::ListenOptions = network::ListenOptions(),
-  ) -> Result[network::Listener, SystemError]
-  fn listen_local(path: Path) -> Result[network::LocalListener, SystemError]
-  fn bind_datagram(address: network::SocketAddress) -> Result[network::DatagramSocket, SystemError]
+    address: network.SocketAddress,
+    options: network.ListenOptions = network.ListenOptions(),
+  ) -> Result[network.Listener, SystemError]
+  fn listen_local(path: Path) -> Result[network.LocalListener, SystemError]
+  fn bind_datagram(address: network.SocketAddress) -> Result[network.DatagramSocket, SystemError]
 }
 
 public capability Handles {
-  fn read(handle: streams::Handle, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError]
+  fn read(handle: streams.Handle, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError]
     ensures !(result is Ok(count) && (count > limit || buffer.length() != old(buffer.length()) + count))
     ensures !(result is Err(_) && buffer.length() != old(buffer.length()))
-  fn write(handle: streams::Handle, bytes: Slice[UInt8]) -> Result[UInt64, SystemError]
+  fn write(handle: streams.Handle, bytes: Slice[UInt8]) -> Result[UInt64, SystemError]
     ensures !(result is Ok(count) && count > bytes.length())
   fn read_at(
-    handle: streams::Handle,
+    handle: streams.Handle,
     offset: UInt64,
     buffer: mut List[UInt8],
     limit: UInt64,
   ) -> Result[UInt64, SystemError]
     ensures !(result is Ok(count) && (count > limit || buffer.length() != old(buffer.length()) + count))
     ensures !(result is Err(_) && buffer.length() != old(buffer.length()))
-  fn write_at(handle: streams::Handle, offset: UInt64, bytes: Slice[UInt8]) -> Result[UInt64, SystemError]
+  fn write_at(handle: streams.Handle, offset: UInt64, bytes: Slice[UInt8]) -> Result[UInt64, SystemError]
     ensures !(result is Ok(count) && count > bytes.length())
-  fn seek(handle: streams::Handle, to: streams::Position) -> Result[UInt64, SystemError]
-  fn set_length(handle: streams::Handle, length: UInt64) -> Result[Unit, SystemError]
-  fn synchronize(handle: streams::Handle) -> Result[Unit, SystemError]
-  fn metadata(handle: streams::Handle) -> Result[files::Metadata, SystemError]
-  fn close(handle: own streams::Handle) -> Result[Unit, SystemError]
-  fn shut_down(handle: streams::Handle, direction: network::Direction) -> Result[Unit, SystemError]
+  fn seek(handle: streams.Handle, to: streams.Position) -> Result[UInt64, SystemError]
+  fn set_length(handle: streams.Handle, length: UInt64) -> Result[Unit, SystemError]
+  fn synchronize(handle: streams.Handle) -> Result[Unit, SystemError]
+  fn metadata(handle: streams.Handle) -> Result[files.Metadata, SystemError]
+  fn close(handle: own streams.Handle) -> Result[Unit, SystemError]
+  fn shut_down(handle: streams.Handle, direction: network.Direction) -> Result[Unit, SystemError]
   fn set_timeout(
-    handle: streams::Handle,
-    direction: network::Direction,
+    handle: streams.Handle,
+    direction: network.Direction,
     timeout: Option[Duration],
   ) -> Result[Unit, SystemError]
-  fn accept(listener: streams::Handle) -> Result[network::Accepted, SystemError]
-  fn accept_local(listener: streams::Handle) -> Result[streams::Handle, SystemError]
-  fn configure(socket: streams::Handle, option: network::SocketOption) -> Result[Unit, SystemError]
+  fn accept(listener: streams.Handle) -> Result[network.Accepted, SystemError]
+  fn accept_local(listener: streams.Handle) -> Result[streams.Handle, SystemError]
+  fn configure(socket: streams.Handle, option: network.SocketOption) -> Result[Unit, SystemError]
   fn send_to(
-    socket: streams::Handle,
+    socket: streams.Handle,
     bytes: Slice[UInt8],
-    address: network::SocketAddress,
+    address: network.SocketAddress,
   ) -> Result[UInt64, SystemError]
   fn receive_from(
-    socket: streams::Handle,
+    socket: streams.Handle,
     buffer: mut List[UInt8],
     limit: UInt64,
-  ) -> Result[network::Datagram, SystemError]
-  fn wait(process: streams::Handle) -> Result[processes::ExitStatus, SystemError]
-  fn signal(process: streams::Handle, signal: processes::Signal) -> Result[Unit, SystemError]
-  fn terminal_size(terminal: streams::Handle) -> Result[console::Size, SystemError]
-  fn set_raw_mode(terminal: streams::Handle, enabled: Bool) -> Result[Unit, SystemError]
+  ) -> Result[network.Datagram, SystemError]
+  fn wait(process: streams.Handle) -> Result[processes.ExitStatus, SystemError]
+  fn signal(process: streams.Handle, signal: processes.Signal) -> Result[Unit, SystemError]
+  fn terminal_size(terminal: streams.Handle) -> Result[console.Size, SystemError]
+  fn set_raw_mode(terminal: streams.Handle, enabled: Bool) -> Result[Unit, SystemError]
 }
 
 public capability Clock {
@@ -113,21 +113,21 @@ public capability Random {
 
 public capability Environment {
   fn variable(name: StringSlice) -> Option[String]
-  fn variables() -> List[environment::Variable]
+  fn variables() -> List[environment.Variable]
   fn current_directory() -> Result[Path, SystemError]
-  fn platform() -> environment::Platform
-  fn location(location: environment::Location) -> Option[Path]
+  fn platform() -> environment.Platform
+  fn location(location: environment.Location) -> Option[Path]
   fn local_zone() -> Option[String]
   fn zone_rules(name: StringSlice) -> Option[List[UInt8]]
 }
 
 public capability Processes {
-  fn run(command: processes::Command) -> Result[processes::Output, SystemError]
-  fn spawn(command: processes::Command) -> Result[processes::Child, SystemError]
+  fn run(command: processes.Command) -> Result[processes.Output, SystemError]
+  fn spawn(command: processes.Command) -> Result[processes.Child, SystemError]
 }
 
 public capability Signals {
-  fn wait(signals: Slice[processes::Signal]) -> Option[processes::Signal]
+  fn wait(signals: Slice[processes.Signal]) -> Option[processes.Signal]
 }
 
 public capability Tasks {
@@ -145,8 +145,8 @@ public capability Tasks {
 }
 
 public capability Log {
-  fn record(record: log::Record)
-  fn enabled(level: log::Level) -> Bool
+  fn record(record: log.Record)
+  fn enabled(level: log.Level) -> Bool
 }
 
 public capability Panic {

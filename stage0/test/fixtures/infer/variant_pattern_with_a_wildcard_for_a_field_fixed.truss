@@ -1,0 +1,10 @@
+type Chain =
+  | indirect Link(value: Int64, rest: Chain)
+  | End
+
+fn has_two(chain: Chain) -> Bool {
+  match chain {
+    Link(value: _, rest) => rest is Link(..)
+    End => false
+  }
+}

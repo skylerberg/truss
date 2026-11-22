@@ -1,0 +1,8 @@
+fn each_equals_itself(values: Slice[Int64], limit: Option[Int64]) -> Bool
+  ensures result
+{
+  match limit {
+    Some(_) => forall i in 0..values.length() => values[i].compare(values[i]) is Equal
+    None => true
+  }
+}

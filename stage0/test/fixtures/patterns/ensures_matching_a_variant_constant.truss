@@ -5,7 +5,7 @@ type Color =
 
 fn pick() -> Color
   ensures match result {
-    app::main::favorite => true
+    app.main.favorite => true
     Green => true
   }
 {

@@ -84,19 +84,12 @@ let check =
              such fix remains, then report the remaining diagnostics. A fix for an obligation that \
              the prover could not prove is never applied, since it changes the contract.")
   in
-  let no_proofs =
-    Cmdliner.Arg.(
-      value & flag
-      & info [ "no-proofs" ]
-          ~doc:"Skip the prover: report every other diagnostic, without the pinned solver.")
-  in
   make_command "check"
-    ~doc:"Report every diagnostic of the packages and of the project's packages they depend on."
+    ~doc:
+      "Report every diagnostic of the packages and of the project's packages they depend on, the \
+       prover's included."
     (make_project_term
-       Cmdliner.Term.(
-         const (fun fix no_proofs () ->
-             Outcome.Exit (Check_command.run ~fix ~proofs:(not no_proofs)))
-         $ fix $ no_proofs))
+       Cmdliner.Term.(const (fun fix () -> Outcome.Exit (Check_command.run ~fix)) $ fix))
 
 let test =
   let match_ =
@@ -181,8 +174,8 @@ let show =
       non_empty & pos_all string []
       & info [] ~docv:"PATH"
           ~doc:
-            "A package, module, or definition: its full path, such as $(b,weather::forecast) or \
-             $(b,weather::forecast::Forecast.summary); a name in scope in every module, such as \
+            "A package, module, or definition: its full path, such as $(b,weather.forecast) or \
+             $(b,weather.forecast.Forecast.summary); a name in scope in every module, such as \
              $(b,Int64); or a suffix of a definition's path, such as $(b,Forecast.summary).")
   in
   let body = Cmdliner.Arg.(value & flag & info [ "body" ] ~doc:"Print whole definitions.") in
@@ -261,7 +254,7 @@ let add =
        Cmdliner.Term.(
          const (fun names () -> Outcome.Exit (Add_command.run ~names))
          $ make_packages_argument
-             ~doc:"A package, such as $(b,acme::geometry) or $(b,acme::geometry@1.4.2)."))
+             ~doc:"A package, such as $(b,acme.geometry) or $(b,acme.geometry@1.4.2)."))
 
 let upgrade =
   make_command "upgrade"
@@ -272,7 +265,7 @@ let upgrade =
        Cmdliner.Term.(
          const (fun names () -> Outcome.Exit (Upgrade_command.run ~names))
          $ make_packages_argument
-             ~doc:"A package, such as $(b,acme::geometry) or $(b,acme::geometry@1.4.2)."))
+             ~doc:"A package, such as $(b,acme.geometry) or $(b,acme.geometry@1.4.2)."))
 
 let publish =
   let version =
@@ -457,7 +450,8 @@ type request = {
   work : work;
   directory : string;
   environment : (string * string) list;
-  terminal : bool;
+  is_terminal : bool;
+  is_colored : bool;
   columns : int option;
 }
 
@@ -469,7 +463,8 @@ let make_request ?(directory = Sys.getcwd ()) work =
     directory;
     environment =
       List.map (fun name -> (name, Option.value (Sys.getenv_opt name) ~default:"")) forwarded;
-    terminal = Output.terminal ();
+    is_terminal = Output.is_terminal ();
+    is_colored = Output.is_colored ();
     columns = Output.columns ();
   }
 
@@ -481,7 +476,8 @@ let respond ~report_progress request run =
       {
         print_out = Buffer.add_string buffer;
         print_err = report_progress;
-        terminal = request.terminal;
+        is_terminal = request.is_terminal;
+        is_colored = request.is_colored;
         columns = request.columns;
         json = false;
       }

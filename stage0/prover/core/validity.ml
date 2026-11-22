@@ -69,13 +69,15 @@ let run_without_costs : 'a. _ -> (unit -> 'a) -> 'a =
   context.counters <- [];
   Fun.protect ~finally:(fun () -> context.counters <- saved) read
 
-let read_specification (context : State.context) frame (formula : Mir.formula) =
+let run_as_specification (context : State.context) read =
   let panics = context.panics in
   context.panics <- false;
   Fun.protect
     ~finally:(fun () -> context.panics <- panics)
-    (fun () ->
-      run_without_costs context (fun () -> context.read_formula frame formula ~arguments:[]))
+    (fun () -> run_without_costs context read)
+
+let read_specification (context : State.context) frame (formula : Mir.formula) =
+  run_as_specification context (fun () -> context.read_formula frame formula ~arguments:[])
 
 let select_field context ty variant field term =
   match (term, Facts.find_constructors context ty) with
@@ -131,6 +133,37 @@ let find_invariants context (ty : Types.ty) =
       Some (source, List.map (fun (invariant : Mir.requirement) -> invariant.clause) invariants)
   | _ -> None
 
+let find_module (context : State.context) path =
+  Option.map
+    (fun (key : Resolve.Names.key) -> key.module_)
+    (context.lookups.interface.names.find_key path)
+
+let is_private_to_another_module (context : State.context) ~current path =
+  match context.lookups.interface.names.find_key path with
+  | Some key ->
+      (context.lookups.interface.names.read_declaration key).visibility = Resolve.Names.Private
+      && Some key.module_ <> current
+  | None -> false
+
+let names_private_definition context ~current (clause : Mir.formula) =
+  let is_hidden = ref false in
+  Mir.iter_formula
+    (fun statement ->
+      List.iter
+        (fun (edge : Mir.Call_edges.edge) ->
+          let paths = match edge with Calls path -> [ path ] | Supplies { code; _ } -> code in
+          if List.exists (is_private_to_another_module context ~current) paths then
+            is_hidden := true)
+        (Mir.Call_edges.list_statement_edges context.lookups.interface Types.no_substitution
+           statement))
+    clause;
+  !is_hidden
+
+let apply_opaque_validity context ty term =
+  let symbol = Logic.Symbol.Valid ty in
+  Facts.declare context (Logic.Function (symbol, [ Facts.declare_sort context ty ], Logic.Bool));
+  Logic.Apply (symbol, [ term ])
+
 let rec make_validity (context : State.context) frame ~assuming ?(deep = true)
     ?(includes_invariants = true) ?(seen = []) ty term =
   if List.exists (Types.equal ty) seen || List.exists (Types.equal ty) context.validating then
@@ -143,15 +176,15 @@ let rec make_validity (context : State.context) frame ~assuming ?(deep = true)
       match find_invariants context ty with
       | _ when not includes_invariants -> Logic.Boolean true
       | Some _ when Facts.find_constructors context ty = None ->
-          let symbol = Logic.Symbol.Valid ty in
-          Facts.declare context
-            (Logic.Function (symbol, [ Facts.declare_sort context ty ], Logic.Bool));
-          Logic.Apply (symbol, [ term ])
+          apply_opaque_validity context ty term
       | Some (source, written) -> (
+          let current = find_module context context.current in
+          let hidden, shown = List.partition (names_private_definition context ~current) written in
           let inner = make_type_frame context frame source ty ~self:(Some term) in
           try
             Logic.conjunction
-              (List.map (fun invariant -> snd (read_specification context inner invariant)) written)
+              ((if hidden = [] then [] else [ apply_opaque_validity context ty term ])
+              @ List.map (fun invariant -> snd (read_specification context inner invariant)) shown)
           with Facts.Unsupported _ when assuming -> Logic.Boolean true)
       | None -> Logic.Boolean true
     in

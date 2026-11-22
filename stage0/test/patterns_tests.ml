@@ -3,12 +3,12 @@ let check packages =
     (Support.make_database packages)
 
 let expect_one_diagnostic = Support.expect_one_diagnostic ~check
-let expect_fine text = Support.expect_no_diagnostics ~check [ ("app::main", text) ]
+let expect_fine text = Support.expect_no_diagnostics ~check [ ("app.main", text) ]
 let priority = Fixtures.Patterns.priority
 
 let read_message text =
-  let packages = Support.setup [ ("app::main", text) ] in
-  match check packages (Support.parse_file "app::main") with
+  let packages = Support.setup [ ("app.main", text) ] in
+  match check packages (Support.parse_file "app.main") with
   | [ diagnostic ] -> diagnostic.message
   | actual -> failwith (Printf.sprintf "%d diagnostics" (List.length actual))
 
@@ -57,7 +57,7 @@ let () =
         "patterns.unreachable_arm"
         ~says:
           "`lucky` in an earlier arm binds a variable, which matches every value. To match the \
-           constant, write `app::main::lucky`."
+           constant, write `app.main.lucky`."
         ~fixed:Fixtures.Patterns.arm_after_a_variant_binding_named_like_a_constant_fixed);
   Harness.test "an arm that the constant also covers is deleted" (fun () ->
       expect_one_diagnostic Fixtures.Patterns.arm_that_the_constant_also_covers
@@ -69,8 +69,8 @@ let () =
 
 let () =
   let list_codes text =
-    let packages = Support.setup [ ("app::main", text) ] in
-    Support.list_codes (Support.run_check ~check packages "app::main")
+    let packages = Support.setup [ ("app.main", text) ] in
+    Support.list_codes (Support.run_check ~check packages "app.main")
   in
   let expect text expected =
     match list_codes text with
@@ -100,7 +100,7 @@ let () =
 let () =
   let list_codes text =
     Support.list_codes
-      (check (Support.setup [ ("app::main", text) ]) (Support.parse_file "app::main"))
+      (check (Support.setup [ ("app.main", text) ]) (Support.parse_file "app.main"))
   in
   Harness.test "a record constant covers the record it is" (fun () ->
       expect_one_diagnostic Fixtures.Patterns.record_constant_and_record_arms

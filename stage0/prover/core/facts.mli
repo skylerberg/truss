@@ -15,6 +15,7 @@ val list_method_type_arguments : self_type:Types.ty -> Types.argument list -> Ty
 val read_parameter_name : Mir.parameter -> string
 val list_clauses : Mir.requirement list -> Mir.formula list
 val declare : State.context -> Logic.declaration -> unit
+val find_argument_sorts : State.context -> Logic.symbol -> Logic.sort list option
 val add_fact : State.context -> Logic.term -> unit
 val declare_value_symbol : State.context -> State.frame -> Logic.symbol -> Logic.sort -> Logic.term
 val make_fresh_name : State.context -> string -> 'a Logic.Symbol.t
@@ -28,7 +29,6 @@ val show_truss_value : State.context -> Logic.term -> string option
 val remove_panic_condition : Types.capability_set -> Types.capability_set
 
 val oblige :
-  ?template_clause:Obligation.template_clause ->
   ?cited:Resolve.Names.key * Core.origin ->
   ?fixes:Obligation.fix list ->
   ?holds_when:Types.condition ->
@@ -61,7 +61,6 @@ val reject_uncompared_recursion :
   unit
 
 val make_closed_obligation :
-  ?template_clause:Obligation.template_clause ->
   State.context ->
   State.frame ->
   Diagnostic.Code.prover ->
@@ -71,7 +70,6 @@ val make_closed_obligation :
   Obligation.t option
 
 val make_obligation :
-  ?template_clause:Obligation.template_clause ->
   State.context ->
   State.frame ->
   Diagnostic.Code.prover ->
@@ -81,6 +79,7 @@ val make_obligation :
   Obligation.t
 
 val locate : State.context -> State.source -> Core.origin -> Obligation.location
+val add_hole : State.context -> Resolve.Names.key * Obligation.location -> unit
 val quote : State.source -> Core.origin -> Obligation.piece
 val is_home : State.context -> State.source -> bool
 val is_in_home_package : State.context -> State.source -> bool

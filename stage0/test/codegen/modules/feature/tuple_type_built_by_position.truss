@@ -1,0 +1,13 @@
+tuple type Span(low: Int64, high: Int64)
+
+test "a tuple type is built by position, then by label in any order" {
+  let positional = Span(3, 7)
+  assert positional.low == 3
+  assert positional.high == 7
+  let labeled = Span(high: 9, low: 4)
+  assert labeled.low == 4
+  assert labeled.high == 9
+  let low, high = Span(5, high: 8)
+  assert low == 5
+  assert high == 8
+}

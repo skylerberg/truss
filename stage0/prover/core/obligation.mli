@@ -1,5 +1,4 @@
-type template_check = { from_template : Path.t; literals : string list; clauses : int list }
-type template_clause = { check : template_check; clause : int }
+type template_check = { function_ : Path.t; literals : string list }
 
 type piece =
   | Text of string
@@ -25,9 +24,9 @@ type t = {
   query : Logic.query;
   values : (Logic.symbol * string) list;
   locals : (Logic.term * string) list;
-  template_clause : template_clause option;
   path_notes : (string * Logic.term) list;
   has_untriggered_written_fact : bool;
+  is_rejection : bool;
 }
 
 type outcome = {

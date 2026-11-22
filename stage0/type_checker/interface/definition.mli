@@ -1,9 +1,5 @@
 val is_specification : Environment.interface -> bool
 val find_interface : Lookups.t -> Path.t -> Environment.interface option
-
-val sort_in_declared_order :
-  Lookups.t -> Path.t -> variant:string option -> name_of:('a -> string) -> 'a list -> 'a list
-
 val find_type_interface : Lookups.t -> Path.t -> Types.type_interface option
 val read_type_interface : Lookups.t -> Path.t -> Types.type_interface
 val find_declared_signature : Lookups.t -> Path.t -> Types.signature option

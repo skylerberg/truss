@@ -1,5 +1,5 @@
-use standard::intrinsic
-use standard::text
+use standard.intrinsic
+use standard.text
 
 public opaque type Regex(pattern: String, program: List[UInt32], group_names: List[String])
   derives Copyable
@@ -125,10 +125,10 @@ fn failure(kind: PatternErrorKind, offset: UInt64) -> Option[ParseError]
 }
 
 fn word_of(count: UInt64) -> UInt32
-  ensures result == (if count > UInt32.maximum { UInt32.maximum } else { intrinsic::convert(count) })
+  ensures result == (if count > UInt32.maximum { UInt32.maximum } else { intrinsic.convert(count) })
   cost time O(1)
 {
-  if intrinsic::fits[UInt64, UInt32](count) { intrinsic::convert(count) } else { UInt32.maximum }
+  if intrinsic.fits[UInt64, UInt32](count) { intrinsic.convert(count) } else { UInt32.maximum }
 }
 
 fn Builder.here(self) -> UInt64
@@ -329,7 +329,7 @@ fn count_at(text: StringSlice, from: UInt64, to: UInt64) -> Option[Count]
     invariant value <= 1000
     decreases to - index
   {
-    value = value * 10 + intrinsic::convert[UInt8, UInt64](text.byte(index) - 48)
+    value = value * 10 + intrinsic.convert[UInt8, UInt64](text.byte(index) - 48)
     if value > 1000 {
       return None
     }
@@ -433,8 +433,8 @@ fn escaped_character(text: StringSlice, from: UInt64, to: UInt64) -> Result[UInt
     if to - from < 4 {
       return Err(wrong)
     }
-    let high: UInt32 = intrinsic::convert(text.byte(from + 2).digit_value())
-    let low: UInt32 = intrinsic::convert(text.byte(from + 3).digit_value())
+    let high: UInt32 = intrinsic.convert(text.byte(from + 2).digit_value())
+    let low: UInt32 = intrinsic.convert(text.byte(from + 3).digit_value())
     if high >= 16 || low >= 16 {
       return Err(wrong)
     }
@@ -452,7 +452,7 @@ fn escaped_character(text: StringSlice, from: UInt64, to: UInt64) -> Result[UInt
       invariant code <= 1114111
       decreases to - index
     {
-      let digit: UInt32 = intrinsic::convert(text.byte(index).digit_value())
+      let digit: UInt32 = intrinsic.convert(text.byte(index).digit_value())
       if digit >= 16 || code > 69631 {
         return Err(wrong)
       }
@@ -937,23 +937,6 @@ fn compile(text: StringSlice, placeholders: Bool) -> Result[Regex, ParseError]
   Ok(Regex(pattern: text.to_string(), program: own program, group_names: own builder.names))
 }
 
-public fn is_valid_template(literals: Slice[text::Literal]) -> Bool
-{
-  var pattern = ""
-  var index: UInt64 = 0
-  while index < literals.length()
-    invariant index <= literals.length()
-    decreases literals.length() - index
-  {
-    if index > 0 {
-      mut pattern.push("\u{1}")
-    }
-    mut pattern.push(literals[index].text())
-    index += 1
-  }
-  literals.length() > 0 && compile(pattern, placeholders: true) is Ok(_)
-}
-
 public opaque type Part(source: String)
 
 impl From[StringSlice] for Part {
@@ -985,8 +968,24 @@ impl From[Regex] for Part {
 impl FromTemplate for Regex {
   type Part = Part
 
+  fn is_valid_template(literals: List[text.Literal]) -> Bool
+  {
+    var pattern = ""
+    var index: UInt64 = 0
+    while index < literals.length()
+      invariant index <= literals.length()
+      decreases literals.length() - index
+    {
+      if index > 0 {
+        mut pattern.push("\u{1}")
+      }
+      mut pattern.push(literals[index].text())
+      index += 1
+    }
+    literals.length() > 0 && compile(pattern, placeholders: true) is Ok(_)
+  }
+
   fn from_template(template: Template[Part]) -> Regex
-    requires is_valid_template(template.literals)
   {
     var pattern = ""
     var index: UInt64 = 0
@@ -1037,7 +1036,7 @@ fn Regex.instructions(self) -> UInt64
   ensures result <= UInt32.maximum
   cost time O(1)
 {
-  intrinsic::convert(self.word(0))
+  intrinsic.convert(self.word(0))
 }
 
 fn Regex.field(self, instruction: UInt64, field: UInt64) -> UInt32
@@ -1052,8 +1051,8 @@ fn Regex.field(self, instruction: UInt64, field: UInt64) -> UInt32
 
 fn Regex.in_ranges(self, first: UInt32, count: UInt32, code: UInt32) -> Bool
 {
-  let base = 1 + self.instructions() * 3 + intrinsic::convert[UInt32, UInt64](first) * 2
-  let pairs: UInt64 = intrinsic::convert(count)
+  let base = 1 + self.instructions() * 3 + intrinsic.convert[UInt32, UInt64](first) * 2
+  let pairs: UInt64 = intrinsic.convert(count)
   var index: UInt64 = 0
   while index < pairs
     invariant index <= pairs
@@ -1130,14 +1129,14 @@ fn Regex.follow(
     } else if first < marks.length() && marks[first] != stamp {
       marks[first] = stamp
       let operation = self.field(first, field: 0)
-      let target: UInt64 = intrinsic::convert(self.field(first, field: 1))
+      let target: UInt64 = intrinsic.convert(self.field(first, field: 1))
       if operation == 6 {
         mut stack.push(0)
         mut stack.push(target)
         mut stack.push(0)
       } else if operation == 5 {
         mut stack.push(0)
-        mut stack.push(intrinsic::convert(self.field(first, field: 2)))
+        mut stack.push(intrinsic.convert(self.field(first, field: 2)))
         mut stack.push(0)
         mut stack.push(0)
         mut stack.push(target)
@@ -1562,7 +1561,7 @@ impl Display for Regex {
   }
 }
 
-impl text::Parse for Regex {
+impl text.Parse for Regex {
   type Error = ParseError
 
   fn parse(text: StringSlice) -> Result[Regex, ParseError] {

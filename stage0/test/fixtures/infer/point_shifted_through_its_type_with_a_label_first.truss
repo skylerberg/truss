@@ -1,0 +1,9 @@
+type Point(x: Int64, y: Int64)
+
+fn Point.shifted(self, by: Int64) -> Int64 {
+  by
+}
+
+fn f(point: Point) -> Int64 {
+  Point.shifted(by: 3, point)
+}

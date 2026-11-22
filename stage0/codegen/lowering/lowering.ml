@@ -40,8 +40,6 @@ let make (context : Lower.context) (item : Lowered.Item.t) : lowered =
   | Debug ty -> Compiled (Debug_output.build_debug env ty)
   | Encode ty -> Compiled (Encoding.encode env ty)
   | Evaluator path -> Compiled (Lower.lower_evaluator context path)
-  | Template_check { from_template; literals; clauses } ->
-      Compiled (Lower.lower_template_check context ~from_template ~literals ~clauses)
   | Call_evaluation { function_; arguments } ->
       Compiled (Lower.lower_call_evaluation context ~function_ ~arguments)
 

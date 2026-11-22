@@ -17,15 +17,16 @@ let rec evaluate_expression lookups ~visiting resolved (value : Syntax.expressio
               if Z.equal right Z.zero then None else Some (Z.rem left right)
           | Operation (Bitwise _ | Shift _) | Comparison _ | Connective _ -> None)
       | _ -> None)
-  | Name path -> (
-      match (resolved : Resolve.resolved).names.(path.last.id) with
-      | Some (Definition (Constant, path)) -> evaluate_path lookups ~visiting path
-      | _ -> None)
-  | Member ({ kind = Name owner; _ }, member) -> (
-      match resolved.names.(owner.last.id) with
-      | Some (Definition (Type, owner)) ->
-          evaluate_path lookups ~visiting (Member_constant { owner; name = member.text })
-      | _ -> None)
+  | Name _ | Member _ -> (
+      match (Resolve.find_head resolved value, value.kind) with
+      | Some { target = Definition (Constant, path); _ }, _ -> evaluate_path lookups ~visiting path
+      | Some _, _ -> None
+      | None, Member (owner, member) -> (
+          match Resolve.find_head resolved owner with
+          | Some { target = Definition (Type, owner); _ } ->
+              evaluate_path lookups ~visiting (Member_constant { owner; name = member.text })
+          | _ -> None)
+      | None, _ -> None)
   | _ -> None
 
 and evaluate_path (lookups : Lookups.t) ~visiting path =

@@ -66,18 +66,24 @@ let list_clauses (requires : Mir.requirement list) =
   List.map (fun (requirement : Mir.requirement) -> requirement.clause) requires
 
 let declare (context : State.context) (declaration : Logic.declaration) =
+  let declare_symbol name arguments =
+    if not (Tables.Symbol_table.mem context.declared name) then begin
+      Tables.Symbol_table.replace context.declared name arguments;
+      context.declarations <- declaration :: context.declarations
+    end
+  in
   match declaration with
-  | Constant (name, _) | Function (name, _, _) ->
-      if not (Tables.Symbol_table.mem context.declared name) then begin
-        Tables.Symbol_table.replace context.declared name ();
-        context.declarations <- declaration :: context.declarations
-      end
+  | Constant (name, _) -> declare_symbol name []
+  | Function (name, arguments, _) -> declare_symbol name arguments
   | Definition { symbol; _ } ->
       if not (Tables.Symbol_table.mem context.definitions symbol) then begin
         Tables.Symbol_table.replace context.definitions symbol ();
         context.declarations <- declaration :: context.declarations
       end
   | Datatype _ -> invalid_arg "Translate.declare: a datatype is declared by its sort"
+
+let find_argument_sorts (context : State.context) symbol =
+  Tables.Symbol_table.find_opt context.declared symbol
 
 let add_fact (context : State.context) fact = context.facts <- fact :: context.facts
 
@@ -173,6 +179,8 @@ let add_quantifier_facts ~binders (context : State.context) term =
     | Logic.Operation (Implies, [ premise; conclusion ]) ->
         Logic.Operation
           (Implies, [ walk (not positive) bound premise; walk positive bound conclusion ])
+    | Logic.Operation (Ite, [ condition; then_; else_ ]) ->
+        Logic.Operation (Ite, [ condition; walk positive bound then_; walk positive bound else_ ])
     | Logic.Operation (Not, [ inner ]) -> Logic.Operation (Not, [ walk (not positive) bound inner ])
     | term -> term
   in
@@ -193,6 +201,9 @@ let assume context (frame : State.frame) term =
 
 let locate (context : State.context) (source : State.source) origin =
   if is_home context source then Obligation.Node origin else Whole_definition
+
+let add_hole (context : State.context) hole =
+  if not (List.mem hole context.holes) then context.holes <- hole :: context.holes
 
 let insert_line_before_body (context : State.context) (line : Obligation.message) =
   let names = context.lookups.interface.names in
@@ -343,11 +354,10 @@ let add_requires (context : State.context) (frame : State.frame) (required : Obl
             ((Obligation.Text ("(" ^ premise ^ ") ==> (") :: required) @ [ Obligation.Text ")" ])
       | None -> make_requires_fix context required)
 
-let rec make_closed_obligation ?template_clause context (frame : State.frame) code location message
-    goal =
+let rec make_closed_obligation context (frame : State.frame) code location message goal =
   if not frame.makes_obligations then None
   else if not (Logic.mentions frame.bound goal || Logic.mentions frame.bound frame.condition) then
-    Some (make_obligation ?template_clause context frame code location message goal)
+    Some (make_obligation context frame code location message goal)
   else
     let names = List.map (fun (name, _, _) -> name) frame.binders in
     let goal =
@@ -358,13 +368,13 @@ let rec make_closed_obligation ?template_clause context (frame : State.frame) co
     match close_over_binders frame (Logic.( ==> ) frame.condition goal) with
     | Some closed ->
         Some
-          (make_obligation ?template_clause context
+          (make_obligation context
              { frame with condition = Logic.Boolean true }
              code location message closed)
     | None -> None
 
-and make_obligation ?template_clause (context : State.context) (frame : State.frame) code location
-    message goal : Obligation.t =
+and make_obligation (context : State.context) (frame : State.frame) code location message goal :
+    Obligation.t =
   let query =
     Logic.prune
       {
@@ -385,6 +395,7 @@ and make_obligation ?template_clause (context : State.context) (frame : State.fr
     has_untriggered_written_fact =
       Logic.has_untriggered_fact query
         ~is_counted:(Tables.Term_table.mem context.written_quantifiers);
+    is_rejection = goal = Logic.Boolean false;
     locals =
       (let is_parameter = function
          | Logic.Symbol symbol -> List.mem_assoc symbol context.values
@@ -400,7 +411,6 @@ and make_obligation ?template_clause (context : State.context) (frame : State.fr
          (match frame.result with
          | Some term when not (is_parameter term) -> [ (term, "result") ]
          | _ -> []));
-    template_clause;
   }
 
 let remove_panic_condition (uses : Types.capability_set) =
@@ -412,8 +422,8 @@ let is_panic_obligation : Diagnostic.Code.prover -> bool = function
   | Overflow | Division | Shift | Panic -> true
   | _ -> false
 
-let oblige ?template_clause ?cited ?(fixes = []) ?holds_when (context : State.context)
-    (frame : State.frame) code location message goal =
+let oblige ?cited ?(fixes = []) ?holds_when (context : State.context) (frame : State.frame) code
+    location message goal =
   let holds_when = Option.value holds_when ~default:context.obligation_condition in
   if
     (is_panic_obligation code && context.panics)
@@ -425,7 +435,7 @@ let oblige ?template_clause ?cited ?(fixes = []) ?holds_when (context : State.co
   then assume context frame goal
   else
     match
-      make_closed_obligation ?template_clause context frame code location message
+      make_closed_obligation context frame code location message
         (add_quantifier_facts
            ~binders:(List.map (fun (name, _, _) -> name) frame.binders)
            context goal)

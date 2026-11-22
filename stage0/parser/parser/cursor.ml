@@ -6,6 +6,7 @@ type t = {
   stop : int;
   base : int;
   group_ends : int array;
+  angle_closers : int option array;
   diagnostics : Diagnostic.Collector.t;
   mutable index : int;
   mutable nesting_depth : int;
@@ -33,6 +34,42 @@ let group_ends tokens ~first ~stop =
   done;
   ends
 
+let continues_type_arguments : Token.kind -> bool = function
+  | Upper _ | Lower _ | Integer _
+  | Punctuation (Comma | Colon | Dot | Equal | Plus | Arrow)
+  | Keyword (Self_type | Any | Fn | Mut | Own | Capability) ->
+      true
+  | _ -> false
+
+let list_angle_closers (tokens : Token.t array) ~first ~stop =
+  let closers = Array.make (stop - first) None in
+  let rec scan index ~openers ~enclosing =
+    if index < stop then
+      match tokens.(index).kind with
+      | Punctuation Less -> scan (index + 1) ~openers:(index :: openers) ~enclosing
+      | Punctuation Greater -> (
+          match openers with
+          | innermost :: outer ->
+              closers.(innermost - first) <- Some index;
+              scan (index + 1) ~openers:outer ~enclosing
+          | [] -> scan (index + 1) ~openers ~enclosing)
+      | Punctuation Shift_right -> (
+          match openers with
+          | _ :: second :: outer ->
+              closers.(second - first) <- Some index;
+              scan (index + 1) ~openers:outer ~enclosing
+          | _ -> scan (index + 1) ~openers:[] ~enclosing)
+      | Punctuation (Open _) -> scan (index + 1) ~openers:[] ~enclosing:(openers :: enclosing)
+      | Punctuation (Close _) -> (
+          match enclosing with
+          | outer :: rest -> scan (index + 1) ~openers:outer ~enclosing:rest
+          | [] -> scan (index + 1) ~openers:[] ~enclosing)
+      | kind when continues_type_arguments kind -> scan (index + 1) ~openers ~enclosing
+      | _ -> scan (index + 1) ~openers:[] ~enclosing
+  in
+  scan first ~openers:[] ~enclosing:[];
+  closers
+
 let create ~diagnostics ~base tokens ~first ~stop =
   {
     tokens;
@@ -40,6 +77,7 @@ let create ~diagnostics ~base tokens ~first ~stop =
     stop;
     base;
     group_ends = group_ends tokens ~first ~stop;
+    angle_closers = list_angle_closers tokens ~first ~stop;
     diagnostics;
     index = first;
     nesting_depth = 0;
@@ -154,29 +192,47 @@ let read_span cursor id = Dynarray.get cursor.spans id
 let set_span cursor id span = Dynarray.set cursor.spans id span
 let read_file_span cursor id = make_file_span cursor (read_span cursor id)
 
+let locate_first (tokens : Token.t array) ~first ~stop is_reached =
+  let rec search low high =
+    if low >= high then low
+    else
+      let middle = low + ((high - low) / 2) in
+      if is_reached tokens.(middle) then search low middle else search (middle + 1) high
+  in
+  search first stop
+
 let rec list_tokens_within (tokens : Token.t array) ~first ~stop (span : Source.span) =
-  let inside = ref [] and enclosing = ref None in
-  for index = first to stop - 1 do
-    let token = tokens.(index) in
-    if span.start <= token.span.start && token.span.stop <= span.stop then
-      inside := token :: !inside
-    else if token.span.start <= span.start && span.stop <= token.span.stop then
-      enclosing := Some token
-  done;
-  match (!inside, !enclosing) with
-  | [], Some { kind = String literal; _ } -> (
-      match
-        List.find_opt
-          (fun (interpolation : Token.interpolation) ->
-            interpolation.span.start <= span.start && span.stop <= interpolation.span.stop)
-          (Array.to_list (Token.list_interpolations literal))
-      with
-      | Some interpolation ->
-          list_tokens_within interpolation.tokens ~first:0
-            ~stop:(Array.length interpolation.tokens)
-            span
-      | None -> [||])
-  | inside, _ -> Array.of_list (List.rev inside)
+  let inside_first =
+    locate_first tokens ~first ~stop (fun (token : Token.t) -> token.span.start >= span.start)
+  in
+  let inside_stop =
+    locate_first tokens ~first:inside_first ~stop (fun (token : Token.t) ->
+        token.span.stop > span.stop)
+  in
+  let encloses index =
+    first <= index && index < stop
+    && tokens.(index).span.start <= span.start
+    && span.stop <= tokens.(index).span.stop
+  in
+  if inside_first < inside_stop then Array.sub tokens inside_first (inside_stop - inside_first)
+  else
+    match List.find_opt encloses [ inside_stop; inside_first - 1 ] with
+    | Some index -> (
+        match tokens.(index).kind with
+        | String literal -> (
+            match
+              List.find_opt
+                (fun (interpolation : Token.interpolation) ->
+                  interpolation.span.start <= span.start && span.stop <= interpolation.span.stop)
+                (Array.to_list (Token.list_interpolations literal))
+            with
+            | Some interpolation ->
+                list_tokens_within interpolation.tokens ~first:0
+                  ~stop:(Array.length interpolation.tokens)
+                  span
+            | None -> [||])
+        | _ -> [||])
+    | None -> [||]
 
 let spell cursor ?insertions span =
   match list_tokens_within cursor.tokens ~first:cursor.first ~stop:cursor.stop span with
@@ -184,26 +240,28 @@ let spell cursor ?insertions span =
   | tokens -> Token.spell_tokens ?insertions tokens
 
 let joins_neighbors cursor (span : Source.span) code =
-  let find_adjacent is_adjacent =
+  let find_spelling ~offset_of offset =
     let rec search index =
-      if index >= cursor.stop then None
-      else
+      if index < cursor.stop && offset_of cursor.tokens.(index) = offset then
         let token = cursor.tokens.(index) in
-        if token.span.start < token.span.stop && is_adjacent token then
-          Token.spell_tokens [| token |]
+        if token.span.start < token.span.stop then Token.spell_tokens [| token |]
         else search (index + 1)
+      else None
     in
-    Option.bind (search cursor.first) (fun spelling ->
-        if spelling = "" then None else Some spelling)
+    Option.bind
+      (search
+         (locate_first cursor.tokens ~first:cursor.first ~stop:cursor.stop (fun token ->
+              offset_of token >= offset)))
+      (fun spelling -> if spelling = "" then None else Some spelling)
   in
   let before =
     Option.map
       (fun spelling -> spelling.[String.length spelling - 1])
-      (find_adjacent (fun token -> token.span.stop = span.start))
+      (find_spelling ~offset_of:(fun (token : Token.t) -> token.span.stop) span.start)
   and after =
     Option.map
       (fun spelling -> spelling.[0])
-      (find_adjacent (fun token -> token.span.start = span.stop))
+      (find_spelling ~offset_of:(fun (token : Token.t) -> token.span.start) span.stop)
   in
   Token.joins_neighbor ~before ~after code
 
@@ -282,6 +340,7 @@ let check_chain_length cursor ~chain_length =
   end
 
 let lookup_closer cursor index = cursor.group_ends.(index - cursor.first)
+let find_angle_closer cursor = cursor.angle_closers.(cursor.index - cursor.first)
 
 let skip_to cursor limit =
   while cursor.index < min limit cursor.stop do

@@ -1,5 +1,5 @@
-use app::main
+use app.main
 
-fn main::Counter.get(self) -> Int64 {
+fn main.Counter.get(self) -> Int64 {
   self.count
 }

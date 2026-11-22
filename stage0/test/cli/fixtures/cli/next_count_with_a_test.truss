@@ -1,0 +1,7 @@
+fn next(count: UInt8) -> UInt8 {
+  count + 1
+}
+
+test "next counts up" {
+  assert next(1) == 2
+}

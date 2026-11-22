@@ -1,1 +1,1 @@
-val run : fix:bool -> proofs:bool -> int
+val run : fix:bool -> int

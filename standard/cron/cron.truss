@@ -1,5 +1,5 @@
-use standard::intrinsic
-use standard::time
+use standard.intrinsic
+use standard.time
 
 public type Error(message: String)
   derives Equal
@@ -156,10 +156,10 @@ public fn Schedule.parse(expression: StringSlice) -> Result[Schedule, Error] {
 }
 
 fn has(mask: UInt64, value: UInt8) -> Bool {
-  value < 64 && (mask & bit(intrinsic::convert(value))) != 0
+  value < 64 && (mask & bit(intrinsic.convert(value))) != 0
 }
 
-fn matches_day(schedule: Schedule, date: time::Date) -> Bool {
+fn matches_day(schedule: Schedule, date: time.Date) -> Bool {
   if !has(schedule.months, value: date.month().number()) {
     return false
   }
@@ -192,7 +192,7 @@ public fn Schedule.next_after(self, after: Instant) -> Option[Instant] {
           for minute in 0..minutes {
             let is_later = day_index > 0 || hour > first_hour || minute >= first_minute
             if is_later && has(self.minutes, value: minute) {
-              match time::TimeOfDay.new(hour, minute: minute) {
+              match time.TimeOfDay.new(hour, minute: minute) {
                 Some(time) => return date.at(time).instant(0)
                 None => {}
               }

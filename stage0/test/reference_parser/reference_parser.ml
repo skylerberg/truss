@@ -79,7 +79,6 @@ let token_of_kind (kind : Token.kind) : Truss.token option =
         | Close Curly -> RBRACE
         | Comma -> COMMA
         | Colon -> COLON
-        | Colon_colon -> COLONCOLON
         | Dot -> DOT
         | Dot_dot -> DOTDOT
         | Dot_dot_equal -> DOTDOTEQ
@@ -156,6 +155,7 @@ module Snippet = struct
     match (read_kind 0, read_kind 1) with
     | Keyword (Public | Internal | Type | Trait | Impl | Capability | Test | Theorem), _ -> true
     | Keyword Fn, (Lower _ | Upper _) -> true
+    | Lower "tuple", Keyword Type -> true
     | Keyword Proof, Upper _ -> true
     | Keyword Let, Upper _ -> (
         match read_kind 2 with Punctuation (Dot | Open Square) -> true | _ -> false)

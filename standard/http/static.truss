@@ -1,5 +1,5 @@
-use standard::streams
-use standard::url
+use standard.streams
+use standard.url
 
 public type StaticOptions(index: String = "index.html", max_age_seconds: Int64 = 0, compress: Bool = true)
   derives Equal
@@ -182,8 +182,8 @@ public fn serve_file(request: Request, responder: mut Responder, file: Path, opt
       mut headers.add("Content-Range", value: "bytes ${span.start}-${span.end}/${length}")
       mut headers.add("Content-Length", value: "${span.length}")
       var reader = system(FileRead.open(file))?
-      let _ = system(mut reader.seek(streams::Position.FromStart(offset: span.start)))?
-      var limited = streams::Limited.new(own reader, limit: span.length)
+      let _ = system(mut reader.seek(streams.Position.FromStart(offset: span.start)))?
+      var limited = streams.Limited.new(own reader, limit: span.length)
       return mut responder.stream(mut limited, status: Status(code: 206), headers: headers)
     }
     Whole => {}
@@ -248,7 +248,7 @@ public fn serve_directory(
     return mut responder.send(Response.text("not found", status: Status.not_found))
   }
   let relative = path.part(prefix.length(), to: path.length())
-  let decoded = match url::decode_component(relative) {
+  let decoded = match url.decode_component(relative) {
     Ok(decoded) => own decoded
     Err(_) => return mut responder.send(Response.text("not found", status: Status.not_found))
   }

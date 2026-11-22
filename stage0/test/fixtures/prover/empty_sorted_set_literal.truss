@@ -1,6 +1,6 @@
-use standard::collections
+use standard.collections
 
-fn f() -> collections::SortedSet[Int64]
+fn f() -> collections.SortedSet[Int64]
   ensures result.length() == 0
   cost time O(1)
 {

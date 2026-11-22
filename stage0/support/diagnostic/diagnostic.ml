@@ -12,6 +12,7 @@ module Code = struct
     | String_delimiter
     | Attribute
     | Foreign_operator
+    | Path_separator
     | Confusable_character
     | Lifetime
     | Number_hexadecimal_float
@@ -50,6 +51,7 @@ module Code = struct
     | Let_else_brace
     | Nesting_too_deep
     | Misplaced_opaque
+    | Misplaced_tuple
     | Misplaced_visibility
     | Misplaced_self
     | Lends_own
@@ -77,7 +79,6 @@ module Code = struct
     | As_conversion
     | Elif
     | Angle_brackets
-    | Path_separator
     | Qualified_variant
     | Macro_call
     | Tuple
@@ -122,6 +123,7 @@ module Code = struct
     | Missing_label
     | Unknown_label
     | Out_of_order
+    | Positional_after_labeled
     | Missing_argument
     | Too_many_arguments
     | Repeated_argument
@@ -148,6 +150,7 @@ module Code = struct
     | Wrong_try
     | Lambda_needs_type
     | Not_a_record
+    | Not_a_tuple_type
     | Unknown_variant
     | Specification_only
     | Not_in_specification
@@ -286,6 +289,7 @@ module Code = struct
     | String_delimiter -> "string_delimiter"
     | Attribute -> "attribute"
     | Foreign_operator -> "foreign_operator"
+    | Path_separator -> "path_separator"
     | Confusable_character -> "confusable_character"
     | Lifetime -> "lifetime"
     | Number_hexadecimal_float -> "number_hexadecimal_float"
@@ -325,6 +329,7 @@ module Code = struct
     | Let_else_brace -> "let_else_brace"
     | Nesting_too_deep -> "nesting_too_deep"
     | Misplaced_opaque -> "misplaced_opaque"
+    | Misplaced_tuple -> "misplaced_tuple"
     | Misplaced_visibility -> "misplaced_visibility"
     | Misplaced_self -> "misplaced_self"
     | Lends_own -> "lends_own"
@@ -352,7 +357,6 @@ module Code = struct
     | As_conversion -> "as_conversion"
     | Elif -> "elif"
     | Angle_brackets -> "angle_brackets"
-    | Path_separator -> "path_separator"
     | Qualified_variant -> "qualified_variant"
     | Macro_call -> "macro_call"
     | Tuple -> "tuple"
@@ -399,6 +403,7 @@ module Code = struct
     | Missing_label -> "missing_label"
     | Unknown_label -> "unknown_label"
     | Out_of_order -> "out_of_order"
+    | Positional_after_labeled -> "positional_after_labeled"
     | Missing_argument -> "missing_argument"
     | Too_many_arguments -> "too_many_arguments"
     | Repeated_argument -> "repeated_argument"
@@ -425,6 +430,7 @@ module Code = struct
     | Wrong_try -> "wrong_try"
     | Lambda_needs_type -> "lambda_needs_type"
     | Not_a_record -> "not_a_record"
+    | Not_a_tuple_type -> "not_a_tuple_type"
     | Unknown_variant -> "unknown_variant"
     | Not_structural -> "not_structural"
     | Specification_only -> "specification_only"
@@ -759,13 +765,32 @@ let quote text =
   Buffer.add_char buffer '"';
   Buffer.contents buffer
 
-let render source (diagnostic : t) =
+type style = Bold | Margin | Severity of severity
+
+let paint ~is_colored style text =
+  if not is_colored then text
+  else
+    let start =
+      match style with
+      | Bold -> "\027[1m"
+      | Margin -> "\027[1;34m"
+      | Severity Error -> "\027[1;31m"
+      | Severity Warning -> "\027[1;33m"
+    in
+    start ^ text ^ "\027[0m"
+
+let paint_severity ~is_colored severity text = paint ~is_colored (Severity severity) text
+
+let render ~is_colored source (diagnostic : t) =
+  let paint = paint ~is_colored in
   let buffer = Buffer.create 256 in
   let text = Source.text source in
-  Printf.bprintf buffer "%s: %s[%s]: %s\n"
-    (show_location source diagnostic.span.start)
-    (show_severity diagnostic.severity)
-    (Code.name diagnostic.code) diagnostic.message;
+  let margin = paint Margin "  |" in
+  Printf.bprintf buffer "%s %s%s\n"
+    (paint Bold (show_location source diagnostic.span.start ^ ":"))
+    (paint (Severity diagnostic.severity)
+       (Printf.sprintf "%s[%s]" (show_severity diagnostic.severity) (Code.name diagnostic.code)))
+    (paint Bold (": " ^ diagnostic.message));
   let start = diagnostic.span.start in
   let line_start = Source.compute_line_start source start in
   let line_end = Source.compute_line_end source start in
@@ -780,7 +805,7 @@ let render source (diagnostic : t) =
     !valid
   in
   if is_printable && String.length line <= 200 then begin
-    Printf.bprintf buffer "  | %s\n" line;
+    Printf.bprintf buffer "%s %s\n" margin line;
     let leading = Buffer.create 16 in
     for index = line_start to start - 1 do
       match text.[index] with
@@ -788,16 +813,17 @@ let render source (diagnostic : t) =
       | character when Char.code character land 0xC0 = 0x80 -> ()
       | _ -> Buffer.add_char leading ' '
     done;
-    Printf.bprintf buffer "  | %s%s\n" (Buffer.contents leading)
-      (String.make (max 1 (stop_column - start_column)) '^')
+    Printf.bprintf buffer "%s %s%s\n" margin (Buffer.contents leading)
+      (paint (Severity diagnostic.severity) (String.make (max 1 (stop_column - start_column)) '^'))
   end;
   List.iter
     (fun ((span : Source.span), note) ->
-      Printf.bprintf buffer "  note: %s: %s\n" (show_location source span.start) note)
+      Printf.bprintf buffer "  %s %s: %s\n" (paint Bold "note:") (show_location source span.start)
+        note)
     diagnostic.notes;
   List.iter
     (fun fix ->
-      Printf.bprintf buffer "  fix: %s\n" fix.title;
+      Printf.bprintf buffer "  %s %s\n" (paint Bold "fix:") fix.title;
       List.iter
         (fun (edit : Source.span edit) ->
           let original = String.sub text edit.span.start (edit.span.stop - edit.span.start) in
@@ -808,6 +834,7 @@ let render source (diagnostic : t) =
             (show_location source edit.span.start))
         fix.edits)
     diagnostic.fixes;
+  Buffer.add_char buffer '\n';
   Buffer.contents buffer
 
 let encode_json_string value =

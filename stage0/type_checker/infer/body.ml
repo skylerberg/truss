@@ -220,9 +220,9 @@ let check_deserialized_invariants state (elaborated : Interface.Environment.elab
           if not invariant.executable then
             State.report state Cannot_derive
               (State.read_span state (Core_walk.locate_origin invariant.value.origin))
-              "This invariant cannot be checked at run time, so `serialization::Deserialize` \
-               cannot be derived: a value read from data might break it. Write the `impl`, which \
-               checks the value another way.")
+              "This invariant cannot be checked at run time, so `serialization.Deserialize` cannot \
+               be derived: a value read from data might break it. Write the `impl`, which checks \
+               the value another way.")
         invariants
   | _ -> ()
 
@@ -359,7 +359,7 @@ let list_used_packages (resolved : Resolve.resolved) ~evidence_packages (form : 
     List.filter_map
       (function
         | Some (Resolve.Definition (_, path) | Variant (path, _)) -> Some (Path.locate_package path)
-        | Some (Module module_) -> Some module_.package
+        | Some (Module { module_; _ }) -> Some module_.package
         | _ -> None)
       (Array.to_list resolved.names)
   in

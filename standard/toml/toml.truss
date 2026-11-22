@@ -1,7 +1,7 @@
-use standard::intrinsic
-use standard::map
-use standard::serialization
-use standard::time
+use standard.intrinsic
+use standard.map
+use standard.serialization
+use standard.time
 
 public type Value =
   | String(value: String)
@@ -9,9 +9,9 @@ public type Value =
   | Float(value: Float64)
   | Boolean(value: Bool)
   | OffsetDateTime(value: Instant)
-  | LocalDateTime(value: time::DateTime)
-  | LocalDate(value: time::Date)
-  | LocalTime(value: time::TimeOfDay)
+  | LocalDateTime(value: time.DateTime)
+  | LocalDate(value: time.Date)
+  | LocalTime(value: time.TimeOfDay)
   | Array(items: List[Value])
   | Table(entries: Map[String, Value])
   derives Equal
@@ -32,7 +32,7 @@ impl Display for ParseError {
 
 public type Error =
   | Parse(error: ParseError)
-  | Deserialize(error: serialization::Error)
+  | Deserialize(error: serialization.Error)
   derives Equal
 
 impl Display for Error {
@@ -177,7 +177,7 @@ fn hex_digits(text: StringSlice, at: mut UInt64, count: UInt64) -> Result[UInt32
         if digit >= 16 {
           return Err(failure_at("expected a hexadecimal digit", offset: at))
         }
-        code = code.wrapping_multiply(16).wrapping_add(intrinsic::convert(digit))
+        code = code.wrapping_multiply(16).wrapping_add(intrinsic.convert(digit))
         at += 1
       }
       None => return Err(failure_at("the text ends inside an escape", offset: at))
@@ -445,13 +445,13 @@ fn date_time_value(text: StringSlice, at: mut UInt64) -> Result[Value, Failure]
   at = end
   let written = normalized.slice()
   if !is_date_at(written, at: 0) {
-    return match time::TimeOfDay.parse(written) {
+    return match time.TimeOfDay.parse(written) {
       Ok(time) => Ok(Value.LocalTime(value: time))
       Err(_) => Err(failure_at("a time that is not a time of day", offset: start))
     }
   }
   if written.length() == 10 {
-    return match time::Date.parse(written) {
+    return match time.Date.parse(written) {
       Ok(date) => Ok(Value.LocalDate(value: date))
       Err(_) => Err(failure_at("a date that is not a date", offset: start))
     }
@@ -473,7 +473,7 @@ fn date_time_value(text: StringSlice, at: mut UInt64) -> Result[Value, Failure]
       Err(_) => Err(failure_at("a date and time that is not one", offset: start))
     }
   } else {
-    match time::DateTime.parse(written) {
+    match time.DateTime.parse(written) {
       Ok(date_time) => Ok(Value.LocalDateTime(value: date_time))
       Err(_) => Err(failure_at("a date and time that is not one", offset: start))
     }
@@ -812,7 +812,7 @@ fn build(document: mut Document, index: UInt64) -> Value
   match document.kind(index) {
     Some(Leaf) => {
       if index < document.values.length() {
-        match map::exchange(mut document.values[index], value: None) {
+        match map.exchange(mut document.values[index], value: None) {
           Some(value) => return own value
           None => {}
         }
@@ -820,7 +820,7 @@ fn build(document: mut Document, index: UInt64) -> Value
       Value.Table(entries: [:])
     }
     Some(Tables) => {
-      let items = if index < document.items.length() { map::exchange(mut document.items[index], value: []) } else { [] }
+      let items = if index < document.items.length() { map.exchange(mut document.items[index], value: []) } else { [] }
       var built: List[Value] = List.with_capacity(items.length())
       for item in items {
         mut built.push(build(mut document, index: item))
@@ -828,7 +828,7 @@ fn build(document: mut Document, index: UInt64) -> Value
       Value.Array(items: own built)
     }
     _ => {
-      let children = if index < document.children.length() { map::exchange(mut document.children[index], value: [:]) } else { [:] }
+      let children = if index < document.children.length() { map.exchange(mut document.children[index], value: [:]) } else { [:] }
       var entries: Map[String, Value] = Map.with_capacity(children.length())
       for child in own children {
         let built = build(mut document, index: child.value)
@@ -944,19 +944,19 @@ fn parse_document(text: StringSlice) -> Result[Map[String, Value], Failure]
   Ok(own document.finish())
 }
 
-impl serialization::Tree for Value {
-  fn kind(self) -> serialization::Kind {
+impl serialization.Tree for Value {
+  fn kind(self) -> serialization.Kind {
     match self {
-      String(_) => serialization::Kind.Text
-      Integer(_) => serialization::Kind.Integer
-      Float(_) => serialization::Kind.Float
-      Boolean(_) => serialization::Kind.Bool
-      OffsetDateTime(_) => serialization::Kind.Text
-      LocalDateTime(_) => serialization::Kind.Text
-      LocalDate(_) => serialization::Kind.Text
-      LocalTime(_) => serialization::Kind.Text
-      Array(_) => serialization::Kind.List
-      Table(_) => serialization::Kind.Record
+      String(_) => serialization.Kind.Text
+      Integer(_) => serialization.Kind.Integer
+      Float(_) => serialization.Kind.Float
+      Boolean(_) => serialization.Kind.Bool
+      OffsetDateTime(_) => serialization.Kind.Text
+      LocalDateTime(_) => serialization.Kind.Text
+      LocalDate(_) => serialization.Kind.Text
+      LocalTime(_) => serialization.Kind.Text
+      Array(_) => serialization.Kind.List
+      Table(_) => serialization.Kind.Record
     }
   }
 
@@ -1043,31 +1043,31 @@ impl serialization::Tree for Value {
   }
 }
 
-public fn to_table[Item: serialization::Serialize](
+public fn to_table[Item: serialization.Serialize](
   item: Item,
-  names: serialization::Names = serialization::Names.AsWritten,
-) -> Result[Map[String, Value], serialization::Error] {
-  var writer: serialization::TreeWriter[Value] = serialization::TreeWriter.new(names: names)
+  names: serialization.Names = serialization.Names.AsWritten,
+) -> Result[Map[String, Value], serialization.Error] {
+  var writer: serialization.TreeWriter[Value] = serialization.TreeWriter.new(names: names)
   item.serialize(mut writer)
   match own writer.finish()? {
     Table(entries) => Ok(own entries)
-    _ => Err(serialization::Error(path: "", message: "a TOML document is a table, so only a record can be written as one"))
+    _ => Err(serialization.Error(path: "", message: "a TOML document is a table, so only a record can be written as one"))
   }
 }
 
-public fn from_table[Item: serialization::Deserialize](
+public fn from_table[Item: serialization.Deserialize](
   table: own Map[String, Value],
-  names: serialization::Names = serialization::Names.AsWritten,
-) -> Result[Item, serialization::Error]
+  names: serialization.Names = serialization.Names.AsWritten,
+) -> Result[Item, serialization.Error]
   uses RunForever
 {
-  var reader = serialization::TreeReader.new(Value.Table(entries: own table), names: names)
+  var reader = serialization.TreeReader.new(Value.Table(entries: own table), names: names)
   Item.deserialize(mut reader)
 }
 
-public fn decode[Item: serialization::Deserialize](
+public fn decode[Item: serialization.Deserialize](
   text: StringSlice,
-  names: serialization::Names = serialization::Names.AsWritten,
+  names: serialization.Names = serialization.Names.AsWritten,
 ) -> Result[Item, Error]
   uses RunForever
 {
@@ -1080,10 +1080,10 @@ public fn decode[Item: serialization::Deserialize](
   }
 }
 
-public fn encode[Item: serialization::Serialize](
+public fn encode[Item: serialization.Serialize](
   item: Item,
-  names: serialization::Names = serialization::Names.AsWritten,
-) -> Result[String, serialization::Error]
+  names: serialization.Names = serialization.Names.AsWritten,
+) -> Result[String, serialization.Error]
   uses RunForever
 {
   Ok(to_text(to_table(item, names: names)?))
@@ -1135,7 +1135,7 @@ fn write_string(output: mut String, text: StringSlice) {
 }
 
 fn write_hex_digit(output: mut String, value: UInt32) {
-  let digit: UInt8 = intrinsic::convert(value % 16)
+  let digit: UInt8 = intrinsic.convert(value % 16)
   mut output.push_byte(if digit < 10 { 48 + digit } else { 87 + digit })
 }
 

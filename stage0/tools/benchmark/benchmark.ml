@@ -42,6 +42,12 @@ let worst_cases =
     ("postfix operations", fun count -> "let x: Int64 = a" ^ repeat count ".b" ^ "\n");
     ("nested loop bodies", fun count -> "fn f() {\n" ^ repeat count "while x {\n");
     ("interpolations", fun count -> "let x: String = \"" ^ repeat count "${a}" ^ "\"\n");
+    ("comparisons in a list", fun count -> "let x: List[Bool] = [" ^ repeat count "A < B, " ^ "]\n");
+    ("a fixable habit on every line", fun count -> "fn f() {\n" ^ repeat count "  a++\n" ^ "}\n");
+    ("path separators", fun count -> "let x: Int64 = A" ^ repeat count "::B" ^ "\n");
+    ("a chain of comparisons", fun count -> "let x: Bool = a" ^ repeat count " < a" ^ "\n");
+    ( "rest fields in a pattern",
+      fun count -> "fn f() {\n  let P(" ^ repeat count ".., " ^ ") = x\n}\n" );
   ]
 
 let benchmark_worst_case (name, make_input) =

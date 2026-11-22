@@ -1,8 +1,8 @@
-use frontend::lexer
-use frontend::parser
-use frontend::show
-use frontend::source
-use frontend::token
+use frontend.lexer
+use frontend.parser
+use frontend.show
+use frontend.source
+use frontend.token
 
 fn escape(value: StringSlice) -> String {
   var buffer = String.with_capacity(value.length())
@@ -20,11 +20,11 @@ fn escape(value: StringSlice) -> String {
   buffer
 }
 
-fn show_span(span: source::Span) -> String {
+fn show_span(span: source.Span) -> String {
   "${span.start}..${span.stop}"
 }
 
-fn show_diagnostic(diagnostic: source::Diagnostic) -> String {
+fn show_diagnostic(diagnostic: source.Diagnostic) -> String {
   var text = "${diagnostic.code} ${show_span(diagnostic.span)} \"${escape(diagnostic.message)}\""
   for note in diagnostic.notes {
     mut text.push("\n  note ${show_span(note.span)} \"${escape(note.message)}\"")
@@ -38,34 +38,34 @@ fn show_diagnostic(diagnostic: source::Diagnostic) -> String {
   text
 }
 
-fn show_form(form: token::Form) -> String {
+fn show_form(form: token.Form) -> String {
   match form {
     Ordinary => "ordinary"
     Raw(quotes, dollars, multi_line) => "raw ${quotes} ${dollars} ${multi_line}"
   }
 }
 
-fn show_text(text: token::Text) -> String {
+fn show_text(text: token.Text) -> String {
   "\"${escape(text.value)}\" ${show_span(text.span)}"
 }
 
-fn show_token(tables: token::Tables, current: token::Token) -> String
+fn show_token(tables: token.Tables, current: token.Token) -> String
   uses Panic, RunForever
 {
   let kind = match current.kind {
     Upper(name) => "upper ${tables.name(name)}"
     Lower(name) => "lower ${tables.name(name)}"
     Underscore => "underscore"
-    Keyword(keyword) => "keyword ${token::spell_keyword(keyword)}"
-    Reserved(reserved) => "reserved ${token::spell_reserved(reserved)}"
+    Keyword(keyword) => "keyword ${token.spell_keyword(keyword)}"
+    Reserved(reserved) => "reserved ${token.spell_reserved(reserved)}"
     Integer(literal) => "integer ${tables.integers.get(literal).expect("an integer")}"
     Float(literal) => match tables.decimals.get(literal) {
       Some(decimal) => "float ${decimal.significand}e${decimal.exponent}"
       None => "float"
     }
     String(literal) => "string ${show_literal(tables, literal: tables.literal(literal))}"
-    Punctuation(punctuation) => "punctuation ${token::spell_punctuation(punctuation)}"
-    Foreign(foreign) => "foreign ${token::spell_foreign(foreign)}"
+    Punctuation(punctuation) => "punctuation ${token.spell_punctuation(punctuation)}"
+    Foreign(foreign) => "foreign ${token.spell_foreign(foreign)}"
     Newline => "newline"
     EndOfFile => "end"
   }
@@ -82,7 +82,7 @@ fn show_token(tables: token::Tables, current: token::Token) -> String
   text
 }
 
-fn show_literal(tables: token::Tables, literal: token::StringLiteral) -> String
+fn show_literal(tables: token.Tables, literal: token.StringLiteral) -> String
   uses Panic, RunForever
 {
   var text = ""
@@ -105,7 +105,7 @@ fn show_literal(tables: token::Tables, literal: token::StringLiteral) -> String
 fn print_tokens(path: StringSlice, text: own String)
   uses Console, Panic, RunForever
 {
-  let result = lexer::lex(source::Source.create(path, text: own text))
+  let result = lexer.lex(source.Source.create(path, own text))
   Console.print_line("== ${path}")
   let tables = result.lexed.tables
   for index in result.lexed.first..result.lexed.stop {
@@ -119,10 +119,10 @@ fn print_tokens(path: StringSlice, text: own String)
 fn print_file(path: StringSlice, text: own String)
   uses Console, Panic, RunForever
 {
-  let lexed = lexer::lex(source::Source.create(path, text: own text))
-  let parsed = parser::parse(own lexed.lexed, lexer_diagnostics: lexed.diagnostics)
+  let lexed = lexer.lex(source.Source.create(path, own text))
+  let parsed = parser.parse(own lexed.lexed, lexer_diagnostics: lexed.diagnostics)
   Console.print_line("== ${path}")
-  let tree = show::show_file(parsed.file)
+  let tree = show.show_file(parsed.file)
   if !tree.is_empty() {
     Console.print_line(tree)
   }
@@ -142,7 +142,7 @@ fn measure(path: StringSlice, text: StringSlice, rounds: UInt64) -> Timing
   var best_lexing: Int64 = Int64.maximum
   for _ in 0..rounds {
     let before = Clock.monotonic()
-    let result = lexer::lex(source::Source.create(path, text: text.to_string()))
+    let result = lexer.lex(source.Source.create(path, text: text.to_string()))
     let elapsed = (Clock.monotonic() - before).total_nanoseconds()
     if result.lexed.stop < result.lexed.first {
       Panic.crash("a token range runs backward")
@@ -151,13 +151,13 @@ fn measure(path: StringSlice, text: StringSlice, rounds: UInt64) -> Timing
       best_lexing = elapsed
     }
   }
-  let lexed = lexer::lex(source::Source.create(path, text: text.to_string()))
+  let lexed = lexer.lex(source.Source.create(path, text: text.to_string()))
   var best_parsing: Int64 = Int64.maximum
   for _ in 0..rounds {
     let tables = lexed.lexed.tables.copy()
-    let input = token::Lexed(tables: own tables, first: lexed.lexed.first, stop: lexed.lexed.stop)
+    let input = token.Lexed(own tables, first: lexed.lexed.first, stop: lexed.lexed.stop)
     let before = Clock.monotonic()
-    let parsed = parser::parse(own input, lexer_diagnostics: lexed.diagnostics)
+    let parsed = parser.parse(own input, lexer_diagnostics: lexed.diagnostics)
     let elapsed = (Clock.monotonic() - before).total_nanoseconds()
     if parsed.file.definitions.length() > text.length() {
       Panic.crash("more definitions than bytes")
@@ -200,9 +200,9 @@ fn main(arguments: List[String]) -> ExitCode
   for path in arguments.slice()[2..] {
     let text = FileRead.read_text(Path.new(path)).expect("a readable UTF-8 file")
     if command_name == "tokens" {
-      print_tokens(path, text: own text)
+      print_tokens(path, own text)
     } else if command_name == "print" {
-      print_file(path, text: own text)
+      print_file(path, own text)
     }
   }
   ExitCode.success
