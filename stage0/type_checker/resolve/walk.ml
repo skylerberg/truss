@@ -85,6 +85,8 @@ type state = {
   key : Names.key;
   spans : Source.Definition_span.t array;
   syntax_errors : Source.Definition_span.t list;
+  imports : (string * Path.module_) list Lazy.t;
+  visible_packages : Path.package list Lazy.t;
   interface : section_names;
   contract : section_names;
   body : section_names;
@@ -107,6 +109,8 @@ let create lookups key ~spans ~syntax_errors =
     key;
     spans;
     syntax_errors;
+    imports = lazy (lookups.list_imports key);
+    visible_packages = lazy (Names.list_visible_packages lookups key.module_.package);
     interface = make_section_names size;
     contract = make_section_names size;
     body = make_section_names size;
@@ -151,10 +155,8 @@ let find_module_item state text = state.lookups.find state.key.module_ text
 
 let note_import_use state text =
   let names = lookup_current_names state in
-  if
-    List.mem_assoc text (state.lookups.list_imports state.key)
-    && not (List.mem text names.used_imports)
-  then names.used_imports <- text :: names.used_imports
+  if List.mem_assoc text (Lazy.force state.imports) && not (List.mem text names.used_imports) then
+    names.used_imports <- text :: names.used_imports
 
 let find_in_module state module_ (name : Syntax.name) ~types =
   let is_kind = if types then Names.Scope.is_type_kind else Names.Scope.is_value_kind in
@@ -213,8 +215,8 @@ let report_unresolved_path_start state scope (first : Syntax.name) ~may_start_wi
               (fun (item : Names.entry) ->
                 if Names.Scope.is_value_kind item.kind then Some item.name else None)
               (state.lookups.list_entries module_)
-          @ List.map fst (state.lookups.list_imports state.key)
-          @ Names.list_package_roots state.lookups module_.package
+          @ List.map fst (Lazy.force state.imports)
+          @ Names.list_package_roots (Lazy.force state.visible_packages)
         in
         add_diagnostic state Unknown_name span
           ~fixes:(Diagnostic.list_spelling_fixes span ~written:first.text candidates)
@@ -227,9 +229,9 @@ let resolve_path state scope (first : Syntax.name) (rest : Syntax.name list) ~mo
     ~may_start_with_value =
   note_import_use state first.text;
   let lookup length =
-    Names.Scope.lookup_module state.lookups ~from:state.key.module_
-      ~imports:(state.lookups.list_imports state.key)
-      first.text
+    Names.Scope.lookup_module state.lookups
+      ~visible_packages:(Lazy.force state.visible_packages)
+      ~from:state.key.module_ ~imports:(Lazy.force state.imports) first.text
       (List.map (fun (name : Syntax.name) -> name.text) (List.take length rest))
   in
   let rec search ~longest_failure = function
@@ -525,11 +527,11 @@ and classify_path_head state scope text =
     | Some (Meaning_unless_defined _) | None -> false
   in
   if is_local then `Value
-  else if List.mem_assoc text (state.lookups.list_imports state.key) then `Module
+  else if List.mem_assoc text (Lazy.force state.imports) then `Module
   else
     match find_module_item state text with
     | Some item when Names.Scope.is_value_kind item.kind ->
-        if List.mem text (Names.list_package_roots state.lookups state.key.module_.package) then
+        if List.mem text (Names.list_package_roots (Lazy.force state.visible_packages)) then
           `Ambiguous
         else `Value
     | Some _ | None -> `Module

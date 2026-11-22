@@ -4,9 +4,18 @@ let lookup_member (state : State.state) member =
 let lookup_method state owner name receiver : Path.t Resolve.Names.lookup =
   lookup_member state (Method { owner; name; receiver })
 
-let list_method_lookups state owner name =
-  List.map (lookup_method state owner name)
+let list_member_lookups (state : State.state) owner name =
+  Resolve.Names.list_member_lookups state.lookups.interface.names ~from:state.key.module_ owner name
+
+let list_methods owner name : Path.t list =
+  List.map
+    (fun receiver : Path.t -> Method { owner; name; receiver })
     [ Path.Static; Instance Read; Instance Mut; Instance Own ]
+
+let list_method_lookups state owner name =
+  List.map
+    (Resolve.Names.choose_member (list_member_lookups state owner name))
+    (list_methods owner name)
 
 let has_visible_method state owner name =
   match Resolve.Names.choose_visible (list_method_lookups state owner name) with
@@ -34,9 +43,11 @@ let find_variants (lookups : Lookups.t) path arguments =
       Types.instantiate_variants interface arguments)
 
 let are_fields_visible (lookups : Lookups.t) ~package (path : Path.t) =
+  Path.locate_package path = package
+  ||
   match Interface.Definition.find_type_interface lookups.interface path with
-  | Some { opaque = true; _ } -> Path.locate_package path = package
-  | _ -> true
+  | Some { opaque; _ } -> not opaque
+  | None -> true
 
 let is_tuple_type (lookups : Lookups.t) (path : Path.t) =
   match Interface.Definition.find_type_interface lookups.interface path with

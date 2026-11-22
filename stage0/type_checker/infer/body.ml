@@ -425,6 +425,8 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
       definition;
       resolved;
       text;
+      visible_packages =
+        lazy (Resolve.Names.list_visible_packages lookups.interface.names module_.package);
       tables = Tables.create (definition.id + 1);
       diagnostics = [];
       unifier =

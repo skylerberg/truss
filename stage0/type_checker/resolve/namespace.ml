@@ -66,7 +66,9 @@ let find_head_type (lookups : Names.lookups) ~(from : Path.module_) ~imports (pa
   | [] -> Names.Scope.find_bare_type lookups ~from path.last.text
   | first :: rest -> (
       match
-        Names.Scope.lookup_module lookups ~from ~imports first.text
+        Names.Scope.lookup_module lookups
+          ~visible_packages:(Names.list_visible_packages lookups from.package)
+          ~from ~imports first.text
           (List.map (fun (name : Syntax.name) -> name.text) rest)
       with
       | Found_module { module_; _ } -> (

@@ -96,11 +96,9 @@ type lookups = {
 let list_visible_packages lookups package =
   List.sort_uniq compare (package :: Path.standard_package :: lookups.list_dependency_names package)
 
-let list_package_roots lookups package =
+let list_package_roots visible_packages =
   List.sort_uniq compare
-    (List.map
-       (fun package -> List.hd (Path.list_package_parts package))
-       (list_visible_packages lookups package))
+    (List.map (fun package -> List.hd (Path.list_package_parts package)) visible_packages)
 
 let list_transitive_dependencies lookups package =
   let rec close seen = function
@@ -113,18 +111,20 @@ let list_transitive_dependencies lookups package =
     (fun name -> name <> package)
     (close [] (standard @ lookups.list_dependency_names package))
 
-let resolve_full_module lookups ~(from : Path.module_) first rest : Path.module_ =
-  let known = list_visible_packages lookups from.package in
-  match Path.split_module ~is_package:(fun package -> List.mem package known) (first :: rest) with
+let split_full_module ~visible_packages first rest : Path.module_ =
+  match
+    Path.split_module ~is_package:(fun package -> List.mem package visible_packages) (first :: rest)
+  with
   | Some module_ -> module_
   | None -> { package = { owner = None; name = first }; modules = rest }
 
-let resolve_used_module lookups ~from (path : Syntax.path) =
+let resolve_used_module lookups ~(from : Path.module_) (path : Syntax.path) =
+  let visible_packages = list_visible_packages lookups from.package in
   let list_texts = List.map (fun (name : Syntax.name) -> name.text) in
   match path.modules with
-  | [] -> resolve_full_module lookups ~from path.last.text []
+  | [] -> split_full_module ~visible_packages path.last.text []
   | first :: rest ->
-      resolve_full_module lookups ~from first.text (list_texts rest @ [ path.last.text ])
+      split_full_module ~visible_packages first.text (list_texts rest @ [ path.last.text ])
 
 let is_visible_package lookups ~(from : Path.module_) package =
   List.mem package (list_visible_packages lookups from.package)
@@ -214,7 +214,7 @@ module Scope = struct
     | No_module of string
     | No_package of string
 
-  let lookup_module lookups ~(from : Path.module_) ~imports first rest =
+  let lookup_module lookups ~visible_packages ~(from : Path.module_) ~imports first rest =
     let imported = List.assoc_opt first imports in
     let through_import =
       Option.map
@@ -222,8 +222,10 @@ module Scope = struct
           { module_ with modules = module_.modules @ rest })
         imported
     in
-    let package = resolve_full_module lookups ~from first rest in
-    let exists module_ = is_visible_module lookups ~from module_ in
+    let package = split_full_module ~visible_packages first rest in
+    let exists (module_ : Path.module_) =
+      List.mem module_.package visible_packages && lookups.module_exists module_
+    in
     match through_import with
     | Some module_ when exists module_ && exists package && module_ <> package ->
         Ambiguous_module (module_, package)
@@ -231,7 +233,7 @@ module Scope = struct
     | _ when exists package ->
         if is_restricted_module ~from package then Restricted_module
         else Found_module { module_ = package; imported = None }
-    | None when not (is_visible_package lookups ~from package.package) ->
+    | None when not (List.mem package.package visible_packages) ->
         No_package (String.concat "." (first :: rest))
     | _ -> No_module (String.concat "." (first :: rest))
 
@@ -265,6 +267,31 @@ let lookup_member lookups ~(from : Path.module_) member =
       else Hidden (member, declaration.visibility)
   | None -> Absent
 
+let list_member_lookups lookups ~(from : Path.module_) owner name =
+  List.fold_left
+    (fun members (key : key) ->
+      if
+        List.exists
+          (function
+            | Visible member | Hidden (member, _) -> Path.equal member key.path | Absent -> false)
+          members
+      then members
+      else
+        let declaration = lookups.read_declaration key in
+        members
+        @ [
+            (if Scope.is_visible ~from declaration.key.module_ declaration.visibility then
+               Visible key.path
+             else Hidden (key.path, declaration.visibility));
+          ])
+    [] (lookups.list_members owner name)
+
+let choose_member members (member : Path.t) =
+  Option.value ~default:Absent
+    (List.find_opt
+       (function Visible path | Hidden (path, _) -> Path.equal path member | Absent -> false)
+       members)
+
 let map_visible convert = function
   | Visible visible -> Visible (convert visible)
   | Hidden hidden -> Hidden hidden
@@ -293,7 +320,7 @@ let describe_hidden hidden (visibility : visibility) =
     | Public | Public_opaque ->
         Compiler_bug.raise_bug ~stage:"Names" "%s is public, so it is not hidden" (Path.show hidden))
 
-let list_declaring_trait_lookups lookups ~(from : Path.module_) name =
+let list_declaring_trait_lookups lookups ~visible_packages ~(from : Path.module_) name =
   List.concat_map
     (fun package ->
       List.map
@@ -307,7 +334,7 @@ let list_declaring_trait_lookups lookups ~(from : Path.module_) name =
               Compiler_bug.raise_bug ~stage:"Names" "the trait %s is not a top-level definition"
                 (Path.show trait))
         (lookups.list_traits_declaring package name))
-    (list_visible_packages lookups from.package)
+    visible_packages
 
 let list_members_visible_to_package lookups ~(package : Path.package) owner name =
   List.filter

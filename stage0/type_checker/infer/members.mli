@@ -1,6 +1,7 @@
 val lookup_member : State.state -> Path.t -> Path.t Resolve.Names.lookup
 val lookup_method : State.state -> Path.t -> string -> Path.receiver -> Path.t Resolve.Names.lookup
-val list_method_lookups : State.state -> Path.t -> string -> Path.t Resolve.Names.lookup list
+val list_member_lookups : State.state -> Path.t -> string -> Path.t Resolve.Names.lookup list
+val list_methods : Path.t -> string -> Path.t list
 val has_visible_method : State.state -> Path.t -> string -> bool
 
 val make_hidden_error :

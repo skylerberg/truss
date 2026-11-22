@@ -64,7 +64,8 @@ type lookups = {
 }
 
 val resolve_used_module : lookups -> from:Path.module_ -> Syntax.path -> Path.module_
-val list_package_roots : lookups -> Path.package -> string list
+val list_visible_packages : lookups -> Path.package -> Path.package list
+val list_package_roots : Path.package list -> string list
 val list_transitive_dependencies : lookups -> Path.package -> Path.package list
 val is_visible_package : lookups -> from:Path.module_ -> Path.package -> bool
 val is_visible_module : lookups -> from:Path.module_ -> Path.module_ -> bool
@@ -97,6 +98,7 @@ module Scope : sig
 
   val lookup_module :
     lookups ->
+    visible_packages:Path.package list ->
     from:Path.module_ ->
     imports:(string * Path.module_) list ->
     string ->
@@ -117,11 +119,15 @@ module Scope : sig
 end
 
 val lookup_member : lookups -> from:Path.module_ -> Path.t -> Path.t lookup
+val list_member_lookups : lookups -> from:Path.module_ -> Path.t -> string -> Path.t lookup list
+val choose_member : Path.t lookup list -> Path.t -> Path.t lookup
 val map_visible : ('visible -> 'converted) -> 'visible lookup -> 'converted lookup
 val choose_visible : 'visible lookup list -> 'visible lookup
 val collect_visible : 'visible lookup list -> 'visible list lookup
 val describe_hidden : Path.t -> visibility -> string
-val list_declaring_trait_lookups : lookups -> from:Path.module_ -> string -> Path.t lookup list
+
+val list_declaring_trait_lookups :
+  lookups -> visible_packages:Path.package list -> from:Path.module_ -> string -> Path.t lookup list
 
 val list_members_visible_to_package :
   lookups -> package:Path.package -> Path.t -> string -> key list
