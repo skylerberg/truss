@@ -871,12 +871,10 @@ let run_lower (database : Tracker.t) id =
             (Tracker.Value code, references)
         | Error _ as code -> (Value code, [])
         | exception Tracker.Reads_failed_fact -> (Blocked, [])
-        | exception (Lowering.Todo_type _ | Lowering.Infinite_size _) -> (Failed, []))
+        | exception Lowering.Infinite_size _ -> (Failed, []))
   in
   ignore (Tracker.write database Facts.lowered ~id (Some outcome));
   follow_item_edges database ~items:references changes
-
-exception Reaches_unsupported of Lowering.unsupported
 
 let run_key_tests (database : Tracker.t) ids =
   let items = List.map (fun id -> (id, read_item database id)) ids in
@@ -884,16 +882,13 @@ let run_key_tests (database : Tracker.t) ids =
   let outcome =
     Tracker.record_group database Key_tests ids ~own:[ Test_key ] (fun recorder ->
         let read view item =
-          match Tracker.read_value database recorder view project ~id:(Ids.of_item item) with
-          | Ok value -> value
-          | Error unsupported -> raise (Reaches_unsupported unsupported)
+          Tracker.read_value database recorder view project ~id:(Ids.of_item item)
         in
         match
           Lowering.derive_test_keys ~read_lowered:(read Facts.lowered.whole)
             ~read_known_key:(read Facts.test_key.whole) (List.map snd items)
         with
-        | keys -> Tracker.Value (Ok keys)
-        | exception Reaches_unsupported unsupported -> Value (Error unsupported)
+        | keys -> Tracker.Value keys
         | exception Tracker.Reads_failed_fact -> Blocked)
   in
   List.iter
@@ -901,7 +896,7 @@ let run_key_tests (database : Tracker.t) ids =
       let key : _ Tracker.outcome =
         match outcome with
         | Value (Ok keys) -> Value (Ok (List.assoc item keys))
-        | Value (Error unsupported) -> Value (Error unsupported)
+        | Value (Error unbuildable) -> Value (Error unbuildable)
         | Failed | Blocked -> Blocked
       in
       ignore (Tracker.write database Facts.test_key ~id (Some key)))

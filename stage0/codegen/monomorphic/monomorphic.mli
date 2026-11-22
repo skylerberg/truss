@@ -1,4 +1,4 @@
-exception Todo_type of Ground.ty
+exception Todo_type of Path.t
 
 type context = {
   find_type_interface : Path.t -> Types.type_interface option;
