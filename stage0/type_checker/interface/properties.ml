@@ -21,11 +21,21 @@ let list_bound_closure_over ~find_requirements ~self (bound : Types.trait_refere
   visit [] bound;
   List.rev !closure
 
-let list_bound_closure lookups =
-  list_bound_closure_over ~find_requirements:(fun trait ->
-      Option.map
-        (fun (interface : Types.trait_interface) -> (interface.trait_generics, interface.requires))
-        (Definition.find_trait_interface lookups trait))
+let list_bound_closure lookups ~self (bound : Types.trait_reference) =
+  match Definition.find_trait_interface lookups bound.trait with
+  | Some interface ->
+      let substitution =
+        Types.bind_argument
+          (Types.make_self_parameter bound.trait)
+          (Types.Type self)
+          (Types.make_substitution interface.trait_generics bound.trait_arguments)
+      in
+      List.fold_left
+        (fun closure supertrait ->
+          let supertrait = Types.substitute_trait substitution supertrait in
+          if List.mem supertrait closure then closure else closure @ [ supertrait ])
+        [ bound ] interface.supertraits
+  | None -> [ bound ]
 
 let find_declaring_trait lookups ~base (trait : Types.trait_reference) ~is_declared =
   List.find_opt

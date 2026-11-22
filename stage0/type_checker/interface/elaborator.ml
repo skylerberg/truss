@@ -1218,7 +1218,25 @@ let split_restated_methods (lookups : Lookups.t) (requires : Types.trait_referen
       | None -> Either.Left method_)
     members
 
-let make_container_interface lookups key (header : Environment.header) :
+let list_supertraits (lookups : Lookups.t) (key : Resolve.Names.key) trait_generics =
+  match
+    Properties.list_bound_closure_over
+      ~find_requirements:(fun trait ->
+        match Option.bind (lookups.names.find_key trait) lookups.find_header with
+        | Some { container = Trait_parts { trait_generics; requires; _ }; _ } ->
+            Some (trait_generics, requires)
+        | Some { container = Capability_parts | Impl_parts _; _ } | None -> None)
+      ~self:(Types.Parameter (Types.make_self_parameter key.path))
+      {
+        trait = key.path;
+        trait_arguments = Types.list_generic_arguments trait_generics;
+        associated = [];
+      }
+  with
+  | _ :: supertraits -> supertraits
+  | [] -> []
+
+let make_container_interface lookups (key : Resolve.Names.key) (header : Environment.header) :
     Environment.elaborated_interface =
   let methods = list_methods lookups key in
   let interface =
@@ -1229,6 +1247,7 @@ let make_container_interface lookups key (header : Environment.header) :
           {
             trait_generics;
             requires;
+            supertraits = list_supertraits lookups key trait_generics;
             associated_types;
             associated_capabilities;
             laws;
@@ -1241,6 +1260,7 @@ let make_container_interface lookups key (header : Environment.header) :
           {
             trait_generics = [];
             requires = [];
+            supertraits = [];
             associated_types = [];
             associated_capabilities = [];
             laws = [];
