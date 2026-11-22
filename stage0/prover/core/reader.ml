@@ -681,8 +681,8 @@ let oblige_unreachable context frame location =
 let lend_part context (frame : State.frame) origin (mode : Language.Mode.t) ~handed ~lends
     ~write_back =
   let location = Facts.locate context frame.source origin in
-  match (context.yielded_part, context.yield_ensures, frame.yielded_so_far) with
-  | Some part_type, Some (each, _), Some before ->
+  match (context.lending, frame.yielded_so_far) with
+  | Some { part_type; on_part; _ }, Some before ->
       List.iter
         (fun (clause : Mir.formula) ->
           let _, term =
@@ -698,7 +698,7 @@ let lend_part context (frame : State.frame) origin (mode : Language.Mode.t) ~han
               Text "` may not hold for the part lent here.";
             ]
             term)
-        each;
+        on_part;
       Lambdas.check_valid context frame location part_type handed ~deep:true
         ~when_:"for the part lent here";
       let frame, part_after =

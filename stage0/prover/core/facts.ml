@@ -981,13 +981,13 @@ let merge context ?value_type ~condition
       | None -> Some (choose values)
   in
   let yielded_so_far =
-    match (context.yielded_part, find_held (fun frame -> frame.yielded_so_far)) with
-    | Some part, Some values ->
+    match (context.lending, find_held (fun frame -> frame.yielded_so_far)) with
+    | Some { part_type; _ }, Some values ->
         Some
           (define "parts"
              (declare_sort context
                 (Types.Named
-                   { path = Well_known.make_path Sequence; arguments = [ Types.Type part ] }))
+                   { path = Well_known.make_path Sequence; arguments = [ Types.Type part_type ] }))
              values)
     | _ -> first.yielded_so_far
   in

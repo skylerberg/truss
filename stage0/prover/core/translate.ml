@@ -46,8 +46,7 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       open_axioms = [];
       axioms_of = Tables.Symbol_table.create 16;
       axiom_clauses = Tables.Axiom_clause_table.create 16;
-      yielded_part = None;
-      yield_ensures = None;
+      lending = None;
       callbacks = [];
       counters = [];
       bounded_counters = [];
@@ -355,11 +354,14 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
   let start =
     match signature with
     | Some { output = Lends (_, part); _ } ->
-        context.yielded_part <- Some part;
-        context.yield_ensures <-
+        context.lending <-
           Some
-            ( List.filter Amounts.mentions_result declared_ensures,
-              List.filter (fun clause -> not (Amounts.mentions_result clause)) declared_ensures );
+            {
+              part_type = part;
+              on_part = List.filter Amounts.mentions_result declared_ensures;
+              at_return =
+                List.filter (fun clause -> not (Amounts.mentions_result clause)) declared_ensures;
+            };
         { start with yielded_so_far = Some (Intrinsics.make_empty_parts context start part) }
     | _ -> start
   in
@@ -558,8 +560,8 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
           Lambdas.check_valid context frame Whole_definition self_type self ~deep:true
             ~when_:"for `self` when the method returns"
       | _ -> ());
-      (match (context.yield_ensures, frame.yielded_so_far) with
-      | Some (_, at_end), Some yielded_so_far ->
+      (match (context.lending, frame.yielded_so_far) with
+      | Some { at_return; _ }, Some yielded_so_far ->
           List.iter
             (fun (ensured : Mir.formula) ->
               let _, term =
@@ -575,7 +577,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
                   Text "` may not hold when the method ends.";
                 ]
                 term)
-            at_end
+            at_return
       | _ ->
           List.iter
             (fun (ensured : Mir.formula) ->

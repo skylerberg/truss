@@ -92,6 +92,8 @@ type stated = Tables.stated =
   | Range_elements of Types.ty
   | Non_negative_rank of Types.ty
 
+type lending = { part_type : Types.ty; on_part : Mir.formula list; at_return : Mir.formula list }
+
 type context = {
   lookups : Lookups.t;
   current : Path.t;
@@ -120,8 +122,7 @@ type context = {
   axioms_of : open_axiom Tables.Symbol_table.t;
   disjoint : (Core.id list * Core.id list) list;
   mutable indexes : (Core.id * noted_place) list;
-  mutable yielded_part : Types.ty option;
-  mutable yield_ensures : (Mir.formula list * Mir.formula list) option;
+  mutable lending : lending option;
   home : Resolve.Names.key;
   mutable laws_assumed : (Types.trait_reference * Types.ty) list;
   mutable counters : Costs.counter list;
