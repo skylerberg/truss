@@ -1002,115 +1002,9 @@ let list_definitions_naming (database : t) (path : Path.t) =
                ~markers:(Kind.encode_markers [ References ])))
        paths)
 
+module Kind = Kind
+
 module For_testing = struct
-  type stage = Kind.stage =
-    | Parse
-    | Declare
-    | Supply
-    | Claim_roots
-    | Resolve
-    | Resolve_grant
-    | Check_imports
-    | Read_trait_header
-    | Evaluate_constant
-    | Elaborate_header
-    | Elaborate
-    | Derive_interface
-    | Compute_type_facts
-    | Check_signature
-    | Check_contract
-    | Check_body
-    | Build_body_mir
-    | Build_contract_mir
-    | Generate_mir
-    | List_calls
-    | Group_recursion
-    | Check_usage
-    | Check_ownership
-    | Check_sealed
-    | Check_impl
-    | Check_type
-    | Check_instantiations
-    | Check_tests
-    | Check_unexported
-    | Check_dependencies
-    | Prove
-    | Lower
-    | Key_tests
-    | Decide
-
-  type fact = Kind.fact =
-    | Resolved of Resolve.section
-    | Grant
-    | Trait_header
-    | Constant_value
-    | Header
-    | Interface
-    | Elaboration
-    | Derived_interface
-    | Type_facts
-    | Signature_check
-    | Contract
-    | Body_form
-    | Body_tables
-    | Run_forever
-    | Ownership_modes
-    | Body_mir
-    | Contract_mir
-    | Generated_mir
-    | Call_node
-    | Callees
-    | Recursion_group
-    | Usage_check
-    | Ownership
-    | Unused_dependencies
-    | Proof
-    | Lowered
-    | Test_key
-
-  type lookup = Kind.lookup =
-    | Source
-    | Packages
-    | Files
-    | Dependencies
-    | Module
-    | Entry
-    | Entries
-    | Imports
-    | Declaration
-    | Tree
-    | Text
-    | Place
-    | Container
-    | Contained
-    | Module_declarations
-    | File_declarations
-    | Package_declarations
-    | Members
-    | Traits_declaring
-    | Impls_of_type
-    | Impls_of_trait
-    | Law_proofs
-
-  type entity = Kind.entity = Definition | Import | Package | Unknown_implementation | Item
-
-  type selection = Kind.selection =
-    | Unresolved
-    | Import_references
-    | Unchecked_bodies
-    | Body_uses
-    | Instantiations
-    | Package_references
-
-  type target = Kind.target =
-    | Fact of fact
-    | Lookup of lookup
-    | Entity of entity
-    | Selection of selection
-
-  let stages = Kind.stages
-  let show_stage = Kind.show_stage
-
   type nonrec checker = checker =
     | Parse
     | Resolve
@@ -1205,7 +1099,7 @@ module For_testing = struct
     drain database ?on_bug ~through:Prove ~scope:Everything ();
     lower_roots database ?on_bug
 
-  type computed = { stage : stage; id : int }
+  type computed = { stage : Kind.stage; id : int }
   type observed = { recomputed : computed list; collected : int list }
 
   let observe run =

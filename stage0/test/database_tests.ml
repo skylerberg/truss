@@ -55,13 +55,13 @@ type name =
 type read = Stored of part | Name of name
 
 let locate (part : part) : Database.For_testing.computed =
-  let of_key (stage : Database.For_testing.stage) key : Database.For_testing.computed =
+  let of_key (stage : Database.Kind.stage) key : Database.For_testing.computed =
     { stage; id = Database.For_testing.identify_key key }
-  and of_path (stage : Database.For_testing.stage) path : Database.For_testing.computed =
+  and of_path (stage : Database.Kind.stage) path : Database.For_testing.computed =
     { stage; id = Database.For_testing.identify_path path }
-  and of_file (stage : Database.For_testing.stage) file : Database.For_testing.computed =
+  and of_file (stage : Database.Kind.stage) file : Database.For_testing.computed =
     { stage; id = Database.For_testing.identify_file file }
-  and of_item (stage : Database.For_testing.stage) item : Database.For_testing.computed =
+  and of_item (stage : Database.Kind.stage) item : Database.For_testing.computed =
     { stage; id = Database.For_testing.identify_item item }
   in
   match part with
@@ -84,7 +84,7 @@ let locate (part : part) : Database.For_testing.computed =
   | Lowered item -> of_item Lower item
   | Test_key item -> of_item Key_tests item
 
-let list_targets : read -> (Database.For_testing.target * int * string) list = function
+let list_targets : read -> (Database.Kind.target * int * string) list = function
   | Name (Tree key) -> [ (Lookup Tree, Database.For_testing.identify_key key, "") ]
   | Name (Text key) -> [ (Lookup Text, Database.For_testing.identify_key key, "") ]
   | Name (Place key) -> [ (Lookup Place, Database.For_testing.identify_key key, "") ]
@@ -97,9 +97,7 @@ let list_targets : read -> (Database.For_testing.target * int * string) list = f
   | Stored part -> (
       let id = (locate part).id in
       let of_facts facts =
-        List.map
-          (fun fact : (Database.For_testing.target * int * string) -> (Fact fact, id, ""))
-          facts
+        List.map (fun fact : (Database.Kind.target * int * string) -> (Fact fact, id, "")) facts
       in
       match part with
       | Resolved (_, section) -> of_facts [ Resolved section ]
@@ -118,7 +116,7 @@ let list_targets : read -> (Database.For_testing.target * int * string) list = f
       | Parsed _ | Declared _ | Import_check _ | Type_check _ | Verdicts _ -> [])
 
 let show_computed ({ stage; id } : Database.For_testing.computed) =
-  Printf.sprintf "%s of %d" (Database.For_testing.show_stage stage) id
+  Printf.sprintf "%s of %d" (Database.Kind.show_stage stage) id
 
 let show_parts computed = String.concat ", " (List.map show_computed computed)
 let make_lowered name = Lowered (make_code_item name)
@@ -141,7 +139,7 @@ let list_units_of definitions : Database.For_testing.computed list =
             { stage; id = Database.For_testing.identify_key key };
             { stage; id = Database.For_testing.identify_path path };
           ])
-        Database.For_testing.stages)
+        Database.Kind.stages)
     definitions
 
 let is_part_of definitions =
