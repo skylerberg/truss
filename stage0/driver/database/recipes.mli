@@ -24,3 +24,4 @@ val drain_stage :
 
 val make_evaluation_root : Prover.Obligation.evaluation -> Lowered.Item.t
 val ensure_item : Tracker.t -> Lowered.Item.t -> unit
+val supply_lowered : Tracker.t -> Lowered.Item.t -> Lowering.lowered -> unit

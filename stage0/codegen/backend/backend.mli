@@ -67,12 +67,8 @@ val evaluate : t -> Lowered.Item.t list -> Lowered.static_value ran list
 module For_testing : sig
   val is_folded : t -> Path.t -> bool
 
-  val build_supplied_tests :
-    t ->
-    time_limit_ms:int ->
-    (Memory_layout.env -> Emit_c.fragment) list ->
-    output:string ->
-    (unit, string) result
+  val build_test_program :
+    t -> time_limit_ms:int -> Lowered.Item.t list -> output:string -> (unit, string) result
 
   val compile_fragment : t -> Lowered.Item.t -> Emit_c.fragment
   val render_unit : t -> Lowered.Item.t -> string

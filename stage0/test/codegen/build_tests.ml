@@ -170,7 +170,7 @@ let () =
   Codegen_support.test
     "the test runner reports each test's outcome, message, and echo output, a leak, and a worker \
      that ends without a word" (fun () ->
-      let _, backend =
+      let database, backend =
         Codegen_support.load
           ~roots:
             [
@@ -248,8 +248,18 @@ let () =
             ];
         ]
       in
+      let env = Lowering.make_env Codegen_support.host (Database.make_interface_lookups database) in
+      let roots =
+        List.map
+          (fun make_fragment ->
+            let fragment = make_fragment env in
+            Database.For_testing.supply_lowered database (Emit_c.item fragment) (Compiled fragment);
+            Emit_c.item fragment)
+          tests
+      in
+      Database.For_testing.lower_roots database;
       let output = Codegen_support.make_scratch_path "tests" in
-      match Backend.For_testing.build_supplied_tests backend ~time_limit_ms:300 tests ~output with
+      match Backend.For_testing.build_test_program backend ~time_limit_ms:300 roots ~output with
       | Error message -> Codegen_support.fail "%s" message
       | Ok () ->
           let status, out, _ = Process.run output [] in

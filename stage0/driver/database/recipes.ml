@@ -846,6 +846,19 @@ let find_call_edges (database : Tracker.t) (recorder : Tracker.recorder) path =
   | Some (Failed | Blocked) -> Some []
   | None -> None
 
+let supply_lowered (database : Tracker.t) item lowered =
+  let id = Ids.of_item item and references = Lowering.list_references lowered in
+  ensure_item database item;
+  ignore (Store.unmark_stale database.store ~stage:(Kind.rank_stage Lower) ~id);
+  let (), changes =
+    Tracker.record_observed database Lower id (fun recorder ->
+        List.iter
+          (fun referenced -> recorder.note References (Entity Item) (Ids.of_item referenced) "")
+          references)
+  in
+  ignore (Tracker.write database Facts.lowered ~id (Some (Value (Ok lowered))));
+  follow_item_edges database ~items:references changes
+
 let run_lower (database : Tracker.t) id =
   let item = read_item database id in
   let (outcome, references), changes =
