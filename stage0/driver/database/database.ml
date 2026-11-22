@@ -1167,6 +1167,10 @@ module For_testing = struct
       Recipes.ensure_item database item
     end
 
+  let supply_lowered (database : t) item lowered =
+    add_root database item;
+    Recipes.supply_lowered database item lowered
+
   let list_differences = list_differences
 
   let list_items (database : t) : Lowered.Item.t list =

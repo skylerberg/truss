@@ -114,35 +114,13 @@ let make_result_key backend root =
             Bytes (read_test_key backend root);
           ]))
 
-let find_supplied supplied item =
-  List.find_opt (fun fragment -> Lowered.Item.equal (Emit_c.item fragment) item) supplied
-
-let list_reached ?(supplied = []) backend roots =
-  let visited = Item_table.create 16 in
-  let reached_supplied = ref [] and stored_roots = ref [] in
-  let rec visit item =
-    if not (Item_table.mem visited item) then begin
-      Item_table.replace visited item ();
-      match find_supplied supplied item with
-      | Some fragment ->
-          reached_supplied := fragment :: !reached_supplied;
-          List.iter visit (Emit_c.references fragment)
-      | None -> stored_roots := item :: !stored_roots
-    end
-  in
-  List.iter visit roots;
-  ( List.rev !reached_supplied,
-    match List.rev !stored_roots with
-    | [] -> []
-    | stored_roots -> backend.lookups.list_linked backend.profile stored_roots )
-
-let list_needed_evaluators ?supplied backend roots =
+let list_needed_evaluators backend roots =
   List.filter_map
     (function
       | Lowering.Evaluated { evaluator; _ } -> Some evaluator
       | Unit _ -> None
       | Unbuildable unbuildable -> raise_unbuildable backend unbuildable)
-    (snd (list_reached ?supplied backend roots))
+    (backend.lookups.list_linked backend.profile roots)
 
 let make_data backend item ~evaluator ~ty =
   match Item_table.find_opt backend.runs evaluator with
@@ -215,9 +193,8 @@ let make_fragment_source backend env fragment =
        ~resolve_position:(resolve_position backend ~show_file:Path.show_file)
        [ (fragment, External) ])
 
-let rec build ?report_progress ?(tests = false) ?(supplied = []) ?dsym_bundle backend ~roots
-    ~startup ~output =
-  let linked = list_linked backend ~supplied roots in
+let rec build ?report_progress ?(tests = false) ?dsym_bundle backend ~roots ~startup ~output =
+  let linked = list_linked backend roots in
   let sources =
     C_compiler.make_source ~name:"the runtime" (Startup.render_runtime ~tests)
     :: List.map fst linked
@@ -236,7 +213,7 @@ let rec build ?report_progress ?(tests = false) ?(supplied = []) ?dsym_bundle ba
   | Ok () -> ()
   | Error message -> raise (Cannot_build message)
 
-and list_linked backend ~supplied roots =
+and list_linked backend roots =
   let env = make_env backend in
   let visited = Item_table.create 256 in
   let visit item =
@@ -244,13 +221,10 @@ and list_linked backend ~supplied roots =
     Item_table.replace visited item ();
     is_new
   in
-  let link_fragment fragment = (make_fragment_source backend env fragment, Emit_c.sites fragment) in
   let rec reach roots =
     match List.filter (fun root -> not (Item_table.mem visited root)) roots with
     | [] -> []
     | roots ->
-        let reached_supplied, stored = list_reached ~supplied backend roots in
-        let made = List.filter (fun fragment -> visit (Emit_c.item fragment)) reached_supplied in
         let units, evaluated =
           List.partition_map
             (function
@@ -258,7 +232,7 @@ and list_linked backend ~supplied roots =
                   Left (item, (make_stored_source backend item ~text_hash, sites))
               | Evaluated { item; evaluator; ty } -> Right (item, (evaluator, ty))
               | Unbuildable unbuildable -> raise_unbuildable backend unbuildable)
-            stored
+            (backend.lookups.list_linked backend.profile roots)
         in
         let units = List.filter (fun (item, _) -> visit item) units
         and evaluated = List.filter (fun (item, _) -> visit item) evaluated in
@@ -266,14 +240,17 @@ and list_linked backend ~supplied roots =
         let data =
           List.map (fun (item, (evaluator, ty)) -> make_data backend item ~evaluator ~ty) evaluated
         in
-        List.map link_fragment made @ List.map snd units @ List.map link_fragment data
+        List.map snd units
+        @ List.map
+            (fun fragment -> (make_fragment_source backend env fragment, Emit_c.sites fragment))
+            data
         @ reach (List.concat_map Emit_c.references data)
   in
   reach roots
 
-and build_test_program ?report_progress ?supplied ?(cpu_time_limit_ms = 0) backend ~time_limit_ms
-    ~roots ~output =
-  build ?report_progress ?supplied backend ~tests:true ~roots:(Lowering.test_runner :: roots)
+and build_test_program ?report_progress ?(cpu_time_limit_ms = 0) backend ~time_limit_ms ~roots
+    ~output =
+  build ?report_progress backend ~tests:true ~roots:(Lowering.test_runner :: roots)
     ~startup:
       (Startup.render_tests_start ~time_limit_ms ~cpu_time_limit_ms
          ~runner:(Emit_c.make_symbol Lowering.test_runner)
@@ -510,13 +487,6 @@ let run_tests ?(rerun = false) ?(report_progress = ignore) backend ~time_limit_m
           | None -> raise_bug "the test %d has no result" index))
     known
 
-let build_supplied_tests backend ~time_limit_ms supplied ~output =
-  capture_failure @@ fun () ->
-  let supplied_env = make_env backend in
-  let fragments = List.map (fun build -> build supplied_env) supplied in
-  let roots = List.map Emit_c.item fragments in
-  build_test_program backend ~supplied:fragments ~time_limit_ms ~roots ~output
-
 type unshippable = { failure : [ `Todo | `Echo ]; location : location; way : Path.t list }
 
 let trace_root lookups root = trace_item lookups (Lowering.make_root root)
@@ -657,7 +627,8 @@ module For_testing = struct
     | Evaluate _ -> false
     | Compiled _ -> raise_bug "%s is not a constant" (Path.show path)
 
-  let build_supplied_tests = build_supplied_tests
+  let build_test_program backend ~time_limit_ms roots ~output =
+    capture_failure (fun () -> build_test_program backend ~time_limit_ms ~roots ~output)
 
   let compile_fragment backend item =
     run_evaluators backend (list_needed_evaluators backend [ item ]);

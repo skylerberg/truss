@@ -150,6 +150,7 @@ module For_testing : sig
   val list_reads : t -> Kind.stage -> int -> (Kind.target * int * string) list
   val with_failing_unit : Kind.stage -> int -> (unit -> 'result) -> 'result
   val add_root : t -> Lowered.Item.t -> unit
+  val supply_lowered : t -> Lowered.Item.t -> Lowering.lowered -> unit
   val list_differences : t -> t -> (string * int) list
   val list_items : t -> Lowered.Item.t list
   val extend_package : loaded:string -> (Path.file * string) list -> t
