@@ -15,6 +15,7 @@ val show_module : module_ -> string
 type file = { module_ : module_; name : string }
 
 val list_file_names : file -> string list
+val show_package_directory : package -> string
 val show_file : file -> string
 
 type receiver = Static | Instance of Language.Mode.t
