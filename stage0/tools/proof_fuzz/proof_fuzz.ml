@@ -190,6 +190,7 @@ let run_mutant ~samples text =
               List.map (fun name -> Lowered.Item.Constant (Top { module_ = example; name })) names
             in
             List.iter (Database.For_testing.add_root running) constants;
+            Database.For_testing.lower_roots running;
             Backend.evaluate (make_backend running) constants
           in
           List.iteri
