@@ -212,24 +212,31 @@ type any_fact = Any : 'value fact -> any_fact
 let make_stored ~table ~id_column ~fixed ~columns =
   Store.make_fact ~table ~id_column ~fixed ~columns:("state" :: columns)
 
+let facts_of_stages : (Kind.stage, any_fact) Hashtbl.t = Hashtbl.create 32
+let list_facts stage = List.rev (Hashtbl.find_all facts_of_stages stage)
+
 let make_fact ~stage ~table ~id_column ~fixed ~groups ~encode ~decode =
   let columns = List.concat_map snd groups in
-  {
-    whole =
-      {
-        table;
-        stage;
-        targets = List.map fst groups;
-        stored = make_stored ~table ~id_column ~fixed ~columns;
-        width = List.length columns;
-        id_column;
-        is_keyed_by_path = id_column = "path";
-        decode;
-        guard = None;
-      };
-    groups = List.map (fun (target, columns) -> (target, List.length columns)) groups;
-    encode;
-  }
+  let fact =
+    {
+      whole =
+        {
+          table;
+          stage;
+          targets = List.map fst groups;
+          stored = make_stored ~table ~id_column ~fixed ~columns;
+          width = List.length columns;
+          id_column;
+          is_keyed_by_path = id_column = "path";
+          decode;
+          guard = None;
+        };
+      groups = List.map (fun (target, columns) -> (target, List.length columns)) groups;
+      encode;
+    }
+  in
+  Hashtbl.add facts_of_stages stage (Any fact);
+  fact
 
 let make_view ~stage ~table ~id_column ~fixed ~target ~columns ~decode =
   {
@@ -378,8 +385,8 @@ let report stage id ~is_changed =
 
 let report_computed stage ids = !observer (Computed { stage; ids; reads = 0; distinct_reads = 0 })
 
-let forget tracker stage id ~facts =
-  List.iter (fun (Any fact) -> ignore (write tracker fact ~id None)) facts;
+let forget tracker stage id =
+  List.iter (fun (Any fact) -> ignore (write tracker fact ~id None)) (list_facts stage);
   remove_edges tracker stage id;
   ignore
     (Store.replace_diagnostics tracker.store ~stage:(Kind.rank_stage stage) ~unit:id ~package:"" []);

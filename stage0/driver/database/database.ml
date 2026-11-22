@@ -763,9 +763,7 @@ let describe_target rank =
 
 let list_reads (database : t) paths ~is_source =
   let reads = Kind.encode_markers [ Reads ] in
-  let lowering =
-    List.map Kind.rank_stage [ Kind.Lower; Key_tests; Render Development; Render Release ]
-  in
+  let lowering = List.map Kind.rank_stage Recipes.item_stages in
   let stages_of_definitions =
     List.filter (fun stage -> not (List.mem stage lowering)) (List.map Kind.rank_stage Kind.stages)
   in

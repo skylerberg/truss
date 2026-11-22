@@ -1,4 +1,5 @@
 val package_stages : Kind.stage list
+val item_stages : Kind.stage list
 val forget_package : Tracker.t -> Path.package -> unit
 val replace_builtin_entries : Tracker.t -> unit
 val write_file : Tracker.t -> package:string -> Path.file -> string -> unit

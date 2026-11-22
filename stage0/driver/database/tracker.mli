@@ -98,7 +98,8 @@ val find_value : t -> recorder -> 'value view -> Path.package -> id:int -> 'valu
 val write : t -> 'value fact -> id:int -> 'value outcome option -> state option
 val report : Kind.stage -> int -> is_changed:bool -> unit
 val report_computed : Kind.stage -> int list -> unit
-val forget : t -> Kind.stage -> int -> facts:any_fact list -> unit
+val list_facts : Kind.stage -> any_fact list
+val forget : t -> Kind.stage -> int -> unit
 
 val replace_file_diagnostics :
   t -> Kind.stage -> package:Path.package -> file:int -> Diagnostic.t list -> bool
