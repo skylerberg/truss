@@ -70,6 +70,125 @@ let allocate_box context builder ty =
        });
   box
 
+type recursive_fields = { leading : string list; spine : string option }
+
+let split_recursive_fields ty (variant : Memory_layout.variant_shape) =
+  let fields =
+    List.filter_map
+      (fun (field, (member : Memory_layout.member)) ->
+        match member with
+        | Typed field_ty when Ground.compare field_ty ty = 0 -> Some field
+        | Typed _ | Raw _ -> None)
+      variant.fields
+  in
+  match List.rev fields with
+  | [] -> { leading = []; spine = None }
+  | spine :: reversed -> { leading = List.rev reversed; spine = Some spine }
+
+let list_recursive_fields ty variants =
+  List.map (fun variant -> (variant, split_recursive_fields ty variant)) variants
+
+let is_recursive recursive_fields =
+  List.exists (fun (_, (fields : recursive_fields)) -> Option.is_some fields.spine) recursive_fields
+
+let project_variant_field place (variant : Memory_layout.variant_shape) field =
+  Lowered.project place (Variant_field { variant = variant.name; field })
+
+let drop_variants context builder ty ~value variants =
+  let emit = Emit_c.Ir_builder.emit builder in
+  let allocate_value () =
+    Lowered.make_local_place (Emit_c.Ir_builder.allocate_local builder (Value ty))
+  in
+  let recursive_fields = list_recursive_fields ty variants in
+  let current =
+    if is_recursive recursive_fields then begin
+      let current = allocate_value () in
+      emit (Assign (current, Use (Move value)));
+      current
+    end
+    else value
+  in
+  let head = Emit_c.Ir_builder.allocate_block builder in
+  let after = Emit_c.Ir_builder.allocate_block builder in
+  Emit_c.Ir_builder.finish builder (Goto head);
+  let next = lazy (allocate_value ()) in
+  let rotation =
+    lazy
+      (let leading_pointer =
+         Emit_c.Ir_builder.allocate_local builder (Pointer { target = Value ty; writable = true })
+       in
+       let child = allocate_value () in
+       let leading_field : Lowered.place =
+         { root = Local leading_pointer; projections = [ Deref ] }
+       in
+       let rotations =
+         List.filter_map
+           (fun ((variant : Memory_layout.variant_shape), (fields : recursive_fields)) ->
+             Option.map
+               (fun spine ->
+                 let rotate = Emit_c.Ir_builder.allocate_block builder in
+                 Emit_c.Ir_builder.run_in_block builder rotate (fun () ->
+                     let child_spine = project_variant_field child variant spine in
+                     emit (Assign (child, Use (Move leading_field)));
+                     emit (Assign (leading_field, Use (Move child_spine)));
+                     emit (Assign (child_spine, Use (Move current)));
+                     emit (Assign (current, Use (Move child)));
+                     Emit_c.Ir_builder.finish builder (Goto head));
+                 (variant.name, rotate))
+               fields.spine)
+           recursive_fields
+       in
+       (leading_pointer, leading_field, rotations))
+  in
+  let rotate_if_deep variant field =
+    let leading_pointer, leading_field, rotations = Lazy.force rotation in
+    let shallow = Emit_c.Ir_builder.allocate_block builder in
+    emit
+      (Assign
+         ( Lowered.make_local_place leading_pointer,
+           Use (Address { place = project_variant_field current variant field; writable = true }) ));
+    Emit_c.Ir_builder.finish builder
+      (Switch_variant { place = leading_field; cases = rotations; default = Some shallow });
+    Emit_c.Ir_builder.start builder shallow
+  in
+  let drop_fields_and_free (variant : Memory_layout.variant_shape) ~spine =
+    List.iter
+      (fun (field, member) ->
+        if Some field <> spine && needs_drop context member then
+          emit (Drop (project_variant_field current variant field)))
+      variant.fields;
+    if variant.indirect then emit (Free_block { place = current; variant = variant.name })
+  in
+  let build_case (variant : Memory_layout.variant_shape) body =
+    let case = Emit_c.Ir_builder.allocate_block builder in
+    Emit_c.Ir_builder.run_in_block builder case body;
+    Some (variant.name, case)
+  in
+  let cases =
+    List.filter_map
+      (fun ((variant : Memory_layout.variant_shape), (fields : recursive_fields)) ->
+        match fields.spine with
+        | Some spine ->
+            build_case variant (fun () ->
+                List.iter (rotate_if_deep variant) fields.leading;
+                let next = Lazy.force next in
+                emit (Assign (next, Use (Move (project_variant_field current variant spine))));
+                drop_fields_and_free variant ~spine:fields.spine;
+                emit (Assign (current, Use (Move next)));
+                Emit_c.Ir_builder.finish builder (Goto head))
+        | None
+          when variant.indirect
+               || List.exists (fun (_, member) -> needs_drop context member) variant.fields ->
+            build_case variant (fun () ->
+                drop_fields_and_free variant ~spine:fields.spine;
+                Emit_c.Ir_builder.finish builder (Goto after))
+        | None -> None)
+      recursive_fields
+  in
+  Emit_c.Ir_builder.start builder head;
+  Emit_c.Ir_builder.finish builder (Switch_variant { place = current; cases; default = Some after });
+  Emit_c.Ir_builder.start builder after
+
 let drop context ty =
   let builder = Emit_c.Ir_builder.create context.env ~item:(Drop ty) in
   let pointer =
@@ -171,37 +290,7 @@ let drop context ty =
           (fun index ->
             Emit_c.Ir_builder.emit builder
               (Drop (Lowered.project value (Index (Copy (Lowered.make_local_place index))))))
-  | Shape (Sum variants) ->
-      let after = Emit_c.Ir_builder.allocate_block builder in
-      let cases =
-        List.filter_map
-          (fun (variant_shape : Memory_layout.variant_shape) ->
-            if
-              variant_shape.indirect
-              || List.exists (fun (_, member) -> needs_drop context member) variant_shape.fields
-            then begin
-              let block = Emit_c.Ir_builder.allocate_block builder in
-              Emit_c.Ir_builder.run_in_block builder block (fun () ->
-                  List.iter
-                    (fun (field, member) ->
-                      if needs_drop context member then
-                        Emit_c.Ir_builder.emit builder
-                          (Drop
-                             (Lowered.project value
-                                (Variant_field { variant = variant_shape.name; field }))))
-                    variant_shape.fields;
-                  if variant_shape.indirect then
-                    Emit_c.Ir_builder.emit builder
-                      (Free_block { place = value; variant = variant_shape.name });
-                  Emit_c.Ir_builder.finish builder (Goto after));
-              Some (variant_shape.name, block)
-            end
-            else None)
-          variants
-      in
-      Emit_c.Ir_builder.finish builder
-        (Switch_variant { place = value; cases; default = Some after });
-      Emit_c.Ir_builder.start builder after
+  | Shape (Sum variants) -> drop_variants context builder ty ~value variants
   | Shape (Scalar _) -> ());
   Emit_c.Ir_builder.finish builder (Return None);
   Emit_c.Ir_builder.build builder { parameters = [ pointer ]; result = None; returns = true }
@@ -259,6 +348,66 @@ let copy_field context builder ~source (name, member) =
       let temporary = Emit_c.Ir_builder.allocate_local builder (Value ty) in
       copy_into context builder ~destination:(Lowered.make_local_place temporary) ~source ty;
       (name, Lowered.Move (Lowered.make_local_place temporary))
+
+let copy_variants context builder ty ~self ~result variants =
+  let emit = Emit_c.Ir_builder.emit builder in
+  let head = Emit_c.Ir_builder.allocate_block builder in
+  let after = Emit_c.Ir_builder.allocate_block builder in
+  let recursive_fields = list_recursive_fields ty variants in
+  let source, destination, finish_case =
+    if is_recursive recursive_fields then begin
+      let allocate_pointer ~writable =
+        Emit_c.Ir_builder.allocate_local builder (Pointer { target = Value ty; writable })
+      in
+      let source_pointer = allocate_pointer ~writable:false in
+      let destination_pointer = allocate_pointer ~writable:true in
+      let point pointer place ~writable =
+        emit (Assign (Lowered.make_local_place pointer, Use (Address { place; writable })))
+      in
+      point source_pointer self ~writable:false;
+      point destination_pointer result ~writable:true;
+      let source : Lowered.place = { root = Local source_pointer; projections = [ Deref ] } in
+      let destination : Lowered.place =
+        { root = Local destination_pointer; projections = [ Deref ] }
+      in
+      let follow_spine variant = function
+        | None -> Emit_c.Ir_builder.finish builder (Goto after)
+        | Some spine ->
+            point destination_pointer
+              (project_variant_field destination variant spine)
+              ~writable:true;
+            point source_pointer (project_variant_field source variant spine) ~writable:false;
+            Emit_c.Ir_builder.finish builder (Goto head)
+      in
+      (source, destination, follow_spine)
+    end
+    else (self, result, fun _ _ -> Emit_c.Ir_builder.finish builder (Goto after))
+  in
+  Emit_c.Ir_builder.finish builder (Goto head);
+  let cases =
+    List.map
+      (fun ((variant : Memory_layout.variant_shape), (fields : recursive_fields)) ->
+        let case = Emit_c.Ir_builder.allocate_block builder in
+        Emit_c.Ir_builder.run_in_block builder case (fun () ->
+            let copied =
+              List.filter_map
+                (fun (name, member) ->
+                  if Some name = fields.spine then None
+                  else
+                    Some
+                      (copy_field context builder
+                         ~source:(project_variant_field source variant name)
+                         (name, member)))
+                variant.fields
+            in
+            emit (Assign (destination, Build { ty; variant = Some variant.name; fields = copied }));
+            finish_case variant fields.spine);
+        (variant.name, case))
+      recursive_fields
+  in
+  Emit_c.Ir_builder.start builder head;
+  Emit_c.Ir_builder.finish builder (Switch_variant { place = source; cases; default = None });
+  Emit_c.Ir_builder.start builder after
 
 let copy context ty =
   let builder = Emit_c.Ir_builder.create context.env ~item:(Copy ty) in
@@ -385,31 +534,7 @@ let copy context ty =
             ~destination:(Lowered.project result (Index (Copy (Lowered.make_local_place index))))
             ~source:(Lowered.project self (Index (Copy (Lowered.make_local_place index))))
             element)
-  | Shape (Sum variants) ->
-      let after = Emit_c.Ir_builder.allocate_block builder in
-      let cases =
-        List.map
-          (fun (variant_shape : Memory_layout.variant_shape) ->
-            let block = Emit_c.Ir_builder.allocate_block builder in
-            Emit_c.Ir_builder.run_in_block builder block (fun () ->
-                let fields =
-                  List.map
-                    (fun (name, member) ->
-                      copy_field context builder
-                        ~source:
-                          (Lowered.project self
-                             (Variant_field { variant = variant_shape.name; field = name }))
-                        (name, member))
-                    variant_shape.fields
-                in
-                Emit_c.Ir_builder.emit builder
-                  (Assign (result, Build { ty; variant = Some variant_shape.name; fields }));
-                Emit_c.Ir_builder.finish builder (Goto after));
-            (variant_shape.name, block))
-          variants
-      in
-      Emit_c.Ir_builder.finish builder (Switch_variant { place = self; cases; default = None });
-      Emit_c.Ir_builder.start builder after);
+  | Shape (Sum variants) -> copy_variants context builder ty ~self ~result variants);
   (match result_local with
   | Some local ->
       Emit_c.Ir_builder.finish builder (Return (Some (Move (Lowered.make_local_place local))))

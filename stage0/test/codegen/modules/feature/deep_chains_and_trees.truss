@@ -1,0 +1,111 @@
+type Chain[Value] =
+  | End
+  | indirect Link(value: Value, rest: Chain[Value])
+
+type Tree =
+  | Leaf
+  | indirect Node(left: Tree, label: String, right: Tree)
+  derives Equal
+
+fn build_chain(length: Int64) -> Chain[Int64] {
+  var chain = Chain[Int64].End
+  for value in 0..length {
+    chain = Chain.Link(value, rest: own chain)
+  }
+  chain
+}
+
+fn is_descending(chain: own Chain[Int64], length: Int64) -> Bool {
+  var rest = own chain
+  var is_ordered = true
+  for position in 0..length {
+    match own rest {
+      Link(value, rest: next) => {
+        is_ordered = is_ordered && value == length - 1 - position
+        rest = own next
+      }
+      End => {
+        is_ordered = false
+        rest = Chain[Int64].End
+      }
+    }
+  }
+  is_ordered && rest is End
+}
+
+fn grow_left(depth: Int64) -> Tree {
+  var tree = Tree.Leaf
+  for _ in 0..depth {
+    tree = Tree.Node(left: own tree, label: "", right: Tree.Leaf)
+  }
+  tree
+}
+
+fn grow_right(depth: Int64) -> Tree {
+  var tree = Tree.Leaf
+  for _ in 0..depth {
+    tree = Tree.Node(left: Tree.Leaf, label: "", right: own tree)
+  }
+  tree
+}
+
+fn grow_zigzag(depth: Int64) -> Tree {
+  var tree = Tree.Leaf
+  for step in 0..depth {
+    tree = if step % 2 == 0 {
+      Tree.Node(left: own tree, label: "", right: Tree.Leaf)
+    } else {
+      Tree.Node(left: Tree.Leaf, label: "", right: own tree)
+    }
+  }
+  tree
+}
+
+fn grow_mixed(count: Int64) -> Tree {
+  var tree = Tree.Leaf
+  for step in 0..count {
+    tree = if step % 3 == 0 {
+      Tree.Node(left: own tree, label: "${step}", right: Tree.Leaf)
+    } else if step % 3 == 1 {
+      Tree.Node(left: Tree.Leaf, label: "${step}", right: own tree)
+    } else {
+      let sibling = Tree.Node(left: Tree.Leaf, label: "${step} sibling", right: Tree.Leaf)
+      Tree.Node(left: own tree, label: "${step}", right: own sibling)
+    }
+  }
+  tree
+}
+
+test "a chain of a million links is dropped" {
+  let chain = build_chain(1000000)
+  assert chain is Link(value: 999999, ..)
+}
+
+test "a chain of a million links is copied" {
+  let original = build_chain(1000000)
+  let copied = original.copy()
+  assert is_descending(own copied, length: 1000000)
+  assert is_descending(own original, length: 1000000)
+}
+
+test "a left-deep tree of a million nodes is dropped" {
+  let tree = grow_left(1000000)
+  assert tree is Node(right: Leaf, ..)
+}
+
+test "a tree of a million nodes that alternates between left and right children is dropped" {
+  let tree = grow_zigzag(1000000)
+  assert tree is Node(left: Leaf, ..)
+}
+
+test "a right-deep tree of a million nodes is copied" {
+  let original = grow_right(1000000)
+  let copied = original.copy()
+  assert copied is Node(left: Leaf, right: Node(left: Leaf, ..), ..)
+}
+
+test "a copy of a tree of mixed shape equals the original, and both free every label" {
+  let original = grow_mixed(3000)
+  let copied = original.copy()
+  assert copied == original
+}
