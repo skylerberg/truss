@@ -120,6 +120,16 @@ type item_graph = {
   claim_kinds : int list;
 }
 
+val mark_items_stale : t -> stage:int -> unit
+
+type linked = {
+  linked_id : int;
+  linked_key : string;
+  sites : string option;
+  text_hash : string option;
+}
+
+val list_linked : t -> item_graph -> profile:int -> roots:int list -> linked list
 val is_item_claimed : t -> item_graph -> item:int -> bool
 val list_claimed_items : t -> item_graph -> packages:string list option -> int list
 val merge : string list -> into:string -> unit

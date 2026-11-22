@@ -2,6 +2,9 @@ let is_package (database : Tracker.t) package =
   List.mem package (Store.list_project database.store)
   || Store.locate_schema database.store package <> Main
 
+let is_worked_on (database : Tracker.t) package =
+  List.mem package (Store.list_project database.store)
+
 let list_dependency_names (database : Tracker.t) (package : Path.package) =
   List.filter_map
     (fun (dependency : Store.dependency) -> Path.parse_package dependency.dependency)
@@ -132,21 +135,19 @@ let make_call_edges database recorder : Mir.Call_edges.lookups =
     mir = make_mir database recorder;
   }
 
+let read_source (database : Tracker.t) (recorder : Tracker.recorder) (file : Path.file) =
+  let id = Ids.of_file file in
+  recorder.note Reads (Lookup Source) id "";
+  match
+    Store.find_file database.store (Store.locate_schema database.store file.module_.package) ~id
+  with
+  | Some row -> Source.create ~path:(Path.show_file file) row.text
+  | None ->
+      Compiler_bug.raise_bug ~stage:"Database" "%s is not a file of the build" (Path.show_file file)
+
 let make_proof (database : Tracker.t) (recorder : Tracker.recorder) : Prover.Lookups.t =
   {
-    read_source =
-      (fun file ->
-        let id = Ids.of_file file in
-        recorder.note Reads (Lookup Source) id "";
-        match
-          Store.find_file database.store
-            (Store.locate_schema database.store file.module_.package)
-            ~id
-        with
-        | Some row -> Source.create ~path:(Path.show_file file) row.text
-        | None ->
-            Compiler_bug.raise_bug ~stage:"Database" "%s is not a file of the build"
-              (Path.show_file file));
+    read_source = read_source database recorder;
     interface = make_interface database recorder ~is_checked:true;
     mir = make_mir database recorder;
     list_must_be_disjoint = read_of_key database recorder Facts.ownership.whole;

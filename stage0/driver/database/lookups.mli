@@ -7,6 +7,8 @@ val make_call_edges : Tracker.t -> Tracker.recorder -> Mir.Call_edges.lookups
 val make_usage : Tracker.t -> Tracker.recorder -> Usage.Lookups.t
 val make_package_checks : Tracker.t -> Tracker.recorder -> Package_checks.Lookups.t
 val locate_items : Tracker.t -> Path.package
+val is_worked_on : Tracker.t -> Path.package -> bool
+val read_source : Tracker.t -> Tracker.recorder -> Path.file -> Source.t
 val make_lowering : Tracker.t -> Tracker.recorder -> Lowering.Lookups.t
 val make_proof : Tracker.t -> Tracker.recorder -> Prover.Lookups.t
 val make_ownership : Tracker.t -> Tracker.recorder -> Ownership.Lookups.t

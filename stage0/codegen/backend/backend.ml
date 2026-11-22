@@ -9,11 +9,10 @@ type results = { find : string -> string option; add : string -> string -> unit 
 
 type t = {
   lookups : Lowering.lowered_lookups;
-  monomorphic : Monomorphic.context;
+  positions : Lowering.Positions.t;
   c_compiler : C_compiler.t;
   profile : profile;
   show_file : Path.file -> string;
-  is_worked_on : Path.package -> bool;
   results : results option;
   evaluation_cpu_time_limit_ms : int;
   programs : string;
@@ -21,9 +20,10 @@ type t = {
   runs : string ran Item_table.t;
 }
 
-let make_env backend =
-  Memory_layout.create backend.lookups.system
-    ~compute_shape:(Monomorphic.compute_shape backend.monomorphic)
+let make_positions (lookups : Lowering.lowered_lookups) =
+  Lowering.Positions.create lookups.interface.names ~read_source:lookups.read_source
+
+let make_env backend = Lowering.make_env backend.lookups.system backend.lookups.interface
 
 exception Cannot_build of string
 
@@ -32,36 +32,21 @@ let describe_stopped_evaluation evaluated report =
 
 let raise_cannot_build format = Printf.ksprintf (fun message -> raise (Cannot_build message)) format
 
-type location = { file : Path.file; line : int; column : int }
+type location = Lowering.Positions.location = { file : Path.file; line : int; column : int }
 
-let locate_offset (lookups : Lowering.lowered_lookups) (definition : Path.t) offset =
-  let names = lookups.interface.names in
-  match Option.map names.read_place (names.find_key definition) with
-  | Some { file; base } ->
-      let line, column = Source.compute_position (lookups.read_source file) (base + offset) in
-      { file; line; column }
-  | None -> raise_bug "%s has no place in a file" (Path.show definition)
-
-let locate_site lookups (site : Lowered.site) = locate_offset lookups site.definition site.offset
-
-let locate_todo_type (lookups : Lowering.lowered_lookups) (path : Path.t) =
+let locate_todo_type (lookups : Lowering.lowered_lookups) positions (path : Path.t) =
   let names = lookups.interface.names in
   match
     Option.map (fun key -> (names.read_definition key, names.read_spans key)) (names.find_key path)
   with
   | Some ({ kind = Type_definition { name; _ }; _ }, spans) ->
-      locate_offset lookups path spans.(name.id).start
+      Lowering.Positions.locate positions path spans.(name.id).start
   | Some _ | None ->
       raise_bug "%s is reached as a type defined as todo, and has no definition" (Path.show path)
 
-let make_position backend ({ file; line; column } : location) : Emit_c.position =
-  { file = backend.show_file file; line; column }
-
-let resolve_position backend site = make_position backend (locate_site backend.lookups site)
-
-let render_code_unit backend env fragment ~copies =
-  Emit_c.render_file env backend.profile ~resolve_position:(resolve_position backend)
-    ((fragment, Emit_c.External) :: List.map (fun copy -> (copy, Emit_c.Internal)) copies)
+let resolve_position backend ~show_file site : Emit_c.position =
+  let { file; line; column } = Lowering.Positions.locate_site backend.positions site in
+  { file = show_file file; line; column }
 
 let show_location backend ({ file; line; column } : location) =
   Printf.sprintf "%s:%d:%d" (backend.show_file file) line column
@@ -70,7 +55,7 @@ let raise_unsupported backend (unsupported : Lowering.unsupported) =
   let where =
     match unsupported.at with
     | None -> ""
-    | Some at -> show_location backend (locate_site backend.lookups at) ^ ": "
+    | Some at -> show_location backend (Lowering.Positions.locate_site backend.positions at) ^ ": "
   in
   raise_cannot_build "%sStage0 cannot build this yet: %s." where unsupported.construct
 
@@ -112,53 +97,51 @@ let make_result_key backend root =
             Bytes (read_test_key backend root);
           ]))
 
-let list_small_callees ~find ~is_worked_on fragment =
-  match Emit_c.item fragment with
-  | Code _ as caller ->
-      List.filter_map
-        (fun (item : Lowered.Item.t) ->
-          match (item, find item) with
-          | Code { path = callee; _ }, Some copy
-            when (not (Lowered.Item.equal item caller))
-                 && (not (is_worked_on (Path.locate_package callee)))
-                 && Emit_c.is_small copy ->
-              Some copy
-          | _ -> None)
-        (List.sort_uniq Lowered.Item.compare (Emit_c.called fragment))
-  | _ -> []
-
 let find_supplied supplied item =
   List.find_opt (fun fragment -> Lowered.Item.equal (Emit_c.item fragment) item) supplied
 
-let list_needed_evaluators ?(supplied = []) backend roots =
-  let visited = Item_table.create 64 and needed = ref [] in
+let list_reached ?(supplied = []) backend roots =
+  let visited = Item_table.create 16 in
+  let reached_supplied = ref [] and stored_roots = ref [] in
   let rec visit item =
     if not (Item_table.mem visited item) then begin
       Item_table.replace visited item ();
       match find_supplied supplied item with
-      | Some fragment -> List.iter visit (Emit_c.references fragment)
-      | None -> (
-          match read_lowered backend item with
-          | Compiled fragment | Folded (_, fragment) -> List.iter visit (Emit_c.references fragment)
-          | Evaluate (evaluator, _) -> needed := evaluator :: !needed)
+      | Some fragment ->
+          reached_supplied := fragment :: !reached_supplied;
+          List.iter visit (Emit_c.references fragment)
+      | None -> stored_roots := item :: !stored_roots
     end
   in
   List.iter visit roots;
-  List.rev !needed
+  ( List.rev !reached_supplied,
+    match List.rev !stored_roots with
+    | [] -> []
+    | stored_roots -> backend.lookups.list_linked backend.profile stored_roots )
+
+let list_needed_evaluators ?supplied backend roots =
+  List.filter_map
+    (function
+      | Lowering.Evaluated { evaluator; _ } -> Some evaluator
+      | Unit _ -> None
+      | Unsupported unsupported -> raise_unsupported backend unsupported)
+    (snd (list_reached ?supplied backend roots))
+
+let make_data backend item ~evaluator ~ty =
+  match Item_table.find_opt backend.runs evaluator with
+  | Some (Ran encoded) ->
+      let env = make_env backend in
+      Emit_c.make_data_fragment env
+        { data_item = item; ty; value = Lowering.Encoding.decode env ty encoded }
+  | Some (Unfinished report | Stopped report) ->
+      raise_cannot_build "%s" (describe_stopped_evaluation item report)
+  | None -> raise_bug "%s is compiled before it is evaluated" (Lowered.Item.to_string item)
 
 let compile_fragment backend item =
   let compiled =
     match read_lowered backend item with
     | Compiled fragment | Folded (_, fragment) -> fragment
-    | Evaluate (evaluator, ty) -> (
-        match Item_table.find_opt backend.runs evaluator with
-        | Some (Ran encoded) ->
-            let env = make_env backend in
-            Emit_c.make_data_fragment env
-              { data_item = item; ty; value = Lowering.Encoding.decode env ty encoded }
-        | Some (Unfinished report | Stopped report) ->
-            raise_cannot_build "%s" (describe_stopped_evaluation item report)
-        | None -> raise_bug "%s is compiled before it is evaluated" (Lowered.Item.to_string item))
+    | Evaluate (evaluator, ty) -> make_data backend item ~evaluator ~ty
   in
   if not (Lowered.Item.equal (Emit_c.item compiled) item) then
     raise_bug "%s compiled to %s" (Lowered.Item.to_string item)
@@ -196,46 +179,80 @@ let make_run (record : Test_report.record) =
   | Failed -> Stopped ("assertion failed: " ^ message)
   | Timed_out | Crashed -> Stopped message
 
+let units_rendered = Atomic.make 0
+
+let make_stored_source backend item ~text_hash : C_compiler.source =
+  {
+    name = Lowered.Item.to_string item;
+    text_hash;
+    render =
+      (fun () ->
+        Atomic.incr units_rendered;
+        backend.lookups.render_unit backend.profile item);
+  }
+
+let make_fragment_source backend env fragment =
+  C_compiler.make_source
+    ~name:(Lowered.Item.to_string (Emit_c.item fragment))
+    (Emit_c.render_file env backend.profile
+       ~resolve_position:(resolve_position backend ~show_file:Path.show_file)
+       [ (fragment, External) ])
+
 let rec build ?report_progress ?(tests = false) ?(supplied = []) ?dsym_bundle backend ~roots
     ~startup ~output =
-  run_evaluators backend (list_needed_evaluators ~supplied backend roots);
-  let lookup item =
-    match find_supplied supplied item with
-    | Some fragment -> fragment
-    | None -> compile_fragment backend item
-  in
-  let linked = Emit_c.list_linked ~lookup roots in
-  let linked_by_item =
-    Item_table.of_seq
-      (List.to_seq (List.map (fun fragment -> (Emit_c.item fragment, fragment)) linked))
-  in
-  let list_copied =
-    match backend.profile with
-    | Development ->
-        list_small_callees
-          ~find:(Item_table.find_opt linked_by_item)
-          ~is_worked_on:backend.is_worked_on
-    | Release -> fun _ -> []
-  in
-  let env = make_env backend in
-  let render_unit index fragment =
-    ( Printf.sprintf "file %d" index,
-      render_code_unit backend env fragment ~copies:(list_copied fragment) )
-  in
-  let units =
-    (("the runtime", Startup.render_runtime ~tests) :: List.mapi render_unit linked)
+  let linked = list_linked backend ~supplied roots in
+  let sources =
+    C_compiler.make_source ~name:"the runtime" (Startup.render_runtime ~tests)
+    :: List.map fst linked
     @ [
-        ("startup", startup);
-        ("sites", Emit_c.render_sites_file ~resolve_position:(resolve_position backend) linked);
-        ("capabilities", Emit_c.render_capabilities_file linked);
+        C_compiler.make_source ~name:"startup" startup;
+        C_compiler.make_source ~name:"sites"
+          (Emit_c.render_sites_file
+             ~resolve_position:(resolve_position backend ~show_file:backend.show_file)
+             (List.concat_map snd linked));
       ]
   in
   match
     C_compiler.build_executable ?report_progress ?dsym_bundle backend.c_compiler backend.profile
-      ~units ~output
+      ~sources ~output
   with
   | Ok () -> ()
   | Error message -> raise (Cannot_build message)
+
+and list_linked backend ~supplied roots =
+  let env = make_env backend in
+  let visited = Item_table.create 256 in
+  let visit item =
+    let is_new = not (Item_table.mem visited item) in
+    Item_table.replace visited item ();
+    is_new
+  in
+  let link_fragment fragment = (make_fragment_source backend env fragment, Emit_c.sites fragment) in
+  let rec reach roots =
+    match List.filter (fun root -> not (Item_table.mem visited root)) roots with
+    | [] -> []
+    | roots ->
+        let reached_supplied, stored = list_reached ~supplied backend roots in
+        let made = List.filter (fun fragment -> visit (Emit_c.item fragment)) reached_supplied in
+        let units, evaluated =
+          List.partition_map
+            (function
+              | Lowering.Unit { item; text_hash; sites } ->
+                  Left (item, (make_stored_source backend item ~text_hash, sites))
+              | Evaluated { item; evaluator; ty } -> Right (item, (evaluator, ty))
+              | Unsupported unsupported -> raise_unsupported backend unsupported)
+            stored
+        in
+        let units = List.filter (fun (item, _) -> visit item) units
+        and evaluated = List.filter (fun (item, _) -> visit item) evaluated in
+        run_evaluators backend (List.map (fun (_, (evaluator, _)) -> evaluator) evaluated);
+        let data =
+          List.map (fun (item, (evaluator, ty)) -> make_data backend item ~evaluator ~ty) evaluated
+        in
+        List.map link_fragment made @ List.map snd units @ List.map link_fragment data
+        @ reach (List.concat_map Emit_c.references data)
+  in
+  reach roots
 
 and build_test_program ?report_progress ?supplied ?(cpu_time_limit_ms = 0) backend ~time_limit_ms
     ~roots ~output =
@@ -250,6 +267,11 @@ and run_evaluators backend evaluators =
   let backend = { backend with profile = Development } in
   let has_run = Item_table.mem backend.runs in
   let dependencies = Item_table.create 16 in
+  let find_stored_run evaluator =
+    Option.map
+      (fun output -> Ran output)
+      (Option.bind backend.results (fun results -> results.find (make_result_key backend evaluator)))
+  in
   let rec note_dependencies dependents evaluator =
     if List.exists (Lowered.Item.equal evaluator) dependents then
       match evaluator with
@@ -260,31 +282,26 @@ and run_evaluators backend evaluators =
           raise_bug "%s is evaluated by code that reads its result"
             (Lowered.Item.to_string evaluator)
     else if not (has_run evaluator || Item_table.mem dependencies evaluator) then
-      match list_needed_evaluators backend [ evaluator; Lowering.test_runner ] with
-      | needed ->
-          Item_table.replace dependencies evaluator needed;
-          List.iter (note_dependencies (evaluator :: dependents)) needed
-      | exception Cannot_build message ->
-          Item_table.replace backend.runs evaluator (Stopped message)
+      match find_stored_run evaluator with
+      | Some run -> Item_table.replace backend.runs evaluator run
+      | None -> (
+          match list_needed_evaluators backend [ evaluator; Lowering.test_runner ] with
+          | needed ->
+              Item_table.replace dependencies evaluator needed;
+              List.iter (note_dependencies (evaluator :: dependents)) needed
+          | exception Cannot_build message ->
+              Item_table.replace backend.runs evaluator (Stopped message))
   in
   List.iter (note_dependencies []) evaluators;
   let find_run_without_a_program evaluator =
-    match
-      List.find_map
-        (fun needed ->
-          match Item_table.find backend.runs needed with
-          | Ran _ -> None
-          | Unfinished report -> Some (Unfinished report)
-          | Stopped report ->
-              Some (Stopped (describe_stopped_evaluation (read_evaluated needed) report)))
-        (Item_table.find dependencies evaluator)
-    with
-    | Some _ as run -> run
-    | None ->
-        Option.map
-          (fun output -> Ran output)
-          (Option.bind backend.results (fun results ->
-               results.find (make_result_key backend evaluator)))
+    List.find_map
+      (fun needed ->
+        match Item_table.find backend.runs needed with
+        | Ran _ -> None
+        | Unfinished report -> Some (Unfinished report)
+        | Stopped report ->
+            Some (Stopped (describe_stopped_evaluation (read_evaluated needed) report)))
+      (Item_table.find dependencies evaluator)
   in
   let run_in_one_program ready =
     let runnable =
@@ -378,7 +395,7 @@ let describe_todo_types backend todo_types =
     (List.map
        (fun path ->
          Printf.sprintf "the type %s is defined as todo\n  at %s" (Path.show path)
-           (show_location backend (locate_todo_type backend.lookups path)))
+           (show_location backend (locate_todo_type backend.lookups backend.positions path)))
        todo_types)
 
 let rec read_executed_fragment (lookups : Lowering.lowered_lookups) item =
@@ -510,6 +527,7 @@ let list_reached_definitions lookups root =
 
 let list_unshippable (lookups : Lowering.lowered_lookups) ~main =
   let reached = trace_root lookups main in
+  let positions = make_positions lookups in
   begin
     let list_definitions keys =
       List.fold_left
@@ -524,7 +542,11 @@ let list_unshippable (lookups : Lowering.lowered_lookups) ~main =
     let reports =
       List.map
         (fun path ->
-          { failure = `Todo; location = locate_todo_type lookups path; way = [ main; path ] })
+          {
+            failure = `Todo;
+            location = locate_todo_type lookups positions path;
+            way = [ main; path ];
+          })
         (lookups.list_reached_todo_types (Lowering.make_root main))
       @ List.concat_map
           (fun (compiled, keys) ->
@@ -532,7 +554,7 @@ let list_unshippable (lookups : Lowering.lowered_lookups) ~main =
               (fun (failure, site) ->
                 {
                   failure = (match failure with Emit_c.Echo -> `Echo | Todo -> `Todo);
-                  location = locate_site lookups site;
+                  location = Lowering.Positions.locate_site positions site;
                   way = list_definitions keys;
                 })
               (Emit_c.failures compiled))
@@ -562,7 +584,7 @@ let make_program_root backend ~main =
                 Printf.sprintf
                   "%s: the type %s is defined as todo, and `main` can reach it, so the program \
                    cannot be built."
-                  (show_location backend (locate_todo_type backend.lookups path))
+                  (show_location backend (locate_todo_type backend.lookups backend.positions path))
                   (Path.show path))
               todo_types))
 
@@ -606,15 +628,13 @@ let evaluate backend evaluated =
     evaluated lowered
 
 let create ?(show_file = Path.show_file) ?results ?(evaluation_cpu_time_limit_ms = 10_000)
-    ?(programs = Filename.get_temp_dir_name ())
-    ?(is_worked_on = fun package -> package <> Path.standard_package) lookups c_compiler profile =
+    ?(programs = Filename.get_temp_dir_name ()) lookups c_compiler profile =
   {
     lookups;
-    monomorphic = Lowering.make_monomorphic_context lookups.interface;
+    positions = make_positions lookups;
     c_compiler;
     profile;
     show_file;
-    is_worked_on;
     results;
     evaluation_cpu_time_limit_ms;
     programs;
@@ -636,7 +656,10 @@ module For_testing = struct
     compile_fragment backend item
 
   let render_unit backend item =
-    render_code_unit backend (make_env backend) (compile_fragment backend item) ~copies:[]
+    Emit_c.render_file (make_env backend) backend.profile
+      ~resolve_position:(resolve_position backend ~show_file:backend.show_file)
+      [ (compile_fragment backend item, External) ]
 
   let count_built_programs () = Atomic.get programs_built
+  let count_rendered_units () = Atomic.get units_rendered
 end

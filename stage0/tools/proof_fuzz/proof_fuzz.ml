@@ -13,7 +13,9 @@ let solver =
 let c_compiler =
   lazy
     (match
-       C_compiler.find ~objects:(Filename.concat (Filename.get_temp_dir_name ()) "truss-proof-fuzz")
+       C_compiler.find
+         ~objects:(Filename.concat (Filename.get_temp_dir_name ()) "truss-proof-fuzz")
+         ()
      with
     | Ok c_compiler -> c_compiler
     | Error message -> failwith message)
