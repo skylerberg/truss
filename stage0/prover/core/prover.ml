@@ -450,12 +450,52 @@ type posed = {
   failed_runs : (Obligation.evaluation * string) list;
 }
 
-let state_value (sort : Logic.sort) (value : Obligation.value) : Logic.term =
+let rec state_value (declarations : Logic.declaration list) (term : Logic.term) (sort : Logic.sort)
+    (value : Obligation.value) : Logic.term list =
+  let raise_bug format = Compiler_bug.raise_bug ~stage:"Prover" format in
   match (sort, value) with
-  | Bool, Boolean holds -> Boolean holds
-  | Int, Integer number -> Integer number
-  | (Int | Bool | Float _ | Type_sort _ | Function_sort _), (Boolean _ | Integer _) ->
-      Compiler_bug.raise_bug ~stage:"Prover" "an evaluation gave a value of another sort"
+  | Bool, Boolean holds -> [ Logic.equal term (Boolean holds) ]
+  | Int, Integer number -> [ Logic.equal term (Integer number) ]
+  | Float (exponent, significand), Float number ->
+      [ Logic.equal term (Operations.make_float_literal (exponent, significand) number) ]
+  | Type_sort _, Elements _ -> []
+  | Type_sort ty, Constructed { variant; fields } -> (
+      match
+        List.find_map
+          (function
+            | Logic.Datatype (declared, constructors) when Types.equal declared ty ->
+                Some constructors
+            | Datatype _ | Constant _ | Function _ | Definition _ -> None)
+          declarations
+      with
+      | None | Some [ (Unit, []) ] -> []
+      | Some constructors -> (
+          match
+            List.find_opt
+              (fun ((constructor : Logic.symbol), _) ->
+                match constructor with
+                | Constructor { variant = declared; _ } -> declared = variant
+                | _ -> false)
+              constructors
+          with
+          | Some (constructor, selectors) ->
+              Logic.Is (constructor, term)
+              :: List.concat_map
+                   (fun ((selector : Logic.symbol), field_sort) ->
+                     match selector with
+                     | Field { field; _ } -> (
+                         match List.assoc_opt field fields with
+                         | Some field_value ->
+                             state_value declarations
+                               (Logic.Apply (selector, [ term ]))
+                               field_sort field_value
+                         | None -> raise_bug "an evaluation gave no value for the field %s" field)
+                     | _ -> raise_bug "a datatype's selector is not a field")
+                   selectors
+          | None -> raise_bug "an evaluation gave a variant that `%s` does not have" (Types.show ty)
+          ))
+  | (Int | Bool | Float _ | Type_sort _ | Function_sort _), _ ->
+      raise_bug "an evaluation gave a value of another sort"
 
 let pose_obligation runs site (obligation : Obligation.t) =
   List.fold_left
@@ -463,21 +503,18 @@ let pose_obligation runs site (obligation : Obligation.t) =
       match (declaration, find_declared_evaluation declaration) with
       | Constant (symbol, sort), Some evaluation -> (
           match Evaluation_table.find_opt runs evaluation with
-          | Some (Obligation.Evaluated (Some value)) ->
-              {
-                posed with
-                query =
+          | Some (Obligation.Evaluated value) -> (
+              match state_value obligation.query.declarations (Logic.Symbol symbol) sort value with
+              | [] -> posed
+              | facts ->
                   {
-                    posed.query with
-                    facts =
-                      posed.query.facts
-                      @ [ Logic.equal (Logic.Symbol symbol) (state_value sort value) ];
-                  };
-                has_run_result = true;
-              }
+                    posed with
+                    query = { posed.query with facts = posed.query.facts @ facts };
+                    has_run_result = true;
+                  })
           | Some (Unfinished report | Failed report) ->
               { posed with failed_runs = posed.failed_runs @ [ (evaluation, report) ] }
-          | Some (Evaluated None) | None -> posed)
+          | None -> posed)
       | _ -> posed)
     { site; obligation; query = obligation.query; has_run_result = false; failed_runs = [] }
     obligation.query.declarations

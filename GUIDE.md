@@ -609,8 +609,9 @@ test "constants that call functions" {
 
 - **A proof knows the value.** A function that returns `seconds_per_day`
   can ensure `result == 86400`, although `to_seconds` has no `ensures`,
-  because the check has run it. This holds for a `Bool`, an integer, or a
-  `Character`. A proof knows a larger value, such as a list, by the
+  because the check has run it. A proof knows a number, a `Bool`, a
+  `Character`, and the fields of a record or a variant that it can see. It
+  knows a collection, and a type whose fields are hidden from it, by the
   contracts of the calls that build it.
 - **A constant is data,** so its type holds no function, no `any` value, and
   nothing that exists only while the program runs, such as an open file.

@@ -387,20 +387,6 @@ let compute_changes ?(also = []) run (frame : State.frame) (blocks : Mir.block l
     reassigned = List.sort_uniq compare !reassigned;
   }
 
-let make_float_literal (exponent, significand) value =
-  let bits =
-    if exponent = 8 then Z.extract (Z.of_int32 (Int32.bits_of_float value)) 0 32
-    else Z.extract (Z.of_int64 (Int64.bits_of_float value)) 0 64
-  in
-  let fraction = significand - 1 in
-  Logic.Operation
-    ( Fp,
-      [
-        Logic.Bits (1, Z.extract bits (exponent + fraction) 1);
-        Logic.Bits (exponent, Z.extract bits fraction exponent);
-        Logic.Bits (fraction, Z.extract bits 0 fraction);
-      ] )
-
 let read_operand context frame run (operand : Mir.operand) =
   match operand with
   | Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> read_place context frame run place
@@ -413,7 +399,7 @@ let read_operand context frame run (operand : Mir.operand) =
       | Integer number -> Logic.Integer number
       | Float number -> (
           match Facts.find_float_format ty with
-          | Some format -> make_float_literal format number
+          | Some format -> Operations.make_float_literal format number
           | None -> Facts.raise_unsupported Whole_definition "a float literal without a float type")
       | Boolean truth -> Logic.Boolean truth)
 

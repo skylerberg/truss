@@ -745,9 +745,10 @@ public let word: Regex = Regex"[a-z]+"
   the result as data. An evaluation that uses more than 10 seconds of CPU
   time is an error.
 - A proof that reads a constant knows its value. Where the value calls a
-  function, the proof knows the result of the evaluation if it is a `Bool`,
-  an integer, or a `Character`, and knows any other result by the contracts
-  of the calls.
+  function, the proof knows the result of the evaluation as far as it sees
+  the type: a number, a `Bool`, a `Character`, and each field of a record or
+  a variant whose fields are visible to it. It knows a collection, and a type
+  whose fields it does not see, by the contracts of the calls.
 - A constant's type is not a function type or an `any` type, and holds no
   value of either, no handle, and no state that tasks share.
 - A constant's value does not depend on itself: through another constant,

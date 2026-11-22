@@ -308,10 +308,21 @@ let () =
   Harness.test "the proofs of a file ask for each computed constant that they read or define"
     (fun () ->
       match list_evaluated_constants Fixtures.Prover.computed_constants_read_by_functions with
-      | [ "app.main.day_is_even"; "app.main.initial"; "app.main.seconds_per_day" ] -> ()
+      | [
+       "app.main.corner";
+       "app.main.day_is_even";
+       "app.main.initial";
+       "app.main.label";
+       "app.main.ratio";
+       "app.main.seconds_per_day";
+      ] ->
+          ()
       | evaluated -> Harness.fail "evaluates [%s]" (String.concat "; " evaluated));
   Harness.test "code that reads a computed constant knows the value that its evaluation gives"
     (fun () -> expect_proven Fixtures.Prover.computed_constants_read_by_functions);
+  Harness.test
+    "code knows the variant and the fields of an evaluated option, result, and recursive type"
+    (fun () -> expect_proven Fixtures.Prover.computed_constants_of_options_and_trees);
   Harness.test "a proof by a computed constant's value trusts compiled code" (fun () ->
       let database =
         Support.make_database
@@ -323,7 +334,7 @@ let () =
             Diagnostic.Code.name (Prover state.site.code) = "prover.ensures")
           (Support.list_proof_states database (Support.parse_file "app.main"))
       with
-      | [ _; _; _; _ ] as ensured ->
+      | [ _; _; _; _; _; _; _; _ ] as ensured ->
           if
             not
               (List.for_all
@@ -2114,6 +2125,27 @@ let () =
           Harness.fail "%s"
             (String.concat "; "
                (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual)));
+  Harness.test
+    "a proof in another package does not know the fields of an evaluated constant of an opaque type"
+    (fun () ->
+      let token =
+        "public opaque type Token(code: UInt64)\n\n\
+         fn make_token() -> Token {\n\
+        \  Token(code: 7)\n\
+         }\n\n\
+         public let token: Token = make_token()\n\n\
+         public fn Token.read_code(self) -> UInt64 {\n\
+        \  self.code\n\
+         }\n"
+      in
+      (match
+         Support.list_codes
+           (check_across token
+              "fn f() -> UInt64\n  ensures result == 7\n{\n  numbers.token.read_code()\n}\n")
+       with
+      | [ "prover.ensures" ] -> ()
+      | codes -> Harness.fail "codes [%s]" (String.concat "; " codes));
+      expect_proven (token ^ "\nfn inside() -> UInt64\n  ensures result == 7\n{\n  token.code\n}\n"));
   Harness.test
     "a caller of another package's function that passes a derived impl where a bound needs one is \
      proven" (fun () ->

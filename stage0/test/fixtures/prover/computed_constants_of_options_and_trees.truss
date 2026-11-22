@@ -1,0 +1,62 @@
+type Point(x: Int64, y: Int64)
+
+type Tree =
+  | Leaf(value: Int64)
+  | indirect Node(left: Tree, right: Tree)
+
+fn find() -> Option[UInt64] {
+  Option.Some(7)
+}
+
+fn check() -> Result[Point, String] {
+  Result.Ok(Point(x: 1, y: 2))
+}
+
+fn grow() -> Tree {
+  Tree.Node(left: Tree.Leaf(value: 1), right: Tree.Leaf(value: 2))
+}
+
+fn find_nothing() -> Option[Point] {
+  Option.None
+}
+
+let found: Option[UInt64] = find()
+let checked: Result[Point, String] = check()
+let tree: Tree = grow()
+let missing: Option[Point] = find_nothing()
+
+fn read_found() -> UInt64
+  ensures result == 7
+{
+  match found {
+    Some(value) => value
+    None => 0
+  }
+}
+
+fn read_checked() -> Int64
+  ensures result == 2
+{
+  match checked {
+    Ok(point) => point.y
+    _ => 0
+  }
+}
+
+fn read_tree() -> Int64
+  ensures result == 2
+{
+  match tree {
+    Leaf(value) => value
+    Node(left: _, right) => match right {
+      Leaf(value) => value
+      _ => 0
+    }
+  }
+}
+
+fn read_missing() -> Bool
+  ensures result
+{
+  missing is None
+}

@@ -44,3 +44,54 @@ fn read_initial() -> Character
 {
   initial
 }
+
+type Point(x: Int64, y: Int64)
+
+type Shape =
+  | Circle(radius: Float64)
+  | Square(side: Float64)
+
+type Label(name: String, corner: Point, shape: Shape)
+
+fn make_point() -> Point {
+  Point(x: 3, y: 4)
+}
+
+fn make_ratio() -> Float64 {
+  0.5
+}
+
+fn make_label() -> Label {
+  Label(name: "origin", corner: make_point(), shape: Shape.Circle(radius: 1.5))
+}
+
+let corner: Point = make_point()
+let ratio: Float64 = make_ratio()
+let label: Label = make_label()
+
+fn read_corner() -> Int64
+  ensures result == 4
+{
+  corner.y
+}
+
+fn read_ratio() -> Float64
+  ensures result == 0.5
+{
+  ratio
+}
+
+fn read_label_corner() -> Int64
+  ensures result == 3
+{
+  label.corner.x
+}
+
+fn read_label_radius() -> Float64
+  ensures result == 1.5
+{
+  match label.shape {
+    Circle(radius) => radius
+    Square(side) => side
+  }
+}

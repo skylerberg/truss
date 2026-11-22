@@ -2,8 +2,14 @@ type evaluation =
   | Template_check of { function_ : Path.t; literals : string list }
   | Constant_value of Path.t
 
-type value = Boolean of bool | Integer of Z.t
-type run = Evaluated of value option | Unfinished of string | Failed of string
+type value =
+  | Boolean of bool
+  | Integer of Z.t
+  | Float of float
+  | Constructed of { variant : string option; fields : (string * value) list }
+  | Elements of value list
+
+type run = Evaluated of value | Unfinished of string | Failed of string
 
 type piece =
   | Text of string
