@@ -238,7 +238,7 @@ let unused_dependencies : Path.package list Tracker.fact =
     ~encode:(fun packages -> [ Tracker.marshal packages ])
     ~decode:(fun cells -> Tracker.unmarshal cells.(0))
 
-let lowered : (Lowering.lowered, Lowering.unsupported) result Tracker.fact =
+let lowered : (Lowering.lowered, Lowering.unbuildable) result Tracker.fact =
   Tracker.make_fact ~stage:Lower ~table:"lowered" ~id_column:"item" ~fixed:[]
     ~groups:[ (Lowered, [ "code"; "is_evaluated"; "sites" ]) ]
     ~encode:(fun code ->
@@ -250,7 +250,7 @@ let lowered : (Lowering.lowered, Lowering.unsupported) result Tracker.fact =
       [ Tracker.marshal code; Integer (Bool.to_int is_evaluated); Tracker.marshal sites ])
     ~decode:(fun cells -> Tracker.unmarshal cells.(0))
 
-let test_key : (string, Lowering.unsupported) result Tracker.fact =
+let test_key : (string, Lowering.unbuildable) result Tracker.fact =
   Tracker.make_fact ~stage:Key_tests ~table:"test_key" ~id_column:"item" ~fixed:[]
     ~groups:[ (Test_key, [ "key" ]) ]
     ~encode:(fun key -> [ Tracker.marshal key ])

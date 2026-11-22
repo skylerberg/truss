@@ -59,6 +59,23 @@ let raise_unsupported backend (unsupported : Lowering.unsupported) =
   in
   raise_cannot_build "%sStage0 cannot build this yet: %s." where unsupported.construct
 
+let describe_todo_types backend todo_types =
+  String.concat "\n"
+    (List.map
+       (fun path ->
+         Printf.sprintf "the type %s is defined as todo\n  at %s" (Path.show path)
+           (show_location backend (locate_todo_type backend.lookups backend.positions path)))
+       todo_types)
+
+let raise_unbuildable backend : Lowering.unbuildable -> 'never = function
+  | Unsupported unsupported -> raise_unsupported backend unsupported
+  | Todo_types todo_types -> raise_cannot_build "%s" (describe_todo_types backend todo_types)
+
+let list_todo_types (lookups : Lowering.lowered_lookups) root =
+  match lookups.read_test_key root with
+  | Error (Todo_types todo_types) -> todo_types
+  | Ok _ | Error (Unsupported _) -> []
+
 let read_lowered backend item =
   match Item_table.find_opt backend.lowered item with
   | Some lowered -> lowered
@@ -67,13 +84,13 @@ let read_lowered backend item =
       | Some (Ok lowered) ->
           Item_table.replace backend.lowered item lowered;
           lowered
-      | Some (Error unsupported) -> raise_unsupported backend unsupported
+      | Some (Error unbuildable) -> raise_unbuildable backend unbuildable
       | None -> raise_bug "%s is requested from code with errors" (Lowered.Item.to_string item))
 
 let read_test_key backend root =
   match backend.lookups.read_test_key root with
   | Ok test_key -> test_key
-  | Error unsupported -> raise_unsupported backend unsupported
+  | Error unbuildable -> raise_unbuildable backend unbuildable
 
 let programs_built = Atomic.make 0
 
@@ -124,7 +141,7 @@ let list_needed_evaluators ?supplied backend roots =
     (function
       | Lowering.Evaluated { evaluator; _ } -> Some evaluator
       | Unit _ -> None
-      | Unsupported unsupported -> raise_unsupported backend unsupported)
+      | Unbuildable unbuildable -> raise_unbuildable backend unbuildable)
     (snd (list_reached ?supplied backend roots))
 
 let make_data backend item ~evaluator ~ty =
@@ -240,7 +257,7 @@ and list_linked backend ~supplied roots =
               | Lowering.Unit { item; text_hash; sites } ->
                   Left (item, (make_stored_source backend item ~text_hash, sites))
               | Evaluated { item; evaluator; ty } -> Right (item, (evaluator, ty))
-              | Unsupported unsupported -> raise_unsupported backend unsupported)
+              | Unbuildable unbuildable -> raise_unbuildable backend unbuildable)
             stored
         in
         let units = List.filter (fun (item, _) -> visit item) units
@@ -390,14 +407,6 @@ let make_incomplete_record message =
     cached = false;
   }
 
-let describe_todo_types backend todo_types =
-  String.concat "\n"
-    (List.map
-       (fun path ->
-         Printf.sprintf "the type %s is defined as todo\n  at %s" (Path.show path)
-           (show_location backend (locate_todo_type backend.lookups backend.positions path)))
-       todo_types)
-
 let rec read_executed_fragment (lookups : Lowering.lowered_lookups) item =
   match lookups.find_lowered item with
   | Some (Ok (Compiled fragment | Folded (_, fragment))) -> Some fragment
@@ -426,7 +435,7 @@ let run_tests ?(rerun = false) ?(report_progress = ignore) backend ~time_limit_m
   let known =
     List.mapi
       (fun index (test, root) ->
-        match backend.lookups.list_reached_todo_types root with
+        match list_todo_types backend.lookups root with
         | _ :: _ as todo_types ->
             ( index,
               root,
@@ -547,7 +556,7 @@ let list_unshippable (lookups : Lowering.lowered_lookups) ~main =
             location = locate_todo_type lookups positions path;
             way = [ main; path ];
           })
-        (lookups.list_reached_todo_types (Lowering.make_root main))
+        (list_todo_types lookups (Lowering.make_root main))
       @ List.concat_map
           (fun (compiled, keys) ->
             List.map
@@ -574,7 +583,7 @@ let list_unshippable (lookups : Lowering.lowered_lookups) ~main =
 
 let make_program_root backend ~main =
   let root = Lowering.make_root main in
-  match backend.lookups.list_reached_todo_types root with
+  match list_todo_types backend.lookups root with
   | [] -> root
   | todo_types ->
       raise_cannot_build "%s"
@@ -600,8 +609,7 @@ let build_program backend ~main ~output ~is_kept =
     ~startup:(Startup.render_program_start (Emit_c.make_symbol root))
     ~output
 
-let list_reached_todo_types (lookups : Lowering.lowered_lookups) root =
-  lookups.list_reached_todo_types (Lowering.make_root root)
+let list_reached_todo_types lookups root = list_todo_types lookups (Lowering.make_root root)
 
 let evaluate backend evaluated =
   let lowered =

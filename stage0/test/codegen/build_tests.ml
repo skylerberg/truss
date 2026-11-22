@@ -35,9 +35,14 @@ let list_components program root =
     ~list_successors:(list_references program) [ root ]
 
 let derive_component_keys program ~read_known_key component =
-  Lowering.derive_test_keys
-    ~read_lowered:(fun item -> Lowering.Compiled (lookup program item))
-    ~read_known_key component
+  match
+    Lowering.derive_test_keys
+      ~read_lowered:(fun item -> Ok (Lowering.Compiled (lookup program item)))
+      ~read_known_key:(fun item -> Ok (read_known_key item))
+      component
+  with
+  | Ok keys -> keys
+  | Error _ -> Codegen_support.fail "a program of supplied fragments cannot be built"
 
 let derive_test_key program root =
   let known = Item_table.create 16 in

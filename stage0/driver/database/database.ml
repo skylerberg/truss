@@ -535,8 +535,8 @@ let list_evaluations proofs =
             find_item_outcome proofs.database Facts.test_key
               (Recipes.make_evaluation_root evaluation)
           with
-          | Some Blocked -> false
-          | Some (Value _ | Failed) | None -> true)
+          | Some (Blocked | Value (Error (Todo_types _))) -> false
+          | Some (Value (Ok _ | Error (Unsupported _)) | Failed) | None -> true)
         evaluations
 
 let decide ?on_bug proofs ~runs solver =
@@ -680,53 +680,6 @@ let read_reached database fact item =
       Compiler_bug.raise_bug ~stage:"Database" "%s is read, and no root of lowering reaches it"
         (Lowered.Item.to_string item)
 
-let list_reached_todo_types (database : t) item =
-  let lowered_kind = Kind.rank_target (Fact Lowered)
-  and key_kind = Kind.rank_target (Fact Test_key)
-  and interface_kind = Kind.rank_target (Fact Interface) in
-  let state fact id =
-    match
-      Tracker.find database Tracker.untracked fact.Tracker.whole (Lookups.locate_items database) ~id
-    with
-    | Some Failed -> `Failed
-    | Some Blocked -> `Blocked
-    | Some (Value _) | None -> `Settled
-  in
-  let visited = Hashtbl.create 16 in
-  let rec visit todo_types (stage : Kind.stage) id =
-    if Hashtbl.mem visited (stage, id) then todo_types
-    else begin
-      Hashtbl.replace visited (stage, id) ();
-      let targets = list_unit_targets database stage id in
-      let recurse () =
-        List.fold_left
-          (fun todo_types (target : Store.endpoint) ->
-            if target.kind = lowered_kind then visit todo_types Lower target.id
-            else if target.kind = key_kind then visit todo_types Key_tests target.id
-            else todo_types)
-          todo_types targets
-      in
-      match (stage, if stage = Lower then state Facts.lowered id else state Facts.test_key id) with
-      | Lower, `Failed ->
-          List.filter_map
-            (fun (target : Store.endpoint) ->
-              if target.kind <> interface_kind then None
-              else
-                Option.bind (Store.find_definition_key_anywhere database.store ~id:target.id)
-                  (fun key ->
-                    let key = Declarations.decode_key key in
-                    match find_value database Facts.elaborated key with
-                    | Some { interface = Type_interface { shape = Todo_type; _ }; _ } ->
-                        Some key.path
-                    | Some _ | None -> None))
-            targets
-          @ todo_types
-      | _, `Blocked -> recurse ()
-      | _, (`Failed | `Settled) -> todo_types
-    end
-  in
-  List.sort_uniq Path.compare (visit [] Key_tests (Ids.of_item item))
-
 let list_linked (database : t) profile roots : Lowering.linked list =
   let list_rows () = Recipes.list_linked database profile ~roots in
   let rows = list_rows () in
@@ -757,7 +710,7 @@ let list_linked (database : t) profile roots : Lowering.linked list =
       | _ -> (
           match find_item_outcome database Facts.lowered item with
           | Some (Value (Ok (Evaluate (evaluator, ty)))) -> Evaluated { item; evaluator; ty }
-          | Some (Value (Error unsupported)) -> Unsupported unsupported
+          | Some (Value (Error unbuildable)) -> Unbuildable unbuildable
           | Some (Value (Ok (Compiled _ | Folded _)) | Failed | Blocked) | None ->
               Compiler_bug.raise_bug ~stage:"Database" "%s is linked from code with errors"
                 (Lowered.Item.to_string item)))
@@ -789,7 +742,6 @@ let find_lowered_lookups (database : t) packages : (Lowering.lowered_lookups, st
                   Compiler_bug.raise_bug ~stage:"Database"
                     "%s is read, and no root of lowering reaches it" (Lowered.Item.to_string item));
           read_test_key = read_reached database Facts.test_key;
-          list_reached_todo_types = list_reached_todo_types database;
           list_linked = list_linked database;
           render_unit = render_unit database;
         }
