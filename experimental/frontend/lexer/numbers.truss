@@ -177,9 +177,9 @@ fn measure_character(text: StringSlice, offset: UInt64) -> UInt64
   if decoded.is_valid { decoded.length } else { 1 }
 }
 
-fn find_leftmost(issues: Slice[Issue], only_unfixable: Bool) -> Option[NumberProblem] {
+fn take_leftmost(issues: own List[Issue], only_unfixable: Bool) -> Option[NumberProblem] {
   var best: Option[NumberProblem] = None
-  for issue in issues {
+  for issue in own issues {
     if only_unfixable && issue.is_fixable {
       continue
     }
@@ -188,13 +188,13 @@ fn find_leftmost(issues: Slice[Issue], only_unfixable: Bool) -> Option[NumberPro
       None => true
     }
     if is_better {
-      best = Some(issue.problem.copy())
+      best = Some(own issue.problem)
     }
   }
   best
 }
 
-fn choose_problem(value: own NumberValue, issues: Slice[Issue], fixed: StringSlice) -> CheckedNumber {
+fn choose_problem(value: own NumberValue, issues: own List[Issue], fixed: StringSlice) -> CheckedNumber {
   var has_unfixable = false
   for issue in issues {
     if !issue.is_fixable {
@@ -202,9 +202,9 @@ fn choose_problem(value: own NumberValue, issues: Slice[Issue], fixed: StringSli
     }
   }
   if has_unfixable {
-    return CheckedNumber(own value, problem: find_leftmost(issues, only_unfixable: true), fixes: [])
+    return CheckedNumber(own value, problem: take_leftmost(own issues, only_unfixable: true), fixes: [])
   }
-  match find_leftmost(issues, only_unfixable: false) {
+  match take_leftmost(own issues, only_unfixable: false) {
     None => CheckedNumber(own value, problem: None, fixes: [])
     Some(problem) => CheckedNumber(
       own value,
@@ -266,7 +266,7 @@ fn check_radix(text: StringSlice) -> CheckedNumber
     )
   }
   let value = NumberValue.IntegerValue(parse_digits(digits, radix: base))
-  choose_problem(own value, issues, fixed: "${text.substring(0, to: 2)}${cleaned.text}")
+  choose_problem(own value, own issues, fixed: "${text.substring(0, to: 2)}${cleaned.text}")
 }
 
 type Group(offset: UInt64, text: StringSlice)
@@ -397,7 +397,7 @@ fn check_decimal(text: StringSlice) -> CheckedNumber
       token.normalize_decimal(significand, exponent: exponent_value - math.BigInteger.from(fraction_digits.length())),
     )
   }
-  choose_problem(own value, issues, fixed)
+  choose_problem(own value, own issues, fixed)
 }
 
 fn numbers_check(text: StringSlice) -> CheckedNumber
@@ -624,13 +624,13 @@ fn lex_foreign_number(text: StringSlice) -> Option[CheckedNumber]
   if !suffix.is_empty() && find_suffix(lowered_suffix) is Some(suffix_entry) {
     let number = text.substring(0, to: stop)
     let checked = check_number(number)
-    let value = match checked.value {
+    let value = match own checked.value {
       IntegerValue(digits) => if is_float_suffix(lowered_suffix) {
         NumberValue.FloatValue(token.normalize_decimal(digits, exponent: math.BigInteger.zero()))
       } else {
-        NumberValue.IntegerValue(digits.copy())
+        NumberValue.IntegerValue(own digits)
       }
-      FloatValue(decimal) => NumberValue.FloatValue(decimal.copy())
+      FloatValue(decimal) => NumberValue.FloatValue(own decimal)
     }
     let type_name: StringSlice = match suffix_entry.type_name {
       Some(name) => name
@@ -684,7 +684,7 @@ fn lex_foreign_number(text: StringSlice) -> Option[CheckedNumber]
   if octal_possible {
     let octal = "0o${without_zeros}"
     if check_number(octal).problem.is_none() && check_number(decimal).problem.is_none() {
-      mut alternatives.push(Replacement(title: "Write `${octal}` (octal)", text: octal.copy()))
+      mut alternatives.push(Replacement(title: "Write `${octal}` (octal)", text: own octal))
       mut alternatives.push(Replacement(title: "Write `${decimal}` (decimal)", text: decimal.copy()))
     }
   } else if check_number(decimal).problem.is_none() {

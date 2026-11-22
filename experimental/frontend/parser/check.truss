@@ -368,10 +368,7 @@ fn check_generic_parameters(cursor: mut TokenCursor, generics: Slice[syntax.Gene
 fn check_function_name(cursor: mut TokenCursor, name: syntax.DefinitionName)
   uses Panic
 {
-  let written = match name {
-    PlainName(plain) => plain.copy()
-    MemberName(name: member, ..) => member.copy()
-  }
+  let PlainName(written) | MemberName(name: written, ..) = name
   if written.text == "old" {
     report_at(
       mut cursor,

@@ -473,8 +473,8 @@ fn lex_trailing_point(scanner: Scanner, start: UInt64, stop: UInt64, checked: Ch
   if pointed.problem.is_some() {
     return None
   }
-  match pointed.value {
-    FloatValue(_) => Some(pointed.value.copy())
+  match own pointed.value {
+    FloatValue(decimal) => Some(NumberValue.FloatValue(own decimal))
     IntegerValue(_) => None
   }
 }
@@ -482,7 +482,7 @@ fn lex_trailing_point(scanner: Scanner, start: UInt64, stop: UInt64, checked: Ch
 fn report_trailing_point(scanner: mut Scanner, start: UInt64, point: UInt64)
   uses Panic
 {
-  let written = scanner.text(start, stop: point + 1).to_string()
+  let written = scanner.text(start, stop: point + 1)
   let fixes = scanner.list_code_fixes(source.make_span(start, stop: point + 1), codes: ["${written}0"])
   report(
     mut scanner,
@@ -498,8 +498,7 @@ fn lex_leading_dot(scanner: mut Scanner) -> Option[NumberValue]
 {
   let start = scanner.position
   let stop = number_scan_end(scanner.source.text, start: start + 1)
-  let written = scanner.text(start, stop).to_string()
-  let fixed = "0${written}"
+  let fixed = "0${scanner.text(start, stop)}"
   let checked = check_number(fixed)
   let is_float = match checked.value {
     FloatValue(_) => true
@@ -554,10 +553,10 @@ fn lex_ellipsis(scanner: mut Scanner, inline: Bool, nesting: UInt64, start: UInt
   }
 }
 
-fn lex_string(scanner: mut Scanner, tag: Option[token.Tag], inline: Bool, nesting: UInt64, start: UInt64) -> Item
+fn lex_string(scanner: mut Scanner, tag: own Option[token.Tag], inline: Bool, nesting: UInt64, start: UInt64) -> Item
   uses Panic, RunForever
 {
-  let scanned = scan_string(mut scanner, tag, nesting)
+  let scanned = scan_string(mut scanner, own tag, nesting)
   lexed(mut scanner, inline, start, kind: scanned.kind, ending: scanned.ending)
 }
 
@@ -567,16 +566,16 @@ fn opens_literal_at(scanner: Scanner, stop: UInt64) -> Bool
   scanner.is_at(stop, byte: 34) || scanner.is_at(stop, byte: 39) || (scanner.is_at(stop, byte: 36) && opens_raw_string(scanner, index: stop))
 }
 
-fn check_cached_name(scanner: mut Scanner, spelling: StringSlice) -> UInt64
+fn intern_name(scanner: mut Scanner, start: UInt64, stop: UInt64) -> UInt64
   uses Panic
 {
-  if scanner.name_indices.get(spelling) is Some(interned_index) {
+  if scanner.name_indices.get(scanner.text(start, stop)) is Some(interned_index) {
     return interned_index
   }
   let index = scanner.tables.names.length()
-  mut scanner.tables.names.push(spelling.to_string())
-  mut scanner.name_indices.insert(spelling.to_string(), value: index)
-  mut scanner.name_checks.push(check_name(spelling))
+  mut scanner.tables.names.push(scanner.text(start, stop).to_string())
+  mut scanner.name_indices.insert(scanner.text(start, stop).to_string(), value: index)
+  mut scanner.name_checks.push(check_name(scanner.text(start, stop)))
   index
 }
 
@@ -603,14 +602,14 @@ fn lex_name(scanner: mut Scanner, inline: Bool, nesting: UInt64) -> Item
   }
   scanner.position = position
   let stop = position
-  let spelling = scanner.text(start, stop).to_string()
+  let spelling = scanner.text(start, stop)
   let kind = if spelling == "_" {
     token.Kind.Underscore
   } else {
     match token.find_word(spelling) {
       Some(word) => word
       None => {
-        let index = check_cached_name(mut scanner, spelling)
+        let index = intern_name(mut scanner, start, stop)
         let checked = scanner.name_checks.get(index).expect("a name check").copy()
         if checked.problem is Some(problem) {
           var fixes: List[source.Fix] = []
@@ -633,7 +632,8 @@ fn lex_name(scanner: mut Scanner, inline: Bool, nesting: UInt64) -> Item
     _ => false
   }
   if is_tag {
-    return lex_string(mut scanner, tag: Some(token.Tag(name: own spelling, span: source.make_span(start, stop))), inline: inline, nesting: nesting, start: start)
+    let tag = token.Tag(name: scanner.text(start, stop).to_string(), span: source.make_span(start, stop))
+    return lex_string(mut scanner, tag: Some(own tag), inline: inline, nesting: nesting, start: start)
   }
   match lex_after_name(mut scanner, nesting, start, name: kind) {
     Some(scanned) => lexed(mut scanner, inline, start, kind: scanned.kind, ending: scanned.ending)

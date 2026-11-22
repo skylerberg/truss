@@ -44,16 +44,15 @@ fn report_misplaced_visibility(cursor: mut TokenCursor, code: StringSlice, token
   let Some(first) = tokens.first() else {
     return
   }
-  let first_token = first
   let last = tokens.last().expect("a last visibility token")
   let next = cursor.peek()
-  let span = source.make_span(first_token.span.start, stop: last.span.stop)
+  let span = source.make_span(first.span.start, stop: last.span.stop)
   report(
     mut cursor,
     code,
     span,
     message,
-    fixes: [source.make_fix("Remove it", edits: [source.delete(source.make_span(first_token.span.start, stop: next.span.start))])],
+    fixes: [source.make_fix("Remove it", edits: [source.delete(source.make_span(first.span.start, stop: next.span.start))])],
   )
 }
 
@@ -228,7 +227,7 @@ fn parse_definition_body(cursor: mut TokenCursor) -> Result[syntax.Block, Failur
   uses Panic, RunForever
 {
   if parse_optional_body(mut cursor)? is Some(body) {
-    return Ok(body.copy())
+    return Ok(own body)
   }
   let stop = cursor.compute_previous_stop()
   let ends_member = match cursor.peek_kind() {
@@ -396,7 +395,7 @@ fn parse_method_kind(cursor: mut TokenCursor, container: Container, name: own sy
   let signature = parse_signature(mut cursor, own name, is_method: true)?
   let kind = match container {
     InTrait => match parse_optional_body(mut cursor)? {
-      Some(body) => syntax.DefinitionKind.Function(syntax.FunctionDefinition(own signature, body: body.copy()))
+      Some(body) => syntax.DefinitionKind.Function(syntax.FunctionDefinition(own signature, own body))
       None => syntax.DefinitionKind.MethodDeclaration(own signature)
     }
     InImpl => {
@@ -663,11 +662,12 @@ fn parse_test(cursor: mut TokenCursor) -> Result[syntax.DefinitionKind, Failure]
   advance(mut cursor)
   let name = match cursor.peek_kind() {
     String(literal) => {
-      let written = cursor.tables.literal(literal)
-      if written.tag.is_some() {
+      let has_tag = cursor.tables.literal(literal).tag.is_some()
+      let has_interpolations = !cursor.tables.literal(literal).rest.is_empty()
+      if has_tag {
         return Err(fail(mut cursor, expected: "a plain string, with no tag, to name the test"))
       }
-      if !written.rest.is_empty() {
+      if has_interpolations {
         let span = cursor.peek().span
         report(mut cursor, code: "parser.interpolation_not_allowed", span: span, message: "A test's name cannot have interpolations.")
         return Err(Failure.Failed)
