@@ -137,13 +137,11 @@ let outlives_call ~(owns : Mir.local -> bool) ~(is_view : Types.ty -> bool) (bod
       | Basic (Lend { part; call }) when part = local ->
           if holds_view then list_receiver_places call @ list_viewed_by call
           else list_receiver_places call
-      | Basic (Call { destination = Some target; call } | Template { destination = target; call; _ })
-        when is_local target ->
+      | Basic (Call { destination = Some target; call }) when is_local target ->
           if holds_view then list_viewed_by call else raise Made
       | Basic
-          ( Assign _ | Lend _ | Call _ | Template _ | Live _ | Dead _ | Assert _ | Echo _
-          | Loan_start _ | Loan_end _ | Ghost_assert _ | Path_note _ | Proof _ | Evaluated_assert _
-            )
+          ( Assign _ | Lend _ | Call _ | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _
+          | Loan_end _ | Ghost_assert _ | Path_note _ | Proof _ | Evaluated_assert _ )
       | Provide_start _ | Provide_end ->
           []
     in

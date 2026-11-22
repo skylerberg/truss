@@ -264,7 +264,7 @@ let c_compiler =
 let run_evaluations database (file : Path.file) proofs =
   match Database.list_evaluations proofs with
   | [] -> []
-  | evaluations -> (
+  | evaluations ->
       let backend =
         Backend.create
           (match Database.find_lowered_lookups database [ file.module_.package ] with
@@ -272,9 +272,7 @@ let run_evaluations database (file : Path.file) proofs =
           | Error message -> failwith message)
           (Lazy.force c_compiler) Development
       in
-      match Evaluations.run backend evaluations with
-      | Ok runs -> runs
-      | Error message -> failwith message)
+      Evaluations.run backend evaluations
 
 let compute_verdicts database file =
   let proofs = prove database file in

@@ -4858,7 +4858,7 @@ test "tagged templates" {
   compiled. An invalid one is a compile error:
 
   ```text
-  main.truss:4:14: error[prover.requires]: `Self.is_valid_template(template.literals)` may not hold for this call to `Regex.from_template`. This fails every time the code reaches it. The clause that must hold is at `standard/text/text.truss:16`.
+  main.truss:4:14: error[prover.assertion]: The call to `Regex.is_valid_template` that `regex.Regex"[a-z"` makes may not give `true`. This fails every time the code reaches it.
     |   let word = regex.Regex"[a-z"
     |              ^^^^^^^^^^^^^^^^^
 
@@ -4879,7 +4879,8 @@ test "tagged templates" {
 
 A type becomes a tag by implementing the prelude trait `FromTemplate`. Its
 `is_valid_template` method states which literal text is valid, and the
-compiler checks each template's text with it when the code is compiled. See
+compiler runs it on each template's text when it checks the code, as it
+runs the condition of an `assert ... by evaluation`. See
 [Tagged templates](SPECIFICATION.md#tagged-templates).
 
 ### Overloads by receiver mode

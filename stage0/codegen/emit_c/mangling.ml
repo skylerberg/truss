@@ -137,17 +137,7 @@ let rec mangle : Lowered.Item.t -> string = function
       render_marker "Evaluate" ^ mangle_path function_
       ^ String.concat ""
           (List.map
-             (function
-               | Lowered.Item.Integer number ->
-                   render_marker "Value" ^ mangle_text (Z.to_string number)
-               | Literals literals ->
-                   render_marker "Literals"
-                   ^ String.concat ""
-                       (List.map
-                          (fun literal ->
-                            render_marker "Text" ^ mangle_text literal ^ render_marker "End")
-                          literals)
-                   ^ render_marker "End")
+             (fun number -> render_marker "Value" ^ mangle_text (Z.to_string number))
              arguments)
       ^ render_marker "End"
   | Generated (Adapter { function_; instantiation; ty }) ->

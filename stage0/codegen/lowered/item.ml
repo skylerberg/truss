@@ -9,7 +9,7 @@ type t =
   | Encode of Ground.ty
   | Evaluator of Path.t
   | Assertion of { definition : Path.t; condition : int }
-  | Call_evaluation of { function_ : Path.t; arguments : argument list }
+  | Call_evaluation of { function_ : Path.t; arguments : Z.t list }
   | Generated of generated
   | Table of table
 
@@ -29,8 +29,6 @@ and table =
   | Impl_table of { impl : Path.t; type_arguments : Ground.argument list }
   | Any_table of { impl : Path.t; type_arguments : Ground.argument list }
   | Locked_table of Path.t
-
-and argument = Integer of Z.t | Literals of string list
 
 and impl_method = {
   impl : Path.t;
@@ -72,7 +70,7 @@ let rec to_string = function
       Printf.sprintf "assertion %d of %s" condition (Path.show definition)
   | Call_evaluation { function_; arguments } ->
       "evaluation " ^ Path.show function_ ^ "("
-      ^ String.concat ", " (List.map show_argument arguments)
+      ^ String.concat ", " (List.map Z.to_string arguments)
       ^ ")"
   | Generated (Adapter { function_; instantiation; _ }) ->
       "adapter " ^ to_string (make_code function_ instantiation)
@@ -87,10 +85,6 @@ let rec to_string = function
   | Table (Locked_table capability) -> "locked table " ^ Path.show capability
   | Table (Impl_table { impl; type_arguments }) ->
       "table " ^ Path.show impl ^ show_arguments type_arguments
-
-and show_argument = function
-  | Integer value -> Z.to_string value
-  | Literals literals -> "[" ^ String.concat ", " (List.map (Printf.sprintf "%S") literals) ^ "]"
 
 and show_arguments = function
   | [] -> ""

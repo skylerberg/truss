@@ -30,4 +30,5 @@ val render_prototype :
   Lowered.signature ->
   C_text.t
 
+val render_initializer : Emission.t -> Ground.ty -> Lowered.static_value -> C_text.t option
 val render_rvalue : Emission.t -> function_context -> Lowered.ty -> Lowered.rvalue -> built option

@@ -121,21 +121,6 @@ let fold_literal state ty (constant : Mir.constant) =
   | Boolean boolean -> make_static_bool boolean
   | Unit -> None
 
-let fold_literal_value (state : Lowering.state) ty text =
-  let element = Ground.make_builtin UInt8 in
-  let elements =
-    List.init (String.length text) (fun index ->
-        Lowered.Static_scalar (Integer (UInt8, Z.of_int (Char.code text.[index]))))
-  in
-  match Monomorphic.compute_shape state.context.monomorphic ty with
-  | Record [ (field, Typed storage) ] when Option.is_some (Storage.find_storage_element storage) ->
-      Some
-        (Lowered.Static_record
-           [ (field, Static_storage { element; elements; capacity = String.length text }) ])
-  | Record [ (field, Typed view) ] when Option.is_some (Storage.find_view_element view) ->
-      Some (Lowered.Static_record [ (field, Static_view { element; elements }) ])
-  | _ -> None
-
 let enter_evaluated (context : Definitions.context) ~item ~(source : Resolve.Names.key) =
   Lowering.enter_item context ~item
     {
@@ -158,7 +143,11 @@ let make_constant_state (context : Definitions.context) path =
   (enter_evaluated context ~item:(Evaluator path) ~source, mir, ty)
 
 let make_assertion_state (context : Definitions.context) ~definition ~condition =
-  match Mir.read_code context.lookups.mir definition with
+  match
+    match Mir.read_code context.lookups.mir definition with
+    | Some _ as code -> code
+    | None -> Mir.read_initializer context.lookups.mir definition
+  with
   | Some { source; form = code } -> (
       match List.assoc_opt condition (Mir.list_evaluated_asserts code) with
       | Some asserted ->
@@ -193,7 +182,10 @@ and fold_body ~visiting ~depth ~steps state (mir : Mir.Graph.t)
       | Constant path ->
           if List.exists (Path.equal path) visiting then None
           else snd (fold_initializer state.context ~visiting path)
-      | Literal { text; type_ } -> fold_literal_value state (Lowering.ground state type_) text
+      | Literal { value; type_ } ->
+          Some
+            (Targets.make_static_literal state.context.monomorphic (Lowering.ground state type_)
+               value)
     in
     project_static_value whole place.projections
   in
@@ -322,7 +314,7 @@ and fold_body ~visiting ~depth ~steps state (mir : Mir.Graph.t)
         ( Live _ | Dead _ | Loan_start _ | Loan_end _ | Path_note _ | Ghost_assert _ | Proof _
         | Evaluated_assert _ ) ->
         Some ()
-    | Basic (Assign _ | Lend _ | Template _ | Echo _) | Provide_start _ | Provide_end -> None
+    | Basic (Assign _ | Lend _ | Echo _) | Provide_start _ | Provide_end -> None
   in
   let rec run block =
     if !steps <= 0 then None

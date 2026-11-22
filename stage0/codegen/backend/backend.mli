@@ -63,13 +63,6 @@ val list_reached_definitions : Lowering.lowered_lookups -> Path.t -> Path.t list
 val list_reached_todo_types : Lowering.lowered_lookups -> Path.t -> Path.t list
 val make_program_path : t -> string
 val build_program : t -> main:Path.t -> output:string -> is_kept:bool -> (unit, string) result
-
-val evaluate_predicate :
-  t ->
-  function_:Path.t ->
-  arguments:Lowered.Item.argument list ->
-  ((bool, string) result, string) result
-
 val evaluate_constant : t -> Path.t -> (Lowered.static_value ran, string) result
 
 val evaluate_assertion :
@@ -89,8 +82,5 @@ module For_testing : sig
   val render_unit : t -> Lowered.Item.t -> string
 
   val evaluate_call :
-    t ->
-    function_:Path.t ->
-    arguments:Lowered.Item.argument list ->
-    (Lowered.static_value ran, string) result
+    t -> function_:Path.t -> arguments:Z.t list -> (Lowered.static_value ran, string) result
 end

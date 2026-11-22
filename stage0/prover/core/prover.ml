@@ -575,7 +575,7 @@ let pose_proof (lookups : Lookups.t) runs key proof =
                             report;
                       }
                 | Constant_value _, (Some (Evaluated _ | Unfinished _) | None) -> None
-                | (Template_check _ | Assertion _), _ ->
+                | Assertion _, _ ->
                     Compiler_bug.raise_bug ~stage:"Prover"
                       "a definition's own evaluation is not of a constant");
         }
@@ -591,10 +591,6 @@ let explain_failed_runs failed_runs =
     (List.map
        (fun ((evaluation : Obligation.evaluation), report) ->
          match evaluation with
-         | Template_check { function_; literals } ->
-             Printf.sprintf
-               " Running `%s` on the template text `%s` failed, so its result is not known: %s"
-               (Facts.show_callee function_) (String.concat "${...}" literals) report
          | Constant_value path ->
              Printf.sprintf " The evaluation of `%s` stopped, so its value is not known: %s"
                (Path.show path) report

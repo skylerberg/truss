@@ -80,10 +80,9 @@ let walk_loop_clause visit (written : Core.loop_clause Core.conditional) =
 
 let walk_expression_children visit (node : Core.expression) =
   match node.kind with
-  | Integer _ | Float _ | Boolean _ | String _ | Function_value _ | Value_parameter _ | Break
+  | Integer _ | Float _ | Boolean _ | Literal _ | Function_value _ | Value_parameter _ | Break
   | Continue | Todo | Unreachable | Result | Current_target | Yielded | Method_cost _ ->
       ()
-  | Template { call; _ } -> visit.expression call
   | Use core_place -> walk_place visit core_place
   | Copy value -> walk_operand visit value
   | Lambda { parameters; body; _ } ->

@@ -1099,8 +1099,6 @@ let list_proof_evaluations : Prover.proof part -> _ = function
   | Failed _ | Blocked -> []
 
 let make_evaluation_root : Prover.Obligation.evaluation -> Lowered.Item.t = function
-  | Template_check { function_; literals } ->
-      Call_evaluation { function_; arguments = [ Literals literals ] }
   | Constant_value path -> Constant path
   | Assertion { definition; condition } -> Assertion { definition; condition }
 

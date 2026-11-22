@@ -232,8 +232,8 @@ let list_statement_edges interface instance (statement : Tree.statement) =
               | Convert _ | Copy _ | Lambda _ | Value_parameter _ | Specification _ );
             _;
           }
-      | Call _ | Lend _ | Template _ | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _
-      | Loan_end _ | Ghost_assert _ | Path_note _ | Proof _ | Evaluated_assert _ )
+      | Call _ | Lend _ | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _ | Loan_end _
+      | Ghost_assert _ | Path_note _ | Proof _ | Evaluated_assert _ )
   | For _
   | Jump (Return _ | Break | Continue | Cancel _ | Unreachable | Written_unreachable | Todo)
   | Choose _ | Assert_by_bit_vector _ | While _ | Fork _ | Resume _ | Yield _ ->
@@ -279,8 +279,7 @@ let list_dependencies (lookups : lookups) instance (code : Tree.t) =
             List.iter (add ~through statement.origin (Supplied supplier)) code)
       (list_statement_edges lookups.interface instance statement);
     match statement.kind with
-    | Basic (Call { call; _ } | Lend { call; _ } | Template { call; _ }) ->
-        add_invariant_check ~through call
+    | Basic (Call { call; _ } | Lend { call; _ }) -> add_invariant_check ~through call
     | Basic (Assign { value = Construct { variant; fields; type_ }; _ }) -> (
         match find_head type_ with
         | Some head ->

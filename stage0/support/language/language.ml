@@ -2,6 +2,7 @@ module Builtin_capability = Builtin_capability
 module Builtin_type = Builtin_type
 module Comparison = Comparison
 module Connective = Connective
+module Literal = Literal
 module Loop_mode = Loop_mode
 module Metric = Metric
 module Mode = Mode

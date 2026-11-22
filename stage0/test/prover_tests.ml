@@ -297,7 +297,6 @@ let list_evaluated_constants text =
   List.map
     (function
       | Prover.Obligation.Constant_value path -> Path.show path
-      | Template_check { function_; _ } -> Path.show function_
       | Assertion { definition; _ } -> Path.show definition)
     (Database.list_evaluations (Support.prove database (Support.parse_file "app.main")))
 
@@ -1241,9 +1240,36 @@ let () =
       let message = read_message (shout ^ Fixtures.Prover.shout_of_a_copied_name) in
       if
         not
-          (String.includes ~affix:"may not hold for this call to `Shout.from_template`" message
-          && String.includes ~affix:"This fails every time the code reaches it." message)
+          (String.includes
+             ~affix:
+               "The call to `Shout.is_valid_template` that `Shout\"hey ${name.copy()}\"` makes may \
+                not give `true`. This fails every time the code reaches it."
+             message)
       then Harness.fail "message %S" message);
+  Harness.test "a proof knows the length and the text of a template's literals with no evaluation"
+    (fun () ->
+      let tag = Fixtures.Prover.generic_tag_whose_check_states_its_result in
+      let of_any_tone ?(parameters = "") template =
+        Printf.sprintf "fn of_any_tone[Tone](%s) -> Shout[Tone] {\n  %s\n}\n" parameters template
+      in
+      (match list_evaluated_constants (tag ^ of_any_tone "Shout\"hey\"") with
+      | [] -> ()
+      | evaluated -> Harness.fail "evaluates [%s]" (String.concat "; " evaluated));
+      expect_proven (tag ^ of_any_tone "Shout\"hey\"");
+      expect_not_proven
+        (tag ^ of_any_tone ~parameters:"name: String" "Shout\"hey ${name.copy()}\"")
+        "prover.requires";
+      expect_not_proven (tag ^ of_any_tone "Shout\"hello\"") "prover.requires");
+  Harness.test "a template copies its literal text once, as a string literal is copied" (fun () ->
+      let count = Fixtures.Prover.template_counting_its_literals in
+      let of_count clause = Printf.sprintf "fn f() -> Count\n  %s\n{\n  Count\"hey\"\n}\n" clause in
+      expect_proven (count ^ of_count "cost allocations == 1");
+      expect_not_proven (count ^ of_count "cost allocations == 0") "prover.cost");
+  Harness.test "a generic tag at a type without type parameters is checked by evaluation" (fun () ->
+      (match list_evaluated_constants Fixtures.Prover.generic_tag_without_a_stated_check with
+      | [ "app.main.loud" ] -> ()
+      | evaluated -> Harness.fail "evaluates [%s]" (String.concat "; " evaluated));
+      expect_proven Fixtures.Prover.generic_tag_without_a_stated_check);
   Harness.test "an impl's from_template cannot require more than the tag's check" (fun () ->
       expect_not_proven Fixtures.Prover.shout_with_a_stronger_requires "prover.requires");
   Harness.test "an obligation that the facts refute says it fails every time it is reached"

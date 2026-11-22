@@ -76,8 +76,7 @@ and kind =
   | Integer of Z.t
   | Float of float
   | Boolean of bool
-  | String of string
-  | Template of { literals : string list; call : expression }
+  | Literal of Language.Literal.t
   | Use of place
   | Copy of operand
   | Function_value of { path : Path.t; instantiation : Types.instantiation }

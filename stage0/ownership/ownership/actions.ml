@@ -645,10 +645,6 @@ let emit_statement builder (statement : Mir.Graph.statement) =
             (fun destination ->
               hold builder destination (make_value (list_result_views builder called)))
             destination
-      | Template { destination; call = called; _ } ->
-          read_uses builder uses;
-          emit_call builder called origin;
-          hold builder destination (make_value (list_result_views builder called))
       | Lend { part; call = called } ->
           read_uses builder uses;
           emit_call builder called origin;

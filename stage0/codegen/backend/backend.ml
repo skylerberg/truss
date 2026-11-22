@@ -535,14 +535,6 @@ let evaluate_call backend ~function_ ~arguments =
           Lowering.Encoding.decode (make_env backend) ty encoded)
   | _ -> raise_bug "%s has no result to evaluate" (Path.show function_)
 
-let evaluate_predicate backend ~function_ ~arguments =
-  Result.map
-    (function
-      | Ran (Lowered.Static_scalar (Bool holds)) -> Ok holds
-      | Ran _ -> raise_bug "%s returned a value that is not a Bool" (Path.show function_)
-      | Reached_todo report | Stopped report -> Error report)
-    (evaluate_call backend ~function_ ~arguments)
-
 let evaluate_constant backend path =
   capture_failure @@ fun () ->
   match read_lowered backend (Constant path) with

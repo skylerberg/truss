@@ -115,8 +115,8 @@ let describe_local : Mir.local_kind -> string = function
 let read_root context frame run (root : Mir.root) =
   match root with
   | Constant path -> Values.evaluate_constant context frame path
-  | Literal { text; type_ } ->
-      Values.make_text_value context frame (Facts.substitute_type context frame type_) text
+  | Literal { value; type_ } ->
+      Values.make_literal_value context frame (Facts.substitute_type context frame type_) value
   | Local local -> (
       match Locals.make_key run.infos local with
       | Core_local Self -> (
@@ -357,9 +357,6 @@ let compute_changes ?(also = []) run (frame : State.frame) (blocks : Mir.block l
             Option.iter note_assigned destination;
             note_passed call
         | Basic (Lend { call; _ }) -> note_passed call
-        | Basic (Template { destination; call; _ }) ->
-            note_assigned destination;
-            note_passed call
         | Provide { target; provided; _ } ->
             note_assigned target;
             List.iter note (list_mut_provided_places provided)
@@ -502,7 +499,12 @@ let read_call context frame run (call : Mir.call) ~result_type =
   | ( Trait_method { trait; name; receiver; _ },
       [
         Passed { value = tested; _ };
-        Passed { value = Borrow { place = { root = Literal { text; _ }; projections = [] }; _ }; _ };
+        Passed
+          {
+            value =
+              Borrow { place = { root = Literal { value = Text text; _ }; projections = [] }; _ };
+            _;
+          };
       ] )
     when Well_known.is_method Equal_equal (Method { owner = trait.trait; name; receiver }) ->
       let ty = compute_operand_type context frame tested in
@@ -728,7 +730,7 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
       let term = translate_operand copied_operand in
       let literal =
         match copied_operand with
-        | Borrow { place = { root = Literal { text; _ }; projections = [] }; _ } -> Some text
+        | Borrow { place = { root = Literal { value; _ }; projections = [] }; _ } -> Some value
         | _ -> None
       in
       (Values.copy_value ?literal context frame ty term, term)
@@ -1481,24 +1483,36 @@ and read_basic context frame run (statement : Mir.statement) (basic : Mir.basic)
             Amounts.run_code context frame code ~type_:Types.bool)
       in
       Facts.assume context frame (Logic.equal (Logic.Symbol symbol) holds);
-      Facts.oblige context frame Assertion
-        (Facts.locate context frame.source statement.origin)
-        [ Text "`"; Facts.quote frame.source statement.origin; Text "` may not hold." ]
+      let location = Facts.locate context frame.source statement.origin in
+      Facts.oblige context frame Assertion location
+        (match statement.origin with
+        | Written _ ->
+            [ Text "`"; Facts.quote frame.source statement.origin; Text "` may not hold." ]
+        | Desugared _ ->
+            let callee =
+              List.find_map
+                (fun (asserted : Mir.statement) ->
+                  match asserted.kind with
+                  | Basic (Call { call; _ }) ->
+                      (Mir.Call_edges.resolve_callee context.lookups.interface frame.substitution
+                         call.callee.target)
+                        .target
+                  | _ -> None)
+                (List.rev code.body.code.statements)
+            in
+            [
+              Text
+                (String.capitalize_ascii
+                   (Facts.describe_call context location
+                      ?callee:(Option.map Facts.show_callee callee)
+                      ()));
+              Text " may not give `true`.";
+            ])
         holds;
       Some frame
   | Path_note note ->
       note_path context frame note;
       Some frame
-  | Template { destination; literals; call } ->
-      (match call.arguments with
-      | [ Passed { value = template; _ } ] ->
-          Calls.assume_template_check context frame ~origin:call.origin
-            (make_unit_callee call.callee.target)
-            ~literals
-            ~template_type:(compute_operand_type context frame template)
-            (read_operand context frame run template)
-      | _ -> Facts.raise_bug "a tagged template whose call does not pass one template");
-      read_call_statement context frame run ~destination:(Some destination) call
 
 and read_call_statement context frame run ~destination (call : Mir.call) =
   let result_type =

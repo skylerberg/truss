@@ -2515,7 +2515,8 @@ provided without `mut` has no mutex.
   a view of it, and binding it with `let` cost nothing. Where an owned
   `String` is needed, as in a `var`, an `own` argument, or a returned value,
   the literal is copied, and a copy of a non-empty literal counts as one
-  allocation.
+  allocation. The literal text of a [tagged template](#tagged-templates) is
+  a constant without a name by the same rules.
 - A string literal without `${...}` where a `StringSlice` is expected is a
   `StringSlice` of the constant's bytes.
 - `StringSlice` is the view of a `String`.
@@ -2539,9 +2540,17 @@ let pattern = Regex"[a-z]+@${domain}"
   literal text as `text.Literal` values, which only the compiler makes, and
   the converted values.
 - A tag's `is_valid_template` states the rules for valid literal text, and
-  `from_template` requires it. The literal text is known when the code is
-  compiled, so the check is evaluated then. `Regex"[a-z"` is an error, and so
-  is a check that panics or reaches `todo`.
+  `from_template` requires it.
+- The literal text of a template is a `List[text.Literal]` constant without
+  a name, as a string literal is a `String` constant without a name.
+- A tagged template is the call of its tag's `from_template`, after
+  `assert Tag.is_valid_template(literals) by evaluation` on that constant
+  (see [Statements and blocks](#statements-and-blocks)). `Regex"[a-z"` is
+  therefore an error when the code is checked, and so is a check that
+  reaches `todo`.
+- Where the tag mentions a type parameter of the code around it, nothing is
+  evaluated, and the `requires` of `from_template` is proven as any other
+  is.
 
 ```truss
 impl FromTemplate for Regex {

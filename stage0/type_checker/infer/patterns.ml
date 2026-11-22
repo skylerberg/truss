@@ -149,7 +149,7 @@ and evaluate_constant_expression context seen (value : Core.expression) : space 
       else None
   | Boolean value -> Some (Constructed (Boolean value, []))
   | Integer value -> Some (Constructed (Interval (value, value), []))
-  | String text -> Some (Constructed (Text text, []))
+  | Literal (Text text) -> Some (Constructed (Text text, []))
   | _ -> None
 
 and evaluate_range_bound context (bound : Core.range_bound) : Z.t option =

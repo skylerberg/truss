@@ -73,24 +73,18 @@ let lower_call_evaluation context ~function_ ~arguments : Emit_c.fragment =
   Lowering.run_in_scope state (fun () ->
       let passed =
         List.map2
-          (fun (mode, ty) (argument : Lowered.Item.argument) ->
+          (fun (mode, ty) argument ->
             let ty = Lowering.ground state ty in
             let place = Lowering.allocate_temporary state ty in
-            (match argument with
-            | Integer value ->
-                let constant =
-                  match Lowering.classify_scalar state ty with
-                  | Integer integer -> Lowering.make_int_constant integer value
-                  | Bool -> Lowered.Constant (Bool (not (Z.equal value Z.zero)))
-                  | _ ->
-                      Definitions.raise_bug "an evaluated call's argument of type %s"
-                        (Ground.to_string ty)
-                in
-                Emit_c.Ir_builder.emit state.builder (Assign (place, Use constant))
-            | Literals literals ->
-                Targets.lower_literals_into state ty place
-                  ~site:{ definition = state.frame.code.definition; offset = 0 }
-                  literals);
+            let constant =
+              match Lowering.classify_scalar state ty with
+              | Integer integer -> Lowering.make_int_constant integer argument
+              | Bool -> Lowered.Constant (Bool (not (Z.equal argument Z.zero)))
+              | _ ->
+                  Definitions.raise_bug "an evaluated call's argument of type %s"
+                    (Ground.to_string ty)
+            in
+            Emit_c.Ir_builder.emit state.builder (Assign (place, Use constant));
             (mode, ty, place))
           (Definitions.list_interface_parameters signature)
           arguments

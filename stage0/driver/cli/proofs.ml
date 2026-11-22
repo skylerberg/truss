@@ -21,16 +21,12 @@ type t = {
 let list_runs database snapshot packages proofs =
   match Database.list_evaluations proofs with
   | [] -> []
-  | evaluations -> (
-      match
-        Evaluations.run
-          (Workspace_backend.create snapshot
-             (Workspace_backend.require_lowered_lookups database packages)
-             Development)
-          evaluations
-      with
-      | Ok runs -> runs
-      | Error message -> Outcome.raise_cannot_run "%s" message)
+  | evaluations ->
+      Evaluations.run
+        (Workspace_backend.create snapshot
+           (Workspace_backend.require_lowered_lookups database packages)
+           Development)
+        evaluations
 
 let check database snapshot packages files =
   let proofs = Database.prove database files in

@@ -1180,7 +1180,8 @@ values, which makes an injection attack impossible by construction:
 | Rule | Reason |
 |---|---|
 | The tag is a type. | The tag names the type of the result. |
-| Malformed literal text is a compile error. | A tag states the rules for its literal text in `is_valid_template`, which `from_template` requires. A function in a specification is pure and terminates, so the compiler can run the check at compile time, and constructing the value cannot fail. The feature reuses `requires`, purity, and termination. |
+| Malformed literal text is a compile error. | A tag states the rules for its literal text in `is_valid_template`, which `from_template` requires. A tagged template is that call after `assert Tag.is_valid_template(literals) by evaluation`, so the check runs when the code is checked, and constructing the value cannot fail. |
+| A tagged template is ordinary code after type checking. | The literal text is a constant without a name, as a string literal is, so the assertion and the call name one value. Ownership, the prover, and code generation then have no rule for templates: the feature is `requires`, a constant, and an assertion by evaluation. A second mechanism for the check would have to be kept equal to the first in each of them. |
 | A check cannot read anything outside the code, such as a live database schema. | A build has no capabilities. |
 | A character and a byte use the syntax of a tagged template: `Character"é"` and `UInt8"\n"`. | They need no lexer rule of their own and no second set of escapes. |
 

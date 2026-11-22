@@ -30,8 +30,8 @@ let list_nested_blocks (statement : Tree.statement) : Tree.block list =
                   (Result | Entry _ | Yielded | Identical _ | Applied _ | Method_cost _ | Map _) );
             _;
           }
-      | Call _ | Lend _ | Template _ | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _
-      | Loan_end _ | Ghost_assert _ | Path_note _ | Proof _ | Evaluated_assert _ )
+      | Call _ | Lend _ | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _ | Loan_end _
+      | Ghost_assert _ | Path_note _ | Proof _ | Evaluated_assert _ )
   | Yield _
   | Jump (Return _ | Break | Continue | Cancel _ | Unreachable | Written_unreachable | Todo) ->
       []
@@ -106,9 +106,6 @@ let visit_statement_places visit (statement : Tree.statement) =
       Option.iter visit_place destination;
       visit_call visit call
   | Basic (Lend { call; _ }) -> visit_call visit call
-  | Basic (Template { destination; call; _ }) ->
-      visit_place destination;
-      visit_call visit call
   | Basic (Assert value | Echo value | Loan_start { borrowed = value; _ })
   | Assert_by_bit_vector { condition = value; _ } ->
       visit_operand value
@@ -149,8 +146,8 @@ let rec visit_block ~on_value visit (block : Tree.block) =
       | Basic (Proof code | Evaluated_assert code) -> visit_code ~on_value visit code
       | While { loop; _ } | For { loop; _ } -> visit_loop ~on_value visit loop
       | Basic
-          ( Assign _ | Call _ | Lend _ | Template _ | Live _ | Dead _ | Assert _ | Echo _
-          | Loan_start _ | Loan_end _ | Path_note _ )
+          ( Assign _ | Call _ | Lend _ | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _
+          | Loan_end _ | Path_note _ )
       | Choose _ | Assert_by_bit_vector _ | Fork _ | Provide _ | Resume _ | Yield _ | Jump _ ->
           ());
       List.iter (visit_block ~on_value visit) (list_nested_blocks statement))
@@ -198,7 +195,7 @@ let list_evaluated_asserts (code : Tree.t) =
 
 let find_callee (statement : Tree.statement) : Tree.callee option =
   match statement.kind with
-  | Basic (Call { call; _ } | Lend { call; _ } | Template { call; _ }) -> Some call.callee
+  | Basic (Call { call; _ } | Lend { call; _ }) -> Some call.callee
   | For { iteration = Pull { next; _ }; _ } -> Some next
   | Basic
       ( Assign _ | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _ | Loan_end _ | Ghost_assert _

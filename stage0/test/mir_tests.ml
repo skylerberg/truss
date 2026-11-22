@@ -104,9 +104,6 @@ and collect_effects : Mir.basic -> Mir.local list * Mir.local list * Mir.local l
       let read, given = Option.fold ~none:([], []) ~some:list_written destination in
       (list_call_locals call @ read, given, [])
   | Lend { part; call } -> (list_call_locals call, [ part ], [])
-  | Template { destination; call; _ } ->
-      let read, given = list_written destination in
-      (list_call_locals call @ read, given, [])
   | Live locals -> ([], locals, [])
   | Dead locals -> ([], [], locals)
   | Assert value | Echo value -> (list_operand_locals value, [], [])
@@ -1510,6 +1507,47 @@ let () =
       | [ { path; omitted_field = Some "size"; _ } ] ->
           expect_paths ~expected:[ "app.main.limit" ] [ path ]
       | dependencies -> Harness.fail "%d reads" (List.length dependencies))
+
+let () =
+  let lookups = lazy (make_call_edge_lookups Fixtures.Mir.tagged_template) in
+  let code =
+    lazy
+      (Option.get (Mir.read_code (Lazy.force lookups).mir (Support.make_top_path "app.main" "f")))
+        .form
+  in
+  let list_literals (code : Mir.t) =
+    let literals = ref [] in
+    Mir.iter_places
+      (fun _ (place : Mir.place) ->
+        match place.root with
+        | Literal { value; _ } -> literals := value :: !literals
+        | Local _ | Constant _ -> ())
+      code;
+    List.sort_uniq compare !literals
+  in
+  let method_of name = "app.main.impl standard.text.FromTemplate for app.main.Shout." ^ name in
+  Harness.test "a tagged template is an assertion by evaluation and a call of from_template"
+    (fun () ->
+      expect_paths
+        ~expected:[ method_of "from_template"; method_of "is_valid_template" ]
+        (List.filter
+           (fun (path : Path.t) -> Path.locate_package path <> Path.standard_package)
+           (Mir.Call_edges.list_path_edges (Lazy.force lookups)
+              (Support.make_top_path "app.main" "f")));
+      match Mir.list_evaluated_asserts (Lazy.force code) with
+      | [ _ ] -> ()
+      | evaluated -> Harness.fail "%d assertions by evaluation" (List.length evaluated));
+  Harness.test "the assertion and the call of a template name one literal constant" (fun () ->
+      let expected : Language.Literal.t list = [ Elements [ Text "hey" ] ] in
+      let in_call = list_literals (Lazy.force code) in
+      let in_assertion =
+        List.concat_map
+          (fun (_, condition) -> list_literals condition)
+          (Mir.list_evaluated_asserts (Lazy.force code))
+      in
+      if in_assertion <> expected then Harness.fail "the assertion names another literal";
+      if not (List.for_all (fun literal -> List.mem literal in_call) expected) then
+        Harness.fail "the call names another literal")
 
 let () =
   let lookups = lazy (make_call_edge_lookups Fixtures.Mir.code_asserting_by_evaluation) in

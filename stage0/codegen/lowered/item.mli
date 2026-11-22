@@ -9,7 +9,7 @@ type t =
   | Encode of Ground.ty
   | Evaluator of Path.t
   | Assertion of { definition : Path.t; condition : int }
-  | Call_evaluation of { function_ : Path.t; arguments : argument list }
+  | Call_evaluation of { function_ : Path.t; arguments : Z.t list }
   | Generated of generated
   | Table of table
 
@@ -29,8 +29,6 @@ and table =
   | Impl_table of { impl : Path.t; type_arguments : Ground.argument list }
   | Any_table of { impl : Path.t; type_arguments : Ground.argument list }
   | Locked_table of Path.t
-
-and argument = Integer of Z.t | Literals of string list
 
 and impl_method = {
   impl : Path.t;

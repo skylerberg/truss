@@ -5,4 +5,5 @@
   quantifier
   loop_mode
   connective
+  literal
   proof_method))

@@ -179,8 +179,8 @@ let rec lower_place state (written : Mir.place) : Lowered.place =
     match written.root with
     | Local local -> lookup_local_place state local
     | Constant path -> Targets.lower_static_constant state path
-    | Literal { text; type_ } ->
-        Targets.lower_literal_place state (Lowering.ground state type_) text
+    | Literal { value; type_ } ->
+        Targets.lower_literal_place state (Lowering.ground state type_) value
   in
   List.fold_left
     (fun place (projection : Mir.projection) ->
@@ -322,7 +322,7 @@ let make_field_projection variant field : Lowered.projection =
 
 let lower_owned_place state (written : Mir.place) =
   match written.root with
-  | Literal { text; _ } -> Definitions.raise_bug "the string literal %S used as an owned value" text
+  | Literal _ -> Definitions.raise_bug "a literal used as an owned value"
   | Local _ | Constant _ -> lower_place state written
 
 let take_place state (written : Mir.place) =

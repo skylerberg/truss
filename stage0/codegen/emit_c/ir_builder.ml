@@ -361,6 +361,7 @@ let list_rvalue_addressed : Lowered.rvalue -> Lowered.local list = function
   | Build { fields; _ } -> list_operands_addressed (List.map snd fields)
   | Is_variant (place, _) -> list_index_addressed place
   | Function_value { environment; _ } -> list_operands_addressed (Option.to_list environment)
+  | Data _ -> []
 
 let list_target_operands : Lowered.target -> Lowered.operand list = function
   | Direct _ | Intrinsic _ | Foreign _ -> []

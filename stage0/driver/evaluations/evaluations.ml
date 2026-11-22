@@ -19,22 +19,13 @@ let make_run : (Lowered.static_value Backend.ran, string) result -> Prover.Oblig
   | Ok (Reached_todo report) -> Unfinished report
   | Ok (Stopped report) | Error report -> Failed report
 
-let run_one backend (evaluation : Prover.Obligation.evaluation) :
-    (Prover.Obligation.run, string) result =
-  match evaluation with
-  | Template_check { function_; literals } -> (
-      match Backend.evaluate_predicate backend ~function_ ~arguments:[ Literals literals ] with
-      | Ok (Ok holds) -> Ok (Evaluated (Boolean holds))
-      | Ok (Error report) -> Ok (Failed report)
-      | Error message ->
-          Error (Printf.sprintf "The check of a template's text could not be built: %s" message))
-  | Constant_value path -> Ok (make_run (Backend.evaluate_constant backend path))
-  | Assertion { definition; condition } ->
-      Ok (make_run (Backend.evaluate_assertion backend ~definition ~condition))
-
 let run backend evaluations =
-  List.fold_right
-    (fun evaluation runs ->
-      Result.bind runs (fun runs ->
-          Result.map (fun run -> (evaluation, run) :: runs) (run_one backend evaluation)))
-    evaluations (Ok [])
+  List.map
+    (fun (evaluation : Prover.Obligation.evaluation) ->
+      ( evaluation,
+        make_run
+          (match evaluation with
+          | Constant_value path -> Backend.evaluate_constant backend path
+          | Assertion { definition; condition } ->
+              Backend.evaluate_assertion backend ~definition ~condition) ))
+    evaluations
