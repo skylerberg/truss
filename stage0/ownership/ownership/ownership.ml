@@ -33,6 +33,7 @@ let check_definition (lookups : Lookups.t) (key : Resolve.Names.key) : result =
       literal_views = Context.Local_table.create 4;
       owned_scrutinees = Context.Local_table.create 4;
       types = Context.Local_table.create 32;
+      decided_types = Context.Type_table.create 16;
       parameters = [];
       implements_capability = implements_capability lookups key;
       is_constant = (match elaborated.interface with Constant_interface _ -> true | _ -> false);

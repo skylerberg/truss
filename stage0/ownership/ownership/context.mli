@@ -2,6 +2,10 @@ module Local_table : Hashtbl.S with type key = Core.local
 
 type owned_scrutinee = { scrutinee : Core.local; written : Core.origin; is_part : bool }
 
+module Type_table : Hashtbl.S with type key = Types.ty
+
+type decided_type
+
 type context = {
   lookups : Lookups.t;
   list_bounds : Types.parameter -> Types.trait_reference list;
@@ -15,6 +19,7 @@ type context = {
   literal_views : unit Local_table.t;
   owned_scrutinees : owned_scrutinee Local_table.t;
   types : Types.ty Local_table.t;
+  decided_types : decided_type Type_table.t;
   mutable parameters : Core.local list;
   implements_capability : bool;
   is_constant : bool;

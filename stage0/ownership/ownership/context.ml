@@ -2,7 +2,18 @@ module Local_table = Hashtbl.Make (Structural_key.Make (struct
   type t = Core.local
 end))
 
+module Type_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Types.ty
+end))
+
 type owned_scrutinee = { scrutinee : Core.local; written : Core.origin; is_part : bool }
+
+type decided_type = {
+  plain : bool Lazy.t;
+  view : bool Lazy.t;
+  holds_function : bool Lazy.t;
+  holds_array : bool Lazy.t;
+}
 
 type context = {
   lookups : Lookups.t;
@@ -17,6 +28,7 @@ type context = {
   literal_views : unit Local_table.t;
   owned_scrutinees : owned_scrutinee Local_table.t;
   types : Types.ty Local_table.t;
+  decided_types : decided_type Type_table.t;
   mutable parameters : Core.local list;
   implements_capability : bool;
   is_constant : bool;
@@ -25,19 +37,28 @@ type context = {
   mutable must_be_disjoint : (Core.id list * Core.id list) list;
 }
 
-let is_plain context type_ =
-  Interface.Impls.is_plain context.lookups.interface ~list_bounds:context.list_bounds type_
-
 let is_copyable context type_ =
   Interface.Impls.is_copyable context.lookups.interface ~list_bounds:context.list_bounds type_
 
-let is_view context type_ =
-  Interface.Impls.is_view context.lookups.interface ~list_bounds:context.list_bounds type_
+let rec decide context (type_ : Types.ty) =
+  match Type_table.find_opt context.decided_types type_ with
+  | Some decided -> decided
+  | None ->
+      let interface = context.lookups.interface and list_bounds = context.list_bounds in
+      let decided =
+        {
+          plain = lazy (Interface.Impls.is_plain interface ~list_bounds type_);
+          view = lazy (Interface.Impls.is_view interface ~list_bounds type_);
+          holds_function = lazy (Interface.Impls.holds_function interface ~list_bounds type_);
+          holds_array = lazy (compute_holds_array context type_);
+        }
+      in
+      Type_table.replace context.decided_types type_ decided;
+      decided
 
-let holds_function context type_ =
-  Interface.Impls.holds_function context.lookups.interface ~list_bounds:context.list_bounds type_
+and holds_array context type_ = Lazy.force (decide context type_).holds_array
 
-let rec holds_array context (type_ : Types.ty) =
+and compute_holds_array context (type_ : Types.ty) =
   match type_ with
   | Named { path; arguments } -> (
       Types.is_builtin Array type_
@@ -57,6 +78,9 @@ let rec holds_array context (type_ : Types.ty) =
   | Parameter _ | Projection _ -> true
   | Function _ | Any _ | Never | Integer | Variable _ | Hole | Error _ -> false
 
+let is_plain context type_ = Lazy.force (decide context type_).plain
+let is_view context type_ = Lazy.force (decide context type_).view
+let holds_function context type_ = Lazy.force (decide context type_).holds_function
 let lends_nothing context type_ = is_plain context type_ && not (holds_array context type_)
 
 let list_callee_signatures context (callee : Mir.callee) : Types.signature list =
