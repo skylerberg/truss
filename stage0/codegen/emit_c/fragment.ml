@@ -57,103 +57,57 @@ let resolve ~prefix ~name_item ~name_type ~name_site ~name_local : C_text.refere
 let raise_local_outside_function local =
   C_runtime.raise_bug "local %d is named outside the function that holds it" local
 
-let number positions key =
-  match Hashtbl.find_opt positions key with
-  | Some position -> position
-  | None ->
-      let position = Hashtbl.length positions in
-      Hashtbl.replace positions key position;
-      position
-
 let make (emission : Emission.t) ~kind ~references ~functions ~definition =
   let item = emission.item in
-  let resolve_linked =
+  let resolve =
     resolve ~prefix:(Mangling.make_symbol item) ~name_item:Mangling.make_symbol
       ~name_type:C_text.render_key_name ~name_site:C_runtime.render_site_symbol
   in
-  let type_positions = Hashtbl.create 16 and site_positions = Hashtbl.create 16 in
-  let resolve_hashed =
-    resolve ~prefix:"@self"
-      ~name_item:(fun referenced ->
-        if Lowered.Item.equal referenced item then "@self"
-        else
-          match List.find_index (Lowered.Item.equal referenced) references with
-          | Some position -> Printf.sprintf "@item_%d" position
-          | None ->
-              C_runtime.raise_bug "%s names %s, which it does not reference"
-                (Lowered.Item.to_string item)
-                (Lowered.Item.to_string referenced))
-      ~name_type:(fun key -> Printf.sprintf "@type_%d" (number type_positions key))
-      ~name_site:(fun site -> Printf.sprintf "@site_%d" (number site_positions site))
-  in
-  let type_keys = C_types.list_keys emission.types in
-  let environments =
-    List.filter_map
-      (fun key ->
-        if is_environment key then Some (key, C_types.define emission.types key) else None)
-      type_keys
-  in
-  let statics =
-    List.map
-      (fun (index, text) ->
-        Text "static const uint8_t " ++ Name (Byte_constant index)
-        ++ Text (C_values.render_bytes_initializer text ^ ";\n"))
-      (Emission.list_bytes emission)
-    @ List.rev emission.statics
-  in
-  let prototypes = List.rev emission.prototypes in
-  let render_outside resolve text =
+  let render_outside text =
     C_text.render text ~resolve:(resolve ~name_local:raise_local_outside_function)
   in
-  let hashed_parts =
-    List.concat_map
-      (fun (pieces : function_pieces) ->
-        [ (pieces.header, pieces.name_local); (pieces.body, pieces.name_local) ])
+  let type_keys = C_types.list_keys emission.types in
+  let functions =
+    List.map
+      (fun (pieces : function_pieces) : function_text ->
+        let resolve = resolve ~name_local:pieces.name_local in
+        {
+          symbol = resolve pieces.symbol;
+          header = C_text.render pieces.header ~resolve;
+          opening = pieces.opening;
+          body = C_text.render_segments pieces.body ~site:pieces.opening ~resolve;
+        })
       functions
-    @ List.map
-        (fun text -> (text, raise_local_outside_function))
-        (definition
-         :: List.map
-              (fun (key, (defined : C_text.t C_types.defined)) ->
-                match defined.definition with
-                | Struct { body; _ } | Typedef body | Code_typedef body ->
-                    Name (Type_name key) ++ body)
-              environments
-        @ List.map snd prototypes @ statics)
-  in
-  let hash =
-    Blake3.derive_key ~context:"truss 2026-11-17 item fragment hash"
-      (String.concat "\n"
-         (List.map
-            (fun (text, name_local) -> C_text.render text ~resolve:(resolve_hashed ~name_local))
-            hashed_parts))
+  and definition = render_outside definition
+  and environments =
+    List.filter_map
+      (fun key ->
+        if is_environment key then
+          Some (key, C_types.map_defined render_outside (C_types.define emission.types key))
+        else None)
+      type_keys
+  and prototypes =
+    List.rev_map
+      (fun (symbol, declaration) -> (render_outside symbol, render_outside declaration))
+      emission.prototypes
+  and statics =
+    List.map render_outside
+      (List.map
+         (fun (index, text) ->
+           Text "static const uint8_t " ++ Name (Byte_constant index)
+           ++ Text (C_values.render_bytes_initializer text ^ ";\n"))
+         (Emission.list_bytes emission)
+      @ List.rev emission.statics)
   in
   {
     item;
     kind;
-    functions =
-      List.map
-        (fun (pieces : function_pieces) ->
-          let resolve = resolve_linked ~name_local:pieces.name_local in
-          {
-            symbol = resolve pieces.symbol;
-            header = C_text.render pieces.header ~resolve;
-            opening = pieces.opening;
-            body = C_text.render_segments pieces.body ~site:pieces.opening ~resolve;
-          })
-        functions;
-    definition = render_outside resolve_linked definition;
+    functions;
+    definition;
     types = List.filter (fun key -> not (is_environment key)) type_keys;
-    environments =
-      List.map
-        (fun (key, defined) -> (key, C_types.map_defined (render_outside resolve_linked) defined))
-        environments;
-    prototypes =
-      List.map
-        (fun (symbol, declaration) ->
-          (render_outside resolve_linked symbol, render_outside resolve_linked declaration))
-        prototypes;
-    statics = List.map (render_outside resolve_linked) statics;
+    environments;
+    prototypes;
+    statics;
     sites = List.sort_uniq compare emission.sites;
     capabilities = List.sort_uniq Path.compare emission.capabilities;
     helpers = emission.helpers_used;
@@ -161,5 +115,21 @@ let make (emission : Emission.t) ~kind ~references ~functions ~definition =
     calls = List.rev emission.calls;
     called = List.rev emission.called;
     failures = List.rev emission.failures;
-    hash;
+    hash =
+      Blake3.derive_key ~context:"truss 2026-11-23 item fragment hash"
+        (String.concat "\n"
+           (List.concat_map
+              (fun (text : function_text) ->
+                text.header :: List.map (fun (segment : C_text.segment) -> segment.text) text.body)
+              functions
+           @ definition
+             :: List.concat_map
+                  (fun (key, (defined : string C_types.defined)) ->
+                    [
+                      C_text.render_key_name key;
+                      (match defined.definition with
+                      | Struct { body; _ } | Typedef body | Code_typedef body -> body);
+                    ])
+                  environments
+           @ List.map snd prototypes @ statics));
   }

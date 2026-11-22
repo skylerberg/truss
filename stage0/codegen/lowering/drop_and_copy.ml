@@ -27,6 +27,7 @@ and has_trivial_representation context ty =
   | Storage _ | Handle | Shared _ | Any -> false
   | Shape (Scalar _) -> true
   | Shape (Record fields) -> are_trivial fields
+  | Shape (Array (_, 0)) -> true
   | Shape (Array (element, _)) -> is_trivial context element
   | Shape (Sum variants) ->
       List.for_all
@@ -258,30 +259,27 @@ let copy_elements context builder element ~count ~destination ~source =
 
 let copy context ty =
   let builder = Emit_c.Ir_builder.create context.env ~item:(Copy ty) in
-  let convention = Convention.classify_result context.env ty in
-  let result_pointer =
-    match convention with
-    | Through_pointer pointer -> Some (Emit_c.Ir_builder.allocate_local builder pointer)
-    | Returned _ | Nothing -> None
+  let raise_zero_size () =
+    raise_bug "a copy of %s, which has zero size and so is trivial" (Ground.to_string ty)
   in
-  let parameter = Convention.classify_parameter context.env Read ty in
-  let self_local = Option.map (fun ty -> Emit_c.Ir_builder.allocate_local builder ty) parameter in
-  let self : Lowered.place =
-    match (parameter, self_local) with
-    | Some (Pointer _), Some local -> Lowered.make_deref_place local
-    | Some _, Some local -> Lowered.make_local_place local
-    | _ -> Lowered.make_local_place 0
+  let result_pointer, result =
+    match Convention.classify_result context.env ty with
+    | Through_pointer pointer ->
+        let pointer = Emit_c.Ir_builder.allocate_local builder pointer in
+        (Some pointer, Lowered.make_deref_place pointer)
+    | Returned _ ->
+        (None, Lowered.make_local_place (Emit_c.Ir_builder.allocate_local builder (Value ty)))
+    | Nothing -> raise_zero_size ()
   in
-  let result_local =
-    match result_pointer with
-    | None -> Some (Emit_c.Ir_builder.allocate_local builder (Value ty))
-    | Some _ -> None
-  in
-  let result : Lowered.place =
-    match (result_pointer, result_local) with
-    | Some pointer, _ -> Lowered.make_deref_place pointer
-    | None, Some local -> Lowered.make_local_place local
-    | None, None -> raise_bug "no place for the copy"
+  let self_local, self =
+    match Convention.classify_parameter context.env Read ty with
+    | Some (Pointer _ as parameter) ->
+        let local = Emit_c.Ir_builder.allocate_local builder parameter in
+        (local, Lowered.make_deref_place local)
+    | Some parameter ->
+        let local = Emit_c.Ir_builder.allocate_local builder parameter in
+        (local, Lowered.make_local_place local)
+    | None -> raise_zero_size ()
   in
   Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
   (match Representation.classify context.env ty with
@@ -388,16 +386,12 @@ let copy context ty =
       in
       Emit_c.Ir_builder.finish builder (Switch_variant { place = self; cases; default = None });
       Emit_c.Ir_builder.start builder after);
-  (match result_local with
-  | Some local ->
-      Emit_c.Ir_builder.finish builder (Return (Some (Move (Lowered.make_local_place local))))
-  | None -> Emit_c.Ir_builder.finish builder (Return None));
-  let parameters = Option.to_list result_pointer @ Option.to_list self_local in
+  Emit_c.Ir_builder.finish builder
+    (Return (match result_pointer with Some _ -> None | None -> Some (Move result)));
   Emit_c.Ir_builder.build builder
     {
-      parameters;
-      result =
-        (match convention with Returned ty -> Some ty | Nothing | Through_pointer _ -> None);
+      parameters = Option.to_list result_pointer @ [ self_local ];
+      result = (copy_signature context ty).result;
       returns = true;
     }
 
