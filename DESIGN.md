@@ -529,6 +529,7 @@ No code builds it at startup, and no mutable global holds it.
 | A constant cannot depend on itself through the code that it calls. | The compiler would need the value to compute the value. A read of a constant is an edge of the call graph, so the check that finds a recursion finds this cycle. |
 | An evaluation is limited by the CPU time that it uses. | A wall-clock limit would fail a build on a busy machine that an idle machine passes, and agents and CI jobs share machines. CPU time varies only with the speed of the processor, and the limit is far above the need of any constant. A count of steps would vary with nothing, but the count would be compiled into every function that an evaluation and a test both reach, or into a second copy of each. |
 | A `todo` that an evaluation reaches leaves the tests that reach the constant incomplete. | The constant is unfinished code, as a function with a `todo` body is, and the tests of the code beside it still run. |
+| A constant computed from a constant that depends on itself is unfinished, as one whose evaluation reaches a `todo` is. | The check reports the cycle once, at the constant that depends on itself. An evaluation error at each constant computed from it would be a cascading error, a second diagnostic for the same mistake. A proof that needs the value still fails, and says why the value is not known. |
 
 ## Functions
 

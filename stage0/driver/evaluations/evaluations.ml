@@ -16,7 +16,7 @@ and make_fields fields = List.map (fun (name, value) -> (name, make_value value)
 
 let make_run : (Lowered.static_value Backend.ran, string) result -> Prover.Obligation.run = function
   | Ok (Ran value) -> Evaluated (make_value value)
-  | Ok (Reached_todo report) -> Unfinished report
+  | Ok (Unfinished report) -> Unfinished report
   | Ok (Stopped report) | Error report -> Failed report
 
 let run backend evaluations =
