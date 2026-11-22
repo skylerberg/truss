@@ -52,6 +52,8 @@ val find_recursive_callee :
   'operand Core.target ->
   Mir.Call_edges.resolution * Path.t option
 
+val reject_constant_cycle : State.context -> State.frame -> Mir.t -> unit
+
 val reject_uncompared_recursion :
   State.context ->
   State.frame ->

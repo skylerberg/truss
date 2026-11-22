@@ -1478,6 +1478,40 @@ let () =
         [ meters_equal; "derived standard.core.Equal for app.main.Span.equal" ])
 
 let () =
+  let lookups = lazy (make_call_edge_lookups Fixtures.Mir.code_reading_constants) in
+  let expect_edges name ~expected =
+    expect_paths ~expected
+      (List.filter
+         (fun (path : Path.t) -> Path.locate_package path <> Path.standard_package)
+         (Mir.Call_edges.list_path_edges (Lazy.force lookups)
+            (Support.make_top_path "app.main" name)))
+  in
+  Harness.test "code that returns a constant has an edge to the constant" (fun () ->
+      expect_edges "pass_limit" ~expected:[ "app.main.limit" ]);
+  Harness.test "code that indexes a constant has an edge to the constant" (fun () ->
+      expect_edges "read_an_offset" ~expected:[ "app.main.offsets" ]);
+  Harness.test "a pattern that names a constant is an edge to the constant" (fun () ->
+      expect_edges "match_limit" ~expected:[ "app.main.limit" ]);
+  Harness.test "code that leaves out a field has an edge to each constant that the default reads"
+    (fun () -> expect_edges "build_window" ~expected:[ "app.main.limit" ]);
+  Harness.test "a constant has an edge to each function it calls and each constant it reads"
+    (fun () -> expect_edges "doubled" ~expected:[ "app.main.limit"; "app.main.pass_limit" ]);
+  Harness.test "a dependency records what reads the constant and through which omitted field"
+    (fun () ->
+      let { Mir.form = code; _ } =
+        Option.get
+          (Mir.read_code (Lazy.force lookups).mir (Support.make_top_path "app.main" "build_window"))
+      in
+      match
+        List.filter
+          (fun (dependency : Mir.Call_edges.dependency) -> dependency.kind = Read)
+          (Mir.Call_edges.list_dependencies (Lazy.force lookups) Types.no_substitution code)
+      with
+      | [ { path; omitted_field = Some "size"; _ } ] ->
+          expect_paths ~expected:[ "app.main.limit" ] [ path ]
+      | dependencies -> Harness.fail "%d reads" (List.length dependencies))
+
+let () =
   let lookups = lazy (make_call_edge_lookups Fixtures.Mir.impls_inheriting_a_provided_method) in
   let list_edges path = Mir.Call_edges.list_path_edges (Lazy.force lookups) path in
   let level = Support.make_top_path "app.main" "Level" in

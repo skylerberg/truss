@@ -1,0 +1,35 @@
+use standard.regex
+
+fn square(value: UInt64) -> UInt64
+  requires value < 1000
+{
+  value * value
+}
+
+fn build_squares() -> List[UInt64]
+  ensures result.length() == 8
+{
+  var squares: List[UInt64] = []
+  for index in 0..8
+    invariant squares.length() == index
+  {
+    mut squares.push(square(index))
+  }
+  squares
+}
+
+let nine: UInt64 = square(3)
+let squares: List[UInt64] = build_squares()
+let last: UInt64 = squares[7]
+let word: regex.Regex = regex.Regex"[a-z]+"
+let report: String = "nine is ${nine}"
+
+test "constants computed by calls" {
+  assert nine == 9
+  assert squares.length() == 8
+  assert squares[5] == 25
+  assert last == 49
+  assert word.is_match("hello")
+  assert !word.is_match("1234")
+  assert report == "nine is 9"
+}

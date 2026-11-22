@@ -91,3 +91,31 @@ let () =
     ~run:[ "colors" ] Fixtures.Lowering.folded_constants_and_a_set;
   expect_fold "a chain of ten constants, each naming the one before, folds" ~folded:[ "tenth" ]
     ~run:[] Fixtures.Lowering.chain_of_ten_constants
+
+let () =
+  expect_fold "a constant computed by a call folds where its code does, and is run otherwise"
+    ~folded:[ "nine" ]
+    ~run:[ "squares"; "last"; "word"; "report" ]
+    Fixtures.Lowering.constants_computed_by_calls;
+  Codegen_support.test
+    "a test that reaches a constant whose evaluation reaches a todo is incomplete, and the others \
+     run" (fun () ->
+      Codegen_support.expect_output Fixtures.Lowering.tests_reading_an_unfinished_constant
+        "test 0 passed\n\
+         test 1 incomplete\n\
+         message 84\n\
+         the constant example.table is not computed: todo reached\n\
+        \  at example/main.truss:2:3\n");
+  Codegen_support.test "a constant whose evaluation uses too much CPU time cannot be built"
+    (fun () ->
+      let database, _ = Codegen_support.load Fixtures.Lowering.constant_computed_by_a_long_loop in
+      match
+        Backend.run_tests
+          (Codegen_support.make_backend ~evaluation_cpu_time_limit_ms:5 database)
+          ~time_limit_ms:2000
+          (Codegen_support.list_tests database)
+      with
+      | Error message ->
+          Codegen_support.expect_string
+            ~expected:"Evaluating example.spun used more than 5 ms of CPU time." message
+      | Ok _ -> Codegen_support.fail "the tests ran")

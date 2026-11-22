@@ -1,0 +1,17 @@
+trait Shape {
+  fn sides(self) -> UInt64
+}
+
+type Square(side: UInt64)
+
+impl Shape for Square {
+  fn sides(self) -> UInt64 {
+    4
+  }
+}
+
+fn make_square() -> any Shape {
+  any Square(side: 1)
+}
+
+let shape: any Shape = make_square()

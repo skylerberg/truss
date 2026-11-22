@@ -1,0 +1,7 @@
+fn half(value: UInt64) -> UInt64
+  requires value % 2 == 0
+{
+  value / 2
+}
+
+let half_of_three: UInt64 = half(3)

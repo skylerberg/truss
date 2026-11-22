@@ -1,0 +1,5 @@
+fn double(value: Int64) -> Int64 {
+  value.saturating_add(value)
+}
+
+let doubler: fn(Int64) -> Int64 = double

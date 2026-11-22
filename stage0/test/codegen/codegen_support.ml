@@ -188,16 +188,16 @@ let make_database packages =
 let make_example_package files : Project.package list =
   [ { name = { owner = None; name = "example" }; dependencies = []; files } ]
 
-let create_backend ?results ?evaluation_time_limit_ms ?(profile = Backend.Development) ~package
+let create_backend ?results ?evaluation_cpu_time_limit_ms ?(profile = Backend.Development) ~package
     database =
-  Backend.create ?results ?evaluation_time_limit_ms
+  Backend.create ?results ?evaluation_cpu_time_limit_ms
     (match Database.find_lowered_lookups database [ package ] with
     | Ok lookups -> lookups
     | Error message -> failwith message)
     (Lazy.force c_compiler) profile
 
-let make_backend ?results ?evaluation_time_limit_ms ?profile database =
-  create_backend ?results ?evaluation_time_limit_ms ?profile ~package:example.package database
+let make_backend ?results ?evaluation_cpu_time_limit_ms ?profile database =
+  create_backend ?results ?evaluation_cpu_time_limit_ms ?profile ~package:example.package database
 
 let extend_standard_library files =
   Database.For_testing.extend_package

@@ -246,6 +246,53 @@ let () =
       expect_proven Fixtures.Prover.run_forever_of_a_callee_that_runs_forever)
 
 let () =
+  let expect_one_cycle = Support.expect_one_diagnostic ~check in
+  Harness.test "constants whose values read each other are an error at each of them" (fun () ->
+      match list_codes "let first: Int64 = second + 1\nlet second: Int64 = first + 1\n" with
+      | [ "prover.constant_cycle"; "prover.constant_cycle" ] -> ()
+      | found -> Harness.fail "found [%s]" (String.concat "; " found));
+  Harness.test "a constant whose value reads itself is an error" (fun () ->
+      expect_one_cycle "let count: Int64 = count + 1\n" "prover.constant_cycle"
+        ~says:"This reads `app.main.count` in its own value" ~at:("count", 2));
+  Harness.test "a constant built with a field default that reads the constant is an error"
+    (fun () ->
+      expect_one_cycle
+        "type Point(x: Int64, y: Int64 = origin.x)\nlet origin: Point = Point(x: 1)\n"
+        "prover.constant_cycle" ~says:"leaves out the field `y`, whose default reads");
+  Harness.test "a constant that sets the field whose default reads the constant is fine" (fun () ->
+      expect_proven
+        "type Point(x: Int64, y: Int64 = origin.x)\nlet origin: Point = Point(x: 1, y: 2)\n");
+  Harness.test "a constant whose value calls a function that reads the constant is an error"
+    (fun () ->
+      expect_one_cycle Fixtures.Prover.constant_read_by_the_function_it_calls
+        "prover.constant_cycle"
+        ~says:
+          "This calls `next_after_limit`, whose code depends on `app.main.limit`, so \
+           `app.main.limit` would be computed from itself."
+        ~at:("next_after_limit()", 2));
+  Harness.test "a cycle of constants through a call is an error at each constant" (fun () ->
+      match
+        List.map
+          (fun (diagnostic : Diagnostic.t) -> diagnostic.message)
+          (list_diagnostics Fixtures.Prover.constants_in_a_cycle_through_a_call)
+      with
+      | [ calls; reads ] ->
+          if not (String.includes ~affix:"This calls `read_second`, whose code depends on" calls)
+          then Harness.fail "%s" calls;
+          if
+            not (String.includes ~affix:"This reads `app.main.first`, whose value depends on" reads)
+          then Harness.fail "%s" reads
+      | messages -> Harness.fail "%d diagnostics" (List.length messages));
+  Harness.test "a constant read by an impl that its value passes to generic code is an error"
+    (fun () ->
+      expect_one_cycle Fixtures.Prover.constant_read_by_the_impl_it_supplies "prover.constant_cycle"
+        ~says:"This uses `Coin.weight`, whose code depends on");
+  Harness.test "code that reads a constant knows the contract of the call that computes it"
+    (fun () -> expect_proven Fixtures.Prover.constant_known_by_the_contract_of_its_call);
+  Harness.test "a call in a constant's value meets its callee's requires" (fun () ->
+      expect_not_proven Fixtures.Prover.constant_calling_outside_a_requires "prover.requires")
+
+let () =
   Harness.test "a loop with an invariant" (fun () ->
       expect_proven Fixtures.Prover.loop_with_an_invariant);
   Harness.test "a loop invariant that an iteration breaks" (fun () ->
@@ -1971,6 +2018,24 @@ let public_doubling =
 let () =
   Harness.test "a caller in another package reads its callee's contract" (fun () ->
       match check_across public_doubling Fixtures.Prover.twice_through_another_packages_double with
+      | [] -> ()
+      | actual ->
+          Harness.fail "%s"
+            (String.concat "; "
+               (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual)));
+  Harness.test
+    "code in another package knows a constant by the contract of the private function that \
+     computes it" (fun () ->
+      match
+        check_across
+          "fn make_three() -> UInt64\n\
+          \  ensures result == 3\n\
+           {\n\
+          \  3\n\
+           }\n\n\
+           public let three: UInt64 = make_three()\n"
+          "fn f() -> UInt64\n  ensures result == 3\n{\n  numbers.three\n}\n"
+      with
       | [] -> ()
       | actual ->
           Harness.fail "%s"

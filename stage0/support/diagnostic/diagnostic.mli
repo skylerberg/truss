@@ -172,6 +172,7 @@ module Code : sig
     | Default_not_constant
     | Not_constant
     | Constant_overflow
+    | Constant_not_data
     | Main_signature
     | No_real_implementation
     | Duplicate_field
@@ -242,6 +243,7 @@ module Code : sig
     | Ensures
     | Invariant
     | Termination
+    | Constant_cycle
     | Panic
     | Assertion
     | Law
@@ -259,7 +261,6 @@ module Code : sig
     | Not_strictly_positive
     | Growing_type
     | Instantiation_cycle
-    | Constant_cycle
     | Duplicate_test
 
   type t =

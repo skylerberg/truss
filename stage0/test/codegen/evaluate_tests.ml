@@ -80,14 +80,30 @@ let () =
       expect_proven (prove_with_running ~results (accepts_all ^ use)))
 
 let () =
-  Codegen_support.test "a template check that timed out is run again on the next check" (fun () ->
+  Codegen_support.test "a template check that used too much CPU time is run again on the next check"
+    (fun () ->
       let results = make_results () in
-      let database, _ = Codegen_support.load (shout ^ Fixtures.Evaluate.shout_of_a_greeting) in
-      expect_failure_saying "failed, so its result is not known: it ran past the time limit of 0 ms"
+      let database, _ = Codegen_support.load Fixtures.Evaluate.slow_check in
+      expect_failure_saying "failed, so its result is not known: it used more than 5 ms of CPU time"
         (list_diagnostics
-           (Codegen_support.make_backend ~results ~evaluation_time_limit_ms:0 database)
+           (Codegen_support.make_backend ~results ~evaluation_cpu_time_limit_ms:5 database)
            database);
       expect_proven (list_diagnostics (Codegen_support.make_backend ~results database) database))
+
+let () =
+  Codegen_support.test "a release build reads the value that a development build evaluated"
+    (fun () ->
+      let results = make_results () in
+      let database, _ = Codegen_support.load Fixtures.Lowering.constant_computed_by_a_long_loop in
+      let spun = Lowered.Item.Constant (Top { module_ = Codegen_support.example; name = "spun" }) in
+      let compile ?evaluation_cpu_time_limit_ms profile =
+        ignore
+          (Backend.For_testing.compile_fragment
+             (Codegen_support.make_backend ~results ?evaluation_cpu_time_limit_ms ~profile database)
+             spun)
+      in
+      compile Development;
+      compile ~evaluation_cpu_time_limit_ms:5 Release)
 
 let loaded_shout_of_a_name_and_an_identity =
   lazy (Codegen_support.load (shout ^ Fixtures.Evaluate.shout_of_a_name_and_an_identity))

@@ -133,7 +133,7 @@ _Noreturn void truss_runtime_assertion_failed(const uint8_t *message, uint64_t l
 
 _Noreturn void truss_runtime_todo(const uint8_t *message, uint64_t length, const struct truss_site *site) {
   truss_describe(message, length, site);
-  truss_end(truss_incomplete, "", 101);
+  truss_end(truss_incomplete, "", TRUSS_TODO_STATUS);
 }
 
 void truss_runtime_echo(const uint8_t *text, uint64_t length, const struct truss_site *site) {
@@ -1904,6 +1904,19 @@ static void truss_root_run(void *argument, uint64_t item, void *capabilities) {
   truss_wake(1);
 }
 
+void truss_runtime_limit_cpu_time(uint64_t microseconds) {
+  signal(SIGPROF, SIG_DFL);
+  sigset_t timer;
+  sigemptyset(&timer);
+  sigaddset(&timer, SIGPROF);
+  pthread_sigmask(SIG_UNBLOCK, &timer, NULL);
+  struct itimerval limit;
+  memset(&limit, 0, sizeof limit);
+  limit.it_value.tv_sec = (time_t)(microseconds / 1000000u);
+  limit.it_value.tv_usec = (suseconds_t)(microseconds % 1000000u);
+  setitimer(ITIMER_PROF, &limit, NULL);
+}
+
 void truss_runtime_main(void (*code)(void *environment, uint64_t item, void *capabilities), void *environment,
                     uint32_t requested_workers) {
   truss_install_signal_dispositions();
@@ -2102,11 +2115,13 @@ void truss_runtime_run_test(uint32_t index) { truss_runtime_tests[index](); }
 |}
 
 let runtime_line_control = "#line 1 \"<runtime>\"\n"
+let todo_status = 102
 
 let render_runtime ~tests =
   String.concat ""
     [
       runtime_line_control;
+      Printf.sprintf "#define TRUSS_TODO_STATUS %d\n" todo_status;
       (if tests then "#define TRUSS_TESTS 1\n" else "");
       headers;
       Emit_c.shared_structs;
@@ -2165,9 +2180,13 @@ let render_tests_start ~time_limit_ms ~runner tests =
     ~before_start:"  truss_runtime_tests = truss_tests;\n" ~requested_workers:1
     (Printf.sprintf "program->status = %s(%d, %d)" runner (List.length tests) time_limit_ms)
 
-let render_evaluator_start entry =
+let render_evaluator_start ~cpu_time_limit_ms entry =
   render_start
-    ~declarations:(Printf.sprintf "void %s(void);\n" entry)
+    ~declarations:
+      (Printf.sprintf "void truss_runtime_limit_cpu_time(uint64_t microseconds);\nvoid %s(void);\n"
+         entry)
+    ~before_start:
+      (Printf.sprintf "  truss_runtime_limit_cpu_time(%d);\n" (max 1 (cpu_time_limit_ms * 1000)))
     ~requested_workers:1
     (Printf.sprintf "(void)program;\n  %s()" entry)
 

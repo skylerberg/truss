@@ -510,9 +510,22 @@ User code never owns a writer that it could drop unflushed.
 
 Rules: [Constants](SPECIFICATION.md#constants).
 
+**A constant's value may call any function that uses no capability.** Such a
+function is pure, terminates, and cannot panic, and its result is the same
+on every machine (*determinism*), so the compiler can run it. Truss
+therefore has no second kind of function for compile time, as Rust has
+`const fn` and C++ has `constexpr`: the `uses` clause already says which
+functions can run. A lookup table or a `Regex` is then data in the program.
+No code builds it at startup, and no mutable global holds it.
+
 | Rule | Reason |
 |---|---|
-| A constant expression calls no function. | A constant can appear in a type, as in `Array[UInt8, digest_size]`, so type checking never waits for code to run. |
+| A constant that a type names calls no function. | A constant can appear in a type, as in `Array[UInt8, digest_size]`, so type checking never waits for code to run. |
+| The value holds no `if`, `match`, or lambda of its own. | Every stage reads a value as one expression with no local variable. A function holds the other code, at the cost of one name. |
+| A constant's type holds no function, `any` value, handle, or state that tasks share. | The value is data in the program. A function and an `any` value hold the address of code. A handle stands for something that the operating system holds only while the program runs. State that tasks share would be a mutable global. |
+| A constant cannot depend on itself through the code that it calls. | The compiler would need the value to compute the value. A read of a constant is an edge of the call graph, so the check that finds a recursion finds this cycle. |
+| An evaluation is limited by the CPU time that it uses. | A wall-clock limit would fail a build on a busy machine that an idle machine passes, and agents and CI jobs share machines. CPU time varies only with the speed of the processor, and the limit is far above the need of any constant. A count of steps would vary with nothing, but the count would be compiled into every function that an evaluation and a test both reach, or into a second copy of each. |
+| A `todo` that an evaluation reaches leaves the tests that reach the constant incomplete. | The constant is unfinished code, as a function with a `todo` body is, and the tests of the code beside it still run. |
 
 ## Functions
 

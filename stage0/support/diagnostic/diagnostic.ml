@@ -172,6 +172,7 @@ module Code = struct
     | Default_not_constant
     | Not_constant
     | Constant_overflow
+    | Constant_not_data
     | Main_signature
     | No_real_implementation
     | Duplicate_field
@@ -242,6 +243,7 @@ module Code = struct
     | Ensures
     | Invariant
     | Termination
+    | Constant_cycle
     | Panic
     | Assertion
     | Law
@@ -259,7 +261,6 @@ module Code = struct
     | Not_strictly_positive
     | Growing_type
     | Instantiation_cycle
-    | Constant_cycle
     | Duplicate_test
 
   type t =
@@ -452,6 +453,7 @@ module Code = struct
     | Default_not_constant -> "default_not_constant"
     | Not_constant -> "not_constant"
     | Constant_overflow -> "constant_overflow"
+    | Constant_not_data -> "constant_not_data"
     | Main_signature -> "main_signature"
     | No_real_implementation -> "no_real_implementation"
     | Duplicate_field -> "duplicate_field"
@@ -530,7 +532,6 @@ module Code = struct
     | Not_strictly_positive -> "not_strictly_positive"
     | Growing_type -> "growing_type"
     | Instantiation_cycle -> "instantiation_cycle"
-    | Constant_cycle -> "constant_cycle"
     | Duplicate_test -> "duplicate_test"
 
   let name_prover_code code =
@@ -544,6 +545,7 @@ module Code = struct
     | Ensures -> "ensures"
     | Invariant -> "invariant"
     | Termination -> "termination"
+    | Constant_cycle -> "constant_cycle"
     | Panic -> "panic"
     | Assertion -> "assertion"
     | Law -> "law"

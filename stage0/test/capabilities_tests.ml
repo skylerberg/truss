@@ -134,6 +134,17 @@ let () =
         "capabilities.not_available");
   Harness.test "a law may use no capability" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.law_calling_stamp "capabilities.not_available");
+  Harness.test "a constant's value may use no capability" (fun () ->
+      expect_not_available Fixtures.Capabilities.constant_calling_the_clock
+        ~message:
+          "This call uses `Clock`, but the value of a constant may use no capability. A constant \
+           is computed when the program is compiled, and a build has no capabilities.");
+  Harness.test "a constant's value cannot call a function that may panic" (fun () ->
+      expect_one_diagnostic Fixtures.Capabilities.constant_calling_a_function_that_panics
+        "capabilities.not_available" ~says:"uses `Panic`, but the value of a constant");
+  Harness.test "a constant's value must terminate" (fun () ->
+      expect_not_available Fixtures.Capabilities.constant_calling_a_function_that_may_run_forever
+        ~message:"This call uses `RunForever`, but the value of a constant must terminate.");
   Harness.test "a lambda's uses must fit the function type it is passed as" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.lambda_using_clock_passed_as_plain
         "capabilities.lambda_uses");

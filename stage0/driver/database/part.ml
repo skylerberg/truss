@@ -238,7 +238,6 @@ let show_stored : type a. a stored -> string =
         | Sealed declared -> "sealed " ^ show_key declared
         | Impl declared -> "impl " ^ show_key declared
         | Type declared -> "type " ^ show_key declared
-        | Constant declared -> "constant " ^ show_key declared
         | Instantiations -> "instantiations"
         | Tests -> "tests"
         | Unexported -> "unexported"
@@ -285,7 +284,7 @@ let find_stored_definition : type a. a stored -> Path.t option = function
   | Usage key
   | Ownership key
   | Proof key
-  | Package_check (_, (Sealed key | Impl key | Type key | Constant key)) ->
+  | Package_check (_, (Sealed key | Impl key | Type key)) ->
       Some key.path
   | Constant_value path
   | Type_facts path

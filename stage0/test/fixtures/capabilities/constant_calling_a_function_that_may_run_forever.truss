@@ -1,0 +1,9 @@
+fn count() -> UInt64 uses RunForever {
+  var counted: UInt64 = 0
+  while counted < 10 {
+    counted = counted.saturating_add(1)
+  }
+  counted
+}
+
+let counted: UInt64 = count()

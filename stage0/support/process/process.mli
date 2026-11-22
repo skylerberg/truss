@@ -5,3 +5,4 @@ val run_with_time_limit :
   ?input:string -> time_limit_ms:int -> string -> string list -> (int * string * string) option
 
 val run_attached : string -> string list -> int
+val status_of_signal : int -> int

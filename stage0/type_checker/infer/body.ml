@@ -324,7 +324,8 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                   check_body state { env with output = Some (Returns Types.bool) } law.body
             | Associated_type _ | Associated_capability _ | Trait_member_error -> ())
           members
-    | Constant { value; _ }, Constant_interface constant ->
+    | Constant { type_; value; _ }, Constant_interface constant ->
+        Constant.check_type state type_ constant.constant_type;
         if not (is_broken Body) then begin
           let env =
             {

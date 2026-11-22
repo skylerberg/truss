@@ -1,0 +1,5 @@
+fn next_after_limit() -> UInt64 {
+  limit.saturating_add(1)
+}
+
+let limit: UInt64 = next_after_limit()

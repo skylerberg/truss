@@ -1097,8 +1097,10 @@ let translate_constant (lookups : Lookups.t) (source : State.source) ~path =
   in
   (match Mir.read_initializer lookups.mir path with
   | Some { form = code; _ } ->
+      let frame = make_empty_frame source in
+      Facts.reject_constant_cycle context frame code;
       ignore
-        (Amounts.run_code context (make_empty_frame source) code
+        (Amounts.run_code context frame code
            ~type_:(Interface.Definition.read_constant_type context.lookups.interface path))
   | None -> Facts.raise_bug "the constant `%s` has no MIR" (Path.show path));
   make_outcome context

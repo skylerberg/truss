@@ -727,15 +727,30 @@ constant_name = LOWER_NAME | type_head "." LOWER_NAME ;
 public let pi: Float64 = 3.141592653589793
 public let UInt8.maximum: UInt8 = 255
 public let seconds_per_day: Int64 = 24 * 60 * 60
+public let greeting_length: UInt64 = "hello".length()
+public let word: Regex = Regex"[a-z]+"
 ```
 
-- The value is a *constant expression*: literals, arithmetic on numbers,
-  other constants, and records, variants, collection literals, and strings
+- A *constant expression* is made of literals, arithmetic on numbers, other
+  constants, and the records, variants, collection literals, and strings
   built from those. It calls no function except the `from_elements` or
-  `from_entries` of a collection literal, and is evaluated when the program
-  is compiled.
-- A constant's value does not depend on itself, through another constant or
-  through the default of a field that a record or variant in it leaves out.
+  `from_entries` of a collection literal.
+- The value of a constant is a constant expression whose parts may also be
+  calls: a call of a function or a method, an operator or an index of any
+  type, a tagged template, and an interpolated string. Other code, such as
+  an `if`, a `match`, or a lambda, goes in a function that the value calls.
+- The value uses no capability, so each call in it terminates and cannot
+  panic. Each call meets its callee's `requires`.
+- The value is evaluated when the program is compiled, and the program holds
+  the result as data. An evaluation that uses more than 10 seconds of CPU
+  time is an error.
+- A constant's type is not a function type or an `any` type, and holds no
+  value of either, no handle, and no state that tasks share.
+- A constant's value does not depend on itself: through another constant,
+  through the default of a field that a record or variant in it leaves out,
+  or through the code that it calls.
+- A constant that a type names, as in `Array[UInt8, digest_size]`, has a
+  constant expression as its value.
 - Reading a constant or taking a view of it allocates nothing.
 
 ## Functions
@@ -2987,6 +3002,9 @@ public opaque type Session = todo
   definitions whose contracts those proofs read, and the `impl`s whose
   methods that code calls or passes to generic code. In a development
   build, a `todo` that runs stops the program and reports its position.
+- A constant whose evaluation reaches a `todo` has no value. A test that can
+  reach the constant is incomplete, and a program that can reach it is not
+  built.
 - A type defined as `todo` can be named, but its contents cannot be used.
 
 ## Debug output

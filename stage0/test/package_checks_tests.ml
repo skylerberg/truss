@@ -84,25 +84,6 @@ let () =
       expect_fine Fixtures.Package_checks.expression_with_a_list_of_arguments);
   Harness.test "a record cannot contain itself through an Option" (fun () ->
       expect_one_diagnostic "type Node(next: Option[Node])\n" "package.needs_indirect");
-  Harness.test "constants whose values read each other are an error at each of them" (fun () ->
-      let packages =
-        Support.setup
-          [ ("app.main", "let first: Int64 = second + 1\nlet second: Int64 = first + 1\n") ]
-      in
-      match Support.list_codes (check packages (Support.parse_file "app.main")) with
-      | [ "package.constant_cycle"; "package.constant_cycle" ] -> ()
-      | found -> Harness.fail "found [%s]" (String.concat "; " found));
-  Harness.test "a constant whose value reads itself is an error" (fun () ->
-      expect_one_diagnostic "let count: Int64 = count + 1\n" "package.constant_cycle"
-        ~says:"in its own value");
-  Harness.test "a constant built with a field default that reads the constant is an error"
-    (fun () ->
-      expect_one_diagnostic
-        "type Point(x: Int64, y: Int64 = origin.x)\nlet origin: Point = Point(x: 1)\n"
-        "package.constant_cycle" ~says:"leaves out the field `y`, whose default reads");
-  Harness.test "a constant that sets the field whose default reads the constant is fine" (fun () ->
-      expect_fine
-        "type Point(x: Int64, y: Int64 = origin.x)\nlet origin: Point = Point(x: 1, y: 2)\n");
   Harness.test "a type that contains itself with growing arguments is an error" (fun () ->
       expect_one_diagnostic Fixtures.Package_checks.nested_type_with_growing_arguments
         "package.growing_type");

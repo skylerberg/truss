@@ -572,6 +572,46 @@ test "a constant" {
 }
 ```
 
+A constant's value can call functions. The compiler runs them when it
+compiles the program, and the program holds the result as data, so a table
+costs nothing when the program starts:
+
+```truss
+fn to_seconds(hours: UInt64) -> UInt64
+  requires hours <= 24
+{
+  hours * 60 * 60
+}
+
+let seconds_per_day: UInt64 = to_seconds(24)
+let greeting: String = "A day has ${seconds_per_day} seconds."
+
+test "constants that call functions" {
+  assert seconds_per_day == 86400
+  assert greeting.length() == 24
+}
+```
+
+- **The value is made of literals, other constants, operators, and calls,**
+  and of the records, variants, collections, and strings built from them.
+  An `if` or a loop goes in a function that the value calls.
+- **A function that a constant calls uses no capability.** The compiler has
+  no clock, console, or file to give it, and such a function cannot panic or
+  run forever. A call of `Clock.now()` in a constant is an error:
+
+  ```text
+  main.truss:1:24: error[capabilities.not_available]: This call uses `Clock`, but the value of a constant may use no capability. A constant is computed when the program is compiled, and a build has no capabilities.
+    | let started: Instant = Clock.now()
+    |                        ^^^^^^^^^^^
+
+  1 error
+  ```
+
+- **A constant is data,** so its type holds no function, no `any` value, and
+  nothing that exists only while the program runs, such as an open file.
+- **A constant cannot depend on itself,** through another constant or
+  through a function that it calls.
+
 Truss has no mutable global variables: a top-level `let` never changes, and
 `var` appears only inside functions. State that changes lives in variables,
 in the values passed to functions, or behind a capability.
@@ -3806,7 +3846,16 @@ shop "discounts are coming": incomplete
 `truss build` refuses a program whose `main` can reach a `todo`, including
 a `todo` in a proof that the program relies on, such as the body of a
 theorem that its code calls. In a development build from `truss run`, a
-`todo` that runs stops the program and reports where.
+`todo` that runs stops the program with status 102 and reports where.
+
+A constant whose value reaches a `todo` is unfinished too. A test that
+reaches the constant is incomplete, and names the constant:
+
+```text
+shop "discounts are coming": incomplete
+    the constant shop.rates is not computed: todo reached
+      at main.truss:2:3
+```
 
 ### echo
 
@@ -4756,6 +4805,9 @@ test "tagged templates" {
 - The standard library's tags include `regex.Regex`, `html.Html`,
   `url.Url`, `json.Value`, `files.Glob`, `processes.Command`,
   `http.Route`, and `time.Layout`.
+- A template can be the value of a constant, as in
+  `let word: regex.Regex = regex.Regex"[a-z]+"`. The compiler then builds
+  the value once, and the program holds it as data.
 - `Character"é"` and `UInt8"\n"` use the same syntax, and are checked to
   hold exactly one character.
 

@@ -36,43 +36,153 @@ let list_nested_blocks (statement : Tree.statement) : Tree.block list =
   | Jump (Return _ | Break | Continue | Cancel _ | Unreachable | Written_unreachable | Todo) ->
       []
 
-let rec visit_block visit (block : Tree.block) =
+let rec visit_place visit origin (place : Tree.place) =
+  visit origin place;
+  List.iter
+    (fun (projection : Tree.projection) ->
+      match projection with
+      | Element { index; _ } -> visit_operand visit index
+      | Range { start; stop; _ } ->
+          visit_operand visit start;
+          Option.iter (visit_operand visit) stop
+      | Field _ | Variant_field _ -> ())
+    place.projections
+
+and visit_operand visit : Tree.operand -> unit = function
+  | Use { place; origin; _ } | Borrow { place; origin; _ } | Take { place; origin; _ } ->
+      visit_place visit origin place
+  | Immediate _ -> ()
+
+let visit_target visit : Tree.operand Core.target -> unit = function
+  | Indirect function_value -> visit_operand visit function_value
+  | Function _ | Trait_method _ | Capability_method _ | Intrinsic _ -> ()
+
+let visit_call visit (call : Tree.call) =
+  visit_target visit call.callee.target;
+  List.iter
+    (function Tree.Passed { value; _ } -> visit_operand visit value | Default -> ())
+    call.arguments
+
+let rec visit_yielded visit : Tree.yielded -> unit = function
+  | Part part -> visit_operand visit part
+  | Built { fields; _ } ->
+      List.iter (fun (_, field) -> Option.iter (visit_yielded visit) field) fields
+
+let visit_rvalue visit origin (rvalue : Tree.rvalue) =
+  let visit_operand = visit_operand visit in
+  match rvalue with
+  | Operand value | Not value | Convert { value; _ } | To_any { value; _ } | Copy value ->
+      visit_operand value
+  | Operation { operands; _ } | Array operands -> List.iter visit_operand operands
+  | Compare { left; right; _ } | Specification (Identical (left, right)) ->
+      visit_operand left;
+      visit_operand right
+  | Construct { fields; _ } -> List.iter (fun (_, field) -> Option.iter visit_operand field) fields
+  | Is_variant { place; _ } -> visit_place visit origin place
+  | Lambda { captures; _ } ->
+      List.iter (fun (capture : Tree.capture) -> visit_place visit origin capture.place) captures
+  | Specification (Applied { arguments; _ }) -> List.iter visit_operand arguments
+  | Specification (Method_cost { method_; _ }) -> visit_target visit method_
+  | Specification (Map entries) ->
+      List.iter
+        (fun (key, value) ->
+          visit_operand key;
+          visit_operand value)
+        entries
+  | Specification (Quantified { range = Over_range { start; stop; _ }; _ }) ->
+      visit_operand start;
+      visit_operand stop
+  | Function_value _ | Value_parameter _
+  | Specification (Result | Entry _ | Yielded | Quantified { range = Over_type _; _ }) ->
+      ()
+
+let visit_statement_places visit (statement : Tree.statement) =
+  let visit_operand = visit_operand visit and visit_place = visit_place visit statement.origin in
+  match statement.kind with
+  | Basic (Assign { target; value }) ->
+      visit_place target;
+      visit_rvalue visit statement.origin value
+  | Basic (Call { destination; call }) ->
+      Option.iter visit_place destination;
+      visit_call visit call
+  | Basic (Lend { call; _ }) -> visit_call visit call
+  | Basic (Template { destination; call; _ }) ->
+      visit_place destination;
+      visit_call visit call
+  | Basic (Assert value | Echo value | Loan_start { borrowed = value; _ })
+  | Assert_by_bit_vector { condition = value; _ } ->
+      visit_operand value
+  | Choose { target; _ } -> visit_place target
+  | Provide { target; provided; _ } ->
+      visit_place target;
+      List.iter (fun (provided : Tree.provided) -> visit_operand provided.value) provided
+  | For { iteration; elements; _ } ->
+      (match iteration with
+      | Range { start; stop; _ } ->
+          visit_operand start;
+          visit_operand stop
+      | Pull { cursor; next; _ } ->
+          visit_place cursor;
+          visit_target visit next.target);
+      Option.iter
+        (fun (elements : Tree.elements) ->
+          visit_place elements.collection;
+          match elements.element with
+          | Sequence_element { place; _ } -> visit_place place
+          | Lent_by_call _ -> ())
+        elements
+  | Yield { part; _ } -> visit_yielded visit part
+  | Jump (Return returned) -> Option.iter visit_operand returned
+  | Jump (Cancel { returned; _ }) -> Option.iter (fun (value, _) -> visit_operand value) returned
+  | Jump (Break | Continue | Unreachable | Written_unreachable | Todo)
+  | Basic (Live _ | Dead _ | Loan_end _ | Ghost_assert _ | Path_note _ | Proof _)
+  | While _ | Fork _ | Resume _ ->
+      ()
+
+let rec visit_block ~on_value visit (block : Tree.block) =
   List.iter
     (fun (statement : Tree.statement) ->
       visit statement;
       (match statement.kind with
-      | Basic (Ghost_assert { condition; _ }) -> visit_formula visit condition
-      | Basic (Proof code) -> visit_code visit code
-      | While { loop; _ } | For { loop; _ } -> visit_loop visit loop
+      | Basic (Ghost_assert { condition; _ }) -> visit_formula ~on_value visit condition
+      | Basic (Proof code) -> visit_code ~on_value visit code
+      | While { loop; _ } | For { loop; _ } -> visit_loop ~on_value visit loop
       | Basic
           ( Assign _ | Call _ | Lend _ | Template _ | Live _ | Dead _ | Assert _ | Echo _
           | Loan_start _ | Loan_end _ | Path_note _ )
       | Choose _ | Assert_by_bit_vector _ | Fork _ | Provide _ | Resume _ | Yield _ | Jump _ ->
           ());
-      List.iter (visit_block visit) (list_nested_blocks statement))
-    block.statements
+      List.iter (visit_block ~on_value visit) (list_nested_blocks statement))
+    block.statements;
+  Option.iter on_value block.value
 
-and visit_formula visit (formula : Tree.formula) =
-  visit_block visit formula.value;
-  Array.iter (visit_body visit) formula.lambdas
+and visit_formula ~on_value visit (formula : Tree.formula) =
+  visit_block ~on_value visit formula.value;
+  Array.iter (visit_body ~on_value visit) formula.lambdas
 
-and visit_loop visit (loop : Tree.loop) =
+and visit_loop ~on_value visit (loop : Tree.loop) =
   List.iter
     (function
-      | Tree.Invariant clause -> visit_formula visit clause
-      | Decreases measures -> List.iter (visit_formula visit) measures
+      | Tree.Invariant clause -> visit_formula ~on_value visit clause
+      | Decreases measures -> List.iter (visit_formula ~on_value visit) measures
       | Cost { bound = Order_of amount | At_most amount | Exactly amount; _ } ->
-          visit_formula visit amount)
+          visit_formula ~on_value visit amount)
     loop.clauses
 
-and visit_body visit (body : Tree.body) = visit_block visit body.code
+and visit_body ~on_value visit (body : Tree.body) = visit_block ~on_value visit body.code
 
-and visit_code visit (code : Tree.t) =
-  visit_body visit code.body;
-  Array.iter (visit_body visit) code.lambdas
+and visit_code ~on_value visit (code : Tree.t) =
+  visit_body ~on_value visit code.body;
+  Array.iter (visit_body ~on_value visit) code.lambdas
 
-let iter_code = visit_code
-let iter_formula = visit_formula
+let iter_code visit code = visit_code ~on_value:ignore visit code
+let iter_formula visit formula = visit_formula ~on_value:ignore visit formula
+
+let iter_places visit code =
+  visit_code ~on_value:(visit_operand visit) (visit_statement_places visit) code
+
+let iter_formula_places visit formula =
+  visit_formula ~on_value:(visit_operand visit) (visit_statement_places visit) formula
 
 let find_callee (statement : Tree.statement) : Tree.callee option =
   match statement.kind with

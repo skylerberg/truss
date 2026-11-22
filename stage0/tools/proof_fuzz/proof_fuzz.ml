@@ -27,7 +27,7 @@ let load text =
   if Database.list_file_diagnostics database example_file <> [] then None else Some database
 
 let make_backend database =
-  Backend.create ~evaluation_time_limit_ms:2000
+  Backend.create ~evaluation_cpu_time_limit_ms:2000
     (match Database.find_lowered_lookups database [ example.package ] with
     | Ok lookups -> lookups
     | Error message -> failwith message)

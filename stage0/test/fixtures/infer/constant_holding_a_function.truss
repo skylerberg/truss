@@ -1,0 +1,7 @@
+fn double(value: Int64) -> Int64 {
+  value.saturating_add(value)
+}
+
+type Handler(name: String, run: fn(Int64) -> Int64)
+
+let handlers: List[Handler] = [Handler(name: "double", run: double)]

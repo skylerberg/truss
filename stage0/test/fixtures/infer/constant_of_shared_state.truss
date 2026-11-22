@@ -1,0 +1,3 @@
+use standard.tasks
+
+let counter: tasks.Cell[Int64] = tasks.Cell.new(0)

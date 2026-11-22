@@ -1,12 +1,12 @@
 type profile = Profile.t = Development | Release
 type t
 type results = { find : string -> string option; add : string -> string -> unit }
-type 'a ran = Ran of 'a | Ran_too_long | Stopped of string
+type 'a ran = Ran of 'a | Used_too_much_cpu_time | Reached_todo of string | Stopped of string
 
 val create :
   ?show_file:(Path.file -> string) ->
   ?results:results ->
-  ?evaluation_time_limit_ms:int ->
+  ?evaluation_cpu_time_limit_ms:int ->
   ?programs:string ->
   ?is_worked_on:(Path.package -> bool) ->
   Lowering.lowered_lookups ->
