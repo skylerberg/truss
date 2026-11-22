@@ -14,18 +14,17 @@ let rec make_value : Lowered.static_value -> Prover.Obligation.value = function
 
 and make_fields fields = List.map (fun (name, value) -> (name, make_value value)) fields
 
-let make_run : (Lowered.static_value Backend.ran, string) result -> Prover.Obligation.run = function
-  | Ok (Ran value) -> Evaluated (make_value value)
-  | Ok (Unfinished report) -> Unfinished report
-  | Ok (Stopped report) | Error report -> Failed report
+let make_run : Lowered.static_value Backend.ran -> Prover.Obligation.run = function
+  | Ran value -> Evaluated (make_value value)
+  | Unfinished report -> Unfinished report
+  | Stopped report -> Failed report
 
 let run backend evaluations =
-  List.map
-    (fun (evaluation : Prover.Obligation.evaluation) ->
-      ( evaluation,
-        make_run
-          (Backend.evaluate backend
-             (match evaluation with
-             | Constant_value path -> Constant path
-             | Assertion { definition; condition } -> Assertion { definition; condition })) ))
-    evaluations
+  List.combine evaluations
+    (List.map make_run
+       (Backend.evaluate backend
+          (List.map
+             (function
+               | Prover.Obligation.Constant_value path -> Lowered.Item.Constant path
+               | Assertion { definition; condition } -> Assertion { definition; condition })
+             evaluations)))

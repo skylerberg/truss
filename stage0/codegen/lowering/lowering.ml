@@ -54,9 +54,12 @@ let lower system (lookups : Lookups.t) item =
   | lowered -> Ok lowered
   | exception Lower.Unsupported unsupported -> Error unsupported
 
+let test_runner : Lowered.Item.t =
+  Lowered.Item.make_code (Well_known.make_path Run_tests) Ground.no_instantiation
+
 let list_references = function
   | Compiled fragment | Folded (_, fragment) -> Emit_c.references fragment
-  | Evaluate (evaluator, _) -> [ evaluator ]
+  | Evaluate (evaluator, _) -> [ evaluator; test_runner ]
 
 let check_calls interface ~find_call_edges item = function
   | Compiled fragment -> Call_edge_check.check interface ~find_call_edges item fragment
@@ -73,9 +76,6 @@ let derive_test_keys ~read_lowered ~read_known_key =
   Test_keys.derive ~read_known_key ~read_hash_and_references:(fun item ->
       let lowered = read_lowered item in
       (hash_fragment lowered, list_references lowered))
-
-let test_runner : Lowered.Item.t =
-  Lowered.Item.make_code (Well_known.make_path Run_tests) Ground.no_instantiation
 
 let make_root (path : Path.t) : Lowered.Item.t =
   match path with Test _ -> Generated (Test_main path) | _ -> Generated (Program_main path)

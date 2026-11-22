@@ -191,32 +191,40 @@ let run_mutant ~samples text =
             (Database.list_file_diagnostics (build_example_database with_samples) example_file);
           failwith ("the samples of a mutant have errors:\n" ^ with_samples)
       | Some running ->
-          let evaluate name =
-            let constant = Lowered.Item.Constant (Top { module_ = example; name }) in
-            Database.For_testing.add_root running constant;
-            Backend.evaluate (make_backend running) constant
+          let evaluate names =
+            let constants =
+              List.map (fun name -> Lowered.Item.Constant (Top { module_ = example; name })) names
+            in
+            List.iter (Database.For_testing.add_root running) constants;
+            Backend.evaluate (make_backend running) constants
           in
           List.iteri
             (fun index (candidate, drawn) ->
               incr functions;
-              List.iteri
-                (fun sample arguments ->
-                  if
-                    candidate.admits = []
-                    || evaluate (name_sample "admits" index sample)
-                       = Ok (Ran (Static_scalar (Bool true)))
-                  then begin
-                    incr runs;
-                    match evaluate (name_sample "result" index sample) with
-                    | Ok (Stopped report) ->
-                        incr failures;
-                        Printf.printf "PROVEN BUT FAILS: %s (%s)\n%s\n%s\n\n"
-                          (Path.show candidate.path)
-                          (String.concat ", " (List.map Z.to_string arguments))
-                          report text
-                    | _ -> ()
-                  end)
-                drawn)
+              let samples = List.mapi (fun sample arguments -> (sample, arguments)) drawn in
+              let name_samples kind = List.map (fun (sample, _) -> name_sample kind index sample) in
+              let admitted =
+                if candidate.admits = [] then samples
+                else
+                  List.filter_map
+                    (fun (sample, admits) ->
+                      if admits = Backend.Ran (Lowered.Static_scalar (Bool true)) then Some sample
+                      else None)
+                    (List.combine samples (evaluate (name_samples "admits" samples)))
+              in
+              List.iter2
+                (fun (_, arguments) ran ->
+                  incr runs;
+                  match ran with
+                  | Backend.Stopped report ->
+                      incr failures;
+                      Printf.printf "PROVEN BUT FAILS: %s (%s)\n%s\n%s\n\n"
+                        (Path.show candidate.path)
+                        (String.concat ", " (List.map Z.to_string arguments))
+                        report text
+                  | _ -> ())
+                admitted
+                (evaluate (name_samples "result" admitted)))
             candidates)
 
 let list_mutants text =
