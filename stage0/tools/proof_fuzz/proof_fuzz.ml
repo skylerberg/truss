@@ -54,7 +54,7 @@ type candidate = {
 let list_runnable database =
   let mir = Database.For_testing.make_mir_lookups database in
   let interface = Database.make_interface_lookups database in
-  let lookups = Database.make_proof_lookups database in
+  let lookups = Database.For_testing.make_proof_lookups database in
   List.filter_map
     (fun (declaration : Resolve.Names.declaration) ->
       let key = declaration.key in
@@ -106,10 +106,10 @@ let list_runnable database =
 let is_proven (names : Resolve.Names.lookups) key states =
   let base = (names.read_place key).base and text = names.read_text key in
   List.for_all
-    (fun (state : Source.span Prover.state) ->
+    (fun (state : Database.proof_state) ->
       state.site.span.stop <= base
       || state.site.span.start >= base + String.length text
-      || state.failure = None)
+      || state.is_proven)
     states
 
 let make_admitting_source index candidate =
@@ -151,14 +151,8 @@ let run_mutant ~samples text =
   | None -> ()
   | Some database -> (
       incr checked;
-      let states =
-        Prover.list_states
-          (Prover.decide ~runs:[]
-             (Database.make_proof_lookups database)
-             (Lazy.force solver)
-             (Database.list_proofs (Database.prove database [ example_file ])))
-          example_file
-      in
+      Database.decide (Database.prove database [ example_file ]) ~runs:[] solver;
+      let states = Database.list_proof_states database example_file in
       let candidates =
         List.map
           (fun candidate ->
@@ -275,14 +269,8 @@ let () =
             in
             match load text with
             | Some database ->
-                let unproven =
-                  Prover.list_diagnostics
-                    (Prover.decide ~runs:[]
-                       (Database.make_proof_lookups database)
-                       (Lazy.force solver)
-                       (Database.list_proofs (Database.prove database [ example_file ])))
-                    example_file
-                in
+                Database.decide (Database.prove database [ example_file ]) ~runs:[] solver;
+                let unproven = Database.list_proof_diagnostics database example_file in
                 print_diagnostics unproven;
                 unproven = []
             | None ->

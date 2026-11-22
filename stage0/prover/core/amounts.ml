@@ -344,7 +344,7 @@ let compute_step_amount context frame (invocation : Invocation.t) (values : Stat
               | Calls _ | Metric _ -> Logic.int 1)
       | Calls (Through _) -> Costs.zero
       | Metric _ -> (
-          match Contracts.find_capability_clauses context.lookups capability name with
+          match Contracts.find_capability_clauses context capability name with
           | Some capability_clauses ->
               let inside =
                 Validity.bind_arguments frame capability_clauses
@@ -649,7 +649,7 @@ let find_method_cost_bound context (metric : Language.Metric.t) (method_ : Path.
         | Some (impl, substitution) -> (
             let path = Path.Method { owner = impl; name; receiver } in
             let makes_no_potential =
-              match Interface.Impls.read_signature context.lookups.interface path with
+              match Contracts.read_signature context path with
               | Some (signature : Types.signature) -> (
                   List.for_all
                     (fun (parameter : Types.parameter_info) ->
@@ -660,7 +660,7 @@ let find_method_cost_bound context (metric : Language.Metric.t) (method_ : Path.
               | None -> false
             in
             match
-              Contracts.find_method_contract context.lookups reference name receiver
+              Contracts.find_method_contract context reference name receiver
                 (Impl { impl; substitution })
             with
             | Some contract when makes_no_potential || not includes_potential_made ->

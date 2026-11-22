@@ -1522,14 +1522,19 @@ let find_counts output kind =
     (String.split_on_char '\n' output)
 
 let () =
-  test "TRUSS_DATABASE_COUNTS=1 writes the database's work during the command, by kind of part"
-    (fun () ->
+  test "TRUSS_DATABASE_COUNTS=1 writes the database's work during the command, by stage" (fun () ->
       ignore (Workspace.For_testing.load_standard_package_database ());
       let root = make_package [ ("main.truss", Fixtures.Cli.doubling) ] in
       Unix.putenv "TRUSS_DATABASE_COUNTS" "1";
       let _, output = run_truss [ "check"; "-C"; root ] in
       if find_counts output "parsed file" <> Some [ "1"; "0"; "1"; "1"; "1" ] then
-        fail "no row counts one parsed file, computed, written, and read once: %s" output);
+        fail "no row counts one parsed file, computed, written, and read once: %s" output;
+      let writes_the_file line =
+        String.includes ~affix:"INSERT OR REPLACE INTO main.file" line
+        && String.starts_with ~prefix:"1  " (String.trim line)
+      in
+      if not (List.exists writes_the_file (String.split_on_char '\n' output)) then
+        fail "no row counts the statement that writes the file, run once: %s" output);
   test "a second release build of an unchanged package computes no body, proof, or code" (fun () ->
       let root = make_package [ ("main.truss", Fixtures.Cli.main_with_a_todo_proof) ] in
       Unix.putenv "TRUSS_DATABASE_COUNTS" "";

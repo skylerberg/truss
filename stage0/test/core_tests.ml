@@ -452,9 +452,12 @@ let () =
       let packages = Support.setup [] in
       let interface = Database.make_interface_lookups (Support.make_database packages) in
       let derived =
-        List.filter_map
-          (fun (_, (impl : Path.t)) -> match impl with Derived _ -> Some impl | _ -> None)
-          (interface.names.list_impls Path.standard_package)
+        List.concat_map
+          (fun (declaration : Resolve.Names.declaration) ->
+            List.filter_map
+              (fun (_, (impl : Path.t)) -> match impl with Derived _ -> Some impl | _ -> None)
+              (interface.names.list_impls_of_type Path.standard_package declaration.key.path))
+          (interface.names.list_package_declarations Path.standard_package)
       in
       if derived = [] then Harness.fail "the standard library derives nothing";
       List.iter
@@ -503,7 +506,7 @@ let () =
   let read_method_core name =
     let packages = Support.setup [ ("app.main", text) ] in
     let parameter : Types.parameter = { owner = both; name = "Value" } in
-    let list_bounds (actual : Types.parameter) = if actual = parameter then [ described ] else [] in
+    let list_bounds = Interface.Properties.Bounds.of_known [ (parameter, [ described ]) ] in
     let owner =
       match
         Interface.Impls.find_evidence

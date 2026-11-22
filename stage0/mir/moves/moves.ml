@@ -371,7 +371,24 @@ let make_owner_test ?(find_passed = fun _ -> None) (body : Mir.Graph.body) =
   in
   (owns, is_lent_mut)
 
-let analyse ?find_passed ?(is_moving = fun _ -> true) ~tracks:needs_drop (body : Mir.Graph.body) =
+module Type_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Types.ty
+end))
+
+let decide_each_type_once is_moving =
+  let decided = Type_table.create 16 in
+  fun type_ ->
+    match Type_table.find_opt decided type_ with
+    | Some moves -> moves
+    | None ->
+        let moves = is_moving type_ in
+        Type_table.replace decided type_ moves;
+        moves
+
+let analyse ?find_passed ?is_moving ~tracks:needs_drop (body : Mir.Graph.body) =
+  let is_moving =
+    match is_moving with Some is_moving -> decide_each_type_once is_moving | None -> fun _ -> true
+  in
   let owns, is_lent_mut = make_owner_test ?find_passed body in
   let tracks local = owns local || is_lent_mut local in
   let list_statement_moves = list_moves ~is_moving

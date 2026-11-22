@@ -8,39 +8,43 @@ type proof =
 
 val prove : Lookups.t -> Resolve.Names.key -> proof
 val list_evaluations : proof -> Obligation.evaluation list
+val list_warnings : proof -> Source.Definition_span.t Diagnostic.diagnostic list
 
 val resolve_location :
   Resolve.Names.lookups -> Resolve.Names.key -> Obligation.location -> Source.Definition_span.t
 
-type 'span site = { code : Diagnostic.Code.prover; span : 'span; shows : string }
+type site = { code : Diagnostic.Code.prover; span : Source.Definition_span.t; shows : string }
+type citation = { cited : Resolve.Names.key; clause : Source.Definition_span.t }
 
-type 'span state = {
-  site : 'span site;
-  failure : 'span Diagnostic.diagnostic option;
+type state = {
+  site : site;
+  is_proven : bool;
   trusts_compiled_code : bool;
+  failure : Source.Definition_span.t Diagnostic.diagnostic option;
+  citation : citation option;
 }
 
-type verdicts
-type warnings
+type posed
 
-val collect_warnings : Lookups.t -> (Resolve.Names.key * proof) list -> warnings
-val list_warnings : warnings -> Path.file -> Diagnostic.t list
-
-val decide :
-  runs:(Obligation.evaluation * Obligation.run) list ->
+val pose :
   Lookups.t ->
-  Solver.t ->
-  (Resolve.Names.key * proof) list ->
-  verdicts
+  runs:(Obligation.evaluation * Obligation.run) list ->
+  Resolve.Names.key ->
+  proof ->
+  posed
 
-val list_states : verdicts -> Path.file -> Source.span state list
-val list_diagnostics : verdicts -> Path.file -> Diagnostic.t list
+val list_requests : posed -> (Solver.request * Logic.query) list
+val list_refutation_requests : posed -> Solver.answer list -> (Solver.request * Logic.query) list
+
+val list_states :
+  Lookups.t -> posed -> answers:Solver.answer list -> refutations:Solver.answer list -> state list
+
+val note_cited_clause :
+  Source.span Diagnostic.diagnostic -> Source.span -> Source.span Diagnostic.diagnostic
+
+val name_cited_clause :
+  Source.span Diagnostic.diagnostic -> path:string -> line:int -> Source.span Diagnostic.diagnostic
 
 module For_testing : sig
-  val list_queries :
-    runs:(Obligation.evaluation * Obligation.run) list ->
-    Lookups.t ->
-    (Resolve.Names.key * proof) list ->
-    Path.file ->
-    (Source.span site * string) list
+  val list_queries : posed -> (site * string) list
 end

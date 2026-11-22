@@ -192,7 +192,7 @@ let instantiate (state : State.state) (span : Source.Definition_span.t)
 let find_intrinsic_signature path =
   Option.map Intrinsic_signatures.make_signature (Intrinsic.find_operation path)
 
-let find_function_signature (lookups : Lookups.t) (path : Path.t) =
+let find_function_signature signatures (lookups : Lookups.t) (path : Path.t) =
   match find_intrinsic_signature path with
   | Some signature -> Some signature
-  | None -> Interface.Impls.read_signature lookups.interface path
+  | None -> Signatures.read signatures lookups.interface path

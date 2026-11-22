@@ -12,11 +12,7 @@ let make_solver () =
   | Ok solver -> solver
   | Error message -> Outcome.raise_cannot_run "%s" message
 
-type t = {
-  proofs : Database.proofs;
-  warnings : Prover.warnings Lazy.t;
-  verdicts : Prover.verdicts Lazy.t;
-}
+type t = { database : Database.t; proofs : Database.proofs; decided : unit Lazy.t }
 
 let list_runs database snapshot packages proofs =
   match Database.list_evaluations proofs with
@@ -30,21 +26,25 @@ let list_runs database snapshot packages proofs =
 
 let check database snapshot packages files =
   let proofs = Database.prove database files in
-  let lookups = Database.make_proof_lookups database in
   {
+    database;
     proofs;
-    warnings = lazy (Prover.collect_warnings lookups (Database.list_proofs proofs));
-    verdicts =
+    decided =
       lazy
-        (let solver = make_solver () in
-         Prover.decide
+        (Database.decide proofs
            ~runs:(list_runs database snapshot packages proofs)
-           lookups solver (Database.list_proofs proofs));
+           (lazy (make_solver ())));
   }
 
-let list_diagnostics checked file = Prover.list_diagnostics (Lazy.force checked.verdicts) file
-let list_warnings checked file = Prover.list_warnings (Lazy.force checked.warnings) file
-let list_states checked file = Prover.list_states (Lazy.force checked.verdicts) file
+let list_diagnostics checked file =
+  Lazy.force checked.decided;
+  Database.list_proof_diagnostics checked.database file
+
+let list_warnings checked file = Database.list_proof_warnings checked.database file
+
+let list_states checked file =
+  Lazy.force checked.decided;
+  Database.list_proof_states checked.database file
 
 let list_holes snapshot checked ~reached =
   List.map

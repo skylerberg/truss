@@ -1,5 +1,6 @@
 val build :
   Lookups.t ->
+  signatures:Signatures.t ->
   resolved:Resolve.resolved ->
   tables:Tables.t ->
   context:Interface.Elaborator.t ->
@@ -10,11 +11,12 @@ val build :
   elaborated:Interface.Environment.elaborated_interface ->
   law_parameters:(string * Types.ty) list ->
   checks_body:bool ->
+  has_syntax_error:(Resolve.Parts.part -> bool) ->
   Core.t
 
 val list_capability_impls :
   Lookups.t ->
-  list_bounds:(Types.parameter -> Types.trait_reference list) ->
+  list_bounds:Interface.Properties.Bounds.t ->
   package:Path.package ->
   Types.ty ->
   (Core.provided * Types.impl_interface) list

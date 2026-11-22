@@ -1,15 +1,17 @@
 let solver =
   lazy (match Solver.find () with Ok solver -> solver | Error message -> failwith message)
 
-let compute_verdicts backend database =
+let decide backend database =
   let proofs = Database.prove database [ Codegen_support.example_file ] in
-  Prover.decide
-    ~runs:(Evaluations.run backend (Database.list_evaluations proofs))
-    (Database.make_proof_lookups database)
-    (Lazy.force solver) (Database.list_proofs proofs)
+  Database.decide proofs ~runs:(Evaluations.run backend (Database.list_evaluations proofs)) solver
 
 let list_diagnostics backend database =
-  Prover.list_diagnostics (compute_verdicts backend database) Codegen_support.example_file
+  decide backend database;
+  Database.list_proof_diagnostics database Codegen_support.example_file
+
+let list_states backend database =
+  decide backend database;
+  Database.list_proof_states database Codegen_support.example_file
 
 let prove_with_running ?results text =
   let database, backend = Codegen_support.load ?results text in
@@ -109,67 +111,51 @@ let () =
           Codegen_support.fail "%d diagnostics: %s" (List.length actual) (show_messages actual));
       expect_proven (list_diagnostics (Codegen_support.make_backend ~results database) database))
 
-let loaded_shout_of_a_name_and_an_identity =
-  lazy (Codegen_support.load (shout ^ Fixtures.Evaluate.shout_of_a_name_and_an_identity))
+let load_shout_of_a_name_and_an_identity () =
+  Codegen_support.load (shout ^ Fixtures.Evaluate.shout_of_a_name_and_an_identity)
 
 let () =
   Codegen_support.test "a state says whether its proof trusts compiled code" (fun () ->
-      let database, backend = Lazy.force loaded_shout_of_a_name_and_an_identity in
-      let states =
-        Prover.list_states (compute_verdicts backend database) Codegen_support.example_file
-      in
+      let database, backend = load_shout_of_a_name_and_an_identity () in
+      let states = list_states backend database in
       let with_code code =
-        List.filter
-          (fun (state : Source.span Prover.state) ->
-            Diagnostic.Code.name (Prover state.site.code) = code)
-          states
+        List.filter (fun (state : Database.proof_state) -> state.site.code = code) states
       in
       let trusting =
-        List.filter (fun (state : Source.span Prover.state) -> state.trusts_compiled_code) states
+        List.filter (fun (state : Database.proof_state) -> state.trusts_compiled_code) states
       in
       match (trusting, with_code "prover.ensures") with
       | [ first; second ], [ ensured ] ->
           if
             List.sort compare
-              (List.map
-                 (fun (state : Source.span Prover.state) ->
-                   Diagnostic.Code.name (Prover state.site.code))
-                 [ first; second ])
+              (List.map (fun (state : Database.proof_state) -> state.site.code) [ first; second ])
             <> [ "prover.assertion"; "prover.requires" ]
-            || first.failure <> None || second.failure <> None
+            || (not first.is_proven) || not second.is_proven
           then
             Codegen_support.fail
               "only the template's check and the requires that it proves should trust compiled code";
-          if ensured.failure <> None then
-            Codegen_support.fail "the proof of g's ensures should hold"
+          if not ensured.is_proven then Codegen_support.fail "the proof of g's ensures should hold"
       | trusting, ensured ->
           Codegen_support.fail
             "expected 2 states that trust compiled code and 1 ensures state, got %d and %d"
             (List.length trusting) (List.length ensured));
   Codegen_support.test "the query of a template states the result of running its check" (fun () ->
-      let database, backend = Lazy.force loaded_shout_of_a_name_and_an_identity in
+      let database, backend = load_shout_of_a_name_and_an_identity () in
       let proofs = Database.prove database [ Codegen_support.example_file ] in
       let runs = Evaluations.run backend (Database.list_evaluations proofs) in
-      let lookups = Database.make_proof_lookups database in
-      let list_queries runs =
-        Prover.For_testing.list_queries ~runs lookups (Database.list_proofs proofs)
-          Codegen_support.example_file
-      in
+      let list_queries runs = Database.For_testing.list_queries proofs ~runs in
       let with_runs = list_queries runs and without_runs = list_queries [] in
-      let states =
-        Prover.list_states
-          (Prover.decide ~runs lookups (Lazy.force solver) (Database.list_proofs proofs))
-          Codegen_support.example_file
-      in
+      Database.decide proofs ~runs solver;
+      let states = Database.list_proof_states database Codegen_support.example_file in
       if List.length with_runs <> List.length states then
         Codegen_support.fail "listed %d queries for %d obligations" (List.length with_runs)
           (List.length states);
       match
-        List.filter (fun (state : Source.span Prover.state) -> state.trusts_compiled_code) states
+        List.filter (fun (state : Database.proof_state) -> state.trusts_compiled_code) states
       with
       | [ _; _ ] as trusting ->
           List.iter
-            (fun (state : Source.span Prover.state) ->
+            (fun (state : Database.proof_state) ->
               if List.assoc state.site with_runs = List.assoc state.site without_runs then
                 Codegen_support.fail "a query is the same without the run of the template's check")
             trusting

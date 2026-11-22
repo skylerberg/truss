@@ -37,6 +37,7 @@ and impl_method = {
 }
 
 val make_method_path : impl_method -> Path.t
+val find_definition : t -> Path.t option
 val make_code : Path.t -> Ground.instantiation -> t
 val make_method_code : impl_method -> t
 val compare : t -> t -> int

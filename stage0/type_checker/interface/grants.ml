@@ -44,8 +44,10 @@ let describe_not_a_capability ~dependency capability =
     (Grant.show_capability capability)
     (Path.show_package dependency)
 
+let needs_grant ~package ~of_ = of_ <> package && of_ <> Path.standard_package
+
 let list_missing (lookups : Lookups.t) ~package ~of_ (uses : Types.capability_set) =
-  if of_ = package || of_ = Path.standard_package then []
+  if not (needs_grant ~package ~of_) then []
   else
     let granted =
       match lookups.find_grant package of_ with Some grant -> grant.capabilities | None -> []

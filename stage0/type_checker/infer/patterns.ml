@@ -51,11 +51,6 @@ let read_variants context path arguments =
   Option.bind (Interface.Definition.find_type_interface context.lookups.interface path)
     (fun interface -> Types.instantiate_variants interface arguments)
 
-let read_shape context path =
-  Option.map
-    (fun (interface : Types.type_interface) -> interface.shape)
-    (Interface.Definition.find_type_interface context.lookups.interface path)
-
 let read_constructor_fields context type_ constructor =
   match (type_, constructor) with
   | Types.Named { path; arguments }, Variant name -> (
@@ -78,6 +73,28 @@ let read_field_types context type_ constructor =
 
 let compute_arity context type_ constructor =
   List.length (read_constructor_fields context type_ constructor)
+
+let list_constructors context type_ : (constructor * Types.ty list) list option =
+  let list_types = List.map (fun (field : Types.field) -> field.field_type) in
+  match type_ with
+  | Types.Named { path; arguments } -> (
+      match Interface.Definition.find_type_interface context.lookups.interface path with
+      | Some ({ shape = Sum _; _ } as interface) ->
+          Option.map
+            (List.map (fun (variant : Types.variant) ->
+                 (Variant variant.variant_name, list_types (Option.value ~default:[] variant.fields))))
+            (Types.instantiate_variants interface arguments)
+      | Some ({ shape = Record _; _ } as interface) ->
+          Some
+            [
+              ( Record,
+                list_types (Option.value ~default:[] (Types.instantiate_fields interface arguments))
+              );
+            ]
+      | Some { shape = Builtin_type Bool; _ } -> Some [ (Boolean false, []); (Boolean true, []) ]
+      | Some { shape = Builtin_type Unit; _ } -> Some [ (Record, []) ]
+      | Some { shape = Builtin_type _ | Todo_type; _ } | None -> None)
+  | _ -> None
 
 let show_range_bound : Core.range_bound -> string = function
   | Integer_bound value -> Z.to_string value
@@ -173,22 +190,6 @@ and build_constructed_space ?replace context type_ constructor
 
 type row = space list
 
-let find_constructors context type_ =
-  match type_ with
-  | Types.Named { path; arguments } -> (
-      match read_shape context path with
-      | Some (Sum _) -> (
-          match read_variants context path arguments with
-          | Some variants ->
-              Some
-                (List.map (fun (variant : Types.variant) -> Variant variant.variant_name) variants)
-          | None -> None)
-      | Some (Record _) -> Some [ Record ]
-      | Some (Builtin_type Bool) -> Some [ Boolean false; Boolean true ]
-      | Some (Builtin_type Unit) -> Some [ Record ]
-      | _ -> None)
-  | _ -> None
-
 let split_intervals (low, high) (column : space list) =
   let rec collect_intervals = function
     | Constructed (Interval (low, high), _) -> [ (low, high) ]
@@ -220,8 +221,7 @@ let covers pattern_constructor constructor =
       Z.leq low part_low && Z.leq part_high high
   | left, right -> left = right
 
-let rec specialize context type_ constructor (rows : row list) =
-  let width = compute_arity context type_ constructor in
+let rec specialize ~width constructor (rows : row list) =
   List.concat_map
     (fun row ->
       match row with
@@ -230,7 +230,7 @@ let rec specialize context type_ constructor (rows : row list) =
       | Constructed (head_constructor, arguments) :: rest ->
           if covers head_constructor constructor then [ arguments @ rest ] else []
       | Alternatives alternatives :: rest ->
-          specialize context type_ constructor
+          specialize ~width constructor
             (List.map (fun alternative -> alternative :: rest) alternatives))
     rows
 
@@ -246,51 +246,38 @@ let rec build_default_matrix (rows : row list) =
 
 let compute_signature context type_ (column : space list) =
   match compute_integer_range type_ with
-  | Some range -> Some (split_intervals range column)
-  | None -> find_constructors context type_
+  | Some range -> Some (List.map (fun interval -> (interval, [])) (split_intervals range column))
+  | None -> list_constructors context type_
 
 let rec find_witness context (types : Types.ty list) (rows : row list) : space list option =
   match types with
   | [] -> if rows = [] then Some [] else None
   | type_ :: rest_types -> (
       let column = List.filter_map (function first :: _ -> Some first | [] -> None) rows in
-      let try_constructor constructor =
-        let arguments = read_field_types context type_ constructor in
+      let try_constructor (constructor, field_types) =
+        let width = List.length field_types in
         match
-          find_witness context (arguments @ rest_types) (specialize context type_ constructor rows)
+          find_witness context (field_types @ rest_types) (specialize ~width constructor rows)
         with
         | Some witness ->
-            let count = List.length arguments in
-            let fields = List.take count witness and rest = List.drop count witness in
-            Some (Constructed (constructor, fields) :: rest)
+            Some (Constructed (constructor, List.take width witness) :: List.drop width witness)
         | None -> None
       in
       let present = List.concat_map list_head_constructors column in
+      let is_present (constructor, _) =
+        List.exists (fun other -> covers other constructor) present
+      in
       match (type_, compute_signature context type_ column) with
       | (Types.Error _ | Types.Hole | Types.Never), _ -> None
-      | _, Some all
-        when all <> []
-             && List.for_all
-                  (fun constructor -> List.exists (fun other -> covers other constructor) present)
-                  all ->
+      | _, Some all when all <> [] && List.for_all is_present all ->
           List.find_map try_constructor all
       | _, signature -> (
           match find_witness context rest_types (build_default_matrix rows) with
           | None -> None
           | Some witness -> (
-              let absent =
-                match signature with
-                | Some all ->
-                    List.find_opt
-                      (fun constructor ->
-                        not (List.exists (fun other -> covers other constructor) present))
-                      all
-                | None -> None
-              in
-              match absent with
-              | Some constructor when present <> [] ->
-                  let count = List.length (read_field_types context type_ constructor) in
-                  Some (Constructed (constructor, List.init count (fun _ -> Wild)) :: witness)
+              match Option.bind signature (List.find_opt (Fun.negate is_present)) with
+              | Some (constructor, field_types) when present <> [] ->
+                  Some (Constructed (constructor, List.map (fun _ -> Wild) field_types) :: witness)
               | _ -> Some (Wild :: witness))))
 
 let rec is_useful context (types : Types.ty list) (rows : row list) (row : row) =
@@ -308,34 +295,29 @@ let rec is_useful context (types : Types.ty list) (rows : row list) (row : row) 
               List.exists
                 (fun part ->
                   covers constructor part
-                  && is_useful context rest_types (specialize context type_ part rows) rest)
+                  && is_useful context rest_types (specialize ~width:0 part rows) rest)
                 (split_intervals range
                    (first :: List.filter_map (function first :: _ -> Some first | [] -> None) rows))
           | _ ->
-              is_useful context
-                (read_field_types context type_ constructor @ rest_types)
-                (specialize context type_ constructor rows)
+              let field_types = read_field_types context type_ constructor in
+              is_useful context (field_types @ rest_types)
+                (specialize ~width:(List.length field_types) constructor rows)
                 (arguments @ rest))
       | Wild -> (
           let column = List.filter_map (function first :: _ -> Some first | [] -> None) rows in
+          let present = List.concat_map list_head_constructors column in
           match compute_signature context type_ column with
           | Some all
             when all <> []
                  && List.for_all
-                      (fun constructor ->
-                        List.exists
-                          (fun other -> covers other constructor)
-                          (List.concat_map list_head_constructors column))
+                      (fun (constructor, _) ->
+                        List.exists (fun other -> covers other constructor) present)
                       all ->
               List.exists
-                (fun constructor ->
-                  is_useful context
-                    (read_field_types context type_ constructor @ rest_types)
-                    (specialize context type_ constructor rows)
-                    (List.init
-                       (List.length (read_field_types context type_ constructor))
-                       (fun _ -> Wild)
-                    @ rest))
+                (fun (constructor, field_types) ->
+                  is_useful context (field_types @ rest_types)
+                    (specialize ~width:(List.length field_types) constructor rows)
+                    (List.map (fun _ -> Wild) field_types @ rest))
                 all
           | _ -> is_useful context rest_types (build_default_matrix rows) rest))
   | _ -> false
@@ -396,18 +378,16 @@ let has_error context type_ =
            let fields_have_error fields =
              List.exists (fun (field : Types.field) -> contains_error field.field_type) fields
            in
-           match read_shape context path with
-           | Some (Record _) ->
-               fields_have_error (Option.value ~default:[] (read_fields context path arguments))
-           | Some (Sum _) -> (
-               match read_variants context path arguments with
-               | Some variants ->
-                   List.exists
-                     (fun (variant : Types.variant) ->
-                       fields_have_error (Option.value ~default:[] variant.fields))
-                     variants
-               | None -> false)
-           | _ -> false)
+           match Interface.Definition.find_type_interface context.lookups.interface path with
+           | Some ({ shape = Record _; _ } as interface) ->
+               fields_have_error
+                 (Option.value ~default:[] (Types.instantiate_fields interface arguments))
+           | Some ({ shape = Sum _; _ } as interface) ->
+               List.exists
+                 (fun (variant : Types.variant) ->
+                   fields_have_error (Option.value ~default:[] variant.fields))
+                 (Option.value ~default:[] (Types.instantiate_variants interface arguments))
+           | Some { shape = Builtin_type _ | Todo_type; _ } | None -> false)
     | _ -> false
   in
   contains_error type_
