@@ -58,17 +58,20 @@ let check_location (declaration : Resolve.Names.declaration) spans (definition :
             (Types.show impl.for_type)))
 
 let check_sealed (lookups : Lookups.t) (declaration : Resolve.Names.declaration) =
-  let package = declaration.key.module_.package in
+  let is_sealed =
+    match declaration.key.path with
+    | Impl { trait; _ } -> Option.is_some (Types.find_sealed_implementors trait.path)
+    | _ -> false
+  in
   match
-    ( List.find_opt
-        (fun (_, impl) -> Path.equal impl declaration.key.path)
-        (lookups.interface.names.list_impls package),
-      read_definition lookups declaration )
+    if is_sealed then Resolve.Namespace.find_impl_heads lookups.interface.names declaration.key.path
+    else None
   with
-  | Some ((trait, type_), _), (definition, spans) -> (
+  | Some (trait, type_) -> (
       match (Types.find_sealed_implementors trait, Well_known.find_builtin_type type_) with
       | Some builtins, Some builtin when List.mem builtin builtins -> []
       | Some _, _ ->
+          let definition, spans = read_definition lookups declaration in
           let implementors, reason =
             if Well_known.is Floating_point trait then
               ( "the built-in float types",
@@ -84,7 +87,7 @@ let check_sealed (lookups : Lookups.t) (declaration : Resolve.Names.declaration)
                  (Path.show trait) (Path.show type_) reason);
           ]
       | None, _ -> [])
-  | _ -> []
+  | None -> []
 
 let impls_overlap (first : Types.impl_interface) (second : Types.impl_interface) =
   let variables =
@@ -580,18 +583,17 @@ let check_overlaps (lookups : Lookups.t) (declaration : Resolve.Names.declaratio
       let trait = impl.implements.trait in
       let rec list_before = function
         | [] -> []
-        | ((indexed_trait, indexed_type), path) :: rest ->
-            if Path.equal path declaration.key.path then []
-            else if Path.equal indexed_trait trait && Path.equal indexed_type type_ then
-              path :: list_before rest
-            else list_before rest
+        | impl :: rest ->
+            if Path.equal impl declaration.key.path then [] else impl :: list_before rest
       in
       let earlier =
         List.filter
           (fun (other : Types.impl_interface) -> List.mem package (list_outer_packages other))
           (List.filter_map
              (Interface.Definition.find_impl_interface lookups.interface)
-             (list_before (lookups.interface.names.list_impls package)))
+             (list_before
+                (Interface.Impls.list_impls_of_trait_for_type lookups.interface ~trait ~type_
+                   package)))
       in
       let dependencies =
         List.concat_map
@@ -765,18 +767,6 @@ type check =
   | Tests
   | Unexported
   | Dependencies
-
-let list_checks (declarations : Resolve.Names.declaration list) =
-  List.concat_map
-    (fun (declaration : Resolve.Names.declaration) ->
-      if declaration.key.ordinal <> 0 then []
-      else
-        match declaration.kind with
-        | Impl -> [ Sealed declaration.key; Impl declaration.key ]
-        | Type -> [ Type declaration.key ]
-        | _ -> [])
-    declarations
-  @ [ Instantiations; Tests; Unexported; Dependencies ]
 
 let describe_unused_dependency ~package dependency =
   Printf.sprintf "Nothing in `%s` uses `%s`. Delete its entry." (Path.show_package package)

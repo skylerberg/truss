@@ -1390,16 +1390,11 @@ type impl = {
   entry : string;
 }
 
-type impl_selection =
-  | Impls_of_package
-  | Impls_of_trait of int
-  | Impls_of_type of int
-  | Impls_of_module of int
+type impl_selection = Impls_of_trait of int | Impls_of_type of int | Impls_of_module of int
 
 let list_impls store schema ~package selection =
   let condition, arguments =
     match selection with
-    | Impls_of_package -> ("package = ?1", [ Text package ])
     | Impls_of_trait trait -> ("package = ?1 AND trait = ?2", [ Text package; Integer trait ])
     | Impls_of_type type_ -> ("package = ?1 AND type = ?2", [ Text package; Integer type_ ])
     | Impls_of_module module_ -> ("package = ?1 AND module = ?2", [ Text package; Integer module_ ])

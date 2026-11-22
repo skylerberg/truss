@@ -223,10 +223,6 @@ let make_lookups store ~(note : Kind.lookup -> int -> string -> unit) ~is_packag
           (fun distinct (trait, _) ->
             if List.exists (Path.equal trait) distinct then distinct else distinct @ [ trait ])
           [] traits);
-    list_impls =
-      (fun package ->
-        note Impl_index (Ids.of_package package) "";
-        list_impl_entries package Impls_of_package);
     list_impls_of_type =
       (fun package type_ ->
         let id = Ids.of_path type_ in
@@ -321,11 +317,7 @@ let list_replaced_lookups store ~before ~after : (Kind.lookup * int * string) li
     | _ -> fail "import")
   @ list_differing "impl" [ "package"; "trait"; "type" ] (function
     | [| Text package; Integer trait; Integer type_ |] ->
-        [
-          (Kind.Impl_index, Store.identify package, "");
-          (Impls_of_type, type_, package);
-          (Impls_of_trait, trait, package);
-        ]
+        [ (Kind.Impls_of_type, type_, package); (Impls_of_trait, trait, package) ]
     | _ -> fail "impl")
   @ list_differing "law_proof" [ "package"; "trait"; "law"; "type" ] (function
     | [| Text package; Integer trait; Text law; Integer type_ |] ->
@@ -459,8 +451,6 @@ let write_module store (module_ : Path.module_) ~(files : (Path.file * string) l
     let key = decode_key row.key in
     consider Module_declarations module_id "" (fun () ->
         Obj.repr (lookups.list_declarations module_));
-    consider Package_declarations (Ids.of_package package) "" (fun () ->
-        Obj.repr (lookups.list_package_declarations package));
     Option.iter
       (fun container ->
         consider Contained container "" (fun () ->
@@ -587,7 +577,6 @@ let write_module store (module_ : Path.module_) ~(files : (Path.file * string) l
   let impls_after = List.map identify_impl impls in
   if List.sort compare impls_before <> List.sort compare impls_after then begin
     Store.replace_module_impls store ~package:package_name ~module_:module_id impls;
-    add Impl_index (Ids.of_package package) "";
     let list_differing select =
       let has_impl impls impl = List.exists (fun candidate -> candidate = impl) impls in
       List.sort_uniq Int.compare
@@ -619,8 +608,11 @@ let write_module store (module_ : Path.module_) ~(files : (Path.file * string) l
             })
           declarations.law_proofs));
   List.iter2
-    (fun (lookup, scope, name, read) before ->
-      if compare before (read ()) <> 0 then add lookup scope name)
+    (fun ((lookup : Kind.lookup), scope, name, read) before ->
+      if compare before (read ()) <> 0 then begin
+        add lookup scope name;
+        if lookup = Module_declarations then add Package_declarations (Ids.of_package package) ""
+      end)
     candidates results_before;
   let supplied =
     List.filter_map

@@ -16,4 +16,5 @@ type module_declarations = {
 val builtin_entries : Names.entry list
 val list_entries : Syntax.file -> Names.entry list
 val declare : Names.lookups -> (Path.file * Syntax.file * string) list -> module_declarations
+val find_impl_heads : Names.lookups -> Path.t -> (Path.t * Path.t) option
 val compare_key : Names.key -> Names.key -> int

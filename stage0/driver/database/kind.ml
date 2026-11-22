@@ -165,7 +165,6 @@ type lookup =
   | Package_declarations
   | Members
   | Traits_declaring
-  | Impl_index
   | Impls_of_type
   | Impls_of_trait
   | Law_proofs
@@ -191,7 +190,6 @@ let lookups =
     Package_declarations;
     Members;
     Traits_declaring;
-    Impl_index;
     Impls_of_type;
     Impls_of_trait;
     Law_proofs;
@@ -317,7 +315,6 @@ let show_lookup = function
   | Package_declarations -> "declarations of a package"
   | Members -> "members"
   | Traits_declaring -> "traits that declare a member"
-  | Impl_index -> "impls of a package"
   | Impls_of_type | Impls_of_trait -> "impls"
   | Law_proofs -> "proofs of a law"
 

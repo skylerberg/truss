@@ -452,9 +452,12 @@ let () =
       let packages = Support.setup [] in
       let interface = Database.make_interface_lookups (Support.make_database packages) in
       let derived =
-        List.filter_map
-          (fun (_, (impl : Path.t)) -> match impl with Derived _ -> Some impl | _ -> None)
-          (interface.names.list_impls Path.standard_package)
+        List.concat_map
+          (fun (declaration : Resolve.Names.declaration) ->
+            List.filter_map
+              (fun (_, (impl : Path.t)) -> match impl with Derived _ -> Some impl | _ -> None)
+              (interface.names.list_impls_of_type Path.standard_package declaration.key.path))
+          (interface.names.list_package_declarations Path.standard_package)
       in
       if derived = [] then Harness.fail "the standard library derives nothing";
       List.iter

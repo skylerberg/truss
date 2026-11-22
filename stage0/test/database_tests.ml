@@ -49,7 +49,6 @@ type name =
   | Tree of Resolve.Names.key
   | Text of Resolve.Names.key
   | Place of Resolve.Names.key
-  | Impl_index of Path.package
   | Impls_of_type of Path.package * Path.t
   | Dependencies of Path.package
 
@@ -89,8 +88,6 @@ let list_targets : read -> (Database.For_testing.target * int * string) list = f
   | Name (Tree key) -> [ (Lookup Tree, Database.For_testing.identify_key key, "") ]
   | Name (Text key) -> [ (Lookup Text, Database.For_testing.identify_key key, "") ]
   | Name (Place key) -> [ (Lookup Place, Database.For_testing.identify_key key, "") ]
-  | Name (Impl_index package) ->
-      [ (Lookup Impl_index, Database.For_testing.identify_package package, "") ]
   | Name (Impls_of_type (package, type_)) ->
       [
         (Lookup Impls_of_type, Database.For_testing.identify_path type_, Path.show_package package);
@@ -785,14 +782,14 @@ let () =
       in
       if not (List.mem (locate (Type_facts (make_main_path "Outer"))) recomputed) then
         Harness.fail "recomputed only %s" (show_parts recomputed));
-  Harness.test "a body that compares a type reads its impls and not the impl index" (fun () ->
+  Harness.test "a body that compares a type reads the impls of the type" (fun () ->
       expect_reads
         (check_text
            "type Box(value: Int64) derives Equal\n\
             fn same(left: Box, right: Box) -> Bool { left == right }\n")
         (Checked_body (make_main_key "same"))
         ~includes:[ Name (Impls_of_type (app, make_main_path "Box")) ]
-        ~excludes:[ Name (Impl_index app); Name (Impl_index Path.standard_package) ]);
+        ~excludes:[]);
   Harness.test
     "a call that closes a cycle recomputes the proofs of the cycle's members and no other"
     (fun () ->
@@ -1608,6 +1605,25 @@ let () =
           Harness.fail "ran %d steps for four modules and %d for forty" (total count_steps for_four)
             (total count_steps for_forty))
   in
+  Harness.test "no statement of a build from nothing grows faster than the project" (fun () ->
+      let count_statements modules =
+        snd
+          (Database.count_statements (fun () ->
+               ignore (build (List.init modules (fun index -> make_part index "1")))))
+      in
+      let for_four = count_statements 4 and for_forty = count_statements 40 in
+      List.iter
+        (fun (count : Database.statement_count) ->
+          let steps_for_four =
+            total count_steps
+              (List.filter
+                 (fun (other : Database.statement_count) -> other.statement = count.statement)
+                 for_four)
+          in
+          if count.steps > 3000 && count.steps > 12 * steps_for_four then
+            Harness.fail "ran %d steps for four modules and %d for forty: %s" steps_for_four
+              count.steps count.statement)
+        for_forty);
   expect_the_same_work_at_two_sizes "an edit to one body" (fun database ->
       Database.update database [ (first_part, Some (snd (make_part 0 "1 + 1"))) ];
       Database.For_testing.propagate database);

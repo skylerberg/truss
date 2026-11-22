@@ -57,7 +57,6 @@ type lookups = {
   list_contained : key -> key list;
   list_members : Path.t -> string -> key list;
   list_traits_declaring : Path.package -> string -> Path.t list;
-  list_impls : Path.package -> ((Path.t * Path.t) * Path.t) list;
   list_impls_of_type : Path.package -> Path.t -> (Path.t * Path.t) list;
   list_impls_of_trait : Path.package -> Path.t -> Path.t list;
   list_law_proofs : Path.package -> law_proof_name -> key list;

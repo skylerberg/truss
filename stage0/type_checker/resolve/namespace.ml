@@ -334,15 +334,21 @@ let resolve_head (lookups : Names.lookups) ~from ~imports (path : Syntax.path) ~
   | Some (_, path) when is_head_kind lookups path ~kinds -> Some path
   | _ -> None
 
+let find_impl_heads (lookups : Names.lookups) (impl : Path.t) =
+  match impl with
+  | Impl { trait = { path = trait; _ }; for_type; _ }
+    when is_head_kind lookups trait ~kinds:[ Trait; Capability ]
+         && is_head_kind lookups for_type ~kinds:[ Type ] ->
+      Some (trait, for_type)
+  | _ -> None
+
 let list_impl_entries (lookups : Names.lookups) ~imports (declaration : Names.declaration)
     (definition : Syntax.definition) =
   match (declaration.key.path, definition.kind) with
-  | Impl { trait = { path = trait; _ }; for_type; _ }, _ ->
-      if
-        is_head_kind lookups trait ~kinds:[ Trait; Capability ]
-        && is_head_kind lookups for_type ~kinds:[ Type ]
-      then [ ((trait, for_type), declaration.key.path) ]
-      else []
+  | Impl _, _ ->
+      List.map
+        (fun heads -> (heads, declaration.key.path))
+        (Option.to_list (find_impl_heads lookups declaration.key.path))
   | _, Type_definition { clauses; _ } ->
       let resolve_local_head = resolve_head lookups ~from:declaration.key.module_ ~imports in
       List.concat_map

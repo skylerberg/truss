@@ -279,11 +279,7 @@ type impl = {
   entry : string;
 }
 
-type impl_selection =
-  | Impls_of_package
-  | Impls_of_trait of int
-  | Impls_of_type of int
-  | Impls_of_module of int
+type impl_selection = Impls_of_trait of int | Impls_of_type of int | Impls_of_module of int
 
 val list_impls : t -> schema -> package:string -> impl_selection -> impl list
 val replace_module_impls : t -> package:string -> module_:int -> impl list -> unit

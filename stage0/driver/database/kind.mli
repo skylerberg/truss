@@ -86,7 +86,6 @@ type lookup =
   | Package_declarations
   | Members
   | Traits_declaring
-  | Impl_index
   | Impls_of_type
   | Impls_of_trait
   | Law_proofs
