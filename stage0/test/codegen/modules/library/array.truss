@@ -1,3 +1,5 @@
+type Shelf(label: String, books: Array[String, 0])
+
 test "a loop goes over an array's elements in order, and can change them" {
   let fixed: Array[Int64, 4] = [1, 2, 3, 4]
   var total = 0
@@ -132,4 +134,11 @@ test "arrays are ordered by their first different element" {
   assert low.compare(high) == Ordering.Less && high.compare(low) == Ordering.Greater
   assert low.compare(low.copy()) == Ordering.Equal
   assert low < high && high >= low
+}
+
+test "a record that holds an empty array of strings is copied and dropped" {
+  let books: Array[String, 0] = []
+  let shelf = Shelf(label: "${1}", books: own books)
+  let copied = shelf.copy()
+  assert copied.label == shelf.label && copied.books.length() == 0
 }
