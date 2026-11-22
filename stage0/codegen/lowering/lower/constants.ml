@@ -129,7 +129,9 @@ let fold_literal_value (state : Lowering.state) ty text =
   in
   match Monomorphic.compute_shape state.context.monomorphic ty with
   | Record [ (field, Typed storage) ] when Option.is_some (Storage.find_storage_element storage) ->
-      Some (Lowered.Static_record [ (field, Static_storage { element; elements }) ])
+      Some
+        (Lowered.Static_record
+           [ (field, Static_storage { element; elements; capacity = String.length text }) ])
   | Record [ (field, Typed view) ] when Option.is_some (Storage.find_view_element view) ->
       Some (Lowered.Static_record [ (field, Static_view { element; elements }) ])
   | _ -> None
@@ -232,10 +234,19 @@ and fold_body ~visiting ~depth ~steps state (mir : Mir.Graph.t)
   in
   let fold_call (destination : Mir.place option) (called : Mir.call) =
     match (called.callee.target, called.arguments) with
-    | Intrinsic { operation = Buffer Storage_with_capacity; type_arguments = [ Type element ] }, _
-      ->
-        assign destination
-          (Lowered.Static_storage { element = Lowering.ground state element; elements = [] })
+    | ( Intrinsic { operation = Buffer Storage_with_capacity; type_arguments = [ Type element ] },
+        [ Passed { value = capacity; _ } ] ) -> (
+        let* capacity = fold_operand capacity in
+        match capacity with
+        | Static_scalar (Integer (_, capacity)) when Z.fits_int capacity ->
+            assign destination
+              (Lowered.Static_storage
+                 {
+                   element = Lowering.ground state element;
+                   elements = [];
+                   capacity = Z.to_int capacity;
+                 })
+        | _ -> None)
     | ( Intrinsic { operation = Buffer Storage_push; _ },
         [
           Passed { value = Borrow { place = { root = Local storage; projections = [] }; _ }; _ };
@@ -243,7 +254,7 @@ and fold_body ~visiting ~depth ~steps state (mir : Mir.Graph.t)
         ] ) -> (
         let* element = fold_operand element in
         match Hashtbl.find_opt locals storage with
-        | Some (Static_storage contents) ->
+        | Some (Static_storage contents) when List.length contents.elements < contents.capacity ->
             Hashtbl.replace locals storage
               (Static_storage { contents with elements = contents.elements @ [ element ] });
             Some ()
@@ -254,7 +265,12 @@ and fold_body ~visiting ~depth ~steps state (mir : Mir.Graph.t)
         match array with
         | Static_array elements ->
             assign destination
-              (Lowered.Static_storage { element = Lowering.ground state element; elements })
+              (Lowered.Static_storage
+                 {
+                   element = Lowering.ground state element;
+                   elements;
+                   capacity = List.length elements;
+                 })
         | _ -> None)
     | Function { path; instantiation }, arguments when depth > 0 ->
         let* { form = callee_mir; _ } = Mir.read_graph state.context.lookups.mir path in

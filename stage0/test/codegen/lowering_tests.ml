@@ -97,6 +97,9 @@ let () =
     ~folded:[ "nine" ]
     ~run:[ "squares"; "last"; "word"; "report" ]
     Fixtures.Lowering.constants_computed_by_calls;
+  expect_fold "a constant keeps the capacity of its lists, whether it folds or is run"
+    ~folded:[ "folded"; "literal" ] ~run:[ "roomy" ]
+    Fixtures.Lowering.constants_keeping_their_capacity;
   Codegen_support.test
     "a test that reaches a constant whose evaluation reaches a todo is incomplete, and the others \
      run" (fun () ->

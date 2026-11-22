@@ -58,10 +58,13 @@ let rec render_initializer (emission : Emission.t) ty (value : Lowered.static_va
             (list_fields ~buffer:(render_buffer element elements)
                ~length:(C_text.Text (string_of_int (List.length elements))))))
   in
+  let list_storage_fields capacity =
+    Storage.list_storage_fields ~capacity:(C_text.Text (string_of_int capacity))
+  in
   match (layout.form, value) with
   | Zero_size, _ -> None
-  | _, Static_storage { element; elements } ->
-      render_sequence Storage.list_borrowed_fields element elements
+  | _, Static_storage { element; elements; capacity } ->
+      render_sequence (list_storage_fields capacity) element elements
   | _, Static_view { element; elements } ->
       render_sequence Storage.list_view_fields element elements
   | Scalar _, Static_scalar constant -> Some (fst (C_values.render_constant emission constant))
