@@ -63,13 +63,11 @@ let explain_decision (site : State.decision_site) ~name ~decided =
           name decided )
   | Method_call -> (took "at an earlier method call", needs "Method lookup")
 
+let make_declaration_remedy name = Printf.sprintf "Declare `%s` with a type." name
+
 let find_log_report (state : State.state) ~fixes code span message (root, wanted) =
   let entries =
-    List.rev
-      (List.filter_map
-         (fun ({ member; entry } : State.logged) ->
-           if Unify.read_root state.unifier member = root then Some entry else None)
-         state.log)
+    List.map (fun (logged : State.logged) -> logged.entry) (State.list_class_log state root)
   in
   let literals =
     List.filter_map (function State.Literal { literal; _ } -> Some literal | _ -> None) entries
@@ -84,7 +82,7 @@ let find_log_report (state : State.state) ~fixes code span message (root, wanted
             State.is_within state wanted Types.number_types
             && not (State.is_within state wanted allowed)
         | State.Decided { decided_type; _ } -> not (Types.equal decided_type wanted_type)
-        | State.Local _ -> false)
+        | State.Local _ | State.Source _ -> false)
       entries
   with
   | Some (State.Literal { allowed; _ })
@@ -123,7 +121,7 @@ let find_log_report (state : State.state) ~fixes code span message (root, wanted
           when site <> Use
                && State.is_within state wanted Types.number_types
                && Hashtbl.mem state.annotatable local ->
-            [ Printf.sprintf "Declare `%s` with a type." name ]
+            [ make_declaration_remedy name ]
         | _ -> []
       in
       let report =
@@ -134,7 +132,7 @@ let find_log_report (state : State.state) ~fixes code span message (root, wanted
       in
       Unify.poison state.unifier root report;
       Some report
-  | Some (State.Literal _ | State.Local _) | None -> None
+  | Some (State.Literal _ | State.Local _ | State.Source _) | None -> None
 
 let add_mismatch_diagnostic (state : State.state) ?(fixes = []) code
     (span : Source.Definition_span.t) ~(sides : (Types.ty * Types.ty) list) message =

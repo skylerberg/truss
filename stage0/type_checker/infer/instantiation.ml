@@ -40,8 +40,8 @@ let read_type_generics (state : State.state) (path : Path.t) =
   | Some interface -> interface.type_generics
   | None -> []
 
-let make_generic_source ~written ~declared_on (generic : Types.generic) : State.source =
-  Generic_argument { written; parameter = generic.generic.name; declared_on }
+let make_generic_source ~written ~declared_on parameter : State.source =
+  Generic_argument { written; parameter; declared_on }
 
 let make_fresh_trait_reference (state : State.state) (trait : Path.t) =
   Types.make_trait_reference trait

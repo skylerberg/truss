@@ -445,7 +445,6 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
       final_type_checks = [];
       log = [];
       annotatable = Hashtbl.create 8;
-      sources = Hashtbl.create 8;
       goals = [];
     }
   in

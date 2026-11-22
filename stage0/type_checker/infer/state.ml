@@ -39,7 +39,7 @@ type source =
   | List_literal of Syntax.id
   | Map_literal of Syntax.id
   | Unbounded_range of Syntax.id
-  | Generic_argument of { written : Syntax.id; parameter : string; declared_on : Path.t }
+  | Generic_argument of { written : Syntax.id; parameter : Types.generic; declared_on : Path.t }
 
 type goal = {
   subject : Types.ty;
@@ -75,6 +75,7 @@ type entry =
       report_excluded : Types.ty -> Diagnostic.reported;
     }
   | Local of Syntax.id
+  | Source of source
   | Decided of {
       site : decision_site;
       decided_type : Types.ty;
@@ -111,7 +112,6 @@ type state = {
   mutable final_type_checks : (unit -> unit) list;
   mutable log : logged list;
   annotatable : (Syntax.id, unit) Hashtbl.t;
-  sources : (Unify.unknown, source) Hashtbl.t;
 }
 
 let add_diagnostic state ?notes ?(fixes = []) code (span : Source.Definition_span.t) message =
@@ -224,57 +224,47 @@ let check_when_final state check =
 
 let resolve state type_ = Unify.resolve state.unifier type_
 let zonk state type_ = Unify.zonk state.unifier type_
+let record_in_log state member entry = state.log <- { member; entry } :: state.log
+
+let list_class_log state index =
+  let root = Unify.read_root state.unifier index in
+  List.rev
+    (List.filter
+       (fun (logged : logged) -> Unify.read_root state.unifier logged.member = root)
+       state.log)
+
+let find_class_source state index =
+  List.find_map
+    (function { member; entry = Source source } -> Some (member, source) | _ -> None)
+    (list_class_log state index)
+
+let find_variable_source state (type_ : Types.ty) =
+  match resolve state type_ with
+  | Types.Variable index -> Option.map snd (find_class_source state index)
+  | _ -> None
+
 let make_goal_decided_type state = Unify.make_fresh_type state.unifier
 
 let make_fresh_type state source =
   let fresh = make_goal_decided_type state in
-  Hashtbl.replace state.sources (Unify.Unknown_type state.unifier.next) source;
+  record_in_log state state.unifier.next (Source source);
   fresh
 
-let make_fresh_value state source =
-  let fresh = Unify.make_fresh_value state.unifier in
-  Hashtbl.replace state.sources (Unify.Unknown_value state.unifier.next) source;
-  fresh
+let make_goal_decided_argument state (generic : Types.generic) =
+  match generic.kind with
+  | Value_generic -> Types.Value (Unify.make_fresh_value state.unifier)
+  | Type_generic _ -> Types.Type (make_goal_decided_type state)
 
-let make_fresh_generic_arguments state (generics : Types.generic list)
-    (source_of : Types.generic -> source) =
+let make_goal_decided_arguments state generics =
+  List.map (make_goal_decided_argument state) generics
+
+let make_fresh_generic_arguments state generics (source_of : Types.generic -> source) =
   List.map
-    (fun (generic : Types.generic) ->
-      match generic.kind with
-      | Value_generic -> Types.Value (make_fresh_value state (source_of generic))
-      | Type_generic _ -> Types.Type (make_fresh_type state (source_of generic)))
+    (fun generic ->
+      let argument = make_goal_decided_argument state generic in
+      record_in_log state state.unifier.next (Source (source_of generic));
+      argument)
     generics
-
-let make_goal_decided_arguments state (generics : Types.generic list) =
-  List.map
-    (fun (generic : Types.generic) ->
-      match generic.kind with
-      | Value_generic -> Types.Value (Unify.make_fresh_value state.unifier)
-      | Type_generic _ -> Types.Type (make_goal_decided_type state))
-    generics
-
-let find_source state (unknown : Unify.unknown) =
-  let read_root : Unify.unknown -> Unify.unknown = function
-    | Unknown_type index -> Unknown_type (Unify.read_root state.unifier index)
-    | Unknown_value index -> (
-        match Unify.resolve_value state.unifier (Value_variable index) with
-        | Value_variable root -> Unknown_value root
-        | _ -> Unknown_value index)
-  in
-  let root = read_root unknown in
-  Hashtbl.fold
-    (fun recorded source earliest ->
-      if read_root recorded <> root then earliest
-      else
-        match earliest with
-        | Some (first, _) when compare first recorded < 0 -> earliest
-        | Some _ | None -> Some (recorded, source))
-    state.sources None
-
-let find_variable_source state (type_ : Types.ty) =
-  match resolve state type_ with
-  | Types.Variable index -> find_source state (Unknown_type index)
-  | _ -> None
 
 let lookup_bounds state parameter = Interface.Elaborator.list_bounds (read_context state) parameter
 
@@ -348,8 +338,6 @@ let read_integer_range state type_ =
       List.fold_left
         (fun (low, high) (other_low, other_high) -> (Z.max low other_low, Z.min high other_high))
         first rest
-
-let record_in_log state member entry = state.log <- { member; entry } :: state.log
 
 let make_literal_type state (value : Syntax.expression) allowed ~report_excluded =
   let literal = Unify.make_fresh_number state.unifier allowed in

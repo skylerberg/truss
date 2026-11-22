@@ -38,7 +38,7 @@ type source =
   | List_literal of Syntax.id
   | Map_literal of Syntax.id
   | Unbounded_range of Syntax.id
-  | Generic_argument of { written : Syntax.id; parameter : string; declared_on : Path.t }
+  | Generic_argument of { written : Syntax.id; parameter : Types.generic; declared_on : Path.t }
 
 type goal = {
   subject : Types.ty;
@@ -74,6 +74,7 @@ type entry =
       report_excluded : Types.ty -> Diagnostic.reported;
     }
   | Local of Syntax.id
+  | Source of source
   | Decided of {
       site : decision_site;
       decided_type : Types.ty;
@@ -110,7 +111,6 @@ type state = {
   mutable final_type_checks : (unit -> unit) list;
   mutable log : logged list;
   annotatable : (Syntax.id, unit) Hashtbl.t;
-  sources : (Unify.unknown, source) Hashtbl.t;
 }
 
 val add_diagnostic :
@@ -172,8 +172,9 @@ val make_fresh_generic_arguments :
   state -> Types.generic list -> (Types.generic -> source) -> Types.argument list
 
 val make_goal_decided_arguments : state -> Types.generic list -> Types.argument list
-val find_source : state -> Unify.unknown -> (Unify.unknown * source) option
-val find_variable_source : state -> Types.ty -> (Unify.unknown * source) option
+val list_class_log : state -> int -> logged list
+val find_class_source : state -> int -> (int * source) option
+val find_variable_source : state -> Types.ty -> source option
 val lookup_bounds : state -> Types.parameter -> Types.trait_reference list
 val normalize : state -> Types.ty -> Types.ty
 val find_domain : state -> Types.ty -> Language.Builtin_type.t list option

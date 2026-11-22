@@ -478,9 +478,11 @@ let show_declaration : Path.t -> string = function
   | Method { owner; name; _ } -> Path.show_name owner ^ "." ^ name
   | path -> Path.show_name path
 
-let make_bracket_remedy declared_on (unknown : Unify.unknown) =
+let make_bracket_remedy declared_on (parameter : Types.generic) =
   Printf.sprintf "Give `%s` its %s in brackets." (show_declaration declared_on)
-    (match unknown with Unknown_type _ -> "type arguments" | Unknown_value _ -> "arguments")
+    (match parameter.kind with
+    | Types.Type_generic _ -> "type arguments"
+    | Value_generic -> "arguments")
 
 let report_undetermined (state : State.state) (frame : State.frame) unsolved =
   let quote id = State.quote_span state (State.read_span state id) in
@@ -498,30 +500,28 @@ let report_undetermined (state : State.state) (frame : State.frame) unsolved =
   | Some binding ->
       let name = quote binding in
       report binding
-        (Printf.sprintf
-           "The type of `%s` cannot be inferred from this statement alone. Declare `%s` with a \
-            type."
-           name name)
+        (Printf.sprintf "The type of `%s` cannot be inferred from this statement alone. %s" name
+           (Failures.make_declaration_remedy name))
   | None -> (
-      let read_index : Unify.unknown -> int = function
-        | Unknown_type index | Unknown_value index -> index
+      let sources =
+        List.sort
+          (fun (first, _) (second, _) -> Int.compare first second)
+          (List.filter_map
+             (fun (Unify.Unknown_type index | Unknown_value index) ->
+               State.find_class_source state index)
+             unsolved)
       in
-      let sourced =
-        List.sort_uniq
-          (fun (first, _) (second, _) -> compare (read_index first) (read_index second))
-          (List.filter_map (State.find_source state) unsolved)
-      in
-      match sourced with
-      | (unknown, Generic_argument { written; parameter; declared_on }) :: _ ->
+      match sources with
+      | (_, Generic_argument { written; parameter; declared_on }) :: _ ->
           let kind =
-            match unknown with
-            | Unify.Unknown_type _ -> "a type parameter"
-            | Unknown_value _ -> "a value parameter"
+            match parameter.kind with
+            | Types.Type_generic _ -> "a type parameter"
+            | Value_generic -> "a value parameter"
           in
           report written
-            (Printf.sprintf "Nothing here determines `%s`, %s of `%s`. %s" parameter kind
-               (show_declaration declared_on)
-               (make_bracket_remedy declared_on unknown))
+            (Printf.sprintf "Nothing here determines `%s`, %s of `%s`. %s" parameter.generic.name
+               kind (show_declaration declared_on)
+               (make_bracket_remedy declared_on parameter))
       | (_, List_literal literal) :: _ ->
           report literal
             (Printf.sprintf

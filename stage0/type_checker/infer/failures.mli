@@ -4,6 +4,7 @@ val report_decided_in_specification :
   State.state -> Source.Definition_span.t -> int -> Diagnostic.reported
 
 val list_class_pairs : State.state -> Types.ty * Types.ty -> (int * Types.ty) list
+val make_declaration_remedy : string -> string
 
 val add_mismatch_diagnostic :
   State.state ->

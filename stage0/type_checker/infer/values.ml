@@ -248,9 +248,9 @@ and check_lambda (state : State.state) env ?expected (value : Syntax.expression)
     | _ ->
         let remedy =
           match Option.bind expected (State.find_variable_source state) with
-          | Some (unknown, Generic_argument { declared_on; _ }) ->
-              Solver.make_bracket_remedy declared_on unknown
-          | Some (_, (List_literal _ | Map_literal _ | Unbounded_range _)) | None ->
+          | Some (Generic_argument { declared_on; parameter; _ }) ->
+              Solver.make_bracket_remedy declared_on parameter
+          | Some (List_literal _ | Map_literal _ | Unbounded_range _) | None ->
               "Bind it with a typed `let`, such as `let double: fn(Int64) -> Int64 = fn(x) { x * 2 \
                }`."
         in
