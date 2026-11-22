@@ -489,17 +489,11 @@ and construct_fields builder fields =
           fields))
 
 and lower_yielded builder (mode : Language.Mode.t) (part : Core.operand) : Tree.yielded option =
-  let rec lends : Core.operand -> bool = function
-    | Place _ -> true
-    | Value { kind = Construct { fields; _ }; _ } ->
-        List.exists (fun (_, field) -> Option.fold ~none:false ~some:lends field) fields
-    | Value _ -> false
-  in
   match part with
-  | Value { kind = Construct _; _ } when lends part ->
+  | Value { kind = Construct _; _ } ->
       let rec plan_part (field : Core.operand) : Tree.yielded In_order.t =
         match field with
-        | Value ({ kind = Construct { variant; fields }; _ } as node) when lends field ->
+        | Value ({ kind = Construct { variant; fields }; _ } as node) ->
             In_order.map
               (fun fields -> Tree.Built { variant; fields; type_ = node.type_ })
               (In_order.all
