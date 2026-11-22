@@ -1588,35 +1588,40 @@ let () =
   in
   let first_part = Support.parse_file "app.part0" in
   let first_of_first_part = Support.make_top_path "app.part0" "first0" in
-  let expect_the_same_statements_at_two_sizes name ?(prepare = ignore) ask =
-    Harness.test (name ^ " runs as many statements in forty modules as in four") (fun () ->
+  let total read counts =
+    List.fold_left (fun total (count : Database.statement_count) -> total + read count) 0 counts
+  in
+  let count_runs (count : Database.statement_count) = count.runs
+  and count_steps (count : Database.statement_count) = count.steps in
+  let expect_the_same_work_at_two_sizes name ?(prepare = ignore) ask =
+    Harness.test (name ^ " costs the same in forty modules as in four") (fun () ->
         let count_statements modules =
           let database = build (List.init modules (fun index -> make_part index "1")) in
           prepare database;
-          let (), statements = Database.count_statements (fun () -> ask database) in
-          List.fold_left
-            (fun total (count : Database.statement_count) -> total + count.runs)
-            0 statements
+          snd (Database.count_statements (fun () -> ask database))
         in
         let for_four = count_statements 4 and for_forty = count_statements 40 in
-        if for_four <> for_forty then
-          Harness.fail "ran %d statements for four modules and %d for forty" for_four for_forty)
+        if total count_runs for_four <> total count_runs for_forty then
+          Harness.fail "ran %d statements for four modules and %d for forty"
+            (total count_runs for_four) (total count_runs for_forty);
+        if 10 * total count_steps for_forty > 11 * total count_steps for_four then
+          Harness.fail "ran %d steps for four modules and %d for forty" (total count_steps for_four)
+            (total count_steps for_forty))
   in
-  expect_the_same_statements_at_two_sizes "an edit to one body" (fun database ->
+  expect_the_same_work_at_two_sizes "an edit to one body" (fun database ->
       Database.update database [ (first_part, Some (snd (make_part 0 "1 + 1"))) ];
       Database.For_testing.propagate database);
-  expect_the_same_statements_at_two_sizes "listing the diagnostics of one file" (fun database ->
+  expect_the_same_work_at_two_sizes "listing the diagnostics of one file" (fun database ->
       ignore (Database.list_file_diagnostics database first_part));
-  expect_the_same_statements_at_two_sizes "listing the dependents of one definition"
-    (fun database -> ignore (Database.list_dependents database [ first_of_first_part ]));
-  expect_the_same_statements_at_two_sizes "listing the dependencies of one definition"
-    (fun database ->
+  expect_the_same_work_at_two_sizes "listing the dependents of one definition" (fun database ->
+      ignore (Database.list_dependents database [ first_of_first_part ]));
+  expect_the_same_work_at_two_sizes "listing the dependencies of one definition" (fun database ->
       ignore (Database.list_dependencies database [ Support.make_top_path "app.part0" "second0" ]));
-  expect_the_same_statements_at_two_sizes "listing the definitions that name one definition"
+  expect_the_same_work_at_two_sizes "listing the definitions that name one definition"
     (fun database -> ignore (Database.list_definitions_naming database first_of_first_part));
-  expect_the_same_statements_at_two_sizes "proving and deciding one file" (fun database ->
+  expect_the_same_work_at_two_sizes "proving and deciding one file" (fun database ->
       ignore (Support.list_proof_states database first_part));
-  expect_the_same_statements_at_two_sizes "proving and deciding one file again without a change"
+  expect_the_same_work_at_two_sizes "proving and deciding one file again without a change"
     ~prepare:(fun database -> ignore (Support.list_proof_states database first_part))
     (fun database -> ignore (Support.list_proof_states database first_part));
   Harness.test "listing a file's diagnostics reads no part" (fun () ->

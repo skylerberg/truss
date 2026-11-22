@@ -604,13 +604,14 @@ let read_edge row =
     target = Sql.read_integer row 3;
   }
 
-let list_edges_from store schema ~sources ~markers =
+let list_edges_from store schema ~source_kinds ~sources ~markers =
   Sql.list_rows store.sql
     (Printf.sprintf
-       "SELECT e.source_kind, e.source, e.target_kind, e.target FROM %s.edge e WHERE e.source IN \
-        (SELECT value FROM json_each(?1)) AND (e.markers & ?2) != 0"
+       "SELECT e.source_kind, e.source, e.target_kind, e.target FROM %s.edge e WHERE e.source_kind \
+        IN (SELECT value FROM json_each(?1)) AND e.source IN (SELECT value FROM json_each(?2)) AND \
+        (e.markers & ?3) != 0"
        (name_schema schema))
-    [ Text (encode_integers sources); Integer markers ]
+    [ Text (encode_integers source_kinds); Text (encode_integers sources); Integer markers ]
     read_edge
 
 let list_edges_into store ~target_kinds ~targets ~markers =

@@ -83,7 +83,9 @@ let bind database sql statement arguments =
         | Null -> Sqlite3.bind statement (index + 1) Sqlite3.Data.NULL))
     arguments
 
-let observer : (string -> seconds:float -> unit) option ref = ref None
+external take_steps : Sqlite3.stmt -> string -> int = "truss_take_statement_steps"
+
+let observer : (string -> seconds:float -> steps:int -> unit) option ref = ref None
 
 let with_observer observe run =
   let previous = !observer in
@@ -102,8 +104,12 @@ let with_statement database sql arguments step_through =
   match !observer with
   | None -> run ()
   | Some observe ->
+      ignore (take_steps statement sql);
       let start = Unix.gettimeofday () in
-      Fun.protect ~finally:(fun () -> observe sql ~seconds:(Unix.gettimeofday () -. start)) run
+      Fun.protect
+        ~finally:(fun () ->
+          observe sql ~seconds:(Unix.gettimeofday () -. start) ~steps:(take_steps statement sql))
+        run
 
 let run database sql arguments =
   with_statement database sql arguments (fun statement ->

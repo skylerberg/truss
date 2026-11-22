@@ -92,7 +92,8 @@ val list_all_packages : t -> string list
 
 type read_edge = { source_kind : int; source : int; target_kind : int; target : int }
 
-val list_edges_from : t -> schema -> sources:int list -> markers:int -> read_edge list
+val list_edges_from :
+  t -> schema -> source_kinds:int list -> sources:int list -> markers:int -> read_edge list
 
 val list_edges_into :
   t -> target_kinds:int list -> targets:int list -> markers:int -> read_edge list

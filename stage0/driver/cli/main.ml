@@ -393,17 +393,21 @@ let print_database_counts (counts : Database.counts list) =
     (heading :: rows)
 
 let print_statement_counts (statements : Database.statement_count list) =
-  let width =
+  let measure_width heading read =
     List.fold_left
       (fun width (count : Database.statement_count) ->
-        max width (String.length (string_of_int count.runs)))
-      (String.length "runs") statements
+        max width (String.length (string_of_int (read count))))
+      (String.length heading) statements
   in
-  Output.eprint_line (Printf.sprintf "%*s  %9s  statement" width "runs" "seconds");
+  let runs_width = measure_width "runs" (fun count -> count.runs)
+  and steps_width = measure_width "steps" (fun count -> count.steps) in
+  Output.eprint_line
+    (Printf.sprintf "%*s  %*s  %9s  statement" runs_width "runs" steps_width "steps" "seconds");
   List.iter
     (fun (count : Database.statement_count) ->
       Output.eprint_line
-        (Printf.sprintf "%*d  %9.3f  %s" width count.runs count.seconds count.statement))
+        (Printf.sprintf "%*d  %*d  %9.3f  %s" runs_width count.runs steps_width count.steps
+           count.seconds count.statement))
     statements
 
 let with_database_counts run =

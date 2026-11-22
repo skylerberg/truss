@@ -86,7 +86,7 @@ type counts = {
 
 val count : (unit -> 'result) -> 'result * counts list
 
-type statement_count = { statement : string; runs : int; seconds : float }
+type statement_count = { statement : string; runs : int; steps : int; seconds : float }
 
 val count_statements : (unit -> 'result) -> 'result * statement_count list
 

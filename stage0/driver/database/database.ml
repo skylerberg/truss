@@ -772,6 +772,9 @@ let describe_target rank =
 let list_reads (database : t) paths ~is_source =
   let reads = Kind.encode_markers [ Reads ] in
   let lowering = [ Kind.rank_stage Lower; Kind.rank_stage Key_tests ] in
+  let stages_of_definitions =
+    List.filter (fun stage -> not (List.mem stage lowering)) (List.map Kind.rank_stage Kind.stages)
+  in
   List.concat_map
     (fun path ->
       let path_id = Ids.of_path path in
@@ -784,7 +787,9 @@ let list_reads (database : t) paths ~is_source =
       let edges =
         List.filter
           (fun (edge : Store.read_edge) -> not (List.mem edge.source_kind lowering))
-          (if is_source then Store.list_edges_from database.store Main ~sources:own ~markers:reads
+          (if is_source then
+             Store.list_edges_from database.store Main ~source_kinds:stages_of_definitions
+               ~sources:own ~markers:reads
            else
              Store.list_edges_into database.store
                ~target_kinds:
@@ -871,20 +876,25 @@ let count run =
          (fun (rank, _) (other_rank, _) -> Int.compare rank other_rank)
          (List.of_seq (Hashtbl.to_seq_values counts_by_kind))) )
 
-type statement_count = { statement : string; runs : int; seconds : float }
+type statement_count = { statement : string; runs : int; steps : int; seconds : float }
 
 let count_statements run =
   let counts = Hashtbl.create 64 in
   let result =
     Sql.with_observer
-      (fun statement ~seconds ->
+      (fun statement ~seconds ~steps ->
         let count =
           Option.value
             (Hashtbl.find_opt counts statement)
-            ~default:{ statement; runs = 0; seconds = 0.0 }
+            ~default:{ statement; runs = 0; steps = 0; seconds = 0.0 }
         in
         Hashtbl.replace counts statement
-          { count with runs = count.runs + 1; seconds = count.seconds +. seconds })
+          {
+            count with
+            runs = count.runs + 1;
+            steps = count.steps + steps;
+            seconds = count.seconds +. seconds;
+          })
       run
   in
   ( result,

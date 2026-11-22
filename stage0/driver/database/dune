@@ -1,5 +1,8 @@
 (library
  (name database)
+ (foreign_stubs
+  (language c)
+  (names sql_stubs))
  (libraries
   structural_key
   language
