@@ -159,14 +159,7 @@ let make_contract ?trait_clauses context path callee_clauses =
     | None -> false
   in
   let result_kind = match signature with Some { output = Lends _; _ } -> `Lends | _ -> `Returns in
-  {
-    State.callee_clauses;
-    trait_clauses;
-    restated_clauses = [];
-    is_logic_function;
-    result_kind;
-    signature;
-  }
+  { State.callee_clauses; trait_clauses; restated_clauses = []; is_logic_function; result_kind }
 
 let list_declared_clauses (contract : State.contract) =
   (contract.callee_clauses :: Option.to_list contract.trait_clauses) @ contract.restated_clauses

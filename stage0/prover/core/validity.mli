@@ -45,19 +45,16 @@ val bind_arguments :
   substitution:Types.substitution ->
   State.frame
 
-val find_callee_declaration :
-  State.context -> State.frame -> Invocation.t -> State.declared_callee option
-
 val list_callback_facts :
   State.context ->
   State.frame ->
-  State.declared_callee option ->
+  Invocation.t ->
   int ->
   (int * Logic.term) list ->
   Logic.term list ->
   Logic.term list
 
-val find_parameter_type : State.declared_callee option -> int -> Types.ty option
+val find_parameter_type : State.context -> State.frame -> Invocation.t -> int -> Types.ty option
 
 val make_callback_ensures_frame :
   State.frame ->
@@ -70,7 +67,7 @@ val make_callback_ensures_frame :
 val list_callback_promises :
   State.context ->
   State.frame ->
-  State.declared_callee option ->
+  Invocation.t ->
   int ->
   (int * Logic.term) list ->
   entries:Logic.term list ->
@@ -98,7 +95,7 @@ val check_callback_promises :
   State.context ->
   State.frame ->
   location:Obligation.location ->
-  State.declared_callee option ->
+  Invocation.t ->
   State.passed ->
   described:string ->
   assume:
@@ -123,7 +120,7 @@ val check_forwarded_callback :
   State.context ->
   State.frame ->
   Invocation.site ->
-  State.declared_callee option ->
+  Invocation.t ->
   State.passed ->
   Core.local ->
   State.passed list ->
