@@ -39,19 +39,6 @@ let render_function_ref_symbol emission : Lowered.function_ref -> C_text.t = fun
   | Item item -> Emission.render_item emission item
   | Nested nested_index -> Name (Nested_function nested_index)
 
-let is_indirect (emission : Emission.t) sum variant =
-  let is_block (payload : Memory_layout.t) =
-    match payload.form with Scalar (Pointer (Block _)) -> true | _ -> false
-  in
-  match (C_types.compute_layout emission.types sum).form with
-  | Tagged { variants; _ } ->
-      List.exists
-        (fun (candidate : Memory_layout.variant) ->
-          candidate.name = variant && is_block candidate.payload)
-        variants
-  | Niche_encoded { dataful; _ } -> dataful.name = variant && is_block dataful.payload
-  | _ -> false
-
 let render_block_pointer (emission : Emission.t) text sum variant =
   match (C_types.compute_layout emission.types sum).form with
   | Tagged _ -> text ++ Text (".payload.v_" ^ variant)
@@ -76,7 +63,7 @@ let rec render_place (emission : Emission.t) fc (place : Lowered.place) :
     | Deref, _ -> Text "(*" ++ text ++ Text ")"
     | Field name, _ -> text ++ Text (".f_" ^ name)
     | Variant_field { variant; field }, Value sum ->
-        if is_indirect emission sum variant then
+        if Memory_layout.is_indirect emission.types.env sum variant then
           render_block_pointer emission text sum variant ++ Text ("->f_" ^ field)
         else
           let payload =

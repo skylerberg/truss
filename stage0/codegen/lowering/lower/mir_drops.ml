@@ -149,13 +149,8 @@ and drop_parts state (path : Moves.path) =
         List.iter
           (fun (name, _) -> drop_child (Variant_field { variant; field = name }))
           (List.assoc (Some variant) (Mir_places.list_variants state ty));
-        if
-          List.exists
-            (fun (shape : Memory_layout.variant_shape) -> shape.name = variant && shape.indirect)
-            (match Memory_layout.compute_shape state.context.env ty with
-            | Sum shapes -> shapes
-            | _ -> [])
-        then Emit_c.Ir_builder.emit state.builder (Free_block { place; variant })
+        if Memory_layout.is_indirect state.context.env ty variant then
+          Emit_c.Ir_builder.emit state.builder (Free_block { place; variant })
       in
       let is_certain variant =
         List.exists
