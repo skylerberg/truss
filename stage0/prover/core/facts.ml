@@ -656,13 +656,19 @@ let is_standard_equal = Well_known.is Equal
 let find_visible_type (context : State.context) (ty : Types.ty) =
   match ty with
   | Named { path; arguments } when Types.find_builtin ty = None -> (
-      match Interface.Definition.find_interface context.lookups.interface path with
-      | Some (Interface.Environment.Type_interface interface)
-        when (not interface.opaque)
-             || Path.locate_package path = Path.locate_package context.current ->
-          let substitution = Types.make_substitution interface.type_generics arguments in
-          Some (interface, substitution)
-      | _ -> None)
+      match Tables.Type_table.find_opt context.visible_types ty with
+      | Some visible -> visible
+      | None ->
+          let visible =
+            match Interface.Definition.find_interface context.lookups.interface path with
+            | Some (Interface.Environment.Type_interface interface)
+              when (not interface.opaque)
+                   || Path.locate_package path = Path.locate_package context.current ->
+                Some (interface, Types.make_substitution interface.type_generics arguments)
+            | _ -> None
+          in
+          Tables.Type_table.replace context.visible_types ty visible;
+          visible)
   | _ -> None
 
 let find_constructors context ty =

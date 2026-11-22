@@ -166,40 +166,52 @@ let restates ~(trait : Path.t) ~name ~receiver (interface : Types.trait_interfac
       && Path.equal restated.declared_by trait)
     interface.restated
 
-let list_implemented_traits (lookups : Lookups.t) ~list_bounds (self_type : Types.ty) ~packages =
+let list_implemented_traits (lookups : Lookups.t) ~list_bounds (self_type : Types.ty) ~packages
+    ~is_wanted =
   match self_type with
   | Types.Named { path; _ } ->
       List.concat_map
         (fun package ->
           List.filter_map
-            (fun (_, impl) ->
-              let interface = Interface.Definition.read_impl_interface lookups.interface impl in
-              let variables =
-                List.map (fun (generic : Types.generic) -> generic.generic) interface.impl_generics
-              in
-              Option.bind
-                (Interface.Impls.match_type ~variables Types.no_substitution interface.for_type
-                   self_type) (fun arguments ->
-                  let implemented = Types.substitute_trait arguments interface.implements in
-                  Option.map
-                    (fun _ -> implemented)
-                    (Interface.Impls.find_evidence lookups.interface ~list_bounds self_type
-                       implemented)))
+            (fun (implemented, impl) ->
+              if not (is_wanted implemented) then None
+              else
+                let interface = Interface.Definition.read_impl_interface lookups.interface impl in
+                let variables =
+                  List.map
+                    (fun (generic : Types.generic) -> generic.generic)
+                    interface.impl_generics
+                in
+                Option.bind
+                  (Interface.Impls.match_type ~variables Types.no_substitution interface.for_type
+                     self_type) (fun arguments ->
+                    let implemented = Types.substitute_trait arguments interface.implements in
+                    Option.map
+                      (fun _ -> implemented)
+                      (Interface.Impls.find_evidence lookups.interface ~list_bounds self_type
+                         implemented)))
             (Interface.Impls.list_impls_for_type lookups.interface path package))
         packages
-  | _ -> Interface.Properties.list_known_bounds lookups.interface ~list_bounds self_type
+  | _ ->
+      List.filter
+        (fun (bound : Types.trait_reference) -> is_wanted bound.trait)
+        (Interface.Properties.list_known_bounds lookups.interface ~list_bounds self_type)
 
 let list_restated_clauses (lookups : Lookups.t) ~list_bounds ~packages ~self_type (trait : Path.t)
     name receiver =
+  let restates_the_method subtrait =
+    match Interface.Definition.find_trait_interface lookups.interface subtrait with
+    | Some interface -> restates ~trait ~name ~receiver interface
+    | None -> false
+  in
   List.filter_map
     (fun (subtrait : Types.trait_reference) ->
-      match Interface.Definition.find_trait_interface lookups.interface subtrait.trait with
-      | Some interface when restates ~trait ~name ~receiver interface ->
-          Option.map
-            (fun clauses -> (subtrait, clauses))
-            (find_declared_clauses lookups (Path.Method { owner = subtrait.trait; name; receiver }))
-      | _ -> None)
-    (List.sort_uniq compare (list_implemented_traits lookups ~list_bounds self_type ~packages))
+      Option.map
+        (fun clauses -> (subtrait, clauses))
+        (find_declared_clauses lookups (Path.Method { owner = subtrait.trait; name; receiver })))
+    (List.sort_uniq compare
+       (list_implemented_traits lookups ~list_bounds self_type ~packages
+          ~is_wanted:restates_the_method))
 
 let find_capability_contract lookups (capability : Path.t) name =
   let path = Path.make_capability_method capability name in

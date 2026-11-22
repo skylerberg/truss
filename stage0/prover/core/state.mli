@@ -109,6 +109,7 @@ type context = {
   declared : Logic.sort list Tables.Symbol_table.t;
   definitions : unit Tables.Symbol_table.t;
   datatypes : unit Tables.Type_table.t;
+  visible_types : (Types.type_interface * Types.substitution) option Tables.Type_table.t;
   stated : unit Tables.Stated_table.t;
   mutable facts : Logic.term list;
   mutable obligations : Obligation.t list;

@@ -27,6 +27,7 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       declared = Tables.Symbol_table.create 64;
       definitions = Tables.Symbol_table.create 8;
       datatypes = Tables.Type_table.create 16;
+      visible_types = Tables.Type_table.create 16;
       stated = Tables.Stated_table.create 64;
       facts = [];
       scopes = [];

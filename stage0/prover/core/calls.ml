@@ -1024,30 +1024,27 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
       (fun (name, argument) -> (name, Types.substitute_capabilities frame.substitution argument))
       instantiation.capability_arguments
   in
-  let read_signature path = Interface.Impls.read_signature context.lookups.interface path in
-  let list_generics path =
-    match read_signature path with
-    | Some (signature : Types.signature) ->
-        List.map (fun (generic : Types.generic) -> generic.generic) signature.generics
-    | None -> []
-  in
-  let list_capability_parameters path =
-    match read_signature path with
-    | Some (signature : Types.signature) -> signature.capability_parameters
-    | None -> []
-  in
-  let bind_parameters parameters arguments ~fixed =
+  let bind_callee path arguments capability_arguments ~fixed =
+    let generics, capability_parameters =
+      match Interface.Impls.read_signature context.lookups.interface path with
+      | Some (signature : Types.signature) ->
+          ( List.map (fun (generic : Types.generic) -> generic.generic) signature.generics,
+            signature.capability_parameters )
+      | None -> ([], [])
+    in
     let rec bind_remaining substitution parameters arguments =
       match (parameters, arguments) with
       | parameter :: parameters, argument :: arguments ->
           bind_remaining (Types.bind_argument parameter argument substitution) parameters arguments
       | _ -> substitution
     in
-    bind_remaining fixed
-      (List.filter
-         (fun parameter -> Option.is_none (Types.find_argument parameter fixed))
-         parameters)
-      arguments
+    Types.combine_substitutions
+      (bind_remaining fixed
+         (List.filter
+            (fun parameter -> Option.is_none (Types.find_argument parameter fixed))
+            generics)
+         arguments)
+      (Types.make_capability_substitution capability_parameters capability_arguments)
   in
   let resolution, recursive_callee =
     Facts.find_recursive_callee context frame location invocation.callee
@@ -1071,10 +1068,9 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
     | Function { path; instantiation } ->
         let arguments = list_arguments instantiation.type_arguments in
         let substitution =
-          Types.combine_substitutions
-            (bind_parameters (list_generics path) arguments ~fixed:Types.no_substitution)
-            (Types.make_capability_substitution (list_capability_parameters path)
-               (list_capability_arguments instantiation))
+          bind_callee path arguments
+            (list_capability_arguments instantiation)
+            ~fixed:Types.no_substitution
         in
         with_contract
           ~substitution_of:(fun _ -> substitution)
@@ -1118,12 +1114,8 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
               (Some (frame, Operations.make_equality context frame self_type left right))
         | _ ->
             let trait_substitution =
-              Types.combine_substitutions
-                (bind_parameters (list_generics trait_path) arguments
-                   ~fixed:(Contracts.make_trait_substitution context.lookups trait self_type))
-                (Types.make_capability_substitution
-                   (list_capability_parameters trait_path)
-                   capability_arguments)
+              bind_callee trait_path arguments capability_arguments
+                ~fixed:(Contracts.make_trait_substitution context.lookups trait self_type)
             in
             let path, callee_substitution =
               match evidence with
@@ -1132,23 +1124,15 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
                     Types.substitute_substitution frame.substitution substitution
                   in
                   let path = Path.Method { owner = impl; name; receiver } in
-                  ( path,
-                    Types.combine_substitutions
-                      (bind_parameters (list_generics path) arguments ~fixed:impl_substitution)
-                      (Types.make_capability_substitution (list_capability_parameters path)
-                         capability_arguments) )
+                  (path, bind_callee path arguments capability_arguments ~fixed:impl_substitution)
               | _ -> (trait_path, trait_substitution)
             in
             let compute_substitution (clauses : State.clauses) =
               if clauses.inherited then trait_substitution else callee_substitution
             in
             let bind_restated subtrait restated =
-              Types.combine_substitutions
-                (bind_parameters (list_generics restated) arguments
-                   ~fixed:(Contracts.make_trait_substitution context.lookups subtrait self_type))
-                (Types.make_capability_substitution
-                   (list_capability_parameters restated)
-                   capability_arguments)
+              bind_callee restated arguments capability_arguments
+                ~fixed:(Contracts.make_trait_substitution context.lookups subtrait self_type)
             in
             with_contract ~substitution_of:compute_substitution
               ~type_arguments:(Facts.list_method_type_arguments ~self_type arguments)
