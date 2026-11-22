@@ -88,21 +88,26 @@ type implemented_method = {
   declaration : Path.t;
 }
 
+let find_method_implemented_by (implementation : implementation) ~name ~receiver =
+  Option.map
+    (fun (declared : Types.trait_method) ->
+      {
+        implementation;
+        declared;
+        declaration =
+          Method
+            {
+              owner = implementation.impl.implements.trait;
+              name = declared.method_name;
+              receiver = declared.method_receiver;
+            };
+      })
+    (Definition.find_method_of_trait implementation.trait ~name ~receiver)
+
 let find_implemented_method lookups (path : Path.t) =
-  let ( let* ) = Option.bind in
   match path with
   | Method { owner = (Impl _ | Derived _) as owner; name; receiver } ->
-      let* implementation = find_implementation lookups owner in
-      let trait = implementation.impl.implements.trait in
-      let* declared = Definition.find_trait_method lookups trait ~name ~receiver in
-      Some
-        {
-          implementation;
-          declared;
-          declaration =
-            Method
-              { owner = trait; name = declared.method_name; receiver = declared.method_receiver };
-        }
+      Option.bind (find_implementation lookups owner) (find_method_implemented_by ~name ~receiver)
   | Top _ | Method _ | Member_constant _ | Impl _ | Derived _ | Test _ | Law_proof _ | Unresolved _
     ->
       None
@@ -724,11 +729,15 @@ and make_expected_signature lookups ?written (implemented : implemented_method) 
 and read_signature lookups (path : Path.t) =
   let ( let* ) = Option.bind in
   match path with
-  | Method { owner = (Impl _ | Derived _) as owner; _ } ->
+  | Method { owner = (Impl _ | Derived _) as owner; name; receiver } ->
       let* impl = Definition.find_impl_interface lookups owner in
       let written = Definition.find_declared_signature lookups path in
       let declared =
-        Option.map (make_expected_signature lookups ?written) (find_implemented_method lookups path)
+        Option.map
+          (make_expected_signature lookups ?written)
+          (Option.bind
+             (find_implementation_of lookups impl)
+             (find_method_implemented_by ~name ~receiver))
       in
       let* stated = if Option.is_some written then written else declared in
       let signature =
