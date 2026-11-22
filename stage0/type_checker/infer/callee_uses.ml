@@ -16,9 +16,10 @@ let instantiate (interface : Interface.Lookups.t) (target : Core.operand Core.ta
             signature.uses
       | None -> raise_bug "the callee `%s` has no signature" (Path.show path))
   | Trait_method { trait; name; receiver; self_type; instantiation; evidence } -> (
+      let trait_interface = Interface.Definition.find_trait_interface interface trait.trait in
       match
-        ( Interface.Definition.find_trait_method interface trait.trait ~name ~receiver,
-          Interface.Definition.find_trait_interface interface trait.trait )
+        ( Option.bind trait_interface (Interface.Definition.find_method_of_trait ~name ~receiver),
+          trait_interface )
       with
       | Some method_, Some trait_interface -> (
           let signature =

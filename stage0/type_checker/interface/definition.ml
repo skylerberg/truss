@@ -110,11 +110,13 @@ let read_method_signature lookups ~owner (method_ : Types.trait_method) =
   | None ->
       Compiler_bug.raise_bug ~stage:"Interface" "the method `%s` has no signature" (Path.show path)
 
+let find_method_of_trait (interface : Types.trait_interface) ~name ~receiver =
+  List.find_opt
+    (fun declared -> Types.is_implemented_by interface declared ~name ~receiver)
+    interface.methods
+
 let find_trait_method lookups trait ~name ~receiver =
-  Option.bind (find_trait_interface lookups trait) (fun (interface : Types.trait_interface) ->
-      List.find_opt
-        (fun declared -> Types.is_implemented_by interface declared ~name ~receiver)
-        interface.methods)
+  Option.bind (find_trait_interface lookups trait) (find_method_of_trait ~name ~receiver)
 
 let is_specification = function
   | Environment.Function_interface signature

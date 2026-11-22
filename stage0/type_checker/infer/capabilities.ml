@@ -84,28 +84,34 @@ let check_grant checking (origin : Core.origin) ~subject package (uses : Types.c
 
 let check_callee_grants checking (origin : Core.origin) (callee : Core.operand Core.target) =
   let state = checking.state in
+  let needs_grant path =
+    Interface.Grants.needs_grant ~package:state.package ~of_:(Path.locate_package path)
+  in
   match callee with
   | Function { path; _ } ->
-      Option.iter
-        (fun (signature : Types.signature) ->
-          check_grant checking origin
-            ~subject:(Printf.sprintf "`%s`" (Path.show path))
-            (Path.locate_package path) signature.uses)
-        (Interface.Impls.read_signature state.lookups.interface path)
+      if needs_grant path then
+        Option.iter
+          (fun (signature : Types.signature) ->
+            check_grant checking origin
+              ~subject:(Printf.sprintf "`%s`" (Path.show path))
+              (Path.locate_package path) signature.uses)
+          (Interface.Impls.read_signature state.lookups.interface path)
   | Trait_method { trait; name; receiver; evidence; _ } -> (
-      (match
-         Interface.Definition.find_trait_method state.lookups.interface trait.trait ~name ~receiver
-       with
-      | Some method_ ->
-          check_grant checking origin
-            ~subject:(Printf.sprintf "`%s.%s`" (Path.show trait.trait) name)
-            (Path.locate_package trait.trait)
-            (Interface.Definition.read_method_signature state.lookups.interface ~owner:trait.trait
-               method_)
-              .uses
-      | None -> ());
+      (if needs_grant trait.trait then
+         match
+           Interface.Definition.find_trait_method state.lookups.interface trait.trait ~name
+             ~receiver
+         with
+         | Some method_ ->
+             check_grant checking origin
+               ~subject:(Printf.sprintf "`%s.%s`" (Path.show trait.trait) name)
+               (Path.locate_package trait.trait)
+               (Interface.Definition.read_method_signature state.lookups.interface
+                  ~owner:trait.trait method_)
+                 .uses
+         | None -> ());
       match evidence with
-      | Impl { impl; _ } -> (
+      | Impl { impl; _ } when needs_grant impl -> (
           match Interface.Definition.find_impl_interface state.lookups.interface impl with
           | Some interface when List.mem (name, receiver) interface.impl_methods ->
               Option.iter
@@ -119,7 +125,7 @@ let check_callee_grants checking (origin : Core.origin) (callee : Core.operand C
                 (Interface.Impls.read_signature state.lookups.interface
                    (Method { owner = impl; name; receiver }))
           | Some _ | None -> ())
-      | Bound | Dynamic -> ())
+      | Impl _ | Bound | Dynamic -> ())
   | Capability_method _ | Intrinsic _ | Indirect _ -> ()
 
 let add_alternative ~sentence_start alternative =
