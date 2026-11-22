@@ -1,9 +1,7 @@
-let status_of_signal signal = 128 + Sys.signal_to_int signal
-
 let exit_code (status : Unix.process_status) =
   match status with
   | WEXITED code -> code
-  | WSIGNALED signal | WSTOPPED signal -> status_of_signal signal
+  | WSIGNALED signal | WSTOPPED signal -> 128 + Sys.signal_to_int signal
 
 type reader = {
   descriptor : Unix.file_descr;
@@ -50,65 +48,38 @@ let write_piece writer =
       close_stdin writer;
       false
 
-let kill pid = try Unix.kill pid Sys.sigkill with Unix.Unix_error (ESRCH, _, _) -> ()
-
-type deadline = Unlimited | Until of float | Passed
-
-let stop_at_deadline pid deadline =
-  match deadline with
-  | Until at when Unix.gettimeofday () >= at ->
-      kill pid;
-      Passed
-  | Unlimited | Until _ | Passed -> deadline
-
-let rec exchange piece pid ~readers ~writer ~deadline =
+let rec exchange piece ~readers ~writer =
   match (readers, writer) with
-  | [], None -> deadline
-  | _ -> (
-      let timeout =
-        match deadline with
-        | Until at -> Float.max 0. (at -. Unix.gettimeofday ())
-        | Unlimited | Passed -> -1.
-      in
+  | [], None -> ()
+  | _ ->
       let readable, writable =
         match
           Unix.select
             (List.map (fun reader -> reader.descriptor) readers)
             (Option.to_list (Option.map (fun writer -> writer.stdin) writer))
-            [] timeout
+            [] (-1.)
         with
         | readable, writable, _ -> (readable, writable)
         | exception Unix.Unix_error (EINTR, _, _) -> ([], [])
       in
-      match stop_at_deadline pid deadline with
-      | Passed -> Passed
-      | (Unlimited | Until _) as deadline ->
-          let readers =
-            List.filter
-              (fun reader -> (not (List.mem reader.descriptor readable)) || read_piece piece reader)
-              readers
-          in
-          let writer =
-            Option.bind writer (fun writer ->
-                if (not (List.mem writer.stdin writable)) || write_piece writer then Some writer
-                else None)
-          in
-          exchange piece pid ~readers ~writer ~deadline)
+      let readers =
+        List.filter
+          (fun reader -> (not (List.mem reader.descriptor readable)) || read_piece piece reader)
+          readers
+      in
+      let writer =
+        Option.bind writer (fun writer ->
+            if (not (List.mem writer.stdin writable)) || write_piece writer then Some writer
+            else None)
+      in
+      exchange piece ~readers ~writer
 
-let rec await pid deadline =
-  match
-    Unix.waitpid (match deadline with Until _ -> [ WNOHANG ] | Unlimited | Passed -> []) pid
-  with
-  | exception Unix.Unix_error (EINTR, _, _) -> await pid deadline
-  | 0, _ -> (
-      match stop_at_deadline pid deadline with
-      | Passed -> await pid Passed
-      | (Unlimited | Until _) as deadline ->
-          Unix.sleepf 0.01;
-          await pid deadline)
-  | _, status -> (deadline, status)
+let rec await pid =
+  match Unix.waitpid [] pid with
+  | exception Unix.Unix_error (EINTR, _, _) -> await pid
+  | _, status -> status
 
-let execute ?input ?on_output ~deadline program arguments =
+let run ?input ?on_output program arguments =
   let stdout_read, stdout_write = Unix.pipe ~cloexec:true () in
   let stderr_read, stderr_write = Unix.pipe ~cloexec:true () in
   let stdin_pipe = Option.map (fun _ -> Unix.pipe ~cloexec:true ()) input in
@@ -140,26 +111,13 @@ let execute ?input ?on_output ~deadline program arguments =
         Some { stdin; text; written = 0; is_open = true }
     | _ -> None
   in
-  let deadline_after_reading =
-    Fun.protect
-      ~finally:(fun () ->
-        Unix.close stdout_read;
-        Unix.close stderr_read;
-        Option.iter (fun writer -> if writer.is_open then close_stdin writer) writer)
-      (fun () ->
-        exchange (Bytes.create piece_length) pid ~readers:[ output; errors ] ~writer ~deadline)
-  in
-  let deadline, status = await pid deadline_after_reading in
-  (deadline, (exit_code status, Buffer.contents output.contents, Buffer.contents errors.contents))
-
-let run ?input ?on_output program arguments =
-  snd (execute ?input ?on_output ~deadline:Unlimited program arguments)
-
-let run_with_time_limit ?input ~time_limit_ms program arguments =
-  let deadline = Until (Unix.gettimeofday () +. (Float.of_int time_limit_ms /. 1000.)) in
-  match execute ?input ~deadline program arguments with
-  | Passed, _ -> None
-  | (Unlimited | Until _), result -> Some result
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.close stdout_read;
+      Unix.close stderr_read;
+      Option.iter (fun writer -> if writer.is_open then close_stdin writer) writer)
+    (fun () -> exchange (Bytes.create piece_length) ~readers:[ output; errors ] ~writer);
+  (exit_code (await pid), Buffer.contents output.contents, Buffer.contents errors.contents)
 
 let run_attached program arguments =
   let pid =

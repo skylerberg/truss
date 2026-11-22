@@ -111,6 +111,17 @@ let () =
           Codegen_support.fail "%d diagnostics: %s" (List.length actual) (show_messages actual));
       expect_proven (list_diagnostics (Codegen_support.make_backend ~results database) database))
 
+let () =
+  Codegen_support.test
+    "the evaluations of a check share one program for each layer of constants that read each other"
+    (fun () ->
+      let database, _ = Codegen_support.load Fixtures.Evaluate.constants_in_two_layers in
+      let built_before = Backend.For_testing.count_built_programs () in
+      expect_proven (list_diagnostics (Codegen_support.make_backend database) database);
+      match Backend.For_testing.count_built_programs () - built_before with
+      | 2 -> ()
+      | built -> Codegen_support.fail "%d programs for three evaluations in two layers" built)
+
 let load_shout_of_a_name_and_an_identity () =
   Codegen_support.load (shout ^ Fixtures.Evaluate.shout_of_a_name_and_an_identity)
 

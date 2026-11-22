@@ -3852,7 +3852,7 @@ shop "discounts are coming": incomplete
 `truss build` refuses a program whose `main` can reach a `todo`, including
 a `todo` in a proof that the program relies on, such as the body of a
 theorem that its code calls. In a development build from `truss run`, a
-`todo` that runs stops the program with status 102 and reports where.
+`todo` that runs stops the program and reports where.
 
 A constant whose value reaches a `todo` is unfinished too. A test that
 reaches the constant is incomplete, and names the constant:

@@ -17,8 +17,8 @@ type t = {
   results : results option;
   evaluation_cpu_time_limit_ms : int;
   programs : string;
-  runs : (string, string ran) Hashtbl.t;
-  evaluating : Lowered.Item.t list ref;
+  lowered : Lowering.lowered Item_table.t;
+  runs : string ran Item_table.t;
 }
 
 let make_env backend =
@@ -26,7 +26,6 @@ let make_env backend =
     ~compute_shape:(Monomorphic.compute_shape backend.monomorphic)
 
 exception Cannot_build of string
-exception Unfinished_evaluation of { evaluated : Lowered.Item.t; report : string }
 
 let describe_stopped_evaluation evaluated report =
   Printf.sprintf "Evaluating %s stopped: %s" (Lowered.Item.to_string evaluated) report
@@ -76,10 +75,15 @@ let raise_unsupported backend (unsupported : Lowering.unsupported) =
   raise_cannot_build "%sStage0 cannot build this yet: %s." where unsupported.construct
 
 let read_lowered backend item =
-  match backend.lookups.find_lowered item with
-  | Some (Ok lowered) -> lowered
-  | Some (Error unsupported) -> raise_unsupported backend unsupported
-  | None -> raise_bug "%s is requested from code with errors" (Lowered.Item.to_string item)
+  match Item_table.find_opt backend.lowered item with
+  | Some lowered -> lowered
+  | None -> (
+      match backend.lookups.find_lowered item with
+      | Some (Ok lowered) ->
+          Item_table.replace backend.lowered item lowered;
+          lowered
+      | Some (Error unsupported) -> raise_unsupported backend unsupported
+      | None -> raise_bug "%s is requested from code with errors" (Lowered.Item.to_string item))
 
 let read_test_key backend root =
   match backend.lookups.read_test_key root with
@@ -123,12 +127,80 @@ let list_small_callees ~find ~is_worked_on fragment =
         (List.sort_uniq Lowered.Item.compare (Emit_c.called fragment))
   | _ -> []
 
+let find_supplied supplied item =
+  List.find_opt (fun fragment -> Lowered.Item.equal (Emit_c.item fragment) item) supplied
+
+let list_needed_evaluators ?(supplied = []) backend roots =
+  let visited = Item_table.create 64 and needed = ref [] in
+  let rec visit item =
+    if not (Item_table.mem visited item) then begin
+      Item_table.replace visited item ();
+      match find_supplied supplied item with
+      | Some fragment -> List.iter visit (Emit_c.references fragment)
+      | None -> (
+          match read_lowered backend item with
+          | Compiled fragment | Folded (_, fragment) -> List.iter visit (Emit_c.references fragment)
+          | Evaluate (evaluator, _) -> needed := evaluator :: !needed)
+    end
+  in
+  List.iter visit roots;
+  List.rev !needed
+
+let compile_fragment backend item =
+  let compiled =
+    match read_lowered backend item with
+    | Compiled fragment | Folded (_, fragment) -> fragment
+    | Evaluate (evaluator, ty) -> (
+        match Item_table.find_opt backend.runs evaluator with
+        | Some (Ran encoded) ->
+            let env = make_env backend in
+            Emit_c.make_data_fragment env
+              { data_item = item; ty; value = Lowering.Encoding.decode env ty encoded }
+        | Some (Unfinished report | Stopped report) ->
+            raise_cannot_build "%s" (describe_stopped_evaluation item report)
+        | None -> raise_bug "%s is compiled before it is evaluated" (Lowered.Item.to_string item))
+  in
+  if not (Lowered.Item.equal (Emit_c.item compiled) item) then
+    raise_bug "%s compiled to %s" (Lowered.Item.to_string item)
+      (Lowered.Item.to_string (Emit_c.item compiled));
+  compiled
+
+module Test_report = Test_report
+
+let run_test_program ?on_start program ~count on_record =
+  let is_reported = Array.make count false in
+  let reader =
+    Test_report.make_reader ~tests:count ?on_start (fun number record ->
+        is_reported.(number) <- true;
+        on_record number record)
+  in
+  let status, _, errors =
+    Fun.protect
+      ~finally:(fun () -> try Sys.remove program with Sys_error _ -> ())
+      (fun () -> Process.run ~input:"" ~on_output:(Test_report.feed reader) program [])
+  in
+  if Array.mem false is_reported then
+    raise_cannot_build "The test program ended with status %d before reporting every test:\n%s"
+      status errors
+
+let read_evaluated : Lowered.Item.t -> Lowered.Item.t = function
+  | Evaluator evaluated -> evaluated
+  | item -> raise_bug "%s is no evaluator" (Lowered.Item.to_string item)
+
+let make_run (record : Test_report.record) =
+  let message = Option.value record.message ~default:"" in
+  match record.outcome with
+  | Passed -> Ran (Option.value record.output ~default:"")
+  | Incomplete -> Unfinished message
+  | Panicked -> Stopped ("panic: " ^ message)
+  | Failed -> Stopped ("assertion failed: " ^ message)
+  | Timed_out | Crashed -> Stopped message
+
 let rec build ?report_progress ?(tests = false) ?(supplied = []) ?dsym_bundle backend ~roots
     ~startup ~output =
+  run_evaluators backend (list_needed_evaluators ~supplied backend roots);
   let lookup item =
-    match
-      List.find_opt (fun fragment -> Lowered.Item.equal (Emit_c.item fragment) item) supplied
-    with
+    match find_supplied supplied item with
     | Some fragment -> fragment
     | None -> compile_fragment backend item
   in
@@ -165,106 +237,105 @@ let rec build ?report_progress ?(tests = false) ?(supplied = []) ?dsym_bundle ba
   | Ok () -> ()
   | Error message -> raise (Cannot_build message)
 
-and build_test_program ?report_progress ?supplied backend ~time_limit_ms ~roots ~output =
+and build_test_program ?report_progress ?supplied ?(cpu_time_limit_ms = 0) backend ~time_limit_ms
+    ~roots ~output =
   build ?report_progress ?supplied backend ~tests:true ~roots:(Lowering.test_runner :: roots)
     ~startup:
-      (Startup.render_tests_start ~time_limit_ms
+      (Startup.render_tests_start ~time_limit_ms ~cpu_time_limit_ms
          ~runner:(Emit_c.make_symbol Lowering.test_runner)
          (List.map Emit_c.make_symbol roots))
     ~output
 
-and build_and_run :
-    'result. t -> roots:Lowered.Item.t list -> startup:string -> (string -> 'result) -> 'result =
- fun backend ~roots ~startup run ->
-  let program = make_program_path backend in
-  build backend ~roots ~startup ~output:program;
-  let result = run program in
-  (try Sys.remove program with Sys_error _ -> ());
-  result
-
-and run_while_compiling : 'value. t -> Lowered.Item.t -> read:(string -> 'value) -> 'value ran =
- fun backend root ~read ->
+and run_evaluators backend evaluators =
   let backend = { backend with profile = Development } in
-  let key = make_result_key backend root in
-  let ran =
-    match Hashtbl.find_opt backend.runs key with
-    | Some ran -> ran
-    | None when List.exists (Lowered.Item.equal root) !(backend.evaluating) -> (
-        match root with
-        | Evaluator (Constant path) ->
-            Unfinished (Printf.sprintf "the value of %s depends on itself" (Path.show path))
-        | _ ->
-            raise_bug "%s is evaluated by code that reads its result" (Lowered.Item.to_string root))
+  let has_run = Item_table.mem backend.runs in
+  let dependencies = Item_table.create 16 in
+  let rec note_dependencies dependents evaluator =
+    if List.exists (Lowered.Item.equal evaluator) dependents then
+      match evaluator with
+      | Evaluator (Constant path) ->
+          Item_table.replace backend.runs evaluator
+            (Unfinished (Printf.sprintf "the value of %s depends on itself" (Path.show path)))
+      | _ ->
+          raise_bug "%s is evaluated by code that reads its result"
+            (Lowered.Item.to_string evaluator)
+    else if not (has_run evaluator || Item_table.mem dependencies evaluator) then
+      match list_needed_evaluators backend [ evaluator; Lowering.test_runner ] with
+      | needed ->
+          Item_table.replace dependencies evaluator needed;
+          List.iter (note_dependencies (evaluator :: dependents)) needed
+      | exception Cannot_build message ->
+          Item_table.replace backend.runs evaluator (Stopped message)
+  in
+  List.iter (note_dependencies []) evaluators;
+  let find_run_without_a_program evaluator =
+    match
+      List.find_map
+        (fun needed ->
+          match Item_table.find backend.runs needed with
+          | Ran _ -> None
+          | Unfinished report -> Some (Unfinished report)
+          | Stopped report ->
+              Some (Stopped (describe_stopped_evaluation (read_evaluated needed) report)))
+        (Item_table.find dependencies evaluator)
+    with
+    | Some _ as run -> run
     | None ->
-        backend.evaluating := root :: !(backend.evaluating);
-        Fun.protect ~finally:(fun () -> backend.evaluating := List.tl !(backend.evaluating))
-        @@ fun () ->
-        let ran =
-          match Option.bind backend.results (fun results -> results.find key) with
-          | Some output -> Ran output
-          | None -> (
-              let cpu_time_limit_ms = backend.evaluation_cpu_time_limit_ms in
-              let time_limit_ms = wall_clock_factor * max 1 cpu_time_limit_ms in
-              match
-                build_and_run backend ~roots:[ root ]
-                  ~startup:
-                    (Startup.render_evaluator_start ~cpu_time_limit_ms (Emit_c.make_symbol root))
-                  (fun program -> Process.run_with_time_limit ~time_limit_ms program [])
-              with
-              | exception Unfinished_evaluation { report; _ } -> Unfinished report
-              | None ->
-                  Stopped
-                    (Printf.sprintf
-                       "it was still running after %d ms, and had used less than %d ms of CPU time"
-                       time_limit_ms cpu_time_limit_ms)
-              | Some (0, output, _) ->
-                  Option.iter (fun results -> results.add key output) backend.results;
-                  Ran output
-              | Some (status, _, _) when status = Process.status_of_signal Sys.sigprof ->
-                  Stopped (Printf.sprintf "it used more than %d ms of CPU time" cpu_time_limit_ms)
-              | Some (status, _, errors) when status = Startup.todo_status ->
-                  Unfinished (String.trim errors)
-              | Some (status, _, errors) -> (
-                  match String.trim errors with
-                  | "" -> Stopped (Printf.sprintf "it ended with status %d" status)
-                  | report -> Stopped report))
-        in
-        Hashtbl.replace backend.runs key ran;
-        ran
+        Option.map
+          (fun output -> Ran output)
+          (Option.bind backend.results (fun results ->
+               results.find (make_result_key backend evaluator)))
   in
-  match ran with
-  | Ran output -> Ran (read output)
-  | Unfinished report -> Unfinished report
-  | Stopped report -> Stopped report
-
-and run_evaluator backend evaluator ty =
-  run_while_compiling backend evaluator ~read:(fun encoded ->
-      Lowering.Encoding.decode (make_env backend) ty encoded)
-
-and compile_fragment backend item =
-  let compiled =
-    match read_lowered backend item with
-    | Compiled fragment | Folded (_, fragment) -> fragment
-    | Evaluate (evaluator, ty) -> (
-        match run_evaluator backend evaluator ty with
-        | Ran value -> Emit_c.make_data_fragment (make_env backend) { data_item = item; ty; value }
-        | Unfinished report -> raise (Unfinished_evaluation { evaluated = item; report })
-        | Stopped report -> raise_cannot_build "%s" (describe_stopped_evaluation item report))
+  let run_in_one_program ready =
+    let runnable =
+      Array.of_list
+        (List.filter
+           (fun evaluator ->
+             match find_run_without_a_program evaluator with
+             | Some run ->
+                 Item_table.replace backend.runs evaluator run;
+                 false
+             | None -> true)
+           ready)
+    in
+    if Array.length runnable > 0 then begin
+      let cpu_time_limit_ms = max 1 backend.evaluation_cpu_time_limit_ms in
+      let program = make_program_path backend in
+      build_test_program backend ~cpu_time_limit_ms
+        ~time_limit_ms:(wall_clock_factor * cpu_time_limit_ms)
+        ~roots:(Array.to_list runnable) ~output:program;
+      run_test_program program ~count:(Array.length runnable) (fun number record ->
+          let evaluator = runnable.(number) and run = make_run record in
+          (match (run, backend.results) with
+          | Ran output, Some results -> results.add (make_result_key backend evaluator) output
+          | _ -> ());
+          Item_table.replace backend.runs evaluator run)
+    end
   in
-  if not (Lowered.Item.equal (Emit_c.item compiled) item) then
-    raise_bug "%s compiled to %s" (Lowered.Item.to_string item)
-      (Lowered.Item.to_string (Emit_c.item compiled));
-  compiled
+  let rec run_ready () =
+    let pending =
+      Item_table.fold
+        (fun evaluator needed pending ->
+          if has_run evaluator then pending else (evaluator, needed) :: pending)
+        dependencies []
+    in
+    match
+      List.filter_map
+        (fun (evaluator, needed) -> if List.for_all has_run needed then Some evaluator else None)
+        pending
+    with
+    | [] -> if pending <> [] then raise_bug "evaluations wait for each other's results"
+    | ready ->
+        run_in_one_program (List.sort Lowered.Item.compare ready);
+        run_ready ()
+  in
+  run_ready ()
 
 let capture_failure work =
   match work () with
   | result -> Ok result
   | exception Cannot_build message -> Error message
-  | exception Unfinished_evaluation { evaluated; report } ->
-      Error (describe_stopped_evaluation evaluated report)
   | exception Test_report.Malformed message -> Error message
-
-module Test_report = Test_report
 
 let is_cacheable (record : Test_report.record) =
   record.outcome = Passed && record.message = None && record.echo = None && record.output = None
@@ -319,10 +390,13 @@ let rec read_executed_fragment (lookups : Lowering.lowered_lookups) item =
 let trace_item lookups item =
   Emit_c.trace_reachable ~lookup:(read_executed_fragment lookups) [ item ]
 
-let reaches_evaluator backend root evaluated =
-  List.exists
-    (fun (fragment, _) -> Lowered.Item.equal (Emit_c.item fragment) (Evaluator evaluated))
-    (trace_item backend.lookups root)
+let find_unfinished backend evaluators =
+  List.find_map
+    (fun evaluator ->
+      match Item_table.find backend.runs evaluator with
+      | Unfinished report -> Some (read_evaluated evaluator, report)
+      | Ran _ | Stopped _ -> None)
+    evaluators
 
 let run_tests ?(rerun = false) ?(report_progress = ignore) backend ~time_limit_ms tests =
   capture_failure @@ fun () ->
@@ -360,62 +434,45 @@ let run_tests ?(rerun = false) ?(report_progress = ignore) backend ~time_limit_m
     Hashtbl.replace fresh index record;
     report_progress (Ended { test = index; record })
   in
-  let output = make_program_path backend in
-  let rec build_runnable = function
-    | [] -> [||]
-    | missing -> (
-        match
-          build_test_program backend ~time_limit_ms
-            ~roots:(List.map (fun (_, root, _, _) -> root) missing)
-            ~output
-            ~report_progress:(fun compiled total -> report_progress (Compiling { compiled; total }))
-        with
-        | () -> Array.of_list missing
-        | exception Unfinished_evaluation { evaluated; report } ->
-            let unfinished, runnable =
-              List.partition
-                (fun (_, root, _, _) -> reaches_evaluator backend root evaluated)
-                missing
-            in
-            if unfinished = [] then
-              raise_cannot_build "%s" (describe_stopped_evaluation evaluated report);
-            List.iter
-              (fun (index, _, _, _) ->
-                end_test index
-                  (make_incomplete_record
-                     (Printf.sprintf "the constant %s is not computed: %s"
-                        (Lowered.Item.to_string evaluated)
-                        report)))
-              unfinished;
-            build_runnable runnable)
+  let missing = List.filter (fun (_, _, _, known_record) -> known_record = None) known in
+  let needed = list_needed_evaluators backend (List.map (fun (_, root, _, _) -> root) missing) in
+  run_evaluators backend needed;
+  let runnable =
+    Array.of_list
+      (if Option.is_some (find_unfinished backend needed) then
+         List.filter
+           (fun (index, root, _, _) ->
+             match find_unfinished backend (list_needed_evaluators backend [ root ]) with
+             | Some (evaluated, report) ->
+                 end_test index
+                   (make_incomplete_record
+                      (Printf.sprintf "the constant %s is not computed: %s"
+                         (Lowered.Item.to_string evaluated)
+                         report));
+                 false
+             | None -> true)
+           missing
+       else missing)
   in
-  let missing =
-    build_runnable (List.filter (fun (_, _, _, known_record) -> known_record = None) known)
-  in
-  if Array.length missing > 0 then begin
-    report_progress (Running { tests = Array.length missing });
+  if Array.length runnable > 0 then begin
+    let program = make_program_path backend in
+    build_test_program backend ~time_limit_ms
+      ~roots:(Array.to_list (Array.map (fun (_, root, _, _) -> root) runnable))
+      ~output:program
+      ~report_progress:(fun compiled total -> report_progress (Compiling { compiled; total }));
+    report_progress (Running { tests = Array.length runnable });
     let read_test_index number =
-      let index, _, _, _ = missing.(number) in
+      let index, _, _, _ = runnable.(number) in
       index
     in
-    let reader =
-      Test_report.make_reader ~tests:(Array.length missing)
-        ~on_start:(fun number -> report_progress (Started { test = read_test_index number }))
-        (fun number record ->
-          let _, _, key, _ = missing.(number) in
-          (match (results, key) with
-          | Some results, Some key when is_cacheable record -> store results key record
-          | _ -> ());
-          end_test (read_test_index number) record)
-    in
-    let status, _, errors =
-      Fun.protect
-        ~finally:(fun () -> try Sys.remove output with Sys_error _ -> ())
-        (fun () -> Process.run ~input:"" ~on_output:(Test_report.feed reader) output [])
-    in
-    if Array.exists (fun (index, _, _, _) -> not (Hashtbl.mem fresh index)) missing then
-      raise_cannot_build "The test program ended with status %d before reporting every test:\n%s"
-        status errors
+    run_test_program program ~count:(Array.length runnable)
+      ~on_start:(fun number -> report_progress (Started { test = read_test_index number }))
+      (fun number record ->
+        let _, _, key, _ = runnable.(number) in
+        (match (results, key) with
+        | Some results, Some key when is_cacheable record -> store results key record
+        | _ -> ());
+        end_test (read_test_index number) record)
   end;
   List.map
     (fun (index, _, _, known_record) ->
@@ -431,8 +488,8 @@ let build_supplied_tests backend ~time_limit_ms supplied ~output =
   capture_failure @@ fun () ->
   let supplied_env = make_env backend in
   let fragments = List.map (fun build -> build supplied_env) supplied in
-  build_test_program backend ~supplied:fragments ~time_limit_ms
-    ~roots:(List.map Emit_c.item fragments) ~output
+  let roots = List.map Emit_c.item fragments in
+  build_test_program backend ~supplied:fragments ~time_limit_ms ~roots ~output
 
 type unshippable = { failure : [ `Todo | `Echo ]; location : location; way : Path.t list }
 
@@ -525,11 +582,28 @@ let list_reached_todo_types (lookups : Lowering.lowered_lookups) root =
   lookups.list_reached_todo_types (Lowering.make_root root)
 
 let evaluate backend evaluated =
-  capture_failure @@ fun () ->
-  match read_lowered backend evaluated with
-  | Folded (data, _) -> Ran data.value
-  | Evaluate (evaluator, ty) -> run_evaluator backend evaluator ty
-  | Compiled _ -> raise_bug "%s is lowered to code" (Lowered.Item.to_string evaluated)
+  let lowered =
+    List.map (fun item -> capture_failure (fun () -> read_lowered backend item)) evaluated
+  in
+  let ran =
+    capture_failure (fun () ->
+        run_evaluators backend
+          (List.filter_map
+             (function Ok (Lowering.Evaluate (evaluator, _)) -> Some evaluator | _ -> None)
+             lowered))
+  in
+  List.map2
+    (fun item (lowered : (Lowering.lowered, string) result) ->
+      match (lowered, ran) with
+      | Error message, _ | Ok (Evaluate _), Error message -> Stopped message
+      | Ok (Folded (data, _)), _ -> Ran data.value
+      | Ok (Evaluate (evaluator, ty)), Ok () -> (
+          match Item_table.find backend.runs evaluator with
+          | Ran encoded -> Ran (Lowering.Encoding.decode (make_env backend) ty encoded)
+          | Unfinished report -> Unfinished report
+          | Stopped report -> Stopped report)
+      | Ok (Compiled _), _ -> raise_bug "%s is lowered to code" (Lowered.Item.to_string item))
+    evaluated lowered
 
 let create ?(show_file = Path.show_file) ?results ?(evaluation_cpu_time_limit_ms = 10_000)
     ?(programs = Filename.get_temp_dir_name ())
@@ -544,8 +618,8 @@ let create ?(show_file = Path.show_file) ?results ?(evaluation_cpu_time_limit_ms
     results;
     evaluation_cpu_time_limit_ms;
     programs;
-    runs = Hashtbl.create 8;
-    evaluating = ref [];
+    lowered = Item_table.create 64;
+    runs = Item_table.create 8;
   }
 
 module For_testing = struct
@@ -556,8 +630,13 @@ module For_testing = struct
     | Compiled _ -> raise_bug "%s is not a constant" (Path.show path)
 
   let build_supplied_tests = build_supplied_tests
-  let compile_fragment = compile_fragment
+
+  let compile_fragment backend item =
+    run_evaluators backend (list_needed_evaluators backend [ item ]);
+    compile_fragment backend item
 
   let render_unit backend item =
     render_code_unit backend (make_env backend) (compile_fragment backend item) ~copies:[]
+
+  let count_built_programs () = Atomic.get programs_built
 end

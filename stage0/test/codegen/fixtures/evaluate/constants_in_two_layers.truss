@@ -1,0 +1,21 @@
+fn count_up(count: UInt64) -> List[UInt64]
+  requires count < 1000
+{
+  var counted: List[UInt64] = []
+  for index in 0..count
+    invariant counted.length() == index
+  {
+    mut counted.push(index)
+  }
+  counted
+}
+
+let first: List[UInt64] = count_up(2)
+let second: List[UInt64] = count_up(3)
+let both: UInt64 = first.length().saturating_add(second.length())
+
+fn read_both() -> UInt64
+  ensures result == 5
+{
+  both
+}
