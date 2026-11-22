@@ -688,37 +688,82 @@ let pose_unit (database : Tracker.t) (recorder : Tracker.recorder) ~runs (row : 
         }
   | Some (Failed | Blocked) | None -> None
 
-let solve_in_parallel (database : Tracker.t) ~runs solver rows =
-  match
-    List.filter_map (pose_unit database Tracker.untracked ~runs) rows
-    |> List.map (fun { posed; _ } -> (posed, Prover.list_requests posed))
-  with
-  | exception (Compiler_bug.Bug _ | Interface.Properties.Recursion_limit _) -> ()
-  | posed ->
-      let answers = ref (Solver.solve_all solver (List.concat_map snd posed)) in
-      ignore
-        (Solver.solve_all solver
-           (List.concat_map
-              (fun (posed, requests) ->
-                let count = List.length requests in
-                let own = List.filteri (fun index _ -> index < count) !answers in
-                answers := List.filteri (fun index _ -> index >= count) !answers;
-                Prover.list_refutation_requests posed own)
-              posed))
+type note = Kind.marker * Kind.target * int * string
 
-let run_decide (database : Tracker.t) ~runs solver (row : Store.definition) =
+type answered_unit = {
+  unit : posed_unit option;
+  notes : note list;
+  answers : Solver.answer list;
+  refutations : Solver.answer list;
+}
+
+let split_by_counts counts values =
+  let remaining = ref values in
+  List.map
+    (fun count ->
+      let own = List.take count !remaining in
+      remaining := List.drop count !remaining;
+      own)
+    counts
+
+let solve_units (database : Tracker.t) ~runs solver (rows : Store.definition list) =
+  let posed =
+    List.map
+      (fun (row : Store.definition) ->
+        let notes = ref [] in
+        let recorder : Tracker.recorder =
+          { note = (fun marker target id name -> notes := (marker, target, id, name) :: !notes) }
+        in
+        match pose_unit database recorder ~runs row with
+        | unit -> (row.id, Ok (unit, List.rev !notes))
+        | exception ((Compiler_bug.Bug _ | Interface.Properties.Recursion_limit _) as raised) ->
+            (row.id, Error raised))
+      rows
+  in
+  let list_of_posed list_requests =
+    List.map
+      (fun (_, unit) ->
+        match unit with
+        | Ok (Some { posed; _ }, _) -> list_requests posed
+        | Ok (None, _) | Error _ -> [])
+      posed
+  in
+  let solve_each requests =
+    split_by_counts (List.map List.length requests) (Solver.solve_all solver (List.concat requests))
+  in
+  let answers = solve_each (list_of_posed Prover.list_requests) in
+  let refutations =
+    solve_each
+      (List.map2
+         (fun (_, unit) answers ->
+           match unit with
+           | Ok (Some { posed; _ }, _) -> Prover.list_refutation_requests posed answers
+           | Ok (None, _) | Error _ -> [])
+         posed answers)
+  in
+  let answered = Hashtbl.create (List.length rows) in
+  List.iter2
+    (fun (id, unit) (answers, refutations) ->
+      Hashtbl.replace answered id
+        (Result.map (fun (unit, notes) -> { unit; notes; answers; refutations }) unit))
+    posed
+    (List.combine answers refutations);
+  answered
+
+let run_decide (database : Tracker.t) answered (row : Store.definition) =
   let states, has_unfinished_run =
     Tracker.record database Decide row.id (fun recorder ->
-        match pose_unit database recorder ~runs row with
-        | Some { posed; has_unfinished_run; _ } ->
-            let answers = List.map (Solver.solve solver) (Prover.list_requests posed) in
-            ( Prover.list_states
-                (Lookups.make_proof database recorder)
-                posed ~answers
-                ~refutations:
-                  (List.map (Solver.solve solver) (Prover.list_refutation_requests posed answers)),
-              has_unfinished_run )
-        | None -> ([], false))
+        match Hashtbl.find answered row.id with
+        | Error raised -> raise raised
+        | Ok { unit; notes; answers; refutations } -> (
+            List.iter (fun (marker, target, id, name) -> recorder.note marker target id name) notes;
+            match unit with
+            | Some { posed; has_unfinished_run } ->
+                ( Prover.list_states
+                    (Lookups.make_proof database recorder)
+                    posed ~answers ~refutations,
+                  has_unfinished_run )
+            | None -> ([], false)))
   in
   Tracker.report Decide row.id
     ~is_changed:
@@ -1355,13 +1400,12 @@ let drain_decide (database : Tracker.t) ?on_bug ~scope ~runs solver =
   with
   | [] -> ()
   | rows ->
-      let solver = Lazy.force solver in
-      solve_in_parallel database ~runs solver rows;
+      let answered = solve_units database ~runs (Lazy.force solver) rows in
       List.iter
         (fun (row : Store.definition) ->
           if Store.unmark_stale database.store ~stage:(Kind.rank_stage Decide) ~id:row.id then
             guard_units database ?on_bug Decide [ row.id ] (fun () ->
-                run_decide database ~runs solver row))
+                run_decide database answered row))
         rows
 
 let drain_stage (database : Tracker.t) ?on_bug (stage : Kind.stage) ~scope =
