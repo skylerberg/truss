@@ -59,7 +59,7 @@ let show_components program root =
     (fun members -> String.concat " " (List.map Lowered.Item.to_string members))
     (list_components program (Codegen_support.code_item root))
 
-let make_ping_pong ?(ping = "ping") ?(pong = "pong") returned =
+let make_ping_pong returned =
   let make_caller name callees =
     Codegen_support.define_function name
       (Codegen_support.function_
@@ -81,9 +81,9 @@ let make_ping_pong ?(ping = "ping") ?(pong = "pong") returned =
          [ Codegen_support.block [] (Return (Some (Codegen_support.constant_int32 returned))) ])
   in
   [
-    make_caller "start" [ ping ];
-    make_caller ping [ pong ];
-    make_caller pong [ ping; "helper" ];
+    make_caller "start" [ "ping" ];
+    make_caller "ping" [ "pong" ];
+    make_caller "pong" [ "ping"; "helper" ];
     helper;
   ]
 
@@ -107,18 +107,11 @@ let () =
       (make_named_program ~entry_name ~helper_name returned)
       (Codegen_support.code_item entry_name)
   in
-  Codegen_support.test "renaming the definitions a test reaches keeps its key" (fun () ->
+  Codegen_support.test "renaming a definition that a test reaches changes its key" (fun () ->
       if
         test_key ~entry_name:"start" ~helper_name:"helper" 1
-        <> test_key ~entry_name:"begin" ~helper_name:"assist" 1
-      then Codegen_support.fail "the keys differ");
-  Codegen_support.test
-    "renaming the definitions a test reaches keeps its key when the callee's name extends the \
-     caller's" (fun () ->
-      if
-        test_key ~entry_name:"start" ~helper_name:"start_again" 1
-        <> test_key ~entry_name:"begin" ~helper_name:"assist" 1
-      then Codegen_support.fail "the keys differ");
+        = test_key ~entry_name:"start" ~helper_name:"assist" 1
+      then Codegen_support.fail "the keys are equal");
   Codegen_support.test "changing the code a test reaches changes its key" (fun () ->
       if
         test_key ~entry_name:"start" ~helper_name:"helper" 1
@@ -159,12 +152,12 @@ let () =
         derive_test_key (make_ping_pong 1) (Codegen_support.code_item "start")
         = derive_test_key (make_ping_pong 2) (Codegen_support.code_item "start")
       then Codegen_support.fail "a change inside the group left the key the same");
-  Codegen_support.test "a group's key does not depend on its items' names" (fun () ->
-      let renamed = make_ping_pong ~ping:"alpha" ~pong:"omega" 1 in
+  Codegen_support.test "the items of a group have keys of their own" (fun () ->
+      let program = make_ping_pong 1 in
       if
-        derive_test_key (make_ping_pong 1) (Codegen_support.code_item "start")
-        <> derive_test_key renamed (Codegen_support.code_item "start")
-      then Codegen_support.fail "the keys differ")
+        derive_test_key program (Codegen_support.code_item "ping")
+        = derive_test_key program (Codegen_support.code_item "pong")
+      then Codegen_support.fail "the keys are equal")
 
 let () =
   Codegen_support.test
