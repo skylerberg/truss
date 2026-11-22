@@ -92,7 +92,11 @@ type stated = Tables.stated =
   | Range_elements of Types.ty
   | Non_negative_rank of Types.ty
 
-type lending = { part_type : Types.ty; on_part : Mir.formula list; at_return : Mir.formula list }
+type lending = {
+  part_type : Types.ty;
+  part_postconditions : Mir.formula list;
+  return_postconditions : Mir.formula list;
+}
 
 type context = {
   lookups : Lookups.t;

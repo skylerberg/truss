@@ -358,8 +358,8 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
           Some
             {
               part_type = part;
-              on_part = List.filter Amounts.mentions_result declared_ensures;
-              at_return =
+              part_postconditions = List.filter Amounts.mentions_result declared_ensures;
+              return_postconditions =
                 List.filter (fun clause -> not (Amounts.mentions_result clause)) declared_ensures;
             };
         { start with yielded_so_far = Some (Intrinsics.make_empty_parts context start part) }
@@ -561,7 +561,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
             ~when_:"for `self` when the method returns"
       | _ -> ());
       (match (context.lending, frame.yielded_so_far) with
-      | Some { at_return; _ }, Some yielded_so_far ->
+      | Some { return_postconditions; _ }, Some yielded_so_far ->
           List.iter
             (fun (ensured : Mir.formula) ->
               let _, term =
@@ -577,7 +577,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
                   Text "` may not hold when the method ends.";
                 ]
                 term)
-            at_return
+            return_postconditions
       | _ ->
           List.iter
             (fun (ensured : Mir.formula) ->
