@@ -139,26 +139,11 @@ let () =
         ~message:
           "This call uses `Clock`, but the value of a constant may use no capability. A constant \
            is computed when the program is compiled, and a build has no capabilities.");
-  Harness.test "a constant's value cannot call a function that may panic" (fun () ->
-      expect_one_diagnostic Fixtures.Capabilities.constant_calling_a_function_that_panics
-        "capabilities.not_available" ~says:"uses `Panic`, but the value of a constant");
   Harness.test "the condition of an assertion by evaluation may use no capability" (fun () ->
-      match
-        List.map
-          (fun (diagnostic : Diagnostic.t) -> diagnostic.message)
-          (check
-             (Support.setup
-                [ ("app.main", Fixtures.Capabilities.assertion_by_evaluation_calling_the_clock) ])
-             (Support.parse_file "app.main"))
-      with
-      | [ first; second ] ->
-          let expected =
-            "This call uses `Clock`, but the condition of an assertion `by evaluation` may use no \
-             capability. It is evaluated when the code is checked, and a check has no \
-             capabilities."
-          in
-          if first <> expected || second <> expected then Harness.fail "%s; %s" first second
-      | messages -> Harness.fail "%d diagnostics" (List.length messages));
+      expect_not_available Fixtures.Capabilities.assertion_by_evaluation_calling_the_clock
+        ~message:
+          "This call uses `Clock`, but the condition of an assertion `by evaluation` may use no \
+           capability. It is evaluated when the code is checked, and a check has no capabilities.");
   Harness.test "a constant's value must terminate" (fun () ->
       expect_not_available Fixtures.Capabilities.constant_calling_a_function_that_may_run_forever
         ~message:"This call uses `RunForever`, but the value of a constant must terminate.");

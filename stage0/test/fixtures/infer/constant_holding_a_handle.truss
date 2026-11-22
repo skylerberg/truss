@@ -1,3 +1,0 @@
-use standard.files
-
-let unopened: Option[files.File] = Option.None

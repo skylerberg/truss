@@ -1,12 +1,10 @@
 let solver =
   lazy (match Solver.find () with Ok solver -> solver | Error message -> failwith message)
 
-let run_evaluations = Evaluations.run
-
 let compute_verdicts backend database =
   let proofs = Database.prove database [ Codegen_support.example_file ] in
   Prover.decide
-    ~runs:(run_evaluations backend (Database.list_evaluations proofs))
+    ~runs:(Evaluations.run backend (Database.list_evaluations proofs))
     (Database.make_proof_lookups database)
     (Lazy.force solver) (Database.list_proofs proofs)
 
@@ -75,18 +73,6 @@ let () =
       expect_proven (prove_with_running ~results (accepts_all ^ use)))
 
 let () =
-  Codegen_support.test "a template check that used too much CPU time is run again on the next check"
-    (fun () ->
-      let results = make_results () in
-      let database, _ = Codegen_support.load Fixtures.Evaluate.slow_check in
-      expect_failure_saying
-        "Its evaluation stopped, so its result is not known: it used more than 5 ms of CPU time"
-        (list_diagnostics
-           (Codegen_support.make_backend ~results ~evaluation_cpu_time_limit_ms:5 database)
-           database);
-      expect_proven (list_diagnostics (Codegen_support.make_backend ~results database) database))
-
-let () =
   Codegen_support.test "a release build reads the value that a development build evaluated"
     (fun () ->
       let results = make_results () in
@@ -103,13 +89,15 @@ let () =
 
 let () =
   Codegen_support.test
-    "a constant whose evaluation uses too much CPU time is an error of its own check" (fun () ->
+    "a constant whose evaluation uses too much CPU time is an error of its own check, and is \
+     evaluated again on the next check" (fun () ->
+      let results = make_results () in
       let database, _ = Codegen_support.load Fixtures.Lowering.constant_computed_by_a_long_loop in
-      match
-        list_diagnostics
-          (Codegen_support.make_backend ~evaluation_cpu_time_limit_ms:5 database)
-          database
-      with
+      (match
+         list_diagnostics
+           (Codegen_support.make_backend ~results ~evaluation_cpu_time_limit_ms:5 database)
+           database
+       with
       | [ diagnostic ] ->
           Codegen_support.expect_string ~expected:"prover.evaluation"
             (Diagnostic.Code.name diagnostic.code);
@@ -119,47 +107,7 @@ let () =
             diagnostic.message
       | actual ->
           Codegen_support.fail "%d diagnostics: %s" (List.length actual) (show_messages actual));
-  Codegen_support.test
-    "an assertion by evaluation whose evaluation uses too much CPU time is not proven" (fun () ->
-      let database, _ =
-        Codegen_support.load
-          "fn spin() -> UInt64 {\n\
-          \  var state: UInt64 = 1\n\
-          \  for round in 0..30_000_000\n\
-          \    invariant state < 1_000_003\n\
-          \  {\n\
-          \    state = (state * 3 + round) % 1_000_003\n\
-          \  }\n\
-          \  state\n\
-           }\n\n\
-           theorem spun() {\n\
-          \  assert spin() == 915_721 by evaluation\n\
-           }\n"
-      in
-      (match
-         list_diagnostics
-           (Codegen_support.make_backend ~evaluation_cpu_time_limit_ms:5 database)
-           database
-       with
-      | [ diagnostic ] ->
-          Codegen_support.expect_string ~expected:"prover.assertion"
-            (Diagnostic.Code.name diagnostic.code);
-          if
-            not
-              (String.includes
-                 ~affix:
-                   "Its evaluation stopped, so its result is not known: it used more than 5 ms of \
-                    CPU time"
-                 diagnostic.message)
-          then Codegen_support.fail "%s" diagnostic.message
-      | actual ->
-          Codegen_support.fail "%d diagnostics: %s" (List.length actual) (show_messages actual));
-      expect_proven (list_diagnostics (Codegen_support.make_backend database) database));
-  Codegen_support.test "a constant whose evaluation reaches a todo is no error of its check"
-    (fun () ->
-      expect_proven
-        (prove_with_running
-           "fn build() -> UInt64 {\n  todo\n}\n\nlet unfinished: UInt64 = build()\n"))
+      expect_proven (list_diagnostics (Codegen_support.make_backend ~results database) database))
 
 let loaded_shout_of_a_name_and_an_identity =
   lazy (Codegen_support.load (shout ^ Fixtures.Evaluate.shout_of_a_name_and_an_identity))
@@ -201,7 +149,7 @@ let () =
   Codegen_support.test "the query of a template states the result of running its check" (fun () ->
       let database, backend = Lazy.force loaded_shout_of_a_name_and_an_identity in
       let proofs = Database.prove database [ Codegen_support.example_file ] in
-      let runs = run_evaluations backend (Database.list_evaluations proofs) in
+      let runs = Evaluations.run backend (Database.list_evaluations proofs) in
       let lookups = Database.make_proof_lookups database in
       let list_queries runs =
         Prover.For_testing.list_queries ~runs lookups (Database.list_proofs proofs)

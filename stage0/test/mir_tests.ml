@@ -1483,14 +1483,13 @@ let () =
          (Mir.Call_edges.list_path_edges (Lazy.force lookups)
             (Support.make_top_path "app.main" name)))
   in
-  Harness.test "code that returns a constant has an edge to the constant" (fun () ->
-      expect_edges "pass_limit" ~expected:[ "app.main.limit" ]);
-  Harness.test "code that indexes a constant has an edge to the constant" (fun () ->
-      expect_edges "read_an_offset" ~expected:[ "app.main.offsets" ]);
-  Harness.test "a pattern that names a constant is an edge to the constant" (fun () ->
-      expect_edges "match_limit" ~expected:[ "app.main.limit" ]);
-  Harness.test "code that leaves out a field has an edge to each constant that the default reads"
-    (fun () -> expect_edges "build_window" ~expected:[ "app.main.limit" ]);
+  Harness.test
+    "code has an edge to each constant that it returns, indexes, names in a pattern, or reads \
+     through an omitted field" (fun () ->
+      expect_edges "pass_limit" ~expected:[ "app.main.limit" ];
+      expect_edges "read_an_offset" ~expected:[ "app.main.offsets" ];
+      expect_edges "match_limit" ~expected:[ "app.main.limit" ];
+      expect_edges "build_window" ~expected:[ "app.main.limit" ]);
   Harness.test "a constant has an edge to each function it calls and each constant it reads"
     (fun () -> expect_edges "doubled" ~expected:[ "app.main.limit"; "app.main.pass_limit" ]);
   Harness.test "a dependency records what reads the constant and through which omitted field"
@@ -1526,27 +1525,20 @@ let () =
     List.sort_uniq compare !literals
   in
   let method_of name = "app.main.impl standard.text.FromTemplate for app.main.Shout." ^ name in
-  Harness.test "a tagged template is an assertion by evaluation and a call of from_template"
-    (fun () ->
+  Harness.test
+    "a tagged template is an assertion by evaluation and a call of from_template that name one \
+     literal constant" (fun () ->
       expect_paths
         ~expected:[ method_of "from_template"; method_of "is_valid_template" ]
         (List.filter
            (fun (path : Path.t) -> Path.locate_package path <> Path.standard_package)
            (Mir.Call_edges.list_path_edges (Lazy.force lookups)
               (Support.make_top_path "app.main" "f")));
-      match Mir.list_evaluated_asserts (Lazy.force code) with
-      | [ _ ] -> ()
+      let literals : Language.Literal.t = Elements [ Text "hey" ] in
+      (match Mir.list_evaluated_asserts (Lazy.force code) with
+      | [ (_, condition) ] when list_literals condition = [ literals ] -> ()
       | evaluated -> Harness.fail "%d assertions by evaluation" (List.length evaluated));
-  Harness.test "the assertion and the call of a template name one literal constant" (fun () ->
-      let expected : Language.Literal.t list = [ Elements [ Text "hey" ] ] in
-      let in_call = list_literals (Lazy.force code) in
-      let in_assertion =
-        List.concat_map
-          (fun (_, condition) -> list_literals condition)
-          (Mir.list_evaluated_asserts (Lazy.force code))
-      in
-      if in_assertion <> expected then Harness.fail "the assertion names another literal";
-      if not (List.for_all (fun literal -> List.mem literal in_call) expected) then
+      if not (List.mem literals (list_literals (Lazy.force code))) then
         Harness.fail "the call names another literal")
 
 let () =
@@ -1554,27 +1546,13 @@ let () =
   let expect_edges path ~expected =
     expect_paths ~expected (Mir.Call_edges.list_path_edges (Lazy.force lookups) path)
   in
-  Harness.test "code has an edge to each function and constant of its assertions by evaluation"
-    (fun () ->
+  Harness.test
+    "a function and a theorem have an edge to each function and constant of their assertions by \
+     evaluation" (fun () ->
       expect_edges
         (Support.make_top_path "app.main" "f")
-        ~expected:[ "app.main.is_small"; "app.main.limit" ]);
-  Harness.test "a theorem has an edge to each function of its assertions by evaluation" (fun () ->
-      expect_edges (Support.make_top_path "app.main" "tiny") ~expected:[ "app.main.is_tiny" ]);
-  Harness.test "the assertions by evaluation of a definition are listed with their conditions"
-    (fun () ->
-      let { Mir.form = code; _ } =
-        Option.get (Mir.read_code (Lazy.force lookups).mir (Support.make_top_path "app.main" "f"))
-      in
-      match Mir.list_evaluated_asserts code with
-      | [ (_, condition) ] ->
-          expect_paths
-            ~expected:[ "app.main.is_small"; "app.main.limit" ]
-            (List.map
-               (fun (dependency : Mir.Call_edges.dependency) -> dependency.path)
-               (Mir.Call_edges.list_dependencies (Lazy.force lookups) Types.no_substitution
-                  condition))
-      | evaluated -> Harness.fail "%d assertions by evaluation" (List.length evaluated))
+        ~expected:[ "app.main.is_small"; "app.main.limit" ];
+      expect_edges (Support.make_top_path "app.main" "tiny") ~expected:[ "app.main.is_tiny" ])
 
 let () =
   let lookups = lazy (make_call_edge_lookups Fixtures.Mir.impls_inheriting_a_provided_method) in

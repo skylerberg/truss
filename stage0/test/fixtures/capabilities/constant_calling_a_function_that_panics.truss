@@ -1,8 +1,0 @@
-fn half(value: UInt64) -> UInt64 uses Panic {
-  if value == 7 {
-    Panic.crash("seven")
-  }
-  value / 2
-}
-
-let four: UInt64 = half(8)

@@ -130,38 +130,38 @@ let enter_evaluated (context : Definitions.context) ~item ~(source : Resolve.Nam
       written = Some (Definitions.read_written context source);
     }
 
-let make_constant_state (context : Definitions.context) path =
-  let ({ source; form = mir } : Mir.Graph.t Mir.sourced) =
-    match Mir.read_initializer_graph context.lookups.mir path with
-    | Some graph -> graph
-    | None -> Definitions.raise_bug "%s is not a constant" (Path.show path)
+let make_evaluated_state (context : Definitions.context) (evaluated : Lowered.Item.t) =
+  let source, mir, ty =
+    match evaluated with
+    | Constant path -> (
+        match Mir.read_initializer_graph context.lookups.mir path with
+        | Some { source; form = mir } ->
+            ( source,
+              mir,
+              Monomorphic.ground context.monomorphic Types.no_substitution
+                (Interface.Definition.read_constant_type context.lookups.interface path) )
+        | None -> Definitions.raise_bug "%s is not a constant" (Path.show path))
+    | Assertion { definition; condition } -> (
+        match
+          match Mir.read_code context.lookups.mir definition with
+          | Some _ as code -> code
+          | None -> Mir.read_initializer context.lookups.mir definition
+        with
+        | Some { source; form = code } -> (
+            match List.assoc_opt condition (Mir.list_evaluated_asserts code) with
+            | Some asserted -> (source, Mir.expand asserted, Ground.make_builtin Bool)
+            | None ->
+                Definitions.raise_bug "%s has no assertion by evaluation at %d"
+                  (Path.show definition) condition)
+        | None -> Definitions.raise_bug "%s has no code" (Path.show definition))
+    | item -> Definitions.raise_bug "%s is not evaluated" (Lowered.Item.to_string item)
   in
-  let ty =
-    Monomorphic.ground context.monomorphic Types.no_substitution
-      (Interface.Definition.read_constant_type context.lookups.interface path)
-  in
-  (enter_evaluated context ~item:(Evaluator path) ~source, mir, ty)
+  (enter_evaluated context ~item:(Evaluator evaluated) ~source, mir, ty)
 
-let make_assertion_state (context : Definitions.context) ~definition ~condition =
-  match
-    match Mir.read_code context.lookups.mir definition with
-    | Some _ as code -> code
-    | None -> Mir.read_initializer context.lookups.mir definition
-  with
-  | Some { source; form = code } -> (
-      match List.assoc_opt condition (Mir.list_evaluated_asserts code) with
-      | Some asserted ->
-          ( enter_evaluated context ~item:(Assertion { definition; condition }) ~source,
-            Mir.expand asserted,
-            Ground.make_builtin Bool )
-      | None ->
-          Definitions.raise_bug "%s has no assertion by evaluation at %d" (Path.show definition)
-            condition)
-  | None -> Definitions.raise_bug "%s has no code" (Path.show definition)
-
-let rec fold_initializer context ~visiting path =
-  let state, mir, ty = make_constant_state context path in
-  (ty, fold_body ~visiting:(path :: visiting) ~depth:call_depth ~steps:(ref step_limit) state mir [])
+let rec fold_evaluated context ~visiting (evaluated : Lowered.Item.t) =
+  let state, mir, ty = make_evaluated_state context evaluated in
+  let visiting = match evaluated with Constant path -> path :: visiting | _ -> visiting in
+  (ty, fold_body ~visiting ~depth:call_depth ~steps:(ref step_limit) state mir [])
 
 and fold_body ~visiting ~depth ~steps state (mir : Mir.Graph.t)
     (arguments : Lowered.static_value list) =
@@ -181,7 +181,7 @@ and fold_body ~visiting ~depth ~steps state (mir : Mir.Graph.t)
       | Local local -> Hashtbl.find_opt locals local
       | Constant path ->
           if List.exists (Path.equal path) visiting then None
-          else snd (fold_initializer state.context ~visiting path)
+          else snd (fold_evaluated state.context ~visiting (Constant path))
       | Literal { value; type_ } ->
           Some
             (Targets.make_static_literal state.context.monomorphic (Lowering.ground state type_)
@@ -338,18 +338,12 @@ and fold_body ~visiting ~depth ~steps state (mir : Mir.Graph.t)
   in
   run 0
 
-type constant = Folded of Lowered.data | Run of Ground.ty
+type evaluated = Folded of Lowered.data | Run of Ground.ty
 
-let compile_constant context path =
-  match fold_initializer context ~visiting:[] path with
-  | ty, Some value -> Folded { data_item = Constant path; ty; value }
+let compile context evaluated =
+  match fold_evaluated context ~visiting:[] evaluated with
+  | ty, Some value -> Folded { data_item = evaluated; ty; value }
   | ty, None -> Run ty
-
-let compile_assertion context ~definition ~condition =
-  let state, mir, ty = make_assertion_state context ~definition ~condition in
-  match fold_body ~visiting:[] ~depth:call_depth ~steps:(ref step_limit) state mir [] with
-  | Some value -> Folded { data_item = Assertion { definition; condition }; ty; value }
-  | None -> Run ty
 
 let write_fully = Well_known.make_path Write_fully
 
@@ -379,8 +373,8 @@ let write_output (state : Lowering.state) output =
     ~destination:(Lowering.allocate_temporary state result)
     ~site:None ()
 
-let build_evaluator_of (context : Definitions.context) ((state : Lowering.state), mir, ty) :
-    Emit_c.fragment =
+let build_evaluator (context : Definitions.context) evaluated : Emit_c.fragment =
+  let (state : Lowering.state), mir, ty = make_evaluated_state context evaluated in
   Emit_c.Ir_builder.start state.builder (Emit_c.Ir_builder.allocate_block state.builder);
   Lowering.run_in_scope state (fun () ->
       let place = Lowering.allocate_temporary state ty in
@@ -391,8 +385,3 @@ let build_evaluator_of (context : Definitions.context) ((state : Lowering.state)
         ty place;
       write_output state output);
   Lowering.finish_item state ~rest:[] ()
-
-let build_evaluator context path = build_evaluator_of context (make_constant_state context path)
-
-let build_assertion_evaluator context ~definition ~condition =
-  build_evaluator_of context (make_assertion_state context ~definition ~condition)

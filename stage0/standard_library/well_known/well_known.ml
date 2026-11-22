@@ -161,7 +161,6 @@ type field =
   | Range_inclusive
   | Template_literals
   | Template_parts
-  | Literal_text
   | Entry_key
   | Entry_value
   | Option_some_value
@@ -343,7 +342,6 @@ let fields =
     (Range_inclusive, Record Range, "inclusive");
     (Template_literals, Record Template, "literals");
     (Template_parts, Record Template, "parts");
-    (Literal_text, Record Literal, "text");
     (Entry_key, Record Entry, "key");
     (Entry_value, Record Entry, "value");
     (Option_some_value, Variant Option_some, "value");

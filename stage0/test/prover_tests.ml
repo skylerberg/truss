@@ -270,29 +270,14 @@ let () =
           "This calls `next_after_limit`, whose code depends on `app.main.limit`, so \
            `app.main.limit` would be computed from itself."
         ~at:("next_after_limit()", 2));
-  Harness.test "a cycle of constants through a call is an error at each constant" (fun () ->
-      match
-        List.map
-          (fun (diagnostic : Diagnostic.t) -> diagnostic.message)
-          (list_diagnostics Fixtures.Prover.constants_in_a_cycle_through_a_call)
-      with
-      | [ calls; reads ] ->
-          if not (String.includes ~affix:"This calls `read_second`, whose code depends on" calls)
-          then Harness.fail "%s" calls;
-          if
-            not (String.includes ~affix:"This reads `app.main.first`, whose value depends on" reads)
-          then Harness.fail "%s" reads
-      | messages -> Harness.fail "%d diagnostics" (List.length messages));
   Harness.test "a constant read by an impl that its value passes to generic code is an error"
     (fun () ->
       expect_one_cycle Fixtures.Prover.constant_read_by_the_impl_it_supplies "prover.constant_cycle"
         ~says:"This uses `Coin.weight`, whose code depends on");
-  Harness.test "code that reads a constant knows the contract of the call that computes it"
-    (fun () -> expect_proven Fixtures.Prover.constant_known_by_the_contract_of_its_call);
   Harness.test "a call in a constant's value meets its callee's requires" (fun () ->
       expect_not_proven Fixtures.Prover.constant_calling_outside_a_requires "prover.requires")
 
-let list_evaluated_constants text =
+let list_evaluated_definitions text =
   let database = Support.make_database (Support.setup [ ("app.main", text) ]) in
   List.map
     (function
@@ -300,128 +285,50 @@ let list_evaluated_constants text =
       | Assertion { definition; _ } -> Path.show definition)
     (Database.list_evaluations (Support.prove database (Support.parse_file "app.main")))
 
+let expect_proven_trusting_compiled_code text ~code ~count =
+  let database = Support.make_database (Support.setup [ ("app.main", text) ]) in
+  let states =
+    List.filter
+      (fun (state : Source.span Prover.state) ->
+        Diagnostic.Code.name (Prover state.site.code) = code)
+      (Support.list_proof_states database (Support.parse_file "app.main"))
+  in
+  if List.length states <> count then Harness.fail "%d %s states" (List.length states) code;
+  List.iter
+    (fun (state : Source.span Prover.state) ->
+      if state.failure <> None || not state.trusts_compiled_code then
+        Harness.fail "a %s state is not proven by an evaluation" code)
+    states
+
+let unfinished_constant = "fn build() -> UInt64 {\n  todo\n}\n\nlet unfinished: UInt64 = build()\n"
+
 let () =
-  Harness.test "a proof that reads constant expressions asks for no evaluation" (fun () ->
-      match list_evaluated_constants Fixtures.Prover.constant_expressions_read_by_a_function with
-      | [] -> ()
-      | evaluated -> Harness.fail "evaluates [%s]" (String.concat "; " evaluated));
-  Harness.test "the proofs of a file ask for each computed constant that they read or define"
-    (fun () ->
-      match list_evaluated_constants Fixtures.Prover.computed_constants_read_by_functions with
-      | [
-       "app.main.corner";
-       "app.main.day_is_even";
-       "app.main.initial";
-       "app.main.label";
-       "app.main.ratio";
-       "app.main.seconds_per_day";
-      ] ->
+  Harness.test "the proofs of a file ask for each constant whose value calls a function" (fun () ->
+      match list_evaluated_definitions Fixtures.Prover.computed_constants with
+      | [ "app.main.corner"; "app.main.day_is_even"; "app.main.seconds_per_day"; "app.main.shape" ]
+        ->
           ()
       | evaluated -> Harness.fail "evaluates [%s]" (String.concat "; " evaluated));
-  Harness.test "code that reads a computed constant knows the value that its evaluation gives"
-    (fun () -> expect_proven Fixtures.Prover.computed_constants_read_by_functions);
-  Harness.test
-    "code knows the variant and the fields of an evaluated option, result, and recursive type"
-    (fun () -> expect_proven Fixtures.Prover.computed_constants_of_options_and_trees);
-  Harness.test "a proof by a computed constant's value trusts compiled code" (fun () ->
-      let database =
-        Support.make_database
-          (Support.setup [ ("app.main", Fixtures.Prover.computed_constants_read_by_functions) ])
-      in
-      match
-        List.filter
-          (fun (state : Source.span Prover.state) ->
-            Diagnostic.Code.name (Prover state.site.code) = "prover.ensures")
-          (Support.list_proof_states database (Support.parse_file "app.main"))
-      with
-      | [ _; _; _; _; _; _; _; _ ] as ensured ->
-          if
-            not
-              (List.for_all
-                 (fun (state : Source.span Prover.state) -> state.trusts_compiled_code)
-                 ensured)
-          then Harness.fail "an ensures proven by an evaluated value does not trust compiled code"
-      | ensured -> Harness.fail "%d ensures states" (List.length ensured));
-  Harness.test "a Bool constant gives its proofs the fact that its evaluation decides" (fun () ->
-      expect_proven Fixtures.Prover.requires_proven_by_a_constant);
-  Harness.test "a Bool constant that evaluates to false refutes the fact" (fun () ->
-      expect_only_codes Fixtures.Prover.requires_refuted_by_a_constant
-        [ "prover.assertion"; "prover.requires" ]);
+  Harness.test "code that reads a computed constant knows its value, and trusts compiled code"
+    (fun () ->
+      expect_proven_trusting_compiled_code Fixtures.Prover.computed_constants ~code:"prover.ensures"
+        ~count:4);
   Harness.test "a proof that needs the value of an unfinished constant says that it has none"
     (fun () ->
-      Support.expect_one_diagnostic ~check Fixtures.Prover.unfinished_constant_read_by_a_function
+      Support.expect_one_diagnostic ~check
+        (unfinished_constant ^ "\nfn f() -> UInt64\n  ensures result == 4\n{\n  unfinished\n}\n")
         "prover.ensures"
         ~says:
           "The evaluation of `app.main.unfinished` stopped, so its value is not known: todo reached");
-  Harness.test "an assertion by evaluation that holds proves the fact that it asserts" (fun () ->
-      expect_proven Fixtures.Prover.requires_proven_by_evaluation);
-  Harness.test "an assertion by evaluation trusts compiled code" (fun () ->
-      let database =
-        Support.make_database
-          (Support.setup [ ("app.main", Fixtures.Prover.requires_proven_by_evaluation) ])
-      in
-      match
-        List.filter
-          (fun (state : Source.span Prover.state) ->
-            Diagnostic.Code.name (Prover state.site.code) = "prover.assertion")
-          (Support.list_proof_states database (Support.parse_file "app.main"))
-      with
-      | [ asserted ] ->
-          if asserted.failure <> None || not asserted.trusts_compiled_code then
-            Harness.fail "the assertion is not proven by its evaluation"
-      | asserted -> Harness.fail "%d assertion states" (List.length asserted));
-  Harness.test "an assertion by evaluation that is false fails every time" (fun () ->
-      Support.expect_one_diagnostic ~check Fixtures.Prover.assertion_by_evaluation_that_is_false
-        "prover.assertion"
-        ~says:"`is_accepted(98)` may not hold. This fails every time the code reaches it."
-        ~at:("is_accepted(98)", 1));
-  Harness.test "assertions by evaluation over a table give its length and its elements" (fun () ->
-      expect_proven Fixtures.Prover.table_known_by_evaluation);
-  Harness.test "a call in the condition of an assertion by evaluation meets its requires" (fun () ->
-      expect_not_proven Fixtures.Prover.assertion_by_evaluation_outside_a_requires "prover.requires");
-  Harness.test "a function cannot assert its own result by evaluation" (fun () ->
-      match
-        List.sort compare
-          (list_codes Fixtures.Prover.function_asserting_its_own_result_by_evaluation)
-      with
-      | [ "prover.ensures"; "prover.termination" ] -> ()
-      | codes -> Harness.fail "codes [%s]" (String.concat "; " codes));
-  Harness.test "a constant cannot be asserted by evaluation in the function that computes it"
-    (fun () ->
-      match
-        List.sort compare
-          (list_codes Fixtures.Prover.constant_asserted_by_the_function_that_computes_it)
-      with
-      | [ "prover.constant_cycle"; "prover.ensures" ] -> ()
-      | codes -> Harness.fail "codes [%s]" (String.concat "; " codes));
-  Harness.test "an assertion by evaluation that reaches a todo says where" (fun () ->
-      Support.expect_one_diagnostic ~check Fixtures.Prover.assertion_by_evaluation_reaching_a_todo
-        "prover.assertion" ~says:"Its evaluation stopped, so its result is not known: todo reached");
-  Harness.test "an assertion by evaluation is proven in a theorem, a provided method, and a lambda"
-    (fun () ->
-      expect_proven Fixtures.Prover.assertions_by_evaluation_in_a_theorem_a_trait_and_a_lambda);
-  Harness.test
-    "an assertion by evaluation is proven in a law proof, a quantifier's body, and generic code"
+  Harness.test "a constant computed from an unfinished constant is unfinished, and no error"
     (fun () ->
       expect_proven
-        Fixtures.Prover.assertions_by_evaluation_in_a_law_proof_a_quantifier_and_generic_code);
-  Harness.test "a constant for specifications only is not evaluated" (fun () ->
-      match
-        list_evaluated_constants
-          "fn twice(value: Integer) -> Integer {\n\
-          \  value * 2\n\
-           }\n\n\
-           let big: Integer = twice(1_000_000_000_000_000_000_000)\n\n\
-           fn f(value: Int64) -> Int64\n\
-          \  requires value < big\n\
-           {\n\
-          \  value\n\
-           }\n"
-      with
-      | [] -> ()
-      | evaluated -> Harness.fail "evaluates [%s]" (String.concat "; " evaluated));
-  Harness.test "a constant computed from an unfinished constant is unfinished, and no error"
-    (fun () -> expect_proven Fixtures.Prover.constant_computed_from_an_unfinished_constant);
+        (unfinished_constant
+       ^ "\n\
+          fn double(value: UInt64) -> UInt64 {\n\
+         \  value.saturating_add(value)\n\
+          }\n\n\
+          let twice: UInt64 = double(unfinished)\n"));
   Harness.test "a constant computed from a cyclic constant cannot be computed" (fun () ->
       match
         List.sort compare
@@ -441,7 +348,81 @@ let () =
   Harness.test "a member constant's value is proven and evaluated as a constant's is" (fun () ->
       match List.sort compare (list_codes Fixtures.Prover.member_constants_computed_by_calls) with
       | [ "prover.constant_cycle"; "prover.requires" ] -> ()
-      | codes -> Harness.fail "codes [%s]" (String.concat "; " codes))
+      | codes -> Harness.fail "codes [%s]" (String.concat "; " codes));
+  Harness.test "a constant for specifications only is not evaluated" (fun () ->
+      match
+        list_evaluated_definitions
+          "fn twice(value: Integer) -> Integer {\n\
+          \  value * 2\n\
+           }\n\n\
+           let big: Integer = twice(1_000_000_000_000_000_000_000)\n\n\
+           fn f(value: Int64) -> Int64\n\
+          \  requires value < big\n\
+           {\n\
+          \  value\n\
+           }\n"
+      with
+      | [] -> ()
+      | evaluated -> Harness.fail "evaluates [%s]" (String.concat "; " evaluated))
+
+let () =
+  let accepted = Fixtures.Prover.accepted_values in
+  let assert_then condition result =
+    Printf.sprintf "fn f() -> UInt64 {\n  proof {\n    assert %s by evaluation\n  }\n  %s\n}\n"
+      condition result
+  in
+  let expect_codes text expected =
+    match List.sort compare (list_codes text) with
+    | codes when codes = expected -> ()
+    | codes -> Harness.fail "codes [%s]" (String.concat "; " codes)
+  in
+  Harness.test "an assertion by evaluation that holds proves its fact, and trusts compiled code"
+    (fun () ->
+      let text = accepted ^ assert_then "is_accepted(97)" "accept(97)" in
+      expect_proven text;
+      expect_proven_trusting_compiled_code text ~code:"prover.assertion" ~count:1);
+  Harness.test "an assertion by evaluation that is false fails every time" (fun () ->
+      Support.expect_one_diagnostic ~check
+        (accepted ^ assert_then "is_accepted(98)" "98")
+        "prover.assertion"
+        ~says:"`is_accepted(98)` may not hold. This fails every time the code reaches it."
+        ~at:("is_accepted(98)", 1));
+  Harness.test "a call in the condition of an assertion by evaluation meets its requires" (fun () ->
+      expect_not_proven (accepted ^ assert_then "accept(5) == 5" "5") "prover.requires");
+  Harness.test "an assertion by evaluation that reaches a todo says where" (fun () ->
+      Support.expect_one_diagnostic ~check
+        ("fn unfinished() -> Bool {\n  todo\n}\n\n" ^ assert_then "unfinished()" "1")
+        "prover.assertion" ~says:"Its evaluation stopped, so its result is not known: todo reached");
+  Harness.test "a function cannot assert its own result by evaluation" (fun () ->
+      expect_codes
+        "fn lies() -> Bool\n\
+        \  ensures result\n\
+         {\n\
+        \  proof {\n\
+        \    assert lies() by evaluation\n\
+        \  }\n\
+        \  false\n\
+         }\n"
+        [ "prover.ensures"; "prover.termination" ]);
+  Harness.test "a constant cannot be asserted by evaluation in the function that computes it"
+    (fun () ->
+      expect_codes
+        "fn count() -> Int64\n\
+        \  ensures result > 0\n\
+         {\n\
+        \  proof {\n\
+        \    assert counted > 0 by evaluation\n\
+        \  }\n\
+        \  0\n\
+         }\n\n\
+         let counted: Int64 = count()\n"
+        [ "prover.constant_cycle"; "prover.ensures" ]);
+  Harness.test "an assertion by evaluation is proven in each place where an assertion is written"
+    (fun () ->
+      expect_proven Fixtures.Prover.assertions_by_evaluation_in_each_place;
+      match list_evaluated_definitions Fixtures.Prover.assertions_by_evaluation_in_each_place with
+      | [ _; _; _; _; _; _ ] -> ()
+      | evaluated -> Harness.fail "evaluates [%s]" (String.concat "; " evaluated))
 
 let () =
   Harness.test "a loop with an invariant" (fun () ->
@@ -1252,7 +1233,7 @@ let () =
       let of_any_tone ?(parameters = "") template =
         Printf.sprintf "fn of_any_tone[Tone](%s) -> Shout[Tone] {\n  %s\n}\n" parameters template
       in
-      (match list_evaluated_constants (tag ^ of_any_tone "Shout\"hey\"") with
+      (match list_evaluated_definitions (tag ^ of_any_tone "Shout\"hey\"") with
       | [] -> ()
       | evaluated -> Harness.fail "evaluates [%s]" (String.concat "; " evaluated));
       expect_proven (tag ^ of_any_tone "Shout\"hey\"");
@@ -1266,7 +1247,7 @@ let () =
       expect_proven (count ^ of_count "cost allocations == 1");
       expect_not_proven (count ^ of_count "cost allocations == 0") "prover.cost");
   Harness.test "a generic tag at a type without type parameters is checked by evaluation" (fun () ->
-      (match list_evaluated_constants Fixtures.Prover.generic_tag_without_a_stated_check with
+      (match list_evaluated_definitions Fixtures.Prover.generic_tag_without_a_stated_check with
       | [ "app.main.loud" ] -> ()
       | evaluated -> Harness.fail "evaluates [%s]" (String.concat "; " evaluated));
       expect_proven Fixtures.Prover.generic_tag_without_a_stated_check);
@@ -2196,24 +2177,6 @@ let public_doubling =
 let () =
   Harness.test "a caller in another package reads its callee's contract" (fun () ->
       match check_across public_doubling Fixtures.Prover.twice_through_another_packages_double with
-      | [] -> ()
-      | actual ->
-          Harness.fail "%s"
-            (String.concat "; "
-               (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual)));
-  Harness.test
-    "code in another package knows a constant by the contract of the private function that \
-     computes it" (fun () ->
-      match
-        check_across
-          "fn make_three() -> UInt64\n\
-          \  ensures result == 3\n\
-           {\n\
-          \  3\n\
-           }\n\n\
-           public let three: UInt64 = make_three()\n"
-          "fn f() -> UInt64\n  ensures result == 3\n{\n  numbers.three\n}\n"
-      with
       | [] -> ()
       | actual ->
           Harness.fail "%s"

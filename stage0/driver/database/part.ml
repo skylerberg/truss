@@ -64,12 +64,10 @@ let find_type_definition : Ground.ty -> Path.t option = function
   | Any { trait; _ } -> Some trait
   | Function _ | Never -> None
 
-let find_item_definition : Lowered.Item.t -> Path.t option = function
+let rec find_item_definition : Lowered.Item.t -> Path.t option = function
   | Code { path; _ }
   | Constant path
-  | Evaluator path
   | Assertion { definition = path; _ }
-  | Call_evaluation { function_ = path; _ }
   | Generated
       ( Locked_entry { capability = path; _ }
       | Adapter { function_ = path; _ }
@@ -77,6 +75,7 @@ let find_item_definition : Lowered.Item.t -> Path.t option = function
       | Test_main path )
   | Table (Impl_table { impl = path; _ } | Any_table { impl = path; _ } | Locked_table path) ->
       Some path
+  | Evaluator evaluated -> find_item_definition evaluated
   | Drop ty | Copy ty | Debug ty | Any_drop ty | Any_copy ty | Encode ty -> find_type_definition ty
   | Generated (Entry impl_method | Any_entry impl_method) ->
       Some (Lowered.Item.make_method_path impl_method)

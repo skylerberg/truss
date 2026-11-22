@@ -26,10 +26,10 @@ let make_env backend =
     ~compute_shape:(Monomorphic.compute_shape backend.monomorphic)
 
 exception Cannot_build of string
-exception Constant_reaches_todo of { constant : Path.t; report : string }
+exception Evaluation_reaches_todo of { evaluated : Lowered.Item.t; report : string }
 
-let describe_stopped_evaluation constant report =
-  Printf.sprintf "Evaluating %s stopped: %s" (Path.show constant) report
+let describe_stopped_evaluation evaluated report =
+  Printf.sprintf "Evaluating %s stopped: %s" (Lowered.Item.to_string evaluated) report
 
 let raise_cannot_build format = Printf.ksprintf (fun message -> raise (Cannot_build message)) format
 
@@ -192,7 +192,7 @@ and run_while_compiling : 'value. t -> Lowered.Item.t -> read:(string -> 'value)
     | None ->
         (if List.exists (Lowered.Item.equal root) !(backend.evaluating) then
            match root with
-           | Evaluator path ->
+           | Evaluator (Constant path) ->
                raise_cannot_build "the value of %s depends on itself" (Path.show path)
            | _ ->
                raise_bug "%s is evaluated by code that reads its result"
@@ -212,7 +212,7 @@ and run_while_compiling : 'value. t -> Lowered.Item.t -> read:(string -> 'value)
                     (Startup.render_evaluator_start ~cpu_time_limit_ms (Emit_c.make_symbol root))
                   (fun program -> Process.run_with_time_limit ~time_limit_ms program [])
               with
-              | exception Constant_reaches_todo { report; _ } -> Reached_todo report
+              | exception Evaluation_reaches_todo { report; _ } -> Reached_todo report
               | None ->
                   Stopped
                     (Printf.sprintf
@@ -238,20 +238,19 @@ and run_while_compiling : 'value. t -> Lowered.Item.t -> read:(string -> 'value)
   | Reached_todo report -> Reached_todo report
   | Stopped report -> Stopped report
 
-and run_evaluator backend path ty =
-  run_while_compiling backend (Lowered.Item.Evaluator path) ~read:(fun encoded ->
+and run_evaluator backend evaluator ty =
+  run_while_compiling backend evaluator ~read:(fun encoded ->
       Lowering.Encoding.decode (make_env backend) ty encoded)
 
 and compile_fragment backend item =
   let compiled =
     match read_lowered backend item with
     | Compiled fragment | Folded (_, fragment) -> fragment
-    | Evaluate (path, ty) -> (
-        match run_evaluator backend path ty with
-        | Ran value ->
-            Emit_c.make_data_fragment (make_env backend) { data_item = Constant path; ty; value }
-        | Reached_todo report -> raise (Constant_reaches_todo { constant = path; report })
-        | Stopped report -> raise_cannot_build "%s" (describe_stopped_evaluation path report))
+    | Evaluate (evaluator, ty) -> (
+        match run_evaluator backend evaluator ty with
+        | Ran value -> Emit_c.make_data_fragment (make_env backend) { data_item = item; ty; value }
+        | Reached_todo report -> raise (Evaluation_reaches_todo { evaluated = item; report })
+        | Stopped report -> raise_cannot_build "%s" (describe_stopped_evaluation item report))
   in
   if not (Lowered.Item.equal (Emit_c.item compiled) item) then
     raise_bug "%s compiled to %s" (Lowered.Item.to_string item)
@@ -262,8 +261,8 @@ let capture_failure work =
   match work () with
   | result -> Ok result
   | exception Cannot_build message -> Error message
-  | exception Constant_reaches_todo { constant; report } ->
-      Error (describe_stopped_evaluation constant report)
+  | exception Evaluation_reaches_todo { evaluated; report } ->
+      Error (describe_stopped_evaluation evaluated report)
   | exception Test_report.Malformed message -> Error message
 
 module Test_report = Test_report
@@ -315,15 +314,15 @@ let describe_todo_types backend todo_types =
 let rec read_executed_fragment (lookups : Lowering.lowered_lookups) item =
   match lookups.find_lowered item with
   | Some (Ok (Compiled fragment | Folded (_, fragment))) -> Some fragment
-  | Some (Ok (Evaluate (path, _))) -> read_executed_fragment lookups (Lowered.Item.Evaluator path)
+  | Some (Ok (Evaluate (evaluator, _))) -> read_executed_fragment lookups evaluator
   | Some (Error _) | None -> None
 
 let trace_item lookups item =
   Emit_c.trace_reachable ~lookup:(read_executed_fragment lookups) [ item ]
 
-let reaches_evaluator backend root constant =
+let reaches_evaluator backend root evaluated =
   List.exists
-    (fun (fragment, _) -> Lowered.Item.equal (Emit_c.item fragment) (Evaluator constant))
+    (fun (fragment, _) -> Lowered.Item.equal (Emit_c.item fragment) (Evaluator evaluated))
     (trace_item backend.lookups root)
 
 let run_tests ?(rerun = false) ?(report_progress = ignore) backend ~time_limit_ms tests =
@@ -373,19 +372,20 @@ let run_tests ?(rerun = false) ?(report_progress = ignore) backend ~time_limit_m
             ~report_progress:(fun compiled total -> report_progress (Compiling { compiled; total }))
         with
         | () -> Array.of_list missing
-        | exception Constant_reaches_todo { constant; report } ->
+        | exception Evaluation_reaches_todo { evaluated; report } ->
             let unfinished, runnable =
               List.partition
-                (fun (_, root, _, _) -> reaches_evaluator backend root constant)
+                (fun (_, root, _, _) -> reaches_evaluator backend root evaluated)
                 missing
             in
             if unfinished = [] then
-              raise_cannot_build "%s" (describe_stopped_evaluation constant report);
+              raise_cannot_build "%s" (describe_stopped_evaluation evaluated report);
             List.iter
               (fun (index, _, _, _) ->
                 end_test index
                   (make_incomplete_record
-                     (Printf.sprintf "the constant %s is not computed: %s" (Path.show constant)
+                     (Printf.sprintf "the constant %s is not computed: %s"
+                        (Lowered.Item.to_string evaluated)
                         report)))
               unfinished;
             build_runnable runnable)
@@ -525,34 +525,12 @@ let build_program backend ~main ~output ~is_kept =
 let list_reached_todo_types (lookups : Lowering.lowered_lookups) root =
   lookups.list_reached_todo_types (Lowering.make_root root)
 
-let evaluate_call backend ~function_ ~arguments =
+let evaluate backend evaluated =
   capture_failure @@ fun () ->
-  match Interface.Impls.read_signature backend.lookups.interface function_ with
-  | Some { output = Returns result; _ } ->
-      let ty = Monomorphic.ground backend.monomorphic Types.no_substitution result in
-      let item = Lowered.Item.Call_evaluation { function_; arguments } in
-      run_while_compiling backend item ~read:(fun encoded ->
-          Lowering.Encoding.decode (make_env backend) ty encoded)
-  | _ -> raise_bug "%s has no result to evaluate" (Path.show function_)
-
-let evaluate_constant backend path =
-  capture_failure @@ fun () ->
-  match read_lowered backend (Constant path) with
+  match read_lowered backend evaluated with
   | Folded (data, _) -> Ran data.value
-  | Evaluate (path, ty) -> run_evaluator backend path ty
-  | Compiled _ -> raise_bug "the constant %s is lowered to code" (Path.show path)
-
-let evaluate_assertion backend ~definition ~condition =
-  capture_failure @@ fun () ->
-  let item = Lowered.Item.Assertion { definition; condition } in
-  match read_lowered backend item with
-  | Folded (data, _) -> Ran data.value
-  | Compiled _ ->
-      run_while_compiling backend item ~read:(fun encoded ->
-          Lowering.Encoding.decode (make_env backend)
-            (Monomorphic.ground backend.monomorphic Types.no_substitution Types.bool)
-            encoded)
-  | Evaluate _ -> raise_bug "%s is lowered to a constant" (Lowered.Item.to_string item)
+  | Evaluate (evaluator, ty) -> run_evaluator backend evaluator ty
+  | Compiled _ -> raise_bug "%s is lowered to code" (Lowered.Item.to_string evaluated)
 
 let create ?(show_file = Path.show_file) ?results ?(evaluation_cpu_time_limit_ms = 10_000)
     ?(programs = Filename.get_temp_dir_name ())
@@ -583,6 +561,4 @@ module For_testing = struct
 
   let render_unit backend item =
     render_code_unit backend (make_env backend) (compile_fragment backend item) ~copies:[]
-
-  let evaluate_call = evaluate_call
 end

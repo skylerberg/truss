@@ -129,17 +129,10 @@ let rec mangle : Lowered.Item.t -> string = function
   | Encode ty -> render_marker "Encode" ^ mangle_ty ty
   | Any_drop ty -> render_marker "AnyDrop" ^ mangle_ty ty
   | Any_copy ty -> render_marker "AnyCopy" ^ mangle_ty ty
-  | Evaluator path -> render_marker "Evaluator" ^ mangle_path path
+  | Evaluator evaluated -> render_marker "Evaluator" ^ mangle evaluated
   | Assertion { definition; condition } ->
       render_marker "Assertion" ^ mangle_path definition ^ render_marker "Value"
       ^ mangle_text (string_of_int condition)
-  | Call_evaluation { function_; arguments } ->
-      render_marker "Evaluate" ^ mangle_path function_
-      ^ String.concat ""
-          (List.map
-             (fun number -> render_marker "Value" ^ mangle_text (Z.to_string number))
-             arguments)
-      ^ render_marker "End"
   | Generated (Adapter { function_; instantiation; ty }) ->
       render_marker "Adapter"
       ^ mangle (Lowered.Item.make_code function_ instantiation)

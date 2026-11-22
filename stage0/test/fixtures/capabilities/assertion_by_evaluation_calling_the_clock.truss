@@ -1,6 +1,10 @@
+fn is_late(instant: Instant) -> Bool {
+  true
+}
+
 fn f() -> UInt64 uses Clock {
   proof {
-    assert Clock.now() == Clock.now() by evaluation
+    assert is_late(Clock.now()) by evaluation
   }
   1
 }

@@ -5,7 +5,7 @@ type unsupported = { construct : string; at : Lowered.site option }
 type lowered =
   | Compiled of Emit_c.fragment
   | Folded of Lowered.data * Emit_c.fragment
-  | Evaluate of Path.t * Ground.ty
+  | Evaluate of Lowered.Item.t * Ground.ty
 
 type lowered_lookups = {
   system : Libc.system;

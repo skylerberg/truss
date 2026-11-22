@@ -26,3 +26,5 @@ let same: Bool = greeting == greeting
 let total: Money = Money(cents: 1) + Money(cents: compute())
 let report: String = "the total is ${computed}"
 let letter: Character = Character"a"
+let all_are_small: Bool = forall number in numbers => number < 10
+let holds_two: Bool = exists index in 0..2 => numbers[index] == 2

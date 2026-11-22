@@ -7,9 +7,8 @@ type t =
   | Any_drop of Ground.ty
   | Any_copy of Ground.ty
   | Encode of Ground.ty
-  | Evaluator of Path.t
+  | Evaluator of t
   | Assertion of { definition : Path.t; condition : int }
-  | Call_evaluation of { function_ : Path.t; arguments : Z.t list }
   | Generated of generated
   | Table of table
 

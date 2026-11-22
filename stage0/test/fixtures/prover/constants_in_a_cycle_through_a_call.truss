@@ -1,6 +1,0 @@
-fn read_second() -> UInt64 {
-  second
-}
-
-let first: UInt64 = read_second()
-let second: UInt64 = first

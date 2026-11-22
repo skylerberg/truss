@@ -24,8 +24,8 @@ let run backend evaluations =
     (fun (evaluation : Prover.Obligation.evaluation) ->
       ( evaluation,
         make_run
-          (match evaluation with
-          | Constant_value path -> Backend.evaluate_constant backend path
-          | Assertion { definition; condition } ->
-              Backend.evaluate_assertion backend ~definition ~condition) ))
+          (Backend.evaluate backend
+             (match evaluation with
+             | Constant_value path -> Constant path
+             | Assertion { definition; condition } -> Assertion { definition; condition })) ))
     evaluations

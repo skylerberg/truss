@@ -5,7 +5,7 @@ type unsupported = Lower.unsupported = { construct : string; at : Lowered.site o
 type lowered =
   | Compiled of Emit_c.fragment
   | Folded of Lowered.data * Emit_c.fragment
-  | Evaluate of Path.t * Ground.ty
+  | Evaluate of Lowered.Item.t * Ground.ty
 
 type lowered_lookups = {
   system : Libc.system;
@@ -29,23 +29,17 @@ let make (context : Lower.context) (item : Lowered.Item.t) : lowered =
       Compiled (Lower.lower_source_code context ~path ~instantiation ~assumes_condition)
   | Generated generated -> Compiled (Lower.lower_generated context generated)
   | Table table -> Compiled (Emit_c.make_table_fragment env (Lower.lower_table context table))
-  | Constant path -> (
-      match Lower.lower_constant context path with
+  | (Constant _ | Assertion _) as evaluated -> (
+      match Lower.lower_evaluated context evaluated with
       | Folded data -> Folded (data, Emit_c.make_data_fragment env data)
-      | Run ty -> Evaluate (path, ty))
+      | Run ty -> Evaluate (Evaluator evaluated, ty))
   | Drop ty -> Compiled (Drop_and_copy.drop drop_and_copy ty)
   | Copy ty -> Compiled (Drop_and_copy.copy drop_and_copy ty)
   | Any_drop ty -> Compiled (Drop_and_copy.build_any_drop drop_and_copy ty)
   | Any_copy ty -> Compiled (Drop_and_copy.build_any_copy drop_and_copy ty)
   | Debug ty -> Compiled (Debug_output.build_debug env ty)
   | Encode ty -> Compiled (Encoding.encode env ty)
-  | Evaluator path -> Compiled (Lower.lower_evaluator context path)
-  | Assertion { definition; condition } -> (
-      match Lower.lower_assertion context ~definition ~condition with
-      | Folded data -> Folded (data, Emit_c.make_data_fragment env data)
-      | Run _ -> Compiled (Lower.lower_assertion_evaluator context ~definition ~condition))
-  | Call_evaluation { function_; arguments } ->
-      Compiled (Lower.lower_call_evaluation context ~function_ ~arguments)
+  | Evaluator evaluated -> Compiled (Lower.lower_evaluator context evaluated)
 
 let lower system (lookups : Lookups.t) item =
   let env =
@@ -62,7 +56,7 @@ let lower system (lookups : Lookups.t) item =
 
 let list_references = function
   | Compiled fragment | Folded (_, fragment) -> Emit_c.references fragment
-  | Evaluate (path, _) -> [ Lowered.Item.Evaluator path ]
+  | Evaluate (evaluator, _) -> [ evaluator ]
 
 let check_calls interface ~find_call_edges item = function
   | Compiled fragment -> Call_edge_check.check interface ~find_call_edges item fragment

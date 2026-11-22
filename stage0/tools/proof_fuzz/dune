@@ -1,7 +1,6 @@
 (executable
  (name proof_fuzz)
  (libraries
-  structural_key
   zarith
   path
   source
