@@ -189,7 +189,7 @@ let spawn_with_item state (loop : Lowering.spawn_loop) (value : Lowered.place) ~
     in
     Emit_c.Ir_builder.emit state.builder
       (Assign (Lowered.make_local_place typed, Use (Copy (Lowered.make_local_place pointer))));
-    (pointer, { root = Local typed; projections = [ Deref ] })
+    (pointer, Lowered.make_deref_place typed)
   in
   let unbox ~dropped_here : Lowered.place =
     if boxed then begin

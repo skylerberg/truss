@@ -5,6 +5,7 @@ include module type of struct
 end
 
 val make_local_place : local -> place
+val make_deref_place : local -> place
 val project : place -> projection -> place
 val make_uint64_constant : int -> operand
 

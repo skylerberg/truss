@@ -476,8 +476,7 @@ let lower_any_into (state : Lowering.state) ~any_ty ~inner_ty ~impl ~type_argume
       (Assign (Lowered.make_local_place typed, Use (Copy (Lowered.make_local_place box))));
     Emit_c.Ir_builder.emit state.builder
       (Assign
-         ( { root = Local typed; projections = [ Deref ] },
-           Use (Lowering.make_owned_operand state value inner_ty) ))
+         (Lowered.make_deref_place typed, Use (Lowering.make_owned_operand state value inner_ty)))
   end;
   Emit_c.Ir_builder.emit state.builder
     (Assign
