@@ -1,5 +1,6 @@
 use frontend.source
 use frontend.token
+use standard.collections
 
 internal type LexResult(lexed: token.Lexed, diagnostics: List[source.Diagnostic], source: source.Source)
 
@@ -57,11 +58,16 @@ fn find_rename(text: StringSlice, diagnostic: source.Diagnostic) -> Option[Renam
   Some(Rename(spelling: text.substring(diagnostic.span.start, to: diagnostic.span.stop).to_string(), renamed: edit.replacement.copy()))
 }
 
-fn remove_colliding_renames(scanner: Scanner, diagnostics: own List[source.Diagnostic]) -> List[source.Diagnostic]
+fn remove_colliding_renames(
+  text: StringSlice,
+  tables: token.Tables,
+  name_indices: collections.SortedMap[String, UInt64],
+  diagnostics: mut List[source.Diagnostic],
+)
   uses Panic
 {
-  var written = List.filled(false, count: scanner.tables.names.length())
-  for current in scanner.tables.tokens {
+  var written = List.filled(false, count: tables.names.length())
+  for current in tables.tokens {
     match current.kind {
       Upper(name) | Lower(name) => if name < written.length() {
         written[name] = true
@@ -71,19 +77,18 @@ fn remove_colliding_renames(scanner: Scanner, diagnostics: own List[source.Diagn
   }
   var renames: List[Rename] = []
   for diagnostic in diagnostics {
-    if find_rename(scanner.source.text, diagnostic) is Some(rename) {
-      mut renames.push(rename.copy())
+    if find_rename(text, diagnostic) is Some(rename) {
+      mut renames.push(own rename)
     }
   }
   if renames.is_empty() {
-    return diagnostics
+    return
   }
-  var checked: List[source.Diagnostic] = []
-  for diagnostic in own diagnostics {
-    let collides = match find_rename(scanner.source.text, diagnostic) {
+  for diagnostic in mut diagnostics {
+    let collides = match find_rename(text, diagnostic) {
       Some(rename) => {
         var is_written = false
-        if scanner.name_indices.get(rename.renamed) is Some(index) && index < written.length() && written[index] {
+        if name_indices.get(rename.renamed) is Some(index) && index < written.length() && written[index] {
           is_written = true
         }
         var is_shared = false
@@ -97,14 +102,9 @@ fn remove_colliding_renames(scanner: Scanner, diagnostics: own List[source.Diagn
       None => false
     }
     if collides {
-      var stripped = own diagnostic
-      stripped.fixes = []
-      mut checked.push(own stripped)
-    } else {
-      mut checked.push(own diagnostic)
+      diagnostic.fixes = []
     }
   }
-  checked
 }
 
 type Accepted(start: UInt64, stop: UInt64, has_insertion: Bool)
@@ -188,24 +188,6 @@ fn list_machine_applicable_edits(diagnostics: Slice[source.Diagnostic]) -> List[
   edits
 }
 
-type Ranked(start: UInt64, sequence: UInt64)
-  derives Equal, Ordered
-
-fn sort_edits(edits: Slice[source.Edit]) -> List[source.Edit]
-  uses Panic
-{
-  var ranked: List[Ranked] = []
-  for entry in edits.enumerate() {
-    mut ranked.push(Ranked(start: entry.element.span.start, sequence: entry.index))
-  }
-  mut ranked.sort()
-  var sorted: List[source.Edit] = []
-  for rank in ranked {
-    mut sorted.push(edits.get(rank.sequence).expect("a ranked edit").copy())
-  }
-  sorted
-}
-
 fn apply_edits(text: StringSlice, sorted: Slice[source.Edit]) -> String
   uses Panic
 {
@@ -280,26 +262,28 @@ fn shift_span(placed: Slice[Placed], span: source.Span) -> source.Span
   source.make_span(map_original_offset(placed, is_stop: false, offset: span.start), stop)
 }
 
+fn shift_literal(literal: mut token.StringLiteral, placed: Slice[Placed])
+  uses Panic
+{
+  match mut literal.tag {
+    Some(tag) => tag.span = shift_span(placed, span: tag.span)
+    None => {}
+  }
+  literal.first.span = shift_span(placed, span: literal.first.span)
+  for segment in mut literal.rest {
+    segment.interpolation.span = shift_span(placed, span: segment.interpolation.span)
+    segment.text.span = shift_span(placed, span: segment.text.span)
+  }
+}
+
 fn map_to_original(tables: mut token.Tables, placed: Slice[Placed])
   uses Panic
 {
   for current in mut tables.tokens {
     current.span = shift_span(placed, span: current.span)
   }
-  let literals = own tables.literals
-  tables.literals = []
-  for literal in own literals {
-    var shifted = own literal
-    if shifted.tag is Some(tag) {
-      let tag_span = shift_span(placed, span: tag.span)
-      shifted.tag = Some(tag.copy() with (span: tag_span))
-    }
-    shifted.first.span = shift_span(placed, span: shifted.first.span)
-    for segment in mut shifted.rest {
-      segment.interpolation.span = shift_span(placed, span: segment.interpolation.span)
-      segment.text.span = shift_span(placed, span: segment.text.span)
-    }
-    mut tables.literals.push(own shifted)
+  for literal in mut tables.literals {
+    shift_literal(mut literal, placed)
   }
 }
 
@@ -308,9 +292,8 @@ internal fn lex(input: own source.Source) -> LexResult
 {
   let scanned = scan_source(own input)
   var scanner = own scanned.scanner
-  let sorted_diagnostics = source.sort_by_start(own scanner.diagnostics)
-  scanner.diagnostics = []
-  let diagnostics = remove_colliding_renames(scanner, diagnostics: own sorted_diagnostics)
+  var diagnostics = source.sort_by_start(own scanner.diagnostics)
+  remove_colliding_renames(scanner.source.text, tables: scanner.tables, name_indices: scanner.name_indices, diagnostics: mut diagnostics)
   let edits = list_machine_applicable_edits(diagnostics)
   if edits.is_empty() {
     mark_inserted_closers(mut scanner.tables.tokens)
@@ -320,7 +303,7 @@ internal fn lex(input: own source.Source) -> LexResult
       source: own scanner.source,
     )
   }
-  let sorted_edits = sort_edits(edits)
+  let sorted_edits = source.sort_edits_by_start(own edits)
   let fixed_text = apply_edits(scanner.source.text, sorted: sorted_edits)
   let fixed = scan_source(source.Source.create(scanner.source.path, text: own fixed_text))
   var tables = own fixed.scanner.tables

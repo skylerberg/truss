@@ -291,7 +291,7 @@ fn list_closing_fixes(scanner: Scanner, run: Run, openers: Slice[Opener], title:
   uses Panic
 {
   match find_closing_edits(scanner, run, openers) {
-    Some(edits) => [source.make_fix(title, edits: edits.copy())]
+    Some(edits) => [source.make_fix(title, own edits)]
     None => []
   }
 }
@@ -303,7 +303,6 @@ fn close_all(scanner: mut Scanner, run: mut Run, position: UInt64, reason: Strin
   let Some(innermost) = openers.get(0) else {
     return
   }
-  let innermost_opener = innermost
   var closers = ""
   for opener in openers {
     mut closers.push(spell_closer(opener.bracket))
@@ -320,8 +319,8 @@ fn close_all(scanner: mut Scanner, run: mut Run, position: UInt64, reason: Strin
   report(
     mut scanner,
     code: "lexer.unclosed_bracket",
-    span: innermost_opener.span,
-    message: "This `${spell_opener(innermost_opener.bracket)}` is never closed${reason}.",
+    span: innermost.span,
+    message: "This `${spell_opener(innermost.bracket)}` is never closed${reason}.",
     notes: own notes,
     fixes: own fixes,
   )
@@ -342,13 +341,12 @@ fn close_bracket(scanner: mut Scanner, run: mut Run, current: token.Token, brack
     return
   }
   while run.stack.last() is Some(opener) && opener.bracket != bracket {
-    let unclosed = opener
-    let fixes = list_closing_fixes(scanner, run, openers: [unclosed], title: "Insert `${spell_closer(unclosed.bracket)}`")
+    let fixes = list_closing_fixes(scanner, run, openers: [opener], title: "Insert `${spell_closer(opener.bracket)}`")
     report(
       mut scanner,
       code: "lexer.unclosed_bracket",
-      span: unclosed.span,
-      message: "This `${spell_opener(unclosed.bracket)}` is never closed.",
+      span: opener.span,
+      message: "This `${spell_opener(opener.bracket)}` is never closed.",
       notes: [
         source.Note(span, message: "This `${spell_closer(bracket)}` closes an earlier `${spell_opener(bracket)}` first."),
       ],
@@ -367,7 +365,7 @@ fn finish_run(
   first_line_break: Option[source.Span],
   blank_line: Bool,
   ends_unterminated: Bool,
-) -> TokenRange
+)
   uses Panic, RunForever
 {
   if !run.stack.is_empty() {
@@ -402,11 +400,6 @@ fn finish_run(
       is_inserted_closer: false,
     ),
   )
-  let first = scanner.tables.tokens.length()
-  let output = own run.output
-  run.output = []
-  mut scanner.tables.tokens.append(own output)
-  TokenRange(first, stop: scanner.tables.tokens.length(), open_at_end: run.open_at_end)
 }
 
 fn read_next_input(scanner: mut Scanner, mode: LayoutMode, state: mut InterpolationState) -> LayoutInput
@@ -435,7 +428,10 @@ fn run_layout(scanner: mut Scanner, mode: LayoutMode, state: mut InterpolationSt
   while true {
     match read_next_input(mut scanner, mode, mut state) {
       Finish(position, first_line_break, blank_line, ends_unterminated) => {
-        return finish_run(mut scanner, mut run, mode, position, first_line_break, blank_line, ends_unterminated)
+        finish_run(mut scanner, mut run, mode, position, first_line_break, blank_line, ends_unterminated)
+        let first = scanner.tables.tokens.length()
+        mut scanner.tables.tokens.append(own run.output)
+        return TokenRange(first, stop: scanner.tables.tokens.length(), open_at_end: run.open_at_end)
       }
       Next(kind, span, first_line_break, blank_line, unterminated_string) => {
         if mode == LayoutMode.FileMode(recovery: true) && !run.stack.is_empty()
