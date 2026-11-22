@@ -1,0 +1,46 @@
+fn to_seconds(hours: UInt64) -> UInt64
+  requires hours <= 24
+{
+  hours * 60 * 60
+}
+
+fn is_even(value: UInt64) -> Bool {
+  value % 2 == 0
+}
+
+fn pick(first: Bool) -> Character {
+  if first {
+    Character"a"
+  } else {
+    Character"b"
+  }
+}
+
+let seconds_per_day: UInt64 = to_seconds(24)
+let seconds_per_two_days: UInt64 = seconds_per_day * 2
+let day_is_even: Bool = is_even(seconds_per_day)
+let initial: Character = pick(true)
+
+fn read_seconds() -> UInt64
+  ensures result == 86400
+{
+  seconds_per_day
+}
+
+fn read_two_days() -> UInt64
+  ensures result == 172800
+{
+  seconds_per_two_days
+}
+
+fn read_evenness() -> Bool
+  ensures result
+{
+  day_is_even
+}
+
+fn read_initial() -> Character
+  ensures result == Character"a"
+{
+  initial
+}

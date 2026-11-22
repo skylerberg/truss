@@ -244,6 +244,7 @@ module Code : sig
     | Invariant
     | Termination
     | Constant_cycle
+    | Evaluation
     | Panic
     | Assertion
     | Law

@@ -117,5 +117,5 @@ let () =
       with
       | Error message ->
           Codegen_support.expect_string
-            ~expected:"Evaluating example.spun used more than 5 ms of CPU time." message
+            ~expected:"Evaluating example.spun stopped: it used more than 5 ms of CPU time" message
       | Ok _ -> Codegen_support.fail "the tests ran")

@@ -420,7 +420,10 @@ let evaluate_constant (context : State.context) frame path =
     (Contracts.find_source context.lookups path, Mir.read_initializer context.lookups.mir path)
   with
   | Some (constant_source, _, _), Some { form = code; _ } ->
-      let symbol = Logic.Symbol.Constant path in
+      let symbol : Logic.symbol =
+        if Facts.is_evaluated_constant context path code then Evaluated_constant path
+        else Constant path
+      in
       let empty =
         {
           frame with

@@ -741,9 +741,13 @@ public let word: Regex = Regex"[a-z]+"
   an `if`, a `match`, or a lambda, goes in a function that the value calls.
 - The value uses no capability, so each call in it terminates and cannot
   panic. Each call meets its callee's `requires`.
-- The value is evaluated when the program is compiled, and the program holds
+- The value is evaluated when the code is checked, and the program holds
   the result as data. An evaluation that uses more than 10 seconds of CPU
   time is an error.
+- A proof that reads a constant knows its value. Where the value calls a
+  function, the proof knows the result of the evaluation if it is a `Bool`,
+  an integer, or a `Character`, and knows any other result by the contracts
+  of the calls.
 - A constant's type is not a function type or an `any` type, and holds no
   value of either, no handle, and no state that tasks share.
 - A constant's value does not depend on itself: through another constant,
@@ -3002,7 +3006,8 @@ public opaque type Session = todo
   definitions whose contracts those proofs read, and the `impl`s whose
   methods that code calls or passes to generic code. In a development
   build, a `todo` that runs stops the program and reports its position.
-- A constant whose evaluation reaches a `todo` has no value. A test that can
+- A constant whose evaluation reaches a `todo` has no value. A proof knows
+  the constant by the contracts of the calls in its value, a test that can
   reach the constant is incomplete, and a program that can reach it is not
   built.
 - A type defined as `todo` can be named, but its contents cannot be used.

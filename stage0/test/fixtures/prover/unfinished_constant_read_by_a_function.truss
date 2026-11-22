@@ -1,0 +1,11 @@
+fn build() -> UInt64 {
+  todo
+}
+
+let unfinished: UInt64 = build()
+
+fn read_unfinished() -> UInt64
+  ensures result == 4
+{
+  unfinished
+}

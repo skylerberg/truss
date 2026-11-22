@@ -1,0 +1,11 @@
+fn build() -> UInt64 {
+  todo
+}
+
+let unfinished: UInt64 = build()
+
+fn double(value: UInt64) -> UInt64 {
+  value.saturating_add(value)
+}
+
+let twice: UInt64 = double(unfinished)

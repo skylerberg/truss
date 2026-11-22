@@ -75,6 +75,7 @@
   manifest
   registry
   backend
+  evaluations
   c_compiler)
  (deps
   served_length/served_length.exe

@@ -292,6 +292,79 @@ let () =
   Harness.test "a call in a constant's value meets its callee's requires" (fun () ->
       expect_not_proven Fixtures.Prover.constant_calling_outside_a_requires "prover.requires")
 
+let list_evaluated_constants text =
+  let database = Support.make_database (Support.setup [ ("app.main", text) ]) in
+  List.map
+    (function
+      | Prover.Obligation.Constant_value path -> Path.show path
+      | Template_check { function_; _ } -> Path.show function_)
+    (Database.list_evaluations (Support.prove database (Support.parse_file "app.main")))
+
+let () =
+  Harness.test "a proof that reads constant expressions asks for no evaluation" (fun () ->
+      match list_evaluated_constants Fixtures.Prover.constant_expressions_read_by_a_function with
+      | [] -> ()
+      | evaluated -> Harness.fail "evaluates [%s]" (String.concat "; " evaluated));
+  Harness.test "the proofs of a file ask for each computed constant that they read or define"
+    (fun () ->
+      match list_evaluated_constants Fixtures.Prover.computed_constants_read_by_functions with
+      | [ "app.main.day_is_even"; "app.main.initial"; "app.main.seconds_per_day" ] -> ()
+      | evaluated -> Harness.fail "evaluates [%s]" (String.concat "; " evaluated));
+  Harness.test "code that reads a computed constant knows the value that its evaluation gives"
+    (fun () -> expect_proven Fixtures.Prover.computed_constants_read_by_functions);
+  Harness.test "a proof by a computed constant's value trusts compiled code" (fun () ->
+      let database =
+        Support.make_database
+          (Support.setup [ ("app.main", Fixtures.Prover.computed_constants_read_by_functions) ])
+      in
+      match
+        List.filter
+          (fun (state : Source.span Prover.state) ->
+            Diagnostic.Code.name (Prover state.site.code) = "prover.ensures")
+          (Support.list_proof_states database (Support.parse_file "app.main"))
+      with
+      | [ _; _; _; _ ] as ensured ->
+          if
+            not
+              (List.for_all
+                 (fun (state : Source.span Prover.state) -> state.trusts_compiled_code)
+                 ensured)
+          then Harness.fail "an ensures proven by an evaluated value does not trust compiled code"
+      | ensured -> Harness.fail "%d ensures states" (List.length ensured));
+  Harness.test "a Bool constant gives its proofs the fact that its evaluation decides" (fun () ->
+      expect_proven Fixtures.Prover.requires_proven_by_a_constant);
+  Harness.test "a Bool constant that evaluates to false refutes the fact" (fun () ->
+      expect_only_codes Fixtures.Prover.requires_refuted_by_a_constant
+        [ "prover.assertion"; "prover.requires" ]);
+  Harness.test "a proof that needs the value of an unfinished constant says that it has none"
+    (fun () ->
+      Support.expect_one_diagnostic ~check Fixtures.Prover.unfinished_constant_read_by_a_function
+        "prover.ensures"
+        ~says:
+          "The evaluation of `app.main.unfinished` stopped, so its value is not known: todo reached");
+  Harness.test "a constant computed from an unfinished constant is unfinished, and no error"
+    (fun () -> expect_proven Fixtures.Prover.constant_computed_from_an_unfinished_constant);
+  Harness.test "a constant computed from a cyclic constant cannot be computed" (fun () ->
+      match
+        List.sort compare
+          (List.map
+             (fun (diagnostic : Diagnostic.t) ->
+               (Diagnostic.Code.name diagnostic.code, diagnostic.message))
+             (list_diagnostics Fixtures.Prover.constant_computed_from_a_cyclic_constant))
+      with
+      | [ ("prover.constant_cycle", _); ("prover.evaluation", message) ] ->
+          if
+            message
+            <> "The value of `app.main.twice` cannot be computed: the value of app.main.limit \
+                depends on itself"
+          then Harness.fail "%s" message
+      | diagnostics ->
+          Harness.fail "[%s]" (String.concat "; " (List.map (fun (code, _) -> code) diagnostics)));
+  Harness.test "a member constant's value is proven and evaluated as a constant's is" (fun () ->
+      match List.sort compare (list_codes Fixtures.Prover.member_constants_computed_by_calls) with
+      | [ "prover.constant_cycle"; "prover.requires" ] -> ()
+      | codes -> Harness.fail "codes [%s]" (String.concat "; " codes))
+
 let () =
   Harness.test "a loop with an invariant" (fun () ->
       expect_proven Fixtures.Prover.loop_with_an_invariant);

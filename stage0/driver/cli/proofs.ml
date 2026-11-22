@@ -18,24 +18,19 @@ type t = {
   verdicts : Prover.verdicts Lazy.t;
 }
 
-let run_template_checks backend checks =
-  List.map
-    (fun ({ function_; literals } as check : Prover.Obligation.template_check) ->
-      match Backend.evaluate_predicate backend ~function_ ~arguments:[ Literals literals ] with
-      | Ok run -> (check, run)
-      | Error message ->
-          Outcome.raise_cannot_run "The check of a template's text could not be built: %s" message)
-    checks
-
 let list_runs database snapshot packages proofs =
-  match Database.list_template_checks proofs with
+  match Database.list_evaluations proofs with
   | [] -> []
-  | checks ->
-      run_template_checks
-        (Workspace_backend.create snapshot
-           (Workspace_backend.require_lowered_lookups database packages)
-           Development)
-        checks
+  | evaluations -> (
+      match
+        Evaluations.run
+          (Workspace_backend.create snapshot
+             (Workspace_backend.require_lowered_lookups database packages)
+             Development)
+          evaluations
+      with
+      | Ok runs -> runs
+      | Error message -> Outcome.raise_cannot_run "%s" message)
 
 let check database snapshot packages files =
   let proofs = Database.prove database files in

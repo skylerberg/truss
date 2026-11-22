@@ -1,7 +1,7 @@
 type profile = Profile.t = Development | Release
 type t
 type results = { find : string -> string option; add : string -> string -> unit }
-type 'a ran = Ran of 'a | Used_too_much_cpu_time | Reached_todo of string | Stopped of string
+type 'a ran = Ran of 'a | Reached_todo of string | Stopped of string
 
 val create :
   ?show_file:(Path.file -> string) ->
@@ -69,6 +69,8 @@ val evaluate_predicate :
   function_:Path.t ->
   arguments:Lowered.Item.argument list ->
   ((bool, string) result, string) result
+
+val evaluate_constant : t -> Path.t -> (Lowered.static_value ran, string) result
 
 module For_testing : sig
   val is_folded : t -> Path.t -> bool

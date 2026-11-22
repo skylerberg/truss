@@ -520,6 +520,8 @@ No code builds it at startup, and no mutable global holds it.
 
 | Rule | Reason |
 |---|---|
+| `truss check` evaluates a constant whose value calls a function. | The prover then knows the value, as it knows the value of `24 * 60 * 60`, and an evaluation that fails is an error of the check and not of a later build. The result is stored under a key over the code that the evaluation reaches, so a later check evaluates nothing until that code changes. |
+| A proof knows an evaluated value that is a `Bool`, an integer, or a `Character`, and any other by the contracts of its calls. | A scalar is one fact for the solver. A table of 256 entries as a fact costs every proof that reads the table. |
 | A constant that a type names calls no function. | A constant can appear in a type, as in `Array[UInt8, digest_size]`, so type checking never waits for code to run. |
 | The value holds no `if`, `match`, or lambda of its own. | Every stage reads a value as one expression with no local variable. A function holds the other code, at the cost of one name. |
 | A constant's type holds no function, `any` value, handle, or state that tasks share. | The value is data in the program. A function and an `any` value hold the address of code. A handle stands for something that the operating system holds only while the program runs. State that tasks share would be a mutable global. |
@@ -1377,6 +1379,7 @@ only, to state the definition.
 | A method of a trait or of an `impl` is known by its contract too. | An `impl` states what it adds to the trait's contract in its own `ensures`: `Int64.compare` ensures the order of the integers. An edit to a provided body then changes no fact that callers know. An edit to an `impl`'s body re-proves that method and the `impl`'s laws alone. |
 | A clause applies only where every name it mentions is visible. | An `ensures` that reads the fields of an opaque type is a fact inside the type's package and no fact elsewhere, so `opaque` hides the representation from proofs too. |
 | A public `requires` or `cost` names only public definitions, and an `ensures` may name a private function. | The proofs of callers in other packages read a `requires` and a `cost`, and a clause applies only where every name it mentions is visible. The `ensures` lets callers inside the package know a result in terms of private helpers. |
+| A constant is known by its value, which an evaluation gives where the value calls a function. | The declaration of the constant asks for the evaluation, as a tagged template asks for its check, so the place that makes a proof depend on a callee's body is written. A proof that used an evaluated value trusts the compiled code, and the tools report that. |
 | A bit-level fact is requested with `assert ... by bit_vector`. | Bit-blasting is slow on most queries, so only the assertion that asks for it is proven that way, as with Verus's `by (bit_vector)`. |
 | A quantifier over a range or a collection is also an expression in code. | The binder carries its range, so the body may rely on it. The standard library therefore has no `all` or `any` methods, and a test of every element has *one spelling*. |
 

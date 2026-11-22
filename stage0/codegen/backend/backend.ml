@@ -4,7 +4,7 @@ let raise_bug format = Compiler_bug.raise_bug ~stage:"Backend" format
 
 module Item_table = Hashtbl.Make (Lowered.Item)
 
-type 'a ran = Ran of 'a | Used_too_much_cpu_time | Reached_todo of string | Stopped of string
+type 'a ran = Ran of 'a | Reached_todo of string | Stopped of string
 type results = { find : string -> string option; add : string -> string -> unit }
 
 type t = {
@@ -190,8 +190,13 @@ and run_while_compiling : 'value. t -> Lowered.Item.t -> read:(string -> 'value)
     match Hashtbl.find_opt backend.runs key with
     | Some ran -> ran
     | None ->
-        if List.exists (Lowered.Item.equal root) !(backend.evaluating) then
-          raise_bug "%s is evaluated by code that reads its result" (Lowered.Item.to_string root);
+        (if List.exists (Lowered.Item.equal root) !(backend.evaluating) then
+           match root with
+           | Evaluator path ->
+               raise_cannot_build "the value of %s depends on itself" (Path.show path)
+           | _ ->
+               raise_bug "%s is evaluated by code that reads its result"
+                 (Lowered.Item.to_string root));
         backend.evaluating := root :: !(backend.evaluating);
         Fun.protect ~finally:(fun () -> backend.evaluating := List.tl !(backend.evaluating))
         @@ fun () ->
@@ -207,6 +212,7 @@ and run_while_compiling : 'value. t -> Lowered.Item.t -> read:(string -> 'value)
                     (Startup.render_evaluator_start ~cpu_time_limit_ms (Emit_c.make_symbol root))
                   (fun program -> Process.run_with_time_limit ~time_limit_ms program [])
               with
+              | exception Constant_reaches_todo { report; _ } -> Reached_todo report
               | None ->
                   Stopped
                     (Printf.sprintf
@@ -216,7 +222,7 @@ and run_while_compiling : 'value. t -> Lowered.Item.t -> read:(string -> 'value)
                   Option.iter (fun results -> results.add key output) backend.results;
                   Ran output
               | Some (status, _, _) when status = Process.status_of_signal Sys.sigprof ->
-                  Used_too_much_cpu_time
+                  Stopped (Printf.sprintf "it used more than %d ms of CPU time" cpu_time_limit_ms)
               | Some (status, _, errors) when status = Startup.todo_status ->
                   Reached_todo (String.trim errors)
               | Some (status, _, errors) -> (
@@ -229,24 +235,21 @@ and run_while_compiling : 'value. t -> Lowered.Item.t -> read:(string -> 'value)
   in
   match ran with
   | Ran output -> Ran (read output)
-  | Used_too_much_cpu_time -> Used_too_much_cpu_time
   | Reached_todo report -> Reached_todo report
   | Stopped report -> Stopped report
+
+and run_evaluator backend path ty =
+  run_while_compiling backend (Lowered.Item.Evaluator path) ~read:(fun encoded ->
+      Lowering.Encoding.decode (make_env backend) ty encoded)
 
 and compile_fragment backend item =
   let compiled =
     match read_lowered backend item with
     | Compiled fragment | Folded (_, fragment) -> fragment
     | Evaluate (path, ty) -> (
-        match
-          run_while_compiling backend (Lowered.Item.Evaluator path) ~read:(fun encoded ->
-              Lowering.Encoding.decode (make_env backend) ty encoded)
-        with
+        match run_evaluator backend path ty with
         | Ran value ->
             Emit_c.make_data_fragment (make_env backend) { data_item = Constant path; ty; value }
-        | Used_too_much_cpu_time ->
-            raise_cannot_build "Evaluating %s used more than %d ms of CPU time." (Path.show path)
-              backend.evaluation_cpu_time_limit_ms
         | Reached_todo report -> raise (Constant_reaches_todo { constant = path; report })
         | Stopped report -> raise_cannot_build "%s" (describe_stopped_evaluation path report))
   in
@@ -537,12 +540,15 @@ let evaluate_predicate backend ~function_ ~arguments =
     (function
       | Ran (Lowered.Static_scalar (Bool holds)) -> Ok holds
       | Ran _ -> raise_bug "%s returned a value that is not a Bool" (Path.show function_)
-      | Used_too_much_cpu_time ->
-          Error
-            (Printf.sprintf "it used more than %d ms of CPU time"
-               backend.evaluation_cpu_time_limit_ms)
       | Reached_todo report | Stopped report -> Error report)
     (evaluate_call backend ~function_ ~arguments)
+
+let evaluate_constant backend path =
+  capture_failure @@ fun () ->
+  match read_lowered backend (Constant path) with
+  | Folded (data, _) -> Ran data.value
+  | Evaluate (path, ty) -> run_evaluator backend path ty
+  | Compiled _ -> raise_bug "the constant %s is lowered to code" (Path.show path)
 
 let create ?(show_file = Path.show_file) ?results ?(evaluation_cpu_time_limit_ms = 10_000)
     ?(programs = Filename.get_temp_dir_name ())

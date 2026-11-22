@@ -1090,12 +1090,14 @@ let read_host_system () =
       Compiler_bug.raise_bug ~stage:"Database"
         "code is lowered on a host that Stage0 does not build for"
 
-let list_proof_template_checks : Prover.proof part -> _ = function
-  | Value proof -> Prover.list_template_checks proof
+let list_proof_evaluations : Prover.proof part -> _ = function
+  | Value proof -> Prover.list_evaluations proof
   | Failed _ | Blocked -> []
 
-let make_template_check_root ({ function_; literals } : Prover.Obligation.template_check) =
-  Lowered.Item.Call_evaluation { function_; arguments = [ Literals literals ] }
+let make_evaluation_root : Prover.Obligation.evaluation -> Lowered.Item.t = function
+  | Template_check { function_; literals } ->
+      Call_evaluation { function_; arguments = [ Literals literals ] }
+  | Constant_value path -> Constant path
 
 let find_entry_point (names : Resolve.Names.lookups) package =
   List.find_map
@@ -1437,9 +1439,9 @@ let compute_part database (Part.Any typed as part) =
           let proof = make_part (Prover.prove (make_recording_proof_lookups database note)) key in
           if Result.is_ok Libc.host then
             List.iter
-              (fun check ->
-                note_edge Claim (Stored (Any (Lowered (make_template_check_root check)))))
-              (list_proof_template_checks proof);
+              (fun evaluation ->
+                note_edge Claim (Stored (Any (Lowered (make_evaluation_root evaluation)))))
+              (list_proof_evaluations proof);
           proof)
   | Lowered key ->
       compute_with_edges (Lowered key) (fun note note_edge ->
@@ -2364,26 +2366,26 @@ let list_holes proofs ~reached =
   in
   collect []
 
-let list_template_checks (proofs : proofs) =
+let list_evaluations (proofs : proofs) =
   let database = proofs.database in
   let note = note_untracked_read database in
   match
     List.sort_uniq compare
       (List.concat_map
-         (fun key -> list_proof_template_checks (read_part database note (Proof key)))
+         (fun key -> list_proof_evaluations (read_part database note (Proof key)))
          proofs.keys)
   with
   | [] -> []
-  | checks ->
+  | evaluations ->
       drain database ~through:Test_keys
         (List.sort_uniq Path.compare_package
            (List.map (fun (key : Resolve.Names.key) -> key.module_.package) proofs.keys));
       List.filter
-        (fun check ->
-          match find_part database note (Test_key (make_template_check_root check)) with
+        (fun evaluation ->
+          match find_part database note (Test_key (make_evaluation_root evaluation)) with
           | Some Blocked -> false
           | Some (Value _ | Failed _) | None -> true)
-        checks
+        evaluations
 
 let list_proofs (proofs : proofs) =
   List.filter_map

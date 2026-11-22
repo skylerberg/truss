@@ -572,9 +572,9 @@ test "a constant" {
 }
 ```
 
-A constant's value can call functions. The compiler runs them when it
-compiles the program, and the program holds the result as data, so a table
-costs nothing when the program starts:
+A constant's value can call functions. `truss check` runs them, and the
+program holds the result as data, so a table costs nothing when the program
+starts:
 
 ```truss
 fn to_seconds(hours: UInt64) -> UInt64
@@ -607,6 +607,11 @@ test "constants that call functions" {
   1 error
   ```
 
+- **A proof knows the value.** A function that returns `seconds_per_day`
+  can ensure `result == 86400`, although `to_seconds` has no `ensures`,
+  because the check has run it. This holds for a `Bool`, an integer, or a
+  `Character`. A proof knows a larger value, such as a list, by the
+  contracts of the calls that build it.
 - **A constant is data,** so its type holds no function, no `any` value, and
   nothing that exists only while the program runs, such as an open file.
 - **A constant cannot depend on itself,** through another constant or

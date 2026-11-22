@@ -7,6 +7,7 @@ module Symbol : sig
     | Limited of { callee : Path.t; type_arguments : Types.argument list }
     | Function_value of { callee : Path.t; type_arguments : Types.argument list }
     | Constant of Path.t
+    | Evaluated_constant of Path.t
     | Generic_value of { owner : Path.t; name : string }
     | Text_literal of { type_ : Types.ty; text : string }
     | Template_check of { function_ : Path.t; literals : string list }

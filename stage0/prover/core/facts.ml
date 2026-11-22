@@ -567,6 +567,27 @@ let reject_uncompared_recursion (context : State.context) frame location recursi
           (Logic.Boolean false))
       recursive_callee
 
+let is_constant_expression (code : Mir.t) =
+  let is_made_for_a_literal : Mir.operand Core.target -> bool = function
+    | Function { path; _ } -> Path.equal path (Well_known.make_method_path List_from_storage)
+    | Trait_method { trait; _ } ->
+        Path.equal trait.trait (Well_known.make_path From_elements)
+        || Path.equal trait.trait (Well_known.make_path From_entries)
+    | Intrinsic _ -> true
+    | Capability_method _ | Indirect _ -> false
+  in
+  let calls_function = ref false in
+  Mir.iter_code
+    (fun statement ->
+      match Mir.find_callee statement with
+      | Some callee when not (is_made_for_a_literal callee.target) -> calls_function := true
+      | Some _ | None -> ())
+    code;
+  not !calls_function
+
+let is_evaluated_constant (context : State.context) path code =
+  (not (is_constant_expression code)) && context.lookups.list_recursion_group path = []
+
 let describe_constant_cycle ~cyclic (dependency : Mir.Call_edges.dependency) =
   let cyclic_name = Path.show cyclic in
   let consequence = Printf.sprintf "so `%s` would be computed from itself." cyclic_name in

@@ -1,18 +1,15 @@
 let solver =
   lazy (match Solver.find () with Ok solver -> solver | Error message -> failwith message)
 
-let run_template_checks backend checks =
-  List.map
-    (fun ({ function_; literals } as check : Prover.Obligation.template_check) ->
-      match Backend.evaluate_predicate backend ~function_ ~arguments:[ Literals literals ] with
-      | Ok run -> (check, run)
-      | Error message -> failwith message)
-    checks
+let run_evaluations backend evaluations =
+  match Evaluations.run backend evaluations with
+  | Ok runs -> runs
+  | Error message -> failwith message
 
 let compute_verdicts backend database =
   let proofs = Database.prove database [ Codegen_support.example_file ] in
   Prover.decide
-    ~runs:(run_template_checks backend (Database.list_template_checks proofs))
+    ~runs:(run_evaluations backend (Database.list_evaluations proofs))
     (Database.make_proof_lookups database)
     (Lazy.force solver) (Database.list_proofs proofs)
 
@@ -61,7 +58,7 @@ let () =
              [ (Codegen_support.example_file, Fixtures.Evaluate.shout_with_an_ill_typed_check) ])
       in
       let proofs = Database.prove database [ Codegen_support.example_file ] in
-      match Database.list_template_checks proofs with
+      match Database.list_evaluations proofs with
       | [] ->
           expect_failure_saying "may not hold for this call to `Shout.from_template`"
             (list_diagnostics (Codegen_support.make_backend database) database)
@@ -105,6 +102,30 @@ let () =
       compile Development;
       compile ~evaluation_cpu_time_limit_ms:5 Release)
 
+let () =
+  Codegen_support.test
+    "a constant whose evaluation uses too much CPU time is an error of its own check" (fun () ->
+      let database, _ = Codegen_support.load Fixtures.Lowering.constant_computed_by_a_long_loop in
+      match
+        list_diagnostics
+          (Codegen_support.make_backend ~evaluation_cpu_time_limit_ms:5 database)
+          database
+      with
+      | [ diagnostic ] ->
+          Codegen_support.expect_string ~expected:"prover.evaluation"
+            (Diagnostic.Code.name diagnostic.code);
+          Codegen_support.expect_string
+            ~expected:
+              "The value of `example.spun` cannot be computed: it used more than 5 ms of CPU time"
+            diagnostic.message
+      | actual ->
+          Codegen_support.fail "%d diagnostics: %s" (List.length actual) (show_messages actual));
+  Codegen_support.test "a constant whose evaluation reaches a todo is no error of its check"
+    (fun () ->
+      expect_proven
+        (prove_with_running
+           "fn build() -> UInt64 {\n  todo\n}\n\nlet unfinished: UInt64 = build()\n"))
+
 let loaded_shout_of_a_name_and_an_identity =
   lazy (Codegen_support.load (shout ^ Fixtures.Evaluate.shout_of_a_name_and_an_identity))
 
@@ -140,7 +161,7 @@ let () =
   Codegen_support.test "the query of a template states the result of running its check" (fun () ->
       let database, backend = Lazy.force loaded_shout_of_a_name_and_an_identity in
       let proofs = Database.prove database [ Codegen_support.example_file ] in
-      let runs = run_template_checks backend (Database.list_template_checks proofs) in
+      let runs = run_evaluations backend (Database.list_evaluations proofs) in
       let lookups = Database.make_proof_lookups database in
       let list_queries runs =
         Prover.For_testing.list_queries ~runs lookups (Database.list_proofs proofs)

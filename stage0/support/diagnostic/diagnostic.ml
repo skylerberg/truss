@@ -244,6 +244,7 @@ module Code = struct
     | Invariant
     | Termination
     | Constant_cycle
+    | Evaluation
     | Panic
     | Assertion
     | Law
@@ -546,6 +547,7 @@ module Code = struct
     | Invariant -> "invariant"
     | Termination -> "termination"
     | Constant_cycle -> "constant_cycle"
+    | Evaluation -> "evaluation"
     | Panic -> "panic"
     | Assertion -> "assertion"
     | Law -> "law"

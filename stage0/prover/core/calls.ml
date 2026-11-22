@@ -23,7 +23,10 @@ let list_required_fixes (context : State.context) (frame : State.frame) (clauses
   let clause = requirement.clause in
   let is_fixed name =
     List.mem name context.entry
-    || match name with Logic.Symbol.Constant _ | Logic.Symbol.Text_literal _ -> true | _ -> false
+    ||
+    match name with
+    | Logic.Symbol.Constant _ | Evaluated_constant _ | Text_literal _ -> true
+    | _ -> false
   in
   let is_simple text =
     String.for_all
