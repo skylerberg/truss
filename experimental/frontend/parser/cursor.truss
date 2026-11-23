@@ -753,21 +753,12 @@ fn locate_first(tables: token.Tables, first: UInt64, stop: UInt64, edge: SpanEdg
   low
 }
 
-fn TokenCursor.list_group_tokens(self, start: UInt64, stop: UInt64, span: source.Span) -> List[token.Token]
-  uses Panic, RunForever
+fn TokenCursor.find_enclosing_interpolation(self, first: UInt64, stop: UInt64, span: source.Span, lower_bound: UInt64) -> Option[token.Interpolation]
+  uses Panic
 {
-  let inside_first = locate_first(self.tables, first: start, stop: stop, edge: SpanEdge.Start, offset: span.start)
-  let inside_stop = locate_first(self.tables, first: inside_first, stop: stop, edge: SpanEdge.Stop, offset: span.stop + 1)
-  var inside: List[token.Token] = []
-  for index in inside_first..inside_stop {
-    mut inside.push(self.tables.token(index))
-  }
-  if !inside.is_empty() {
-    return inside
-  }
-  var candidates: List[UInt64] = [inside_stop]
-  if inside_first > start {
-    mut candidates.push(inside_first - 1)
+  var candidates: List[UInt64] = [lower_bound]
+  if lower_bound > first {
+    mut candidates.push(lower_bound - 1)
   }
   for index in candidates {
     if index < stop {
@@ -777,25 +768,34 @@ fn TokenCursor.list_group_tokens(self, start: UInt64, stop: UInt64, span: source
           for segment in self.tables.literal(literal_index).rest {
             let interpolation = segment.interpolation
             if interpolation.span.start <= span.start && span.stop <= interpolation.span.stop {
-              return self.list_group_tokens(start: interpolation.first, stop: interpolation.stop, span: span)
+              return Some(interpolation)
             }
           }
         }
-        return []
+        return None
       }
     }
   }
-  []
+  None
 }
 
 fn TokenCursor.spell(self, span: source.Span, insertions: Slice[source.Edit] = []) -> Option[String]
   uses Panic, RunForever
 {
-  let tokens = self.list_group_tokens(start: self.region.first, stop: self.region.stop, span: span)
-  if tokens.is_empty() {
-    return None
+  var first = self.region.first
+  var stop = self.region.stop
+  while true {
+    let inside_first = locate_first(self.tables, first, stop, edge: SpanEdge.Start, offset: span.start)
+    let inside_stop = locate_first(self.tables, first: inside_first, stop: stop, edge: SpanEdge.Stop, offset: span.stop + 1)
+    if inside_first < inside_stop {
+      return token.spell_tokens(self.tables, first: inside_first, stop: inside_stop, insertions: insertions)
+    }
+    let Some(interpolation) = self.find_enclosing_interpolation(first, stop, span, lower_bound: inside_first) else {
+      return None
+    }
+    first = interpolation.first
+    stop = interpolation.stop
   }
-  token.spell_tokens(self.tables, tokens, insertions)
 }
 
 fn TokenCursor.find_spelling_at(self, edge: SpanEdge, offset: UInt64) -> Option[String]
@@ -805,7 +805,7 @@ fn TokenCursor.find_spelling_at(self, edge: SpanEdge, offset: UInt64) -> Option[
   while index < self.region.stop && read_edge(self.tables.token(index).span, edge) == offset {
     let current = self.tables.token(index)
     if current.span.start < current.span.stop {
-      return token.spell_tokens(self.tables, tokens: [current], insertions: [])
+      return token.spell_tokens(self.tables, first: index, stop: index + 1, insertions: [])
     }
     index += 1
   }
