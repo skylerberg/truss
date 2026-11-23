@@ -1768,6 +1768,30 @@ let () =
       match read_callee_ownership database with
       | Value _ -> ()
       | Failed | Blocked -> Harness.fail "the part did not compute");
+  Harness.test
+    "a part whose computation raised an exception that is no compiler bug is computed at the next \
+     input" (fun () ->
+      let before = [ ("app.main", callee_and_caller) ] in
+      let after =
+        [
+          ( "app.main",
+            "fn callee(x: Int64) -> Int64 { x + 2 }\npublic fn caller() -> Int64 { callee(1) }\n" );
+        ]
+      in
+      let database = build before in
+      (match
+         Database.For_testing.with_failing_unit ~raising:Exit Check_body
+           (Database.For_testing.identify_key (make_main_key "callee"))
+           (fun () -> Database.update database (list_changes ~before ~after))
+       with
+      | () -> Harness.fail "the exception did not escape the update"
+      | exception Exit -> ());
+      Database.update database [];
+      Database.For_testing.propagate database;
+      match Database.For_testing.list_differences database (build after) with
+      | [] -> ()
+      | differences ->
+          Harness.fail "the database differs from a cold build in %s" (show_differences differences));
   Harness.test "a request that reads a fact computes nothing" (fun () ->
       let database = build [ ("app.main", callee_and_caller) ] in
       match
