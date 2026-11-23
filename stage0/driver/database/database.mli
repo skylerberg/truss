@@ -138,7 +138,7 @@ module For_testing : sig
   val identify_package : Path.package -> int
   val identify_item : Lowered.Item.t -> int
   val list_reads : t -> Kind.stage -> int -> (Kind.target * int * string) list
-  val with_failing_unit : Kind.stage -> int -> (unit -> 'result) -> 'result
+  val with_failing_unit : ?raising:exn -> Kind.stage -> int -> (unit -> 'result) -> 'result
   val add_root : t -> Lowered.Item.t -> unit
   val supply_lowered : t -> Lowered.Item.t -> Lowering.lowered -> unit
   val list_differences : t -> t -> (string * int) list

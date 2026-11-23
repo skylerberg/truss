@@ -29,7 +29,9 @@ propagation.
 
 A unit whose pass raises a compiler bug stays stale, and the orchestrator
 drains the units that do not read it. A unit that reads the broken unit's
-row raises the same bug.
+row raises the same bug. A unit whose pass raises any other exception, such
+as a stack overflow, stays stale as well. That exception ends the command,
+and the next command computes the unit again.
 
 ## Rules for the schema
 
