@@ -1106,6 +1106,31 @@ let () =
              (List.map
                 (fun (definition, position) -> Printf.sprintf "%s at %d" definition position)
                 (List.sort compare !defaults))));
+  Harness.test
+    "a default's code ends none of its temporaries, which the statement that makes the call ends"
+    (fun () ->
+      let packages = Support.setup [ ("app.main", Fixtures.Mir.calls_that_omit_arguments) ] in
+      match
+        Mir.read_default_graphs (make_mir_parts packages) (Support.make_top_path "app.main" "count")
+      with
+      | Some { form = Parameter_defaults [ (0, default) ]; _ } ->
+          let statements = list_statements default.body in
+          if
+            not
+              (List.exists
+                 (fun (statement : Mir.Graph.statement) ->
+                   match statement.kind with
+                   | Basic (Assign { value = Array _; _ }) -> true
+                   | _ -> false)
+                 statements)
+          then Harness.fail "the default builds no array";
+          if
+            List.exists
+              (fun (statement : Mir.Graph.statement) ->
+                match statement.kind with Basic (Dead _) -> true | _ -> false)
+              statements
+          then Harness.fail "the default's code ends a temporary"
+      | _ -> Harness.fail "`count` does not have one default at position 0");
   Harness.test "a contract's clauses are formulas that take the function's parameters" (fun () ->
       let packages =
         Support.setup

@@ -240,11 +240,44 @@ and assign state (target : Mir.place) (value : Mir.rvalue) ~origin =
       if List.mem target frame.taken then
         frame.taken <- List.filter (fun taken -> taken <> target) frame.taken
       else Mir_drops.drop_overwritten state target destination ty;
-      match evaluated with
-      | Some fresh ->
+      match (evaluated, value, target) with
+      | Some fresh, _, _ ->
           Emit_c.Ir_builder.emit state.builder
             (Assign (destination, Use (Lowering.make_owned_operand state fresh ty)))
-      | None -> lower_rvalue_into ?types_ty state value destination ty ~origin)
+      | ( None,
+          Parameter_default { definition; position; substitution },
+          { root = Local local; projections = [] } ) ->
+          let default =
+            Mir.read_parameter_default_graph state.context.lookups.mir ~definition ~position
+          in
+          let caller = state.frame in
+          state.frame <-
+            {
+              caller with
+              code =
+                Definitions.make_default_code state.context caller.code ~source:default.source
+                  ~substitution;
+              self_place = None;
+            };
+          let default_frame = inline_mir state default.form destination in
+          state.frame <- caller;
+          Option.iter
+            (fun (inlined : Lowering.mir_frame) ->
+              Option.iter
+                (fun at_return -> inlined.move_state <- at_return)
+                inlined.move_state_at_return;
+              if Mir_drops.list_default_temporaries inlined <> [] then begin
+                let is_applied =
+                  Lowered.make_local_place
+                    (Emit_c.Ir_builder.allocate_local state.builder ~is_zeroed:true (Raw Bool))
+                in
+                Emit_c.Ir_builder.emit state.builder
+                  (Assign (is_applied, Use (Constant (Bool true))));
+                Hashtbl.replace (Mir_places.require_mir_frame state).applied_defaults local
+                  { default_frame; is_applied }
+              end)
+            default_frame.mir
+      | None, _, _ -> lower_rvalue_into ?types_ty state value destination ty ~origin)
 
 and lower_rvalue_into ?types_ty state (rvalue : Mir.rvalue) (destination : Lowered.place) ty ~origin
     =
@@ -347,21 +380,8 @@ and lower_rvalue_into ?types_ty state (rvalue : Mir.rvalue) (destination : Lower
       match Mir_places.ground_argument state (Value (Value_parameter parameter)) with
       | Value number -> assign (Use (Targets.lower_literal state ty (Integer_value number)))
       | _ -> Definitions.raise_bug "the value parameter %s is not a number" parameter.name)
-  | Parameter_default { definition; position; substitution } ->
-      let default =
-        Mir.read_parameter_default_graph state.context.lookups.mir ~definition ~position
-      in
-      let caller = state.frame in
-      state.frame <-
-        {
-          caller with
-          code =
-            Definitions.make_default_code state.context caller.code ~source:default.source
-              ~substitution;
-          self_place = None;
-        };
-      lower_mir_into state default.form destination;
-      state.frame <- caller
+  | Parameter_default _ ->
+      Definitions.raise_bug "a default assigned to a place that is no temporary of its own"
   | Lambda { body = index; captures; _ } ->
       let function_type =
         match ty with
@@ -408,8 +428,8 @@ and lower_field_default_place state ty ~variant ~field =
       lower_mir_into state default.value place;
       (place, default_ty))
 
-and lower_mir_into ?(arguments = []) state (expression_mir : Mir.Graph.t)
-    (destination : Lowered.place) =
+and inline_mir ?(arguments = []) state (expression_mir : Mir.Graph.t) (destination : Lowered.place)
+    : Lowering.frame =
   let expression_mir = Loop_parts.end_parts expression_mir in
   let caller = state.frame in
   let exit = Emit_c.Ir_builder.allocate_block state.builder in
@@ -417,12 +437,17 @@ and lower_mir_into ?(arguments = []) state (expression_mir : Mir.Graph.t)
     Mir_places.make_body_frame state ~returns_into:destination ~lambdas:expression_mir.lambdas
       expression_mir.body
   in
-  state.frame <- { caller with exit = Some (exit, List.length state.scopes); mir = Some frame };
+  let inlined = { caller with exit = Some (exit, List.length state.scopes); mir = Some frame } in
+  state.frame <- inlined;
   List.iter2 (Mir_places.bind_local state) expression_mir.body.parameters arguments;
   lower_body state frame;
   Emit_c.Ir_builder.finish state.builder Unreachable;
   Emit_c.Ir_builder.start state.builder exit;
-  state.frame <- caller
+  state.frame <- caller;
+  inlined
+
+and lower_mir_into ?arguments state expression_mir destination =
+  ignore (inline_mir ?arguments state expression_mir destination)
 
 and lower_call_into state (call : Mir.call) destination ~origin =
   match (Mir_calls.resolve_callee state call.callee, call.callee.target) with
@@ -825,6 +850,8 @@ and lower_terminator state (region : Mir_drops.region) (ending : Mir.Graph.termi
            });
       Emit_c.Ir_builder.start state.builder (Emit_c.Ir_builder.allocate_block state.builder)
   | Return returned ->
+      (let frame = Mir_places.require_mir_frame state in
+       frame.move_state_at_return <- Some (Moves.copy frame.move_state));
       (match (Mir_places.find_result_slot state, returned) with
       | Some _, Some (Use { place = { root = Local local; projections = [] }; _ })
         when List.mem local (Mir_places.require_mir_frame state).returned ->

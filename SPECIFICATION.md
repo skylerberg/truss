@@ -698,6 +698,10 @@ it.
   long as `middle` can be used. A `let` keeps no other temporary, such as the
   receiver in `let part = make_list().slice()`. A view cannot be used after
   the temporary or the local that it views is dropped.
+- **A default's temporaries are dropped at the end of the statement that
+  makes the call,** as the temporaries of a written argument are. So a view
+  parameter can have an owned default: in
+  `names: Slice[String] = ["ab", "cde"]` the list lasts for the call.
 - **The implicit conversions are between a `List`, an `Array`, or a
   `String` and its view.** One makes a view of a `List` or an `Array` where
   a `Slice` is expected, and of a `String` where a `StringSlice` is. It

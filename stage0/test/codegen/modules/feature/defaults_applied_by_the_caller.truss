@@ -53,6 +53,39 @@ fn scale(value: Int64, factor: Int64 = 2) -> Int64 {
 
 let doubled: Int64 = scale(5)
 
+fn count_letters(names: Slice[String] = ["ab", "cde"]) -> UInt64 {
+  names[0].length() + names[1].length()
+}
+
+fn mark_first(names: mut Slice[String] = ["ab", "cde"]) -> UInt64 {
+  mut names[0].push("!")
+  names[0].length() + names[1].length()
+}
+
+fn checked_count(names: Slice[String] = ["ab", "cde"]) -> Option[UInt64] {
+  if names.length() == 0 {
+    return None
+  }
+  Some(names[0].length() + names[1].length())
+}
+
+fn doubled_count() -> Option[UInt64] {
+  let counted = checked_count()?
+  Some(counted * 2)
+}
+
+fn count_if(wanted: Bool) -> UInt64 {
+  if wanted && count_letters() == 5 {
+    count_letters()
+  } else {
+    0
+  }
+}
+
+fn call(count: fn() -> UInt64) -> UInt64 {
+  count()
+}
+
 type Shelf(books: List[String])
 
 fn Shelf.book(self, position: UInt64 = 0) lends String {
@@ -95,6 +128,24 @@ test "a mut parameter's default is a place of the caller that the callee mutates
 test "a view parameter's default views data that outlives the call" {
   assert greet() == 7
   assert greet("you") == 5
+}
+
+test "a view parameter's default views strings that last for the call" {
+  assert count_letters() == 5
+  var total: UInt64 = 0
+  for _ in 0..3 {
+    total += count_letters()
+  }
+  assert total == 15
+  assert mark_first() == 6
+}
+
+test "a default's temporaries end on each path that leaves the statement, and only where it was applied" {
+  assert doubled_count() == Some(10)
+  assert count_if(true) == 5
+  assert count_if(false) == 0
+  assert count_letters() + count_letters() == 10
+  assert call(fn() { count_letters() }) == 5
 }
 
 test "an own parameter's default is moved into the callee" {
