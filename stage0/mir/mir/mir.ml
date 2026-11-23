@@ -29,7 +29,7 @@ let find_defaults (definition : Core.definition) =
               (List.mapi
                  (fun position (parameter : Core.parameter) ->
                    match parameter.default with
-                   | Some default -> [ (position, Builder.of_expression default) ]
+                   | Some default -> [ (position, Builder.of_default default) ]
                    | None -> [])
                  parameters)))
   | Type { defaults; _ } ->

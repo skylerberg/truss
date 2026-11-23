@@ -1629,15 +1629,21 @@ and lower_loop_clauses builder (clauses : Core.loop_clause Core.conditional list
           Cost { origin; amortized; resource; bound = lower_bound written; holds_when })
     clauses
 
-and of_expression (written : Core.expression) =
+and build_expression_body (written : Core.expression) ~return =
   let builder = Emitter.create ~entry_locals:[] () in
   Emitter.run_in_scope builder written.origin (fun () ->
       Emitter.run_in_statement builder written.origin (fun () ->
-          Option.iter
-            (fun value -> Emitter.return_ builder (Some value) written.origin)
-            (lower_expression builder written)));
+          Option.iter (return builder) (lower_expression builder written)));
   let body = Emitter.finish builder ~parameters:[] in
   { Tree.body; lambdas = Emitter.lambdas builder }
+
+and of_expression (written : Core.expression) =
+  build_expression_body written ~return:(fun builder value ->
+      Emitter.return_ builder (Some value) written.origin)
+
+and of_default (written : Core.expression) =
+  build_expression_body written ~return:(fun builder value ->
+      Emitter.jump builder (Return (Some value)) written.origin)
 
 let compute_parameter_origin ~(enclosing : Core.origin) (parameter : Core.parameter) : Core.origin =
   match parameter.local with

@@ -293,6 +293,8 @@ let make_body_frame (state : Lowering.state) ?owner ?returns_into ?lending
               (Emit_c.Ir_builder.allocate_local state.builder ~is_zeroed:true (Raw Bool)) ))
         (Moves.list_flagged moves);
     move_state = Moves.copy_entry_state moves 0;
+    move_state_at_return = None;
+    applied_defaults = Hashtbl.create 1;
     lending;
     called_parts =
       list_statements_where
