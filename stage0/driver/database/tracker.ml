@@ -5,16 +5,18 @@ type t = {
 }
 
 let create store = { store; bugs = Hashtbl.create 8; broken = Hashtbl.create 8 }
-let failing_unit : (Kind.stage * int) option ref = ref None
+let failing_unit : (Kind.stage * int * exn option) option ref = ref None
 
-let with_failing_unit stage id run =
-  failing_unit := Some (stage, id);
+let with_failing_unit ?raising stage id run =
+  failing_unit := Some (stage, id, raising);
   Fun.protect ~finally:(fun () -> failing_unit := None) run
 
 let fail_for_test stage ids =
   match !failing_unit with
-  | Some (failing_stage, id) when failing_stage = stage && List.mem id ids ->
-      Compiler_bug.raise_bug ~stage:"Database" "a unit fails for a test"
+  | Some (failing_stage, id, raising) when failing_stage = stage && List.mem id ids -> (
+      match raising with
+      | Some raised -> raise raised
+      | None -> Compiler_bug.raise_bug ~stage:"Database" "a unit fails for a test")
   | Some _ | None -> ()
 
 let reset_broken tracker = Hashtbl.reset tracker.broken

@@ -5,7 +5,7 @@ type t = {
 }
 
 val create : Store.t -> t
-val with_failing_unit : Kind.stage -> int -> (unit -> 'result) -> 'result
+val with_failing_unit : ?raising:exn -> Kind.stage -> int -> (unit -> 'result) -> 'result
 val fail_for_test : Kind.stage -> int list -> unit
 val reset_broken : t -> unit
 val is_broken : t -> Kind.stage -> int -> bool

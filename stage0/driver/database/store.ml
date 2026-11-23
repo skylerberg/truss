@@ -701,6 +701,7 @@ type item_graph = {
   item_kind : int;
   references : int;
   claims : int;
+  claim_kinds : int list;
 }
 
 let mark_items_stale store ~stage =
@@ -753,6 +754,10 @@ let require_settled ~stage ~unit =
   Printf.sprintf " AND NOT EXISTS (SELECT 1 FROM main.stale s WHERE s.stage = %s AND s.id = %s)"
     stage unit
 
+let select_claim_kinds graph =
+  Printf.sprintf " AND c.source_kind IN (%s)"
+    (String.concat ", " (List.map string_of_int graph.claim_kinds))
+
 let select_settled_claims ~packages ~parameter =
   let condition = require_settled ~stage:"c.source_kind" ~unit:"c.source" in
   match packages with
@@ -767,32 +772,56 @@ let is_item_claimed store graph ~item ~over =
     match over with
     | Every_edge -> ("", "", "", [])
     | Settled_edges { packages } ->
-        let claimant, claim_condition, packages = select_settled_claims ~packages ~parameter:6 in
+        let claimant, claim_condition, packages = select_settled_claims ~packages ~parameter:4 in
         (require_settled ~stage:"?3" ~unit:"e.source", claimant, claim_condition, packages)
   in
-  Sql.has_row store.sql
-    (Printf.sprintf
-       "WITH RECURSIVE up(node) AS (VALUES (?1) UNION SELECT e.source FROM up CROSS JOIN main.edge \
-        e ON e.target_kind = ?2 AND e.target = up.node AND e.name = '' WHERE e.source_kind = ?3 \
-        AND (e.markers & ?4) != 0%s) SELECT 1 FROM up CROSS JOIN main.edge c ON c.target_kind = ?2 \
-        AND c.target = up.node AND c.name = ''%s WHERE (c.markers & ?5) != 0%s LIMIT 1"
-       reference_condition claimant claim_condition)
-    ([
-       Integer item;
-       Integer graph.item_kind;
-       Integer graph.lower_kind;
-       Integer graph.references;
-       Integer graph.claims;
-     ]
-    @ packages)
+  let has_claim node =
+    Sql.has_row store.sql
+      (Printf.sprintf
+         "SELECT 1 FROM main.edge c%s WHERE c.target_kind = ?1 AND c.target = ?2 AND c.name = ''%s \
+          AND (c.markers & ?3) != 0%s LIMIT 1"
+         claimant (select_claim_kinds graph) claim_condition)
+      ([ Integer graph.item_kind; Integer node; Integer graph.claims ] @ packages)
+  in
+  let find_referrer node ~from =
+    Sql.find_row store.sql
+      (Printf.sprintf
+         "SELECT e.source FROM main.edge e WHERE e.target_kind = ?1 AND e.target = ?2 AND e.name = \
+          '' AND e.source_kind = ?3 AND e.source >= ?4 AND (e.markers & ?5) != 0%s ORDER BY \
+          e.source LIMIT 1"
+         reference_condition)
+      [
+        Integer graph.item_kind;
+        Integer node;
+        Integer graph.lower_kind;
+        Integer from;
+        Integer graph.references;
+      ] (fun row -> Sql.read_integer row 0)
+  in
+  let visited = Hashtbl.create 16 in
+  let rec search = function
+    | [] -> false
+    | (node, from) :: pending -> (
+        match find_referrer node ~from with
+        | None -> search pending
+        | Some referrer ->
+            let pending = if referrer = max_int then pending else (node, referrer + 1) :: pending in
+            if Hashtbl.mem visited referrer then search pending
+            else begin
+              Hashtbl.replace visited referrer ();
+              has_claim referrer || search ((referrer, min_int) :: pending)
+            end)
+  in
+  Hashtbl.replace visited item ();
+  has_claim item || search [ (item, min_int) ]
 
 let list_claimed_among store graph ~items ~packages =
   let claimant, claim_condition, packages = select_settled_claims ~packages ~parameter:4 in
   Sql.list_rows store.sql
     (Printf.sprintf
        "SELECT DISTINCT c.target FROM json_each(?1) i CROSS JOIN main.edge c ON c.target_kind = ?2 \
-        AND c.target = i.value AND c.name = ''%s WHERE (c.markers & ?3) != 0%s"
-       claimant claim_condition)
+        AND c.target = i.value AND c.name = ''%s%s WHERE (c.markers & ?3) != 0%s"
+       (select_claim_kinds graph) claimant claim_condition)
     ([ Text (encode_integers items); Integer graph.item_kind; Integer graph.claims ] @ packages)
     (fun row -> Sql.read_integer row 0)
 

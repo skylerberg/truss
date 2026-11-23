@@ -29,7 +29,9 @@ propagation.
 
 A unit whose pass raises a compiler bug stays stale, and the orchestrator
 drains the units that do not read it. A unit that reads the broken unit's
-row raises the same bug.
+row raises the same bug. A unit whose pass raises any other exception, such
+as a stack overflow, stays stale as well. That exception ends the command,
+and the next command computes the unit again.
 
 ## Rules for the schema
 
@@ -259,10 +261,11 @@ the types it holds.
 
 An `item` row exists while a claimed item reaches it. A unit that gains a
 `claims` or `references` edge to an item inserts the item's row and marks
-its Lower and Key tests units stale. A unit that loses such an edge asks, by
-one recursive query that stops at the first claimed item, whether any
-claimed item still reaches the target; if none does, the item's rows are
-deleted and the items it referenced are asked the same.
+its Lower and Key tests units stale. A unit that loses such an edge asks
+whether any claimed item still reaches the target. A depth-first search
+follows the `references` edges into the target backward, one referrer at a
+time, and stops at the first claimed item. If none reaches the target, the
+item's rows are deleted and the items it referenced are asked the same.
 
 A command says how far to drain: `check` drains through Decide, and `test`
 and `build` through Key tests, for the packages they name and the packages
@@ -275,9 +278,9 @@ that its roots reach.
 A drain selects its units from the `stale` rows, so a stage with no stale row
 costs one seek. A drain for packages joins the stale rows of a stage with
 their entities and keeps the entities of those packages. Lower asks, for each
-stale item, whether a claim reaches it: one recursive query follows the
-`references` edges into the item backward, through settled units only, and
-stops at the first settled claim of the command's packages. Lower then
+stale item, whether a claim reaches it: the same depth-first search follows
+the `references` edges into the item backward, through settled units only,
+and stops at the first settled claim of the command's packages. Lower then
 continues from each unit it lowers to the stale items that the unit
 references, and asks again about the stale items that remain until none is
 reached. Key tests starts from its stale items and the items whose keys read
@@ -360,6 +363,7 @@ runs the evaluation again.
 | A statement that joins names its driving table first and joins with `CROSS JOIN`, which SQLite never reorders. | The store's statements have no statistics to plan from, and the planner's choice differs between versions of SQLite. A newer planner made the edge table the outer loop of a recursive step, so each step read every edge, and CI's jobs took ten times as long as the same work on a machine with an older SQLite. |
 | A membership test on the rows of a join is written `+column IN (…)`, and a bare `column IN (…)` is written only where the list is to drive the index. | SQLite uses a list on a column that continues an index as part of the seek, once for each value of the list. The statement that lists the call edges among the definitions of a recursion scope tested each edge's target against the scope this way, so it sought the edge index once for each pair of definitions: 16 s of a 30 s build of the standard library, from one statement that returns 20 thousand rows. The unary plus keeps the test out of the seek. |
 | A drain selects its units from the `stale` rows, and from the entities in its scope only for the files an editor has open. | A command with no change must cost the same at every project size. Selecting from the scope read every definition of the named files once for each stage, and walked every claimed item once for each level of the deepest chain of references. On 10,400 functions a command with no change took 438 ms, and an edit to one body took 729 ms, of which 17 ms was the edit's own work. A stale item that no settled claim reaches stays stale, and each command asks about it again. |
+| A search for a claim that reaches an item goes depth first, and reads one referrer of an item at a time. | A breadth-first query read every referrer of an item before any referrer of those. For a function that every module calls, that is every caller, although a test claims the first caller's own caller. Removing a module of 26 functions took 4.6 s on 10,400 functions, of which 4.1 s was 83 such searches. Depth first, a search reaches a claimed item after as many steps as the chain to it is long. A search that finds no claim still visits every item that reaches its target. |
 | A unit that reads an interface with its signature check records one edge, to the definition's checked interface. A write of the interface's value, and a write of the signature check, each mark the readers of that target. | The read recorded one edge to the interface and another to the signature check. These pairs were a third of the edges of a 15,000-line program: with one target its 853,105 edges are 582,376. The stages up to Check signatures read an interface before it is checked, and keep the interface as their target, so a signature check that fails does not mark them. |
 | A lookup's statement has an index on every column that it filters by. | A statement that filters a package's definitions by member name with an index on the package alone reads the whole package each time it runs. The count of statements does not show it. |
 | A fact holds everything that its reader needs to use it. `type_facts` holds the type's generic parameters beside the conditions written over them. | A reader that must fetch a second fact to interpret the first makes every question cost both reads. Deciding whether a type is plain read the type's facts and then its whole interface for the parameters' names, at every operand of every body. |
