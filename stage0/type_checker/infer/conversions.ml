@@ -20,13 +20,58 @@ let find_view_as ~owned ~view =
       Some owned_view
   | _ -> None
 
+let list_view_copy_fixes (state : State.state) (written : Syntax.expression) ~view ~owner =
+  let copy =
+    match State.normalize state owner with
+    | Types.Named { path; arguments = [] } when Well_known.is String path -> Some "to_string"
+    | Types.Named { path; arguments = [ Type element ] }
+      when Well_known.is List path
+           && State.decide_property state Interface.Properties.Copyable element = Holds ->
+        Some "to_list"
+    | _ -> None
+  in
+  let is_view_of_owner =
+    match Types.find_view (State.normalize state owner) with
+    | Some owned_view -> Types.equal owned_view (State.normalize state view)
+    | None -> false
+  in
+  match copy with
+  | Some method_name when is_view_of_owner -> (
+      let title = Printf.sprintf "Copy the view with `%s()`." method_name in
+      let span = State.read_span state written.id in
+      let is_postfix (value : Syntax.expression) =
+        match value.kind with
+        | Name _ | Member _ | Call _ | Bracket _ | Parenthesized _ | Self_value -> true
+        | _ -> false
+      in
+      match written.kind with
+      | Call ({ kind = Member (_, name); _ }, []) when name.text = "copy" ->
+          [ State.fix title [ State.replace (State.read_span state name.id) method_name ] ]
+      | Mode (_, inner) when is_postfix inner ->
+          [
+            State.fix title
+              [ State.insert (State.read_span state inner.id).stop ("." ^ method_name ^ "()") ];
+          ]
+      | _ when is_postfix written ->
+          [ State.fix title [ State.insert span.stop ("." ^ method_name ^ "()") ] ]
+      | _ ->
+          [
+            State.fix title
+              [
+                State.replace span
+                  (Printf.sprintf "(%s).%s()" (State.quote_span state span) method_name);
+              ];
+          ])
+  | _ -> []
+
 let convert (state : State.state) (env : State.env) ?argument ?(takes_view_as_owner = false)
-    ?expression (span : Source.Definition_span.t) ~actual ~expected =
+    ?(expression : Syntax.expression option) (span : Source.Definition_span.t) ~actual ~expected =
   let is_argument = Option.is_some argument in
   let record_conversion conversion =
     match (conversion, expression) with
-    | Some conversion, Some id ->
-        state.tables.conversions.(id) <- state.tables.conversions.(id) @ [ (conversion, expected) ]
+    | Some conversion, Some (written : Syntax.expression) ->
+        state.tables.conversions.(written.id) <-
+          state.tables.conversions.(written.id) @ [ (conversion, expected) ]
     | _ -> ()
   in
   record_conversion
@@ -34,7 +79,12 @@ let convert (state : State.state) (env : State.env) ?argument ?(takes_view_as_ow
   let actual_type = read_head state ~default_at:span actual in
   let wanted = read_expected_head state expected in
   let refuse () =
-    Failures.report_mismatch state span ~expected ~actual;
+    let fixes =
+      match expression with
+      | Some written -> list_view_copy_fixes state written ~view:actual_type ~owner:wanted
+      | None -> []
+    in
+    Failures.report_mismatch ~fixes state span ~expected ~actual;
     None
   in
   let between_owner_and_view =
@@ -105,5 +155,5 @@ let convert (state : State.state) (env : State.env) ?argument ?(takes_view_as_ow
       | _ -> if Unify.unify state.unifier wanted actual_type then None else refuse ())
 
 let coerce state env ?argument ?takes_view_as_owner (value : Syntax.expression) ~actual ~expected =
-  convert state env ?argument ?takes_view_as_owner ~expression:value.id
+  convert state env ?argument ?takes_view_as_owner ~expression:value
     (State.read_span state value.id) ~actual ~expected

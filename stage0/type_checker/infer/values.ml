@@ -234,7 +234,7 @@ and check_lambda (state : State.state) env ?expected (value : Syntax.expression)
         let output = function_type.output in
         let lambda_env = { env with output = Some (Returns output) } in
         let body_type = Statements.check_block_value state lambda_env ~expected:output body in
-        Conversions.convert state lambda_env ?expression:(find_block_value_id body)
+        Conversions.convert state lambda_env ?expression:(find_block_value body)
           (State.read_span state body.id) ~actual:body_type ~expected:output;
         Types.Function function_type
     | Some (Types.Function function_type) ->
@@ -313,21 +313,21 @@ and check_if state env ?expected (test : Syntax.expression) then_ else_ =
         | Syntax.Else block ->
             ( Statements.check_block_value state env ?expected block,
               State.read_span state block.id,
-              find_block_value_id block )
+              find_block_value block )
         | Else_if branch_expression ->
             ( Hooks.check_expression state env ?expected branch_expression,
               State.read_span state branch_expression.id,
-              Some branch_expression.id )
+              Some branch_expression )
       in
       join state env ~expected
         [
-          (then_type, State.read_span state then_.id, find_block_value_id then_);
+          (then_type, State.read_span state then_.id, find_block_value then_);
           (else_type, else_span, else_end);
         ]
 
-and find_block_value_id (written : Syntax.block) =
+and find_block_value (written : Syntax.block) =
   match List.rev written.statements with
-  | { kind = Expression value; _ } :: _ -> Some value.id
+  | { kind = Expression value; _ } :: _ -> Some value
   | _ -> None
 
 and join state env ~expected branches =
@@ -384,7 +384,7 @@ and match_ state env ?expected scrutinees arms =
         Option.iter (fun guard -> Hooks.check state env guard Types.bool) arm.guard;
         ( check_arm_value state env ?expected arm.body,
           State.read_span state arm.body.id,
-          match arm.body.kind with Expression value -> Some value.id | _ -> None ))
+          match arm.body.kind with Expression value -> Some value | _ -> None ))
       arms
   in
   join state env ~expected branch_types

@@ -877,6 +877,71 @@ let () =
       expect_one_diagnostic Fixtures.Infer.slice_passed_as_an_array_key "types.mismatch");
   Harness.test "a slice of bytes is not passed as a string" (fun () ->
       expect_one_diagnostic Fixtures.Infer.byte_slice_passed_as_a_string_key "types.mismatch");
+  Harness.test "a string slice where a string is expected is a mismatch with a fix to `to_string()`"
+    (fun () ->
+      expect_one_diagnostic "fn f(name: StringSlice) -> List[String] {\n  [name]\n}\n"
+        "types.mismatch" ~at:("name]", 1)
+        ~fixed:"fn f(name: StringSlice) -> List[String] {\n  [name.to_string()]\n}\n");
+  Harness.test "a copy of a slice where a list is expected is a mismatch with a fix to `to_list()`"
+    (fun () ->
+      expect_one_diagnostic "fn f(items: Slice[Int64]) -> List[Int64] {\n  items.copy()\n}\n"
+        "types.mismatch" ~at:("items.copy", 1)
+        ~fixed:"fn f(items: Slice[Int64]) -> List[Int64] {\n  items.to_list()\n}\n");
+  Harness.test "a range where a list is expected is a mismatch with a fix to `to_list()`" (fun () ->
+      expect_one_diagnostic
+        "fn f(items: Slice[Int64]) -> List[Int64] {\n\
+        \  let rest: List[Int64] = items[1..]\n\
+        \  rest\n\
+         }\n"
+        "types.mismatch" ~at:("items[1..]", 1)
+        ~fixed:
+          "fn f(items: Slice[Int64]) -> List[Int64] {\n\
+          \  let rest: List[Int64] = items[1..].to_list()\n\
+          \  rest\n\
+           }\n");
+  Harness.test
+    "a view passed `own` where its owning type is expected is copied, and the redundant `own` \
+     removed" (fun () ->
+      let text =
+        "fn keep(name: own String) {}\n\nfn f(name: StringSlice) {\n  keep(own name)\n}\n"
+      in
+      let diagnostics =
+        Support.run_check ~check (Support.setup [ ("app.main", text) ]) "app.main"
+      in
+      if Support.list_codes diagnostics <> [ "types.mismatch"; "types.redundant_mode" ] then
+        Harness.fail "found [%s]" (String.concat "; " (Support.list_codes diagnostics));
+      let fixed =
+        Diagnostic.apply_edits text
+          (List.concat_map
+             (fun (diagnostic : Diagnostic.t) ->
+               List.concat_map
+                 (fun (fix : Source.span Diagnostic.fix) -> fix.edits)
+                 diagnostic.fixes)
+             diagnostics)
+      in
+      if
+        fixed
+        <> "fn keep(name: own String) {}\n\n\
+            fn f(name: StringSlice) {\n\
+           \  keep(name.to_string())\n\
+            }\n"
+      then Harness.fail "fixed to %S" fixed);
+  Harness.test "a slice of elements that do not copy, where a list is expected, has no fix"
+    (fun () ->
+      let text =
+        "trait Shape {\n\
+        \  fn area(self) -> Int64\n\
+         }\n\n\
+         fn f(shapes: Slice[any Shape]) -> List[any Shape] {\n\
+        \  shapes\n\
+         }\n"
+      in
+      expect_one_diagnostic text "types.mismatch";
+      expect_fix_titles text []);
+  Harness.test "a slice of another element type than the list's has no fix" (fun () ->
+      let text = "fn f(items: Slice[Int64]) -> List[String] {\n  items\n}\n" in
+      expect_one_diagnostic text "types.mismatch";
+      expect_fix_titles text []);
   Harness.test "a string slice is not the receiver of a string's method" (fun () ->
       expect_one_diagnostic Fixtures.Infer.string_slice_passed_as_a_string_receiver "types.mismatch");
   Harness.test "+ on strings is an error with a fix to interpolation" (fun () ->
