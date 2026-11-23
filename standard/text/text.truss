@@ -53,6 +53,7 @@ impl Model for Literal {
 
 public fn String.length(self) -> UInt64
   ensures result == self.model().length()
+  ensures result <= UInt64.maximum / 2
   cost time O(1)
   cost allocations == 0
 {
@@ -163,6 +164,7 @@ fn utf8_sequence(bytes: intrinsic.View[UInt8], at: UInt64) -> UInt64
 
 public fn StringSlice.length(self) -> UInt64
   ensures result == self.model().length()
+  ensures result <= UInt64.maximum / 2
   cost time O(1)
   cost allocations == 0
 {

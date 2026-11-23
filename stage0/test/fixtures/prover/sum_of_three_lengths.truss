@@ -1,0 +1,3 @@
+fn f(first: List[UInt8], second: List[UInt8], third: List[UInt8]) -> UInt64 {
+  first.length() + second.length() + third.length()
+}

@@ -1213,6 +1213,10 @@ let () =
   Harness.test "an element bound to `_` is still proven in bounds" (fun () ->
       expect_not_proven Fixtures.Prover.element_out_of_bounds_bound_to_a_wildcard
         "prover.out_of_bounds");
+  Harness.test "a length plus one, and a sum of two lengths, fit `UInt64`" (fun () ->
+      expect_proven Fixtures.Prover.sums_of_lengths_that_fit);
+  Harness.test "a sum of three lengths may overflow `UInt64`" (fun () ->
+      expect_not_proven Fixtures.Prover.sum_of_three_lengths "prover.overflow");
   Harness.test "a `mut Slice` parameter keeps its length through a call that writes it" (fun () ->
       expect_proven Fixtures.Prover.slice_parameter_keeps_its_length_through_a_call);
   Harness.test "two halves of a list can be lent together" (fun () ->

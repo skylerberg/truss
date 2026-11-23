@@ -373,9 +373,6 @@ fn multiply_magnitudes(first: Slice[UInt64], second: Slice[UInt64]) -> List[UInt
   if first.length() == 0 || second.length() == 0 {
     return []
   }
-  if first.length() > UInt64.maximum - second.length() {
-    intrinsic.crash("a big integer cannot hold that many limbs")
-  }
   let count = first.length() + second.length()
   var product = zero_limbs(count)
   var outer: UInt64 = 0

@@ -1,5 +1,4 @@
 use standard.collections
-use standard.intrinsic
 use standard.map
 use standard.list
 
@@ -37,9 +36,6 @@ public fn collections.Deque[Element].push_front(mut self, item: own Element)
   ensures self.length() == old(self.length()) + 1
   cost amortized time O(1)
 {
-  if self.back.length() == UInt64.maximum - self.front.length() {
-    intrinsic.crash("a deque cannot hold that many items")
-  }
   mut self.front.push(own item)
 }
 
@@ -47,9 +43,6 @@ public fn collections.Deque[Element].push_back(mut self, item: own Element)
   ensures self.length() == old(self.length()) + 1
   cost amortized time O(1)
 {
-  if self.back.length() == UInt64.maximum - self.front.length() {
-    intrinsic.crash("a deque cannot hold that many items")
-  }
   mut self.back.push(own item)
 }
 

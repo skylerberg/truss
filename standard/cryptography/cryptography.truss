@@ -3528,9 +3528,6 @@ public fn seal(
   ensures result.length() == plaintext.length() + 16
   cost time O(plaintext.length() + associated_data.length())
 {
-  if plaintext.length() > UInt64.maximum - 16 {
-    intrinsic.crash("a list cannot hold that many bytes")
-  }
   match cipher {
     ChaCha20Poly1305 => chacha20_poly1305_seal(
       key.bytes,
