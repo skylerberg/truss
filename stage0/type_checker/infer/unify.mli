@@ -22,6 +22,7 @@ val create :
 val make_fresh_type : t -> Types.ty
 val make_fresh_number : t -> Language.Builtin_type.t list -> Types.ty
 val make_fresh_value : t -> Types.value
+val make_fresh_argument : t -> Types.generic -> Types.argument
 val make_fresh_capability_variable : t -> Types.capability_set
 val resolve : t -> Types.ty -> Types.ty
 val read_root : t -> int -> int

@@ -31,8 +31,14 @@ type cause =
     }
   | Method_call of Source.Definition_span.t
   | Loop of Source.Definition_span.t
+  | Quantifier of Source.Definition_span.t
   | Any_conversion of { at : Source.Definition_span.t; any_type : Types.ty }
   | Excluded of (Types.ty -> Diagnostic.reported)
+
+type origin =
+  | List_literal of Syntax.id
+  | Map_literal of Syntax.id
+  | Generic_argument of { written : Syntax.id; parameter : Types.generic; declared_on : Path.t }
 
 type goal = {
   subject : Types.ty;
@@ -68,6 +74,7 @@ type entry =
       report_excluded : Types.ty -> Diagnostic.reported;
     }
   | Local of Syntax.id
+  | Origin of origin
   | Decided of {
       site : decision_site;
       decided_type : Types.ty;
@@ -218,14 +225,36 @@ let check_when_final state check =
 
 let resolve state type_ = Unify.resolve state.unifier type_
 let zonk state type_ = Unify.zonk state.unifier type_
-let make_fresh_type state = Unify.make_fresh_type state.unifier
+let record_in_log state member entry = state.log <- { member; entry } :: state.log
 
-let make_fresh_generic_arguments state (generics : Types.generic list) =
+let list_class_log state index =
+  let root = Unify.read_root state.unifier index in
+  List.rev
+    (List.filter
+       (fun (logged : logged) -> Unify.read_root state.unifier logged.member = root)
+       state.log)
+
+let find_class_origin state index =
+  List.find_map
+    (function { member; entry = Origin origin } -> Some (member, origin) | _ -> None)
+    (list_class_log state index)
+
+let find_variable_origin state (type_ : Types.ty) =
+  match resolve state type_ with
+  | Types.Variable index -> Option.map snd (find_class_origin state index)
+  | _ -> None
+
+let make_fresh_type state origin =
+  let fresh = Unify.make_fresh_type state.unifier in
+  record_in_log state state.unifier.next (Origin origin);
+  fresh
+
+let make_fresh_generic_arguments state generics (origin_of : Types.generic -> origin) =
   List.map
-    (fun (generic : Types.generic) ->
-      match generic.kind with
-      | Value_generic -> Types.Value (Unify.make_fresh_value state.unifier)
-      | Type_generic _ -> Types.Type (make_fresh_type state))
+    (fun generic ->
+      let argument = Unify.make_fresh_argument state.unifier generic in
+      record_in_log state state.unifier.next (Origin (origin_of generic));
+      argument)
     generics
 
 let lookup_bounds state = Interface.Elaborator.list_known_bounds (read_context state)
@@ -301,8 +330,6 @@ let read_integer_range state type_ =
         (fun (low, high) (other_low, other_high) -> (Z.max low other_low, Z.min high other_high))
         first rest
 
-let record_in_log state member entry = state.log <- { member; entry } :: state.log
-
 let make_literal_type state (value : Syntax.expression) allowed ~report_excluded =
   let literal = Unify.make_fresh_number state.unifier allowed in
   record_in_log state state.unifier.next
@@ -373,7 +400,8 @@ let unify_as_hint state actual expected =
   let skip_outputs type_ =
     Types.map
       (function
-        | Types.Variable index when is_output index -> Some (make_fresh_type state) | _ -> None)
+        | Types.Variable index when is_output index -> Some (Unify.make_fresh_type state.unifier)
+        | _ -> None)
       (zonk state type_)
   in
   let deferred_capability_equalities = state.unifier.deferred_capability_equalities in

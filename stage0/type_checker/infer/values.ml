@@ -70,8 +70,7 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
             Types.Named
               {
                 path = tag_path;
-                arguments =
-                  Instantiation.instantiate_type state (State.read_span state tag.last.id) tag_path;
+                arguments = Instantiation.instantiate_type state ~written:tag.last.id tag_path;
               }
           in
           List.iter (fun (part, _) -> Modes.note_owned_value state env part) parts;
@@ -170,7 +169,7 @@ and check_list_literal state env ?expected (value : Syntax.expression) items =
         From_elements_from_elements;
       collection
   | _ ->
-      let element = State.make_fresh_type state in
+      let element = State.make_fresh_type state (List_literal value.id) in
       check_items element;
       Types.make_named (Well_known.make_path List) [ element ]
 
@@ -196,7 +195,10 @@ and check_map_literal state env ?expected (value : Syntax.expression) entries =
         | Some collection when takes_literal state collection from_entries -> collection
         | _ ->
             Types.make_named (Well_known.make_path Map)
-              [ State.make_fresh_type state; State.make_fresh_type state ]
+              [
+                State.make_fresh_type state (Map_literal value.id);
+                State.make_fresh_type state (Map_literal value.id);
+              ]
       in
       let at = State.read_span state value.id in
       let key = Solver.resolve_associated_type state map from_entries From_entries_key ~at in
@@ -244,10 +246,18 @@ and check_lambda (state : State.state) env ?expected (value : Syntax.expression)
                 (List.length function_type.inputs)))
     | Some ((Types.Error _ | Types.Hole) as unknown) -> make_untyped unknown
     | _ ->
+        let remedy =
+          match Option.bind expected (State.find_variable_origin state) with
+          | Some (Generic_argument { declared_on; parameter; _ }) ->
+              Failures.make_bracket_remedy declared_on parameter
+          | Some (List_literal _ | Map_literal _) | None ->
+              "Bind it with a typed `let`, such as `let double: fn(Int64) -> Int64 = fn(x) { x * 2 \
+               }`."
+        in
         make_untyped
           (State.make_error_type state Lambda_needs_type (State.read_span state value.id)
-             "A lambda's parameter types come from where it is used, and nothing here gives them. \
-              Give the `let` a function type, or the call type arguments.")
+             ("A lambda's parameter types come from where it is used, and nothing here gives them. "
+            ^ remedy))
   in
   state.lambdas <- List.tl state.lambdas;
   let rec list_newer acc list =
@@ -398,7 +408,11 @@ and check_collection_element state env ~(quantifier : Syntax.expression)
       element
   | _, (Types.Error _ | Types.Hole) -> collection_type
   | _ -> (
-      match Name_lookup.find_elements_calls state collection collection_type Language.Mode.Read with
+      match
+        Name_lookup.find_elements_calls state
+          ~cause:(Quantifier (State.read_span state collection.id))
+          collection collection_type Language.Mode.Read
+      with
       | Visible (loop, element, _) ->
           State.elaborate state quantifier.id (Loop loop);
           element

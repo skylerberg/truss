@@ -2051,9 +2051,9 @@ An empty literal does not say what it holds, so its `let` or `var` states the
 type:
 
 ```text
-main.truss:2:3: error[types.cannot_infer]: The types in this statement cannot be inferred from it alone. Give the `let` a type, or the call type arguments, such as `var names: List[String] = []`.
+main.truss:2:7: error[types.cannot_infer]: The type of `names` cannot be inferred from this statement alone. Declare `names` with a type.
   |   var names = []
-  |   ^^^^^^^^^^^^^^
+  |       ^^^^^
 
 1 error
 ```
@@ -3169,7 +3169,7 @@ test "lambdas" {
   it types is an error:
 
   ```text
-  main.truss:2:15: error[types.lambda_needs_type]: A lambda's parameter types come from where it is used, and nothing here gives them. Give the `let` a function type, or the call type arguments.
+  main.truss:2:15: error[types.lambda_needs_type]: A lambda's parameter types come from where it is used, and nothing here gives them. Bind it with a typed `let`, such as `let double: fn(Int64) -> Int64 = fn(x) { x * 2 }`.
     |   let twice = fn(value) { value * 2 }
     |               ^^^^^^^^^^^^^^^^^^^^^^^
 

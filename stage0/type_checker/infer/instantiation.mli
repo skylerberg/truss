@@ -6,9 +6,9 @@ type static_ =
 val check_grants_when_final :
   State.state -> Source.Definition_span.t -> Types.ty -> Types.trait_reference -> unit
 
-val make_fresh_arguments : State.state -> Path.t -> Types.argument list
+val read_type_generics : State.state -> Path.t -> Types.generic list
 val make_fresh_trait_reference : State.state -> Path.t -> Types.trait_reference
-val instantiate_type : State.state -> Source.Definition_span.t -> Path.t -> Types.argument list
+val instantiate_type : State.state -> written:Syntax.id -> Path.t -> Types.argument list
 val find_static : State.state -> Syntax.expression -> static_ option
 
 val check_named_type :
@@ -27,7 +27,8 @@ type instance = {
 
 val instantiate :
   State.state ->
-  Source.Definition_span.t ->
+  written:Syntax.id ->
+  declared_on:Path.t ->
   ?extra:Types.substitution ->
   Types.signature ->
   instance

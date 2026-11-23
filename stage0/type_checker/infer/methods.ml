@@ -308,7 +308,7 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
           with
           | Some signature -> (
               let instance =
-                Instantiation.instantiate state (State.read_span state value.id) signature
+                Instantiation.instantiate state ~written:value.id ~declared_on:method_path signature
               in
               let head =
                 List.take
@@ -444,14 +444,13 @@ and check_trait_method_through_type state env ?expected:_ ?trait_arguments
       check_trait_method_call state env value self_type trait method_ arguments ~trait_arguments
   | None ->
       check_trait_method_call state env value self_type trait method_ arguments
-        ~trait_arguments:(State.make_fresh_generic_arguments state trait_generics)
+        ~trait_arguments:(List.map (Unify.make_fresh_argument state.unifier) trait_generics)
 
 and check_trait_method_call state env (value : Syntax.expression) self_type
     (trait : Types.trait_reference) (method_ : Types.trait_method) arguments ~trait_arguments =
   let reference = { trait with trait_arguments } in
   let instance, callee =
-    Name_lookup.instantiate_trait_method state (State.read_span state value.id) ~self_type reference
-      method_
+    Name_lookup.instantiate_trait_method state ~written:value.id ~self_type reference method_
   in
   let receiver_and_arguments =
     match (instance.signature.receiver, arguments) with
@@ -505,7 +504,8 @@ and check_trait_call_in_full state env (value : Syntax.expression) trait ~trait_
     match find_overload Static with None -> find_overload wanted | trait_method -> trait_method
   with
   | Some method_ ->
-      check_trait_method_through_type state env ?trait_arguments value (State.make_fresh_type state)
+      check_trait_method_through_type state env ?trait_arguments value
+        (Unify.make_fresh_type state.unifier)
         (Instantiation.make_fresh_trait_reference state trait)
         method_ arguments
   | None when Members.list_trait_methods state.lookups trait member.text <> [] ->
@@ -528,7 +528,7 @@ and check_trait_call_in_full state env (value : Syntax.expression) trait ~trait_
                  ~name:member.text ~receiver:wanted))
       with
       | Some (declared_by, method_) ->
-          let self_type = State.make_fresh_type state in
+          let self_type = Unify.make_fresh_type state.unifier in
           Solver.require state
             (Method_call (State.read_span state value.id))
             self_type
@@ -548,7 +548,8 @@ and check_capability_call state env (value : Syntax.expression) capability (memb
   with
   | Some method_ -> (
       let instance =
-        Instantiation.instantiate state (State.read_span state value.id)
+        Instantiation.instantiate state ~written:value.id
+          ~declared_on:(Method { owner = capability; name = member.text; receiver = Static })
           (Members.read_method_signature state.signatures state.lookups capability method_)
       in
       match
@@ -724,7 +725,9 @@ and check_method_with_receiver state env ?expected ?(type_arguments = [])
   match Instantiation.find_function_signature state.signatures state.lookups method_path with
   | None -> State.raise_bug "the method `%s` has no signature" (Path.show method_path)
   | Some signature -> (
-      let instance = Instantiation.instantiate state (State.read_span state value.id) signature in
+      let instance =
+        Instantiation.instantiate state ~written:value.id ~declared_on:method_path signature
+      in
       match
         Name_lookup.check_explicit_type_arguments
           ~head:
@@ -802,8 +805,8 @@ and check_trait_method_with_receiver state env (value : Syntax.expression)
   | Some error -> Calls.check_arguments_alone state env arguments error
   | None -> (
       let instance, callee =
-        Name_lookup.instantiate_trait_method state (State.read_span state value.id)
-          ~self_type:receiver_type trait method_
+        Name_lookup.instantiate_trait_method state ~written:value.id ~self_type:receiver_type trait
+          method_
       in
       match Name_lookup.check_explicit_type_arguments state value instance type_arguments with
       | Error error -> Calls.check_arguments_alone state env arguments error

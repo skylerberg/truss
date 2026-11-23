@@ -296,7 +296,10 @@ and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable :
           let cursor = Types.make_trait_reference ~arguments:[] (Well_known.make_path Cursor) in
           let by_position : (Tables.loop * Types.ty * Language.Mode.t) Resolve.Names.lookup =
             if mode = Language.Mode.Own then Absent
-            else Name_lookup.find_elements_calls state iterable type_ mode
+            else
+              Name_lookup.find_elements_calls state
+                ~cause:(Loop (State.read_span state iterable.id))
+                iterable type_ mode
           and consumed : (Tables.loop * Types.ty) Resolve.Names.lookup =
             if mode = Language.Mode.Own then Name_lookup.find_consuming_cursor state iterable type_
             else Absent
