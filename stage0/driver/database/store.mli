@@ -46,20 +46,15 @@ type diagnostic = {
   detail : string;
 }
 
+val has_diagnostic : t -> stage:int -> unit:int -> bool
+val mark_reported_units_stale : t -> stage:int -> unit
 val replace_diagnostics : t -> stage:int -> unit:int -> package:string -> diagnostic list -> bool
-
-val list_definition_edges :
-  t -> package:string -> unit_kind:int -> target_kind:int -> markers:int -> (int * int * int) list
-
-val list_definition_edge_names :
-  t -> package:string -> unit_kind:int -> target_kind:int -> string list
+val has_unchecked_body : t -> package:string -> skipped_kind:int option -> bool
 
 val list_code_packages :
   t -> package:string -> unit_kind:int -> target_kind:int -> test_kind:int -> string list option
 
 val find_definition_key_anywhere : t -> id:int -> string option
-val has_unchecked_body : t -> package:string -> generic_kinds:int list -> bool
-val find_package_name : t -> id:int -> string option
 
 type endpoint = { kind : int; id : int; name : string }
 type edge = { target : endpoint; markers : int }
@@ -69,6 +64,7 @@ val list_edges : t -> schema -> source:endpoint -> edge list
 type edge_change = { changed : endpoint; before : int; after : int }
 
 val replace_edges : t -> source:endpoint -> edge list -> edge_change list
+val has_source : t -> target:endpoint -> source_kind:int -> markers:int -> bool
 val list_sources : t -> target:endpoint -> markers:int -> endpoint list
 val list_definitions_naming : t -> target:endpoint -> markers:int -> string list
 val list_names_of_edges_into : t -> kind:int -> id:int -> markers:int -> string list
@@ -146,7 +142,7 @@ val merge : string list -> into:string -> unit
 type located = { stage : int; base : int option; is_in_test : bool; detail : string }
 
 val list_file_diagnostics : t -> schema -> file:int -> test_kind:int -> located list
-val has_error : t -> package:string -> last_stage:int -> bool
+val has_error : t -> package:string -> last_stage:int -> hidden_stage:int option -> bool
 
 type scope = Everything | Packages of string list | Files of int list
 
@@ -202,7 +198,6 @@ type unit_entity =
   | Definition_unit
   | Path_unit
   | Dependency_unit
-  | Package_unit
   | Item_unit
 
 val list_stale : t -> stage:int -> entity:unit_entity -> scope:scope -> int list
@@ -255,6 +250,16 @@ type selection =
 
 val find_definition : t -> schema -> id:int -> definition option
 val list_definitions : t -> schema -> selection -> definition list
+
+val find_source_definition :
+  t -> target:endpoint -> source_kind:int -> markers:int -> from_:int -> definition option
+
+val list_target_definitions :
+  t -> source:endpoint -> target_kind:int -> markers:int -> origin:int -> (definition * int) list
+
+val list_package_member_keys :
+  t -> schema -> package:string -> member:string -> kind:int -> origin:int -> string list
+
 val replace_definition : t -> definition -> unit
 val remove_definition : t -> id:int -> unit
 

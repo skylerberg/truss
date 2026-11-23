@@ -43,6 +43,8 @@ val encode_supplied :
   Store.definition
 
 val decode_key : string -> Resolve.Names.key
+val decode_declaration : Store.definition -> Resolve.Names.declaration
+val list_tests : Store.t -> Path.package -> string -> Resolve.Names.key list
 val decode_file : string -> Path.file
 val decode_kind : int -> Resolve.Names.kind
 val rank_kind : Resolve.Names.kind -> int

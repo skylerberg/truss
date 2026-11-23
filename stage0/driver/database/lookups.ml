@@ -27,9 +27,20 @@ let sort_in_dependency_order database packages =
   List.rev !order
 
 let make_names (database : Tracker.t) (recorder : Tracker.recorder) =
-  Declarations.make_lookups database.store
-    ~note:(fun lookup scope name -> recorder.note Reads (Lookup lookup) scope name)
-    ~is_package:(is_package database) ~list_dependency_names:(list_dependency_names database)
+  let names =
+    Declarations.make_lookups database.store
+      ~note:(fun lookup scope name -> recorder.note Reads (Lookup lookup) scope name)
+      ~is_package:(is_package database) ~list_dependency_names:(list_dependency_names database)
+  in
+  if recorder == Tracker.untracked then names
+  else
+    {
+      names with
+      list_package_declarations =
+        (fun _ ->
+          Compiler_bug.raise_bug ~stage:"Database"
+            "a unit lists the declarations of a package, and no edge records that read");
+    }
 
 let make_interface (database : Tracker.t) (recorder : Tracker.recorder) ~is_checked :
     Interface.Lookups.t =
@@ -161,55 +172,66 @@ let make_proof (database : Tracker.t) (recorder : Tracker.recorder) : Prover.Loo
 
 let make_package_checks (database : Tracker.t) (recorder : Tracker.recorder) :
     Package_checks.Lookups.t =
-  let interface = make_interface database recorder ~is_checked:true in
-  let unit_kind = Kind.rank_stage Check_body in
+  let body_kind = Kind.rank_stage Check_body in
   let definition_kind = Kind.rank_target (Entity Definition) in
-  let require_checked package ~generic_kinds =
-    recorder.note Reads (Selection Unchecked_bodies) (Ids.of_package package) "";
-    if Store.has_unchecked_body database.store ~package:(Path.show_package package) ~generic_kinds
-    then raise Tracker.Reads_failed_fact
+  let references = Kind.encode_markers [ References ] in
+  let list_body_targets (key : Resolve.Names.key) ~markers =
+    Store.list_target_definitions database.store
+      ~source:(Tracker.locate_unit Check_body (Ids.of_key key))
+      ~target_kind:definition_kind ~markers:(Kind.encode_markers markers)
+      ~origin:Declarations.written_origin
   in
-  let list_edges package selection ~markers =
-    recorder.note Reads (Selection selection) (Ids.of_package package) "";
-    let keys = Hashtbl.create 64 and paths = Hashtbl.create 64 in
-    List.iter
-      (fun (declaration : Resolve.Names.declaration) ->
-        Hashtbl.replace keys (Ids.of_key declaration.key) declaration.key;
-        Hashtbl.replace paths (Ids.of_path declaration.key.path) declaration.key.path)
-      (interface.names.list_package_declarations package);
-    List.filter_map
-      (fun (source, target, edge_markers) ->
-        match (Hashtbl.find_opt keys source, Hashtbl.find_opt paths target) with
-        | Some key, Some path -> Some (key, path, edge_markers)
-        | _ -> None)
-      (Store.list_definition_edges database.store ~package:(Path.show_package package) ~unit_kind
-         ~target_kind:definition_kind ~markers:(Kind.encode_markers markers))
+  let require_untracked () =
+    if recorder != Tracker.untracked then
+      Compiler_bug.raise_bug ~stage:"Database"
+        "a unit reads the uses of a definition, and no edge records that read"
+  in
+  let rec list_users_from path ~from_ () =
+    match
+      Store.find_source_definition database.store
+        ~target:(Tracker.locate (Entity Definition) (Ids.of_path path) "")
+        ~source_kind:body_kind ~markers:references ~from_
+    with
+    | Some row ->
+        Seq.Cons (Declarations.decode_declaration row, list_users_from path ~from_:(row.id + 1))
+    | None -> Seq.Nil
   in
   {
-    interface;
-    read_core = read_of_key database recorder Facts.body_form;
-    list_uses =
-      (fun package ->
-        require_checked package ~generic_kinds:[];
-        List.map
-          (fun (key, path, _) -> (key, path))
-          (list_edges package Body_uses ~markers:[ References ]));
+    interface = make_interface database recorder ~is_checked:true;
+    list_tests =
+      (fun package name ->
+        recorder.note Reads (Lookup Tests) (Ids.of_package package) name;
+        Declarations.list_tests database.store package name);
     list_instantiations =
-      (fun package ->
-        require_checked package
-          ~generic_kinds:[ Declarations.rank_kind Function; Declarations.rank_kind Method ];
+      (fun key ->
+        require_untracked ();
         List.map
-          (fun ((key : Resolve.Names.key), callee, markers) ->
-            (key.path, callee, Kind.has_marker markers Grows))
-          (list_edges package Instantiations ~markers:[ Instantiates ]));
-    list_used_packages =
-      (fun package ->
-        require_checked package ~generic_kinds:[];
-        recorder.note Reads (Selection Package_references) (Ids.of_package package) "";
-        List.filter_map Path.parse_package
-          (Store.list_definition_edge_names database.store ~package:(Path.show_package package)
-             ~unit_kind
-             ~target_kind:(Kind.rank_target (Entity Package))));
+          (fun ((row : Store.definition), markers) ->
+            (Declarations.decode_key row.key, Kind.has_marker markers Grows))
+          (list_body_targets key ~markers:[ Instantiates ]));
+    list_users =
+      (fun path ->
+        require_untracked ();
+        list_users_from path ~from_:min_int);
+    list_used =
+      (fun key ->
+        require_untracked ();
+        List.map
+          (fun (row, _) -> Declarations.decode_declaration row)
+          (list_body_targets key ~markers:[ References ]));
+    was_unused =
+      (fun path ->
+        require_untracked ();
+        Store.has_diagnostic database.store
+          ~stage:(Kind.rank_stage Check_unexported)
+          ~unit:(Ids.of_path path));
+    is_package_used =
+      (fun ~by dependency ->
+        let name = Path.show_package dependency in
+        recorder.note Reads (Selection Package_references) (Ids.of_package by) name;
+        Store.has_source database.store
+          ~target:(Tracker.locate (Entity Package) (Ids.of_package by) name)
+          ~source_kind:body_kind ~markers:references);
   }
 
 let locate_items (database : Tracker.t) =

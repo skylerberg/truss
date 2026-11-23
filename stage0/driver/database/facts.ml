@@ -234,11 +234,12 @@ let recursion_group : Path.t list Tracker.fact =
 let proof : Prover.proof Tracker.fact =
   make_marshaled ~stage:Prove ~table:"proof" ~id_column:"definition" Proof
 
-let unused_dependencies : Path.package list Tracker.fact =
-  Tracker.make_fact ~stage:Check_dependencies ~table:"dependency_use" ~id_column:"package" ~fixed:[]
-    ~groups:[ (Unused_dependencies, [ "unused" ]) ]
-    ~encode:(fun packages -> [ Tracker.marshal packages ])
-    ~decode:(fun cells -> Tracker.unmarshal cells.(0))
+let dependency_use : bool Tracker.fact =
+  Tracker.make_fact ~stage:Check_dependency ~table:"dependency_use" ~id_column:"dependency"
+    ~fixed:[]
+    ~groups:[ (Dependency_use, [ "is_used" ]) ]
+    ~encode:(fun is_used -> [ Integer (Bool.to_int is_used) ])
+    ~decode:(fun cells -> decode_boolean cells.(0))
 
 let lowered : (Lowering.lowered, Lowering.unbuildable) result Tracker.fact =
   Tracker.make_fact ~stage:Lower ~table:"lowered" ~id_column:"item" ~fixed:[]

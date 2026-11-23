@@ -1,10 +1,9 @@
-val package_stages : Kind.stage list
+val dependency_stages : Kind.stage list
 val item_stages : Kind.stage list
-val forget_package : Tracker.t -> Path.package -> unit
 val replace_builtin_entries : Tracker.t -> unit
 val write_file : Tracker.t -> package:string -> Path.file -> string -> unit
 val remove_file : Tracker.t -> Path.file -> unit
-val forget_grant : Tracker.t -> int -> unit
+val forget_dependency : Tracker.t -> int -> unit
 val list_linked : Tracker.t -> Profile.t -> roots:Lowered.Item.t list -> Store.linked list
 val render_unit : Tracker.t -> Tracker.recorder -> Profile.t -> Lowered.Item.t -> string option
 val list_definition_facts : unit -> Tracker.description list

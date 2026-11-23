@@ -1919,6 +1919,43 @@ let () =
   expect_the_same_work_at_two_sizes "an edit to one body" (fun database ->
       Database.update database [ (first_part, Some (snd (make_part 0 "1 + 1"))) ];
       Database.For_testing.propagate database);
+  let make_helped_part index body =
+    ( Printf.sprintf "app.part%d" index,
+      Printf.sprintf
+        "fn helper%d() -> Int64 { 3 }\n\
+         public fn first%d() -> Int64 { %s }\n\
+         public fn second%d() -> Int64 { helper%d() }\n"
+        index index body index index )
+  in
+  let edit_first_part make_part body database =
+    Database.update database [ (first_part, Some (snd (make_part 0 body))) ]
+  in
+  expect_the_same_work_at_two_sizes "adding a function that nothing uses" (fun database ->
+      Database.update database
+        [ (first_part, Some (snd (make_part 0 "1") ^ "fn spare() -> Int64 { 4 }\n")) ]);
+  expect_the_same_work_at_two_sizes "an edit that adds a use of an unexported function"
+    ~make_part:make_helped_part
+    (edit_first_part make_helped_part "helper0()");
+  expect_the_same_work_at_two_sizes "an edit that removes the last use of an unexported function"
+    ~make_part:make_helped_part (fun database ->
+      Database.update database
+        [
+          ( first_part,
+            Some
+              "fn helper0() -> Int64 { 3 }\n\
+               public fn first0() -> Int64 { 1 }\n\
+               public fn second0() -> Int64 { 2 }\n" );
+        ]);
+  expect_the_same_work_at_two_sizes "an edit that leaves a body with a type error"
+    ~make_part:make_helped_part
+    (edit_first_part make_helped_part "\"one\"");
+  expect_the_same_work_at_two_sizes "an edit that fixes a body's type error"
+    ~make_part:make_helped_part
+    ~prepare:(edit_first_part make_helped_part "\"one\"")
+    (edit_first_part make_helped_part "1");
+  expect_the_same_work_at_two_sizes "adding a test" ~make_part:make_tested_part (fun database ->
+      Database.update database
+        [ (first_part, Some (snd (make_tested_part 0 "1") ^ "test \"another\" {\n}\n")) ]);
   let lower_tested_code database =
     match Database.find_lowered_lookups database [ app ] with
     | Ok _ -> ()
@@ -2057,6 +2094,179 @@ let () =
       | diagnostics, counts ->
           Harness.fail "listed %d diagnostics and counted %s" (List.length diagnostics)
             (String.concat "; " (List.map show_counts counts)))
+
+let () =
+  let count_reports database file code =
+    List.length
+      (List.filter (String.equal code)
+         (Support.list_codes (Database.list_file_diagnostics database (Support.parse_file file))))
+  in
+  let expect_reports_after_edits name ~code steps =
+    Harness.test name (fun () ->
+        match steps with
+        | [] -> Harness.fail "no step"
+        | (first, _) :: _ ->
+            let hot = build first in
+            ignore
+              (List.fold_left
+                 (fun before (after, counts) ->
+                   ignore (propagate hot ~before ~after);
+                   List.iter
+                     (fun (file, count) ->
+                       let reported = count_reports hot file code in
+                       if reported <> count then
+                         Harness.fail "%s holds %d reports of %s, and not %d" file reported code
+                           count)
+                     counts;
+                   after)
+                 first steps))
+  in
+  let expect_unused_after_edits name texts =
+    expect_reports_after_edits name ~code:"usage.unused_function"
+      (List.map (fun (text, count) -> ([ ("app.main", text) ], [ ("app.main", count) ])) texts)
+  in
+  let helper = "internal fn helper() -> Int64 { 1 }\n" in
+  let helper_and_user = helper ^ "public fn top() -> Int64 { helper() }\n" in
+  let helper_alone = helper ^ "public fn top() -> Int64 { 2 }\n" in
+  expect_unused_after_edits
+    "an unexported function is reported while no body uses it, and at no other time"
+    [ (helper_and_user, 0); (helper_alone, 1); (helper_and_user, 0) ];
+  let make_chain top =
+    "internal fn leaf() -> Int64 { 1 }\ninternal fn middle() -> Int64 { leaf() }\n" ^ top
+  in
+  expect_unused_after_edits
+    "the functions that only an unused function reaches are reported with it"
+    [
+      (make_chain "public fn top() -> Int64 { middle() }\n", 0);
+      (make_chain "public fn top() -> Int64 { 2 }\n", 2);
+      (make_chain "public fn top() -> Int64 { middle() }\n", 0);
+    ];
+  let make_cycle top =
+    "internal fn ping(depth: Int64) -> Int64 { pong(depth) }\n\
+     internal fn pong(depth: Int64) -> Int64 { ping(depth) }\n" ^ top
+  in
+  expect_unused_after_edits
+    "functions that call each other are reported once no other body calls them"
+    [
+      (make_cycle "public fn top() -> Int64 { ping(1) }\n", 0);
+      (make_cycle "public fn top() -> Int64 { 2 }\n", 2);
+      (make_cycle "public fn top() -> Int64 { pong(1) }\n", 0);
+    ];
+  expect_unused_after_edits
+    "a function that becomes unexported and unused is reported with the functions that only it uses"
+    [
+      (helper_and_user, 0);
+      (helper ^ "internal fn top() -> Int64 { helper() }\n", 2);
+      (helper_and_user, 0);
+    ];
+  let make_dead_chain top = make_chain "internal fn upper() -> Int64 { middle() }\n" ^ top in
+  expect_unused_after_edits
+    "a use of the middle of an unused chain leaves the function above it unused"
+    [
+      (make_dead_chain "public fn top() -> Int64 { 2 }\n", 3);
+      (make_dead_chain "public fn top() -> Int64 { middle() }\n", 1);
+      (make_dead_chain "public fn top() -> Int64 { 2 }\n", 3);
+    ];
+  expect_unused_after_edits
+    "no unexported function is reported while a body of its package fails to check"
+    [
+      (helper_and_user, 0);
+      (helper ^ "public fn top() -> Int64 { \"one\" }\n", 0);
+      (helper_alone, 1);
+      (helper ^ "public fn top() -> Int64 { helper() + \"one\" }\n", 0);
+      (helper_and_user, 0);
+    ];
+  expect_unused_after_edits
+    "an unexported function whose definition has a syntax error after its name is not reported"
+    [
+      ("public fn top() -> Int64 { 2 }\ninternal fn helper( -> Int64 { 1 }\n", 0); (helper_alone, 1);
+    ];
+  let expect_linear_work name ~affix make_definition =
+    Harness.test (name ^ " cost in proportion to their number") (fun () ->
+        let count_steps length =
+          let text = String.concat "" (List.init length make_definition) in
+          List.fold_left
+            (fun steps (count : Database.statement_count) ->
+              if String.includes ~affix count.statement then steps + count.steps else steps)
+            0
+            (snd (Database.count_statements (fun () -> ignore (build [ ("app.main", text) ]))))
+        in
+        let for_ten = count_steps 10 and for_forty = count_steps 40 in
+        if for_ten = 0 || for_forty > 5 * for_ten then
+          Harness.fail "ran %d steps for ten definitions and %d for forty" for_ten for_forty)
+  in
+  expect_linear_work "unused functions that call each other in a chain" ~affix:"ON d.id = e.source"
+    (fun index ->
+      Printf.sprintf "fn link%d() -> Int64 { %s }\n" index
+        (if index = 0 then "1" else Printf.sprintf "link%d()" (index - 1)));
+  expect_linear_work "tests added together" ~affix:"AND member = ?2 AND kind = ?3" (fun index ->
+      Printf.sprintf "test \"case %d\" {\n}\n" index);
+  expect_linear_work "generic functions whose calls grow in a chain" ~affix:"ON d.path = e.target"
+    (fun index ->
+      Printf.sprintf "fn wrap%d[Element](value: own Element) -> Int64 {\n  %s\n}\n\n" index
+        (if index = 0 then "1" else Printf.sprintf "wrap%d(Some(own value))" (index - 1)));
+  let adds = "test \"adds\" {\n}\n" in
+  expect_reports_after_edits "a test is reported while an earlier test of its package has its name"
+    ~code:"package.duplicate_test"
+    [
+      ([ ("app.main", adds) ], [ ("app.main", 0) ]);
+      ([ ("app.main", adds); ("app.other", adds) ], [ ("app.main", 0); ("app.other", 1) ]);
+      ([ ("app.other", adds) ], [ ("app.other", 0) ]);
+    ];
+  let make_generic_pair pong_body =
+    Printf.sprintf
+      "fn ping[Element](value: own Element) -> Int64 {\n\
+      \  pong(Some(own value))\n\
+       }\n\n\
+       fn pong[Element](value: own Element) -> Int64 {\n\
+      \  %s\n\
+       }\n"
+      pong_body
+  in
+  expect_reports_after_edits
+    "generic code is reported when an edit to its callee closes a cycle that grows"
+    ~code:"package.instantiation_cycle"
+    (List.map
+       (fun (pong_body, count) ->
+         ([ ("app.main", make_generic_pair pong_body) ], [ ("app.main", count) ]))
+       [ ("1", 0); ("ping(own value)", 1); ("1", 0) ]);
+  expect_reports_after_edits
+    "a function is reported once it becomes generic and instantiates itself with a growing type"
+    ~code:"package.instantiation_cycle"
+    (List.map
+       (fun (text, count) -> ([ ("app.main", text) ], [ ("app.main", count) ]))
+       [
+         ("fn grow(value: Int64) -> Int64 {\n  1\n}\n", 0);
+         ("fn grow[Element](value: own Element) -> Int64 {\n  grow(Some(own value))\n}\n", 1);
+         ("fn grow(value: Int64) -> Int64 {\n  1\n}\n", 0);
+       ]);
+  Harness.test "a dependency is reported while no body of its package uses it" (fun () ->
+      let settle files =
+        let database =
+          Support.make_database (Support.setup ~dependencies:[ ("app", "lib") ] files)
+        in
+        Database.For_testing.propagate database;
+        database
+      in
+      let lib = List.nth tool_user 1 in
+      let unused = [ ("app.main", "fn caller() -> Int64 { 1 }\n"); lib ] in
+      let hot = settle tool_user in
+      ignore
+        (List.fold_left
+           (fun before (after, is_reported) ->
+             Database.update hot (list_changes ~before ~after);
+             Database.For_testing.propagate hot;
+             (match Database.For_testing.list_differences hot (settle after) with
+             | [] -> ()
+             | differences ->
+                 Harness.fail "the propagated database differs from a cold build in %s"
+                   (show_differences differences));
+             (match (Database.list_manifest_problems hot app, is_reported) with
+             | [], false | [ Unused_dependency { owner = None; name = "lib" } ], true -> ()
+             | problems, _ -> Harness.fail "reported %d problems" (List.length problems));
+             after)
+           tool_user
+           [ (tool_user, false); (unused, true); (tool_user, false) ]))
 
 let () =
   Harness.test "a blocked proof in a package with no error is a compiler bug" (fun () ->

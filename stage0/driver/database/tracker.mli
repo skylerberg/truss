@@ -24,15 +24,10 @@ type observation =
   | Written of { stage : Kind.stage; id : int; is_removal : bool }
 
 val with_observer : (observation -> unit) -> (unit -> 'result) -> 'result
-val record : t -> ?package:int -> Kind.stage -> int -> (recorder -> 'result) -> 'result
+val record : t -> Kind.stage -> int -> (recorder -> 'result) -> 'result
 
 val record_observed :
-  t ->
-  ?package:int ->
-  Kind.stage ->
-  int ->
-  (recorder -> 'result) ->
-  'result * Store.edge_change list
+  t -> Kind.stage -> int -> (recorder -> 'result) -> 'result * Store.edge_change list
 
 val record_group :
   t -> Kind.stage -> int list -> own:Kind.fact list -> (recorder -> 'result) -> 'result

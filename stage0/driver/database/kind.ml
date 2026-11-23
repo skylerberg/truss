@@ -25,10 +25,10 @@ type stage =
   | Check_sealed
   | Check_impl
   | Check_type
-  | Check_instantiations
-  | Check_tests
+  | Check_instantiation
+  | Check_test
   | Check_unexported
-  | Check_dependencies
+  | Check_dependency
   | Prove
   | Lower
   | Key_tests
@@ -64,10 +64,10 @@ let stages =
     Check_sealed;
     Check_impl;
     Check_type;
-    Check_instantiations;
-    Check_tests;
+    Check_instantiation;
+    Check_test;
     Check_unexported;
-    Check_dependencies;
+    Check_dependency;
     Prove;
     Lower;
     Key_tests;
@@ -113,7 +113,7 @@ type fact =
   | Recursion_group
   | Usage_check
   | Ownership
-  | Unused_dependencies
+  | Dependency_use
   | Proof
   | Lowered
   | Test_key
@@ -148,7 +148,7 @@ let facts =
     Recursion_group;
     Usage_check;
     Ownership;
-    Unused_dependencies;
+    Dependency_use;
     Proof;
     Lowered;
     Test_key;
@@ -174,12 +174,12 @@ type lookup =
   | Contained
   | Module_declarations
   | File_declarations
-  | Package_declarations
   | Members
   | Traits_declaring
   | Impls_of_type
   | Impls_of_trait
   | Law_proofs
+  | Tests
 
 let lookups =
   [
@@ -199,28 +199,19 @@ let lookups =
     Contained;
     Module_declarations;
     File_declarations;
-    Package_declarations;
     Members;
     Traits_declaring;
     Impls_of_type;
     Impls_of_trait;
     Law_proofs;
+    Tests;
   ]
 
 type entity = Definition | Import | Package | Unknown_implementation | Item
-
-type selection =
-  | Unresolved
-  | Import_references
-  | Unchecked_bodies
-  | Body_uses
-  | Instantiations
-  | Package_references
+type selection = Unresolved | Import_references | Package_references
 
 let entities = [ Definition; Import; Package; Unknown_implementation; Item ]
-
-let selections =
-  [ Unresolved; Import_references; Unchecked_bodies; Body_uses; Instantiations; Package_references ]
+let selections = [ Unresolved; Import_references; Package_references ]
 
 type target = Fact of fact | Lookup of lookup | Entity of entity | Selection of selection
 
@@ -273,8 +264,8 @@ let show_stage = function
   | Group_recursion -> "recursion group"
   | Check_usage -> "usage check"
   | Check_ownership -> "ownership check"
-  | Check_sealed | Check_impl | Check_type | Check_instantiations | Check_tests | Check_unexported
-  | Check_dependencies ->
+  | Check_sealed | Check_impl | Check_type | Check_instantiation | Check_test | Check_unexported
+  | Check_dependency ->
       "package check"
   | Prove -> "proof"
   | Lower -> "lowered code"
@@ -305,7 +296,7 @@ let show_fact = function
   | Recursion_group -> "recursion group"
   | Usage_check -> "usage check"
   | Ownership -> "ownership check"
-  | Unused_dependencies -> "package check"
+  | Dependency_use -> "package check"
   | Proof -> "proof"
   | Lowered -> "lowered code"
   | Test_key -> "test key"
@@ -330,19 +321,19 @@ let show_lookup = function
   | Contained -> "members"
   | Module_declarations -> "declarations of a module"
   | File_declarations -> "declarations of a file"
-  | Package_declarations -> "declarations of a package"
   | Members -> "members"
   | Traits_declaring -> "traits that declare a member"
   | Impls_of_type | Impls_of_trait -> "impls"
   | Law_proofs -> "proofs of a law"
+  | Tests -> "tests of a name"
 
 let is_signature = function
   | Header | Trait_header | Constant_value | Interface | Elaboration | Derived_interface
   | Type_facts | Signature_check | Checked_interface | Contract | Contract_mir ->
       true
   | Resolved _ | Grant | Body_form | Body_tables | Run_forever | Ownership_modes | Body_mir
-  | Generated_mir | Call_node | Callees | Recursion_group | Usage_check | Ownership
-  | Unused_dependencies | Proof | Lowered | Test_key | Evaluation | Unit _ ->
+  | Generated_mir | Call_node | Callees | Recursion_group | Usage_check | Ownership | Dependency_use
+  | Proof | Lowered | Test_key | Evaluation | Unit _ ->
       false
 
 let list_read_targets = function
@@ -351,7 +342,7 @@ let list_read_targets = function
   | ( Resolved _ | Grant | Trait_header | Constant_value | Header | Elaboration | Derived_interface
     | Type_facts | Checked_interface | Contract | Body_form | Body_tables | Run_forever
     | Ownership_modes | Body_mir | Contract_mir | Generated_mir | Call_node | Callees
-    | Recursion_group | Usage_check | Ownership | Unused_dependencies | Proof | Lowered | Test_key
+    | Recursion_group | Usage_check | Ownership | Dependency_use | Proof | Lowered | Test_key
     | Evaluation | Unit _ ) as fact ->
       [ fact ]
 

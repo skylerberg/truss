@@ -265,6 +265,16 @@ let list_unit_diagnostics store schema ~stage ~unit =
     (fun row ->
       ((if Sql.is_null row 0 then None else Some (Sql.read_integer row 0)), Sql.read_blob row 1))
 
+let has_diagnostic store ~stage ~unit =
+  Sql.has_row store.sql "SELECT 1 FROM main.diagnostic WHERE stage = ?1 AND unit = ?2 LIMIT 1"
+    [ Integer stage; Integer unit ]
+
+let mark_reported_units_stale store ~stage =
+  Sql.run store.sql
+    "INSERT OR IGNORE INTO main.stale (stage, id) SELECT DISTINCT stage, unit FROM main.diagnostic \
+     WHERE stage = ?1"
+    [ Integer stage ]
+
 let replace_diagnostics store ~stage ~unit ~package diagnostics =
   let is_changed =
     list_unit_diagnostics store Main ~stage ~unit
@@ -297,28 +307,15 @@ let replace_diagnostics store ~stage ~unit ~package diagnostics =
   end;
   is_changed
 
-let list_definition_edges store ~package ~unit_kind ~target_kind ~markers =
-  Sql.list_rows store.sql
-    "SELECT d.id, e.target, e.markers FROM main.definition d CROSS JOIN main.edge e ON \
-     e.source_kind = ?1 AND e.source = d.id AND e.target_kind = ?2 WHERE d.package = ?3 AND \
-     (e.markers & ?4) != 0"
-    [ Integer unit_kind; Integer target_kind; Text package; Integer markers ] (fun row ->
-      (Sql.read_integer row 0, Sql.read_integer row 1, Sql.read_integer row 2))
-
-let list_definition_edge_names store ~package ~unit_kind ~target_kind =
-  Sql.list_rows store.sql
-    "SELECT DISTINCT e.name FROM main.definition d CROSS JOIN main.edge e ON e.source_kind = ?1 \
-     AND e.source = d.id AND e.target_kind = ?2 WHERE d.package = ?3 ORDER BY e.name"
-    [ Integer unit_kind; Integer target_kind; Text package ] (fun row -> Sql.read_text row 0)
+let has_unchecked_body store ~package ~skipped_kind =
+  Sql.has_row store.sql
+    "SELECT 1 FROM main.body b INDEXED BY body_without_value CROSS JOIN main.definition d ON d.id \
+     = b.definition WHERE b.state != 0 AND d.origin = 0 AND +d.package = ?1 AND d.kind IS NOT ?2 \
+     LIMIT 1"
+    [ Text package; (match skipped_kind with Some kind -> Integer kind | None -> Null) ]
 
 let list_code_packages store ~package ~unit_kind ~target_kind ~test_kind =
-  if
-    Sql.has_row store.sql
-      "SELECT 1 FROM main.definition d LEFT JOIN main.body b ON b.definition = d.id WHERE \
-       d.package = ?1 AND d.origin = 0 AND d.kind != ?2 AND (b.state IS NULL OR b.state != 0) \
-       LIMIT 1"
-      [ Text package; Integer test_kind ]
-  then None
+  if has_unchecked_body store ~package ~skipped_kind:(Some test_kind) then None
   else
     Some
       (Sql.list_rows store.sql
@@ -334,22 +331,6 @@ let find_definition_key_anywhere store ~id =
       Sql.find_row store.sql (Printf.sprintf "SELECT key FROM %s.definition WHERE id = ?1" schema)
         [ Integer id ] (fun row -> Sql.read_blob row 0))
     ("main" :: List.map snd store.attached)
-
-let has_unchecked_body store ~package ~generic_kinds =
-  Sql.has_row store.sql
-    (Printf.sprintf
-       "SELECT 1 FROM main.definition d LEFT JOIN main.body b ON b.definition = d.id WHERE \
-        d.package = ?1 AND d.origin = 0 AND (b.state IS NULL OR b.state != 0)%s LIMIT 1"
-       (match generic_kinds with
-       | [] -> ""
-       | kinds ->
-           Printf.sprintf " AND d.is_generic = 1 AND d.ordinal = 0 AND d.kind IN (%s)"
-             (String.concat ", " (List.map string_of_int kinds))))
-    [ Text package ]
-
-let find_package_name store ~id =
-  Sql.find_row store.sql "SELECT name FROM main.package WHERE id = ?1" [ Integer id ] (fun row ->
-      Sql.read_text row 0)
 
 type endpoint = { kind : int; id : int; name : string }
 type edge = { target : endpoint; markers : int }
@@ -429,6 +410,14 @@ let replace_edges store ~(source : endpoint) edges =
        json_extract(value, '$[2]') FROM json_each(?3))"
       [ Integer source.kind; Integer source.id; Text (encode_rows removed) ];
   written @ removed
+
+let has_source store ~(target : endpoint) ~source_kind ~markers =
+  Sql.has_row store.sql
+    "SELECT 1 FROM main.edge WHERE target_kind = ?1 AND target = ?2 AND name = ?3 AND source_kind \
+     = ?4 AND (markers & ?5) != 0 LIMIT 1"
+    [
+      Integer target.kind; Integer target.id; Text target.name; Integer source_kind; Integer markers;
+    ]
 
 let list_sources store ~(target : endpoint) ~markers =
   Sql.list_rows store.sql
@@ -862,11 +851,11 @@ let list_file_diagnostics store schema ~file ~test_kind =
         detail = Sql.read_blob row 3;
       })
 
-let has_error store ~package ~last_stage =
+let has_error store ~package ~last_stage ~hidden_stage =
   Sql.has_row store.sql
-    "SELECT 1 FROM main.diagnostic WHERE package = ?1 AND severity = 'error' AND stage <= ?2 LIMIT \
-     1"
-    [ Text package; Integer last_stage ]
+    "SELECT 1 FROM main.diagnostic WHERE package = ?1 AND severity = 'error' AND stage <= ?2 AND \
+     stage IS NOT ?3 LIMIT 1"
+    [ Text package; Integer last_stage; encode_optional hidden_stage ]
 
 type scope = Everything | Packages of string list | Files of int list
 
@@ -1090,7 +1079,6 @@ type unit_entity =
   | Definition_unit
   | Path_unit
   | Dependency_unit
-  | Package_unit
   | Item_unit
 
 let list_stale store ~stage ~entity ~scope =
@@ -1101,7 +1089,6 @@ let list_stale store ~stage ~entity ~scope =
     | Definition_unit -> ("definition", "id")
     | Path_unit -> ("definition", "path")
     | Dependency_unit -> ("dependency", "id")
-    | Package_unit -> ("package", "id")
     | Item_unit -> ("item", "id")
   in
   let list_joined ~from_ column members =
@@ -1119,13 +1106,12 @@ let list_stale store ~stage ~entity ~scope =
   | Everything, _ ->
       Sql.list_rows store.sql "SELECT id FROM main.stale WHERE stage = ?1" [ Integer stage ]
         (fun row -> Sql.read_integer row 0)
-  | Packages packages, Package_unit -> list_stale_among "name" (encode_texts packages)
   | Packages packages, (File_unit | Module_unit | Definition_unit | Path_unit | Dependency_unit) ->
       list_stale_among "package" (encode_texts packages)
   | Files files, (Definition_unit | Path_unit) -> list_among "file" (encode_integers files)
   | Files files, File_unit -> list_among "id" (encode_integers files)
   | (Packages _ | Files _), Item_unit -> []
-  | Files _, (Module_unit | Dependency_unit | Package_unit) -> []
+  | Files _, (Module_unit | Dependency_unit) -> []
 
 type entry = {
   file : int;
@@ -1272,6 +1258,48 @@ let list_definitions store schema selection =
     (Printf.sprintf "SELECT %s FROM %s.definition WHERE %s" definition_columns (name_schema schema)
        condition)
     arguments read_definition
+
+let qualified_definition_columns =
+  String.concat ", "
+    (List.map
+       (fun column -> "d." ^ String.trim column)
+       (String.split_on_char ',' definition_columns))
+
+let find_source_definition store ~(target : endpoint) ~source_kind ~markers ~from_ =
+  Sql.find_row store.sql
+    (Printf.sprintf
+       "SELECT %s FROM main.edge e CROSS JOIN main.definition d ON d.id = e.source WHERE \
+        e.target_kind = ?1 AND e.target = ?2 AND e.name = ?3 AND e.source_kind = ?4 AND e.source \
+        >= ?5 AND (e.markers & ?6) != 0 ORDER BY e.source LIMIT 1"
+       qualified_definition_columns)
+    [
+      Integer target.kind;
+      Integer target.id;
+      Text target.name;
+      Integer source_kind;
+      Integer from_;
+      Integer markers;
+    ]
+    read_definition
+
+let list_target_definitions store ~(source : endpoint) ~target_kind ~markers ~origin =
+  Sql.list_rows store.sql
+    (Printf.sprintf
+       "SELECT %s, e.markers FROM main.edge e CROSS JOIN main.definition d ON d.path = e.target \
+        WHERE e.source_kind = ?1 AND e.source = ?2 AND e.target_kind = ?3 AND (e.markers & ?4) != \
+        0 AND d.origin = ?5 AND d.ordinal = 0 ORDER BY e.target"
+       qualified_definition_columns)
+    [ Integer source.kind; Integer source.id; Integer target_kind; Integer markers; Integer origin ]
+    (fun row -> (read_definition row, Sql.read_integer row 20))
+
+let list_package_member_keys store schema ~package ~member ~kind ~origin =
+  Sql.list_rows store.sql
+    (Printf.sprintf
+       "SELECT key FROM %s.definition WHERE package = ?1 AND member = ?2 AND kind = ?3 AND origin \
+        = ?4 AND ordinal = 0"
+       (name_schema schema))
+    [ Text package; Text member; Integer kind; Integer origin ]
+    (fun row -> Sql.read_blob row 0)
 
 let replace_definition store (definition : definition) =
   Sql.run store.sql

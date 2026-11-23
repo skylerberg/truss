@@ -9,8 +9,20 @@ let keyed_by_id name columns indexes =
 let keyed_by_columns name columns indexes =
   { name; columns; without_rowid = true; indexes = List.map index_every_row indexes }
 
-let fact_of_definition name columns =
-  keyed_by_id name ("definition INTEGER PRIMARY KEY, " ^ columns) []
+let fact_of_definition ?(has_index_without_value = false) name columns =
+  {
+    (keyed_by_id name ("definition INTEGER PRIMARY KEY, " ^ columns) []) with
+    indexes =
+      (if has_index_without_value then
+         [
+           {
+             index_name = name ^ "_without_value";
+             indexed = "definition";
+             condition = Some "state != 0";
+           };
+         ]
+       else []);
+  }
 
 let state = "state INTEGER NOT NULL"
 
@@ -81,7 +93,7 @@ let tables =
     keyed_by_id "constant_value" ("path INTEGER PRIMARY KEY, " ^ state ^ ", value TEXT") [];
     keyed_by_id "derived_interface" ("path INTEGER PRIMARY KEY, " ^ state ^ ", value BLOB") [];
     fact_of_definition "contract" (state ^ ", form BLOB");
-    fact_of_definition "body"
+    fact_of_definition ~has_index_without_value:true "body"
       (state
      ^ ", form BLOB, tables BLOB, requires_run_forever INTEGER, places_without_keyword BLOB, \
         mode_keywords BLOB");
@@ -98,17 +110,7 @@ let tables =
       [ ("recursion_group_representative", "representative") ];
     fact_of_definition "usage_check" state;
     fact_of_definition "ownership" (state ^ ", must_be_disjoint BLOB");
-    {
-      (fact_of_definition "proof" (state ^ ", value BLOB")) with
-      indexes =
-        [
-          {
-            index_name = "proof_without_value";
-            indexed = "definition";
-            condition = Some "state != 0";
-          };
-        ];
-    };
+    fact_of_definition ~has_index_without_value:true "proof" (state ^ ", value BLOB");
     keyed_by_columns "hole"
       "definition INTEGER NOT NULL, position INTEGER NOT NULL, home INTEGER NOT NULL, start \
        INTEGER NOT NULL, stop INTEGER NOT NULL, PRIMARY KEY (definition, position)"
@@ -122,7 +124,9 @@ let tables =
     keyed_by_id "grant"
       ("dependency INTEGER PRIMARY KEY, " ^ state ^ ", capabilities BLOB, unknown BLOB")
       [];
-    keyed_by_id "dependency_use" ("package INTEGER PRIMARY KEY, " ^ state ^ ", unused BLOB") [];
+    keyed_by_id "dependency_use"
+      ("dependency INTEGER PRIMARY KEY, " ^ state ^ ", is_used INTEGER")
+      [];
     keyed_by_id "item"
       "id INTEGER PRIMARY KEY, definition INTEGER, key BLOB NOT NULL, label TEXT NOT NULL"
       [ ("item_definition", "definition") ];

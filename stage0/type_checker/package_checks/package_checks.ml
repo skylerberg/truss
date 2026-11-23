@@ -1,10 +1,6 @@
 module Lookups = Lookups
 module Path_table = Hashtbl.Make (Path)
 
-module Key_table = Hashtbl.Make (Structural_key.Make (struct
-  type t = Resolve.Names.key
-end))
-
 module Parameter_table = Hashtbl.Make (Structural_key.Make (struct
   type t = Types.parameter
 end))
@@ -521,63 +517,73 @@ let list_instantiations (key : Resolve.Names.key) (form : Core.t) =
     form.definition;
   List.rev !edges
 
-let is_checked_for_instantiation (declaration : Resolve.Names.declaration) =
-  declaration.generic && declaration.key.ordinal = 0
-  && (declaration.kind = Function || declaration.kind = Method)
-
-let check_instantiation (lookups : Lookups.t) (package : Path.package) =
-  let generic =
-    List.filter is_checked_for_instantiation
-      (lookups.interface.names.list_package_declarations package)
-  in
-  let edges = Path_table.create 64 in
+let find_growing_cycles (lookups : Lookups.t) (stale : Resolve.Names.declaration list) =
+  let keys = Path_table.create 64 and calls = Path_table.create 64 in
   List.iter
-    (fun (caller, callee, grows) -> Path_table.add edges caller (callee, grows))
-    (lookups.list_instantiations package);
-  let list_outgoing path = List.rev (Path_table.find_all edges path) in
-  let component_index = Path_table.create 64 in
+    (fun (declaration : Resolve.Names.declaration) ->
+      Path_table.replace keys declaration.key.path declaration.key)
+    stale;
+  let list_calls path =
+    match Path_table.find_opt calls path with
+    | Some listed -> listed
+    | None ->
+        let listed = lookups.list_instantiations (Path_table.find keys path) in
+        List.iter
+          (fun ((callee : Resolve.Names.key), _) -> Path_table.replace keys callee.path callee)
+          listed;
+        Path_table.replace calls path listed;
+        listed
+  in
+  let component = Path_table.create 64 in
   List.iteri
-    (fun index members ->
-      List.iter (fun path -> Path_table.replace component_index path index) members)
+    (fun index members -> List.iter (fun path -> Path_table.replace component path index) members)
     (Strongly_connected.list_components
        (module Path)
-       ~list_successors:(fun path -> List.map fst (list_outgoing path))
-       (List.map (fun (declaration : Resolve.Names.declaration) -> declaration.key.path) generic));
-  let grows_on_cycle path (callee, grows) =
-    grows && Path_table.find component_index callee = Path_table.find component_index path
+       ~list_successors:(fun path ->
+         List.map (fun ((callee : Resolve.Names.key), _) -> callee.path) (list_calls path))
+       (List.map (fun (declaration : Resolve.Names.declaration) -> declaration.key.path) stale));
+  let grows_on_a_cycle path =
+    List.exists
+      (fun ((callee : Resolve.Names.key), grows) ->
+        grows && Path_table.find component callee.path = Path_table.find component path)
+      (list_calls path)
   in
-  List.filter_map
+  let stale_paths = Path_table.create 64 in
+  List.iter
     (fun (declaration : Resolve.Names.declaration) ->
-      if List.exists (grows_on_cycle declaration.key.path) (list_outgoing declaration.key.path) then
-        let definition, spans = read_definition lookups declaration in
-        Some
-          (make_diagnostic declaration.key Instantiation_cycle (locate_header spans definition)
-             "This generic code instantiates itself with type arguments that grow each time \
-              around, so it would be compiled without end.")
-      else None)
-    generic
+      Path_table.replace stale_paths declaration.key.path ())
+    stale;
+  List.sort
+    (fun ((left : Resolve.Names.key), _) ((right : Resolve.Names.key), _) ->
+      Path.compare left.path right.path)
+    (Path_table.fold
+       (fun path _ found ->
+         let grows = grows_on_a_cycle path in
+         if grows || Path_table.mem stale_paths path then
+           (Path_table.find keys path, grows) :: found
+         else found)
+       calls [])
 
-let check_tests (lookups : Lookups.t) (package : Path.package) =
-  let tests =
-    List.filter
-      (fun (declaration : Resolve.Names.declaration) ->
-        declaration.kind = Test && declaration.key.ordinal = 0)
-      (lookups.interface.names.list_package_declarations package)
-  in
-  snd
-    (List.fold_left
-       (fun (seen, diagnostics) (declaration : Resolve.Names.declaration) ->
-         let name = match declaration.key.path with Test { name; _ } -> name | _ -> "" in
-         if List.mem name seen then
-           let definition, spans = read_definition lookups declaration in
-           ( seen,
-             diagnostics
-             @ [
-                 make_diagnostic declaration.key Duplicate_test spans.(definition.id)
-                   (Printf.sprintf "Another test of this package is named %S." name);
-               ] )
-         else (name :: seen, diagnostics))
-       ([], []) tests)
+let report_growing_cycle (lookups : Lookups.t) (declaration : Resolve.Names.declaration) =
+  let definition, spans = read_definition lookups declaration in
+  [
+    make_diagnostic declaration.key Instantiation_cycle (locate_header spans definition)
+      "This generic code instantiates itself with type arguments that grow each time around, so it \
+       would be compiled without end.";
+  ]
+
+let check_test (lookups : Lookups.t) (declaration : Resolve.Names.declaration) =
+  match declaration.key.path with
+  | Test { name; _ } -> (
+      match lookups.list_tests declaration.key.module_.package name with
+      | first :: _ when not (Path.equal first.path declaration.key.path) ->
+          let definition, spans = read_definition lookups declaration in
+          [
+            make_diagnostic declaration.key Duplicate_test spans.(definition.id)
+              (Printf.sprintf "Another test of this package is named %S." name);
+          ]
+      | _ -> [])
+  | _ -> []
 
 let check_overlaps (lookups : Lookups.t) (declaration : Resolve.Names.declaration) spans definition
     (impl : Types.impl_interface) =
@@ -691,7 +697,9 @@ let locate_name (spans : Source.Definition_span.t array) (definition : Syntax.de
   match definition.kind with
   | Function { signature; _ } | Method_declaration signature ->
       spans.((Resolve.Names.extract_signature_name signature).id)
-  | Constant { name = Plain_name name | Member_name (_, name); _ } -> spans.(name.id)
+  | Constant { name = Plain_name name | Member_name (_, name); _ }
+  | Definition_error { name = Some (Plain_name name | Member_name (_, name)); _ } ->
+      spans.(name.id)
   | _ -> raise_bug "an unused definition that is neither a function nor a constant"
 
 let report_unused (lookups : Lookups.t) (declaration : Resolve.Names.declaration) ~is_named =
@@ -721,68 +729,133 @@ let report_unused (lookups : Lookups.t) (declaration : Resolve.Names.declaration
     diagnostic = Diagnostic.make ~severity ~code:(Usage code) (locate_name spans definition) message;
   }
 
-let check_unexported (lookups : Lookups.t) package =
-  let used_by = Key_table.create 64 in
-  List.iter (fun (key, path) -> Key_table.add used_by key path) (lookups.list_uses package);
-  let uses =
-    List.map
-      (fun (declaration : Resolve.Names.declaration) ->
-        ( declaration,
-          must_be_used lookups declaration,
-          List.rev (Key_table.find_all used_by declaration.key) ))
-      (lookups.interface.names.list_package_declarations package)
+type use = Used | Unused of { is_named : bool }
+
+exception Is_used
+
+let classify_uses (lookups : Lookups.t) (stale : Resolve.Names.declaration list) =
+  let was_unused = memoize lookups.was_unused in
+  let decided = Path_table.create 64 in
+  let stale_paths = Path_table.create 64 in
+  let unsettled = Path_table.create 64 in
+  let queued = Queue.create () in
+  let enqueue (declaration : Resolve.Names.declaration) =
+    match Path_table.find_opt decided declaration.key.path with
+    | Some (_, Used) -> ()
+    | Some (_, Unused _) | None ->
+        Path_table.replace unsettled declaration.key.path ();
+        Queue.add declaration queued
   in
-  let uses_of_unexported = Path_table.create 64 in
-  let named_by_another = Path_table.create 64 in
   List.iter
-    (fun ((declaration : Resolve.Names.declaration), is_checked, paths) ->
-      if is_checked then Path_table.replace uses_of_unexported declaration.key.path paths;
-      List.iter
-        (fun path ->
-          if not (Path.equal path declaration.key.path) then
-            Path_table.replace named_by_another path ())
-        paths)
-    uses;
-  let reached = Path_table.create 64 in
-  let rec reach paths =
-    List.iter
-      (fun path ->
-        if not (Path_table.mem reached path) then begin
-          Path_table.replace reached path ();
-          Option.iter reach (Path_table.find_opt uses_of_unexported path)
-        end)
-      paths
+    (fun (declaration : Resolve.Names.declaration) ->
+      Path_table.replace stale_paths declaration.key.path ();
+      enqueue declaration)
+    stale;
+  let is_believed_unused path =
+    match Path_table.find_opt decided path with
+    | Some (_, Unused _) -> true
+    | Some (_, Used) -> false
+    | None -> was_unused path
   in
-  List.iter (fun (_, is_checked, paths) -> if not is_checked then reach paths) uses;
-  List.filter_map
-    (fun ((declaration : Resolve.Names.declaration), is_checked, _) ->
-      if is_checked && not (Path_table.mem reached declaration.key.path) then
-        Some
-          (report_unused lookups declaration
-             ~is_named:(Path_table.mem named_by_another declaration.key.path))
-      else None)
-    uses
+  let decide (declaration : Resolve.Names.declaration) use =
+    let path = declaration.key.path in
+    let flips = is_believed_unused path <> (use <> Used) in
+    Path_table.remove unsettled path;
+    Path_table.replace decided path (declaration, use);
+    if flips then List.iter enqueue (lookups.list_used declaration.key)
+  in
+  let search (start : Resolve.Names.declaration) =
+    let low_link = Path_table.create 16 in
+    let index_on_stack = Path_table.create 16 in
+    let named_by_another = Path_table.create 16 in
+    let stack = ref [] in
+    let rec visit (declaration : Resolve.Names.declaration) =
+      let path = declaration.key.path in
+      let index = Path_table.length low_link in
+      Path_table.replace low_link path index;
+      Path_table.replace index_on_stack path index;
+      stack := declaration :: !stack;
+      let lower other =
+        Path_table.replace low_link path (min (Path_table.find low_link path) other)
+      in
+      Seq.iter
+        (fun (user : Resolve.Names.declaration) ->
+          let user_path = user.key.path in
+          if not (Path.equal user_path path && user.key.ordinal = 0) then begin
+            Path_table.replace named_by_another path ();
+            if not (must_be_used lookups user) then raise Is_used;
+            match
+              (Path_table.find_opt index_on_stack user_path, Path_table.find_opt decided user_path)
+            with
+            | Some user_index, _ -> lower user_index
+            | None, Some (_, Used) -> raise Is_used
+            | None, verdict ->
+                let is_settled_unused =
+                  (not (Path_table.mem unsettled user_path))
+                  && match verdict with Some _ -> true | None -> was_unused user_path
+                in
+                if not is_settled_unused then begin
+                  visit user;
+                  lower (Path_table.find low_link user_path)
+                end
+          end)
+        (lookups.list_users path);
+      if Path_table.find low_link path = index then
+        let rec emit () =
+          match !stack with
+          | (member : Resolve.Names.declaration) :: rest ->
+              stack := rest;
+              Path_table.remove index_on_stack member.key.path;
+              decide member (Unused { is_named = Path_table.mem named_by_another member.key.path });
+              if not (Path.equal member.key.path path) then emit ()
+          | [] -> ()
+        in
+        emit ()
+    in
+    match visit start with
+    | () -> ()
+    | exception Is_used -> List.iter (fun member -> decide member Used) !stack
+  in
+  let rec settle () =
+    match Queue.take_opt queued with
+    | None -> ()
+    | Some (declaration : Resolve.Names.declaration) ->
+        if Path_table.mem unsettled declaration.key.path then
+          if must_be_used lookups declaration then search declaration else decide declaration Used;
+        settle ()
+  in
+  settle ();
+  List.sort
+    (fun ((left : Resolve.Names.declaration), _) ((right : Resolve.Names.declaration), _) ->
+      Path.compare left.key.path right.key.path)
+    (Path_table.fold
+       (fun path (declaration, use) classified ->
+         if Path_table.mem stale_paths path || was_unused path <> (use <> Used) then
+           (declaration, use) :: classified
+         else classified)
+       decided [])
+
+let check_unexported (lookups : Lookups.t) use (declaration : Resolve.Names.declaration) =
+  if must_be_used lookups declaration then
+    match use with
+    | Unused { is_named } -> [ report_unused lookups declaration ~is_named ]
+    | Used -> []
+  else []
 
 type check =
   | Sealed of Resolve.Names.key
   | Impl of Resolve.Names.key
   | Type of Resolve.Names.key
-  | Instantiations
-  | Tests
-  | Unexported
-  | Dependencies
+  | Instantiation of Resolve.Names.key
+  | Test of Resolve.Names.key
+  | Unexported of Resolve.Names.key * use
+  | Dependency of Path.package
 
 let describe_unused_dependency ~package dependency =
   Printf.sprintf "Nothing in `%s` uses `%s`. Delete its entry." (Path.show_package package)
     (Path.show_package dependency)
 
-let list_unused_dependencies (lookups : Lookups.t) package =
-  let used = lookups.list_used_packages package in
-  List.filter
-    (fun dependency -> not (List.mem dependency used))
-    (lookups.interface.names.list_dependency_names package)
-
-type outcome = Placed of placed list | Unused_dependencies of Path.package list
+type outcome = Placed of placed list | Dependency_used of bool
 
 let check_definition (lookups : Lookups.t) key check_declaration =
   let names = lookups.interface.names in
@@ -806,7 +879,7 @@ let run (lookups : Lookups.t) package check =
   | Sealed key -> check_definition lookups key (check_sealed lookups)
   | Impl key -> check_definition lookups key (check_impl lookups ~list_contained)
   | Type key -> check_definition lookups key (check_type lookups ~list_contained)
-  | Instantiations -> Placed (check_instantiation lookups package)
-  | Tests -> Placed (check_tests lookups package)
-  | Unexported -> Placed (check_unexported lookups package)
-  | Dependencies -> Unused_dependencies (list_unused_dependencies lookups package)
+  | Instantiation key -> check_definition lookups key (report_growing_cycle lookups)
+  | Test key -> check_definition lookups key (check_test lookups)
+  | Unexported (key, use) -> check_definition lookups key (check_unexported lookups use)
+  | Dependency dependency -> Dependency_used (lookups.is_package_used ~by:package dependency)
