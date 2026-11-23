@@ -122,7 +122,6 @@ fn show_type_expression(written: syntax.TypeExpression) -> String
       Some(associated) => "Self.${associated.text}"
     }
     Associated(parameter, name) => "${parameter.text}.${name.text}"
-    AnyType(path_type) => make_form("any", parts: [show_path_type(path_type)])
     FunctionType(function_type) => show_function_type(function_type)
     TypeError => "error"
   }
@@ -382,7 +381,6 @@ fn show_expression(value: syntax.Expression) -> String
       make_form(head, parts: [show_expression(operand)])
     }
     Mode(mode, inner) => make_form(show_mode(mode), parts: [show_expression(inner)])
-    Any(inner) => make_form("any", parts: [show_expression(inner)])
     Binary(operator, left, right, ..) => make_form(show_binary(operator), parts: [show_expression(left), show_expression(right)])
     Is(value: inner, pattern, ..) => make_form("is", parts: [show_expression(inner), show_pattern(pattern)])
     Range(start, stop, is_inclusive, ..) => {

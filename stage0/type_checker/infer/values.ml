@@ -6,7 +6,7 @@ let takes_literal (state : State.state) (collection : Types.ty) (trait : Types.t
           ~list_bounds:(State.lookup_bounds state) ~checks_conditions:false collection trait
       with
       | Some (Evidence (Impl _) | Evidence Bound) -> true
-      | Some (Evidence Dynamic | Built_in | Accepted _) | None -> false)
+      | Some (Built_in | Accepted _) | None -> false)
   | _ -> false
 
 let record_conversion (state : State.state) (value : Syntax.expression) elements

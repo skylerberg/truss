@@ -4,16 +4,6 @@ type Window(view: Slice[Int64])
 
 type Holder(items: List[Int64], count: Int64)
 
-trait Sized {
-  fn size(self) -> UInt64
-}
-
-impl Sized for Window {
-  fn size(self) -> UInt64 {
-    self.view.length()
-  }
-}
-
 fn Holder.reset(mut self) {
   self.items = []
 }

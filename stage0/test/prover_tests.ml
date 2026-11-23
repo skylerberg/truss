@@ -545,11 +545,6 @@ let () =
       Support.expect_one_diagnostic ~check Fixtures.Prover.impl_condition_beyond_its_trait
         "prover.requires" ~says:"may not follow from the trait's condition after `Panic unless`";
       expect_proven Fixtures.Prover.impl_condition_within_its_trait);
-  Harness.test "a call through `any` is ruled out once where the caller's condition holds"
-    (fun () ->
-      Support.expect_one_diagnostic ~check
-        Fixtures.Prover.call_through_any_where_the_condition_holds "prover.panic"
-        ~says:"This call may panic where `count < 50` holds");
   Harness.test "a call through a bound without `Panic` proves the trait's condition on values"
     (fun () ->
       Support.expect_one_diagnostic ~check
@@ -684,8 +679,6 @@ let () =
       | None -> Harness.fail "the caller has no proof");
   Harness.test "a function that passes a derived impl where a bound needs one is proven" (fun () ->
       expect_not_proven Fixtures.Prover.same_of_a_derived_version_ensured_false "prover.ensures");
-  Harness.test "a function that converts a value with a derived impl to `any` is proven" (fun () ->
-      expect_not_proven Fixtures.Prover.digest_of_a_derived_version_ensured_eight "prover.ensures");
   Harness.test
     "a written default that calls a function that calls a derived default is not recursion"
     (fun () ->
@@ -1371,8 +1364,6 @@ let () =
       expect_proven Fixtures.Prover.empty_sorted_set_literal);
   Harness.test "a literal of a type that implements FromElements is proven against its impl"
     (fun () -> expect_proven Fixtures.Prover.literal_of_a_type_with_from_elements);
-  Harness.test "any is one allocation" (fun () ->
-      expect_proven Fixtures.Prover.any_of_a_value_with_one_allocation);
   Harness.test "a provided implementation's calls keep the capability's contract" (fun () ->
       expect_proven (dice ^ Fixtures.Prover.fixed_dice_provided));
   Harness.test "an implementation of a capability keeps the capability's contract" (fun () ->
@@ -1888,25 +1879,7 @@ let () =
   Harness.test "provided methods that call each other are recursion" (fun () ->
       expect_only_codes Fixtures.Prover.ping_and_pong_provided_methods [ "prover.termination" ]);
   Harness.test "an implementation that calls the function providing it is recursion" (fun () ->
-      expect_only_codes Fixtures.Prover.looper_provided_by_its_own_caller [ "prover.termination" ]);
-  Harness.test "a call through any that reaches back is recursion" (fun () ->
-      expect_only_codes Fixtures.Prover.step_reaching_back_through_any [ "prover.termination" ]);
-  Harness.test
-    "a method that calls itself through any is recursion at the conversion and at the call"
-    (fun () ->
-      match
-        List.sort compare
-          (list_termination_failures Fixtures.Prover.check_calling_itself_through_any)
-      with
-      | [ call; conversion ]
-        when String.starts_with ~prefix:"This call to `Check.check` may not end" call
-             && String.starts_with
-                  ~prefix:
-                    "This conversion to `any` gives `app.main.impl app.main.Check for \
-                     app.main.Loop`, whose methods call back here"
-                  conversion ->
-          ()
-      | messages -> Harness.fail "%s" (String.concat "; " messages))
+      expect_only_codes Fixtures.Prover.looper_provided_by_its_own_caller [ "prover.termination" ])
 
 let () =
   Harness.test "an impl's method that calls itself through its type is recursion" (fun () ->
@@ -2051,12 +2024,7 @@ let () =
   Harness.test "a trait's method is given the impls of its own type arguments" (fun () ->
       Support.expect_one_diagnostic ~check
         ~says:"uses `app.main.impl app.main.Grow for app.main.Seed` where a bound needs it"
-        Fixtures.Prover.visit_given_a_seed_that_calls_it_back "prover.termination");
-  Harness.test "a call through any in a function that an impl's method calls is recursion"
-    (fun () ->
-      match list_codes Fixtures.Prover.step_of_a_node_reaching_back_through_any with
-      | [ "prover.termination"; "prover.termination" ] -> ()
-      | codes -> Harness.fail "codes %s" (String.concat ", " codes))
+        Fixtures.Prover.visit_given_a_seed_that_calls_it_back "prover.termination")
 
 let () =
   Harness.test "a constant's value is well defined" (fun () ->

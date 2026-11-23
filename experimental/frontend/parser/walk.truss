@@ -33,7 +33,7 @@ fn walk_type_expression(cursor: mut TokenCursor, visitor: Visitor, written: synt
   uses Panic, RunForever
 {
   match written.kind {
-    PathType(path_type) | AnyType(path_type) => walk_path_type(mut cursor, visitor, path_type)
+    PathType(path_type) => walk_path_type(mut cursor, visitor, path_type)
     FunctionType(function_type) => {
       for input in function_type.inputs {
         walk_type_expression(mut cursor, visitor, written: input.annotation)
@@ -148,7 +148,7 @@ fn walk_expression_parts(cursor: mut TokenCursor, visitor: Visitor, value: synta
     Integer(_) | Float(_) | True | False | Todo | Unreachable | Break | Continue | SelfValue | SelfTypeValue | Name(_)
       | ExpressionError => {}
     String(literal) => walk_string_literal(mut cursor, visitor, literal)
-    Member(base: inner, ..) | Try(inner) | Prefix(operand: inner, ..) | Mode(inner, ..) | Any(inner) | Echo(inner) | Parenthesized(inner) => {
+    Member(base: inner, ..) | Try(inner) | Prefix(operand: inner, ..) | Mode(inner, ..) | Echo(inner) | Parenthesized(inner) => {
       on_expression(mut cursor, visitor, value: inner)
     }
     Is(value: inner, ..) => on_expression(mut cursor, visitor, value: inner)

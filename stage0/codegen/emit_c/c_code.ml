@@ -200,10 +200,7 @@ let render_call (emission : Emission.t) fc (target : Lowered.target) arguments :
   let arguments = List.filter_map (C_values.render_operand emission fc) arguments in
   let texts = List.map fst arguments in
   (match target with
-  | Direct { signature; _ }
-  | Indirect { signature; _ }
-  | Evidence_call { signature; _ }
-  | Table_call { signature; _ } ->
+  | Direct { signature; _ } | Indirect { signature; _ } | Evidence_call { signature; _ } ->
       let leading = match target with Direct _ -> 0 | _ -> 1 in
       let arity = List.length signature.parameters in
       if leading + List.length arguments <> arity then
@@ -247,14 +244,6 @@ let render_call (emission : Emission.t) fc (target : Lowered.target) arguments :
       match declaration.returns with
       | Pointer _ -> C_values.render_cast (Text "void *") called
       | _ -> called)
-  | Table_call { table; value; slot; signature } ->
-      render_through_table emission
-        ~pointer:
-          (Text "((const void *const *)"
-          ++ render_required table ~description:"a table"
-          ++ Text (Printf.sprintf ")[%d]" slot))
-        signature
-        (render_required value ~description:"an any value" :: texts)
   | Evidence_call { evidence; capability; slot; signature } ->
       Emission.record_capability_call emission ~capability ~slot;
       let evidence = render_required evidence ~description:"evidence" in

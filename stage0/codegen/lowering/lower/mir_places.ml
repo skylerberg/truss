@@ -403,7 +403,7 @@ let reads (value : Mir.rvalue) local =
   in
   match value with
   | Operand operand | Not operand | Copy operand -> is_in_operand operand
-  | Convert { value; _ } | To_any { value; _ } -> is_in_operand value
+  | Convert { value; _ } -> is_in_operand value
   | Operation { operands; _ } | Array operands -> List.exists is_in_operand operands
   | Compare { left; right; _ } -> is_in_operand left || is_in_operand right
   | Construct { fields; _ } ->

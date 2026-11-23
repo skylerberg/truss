@@ -265,8 +265,7 @@ let report_null_coalescing cursor ~(value : Syntax.expression) ~(first : Token.t
   and default_span = Cursor.read_file_span cursor default.id in
   let needs_parentheses =
     match value.kind with
-    | Binary _ | Is _ | Range _ | Prefix _ | Mode _ | Any _ | Quantified _ | Echo _ | Return _ ->
-        true
+    | Binary _ | Is _ | Range _ | Prefix _ | Mode _ | Quantified _ | Echo _ | Return _ -> true
     | _ -> false
   in
   report cursor Null_coalescing first.span

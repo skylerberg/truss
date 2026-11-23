@@ -6,8 +6,9 @@ let resolve_callee state (callee : Mir.callee) : (Path.t * Ground.instantiation)
   match callee.target with
   | Function { path; instantiation } -> Some (path, ground_instantiation state instantiation)
   | Trait_method { trait; name; receiver; self_type; instantiation; evidence } ->
-      Targets.find_trait_method state.context state.frame.code.substitution ~trait ~name ~receiver
-        ~self_type ~instantiation ~evidence
+      Some
+        (Targets.resolve_trait_method state.context state.frame.code.substitution ~trait ~name
+           ~receiver ~self_type ~instantiation ~evidence)
   | Capability_method _ | Intrinsic _ | Indirect _ -> None
 
 let read_callee_signature (state : Lowering.state) path instantiation =

@@ -268,8 +268,7 @@ let () =
           (List.init levels make_level_source
           @ [
               Printf.sprintf "trait T%d {}\n\n" levels;
-              "fn measure[Value: T0](value: Value) -> UInt64 {\n  value.size()\n}\n\n";
-              "fn measure_any(value: any T0) -> UInt64 {\n  value.size()\n}\n";
+              "fn measure[Value: T0](value: Value) -> UInt64 {\n  value.size()\n}\n";
             ])
       in
       let started = Sys.time () in
@@ -827,7 +826,6 @@ let () =
         | [], None -> ()
         | _ -> Harness.fail "another number of generic parameters")
     | Bound -> Harness.fail "a bound"
-    | Dynamic -> Harness.fail "dynamic evidence"
   in
   Harness.test "evidence by a bound is the impl once a substitution makes its type concrete"
     (fun () ->
@@ -839,7 +837,7 @@ let () =
       let interface, value = read () in
       match resolve interface Types.no_substitution (Parameter value) Bound with
       | Bound -> ()
-      | Impl _ | Dynamic -> Harness.fail "not a bound");
+      | Impl _ -> Harness.fail "not a bound");
   Harness.test "an impl is selected for a type whose argument has no bound in scope" (fun () ->
       let interface, value = read () in
       expect_impl interface
@@ -851,12 +849,7 @@ let () =
       expect_impl interface
         (resolve interface (bind_to_tag value) crate
            (resolve interface Types.no_substitution crate Bound))
-        ~for_type:"Crate[Item]" ~item:(Some "Tag"));
-  Harness.test "evidence for an `any` type is dynamic" (fun () ->
-      let interface, _ = read () in
-      match resolve interface Types.no_substitution (Any named) Bound with
-      | Dynamic -> ()
-      | Impl _ | Bound -> Harness.fail "not dynamic")
+        ~for_type:"Crate[Item]" ~item:(Some "Tag"))
 
 let () =
   let text = Fixtures.Interface.described in
@@ -1034,8 +1027,6 @@ let () =
                 (Database.For_testing.list_diagnostics [ Interface ]
                    (Support.make_database packages) (Support.parse_file "app.main"))))
       then Harness.fail "accepted");
-  Harness.test "any must fix every associated type" (fun () ->
-      expect_one_diagnostic "fn f(items: any Iterable) {}\n" "types.associated_type_not_fixed");
   Harness.test "nothing can implement Copyable" (fun () ->
       expect_one_diagnostic Fixtures.Interface.copyable_impl "types.implements_built_in");
   Harness.test "a public constant cannot have a private type" (fun () ->
@@ -1049,15 +1040,6 @@ let () =
         Option.is_some
           (Interface.Impls.find_evidence (make_interface packages)
              ~list_bounds:Interface.Impls.list_no_bounds Types.Never (trait "Hash" []))
-      then Harness.fail "it does");
-  Harness.test "an any value implements its trait only with the same arguments" (fun () ->
-      let packages = Support.setup [] in
-      let any = Types.Any (trait "From" [ int64 ]) in
-      if
-        Option.is_some
-          (Interface.Impls.find_evidence (make_interface packages)
-             ~list_bounds:Interface.Impls.list_no_bounds any
-             (trait "From" [ Types.make_builtin Int32 ]))
       then Harness.fail "it does")
 
 let () =

@@ -114,7 +114,7 @@ let walk_expression_children visit (node : Core.expression) =
   | Compare { left; right; _ } | Connective { left; right; _ } | Identical (left, right) ->
       visit.expression left;
       visit.expression right
-  | Not inner | Echo inner | Old inner | To_any { value = inner; _ } -> visit.expression inner
+  | Not inner | Echo inner | Old inner -> visit.expression inner
   | Matches { value; pattern } ->
       walk_operand visit value;
       visit.pattern pattern

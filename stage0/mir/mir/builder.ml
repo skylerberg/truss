@@ -277,9 +277,6 @@ let rec lower_expression builder (node : Core.expression) : Tree.operand option 
     | Convert { conversion; value = converted } ->
         let* value = lower_expression builder converted in
         hold (Convert { conversion; value; converts_function_expression = false })
-    | To_any { value; trait; evidence } ->
-        let* value = lower_expression builder value in
-        hold (To_any { value; trait; evidence })
     | If { condition = tested; then_; else_ } ->
         let scope = Emitter.make_block_scope () in
         let* condition = lower_condition builder scope tested in

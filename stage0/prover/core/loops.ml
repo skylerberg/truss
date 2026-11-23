@@ -706,7 +706,7 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
     | Impl { impl; substitution } ->
         ( Well_known.make_impl_method_path Cursor_next ~impl,
           Types.combine_substitutions substitution self_binding )
-    | Bound | Dynamic -> (Well_known.make_method_path Cursor_next, self_binding)
+    | Bound -> (Well_known.make_method_path Cursor_next, self_binding)
   in
   let cursor_next = Well_known.locate_method Cursor_next in
   let contract =

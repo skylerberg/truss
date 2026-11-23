@@ -110,9 +110,7 @@ let () =
   Harness.test "a law's proof names its type as an impl does, with generic parameters" (fun () ->
       Parse_support.expect_definition
         "proof Ordered.transitive for Box[Item: Ordered] {\n  lemma()\n}"
-        "(proof Ordered.transitive for Box[Item: Ordered] (block (call lemma)))";
-      Parse_support.expect_error "proof Ordered.transitive for any Shown {}" ~code:Unexpected_token
-        ~at:"any");
+        "(proof Ordered.transitive for Box[Item: Ordered] (block (call lemma)))");
   Harness.test "a test's name is a plain string" (fun () ->
       Parse_support.expect_error "test \"a${b}\" {}" ~code:Interpolation_not_allowed ~at:"\"a");
   Harness.test "an impl takes no visibility" (fun () ->
@@ -127,8 +125,6 @@ let () =
       Parse_support.expect_error "impl From[fn(Int64) -> Int64] for Handler {}"
         ~code:Misplaced_function_type ~at:"fn(";
       Parse_support.expect_error "impl From[List[fn() -> Int64]] for Handler {}"
-        ~code:Misplaced_function_type ~at:"fn(";
-      Parse_support.expect_error "impl From[any Source[Item = fn() -> Int64]] for Handler {}"
         ~code:Misplaced_function_type ~at:"fn(");
   Harness.test "an impl's trait arguments hold no associated type, so the impl overlaps no other"
     (fun () ->
@@ -149,11 +145,7 @@ let () =
         ~code:Misplaced_constraint ~at:"Output = Text";
       Parse_support.expect_error "proof Cursor[Element = Int64].ordered for Numbers {}"
         ~code:Misplaced_constraint ~at:"Element = Int64");
-  Harness.test "a constraint inside an impl's trait arguments is part of an any type" (fun () ->
-      Parse_support.expect_definition "impl From[any Cursor[Element = Int64]] for Numbers {}"
-        "(impl From[(any Cursor[Element = Int64])] for Numbers)");
-  Harness.test
-    "an impl's trait arguments may be types, its generic parameters, Self, any, and counts"
+  Harness.test "an impl's trait arguments may be types, its generic parameters, Self, and counts"
     (fun () ->
       Parse_support.expect_definition "impl Add[Element] for Vector[Element] {}"
         "(impl Add[Element] for Vector[Element])";
@@ -161,8 +153,6 @@ let () =
         "impl From[List[map.Entry[Key, Value]]] for Table[Key, Value] {}"
         "(impl From[List[map.Entry[Key, Value]]] for Table[Key, Value])";
       Parse_support.expect_definition "impl Add[Self] for Meters {}" "(impl Add[Self] for Meters)";
-      Parse_support.expect_definition "impl From[any Display] for Report {}"
-        "(impl From[(any Display)] for Report)";
       Parse_support.expect_definition "impl From[Array[UInt8, 32]] for Digest {}"
         "(impl From[Array[UInt8, 32]] for Digest)");
   Harness.test "a test takes no visibility" (fun () ->

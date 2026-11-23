@@ -431,7 +431,7 @@ let compute_rvalue_held builder (value : Mir.rvalue) : held =
   | Operation _ | Compare _ | Is_variant _ | Function_value _ | Value_parameter _
   | Parameter_default _ | Specification _ ->
       make_value []
-  | Not operand | Convert { value = operand; _ } | To_any { value = operand; _ } | Copy operand ->
+  | Not operand | Convert { value = operand; _ } | Copy operand ->
       make_value (list_operand_views builder operand)
   | Construct { fields; _ } ->
       let supplied = List.filter_map snd fields in

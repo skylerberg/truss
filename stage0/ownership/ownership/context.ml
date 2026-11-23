@@ -76,7 +76,7 @@ and compute_holds_array context (type_ : Types.ty) =
                (Option.value ~default:[] (Types.instantiate_variants interface arguments))
       | None -> false)
   | Parameter _ | Projection _ -> true
-  | Function _ | Any _ | Never | Integer | Variable _ | Hole | Error _ -> false
+  | Function _ | Never | Integer | Variable _ | Hole | Error _ -> false
 
 let is_plain context type_ = Lazy.force (decide context type_).plain
 let is_view context type_ = Lazy.force (decide context type_).view

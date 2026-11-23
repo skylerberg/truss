@@ -44,11 +44,11 @@ let trace_reachable ~lookup roots =
           let chain = item :: chain in
           reachable := (fragment, List.rev chain) :: !reachable;
           match fragment.kind with
-          | Table_entries (Some capability) ->
+          | Table_entries capability ->
               Path_table.add tables capability fragment;
               List.iter (enqueue_entry fragment)
                 (List.rev (Path_table.find_all called_slots capability))
-          | Functions _ | Static_data | Table_entries None ->
+          | Functions _ | Static_data ->
               List.iter
                 (fun (capability, slot) ->
                   if not (List.mem_assoc slot (Path_table.find_all called_slots capability)) then begin

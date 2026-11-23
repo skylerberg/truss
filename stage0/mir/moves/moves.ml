@@ -61,7 +61,7 @@ let list_rvalue_uses ~is_moving ~origin (rvalue : Mir.rvalue) =
   let list_by_value_uses = List.concat_map (list_operand_uses ~is_moving ~by_value:true)
   and list_read_uses = List.concat_map (list_operand_uses ~is_moving ~by_value:false) in
   match rvalue with
-  | Operand operand | To_any { value = operand; _ } -> list_by_value_uses [ operand ]
+  | Operand operand -> list_by_value_uses [ operand ]
   | Operation { operands; _ } | Array operands -> list_by_value_uses operands
   | Construct { fields; _ } -> list_by_value_uses (List.filter_map snd fields)
   | Compare { left; right; _ } -> list_read_uses [ left; right ]

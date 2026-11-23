@@ -38,11 +38,3 @@ val check_binary :
   Syntax.expression ->
   Syntax.expression ->
   Types.ty
-
-val check_any :
-  State.state ->
-  State.env ->
-  ?expected:Types.ty ->
-  Syntax.expression ->
-  Syntax.expression ->
-  Types.ty

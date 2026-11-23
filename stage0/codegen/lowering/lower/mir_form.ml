@@ -349,16 +349,6 @@ and lower_rvalue_into ?types_ty state (rvalue : Mir.rvalue) (destination : Lower
       Definitions.raise_bug "a conversion that exists only in specifications"
   | Convert { conversion = View_to_owned; _ } ->
       Definitions.raise_bug "the owner of a view written outside its lent local"
-  | To_any { value = inner; trait; evidence } ->
-      let impl, type_arguments =
-        Targets.read_impl state.context state.frame.code.substitution ~trait
-          ~self_type:(Mir.extract_operand_type inner) ~evidence
-      in
-      Targets.lower_any_into state ~any_ty:ty
-        ~inner_ty:(Mir_places.compute_operand_type state inner)
-        ~impl ~type_arguments
-        ~value:(Mir_places.lower_operand_place state inner)
-        destination
   | Copy source ->
       Drop_and_copy.copy_into state.context.drop_and_copy state.builder ~destination
         ~source:(Mir_places.lower_operand_place state source)
@@ -516,19 +506,6 @@ and lower_call_into state (call : Mir.call) destination ~origin =
              });
         if not c_signature.returns then Lowering.emit_unreachable_block state
       end
-  | None, Trait_method { trait; name; receiver; self_type; _ } -> (
-      let any_type =
-        match Types.substitute state.frame.code.substitution self_type with
-        | Types.Any reference -> reference
-        | receiver -> Definitions.raise_bug "a call through any on %s" (Types.show receiver)
-      in
-      match List.map (Mir_calls.lower_argument_place state) call.arguments with
-      | (_, _, any) :: arguments ->
-          Targets.lower_call_through_any state ~any_type ~trait:trait.trait ~name ~receiver ~any
-            ~arguments
-            ~site:(Some (Mir_places.locate_site state origin))
-            destination
-      | [] -> Definitions.raise_bug "a call through any with no receiver")
   | None, Indirect function_value ->
       let function_type =
         match Mir_places.compute_operand_type state function_value with
@@ -544,7 +521,8 @@ and lower_call_into state (call : Mir.call) destination ~origin =
              place)
            call.arguments)
         destination
-  | None, Function _ -> Definitions.raise_bug "a function that does not resolve"
+  | None, (Function _ | Trait_method _) ->
+      Definitions.raise_bug "a function or a method that does not resolve"
 
 and check_invariant state ~value ~clause ~destination =
   let _, value_ty, value_place = Mir_calls.lower_argument_place state value in
@@ -658,30 +636,11 @@ and lend ?(forwards = 0) state part (call : Mir.call) ~origin =
                   ~signature ~substitution ~arguments ~lending ~destination
                   ~site:(Some (Mir_places.locate_site state origin))
                   ())
-        | None, Trait_method { trait; name; receiver; self_type; _ } -> (
-            let any_type =
-              match Types.substitute state.frame.code.substitution self_type with
-              | Types.Any reference -> reference
-              | receiver -> Definitions.raise_bug "a call through any on %s" (Types.show receiver)
-            in
-            let _, signature =
-              Targets.lookup_dynamic_method state.context ~any:any_type trait.trait name receiver
-            in
-            match List.map (Mir_calls.lower_argument_place state) call.arguments with
-            | (_, _, any) :: arguments ->
-                compute_lent_place signature.output
-                  (Targets.make_any_substitution state.context ~any:any_type trait.trait)
-                  (fun ~lending destination ->
-                    Targets.lower_call_through_any state ~any_type ~trait:trait.trait ~name
-                      ~receiver ~any ~arguments ~lending
-                      ~site:(Some (Mir_places.locate_site state origin))
-                      destination)
-            | [] -> Definitions.raise_bug "a call through any with no receiver")
         | None, Capability_method { capability; name } ->
             Targets.raise_lending_capability_method capability name
         | None, Indirect _ ->
             Definitions.raise_bug "a lending call of a function value, whose type cannot lend"
-        | None, (Function _ | Intrinsic _) ->
+        | None, (Function _ | Trait_method _ | Intrinsic _) ->
             Definitions.raise_bug "a lending call that does not resolve"
       in
       Mir_lends.emit_mark state Lend_called lent;
@@ -785,7 +744,8 @@ and lend_part state ~(mode : Language.Mode.t) (part : Mir.yielded) =
     let target = List.fold_left Lowered.project slot inside in
     match deferred with
     | Deferred_drop ty ->
-        defer_call Lend_defer_drop [ Constant (Symbol_address (Any_drop ty)); take_address target ]
+        defer_call Lend_defer_drop
+          [ Constant (Symbol_address (Untyped_drop ty)); take_address target ]
     | Deferred_write_back { source; ty } ->
         defer_call Lend_defer_write_back
           [ take_address source; take_address target; Constant (Size_of ty) ]

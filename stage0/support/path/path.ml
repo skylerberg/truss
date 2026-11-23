@@ -59,13 +59,7 @@ type t =
   | Unresolved of { file : file; names : string list }
 
 and reference = { path : t; arguments : argument list; associated : (string * argument) list }
-
-and argument =
-  | Named of reference
-  | Parameter of string
-  | Any of reference
-  | Count of Z.t
-  | Constant of t
+and argument = Named of reference | Parameter of string | Count of Z.t | Constant of t
 
 let standard_package = { owner = None; name = "standard" }
 let make_standard_module modules = { package = standard_package; modules }
@@ -97,7 +91,7 @@ and is_resolved_reference { path; arguments; associated } =
   && List.for_all (fun (_, argument) -> is_resolved_argument argument) associated
 
 and is_resolved_argument = function
-  | Named reference | Any reference -> is_resolved_reference reference
+  | Named reference -> is_resolved_reference reference
   | Constant path -> is_resolved path
   | Parameter _ | Count _ -> true
 
@@ -143,7 +137,6 @@ and show_reference { path; arguments; associated } =
 and show_argument = function
   | Named reference -> show_reference reference
   | Parameter name -> name
-  | Any reference -> "any " ^ show_reference reference
   | Count value -> Z.to_string value
   | Constant path -> show path
 

@@ -3,19 +3,8 @@ let raise_bug format = Compiler_bug.raise_bug ~stage:"Infer" format
 let instantiate signatures (interface : Interface.Lookups.t) (target : Core.operand Core.target) :
     Types.capability_set =
   match (target, Signatures.find_declaration signatures interface target) with
-  | Function _, Some { signature; substitution; _ } ->
+  | (Function _ | Trait_method _), Some { signature; substitution; _ } ->
       Types.substitute_capabilities substitution signature.uses
-  | Trait_method { evidence; _ }, Some { signature; substitution; _ } -> (
-      let uses = Types.substitute_capabilities substitution signature.uses in
-      match evidence with
-      | Dynamic ->
-          Types.replace_capabilities
-            (function
-              | Types.Capability_unless_values capability ->
-                  Some (Types.make_capability_set [ capability ])
-              | _ -> None)
-            uses
-      | Impl _ | Bound -> uses)
   | Capability_method { capability; _ }, Some { signature; _ } ->
       Types.union_capabilities
         (Types.make_capability_set [ Types.make_capability capability ])

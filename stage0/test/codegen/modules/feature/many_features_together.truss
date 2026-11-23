@@ -51,6 +51,26 @@ impl Shape for Rectangle {
   fn name(self) -> String { "rectangle ${self.width}x${self.height}" }
 }
 
+type Figure =
+  | Squared(square: Square)
+  | Rectangular(rectangle: Rectangle)
+
+impl Shape for Figure {
+  fn area(self) -> Int64 {
+    match self {
+      Squared(square) => square.area()
+      Rectangular(rectangle) => rectangle.area()
+    }
+  }
+
+  fn name(self) -> String {
+    match self {
+      Squared(square) => square.name()
+      Rectangular(rectangle) => rectangle.name()
+    }
+  }
+}
+
 fn checked(text: own String) -> Result[String, ParseError] {
   if text.is_empty() {
     return Err(ParseError.Empty)
@@ -63,14 +83,17 @@ fn twice(text: String) -> Result[UInt64, ParseError] {
   Ok(value.length() * 2)
 }
 
-test "a program of many features together: generics, any, lambdas, ?, Map, mut loops" {
+test "a program of many features together: generics, a sum type, lambdas, ?, Map, mut loops" {
   assert parse_digit(55) == Some(7)
   assert parse_digit(65) == None
   assert largest([3, 9, 2]) == Some(9)
   assert largest(["b", "c", "a"]) == Some("c")
   let empty: List[Int64] = []
   assert largest(empty) == None
-  let shapes: List[any Shape] = [any Square(side: 3), any Rectangle(width: 2, height: 5)]
+  let shapes: List[Figure] = [
+    Figure.Squared(square: Square(side: 3)),
+    Figure.Rectangular(rectangle: Rectangle(width: 2, height: 5)),
+  ]
   var total = 0
   var names: List[String] = []
   for shape in shapes {

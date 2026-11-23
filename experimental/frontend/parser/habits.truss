@@ -424,7 +424,7 @@ fn report_null_coalescing(cursor: mut TokenCursor, value: syntax.Expression, fir
   let value_span = cursor.read_file_span(value.id)
   let default_span = cursor.read_file_span(default.id)
   let needs_parentheses = match value.kind {
-    Binary(..) | Is(..) | Range(..) | Prefix(..) | Mode(..) | Any(_) | Quantified(..) | Echo(_) | Return(_) => true
+    Binary(..) | Is(..) | Range(..) | Prefix(..) | Mode(..) | Quantified(..) | Echo(_) | Return(_) => true
     _ => false
   }
   let written = if second.kind == token.Kind.Punctuation(token.Punctuation.Colon) { "?:" } else { "??" }

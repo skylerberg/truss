@@ -61,7 +61,6 @@ let rec show_type_expression (type_ : Syntax.type_expression) =
   | Self_type None -> "Self"
   | Self_type (Some name) -> "Self." ^ name.text
   | Associated (parameter, name) -> parameter.text ^ "." ^ name.text
-  | Any_type path_type -> make_form "any" [ show_path_type path_type ]
   | Function_type function_type_ -> show_function_type function_type_
   | Type_error -> "error"
 
@@ -197,7 +196,6 @@ and show_expression (value : Syntax.expression) =
         (match operator with Negate -> "-" | Not -> "!" | Complement -> "~")
         [ show_expression inner ]
   | Mode (written, inner) -> make_form (show_mode written) [ show_expression inner ]
-  | Any inner -> make_form "any" [ show_expression inner ]
   | Binary { operator; left; right; _ } ->
       make_form (show_binary operator) [ show_expression left; show_expression right ]
   | Is { value = inner; pattern = tested; _ } ->

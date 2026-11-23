@@ -1713,8 +1713,6 @@ let () =
   (let keep = Fixtures.Infer.keep in
    Harness.test "a type that holds no view is Storable" (fun () ->
        expect_fine (keep ^ Fixtures.Infer.values_without_views_kept));
-   Harness.test "an any type is Storable when its trait requires Storable" (fun () ->
-       expect_fine (keep ^ Fixtures.Infer.any_job_kept));
    Harness.test "a trait that requires Storable cannot be implemented for a view type" (fun () ->
        expect_one_diagnostic
          (keep ^ Fixtures.Infer.job_impl_for_labeled)
@@ -1727,8 +1725,6 @@ let () =
        ("a record that holds a slice is not Storable", Fixtures.Infer.labeled_slice_kept);
        ("a generic type is not Storable where its argument is not", Fixtures.Infer.boxed_slice_kept);
        ("a function type is not Storable", Fixtures.Infer.function_kept);
-       ( "an any type is not Storable when its trait does not require it",
-         Fixtures.Infer.any_task_kept );
        ( "a type parameter is Storable only when it is bounded",
          Fixtures.Infer.unbounded_element_kept );
      ];
@@ -1808,7 +1804,7 @@ let () =
           ()
       | Some (Impl { impl; _ }) ->
           Harness.fail "the loop calls the `element` of %s" (Path.show impl)
-      | Some (Bound | Dynamic) -> Harness.fail "the loop calls an `element` of no impl"
+      | Some Bound -> Harness.fail "the loop calls an `element` of no impl"
       | None -> Harness.fail "the loop calls no `element`");
   Harness.test "a loop whose element type has no impl of the trait is an error at the loop"
     (fun () ->
@@ -2285,10 +2281,6 @@ let () =
   Harness.test "a method call through two bounds of one trait does not choose the first" (fun () ->
       expect_one_diagnostic Fixtures.Infer.method_of_a_parameter_with_two_bounds_of_one_trait
         ~says:"does not determine the arguments of `Tagged`" "types.cannot_infer");
-  Harness.test "a method call through an `any` with two instances of one trait chooses neither"
-    (fun () ->
-      expect_one_diagnostic Fixtures.Infer.method_through_an_any_with_two_instances_of_one_trait
-        "types.cannot_infer");
   Harness.test "a method call's argument chooses among two bounds of one trait" (fun () ->
       expect_fine Fixtures.Infer.method_of_a_parameter_whose_argument_chooses_a_bound);
   Harness.test "a generic parameter given type arguments is an error type, not the parameter"
@@ -2457,35 +2449,6 @@ let () =
       expect_one_diagnostic (make_clause_source "count") "types.not_callable";
       expect_one_diagnostic (make_clause_source "Point") "types.not_a_capability";
       expect_one_diagnostic (make_clause_source "Clock.later") "types.unknown_member");
-  Harness.test "a method with generic parameters is not object-safe" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.generic_visit_through_any "types.not_callable");
-  Harness.test "a method with a capability parameter cannot be called through any" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.visitor_with_a_capability_parameter_called_through_any
-        "types.not_callable");
-  Harness.test "a method that takes or returns Self cannot be called through any" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.join_through_any "types.not_callable");
-  Harness.test
-    "a supertrait's method that takes Self through its trait's argument cannot be called through \
-     any, so a dog is never matched against a cat" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.supertraits_method_that_takes_self_through_its_argument
-        "types.not_callable" ~at:("dog.matches(cat)", 1));
-  Harness.test "a method whose result holds Self cannot be called through any" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.skip_through_any_cursor "types.not_callable");
-  Harness.test "a cursor's own step and its counting can be called through any" (fun () ->
-      expect_fine Fixtures.Infer.any_cursor_stepped_and_counted);
-  Harness.test "a method that names an associated type can be called through any" (fun () ->
-      expect_fine (source ^ Fixtures.Infer.any_source_of_numbers));
-  Harness.test "`any value` must give the associated types its type fixes" (fun () ->
-      expect_one_diagnostic
-        (source ^ Fixtures.Infer.any_source_of_numbers_as_strings)
-        "types.no_impl");
-  Harness.test "`any value` that gives the associated types its type fixes is fine" (fun () ->
-      expect_fine (source ^ Fixtures.Infer.any_source_of_numbers));
-  Harness.test "`any value` of a generic parameter needs a bound that fixes the associated types"
-    (fun () ->
-      expect_one_diagnostic (source ^ Fixtures.Infer.any_source_of_an_unfixed_input) "types.no_impl");
-  Harness.test "`any value` of a generic parameter whose bound fixes the associated types is fine"
-    (fun () -> expect_fine (source ^ Fixtures.Infer.any_source_of_a_fixed_input));
   Harness.test "an associated type a bound fixes infers a type argument" (fun () ->
       expect_fine (source ^ Fixtures.Infer.first_of_a_source_with_a_fixed_item));
   Harness.test "an associated type a bound fixes must be the one the impl gives" (fun () ->
@@ -2510,8 +2473,8 @@ let () =
       expect_one_diagnostic Fixtures.Infer.constant_calling_a_function_value "types.not_constant"
         ~at:("fn(value) { value }", 1));
   Harness.test
-    "a constant's type cannot be or hold a function type, an `any` type, a handle, or state that \
-     tasks share" (fun () ->
+    "a constant's type cannot be or hold a function type, a handle, or state that tasks share"
+    (fun () ->
       let reported =
         List.map
           (fun (diagnostic : Diagnostic.t) ->
@@ -2526,13 +2489,7 @@ let () =
             ( "types.constant_not_data",
               "A constant is stored in the compiled program as data, so its type cannot be or hold "
               ^ part ^ "." ))
-          [
-            "a function type";
-            "a function type";
-            "an `any` type";
-            "a handle";
-            "state that tasks share";
-          ]
+          [ "a function type"; "a function type"; "a handle"; "state that tasks share" ]
       in
       if reported <> expected then
         Harness.fail "reported [%s]" (String.concat "; " (List.map snd reported)));

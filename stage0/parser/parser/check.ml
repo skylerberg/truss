@@ -115,7 +115,7 @@ and check_placement cursor ~top (type_ : Syntax.type_expression) =
         (fun (input : Syntax.function_input) -> check_placement cursor ~top:false input.type_)
         inputs;
       Option.iter (check_placement cursor ~top:false) output
-  | Path_type path | Any_type path -> check_path_placement cursor path
+  | Path_type path -> check_path_placement cursor path
   | Self_type _ | Associated _ | Type_error -> ()
 
 and check_path_placement cursor (path : Syntax.path_type) =
@@ -213,7 +213,7 @@ and check_trait_argument cursor ~is_law_proof (type_ : Syntax.type_expression) =
            written)
   in
   match type_.kind with
-  | Path_type path | Any_type path -> check_trait_arguments cursor ~is_law_proof path
+  | Path_type path -> check_trait_arguments cursor ~is_law_proof path
   | Function_type _ ->
       report cursor Misplaced_function_type type_.id
         (if is_law_proof then

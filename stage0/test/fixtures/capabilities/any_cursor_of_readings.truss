@@ -1,5 +1,0 @@
-fn boxed() -> any Cursor[Element = Int64]
-  uses Meter
-{
-  any readings(3)
-}

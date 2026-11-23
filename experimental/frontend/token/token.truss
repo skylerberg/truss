@@ -2,7 +2,6 @@ use frontend.source
 use standard.math
 
 internal type Keyword =
-  | Any
   | Assert
   | Break
   | Capability
@@ -232,7 +231,6 @@ internal type Lexed(tables: Tables, first: UInt64, stop: UInt64)
 
 internal fn find_word(spelling: StringSlice) -> Option[Kind] {
   match spelling {
-    "any" => Some(Kind.Keyword(Keyword.Any))
     "assert" => Some(Kind.Keyword(Keyword.Assert))
     "break" => Some(Kind.Keyword(Keyword.Break))
     "capability" => Some(Kind.Keyword(Keyword.Capability))
@@ -302,7 +300,6 @@ internal fn find_word(spelling: StringSlice) -> Option[Kind] {
 
 internal fn spell_keyword(keyword: Keyword) -> StringSlice {
   match keyword {
-    Any => "any"
     Assert => "assert"
     Break => "break"
     Capability => "capability"

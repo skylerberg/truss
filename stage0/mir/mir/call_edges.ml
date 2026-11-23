@@ -86,7 +86,6 @@ let rec list_code_of_impl_for interface ((type_ : Types.ty), (bound : Types.trai
                 (Interface.Impls.list_required_bounds
                    (Interface.Definition.read_impl_interface interface impl).impl_generics
                    substitution)
-        | Dynamic -> list_trait_methods interface required.trait
         | Bound -> [])
     (Interface.Properties.list_bound_closure interface ~self:type_ bound)
 
@@ -158,7 +157,6 @@ let resolve_callee (interface : Interface.Lookups.t) instance (callee : _ Core.t
         | Impl { impl; substitution } ->
             let method_ = Path.Method { owner = impl; name; receiver } in
             (Some method_, lazy (list_code_supplied_to method_ ~bound_by_owner:substitution))
-        | Dynamic -> (Some declaration, lazy (list_code_supplied_to_declaration ()))
         | Bound ->
             ( (if is_self_of_enclosing_trait self_type then Some declaration else None),
               lazy (list_code_supplied_to_declaration ()) )
@@ -191,7 +189,7 @@ let resolve_node (lookups : lookups) (declaration : Path.t) instance =
           ~trait Bound
       with
       | Impl { impl; _ } -> Some (Path.Method { owner = impl; name; receiver })
-      | Bound | Dynamic -> None
+      | Bound -> None
     in
     match lookups.mir.find_form_origin method_ with
     | Some (Inherited key, _) when Path.equal key.path declaration -> Some method_
@@ -202,7 +200,7 @@ let resolve_node (lookups : lookups) (declaration : Path.t) instance =
       Option.value (find_inheriting_method owner name receiver) ~default:declaration
   | _ -> declaration
 
-type supplier = Call | Named_function of Path.t | Conversion_to_any | Provide
+type supplier = Call | Named_function of Path.t | Provide
 type edge = Calls of Path.t | Supplies of { supplier : supplier; code : Path.t list }
 
 let list_statement_edges interface instance (statement : Tree.statement) =
@@ -218,9 +216,6 @@ let list_statement_edges interface instance (statement : Tree.statement) =
   | Basic (Assign { value = Function_value { path; instantiation; _ }; _ }) ->
       supply (Named_function path)
         (path :: list_code_supplied_by_function_value interface instance path instantiation)
-  | Basic (Assign { value = To_any { value; trait; _ }; _ }) ->
-      supply Conversion_to_any
-        (list_code_supplied_to_bound interface instance (Walk.extract_operand_type value, trait))
   | Provide { provided; _ } ->
       supply Provide
         (List.concat_map
@@ -312,8 +307,7 @@ let list_dependencies (lookups : lookups) instance (code : Tree.t) =
             {
               value =
                 ( Operand _ | Operation _ | Compare _ | Not _ | Array _ | Is_variant _ | Convert _
-                | To_any _ | Copy _ | Function_value _ | Lambda _ | Value_parameter _
-                | Specification _ );
+                | Copy _ | Function_value _ | Lambda _ | Value_parameter _ | Specification _ );
               _;
             }
         | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _ | Loan_end _ | Ghost_assert _

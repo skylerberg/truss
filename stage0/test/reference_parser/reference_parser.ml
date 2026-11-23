@@ -15,7 +15,6 @@ let token_of_kind (kind : Token.kind) : Truss.token option =
   | Keyword keyword ->
       Some
         (match keyword with
-        | Any -> ANY
         | Assert -> ASSERT
         | Break -> BREAK
         | Capability -> CAPABILITY

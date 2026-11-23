@@ -88,7 +88,7 @@ pattern, `Circle` is therefore a constructor and `radius` a binding.
 Reserved everywhere:
 
 ```text
-any assert break capability concurrent continue cost decreases derives echo else
+assert break capability concurrent continue cost decreases derives echo else
 ensures exists false fn for forall if impl in indirect internal invariant is law
 lends let match mut opaque own parallel proof provide public requires return self
 Self test theorem todo trait true type unless unreachable use uses var when
@@ -290,12 +290,12 @@ end a statement and the token after it can begin one, outside `(` and `[`:
      `todo`, `unreachable`, `break`, `continue`, `return`;
    - the first token after it **can begin a statement**: a name, `_`, a
      number or string literal, `(`, `[`, `{`, `-`, `!`, `~`, a reserved word,
-     or one of the keywords `any`, `assert`, `break`, `capability`,
-     `concurrent`, `continue`, `echo`, `exists`, `false`, `fn`, `for`,
-     `forall`, `if`, `impl`, `internal`, `law`, `let`, `match`, `mut`, `own`,
-     `parallel`, `proof`, `provide`, `public`, `return`, `self`, `Self`,
-     `test`, `theorem`, `todo`, `trait`, `true`, `type`, `unreachable`,
-     `use`, `var`, `while`.
+     or one of the keywords `assert`, `break`, `capability`, `concurrent`,
+     `continue`, `echo`, `exists`, `false`, `fn`, `for`, `forall`, `if`,
+     `impl`, `internal`, `law`, `let`, `match`, `mut`, `own`, `parallel`,
+     `proof`, `provide`, `public`, `return`, `self`, `Self`, `test`,
+     `theorem`, `todo`, `trait`, `true`, `type`, `unreachable`, `use`, `var`,
+     `while`.
 3. Several line feeds in a row produce at most one `NEWLINE`.
 4. At the end of the file, a `NEWLINE` follows the last token if it can end a
    statement.
@@ -475,7 +475,6 @@ type Expression =
 type           = path_type
                | "Self" [ "." UPPER_NAME ]
                | UPPER_NAME "." UPPER_NAME
-               | "any" path_type
                | function_type
                | "(" function_type { function_type_clause } ")" ;
 
@@ -633,9 +632,8 @@ fn Option[Value].take(mut self) -> Option[Value] {
   from a type's fields, except for an opaque type, which has them only when
   it declares them with `derives`. The compiler checks the declaration, and
   other packages rely only on it.
-- A generic type has them under the conditions its fields give, and
-  `any Trait` is `Copyable` only when `Trait` requires it. Generic code
-  copies only where a bound allows it.
+- A generic type has them under the conditions its fields give. Generic
+  code copies only where a bound allows it.
 
 ### Views
 
@@ -655,8 +653,7 @@ it.
 
 - **Being a view is a property of a type.** `Slice`, `StringSlice`, and a
   lambda that reads local variables are views, and so is any type that holds
-  one anywhere, such as a cursor over a slice. An `any Trait` is a view
-  unless `Trait` requires `Storable`.
+  one anywhere, such as a cursor over a slice.
 - **`Storable`** is the prelude trait of every type that is not a view,
   which the compiler derives and no type declares.
 - **A view never outlives the function that made it.** It can be bound, held
@@ -754,8 +751,8 @@ public let word: Regex = Regex"[a-z]+"
   the type: a number, a `Bool`, a `Character`, and each field of a record or
   a variant whose fields are visible to it. It knows a collection, and a type
   whose fields it does not see, by the contracts of the calls.
-- A constant's type is not a function type or an `any` type, and holds no
-  value of either, no handle, and no state that tasks share.
+- A constant's type is not a function type, and holds no function value,
+  no handle, and no state that tasks share.
 - A constant's value does not depend on itself: through another constant,
   through the default of a field that a record or variant in it leaves out,
   or through the code that it calls.
@@ -996,10 +993,10 @@ public fn Option[Value].expect(own self, message: StringSlice) -> Value
   own `uses Panic unless` a condition, which the trait's must imply, or uses
   no `Panic`. A call known to reach an `impl` proves that `impl`'s
   condition, and a call through a bound proves the trait's.
-- A call through `any` and a function named as a value use `Panic`, since
-  the code they reach is chosen when the program runs. A capability's
-  method, a written function type, and a `when` condition take no condition
-  on values.
+- A function named as a value uses `Panic`, since the code that a call of
+  the value reaches is chosen when the program runs. A capability's method,
+  a written function type, and a `when` condition take no condition on
+  values.
 
 ### Termination
 
@@ -1039,9 +1036,7 @@ fn serve(listener: mut Listener)
 - A trait's method runs forever only where its `uses` names `RunForever` and
   no `unless` condition of it holds, or names an associated capability set
   that an `impl` puts `RunForever` in
-  (see [Associated capability sets](#associated-capability-sets)). `any`
-  fixes those sets to the empty set, so a method called through `any`
-  terminates unless its trait's method names `RunForever`.
+  (see [Associated capability sets](#associated-capability-sets)).
 - A recursive call on a part of a parameter needs nothing written. A part is
   a field taken out by a pattern, or an element of a collection that is
   itself a part:
@@ -1090,7 +1085,6 @@ fn serve(listener: mut Listener)
   |---|---|
   | A function, or a method of a type | That function or method |
   | A trait's method, on a type whose `impl` is known | That `impl`'s method: the method written in the `impl`, the method that the `impl` derives, or the provided method that the `impl` inherits |
-  | A trait's method, through `any Trait` | The method of every `impl` of the trait |
   | A trait's method, through a bound on a type parameter | Code that a caller of the enclosing function supplies, as the next rule says |
   | A function value | Code that a caller of the enclosing function supplies, as the next rule says |
 
@@ -1105,7 +1099,6 @@ fn serve(listener: mut Listener)
   |---|---|
   | A call that gives a type argument to a type parameter with a bound. The parameter is one of a generic function, of a generic `impl`, of a generic type with a derived `impl`, or of a trait's generic method | Every method of the type argument's `impl` of the bound |
   | A function named as a value | The function, and the code that its type arguments supply |
-  | A conversion to `any Trait` | Every method of the value's `impl` of the trait |
   | A `provide` | Every method of the provided `impl` |
 
 - **A recursion that leads back to a function without `RunForever` is proven
@@ -1113,7 +1106,7 @@ fn serve(listener: mut Listener)
 
   | The way back to the function | The requirement |
   |---|---|
-  | A call of a function, of a method written in an `impl`, or of a trait's method through `any Trait` or on `Self` | The call is on a part of a parameter, or each function in the cycle states `decreases` |
+  | A call of a function, of a method written in an `impl`, or of a trait's method on `Self` | The call is on a part of a parameter, or each function in the cycle states `decreases` |
   | A call of a method that its `impl` derives or inherits | Rejected |
   | Supplied code | Rejected |
 
@@ -2150,7 +2143,7 @@ bitwise    = prefix "&" prefix { "&" prefix }
            | prefix ( "<<" | ">>" ) prefix { ( "<<" | ">>" ) prefix } ;
 
 prefix     = ( "-" | "!" | "~" ) prefix
-           | ( "mut" | "own" | "any" ) postfix
+           | ( "mut" | "own" ) postfix
            | postfix ;
 
 postfix    = primary { "." LOWER_NAME
@@ -2196,9 +2189,9 @@ if         = "if" expression block [ "else" ( if | block ) ] ;
 
 `==` and `!=` call the `Equal` trait, and `<`, `<=`, `>`, and `>=` call
 `Ordered`. Both sides have the same type, or one side is a view that the
-other converts to (see [Views](#views)). Functions and `any` values cannot
-be compared. `!` works on `Bool`, `~` on integers, and negation on
-signed integers and floats.
+other converts to (see [Views](#views)). Functions cannot be compared. `!`
+works on `Bool`, `~` on integers, and negation on signed integers and
+floats.
 
 The arithmetic operators call traits with a type parameter for the right
 side and an associated type for the result:
@@ -2511,9 +2504,9 @@ When the code inside a `provide mut` can use `Tasks`, as known from the
 signatures it calls, including through a capability parameter, the
 implementation's calls are mutually exclusive: each holds the
 implementation's mutex from start to end. Such an implementation has no
-method with a parameter that can hold a function, or an `any` value, that
-uses a capability other than `Panic` and `RunForever`. An implementation
-provided without `mut` has no mutex.
+method with a parameter that can hold a function that uses a capability
+other than `Panic` and `RunForever`. An implementation provided without
+`mut` has no mutex.
 
 ## Strings
 
@@ -2633,7 +2626,7 @@ trait Ordered: Equal {
   The trait's `requires` must imply the method's, and the condition after
   the trait's `Panic unless` must imply the method's. A call known to reach
   that `impl` is proven against the `impl`'s contract, and a call through a
-  bound or `any` against the trait's.
+  bound against the trait's.
 - An `impl`'s method without a `time` clause has its trait's.
 - **Required traits:** a type implements the traits a trait requires before
   it implements the trait, and a bound includes them. A trait can add an
@@ -2652,8 +2645,8 @@ trait Ordered: Equal {
   keeps the contract of every other method.
 - **A method with a default has one declaration.** In a trait, only a method
   with a body declares a default. No `impl` overrides that method and no
-  trait restates it, so a call on a known type, through a bound, or through
-  `any` reads the default from the trait. A method without a body has no
+  trait restates it, so a call on a known type or through a bound reads the
+  default from the trait. A method without a body has no
   default: each `impl` writes it, and a call on a known type names the
   `impl`'s method, which would not show the default.
 
@@ -2804,23 +2797,6 @@ type Priority =
   methods have. These rules count the methods that the `impl`'s package can
   see: every method of the type for an `impl` in its own package, and the
   public ones for an `impl` in another package.
-
-### Dynamic dispatch
-
-```truss
-type Server(handlers: List[any Handler])
-
-mut server.handlers.push(any HealthCheck())
-```
-
-- `any value` takes ownership of the value and allocates once, which `cost`
-  clauses count.
-- `any` names one trait, and fixes each of its associated types, as in
-  `any Cursor[Element = Int64]`, and each of its associated capability sets
-  to the empty set.
-- A method can be called through `any` if it takes `self` in any mode, has no
-  generic or capability parameters, and does not take or return `Self`.
-- An `any` value cannot be converted back to its type.
 
 ## Tests
 
