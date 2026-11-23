@@ -123,6 +123,7 @@ module For_testing : sig
   val list_unread : t -> string list
   val make_proof_lookups : t -> Prover.Lookups.t
   val find_proof : proofs -> Resolve.Names.key -> Prover.proof outcome option
+  val block_proof : t -> Resolve.Names.key -> unit
   val list_queries : proofs -> (proof_site * string) list
   val lower_roots : ?on_bug:(Compiler_bug.t -> unit) -> t -> unit
   val propagate : ?on_bug:(Compiler_bug.t -> unit) -> t -> unit

@@ -875,14 +875,14 @@ let find_unproven_definition store ~scope ~origin =
     match scope with
     | Everything -> ("", [])
     | Packages packages ->
-        ("d.package IN (SELECT value FROM json_each(?2)) AND ", [ Text (encode_texts packages) ])
+        (" AND +d.package IN (SELECT value FROM json_each(?2))", [ Text (encode_texts packages) ])
     | Files files ->
-        ("d.file IN (SELECT value FROM json_each(?2)) AND ", [ Text (encode_integers files) ])
+        (" AND +d.file IN (SELECT value FROM json_each(?2))", [ Text (encode_integers files) ])
   in
   Sql.find_row store.sql
     (Printf.sprintf
-       "SELECT d.key FROM main.definition d LEFT JOIN main.proof p ON p.definition = d.id WHERE \
-        %sd.origin = ?1 AND (p.state IS NULL OR p.state != 0) LIMIT 1"
+       "SELECT d.key FROM main.proof p INDEXED BY proof_without_value CROSS JOIN main.definition d \
+        ON d.id = p.definition WHERE p.state != 0 AND d.origin = ?1%s LIMIT 1"
        membership) (Integer origin :: members) (fun row -> Sql.read_blob row 0)
 
 type hole = { home : int; start : int; stop : int }

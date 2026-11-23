@@ -1,12 +1,13 @@
-type table = {
-  name : string;
-  columns : string;
-  without_rowid : bool;
-  indexes : (string * string) list;
-}
+type index = { index_name : string; indexed : string; condition : string option }
+type table = { name : string; columns : string; without_rowid : bool; indexes : index list }
 
-let keyed_by_id name columns indexes = { name; columns; without_rowid = false; indexes }
-let keyed_by_columns name columns indexes = { name; columns; without_rowid = true; indexes }
+let index_every_row (index_name, indexed) = { index_name; indexed; condition = None }
+
+let keyed_by_id name columns indexes =
+  { name; columns; without_rowid = false; indexes = List.map index_every_row indexes }
+
+let keyed_by_columns name columns indexes =
+  { name; columns; without_rowid = true; indexes = List.map index_every_row indexes }
 
 let fact_of_definition name columns =
   keyed_by_id name ("definition INTEGER PRIMARY KEY, " ^ columns) []
@@ -97,7 +98,17 @@ let tables =
       [ ("recursion_group_representative", "representative") ];
     fact_of_definition "usage_check" state;
     fact_of_definition "ownership" (state ^ ", must_be_disjoint BLOB");
-    fact_of_definition "proof" (state ^ ", value BLOB");
+    {
+      (fact_of_definition "proof" (state ^ ", value BLOB")) with
+      indexes =
+        [
+          {
+            index_name = "proof_without_value";
+            indexed = "definition";
+            condition = Some "state != 0";
+          };
+        ];
+    };
     keyed_by_columns "hole"
       "definition INTEGER NOT NULL, position INTEGER NOT NULL, home INTEGER NOT NULL, start \
        INTEGER NOT NULL, stop INTEGER NOT NULL, PRIMARY KEY (definition, position)"
@@ -150,8 +161,10 @@ let make_script ~schema =
          Printf.sprintf "CREATE TABLE %s.\"%s\" (%s)%s;" schema name columns
            (if without_rowid then " WITHOUT ROWID" else "")
          :: List.map
-              (fun (index, indexed) ->
-                Printf.sprintf "CREATE INDEX %s.\"%s\" ON \"%s\" (%s);" schema index name indexed)
+              (fun { index_name; indexed; condition } ->
+                Printf.sprintf "CREATE INDEX %s.\"%s\" ON \"%s\" (%s)%s;" schema index_name name
+                  indexed
+                  (match condition with Some condition -> " WHERE " ^ condition | None -> ""))
               indexes)
        tables)
 
