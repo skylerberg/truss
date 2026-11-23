@@ -76,10 +76,7 @@ let run ~direction ~name =
   | [] -> Outcome.raise_cannot_run "No definition named %s is visible here." name
   | targets ->
       ignore
-        (Database.prove database
-           (List.concat_map
-              (Workspace.list_package_files snapshot)
-              (List.map snd (Workspace.list_packages snapshot))));
+        (Database.prove database (In_packages (List.map snd (Workspace.list_packages snapshot))));
       let lines =
         list_lines
           (match direction with

@@ -153,7 +153,7 @@ let run_mutant ~samples text =
   | None -> ()
   | Some database -> (
       incr checked;
-      Database.decide (Database.prove database [ example_file ]) solver;
+      Database.decide (Database.prove database (In_files [ example_file ])) solver;
       let states = Database.list_proof_states database example_file in
       let candidates =
         List.map
@@ -280,7 +280,7 @@ let () =
             in
             match load text with
             | Some database ->
-                Database.decide (Database.prove database [ example_file ]) solver;
+                Database.decide (Database.prove database (In_files [ example_file ])) solver;
                 let unproven = Database.list_proof_diagnostics database example_file in
                 print_diagnostics unproven;
                 unproven = []

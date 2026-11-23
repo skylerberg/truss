@@ -100,7 +100,8 @@ let check ~root encoding (buffers : (string * string) list) =
   in
   let database = Workspace.open_database trial in
   let proofs =
-    Proofs.check database trial packages (List.filter_map (fun (_, _, file) -> file) opened)
+    Proofs.check database trial packages
+      (In_files (List.filter_map (fun (_, _, file) -> file) opened))
   in
   Json.Object
     [

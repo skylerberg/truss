@@ -50,8 +50,7 @@ let attach_blocks snapshot packages database holes =
   let list_holes_relied_on main =
     let proofs =
       Proofs.check database snapshot packages
-        (Command_packages.list_files snapshot
-           (Command_packages.list_program_packages snapshot packages))
+        (In_packages (Command_packages.list_program_packages snapshot packages))
     in
     List.map
       (fun (file, line, column, _) -> (file, line, column))

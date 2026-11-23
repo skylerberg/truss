@@ -2,7 +2,7 @@ let solver =
   lazy (match Solver.find () with Ok solver -> solver | Error message -> failwith message)
 
 let decide backend database =
-  let proofs = Database.prove database [ Codegen_support.example_file ] in
+  let proofs = Database.prove database (In_files [ Codegen_support.example_file ]) in
   ignore (Backend.evaluate backend (Database.list_evaluations proofs));
   Database.decide proofs solver
 
@@ -55,7 +55,7 @@ let () =
           (Codegen_support.make_example_package
              [ (Codegen_support.example_file, Fixtures.Evaluate.shout_with_an_ill_typed_check) ])
       in
-      let proofs = Database.prove database [ Codegen_support.example_file ] in
+      let proofs = Database.prove database (In_files [ Codegen_support.example_file ]) in
       match Database.list_evaluations proofs with
       | [] ->
           expect_failure_saying
@@ -166,7 +166,7 @@ let () =
             (List.length trusting) (List.length ensured));
   Codegen_support.test "the query of a template states the result of running its check" (fun () ->
       let database, backend = load_shout_of_a_name_and_an_identity () in
-      let proofs = Database.prove database [ Codegen_support.example_file ] in
+      let proofs = Database.prove database (In_files [ Codegen_support.example_file ]) in
       let without_runs = Database.For_testing.list_queries proofs in
       ignore (Backend.evaluate backend (Database.list_evaluations proofs));
       let with_runs = Database.For_testing.list_queries proofs in

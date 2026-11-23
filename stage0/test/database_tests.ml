@@ -669,7 +669,7 @@ let () =
           ]);
   Harness.test "a caller's checked body and proof read no place or text of the callee" (fun () ->
       let database = check_text callee_and_caller in
-      ignore (Database.prove database [ Support.parse_file "app.main" ]);
+      ignore (Database.prove database (In_files [ Support.parse_file "app.main" ]));
       List.iter
         (fun part ->
           expect_reads database part ~includes:[]
@@ -1221,6 +1221,45 @@ let () =
                 ~expected:[ "app.main.First"; "app.main.Second" ]
                 (List.map Path.show types)
           | Ok _ | Error (Unsupported _) -> Harness.fail "the key names no type defined as todo"));
+  Harness.test
+    "an edit to a function and to one that it reaches through an unchanged function lowers both"
+    (fun () ->
+      let make_program ~top ~bottom =
+        [
+          ( "app.main",
+            Printf.sprintf
+              "fn bottom() -> Int64 { %s }\n\
+               fn middle() -> Int64 { bottom() }\n\
+               fn top() -> Int64 { middle() + %s }\n"
+              bottom top );
+        ]
+      in
+      let recomputed =
+        list_propagated_with_roots ~roots:[ "top" ]
+          ~before:(make_program ~top:"1" ~bottom:"1")
+          ~after:(make_program ~top:"2" ~bottom:"2")
+      in
+      expect_included recomputed ~parts:[ make_lowered "top"; make_lowered "bottom" ];
+      expect_untouched recomputed ~is_excluded:(( = ) (locate (make_lowered "middle"))));
+  Harness.test
+    "lowering the code that the tests of one package reach lowers no code of a package that it \
+     does not depend on" (fun () ->
+      let make_tested package =
+        ( package ^ ".main",
+          "fn helper() -> Int64 { 1 }\ntest \"helps\" {\n  assert helper() == 1\n}\n" )
+      in
+      let database =
+        Support.make_database (Support.setup [ make_tested "app"; make_tested "far" ])
+      in
+      let lowered_helper package =
+        Lowered (make_code_item_of (Support.make_top_path (package ^ ".main") "helper"))
+      in
+      let lookups, observed =
+        Database.For_testing.observe (fun () -> Database.find_lowered_lookups database [ app ])
+      in
+      if Result.is_error lookups then Harness.fail "the host builds no code";
+      expect_included observed.recomputed ~parts:[ lowered_helper "app" ];
+      expect_untouched observed.recomputed ~is_excluded:(( = ) (locate (lowered_helper "far"))));
   Harness.test "defining a type that was todo lowers the code that reaches it again" (fun () ->
       let make_program definition =
         [
@@ -1738,12 +1777,17 @@ let () =
   in
   let count_runs (count : Database.statement_count) = count.runs
   and count_steps (count : Database.statement_count) = count.steps in
-  let expect_the_same_work_at_two_sizes name ?(prepare = ignore) ask =
+  let make_tested_part index body =
+    let name, text = make_part index body in
+    (name, Printf.sprintf "%stest \"part %d\" {\n  assert second%d() > 0\n}\n" text index index)
+  in
+  let expect_the_same_work_at_two_sizes name ?(make_part = make_part) ?(prepare = ignore)
+      ?(is_counted = fun _ -> true) ask =
     Harness.test (name ^ " costs the same in forty modules as in four") (fun () ->
         let count_statements modules =
           let database = build (List.init modules (fun index -> make_part index "1")) in
           prepare database;
-          snd (Database.count_statements (fun () -> ask database))
+          List.filter is_counted (snd (Database.count_statements (fun () -> ask database)))
         in
         let for_four = count_statements 4 and for_forty = count_statements 40 in
         if total count_runs for_four <> total count_runs for_forty then
@@ -1775,10 +1819,22 @@ let () =
   expect_the_same_work_at_two_sizes "an edit to one body" (fun database ->
       Database.update database [ (first_part, Some (snd (make_part 0 "1 + 1"))) ];
       Database.For_testing.propagate database);
+  let lower_tested_code database =
+    match Database.find_lowered_lookups database [ app ] with
+    | Ok _ -> ()
+    | Error message -> Harness.fail "%s" message
+  in
+  expect_the_same_work_at_two_sizes "lowering the code that the tests reach without a change"
+    ~make_part:make_tested_part lower_tested_code;
+  expect_the_same_work_at_two_sizes
+    "lowering the code that the tests reach after an edit to one body" ~make_part:make_tested_part
+    ~prepare:(fun database ->
+      Database.update database [ (first_part, Some (snd (make_tested_part 0 "1 + 1"))) ])
+    lower_tested_code;
   Harness.test
     "listing the linked items of a program after an edit to one body runs as many statements for \
-     forty modules as for four" (fun () ->
-      let count_runs_of_listing modules =
+     forty modules as for four, and renders the edited unit in as many steps" (fun () ->
+      let count_listing_work modules =
         let roots =
           List.init modules (fun index ->
               make_code_item_of
@@ -1809,11 +1865,18 @@ let () =
              (fun (computed : Database.For_testing.computed) -> computed.stage = Render Development)
              observed.recomputed)
           ~exactly:[ Unit (Development, make_code_item_of first_of_first_part) ];
-        total count_runs statements
+        let _, statements_without_a_change = Database.count_statements list_linked in
+        ( total count_runs statements,
+          total count_steps statements - total count_steps statements_without_a_change )
       in
-      let for_four = count_runs_of_listing 4 and for_forty = count_runs_of_listing 40 in
-      if for_four <> for_forty then
-        Harness.fail "ran %d statements for four modules and %d for forty" for_four for_forty);
+      let runs_for_four, rendering_steps_for_four = count_listing_work 4
+      and runs_for_forty, rendering_steps_for_forty = count_listing_work 40 in
+      if runs_for_four <> runs_for_forty then
+        Harness.fail "ran %d statements for four modules and %d for forty" runs_for_four
+          runs_for_forty;
+      if 10 * rendering_steps_for_forty > 11 * rendering_steps_for_four then
+        Harness.fail "rendering the unit added %d steps for four modules and %d for forty"
+          rendering_steps_for_four rendering_steps_for_forty);
   expect_the_same_work_at_two_sizes "listing the diagnostics of one file" (fun database ->
       ignore (Database.list_file_diagnostics database first_part));
   expect_the_same_work_at_two_sizes "listing the readers of one module" (fun database ->
@@ -1851,6 +1914,11 @@ let () =
   expect_the_same_work_at_two_sizes "proving and deciding one file again without a change"
     ~prepare:(fun database -> ignore (Support.list_proof_states database first_part))
     (fun database -> ignore (Support.list_proof_states database first_part));
+  let decide_package database = Support.decide database (In_packages [ app ]) in
+  expect_the_same_work_at_two_sizes
+    "selecting the stale proofs of a package, after every proof is decided," ~prepare:decide_package
+    ~is_counted:(fun count -> String.includes ~affix:"main.stale" count.statement)
+    decide_package;
   Harness.test "listing a file's diagnostics reads no part" (fun () ->
       let database = build [ ("app.main", "fn caller() -> Int64 { \"one\" }\n") ] in
       match

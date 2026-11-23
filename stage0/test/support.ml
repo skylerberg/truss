@@ -250,7 +250,7 @@ let solver =
         prerr_endline message;
         exit 1)
 
-let prove database file = Database.prove database [ file ]
+let prove database file = Database.prove database (In_files [ file ])
 
 let c_compiler =
   lazy
@@ -260,30 +260,34 @@ let c_compiler =
         prerr_endline message;
         exit 1)
 
-let run_evaluations database (file : Path.file) proofs =
+let run_evaluations database packages proofs =
   match Database.list_evaluations proofs with
   | [] -> ()
   | evaluated ->
       let backend =
         Backend.create
-          (match Database.find_lowered_lookups database [ file.module_.package ] with
+          (match Database.find_lowered_lookups database packages with
           | Ok lookups -> lookups
           | Error message -> failwith message)
           (Lazy.force c_compiler) Development
       in
       ignore (Backend.evaluate backend evaluated)
 
-let decide database file =
-  let proofs = prove database file in
-  run_evaluations database file proofs;
+let decide database (scope : Database.proof_scope) =
+  let proofs = Database.prove database scope in
+  run_evaluations database
+    (match scope with
+    | In_packages packages -> packages
+    | In_files files -> List.map (fun (file : Path.file) -> file.module_.package) files)
+    proofs;
   Database.decide proofs solver
 
 let list_proof_diagnostics database file =
-  decide database file;
+  decide database (In_files [ file ]);
   Database.list_proof_diagnostics database file
 
 let list_proof_states database file =
-  decide database file;
+  decide database (In_files [ file ]);
   Database.list_proof_states database file
 
 let read_proofs database file =

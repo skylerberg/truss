@@ -267,8 +267,23 @@ A command says how far to drain: `check` drains through Decide, and `test`
 and `build` through Key tests, for the packages they name and the packages
 those depend on. Saving a file drains through the checks of packages. Lower
 and Key tests drain the items that the claims of those packages reach, and
-Prove and Decide the definitions of the files a command names. A build drains
-Render of its profile for the items that its roots reach.
+Prove and Decide the definitions of the packages a command names, or of the
+files an editor has open. A build drains Render of its profile for the items
+that its roots reach.
+
+A drain selects its units from the `stale` rows, so a stage with no stale row
+costs one seek. A drain for packages joins the stale rows of a stage with
+their entities and keeps the entities of those packages. Lower asks, for each
+stale item, whether a claim reaches it: one recursive query follows the
+`references` edges into the item backward, through settled units only, and
+stops at the first settled claim of the command's packages. Lower then
+continues from each unit it lowers to the stale items that the unit
+references, and asks again about the stale items that remain until none is
+reached. Key tests asks the same question of its stale items once, and does
+not ask it of an item that the drain has just lowered, which a claim reaches.
+Render takes its stale units from the query that lists the linked items. A drain for
+an editor's files is the exception: it joins from the definitions of those
+files, because the proofs of every other file can be stale.
 
 Evaluate and Decide each take an input that no pass computes. A command
 runs the evaluations that its Decide units or its program need, which are
@@ -298,7 +313,7 @@ runs the evaluation again.
 | The holes and the obligations not yet proven | `holes`, an agent proving | `hole`, and `verdict` rows that are not proven |
 | The tests a change can affect | `test` | The `test_key` rows whose key changed |
 | A definition's callees and its recursion group | `graph`, lowering | `edge` with `calls`, `recursion_group` |
-| The translation units of a program | `run`, `build`, `test`, a check that runs an evaluation | One recursive query over the `references` edges from the program's roots, joined with `lowered` and `unit`. From an evaluated item the query follows the edges of its evaluation, which name the items in its value, and not those of its lowered code, which name its evaluator. |
+| The translation units of a program | `run`, `build`, `test`, a check that runs an evaluation | One recursive query over the `references` edges from the program's roots, joined with `lowered` and `unit`, which also says whether each item's Render unit is stale. From an evaluated item the query follows the edges of its evaluation, which name the items in its value, and not those of its lowered code, which name its evaluator. |
 | The rows that differ between two databases | `upgrade`, two agents' worktrees | Each table of one attached database minus the same table of the other |
 
 ## Costs
@@ -341,6 +356,7 @@ runs the evaluation again.
 | When a dependency's file is replaced, a differing row of `definition`, `entry`, `impl`, or another table of names marks the readers of every lookup that the row backs, under the row's own name: the entry `name` of its module, the members `member` of its owner. A differing fact row marks the readers of each of its facts. | The old file and the new one are attached together, so the rows that differ are one query for each table. Marking by row and name leaves a reader of one function untouched when another function of the same module changes. A lookup that reads only some columns of a differing row is recomputed once and found unchanged, which costs one unit and can never leave a stale read. |
 | A statement that joins names its driving table first and joins with `CROSS JOIN`, which SQLite never reorders. | The store's statements have no statistics to plan from, and the planner's choice differs between versions of SQLite. A newer planner made the edge table the outer loop of a recursive step, so each step read every edge, and CI's jobs took ten times as long as the same work on a machine with an older SQLite. |
 | A membership test on the rows of a join is written `+column IN (…)`, and a bare `column IN (…)` is written only where the list is to drive the index. | SQLite uses a list on a column that continues an index as part of the seek, once for each value of the list. The statement that lists the call edges among the definitions of a recursion scope tested each edge's target against the scope this way, so it sought the edge index once for each pair of definitions: 16 s of a 30 s build of the standard library, from one statement that returns 20 thousand rows. The unary plus keeps the test out of the seek. |
+| A drain selects its units from the `stale` rows, and from the entities in its scope only for the files an editor has open. | A command with no change must cost the same at every project size. Selecting from the scope read every definition of the named files once for each stage, and walked every claimed item once for each level of the deepest chain of references. On 10,400 functions a command with no change took 438 ms, and an edit to one body took 729 ms, of which 17 ms was the edit's own work. A stale item that no settled claim reaches stays stale, and each command asks about it again. |
 | A lookup's statement has an index on every column that it filters by. | A statement that filters a package's definitions by member name with an index on the package alone reads the whole package each time it runs. The count of statements does not show it. |
 | A fact holds everything that its reader needs to use it. `type_facts` holds the type's generic parameters beside the conditions written over them. | A reader that must fetch a second fact to interpret the first makes every question cost both reads. Deciding whether a type is plain read the type's facts and then its whole interface for the parameters' names, at every operand of every body. |
 | A reader finds the interface of a top-level definition, an impl, a test, or a law proof by the key that its path determines, and reads no declaration first. | An absent row whose unit is not stale means that the path is not declared, and a first write or a removal of the interface marks its readers. The declaration read cost one statement and one edge at every mention of a definition. |
@@ -368,9 +384,10 @@ runs the evaluation again.
 
 | Claim | Evidence |
 |---|---|
-| A local change costs the same at every project size. | `database_tests` counts the statements and the virtual machine steps of an edit to one body, and of proving and deciding one file, in four modules and in forty. `stage0/tools/database_benchmark` times the same edits at each size. |
+| A local change costs the same at every project size. | `database_tests` counts the statements and the virtual machine steps of an edit to one body, of lowering the code that the tests reach after that edit, and of proving and deciding one file, in four modules and in forty. `stage0/tools/database_benchmark` times the same edits at each size. |
 | A command with no change computes nothing. | `database_tests`: deciding a file again decides no definition, and a database opened again recomputes no unit. `build_tests`: a development build and a release build of a program that was built before render no unit. |
-| A build renders the units of the items that an edit changes. | `database_tests`: after an edit to one body, listing the linked items of a program renders the development unit of that item alone, with as many statements in forty modules as in four, and the release units of that item's file and of no other. |
+| A command with no change selects its units in the same number of steps at every project size. | `database_tests` counts the steps of lowering the code that the tests reach, and of selecting the stale proofs of a package, in four modules and in forty. |
+| A build renders the units of the items that an edit changes. | `database_tests`: after an edit to one body, listing the linked items of a program renders the development unit of that item alone, with as many statements in forty modules as in four and as many steps more than a listing that renders nothing, and the release units of that item's file and of no other. |
 | A question costs the same at every project size. | `database_tests` counts the statements and the steps of listing a file's diagnostics, a definition's dependents and dependencies, and the definitions that name it, in four modules and in forty. |
 | A propagated database equals one built from nothing. | `database_tests` compares every table after each of seventeen edits, and `stage0/tools/database_fuzz` compares them after random edits. |
 | No pass sees the database. | No library under `stage0/type_checker`, `stage0/mir`, `stage0/prover`, or `stage0/codegen` depends on the store or the orchestrator, and the store depends on no pass. |

@@ -57,6 +57,7 @@ val expect_one_diagnostic :
   unit
 
 val prove : Database.t -> Path.file -> Database.proofs
+val decide : Database.t -> Database.proof_scope -> unit
 val list_proof_diagnostics : Database.t -> Path.file -> Diagnostic.t list
 val list_proof_states : Database.t -> Path.file -> Database.proof_state list
 val read_proofs : Database.t -> Path.file -> Resolve.Names.key -> Prover.proof

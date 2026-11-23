@@ -116,9 +116,7 @@ let list_signatures snapshot trial =
       (fun (change : Database.change) -> change.is_signature && not (is_in_project change.changed))
       (Database.list_changes database upgraded)
   in
-  ignore
-    (Database.prove database
-       (List.concat_map (Workspace.list_package_files snapshot) project_packages));
+  ignore (Database.prove database (In_packages project_packages));
   let dependents = Path_table.create 16 in
   List.iter
     (fun ({ reader; read; read_kind; _ } : Database.read) ->

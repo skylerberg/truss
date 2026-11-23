@@ -54,17 +54,19 @@ let run_past_bugs (database : t) ?on_bug drain =
   | None, bug :: _ -> raise (Compiler_bug.Bug bug)
   | None, [] -> ()
 
-let drain_stages (database : t) ~on_bug ~(through : Kind.stage) ~scope =
-  List.iter
-    (fun stage ->
-      if Kind.rank_stage stage <= Kind.rank_stage through then
-        while Recipes.drain_stage database ~on_bug stage ~scope do
-          ()
-        done)
-    Kind.stages
+let drain_stages (database : t) ?on_bug stages ~scope =
+  run_past_bugs database ?on_bug (fun ~on_bug ->
+      List.iter
+        (fun stage ->
+          while Recipes.drain_stage database ~on_bug stage ~scope do
+            ()
+          done)
+        stages)
 
-let drain (database : t) ?on_bug ~through ~scope () =
-  run_past_bugs database ?on_bug (fun ~on_bug -> drain_stages database ~on_bug ~through ~scope)
+let drain (database : t) ?on_bug ~(through : Kind.stage) ~scope () =
+  drain_stages database ?on_bug
+    (List.filter (fun stage -> Kind.rank_stage stage <= Kind.rank_stage through) Kind.stages)
+    ~scope
 
 let scope_packages (database : t) packages : Store.scope =
   Packages (List.map Path.show_package (Lookups.sort_in_dependency_order database packages))
@@ -381,15 +383,8 @@ let last_stage_before_lowering : Kind.stage = List_calls
 
 let drain_claimed_items (database : t) ?on_bug packages =
   run_past_bugs database ?on_bug (fun ~on_bug ->
-      List.iter
-        (fun stage ->
-          while
-            Recipes.drain_stage database ~on_bug stage
-              ~scope:(Items (Recipes.list_claimed_items database packages))
-          do
-            ()
-          done)
-        [ Kind.Lower; Key_tests ])
+      Recipes.drain_claimed_items database ~on_bug
+        (Option.map (List.map Path.show_package) packages))
 
 let drain_lowering (database : t) ?on_bug packages =
   drain_packages database ?on_bug ~through:last_stage_before_lowering packages;
@@ -467,24 +462,30 @@ let has_errors (database : t) package =
     list_dependency_diagnostics database package <> []
   else true
 
-type proofs = { database : t; files : Path.file list }
+type proof_scope = In_packages of Path.package list | In_files of Path.file list
+type proofs = { database : t; scope : proof_scope }
 
 let find_proof (database : t) (key : Resolve.Names.key) =
   Tracker.find database Tracker.untracked Facts.proof.whole key.module_.package ~id:(Ids.of_key key)
 
 let list_proof_packages proofs =
   List.sort_uniq Path.compare_package
-    (List.map (fun (file : Path.file) -> file.module_.package) proofs.files)
+    (match proofs.scope with
+    | In_packages packages -> packages
+    | In_files files -> List.map (fun (file : Path.file) -> file.module_.package) files)
 
-let scope_proofs proofs : Store.scope = Files (List.map Ids.of_file proofs.files)
+let scope_proofs proofs : Store.scope =
+  match proofs.scope with
+  | In_packages packages -> Packages (List.map Path.show_package packages)
+  | In_files files -> Files (List.map Ids.of_file files)
 
-let prove ?on_bug (database : t) (files : Path.file list) =
-  let proofs = { database; files } in
+let prove ?on_bug (database : t) scope =
+  let proofs = { database; scope } in
   let packages = list_proof_packages proofs in
   drain_packages database ?on_bug ~through:last_checking_stage packages;
-  drain database ?on_bug ~through:Prove ~scope:(scope_proofs proofs) ();
+  drain_stages database ?on_bug [ Prove ] ~scope:(scope_proofs proofs);
   (match
-     Store.find_unproven_definition database.store ~files:(List.map Ids.of_file files)
+     Store.find_unproven_definition database.store ~scope:(scope_proofs proofs)
        ~origin:Declarations.written_origin
    with
   | Some key
@@ -500,12 +501,11 @@ let prove ?on_bug (database : t) (files : Path.file list) =
 
 let list_proof_keys proofs =
   let names = make_name_lookups proofs.database in
-  List.concat_map
-    (fun file ->
-      List.map
-        (fun (declaration : Resolve.Names.declaration) -> declaration.key)
-        (names.list_declarations_in file))
-    proofs.files
+  List.map
+    (fun (declaration : Resolve.Names.declaration) -> declaration.key)
+    (match proofs.scope with
+    | In_packages packages -> List.concat_map names.list_package_declarations packages
+    | In_files files -> List.concat_map names.list_declarations_in files)
 
 let find_item_outcome (database : t) fact item =
   Tracker.find database Tracker.untracked fact.Tracker.whole (Lookups.locate_items database)
@@ -678,19 +678,14 @@ let read_reached database fact item =
         (Lowered.Item.to_string item)
 
 let list_linked (database : t) profile roots : Lowering.linked list =
-  let list_rows () = Recipes.list_linked database profile ~roots in
-  let rows = list_rows () in
-  let has_rendered = ref false in
+  let rows = Recipes.list_linked database profile ~roots in
+  let is_rendered_by_listing (row : Store.linked) = row.is_unit_stale && not row.is_unevaluated in
   run_past_bugs database (fun ~on_bug ->
-      has_rendered :=
-        Recipes.drain_stage database ~on_bug (Render profile)
-          ~scope:
-            (Items
-               (List.filter_map
-                  (fun (row : Store.linked) ->
-                    if row.is_unevaluated then None else Some row.linked_id)
-                  rows)));
-  let rows = if !has_rendered then list_rows () else rows in
+      Recipes.render_units database ~on_bug profile
+        (List.filter_map
+           (fun (row : Store.linked) ->
+             if is_rendered_by_listing row then Some row.linked_id else None)
+           rows));
   List.iter
     (fun root ->
       let id = Ids.of_item root in
@@ -701,14 +696,15 @@ let list_linked (database : t) profile roots : Lowering.linked list =
   List.map
     (fun (row : Store.linked) : Lowering.linked ->
       let item : Lowered.Item.t = Marshal.from_string row.linked_key 0 in
-      match (row.text_hash, row.sites) with
-      | Some text_hash, Some sites ->
-          Unit
-            {
-              item;
-              text_hash = Marshal.from_string text_hash 0;
-              sites = Marshal.from_string sites 0;
-            }
+      let text_hash =
+        if is_rendered_by_listing row then
+          match find_item_outcome database (Facts.unit profile) item with
+          | Some (Value text_hash) -> Some text_hash
+          | Some (Failed | Blocked) | None -> None
+        else Option.map (fun text_hash : string -> Marshal.from_string text_hash 0) row.text_hash
+      in
+      match (text_hash, row.sites) with
+      | Some text_hash, Some sites -> Unit { item; text_hash; sites = Marshal.from_string sites 0 }
       | _ -> (
           match find_item_outcome database Facts.lowered item with
           | Some (Value (Ok (Evaluate (evaluator, _)))) -> Evaluated { item; evaluator }
