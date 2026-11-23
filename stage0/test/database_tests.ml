@@ -1614,38 +1614,76 @@ let expect_cold_snapshot database snapshot =
       Harness.fail "the database differs from a cold build in %s" (show_differences differences)
 
 let () =
-  Harness.test "a trial is a copy of the database, propagated with the files that differ" (fun () ->
+  let follow_overlay_and_return name changes ~check_overlay =
+    Harness.test name (fun () ->
+        let root = project [ ("main/main", callee_and_caller) ] in
+        let snapshot = open_workspace root in
+        let worktree = Workspace.open_database snapshot in
+        Database.For_testing.propagate worktree;
+        let overlay = Workspace.make_overlay snapshot changes in
+        let database, observed =
+          Database.For_testing.observe (fun () ->
+              let database = Workspace.open_database overlay in
+              Database.For_testing.propagate database;
+              database)
+        in
+        if database != worktree then Harness.fail "the overlay has a database of its own";
+        check_overlay observed.Database.For_testing.recomputed;
+        expect_cold_snapshot database overlay;
+        let saved = Workspace.open_database snapshot in
+        Database.For_testing.propagate saved;
+        expect_cold_snapshot saved snapshot;
+        Workspace.flush ())
+  in
+  follow_overlay_and_return
+    "the worktree's database follows an overlay of its files, and then the saved files again"
+    [ ("main/main.truss", Some edited_body) ]
+    ~check_overlay:(fun recomputed ->
+      expect_included recomputed ~parts:[ Checked_body (make_main_key "callee") ];
+      expect_untouched recomputed ~is_excluded:(is_part_of [ make_main_path "caller" ]));
+  follow_overlay_and_return
+    "the worktree's database follows an overlay that renames the package, and then the saved files \
+     again"
+    [ ("truss.toml", Some "[package]\nname = \"tool\"\ntruss = \"0.1\"\n") ]
+    ~check_overlay:ignore;
+  Harness.test "a second overlay keeps the proofs that the first computed" (fun () ->
       let root = project [ ("main/main", callee_and_caller) ] in
       let snapshot = open_workspace root in
-      let worktree = Workspace.open_database snapshot in
-      Database.For_testing.propagate worktree;
-      let trial = Workspace.make_trial snapshot [ ("main/main.truss", Some edited_body) ] in
-      let database, observed =
-        Database.For_testing.observe (fun () ->
-            let database = Workspace.open_database trial in
-            Database.For_testing.propagate database;
-            database)
+      let prove text =
+        (snd
+           (Database.For_testing.observe (fun () ->
+                ignore
+                  (Database.prove
+                     (Workspace.open_database
+                        (Workspace.make_overlay snapshot [ ("main/main.truss", Some text) ]))
+                     (In_files [ Support.parse_file "app.main" ])))))
+          .recomputed
       in
-      let recomputed = observed.recomputed in
-      expect_included recomputed ~parts:[ Checked_body (make_main_key "callee") ];
-      expect_untouched recomputed ~is_excluded:(is_part_of [ make_main_path "caller" ]);
-      expect_cold_snapshot database trial;
-      expect_cold_snapshot worktree snapshot;
+      expect_included (prove edited_body) ~parts:[ Proof (make_main_key "caller") ];
+      expect_untouched
+        (prove (edited_body ^ "\n"))
+        ~is_excluded:(fun computed -> computed.stage = Prove);
       Workspace.flush ());
-  Harness.test "a trial that renames the package leaves the worktree's database as it was"
+  Harness.test "a database that holds an overlay is closed without a commit" (fun () ->
+      let root = project [ ("main/main", callee_and_caller) ] in
+      ignore (settle_on_disk root);
+      Workspace.flush ();
+      let snapshot = open_workspace root in
+      let overlay = Workspace.make_overlay snapshot [ ("main/main.truss", Some edited_body) ] in
+      Database.For_testing.propagate (Workspace.open_database overlay);
+      Workspace.flush ();
+      expect_recomputed (settle_on_disk root) ~exactly:[];
+      Workspace.flush ());
+  Harness.test "an overlay whose files equal the saved files is committed as the saved files"
     (fun () ->
       let root = project [ ("main/main", callee_and_caller) ] in
       let snapshot = open_workspace root in
-      let worktree = Workspace.open_database snapshot in
-      Database.For_testing.propagate worktree;
-      let trial =
-        Workspace.make_trial snapshot
-          [ ("truss.toml", Some "[package]\nname = \"tool\"\ntruss = \"0.1\"\n") ]
+      let overlay =
+        Workspace.make_overlay snapshot [ ("main/main.truss", Some callee_and_caller) ]
       in
-      let database = Workspace.open_database trial in
-      Database.For_testing.propagate database;
-      expect_cold_snapshot database trial;
-      expect_cold_snapshot worktree snapshot;
+      Database.For_testing.propagate (Workspace.open_database overlay);
+      Workspace.flush ();
+      expect_recomputed (settle_on_disk root) ~exactly:[];
       Workspace.flush ())
 
 let show_counts (counts : Database.counts) =

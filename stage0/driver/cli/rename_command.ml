@@ -226,7 +226,7 @@ let locate_directory snapshot packages (module_ : Path.module_) =
 let locate_path snapshot packages (file : Path.file) =
   Filename.concat (locate_directory snapshot packages file.module_) (file.name ^ ".truss")
 
-let make_trial_snapshot snapshot after =
+let make_renamed_snapshot snapshot after =
   let locate_file file = Workspace.locate_file snapshot file in
   let written = List.map (fun (_, file, text) -> (locate_file file, Some text)) after in
   let removed =
@@ -236,7 +236,7 @@ let make_trial_snapshot snapshot after =
         if List.mem_assoc old_path written then None else Some (old_path, None))
       after
   in
-  Workspace.make_trial snapshot (written @ removed)
+  Workspace.make_overlay snapshot (written @ removed)
 
 let encode_edits snapshot plan =
   List.concat_map
@@ -267,7 +267,7 @@ let run ~from_ ~to_ =
     | Module module_ -> plan_module database snapshot packages module_ to_
   in
   let after = apply_plan database snapshot packages plan in
-  let database = Workspace.open_database (make_trial_snapshot snapshot after) in
+  let database = Workspace.open_database (make_renamed_snapshot snapshot after) in
   let caused =
     List.filter_map
       (fun (_, file, text) ->

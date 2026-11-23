@@ -14,7 +14,7 @@ val list_package_files : snapshot -> Path.package -> Path.file list
 val list_dependency_names : snapshot -> Path.package -> Path.package list
 val locate_file : snapshot -> Path.file -> string
 val list_package_databases : unit -> string list
-val make_trial : snapshot -> (string * string option) list -> snapshot
+val make_overlay : snapshot -> (string * string option) list -> snapshot
 val flush : unit -> unit
 
 type lock_plan = { text : string; before : Registry.Lock.t; after : Registry.Lock.t }
