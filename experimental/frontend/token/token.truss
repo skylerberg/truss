@@ -580,7 +580,7 @@ fn spell_inserted(insertions: Slice[source.Edit], offset: UInt64, buffer: mut St
 
 type TokenRun(next: UInt64, stop: UInt64, previous_stop: Option[UInt64])
 
-type StringFrame(literal_index: UInt64, segment: UInt64, escaped_text: String, enclosing: TokenRun)
+type StringFrame(literal_index: UInt64, segment: UInt64, escaped_text: String, interpolation_span: source.Span, enclosing: TokenRun)
 
 fn advance_string(
   literal: StringLiteral,
@@ -601,7 +601,15 @@ fn advance_string(
     return None
   }
   mut buffer.push("\${")
-  mut strings.push(StringFrame(literal_index, segment, escaped_text: escape_spelling(literal.rest[segment].text.value), enclosing))
+  mut strings.push(
+    StringFrame(
+      literal_index,
+      segment,
+      escaped_text: escape_spelling(literal.rest[segment].text.value),
+      interpolation_span: interpolation.span,
+      enclosing,
+    ),
+  )
   Some(TokenRun(next: interpolation.first, stop: interpolation.stop, previous_stop: None))
 }
 
@@ -623,12 +631,15 @@ fn open_string(
 }
 
 internal fn spell_tokens(tables: Tables, first: UInt64, stop: UInt64, insertions: Slice[source.Edit]) -> Option[String]
-  uses Panic, RunForever
+  uses Panic
 {
   var buffer = ""
   var run = TokenRun(next: first, stop, previous_stop: None)
   var strings: List[StringFrame] = []
-  while true {
+  var spelled_offset: UInt64 = 0
+  while true
+    decreases UInt64.maximum - spelled_offset, UInt64.maximum - run.next
+  {
     if run.next >= run.stop {
       if run.previous_stop is Some(previous_stop) {
         spell_inserted(insertions, offset: previous_stop, buffer: mut buffer)
@@ -636,6 +647,10 @@ internal fn spell_tokens(tables: Tables, first: UInt64, stop: UInt64, insertions
       let Some(frame) = mut strings.pop() else {
         return Some(own buffer)
       }
+      if frame.interpolation_span.stop <= spelled_offset {
+        Panic.crash("an interpolation that ends before the spelled offset")
+      }
+      spelled_offset = frame.interpolation_span.stop
       mut buffer.push("}")
       mut buffer.push(frame.escaped_text)
       let Some(next_run) = advance_string(
@@ -685,6 +700,10 @@ internal fn spell_tokens(tables: Tables, first: UInt64, stop: UInt64, insertions
         None => Panic.crash("a decimal index past the table")
       }
       String(literal) => {
+        if current.span.start < spelled_offset {
+          Panic.crash("a string token before the spelled offset")
+        }
+        spelled_offset = current.span.start + 1
         let Some(next_run) = open_string(
           tables.literal(literal),
           literal_index: literal,

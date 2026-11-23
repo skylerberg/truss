@@ -172,7 +172,7 @@ fn TokenCursor.compute_line_stop(self, piece: Piece) -> UInt64
 }
 
 fn use_after_definition(cursor: TokenCursor, piece: Piece, base: UInt64, stop: UInt64, destination: UInt64) -> source.Diagnostic
-  uses Panic, RunForever
+  uses Panic
 {
   let fixes = match token.spell_tokens(cursor.tables, first: piece.first, stop: piece.stop, insertions: []) {
     Some(spelling) => [
