@@ -9,8 +9,7 @@ type ConfusableScan = LexedConfusable(kind: token.Kind) | Spaced
 type OperatorScan = LexedOperator(kind: token.Kind) | Ellipsis
   derives Equal
 
-type StringFormScan = LexedString(kind: token.Kind, ending: Ending) | Skipped
-  derives Equal
+type StringFormScan = FormScanned(scan: ItemScan) | Skipped
 
 fn lex_line_comment(scanner: mut Scanner)
   uses Panic, RunForever

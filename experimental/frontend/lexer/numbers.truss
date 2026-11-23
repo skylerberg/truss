@@ -552,20 +552,61 @@ fn compute_number_end(text: StringSlice) -> UInt64
   }
 }
 
-fn make_translation(code: StringSlice, message: StringSlice, start: UInt64, stop: UInt64, translation: StringSlice) -> CheckedNumber
-  uses Panic, RunForever
+type OctalChoice = NotOctal | ValidOctal(octal: String) | InvalidOctal
+
+type Derivation =
+  | Translated(problem: NumberProblem, translation: String)
+  | HexadecimalFloat(problem: NumberProblem)
+  | Suffixed(problem: NumberProblem, is_float: Bool)
+  | LeadingZero(problem: NumberProblem, decimal: String, octal: OctalChoice)
+
+type Examination = Final(checked: CheckedNumber) | Derived(derivation: Derivation, text: String)
+
+fn make_problem(code: StringSlice, message: StringSlice, start: UInt64, stop: UInt64) -> NumberProblem {
+  NumberProblem(code: code.to_string(), message: message.to_string(), start, stop)
+}
+
+fn translate(code: StringSlice, message: StringSlice, start: UInt64, stop: UInt64, translation: own String) -> Examination {
+  let text = translation.copy()
+  Examination.Derived(derivation: Derivation.Translated(problem: make_problem(code, message, start, stop), own translation), own text)
+}
+
+fn combine(derivation: own Derivation, derived: own CheckedNumber) -> CheckedNumber
+  uses Panic
 {
-  let checked = check_number(translation)
-  let fixes = if checked.problem.is_none() {
-    [Replacement(title: "Write `${translation}`", text: translation.to_string())]
-  } else {
-    []
+  let is_valid = derived.problem.is_none()
+  match own derivation {
+    Translated(problem, translation) => {
+      let fixes = if is_valid { [Replacement(title: "Write `${translation}`", text: own translation)] } else { [] }
+      CheckedNumber(value: own derived.value, problem: Some(own problem), own fixes)
+    }
+    HexadecimalFloat(problem) => CheckedNumber(value: own derived.value, problem: Some(own problem), fixes: [])
+    Suffixed(problem, is_float) => {
+      let value = match own derived.value {
+        IntegerValue(digits) => if is_float {
+          NumberValue.FloatValue(token.normalize_decimal(digits, exponent: math.BigInteger.zero()))
+        } else {
+          NumberValue.IntegerValue(own digits)
+        }
+        FloatValue(decimal) => NumberValue.FloatValue(own decimal)
+      }
+      CheckedNumber(own value, problem: Some(own problem), fixes: [])
+    }
+    LeadingZero(problem, decimal, octal) => {
+      var alternatives: List[Replacement] = []
+      match own octal {
+        NotOctal => if is_valid {
+          mut alternatives.push(Replacement(title: "Write `${decimal}`", text: own decimal))
+        }
+        ValidOctal(text) => if is_valid {
+          mut alternatives.push(Replacement(title: "Write `${text}` (octal)", own text))
+          mut alternatives.push(Replacement(title: "Write `${decimal}` (decimal)", text: own decimal))
+        }
+        InvalidOctal => {}
+      }
+      CheckedNumber(value: own derived.value, problem: Some(own problem), fixes: own alternatives)
+    }
   }
-  CheckedNumber(
-    value: own checked.value,
-    problem: Some(NumberProblem(code: code.to_string(), message: message.to_string(), start, stop)),
-    own fixes,
-  )
 }
 
 fn replace_quotes(text: StringSlice) -> String
@@ -574,7 +615,7 @@ fn replace_quotes(text: StringSlice) -> String
   text.replace("'", replacement: "_")
 }
 
-fn lex_foreign_number(text: StringSlice) -> Option[CheckedNumber]
+fn examine(text: StringSlice) -> Examination
   uses Panic, RunForever
 {
   let length = text.length()
@@ -582,90 +623,61 @@ fn lex_foreign_number(text: StringSlice) -> Option[CheckedNumber]
   let suffix = text.substring(stop, to: length)
   if text.find("'") is Some(quote) {
     let grouped = replace_quotes(text)
-    return Some(
-      make_translation(
-        "lexer.number_digit_separator",
-        message: "Digits are grouped with `_`, as in `${grouped}`.",
-        start: quote,
-        stop: quote + 1,
-        translation: grouped,
-      ),
+    return translate(
+      "lexer.number_digit_separator",
+      message: "Digits are grouped with `_`, as in `${grouped}`.",
+      start: quote,
+      stop: quote + 1,
+      translation: own grouped,
     )
   }
   if is_hexadecimal(text) && stop < length && (text.byte(stop) == 46 || text.byte(stop) == 112 || text.byte(stop) == 80) {
-    return Some(
-      CheckedNumber(
-        value: check_number(text.substring(0, to: stop)).value,
-        problem: Some(
-          NumberProblem(
-            code: "lexer.number_hexadecimal_float",
-            message: "Truss has no hexadecimal floats. Write the value as a decimal float.",
-            start: 0,
-            stop: length,
-          ),
-        ),
-        fixes: [],
-      ),
+    let problem = make_problem(
+      "lexer.number_hexadecimal_float",
+      message: "Truss has no hexadecimal floats. Write the value as a decimal float.",
+      start: 0,
+      stop: length,
     )
+    return Examination.Derived(derivation: Derivation.HexadecimalFloat(own problem), text: text.substring(0, to: stop).to_string())
   }
   if is_radix(text) && (text.byte(1) == 88 || text.byte(1) == 66 || text.byte(1) == 79) {
     let prefix = "0${text.substring(1, to: 2).to_ascii_lowercase()}"
-    return Some(
-      make_translation(
-        "lexer.number_uppercase_prefix",
-        message: "Number prefixes are lowercase: write `${prefix}`.",
-        start: 0,
-        stop: 2,
-        translation: "${prefix}${text.substring(2, to: length)}",
-      ),
+    return translate(
+      "lexer.number_uppercase_prefix",
+      message: "Number prefixes are lowercase: write `${prefix}`.",
+      start: 0,
+      stop: 2,
+      translation: "${prefix}${text.substring(2, to: length)}",
     )
   }
   let lowered_suffix = suffix.to_ascii_lowercase()
   if !suffix.is_empty() && find_suffix(lowered_suffix) is Some(suffix_entry) {
     let number = text.substring(0, to: stop)
-    let checked = check_number(number)
-    let value = match own checked.value {
-      IntegerValue(digits) => if is_float_suffix(lowered_suffix) {
-        NumberValue.FloatValue(token.normalize_decimal(digits, exponent: math.BigInteger.zero()))
-      } else {
-        NumberValue.IntegerValue(own digits)
-      }
-      FloatValue(decimal) => NumberValue.FloatValue(own decimal)
-    }
     let type_name: StringSlice = match suffix_entry.type_name {
       Some(name) => name
       None => if number.contains(".") || number.contains("e") { "Float64" } else { "Int64" }
     }
-    return Some(
-      CheckedNumber(
-        own value,
-        problem: Some(
-          NumberProblem(
-            code: "lexer.number_suffix",
-            message: "Number literals have no type suffixes such as `${suffix}`. A literal takes its type from its context, as in `let value: ${type_name} = ${number}`.",
-            start: stop,
-            stop: length,
-          ),
-        ),
-        fixes: [],
-      ),
+    let problem = make_problem(
+      "lexer.number_suffix",
+      message: "Number literals have no type suffixes such as `${suffix}`. A literal takes its type from its context, as in `let value: ${type_name} = ${number}`.",
+      start: stop,
+      stop: length,
     )
+    return Examination.Derived(derivation: Derivation.Suffixed(own problem, is_float: is_float_suffix(lowered_suffix)), text: number.to_string())
   }
   if !is_radix(text) && text.find("E") is Some(marker) && marker < stop {
-    return Some(
-      make_translation(
-        "lexer.number_uppercase_exponent",
-        message: "The exponent is written with a lowercase `e`.",
-        start: marker,
-        stop: marker + 1,
-        translation: "${text.substring(0, to: marker)}e${text.substring(marker + 1, to: length)}",
-      ),
+    return translate(
+      "lexer.number_uppercase_exponent",
+      message: "The exponent is written with a lowercase `e`.",
+      start: marker,
+      stop: marker + 1,
+      translation: "${text.substring(0, to: marker)}e${text.substring(marker + 1, to: length)}",
     )
   }
   let whole = skip_decimal_digits(text, position: 0, with_underscores: true)
   let digits = remove_underscores(text.substring(0, to: whole))
   if is_radix(text) || digits.length() < 2 || digits.byte(0) != 48 {
-    return None
+    return Examination.Final(numbers_check(text))
   }
   var stripped: UInt64 = 0
   while stripped < length && (text.byte(stripped) == 48 || text.byte(stripped) == 95) {
@@ -680,35 +692,40 @@ fn lex_foreign_number(text: StringSlice) -> Option[CheckedNumber]
     }
   }
   let octal_possible = whole == length && is_octal_digits
-  var alternatives: List[Replacement] = []
-  if octal_possible {
-    let octal = "0o${without_zeros}"
-    if check_number(octal).problem.is_none() && check_number(decimal).problem.is_none() {
-      mut alternatives.push(Replacement(title: "Write `${octal}` (octal)", text: own octal))
-      mut alternatives.push(Replacement(title: "Write `${decimal}` (decimal)", text: decimal.copy()))
-    }
-  } else if check_number(decimal).problem.is_none() {
-    mut alternatives.push(Replacement(title: "Write `${decimal}`", text: decimal.copy()))
+  let octal = if !octal_possible {
+    OctalChoice.NotOctal
+  } else {
+    let written = "0o${without_zeros}"
+    if numbers_check(written).problem.is_none() { OctalChoice.ValidOctal(own written) } else { OctalChoice.InvalidOctal }
   }
   let message = if octal_possible {
     "Decimal numbers do not start with `0`. In C and Go, `${text.substring(0, to: whole)}` would be octal: write `0o${without_zeros}` for octal, or `${without_zeros}` for decimal."
   } else {
     "Decimal numbers do not start with `0`."
   }
-  Some(
-    CheckedNumber(
-      value: check_number(decimal).value,
-      problem: Some(NumberProblem(code: "lexer.number_leading_zero", own message, start: 0, stop: whole)),
-      fixes: own alternatives,
-    ),
-  )
+  let problem = NumberProblem(code: "lexer.number_leading_zero", own message, start: 0, stop: whole)
+  let derived = decimal.copy()
+  Examination.Derived(derivation: Derivation.LeadingZero(own problem, own decimal, own octal), text: own derived)
 }
 
 fn check_number(text: StringSlice) -> CheckedNumber
   uses Panic, RunForever
 {
-  match lex_foreign_number(text) {
-    Some(checked) => checked
-    None => numbers_check(text)
+  var derivations: List[Derivation] = []
+  var next = examine(text)
+  while true {
+    match own next {
+      Final(checked) => {
+        var result = own checked
+        while mut derivations.pop() is Some(derivation) {
+          result = combine(own derivation, derived: own result)
+        }
+        return result
+      }
+      Derived(derivation, text: derived) => {
+        mut derivations.push(own derivation)
+        next = examine(derived)
+      }
+    }
   }
 }
