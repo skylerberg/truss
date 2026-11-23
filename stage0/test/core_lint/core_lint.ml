@@ -324,16 +324,7 @@ let check_semantics context (form : Core.t) =
                      context.report
                        "an arithmetic operator on `%s` is a call of `%s`, not an Operator"
                        (Types.show self_type) (show_target call.callee.target)
-                 | Trait_method { self_type = Any _; evidence = Impl _ | Bound; _ } ->
-                     context.report "a call of `%s` on an `any` value is not dynamic"
-                       (show_target call.callee.target)
-                 | Trait_method { self_type; evidence = Dynamic; _ }
-                   when match self_type with Any _ -> false | _ -> true ->
-                     context.report "a call of `%s` on `%s` is dynamic"
-                       (show_target call.callee.target) (Types.show self_type)
                  | _ -> ())
-             | To_any { evidence = Dynamic; _ } ->
-                 context.report "a conversion to `any` has dynamic evidence"
              | Operator { operation; arguments } ->
                  check_operator_types context node operation arguments
              | Compare { left; right; _ } -> compare_types context left right
@@ -454,7 +445,6 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
         List.iter (fun (_, input) -> check_type subject input) inputs;
         check_capabilities subject uses;
         check_type subject output
-    | Any reference -> check_trait subject reference
     | Never | Integer -> ()
     | Variable _ | Hole | Error _ ->
         report "%s has the type `%s`, which is not fully inferred" subject (Types.show ty)
@@ -490,7 +480,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
             List.iter
               (fun (_, inner) -> check_argument "an `impl`'s type argument" inner)
               (Types.For_testing.list_arguments substitution)
-        | Bound | Dynamic -> ())
+        | Bound -> ())
     | Intrinsic { type_arguments; _ } ->
         List.iter (check_argument "an intrinsic's type argument") type_arguments
     | Capability_method _ | Indirect _ -> ()
@@ -686,7 +676,6 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                    (fun ({ local; type_ } : Core.capture) ->
                      check_place (Local { local; type_; origin = node.origin }))
                    captures
-             | To_any { trait = reference; _ } -> check_trait "a conversion to `any`" reference
              | Provide { implementations; _ } ->
                  List.iter
                    (fun (implementation : Core.implementation) ->

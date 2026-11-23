@@ -255,7 +255,7 @@ let find_method_contract context (trait : Types.trait_reference) name receiver
       | Some ((Written _ | Derived _), clauses) ->
           Option.map (make_contract ?trait_clauses context path) clauses
       | Some (Inherited _, _) | None -> Option.map (make_contract context path) trait_clauses)
-  | Bound | Dynamic ->
+  | Bound ->
       Option.map
         (make_contract context (Path.Method { owner = trait.trait; name; receiver }))
         trait_clauses

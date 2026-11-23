@@ -22,14 +22,6 @@ fn scale_through_a_bound[Shape: Scaled](shape: Shape) -> Int64 {
   shape.scaled()
 }
 
-fn scale_through_any(shape: any Scaled) -> Int64 {
-  shape.scaled() + shape.scaled(3)
-}
-
-fn count_through_any(shape: any Scaled) -> UInt64 {
-  shape.labels()
-}
-
 fn is_missing[Item](extra: Option[Item] = None) -> Bool {
   extra is None
 }
@@ -96,20 +88,16 @@ fn Shelf.rename(mut self, position: UInt64 = 0) lends mut String {
   mut self.books[position]
 }
 
-test "a default of a trait's method is applied on a known type, through a bound, and through any" {
+test "a default of a trait's method is applied on a known type and through a bound" {
   let box = Box(mass: 5)
   assert box.scaled() == 10
   assert box.scaled(3) == 15
   assert scale_through_a_bound(Box(mass: 5)) == 10
-  let shape: any Scaled = any Box(mass: 5)
-  assert scale_through_any(shape) == 25
 }
 
 test "a default that owns a list is dropped by the caller that applies it" {
   let box = Box(mass: 1)
   assert box.labels() == 10
-  let shape: any Scaled = any Box(mass: 1)
-  assert count_through_any(shape) == 10
 }
 
 test "a default whose type names the callee's type parameter" {

@@ -1,3 +1,0 @@
-fn f() -> any Runner {
-  any Owner(items: [1, 2, 3])
-}

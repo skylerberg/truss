@@ -235,8 +235,8 @@ and fold_body ~visiting ~depth ~steps state (mir : Mir.Graph.t)
                 (Definitions.make_default_code state.context state.frame.code ~source:default.source
                    ~substitution)))
           default.form []
-    | Operation _ | Is_variant _ | Convert _ | To_any _ | Function_value _ | Lambda _
-    | Value_parameter _ | Specification _ ->
+    | Operation _ | Is_variant _ | Convert _ | Function_value _ | Lambda _ | Value_parameter _
+    | Specification _ ->
         None
   in
   let assign (destination : Mir.place option) value =

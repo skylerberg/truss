@@ -226,9 +226,6 @@ let () =
   Harness.test "a type cannot occur in the input of a function type in such an input" (fun () ->
       expect_one_diagnostic "type Knot(run: fn(fn(Knot) -> Bool) -> Bool)\n"
         "package.not_strictly_positive");
-  Harness.test "a type cannot occur in such an input of an any type's associated type" (fun () ->
-      expect_one_diagnostic Fixtures.Package_checks.knot_in_an_any_types_function_input
-        "package.not_strictly_positive");
   Harness.test "a type cannot be the argument that a generic type puts in such an input" (fun () ->
       expect_one_diagnostic Fixtures.Package_checks.callback_of_wrap_in_wrap
         "package.not_strictly_positive");

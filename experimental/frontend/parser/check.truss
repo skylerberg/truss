@@ -177,7 +177,7 @@ fn check_placement(cursor: mut TokenCursor, written: syntax.TypeExpression, is_t
         check_placement(mut cursor, written: output, is_top: false)
       }
     }
-    PathType(path_type) | AnyType(path_type) => check_path_placement(mut cursor, path_type)
+    PathType(path_type) => check_path_placement(mut cursor, path_type)
     SelfType(_) | Associated(..) | TypeError => {}
   }
 }
@@ -307,7 +307,7 @@ fn check_trait_argument(cursor: mut TokenCursor, written: syntax.TypeExpression,
   uses Panic, RunForever
 {
   match written.kind {
-    PathType(path_type) | AnyType(path_type) => check_trait_arguments(mut cursor, implemented_trait: path_type, is_law_proof: is_law_proof)
+    PathType(path_type) => check_trait_arguments(mut cursor, implemented_trait: path_type, is_law_proof: is_law_proof)
     FunctionType(_) => {
       let message = if is_law_proof {
         "A function type cannot be a trait argument of a law proof, since no `impl` can have one."

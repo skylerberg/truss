@@ -112,14 +112,6 @@ let makers =
             "built" ^ suffix ));
     };
     { maker = "a cursor"; type_ = None; make = (fun ~suffix:_ place -> ([], place ^ ".cursor()")) };
-    {
-      maker = "an any value";
-      type_ = Some "any Sized";
-      make =
-        (fun ~suffix place ->
-          ( [ Printf.sprintf "let built%s: any Sized = any Window(view: %s[0..2])" suffix place ],
-            "own built" ^ suffix ));
-    };
   ]
 
 type holder = {

@@ -613,8 +613,8 @@ test "constants that call functions" {
   `Character`, and the fields of a record or a variant that it can see. It
   knows a collection, and a type whose fields are hidden from it, by the
   contracts of the calls that build it.
-- **A constant is data,** so its type holds no function, no `any` value, and
-  nothing that exists only while the program runs, such as an open file.
+- **A constant is data,** so its type holds no function and nothing that
+  exists only while the program runs, such as an open file.
 - **A constant cannot depend on itself,** through another constant or
   through a function that it calls.
 
@@ -3082,11 +3082,11 @@ When the prover cannot prove a law from the contracts alone, a *law proof*
 gives the steps: `proof Combine.left_identity for Maximum { ... }`.
 [Chapter 13](#theorems-and-proof-blocks) shows proofs.
 
-### Dynamic dispatch with any
+### Values of several types in one list
 
-Generic code is compiled for each type. When one list must hold values of
-different types, `any Trait` holds a value of any type that implements the
-trait, and calls its methods through the trait:
+Generic code is compiled for each type, and a list holds values of one type.
+When one list must hold values of different types, a sum type names them,
+and implements the trait by passing each call on to the value it holds:
 
 ```truss
 trait Shape {
@@ -3110,7 +3110,21 @@ impl Shape for Circle {
   }
 }
 
-fn total_area(shapes: Slice[any Shape]) -> Float64 {
+type Figure =
+  | Squared(square: Square)
+  | Round(circle: Circle)
+
+impl Shape for Figure {
+  fn area(self) -> Float64
+  {
+    match self {
+      Squared(square) => square.area()
+      Round(circle) => circle.area()
+    }
+  }
+}
+
+fn total_area[Item: Shape](shapes: Slice[Item]) -> Float64 {
   var total = 0.0
   for shape in shapes {
     total = total + shape.area()
@@ -3119,15 +3133,18 @@ fn total_area(shapes: Slice[any Shape]) -> Float64 {
 }
 
 test "values of different types in one list" {
-  let shapes: List[any Shape] = [any Square(side: 2.0), any Circle(radius: 1.0)]
+  let shapes: List[Figure] = [
+    Figure.Squared(square: Square(side: 2.0)),
+    Figure.Round(circle: Circle(radius: 1.0)),
+  ]
   assert total_area(shapes) > 7.0
 }
 ```
 
-- `any Square(side: 2.0)` takes ownership of the value and allocates once.
-- A method can be called through `any` if it takes `self`, has no type
-  parameters of its own, and neither takes nor returns `Self`.
-- An `any` value cannot be turned back into its original type.
+- The `match` names every type the list can hold, so a new variant is an
+  error at each `match` that does not handle it.
+- Truss has no type that stands for "any type with this trait", such as an
+  interface value in Go or `dyn Trait` in Rust.
 
 ### Method names
 
@@ -4938,7 +4955,7 @@ From the tightest binding to the loosest:
 | Operators | Meaning |
 |---|---|
 | `.field`, `.method()`, `[index]`, `(arguments)`, `?`, `with (...)` | Access, call, and propagate an error |
-| `-a`, `!a`, `~a`, `mut place`, `own place`, `any value` | Negation, logical not, bitwise not, modes, dynamic dispatch |
+| `-a`, `!a`, `~a`, `mut place`, `own place` | Negation, logical not, bitwise not, modes |
 | `*`, `/`, `%` | Multiplication, division rounding toward zero, remainder with the sign of the left side |
 | `+`, `-` | Addition and subtraction |
 | `..`, `..=` | Ranges, excluding and including the end |

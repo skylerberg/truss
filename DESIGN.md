@@ -374,7 +374,6 @@ rule excludes `Plain` arguments, such as indexes, so that case is rare.
 |---|---|
 | Whether a type is a view is derived from its fields, and a record that holds a view is a view. | Nothing is declared, and a view cannot escape inside a record. |
 | Generic code that keeps a value requires `Storable`. | A type parameter may stand for a view, and the bound stops generic code from storing one. |
-| An `any Trait` is a view unless `Trait` requires `Storable`. | `any` hides the type, so the compiler cannot see whether the value holds a view. |
 | `mut` access is never stored. | It lasts for one call, one iteration, or one `provide mut` block, so the ownership check tracks no mutable reference from one statement to the next. |
 | A slice's elements are written only through a `mut Slice` parameter or a range of a mutable place, and a slice held in a variable, a field, or an element is read-only. | Write access then always names the place it writes, so the ownership check compares the written place with every other argument and view, and the prover writes the callee's changes back to that place. Write access held in a variable would let `var target = items[1..5]` overwrite elements that `items[0..4]`, passed beside it, still views. |
 | A `mut Slice` parameter cannot be assigned, and a slice is passed `mut` only to a `mut Slice` parameter. | A callee that assigned the slice another one would leave the caller's elements unchanged while the caller read the callee's contract as a write to them, and would carry write access to elements lent read-only. A slice's length is then fixed for the call, so the prover knows it with no clause, and the slice is passed by value. |
@@ -413,7 +412,7 @@ mutated. Such a type takes the new value in an ordinary method, as
 |---|---|
 | Reading an element and mutating it in place are separate traits, `Index` and `IndexMut`. | A collection that packs its elements, such as a `BitSet`, has no place to lend `mut`. It implements `Index` to read an element and `IndexAssign` to replace one. |
 | A method may lend a value that it computes, and a mutation of that value is not written back. | Writing back would be code after the lend. |
-| A method lends a part of its first parameter, or a whole value that it made, and never a part inside a value it owns. | Nothing of the method then has to outlive its call except the part, which the caller holds. So the method can be compiled as a function, be called through `any`, and call itself. Swift's accessors lend such a part by keeping the accessor's frame alive. |
+| A method lends a part of its first parameter, or a whole value that it made, and never a part inside a value it owns. | Nothing of the method then has to outlive its call except the part, which the caller holds. So the method can be compiled as a function and call itself. Swift's accessors lend such a part by keeping the accessor's frame alive. |
 | A lending call lends its whole receiver. | The method was proven on the assumption that nothing else uses `self` while the part is lent. |
 | An element or a range of a `List`, a `Slice`, or an `Array` is a place, as a field is, and calls no method. | A lending call lends its whole receiver, so `mut items[0]` passed beside `items[1]` would conflict, and the ownership check and the prover would not see which element a call wrote. As places, elements are parts of the sequence: disjoint parts pass side by side, and a write changes one element of the prover's model. |
 
@@ -525,7 +524,7 @@ No code builds it at startup, and no mutable global holds it.
 | A proof knows a collection, and an opaque type of another package, by the contracts of the calls that build it. | To such a proof the value is its model, and `model()` returns a type that exists only in specifications, so no evaluation computes it yet. |
 | A constant that a type names calls no function. | A constant can appear in a type, as in `Array[UInt8, digest_size]`, so type checking never waits for code to run. |
 | The value holds no `if`, `match`, or lambda of its own. | Every stage reads a value as one expression with no local variable. A function holds the other code, at the cost of one name. |
-| A constant's type holds no function, `any` value, handle, or state that tasks share. | The value is data in the program. A function and an `any` value hold the address of code. A handle stands for something that the operating system holds only while the program runs. State that tasks share would be a mutable global. |
+| A constant's type holds no function, handle, or state that tasks share. | The value is data in the program. A function holds the address of code. A handle stands for something that the operating system holds only while the program runs. State that tasks share would be a mutable global. |
 | A constant cannot depend on itself through the code that it calls. | The compiler would need the value to compute the value. A read of a constant is an edge of the call graph, so the check that finds a recursion finds this cycle. |
 | An evaluation is limited by the CPU time that it uses. | A wall-clock limit would fail a build on a busy machine that an idle machine passes, and agents and CI jobs share machines. CPU time varies only with the speed of the processor, and the limit is far above the need of any constant. A count of steps would vary with nothing, but the count would be compiled into every function that an evaluation and a test both reach, or into a second copy of each. |
 | The evaluations that a check or a build needs run as the entries of one program, in the test runner. | A program for each evaluation costs a C compilation and a link for each computed constant and each tagged template. An evaluator is to the runner what a test is: a function with no parameter, whose output the runner captures, and which may panic, reach a `todo`, or pass a limit. The runner isolates each entry in a worker process and uses every core. An evaluator that reads an evaluated constant holds that value as data, so it is compiled after that constant is evaluated: the evaluations run in layers, and one program holds one layer. |
@@ -619,7 +618,6 @@ arguments only.
 | `expect` uses `Panic unless self is Some(_)`. | Code that proves its value present calls `expect` without declaring `Panic`. |
 | A trait's method takes a condition on values. An `impl`'s method states its own, which the trait's implies. | The integer conversions and the operator traits guard overflows, so generic code over them panics where code over a built-in type does. The trait's condition implies the `impl`'s as the trait's `requires` implies the `impl`'s, so a caller that proved the trait's condition can call the copy of the `impl`'s method that assumes the `impl`'s. |
 | An `impl`'s method of a trait method that uses `Panic unless P` uses no `Panic` without a condition. | The `impl`'s method would panic where `P` holds, in a caller without `Panic`. |
-| A call through `any` uses `Panic`. | The `impl` is chosen when the program runs, so the call cannot reach a copy that assumes the condition. |
 | A capability's method takes no condition on values. | `provide` chooses the implementation when the program runs, and the implementation's capabilities are the provider's, so a caller's proof of the condition would not stop it from panicking. |
 | `when` takes no condition on values. | `requires P ==> Q` and `ensures P ==> Q` already say it. |
 | Every clause of a function and of a loop takes a condition. | A clause with a condition is proven through the body's loops and recursion, and their invariants and measures name the methods that the clause names: an `ensures` of `extend` that counts the elements `when Source: FiniteCursor` needs a loop `invariant` that names `remaining()`, and a recursion over a cursor needs `decreases source.remaining() when Source: FiniteCursor`. A call decides the condition of a `requires` by the `impl` lookup that decides every other clause's. |
@@ -648,7 +646,7 @@ written form.
 **The recursion check follows every edge of the call graph.** A function
 reaches itself by a direct call, and by supplying code to a callee: by
 naming a function as a value, by passing an `impl` where a bound needs one,
-by converting a value to `any`, and by providing an `impl`, because the
+and by providing an `impl`, because the
 code that receives the function or the `impl` can call back. If the check
 ignored the supplied code, a package could implement a trait with a method
 that calls a generic function that calls the method back, and each
@@ -1246,8 +1244,7 @@ A trait can leave a set of capabilities to each `impl`. Otherwise
 `Cursor.next` would use no capability in every `impl`, and a cursor that
 reads a file could not be passed to `zip` or `to_list`. Swift's
 `AsyncIteratorProtocol` leaves its error type to each implementation in the
-same way. `any` fixes the set to the empty set, because code that holds the
-value cannot name the capabilities of the type that `any` hides.
+same way.
 
 ### Equality
 
@@ -1289,23 +1286,29 @@ Rules: [Method lookup](SPECIFICATION.md#method-lookup).
 | A `String` has the methods of `StringSlice`, and a `List` and an `Array` those of `Slice`. | `self` is a parameter, and an argument of the owned type converts to its view. Without the rule, every method of a view needs a forwarding method on the owned type, whose contract is stated and proven a second time, and a view's method that has none cannot be called on the owned value. |
 | A type's own method hides its view's method of the same name and mode. | The owned type can do better where it owns the storage: `String.to_bytes(own self)` hands over its buffer, and `StringSlice.to_bytes(self)` copies. Both are written in one package, so no other package can change which one a call reaches. |
 
-### Dynamic dispatch
+### Dispatch
 
-Rules: [Dynamic dispatch](SPECIFICATION.md#dynamic-dispatch).
+A call of a trait's method is dispatched statically: the `impl` is known
+where the calling code is compiled. No type hides the type of a value behind
+a trait, as Rust's `dyn Trait` and Go's interface values do.
 
 | Need | Use |
 |---|---|
-| One type, known at the call site | A generic parameter with a bound, dispatched statically |
+| One type, known at the call site | A generic parameter with a bound |
 | A closed set of alternatives | A sum type |
-| An open set, mixed in one collection | `any Trait` |
+| An open set, mixed in one collection | A sum type that the program declares, which implements the trait with a `match`. A library that stores the values takes the sum type as a type parameter. |
+| An implementation chosen when the program runs | A capability and `provide` |
+| A callback | A function value |
 
 | Rule | Reason |
 |---|---|
-| `any value` is written, and it allocates once. | *Nothing hidden.* An implicit conversion would hide the allocation. |
-| An `any` type fixes every associated type of its trait. | A method that mentions an associated type could not otherwise be called. |
-| The limits of `any` apply to a call, not to a trait. | A method that needs the concrete type cannot be called through `any`, and the error is at the call site. A trait never becomes unusable with `any` because one method does not fit, as a trait does under Rust's object-safety rules. |
-| A dynamic call is verified against the contract of the trait. | Adding an `impl` checks only that `impl`, never the callers. |
-| There is no downcast. | Code that needs to know which type it holds has a closed set of types, which a sum type expresses with exhaustive matching. |
+| No type hides a value's type behind a trait. | A program is whole when it is built, so the types behind a trait are a closed set, and a sum type states it. A `match` on the sum type is exhaustive, each arm is proven against the contract of its own `impl`, and nothing is allocated. A call through a hidden type is proven only against the trait's contract, and a change to the trait's `impl`s reaches every such call. |
+| The sum type is written by the program, not derived by the compiler from the `impl`s. | Adding an `impl` would otherwise change the layout of a type in code that names neither. |
+
+Every other feature would also need a rule for a value of a hidden type:
+whether it is a view, whether it is `Copyable`, which capabilities its
+methods use, and which of them can be called at all. The cost of leaving it
+out is a type parameter on each library type that stores such a value.
 
 ## Tests
 
@@ -1645,7 +1648,7 @@ Rules: [The registry](PACKAGES.md#the-registry).
 | `async` | [Concurrency](#concurrency) |
 | A mutex as a value | [Shared state](#shared-state) |
 | Blanket `impl`s, overlapping `impl`s, and specialization | [Traits and laws](#traits-and-laws) and [Implementations](#implementations) |
-| Downcasting | [Dynamic dispatch](#dynamic-dispatch) |
+| A type that hides a value's type behind a trait, such as Rust's `dyn Trait`, and downcasting | [Dispatch](#dispatch) |
 | Macros | `derives` covers the uses of Rust's `#[derive]`, and a procedural macro would run a dependency's code during a build ([Grants](#grants)). |
 | Expected-time bounds | [Cost clauses](#cost-clauses) |
 | `assume` | [Proofs](#proofs) |

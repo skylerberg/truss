@@ -351,23 +351,18 @@ let cyclic = make_mutual_source "f(n)"
 
 let stepper =
   "trait Step {\n\
-  \  fn step(own self) -> Int64\n\
-   }\n\
-   fn run(value: own any Step) -> Int64\n\
-   {\n\
-  \  own value.step()\n\
-   }\n\
+  \  fn step(self) -> Int64\n\n\
+  \  fn run(self) -> Int64 {\n\
+  \    self.step()\n\
+  \  }\n\
+   }\n\n\
    type Foo()\n"
 
 let stepper_that_runs =
-  stepper
-  ^ "impl Step for Foo {\n\
-    \  fn step(own self) -> Int64\n\
-    \  {\n\
-    \    let value: any Step = any self\n\
-    \    run(own value)\n\
-    \  }\n\
-     }\n"
+  stepper ^ "\nimpl Step for Foo {\n  fn step(self) -> Int64 {\n    self.run()\n  }\n}\n"
+
+let run_of_step : Path.t =
+  Method { owner = make_main_path "Step"; name = "run"; receiver = Instance Read }
 
 let make_configured_source construction =
   Printf.sprintf
@@ -497,11 +492,10 @@ let raised_of_library_shelf =
 let make_step_library ~follow =
   Printf.sprintf
     "public trait Step {\n\
-    \  fn step(self, node: Node) -> Int64\n\
-     }\n\n\
-     public type Node(next: any Step)\n\n\
-     public fn follow(node: Node) -> Int64 {\n\
-    \  %s\n\
+    \  fn step(self) -> Int64\n\n\
+    \  fn follow(self) -> Int64 {\n\
+    \    %s\n\
+    \  }\n\
      }\n"
     follow
 
@@ -509,8 +503,8 @@ let hop_stepping_through_a_library =
   "use lib.tools\n\n\
    type Hop()\n\n\
    impl tools.Step for Hop {\n\
-  \  fn step(self, node: tools.Node) -> Int64 {\n\
-  \    tools.follow(node)\n\
+  \  fn step(self) -> Int64 {\n\
+  \    self.follow()\n\
   \  }\n\
    }\n"
 
@@ -890,19 +884,10 @@ let () =
       expect_included recomputed ~parts:[ Proof (make_main_key "f"); Proof (make_main_key "g") ];
       expect_untouched recomputed ~is_excluded:(fun part ->
           is_part_of [ make_main_path "h" ] part || part = locate (Checked_body (make_main_key "f"))));
-  Harness.test
-    "an impl that closes a cycle through a trait method recomputes the proofs on the cycle"
-    (fun () ->
-      expect_included
-        (list_propagated
-           ~before:[ ("app.main", stepper) ]
-           ~after:[ ("app.main", stepper_that_runs) ])
-        ~parts:[ Recursion_group (make_main_path "run"); Proof (make_main_key "run") ]);
   Harness.test "a function's call edges read the dependencies of no package" (fun () ->
       expect_reads
         (build [ ("app.main", stepper_that_runs) ])
-        (Call_edges (make_main_path "run"))
-        ~includes:[]
+        (Call_edges run_of_step) ~includes:[]
         ~excludes:[ Name (Dependencies app); Name (Dependencies Path.standard_package) ]);
   Harness.test
     "a construction that runs a field default that fails adds no call edge to the default's callee"
@@ -1006,7 +991,8 @@ let () =
       ignore
         (propagate_with_lib ~before:tool_user
            ~after:[ List.hd tool_user; ("lib.tools", "public fn other() -> Int64 { 2 }\n") ]));
-  Harness.test "removing an impl that a call through `any` reaches matches a cold build" (fun () ->
+  Harness.test "removing an impl that a provided method reaches through `Self` matches a cold build"
+    (fun () ->
       ignore
         (list_propagated
            ~before:[ ("app.main", stepper_that_runs) ]
@@ -1029,8 +1015,7 @@ let () =
       let with_follow follow =
         [ ("app.main", hop_stepping_through_a_library); ("lib.tools", make_step_library ~follow) ]
       in
-      let failing = with_follow "node.next.step(node) + missing"
-      and fixed = with_follow "node.next.step(node)" in
+      let failing = with_follow "self.step() + missing" and fixed = with_follow "self.step()" in
       let settle files =
         Support.make_database (Support.setup ~dependencies:[ ("app", "lib") ] files)
       in
@@ -1046,7 +1031,16 @@ let () =
       expect_included
         (propagate_with_lib ~before:failing ~after:fixed)
         ~parts:
-          [ Call_edges (Support.make_top_path "lib.tools" "follow"); Proof (make_key step_of_hop) ];
+          [
+            Call_edges
+              (Method
+                 {
+                   owner = Support.make_top_path "lib.tools" "Step";
+                   name = "follow";
+                   receiver = Instance Read;
+                 });
+            Proof (make_key step_of_hop);
+          ];
       if count_termination_obligations (settle fixed) ~of_:step_of_hop <> 1 then
         Harness.fail "the proof makes no termination obligation for the recursion");
   Harness.test

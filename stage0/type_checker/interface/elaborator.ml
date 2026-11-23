@@ -174,28 +174,6 @@ let rec elaborate_type context (written : Syntax.type_expression) : Types.ty =
       match resolve_parameter context base with
       | Ok parameter -> elaborate_associated context (Types.Parameter parameter) parameter key
       | Error report -> Types.Error report)
-  | Any_type path -> (
-      match elaborate_trait_reference context path with
-      | Ok (trait : Types.trait_reference) -> (
-          let open_names =
-            List.concat_map
-              (fun trait_path ->
-                match context.lookups.find_trait_header trait_path with
-                | Some header ->
-                    List.filter
-                      (fun name -> not (List.mem_assoc name trait.associated))
-                      header.associated
-                | None -> [])
-              (list_trait_closure context.lookups trait.trait)
-          in
-          match open_names with
-          | first :: _ ->
-              report_error_type context Associated_type_not_fixed context.spans.(path.id)
-                (Printf.sprintf
-                   "`any %s` must fix every associated type of its trait, such as `%s[%s = ...]`."
-                   (show_path path.path) (show_path path.path) first)
-          | [] -> Types.Any trait)
-      | Error report -> Types.Error report)
   | Function_type function_type -> (
       match elaborate_function_type context function_type with
       | Ok function_type -> Types.Function function_type
@@ -349,7 +327,9 @@ and elaborate_path_type context (path : Syntax.path_type) : Types.ty =
               type_))
   | Some (Definition (Trait, _)) ->
       report_error_type context Not_a_type context.spans.(path.id)
-        (Printf.sprintf "`%s` is a trait, not a type. A value of any type with it is `any %s`."
+        (Printf.sprintf
+           "`%s` is a trait, not a type. A type parameter can have it as a bound, as in `[Item: \
+            %s]`."
            shown shown)
   | Some (Definition (Capability, _)) ->
       report_error_type context Not_a_type context.spans.(path.id)

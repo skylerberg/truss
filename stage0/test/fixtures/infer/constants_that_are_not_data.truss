@@ -1,10 +1,6 @@
 use standard.files
 use standard.tasks
 
-trait Shape {
-  fn sides(self) -> UInt64
-}
-
 type Handler(name: String, run: fn(Int64) -> Int64)
 
 fn double(value: Int64) -> Int64 {
@@ -13,6 +9,5 @@ fn double(value: Int64) -> Int64 {
 
 let doubler: fn(Int64) -> Int64 = double
 let handlers: List[Handler] = []
-let shape: Option[any Shape] = Option.None
 let unopened: Option[files.File] = Option.None
 let counter: tasks.Cell[Int64] = tasks.Cell.new(0)

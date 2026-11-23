@@ -168,7 +168,6 @@ let check state (site : site) (value : Syntax.expression) =
 let rec find_part_that_is_not_data (state : State.state) ~visited (type_ : Types.ty) =
   match State.normalize state type_ with
   | Function _ -> Some "a function type"
-  | Any _ -> Some "an `any` type"
   | Named { path; arguments } as named -> (
       let find_in_arguments () =
         List.find_map

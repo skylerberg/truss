@@ -34,14 +34,6 @@ let rec ground context substitution (ty : Types.ty) : Ground.ty =
   | Named { path; arguments } ->
       Named { path; arguments = List.map (ground_argument context Types.no_substitution) arguments }
   | Function function_type -> Function (ground_function context Types.no_substitution function_type)
-  | Any { trait; trait_arguments; associated } ->
-      Any
-        {
-          trait;
-          arguments = List.map (ground_argument context Types.no_substitution) trait_arguments;
-          associated =
-            List.map (fun (name, ty) -> (name, ground context Types.no_substitution ty)) associated;
-        }
   | Never -> Never
   | Parameter parameter ->
       raise_bug "the generic parameter %s of %s is not substituted" parameter.name
@@ -82,13 +74,6 @@ let rec convert_ty : Ground.ty -> Types.ty = function
           output = convert_ty function_type.result;
           uses = Types.make_capability_set (List.map Types.make_capability function_type.uses);
           costs = [];
-        }
-  | Any { trait; arguments; associated } ->
-      Any
-        {
-          trait;
-          trait_arguments = List.map convert_argument arguments;
-          associated = List.map (fun (name, ty) -> (name, convert_ty ty)) associated;
         }
 
 and convert_argument : Ground.argument -> Types.argument = function
@@ -159,7 +144,6 @@ let find_builtin_shape (ty : Ground.ty) : Memory_layout.shape option =
   match ty with
   | Never -> Some (Sum [])
   | Function function_type -> Some (Builtin_records.Function_value.make_shape function_type)
-  | Any _ -> Some Builtin_records.Any.shape
   | Named { path; arguments } ->
       Option.map
         (fun builtin -> compute_named_builtin_shape ty builtin arguments)
@@ -190,5 +174,5 @@ let compute_shape context (ty : Ground.ty) =
   match (find_builtin_shape ty, ty) with
   | Some shape, _ -> shape
   | None, Named { path; arguments } -> compute_defined_shape context path arguments
-  | None, (Never | Function _ | Any _) ->
+  | None, (Never | Function _) ->
       raise_bug "the unnamed type %s has no built-in shape" (Ground.to_string ty)

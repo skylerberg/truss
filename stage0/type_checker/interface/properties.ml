@@ -203,19 +203,6 @@ let rec compute_conditions lookups ~facts_of ~resolve ~compute_leaf ?(in_progres
       match strip_projections type_ with
       | root when Types.is_open_type root -> Some [ root ]
       | _ -> compute_leaf type_)
-  | Types.Any trait -> (
-      let requires traits =
-        List.exists
-          (fun (bound : Types.trait_reference) -> List.exists (Path.equal bound.trait) traits)
-          (list_bound_closure lookups ~self:type_ trait)
-      in
-      match property with
-      | Copyable ->
-          if requires [ Well_known.make_path Copyable; Well_known.make_path Plain ] then Some []
-          else None
-      | Plain -> None
-      | View -> if requires [ Well_known.make_path Storable ] then Some [] else None
-      | Holds_function -> None)
   | Types.Named { path; arguments } -> (
       match (Well_known.find_builtin_type path, property) with
       | Some Storage, Plain | Some View, View | Some Handle, (Copyable | Plain) -> None
@@ -263,9 +250,6 @@ let walk_contents lookups ~(facts_of : Path.t -> Environment.type_facts) ~resolv
             step_inside (if Types.terminates function_.uses then Function_input else Indirect) input)
           inputs;
         step_inside Indirect output
-    | Types.Any { trait_arguments; associated; _ } ->
-        List.iter (step_inside Indirect)
-          (list_type_arguments trait_arguments @ List.map snd associated)
     | Types.Named { path; arguments } -> (
         match Well_known.find_builtin_type path with
         | Some Array -> List.iter (step_inside In_place) (list_type_arguments arguments)

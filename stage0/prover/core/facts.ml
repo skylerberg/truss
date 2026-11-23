@@ -488,7 +488,7 @@ let reject_recursion_through_supplied_code (context : State.context) (frame : St
               prover can compare, so the recursion cannot be shown to end: write it as a direct \
               call on a part."
              (Path.show path))
-    | Named_function _ | Call | Conversion_to_any | Provide -> ());
+    | Named_function _ | Call | Provide -> ());
     List.iter
       (fun owner ->
         let owner = Path.show owner in
@@ -507,11 +507,6 @@ let reject_recursion_through_supplied_code (context : State.context) (frame : St
                  back here. Such a use passes no arguments the prover can compare, so the \
                  recursion cannot be shown to end."
                 (Path.show path) owner
-          | Conversion_to_any ->
-              Printf.sprintf
-                "This conversion to `any` gives `%s`, whose methods call back here, so the prover \
-                 cannot show that the recursion ends."
-                owner
           | Provide ->
               Printf.sprintf
                 "This `provide` gives `%s`, whose methods call back here, so the prover cannot \
@@ -830,7 +825,7 @@ let find_impl (context : State.context) (trait : Types.trait_reference) (ty : Ty
       ~trait Bound
   with
   | Impl { impl; substitution } -> Some (impl, substitution)
-  | Bound | Dynamic -> None
+  | Bound -> None
 
 let is_potential = function
   | Logic.Apply ((Logic.Symbol.Potential _ | Logic.Symbol.Slack _), _) -> true

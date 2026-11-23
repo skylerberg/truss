@@ -25,7 +25,7 @@ let list_nested_blocks (statement : Tree.statement) : Tree.block list =
           {
             value =
               ( Operand _ | Operation _ | Compare _ | Not _ | Construct _ | Array _ | Is_variant _
-              | Convert _ | To_any _ | Copy _ | Function_value _ | Lambda _ | Value_parameter _
+              | Convert _ | Copy _ | Function_value _ | Lambda _ | Value_parameter _
               | Parameter_default _
               | Specification
                   (Result | Entry _ | Yielded | Identical _ | Applied _ | Method_cost _ | Map _) );
@@ -70,8 +70,7 @@ let rec visit_yielded visit : Tree.yielded -> unit = function
 let visit_rvalue visit origin (rvalue : Tree.rvalue) =
   let visit_operand = visit_operand visit in
   match rvalue with
-  | Operand value | Not value | Convert { value; _ } | To_any { value; _ } | Copy value ->
-      visit_operand value
+  | Operand value | Not value | Convert { value; _ } | Copy value -> visit_operand value
   | Operation { operands; _ } | Array operands -> List.iter visit_operand operands
   | Compare { left; right; _ } | Specification (Identical (left, right)) ->
       visit_operand left;

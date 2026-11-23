@@ -305,15 +305,7 @@ let report_requirement (state : State.state) (goal : State.goal) ?associated ~un
         (match goal.cause with Loop _ | Quantifier _ -> Not_indexable | _ -> No_impl)
         at
         (does_not_implement trait ^ "." ^ unmet)
-  | Any_conversion { at; any_type }, Implements trait ->
-      State.add_diagnostic state No_impl at
-        ((match associated with
-           | None -> does_not_implement trait ^ "."
-           | Some (name, found, _) ->
-               Printf.sprintf "`%s` is expected, and the `%s` of `%s` is `%s`."
-                 (Types.show any_type) name (Types.show shown) (State.show state found))
-        ^ unmet)
-  | (Bound _ | Operator _ | Method_call _ | Loop _ | Quantifier _ | Any_conversion _), Within _ ->
+  | (Bound _ | Operator _ | Method_call _ | Loop _ | Quantifier _), Within _ ->
       State.raise_bug "a goal's cause does not fit its requirement"
 
 let report_failure (state : State.state) (goal : State.goal) ?associated subject =

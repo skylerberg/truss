@@ -120,7 +120,6 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
              (Places.find_keyword_operation state.State.resolved state.State.tables inner)
       then Modes.mutate state env ~by:Passed_mut inner;
       type_
-  | Any inner -> Operators.check_any state env ?expected value inner
   | Binary { operator; left; right; _ } ->
       Operators.check_binary state env ?expected value operator left right
   | Is { value = tested; pattern = written; _ } ->

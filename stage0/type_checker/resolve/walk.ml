@@ -333,7 +333,6 @@ let find_target state (name : Syntax.name) = (lookup_current_names state).names.
 let rec resolve_type_expression state scope (type_ : Syntax.type_expression) =
   match type_.kind with
   | Path_type path -> resolve_path_type state scope path
-  | Any_type path -> resolve_path_type state scope path
   | Self_type _ -> ()
   | Associated (base, member) -> resolve_associated_base state scope base member "type"
   | Function_type { inputs; output; clauses } ->
@@ -676,7 +675,7 @@ and resolve_expression state scope (value : Syntax.expression) =
       List.iter
         (fun (argument : Syntax.argument) -> resolve_expression state scope argument.value)
         arguments
-  | Try inner | Prefix (_, inner) | Any inner | Echo inner | Parenthesized inner ->
+  | Try inner | Prefix (_, inner) | Echo inner | Parenthesized inner ->
       resolve_expression state scope inner
   | Mode (_, inner) ->
       resolve_expression state scope inner;
@@ -967,7 +966,7 @@ let declare_type state scope (name : Syntax.name) target =
 
 let rec list_generic_capabilities (type_ : Syntax.type_expression) : Syntax.name list =
   match type_.kind with
-  | Path_type path | Any_type path ->
+  | Path_type path ->
       List.concat_map
         (function
           | Syntax.Type_argument argument | Constraint (_, argument) ->

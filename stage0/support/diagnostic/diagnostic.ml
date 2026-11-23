@@ -199,7 +199,6 @@ module Code = struct
     | Read_only_owning_parameter
     | Unknown_associated_type
     | Unknown_associated_capability
-    | Associated_type_not_fixed
 
   type patterns = Not_covered | Unreachable_arm | Unreachable_alternative | Refutable
 
@@ -486,7 +485,6 @@ module Code = struct
     | Read_only_owning_parameter -> "read_only_owning_parameter"
     | Unknown_associated_type -> "unknown_associated_type"
     | Unknown_associated_capability -> "unknown_associated_capability"
-    | Associated_type_not_fixed -> "associated_type_not_fixed"
 
   let name_patterns_code code =
     match code with

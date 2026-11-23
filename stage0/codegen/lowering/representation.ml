@@ -1,8 +1,7 @@
-type t = Shape of Memory_layout.shape | Storage of Ground.ty | Handle | Shared of Ground.ty | Any
+type t = Shape of Memory_layout.shape | Storage of Ground.ty | Handle | Shared of Ground.ty
 
 let classify env (ty : Ground.ty) =
   match ty with
-  | Any _ -> Any
   | Named { path; arguments } -> (
       match (Well_known.find_builtin_type path, arguments) with
       | Some Storage, [ Type element ] -> Storage element

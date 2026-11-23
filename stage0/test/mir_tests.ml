@@ -29,8 +29,7 @@ let list_written (place : Mir.place) =
   | _ -> (list_place_locals place, [])
 
 let rec list_rvalue_locals : Mir.rvalue -> Mir.local list = function
-  | Operand value | Not value | Convert { value; _ } | To_any { value; _ } | Copy value ->
-      list_operand_locals value
+  | Operand value | Not value | Convert { value; _ } | Copy value -> list_operand_locals value
   | Operation { operands; _ } | Array operands -> List.concat_map list_operand_locals operands
   | Compare { left; right; _ } -> list_operand_locals left @ list_operand_locals right
   | Construct { fields; _ } ->
@@ -177,7 +176,6 @@ let validate definition (body : Mir.Graph.body) =
                     | Array _ -> "array"
                     | Is_variant _ -> "is_variant"
                     | Convert _ -> "convert"
-                    | To_any _ -> "to_any"
                     | Copy _ -> "copy"
                     | Function_value _ -> "function"
                     | Lambda _ -> "lambda"

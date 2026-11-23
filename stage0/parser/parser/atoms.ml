@@ -12,7 +12,7 @@ let begins_expression = function
   | Punctuation (Open _ | Minus | Bang | Tilde | Dot_dot | Dot_dot_equal) -> true
   | Keyword
       ( True | False | Todo | Unreachable | Break | Continue | Self_value | Self_type | Fn | If
-      | Match | Provide | Mut | Own | Any | Echo | Return | Forall | Exists ) ->
+      | Match | Provide | Mut | Own | Echo | Return | Forall | Exists ) ->
       true
   | _ -> false
 

@@ -29,7 +29,7 @@ fn begins_expression(kind: token.Kind) -> Bool {
     }
     Keyword(keyword) => match keyword {
       True | False | Todo | Unreachable | Break | Continue | SelfValue | SelfType | Fn | If | Match | Provide | Mut
-        | Own | Any | Echo | Return | Forall | Exists => true
+        | Own | Echo | Return | Forall | Exists => true
       _ => false
     }
     _ => false

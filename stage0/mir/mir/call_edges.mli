@@ -3,7 +3,7 @@ type resolution = { target : Path.t option; supplied : Path.t list Lazy.t }
 
 val resolve_callee : Interface.Lookups.t -> Types.substitution -> 'operand Core.target -> resolution
 
-type supplier = Call | Named_function of Path.t | Conversion_to_any | Provide
+type supplier = Call | Named_function of Path.t | Provide
 type edge = Calls of Path.t | Supplies of { supplier : supplier; code : Path.t list }
 
 val list_statement_edges : Interface.Lookups.t -> Types.substitution -> Tree.statement -> edge list

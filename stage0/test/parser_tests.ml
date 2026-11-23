@@ -476,8 +476,6 @@ let () =
       expect_type "Self.Key" "Self.Key");
   Harness.test "an associated type of a parameter" (fun () ->
       expect_type "Items.Element" "Items.Element");
-  Harness.test "any with a constraint" (fun () ->
-      expect_type "any Cursor[Element = Int64]" "(any Cursor[Element = Int64])");
   Harness.test "a function type" (fun () ->
       expect_type "fn(mut Element, Element) -> Ordering" "(fn (mut Element Element) -> Ordering)");
   Harness.test "a function type in parentheses with clauses" (fun () ->
@@ -648,10 +646,11 @@ let () =
       expect_expression "a with (own b)" "(with a (own b))");
   Harness.test "the label of an update is a path of fields" (fun () ->
       Parse_support.expect_error "fn f() { p with (g(x): 1) }" ~code:Unexpected_token ~at:"g(x)");
-  Harness.test "modes and any take a postfix expression" (fun () ->
+  Harness.test "a mode takes a postfix expression" (fun () ->
       Parse_support.expect_statement "mut config.servers.sort()"
-        "(mut (call (. (. config servers) sort)))";
-      expect_expression "any UserRoutes(users: [:])" "(any (call UserRoutes (users: (map))))");
+        "(mut (call (. (. config servers) sort)))");
+  Harness.test "`any` is an ordinary name" (fun () ->
+      expect_expression "any(items)" "(call any items)");
   Harness.test "own with an update" (fun () ->
       expect_expression "own config with (debug: true)" "(own (with config (debug: true)))");
   Harness.test "open ranges in brackets" (fun () ->

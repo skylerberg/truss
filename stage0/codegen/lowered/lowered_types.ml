@@ -137,7 +137,6 @@ type target =
   | Intrinsic of intrinsic
   | Foreign of Libc.declaration
   | Evidence_call of { evidence : operand; capability : Path.t; slot : int; signature : signature }
-  | Table_call of { table : operand; value : operand; slot : int; signature : signature }
 
 type static_value =
   | Static_scalar of constant
@@ -196,9 +195,4 @@ type terminator =
     }
 
 type data = { data_item : Item.t; ty : Ground.ty; value : static_value }
-
-type table = {
-  table_item : Item.t;
-  capability : Path.t option;
-  entries : (Item.t * signature) list;
-}
+type table = { table_item : Item.t; capability : Path.t; entries : (Item.t * signature) list }

@@ -1015,8 +1015,8 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
         (Facts.locate context start.source at)
         "a method that `%s` restates from `%s`, which the compiler implements"
         (Types.show_trait trait) (Path.show restated.declared_by)
-  | Some (Evidence Bound | Evidence Dynamic) ->
-      Facts.raise_bug "`%s` implements `%s` through a bound or `any`" (Types.show for_type)
+  | Some (Evidence Bound) ->
+      Facts.raise_bug "`%s` implements `%s` through a bound" (Types.show for_type)
         (Types.show_trait declared)
   | Some (Accepted _) | None -> ()
 

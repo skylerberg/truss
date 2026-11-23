@@ -59,7 +59,6 @@ let encode env ty =
       encode_elements element
   | None, Handle -> raise_bug "a handle cannot be computed while compiling"
   | None, Shared _ -> raise_bug "a shared value cannot be computed while compiling"
-  | None, Any -> raise_bug "an any value cannot be computed while compiling"
   | None, Shape (Scalar _) -> append_bytes value (Memory_layout.of_type env ty).size
   | None, Shape (Record members) -> encode_fields value None members
   | None, Shape (Array (element, count)) ->
@@ -142,7 +141,6 @@ let decode env ty encoded : Lowered.static_value =
           Static_storage { element; elements = decode_elements element; capacity }
       | None, Handle -> raise_bug "a handle computed while compiling"
       | None, Shared _ -> raise_bug "a shared value computed while compiling"
-      | None, Any -> raise_bug "an any value computed while compiling"
       | None, Shape (Scalar kind) -> Static_scalar (decode_scalar reader kind)
       | None, Shape (Record members) -> Static_record (decode_fields members)
       | None, Shape (Array (element, count)) ->
