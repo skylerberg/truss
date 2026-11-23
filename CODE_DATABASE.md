@@ -339,6 +339,7 @@ runs the evaluation again.
 | Decision | Reason |
 |---|---|
 | A dependency's database is a SQLite file in the user's cache, attached read-only. Registry packages beyond the standard library share one merged file. | Every database of a machine shares one copy of the standard library. SQLite attaches ten files at most. |
+| A package build records no `reads` edge and marks no reader. | A package's database is built once from nothing and never updated, so no unit of it runs a second time, and the build deleted its `reads` edges before it saved the file. Writing and then deleting them took 6.0 s of the 30 s that the standard library takes to build. The edges that the build's own checks select, `references`, `instantiates`, `calls`, and `implements`, are still written. |
 | A change set is one transaction, and a trial is a copy of the database in memory. | A crash leaves the state before the change set or after it. A trial never writes the worktree's database. |
 | The solver's answers stay in the user's cache, keyed by query, and a `verdict` row records the answer that an obligation got. | Worktrees and CI share answers. A command with no change reads verdicts and runs no part of the prover. |
 | `Prover.decide` splits into `Prover.pose`, which gives a proof's queries, and `Prover.list_states`, which renders the solver's answers. Decide calls both. | Each half is a pure function, and the solver's run between them is the orchestrator's. |
