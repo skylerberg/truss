@@ -468,16 +468,22 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                         {
                           variant = None;
                           fields =
-                            List.map
-                              (fun (field : Types.field) ->
-                                ( field.field_name,
-                                  if field.field_has_default then None
-                                  else
-                                    Some
-                                      (Core.Value
-                                         (make_method_call Default_default field.field_type []
-                                            field.field_type)) ))
-                              (record_fields ());
+                            (let defaulted, given =
+                               List.partition
+                                 (fun (field : Types.field) -> field.field_has_default)
+                                 (record_fields ())
+                             in
+                             List.map
+                               (fun (field : Types.field) ->
+                                 ( field.field_name,
+                                   Some
+                                     (Core.Value
+                                        (make_method_call Default_default field.field_type []
+                                           field.field_type)) ))
+                               given
+                             @ List.map
+                                 (fun (field : Types.field) -> (field.field_name, None))
+                                 defaulted);
                         }))
             | Serialize_serialize ->
                 let sink, sink_type =
@@ -738,17 +744,17 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                            variant;
                            fields =
                              List.map
-                               (fun (field : Types.field) ->
+                               (fun ((field : Types.field), local) ->
                                  ( field.field_name,
-                                   match List.assq_opt field read with
-                                   | Some local ->
-                                       Some
-                                         (Core.Value
-                                            (node field.field_type
-                                               (Use
-                                                  (Local { local; type_ = field.field_type; origin }))))
-                                   | None -> None ))
-                               fields;
+                                   Some
+                                     (Core.Value
+                                        (node field.field_type
+                                           (Use (Local { local; type_ = field.field_type; origin }))))
+                                 ))
+                               read
+                             @ List.map
+                                 (fun (field : Types.field) -> (field.field_name, None))
+                                 defaulted;
                          })
                   in
                   let updates =

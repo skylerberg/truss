@@ -16,4 +16,6 @@
   infer
   intrinsic
   intrinsic_signatures
-  well_known))
+  well_known
+  database
+  compiler_bug))
