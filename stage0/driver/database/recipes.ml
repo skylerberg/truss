@@ -1357,33 +1357,6 @@ let run_package_stage (database : Tracker.t) (stage : Kind.stage) id =
   | Check_unexported -> run_package_check database stage ~package ~unit:id Unexported
   | _ -> run_check_dependencies database package
 
-let drain_test_keys (database : Tracker.t) ~guard stale =
-  let rank = Kind.rank_stage Key_tests in
-  let closure = Hashtbl.create 64 in
-  let rec close id =
-    if not (Hashtbl.mem closure id) then begin
-      Hashtbl.replace closure id ();
-      List.iter
-        (fun (reader : Store.endpoint) -> if reader.kind = rank then close reader.id)
-        (Store.list_sources database.store
-           ~target:(Tracker.locate (Fact Test_key) id "")
-           ~markers:reads)
-    end
-  in
-  List.iter close stale;
-  List.iter
-    (fun component ->
-      let was_stale =
-        List.map (fun id -> Store.unmark_stale database.store ~stage:rank ~id) component
-      in
-      if List.exists Fun.id was_stale then
-        guard component (fun () -> run_key_tests database component))
-    (Strongly_connected.list_components
-       (module Integer_node)
-       ~list_successors:(fun id ->
-         List.filter (Hashtbl.mem closure) (list_item_targets database Lower id))
-       (List.sort Int.compare (Hashtbl.fold (fun id () ids -> id :: ids) closure [])))
-
 let list_definition_facts () =
   List.concat_map
     (fun recipe -> List.map Tracker.describe (Tracker.list_facts recipe.stage))
@@ -1522,35 +1495,87 @@ let drain_stage (database : Tracker.t) ?on_bug (stage : Kind.stage) ~scope =
       run_each (fun database id -> recipe.run database (read_first_definition database recipe id)));
   stale <> []
 
-let drain_claimed_items (database : Tracker.t) ?on_bug packages =
-  let lowered = Hashtbl.create 64 in
-  let list_claimed_stale_units stage =
-    List.filter
-      (fun item ->
-        Hashtbl.mem lowered item
-        || Store.is_item_claimed database.store item_graph ~item ~over:(Settled_edges { packages }))
-      (list_stale_units database stage ~scope:Everything)
+let drain_test_keys (database : Tracker.t) ?on_bug packages =
+  let rank = Kind.rank_stage Key_tests in
+  let candidates = Hashtbl.create 64 in
+  let rec add_readers id =
+    if not (Hashtbl.mem candidates id) then begin
+      Hashtbl.replace candidates id ();
+      List.iter
+        (fun (reader : Store.endpoint) -> if reader.kind = rank then add_readers reader.id)
+        (Store.list_sources database.store
+           ~target:(Tracker.locate (Fact Test_key) id "")
+           ~markers:reads)
+    end
   in
+  List.iter add_readers (list_stale_units database Key_tests ~scope:Everything);
+  let list_sorted_ids table =
+    List.sort Int.compare (Hashtbl.fold (fun id _ ids -> id :: ids) table [])
+  in
+  if Hashtbl.length candidates > 0 then begin
+    let targets = Hashtbl.create 64 in
+    let list_candidate_targets id =
+      match Hashtbl.find_opt targets id with
+      | Some candidate_targets -> candidate_targets
+      | None ->
+          let candidate_targets =
+            List.filter (Hashtbl.mem candidates) (list_item_targets database Lower id)
+          in
+          Hashtbl.replace targets id candidate_targets;
+          candidate_targets
+    in
+    let unsettled = Hashtbl.create 16 in
+    List.iter
+      (fun id -> Hashtbl.replace unsettled id ())
+      (Store.list_stale database.store ~stage:(Kind.rank_stage Lower) ~entity:Item_unit
+         ~scope:Everything);
+    let reached = Hashtbl.create 64 in
+    let rec reach id =
+      if not (Hashtbl.mem reached id || Hashtbl.mem unsettled id) then begin
+        Hashtbl.replace reached id ();
+        List.iter reach (list_candidate_targets id)
+      end
+    in
+    List.iter reach
+      (Store.list_claimed_among database.store item_graph ~items:(list_sorted_ids candidates)
+         ~packages);
+    List.iter
+      (fun component ->
+        let was_stale =
+          List.map (fun id -> Store.unmark_stale database.store ~stage:rank ~id) component
+        in
+        if List.exists Fun.id was_stale then
+          guard_units database ?on_bug Key_tests component (fun () ->
+              run_key_tests database component))
+      (Strongly_connected.list_components
+         (module Integer_node)
+         ~list_successors:(fun id -> List.filter (Hashtbl.mem reached) (list_candidate_targets id))
+         (list_sorted_ids reached))
+  end
+
+let drain_claimed_items (database : Tracker.t) ?on_bug packages =
   let rec lower_each = function
     | [] -> ()
     | id :: pending ->
         let referenced = ref [] in
         run_units database ?on_bug Lower [ id ] (fun database id ->
-            referenced := List.map Ids.of_item (run_lower database id);
-            Hashtbl.replace lowered id ());
+            referenced := List.map Ids.of_item (run_lower database id));
         lower_each (!referenced @ pending)
   in
   let rec lower_claimed () =
-    match list_claimed_stale_units Lower with
+    match
+      List.filter
+        (fun item ->
+          Store.is_item_claimed database.store item_graph ~item ~over:(Settled_edges { packages }))
+        (list_stale_units database Lower ~scope:Everything)
+    with
     | [] -> ()
     | claimed ->
         lower_each claimed;
         lower_claimed ()
   in
   lower_claimed ();
-  match list_claimed_stale_units Key_tests with
-  | [] -> ()
-  | claimed -> drain_test_keys database ~guard:(guard_units database ?on_bug Key_tests) claimed
+  drain_test_keys database ?on_bug packages
 
 let render_units (database : Tracker.t) ?on_bug profile items =
   run_units database ?on_bug (Render profile) items (run_render profile)

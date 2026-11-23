@@ -1260,6 +1260,46 @@ let () =
       if Result.is_error lookups then Harness.fail "the host builds no code";
       expect_included observed.recomputed ~parts:[ lowered_helper "app" ];
       expect_untouched observed.recomputed ~is_excluded:(( = ) (locate (lowered_helper "far"))));
+  Harness.test
+    "keying the tests of one package after an edit to a package that it depends on and to a third \
+     package keys no item of the third" (fun () ->
+      let make_user package body =
+        ( package ^ ".main",
+          "use lib.tools\nfn helper() -> Int64 { tools.shared() + " ^ body
+          ^ " }\ntest \"helps\" {\n  assert helper() == 1\n}\n" )
+      in
+      let make_packages ~shared ~far =
+        [
+          ("lib.tools", "public fn shared() -> Int64 { " ^ shared ^ " }\n");
+          make_user "app" "0";
+          make_user "far" far;
+        ]
+      in
+      let build_packages files =
+        let database =
+          Support.make_database
+            (Support.setup ~dependencies:[ ("app", "lib"); ("far", "lib") ] files)
+        in
+        Database.For_testing.propagate database;
+        database
+      in
+      let before = make_packages ~shared:"1" ~far:"0"
+      and after = make_packages ~shared:"2" ~far:"1" in
+      let hot = build_packages before in
+      Database.update hot (list_changes ~before ~after);
+      let lookups, observed =
+        Database.For_testing.observe (fun () -> Database.find_lowered_lookups hot [ app ])
+      in
+      if Result.is_error lookups then Harness.fail "the host builds no code";
+      let helper package = make_code_item_of (Support.make_top_path (package ^ ".main") "helper") in
+      expect_included observed.recomputed ~parts:[ Test_key (helper "app") ];
+      expect_untouched observed.recomputed ~is_excluded:(( = ) (locate (Test_key (helper "far"))));
+      Database.For_testing.propagate hot;
+      match Database.For_testing.list_differences hot (build_packages after) with
+      | [] -> ()
+      | differences ->
+          Harness.fail "the propagated database differs from a cold build in %s"
+            (show_differences differences));
   Harness.test "defining a type that was todo lowers the code that reaches it again" (fun () ->
       let make_program definition =
         [

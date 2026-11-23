@@ -136,6 +136,10 @@ val list_linked : t -> item_graph -> profile:int -> unit_kind:int -> roots:int l
 type claim_edges = Every_edge | Settled_edges of { packages : string list option }
 
 val is_item_claimed : t -> item_graph -> item:int -> over:claim_edges -> bool
+
+val list_claimed_among :
+  t -> item_graph -> items:int list -> packages:string list option -> int list
+
 val merge : string list -> into:string -> unit
 
 type located = { stage : int; base : int option; is_in_test : bool; detail : string }
