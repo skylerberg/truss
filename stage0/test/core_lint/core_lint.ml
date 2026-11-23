@@ -886,14 +886,61 @@ let check_derived interface path form =
   check_form interface ~path ~key:None form;
   check_derived_origins path form
 
-let check_file (interface : Interface.Lookups.t) ~find_core (file : Path.file) =
+let list_provided_methods interface (impl : Types.impl_interface) =
+  match Interface.Definition.find_trait_interface interface impl.implements.trait with
+  | Some trait ->
+      List.filter_map
+        (fun (method_ : Types.trait_method) ->
+          if method_.provided then Some method_.method_name else None)
+        trait.methods
+  | None -> []
+
+let check_derived_impls database interface (type_ : Path.t) =
+  let is_todo =
+    match Interface.Definition.find_type_interface interface type_ with
+    | Some { shape = Todo_type; _ } -> true
+    | Some _ | None -> false
+  in
+  let check_impl count (impl : Path.t) =
+    match Interface.Definition.find_impl_interface interface impl with
+    | None -> Harness.fail "`%s` has no interface" (Path.show impl)
+    | Some impl_interface ->
+        let provided = list_provided_methods interface impl_interface in
+        List.fold_left
+          (fun count (name, receiver) ->
+            let path : Path.t = Method { owner = impl; name; receiver } in
+            match Database.For_testing.read_derived_form database path with
+            | Some form ->
+                check_derived interface path form;
+                count + 1
+            | None when List.mem name provided -> count
+            | None -> Harness.fail "`%s` has no core form for `%s`" (Path.show impl) name
+            | exception Compiler_bug.Bug bug ->
+                Harness.fail "`%s`, `%s`: %s" (Path.show impl) name (Compiler_bug.to_string bug))
+          count impl_interface.impl_methods
+  in
+  if is_todo then 0
+  else
+    List.fold_left
+      (fun count (_, (impl : Path.t)) ->
+        match impl with
+        | Derived { type_ = derived; _ } when Path.equal derived type_ -> check_impl count impl
+        | _ -> count)
+      0
+      (interface.names.list_impls_of_type (Path.locate_package type_) type_)
+
+let check_file database (file : Path.file) =
+  let interface = Database.make_interface_lookups database in
   List.fold_left
     (fun count (declaration : Resolve.Names.declaration) ->
       let key = declaration.key in
-      match find_core key with
-      | Some form ->
-          check interface key form;
-          count + 1
-      | None -> count)
+      let written =
+        match Database.read_checked_body database key with
+        | Some checked ->
+            check interface key checked.form;
+            1
+        | None -> 0
+      in
+      count + written + check_derived_impls database interface key.path)
     0
     (interface.names.list_declarations_in file)

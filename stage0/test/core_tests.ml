@@ -411,18 +411,13 @@ let () =
         (Support.list_declarations packages (Support.parse_module "app.main")))
 
 let () =
-  let packages = Support.setup [] in
+  let database = Support.make_database (Support.setup []) in
   let forms = ref 0 in
   List.iter
     (fun ((file : Path.file), _) ->
       Harness.test
         (Printf.sprintf "%s's core forms satisfy the invariants" (Path.show_file file))
-        (fun () ->
-          forms :=
-            !forms
-            + Core_lint.check_file
-                (Database.make_interface_lookups (Support.make_database packages))
-                ~find_core:(find_core packages) file))
+        (fun () -> forms := !forms + Core_lint.check_file database file))
     Standard_library.files;
   Harness.test "the standard library has core forms" (fun () ->
       if !forms < 500 then Harness.fail "only %d of its definitions have one" !forms)
@@ -441,52 +436,15 @@ let () =
       in
       if Database.For_testing.read_derived_form (Support.make_database packages) path <> None then
         Harness.fail "it has a core form");
-  Harness.test
-    "every method of a derived impl in the standard library has a core form that satisfies the \
-     invariants" (fun () ->
-      let packages = Support.setup [] in
-      let interface = Database.make_interface_lookups (Support.make_database packages) in
-      let derived =
-        List.concat_map
-          (fun (declaration : Resolve.Names.declaration) ->
-            List.filter_map
-              (fun (_, (impl : Path.t)) -> match impl with Derived _ -> Some impl | _ -> None)
-              (interface.names.list_impls_of_type Path.standard_package declaration.key.path))
-          (interface.names.list_package_declarations Path.standard_package)
+  Harness.test "every derived method of a record and of a sum type satisfies the invariants"
+    (fun () ->
+      let packages = Support.setup [ ("app.main", Fixtures.Core.types_deriving_every_trait) ] in
+      let forms =
+        Core_lint.check_file (Support.make_database packages) (Support.parse_file "app.main")
       in
-      if derived = [] then Harness.fail "the standard library derives nothing";
-      List.iter
-        (fun impl ->
-          match Interface.Definition.find_impl_interface interface impl with
-          | None -> Harness.fail "`%s` has no interface" (Path.show impl)
-          | Some impl_interface ->
-              let provided =
-                match
-                  Interface.Definition.find_trait_interface interface
-                    impl_interface.implements.trait
-                with
-                | Some trait ->
-                    List.filter_map
-                      (fun (method_ : Types.trait_method) ->
-                        if method_.provided then Some method_.method_name else None)
-                      trait.methods
-                | None -> []
-              in
-              List.iter
-                (fun (name, receiver) ->
-                  let path : Path.t = Method { owner = impl; name; receiver } in
-                  match
-                    Database.For_testing.read_derived_form (Support.make_database packages) path
-                  with
-                  | Some form -> Core_lint.check_derived interface path form
-                  | None ->
-                      if not (List.mem name provided) then
-                        Harness.fail "`%s` has no core form for `%s`" (Path.show impl) name
-                  | exception Compiler_bug.Bug bug ->
-                      Harness.fail "`%s`, `%s`: %s" (Path.show impl) name
-                        (Compiler_bug.to_string bug))
-                impl_interface.impl_methods)
-        derived)
+      if forms <> 13 then
+        Harness.fail
+          "the lint checked %d core forms, not the 2 types' and their 11 derived methods'" forms)
 
 let () =
   let text = Fixtures.Core.described_both in

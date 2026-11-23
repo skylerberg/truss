@@ -1199,6 +1199,8 @@ let () =
       expect_proven Fixtures.Prover.count_of_a_list_as_a_slice);
   Harness.test "two views of one list are one slice, so a function of them agrees" (fun () ->
       expect_proven Fixtures.Prover.short_list_passed_where_a_short_slice_is_required);
+  Harness.test "two views of one string are one slice, so a function of them agrees" (fun () ->
+      expect_proven Fixtures.Prover.short_text_passed_where_a_short_slice_is_required);
   Harness.test "a slice must be within its collection" (fun () ->
       expect_not_proven Fixtures.Prover.slice_past_the_end "prover.out_of_bounds");
   Harness.test "two slices lent together must not overlap" (fun () ->

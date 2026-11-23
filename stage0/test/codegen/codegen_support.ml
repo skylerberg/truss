@@ -226,15 +226,7 @@ let load_checked ~list_diagnostics ?results ?(roots = []) ?profile files =
     (fun ((file : Path.file), text) ->
       let source = Source.create ~path:(Path.show_file file) text in
       match list_diagnostics database file with
-      | [] ->
-          ignore
-            (Core_lint.check_file
-               (Database.make_interface_lookups database)
-               ~find_core:(fun key ->
-                 Option.map
-                   (fun (checked : Infer.checked) -> checked.form)
-                   (Database.read_checked_body database key))
-               file)
+      | [] -> ignore (Core_lint.check_file database file)
       | diagnostics ->
           fail "the source has diagnostics:\n%s"
             (String.concat "" (List.map (Diagnostic.render ~is_colored:false source) diagnostics)))

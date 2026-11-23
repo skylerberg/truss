@@ -1,0 +1,23 @@
+type Named(name: String)
+
+fn is_short_text(text: StringSlice) -> Bool {
+  text.length() < 3
+}
+
+fn measure(text: StringSlice) -> UInt64
+  requires is_short_text(text)
+{
+  text.length()
+}
+
+fn of_a_string(text: own String) -> UInt64
+  requires is_short_text(text)
+{
+  measure(text)
+}
+
+fn of_a_field(named: Named) -> UInt64
+  requires is_short_text(named.name)
+{
+  measure(named.name)
+}

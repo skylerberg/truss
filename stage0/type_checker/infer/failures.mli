@@ -25,7 +25,12 @@ val add_operand_mismatch :
   Diagnostic.reported
 
 val report_mismatch :
-  State.state -> Source.Definition_span.t -> expected:Types.ty -> actual:Types.ty -> unit
+  ?fixes:Source.Definition_span.t Diagnostic.fix list ->
+  State.state ->
+  Source.Definition_span.t ->
+  expected:Types.ty ->
+  actual:Types.ty ->
+  unit
 
 val report_requirement :
   State.state ->
