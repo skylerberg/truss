@@ -69,17 +69,15 @@ let list_rvalue_uses ~is_moving ~origin (rvalue : Mir.rvalue) =
   | Is_variant { place; _ } -> [ read ~origin place ]
   | Lambda { captures; _ } ->
       List.map (fun (capture : Mir.capture) -> read ~origin capture.place) captures
-  | Function_value _ | Value_parameter _ | Specification _ -> []
+  | Function_value _ | Value_parameter _ | Parameter_default _ | Specification _ -> []
 
 let list_call_uses ~is_moving (call : Mir.call) =
   (match call.callee.target with
     | Indirect operand -> list_operand_uses ~is_moving ~by_value:false operand
     | _ -> [])
   @ List.concat_map
-      (function
-        | Mir.Passed { mode; value; _ } ->
-            list_operand_uses ~passed:mode ~is_moving ~by_value:(mode = Own) value
-        | Default -> [])
+      (fun ({ mode; value; _ } : Mir.argument) ->
+        list_operand_uses ~passed:mode ~is_moving ~by_value:(mode = Own) value)
       call.arguments
 
 let list_uses ~is_moving (statement : Mir.Graph.statement) =

@@ -1,0 +1,24 @@
+capability Tally {
+  fn add(amount: Int64 = 5)
+}
+
+trait Scaled {
+  fn scaled(self, factor: Int64 = 2) -> Int64 {
+    factor
+  }
+}
+
+type Box()
+
+impl Scaled for Box {}
+
+fn scale(value: Int64, factor: Int64 = 3) -> Int64 {
+  value * factor
+}
+
+fn f(box: Box) -> Int64
+  uses Tally
+{
+  Tally.add()
+  scale(1) + box.scaled()
+}

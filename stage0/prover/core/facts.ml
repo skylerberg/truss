@@ -601,18 +601,22 @@ let describe_constant_cycle ~cyclic (dependency : Mir.Call_edges.dependency) =
     | Direct_call -> ("calls", show_callee dependency.path, "code")
     | Supplied _ -> ("uses", show_callee dependency.path, "code")
   in
-  match (dependency.omitted_field, Path.equal dependency.path cyclic) with
+  let describe_omitted : Mir.Call_edges.omitted -> string = function
+    | Field field -> Printf.sprintf "field `%s`" field
+    | Argument parameter -> Printf.sprintf "argument `%s`" parameter
+  in
+  match (dependency.omitted, Path.equal dependency.path cyclic) with
   | None, true -> Printf.sprintf "This %s `%s` in its own value, %s" verb name consequence
   | None, false ->
       Printf.sprintf "This %s `%s`, whose %s depends on `%s`, %s" verb name part cyclic_name
         consequence
-  | Some field, true ->
-      Printf.sprintf "This leaves out the field `%s`, whose default %s `%s`, %s" field verb name
-        consequence
-  | Some field, false ->
+  | Some omitted, true ->
+      Printf.sprintf "This leaves out the %s, whose default %s `%s`, %s" (describe_omitted omitted)
+        verb name consequence
+  | Some omitted, false ->
       Printf.sprintf
-        "This leaves out the field `%s`, whose default %s `%s`. The %s of `%s` depends on `%s`, %s"
-        field verb name part name cyclic_name consequence
+        "This leaves out the %s, whose default %s `%s`. The %s of `%s` depends on `%s`, %s"
+        (describe_omitted omitted) verb name part name cyclic_name consequence
 
 let reject_constant_cycle (context : State.context) (frame : State.frame) (code : Mir.t) =
   if context.lookups.list_recursion_group context.node <> [] then

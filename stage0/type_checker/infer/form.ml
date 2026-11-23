@@ -387,7 +387,7 @@ let build_list_literal form ~origin (element : Types.ty) (elements : Core.expres
               instantiation =
                 { Types.no_instantiation with type_arguments = [ Types.Type element ] };
             })
-       ~arguments:[ Passed { mode = Own; value = Value storage } ]
+       ~arguments:[ { mode = Own; value = Value storage } ]
        ~lends:None)
 
 let build_constant_pattern form (id : Syntax.id) (value : Core.pattern_constant) : Core.pattern_kind
@@ -997,31 +997,39 @@ and build_final form (value : Syntax.expression) ~part : Core.kind =
   in
   Use (Lent first)
 
-and build_arguments form env (call : Tables.call) : Core.argument list =
+and build_default_argument form ~construct (callee : Core.operand Core.target) ~position :
+    Core.argument =
+  match Signatures.find_declaration form.signatures form.lookups.interface callee with
+  | Some { definition; signature; substitution } ->
+      let receivers = if Option.is_some signature.receiver then 1 else 0 in
+      let parameter = List.nth signature.parameters (position - receivers) in
+      Operands.build_argument parameter.mode
+        (make_synthetic_expression form ~origin:(make_rewrite_origin construct)
+           (normalize form (Types.substitute substitution parameter.type_))
+           (Parameter_default { definition; position; substitution }))
+  | None -> raise_bug "an omitted argument of a callee that declares no default"
+
+and build_arguments form env ~construct ~callee (call : Tables.call) : Core.argument list =
   List.init
     (List.length call.arguments + List.length call.omitted_defaults)
-    (fun index ->
+    (fun position ->
       match
         List.find_opt
-          (fun (argument : Tables.argument) -> argument.core_argument_index = index)
+          (fun (argument : Tables.argument) -> argument.core_argument_index = position)
           call.arguments
       with
       | Some argument ->
-          Core.Passed
-            {
-              mode = argument.mode;
-              value = Operands.build argument.mode (build_expression form env argument.expression);
-            }
-      | None -> Default)
+          Operands.build_argument argument.mode (build_expression form env argument.expression)
+      | None -> build_default_argument form ~construct callee ~position)
 
-and build_call form env ~lends ?function_value (call : Tables.call) : Core.call =
+and build_call form env ~construct ~lends ?function_value (call : Tables.call) : Core.call =
+  let callee =
+    match (call.callee, function_value) with
+    | Indirect, Some function_value -> Core.Indirect (Operands.build Read function_value)
+    | direct, _ -> convert_callee form direct
+  in
   let core_call =
-    make_call form
-      ~callee:
-        (match (call.callee, function_value) with
-        | Indirect, Some function_value -> Indirect (Operands.build Read function_value)
-        | direct, _ -> convert_callee form direct)
-      ~arguments:(build_arguments form env call) ~lends
+    make_call form ~callee ~arguments:(build_arguments form env ~construct ~callee call) ~lends
   in
   let written_order =
     List.map (fun (argument : Tables.argument) -> argument.core_argument_index) call.arguments
@@ -1080,7 +1088,9 @@ and build_call_kind ?function_value form env (value : Syntax.expression) (record
       Construct { variant; fields = written @ defaulted }
   | Indirect | Function _ | Trait_method _ | Capability_method _ | Intrinsic _ -> (
       let function_value = Option.map (build_expression form env) function_value in
-      let call = Core.Call (build_call form env ~lends ?function_value recorded) in
+      let call =
+        Core.Call (build_call form env ~construct:value.id ~lends ?function_value recorded)
+      in
       match lends with
       | Some _ ->
           Use
@@ -1120,7 +1130,7 @@ and build_comparison form env (value : Syntax.expression) comparison (left : Syn
       let origin = make_rewrite_origin value.id in
       let call =
         make_synthetic_expression form ~origin recorded.callee_result
-          (Call (build_call form env ~lends:None recorded))
+          (Call (build_call form env ~construct:value.id ~lends:None recorded))
       in
       let make_matches_variant variant : Core.kind =
         Matches
@@ -1203,16 +1213,15 @@ and build_interpolated_string form env ~origin (literal : Syntax.string_literal)
                    (make_call form ~callee:push_target
                       ~arguments:
                         [
-                          Passed { mode = Mut; value = Place text_place };
-                          Passed
-                            {
-                              mode = Read;
-                              value =
-                                Value
-                                  (make
-                                     (Types.make_named (Well_known.make_path String_slice) [])
-                                     (Literal (Text pushed.value)));
-                            };
+                          { mode = Mut; value = Place text_place };
+                          {
+                            mode = Read;
+                            value =
+                              Value
+                                (make
+                                   (Types.make_named (Well_known.make_path String_slice) [])
+                                   (Literal (Text pushed.value)));
+                          };
                         ]
                       ~lends:None))));
       ]
@@ -1227,7 +1236,7 @@ and build_interpolated_string form env ~origin (literal : Syntax.string_literal)
                   ~arguments:
                     [
                       Operands.build_argument Read (build_expression form env part);
-                      Passed { mode = Mut; value = Place text_place };
+                      { mode = Mut; value = Place text_place };
                     ]
                   ~lends:None))))
   in
@@ -1269,7 +1278,7 @@ and build_tagged_string form env (value : Syntax.expression) (literal : Syntax.s
         | Some call ->
             make_synthetic_expression form ~origin:(make_rewrite_origin written.id)
               call.callee_result
-              (Call (build_call form env ~lends:None call))
+              (Call (build_call form env ~construct:written.id ~lends:None call))
         | None -> build_expression form env written)
       literal.rest part_conversions
   in
@@ -1447,7 +1456,7 @@ and build_elements form ~origin (collection : Core.place) ~(count : Tables.call)
     ~(element : Tables.call) ~(lends : Language.Mode.t) : Core.elements =
   let uint64 = Types.make_builtin UInt64 in
   let local = allocate_synthetic_local form in
-  let make_receiver mode : Core.argument = Passed { mode; value = Place collection } in
+  let make_receiver mode : Core.argument = { mode; value = Place collection } in
   let position = make_local_use form ~origin uint64 local in
   {
     count =
@@ -1477,8 +1486,7 @@ and build_elements form ~origin (collection : Core.place) ~(count : Tables.call)
                      ~callee:(convert_callee form element.callee)
                      ~arguments:
                        [
-                         make_receiver lends;
-                         Passed { mode = Read; value = Operands.build Read position };
+                         make_receiver lends; { mode = Read; value = Operands.build Read position };
                        ]
                      ~lends:(Some lends)))));
     lends;
@@ -1542,7 +1550,7 @@ and build_for_loop form env (written : Syntax.statement) (iterable : Syntax.expr
               (Call
                  (make_call form
                     ~callee:(convert_callee form cursor_call.callee)
-                    ~arguments:[ Passed { mode = Own; value = Operands.build Own collection } ]
+                    ~arguments:[ { mode = Own; value = Operands.build Own collection } ]
                     ~lends:None))
       in
       let next = build_cursor_next form cursor in
@@ -1561,7 +1569,7 @@ and build_for_loop form env (written : Syntax.statement) (iterable : Syntax.expr
                         (Call
                            (make_call form
                               ~callee:(convert_callee form remaining.callee)
-                              ~arguments:[ Passed { mode = Read; value = Place place } ]
+                              ~arguments:[ { mode = Read; value = Place place } ]
                               ~lends:None));
                     ];
               })
@@ -1705,7 +1713,7 @@ and build_statement_kind form env (written : Syntax.statement) : Core.statement_
       match Tables.find_call form.tables written.id with
       | Some recorded ->
           let id = allocate_node_id form in
-          let call = build_call form env ~lends:None recorded in
+          let call = build_call form env ~construct:written.id ~lends:None recorded in
           Evaluate
             { id; origin = make_rewrite_origin written.id; type_ = Types.unit; kind = Call call }
       | None ->

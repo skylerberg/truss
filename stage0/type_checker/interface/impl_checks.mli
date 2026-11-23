@@ -1,5 +1,6 @@
 val show_signature : Types.signature -> string
 val signatures_agree : Types.signature -> Types.signature -> bool
+val has_default : Types.signature -> bool
 
 val check_impl :
   Checking.state ->

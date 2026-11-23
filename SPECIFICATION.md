@@ -821,8 +821,10 @@ let connection = connect(host, secure: false)?
 4. Arguments are evaluated in the order written.
 
 - A default is a constant expression that refers to no other parameter. An
-  argument for a parameter with a default can be left out, and the function
-  fills it in.
+  argument for a parameter with a default can be left out, and the call then
+  passes the default's value. A function, a method of a type, a capability's
+  method, and a trait's method that has a body can declare a default (see
+  [Traits and laws](#traits-and-laws)).
 - Building a record or a variant takes labeled arguments in any order,
   evaluated in the order written. A bare name that matches a field's name
   passes that variable to that field, optionally after a mode keyword. Only
@@ -2343,8 +2345,8 @@ let rolled = provide LoadedDie(face: 5) {
   and never calls an implementation directly.
 - An implementation is a type with an `impl`. Its methods take `self`, or
   `mut self` where they mutate its state, and then the capability's
-  parameters without their defaults: the capability's method fills a
-  default in before the call reaches an implementation.
+  parameters without their defaults: a call fills a default in from the
+  capability's method, so an implementation receives every argument.
 - `provide implementation, ... { body }` runs the body with the given
   implementations, passed as arguments are: a place is written with `mut`
   when its methods mutate it, and it holds the mutations afterward, on
@@ -2611,17 +2613,16 @@ trait Ordered: Equal {
 - A trait's contracts bind every `impl` and are proven for each.
 - **An `impl`'s method has its trait's signature.** It restates that
   signature: the generic parameters with their bounds; the parameters with
-  their names, modes, and types, and a default exactly where the trait's
-  parameter has one; and the result. `Self`, the trait's arguments, and the
-  associated types are as the `impl` gives them, and a function type has the
-  trait's `uses` and `cost` clauses. The method's generic parameters may
-  have other names, its capability parameters have the trait's names (see
+  their names, modes, and types, and no default; and the result. `Self`, the
+  trait's arguments, and the associated types are as the `impl` gives them,
+  and a function type has the trait's `uses` and `cost` clauses. The
+  method's generic parameters may have other names, its capability
+  parameters have the trait's names (see
   [Capability parameters](#capability-parameters)), and a type parameter's
   bounds and a function type's `cost` clauses may come in another order.
   The body of the method and every call of it are checked against this one
   signature. The method states of its own only its `uses`, which stays
-  within the trait's, the values of its defaults, and the contract clauses
-  that the next two rules allow.
+  within the trait's, and the contract clauses that the next two rules allow.
 - **An `impl`'s method may promise more than its trait.** Its contract is
   the trait method's, with the method's own `ensures` and `cost` clauses
   added, and its own `requires`, if it has any, in place of the trait's.
@@ -2645,6 +2646,12 @@ trait Ordered: Equal {
 - **A method with a body** is provided to every implementation. An `impl` can
   override it with a method that keeps the trait's contract for it, as it
   keeps the contract of every other method.
+- **A method with a default has one declaration.** In a trait, only a method
+  with a body declares a default. No `impl` overrides that method and no
+  trait restates it, so a call on a known type, through a bound, or through
+  `any` reads the default from the trait. A method without a body has no
+  default: each `impl` writes it, and a call on a known type names the
+  `impl`'s method, which would not show the default.
 
 ### Implementations
 

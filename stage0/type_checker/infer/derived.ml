@@ -181,7 +181,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
             Operands.build_argument Read
               (node (Types.make_builtin UInt64) (Integer (Z.of_int count)))
           in
-          let read place : Core.argument = Passed { mode = Read; value = Place place } in
+          let read place : Core.argument = { mode = Read; value = Place place } in
           let variants =
             match shape with
             | Sum variants ->
@@ -315,7 +315,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                       Core.Local { local; type_; origin }
                   | [] -> raise_bug "`hash` takes a hasher"
                 in
-                let passed state : Core.argument = Passed { mode = Read; value = Value state } in
+                let passed state : Core.argument = { mode = Read; value = Value state } in
                 let write state number =
                   node hasher_type
                     (Call
@@ -467,7 +467,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                       (Core.Local { local; type_; origin }, type_)
                   | [] -> raise_bug "`serialize` takes a serializer"
                 in
-                let sink_argument : Core.argument = Passed { mode = Mut; value = Place sink } in
+                let sink_argument : Core.argument = { mode = Mut; value = Place sink } in
                 let call method_ arguments =
                   statement
                     (Evaluate
@@ -509,9 +509,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                       (Core.Local { local; type_; origin }, type_)
                   | _ -> raise_bug "`deserialize` takes a deserializer"
                 in
-                let make_source_argument mode : Core.argument =
-                  Passed { mode; value = Place source }
-                in
+                let make_source_argument mode : Core.argument = { mode; value = Place source } in
                 let error_type =
                   match result with
                   | Named { arguments = [ _; Type error ]; _ } -> error
@@ -642,7 +640,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                  })
                             ~arguments:
                               [
-                                Passed { mode = Read; value = Place built_place };
+                                { mode = Read; value = Place built_place };
                                 Operands.build_argument Read
                                   (node uint64 (Integer (Z.of_int index)));
                               ]

@@ -259,6 +259,15 @@ let () =
       expect_one_cycle
         "type Point(x: Int64, y: Int64 = origin.x)\nlet origin: Point = Point(x: 1)\n"
         "prover.constant_cycle" ~says:"leaves out the field `y`, whose default reads");
+  Harness.test
+    "a constant built by a call that omits an argument whose default reads it is an error"
+    (fun () ->
+      expect_one_cycle "fn scale(by: Int64 = limit) -> Int64 { by }\nlet limit: Int64 = scale()\n"
+        "prover.constant_cycle"
+        ~says:
+          "This leaves out the argument `by`, whose default reads `app.main.limit`, so \
+           `app.main.limit` would be computed from itself."
+        ~at:("scale()", 1));
   Harness.test "a constant that sets the field whose default reads the constant is fine" (fun () ->
       expect_proven
         "type Point(x: Int64, y: Int64 = origin.x)\nlet origin: Point = Point(x: 1, y: 2)\n");
@@ -463,6 +472,15 @@ let () =
       expect_proven Fixtures.Prover.finite_cursor_kept_by_its_next);
   Harness.test "a loop over a type parameter bound by FiniteCursor ends" (fun () ->
       expect_proven Fixtures.Prover.loop_over_a_bound_finite_cursor);
+  Harness.test "an omitted argument has its trait's default on a known type and through a bound"
+    (fun () ->
+      expect_proven Fixtures.Prover.default_of_a_trait_method_read_through_a_bound;
+      expect_not_proven Fixtures.Prover.default_of_a_trait_method_ensured_as_another_value
+        "prover.ensures");
+  Harness.test "a caller spends the allocations of a default that it applies" (fun () ->
+      expect_proven Fixtures.Prover.allocations_of_a_default_that_the_caller_applies;
+      expect_not_proven Fixtures.Prover.allocations_of_a_default_left_out_of_the_callers_cost
+        "prover.cost");
   Harness.test "a call through a bound has the clauses that the bound's trait restates" (fun () ->
       expect_proven Fixtures.Prover.restated_clause_through_a_bound);
   Harness.test "a call that names the restating trait has the restated clauses" (fun () ->

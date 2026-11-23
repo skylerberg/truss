@@ -182,6 +182,9 @@ module Code = struct
     | Redeclared_method
     | Restated_method_body
     | Restated_method_clause
+    | Restated_method_default
+    | Overridden_method_default
+    | Default_without_body
     | Decided_condition
     | Misplaced_value_condition
     | Trait_cycle
@@ -465,6 +468,9 @@ module Code = struct
     | Redeclared_method -> "redeclared_method"
     | Restated_method_body -> "restated_method_body"
     | Restated_method_clause -> "restated_method_clause"
+    | Restated_method_default -> "restated_method_default"
+    | Overridden_method_default -> "overridden_method_default"
+    | Default_without_body -> "default_without_body"
     | Decided_condition -> "decided_condition"
     | Misplaced_value_condition -> "misplaced_value_condition"
     | Trait_cycle -> "trait_cycle"

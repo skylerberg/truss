@@ -225,6 +225,16 @@ and fold_body ~visiting ~depth ~steps state (mir : Mir.Graph.t)
     | Array elements ->
         let* elements = collect_all (List.map fold_operand elements) in
         Some (Lowered.Static_array elements)
+    | Parameter_default { definition; position; substitution } ->
+        let default =
+          Mir.read_parameter_default_graph state.context.lookups.mir ~definition ~position
+        in
+        fold_body ~visiting ~depth ~steps
+          (Lowering.enter state.context ~builder:state.builder
+             (Lowering.make_frame
+                (Definitions.make_default_code state.context state.frame.code ~source:default.source
+                   ~substitution)))
+          default.form []
     | Operation _ | Is_variant _ | Convert _ | To_any _ | Function_value _ | Lambda _
     | Value_parameter _ | Specification _ ->
         None
@@ -240,7 +250,7 @@ and fold_body ~visiting ~depth ~steps state (mir : Mir.Graph.t)
   let fold_call (destination : Mir.place option) (called : Mir.call) =
     match (called.callee.target, called.arguments) with
     | ( Intrinsic { operation = Buffer Storage_with_capacity; type_arguments = [ Type element ] },
-        [ Passed { value = capacity; _ } ] ) -> (
+        [ { value = capacity; _ } ] ) -> (
         let* capacity = fold_operand capacity in
         match capacity with
         | Static_scalar (Integer (_, capacity)) when Z.fits_int capacity ->
@@ -254,8 +264,8 @@ and fold_body ~visiting ~depth ~steps state (mir : Mir.Graph.t)
         | _ -> None)
     | ( Intrinsic { operation = Buffer Storage_push; _ },
         [
-          Passed { value = Borrow { place = { root = Local storage; projections = [] }; _ }; _ };
-          Passed { value = element; _ };
+          { value = Borrow { place = { root = Local storage; projections = [] }; _ }; _ };
+          { value = element; _ };
         ] ) -> (
         let* element = fold_operand element in
         match Hashtbl.find_opt locals storage with
@@ -265,7 +275,7 @@ and fold_body ~visiting ~depth ~steps state (mir : Mir.Graph.t)
             Some ()
         | _ -> None)
     | ( Intrinsic { operation = Buffer Storage_from_array; type_arguments = Type element :: _ },
-        [ Passed { value = array; _ } ] ) -> (
+        [ { value = array; _ } ] ) -> (
         let* array = fold_operand array in
         match array with
         | Static_array elements ->
@@ -286,17 +296,9 @@ and fold_body ~visiting ~depth ~steps state (mir : Mir.Graph.t)
                   (Monomorphic.ground_instantiation state.context.monomorphic
                      state.frame.code.substitution instantiation)))
         in
-        let defaults = (Mir_places.read_parameter_defaults state.context path).form in
         let* values =
           collect_all
-            (List.mapi
-               (fun position (argument : Mir.argument) ->
-                 match argument with
-                 | Passed { value; _ } -> fold_operand value
-                 | Default ->
-                     let* default = List.assoc_opt position defaults in
-                     fold_body ~visiting ~depth:(depth - 1) ~steps callee default [])
-               arguments)
+            (List.map (fun (argument : Mir.argument) -> fold_operand argument.value) arguments)
         in
         let* value = fold_body ~visiting ~depth:(depth - 1) ~steps callee callee_mir values in
         assign destination value

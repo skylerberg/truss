@@ -2781,7 +2781,9 @@ test "a generic type" {
 
 A trait declares methods that types implement. A method with a body is
 *provided*: every implementation has it, and an implementation can replace
-it.
+it. Only a provided method can give a parameter a default, and no
+implementation replaces a method that has one, so every call reads the
+default from the trait.
 
 ```truss
 trait Summary {

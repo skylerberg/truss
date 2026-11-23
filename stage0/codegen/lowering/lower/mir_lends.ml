@@ -100,17 +100,15 @@ let outlives_call ~(owns : Mir.local -> bool) ~(is_view : Types.ty -> bool) (bod
   in
   let list_viewed_by (call : Mir.call) =
     List.filter_map
-      (function
-        | Mir.Passed { mode; value; _ } -> (
-            match find_operand_place value with
-            | Some (place, holds_view) when holds_view || mode <> Own -> Some (place, holds_view)
-            | _ -> None)
-        | Default -> None)
+      (fun ({ mode; value; _ } : Mir.argument) ->
+        match find_operand_place value with
+        | Some (place, holds_view) when holds_view || mode <> Own -> Some (place, holds_view)
+        | _ -> None)
       call.arguments
   in
   let list_receiver_places (call : Mir.call) =
     match call.arguments with
-    | Passed { mode = Read | Mut; value; _ } :: _ -> Option.to_list (find_operand_place value)
+    | { mode = Read | Mut; value; _ } :: _ -> Option.to_list (find_operand_place value)
     | _ -> []
   in
   let find_sources ~holds_view local : (Mir.place * bool) list option =

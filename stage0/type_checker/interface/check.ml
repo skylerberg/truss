@@ -378,6 +378,10 @@ let check_restated (state : Checking.state) (signature : Syntax.signature) ~has_
   | None -> ()
   | Some restated ->
       let declared_by = Path.show restated.declared_by in
+      let original =
+        Definition.read_method_signature state.lookups ~owner:restated.declared_by
+          { method_name = name.text; method_receiver = receiver; provided = false }
+      in
       let is_added (clause : Syntax.clause) =
         match clause.kind with Ensures _ | Cost _ -> true | _ -> false
       in
@@ -398,7 +402,14 @@ let check_restated (state : Checking.state) (signature : Syntax.signature) ~has_
                    name.text declared_by name.text)
           | Ensures _ | Cost _ | Uses _ | Clause_error -> ())
         signature.clauses;
-      if has_body then
+      if Impl_checks.has_default original then
+        Checking.report state Restated_method_default state.spans.(name.id)
+          (Printf.sprintf
+             "`%s` restates `%s.%s`, which has a default, and a method with a default has one \
+              declaration. A call that omits the argument reads the default from `%s`, and this \
+              restatement would be a second declaration that shows none."
+             name.text declared_by name.text declared_by)
+      else if has_body then
         Checking.report state Restated_method_body state.spans.(name.id)
           (Printf.sprintf
              "`%s` restates `%s.%s`, so it has no body: each type's `impl` of `%s` gives the body."
@@ -410,10 +421,6 @@ let check_restated (state : Checking.state) (signature : Syntax.signature) ~has_
               or `cost` clause. Add the clauses that the trait promises, or delete the method."
              declared_by name.text (Path.show_receiver receiver))
       else
-        let original =
-          Definition.read_method_signature state.lookups ~owner:restated.declared_by
-            { method_name = name.text; method_receiver = receiver; provided = false }
-        in
         let self = Types.Parameter (Types.make_self_parameter trait_path) in
         let substitution =
           match
@@ -453,6 +460,30 @@ let check_restated (state : Checking.state) (signature : Syntax.signature) ~has_
                | [] -> ""
                | capabilities ->
                    " uses " ^ String.concat ", " (List.map Types.show_capability capabilities)))
+
+let check_defaults_without_body (state : Checking.state) (signature : Syntax.signature) =
+  let name = Resolve.Names.extract_signature_name signature in
+  List.iter
+    (fun (parameter : Syntax.parameter) ->
+      match parameter.kind with
+      | Named_parameter { type_; default = Some default; _ } ->
+          Checking.report state Default_without_body state.spans.(default.id)
+            ~fixes:
+              [
+                Diagnostic.fix "Remove the default"
+                  [
+                    Diagnostic.delete
+                      (Source.Definition_span.make state.spans.(type_.id).stop
+                         state.spans.(default.id).stop);
+                  ];
+              ]
+            (Printf.sprintf
+               "`%s` has no body, so each `impl` writes it, and a method that an `impl` writes has \
+                no default: a call on a known type names the `impl`'s method, which would not show \
+                the default. Remove the default, or give `%s` a body."
+               name.text name.text)
+      | Named_parameter { default = None; _ } | Self_parameter _ | Parameter_error -> ())
+    signature.parameters
 
 let check_proof_bounds (state : Checking.state) (written : Syntax.type_head)
     (generics : Types.generic list) (impl : Types.impl_interface) =
@@ -505,9 +536,17 @@ let check (state : Checking.state) =
         let name = Resolve.Names.extract_signature_name signature in
         match (lookups.names.read_definition container, lookups.read_interface container) with
         | { kind = Trait _; _ }, Trait_interface trait ->
-            check_restated state signature
-              ~has_body:(match definition.kind with Function _ -> true | _ -> false)
-              written ~trait_path:container.path trait;
+            let has_body = match definition.kind with Function _ -> true | _ -> false in
+            let is_restated =
+              List.exists
+                (fun (restated : Types.restated_method) ->
+                  restated.restated_name = name.text
+                  && restated.restated_receiver
+                     = Resolve.Names.classify_receiver signature.parameters)
+                trait.restated
+            in
+            if not (has_body || is_restated) then check_defaults_without_body state signature;
+            check_restated state signature ~has_body written ~trait_path:container.path trait;
             check_private_in_public state ~visibility (list_signature_types written)
               state.spans.(name.id)
         | { kind = Impl { trait_; _ }; _ }, Impl_interface impl ->

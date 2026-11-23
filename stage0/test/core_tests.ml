@@ -64,10 +64,8 @@ and show_operand (value : Core.operand) =
   | Place place -> "place " ^ show_access_path place
   | Value value -> show_expression value
 
-and show_argument (passed : Core.argument) =
-  match passed with
-  | Passed { mode; value; _ } -> Language.Mode.show_prefix mode ^ show_operand value
-  | Default -> "default"
+and show_argument ({ mode; value } : Core.argument) =
+  Language.Mode.show_prefix mode ^ show_operand value
 
 let make_definition_form text (path : Path.t) =
   let packages = Support.setup [ ("app.main", text) ] in

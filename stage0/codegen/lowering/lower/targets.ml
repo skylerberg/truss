@@ -90,7 +90,7 @@ let make_entry_signature context (signature : Types.signature) =
   let entry, result =
     Definitions.make_c_signature context Types.no_substitution
       ~parameters:(Definitions.list_interface_parameters { signature with receiver = None })
-      ~has_defaults:false signature.output
+      signature.output
   in
   ({ entry with parameters = Convention.evidence :: entry.parameters }, result)
 
@@ -148,7 +148,7 @@ let make_any_entry_signature context ~any ~trait (signature : Types.signature) =
   let entry, result =
     Definitions.make_c_signature context substitution
       ~parameters:(Definitions.list_interface_parameters { signature with receiver = None })
-      ~has_defaults:false ~uses:signature.uses signature.output
+      ~uses:signature.uses signature.output
   in
   ( { entry with parameters = Lowered.Raw (Pointer Opaque) :: entry.parameters },
     result,
@@ -502,18 +502,9 @@ let lower_provided_evidence (state : Lowering.state) ~(implementation : Lowered.
       (capability, lower_implementation_evidence state ~impl ~type_arguments ~implementation ~site))
     provides
 
-let count_passed (signature : Types.signature) =
-  let defaulted =
-    List.length
-      (List.filter
-         (fun (parameter : Types.parameter_info) -> parameter.has_default)
-         signature.parameters)
-  in
-  (1 lsl defaulted) - 1
-
 let lower_item_call (state : Lowering.state) item ~(signature : Types.signature) ~substitution
-    ~(arguments : (Language.Mode.t * Ground.ty * Lowered.place) list) ?mask ?(lending = [])
-    ~destination ~site () =
+    ~(arguments : (Language.Mode.t * Ground.ty * Lowered.place) list) ?(lending = []) ~destination
+    ~site () =
   let item : Lowered.Item.t =
     match item with
     | Lowered.Item.Code { path; instantiation; assumes_condition = false }
@@ -531,27 +522,22 @@ let lower_item_call (state : Lowering.state) item ~(signature : Types.signature)
   if is_unreachable_panic state (Definitions.list_evidence state.context substitution uses) then
     Lowering.emit_unreachable_block state
   else
-    let mask = match mask with Some mask -> mask | None -> count_passed signature in
     let c_signature, result =
       Definitions.make_c_signature state.context substitution
         ~parameters:(Definitions.list_interface_parameters signature)
-        ~has_defaults:(Definitions.has_defaults signature)
         ~uses signature.output
     in
     let passed = List.filter_map (fun (mode, ty, place) -> pass state mode ty place) arguments in
-    let mask =
-      (if Definitions.has_defaults signature then
-         [ Lowering.make_int_constant UInt64 (Z.of_int mask) ]
-       else [])
-      @ List.map (pass_evidence state ~site)
-          (Definitions.list_evidence state.context substitution uses)
+    let evidence =
+      List.map (pass_evidence state ~site)
+        (Definitions.list_evidence state.context substitution uses)
     in
     let target = Lowered.Direct { function_ = Item item; signature = c_signature } in
     Emit_c.Ir_builder.emit state.builder
       (Call
          {
            target;
-           arguments = passed @ mask @ lending;
+           arguments = passed @ evidence @ lending;
            result = Convention.make_destination result destination;
          });
     if not c_signature.returns then Lowering.emit_unreachable_block state

@@ -88,18 +88,6 @@ let name_term context ty term =
         Facts.add_fact context (Logic.equal named term));
     named
 
-let evaluate_default_value (context : State.context) frame (clauses : State.clauses) position =
-  match Mir.read_defaults context.lookups.mir clauses.callee.definition with
-  | Some { form = Parameter_defaults defaults; _ } -> (
-      match (List.assoc_opt position defaults, List.nth_opt clauses.parameters position) with
-      | Some default, Some parameter ->
-          snd
-            (Amounts.run_code context frame default
-               ~type_:(Facts.substitute_type context frame parameter.type_))
-      | _ -> Facts.raise_bug "a parameter's default has no MIR")
-  | Some { form = Field_defaults _; _ } | None ->
-      Facts.raise_bug "a callee with no MIR of its defaults"
-
 let is_datatype ty = match ty with Types.Named _ -> Types.find_builtin ty = None | _ -> false
 
 let calls_update_step (context : State.context) (invocation : Invocation.t) =
@@ -220,26 +208,7 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   in
   let list_bindings (clauses : State.clauses) =
     List.mapi
-      (fun index (parameter : Mir.parameter) ->
-        let term =
-          match find_argument_at index with
-          | Some term -> Some term
-          | None ->
-              if parameter.has_default then
-                let empty =
-                  {
-                    frame with
-                    source = clauses.callee;
-                    locals = Locals.empty;
-                    types = Locals.empty;
-                    makes_obligations = false;
-                    substitution = substitution_of clauses;
-                  }
-                in
-                Some (evaluate_default_value context empty clauses index)
-              else None
-        in
-        (parameter, term))
+      (fun index (parameter : Mir.parameter) -> (parameter, find_argument_at index))
       clauses.parameters
   in
   let bind bindings =

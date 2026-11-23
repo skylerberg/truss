@@ -143,14 +143,11 @@ let check_call_types context (node : Core.expression) (call : Core.call) =
       if List.length parameters = List.length call.arguments then
         List.iteri
           (fun position (expected, (argument : Core.argument)) ->
-            match argument with
-            | Passed { value; _ } ->
-                let found = read_operand_type value in
-                if not (fits context ~expected ~found) then
-                  context.report
-                    "argument %d of a call of `%s` has the type `%s`, and its parameter `%s`"
-                    position callee (Types.show found) (Types.show expected)
-            | Default -> ())
+            let found = read_operand_type argument.value in
+            if not (fits context ~expected ~found) then
+              context.report
+                "argument %d of a call of `%s` has the type `%s`, and its parameter `%s`" position
+                callee (Types.show found) (Types.show expected))
           (List.combine parameters call.arguments);
       let result = match output with Returns result | Lends (_, result) -> Some result in
       Option.iter
@@ -543,15 +540,15 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
         List.iteri
           (fun position ((mode, has_default), (argument : Core.argument)) ->
             match argument with
-            | Passed { mode = passed; _ } when passed <> mode ->
+            | { mode = passed; _ } when passed <> mode ->
                 report "argument %d of a call of `%s` has the mode `%s`, and its parameter `%s`"
                   position callee
                   (Language.Mode.show_prefix passed)
                   (Language.Mode.show_prefix mode)
-            | Default when not has_default ->
+            | { value = Value { kind = Parameter_default _; _ }; _ } when not has_default ->
                 report "a call of `%s` omits argument %d, whose parameter has no default" callee
                   position
-            | Passed _ | Default -> ())
+            | _ -> ())
           (List.combine parameters call.arguments)
   in
   let compound_assignments = ref 0 and current_targets = ref 0 in
@@ -706,22 +703,21 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                  | _ -> ());
                  List.iter
                    (function
-                     | Core.Passed
-                         { mode = Mut; value = Value { kind = Use (Range { base; _ }); _ }; _ } ->
+                     | ({ mode = Mut; value = Value { kind = Use (Range { base; _ }); _ }; _ } :
+                         Core.argument) ->
                          check_mutable_place "a range passed `mut`" base
-                     | Core.Passed { mode = Mut; value = Value _; _ } ->
+                     | { mode = Mut; value = Value _; _ } ->
                          report "a `mut` parameter receives a value that is not a slice"
-                     | Passed { mode = Mut; value = Place core_place; _ } ->
+                     | { mode = Mut; value = Place core_place; _ } ->
                          check_mutable_place "a `mut` argument" core_place
-                     | Passed { mode = Own; value = Place _; _ } ->
+                     | { mode = Own; value = Place _; _ } ->
                          report "an `own` parameter receives a place"
-                     | Passed { mode = Read; value = Value { kind = Use _; _ }; _ } ->
+                     | { mode = Read; value = Value { kind = Use _; _ }; _ } ->
                          report
                            "a read-only parameter of `%s` receives a `Use`, which moves or copies \
                             the place"
                            (show_target call.callee.target)
-                     | Passed { value; _ } -> check_operand value
-                     | Default -> ())
+                     | { value; _ } -> check_operand value)
                    call.arguments
              | _ -> ());
          statement =
@@ -734,11 +730,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                  incr compound_assignments;
                  match value.kind with
                  | Operator { arguments = { kind = Current_target; _ } :: _; _ }
-                 | Call
-                     {
-                       arguments = Passed { value = Value { kind = Current_target; _ }; _ } :: _;
-                       _;
-                     } ->
+                 | Call { arguments = { value = Value { kind = Current_target; _ }; _ } :: _; _ } ->
                      ()
                  | _ ->
                      report

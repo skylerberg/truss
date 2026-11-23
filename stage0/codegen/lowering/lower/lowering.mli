@@ -1,6 +1,5 @@
 type cleanup =
   | Drop_value of Lowered.place
-  | Drop_flagged of { place : Lowered.place; flag : Lowered.place }
   | Free_pointed of Lowered.place
   | Join_group of Lowered.statement
 
@@ -99,7 +98,6 @@ val quote_span : state -> Source.Definition_span.t -> string
 val lookup_innermost_scope : state -> scope
 val allocate_temporary : state -> Ground.ty -> Lowered.place
 val allocate_binding : state -> Ground.ty -> Lowered.place
-val allocate_flagged_binding : state -> Ground.ty -> flag:Lowered.place -> Lowered.place
 
 val allocate_parameter :
   state ->

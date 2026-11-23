@@ -45,10 +45,7 @@ type function_argument =
   | Function_reference of { path : Path.t; origin : Core.origin }
   | Lambda_expression of { body : int; origin : Core.origin; type_ : Types.ty }
 
-type argument =
-  | Passed of { mode : Language.Mode.t; value : operand; function_ : function_argument option }
-  | Default
-
+type argument = { mode : Language.Mode.t; value : operand; function_ : function_argument option }
 type call = { callee : callee; arguments : argument list; node : Core.id; origin : Core.origin }
 type capture = { local : Core.local; type_ : Types.ty; place : place }
 
@@ -103,6 +100,7 @@ type rvalue =
   | Function_value of { path : Path.t; instantiation : Types.instantiation; is_argument : bool }
   | Lambda of { body : int; captures : capture list; is_argument : bool }
   | Value_parameter of Types.parameter
+  | Parameter_default of { definition : Path.t; position : int; substitution : Types.substitution }
   | Specification of specification
 
 and path_note =
@@ -274,13 +272,7 @@ type requirement = {
 }
 
 type callback = { inputs : Core.local list; requires : formula list; ensures : formula list }
-
-type parameter = {
-  local : Core.local;
-  mode : Language.Mode.t;
-  type_ : Types.ty;
-  has_default : bool;
-}
+type parameter = { local : Core.local; mode : Language.Mode.t; type_ : Types.ty }
 
 type contract = {
   parameters : parameter list;

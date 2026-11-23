@@ -50,40 +50,15 @@ let evaluate_arguments (state : Lowering.state) (signature : Types.signature) su
   if List.length parameters <> List.length arguments then
     Definitions.raise_bug "a call with %d arguments for %d parameters" (List.length arguments)
       (List.length parameters);
-  let receivers = List.length parameters - List.length signature.parameters in
-  let mask = ref 0 and defaulted = ref 0 in
-  let evaluated =
-    List.mapi
-      (fun index ((mode, ty), (argument : Mir.argument)) ->
-        let ty = Monomorphic.ground state.context.monomorphic substitution ty in
-        let bit =
-          if index >= receivers && (List.nth signature.parameters (index - receivers)).has_default
-          then begin
-            incr defaulted;
-            Some (!defaulted - 1)
-          end
-          else None
-        in
-        match argument with
-        | Default ->
-            ( mode,
-              ty,
-              Lowered.make_local_place
-                (Emit_c.Ir_builder.allocate_local state.builder ~is_zeroed:true (Value ty)) )
-        | Passed { value; _ } ->
-            Option.iter (fun bit -> mask := !mask lor (1 lsl bit)) bit;
-            (mode, ty, Mir_places.lower_operand_place state value))
-      (List.combine parameters arguments)
-  in
-  if !defaulted > 62 then
-    Lowering.raise_unsupported "a function with more than 62 parameters that have defaults";
-  (evaluated, !mask)
+  List.map2
+    (fun (mode, ty) (argument : Mir.argument) ->
+      ( mode,
+        Monomorphic.ground state.context.monomorphic substitution ty,
+        Mir_places.lower_operand_place state argument.value ))
+    parameters arguments
 
-let lower_argument_place state (argument : Mir.argument) =
-  match argument with
-  | Passed { mode; value; _ } ->
-      (mode, Mir_places.compute_operand_type state value, Mir_places.lower_operand_place state value)
-  | Default -> Definitions.raise_bug "an omitted argument in a call that has no defaults"
+let lower_argument_place state ({ mode; value; _ } : Mir.argument) =
+  (mode, Mir_places.compute_operand_type state value, Mir_places.lower_operand_place state value)
 
 let lower_shared_update state ~shared ~input ~change ~destination ~site =
   let _, _, shared = lower_argument_place state shared in
@@ -131,15 +106,14 @@ let lower_intrinsic state ?reported (operation : Intrinsic.operation) ~type_argu
       let arguments =
         List.map
           (fun (argument : Mir.argument) ->
-            match argument with
-            | Passed { value = Borrow _ as borrowed; _ } ->
+            match argument.value with
+            | Borrow _ as borrowed ->
                 Intrinsics.Place (Mir_places.lower_operand_place state borrowed)
-            | Passed { value = passed; _ } ->
+            | passed ->
                 let ty = Mir_places.compute_operand_type state passed in
                 if Storage.find_storage_element ty <> None || Storage.find_view_element ty <> None
                 then Intrinsics.Place (Mir_places.lower_operand_place state passed)
-                else Intrinsics.Value (Mir_places.lower_operand state passed)
-            | Default -> Definitions.raise_bug "an intrinsic called with an omitted argument")
+                else Intrinsics.Value (Mir_places.lower_operand state passed))
           arguments
       in
       List.iter

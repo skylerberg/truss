@@ -283,13 +283,10 @@ let result_may_view builder (mode : Language.Mode.t) type_ =
   (mode <> Own && not (Context.lends_nothing builder.context type_))
   || Context.is_view builder.context type_
 
-let find_viewable_argument builder (argument : Mir.argument) =
-  match argument with
-  | Passed { mode; value; _ } -> (
-      match find_operand_type value with
-      | Some type_ when result_may_view builder mode type_ -> Some (mode, value)
-      | _ -> None)
-  | Default -> None
+let find_viewable_argument builder ({ mode; value; _ } : Mir.argument) =
+  match find_operand_type value with
+  | Some type_ when result_may_view builder mode type_ -> Some (mode, value)
+  | _ -> None
 
 let list_viewable_arguments builder (call : Mir.call) =
   List.filter_map (find_viewable_argument builder) call.arguments
@@ -332,37 +329,32 @@ let borrow_mut builder (operand : Mir.operand) =
 
 let emit_call builder (call : Mir.call) origin =
   List.iter
-    (function
-      | Mir.Passed { mode = Mut; value; _ } -> borrow_mut builder value | Passed _ | Default -> ())
+    (fun ({ mode; value; _ } : Mir.argument) -> if mode = Mut then borrow_mut builder value)
     call.arguments;
   let borrowed_arguments =
     List.concat
       (List.mapi
-         (fun position (argument : Mir.argument) ->
-           match argument with
-           | Passed { mode; value; _ } -> (
-               match (find_lent_place builder mode value, find_operand_origin value) with
-               | Some place, Some origin -> [ { place; mode; origin; position } ]
-               | _ -> [])
-           | Default -> [])
+         (fun position ({ mode; value; _ } : Mir.argument) ->
+           match (find_lent_place builder mode value, find_operand_origin value) with
+           | Some place, Some origin -> [ { place; mode; origin; position } ]
+           | _ -> [])
          call.arguments)
   in
   let view_arguments =
     List.concat
       (List.mapi
-         (fun position (argument : Mir.argument) ->
-           match argument with
-           | Passed { mode; value; _ } when is_view_operand builder value -> (
-               let lent = find_lent_place builder mode value in
-               match
-                 ( find_operand_origin value,
-                   List.filter
-                     (fun view -> Some view <> Option.map (fun place -> Borrow_of place) lent)
-                     (list_argument_views builder mode value) )
-               with
-               | Some _, [] | None, _ -> []
-               | Some origin, views -> [ { position; views; origin } ])
-           | Passed _ | Default -> [])
+         (fun position ({ mode; value; _ } : Mir.argument) ->
+           if is_view_operand builder value then
+             let lent = find_lent_place builder mode value in
+             match
+               ( find_operand_origin value,
+                 List.filter
+                   (fun view -> Some view <> Option.map (fun place -> Borrow_of place) lent)
+                   (list_argument_views builder mode value) )
+             with
+             | Some _, [] | None, _ -> []
+             | Some origin, views -> [ { position; views; origin } ]
+           else [])
          call.arguments)
   in
   if List.length borrowed_arguments > 1 || (borrowed_arguments <> [] && view_arguments <> []) then
@@ -376,7 +368,7 @@ let emit_call builder (call : Mir.call) origin =
   List.iter
     (fun (argument : Mir.argument) ->
       match argument with
-      | Passed { mode = Mut; value = target; _ } -> (
+      | { mode = Mut; value = target; _ } -> (
           match (find_lent_place builder Mut target, find_stored_type builder Mut target) with
           | Some place, Some stored_type when Context.is_view builder.context stored_type ->
               let others =
@@ -403,7 +395,7 @@ let emit_call builder (call : Mir.call) origin =
   List.iteri
     (fun position (argument : Mir.argument) ->
       match argument with
-      | Passed { mode = Own; value = Use { type_ = Types.Function _; origin; _ } as value; _ }
+      | { mode = Own; value = Use { type_ = Types.Function _; origin; _ } as value; _ }
         when Context.stores_function builder.context call.callee position ->
           emit builder (Pass_owned_function (list_argument_views builder Own value)) origin
       | _ -> ())
@@ -436,8 +428,8 @@ let compute_rvalue_held builder (value : Mir.rvalue) : held =
       | Some copied, _ -> copied
       | None, _ -> make_value [])
   | Operand operand -> make_value (list_operand_views builder operand)
-  | Operation _ | Compare _ | Is_variant _ | Function_value _ | Value_parameter _ | Specification _
-    ->
+  | Operation _ | Compare _ | Is_variant _ | Function_value _ | Value_parameter _
+  | Parameter_default _ | Specification _ ->
       make_value []
   | Not operand | Convert { value = operand; _ } | To_any { value = operand; _ } | Copy operand ->
       make_value (list_operand_views builder operand)
