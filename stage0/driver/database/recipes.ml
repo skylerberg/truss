@@ -576,6 +576,7 @@ let item_graph : Store.item_graph =
     item_kind;
     references = Kind.encode_markers [ References ];
     claims = Kind.encode_markers [ Claims ];
+    claim_kinds = [ Kind.rank_stage Claim_roots; Kind.rank_stage Prove ];
   }
 
 let ensure_item (database : Tracker.t) (item : Lowered.Item.t) =

@@ -1821,11 +1821,11 @@ let () =
     let name, text = make_part index body in
     (name, Printf.sprintf "%stest \"part %d\" {\n  assert second%d() > 0\n}\n" text index index)
   in
-  let expect_the_same_work_at_two_sizes name ?(make_part = make_part) ?(prepare = ignore)
-      ?(is_counted = fun _ -> true) ask =
+  let expect_the_same_work_at_two_sizes name ?(make_part = make_part) ?(shared = []) ?(body = "1")
+      ?(prepare = ignore) ?(is_counted = fun _ -> true) ask =
     Harness.test (name ^ " costs the same in forty modules as in four") (fun () ->
         let count_statements modules =
-          let database = build (List.init modules (fun index -> make_part index "1")) in
+          let database = build (shared @ List.init modules (fun index -> make_part index body)) in
           prepare database;
           List.filter is_counted (snd (Database.count_statements (fun () -> ask database)))
         in
@@ -1870,6 +1870,36 @@ let () =
     "lowering the code that the tests reach after an edit to one body" ~make_part:make_tested_part
     ~prepare:(fun database ->
       Database.update database [ (first_part, Some (snd (make_tested_part 0 "1 + 1"))) ])
+    lower_tested_code;
+  let make_hub_caller index body =
+    ( Printf.sprintf "app.part%d" index,
+      Printf.sprintf
+        "use app.hub\n\
+         public fn first%d() -> Int64 { %s }\n\
+         public fn second%d() -> Int64 { first%d() }\n\
+         test \"part %d\" {\n\
+        \  assert second%d() > 0\n\
+         }\n"
+        index body index index index index )
+  in
+  expect_the_same_work_at_two_sizes
+    "lowering the code that the tests reach after an edit that removes one call to a function that \
+     every module calls"
+    ~make_part:make_hub_caller
+    ~shared:[ ("app.hub", "public fn shared() -> Int64 { 1 }\npublic fn other() -> Int64 { 2 }\n") ]
+    ~body:"hub.shared()"
+    ~prepare:(fun database ->
+      Database.update database [ (first_part, Some (snd (make_hub_caller 0 "hub.other()"))) ])
+    lower_tested_code;
+  expect_the_same_work_at_two_sizes
+    "asking whether a claim names a function that every module calls, after an edit that removes \
+     one call to it,"
+    ~make_part:make_hub_caller
+    ~shared:[ ("app.hub", "public fn shared() -> Int64 { 1 }\npublic fn other() -> Int64 { 2 }\n") ]
+    ~body:"hub.shared()"
+    ~prepare:(fun database ->
+      Database.update database [ (first_part, Some (snd (make_hub_caller 0 "hub.other()"))) ])
+    ~is_counted:(fun count -> String.includes ~affix:"FROM main.edge c" count.statement)
     lower_tested_code;
   Harness.test
     "listing the linked items of a program after an edit to one body runs as many statements for \
