@@ -70,6 +70,10 @@ val list_definitions_naming : t -> target:endpoint -> markers:int -> string list
 val list_names_of_edges_into : t -> kind:int -> id:int -> markers:int -> string list
 val has_unresolved : t -> file:int -> bool
 val mark_sources_stale : t -> target:endpoint -> markers:int -> unit
+
+val mark_stage_of_sources_stale :
+  t -> target:endpoint -> source_kind:int -> markers:int -> stage:int -> unit
+
 val mark_position_holders_stale : t -> target:endpoint -> markers:int -> stages:int -> unit
 
 type call_graph = {

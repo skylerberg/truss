@@ -377,7 +377,7 @@ let rec list_changed_groups groups before after =
       let changed = list_changed_groups rest (List.drop width before) (List.drop width after) in
       if is_equal then changed else target :: changed
 
-let write tracker fact ~id outcome =
+let write_observed tracker fact ~id outcome =
   let stored = fact.whole.stored in
   let before = Store.find_stored_fact tracker.store stored ~id in
   let changed =
@@ -403,7 +403,10 @@ let write tracker fact ~id outcome =
   !observer
     (if changed = [] then Unchanged { stage = fact.whole.stage; id }
      else Written { stage = fact.whole.stage; id; is_removal = Option.is_none outcome });
-  Option.map (fun (cells : Store.cell array) -> decode_state fact.whole.table cells.(0)) before
+  ( Option.map (fun (cells : Store.cell array) -> decode_state fact.whole.table cells.(0)) before,
+    changed <> [] )
+
+let write tracker fact ~id outcome = fst (write_observed tracker fact ~id outcome)
 
 let report stage id ~is_changed =
   !observer

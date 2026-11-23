@@ -906,6 +906,10 @@ let find_call_edges (database : Tracker.t) (recorder : Tracker.recorder) path =
   | Some (Failed | Blocked) -> Some []
   | None -> None
 
+let write_lowered (database : Tracker.t) ~id outcome =
+  if snd (Tracker.write_observed database Facts.lowered ~id (Some outcome)) then
+    Tracker.mark_stale database Key_tests id
+
 let supply_lowered (database : Tracker.t) item lowered =
   let id = Ids.of_item item and references = Lowering.list_references lowered in
   ensure_item database item;
@@ -916,7 +920,7 @@ let supply_lowered (database : Tracker.t) item lowered =
           (fun referenced -> recorder.note References (Entity Item) (Ids.of_item referenced) "")
           references)
   in
-  ignore (Tracker.write database Facts.lowered ~id (Some (Value (Ok lowered))));
+  write_lowered database ~id (Value (Ok lowered));
   follow_item_edges database ~items:references changes
 
 let run_lower (database : Tracker.t) id =
@@ -938,35 +942,46 @@ let run_lower (database : Tracker.t) id =
         | exception Tracker.Reads_failed_fact -> (Blocked, [])
         | exception Lowering.Infinite_size _ -> (Failed, []))
   in
-  ignore (Tracker.write database Facts.lowered ~id (Some outcome));
+  write_lowered database ~id outcome;
   follow_item_edges database ~items:references changes;
   references
 
 let run_key_tests (database : Tracker.t) ids =
   let items = List.map (fun id -> (id, read_item database id)) ids in
   let project = Lookups.locate_items database in
-  let outcome =
-    Tracker.record_group database Key_tests ids ~own:[ Test_key ] (fun recorder ->
-        let read view item =
-          Tracker.read_value database recorder view project ~id:(Ids.of_item item)
+  let read view item =
+    Tracker.read_value database Tracker.untracked view project ~id:(Ids.of_item item)
+  in
+  let outcome : _ Tracker.outcome =
+    match
+      Lowering.derive_test_keys ~read_lowered:(read Facts.lowered.whole)
+        ~read_known_key:(read Facts.test_key.whole) (List.map snd items)
+    with
+    | keys -> Value keys
+    | exception Tracker.Reads_failed_fact -> Blocked
+  in
+  Tracker.report_computed Key_tests ids;
+  let rank = Kind.rank_stage Key_tests in
+  let changed =
+    List.filter
+      (fun (id, item) ->
+        let key : _ Tracker.outcome =
+          match outcome with
+          | Value (Ok keys) -> Value (Ok (List.assoc item keys))
+          | Value (Error unbuildable) -> Value (Error unbuildable)
+          | Failed | Blocked -> Blocked
         in
-        match
-          Lowering.derive_test_keys ~read_lowered:(read Facts.lowered.whole)
-            ~read_known_key:(read Facts.test_key.whole) (List.map snd items)
-        with
-        | keys -> Tracker.Value keys
-        | exception Tracker.Reads_failed_fact -> Blocked)
+        snd (Tracker.write_observed database Facts.test_key ~id (Some key)))
+      items
   in
   List.iter
-    (fun (id, item) ->
-      let key : _ Tracker.outcome =
-        match outcome with
-        | Value (Ok keys) -> Value (Ok (List.assoc item keys))
-        | Value (Error unbuildable) -> Value (Error unbuildable)
-        | Failed | Blocked -> Blocked
-      in
-      ignore (Tracker.write database Facts.test_key ~id (Some key)))
-    items
+    (fun (id, _) ->
+      Store.mark_stage_of_sources_stale database.store
+        ~target:(Tracker.locate (Entity Item) id "")
+        ~source_kind:(Kind.rank_stage Lower) ~markers:references ~stage:rank)
+    changed;
+  if changed <> [] then
+    List.iter (fun id -> ignore (Store.unmark_stale database.store ~stage:rank ~id)) ids
 
 let render_unit (database : Tracker.t) recorder profile item =
   let project = Lookups.locate_items database in
@@ -1591,17 +1606,19 @@ let drain_stage (database : Tracker.t) ?on_bug (stage : Kind.stage) ~scope =
 let drain_test_keys (database : Tracker.t) ?on_bug packages =
   let rank = Kind.rank_stage Key_tests in
   let candidates = Hashtbl.create 64 in
-  let rec add_readers id =
+  let lower_rank = Kind.rank_stage Lower in
+  let rec add_referrers id =
     if not (Hashtbl.mem candidates id) then begin
       Hashtbl.replace candidates id ();
       List.iter
-        (fun (reader : Store.endpoint) -> if reader.kind = rank then add_readers reader.id)
+        (fun (referrer : Store.endpoint) ->
+          if referrer.kind = lower_rank then add_referrers referrer.id)
         (Store.list_sources database.store
-           ~target:(Tracker.locate (Fact Test_key) id "")
-           ~markers:reads)
+           ~target:(Tracker.locate (Entity Item) id "")
+           ~markers:references)
     end
   in
-  List.iter add_readers (list_stale_units database Key_tests ~scope:Everything);
+  List.iter add_referrers (list_stale_units database Key_tests ~scope:Everything);
   let list_sorted_ids table =
     List.sort Int.compare (Hashtbl.fold (fun id _ ids -> id :: ids) table [])
   in

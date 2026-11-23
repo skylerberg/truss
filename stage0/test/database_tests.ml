@@ -2219,28 +2219,38 @@ let () =
     [
       ("public fn top() -> Int64 { 2 }\ninternal fn helper( -> Int64 { 1 }\n", 0); (helper_alone, 1);
     ];
-  let expect_linear_work name ~affix make_definition =
+  let expect_linear_work name ~affix ?(ask = ignore) make_definition =
     Harness.test (name ^ " cost in proportion to their number") (fun () ->
         let count_steps length =
-          let text = String.concat "" (List.init length make_definition) in
+          let text = String.concat "" (List.init length (make_definition ~length)) in
           List.fold_left
             (fun steps (count : Database.statement_count) ->
               if String.includes ~affix count.statement then steps + count.steps else steps)
             0
-            (snd (Database.count_statements (fun () -> ignore (build [ ("app.main", text) ]))))
+            (snd (Database.count_statements (fun () -> ask (length, build [ ("app.main", text) ]))))
         in
         let for_ten = count_steps 10 and for_forty = count_steps 40 in
         if for_ten = 0 || for_forty > 5 * for_ten then
           Harness.fail "ran %d steps for ten definitions and %d for forty" for_ten for_forty)
   in
   expect_linear_work "unused functions that call each other in a chain" ~affix:"ON d.id = e.source"
-    (fun index ->
+    (fun ~length:_ index ->
       Printf.sprintf "fn link%d() -> Int64 { %s }\n" index
         (if index = 0 then "1" else Printf.sprintf "link%d()" (index - 1)));
-  expect_linear_work "tests added together" ~affix:"AND member = ?2 AND kind = ?3" (fun index ->
-      Printf.sprintf "test \"case %d\" {\n}\n" index);
+  expect_linear_work "items that reference each other in a cycle, lowered and keyed,"
+    ~affix:"INTO main.edge"
+    ~ask:(fun (length, database) ->
+      Database.For_testing.add_root database (make_code_item (Printf.sprintf "link%d" (length - 1)));
+      Database.For_testing.lower_roots database)
+    (fun ~length index ->
+      Printf.sprintf "public fn link%d(depth: UInt64) -> UInt64 {\n  %s\n}\n" index
+        (if index = 0 then
+           Printf.sprintf "if depth == 0 { 0 } else { link%d(depth - 1) }" (length - 1)
+         else Printf.sprintf "link%d(depth)" (index - 1)));
+  expect_linear_work "tests added together" ~affix:"AND member = ?2 AND kind = ?3"
+    (fun ~length:_ index -> Printf.sprintf "test \"case %d\" {\n}\n" index);
   expect_linear_work "generic functions whose calls grow in a chain" ~affix:"ON d.path = e.target"
-    (fun index ->
+    (fun ~length:_ index ->
       Printf.sprintf "fn wrap%d[Element](value: own Element) -> Int64 {\n  %s\n}\n\n" index
         (if index = 0 then "1" else Printf.sprintf "wrap%d(Some(own value))" (index - 1)));
   let adds = "test \"adds\" {\n}\n" in
@@ -2305,6 +2315,40 @@ let () =
              after)
            tool_user
            [ (tool_user, false); (unused, true); (tool_user, false) ]))
+
+let () =
+  let make_cycle base =
+    [
+      ( "app.main",
+        Printf.sprintf
+          "fn ping(depth: UInt64) -> UInt64 {\n\
+          \  if depth == 0 { %s } else { pong(depth - 1) }\n\
+           }\n\n\
+           fn pong(depth: UInt64) -> UInt64 {\n\
+          \  ping(depth)\n\
+           }\n\n\
+           public fn top() -> UInt64 {\n\
+          \  ping(3)\n\
+           }\n"
+          base );
+    ]
+  in
+  Harness.test "an edit inside a reference cycle keys the cycle and the code that reaches it again"
+    (fun () ->
+      expect_included
+        (list_propagated_with_roots ~roots:[ "top" ] ~before:(make_cycle "0")
+           ~after:(make_cycle "1"))
+        ~parts:[ make_test_key "ping"; make_test_key "pong"; make_test_key "top" ]);
+  Harness.test "a test key records no read, in a reference cycle or out of one" (fun () ->
+      let database = build ~roots:[ "top" ] (make_cycle "0") in
+      Database.For_testing.lower_roots database;
+      List.iter
+        (fun name ->
+          let unit = locate (make_test_key name) in
+          match Database.For_testing.list_reads database unit.stage unit.id with
+          | [] -> ()
+          | reads -> Harness.fail "the key of %s records %d reads" name (List.length reads))
+        [ "ping"; "pong"; "top" ])
 
 let () =
   Harness.test "a blocked proof in a package with no error is a compiler bug" (fun () ->

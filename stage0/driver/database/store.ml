@@ -452,6 +452,19 @@ let mark_sources_stale store ~(target : endpoint) ~markers =
      target_kind = ?1 AND target = ?2 AND name = ?3 AND (markers & ?4) != 0"
     [ Integer target.kind; Integer target.id; Text target.name; Integer markers ]
 
+let mark_stage_of_sources_stale store ~(target : endpoint) ~source_kind ~markers ~stage =
+  Sql.run store.sql
+    "INSERT OR IGNORE INTO main.stale (stage, id) SELECT ?5, source FROM main.edge WHERE \
+     target_kind = ?1 AND target = ?2 AND name = ?3 AND source_kind = ?4 AND (markers & ?6) != 0"
+    [
+      Integer target.kind;
+      Integer target.id;
+      Text target.name;
+      Integer source_kind;
+      Integer stage;
+      Integer markers;
+    ]
+
 let mark_position_holders_stale store ~(target : endpoint) ~markers ~stages =
   Sql.run store.sql
     "INSERT OR IGNORE INTO main.stale (stage, id) SELECT source_kind, source FROM main.edge WHERE \
