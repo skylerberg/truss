@@ -929,11 +929,9 @@ let () =
   Harness.test "a slice of elements that do not copy, where a list is expected, has no fix"
     (fun () ->
       let text =
-        "trait Shape {\n\
-        \  fn area(self) -> Int64\n\
-         }\n\n\
-         fn f(shapes: Slice[any Shape]) -> List[any Shape] {\n\
-        \  shapes\n\
+        "public opaque type Token(code: Int64)\n\n\
+         fn f(tokens: Slice[Token]) -> List[Token] {\n\
+        \  tokens\n\
          }\n"
       in
       expect_one_diagnostic text "types.mismatch";
