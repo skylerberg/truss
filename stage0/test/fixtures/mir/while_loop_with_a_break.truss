@@ -1,4 +1,4 @@
-fn g(items: List[Int64]) -> UInt64 {
+fn g(items: Slice[Int64]) -> UInt64 {
   var index: UInt64 = 0
   while index < items.length() {
     if items[index] < 0 {

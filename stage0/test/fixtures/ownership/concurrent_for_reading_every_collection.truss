@@ -18,7 +18,7 @@ fn Pair.element(mut self, position: UInt64) lends mut List[Int64] {
   }
 }
 
-fn f(pair: Pair, names: List[String], parts: List[Slice[Int64]])
+fn f(pair: Pair, names: own List[String], parts: own List[Slice[Int64]])
   uses Tasks
 {
   concurrent for list in pair {

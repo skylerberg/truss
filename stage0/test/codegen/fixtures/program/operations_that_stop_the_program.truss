@@ -37,7 +37,7 @@ fn tail_length(items: Slice[Int64], start: UInt64) -> UInt64
   items[start..].length()
 }
 
-fn port(ports: Map[String, UInt16], name: String) -> UInt16
+fn port(ports: Map[String, UInt16], name: StringSlice) -> UInt16
   uses Panic
 {
   ports.get(name).expect("index out of bounds")
@@ -83,7 +83,7 @@ fn shelved(shelf: Shelf, index: UInt64) -> Int64
   shelf[index]
 }
 
-fn main(arguments: List[String]) -> ExitCode
+fn main(arguments: Slice[String]) -> ExitCode
   uses Console, Panic
 {
   let numbers = [9223372036854775807, 0]

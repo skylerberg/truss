@@ -149,23 +149,9 @@ let lower_range state place start stop ~sequence ~origin =
     stop;
   let stop = Option.value stop ~default:length in
   fail_out_of_bounds state ~origin (Test (Greater, start, stop)) "slice out of bounds";
-  let view_type = Storage.make_view_type element in
-  let view = Lowering.allocate_temporary state view_type in
   let count = Lowering.allocate_temporary state (Ground.make_builtin UInt64) in
   Emit_c.Ir_builder.emit state.builder (Assign (count, Binary (Subtract, stop, start)));
-  Emit_c.Ir_builder.emit state.builder
-    (Assign (view, Storage.build_view view_type ~buffer:first_element ~length:(Copy count)));
-  let slice_type : Ground.ty =
-    Named { path = Well_known.make_path Slice; arguments = [ Type element ] }
-  in
-  let slice = Lowering.allocate_temporary state slice_type in
-  (match (Memory_layout.of_type state.context.env slice_type).form with
-  | Struct [ field ] ->
-      Emit_c.Ir_builder.emit state.builder
-        (Assign
-           (slice, Build { ty = slice_type; variant = None; fields = [ (field.name, Copy view) ] }))
-  | _ -> Definitions.raise_bug "a `Slice` that is not one view");
-  slice
+  Targets.lower_slice state ~element ~buffer:first_element ~length:(Copy count)
 
 let rec lower_place state (written : Mir.place) : Lowered.place =
   let root =

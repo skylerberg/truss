@@ -12,7 +12,7 @@ test "counts" {
   assert 1 + 1 == 2
 }
 
-fn main(arguments: List[String]) -> ExitCode {
+fn main(arguments: Slice[String]) -> ExitCode {
   let _ = none()
   ExitCode.success
 }

@@ -4,7 +4,7 @@ fn apply(change: fn(Bool) -> Bool, value: Bool) -> Bool
   change(value)
 }
 
-theorem each_kept(items: List[Bool])
+theorem each_kept(items: Slice[Bool])
   ensures forall i in 0..items.length() =>
     apply(fn(x) {
       let held = x

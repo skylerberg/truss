@@ -127,7 +127,7 @@ truss = "0.1"
 in. `main.truss` holds the program. Replace its contents with:
 
 ```truss
-fn main(arguments: List[String]) -> ExitCode
+fn main(arguments: Slice[String]) -> ExitCode
   uses Console
 {
   Console.print_line("Hello, world!")
@@ -145,7 +145,7 @@ Hello, world!
 Four things in this program recur in every Truss program:
 
 - **`fn main`** is where a program starts. It takes the command-line
-  arguments as a `List[String]`, whose first element is the program's name,
+  arguments as a `Slice[String]`, whose first element is the program's name,
   and returns an `ExitCode`, the status the program exits with.
 - **`uses Console`** declares that `main` uses the console. A function can
   print only if its signature says so. Without the clause, `truss check`
@@ -229,7 +229,7 @@ $ cd guessing_game
 The first version asks for a guess and prints it back:
 
 ```truss
-fn main(arguments: List[String]) -> ExitCode
+fn main(arguments: Slice[String]) -> ExitCode
   uses Console
 {
   Console.print_line("Guess the number!")
@@ -281,7 +281,7 @@ Randomness is an effect, like printing, so it is a capability too:
 ```truss
 use standard.random
 
-fn main(arguments: List[String]) -> ExitCode
+fn main(arguments: Slice[String]) -> ExitCode
   uses Console, Random
 {
   Console.print_line("Guess the number!")
@@ -346,7 +346,7 @@ main.truss:13:23: error[types.mismatch]: Expected `String`, found `UInt64`.
 ```truss
 use standard.random
 
-fn main(arguments: List[String]) -> ExitCode
+fn main(arguments: Slice[String]) -> ExitCode
   uses Console, Random
 {
   Console.print_line("Guess the number!")
@@ -412,7 +412,7 @@ termination.
 ```truss
 use standard.random
 
-fn main(arguments: List[String]) -> ExitCode
+fn main(arguments: Slice[String]) -> ExitCode
   uses Console, Random, RunForever
 {
   Console.print_line("Guess the number!")
@@ -467,7 +467,7 @@ test "the secret itself wins" {
   assert verdict(50, secret: 50) == "You win!"
 }
 
-fn main(arguments: List[String]) -> ExitCode
+fn main(arguments: Slice[String]) -> ExitCode
   uses Console, Random, RunForever
 {
   Console.print_line("Guess the number!")
@@ -1244,7 +1244,7 @@ fn first_name(names: Slice[String]) -> Option[String] {
   names.get(0).map(fn(name) { name.copy() })
 }
 
-fn count_of(counts: Map[String, UInt64], word: String) -> UInt64 {
+fn count_of(counts: Map[String, UInt64], word: StringSlice) -> UInt64 {
   if counts.get(word) is Some(count) {
     count
   } else {
@@ -1970,7 +1970,7 @@ workshop/
 use geometry
 use geometry.measure
 
-fn main(arguments: List[String]) -> ExitCode
+fn main(arguments: Slice[String]) -> ExitCode
   uses Console
 {
   let corner = geometry.Point(x: 3, y: 4)
@@ -2508,7 +2508,7 @@ test "a line without an equals sign is an error" {
   assert parse_settings("retries") == Err(SettingError.MissingEquals("retries"))
 }
 
-fn main(arguments: List[String]) -> ExitCode
+fn main(arguments: Slice[String]) -> ExitCode
   uses Console
 {
   match parse_settings("retries = 3\ntimeout = thirty") {
@@ -2642,7 +2642,7 @@ fn checked_count(count: UInt64) -> UInt64
   count
 }
 
-fn main(arguments: List[String]) -> ExitCode
+fn main(arguments: Slice[String]) -> ExitCode
   uses Console, Panic
 {
   Console.print_line("${parse_known_port("8080")} ${checked_count(3)}")
@@ -3471,7 +3471,7 @@ test "fake files and a fake console" uses RunForever {
   assert screen.output() == "archived notes.txt\n"
 }
 
-fn main(arguments: List[String]) -> ExitCode
+fn main(arguments: Slice[String]) -> ExitCode
   uses FileRead, FileWrite, Console
 {
   match archive("notes.txt") {
@@ -4324,7 +4324,7 @@ theorem doubling_is_even(value: Int64)
 {
 }
 
-theorem doubles_are_even(values: List[Int64])
+theorem doubles_are_even(values: Slice[Int64])
   requires forall i in 0..values.length() => values[i] >= -1000 && values[i] <= 1000
   ensures forall i in 0..values.length() => double(values[i]) % 2 == 0
 {

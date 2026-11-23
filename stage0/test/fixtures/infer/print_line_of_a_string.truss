@@ -1,4 +1,4 @@
-fn f(name: String)
+fn f(name: own String)
   uses Console
 {
   Console.print_line(name)

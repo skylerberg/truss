@@ -2,6 +2,6 @@ fn next(count: UInt8) -> UInt8 {
   count + 1
 }
 
-fn main(arguments: List[String]) -> ExitCode {
+fn main(arguments: Slice[String]) -> ExitCode {
   if next(1) == 2 { ExitCode.success } else { ExitCode.failure }
 }

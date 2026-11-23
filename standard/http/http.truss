@@ -2055,7 +2055,7 @@ public fn Route.parse(text: StringSlice) -> Option[Route] {
 impl FromTemplate for Route {
   type Part = String
 
-  fn is_valid_template(literals: List[text.Literal]) -> Bool
+  fn is_valid_template(literals: Slice[text.Literal]) -> Bool
   {
     literals.length() == 1 && parse_route(literals[0].text()) is Some(_)
   }
@@ -2844,14 +2844,14 @@ public fn Client.stream[Output](
   url: url.Url,
   receive: (fn(Status, Headers, mut Body) -> Output uses generic Granted),
   headers: Headers = Headers(entries: []),
-  body: List[UInt8] = [],
+  body: Slice[UInt8] = [],
 ) -> Result[Output, Error]
   uses NetworkClient, Handles, Tasks, Random, Clock, Panic, generic Granted, RunForever
 {
   var current_method = method.copy()
   var address = url.copy()
   var request_headers = headers.copy()
-  var request_body = body.copy()
+  var request_body = body.to_list()
   var redirects_left = self.options.redirects
   var attempt: UInt64 = 1
   while true {
@@ -2944,7 +2944,7 @@ public fn Client.send(
   method: Method,
   url: url.Url,
   headers: Headers = Headers(entries: []),
-  body: List[UInt8] = [],
+  body: Slice[UInt8] = [],
 ) -> Result[Response, Error]
   uses NetworkClient, Handles, Tasks, Random, Clock, Panic, RunForever
 {
@@ -2975,7 +2975,7 @@ public fn send(
   method: Method,
   url: url.Url,
   headers: Headers = Headers(entries: []),
-  body: List[UInt8] = [],
+  body: Slice[UInt8] = [],
   options: ClientOptions = ClientOptions(),
 ) -> Result[Response, Error]
   uses NetworkClient, Handles, Tasks, FileRead, Random, Clock, Panic, RunForever
@@ -3590,7 +3590,7 @@ public fn Client.websocket[Output](
   url: url.Url,
   session: (fn(mut WebSocket) -> Output uses generic Granted),
   headers: Headers = Headers(entries: []),
-  protocols: List[String] = [],
+  protocols: Slice[String] = [],
   message_limit: UInt64 = 16777216,
   compresses: Bool = true,
 ) -> Result[Output, Error]
@@ -3642,9 +3642,9 @@ public fn Client.websocket[Output](
       if forwarding is Some(_) {
         return Err(Error.Unsupported(message: "a ws:// WebSocket through an HTTP proxy"))
       }
-      run_websocket(connection, inbox: own inbox, request: request.slice(), key: key, protocols: protocols.slice(), limits: self.options.limits, message_limit: message_limit, is_deflate_offered: compresses, seed: seed, session: session)
+      run_websocket(connection, inbox: own inbox, request: request.slice(), key: key, protocols: protocols, limits: self.options.limits, message_limit: message_limit, is_deflate_offered: compresses, seed: seed, session: session)
     }
-    Secure(connection, inbox) => run_websocket(connection, inbox: own inbox, request: request.slice(), key: key, protocols: protocols.slice(), limits: self.options.limits, message_limit: message_limit, is_deflate_offered: compresses, seed: seed, session: session)
+    Secure(connection, inbox) => run_websocket(connection, inbox: own inbox, request: request.slice(), key: key, protocols: protocols, limits: self.options.limits, message_limit: message_limit, is_deflate_offered: compresses, seed: seed, session: session)
     Multiplexed(..) => Err(Error.Unsupported(message: "a WebSocket over HTTP/2"))
   }
 }

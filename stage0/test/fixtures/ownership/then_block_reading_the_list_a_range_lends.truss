@@ -1,4 +1,4 @@
-fn show(text: String) {}
+fn show(text: StringSlice) {}
 
 fn f(names: mut List[String]) -> UInt64 {
   if names[..].get(0) is Some(name) {

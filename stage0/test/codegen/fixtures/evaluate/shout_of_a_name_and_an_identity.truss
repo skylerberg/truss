@@ -1,6 +1,6 @@
 
-fn f(name: String) -> Shout {
-  Shout"hey ${name.copy()}!"
+fn f(name: StringSlice) -> Shout {
+  Shout"hey ${name.to_string()}!"
 }
 
 fn g(value: UInt8) -> UInt8

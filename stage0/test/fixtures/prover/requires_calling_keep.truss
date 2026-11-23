@@ -1,4 +1,4 @@
-fn f(items: List[Int64], keep: fn(Int64) -> Bool) -> UInt64
+fn f(items: Slice[Int64], keep: fn(Int64) -> Bool) -> UInt64
   requires forall i in 0..items.length() => keep(items.model()[i])
   cost time O(1)
 {

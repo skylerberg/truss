@@ -158,6 +158,10 @@ internal fn StringSlice.copy_onto(self, output: mut intrinsic.Storage[UInt8])
   requires intrinsic.storage_length(output) + self.length() <= intrinsic.storage_capacity(output)
   ensures intrinsic.storage_length(output) == old(intrinsic.storage_length(output)) + self.length()
   ensures intrinsic.storage_capacity(output) == old(intrinsic.storage_capacity(output))
+  ensures forall i in 0..old(intrinsic.storage_length(output)) =>
+    intrinsic.storage_model(output)[i] == old(intrinsic.storage_model(output))[i]
+  ensures forall i in 0..self.length() =>
+    intrinsic.storage_model(output)[old(intrinsic.storage_length(output)) + i] == self.model()[i]
   cost time O(self.length())
   cost allocations == 0
 {
@@ -165,6 +169,9 @@ internal fn StringSlice.copy_onto(self, output: mut intrinsic.Storage[UInt8])
   for index in 0..self.length()
     invariant intrinsic.storage_length(output) == start + index
     invariant intrinsic.storage_capacity(output) == old(intrinsic.storage_capacity(output))
+    invariant forall i in 0..start =>
+      intrinsic.storage_model(output)[i] == old(intrinsic.storage_model(output))[i]
+    invariant forall i in 0..index => intrinsic.storage_model(output)[start + i] == self.model()[i]
     cost allocations == 0
   {
     intrinsic.storage_push(mut output, value: self.byte(index))

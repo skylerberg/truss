@@ -1,5 +1,5 @@
-fn f(first: List[Int64], second: List[Int64]) -> UInt64 {
-  var items = first.copy()
+fn f(first: Slice[Int64], second: Slice[Int64]) -> UInt64 {
+  var items = first.to_list()
   var part = items[..]
   part = second[..]
   mut items.push(1)

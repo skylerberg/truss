@@ -1,4 +1,4 @@
-fn main(arguments: List[String]) -> ExitCode
+fn main(arguments: Slice[String]) -> ExitCode
   uses Console, Environment
 {
   if Environment.variable("TRUSS_TEST_VARIABLE".slice()) is Some(value) {

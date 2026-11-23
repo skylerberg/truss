@@ -196,6 +196,7 @@ module Code = struct
     | Implements_built_in_capability
     | Impl_uses
     | Mut_self_for_slice
+    | Read_only_owning_parameter
     | Unknown_associated_type
     | Unknown_associated_capability
 
@@ -481,6 +482,7 @@ module Code = struct
     | Implements_built_in_capability -> "implements_built_in_capability"
     | Impl_uses -> "impl_uses"
     | Mut_self_for_slice -> "mut_self_for_slice"
+    | Read_only_owning_parameter -> "read_only_owning_parameter"
     | Unknown_associated_type -> "unknown_associated_type"
     | Unknown_associated_capability -> "unknown_associated_capability"
 

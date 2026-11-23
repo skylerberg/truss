@@ -11,7 +11,7 @@ impl Generates for Eager {
   }
 }
 
-fn f(values: List[Int64]) -> Int64
+fn f(values: Slice[Int64]) -> Int64
   requires values.length() > 0
 {
   Eager().generate(values.length(), make: fn(index) { values[index] })

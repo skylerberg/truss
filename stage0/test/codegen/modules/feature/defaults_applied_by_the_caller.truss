@@ -5,7 +5,7 @@ trait Scaled {
     self.mass() * factor
   }
 
-  fn labels(self, names: List[String] = ["light", "heavy"]) -> UInt64 {
+  fn labels(self, names: Slice[String] = ["light", "heavy"]) -> UInt64 {
     names[0].length() + names[1].length()
   }
 }

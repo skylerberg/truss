@@ -1197,6 +1197,8 @@ let () =
       expect_proven Fixtures.Prover.slice_element_read);
   Harness.test "a list passed as a slice is a view with its model" (fun () ->
       expect_proven Fixtures.Prover.count_of_a_list_as_a_slice);
+  Harness.test "two views of one list are one slice, so a function of them agrees" (fun () ->
+      expect_proven Fixtures.Prover.short_list_passed_where_a_short_slice_is_required);
   Harness.test "a slice must be within its collection" (fun () ->
       expect_not_proven Fixtures.Prover.slice_past_the_end "prover.out_of_bounds");
   Harness.test "two slices lent together must not overlap" (fun () ->
@@ -1238,8 +1240,8 @@ let () =
         not
           (String.includes
              ~affix:
-               "The call to `Shout.is_valid_template` that `Shout\"hey ${name.copy()}\"` makes may \
-                not give `true`. This fails every time the code reaches it."
+               "The call to `Shout.is_valid_template` that `Shout\"hey ${name.to_string()}\"` \
+                makes may not give `true`. This fails every time the code reaches it."
              message)
       then Harness.fail "message %S" message);
   Harness.test "a proof knows the length and the text of a template's literals with no evaluation"
@@ -1253,7 +1255,7 @@ let () =
       | evaluated -> Harness.fail "evaluates [%s]" (String.concat "; " evaluated));
       expect_proven (tag ^ of_any_tone "Shout\"hey\"");
       expect_not_proven
-        (tag ^ of_any_tone ~parameters:"name: String" "Shout\"hey ${name.copy()}\"")
+        (tag ^ of_any_tone ~parameters:"name: StringSlice" "Shout\"hey ${name.to_string()}\"")
         "prover.requires";
       expect_not_proven (tag ^ of_any_tone "Shout\"hello\"") "prover.requires");
   Harness.test "a template copies its literal text once, as a string literal is copied" (fun () ->

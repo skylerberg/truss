@@ -258,12 +258,12 @@ fn identity(certificate_text: StringSlice, key_text: StringSlice) -> tls.Identit
   tls.Identity(chain: [certificate(certificate_text)], key: own key)
 }
 
-fn mutual(port: UInt16, required: tls.ClientCertificates, protocols: List[String], presented: Option[tls.Identity]) -> String
+fn mutual(port: UInt16, required: tls.ClientCertificates, protocols: Slice[String], presented: Option[tls.Identity]) -> String
   uses Tasks, Clock, NetworkServer, NetworkClient, Handles, FileRead, Random, Panic, RunForever
 {
   var listener = NetworkServer.listen(network.SocketAddress(address: network.IpAddress.loopback, port: port)).expect("the port is free")
   var config = server_config()
-  config.protocols = protocols.copy()
+  config.protocols = protocols.to_list()
   config.client_certificates = required
   config.client_roots = [certificate(client_ca_pem.slice())]
   concurrent {

@@ -1,4 +1,4 @@
-fn f(items: List[UInt8]) -> Bool
+fn f(items: Slice[UInt8]) -> Bool
   cost time O(1)
 {
   proof {

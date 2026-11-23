@@ -11,7 +11,7 @@ fn held(text: own String) -> Int64 {
   if text.length() > 0 { 1 } else { 0 }
 }
 
-fn main(arguments: List[String]) -> ExitCode
+fn main(arguments: Slice[String]) -> ExitCode
   uses Tasks, Console
 {
   var counter = Counter(count: 0)

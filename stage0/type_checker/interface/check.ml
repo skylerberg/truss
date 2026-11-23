@@ -140,20 +140,21 @@ let check_real_implementations (state : Checking.state) (resolved : Resolve.reso
     uses
 
 let main_message =
-  "`main` must have exactly the signature `fn main(arguments: List[String]) -> ExitCode`."
+  "`main` must have exactly the signature `fn main(arguments: Slice[String]) -> ExitCode`."
 
 let check_main state resolved (clauses : Syntax.clause list) (signature : Types.signature) span =
-  let list_of_string =
+  let slice_of_string =
     match signature.parameters with
     | [
      {
        name = "arguments";
        mode = Read;
-       type_ = Named { path = list; arguments = [ Type (Named { path = string; arguments = [] }) ] };
+       type_ =
+         Named { path = slice; arguments = [ Type (Named { path = string; arguments = [] }) ] };
        has_default = false;
      };
     ] ->
-        Well_known.is List list && Well_known.is String string
+        Well_known.is Slice slice && Well_known.is String string
     | _ -> false
   in
   let exit_code =
@@ -161,7 +162,7 @@ let check_main state resolved (clauses : Syntax.clause list) (signature : Types.
     | Returns (Named { path; arguments = [] }) -> Well_known.is Exit_code path
     | _ -> false
   in
-  if not (list_of_string && exit_code && signature.generics = [] && signature.receiver = None) then
+  if not (slice_of_string && exit_code && signature.generics = [] && signature.receiver = None) then
     Checking.report state Main_signature span main_message;
   check_real_implementations state resolved ~recipient:"`main`"
     (List.concat_map

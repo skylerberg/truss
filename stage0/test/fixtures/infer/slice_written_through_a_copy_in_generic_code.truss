@@ -9,7 +9,7 @@ fn scribble[Collection: IndexMut + Copyable](
   copied[key] = own value
 }
 
-fn f(others: List[Int64]) {
+fn f(others: Slice[Int64]) {
   let part: Slice[Int64] = others[..]
   let first: UInt64 = 0
   let nine: Int64 = 9

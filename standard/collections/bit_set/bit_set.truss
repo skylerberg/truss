@@ -80,7 +80,7 @@ fn fill_words(words: mut List[UInt64], value: UInt64)
   }
 }
 
-fn copy_words(words: mut List[UInt64], source: List[UInt64], count: UInt64)
+fn copy_words(words: mut List[UInt64], source: Slice[UInt64], count: UInt64)
   requires count <= words.length()
   requires count <= source.length()
   ensures words.length() == old(words.length())

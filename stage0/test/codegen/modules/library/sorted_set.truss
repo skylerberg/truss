@@ -1,6 +1,6 @@
 use standard.collections
 
-fn set_of(elements: List[Int64]) -> collections.SortedSet[Int64] {
+fn set_of(elements: Slice[Int64]) -> collections.SortedSet[Int64] {
   var sorted: collections.SortedSet[Int64] = []
   for element in elements {
     mut sorted.insert(element)

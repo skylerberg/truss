@@ -1,4 +1,4 @@
-fn f(tally: mut Tally, count: Int64, shelf: mut Shelf, title: String) {
+fn f(tally: mut Tally, count: Int64, shelf: mut Shelf, title: own String) {
   tally += count
   shelf += title
 }

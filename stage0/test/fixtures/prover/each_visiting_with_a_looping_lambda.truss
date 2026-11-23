@@ -1,4 +1,4 @@
-fn each(items: List[UInt32], visit: fn(UInt32))
+fn each(items: Slice[UInt32], visit: fn(UInt32))
   cost time O(items.length() * time(visit))
 {
   for item in items {
@@ -6,7 +6,7 @@ fn each(items: List[UInt32], visit: fn(UInt32))
   }
 }
 
-fn f(items: List[UInt32])
+fn f(items: Slice[UInt32])
   cost time O(items.length())
 {
   each(items, visit: fn(item) {

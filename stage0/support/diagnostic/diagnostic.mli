@@ -196,6 +196,7 @@ module Code : sig
     | Implements_built_in_capability
     | Impl_uses
     | Mut_self_for_slice
+    | Read_only_owning_parameter
     | Unknown_associated_type
     | Unknown_associated_capability
 

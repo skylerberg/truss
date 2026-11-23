@@ -139,7 +139,7 @@ let () =
               "fn double(x: Int64) -> Int64 {\n\
               \  x\n\
                }\n\n\
-               fn piped(name: String) -> Int64 {\n\
+               fn piped(name: StringSlice) -> Int64 {\n\
               \  name |> double\n\
                }\n\n\
                fn compared(flag: Bool) -> Bool {\n\
@@ -871,9 +871,6 @@ let () =
     "a read-only parameter whose type is a type parameter or an associated type takes a view of \
      the list or the string it stands for" (fun () ->
       expect_fine Fixtures.Infer.views_passed_as_owners_to_generic_parameters);
-  Harness.test "a parameter declared as a string takes no string slice" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.string_slice_passed_to_a_string_parameter
-        "types.mismatch");
   Harness.test "an `own` parameter takes no view of its owning type" (fun () ->
       expect_one_diagnostic Fixtures.Infer.string_slice_passed_as_an_own_key "types.mismatch");
   Harness.test "a slice is not passed as an array" (fun () ->
@@ -2369,8 +2366,8 @@ let () =
   Harness.test "function types that count the calls of different capabilities are different types"
     (fun () ->
       let make_lists_source counted =
-        "fn take(runs: List[(fn() uses Clock, Console cost calls(Console) <= 1)]) {}\n\n\
-         fn f(runs: List[(fn() uses Clock, Console cost calls(" ^ counted
+        "fn take(runs: Slice[(fn() uses Clock, Console cost calls(Console) <= 1)]) {}\n\n\
+         fn f(runs: Slice[(fn() uses Clock, Console cost calls(" ^ counted
         ^ ") <= 1)]) {\n  take(runs)\n}\n"
       in
       expect_fine (make_lists_source "Console");
@@ -2679,7 +2676,7 @@ let () =
 let () =
   let make_each_source ?(loop_clause = "") clause =
     Printf.sprintf
-      "fn each(items: List[Int64], count: UInt64, visit: (fn(Int64) uses generic Granted))\n\
+      "fn each(items: Slice[Int64], count: UInt64, visit: (fn(Int64) uses generic Granted))\n\
       \  uses generic Granted\n\
       \  %s\n\
        {\n\

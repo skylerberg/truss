@@ -1,3 +1,3 @@
-fn f(name: String) -> UInt64 {
+fn f(name: own String) -> UInt64 {
   name.width()
 }
