@@ -749,24 +749,26 @@ let list_linked store graph ~profile ~unit_kind ~roots =
 
 type claim_edges = Every_edge | Settled_edges of { packages : string list option }
 
+let require_settled ~stage ~unit =
+  Printf.sprintf " AND NOT EXISTS (SELECT 1 FROM main.stale s WHERE s.stage = %s AND s.id = %s)"
+    stage unit
+
+let select_settled_claims ~packages ~parameter =
+  let condition = require_settled ~stage:"c.source_kind" ~unit:"c.source" in
+  match packages with
+  | None -> ("", condition, [])
+  | Some packages ->
+      ( " CROSS JOIN main.definition d ON d.id = c.source",
+        Printf.sprintf "%s AND +d.package IN (SELECT value FROM json_each(?%d))" condition parameter,
+        [ Text (encode_texts packages) ] )
+
 let is_item_claimed store graph ~item ~over =
-  let require_settled ~stage ~unit =
-    Printf.sprintf " AND NOT EXISTS (SELECT 1 FROM main.stale s WHERE s.stage = %s AND s.id = %s)"
-      stage unit
-  in
   let reference_condition, claimant, claim_condition, packages =
     match over with
     | Every_edge -> ("", "", "", [])
-    | Settled_edges { packages } -> (
-        let reference_condition = require_settled ~stage:"?3" ~unit:"e.source"
-        and claim_condition = require_settled ~stage:"c.source_kind" ~unit:"c.source" in
-        match packages with
-        | None -> (reference_condition, "", claim_condition, [])
-        | Some packages ->
-            ( reference_condition,
-              " CROSS JOIN main.definition d ON d.id = c.source",
-              claim_condition ^ " AND +d.package IN (SELECT value FROM json_each(?6))",
-              [ Text (encode_texts packages) ] ))
+    | Settled_edges { packages } ->
+        let claimant, claim_condition, packages = select_settled_claims ~packages ~parameter:6 in
+        (require_settled ~stage:"?3" ~unit:"e.source", claimant, claim_condition, packages)
   in
   Sql.has_row store.sql
     (Printf.sprintf
@@ -783,6 +785,16 @@ let is_item_claimed store graph ~item ~over =
        Integer graph.claims;
      ]
     @ packages)
+
+let list_claimed_among store graph ~items ~packages =
+  let claimant, claim_condition, packages = select_settled_claims ~packages ~parameter:4 in
+  Sql.list_rows store.sql
+    (Printf.sprintf
+       "SELECT DISTINCT c.target FROM json_each(?1) i CROSS JOIN main.edge c ON c.target_kind = ?2 \
+        AND c.target = i.value AND c.name = ''%s WHERE (c.markers & ?3) != 0%s"
+       claimant claim_condition)
+    ([ Text (encode_integers items); Integer graph.item_kind; Integer graph.claims ] @ packages)
+    (fun row -> Sql.read_integer row 0)
 
 let merge paths ~into =
   let merged = create_memory () in

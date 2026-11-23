@@ -279,9 +279,11 @@ stale item, whether a claim reaches it: one recursive query follows the
 stops at the first settled claim of the command's packages. Lower then
 continues from each unit it lowers to the stale items that the unit
 references, and asks again about the stale items that remain until none is
-reached. Key tests asks the same question of its stale items once, and does
-not ask it of an item that the drain has just lowered, which a claim reaches.
-Render takes its stale units from the query that lists the linked items. A drain for
+reached. Key tests starts from its stale items and the items whose keys read
+theirs. One statement lists the settled claims of the command's packages
+among those items, and the drain keys the items that those claims reach
+through settled units. An item that they do not reach stays stale. Render
+takes its stale units from the query that lists the linked items. A drain for
 an editor's files is the exception: it joins from the definitions of those
 files, because the proofs of every other file can be stale.
 
