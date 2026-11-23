@@ -578,86 +578,127 @@ fn spell_inserted(insertions: Slice[source.Edit], offset: UInt64, buffer: mut St
   }
 }
 
-fn spell_kind(tables: Tables, kind: Kind) -> Option[String]
-  uses Panic, RunForever
+type TokenRun(next: UInt64, stop: UInt64, previous_stop: Option[UInt64])
+
+type StringFrame(literal_index: UInt64, segment: UInt64, escaped_text: String, enclosing: TokenRun)
+
+fn advance_string(
+  literal: StringLiteral,
+  literal_index: UInt64,
+  segment: UInt64,
+  enclosing: TokenRun,
+  strings: mut List[StringFrame],
+  buffer: mut String,
+) -> Option[TokenRun]
+  uses Panic
 {
-  match kind {
-    Upper(name) | Lower(name) => Some(tables.name(name).to_string())
-    Underscore => Some("_")
-    Keyword(keyword) => Some(spell_keyword(keyword).to_string())
-    Reserved(reserved) => Some(spell_reserved(reserved).to_string())
-    Integer(literal) => match tables.integers.get(literal) {
-      Some(value) => Some("${value}")
-      None => None
-    }
-    Float(literal) => match tables.decimals.get(literal) {
-      Some(decimal) => Some("${decimal.significand}e${decimal.exponent}")
-      None => None
-    }
-    String(literal) => spell_string(tables, literal: tables.literal(literal))
-    Punctuation(punctuation) => Some(spell_punctuation(punctuation).to_string())
-    Foreign(foreign) => Some(spell_foreign(foreign).to_string())
-    Newline | EndOfFile => None
+  if segment >= literal.rest.length() {
+    mut buffer.push("\"")
+    return Some(enclosing)
   }
+  let interpolation = literal.rest[segment].interpolation
+  if !interpolation.is_closed {
+    return None
+  }
+  mut buffer.push("\${")
+  mut strings.push(StringFrame(literal_index, segment, escaped_text: escape_spelling(literal.rest[segment].text.value), enclosing))
+  Some(TokenRun(next: interpolation.first, stop: interpolation.stop, previous_stop: None))
 }
 
-fn spell_string(tables: Tables, literal: StringLiteral) -> Option[String]
-  uses Panic, RunForever
+fn open_string(
+  literal: StringLiteral,
+  literal_index: UInt64,
+  enclosing: TokenRun,
+  strings: mut List[StringFrame],
+  buffer: mut String,
+) -> Option[TokenRun]
+  uses Panic
 {
-  var text = ""
   if literal.tag is Some(tag) {
-    mut text.push(tag.name)
+    mut buffer.push(tag.name)
   }
-  mut text.push("\"")
-  mut text.push(escape_spelling(literal.first.value))
-  for segment in literal.rest {
-    if !segment.interpolation.is_closed {
-      return None
-    }
-    var inner: List[Token] = []
-    for index in segment.interpolation.first..segment.interpolation.stop {
-      mut inner.push(tables.token(index))
-    }
-    let Some(spelled) = spell_tokens(tables, tokens: inner, insertions: []) else {
-      return None
-    }
-    mut text.push("\${")
-    mut text.push(spelled)
-    mut text.push("}")
-    mut text.push(escape_spelling(segment.text.value))
-  }
-  mut text.push("\"")
-  Some(own text)
+  mut buffer.push("\"")
+  mut buffer.push(escape_spelling(literal.first.value))
+  advance_string(literal, literal_index, segment: 0, enclosing: enclosing, strings: mut strings, buffer: mut buffer)
 }
 
-internal fn spell_tokens(tables: Tables, tokens: Slice[Token], insertions: Slice[source.Edit]) -> Option[String]
+internal fn spell_tokens(tables: Tables, first: UInt64, stop: UInt64, insertions: Slice[source.Edit]) -> Option[String]
   uses Panic, RunForever
 {
   var buffer = ""
-  var previous_stop: Option[UInt64] = None
-  for current in tokens {
+  var run = TokenRun(next: first, stop, previous_stop: None)
+  var strings: List[StringFrame] = []
+  while true {
+    if run.next >= run.stop {
+      if run.previous_stop is Some(previous_stop) {
+        spell_inserted(insertions, offset: previous_stop, buffer: mut buffer)
+      }
+      let Some(frame) = mut strings.pop() else {
+        return Some(own buffer)
+      }
+      mut buffer.push("}")
+      mut buffer.push(frame.escaped_text)
+      let Some(next_run) = advance_string(
+        tables.literal(frame.literal_index),
+        literal_index: frame.literal_index,
+        segment: frame.segment + 1,
+        enclosing: frame.enclosing,
+        strings: mut strings,
+        buffer: mut buffer,
+      ) else {
+        return None
+      }
+      run = next_run
+      continue
+    }
+    let current = tables.token(run.next)
+    run.next += 1
     if current.kind == Kind.EndOfFile {
       continue
     }
-    let spelled = if current.is_inserted_closer { None } else { spell_kind(tables, kind: current.kind) }
-    let Some(text) = own spelled else {
+    if current.is_inserted_closer {
       return None
     }
-    match previous_stop {
-      Some(stop) => {
-        spell_inserted(insertions, offset: stop, buffer: mut buffer)
-        if stop < current.span.start {
+    match run.previous_stop {
+      Some(previous_stop) => {
+        spell_inserted(insertions, offset: previous_stop, buffer: mut buffer)
+        if previous_stop < current.span.start {
           mut buffer.push(" ")
           spell_inserted(insertions, offset: current.span.start, buffer: mut buffer)
         }
       }
       None => spell_inserted(insertions, offset: current.span.start, buffer: mut buffer)
     }
-    mut buffer.push(text)
-    previous_stop = Some(current.span.stop)
+    run.previous_stop = Some(current.span.stop)
+    match current.kind {
+      Upper(name) | Lower(name) => mut buffer.push(tables.name(name))
+      Underscore => mut buffer.push("_")
+      Keyword(keyword) => mut buffer.push(spell_keyword(keyword))
+      Reserved(reserved) => mut buffer.push(spell_reserved(reserved))
+      Integer(literal) => mut buffer.push(tables.integers.get(literal).expect("an integer literal"))
+      Float(literal) => match tables.decimals.get(literal) {
+        Some(decimal) => {
+          mut buffer.push(decimal.significand)
+          mut buffer.push("e")
+          mut buffer.push(decimal.exponent)
+        }
+        None => Panic.crash("a decimal index past the table")
+      }
+      String(literal) => {
+        let Some(next_run) = open_string(
+          tables.literal(literal),
+          literal_index: literal,
+          enclosing: run,
+          strings: mut strings,
+          buffer: mut buffer,
+        ) else {
+          return None
+        }
+        run = next_run
+      }
+      Punctuation(punctuation) => mut buffer.push(spell_punctuation(punctuation))
+      Foreign(foreign) => mut buffer.push(spell_foreign(foreign))
+      Newline | EndOfFile => return None
+    }
   }
-  if previous_stop is Some(stop) {
-    spell_inserted(insertions, offset: stop, buffer: mut buffer)
-  }
-  Some(own buffer)
 }
