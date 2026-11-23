@@ -25,10 +25,10 @@ type stage =
   | Check_sealed
   | Check_impl
   | Check_type
-  | Check_instantiations
-  | Check_tests
+  | Check_instantiation
+  | Check_test
   | Check_unexported
-  | Check_dependencies
+  | Check_dependency
   | Prove
   | Lower
   | Key_tests
@@ -64,7 +64,7 @@ type fact =
   | Recursion_group
   | Usage_check
   | Ownership
-  | Unused_dependencies
+  | Dependency_use
   | Proof
   | Lowered
   | Test_key
@@ -88,23 +88,15 @@ type lookup =
   | Contained
   | Module_declarations
   | File_declarations
-  | Package_declarations
   | Members
   | Traits_declaring
   | Impls_of_type
   | Impls_of_trait
   | Law_proofs
+  | Tests
 
 type entity = Definition | Import | Package | Unknown_implementation | Item
-
-type selection =
-  | Unresolved
-  | Import_references
-  | Unchecked_bodies
-  | Body_uses
-  | Instantiations
-  | Package_references
-
+type selection = Unresolved | Import_references | Package_references
 type target = Fact of fact | Lookup of lookup | Entity of entity | Selection of selection
 
 val rank_target : target -> int

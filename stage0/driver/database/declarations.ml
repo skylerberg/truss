@@ -64,6 +64,14 @@ let derived_method_origin = 3
 
 type impl_entry = { declared_in : Path.module_; entry : (Path.t * Path.t) * Path.t }
 
+let list_tests store (package : Path.package) name =
+  List.sort Resolve.Namespace.compare_key
+    (List.map decode_key
+       (Store.list_package_member_keys store
+          (Store.locate_schema store package)
+          ~package:(Path.show_package package) ~member:name ~kind:(rank kinds Test)
+          ~origin:written_origin))
+
 let name_law_proofs ~package ~law ~type_ = Printf.sprintf "%s %s %d" package law type_
 
 let make_lookups store ~(note : Kind.lookup -> int -> string -> unit) ~is_package
@@ -181,9 +189,7 @@ let make_lookups store ~(note : Kind.lookup -> int -> string -> unit) ~is_packag
         note File_declarations (Ids.of_file file) "";
         List.map snd (list_written (locate file.module_.package) (Of_file (Ids.of_file file))));
     list_package_declarations =
-      (fun package ->
-        note Package_declarations (Ids.of_package package) "";
-        list_sorted (locate package) (Of_package (Path.show_package package)));
+      (fun package -> list_sorted (locate package) (Of_package (Path.show_package package)));
     read_definition = (fun key -> Marshal.from_string (read_column Tree key Store.find_tree) 0);
     read_text = (fun key -> read_column Text key Store.find_text);
     read_spans = (fun key -> Marshal.from_string (read_column Tree key Store.find_spans) 0);
@@ -287,7 +293,7 @@ let list_replaced_lookups store ~before ~after : (Kind.lookup * int * string) li
           List.map
             (fun (lookup : Kind.lookup) -> (lookup, id, ""))
             [ Declaration; Tree; Text; Place; Imports; Container ]
-          @ [ (Kind.Module_declarations, module_, ""); (Package_declarations, package, "") ]
+          @ [ (Kind.Module_declarations, module_, "") ]
           @ List.map
               (fun container -> (Kind.Contained, container, ""))
               (Option.to_list (read_optional "definition" container))
@@ -346,7 +352,8 @@ let encode_definition ~text (declared : Resolve.Namespace.declared_definition) :
     match key.path with
     | Method { owner; name; _ } | Member_constant { owner; name } ->
         (Some (Ids.of_path owner), Some name)
-    | Top _ | Impl _ | Derived _ | Test _ | Law_proof _ | Unresolved _ -> (None, None)
+    | Test { name; _ } -> (None, Some name)
+    | Top _ | Impl _ | Derived _ | Law_proof _ | Unresolved _ -> (None, None)
   in
   let item = declared.item in
   ( {
@@ -465,6 +472,9 @@ let write_module store (module_ : Path.module_) ~(files : (Path.file * string) l
             Obj.repr (lookups.list_members owner name));
         consider Traits_declaring (Ids.of_package package) member (fun () ->
             Obj.repr (lookups.list_traits_declaring package member))
+    | Test { name; _ }, _ ->
+        consider Tests (Ids.of_package package) name (fun () ->
+            Obj.repr (list_tests store package name))
     | _ -> ()
   in
   List.iter
@@ -609,10 +619,7 @@ let write_module store (module_ : Path.module_) ~(files : (Path.file * string) l
           declarations.law_proofs));
   List.iter2
     (fun ((lookup : Kind.lookup), scope, name, read) before ->
-      if compare before (read ()) <> 0 then begin
-        add lookup scope name;
-        if lookup = Module_declarations then add Package_declarations (Ids.of_package package) ""
-      end)
+      if compare before (read ()) <> 0 then add lookup scope name)
     candidates results_before;
   let supplied =
     List.filter_map

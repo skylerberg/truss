@@ -25,11 +25,13 @@ let add_package_rows (database : t) (package : Project.package) =
     List.iter
       (fun (before : Store.dependency) ->
         if not (List.exists (fun (after : Store.dependency) -> after.id = before.id) dependencies)
-        then Recipes.forget_grant database before.id)
+        then Recipes.forget_dependency database before.id)
       dependencies_before;
     List.iter
       (fun (dependency : Store.dependency) ->
-        Tracker.mark_stale database Resolve_grant dependency.id)
+        List.iter
+          (fun stage -> Tracker.mark_stale database stage dependency.id)
+          Recipes.dependency_stages)
       dependencies
   end;
   if package.name = Well_known.intrinsic_module.package then
@@ -37,9 +39,6 @@ let add_package_rows (database : t) (package : Project.package) =
 
 let add_package (database : t) (package : Project.package) =
   add_package_rows database package;
-  List.iter
-    (fun stage -> Tracker.mark_stale database stage (Ids.of_package package.name))
-    Recipes.package_stages;
   List.iter
     (fun (file, text) ->
       Recipes.write_file database ~package:(Path.show_package package.name) file text)
@@ -74,7 +73,7 @@ let scope_packages (database : t) packages : Store.scope =
 let drain_packages (database : t) ?on_bug ~through packages =
   drain database ?on_bug ~through ~scope:(scope_packages database packages) ()
 
-let last_checking_stage : Kind.stage = Check_dependencies
+let last_checking_stage : Kind.stage = Check_dependency
 let loaded_meta = "loaded"
 let compiler_meta = "compiler"
 
@@ -132,9 +131,8 @@ let retire (database : t) (package : Path.package) =
     (fun (file : Store.file) -> Recipes.remove_file database (Declarations.decode_file file.key))
     (Store.list_files database.store Main (Of_package name));
   List.iter
-    (fun (dependency : Store.dependency) -> Recipes.forget_grant database dependency.id)
+    (fun (dependency : Store.dependency) -> Recipes.forget_dependency database dependency.id)
     (Store.list_dependencies database.store Main ~package:name);
-  Recipes.forget_package database package;
   Store.remove_package database.store ~name
 
 let list_differing_ids (database : t) ~table ~id_column ~before ~after =
@@ -312,22 +310,28 @@ let find_checker (stage : Kind.stage) : checker option =
   | Check_contract | Check_body -> Some Infer
   | Check_usage -> Some Usage
   | Check_ownership -> Some Ownership
-  | Check_sealed | Check_impl | Check_type | Check_instantiations | Check_tests ->
-      Some Package_checks
+  | Check_sealed | Check_impl | Check_type | Check_instantiation | Check_test -> Some Package_checks
   | Check_unexported -> Some Unexported
   | Declare | Supply | Claim_roots | Resolve_grant | Read_trait_header | Evaluate_constant
   | Derive_interface | Compute_type_facts | Build_body_mir | Build_contract_mir | Generate_mir
-  | List_calls | Group_recursion | Check_dependencies | Prove | Lower | Key_tests | Evaluate
+  | List_calls | Group_recursion | Check_dependency | Prove | Lower | Key_tests | Evaluate
   | Render _ | Decide ->
       None
 
+let has_unchecked_body (database : t) (package : Path.package) =
+  Store.locate_schema database.store package = Main
+  && Store.has_unchecked_body database.store ~package:(Path.show_package package) ~skipped_kind:None
+
 let list_staged (database : t) (file : Path.file) ~is_selected : Diagnostic.t list =
+  let hides_unused = lazy (has_unchecked_body database file.module_.package) in
+  let is_shown (stage : Kind.stage) = stage <> Check_unexported || not (Lazy.force hides_unused) in
   List.sort_uniq
     (fun (left : Diagnostic.t) (right : Diagnostic.t) ->
       compare (left.span, left.code, left.message) (right.span, right.code, right.message))
     (List.filter_map
        (fun (located : Store.located) ->
-         if is_selected (List.nth Kind.stages located.stage) located then
+         let stage = List.nth Kind.stages located.stage in
+         if is_shown stage && is_selected stage located then
            Some
              (match located.base with
              | Some base ->
@@ -439,16 +443,23 @@ let list_manifest_problems (database : t) package =
     | Some (Tracker.Value value) -> Some value
     | Some (Failed | Blocked) | None -> None
   in
+  let dependencies = (make_name_lookups database).list_dependency_names package in
   List.concat_map
     (fun dependency ->
       match read Facts.grant ~id:(Ids.of_dependency package dependency) with
       | Some (grant : Interface.Environment.grant) ->
           List.map (fun capability -> Not_a_capability { dependency; capability }) grant.unknown
       | None -> [])
-    ((make_name_lookups database).list_dependency_names package)
-  @ List.map
-      (fun dependency -> Unused_dependency dependency)
-      (Option.value ~default:[] (read Facts.unused_dependencies ~id:(Ids.of_package package)))
+    dependencies
+  @
+  if has_unchecked_body database package then []
+  else
+    List.filter_map
+      (fun dependency ->
+        match read Facts.dependency_use ~id:(Ids.of_dependency package dependency) with
+        | Some false -> Some (Unused_dependency dependency)
+        | Some true | None -> None)
+      dependencies
 
 let find_code_packages (database : t) package =
   Option.map
@@ -462,6 +473,9 @@ let has_errors (database : t) package =
   if List.mem package (Store.list_project database.store) then
     Store.has_error database.store ~package:(Path.show_package package)
       ~last_stage:(Kind.rank_stage last_checking_stage)
+      ~hidden_stage:
+        (if has_unchecked_body database package then Some (Kind.rank_stage Check_unexported)
+         else None)
   else if Store.locate_schema database.store package <> Main then
     list_dependency_diagnostics database package <> []
   else true

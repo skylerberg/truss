@@ -82,23 +82,38 @@ let mark_callers_to_group tracker ~seeds =
 
 let package_kind = Kind.rank_target (Entity Package)
 
-let follow_edge_changes tracker ?package (stage : Kind.stage) id changes =
+let follow_edge_changes tracker (stage : Kind.stage) id changes =
   let differs (change : Store.edge_change) marker =
     Kind.has_marker change.before marker <> Kind.has_marker change.after marker
   in
-  (match (stage, package) with
-  | Check_body, Some package ->
-      let mark_where selection is_member =
-        if List.exists is_member changes then mark_readers tracker (Selection selection) package ""
-      in
-      mark_where Body_uses (fun (change : Store.edge_change) ->
-          change.changed.kind = definition_kind && differs change References);
-      mark_where Instantiations (fun (change : Store.edge_change) ->
+  if stage = Check_body && tracker.records_reads then begin
+    (match
+       List.filter_map
+         (fun (change : Store.edge_change) ->
+           if change.changed.kind = definition_kind && differs change References then
+             Some change.changed.id
+           else None)
+         changes
+     with
+    | [] -> ()
+    | used ->
+        Store.mark_paths_stale tracker.store ~stage:(Kind.rank_stage Check_unexported) ~paths:used);
+    if
+      List.exists
+        (fun (change : Store.edge_change) ->
           change.changed.kind = definition_kind
-          && (differs change Instantiates || differs change Grows));
-      mark_where Package_references (fun (change : Store.edge_change) ->
-          change.changed.kind = package_kind && differs change References)
-  | _ -> ());
+          && (differs change Instantiates || differs change Grows))
+        changes
+    then begin
+      mark_stale tracker Check_instantiation id;
+      Store.mark_reported_units_stale tracker.store ~stage:(Kind.rank_stage Check_instantiation)
+    end;
+    List.iter
+      (fun (change : Store.edge_change) ->
+        if change.changed.kind = package_kind && differs change References then
+          mark_readers tracker (Selection Package_references) change.changed.id change.changed.name)
+      changes
+  end;
   List.iter
     (fun (change : Store.edge_change) ->
       if change.changed.kind = import_kind && differs change References then
@@ -127,9 +142,9 @@ let follow_edge_changes tracker ?package (stage : Kind.stage) id changes =
           ~seeds:(Store.list_paths_owned_by tracker.store ~owners:traits)
   end
 
-let replace_edges tracker ?package stage id edges =
+let replace_edges tracker stage id edges =
   let changes = Store.replace_edges tracker.store ~source:(locate_unit stage id) edges in
-  follow_edge_changes tracker ?package stage id changes;
+  follow_edge_changes tracker stage id changes;
   changes
 
 type observation =
@@ -157,7 +172,7 @@ let list_noted_edges tracker noted =
       | markers -> { Store.target; markers } :: edges)
     noted []
 
-let record_observed tracker ?package stage id compute =
+let record_observed tracker stage id compute =
   let noted = Hashtbl.create 16 in
   let read_count = ref 0 in
   let note (marker : Kind.marker) target target_id name =
@@ -169,10 +184,9 @@ let record_observed tracker ?package stage id compute =
   let result = compute { note } in
   !observer
     (Computed { stage; ids = [ id ]; reads = !read_count; distinct_reads = count_reads noted });
-  (result, replace_edges tracker ?package stage id (list_noted_edges tracker noted))
+  (result, replace_edges tracker stage id (list_noted_edges tracker noted))
 
-let record tracker ?package stage id compute =
-  fst (record_observed tracker ?package stage id compute)
+let record tracker stage id compute = fst (record_observed tracker stage id compute)
 
 let record_group tracker stage ids ~own compute =
   let noted = Hashtbl.create 16 in
