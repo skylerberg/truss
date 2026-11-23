@@ -472,11 +472,27 @@ let () =
            (fn(Item) uses generic Granted)) -> UInt64`, which `Feeds` declares.")
 
 let () =
-  Harness.test "an impl's method gives a default where its trait's parameter has one" (fun () ->
-      expect_signature_mismatch Fixtures.Interface.steps_impl_without_its_traits_default
-        ~declared:
-          "`step` must have the signature `step(self, by: Int64 = ...) -> Int64` that `Steps` \
-           declares.");
+  Harness.test "a trait's method without a body has no default" (fun () ->
+      expect_one_diagnostic
+        Fixtures.Interface.steps_trait_giving_a_default_to_a_method_without_a_body
+        "types.default_without_body" ~at:("3", 1)
+        ~says:"a method that an `impl` writes has no default"
+        ~fixed:
+          "trait Steps {\n\
+          \  fn step(self, by: Int64) -> Int64\n\
+           }\n\n\
+           type Walker()\n\n\
+           impl Steps for Walker {\n\
+          \  fn step(self, by: Int64) -> Int64 { todo }\n\
+           }\n");
+  Harness.test "an impl overrides no method that has a default" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.steps_impl_overriding_a_method_that_has_a_default
+        "types.overridden_method_default" ~at:("step", 2)
+        ~says:"`Steps` declares `step` with a default, so no `impl` overrides it");
+  Harness.test "a trait restates no method that has a default" (fun () ->
+      expect_one_diagnostic Fixtures.Interface.strides_restating_a_method_that_has_a_default
+        "types.restated_method_default" ~at:("step", 2)
+        ~says:"`step` restates `app.main.Steps.step`, which has a default");
   Harness.test "an impl's method gives no default where its trait's parameter has none" (fun () ->
       expect_signature_mismatch Fixtures.Interface.steps_impl_adding_a_default
         ~declared:"`step(self, by: Int64) -> Int64`");

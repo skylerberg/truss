@@ -2,55 +2,28 @@ let raise_bug format = Compiler_bug.raise_bug ~stage:"Infer" format
 
 let instantiate signatures (interface : Interface.Lookups.t) (target : Core.operand Core.target) :
     Types.capability_set =
-  match target with
-  | Function { path; instantiation } -> (
-      let signature =
-        match Intrinsic.find_operation path with
-        | Some operation -> Some (Intrinsic_signatures.make_signature operation)
-        | None -> Signatures.read signatures interface path
-      in
-      match signature with
-      | Some signature ->
-          Types.substitute_capabilities
-            (Types.make_signature_substitution signature instantiation)
-            signature.uses
-      | None -> raise_bug "the callee `%s` has no signature" (Path.show path))
-  | Trait_method { trait; name; receiver; self_type; instantiation; evidence } -> (
-      let trait_interface = Interface.Definition.find_trait_interface interface trait.trait in
-      match
-        ( Option.bind trait_interface (Interface.Definition.find_method_of_trait ~name ~receiver),
-          trait_interface )
-      with
-      | Some method_, Some trait_interface -> (
-          let signature =
-            Signatures.read_of_method signatures interface ~owner:trait.trait method_
-          in
-          let uses =
-            Types.substitute_capabilities
-              (Types.combine_substitutions
-                 (Types.make_trait_substitution trait_interface.trait_generics ~self:self_type trait)
-                 (Types.make_signature_substitution signature instantiation))
-              signature.uses
-          in
-          match evidence with
-          | Dynamic ->
-              Types.replace_capabilities
-                (function
-                  | Types.Capability_unless_values capability ->
-                      Some (Types.make_capability_set [ capability ])
-                  | _ -> None)
-                uses
-          | Impl _ | Bound -> uses)
-      | _ -> raise_bug "`%s` has no method `%s`" (Path.show trait.trait) name)
-  | Capability_method { capability; name } -> (
-      match Interface.Definition.find_trait_method interface capability ~name ~receiver:Static with
-      | Some method_ ->
-          Types.union_capabilities
-            (Types.make_capability_set [ Types.make_capability capability ])
-            (Signatures.read_of_method signatures interface ~owner:capability method_).uses
-      | None -> raise_bug "`%s` has no method `%s`" (Path.show capability) name)
-  | Intrinsic { operation; _ } -> (Intrinsic_signatures.make_signature operation).uses
-  | Indirect function_value -> (
+  match (target, Signatures.find_declaration signatures interface target) with
+  | Function _, Some { signature; substitution; _ } ->
+      Types.substitute_capabilities substitution signature.uses
+  | Trait_method { evidence; _ }, Some { signature; substitution; _ } -> (
+      let uses = Types.substitute_capabilities substitution signature.uses in
+      match evidence with
+      | Dynamic ->
+          Types.replace_capabilities
+            (function
+              | Types.Capability_unless_values capability ->
+                  Some (Types.make_capability_set [ capability ])
+              | _ -> None)
+            uses
+      | Impl _ | Bound -> uses)
+  | Capability_method { capability; _ }, Some { signature; _ } ->
+      Types.union_capabilities
+        (Types.make_capability_set [ Types.make_capability capability ])
+        signature.uses
+  | (Function _ | Trait_method _ | Capability_method _), None ->
+      raise_bug "a callee that names no declaration"
+  | Intrinsic { operation; _ }, _ -> (Intrinsic_signatures.make_signature operation).uses
+  | Indirect function_value, _ -> (
       let type_ =
         match function_value with
         | Value value | Place (Lent value | Temporary value) -> value.type_

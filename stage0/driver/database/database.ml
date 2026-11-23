@@ -1095,7 +1095,6 @@ module For_testing = struct
           Any Facts.contract;
           Any Facts.body;
           Any Facts.body_mir;
-          Any Facts.contract_mir;
         ]
 
   let make_proof_lookups = make_proof_lookups

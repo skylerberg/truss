@@ -331,11 +331,11 @@ let compute_changes ?(also = []) run (frame : State.frame) (blocks : Mir.block l
   in
   let note_passed (call : Mir.call) =
     List.iter
-      (function
-        | Mir.Passed { mode = Language.Mode.Mut; value = Borrow { place; _ } | Use { place; _ }; _ }
-          ->
+      (fun (argument : Mir.argument) ->
+        match argument with
+        | { mode = Language.Mode.Mut; value = Borrow { place; _ } | Use { place; _ }; _ } ->
             note place
-        | Passed _ | Default -> ())
+        | { mode = Mut; value = Take _ | Immediate _; _ } | { mode = Read | Own; _ } -> ())
       call.arguments
   in
   let rec note_lent : Mir.yielded -> unit = function
@@ -459,52 +459,43 @@ let find_argument_place context run (mode : Language.Mode.t) (value : Mir.operan
 let evaluate_call_values context frame run (invocation : Invocation.t)
     (arguments : Mir.argument list) =
   Lambdas.make_passed_values context frame invocation
-    (List.concat
-       (List.mapi
-          (fun position (argument : Mir.argument) ->
-            match argument with
-            | Passed { mode; value; function_; _ } -> (
-                match function_ with
-                | Some (Lambda_expression { body; origin; type_ }) ->
-                    [
-                      State.Lambda_argument
-                        {
-                          position;
-                          mode;
-                          site = { origin; type_ };
-                          lambda = { code = run.lambdas.(body); lambdas = run.lambdas };
-                        };
-                    ]
-                | Some (Function_reference _) | None ->
-                    [
-                      Value_argument
-                        {
-                          position;
-                          mode;
-                          shape = classify_shape run ?function_ value;
-                          origin = find_operand_origin value;
-                          passed_place = find_argument_place context run mode value;
-                          type_ = compute_operand_type context frame value;
-                          term =
-                            Validity.run_reading_callback context (fun () ->
-                                read_operand context frame run value);
-                        };
-                    ])
-            | Default -> [])
-          arguments))
+    (List.mapi
+       (fun position ({ mode; value; function_ } : Mir.argument) ->
+         match function_ with
+         | Some (Lambda_expression { body; origin; type_ }) ->
+             State.Lambda_argument
+               {
+                 position;
+                 mode;
+                 site = { origin; type_ };
+                 lambda = { code = run.lambdas.(body); lambdas = run.lambdas };
+               }
+         | Some (Function_reference _) | None ->
+             Value_argument
+               {
+                 position;
+                 mode;
+                 shape = classify_shape run ?function_ value;
+                 origin = find_operand_origin value;
+                 passed_place = find_argument_place context run mode value;
+                 type_ = compute_operand_type context frame value;
+                 term =
+                   Validity.run_reading_callback context (fun () ->
+                       read_operand context frame run value);
+               })
+       arguments)
 
 let read_call context frame run (call : Mir.call) ~result_type =
   let invocation = make_invocation call.callee ~lends:None in
   match (invocation.callee, call.arguments) with
   | ( Trait_method { trait; name; receiver; _ },
       [
-        Passed { value = tested; _ };
-        Passed
-          {
-            value =
-              Borrow { place = { root = Literal { value = Text text; _ }; projections = [] }; _ };
-            _;
-          };
+        { value = tested; _ };
+        {
+          value =
+            Borrow { place = { root = Literal { value = Text text; _ }; projections = [] }; _ };
+          _;
+        };
       ] )
     when Well_known.is_method Equal_equal (Method { owner = trait.trait; name; receiver }) ->
       let ty = compute_operand_type context frame tested in
@@ -741,6 +732,21 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
       (frame, translate_operand value)
   | Value_parameter parameter ->
       (frame, Models.make_value_term context frame (Value_parameter parameter))
+  | Parameter_default { definition; position; substitution } ->
+      let default = Mir.read_parameter_default context.lookups.mir ~definition ~position in
+      let declared, term =
+        Amounts.run_code context
+          {
+            frame with
+            source = Contracts.read_source_at_key context.lookups default.source;
+            locals = Locals.empty;
+            types = Locals.empty;
+            makes_obligations = false;
+            substitution = Types.substitute_substitution frame.substitution substitution;
+          }
+          default.form ~type_:ty
+      in
+      ({ frame with spent = declared.spent }, term)
   | Convert { conversion = To_integer; value; _ } -> (frame, translate_operand value)
   | Convert { conversion = View_to_owned; value; _ } ->
       ( frame,

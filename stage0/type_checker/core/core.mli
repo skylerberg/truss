@@ -51,7 +51,7 @@ and call = {
   lends : Language.Mode.t option;
 }
 
-and argument = Passed of { mode : Language.Mode.t; value : operand } | Default
+and argument = { mode : Language.Mode.t; value : operand }
 and operand = Place of place | Value of expression
 
 and place =
@@ -81,6 +81,7 @@ and kind =
   | Copy of operand
   | Function_value of { path : Path.t; instantiation : Types.instantiation }
   | Value_parameter of Types.parameter
+  | Parameter_default of { definition : Path.t; position : int; substitution : Types.substitution }
   | Lambda of {
       parameters : pattern list;
       captures : capture list;

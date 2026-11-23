@@ -8,13 +8,6 @@ let read_mir_graph (context : Definitions.context) path : Mir.Graph.t =
   | Some { form; _ } -> form
   | None -> Definitions.raise_bug "%s has no MIR" (Path.show path)
 
-let read_parameter_defaults (context : Definitions.context) path :
-    (int * Mir.Graph.t) list Mir.sourced =
-  match Mir.read_default_graphs context.lookups.mir path with
-  | Some { source; form = Parameter_defaults defaults } -> { source; form = defaults }
-  | Some { form = Field_defaults _; _ } | None ->
-      Definitions.raise_bug "%s is not a function" (Path.show path)
-
 let extract_parameter (body : Mir.Graph.body) local =
   match body.locals.(local) with
   | { kind = Source { local = core; mode; _ }; type_; _ } -> (mode, Mir.find_local_name core, type_)
@@ -414,7 +407,7 @@ let reads (value : Mir.rvalue) local =
   | Construct { fields; _ } ->
       List.exists (fun (_, field) -> Option.fold ~none:false ~some:is_in_operand field) fields
   | Is_variant { place; _ } -> is_in_place place
-  | Function_value _ | Lambda _ | Value_parameter _ | Specification _ -> false
+  | Function_value _ | Lambda _ | Value_parameter _ | Parameter_default _ | Specification _ -> false
 
 let alias state local (source : Lowered.place) ~writable =
   let info = lookup_local_info state local in

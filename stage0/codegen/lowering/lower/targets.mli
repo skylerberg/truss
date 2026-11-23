@@ -124,7 +124,6 @@ val lower_item_call :
   signature:Types.signature ->
   substitution:Types.substitution ->
   arguments:(Language.Mode.t * Ground.ty * Lowered.place) list ->
-  ?mask:int ->
   ?lending:Lowered.operand list ->
   destination:Lowered.place ->
   site:Lowered.site option ->

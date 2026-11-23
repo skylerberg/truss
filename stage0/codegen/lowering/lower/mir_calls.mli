@@ -19,7 +19,7 @@ val evaluate_arguments :
   Types.signature ->
   Types.substitution ->
   Mir.argument list ->
-  (Language.Mode.t * Ground.ty * Lowered.place) list * int
+  (Language.Mode.t * Ground.ty * Lowered.place) list
 
 val lower_argument_place :
   Lowering.state -> Mir.argument -> Language.Mode.t * Ground.ty * Lowered.place

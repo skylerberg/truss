@@ -182,6 +182,9 @@ module Code : sig
     | Redeclared_method
     | Restated_method_body
     | Restated_method_clause
+    | Restated_method_default
+    | Overridden_method_default
+    | Default_without_body
     | Decided_condition
     | Misplaced_value_condition
     | Trait_cycle

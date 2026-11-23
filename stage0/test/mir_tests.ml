@@ -20,7 +20,7 @@ and list_operand_locals : Mir.operand -> Mir.local list = function
 let list_call_locals (call : Mir.call) =
   (match call.callee.target with Indirect callee -> list_operand_locals callee | _ -> [])
   @ List.concat_map
-      (function Mir.Passed { value; _ } -> list_operand_locals value | Default -> [])
+      (fun (argument : Mir.argument) -> list_operand_locals argument.value)
       call.arguments
 
 let list_written (place : Mir.place) =
@@ -40,7 +40,7 @@ let rec list_rvalue_locals : Mir.rvalue -> Mir.local list = function
   | Is_variant { place; _ } -> list_place_locals place
   | Lambda { captures; _ } ->
       List.concat_map (fun (capture : Mir.capture) -> list_place_locals capture.place) captures
-  | Function_value _ | Value_parameter _ -> []
+  | Function_value _ | Value_parameter _ | Parameter_default _ -> []
   | Specification (Result | Yielded) -> []
   | Specification (Entry local) -> [ local ]
   | Specification (Identical (first, second)) ->
@@ -182,6 +182,7 @@ let validate definition (body : Mir.Graph.body) =
                     | Function_value _ -> "function"
                     | Lambda _ -> "lambda"
                     | Value_parameter _ -> "value_parameter"
+                    | Parameter_default _ -> "parameter_default"
                     | Specification _ -> "specification")
               | None, Basic (Call { destination = Some { root = Local l; projections = [] }; _ })
                 when l = local ->
@@ -542,8 +543,7 @@ let () =
                      call =
                        {
                          callee = { target = Function { path = Top { name = "step"; _ }; _ }; _ };
-                         arguments =
-                           [ _; Passed { value = Immediate { value = Integer next; _ }; _ } ];
+                         arguments = [ _; { value = Immediate { value = Integer next; _ }; _ } ];
                          _;
                        };
                      _;
@@ -718,10 +718,7 @@ let () =
           | Basic (Assign { value = Operand operand; _ }) -> find_ranged_root operand
           | Basic (Call { call; _ }) ->
               List.find_map
-                (fun (argument : Mir.argument) ->
-                  match argument with
-                  | Passed { value; _ } -> find_ranged_root value
-                  | Default -> None)
+                (fun (argument : Mir.argument) -> find_ranged_root argument.value)
                 call.arguments
           | _ -> None)
         all
@@ -954,9 +951,7 @@ let () =
       Mir.iter_code
         (fun (statement : Mir.statement) ->
           match statement.kind with
-          | Basic
-              (Call { call = { arguments = Passed { function_ = Some function_; _ } :: _; _ }; _ })
-            ->
+          | Basic (Call { call = { arguments = { function_ = Some function_; _ } :: _; _ }; _ }) ->
               functions := function_ :: !functions
           | _ -> ())
         mir;
@@ -1089,6 +1084,28 @@ let () =
       | Field_defaults defaults ->
           Harness.fail "`Counter` has %d field defaults" (List.length defaults)
       | Parameter_defaults _ -> Harness.fail "a type with parameter defaults");
+  Harness.test "an omitted argument reads the default of the definition that declares it" (fun () ->
+      let packages = Support.setup [ ("app.main", Fixtures.Mir.calls_that_omit_arguments) ] in
+      let { Mir.form = code; _ } =
+        Option.get (Mir.read_code (make_mir_parts packages) (Support.make_top_path "app.main" "f"))
+      in
+      let defaults = ref [] in
+      Mir.iter_code
+        (fun (statement : Mir.statement) ->
+          match statement.kind with
+          | Basic (Assign { value = Parameter_default { definition; position; _ }; _ }) ->
+              defaults := (Path.show definition, position) :: !defaults
+          | _ -> ())
+        code;
+      let expected =
+        [ ("app.main.Scaled.scaled", 1); ("app.main.Tally.add", 0); ("app.main.scale", 1) ]
+      in
+      if List.sort compare !defaults <> expected then
+        Harness.fail "the defaults read are [%s]"
+          (String.concat "; "
+             (List.map
+                (fun (definition, position) -> Printf.sprintf "%s at %d" definition position)
+                (List.sort compare !defaults))));
   Harness.test "a contract's clauses are formulas that take the function's parameters" (fun () ->
       let packages =
         Support.setup
@@ -1488,6 +1505,11 @@ let () =
       expect_edges "read_an_offset" ~expected:[ "app.main.offsets" ];
       expect_edges "match_limit" ~expected:[ "app.main.limit" ];
       expect_edges "build_window" ~expected:[ "app.main.limit" ]);
+  Harness.test
+    "a call that omits an argument has an edge to each constant that the default reads, and the \
+     callee has none" (fun () ->
+      expect_edges "pick_size" ~expected:[ "app.main.limit"; "app.main.size_window" ];
+      expect_edges "size_window" ~expected:[]);
   Harness.test "a constant has an edge to each function it calls and each constant it reads"
     (fun () -> expect_edges "doubled" ~expected:[ "app.main.limit"; "app.main.pass_limit" ]);
   Harness.test "a dependency records what reads the constant and through which omitted field"
@@ -1501,7 +1523,21 @@ let () =
           (fun (dependency : Mir.Call_edges.dependency) -> dependency.kind = Read)
           (Mir.Call_edges.list_dependencies (Lazy.force lookups) Types.no_substitution code)
       with
-      | [ { path; omitted_field = Some "size"; _ } ] ->
+      | [ { path; omitted = Some (Field "size"); _ } ] ->
+          expect_paths ~expected:[ "app.main.limit" ] [ path ]
+      | dependencies -> Harness.fail "%d reads" (List.length dependencies));
+  Harness.test "a dependency records what reads the constant and through which omitted argument"
+    (fun () ->
+      let { Mir.form = code; _ } =
+        Option.get
+          (Mir.read_code (Lazy.force lookups).mir (Support.make_top_path "app.main" "pick_size"))
+      in
+      match
+        List.filter
+          (fun (dependency : Mir.Call_edges.dependency) -> dependency.kind = Read)
+          (Mir.Call_edges.list_dependencies (Lazy.force lookups) Types.no_substitution code)
+      with
+      | [ { path; omitted = Some (Argument "size"); _ } ] ->
           expect_paths ~expected:[ "app.main.limit" ] [ path ]
       | dependencies -> Harness.fail "%d reads" (List.length dependencies))
 

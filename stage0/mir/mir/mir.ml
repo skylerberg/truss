@@ -43,9 +43,7 @@ let find_defaults (definition : Core.definition) =
   | Trait _ | Constant _ | Empty -> None
 
 let find_local_name = Core_walk.find_local_name
-
-let make_parameter ({ local; mode; type_; default; _ } : Core.parameter) : parameter =
-  { local; mode; type_; has_default = default <> None }
+let make_parameter ({ local; mode; type_; _ } : Core.parameter) : parameter = { local; mode; type_ }
 
 let of_conditional_clause ~parameters ({ holds_when; clause } : Core.expression Core.conditional) =
   { (Builder.of_clause ~parameters clause) with holds_when }

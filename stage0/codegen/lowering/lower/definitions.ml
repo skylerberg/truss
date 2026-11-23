@@ -40,7 +40,6 @@ type code = {
   result : Types.result;
   substitution : Types.substitution;
   uses : Types.capability_set;
-  has_defaults : bool;
   assumes_condition : bool;
 }
 
@@ -52,7 +51,6 @@ let make_unwritten_code ~definition ~substitution ~result =
     result;
     substitution;
     uses = Types.no_capabilities;
-    has_defaults = false;
     assumes_condition = false;
   }
 
@@ -60,6 +58,15 @@ let read_written context key =
   {
     spans = context.lookups.interface.names.read_spans key;
     text = context.lookups.interface.names.read_text key;
+  }
+
+let make_default_code context (code : code) ~(source : Resolve.Names.key) ~substitution =
+  {
+    code with
+    definition = source.path;
+    written = Some (read_written context source);
+    enclosing_impl = None;
+    substitution = Types.substitute_substitution code.substitution substitution;
   }
 
 let bind = Monomorphic.make_substitution
@@ -84,10 +91,6 @@ let make_function_code context ~enclosing_impl (key : Resolve.Names.key)
     result = interface.output;
     substitution;
     uses = interface.uses;
-    has_defaults =
-      List.exists
-        (fun (parameter : Types.parameter_info) -> parameter.has_default)
-        interface.parameters;
     assumes_condition = false;
   }
 
@@ -181,8 +184,8 @@ let list_lending_parameters context substitution (result : Types.result) : Lower
   | Returns _ -> []
 
 let make_c_signature context substitution ~(parameters : (Language.Mode.t * Types.ty) list)
-    ~has_defaults ?(uses = Types.no_capabilities) (result : Types.result) :
-    Lowered.signature * Convention.result =
+    ?(uses = Types.no_capabilities) (result : Types.result) : Lowered.signature * Convention.result
+    =
   let ground ty = Monomorphic.ground context.monomorphic substitution ty in
   let result_ty, returns = classify_result context substitution result in
   let written =
@@ -190,15 +193,11 @@ let make_c_signature context substitution ~(parameters : (Language.Mode.t * Type
       (fun (mode, ty) -> Convention.classify_parameter context.env mode (ground ty))
       parameters
   in
-  let mask = if has_defaults then [ Lowered.Raw (Integer UInt64) ] else [] in
   let evidence =
     List.map (fun _ -> Convention.evidence) (list_evidence context substitution uses)
   in
   let lending = list_lending_parameters context substitution result in
-  (Convention.make_signature ~returns (written @ mask @ evidence @ lending) result_ty, result_ty)
-
-let has_defaults (signature : Types.signature) =
-  List.exists (fun (parameter : Types.parameter_info) -> parameter.has_default) signature.parameters
+  (Convention.make_signature ~returns (written @ evidence @ lending) result_ty, result_ty)
 
 let list_interface_parameters (signature : Types.signature) =
   Option.to_list signature.receiver

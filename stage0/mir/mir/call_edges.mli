@@ -21,12 +21,13 @@ val list_code_supplied_to_generics :
   Path.t list
 
 type dependency_kind = Read | Direct_call | Supplied of supplier
+type omitted = Field of string | Argument of string
 
 type dependency = {
   path : Path.t;
   kind : dependency_kind;
   origin : Core.origin;
-  omitted_field : string option;
+  omitted : omitted option;
 }
 
 val list_dependencies : lookups -> Types.substitution -> Tree.t -> dependency list

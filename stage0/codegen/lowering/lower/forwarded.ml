@@ -117,8 +117,8 @@ let forward_call ~(substitution : Types.substitution) ~(make_fresh_local : unit 
   let* { held; computed; lending } = find_forwarding body in
   let outer_arguments =
     List.map
-      (function
-        | Mir.Passed { mode = Read | Mut; value; _ } -> Some value | Passed _ | Default -> None)
+      (fun ({ mode; value; _ } : Mir.argument) ->
+        match mode with Read | Mut -> Some value | Own -> None)
       outer.arguments
   in
   let* outer_values =
@@ -218,11 +218,8 @@ let forward_call ~(substitution : Types.substitution) ~(make_fresh_local : unit 
       List.fold_right
         (fun (argument : Mir.argument) arguments ->
           let* arguments = arguments in
-          match argument with
-          | Passed passed ->
-              let* value = find_forwarded passed.value in
-              Some (Mir.Passed { passed with value } :: arguments)
-          | Default -> None)
+          let* value = find_forwarded argument.value in
+          Some ({ argument with value } :: arguments))
         inner.arguments (Some [])
     in
     Some { outer with callee = { inner.callee with target }; arguments }

@@ -23,6 +23,9 @@ let show_signature (signature : Types.signature) =
            signature.parameters))
     (Types.show_output signature.output)
 
+let has_default (signature : Types.signature) =
+  List.exists (fun (parameter : Types.parameter_info) -> parameter.has_default) signature.parameters
+
 let list_types (signature : Types.signature) =
   let types = ref [] in
   ignore
@@ -341,6 +344,18 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
             Checking.report state Wrong_receiver state.spans.(name.id)
               "A capability's implementation takes `self`, or `mut self` if it mutates its own \
                state."
+          else if
+            (not trait.is_capability) && implemented.declared.provided
+            && has_default
+                 (Definition.read_method_signature state.lookups ~owner:impl.implements.trait
+                    implemented.declared)
+          then
+            Checking.report state Overridden_method_default state.spans.(name.id)
+              (Printf.sprintf
+                 "`%s` declares `%s` with a default, so no `impl` overrides it. A call that omits \
+                  the argument reads the default from the declaration in `%s`, and this method \
+                  would be a second declaration that shows none."
+                 shown_trait name.text shown_trait)
           else
             let normalize_capabilities =
               Impls.Conformance.normalize_capabilities_in_impl state.lookups ~list_bounds impl

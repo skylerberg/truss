@@ -26,6 +26,7 @@ let list_nested_blocks (statement : Tree.statement) : Tree.block list =
             value =
               ( Operand _ | Operation _ | Compare _ | Not _ | Construct _ | Array _ | Is_variant _
               | Convert _ | To_any _ | Copy _ | Function_value _ | Lambda _ | Value_parameter _
+              | Parameter_default _
               | Specification
                   (Result | Entry _ | Yielded | Identical _ | Applied _ | Method_cost _ | Map _) );
             _;
@@ -59,9 +60,7 @@ let visit_target visit : Tree.operand Core.target -> unit = function
 
 let visit_call visit (call : Tree.call) =
   visit_target visit call.callee.target;
-  List.iter
-    (function Tree.Passed { value; _ } -> visit_operand visit value | Default -> ())
-    call.arguments
+  List.iter (fun (argument : Tree.argument) -> visit_operand visit argument.value) call.arguments
 
 let rec visit_yielded visit : Tree.yielded -> unit = function
   | Part part -> visit_operand visit part
@@ -92,7 +91,7 @@ let visit_rvalue visit origin (rvalue : Tree.rvalue) =
   | Specification (Quantified { range = Over_range { start; stop; _ }; _ }) ->
       visit_operand start;
       visit_operand stop
-  | Function_value _ | Value_parameter _
+  | Function_value _ | Value_parameter _ | Parameter_default _
   | Specification (Result | Entry _ | Yielded | Quantified { range = Over_type _; _ }) ->
       ()
 

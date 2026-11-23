@@ -90,23 +90,22 @@ let locate_core_call text written occurrence =
   | None -> failwith (Printf.sprintf "%S is not a call" written)
 
 let is_view : Core.argument -> bool = function
-  | Passed
-      {
-        value =
-          ( Value
-              {
-                kind =
-                  ( Call
-                      {
-                        callee = { target = Function { path = Method { name = "slice"; _ }; _ }; _ };
-                        _;
-                      }
-                  | Use (Range { stop = None; _ }) );
-                _;
-              }
-          | Place (Range { stop = None; _ }) );
-        _;
-      } ->
+  | {
+      value =
+        ( Value
+            {
+              kind =
+                ( Call
+                    {
+                      callee = { target = Function { path = Method { name = "slice"; _ }; _ }; _ };
+                      _;
+                    }
+                | Use (Range { stop = None; _ }) );
+              _;
+            }
+        | Place (Range { stop = None; _ }) );
+      _;
+    } ->
       true
   | _ -> false
 
@@ -927,9 +926,8 @@ let () =
 let () =
   let functions = "fn copy_file(source: Int64, destination: Int64) {}\n\n" in
   let passes_local name : Core.argument -> bool = function
-    | Passed { value = Place (Local { local = Declared { name = passed; _ }; _ }); _ } ->
-        passed = name
-    | Passed _ | Default -> false
+    | { value = Place (Local { local = Declared { name = passed; _ }; _ }); _ } -> passed = name
+    | _ -> false
   in
   Harness.test "arguments without labels are passed by position" (fun () ->
       expect_fine (functions ^ Fixtures.Infer.copy_file_with_positional_arguments));
@@ -1028,8 +1026,27 @@ let () =
   Harness.test "an argument for a parameter with a default can be omitted" (fun () ->
       let text = Fixtures.Infer.connect_without_its_port in
       match locate_core_call text "connect(1)" 1 with
-      | { arguments = [ Passed _; Default ]; _ }, _ -> ()
-      | _ -> Harness.fail "the omitted default is not recorded");
+      | ( {
+            arguments =
+              [
+                _;
+                {
+                  mode = Read;
+                  value =
+                    Value
+                      {
+                        kind =
+                          Parameter_default
+                            { definition = Top { name = "connect"; _ }; position = 1; _ };
+                        _;
+                      };
+                };
+              ];
+            _;
+          },
+          _ ) ->
+          ()
+      | _ -> Harness.fail "the omitted argument is not the default that `connect` declares");
   Harness.test "a String passed where a StringSlice is expected is viewed" (fun () ->
       let text = Fixtures.Infer.greet_of_a_string in
       match locate_core_call text "greet(name)" 1 with
@@ -1050,7 +1067,7 @@ let () =
       match locate_core_call text "values.sort()" 1 with
       | ( {
             arguments =
-              [ Passed { mode = Mut; value = Value { kind = Use (Range _); _ } | Place (Range _) } ];
+              [ { mode = Mut; value = Value { kind = Use (Range _); _ } | Place (Range _) } ];
             _;
           },
           _ ) ->
@@ -1080,13 +1097,12 @@ let () =
       | ( {
             arguments =
               [
-                Passed
-                  {
-                    mode = Mut;
-                    value =
-                      ( Value { kind = Use (Range { stop = None; _ }); _ }
-                      | Place (Range { stop = None; _ }) );
-                  };
+                {
+                  mode = Mut;
+                  value =
+                    ( Value { kind = Use (Range { stop = None; _ }); _ }
+                    | Place (Range { stop = None; _ }) );
+                };
               ];
             _;
           },

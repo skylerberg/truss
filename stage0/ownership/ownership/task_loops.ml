@@ -3,11 +3,7 @@ let find_collection_type (body : Mir.Graph.body) ~(inside : Mir.Graph.block) par
     (fun (statement : Mir.Graph.statement) ->
       match statement.kind with
       | Basic
-          (Lend
-             {
-               part = lent;
-               call = { arguments = Passed { value = Borrow { type_; _ }; _ } :: _; _ };
-             })
+          (Lend { part = lent; call = { arguments = { value = Borrow { type_; _ }; _ } :: _; _ } })
         when lent = part ->
           Some type_
       | Basic _ | Provide_start _ | Provide_end -> None)

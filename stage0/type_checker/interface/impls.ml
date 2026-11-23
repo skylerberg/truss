@@ -721,16 +721,17 @@ and make_expected_signature lookups ?written (implemented : implemented_method) 
       implementation declared
   in
   match written with
-  | Some written when implementation.trait.is_capability ->
+  | Some written ->
       {
         expected with
-        receiver = written.receiver;
+        receiver =
+          (if implementation.trait.is_capability then written.receiver else expected.receiver);
         parameters =
           List.map
             (fun (parameter : Types.parameter_info) -> { parameter with has_default = false })
             expected.parameters;
       }
-  | Some _ | None -> expected
+  | None -> expected
 
 and read_signature lookups (path : Path.t) =
   let ( let* ) = Option.bind in
