@@ -701,7 +701,6 @@ type item_graph = {
   item_kind : int;
   references : int;
   claims : int;
-  claim_kinds : int list;
 }
 
 let mark_items_stale store ~stage =
@@ -714,17 +713,19 @@ type linked = {
   sites : string option;
   text_hash : string option;
   is_unevaluated : bool;
+  is_unit_stale : bool;
 }
 
-let list_linked store graph ~profile ~roots =
+let list_linked store graph ~profile ~unit_kind ~roots =
   Sql.list_rows store.sql
     "WITH RECURSIVE down(node) AS (SELECT value FROM json_each(?4) UNION SELECT e.target FROM down \
      CROSS JOIN main.lowered l ON l.item = down.node CROSS JOIN main.edge e ON e.source_kind = \
      CASE WHEN l.is_evaluated = 1 THEN ?6 ELSE ?2 END AND e.source = down.node AND e.target_kind = \
      ?1 WHERE (e.markers & ?3) != 0) SELECT down.node, i.key, l.sites, u.state, u.text_hash, \
      l.is_evaluated = 1 AND EXISTS (SELECT 1 FROM main.stale s WHERE s.stage = ?6 AND s.id = \
-     down.node) FROM down CROSS JOIN main.item i ON i.id = down.node LEFT JOIN main.lowered l ON \
-     l.item = down.node LEFT JOIN main.unit u ON u.item = down.node AND u.profile = ?5"
+     down.node), EXISTS (SELECT 1 FROM main.stale s WHERE s.stage = ?7 AND s.id = down.node) FROM \
+     down CROSS JOIN main.item i ON i.id = down.node LEFT JOIN main.lowered l ON l.item = \
+     down.node LEFT JOIN main.unit u ON u.item = down.node AND u.profile = ?5"
     [
       Integer graph.item_kind;
       Integer graph.lower_kind;
@@ -732,6 +733,7 @@ let list_linked store graph ~profile ~roots =
       Text (encode_integers roots);
       Integer profile;
       Integer graph.evaluate_kind;
+      Integer unit_kind;
     ]
     (fun row ->
       {
@@ -742,55 +744,45 @@ let list_linked store graph ~profile ~roots =
           (if Sql.is_null row 3 || Sql.read_integer row 3 <> 0 then None
            else Some (Sql.read_blob row 4));
         is_unevaluated = (not (Sql.is_null row 5)) && Sql.read_integer row 5 = 1;
+        is_unit_stale = Sql.read_integer row 6 = 1;
       })
 
-let is_item_claimed store graph ~item =
-  Sql.has_row store.sql
-    "WITH RECURSIVE up(node) AS (VALUES (?1) UNION SELECT e.source FROM up CROSS JOIN main.edge e \
-     ON e.target_kind = ?2 AND e.target = up.node AND e.name = '' WHERE e.source_kind = ?3 AND \
-     (e.markers & ?4) != 0) SELECT 1 FROM up CROSS JOIN main.edge c ON c.target_kind = ?2 AND \
-     c.target = up.node AND c.name = '' WHERE (c.markers & ?5) != 0 LIMIT 1"
-    [
-      Integer item;
-      Integer graph.item_kind;
-      Integer graph.lower_kind;
-      Integer graph.references;
-      Integer graph.claims;
-    ]
+type claim_edges = Every_edge | Settled_edges of { packages : string list option }
 
-let list_claimed_items store graph ~packages =
-  let claim_kinds = String.concat ", " (List.map string_of_int graph.claim_kinds) in
-  let roots =
-    match packages with
-    | Some _ ->
-        Printf.sprintf
-          "SELECT c.target FROM main.definition d CROSS JOIN main.edge c ON c.source_kind IN (%s) \
-           AND c.source = d.id AND c.target_kind = ?1 WHERE d.package IN (SELECT value FROM \
-           json_each(?5)) AND (c.markers & ?4) != 0 AND NOT EXISTS (SELECT 1 FROM main.stale s \
-           WHERE s.stage = c.source_kind AND s.id = c.source)"
-          claim_kinds
-    | None ->
-        Printf.sprintf
-          "SELECT c.target FROM main.edge c WHERE c.source_kind IN (%s) AND c.target_kind = ?1 AND \
-           ?5 IS NOT NULL AND (c.markers & ?4) != 0 AND NOT EXISTS (SELECT 1 FROM main.stale s \
-           WHERE s.stage = c.source_kind AND s.id = c.source)"
-          claim_kinds
+let is_item_claimed store graph ~item ~over =
+  let require_settled ~stage ~unit =
+    Printf.sprintf " AND NOT EXISTS (SELECT 1 FROM main.stale s WHERE s.stage = %s AND s.id = %s)"
+      stage unit
   in
-  Sql.list_rows store.sql
+  let reference_condition, claimant, claim_condition, packages =
+    match over with
+    | Every_edge -> ("", "", "", [])
+    | Settled_edges { packages } -> (
+        let reference_condition = require_settled ~stage:"?3" ~unit:"e.source"
+        and claim_condition = require_settled ~stage:"c.source_kind" ~unit:"c.source" in
+        match packages with
+        | None -> (reference_condition, "", claim_condition, [])
+        | Some packages ->
+            ( reference_condition,
+              " CROSS JOIN main.definition d ON d.id = c.source",
+              claim_condition ^ " AND +d.package IN (SELECT value FROM json_each(?6))",
+              [ Text (encode_texts packages) ] ))
+  in
+  Sql.has_row store.sql
     (Printf.sprintf
-       "WITH RECURSIVE down(node) AS (%s UNION SELECT e.target FROM down CROSS JOIN main.edge e ON \
-        e.source_kind = ?2 AND e.source = down.node AND e.target_kind = ?1 WHERE (e.markers & ?3) \
-        != 0 AND NOT EXISTS (SELECT 1 FROM main.stale s WHERE s.stage = ?2 AND s.id = down.node)) \
-        SELECT node FROM down"
-       roots)
-    [
-      Integer graph.item_kind;
-      Integer graph.lower_kind;
-      Integer graph.references;
-      Integer graph.claims;
-      Text (encode_texts (Option.value packages ~default:[]));
-    ]
-    (fun row -> Sql.read_integer row 0)
+       "WITH RECURSIVE up(node) AS (VALUES (?1) UNION SELECT e.source FROM up CROSS JOIN main.edge \
+        e ON e.target_kind = ?2 AND e.target = up.node AND e.name = '' WHERE e.source_kind = ?3 \
+        AND (e.markers & ?4) != 0%s) SELECT 1 FROM up CROSS JOIN main.edge c ON c.target_kind = ?2 \
+        AND c.target = up.node AND c.name = ''%s WHERE (c.markers & ?5) != 0%s LIMIT 1"
+       reference_condition claimant claim_condition)
+    ([
+       Integer item;
+       Integer graph.item_kind;
+       Integer graph.lower_kind;
+       Integer graph.references;
+       Integer graph.claims;
+     ]
+    @ packages)
 
 let merge paths ~into =
   let merged = create_memory () in
@@ -835,13 +827,22 @@ let has_error store ~package ~last_stage =
      1"
     [ Text package; Integer last_stage ]
 
-let find_unproven_definition store ~files ~origin =
+type scope = Everything | Packages of string list | Files of int list
+
+let find_unproven_definition store ~scope ~origin =
+  let membership, members =
+    match scope with
+    | Everything -> ("", [])
+    | Packages packages ->
+        ("d.package IN (SELECT value FROM json_each(?2)) AND ", [ Text (encode_texts packages) ])
+    | Files files ->
+        ("d.file IN (SELECT value FROM json_each(?2)) AND ", [ Text (encode_integers files) ])
+  in
   Sql.find_row store.sql
-    "SELECT d.key FROM main.definition d LEFT JOIN main.proof p ON p.definition = d.id WHERE \
-     d.file IN (SELECT value FROM json_each(?1)) AND d.origin = ?2 AND (p.state IS NULL OR p.state \
-     != 0) LIMIT 1"
-    [ Text (encode_integers files); Integer origin ]
-    (fun row -> Sql.read_blob row 0)
+    (Printf.sprintf
+       "SELECT d.key FROM main.definition d LEFT JOIN main.proof p ON p.definition = d.id WHERE \
+        %sd.origin = ?1 AND (p.state IS NULL OR p.state != 0) LIMIT 1"
+       membership) (Integer origin :: members) (fun row -> Sql.read_blob row 0)
 
 type hole = { home : int; start : int; stop : int }
 
@@ -1051,8 +1052,6 @@ type unit_entity =
   | Package_unit
   | Item_unit
 
-type scope = Everything | Packages of string list | Files of int list | Items of int list
-
 let list_stale store ~stage ~entity ~scope =
   let table, id_column =
     match entity with
@@ -1084,8 +1083,7 @@ let list_stale store ~stage ~entity ~scope =
       list_stale_among "package" (encode_texts packages)
   | Files files, (Definition_unit | Path_unit) -> list_among "file" (encode_integers files)
   | Files files, File_unit -> list_among "id" (encode_integers files)
-  | Items items, Item_unit -> list_among "id" (encode_integers items)
-  | (Packages _ | Files _), Item_unit | Items _, _ -> []
+  | (Packages _ | Files _), Item_unit -> []
   | Files _, (Module_unit | Dependency_unit | Package_unit) -> []
 
 type entry = {

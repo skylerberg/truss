@@ -5,7 +5,6 @@ val replace_builtin_entries : Tracker.t -> unit
 val write_file : Tracker.t -> package:string -> Path.file -> string -> unit
 val remove_file : Tracker.t -> Path.file -> unit
 val forget_grant : Tracker.t -> int -> unit
-val list_claimed_items : Tracker.t -> Path.package list option -> int list
 val list_linked : Tracker.t -> Profile.t -> roots:Lowered.Item.t list -> Store.linked list
 val render_unit : Tracker.t -> Tracker.recorder -> Profile.t -> Lowered.Item.t -> string option
 val list_definition_facts : unit -> Tracker.description list
@@ -17,6 +16,10 @@ val drain_decide :
 val drain_stage :
   Tracker.t -> ?on_bug:(Compiler_bug.t -> unit) -> Kind.stage -> scope:Store.scope -> bool
 
+val drain_claimed_items :
+  Tracker.t -> ?on_bug:(Compiler_bug.t -> unit) -> string list option -> unit
+
+val render_units : Tracker.t -> ?on_bug:(Compiler_bug.t -> unit) -> Profile.t -> int list -> unit
 val make_evaluation_root : Prover.Obligation.evaluation -> Lowered.Item.t
 val ensure_item : Tracker.t -> Lowered.Item.t -> unit
 val supply_lowered : Tracker.t -> Lowered.Item.t -> Lowering.lowered -> unit

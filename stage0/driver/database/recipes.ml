@@ -576,7 +576,6 @@ let item_graph : Store.item_graph =
     item_kind;
     references = Kind.encode_markers [ References ];
     claims = Kind.encode_markers [ Claims ];
-    claim_kinds = [ Kind.rank_stage Claim_roots; Kind.rank_stage Prove ];
   }
 
 let ensure_item (database : Tracker.t) (item : Lowered.Item.t) =
@@ -601,7 +600,7 @@ let rec collect_items (database : Tracker.t) candidates =
     (fun id ->
       if
         Option.is_some (Store.find_item_key database.store ~id)
-        && not (Store.is_item_claimed database.store item_graph ~item:id)
+        && not (Store.is_item_claimed database.store item_graph ~item:id ~over:Every_edge)
       then begin
         let referenced = list_item_targets database Lower id in
         List.iter (fun stage -> Tracker.forget database stage id) item_stages;
@@ -915,7 +914,8 @@ let run_lower (database : Tracker.t) id =
         | exception Lowering.Infinite_size _ -> (Failed, []))
   in
   ignore (Tracker.write database Facts.lowered ~id (Some outcome));
-  follow_item_edges database ~items:references changes
+  follow_item_edges database ~items:references changes;
+  references
 
 let run_key_tests (database : Tracker.t) ids =
   let items = List.map (fun id -> (id, read_item database id)) ids in
@@ -1003,6 +1003,7 @@ let run_render profile (database : Tracker.t) id =
 
 let list_linked (database : Tracker.t) profile ~roots =
   Store.list_linked database.store item_graph ~profile:(Facts.rank_profile profile)
+    ~unit_kind:(Kind.rank_stage (Render profile))
     ~roots:(List.map Ids.of_item roots)
 
 let decode_kind (row : Store.definition) = Declarations.decode_kind row.kind
@@ -1383,10 +1384,6 @@ let drain_test_keys (database : Tracker.t) ~guard stale =
          List.filter (Hashtbl.mem closure) (list_item_targets database Lower id))
        (List.sort Int.compare (Hashtbl.fold (fun id () ids -> id :: ids) closure [])))
 
-let list_claimed_items (database : Tracker.t) packages =
-  Store.list_claimed_items database.store item_graph
-    ~packages:(Option.map (List.map Path.show_package) packages)
-
 let list_definition_facts () =
   List.concat_map
     (fun recipe -> List.map Tracker.describe (Tracker.list_facts recipe.stage))
@@ -1434,6 +1431,15 @@ let guard_units (database : Tracker.t) ?on_bug (stage : Kind.stage) ids run =
           doing = [];
         }
 
+let run_units (database : Tracker.t) ?on_bug (stage : Kind.stage) ids run =
+  List.iter
+    (fun id ->
+      if
+        (not (Tracker.is_broken database stage id))
+        && Store.unmark_stale database.store ~stage:(Kind.rank_stage stage) ~id
+      then guard_units database ?on_bug stage [ id ] (fun () -> run database id))
+    ids
+
 let drain_decide (database : Tracker.t) ?on_bug ~scope solver =
   match
     List.filter_map
@@ -1454,13 +1460,7 @@ let drain_stage (database : Tracker.t) ?on_bug (stage : Kind.stage) ~scope =
   let rank = Kind.rank_stage stage in
   let stale = list_stale_units database stage ~scope in
   let guard = guard_units database ?on_bug stage in
-  let run_each run =
-    List.iter
-      (fun id ->
-        if Store.unmark_stale database.store ~stage:rank ~id then
-          guard [ id ] (fun () -> run database id))
-      stale
-  in
+  let run_each = run_units database ?on_bug stage stale in
   (match stage with
   | Parse -> run_each run_parse
   | Declare -> run_each run_declare
@@ -1505,9 +1505,11 @@ let drain_stage (database : Tracker.t) ?on_bug (stage : Kind.stage) ~scope =
           | None -> Compiler_bug.raise_bug ~stage:"Database" "a stale impl has no row")
   | Check_instantiations | Check_tests | Check_unexported | Check_dependencies ->
       run_each (fun database id -> run_package_stage database stage id)
-  | Lower -> run_each run_lower
-  | Key_tests -> if stale <> [] then drain_test_keys database ~guard stale
-  | Render profile -> run_each (run_render profile)
+  | Lower | Key_tests ->
+      Compiler_bug.raise_bug ~stage:"Database"
+        "an item is lowered and keyed from the claims that reach it"
+  | Render _ ->
+      Compiler_bug.raise_bug ~stage:"Database" "a unit is rendered when its item is linked"
   | Evaluate ->
       Compiler_bug.raise_bug ~stage:"Database"
         "an evaluation is recorded by the command that runs it"
@@ -1519,3 +1521,36 @@ let drain_stage (database : Tracker.t) ?on_bug (stage : Kind.stage) ~scope =
       let recipe = find_recipe stage in
       run_each (fun database id -> recipe.run database (read_first_definition database recipe id)));
   stale <> []
+
+let drain_claimed_items (database : Tracker.t) ?on_bug packages =
+  let lowered = Hashtbl.create 64 in
+  let list_claimed_stale_units stage =
+    List.filter
+      (fun item ->
+        Hashtbl.mem lowered item
+        || Store.is_item_claimed database.store item_graph ~item ~over:(Settled_edges { packages }))
+      (list_stale_units database stage ~scope:Everything)
+  in
+  let rec lower_each = function
+    | [] -> ()
+    | id :: pending ->
+        let referenced = ref [] in
+        run_units database ?on_bug Lower [ id ] (fun database id ->
+            referenced := List.map Ids.of_item (run_lower database id);
+            Hashtbl.replace lowered id ());
+        lower_each (!referenced @ pending)
+  in
+  let rec lower_claimed () =
+    match list_claimed_stale_units Lower with
+    | [] -> ()
+    | claimed ->
+        lower_each claimed;
+        lower_claimed ()
+  in
+  lower_claimed ();
+  match list_claimed_stale_units Key_tests with
+  | [] -> ()
+  | claimed -> drain_test_keys database ~guard:(guard_units database ?on_bug Key_tests) claimed
+
+let render_units (database : Tracker.t) ?on_bug profile items =
+  run_units database ?on_bug (Render profile) items (run_render profile)

@@ -118,7 +118,6 @@ type item_graph = {
   item_kind : int;
   references : int;
   claims : int;
-  claim_kinds : int list;
 }
 
 val mark_items_stale : t -> stage:int -> unit
@@ -129,18 +128,24 @@ type linked = {
   sites : string option;
   text_hash : string option;
   is_unevaluated : bool;
+  is_unit_stale : bool;
 }
 
-val list_linked : t -> item_graph -> profile:int -> roots:int list -> linked list
-val is_item_claimed : t -> item_graph -> item:int -> bool
-val list_claimed_items : t -> item_graph -> packages:string list option -> int list
+val list_linked : t -> item_graph -> profile:int -> unit_kind:int -> roots:int list -> linked list
+
+type claim_edges = Every_edge | Settled_edges of { packages : string list option }
+
+val is_item_claimed : t -> item_graph -> item:int -> over:claim_edges -> bool
 val merge : string list -> into:string -> unit
 
 type located = { stage : int; base : int option; is_in_test : bool; detail : string }
 
 val list_file_diagnostics : t -> schema -> file:int -> test_kind:int -> located list
 val has_error : t -> package:string -> last_stage:int -> bool
-val find_unproven_definition : t -> files:int list -> origin:int -> string option
+
+type scope = Everything | Packages of string list | Files of int list
+
+val find_unproven_definition : t -> scope:scope -> origin:int -> string option
 
 type hole = { home : int; start : int; stop : int }
 
@@ -194,8 +199,6 @@ type unit_entity =
   | Dependency_unit
   | Package_unit
   | Item_unit
-
-type scope = Everything | Packages of string list | Files of int list | Items of int list
 
 val list_stale : t -> stage:int -> entity:unit_entity -> scope:scope -> int list
 

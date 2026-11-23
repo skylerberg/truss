@@ -25,8 +25,8 @@ let evaluate database snapshot packages proofs =
               Development)
            evaluated)
 
-let check database snapshot packages files =
-  let proofs = Database.prove database files in
+let check database snapshot packages scope =
+  let proofs = Database.prove database scope in
   {
     database;
     proofs;

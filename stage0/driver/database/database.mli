@@ -40,8 +40,9 @@ val list_dependency_diagnostics : t -> Path.package -> (Source.t * Diagnostic.t 
 val read_source : t -> Path.file -> Source.t
 
 type proofs
+type proof_scope = In_packages of Path.package list | In_files of Path.file list
 
-val prove : ?on_bug:(Compiler_bug.t -> unit) -> t -> Path.file list -> proofs
+val prove : ?on_bug:(Compiler_bug.t -> unit) -> t -> proof_scope -> proofs
 val list_evaluations : proofs -> Lowered.Item.t list
 val decide : ?on_bug:(Compiler_bug.t -> unit) -> proofs -> Solver.t Lazy.t -> unit
 

@@ -68,7 +68,7 @@ let () =
           && Option.fold ~none:true ~some:(( = ) site_column) column
         then Some (site_line, site_column, site, input)
         else None)
-      (Database.For_testing.list_queries (Database.prove database [ file ]))
+      (Database.For_testing.list_queries (Database.prove database (In_files [ file ])))
   in
   if queries = [] then exit_with_error "No obligation of %s starts there." path;
   List.iter

@@ -66,7 +66,7 @@ let fix snapshot packages =
       with
       | [] ->
           apply_fixes snapshot database files
-            (Proofs.list_warnings (Proofs.check database snapshot packages files))
+            (Proofs.list_warnings (Proofs.check database snapshot packages (In_packages packages)))
       | applied -> applied
     in
     if applied = [] || number = rounds then (snapshot, List.rev fixed)
