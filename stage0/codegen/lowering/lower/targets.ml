@@ -595,6 +595,22 @@ let lower_owner_of_view (state : Lowering.state) ~(owner : Ground.ty) ~(view : G
     (Assign
        (destination, Build { ty = owner; variant = None; fields = [ (storage_field, Copy built) ] }))
 
+let lower_slice (state : Lowering.state) ~element ~buffer ~length =
+  let view_type = Storage.make_view_type element in
+  let view = Lowering.allocate_temporary state view_type in
+  Emit_c.Ir_builder.emit state.builder (Assign (view, Storage.build_view view_type ~buffer ~length));
+  let slice_type : Ground.ty =
+    Named { path = Well_known.make_path Slice; arguments = [ Type element ] }
+  in
+  let slice = Lowering.allocate_temporary state slice_type in
+  (match (Memory_layout.of_type state.context.env slice_type).form with
+  | Struct [ field ] ->
+      Emit_c.Ir_builder.emit state.builder
+        (Assign
+           (slice, Build { ty = slice_type; variant = None; fields = [ (field.name, Copy view) ] }))
+  | _ -> Definitions.raise_bug "a `Slice` that is not one view");
+  slice
+
 let lower_static_constant (state : Lowering.state) path : Lowered.place =
   let ty = Interface.Definition.read_constant_type state.context.lookups.interface path in
   { root = Static { item = Constant path; ty = Lowering.ground state ty }; projections = [] }

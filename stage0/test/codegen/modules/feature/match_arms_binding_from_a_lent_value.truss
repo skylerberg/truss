@@ -7,17 +7,17 @@ fn Holder.label(self) lends Option[String] {
 
 type Ledger(counts: Map[String, UInt64], names: List[String])
 
-fn Ledger.name_for(self, word: String) lends String {
+fn Ledger.name_for(self, word: StringSlice) lends String {
   match self.counts.get(word) {
     Some(count) if count < self.names.length() => self.names[count]
     _ => self.names[0]
   }
 }
 
-fn count_word(counts: mut Map[String, UInt64], word: String) {
+fn count_word(counts: mut Map[String, UInt64], word: StringSlice) {
   match counts.get(word) {
-    Some(count) => counts[word.copy()] = count.saturating_add(1)
-    None => counts[word.copy()] = 1
+    Some(count) => counts[word.to_string()] = count.saturating_add(1)
+    None => counts[word.to_string()] = 1
   }
 }
 

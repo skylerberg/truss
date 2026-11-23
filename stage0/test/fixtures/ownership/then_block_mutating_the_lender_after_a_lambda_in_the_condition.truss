@@ -1,5 +1,5 @@
-fn f(counts: mut Map[String, UInt64], word: String, words: List[String]) {
+fn f(counts: mut Map[String, UInt64], word: StringSlice, words: Slice[String]) {
   if counts.get(word) is Some(count) && words.find_index(fn(other) { other.length() > count }) is Some(_) {
-    counts[word.copy()] = 0
+    counts[word.to_string()] = 0
   }
 }

@@ -1,4 +1,4 @@
-fn g(items: List[Int64], visit: fn(Int64))
+fn g(items: Slice[Int64], visit: fn(Int64))
   uses Clock
   cost calls(visit) == items.length()
   cost calls(Clock.now) <= 1

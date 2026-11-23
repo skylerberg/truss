@@ -1,4 +1,4 @@
-fn f(actions: List[fn() -> Int64]) -> UInt64 {
-  let bounded: List[(fn() -> Int64 cost time O(1))] = actions
+fn f(actions: Slice[fn() -> Int64]) -> UInt64 {
+  let bounded: Slice[(fn() -> Int64 cost time O(1))] = actions
   bounded.length()
 }

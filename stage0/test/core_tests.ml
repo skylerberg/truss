@@ -166,7 +166,7 @@ let () =
                  fn take(count: Int64) -> Int64 {\n\
                 \  count\n\
                  }\n\n\
-                 fn g(items: List[Int64], config: Config) -> Int64\n\
+                 fn g(items: Slice[Int64], config: Config) -> Int64\n\
                 \  uses RunForever\n\
                  {\n\
                 \  var hole = todo\n\
@@ -384,7 +384,7 @@ let () =
     ];
   expect "the allocations of a callback are a specification function of the resource"
     Fixtures.Core.cost_naming_allocations_of_a_callback_and_a_bounds_method list_applied
-    [ "call standard.list.List.length"; "allocations"; "allocated_bytes" ];
+    [ "call standard.list.Slice.length"; "allocations"; "allocated_bytes" ];
   Harness.test "in a trait, `time(Self.method)` names the trait's own method" (fun () ->
       Support.expect_no_diagnostics
         ~check:(fun packages module_ ->

@@ -1,0 +1,7 @@
+type Pile(items: List[Int64])
+
+fn keep_pile(pile: own Pile) {}
+
+fn f(pile: Pile) {
+  keep_pile(own pile)
+}

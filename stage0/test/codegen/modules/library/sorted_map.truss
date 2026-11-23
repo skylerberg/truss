@@ -1,7 +1,7 @@
 use standard.collections
 use standard.map
 
-fn squares(keys: List[Int64]) -> collections.SortedMap[Int64, Int64] {
+fn squares(keys: Slice[Int64]) -> collections.SortedMap[Int64, Int64] {
   var sorted: collections.SortedMap[Int64, Int64] = [:]
   for key in keys {
     mut sorted.insert(key, value: key * key)

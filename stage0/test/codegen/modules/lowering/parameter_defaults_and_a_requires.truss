@@ -4,7 +4,7 @@ fn step(start: Int64, by: Int64 = 2 * 3) -> Int64
   start + by
 }
 
-fn length(prefix: String = "item") -> UInt64 {
+fn length(prefix: StringSlice = "item") -> UInt64 {
   prefix.length()
 }
 

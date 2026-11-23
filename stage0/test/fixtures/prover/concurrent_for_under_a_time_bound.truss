@@ -1,4 +1,4 @@
-fn waits(values: List[Int64]) -> Int64
+fn waits(values: Slice[Int64]) -> Int64
   uses Tasks
   cost time O(values.length())
 {

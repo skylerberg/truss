@@ -1,6 +1,6 @@
 use standard.processes
 
-fn holds(bytes: List[UInt8], word: String) -> Bool {
+fn holds(bytes: Slice[UInt8], word: StringSlice) -> Bool {
   let wanted = word.bytes()
   if wanted.length() > bytes.length() {
     return false
@@ -32,7 +32,7 @@ fn settings() -> List[UInt8]
   }
 }
 
-fn main(arguments: List[String]) -> ExitCode
+fn main(arguments: Slice[String]) -> ExitCode
   uses Console, Handles, Processes, FileWrite
 {
   var report = ""

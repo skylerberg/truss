@@ -255,7 +255,7 @@ fn time_files(rounds: UInt64, paths: Slice[String])
   Console.print_line("${total_lexing} ${total_parsing} total")
 }
 
-fn main(arguments: List[String]) -> ExitCode
+fn main(arguments: Slice[String]) -> ExitCode
   uses Console, Clock, FileRead, Panic, RunForever
 {
   if arguments.length() < 2 {
@@ -265,10 +265,10 @@ fn main(arguments: List[String]) -> ExitCode
   let command_name = arguments[1].copy()
   if command_name == "time" && arguments.length() >= 3 {
     let rounds = UInt64.parse(arguments[2]).expect("a count of rounds")
-    time_files(rounds, paths: arguments.slice()[3..])
+    time_files(rounds, paths: arguments[3..])
     return ExitCode.success
   }
-  for path in arguments.slice()[2..] {
+  for path in arguments[2..] {
     let text = FileRead.read_text(Path.new(path)).expect("a readable UTF-8 file")
     if command_name == "tokens" {
       print_tokens(path, own text)

@@ -1,7 +1,7 @@
 use standard.processes
 
-fn say(text: String) uses Console {
-  Console.print_line(text.slice())
+fn say(text: StringSlice) uses Console {
+  Console.print_line(text)
 }
 
 fn shown(status: processes.ExitStatus) -> String {
@@ -15,15 +15,15 @@ fn shown(status: processes.ExitStatus) -> String {
   }
 }
 
-fn show(label: String, bytes: List[UInt8])
+fn show(label: StringSlice, bytes: Slice[UInt8])
   uses Console, Handles
 {
-  Console.print(label.slice())
+  Console.print(label)
   var out = Console.output()
-  let _ = mut out.write(bytes.slice())
+  let _ = mut out.write(bytes)
 }
 
-fn main(arguments: List[String]) -> ExitCode
+fn main(arguments: Slice[String]) -> ExitCode
   uses Console, Processes, Handles, RunForever
 {
   let quiet = processes.Command.new("sh").argument("-c").argument("exit 3")

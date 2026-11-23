@@ -1,4 +1,4 @@
-fn each(items: List[Int64], visit: (fn(Int64) uses generic Granted))
+fn each(items: Slice[Int64], visit: (fn(Int64) uses generic Granted))
   uses generic Granted
   cost allocations O(items.length() * allocations(visit))
 {
@@ -14,7 +14,7 @@ fn apply(value: Int64, change: (fn(Int64) -> Int64 uses generic Granted)) -> Int
   change(value)
 }
 
-fn f(items: List[Int64])
+fn f(items: Slice[Int64])
   cost allocations O(1)
 {
   each(items, visit: fn(item) {

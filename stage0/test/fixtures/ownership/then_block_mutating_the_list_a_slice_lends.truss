@@ -1,4 +1,4 @@
-fn show(text: String) {}
+fn show(text: StringSlice) {}
 
 fn f(names: mut List[String]) {
   if names.slice().first() is Some(name) {

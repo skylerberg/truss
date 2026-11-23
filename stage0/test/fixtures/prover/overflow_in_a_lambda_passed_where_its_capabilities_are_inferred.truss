@@ -1,4 +1,4 @@
-fn incremented(values: List[UInt8]) -> List[UInt8]
+fn incremented(values: Slice[UInt8]) -> List[UInt8]
   uses Panic
 {
   values.map(fn(value) { value + 1 })

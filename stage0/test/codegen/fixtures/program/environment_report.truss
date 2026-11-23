@@ -1,14 +1,14 @@
 use standard.environment
 
-fn say(text: String) uses Console {
-  Console.print_line(text.slice())
+fn say(text: StringSlice) uses Console {
+  Console.print_line(text)
 }
 
 fn shown(path: Option[Path]) -> String {
   if path is Some(present) && present.text() is Some(text) { "${text}" } else { "none".copy() }
 }
 
-fn main(arguments: List[String]) -> ExitCode
+fn main(arguments: Slice[String]) -> ExitCode
   uses Console, Environment, FileRead
 {
   var marked = 0

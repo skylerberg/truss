@@ -417,7 +417,7 @@ fn Worker.leave(mut self)
   self.process = -1
 }
 
-fn any_running(workers: List[Worker]) -> Bool {
+fn any_running(workers: Slice[Worker]) -> Bool {
   var running = false
   for index in 0..workers.length() {
     if workers[index].running {
@@ -449,7 +449,7 @@ fn hand_out(workers: mut List[Worker], next: UInt64, tests: UInt64) -> UInt64
   handed
 }
 
-fn descriptors_to_wait_for(workers: List[Worker]) -> intrinsic.Storage[Int32]
+fn descriptors_to_wait_for(workers: Slice[Worker]) -> intrinsic.Storage[Int32]
   ensures intrinsic.storage_length(result) == workers.length() * 4
 {
   let width = workers.length()
@@ -472,7 +472,7 @@ fn descriptors_to_wait_for(workers: List[Worker]) -> intrinsic.Storage[Int32]
   waited_for
 }
 
-fn milliseconds_until_a_limit(workers: List[Worker], longest_microseconds: UInt64) -> Int32
+fn milliseconds_until_a_limit(workers: Slice[Worker], longest_microseconds: UInt64) -> Int32
   uses capabilities.System
 {
   let now = microseconds()

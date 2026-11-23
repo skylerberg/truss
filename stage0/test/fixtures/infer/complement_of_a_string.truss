@@ -1,3 +1,3 @@
-fn f(text: String) -> Int64 {
+fn f(text: StringSlice) -> Int64 {
   ~text
 }

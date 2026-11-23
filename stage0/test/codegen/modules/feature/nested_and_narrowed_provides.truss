@@ -82,7 +82,7 @@ impl Console for Prefixed
   }
 }
 
-fn greet(name: String) -> UInt64
+fn greet(name: StringSlice) -> UInt64
   uses Console
 {
   Console.print_line("hello ${name}".slice())

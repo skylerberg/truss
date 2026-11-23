@@ -716,9 +716,18 @@ it.
   `counts.get(word)` and `counts[word]` look up a `Map[String, Int64]` with
   a `StringSlice`. The call allocates nothing, and a view that the call
   returns views what the argument views. `self` is no such
-  parameter, and neither is a parameter declared as `List` or `String`,
-  which takes no view. The receiver and the other arguments instantiate the
-  type parameter first, in whatever order the arguments are written.
+  parameter, and neither is a parameter declared as `List` or `String`.
+  The receiver and the other arguments instantiate the type parameter
+  first, in whatever order the arguments are written.
+- **A read-only parameter is declared as a view, never as `List` or
+  `String`.** `fn total(items: List[Int64])` is an error with a fix to
+  `Slice[Int64]`, and so is a read-only `List` or `String` input of a
+  function type. A `Slice` takes a `List`, an `Array`, and a range of
+  either, and a `StringSlice` takes a `String` and a part of one, so the
+  rule prevents a signature that makes every caller that holds a view copy
+  it into a new value. `self` has its method's type. An `impl`'s method
+  restates its trait's signature, so the rule applies where the trait
+  declares the method, and a `Self` parameter there is no `List`.
 
 ## Constants
 
@@ -1137,7 +1146,7 @@ bound       = "O" "(" expression ")" | ( "<=" | "==" ) expression ;
 ```
 
 ```truss
-public fn load_configs(paths: List[Path]) -> Result[List[Config], ConfigError]
+public fn load_configs(paths: Slice[Path]) -> Result[List[Config], ConfigError]
   uses FileRead
   cost calls(FileRead.read) == paths.length()
   cost time O(paths.length())
@@ -1272,7 +1281,7 @@ fn serve(handle: (fn(Request) -> Response uses Database, Log))
 
 ```truss
 public fn for_each[Item](
-  items: List[Item],
+  items: Slice[Item],
   visit: (fn(Item) uses generic Granted),
 )
   uses generic Granted
@@ -1506,10 +1515,10 @@ mut grid.cell(position).visit()
   tested.
 
   ```truss
-  fn tally(counts: mut Map[String, UInt64], word: String) {
+  fn tally(counts: mut Map[String, UInt64], word: StringSlice) {
     match counts.get(word) {
-      Some(count) => counts[word.copy()] = count.saturating_add(1)
-      None => counts[word.copy()] = 1
+      Some(count) => counts[word.to_string()] = count.saturating_add(1)
+      None => counts[word.to_string()] = 1
     }
   }
   ```
@@ -1670,7 +1679,7 @@ loop_clause = ( "invariant" expression | "decreases" expression { "," expression
 ```
 
 ```truss
-fn summarize(scores: List[Int64]) -> Result[Summary, SummaryError] {
+fn summarize(scores: Slice[Int64]) -> Result[Summary, SummaryError] {
   let count = scores.length()
   var best = 0
   for score in scores {
@@ -1983,7 +1992,7 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
   `visited` or a range's index:
 
   ```truss
-  fn sum_all(rows: List[List[Int64]]) -> Int64
+  fn sum_all(rows: Slice[List[Int64]]) -> Int64
     cost time O(rows.length() + rows.model().sum(fn(cells) { cells.length() }))
   {
     var total = 0
@@ -2409,7 +2418,7 @@ A program starts at the `main` of its package's root module, the files in the
 directory of its manifest:
 
 ```truss
-fn main(arguments: List[String]) -> ExitCode
+fn main(arguments: Slice[String]) -> ExitCode
   uses Console, FileRead
 {
   match Config.parse(arguments) {
@@ -2562,7 +2571,7 @@ let pattern = Regex"[a-z]+@${domain}"
 impl FromTemplate for Regex {
   type Part = RegexPart
 
-  fn is_valid_template(literals: List[text.Literal]) -> Bool {
+  fn is_valid_template(literals: Slice[text.Literal]) -> Bool {
     todo
   }
 

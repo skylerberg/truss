@@ -1,4 +1,4 @@
-fn f(words: List[String]) -> Map[String, Int64] {
+fn f(words: Slice[String]) -> Map[String, Int64] {
   var counts: Map[String, Int64] = [:]
   for word in words {
     if counts.get(word) is Some(count) {

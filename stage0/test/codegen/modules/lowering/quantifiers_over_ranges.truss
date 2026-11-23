@@ -1,16 +1,16 @@
-fn all_positive(items: List[Int64]) -> Bool {
+fn all_positive(items: Slice[Int64]) -> Bool {
   forall i in 0..items.length() => items[i] > 0
 }
 
-fn any_long(names: List[String], over: UInt64) -> Bool {
+fn any_long(names: Slice[String], over: UInt64) -> Bool {
   exists i in 0..names.length() => names[i].length() > over
 }
 
-fn sorted(items: List[Int64]) -> Bool {
+fn sorted(items: Slice[Int64]) -> Bool {
   forall i in 1..items.length() => items[i - 1] <= items[i]
 }
 
-fn first_long(names: List[String]) -> Int64 {
+fn first_long(names: Slice[String]) -> Int64 {
   var looked: Int64 = 0
   for name in names {
     looked += 1

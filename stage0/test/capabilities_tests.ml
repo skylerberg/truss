@@ -601,7 +601,7 @@ let () =
     (fun () -> expect_fine Fixtures.Capabilities.quick_bound_with_its_time_clause);
   Harness.test "function types inside a type must promise the same costs" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.list_of_actions_gaining_a_cost "types.mismatch"
-        ~says:"Expected `List[(fn() -> Int64 cost time O(1))]`, found `List[fn() -> Int64]`.")
+        ~says:"Expected `Slice[(fn() -> Int64 cost time O(1))]`, found `Slice[fn() -> Int64]`.")
 
 let readings = Fixtures.Capabilities.readings
 

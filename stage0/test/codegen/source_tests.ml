@@ -87,7 +87,7 @@ let () =
       in
       let _, backend =
         Codegen_support.load ~roots:(List.map function_ names)
-          "fn list_at(items: List[Int64]) -> Int64 {\n\
+          "fn list_at(items: own List[Int64]) -> Int64 {\n\
           \  items[2]\n\
            }\n\n\
            fn slice_at(items: Slice[Int64]) -> Int64 {\n\
@@ -102,7 +102,7 @@ let () =
            fn array_add(items: mut Array[Int64, 4]) {\n\
           \  items[2] += 5\n\
            }\n\n\
-           fn list_sum(items: List[Int64]) -> Int64 {\n\
+           fn list_sum(items: own List[Int64]) -> Int64 {\n\
           \  var total: Int64 = 0\n\
           \  for item in items {\n\
           \    total += item\n\
@@ -145,7 +145,7 @@ let () =
       in
       let _, backend =
         Codegen_support.load ~roots:[ sum ]
-          "fn sum(items: List[Int64]) -> Int64 {\n\
+          "fn sum(items: Slice[Int64]) -> Int64 {\n\
           \  var total: Int64 = 0\n\
           \  for item in items {\n\
           \    total += item\n\

@@ -1,5 +1,5 @@
-fn f(texts: own List[String], other: String) -> UInt64 {
-  var outer = other.slice()
+fn f(texts: own List[String], other: StringSlice) -> UInt64 {
+  var outer = other
   for text in own texts {
     outer = text.slice()
   }

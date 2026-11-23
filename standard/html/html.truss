@@ -401,7 +401,7 @@ fn is_safe_url(text: StringSlice) -> Bool {
 impl FromTemplate for Html {
   type Part = Part
 
-  fn is_valid_template(literals: List[text.Literal]) -> Bool
+  fn is_valid_template(literals: Slice[text.Literal]) -> Bool
   {
     for place in places(literals) {
       if place == Place.Unsafe {

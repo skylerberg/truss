@@ -1,6 +1,6 @@
 type Cell(index: UInt64)
 
-fn f(units: List[UInt64], links: mut List[Cell]) {
+fn f(units: Slice[UInt64], links: mut List[Cell]) {
   for unit in units {
     var ends: List[Cell] = []
     mut ends.push(Cell(index: unit))

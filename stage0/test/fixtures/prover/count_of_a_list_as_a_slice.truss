@@ -5,7 +5,7 @@ fn count(items: Slice[Int64]) -> UInt64
   items.length()
 }
 
-fn f(items: List[Int64]) -> UInt64
+fn f(items: Slice[Int64]) -> UInt64
   ensures result == items.length()
 {
   count(items)

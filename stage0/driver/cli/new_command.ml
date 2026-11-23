@@ -1,7 +1,7 @@
 let render_manifest name =
   Printf.sprintf "[package]\nname = \"%s\"\ntruss = \"%s\"\n" name Manifest.truss_version
 
-let main = {|fn main(arguments: List[String]) -> ExitCode {
+let main = {|fn main(arguments: Slice[String]) -> ExitCode {
   ExitCode.success
 }
 |}

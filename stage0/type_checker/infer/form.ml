@@ -1309,7 +1309,13 @@ and build_tagged_string form env (value : Syntax.expression) (literal : Syntax.s
         Well_known.locate_method From_template_is_valid_template
       in
       let is_valid =
-        call_tag (Trait_method { tag with name; receiver }) Types.bool (make_literals ())
+        call_tag
+          (Trait_method { tag with name; receiver })
+          Types.bool
+          (apply_conversion form value.id (make_literals ())
+             ( Tables.Owned_to_view,
+               Types.make_named (Well_known.make_path Slice)
+                 [ Types.make_named (Well_known.make_path Literal) [] ] ))
       in
       Block
         {

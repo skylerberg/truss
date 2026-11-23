@@ -1,16 +1,16 @@
-fn same_as_view(text: String, view: StringSlice) -> Bool
+fn same_as_view(text: own String, view: StringSlice) -> Bool
   cost allocations == 0
 {
   text == view
 }
 
-fn same_as_part(numbers: List[Int64], part: Slice[Int64]) -> Bool
+fn same_as_part(numbers: own List[Int64], part: Slice[Int64]) -> Bool
   cost allocations == 0
 {
   part == numbers
 }
 
-fn equals_its_whole_slice(numbers: List[Int64]) -> Bool
+fn equals_its_whole_slice(numbers: own List[Int64]) -> Bool
   ensures result
 {
   numbers == numbers[..]

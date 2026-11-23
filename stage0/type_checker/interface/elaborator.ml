@@ -14,6 +14,7 @@ type t = {
   self_associated : (string * Types.ty) list;
   self_capabilities : (string * Types.capability_set) list;
   is_in_capability : bool;
+  is_in_impl : bool;
   diagnostics : Diagnostic.in_definition list ref;
   named : (Syntax.id * Types.ty) list ref;
   spans : Source.Definition_span.t array;
@@ -40,6 +41,7 @@ let create_with lookups resolved ~spans (scope : _ Environment.scope) ~known_bou
     self_associated = scope.self_associated;
     self_capabilities = scope.self_capabilities;
     is_in_capability = false;
+    is_in_impl = false;
     diagnostics = ref [];
     named = ref [];
     spans;
@@ -510,12 +512,42 @@ and elaborate_mode = function
   | Some Syntax.Mut -> Language.Mode.Mut
   | Some Own -> Language.Mode.Own
 
+and elaborate_parameter_type context mode (written : Syntax.type_expression) =
+  let type_ = elaborate_type context written in
+  let report_owning_type ~written_path ~view ~copy ~takes =
+    Types.Error
+      (record_diagnostic context.diagnostics Read_only_owning_parameter
+         ~fixes:
+           [
+             Diagnostic.fix
+               (Printf.sprintf "Write `%s`." view)
+               [ Diagnostic.replace context.spans.(written_path.Syntax.last.id) view ];
+           ]
+         context.spans.(written.id)
+         (Printf.sprintf
+            "A read-only `%s` parameter makes every caller that holds a `%s` copy it into a new \
+             %s. Declare it as `%s`, which takes %s."
+            (show_path written_path) view copy view takes))
+  in
+  match (mode, type_, written.kind) with
+  | Language.Mode.Read, Types.Named { path; _ }, Path_type { path = written_path; _ }
+    when not context.is_in_impl ->
+      if Well_known.is List path then
+        report_owning_type ~written_path ~view:"Slice" ~copy:"list"
+          ~takes:"a `List`, an `Array`, and a range of either"
+      else if Well_known.is String path then
+        report_owning_type ~written_path ~view:"StringSlice" ~copy:"string"
+          ~takes:"a `String`, a string literal, and a part of a string"
+      else type_
+  | _ -> type_
+
 and elaborate_function_type context (written : Syntax.function_type) :
     (Types.function_type, Diagnostic.reported) Stdlib.result =
   let inputs =
     List.map
       (fun (input : Syntax.function_input) ->
-        (elaborate_mode input.mode, elaborate_type context input.type_))
+        let mode = elaborate_mode input.mode in
+        (mode, elaborate_parameter_type context mode input.type_))
       written.inputs
   in
   let output =
@@ -886,11 +918,12 @@ let elaborate_signature context ~owner ~head ~self_type (written : Syntax.signat
       (fun (parameter : Syntax.parameter) ->
         match parameter.kind with
         | Named_parameter { name; mode; type_; default } ->
+            let mode = elaborate_mode mode in
             Some
               {
                 Types.name = name.text;
-                mode = elaborate_mode mode;
-                type_ = elaborate_type context type_;
+                mode;
+                type_ = elaborate_parameter_type context mode type_;
                 has_default = Option.is_some default;
               }
         | Self_parameter _ | Parameter_error -> None)
@@ -1330,15 +1363,16 @@ let elaborate_member (lookups : Lookups.t) ~path ~spans resolved (definition : S
   let context = create_declared lookups resolved ~spans header.container_scope in
   match definition.kind with
   | Function { signature; _ } | Method_declaration signature ->
-      let is_in_capability =
+      let is_in_capability, is_in_impl =
         match header.container with
-        | Capability_parts -> true
-        | Trait_parts _ | Impl_parts _ -> false
+        | Capability_parts -> (true, false)
+        | Trait_parts _ -> (false, false)
+        | Impl_parts _ -> (false, true)
       in
       make_elaborated_interface context
         (Function_interface
            (elaborate_signature
-              { context with self_capabilities = []; is_in_capability }
+              { context with self_capabilities = []; is_in_capability; is_in_impl }
               ~owner:path ~head:[] ~self_type:header.container_scope.self_type signature))
   | _ -> make_elaborated_interface context (Error_interface Diagnostic.reported_elsewhere)
 

@@ -361,8 +361,8 @@ fn local(text: StringSlice) -> time.DateTime {
   }
 }
 
-fn zone_of(name: StringSlice, rules: List[UInt8]) -> time.TimeZone {
-  match time.TimeZone.from_rules(name, rules: rules.slice()) {
+fn zone_of(name: StringSlice, rules: Slice[UInt8]) -> time.TimeZone {
+  match time.TimeZone.from_rules(name, rules: rules) {
     Ok(zone) => zone
     Err(_) => time.TimeZone.utc()
   }

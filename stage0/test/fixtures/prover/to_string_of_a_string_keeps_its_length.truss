@@ -1,4 +1,4 @@
-fn f(name: String) -> String
+fn f(name: own String) -> String
   ensures result.length() == name.length()
 {
   name.to_string()

@@ -1,4 +1,4 @@
-fn f(items: List[Int64], visit: (fn(Int64) uses generic Granted))
+fn f(items: Slice[Int64], visit: (fn(Int64) uses generic Granted))
   uses generic Granted
   cost allocations <= allocations(visit)
 {

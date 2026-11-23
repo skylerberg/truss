@@ -5,7 +5,7 @@ fn f(value: Int64) -> Int64
   apply(value, change: fn(inner) { inner })
 }
 
-fn g(items: List[Int64])
+fn g(items: Slice[Int64])
   cost allocations <= 0
 {
   each(items, visit: fn(item) {

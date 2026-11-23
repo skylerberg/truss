@@ -253,13 +253,20 @@ let build_program_main context (item : Lowered.Item.t) main_path : Emit_c.fragme
   Lowering.set_result_slot state (Returned (Raw (Integer Int32)));
   Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
   let signature = Definitions.read_signature context main_path in
-  let list_ty, list_mode =
+  let slice_ty =
     match signature.parameters with
-    | [ info ] ->
-        (Monomorphic.ground context.monomorphic Types.no_substitution info.type_, info.mode)
+    | [ info ] -> Monomorphic.ground context.monomorphic Types.no_substitution info.type_
     | _ -> Definitions.raise_bug "main takes its arguments"
   in
-  let storage_field, _, string_ty = Targets.read_list_parts context.monomorphic list_ty in
+  let string_ty =
+    match slice_ty with
+    | Named { arguments = [ Type string_ty ]; _ } -> string_ty
+    | _ -> Definitions.raise_bug "main takes a slice of %s" (Ground.to_string slice_ty)
+  in
+  let list_ty : Ground.ty =
+    Named { path = Well_known.make_path List; arguments = [ Type string_ty ] }
+  in
+  let storage_field, _, _ = Targets.read_list_parts context.monomorphic list_ty in
   let list = Lowering.allocate_temporary state list_ty in
   let lower operation type_arguments arguments destination =
     ignore
@@ -323,10 +330,16 @@ let build_program_main context (item : Lowered.Item.t) main_path : Emit_c.fragme
     | _ -> Definitions.raise_bug "main lends"
   in
   let exit = Lowering.allocate_temporary state exit_ty in
+  let storage = Lowered.project list (Field storage_field) in
+  let slice =
+    Targets.lower_slice state ~element:string_ty
+      ~buffer:(Copy (Storage.project_buffer storage))
+      ~length:(Copy (Storage.project_length storage))
+  in
   Targets.lower_item_call state
     (Lowered.Item.make_code main_path Ground.no_instantiation)
     ~signature ~substitution:Types.no_substitution
-    ~arguments:[ (list_mode, list_ty, list) ]
+    ~arguments:[ (Read, slice_ty, slice) ]
     ~destination:exit ~site:None ();
   (match
      (Monomorphic.compute_shape context.monomorphic exit_ty, Lowering.find_result_place state)
