@@ -18,8 +18,6 @@ type local =
   | Self
   | Synthetic of int
 
-type evidence = Impl of { impl : Path.t; substitution : Types.substitution } | Bound | Dynamic
-
 type pattern_constant =
   | Boolean_constant of bool
   | Integer_constant of Z.t
@@ -36,7 +34,7 @@ type 'indirect target =
       receiver : Path.receiver;
       self_type : Types.ty;
       instantiation : Types.instantiation;
-      evidence : evidence;
+      evidence : Types.evidence;
     }
   | Capability_method of { capability : Path.t; name : string }
   | Intrinsic of { operation : Intrinsic.operation; type_arguments : Types.argument list }
@@ -99,7 +97,7 @@ and kind =
   | Connective of { connective : Language.Connective.t; left : expression; right : expression }
   | Matches of { value : operand; pattern : pattern }
   | Convert of { conversion : conversion; value : expression }
-  | To_any of { value : expression; trait : Types.trait_reference; evidence : evidence }
+  | To_any of { value : expression; trait : Types.trait_reference; evidence : Types.evidence }
   | If of { condition : expression; then_ : block; else_ : block option }
   | Match of { scrutinees : operand list; arms : arm list }
   | Block of block

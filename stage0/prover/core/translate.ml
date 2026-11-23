@@ -813,8 +813,8 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
           (Path.show trait.trait) (Path.show restated.declared_by)
   in
   match Interface.Impls.find_evidence lookups.interface ~list_bounds for_type declared with
-  | Some (From_impl { impl; substitution }) -> (
-      let evidence : Core.evidence = Impl { impl; substitution } in
+  | Some (Evidence (Impl { impl; substitution })) -> (
+      let evidence : Types.evidence = Impl { impl; substitution } in
       let signature =
         match Interface.Impls.read_signature lookups.interface restated_path with
         | Some signature -> signature
@@ -1015,7 +1015,7 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
         (Facts.locate context start.source at)
         "a method that `%s` restates from `%s`, which the compiler implements"
         (Types.show_trait trait) (Path.show restated.declared_by)
-  | Some (From_bound | From_any) ->
+  | Some (Evidence Bound | Evidence Dynamic) ->
       Facts.raise_bug "`%s` implements `%s` through a bound or `any`" (Types.show for_type)
         (Types.show_trait declared)
   | Some (Accepted _) | None -> ()

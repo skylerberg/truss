@@ -48,7 +48,7 @@ val find_method_contract :
   Types.trait_reference ->
   string ->
   Path.receiver ->
-  Core.evidence ->
+  Types.evidence ->
   State.contract option
 
 val find_integer_literal : Mir.formula -> Z.t option

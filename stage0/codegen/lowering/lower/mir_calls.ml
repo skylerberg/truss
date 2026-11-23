@@ -5,14 +5,9 @@ let ground_instantiation (state : Lowering.state) instantiation =
 let resolve_callee state (callee : Mir.callee) : (Path.t * Ground.instantiation) option =
   match callee.target with
   | Function { path; instantiation } -> Some (path, ground_instantiation state instantiation)
-  | Trait_method { evidence = Dynamic; _ } -> None
-  | Trait_method { trait; name; receiver; self_type; instantiation; evidence } -> (
-      match
-        Targets.make_trait_method_item state.context state.frame.code.substitution ~trait ~name
-          ~receiver ~self_type ~instantiation ~evidence
-      with
-      | Code { path; instantiation; _ } -> Some (path, instantiation)
-      | _ -> Definitions.raise_bug "a trait method whose item is not code")
+  | Trait_method { trait; name; receiver; self_type; instantiation; evidence } ->
+      Targets.find_trait_method state.context state.frame.code.substitution ~trait ~name ~receiver
+        ~self_type ~instantiation ~evidence
   | Capability_method _ | Intrinsic _ | Indirect _ -> None
 
 let read_callee_signature (state : Lowering.state) path instantiation =

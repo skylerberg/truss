@@ -1,12 +1,12 @@
-val resolve_impl :
+val read_impl :
   Definitions.context ->
   Types.substitution ->
   trait:Types.trait_reference ->
   self_type:Types.ty ->
-  evidence:Core.evidence ->
+  evidence:Types.evidence ->
   Path.t * Ground.argument list
 
-val make_trait_method_item :
+val find_trait_method :
   Definitions.context ->
   Types.substitution ->
   trait:Types.trait_reference ->
@@ -14,8 +14,8 @@ val make_trait_method_item :
   receiver:Path.receiver ->
   self_type:Types.ty ->
   instantiation:Types.instantiation ->
-  evidence:Core.evidence ->
-  Lowered.Item.t
+  evidence:Types.evidence ->
+  (Path.t * Ground.instantiation) option
 
 val pass : Lowering.state -> Language.Mode.t -> Ground.ty -> Lowered.place -> Lowered.operand option
 val raise_lending_capability_method : Path.t -> string -> 'a

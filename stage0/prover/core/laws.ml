@@ -106,7 +106,7 @@ let assume_laws (context : State.context) frame (trait : Types.trait_reference) 
     List.iter
       (fun (required : Types.trait_reference) ->
         let substitution = Contracts.make_trait_substitution context.lookups required ty in
-        let impl = Option.map fst (Operations.find_concrete_impl context required ty) in
+        let impl = Option.map fst (Facts.find_impl context required ty) in
         List.iter
           (fun (source, (law : Mir.law)) ->
             match make_law_fact context frame source ~substitution law with

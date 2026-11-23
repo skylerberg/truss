@@ -46,11 +46,7 @@ val reject_recursion_through_supplied_code :
   State.context -> State.frame -> Obligation.location -> Mir.statement -> unit
 
 val find_recursive_callee :
-  State.context ->
-  State.frame ->
-  Obligation.location ->
-  'operand Core.target ->
-  Mir.Call_edges.resolution * Path.t option
+  State.context -> State.frame -> Obligation.location -> 'operand Core.target -> Path.t option
 
 val is_evaluated_constant : State.context -> Path.t -> Mir.t -> bool
 val reject_constant_cycle : State.context -> State.frame -> Mir.t -> unit
@@ -116,6 +112,10 @@ val list_definition_bounds :
   Lookups.t -> current:Path.t -> condition:Types.condition -> Interface.Impls.bounds
 
 val substitute_type : State.context -> State.frame -> Types.ty -> Types.ty
+
+val find_impl :
+  State.context -> Types.trait_reference -> Types.ty -> (Path.t * Types.substitution) option
+
 val find_local_type : State.context -> State.frame -> Locals.key -> Types.ty option
 val mentions_potential : Logic.term -> bool
 val list_potentials : Logic.term -> Logic.term list

@@ -1015,9 +1015,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
          arguments)
       (Types.make_capability_substitution capability_parameters capability_arguments)
   in
-  let resolution, recursive_callee =
-    Facts.find_recursive_callee context frame location invocation.callee
-  in
+  let recursive_callee = Facts.find_recursive_callee context frame location invocation.callee in
   let with_contract ?(substitution_of = fun _ -> Types.no_substitution) ?(type_arguments = []) path
       = function
     | Some contract ->
@@ -1048,13 +1046,12 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
     | Trait_method { trait; name; receiver; evidence; self_type; instantiation } -> (
         let arguments = list_arguments instantiation.type_arguments in
         let capability_arguments = list_capability_arguments instantiation in
+        let evidence =
+          Interface.Impls.resolve_evidence context.lookups.interface frame.substitution ~self_type
+            ~trait evidence
+        in
         let self_type = Facts.substitute_type context frame self_type in
         let trait = { trait with trait_arguments = list_arguments trait.trait_arguments } in
-        let evidence : Core.evidence =
-          match (evidence, resolution.evidence) with
-          | Bound, Some (Impl _ as resolved) -> resolved
-          | _ -> evidence
-        in
         Laws.assume_laws context frame trait self_type;
         let list_operands () = List.map (fun (passed : State.passed) -> passed.term) values in
         let trait_path = Path.Method { owner = trait.trait; name; receiver } in
@@ -1089,11 +1086,8 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
             let path, callee_substitution =
               match evidence with
               | Impl { impl; substitution } ->
-                  let impl_substitution =
-                    Types.substitute_substitution frame.substitution substitution
-                  in
                   let path = Path.Method { owner = impl; name; receiver } in
-                  (path, bind_callee path arguments capability_arguments ~fixed:impl_substitution)
+                  (path, bind_callee path arguments capability_arguments ~fixed:substitution)
               | _ -> (trait_path, trait_substitution)
             in
             let compute_substitution (clauses : State.clauses) =

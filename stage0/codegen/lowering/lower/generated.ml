@@ -213,13 +213,14 @@ let build_real_implementation (state : Lowering.state) ~user capability =
       let value = Lowering.allocate_binding state ty in
       let default =
         match
-          Interface.Impls.find_evidence state.context.lookups.interface
-            ~list_bounds:Interface.Impls.list_no_bounds for_type
-            { trait = Well_known.make_path Default; trait_arguments = []; associated = [] }
+          Interface.Impls.resolve_evidence state.context.lookups.interface Types.no_substitution
+            ~self_type:for_type
+            ~trait:{ trait = Well_known.make_path Default; trait_arguments = []; associated = [] }
+            Bound
         with
-        | Some (From_impl { impl = default_impl; _ }) ->
+        | Impl { impl = default_impl; _ } ->
             Well_known.make_impl_method_path Default_default ~impl:default_impl
-        | _ ->
+        | Bound | Dynamic ->
             Definitions.raise_bug "%s implements %s and has no impl of Default"
               (Types.show for_type) (Path.show capability)
       in
@@ -494,7 +495,7 @@ let build_any_table context (item : Lowered.Item.t) ~impl ~type_arguments : Lowe
         let implementing, implementing_arguments =
           if Path.equal trait interface.implements.trait then (impl, type_arguments)
           else
-            Targets.resolve_impl context substitution ~trait:bound ~self_type:interface.for_type
+            Targets.read_impl context substitution ~trait:bound ~self_type:interface.for_type
               ~evidence:Bound
         in
         let receiver =

@@ -246,7 +246,7 @@ let find_capability_clauses context (capability : Path.t) name =
   find_callee_clauses context (Path.make_capability_method capability name)
 
 let find_method_contract context (trait : Types.trait_reference) name receiver
-    (evidence : Core.evidence) =
+    (evidence : Types.evidence) =
   let trait_clauses = find_trait_clauses context trait.trait name receiver in
   match evidence with
   | Impl { impl; _ } -> (

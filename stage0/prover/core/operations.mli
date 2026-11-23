@@ -10,9 +10,6 @@ val declare_unknown_amount : State.context -> State.frame -> Costs.counter -> Lo
 val convert_to_any : State.context -> State.frame -> Invocation.site -> State.frame * Logic.term
 val list_impl_packages : State.context -> Types.ty -> Path.package list
 
-val find_concrete_impl :
-  State.context -> Types.trait_reference -> Types.ty -> (Path.t * Types.substitution) option
-
 val make_equality :
   State.context -> State.frame -> Types.ty -> Logic.term -> Logic.term -> Logic.term
 

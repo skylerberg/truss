@@ -689,7 +689,10 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
   let entry_model = find_model frame in
   let trait, evidence =
     match next.callee with
-    | Trait_method { trait; evidence; _ } -> (trait, evidence)
+    | Trait_method { trait; evidence; _ } ->
+        ( trait,
+          Interface.Impls.resolve_evidence context.lookups.interface frame.substitution
+            ~self_type:cursor_type ~trait evidence )
     | _ -> Facts.raise_bug "a loop over `%s` pulls no `Cursor`" (Types.show cursor_type)
   in
   let self_type = Facts.substitute_type context frame cursor_type in
@@ -702,9 +705,7 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
     match evidence with
     | Impl { impl; substitution } ->
         ( Well_known.make_impl_method_path Cursor_next ~impl,
-          Types.combine_substitutions
-            (Types.substitute_substitution frame.substitution substitution)
-            self_binding )
+          Types.combine_substitutions substitution self_binding )
     | Bound | Dynamic -> (Well_known.make_method_path Cursor_next, self_binding)
   in
   let cursor_next = Well_known.locate_method Cursor_next in
@@ -783,7 +784,7 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
       let havoc_mut (frame : State.frame) =
         cursor_access.write frame (Facts.arrive context frame "changed" cursor_type)
       in
-      let _, recursive_callee = Facts.find_recursive_callee context head location next.callee in
+      let recursive_callee = Facts.find_recursive_callee context head location next.callee in
       let after, pulled =
         Calls.call_contract ~recursive_callee ~lent_final:None context head pulling next path
           contract

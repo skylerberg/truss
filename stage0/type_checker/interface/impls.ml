@@ -154,13 +154,7 @@ and match_arguments ~variables substitution patterns arguments =
             | _ -> None))
       (Some substitution) patterns arguments
 
-type evidence =
-  | From_impl of { impl : Path.t; substitution : Types.substitution }
-  | From_bound
-  | From_any
-  | Built_in
-  | Accepted of Types.ty
-
+type solution = Evidence of Types.evidence | Built_in | Accepted of Types.ty
 type through_any = Callable | Has_generics | Names_self
 
 type dispatched = {
@@ -307,7 +301,7 @@ let rename_as_written (declared : Types.signature) (written : Types.signature) =
         renamed.capability_parameters;
   }
 
-let find_built_in_evidence : Properties.decision -> evidence option = function
+let find_built_in_solution : Properties.decision -> solution option = function
   | Holds -> Some Built_in
   | Fails -> None
   | Depends_on open_type -> Some (Accepted open_type)
@@ -359,7 +353,7 @@ let check_recursion_depth ~depth type_ trait =
             (Types.show type_) (Types.show_trait trait) Properties.recursion_limit))
 
 let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_conditions = true)
-    (type_ : Types.ty) (wanted : Types.trait_reference) : evidence option =
+    (type_ : Types.ty) (wanted : Types.trait_reference) : solution option =
   let broken_trait =
     match Definition.find_interface lookups wanted.trait with
     | Some (Error_interface report) -> Some report
@@ -371,16 +365,18 @@ let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_cond
   else
     match decide_property_trait lookups ~list_bounds wanted.trait type_ with
     | Some _ when not checks_conditions -> Some Built_in
-    | Some decision -> find_built_in_evidence decision
+    | Some decision -> find_built_in_solution decision
     | None -> (
         match type_ with
         | Types.Error _ | Types.Hole | Types.Variable _ -> Some (Accepted type_)
         | Types.Never | Types.Integer | Types.Function _ -> None
         | Types.Parameter _ | Types.Projection _ ->
-            if list_matching_bounds lookups ~list_bounds type_ wanted <> [] then Some From_bound
+            if list_matching_bounds lookups ~list_bounds type_ wanted <> [] then
+              Some (Evidence Bound)
             else None
         | Types.Any _ ->
-            if list_matching_bounds lookups ~list_bounds type_ wanted <> [] then Some From_any
+            if list_matching_bounds lookups ~list_bounds type_ wanted <> [] then
+              Some (Evidence Dynamic)
             else None
         | Types.Named _ ->
             List.find_map
@@ -415,7 +411,7 @@ let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_cond
                 if
                   conditions_hold
                   && has_matching_associated_types lookups ~list_bounds wanted ~base:None associated
-                then Some (From_impl { impl = impl_path; substitution })
+                then Some (Evidence (Impl { impl = impl_path; substitution }))
                 else None)
               (list_matching_impls lookups type_ wanted))
 
@@ -495,14 +491,14 @@ and project_declared_type lookups ~list_bounds ?defining type_ (trait : Types.tr
   | Some fixed -> Some fixed
   | None -> (
       match find_evidence lookups ~list_bounds ~checks_conditions:false type_ trait with
-      | Some (From_impl { impl; substitution }) -> (
+      | Some (Evidence (Impl { impl; substitution })) -> (
           match Definition.find_impl_interface lookups impl with
           | Some interface ->
               Option.iter (fun defining -> defining := impl :: !defining) defining;
               Option.map (Types.substitute substitution)
                 (List.assoc_opt name interface.implements.associated)
           | None -> None)
-      | Some From_bound -> (
+      | Some (Evidence Bound) -> (
           match
             List.find_map
               (fun (bound : Types.trait_reference) ->
@@ -512,7 +508,7 @@ and project_declared_type lookups ~list_bounds ?defining type_ (trait : Types.tr
           with
           | Some fixed -> Some fixed
           | None -> Some (Types.Projection { base = type_; trait; name }))
-      | Some From_any -> (
+      | Some (Evidence Dynamic) -> (
           match type_ with
           | Types.Any any ->
               List.find_map
@@ -539,7 +535,7 @@ and project_capability_set lookups ~list_bounds ?(depth = 0) type_ (trait : Type
             Properties.recursion_limit))
   else
     match find_evidence lookups ~list_bounds ~checks_conditions:false type_ trait with
-    | Some (From_impl { impl; substitution }) -> (
+    | Some (Evidence (Impl { impl; substitution })) -> (
         match Definition.find_impl_interface lookups impl with
         | Some interface ->
             normalize_capabilities lookups ~list_bounds ~depth:(depth + 1)
@@ -547,8 +543,8 @@ and project_capability_set lookups ~list_bounds ?(depth = 0) type_ (trait : Type
                  (Option.value ~default:Types.no_capabilities
                     (List.assoc_opt name interface.capability_sets)))
         | None -> Types.no_capabilities)
-    | Some From_bound | Some (Accepted (Types.Variable _)) | None -> projection
-    | Some (From_any | Built_in | Accepted _) -> Types.no_capabilities
+    | Some (Evidence Bound) | Some (Accepted (Types.Variable _)) | None -> projection
+    | Some (Evidence Dynamic | Built_in | Accepted _) -> Types.no_capabilities
 
 and normalize_capabilities lookups ~list_bounds ?depth (capabilities : Types.capability_set) =
   let reads_an_impl : Types.capability -> bool = function
@@ -626,7 +622,7 @@ and decide_bound_condition lookups ~list_bounds ~depth (bound : Types.bound_cond
         match
           find_evidence lookups ~list_bounds ~depth ~checks_conditions:false subject bound.bound
         with
-        | Some (From_impl { impl; substitution }) -> (
+        | Some (Evidence (Impl { impl; substitution })) -> (
             match Definition.find_impl_interface lookups impl with
             | Some interface ->
                 decide_condition lookups ~list_bounds ~depth:(depth + 1)
@@ -776,6 +772,20 @@ module Conformance = struct
   let normalize_signature_in_impl = normalize_signature_in_impl
   let make_expected_signature = make_expected_signature
 end
+
+let resolve_evidence lookups substitution ~self_type ~trait (evidence : Types.evidence) :
+    Types.evidence =
+  match Types.substitute_evidence substitution evidence with
+  | Bound -> (
+      let normalize type_ = normalize lookups ~list_bounds:list_no_bounds type_ in
+      match
+        find_evidence lookups ~list_bounds:list_no_bounds ~checks_conditions:false
+          (normalize (Types.substitute substitution self_type))
+          (Types.map_trait normalize (Types.substitute_trait substitution trait))
+      with
+      | Some (Evidence evidence) -> evidence
+      | Some (Built_in | Accepted _) | None -> Bound)
+  | (Impl _ | Dynamic) as evidence -> evidence
 
 let read_scope (lookups : Lookups.t) (key : Resolve.Names.key) :
     Environment.known_bounds Environment.scope =

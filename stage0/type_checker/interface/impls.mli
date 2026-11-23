@@ -37,13 +37,7 @@ val match_arguments :
   Types.argument list ->
   Types.substitution option
 
-type evidence =
-  | From_impl of { impl : Path.t; substitution : Types.substitution }
-  | From_bound
-  | From_any
-  | Built_in
-  | Accepted of Types.ty
-
+type solution = Evidence of Types.evidence | Built_in | Accepted of Types.ty
 type through_any = Callable | Has_generics | Names_self
 
 type dispatched = {
@@ -71,7 +65,15 @@ val find_evidence :
   ?checks_conditions:bool ->
   Types.ty ->
   Types.trait_reference ->
-  evidence option
+  solution option
+
+val resolve_evidence :
+  Lookups.t ->
+  Types.substitution ->
+  self_type:Types.ty ->
+  trait:Types.trait_reference ->
+  Types.evidence ->
+  Types.evidence
 
 val check_recursion_depth : depth:int -> Types.ty -> Types.trait_reference -> unit
 

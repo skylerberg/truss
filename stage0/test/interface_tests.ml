@@ -530,7 +530,7 @@ let () =
         (Types.make_named (app "Reader") [])
         feeds
     with
-    | Some (From_impl { impl; _ }) ->
+    | Some (Evidence (Impl { impl; _ })) ->
         (interface, Path.Method { owner = impl; name = "feed"; receiver = Instance Read })
     | _ -> failwith "no impl"
   in
@@ -794,13 +794,78 @@ let () =
         Harness.fail "an impl of From[Int32]")
 
 let () =
+  let read () =
+    let interface =
+      make_interface
+        (Support.setup [ ("app.main", Fixtures.Interface.named_impls_for_a_tag_and_a_crate) ])
+    in
+    match Interface.Definition.find_declared_signature interface (app "show") with
+    | Some { generics = [ { generic = value; _ } ]; _ } -> (interface, value)
+    | _ -> failwith "no generic parameter"
+  in
+  let named : Types.trait_reference =
+    { trait = app "Named"; trait_arguments = []; associated = [] }
+  in
+  let tag = Types.make_named (app "Tag") [] in
+  let make_crate item = Types.make_named (app "Crate") [ item ] in
+  let bind_to_tag value = Types.bind_argument value (Types.Type tag) Types.no_substitution in
+  let resolve interface substitution self_type evidence =
+    Interface.Impls.resolve_evidence interface substitution ~self_type ~trait:named evidence
+  in
+  let expect_impl interface (evidence : Types.evidence) ~for_type ~item =
+    match evidence with
+    | Impl { impl; substitution } -> (
+        let impl_interface = Interface.Definition.read_impl_interface interface impl in
+        if Types.show impl_interface.for_type <> for_type then
+          Harness.fail "an impl for %s" (Types.show impl_interface.for_type);
+        match (impl_interface.impl_generics, item) with
+        | [ { generic; _ } ], Some item -> (
+            match Types.find_argument generic substitution with
+            | Some (Type bound) when Types.show bound = item -> ()
+            | Some (Type bound) -> Harness.fail "`Item` is %s" (Types.show bound)
+            | Some (Value _) | None -> Harness.fail "`Item` is not bound")
+        | [], None -> ()
+        | _ -> Harness.fail "another number of generic parameters")
+    | Bound -> Harness.fail "a bound"
+    | Dynamic -> Harness.fail "dynamic evidence"
+  in
+  Harness.test "evidence by a bound is the impl once a substitution makes its type concrete"
+    (fun () ->
+      let interface, value = read () in
+      expect_impl interface
+        (resolve interface (bind_to_tag value) (Parameter value) Bound)
+        ~for_type:"Tag" ~item:None);
+  Harness.test "evidence by a bound stays a bound while its type is a parameter" (fun () ->
+      let interface, value = read () in
+      match resolve interface Types.no_substitution (Parameter value) Bound with
+      | Bound -> ()
+      | Impl _ | Dynamic -> Harness.fail "not a bound");
+  Harness.test "an impl is selected for a type whose argument has no bound in scope" (fun () ->
+      let interface, value = read () in
+      expect_impl interface
+        (resolve interface Types.no_substitution (make_crate (Parameter value)) Bound)
+        ~for_type:"Crate[Item]" ~item:(Some "Value"));
+  Harness.test "evidence by an impl takes the types of a substitution" (fun () ->
+      let interface, value = read () in
+      let crate = make_crate (Parameter value) in
+      expect_impl interface
+        (resolve interface (bind_to_tag value) crate
+           (resolve interface Types.no_substitution crate Bound))
+        ~for_type:"Crate[Item]" ~item:(Some "Tag"));
+  Harness.test "evidence for an `any` type is dynamic" (fun () ->
+      let interface, _ = read () in
+      match resolve interface Types.no_substitution (Any named) Bound with
+      | Dynamic -> ()
+      | Impl _ | Bound -> Harness.fail "not dynamic")
+
+let () =
   let text = Fixtures.Interface.described in
   let read_impl packages type_ wanted : Path.t =
     match
       Interface.Impls.find_evidence (make_interface packages)
         ~list_bounds:Interface.Impls.list_no_bounds type_ wanted
     with
-    | Some (From_impl { impl; _ }) -> impl
+    | Some (Evidence (Impl { impl; _ })) -> impl
     | _ -> failwith "no impl"
   in
   let read_method_signature packages type_ wanted name : Types.signature =

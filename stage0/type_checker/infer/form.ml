@@ -171,11 +171,9 @@ let was_hole form (select_table : Tables.t -> Types.ty option array) (id : Synta
   | Some tables -> (select_table tables).(id) = Some Types.Hole
   | None -> false
 
-let read_evidence form self_type trait : Core.evidence =
+let read_evidence form self_type trait : Types.evidence =
   match find_evidence form self_type trait with
-  | Some (From_impl { impl; substitution }) -> Impl { impl; substitution }
-  | Some From_bound -> Bound
-  | Some From_any -> Dynamic
+  | Some (Evidence evidence) -> evidence
   | Some (Built_in | Accepted _) | None ->
       raise_bug "`%s` does not implement `%s` by an impl, a bound, or `any`" (Types.show self_type)
         (Types.show_trait trait)
@@ -338,7 +336,7 @@ let list_capability_impls (lookups : Lookups.t) ~list_bounds ~package (type_ : T
               Interface.Impls.find_evidence lookups.interface ~list_bounds type_
                 (Types.make_trait_reference ~arguments:[] trait)
             with
-            | Some (Interface.Impls.From_impl { impl; substitution }) ->
+            | Some (Interface.Impls.Evidence (Impl { impl; substitution })) ->
                 Option.map
                   (fun interface ->
                     ({ Core.capability = trait; impl; arguments = substitution }, interface))

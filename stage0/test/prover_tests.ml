@@ -2234,6 +2234,16 @@ let () =
              Fixtures.Prover.same_versions_of_a_dependency_ensured_false)
       with
       | [ "prover.ensures" ] -> ()
+      | codes -> Harness.fail "codes %s" (String.concat ", " codes));
+  Harness.test
+    "the time of a bound's method is the time that an impl states in the package of its trait"
+    (fun () ->
+      match
+        Support.list_codes
+          (check_across Fixtures.Prover.public_weighed_with_an_impl_for_uint64
+             Fixtures.Prover.weigh_of_a_uint64_in_constant_time)
+      with
+      | [] -> ()
       | codes -> Harness.fail "codes %s" (String.concat ", " codes))
 
 let () =
