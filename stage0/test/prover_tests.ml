@@ -2549,6 +2549,14 @@ let () =
       expect_not_proven (applying ^ Fixtures.Prover.nested_lambda_wrongly_constant) "prover.ensures")
 
 let () =
+  Harness.test "a lambda in a lambda's body knows the enclosing lambda's argument it captures"
+    (fun () -> expect_proven Fixtures.Prover.filter_in_a_lambda_capturing_its_argument);
+  Harness.test
+    "a lambda in the body of a lambda that may panic knows the enclosing lambda's argument it \
+     captures" (fun () ->
+      expect_proven Fixtures.Prover.filter_in_a_lambda_that_may_panic_capturing_its_argument)
+
+let () =
   Harness.test "a contract with branches, called under a quantifier on no bound value, holds there"
     (fun () -> expect_proven Fixtures.Prover.used_bits_under_a_quantifier);
   Harness.test "a derived ordering of a one-field record is its field's, for every value" (fun () ->
