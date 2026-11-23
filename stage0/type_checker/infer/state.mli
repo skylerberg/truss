@@ -90,6 +90,8 @@ type state = {
   definition : Syntax.definition;
   resolved : Resolve.resolved;
   text : string Lazy.t;
+  signatures : Signatures.t;
+  visible_packages : Path.package list Lazy.t;
   tables : Tables.t;
   mutable diagnostics : Diagnostic.in_definition list;
   unifier : Unify.t;
@@ -175,7 +177,7 @@ val make_goal_decided_arguments : state -> Types.generic list -> Types.argument 
 val list_class_log : state -> int -> logged list
 val find_class_source : state -> int -> (int * source) option
 val find_variable_source : state -> Types.ty -> source option
-val lookup_bounds : state -> Types.parameter -> Types.trait_reference list
+val lookup_bounds : state -> Interface.Properties.Bounds.t
 val normalize : state -> Types.ty -> Types.ty
 val find_domain : state -> Types.ty -> Language.Builtin_type.t list option
 val is_float_domain : Language.Builtin_type.t list -> bool

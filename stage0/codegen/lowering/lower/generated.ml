@@ -73,7 +73,7 @@ let build_entry context (item : Lowered.Item.t) (impl_method : Lowered.Item.impl
     (Lowered.Item.make_code path { Ground.no_instantiation with type_arguments })
     ~signature:method_signature ~substitution
     ~arguments:
-      ((self_mode, self_ty, { Lowered.root = Local implementation; projections = [ Deref ] })
+      ((self_mode, self_ty, Lowered.make_deref_place implementation)
       :: List.map (fun ((_, place), mode, ty) -> (mode, ty, place)) parameter_places)
     ~destination:(choose_result_place state result_ty)
     ~site:None ();
@@ -437,7 +437,7 @@ let build_any_entry context (item : Lowered.Item.t) (impl_method : Lowered.Item.
     (Lowered.Item.make_code path { Ground.no_instantiation with type_arguments })
     ~signature:method_signature ~substitution
     ~arguments:
-      ((self_mode, self_ty, { Lowered.root = Local typed; projections = [ Deref ] })
+      ((self_mode, self_ty, Lowered.make_deref_place typed)
       :: List.map (fun ((_, place), mode, ty) -> (mode, ty, place)) parameter_places)
     ~lending:(List.map (fun local -> Lowered.Copy (Lowered.make_local_place local)) lending)
     ~destination ~site:None ();

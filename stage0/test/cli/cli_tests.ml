@@ -1522,14 +1522,19 @@ let find_counts output kind =
     (String.split_on_char '\n' output)
 
 let () =
-  test "TRUSS_DATABASE_COUNTS=1 writes the database's work during the command, by kind of part"
-    (fun () ->
+  test "TRUSS_DATABASE_COUNTS=1 writes the database's work during the command, by stage" (fun () ->
       ignore (Workspace.For_testing.load_standard_package_database ());
       let root = make_package [ ("main.truss", Fixtures.Cli.doubling) ] in
       Unix.putenv "TRUSS_DATABASE_COUNTS" "1";
       let _, output = run_truss [ "check"; "-C"; root ] in
       if find_counts output "parsed file" <> Some [ "1"; "0"; "1"; "1"; "1" ] then
-        fail "no row counts one parsed file, computed, written, and read once: %s" output);
+        fail "no row counts one parsed file, computed, written, and read once: %s" output;
+      let writes_the_file line =
+        String.includes ~affix:"INSERT OR REPLACE INTO main.file" line
+        && String.starts_with ~prefix:"1  " (String.trim line)
+      in
+      if not (List.exists writes_the_file (String.split_on_char '\n' output)) then
+        fail "no row counts the statement that writes the file, run once: %s" output);
   test "a second release build of an unchanged package computes no body, proof, or code" (fun () ->
       let root = make_package [ ("main.truss", Fixtures.Cli.main_with_a_todo_proof) ] in
       Unix.putenv "TRUSS_DATABASE_COUNTS" "";
@@ -2248,6 +2253,33 @@ let () =
         capture (fun () -> Cli.Main.run_client [ "truss"; "--no-server"; "check"; "-C"; root ])
       in
       if status <> 0 then fail "did not succeed: %s" output);
+  test "check evaluates a computed constant, and its proofs know the value" (fun () ->
+      let check ensured =
+        let root =
+          make_package
+            [
+              ( "main.truss",
+                Printf.sprintf
+                  "fn to_seconds(hours: UInt64) -> UInt64\n\
+                  \  requires hours <= 24\n\
+                   {\n\
+                  \  hours * 60 * 60\n\
+                   }\n\n\
+                   let seconds_per_day: UInt64 = to_seconds(24)\n\n\
+                   public fn read() -> UInt64\n\
+                  \  ensures result == %d\n\
+                   {\n\
+                  \  seconds_per_day\n\
+                   }\n"
+                  ensured );
+            ]
+        in
+        capture (fun () -> Cli.Main.run_client [ "truss"; "--no-server"; "check"; "-C"; root ])
+      in
+      (match check 86400 with 0, _ -> () | _, output -> fail "did not prove the value: %s" output);
+      match check 86401 with
+      | 1, output when String.includes ~affix:"prover.ensures" output -> ()
+      | _, output -> fail "accepted another value: %s" output);
   test "check rejects an HTML template that interpolates into an event handler or a script"
     (fun () ->
       List.iter

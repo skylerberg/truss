@@ -1,4 +1,5 @@
 type sort = Int | Bool | Float of int * int | Type_sort of Types.ty | Function_sort of int
+type evaluation = Constant_value of Path.t | Assertion of { definition : Path.t; condition : int }
 
 module Symbol : sig
   type 'term t =
@@ -7,9 +8,9 @@ module Symbol : sig
     | Limited of { callee : Path.t; type_arguments : Types.argument list }
     | Function_value of { callee : Path.t; type_arguments : Types.argument list }
     | Constant of Path.t
+    | Evaluated of evaluation
     | Generic_value of { owner : Path.t; name : string }
-    | Text_literal of { type_ : Types.ty; text : string }
-    | Template_check of { function_ : Path.t; literals : string list }
+    | Literal of { type_ : Types.ty; value : Language.Literal.t }
     | Named_term of 'term
     | Lambda of { sorts : sort list; definition : 'term }
     | Lifted of 'term t

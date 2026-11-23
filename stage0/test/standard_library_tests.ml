@@ -90,21 +90,7 @@ let read_processor_time () =
   times.tms_utime +. times.tms_stime +. times.tms_cutime +. times.tms_cstime
 
 let prove_files database files =
-  Prover.decide ~runs:[]
-    (Database.make_proof_lookups database)
-    solver
-    (Database.list_proofs (Database.prove database files))
-
-let is_always_read_kind : type a. a Database.Part.stored -> bool = function
-  | Parsed _ | Resolved _ | Trait_header _ | Interface _ | Signature_check _ | Contract _
-  | Checked_body _ | Body_mir _ | Contract_mir _ ->
-      true
-  | Namespace _ | Constant_value _ | Header _ | Derived_interface _ | Type_facts _ | Grant _
-  | Generated_mir _ | Call_edges _ | Usage _ | Ownership _ | Import_check _ | Package_check _
-  | Implementations _ | Recursion_group _ | Proof _ | Lowered _ | Test_key _ ->
-      false
-
-let is_always_read (Database.Part.Any part) = is_always_read_kind part
+  Database.decide (Database.prove database (In_files files)) (Lazy.from_val solver)
 
 let measure database ~is_measured =
   let measured =
@@ -152,12 +138,10 @@ let () =
       exit 0)
     measured_modules;
   let database = run_timed "type checking" make_database in
-  Harness.test "every part whose kind is always read has a reader" (fun () ->
-      List.iter
-        (fun part ->
-          if is_always_read part then
-            Harness.fail "no part reads %s" (Database.Part.show (Stored part)))
-        (Database.For_testing.list_unread_parts database [ Path.standard_package ]));
+  Harness.test "every fact whose kind is always read has a reader" (fun () ->
+      match Database.For_testing.list_unread database with
+      | [] -> ()
+      | unread -> Harness.fail "no unit reads %s" (String.concat ", " unread));
   let checked =
     List.map
       (fun (module_, files) ->
@@ -165,14 +149,12 @@ let () =
           List.map (fun (file, _) -> (file, Database.list_file_diagnostics database file)) files ))
       modules
   in
-  let verdicts =
-    run_timed "proving" (fun () ->
-        prove_files database
-          (List.concat_map
-             (fun (_, files) ->
-               List.filter_map (fun (file, errors) -> if errors = [] then Some file else None) files)
-             checked))
-  in
+  run_timed "proving" (fun () ->
+      prove_files database
+        (List.concat_map
+           (fun (_, files) ->
+             List.filter_map (fun (file, errors) -> if errors = [] then Some file else None) files)
+           checked));
   List.iter
     (fun ((module_ : Path.module_), files) ->
       Harness.test (test_name module_) (fun () ->
@@ -187,7 +169,7 @@ let () =
                     (fun diagnostic ->
                       Harness.fail "%s" (Diagnostic.render ~is_colored:false source diagnostic))
                     (match errors with
-                    | [] -> Prover.list_diagnostics verdicts file
+                    | [] -> Database.list_proof_diagnostics database file
                     | errors -> errors))
                 files)))
     checked;

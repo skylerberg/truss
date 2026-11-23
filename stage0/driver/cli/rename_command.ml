@@ -85,37 +85,51 @@ let parse_module_path package text =
       | Some _ | None -> None)
   | { member = Some _; _ } | (exception Outcome.Cannot_run _) -> None
 
-let list_occurrences database snapshot packages =
-  let names = Database.make_name_lookups database in
-  List.concat_map
-    (fun file ->
-      List.concat_map
-        (fun (declaration : Resolve.Names.declaration) ->
-          let key = declaration.key in
-          match Database.read_resolved database key with
-          | Some resolved ->
-              let ({ file; base } : Resolve.Names.place) = names.read_place key in
-              let tables =
-                Option.map
-                  (fun (checked : Infer.checked) -> checked.tables)
-                  (Database.read_checked_body database key)
-              in
-              List.map
-                (fun ({ span; target } : Inspect.References.occurrence) ->
-                  (file, Source.Definition_span.to_file ~base span, target))
-                (Inspect.References.list_occurrences ~path:key.path (names.read_spans key)
-                   (names.read_definition key) resolved tables)
-          | None -> [])
-        (names.list_declarations_in file))
-    (Command_packages.list_files snapshot packages)
+let list_definition_occurrences database (names : Resolve.Names.lookups) (key : Resolve.Names.key) =
+  match Database.read_resolved database key with
+  | Some resolved ->
+      let ({ file; base } : Resolve.Names.place) = names.read_place key in
+      let tables =
+        Option.map
+          (fun (checked : Infer.checked) -> checked.tables)
+          (Database.read_checked_body database key)
+      in
+      List.map
+        (fun ({ span; target } : Inspect.References.occurrence) ->
+          (file, Source.Definition_span.to_file ~base span, target))
+        (Inspect.References.list_occurrences ~path:key.path (names.read_spans key)
+           (names.read_definition key) resolved tables)
+  | None -> []
 
-let plan_definition database snapshot packages path name =
+let list_module_occurrences database snapshot packages (module_ : Path.module_) =
+  let names = Database.make_name_lookups database in
+  let definitions, importing_files = Database.list_readers_of_module database module_ in
+  let project_files = Command_packages.list_files snapshot packages in
+  let importing_files = List.filter (fun file -> List.mem file project_files) importing_files in
+  let definitions =
+    List.filter (fun (key : Resolve.Names.key) -> List.mem key.module_.package packages) definitions
+    @ List.concat_map
+        (fun file ->
+          List.map
+            (fun (declaration : Resolve.Names.declaration) -> declaration.key)
+            (names.list_declarations_in file))
+        importing_files
+  in
+  ( List.concat_map (list_definition_occurrences database names) (List.sort_uniq compare definitions),
+    importing_files )
+
+let plan_definition database packages path name =
+  let names = Database.make_name_lookups database in
   let edits =
     List.filter_map
       (fun (file, span, target) ->
         if Inspect.References.is_named_by path target then Some (file, Diagnostic.replace span name)
         else None)
-      (list_occurrences database snapshot packages)
+      (List.concat_map
+         (list_definition_occurrences database names)
+         (List.filter
+            (fun (key : Resolve.Names.key) -> List.mem key.module_.package packages)
+            (Database.list_definitions_naming database path)))
   in
   { edits = group_by_file edits; moved = None }
 
@@ -162,6 +176,9 @@ let plan_module database snapshot packages (old_module : Path.module_) to_ =
   if has_module snapshot packages new_module then
     Outcome.raise_cannot_run "`%s` already exists." to_;
   let full = Path.show_module new_module in
+  let occurrences, importing_files =
+    list_module_occurrences database snapshot packages old_module
+  in
   let edits =
     List.filter_map
       (fun (file, (span : Source.span), (target : Inspect.References.target)) ->
@@ -171,7 +188,7 @@ let plan_module database snapshot packages (old_module : Path.module_) to_ =
               (fun replacement -> (file, Diagnostic.replace span replacement))
               (find_module_replacement ~old_module ~new_module written imported)
         | Definition _ -> None)
-      (list_occurrences database snapshot packages)
+      occurrences
     @ List.concat_map
         (fun (file : Path.file) ->
           List.filter_map
@@ -183,7 +200,7 @@ let plan_module database snapshot packages (old_module : Path.module_) to_ =
                     (Database.make_name_lookups database)
                     ~from:file.module_)
                (Database.read_parsed database file).uses))
-        (Command_packages.list_files snapshot packages)
+        importing_files
   in
   { edits = group_by_file edits; moved = Some (old_module, new_module) }
 
@@ -246,8 +263,7 @@ let run ~from_ ~to_ =
   let plan =
     match resolve_target database packages from_ with
     | Definition { path; module_; owner } ->
-        plan_definition database snapshot packages path
-          (compute_new_name ~from_ ~module_ ~owner to_)
+        plan_definition database packages path (compute_new_name ~from_ ~module_ ~owner to_)
     | Module module_ -> plan_module database snapshot packages module_ to_
   in
   let after = apply_plan database snapshot packages plan in

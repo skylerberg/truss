@@ -15,5 +15,5 @@ val report :
   string ->
   unit
 
-val list_bounds : state -> Types.parameter -> Types.trait_reference list
+val list_bounds : state -> Impls.bounds
 val find_evidence : state -> Types.ty -> Types.trait_reference -> Impls.evidence option

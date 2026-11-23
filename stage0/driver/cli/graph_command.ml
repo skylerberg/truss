@@ -37,18 +37,9 @@ let list_lines (reads : Database.read list) =
       (module Kind_groups)
       (fun (reader, read_kind, read, _) -> (reader, read_kind, read))
       (fun (_, _, _, reader_kind) -> reader_kind)
-      (List.filter_map
-         (fun ({ dependent; dependency } : Database.read) ->
-           match
-             (Database.Part.find_definition dependent, Database.Part.find_definition dependency)
-           with
-           | Some reader, Some read ->
-               Some
-                 ( reader,
-                   Database.Part.show_kind dependency,
-                   read,
-                   Database.Part.show_kind dependent )
-           | Some _, None | None, _ -> None)
+      (List.map
+         (fun ({ reader; reader_kind; read; read_kind; _ } : Database.read) ->
+           (reader, read_kind, read, reader_kind))
          reads)
   in
   List.sort compare
@@ -85,10 +76,7 @@ let run ~direction ~name =
   | [] -> Outcome.raise_cannot_run "No definition named %s is visible here." name
   | targets ->
       ignore
-        (Database.prove database
-           (List.concat_map
-              (Workspace.list_package_files snapshot)
-              (List.map snd (Workspace.list_packages snapshot))));
+        (Database.prove database (In_packages (List.map snd (Workspace.list_packages snapshot))));
       let lines =
         list_lines
           (match direction with

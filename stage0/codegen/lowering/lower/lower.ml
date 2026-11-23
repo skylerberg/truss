@@ -9,9 +9,9 @@ let drop_and_copy (context : context) = context.drop_and_copy
 let make_monomorphic_context = Definitions.make_monomorphic_context
 let make_context = Definitions.make_context
 
-type constant = Constants.constant = Folded of Lowered.data | Run of Ground.ty
+type evaluated = Constants.evaluated = Folded of Lowered.data | Run of Ground.ty
 
-let lower_constant = Constants.compile_constant
+let lower_evaluated = Constants.compile
 let lower_evaluator = Constants.build_evaluator
 let lower_generated = Generated.lower
 let lower_table = Generated.lower_table
@@ -58,57 +58,6 @@ let begin_body (state : Lowering.state) ~(body : Mir.Graph.body) ~defaults =
     | None -> places
   in
   (List.filter_map (fun (arrives, _, _) -> arrives) bound @ Option.to_list mask @ evidence, places)
-
-let make_code_state context ~item path =
-  let code = Definitions.make_code context path Ground.no_instantiation in
-  (Lowering.enter_item context ~item code, code)
-
-let lower_call_evaluation context ~function_ ~arguments : Emit_c.fragment =
-  let item = Lowered.Item.Call_evaluation { function_; arguments } in
-  let state, _ = make_code_state context ~item function_ in
-  Emit_c.Ir_builder.start state.builder (Emit_c.Ir_builder.allocate_block state.builder);
-  let signature = Definitions.read_signature context function_ in
-  Lowering.run_in_scope state (fun () ->
-      let passed =
-        List.map2
-          (fun (mode, ty) (argument : Lowered.Item.argument) ->
-            let ty = Lowering.ground state ty in
-            let place = Lowering.allocate_temporary state ty in
-            (match argument with
-            | Integer value ->
-                let constant =
-                  match Lowering.classify_scalar state ty with
-                  | Integer integer -> Lowering.make_int_constant integer value
-                  | Bool -> Lowered.Constant (Bool (not (Z.equal value Z.zero)))
-                  | _ ->
-                      Definitions.raise_bug "an evaluated call's argument of type %s"
-                        (Ground.to_string ty)
-                in
-                Emit_c.Ir_builder.emit state.builder (Assign (place, Use constant))
-            | Literals literals ->
-                Targets.lower_literals_into state ty place
-                  ~site:{ definition = state.frame.code.definition; offset = 0 }
-                  literals);
-            (mode, ty, place))
-          (Definitions.list_interface_parameters signature)
-          arguments
-      in
-      let result_ty =
-        match signature.output with
-        | Returns ty -> Lowering.ground state ty
-        | _ -> Definitions.raise_bug "an evaluated call that does not return"
-      in
-      let result = Lowering.allocate_temporary state result_ty in
-      Targets.lower_item_call state
-        (Lowered.Item.make_code function_ Ground.no_instantiation)
-        ~signature ~substitution:Types.no_substitution ~arguments:passed ~destination:result
-        ~site:None ();
-      let output = Targets.begin_output state in
-      Encoding.encode_call context.env state.builder
-        ~output:(Address { place = output; writable = true })
-        result_ty result;
-      Constants.write_output state output);
-  Lowering.finish_item state ~rest:[] ()
 
 let lower_source_code context ~path ~instantiation ~assumes_condition : Emit_c.fragment =
   let item = Lowered.Item.Code { path; instantiation; assumes_condition } in

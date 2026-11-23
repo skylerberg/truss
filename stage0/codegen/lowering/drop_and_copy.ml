@@ -27,6 +27,7 @@ and has_trivial_representation context ty =
   | Storage _ | Handle | Shared _ | Any -> false
   | Shape (Scalar _) -> true
   | Shape (Record fields) -> are_trivial fields
+  | Shape (Array (_, 0)) -> true
   | Shape (Array (element, _)) -> is_trivial context element
   | Shape (Sum variants) ->
       List.for_all
@@ -70,12 +71,27 @@ let allocate_box context builder ty =
        });
   box
 
+let project_variant_field place (variant : Memory_layout.variant_shape) field =
+  Lowered.project place (Variant_field { variant = variant.name; field })
+
+let drop_members context builder ~project members =
+  List.iter
+    (fun (name, member) ->
+      if needs_drop context member then Emit_c.Ir_builder.emit builder (Drop (project name)))
+    members
+
+let drop_elements context builder element ~count ~project =
+  if not (is_trivial context element) then
+    Emit_c.Ir_builder.emit_loop builder ~count (fun index ->
+        Emit_c.Ir_builder.emit builder
+          (Drop (project (Lowered.Copy (Lowered.make_local_place index)))))
+
 let drop context ty =
   let builder = Emit_c.Ir_builder.create context.env ~item:(Drop ty) in
   let pointer =
     Emit_c.Ir_builder.allocate_local builder (Pointer { target = Value ty; writable = true })
   in
-  let value : Lowered.place = { root = Local pointer; projections = [ Deref ] } in
+  let value = Lowered.make_deref_place pointer in
   Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
   (match Representation.classify context.env ty with
   | Any ->
@@ -127,28 +143,14 @@ let drop context ty =
                 (Pointer { target = Value inner; writable = true })
             in
             Emit_c.Ir_builder.emit builder (Assign (Lowered.make_local_place typed, Use pointer));
-            Emit_c.Ir_builder.emit builder
-              (Call
-                 {
-                   target =
-                     Direct
-                       {
-                         function_ = Item (Drop inner);
-                         signature = Convention.drop_signature inner;
-                       };
-                   arguments = [ Copy (Lowered.make_local_place typed) ];
-                   result = Discarded;
-                 })
+            Emit_c.Ir_builder.emit builder (Drop (Lowered.make_deref_place typed))
           end;
           Emit_c.Ir_builder.emit builder
             (Call { target = Intrinsic Shared_free; arguments = [ pointer ]; result = Discarded }))
   | Storage element ->
-      if not (is_trivial context element) then
-        Emit_c.Ir_builder.emit_loop builder
-          ~count:(Copy (Storage.project_length value))
-          (fun index ->
-            Emit_c.Ir_builder.emit builder
-              (Drop (Storage.index_element value (Copy (Lowered.make_local_place index)))));
+      drop_elements context builder element
+        ~count:(Copy (Storage.project_length value))
+        ~project:(Storage.index_element value);
       Emit_c.Ir_builder.emit_when builder
         (Test (Storage.make_owned_block_test value))
         (fun () ->
@@ -160,17 +162,10 @@ let drop context ty =
                  result = Discarded;
                }))
   | Shape (Record fields) ->
-      List.iter
-        (fun (name, member) ->
-          if needs_drop context member then
-            Emit_c.Ir_builder.emit builder (Drop (Lowered.project value (Field name))))
-        fields
+      drop_members context builder ~project:(fun name -> Lowered.project value (Field name)) fields
   | Shape (Array (element, count)) ->
-      if not (is_trivial context element) then
-        Emit_c.Ir_builder.emit_loop builder ~count:(Lowered.make_uint64_constant count)
-          (fun index ->
-            Emit_c.Ir_builder.emit builder
-              (Drop (Lowered.project value (Index (Copy (Lowered.make_local_place index))))))
+      drop_elements context builder element ~count:(Lowered.make_uint64_constant count)
+        ~project:(fun index -> Lowered.project value (Index index))
   | Shape (Sum variants) ->
       let after = Emit_c.Ir_builder.allocate_block builder in
       let cases =
@@ -182,13 +177,8 @@ let drop context ty =
             then begin
               let block = Emit_c.Ir_builder.allocate_block builder in
               Emit_c.Ir_builder.run_in_block builder block (fun () ->
-                  List.iter
-                    (fun (field, member) ->
-                      if needs_drop context member then
-                        Emit_c.Ir_builder.emit builder
-                          (Drop
-                             (Lowered.project value
-                                (Variant_field { variant = variant_shape.name; field }))))
+                  drop_members context builder
+                    ~project:(project_variant_field value variant_shape)
                     variant_shape.fields;
                   if variant_shape.indirect then
                     Emit_c.Ir_builder.emit builder
@@ -216,13 +206,7 @@ let build_any_drop context ty =
     in
     Emit_c.Ir_builder.emit builder
       (Assign (Lowered.make_local_place typed, Use (Copy (Lowered.make_local_place untyped))));
-    Emit_c.Ir_builder.emit builder
-      (Call
-         {
-           target = Direct { function_ = Item (Drop ty); signature = Convention.drop_signature ty };
-           arguments = [ Copy (Lowered.make_local_place typed) ];
-           result = Discarded;
-         })
+    Emit_c.Ir_builder.emit builder (Drop (Lowered.make_deref_place typed))
   end;
   Emit_c.Ir_builder.finish builder (Return None);
   Emit_c.Ir_builder.build builder { parameters = [ untyped ]; result = None; returns = true }
@@ -260,32 +244,42 @@ let copy_field context builder ~source (name, member) =
       copy_into context builder ~destination:(Lowered.make_local_place temporary) ~source ty;
       (name, Lowered.Move (Lowered.make_local_place temporary))
 
+let copy_members context builder ty ~destination ?variant ~project members =
+  let fields =
+    List.map
+      (fun (name, member) -> copy_field context builder ~source:(project name) (name, member))
+      members
+  in
+  Emit_c.Ir_builder.emit builder (Assign (destination, Build { ty; variant; fields }))
+
+let copy_elements context builder element ~count ~destination ~source =
+  Emit_c.Ir_builder.emit_loop builder ~count (fun index ->
+      let index = Lowered.Copy (Lowered.make_local_place index) in
+      copy_into context builder ~destination:(destination index) ~source:(source index) element)
+
 let copy context ty =
   let builder = Emit_c.Ir_builder.create context.env ~item:(Copy ty) in
-  let convention = Convention.classify_result context.env ty in
-  let result_pointer =
-    match convention with
-    | Through_pointer pointer -> Some (Emit_c.Ir_builder.allocate_local builder pointer)
-    | Returned _ | Nothing -> None
+  let raise_zero_size () =
+    raise_bug "a copy of %s, which has zero size and so is trivial" (Ground.to_string ty)
   in
-  let parameter = Convention.classify_parameter context.env Read ty in
-  let self_local = Option.map (fun ty -> Emit_c.Ir_builder.allocate_local builder ty) parameter in
-  let self : Lowered.place =
-    match (parameter, self_local) with
-    | Some (Pointer _), Some local -> { root = Local local; projections = [ Deref ] }
-    | Some _, Some local -> Lowered.make_local_place local
-    | _ -> Lowered.make_local_place 0
+  let result_pointer, result =
+    match Convention.classify_result context.env ty with
+    | Through_pointer pointer ->
+        let pointer = Emit_c.Ir_builder.allocate_local builder pointer in
+        (Some pointer, Lowered.make_deref_place pointer)
+    | Returned _ ->
+        (None, Lowered.make_local_place (Emit_c.Ir_builder.allocate_local builder (Value ty)))
+    | Nothing -> raise_zero_size ()
   in
-  let result_local =
-    match result_pointer with
-    | None -> Some (Emit_c.Ir_builder.allocate_local builder (Value ty))
-    | Some _ -> None
-  in
-  let result : Lowered.place =
-    match (result_pointer, result_local) with
-    | Some pointer, _ -> { root = Local pointer; projections = [ Deref ] }
-    | None, Some local -> Lowered.make_local_place local
-    | None, None -> raise_bug "no place for the copy"
+  let self_local, self =
+    match Convention.classify_parameter context.env Read ty with
+    | Some (Pointer _ as parameter) ->
+        let local = Emit_c.Ir_builder.allocate_local builder parameter in
+        (local, Lowered.make_deref_place local)
+    | Some parameter ->
+        let local = Emit_c.Ir_builder.allocate_local builder parameter in
+        (local, Lowered.make_local_place local)
+    | None -> raise_zero_size ()
   in
   Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
   (match Representation.classify context.env ty with
@@ -354,15 +348,11 @@ let copy context ty =
                    result = Discarded;
                  })
           else
-            Emit_c.Ir_builder.emit_loop builder
+            copy_elements context builder element
               ~count:(Copy (Storage.project_length self))
-              (fun index ->
-                copy_into context builder
-                  ~destination:
-                    (Lowered.project (Lowered.make_local_place buffer)
-                       (Index (Copy (Lowered.make_local_place index))))
-                  ~source:(Storage.index_element self (Copy (Lowered.make_local_place index)))
-                  element);
+              ~destination:(fun index ->
+                Lowered.project (Lowered.make_local_place buffer) (Index index))
+              ~source:(Storage.index_element self);
           Emit_c.Ir_builder.emit builder
             (Assign
                ( result,
@@ -372,19 +362,14 @@ let copy context ty =
                    ~capacity:(Copy (Storage.project_capacity self)) )))
         ~no:(fun () -> Emit_c.Ir_builder.emit builder (Assign (result, Storage.build_empty ty)))
   | Shape (Record fields) ->
-      let fields =
-        List.map
-          (fun (name, member) ->
-            copy_field context builder ~source:(Lowered.project self (Field name)) (name, member))
-          fields
-      in
-      Emit_c.Ir_builder.emit builder (Assign (result, Build { ty; variant = None; fields }))
+      copy_members context builder ty ~destination:result
+        ~project:(fun name -> Lowered.project self (Field name))
+        fields
   | Shape (Array (element, count)) ->
-      Emit_c.Ir_builder.emit_loop builder ~count:(Lowered.make_uint64_constant count) (fun index ->
-          copy_into context builder
-            ~destination:(Lowered.project result (Index (Copy (Lowered.make_local_place index))))
-            ~source:(Lowered.project self (Index (Copy (Lowered.make_local_place index))))
-            element)
+      copy_elements context builder element
+        ~count:(Lowered.make_uint64_constant count)
+        ~destination:(fun index -> Lowered.project result (Index index))
+        ~source:(fun index -> Lowered.project self (Index index))
   | Shape (Sum variants) ->
       let after = Emit_c.Ir_builder.allocate_block builder in
       let cases =
@@ -392,34 +377,21 @@ let copy context ty =
           (fun (variant_shape : Memory_layout.variant_shape) ->
             let block = Emit_c.Ir_builder.allocate_block builder in
             Emit_c.Ir_builder.run_in_block builder block (fun () ->
-                let fields =
-                  List.map
-                    (fun (name, member) ->
-                      copy_field context builder
-                        ~source:
-                          (Lowered.project self
-                             (Variant_field { variant = variant_shape.name; field = name }))
-                        (name, member))
-                    variant_shape.fields
-                in
-                Emit_c.Ir_builder.emit builder
-                  (Assign (result, Build { ty; variant = Some variant_shape.name; fields }));
+                copy_members context builder ty ~destination:result ~variant:variant_shape.name
+                  ~project:(project_variant_field self variant_shape)
+                  variant_shape.fields;
                 Emit_c.Ir_builder.finish builder (Goto after));
             (variant_shape.name, block))
           variants
       in
       Emit_c.Ir_builder.finish builder (Switch_variant { place = self; cases; default = None });
       Emit_c.Ir_builder.start builder after);
-  (match result_local with
-  | Some local ->
-      Emit_c.Ir_builder.finish builder (Return (Some (Move (Lowered.make_local_place local))))
-  | None -> Emit_c.Ir_builder.finish builder (Return None));
-  let parameters = Option.to_list result_pointer @ Option.to_list self_local in
+  Emit_c.Ir_builder.finish builder
+    (Return (match result_pointer with Some _ -> None | None -> Some (Move result)));
   Emit_c.Ir_builder.build builder
     {
-      parameters;
-      result =
-        (match convention with Returned ty -> Some ty | Nothing | Through_pointer _ -> None);
+      parameters = Option.to_list result_pointer @ [ self_local ];
+      result = (copy_signature context ty).result;
       returns = true;
     }
 
@@ -440,9 +412,8 @@ let build_any_copy context ty =
     Emit_c.Ir_builder.emit builder
       (Assign (Lowered.make_local_place destination, Use (Copy (Lowered.make_local_place copied))));
     copy_into context builder
-      ~destination:{ root = Local destination; projections = [ Deref ] }
-      ~source:{ root = Local source; projections = [ Deref ] }
-      ty
+      ~destination:(Lowered.make_deref_place destination)
+      ~source:(Lowered.make_deref_place source) ty
   end;
   Emit_c.Ir_builder.finish builder (Return (Some (Copy (Lowered.make_local_place copied))));
   Emit_c.Ir_builder.build builder

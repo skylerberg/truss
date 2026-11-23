@@ -104,14 +104,11 @@ and collect_effects : Mir.basic -> Mir.local list * Mir.local list * Mir.local l
       let read, given = Option.fold ~none:([], []) ~some:list_written destination in
       (list_call_locals call @ read, given, [])
   | Lend { part; call } -> (list_call_locals call, [ part ], [])
-  | Template { destination; call; _ } ->
-      let read, given = list_written destination in
-      (list_call_locals call @ read, given, [])
   | Live locals -> ([], locals, [])
   | Dead locals -> ([], [], locals)
   | Assert value | Echo value -> (list_operand_locals value, [], [])
   | Loan_start { borrowed; _ } -> (list_operand_locals borrowed, [], [])
-  | Loan_end _ | Ghost_assert _ | Path_note _ | Proof _ -> ([], [], [])
+  | Loan_end _ | Ghost_assert _ | Path_note _ | Proof _ | Evaluated_assert _ -> ([], [], [])
 
 let collect_graph_effects :
     Mir.Graph.statement_kind -> Mir.local list * Mir.local list * Mir.local list = function
@@ -1026,29 +1023,27 @@ let () =
           }
       in
       let parts = make_mir_parts packages in
-      let read_form path =
+      let read_source path =
         match Mir.read_graph parts path with
-        | Some { form; _ } -> form
+        | Some { source; _ } -> source
         | None -> failwith (Path.show path ^ " has no MIR")
       in
       let default_method = make_method_path (Top { module_; name = "Shape" }) "doubled" in
-      let default_mir =
-        match
-          Option.bind ((Support.make_names packages).find_key default_method) (find_graph parts)
-        with
-        | Some mir -> mir
-        | None -> failwith "the default method has no MIR"
+      let default_key =
+        match (Support.make_names packages).find_key default_method with
+        | Some key -> key
+        | None -> failwith "the default method is not declared"
       in
       List.iter
         (fun type_name ->
-          if read_form (make_method_path (make_impl_path type_name) "doubled") != default_mir then
+          if read_source (make_method_path (make_impl_path type_name) "doubled") <> default_key then
             Harness.fail "`%s` has a MIR of its own for the method it inherits" type_name)
         [ "Square"; "Cube" ];
-      if read_form default_method != default_mir then
+      if read_source default_method <> default_key then
         Harness.fail "the default method's MIR by its path is not its definition's";
       if
-        read_form (make_method_path (make_impl_path "Square") "side")
-        == read_form (make_method_path (make_impl_path "Cube") "side")
+        read_source (make_method_path (make_impl_path "Square") "side")
+        = read_source (make_method_path (make_impl_path "Cube") "side")
       then Harness.fail "two written methods share one MIR");
   Harness.test "defaults have bodies of their own, apart from the MIR of any function's body"
     (fun () ->
@@ -1238,7 +1233,7 @@ let () =
           | None -> Harness.fail "the loop's condition is no comparison")
       | loops -> Harness.fail "%d `while` loops with one invariant" (List.length loops));
       match !proofs with
-      | [ proof ] -> validate "the proof block" (Mir.For_testing.expand proof).body
+      | [ proof ] -> validate "the proof block" (Mir.expand proof).body
       | proofs -> Harness.fail "%d proof blocks" (List.length proofs));
   Harness.test "an early exit from concurrent code ends the tasks it leaves" (fun () ->
       let mir = lower_graph Fixtures.Mir.early_return_from_a_concurrent_loop in
@@ -1476,6 +1471,86 @@ let () =
             Harness.fail "the implementations lack %s: [%s]" expected
               (String.concat "; " implementations))
         [ meters_equal; "derived standard.core.Equal for app.main.Span.equal" ])
+
+let () =
+  let lookups = lazy (make_call_edge_lookups Fixtures.Mir.code_reading_constants) in
+  let expect_edges name ~expected =
+    expect_paths ~expected
+      (List.filter
+         (fun (path : Path.t) -> Path.locate_package path <> Path.standard_package)
+         (Mir.Call_edges.list_path_edges (Lazy.force lookups)
+            (Support.make_top_path "app.main" name)))
+  in
+  Harness.test
+    "code has an edge to each constant that it returns, indexes, names in a pattern, or reads \
+     through an omitted field" (fun () ->
+      expect_edges "pass_limit" ~expected:[ "app.main.limit" ];
+      expect_edges "read_an_offset" ~expected:[ "app.main.offsets" ];
+      expect_edges "match_limit" ~expected:[ "app.main.limit" ];
+      expect_edges "build_window" ~expected:[ "app.main.limit" ]);
+  Harness.test "a constant has an edge to each function it calls and each constant it reads"
+    (fun () -> expect_edges "doubled" ~expected:[ "app.main.limit"; "app.main.pass_limit" ]);
+  Harness.test "a dependency records what reads the constant and through which omitted field"
+    (fun () ->
+      let { Mir.form = code; _ } =
+        Option.get
+          (Mir.read_code (Lazy.force lookups).mir (Support.make_top_path "app.main" "build_window"))
+      in
+      match
+        List.filter
+          (fun (dependency : Mir.Call_edges.dependency) -> dependency.kind = Read)
+          (Mir.Call_edges.list_dependencies (Lazy.force lookups) Types.no_substitution code)
+      with
+      | [ { path; omitted_field = Some "size"; _ } ] ->
+          expect_paths ~expected:[ "app.main.limit" ] [ path ]
+      | dependencies -> Harness.fail "%d reads" (List.length dependencies))
+
+let () =
+  let lookups = lazy (make_call_edge_lookups Fixtures.Mir.tagged_template) in
+  let code =
+    lazy
+      (Option.get (Mir.read_code (Lazy.force lookups).mir (Support.make_top_path "app.main" "f")))
+        .form
+  in
+  let list_literals (code : Mir.t) =
+    let literals = ref [] in
+    Mir.iter_places
+      (fun _ (place : Mir.place) ->
+        match place.root with
+        | Literal { value; _ } -> literals := value :: !literals
+        | Local _ | Constant _ -> ())
+      code;
+    List.sort_uniq compare !literals
+  in
+  let method_of name = "app.main.impl standard.text.FromTemplate for app.main.Shout." ^ name in
+  Harness.test
+    "a tagged template is an assertion by evaluation and a call of from_template that name one \
+     literal constant" (fun () ->
+      expect_paths
+        ~expected:[ method_of "from_template"; method_of "is_valid_template" ]
+        (List.filter
+           (fun (path : Path.t) -> Path.locate_package path <> Path.standard_package)
+           (Mir.Call_edges.list_path_edges (Lazy.force lookups)
+              (Support.make_top_path "app.main" "f")));
+      let literals : Language.Literal.t = Elements [ Text "hey" ] in
+      (match Mir.list_evaluated_asserts (Lazy.force code) with
+      | [ (_, condition) ] when list_literals condition = [ literals ] -> ()
+      | evaluated -> Harness.fail "%d assertions by evaluation" (List.length evaluated));
+      if not (List.mem literals (list_literals (Lazy.force code))) then
+        Harness.fail "the call names another literal")
+
+let () =
+  let lookups = lazy (make_call_edge_lookups Fixtures.Mir.code_asserting_by_evaluation) in
+  let expect_edges path ~expected =
+    expect_paths ~expected (Mir.Call_edges.list_path_edges (Lazy.force lookups) path)
+  in
+  Harness.test
+    "a function and a theorem have an edge to each function and constant of their assertions by \
+     evaluation" (fun () ->
+      expect_edges
+        (Support.make_top_path "app.main" "f")
+        ~expected:[ "app.main.is_small"; "app.main.limit" ];
+      expect_edges (Support.make_top_path "app.main" "tiny") ~expected:[ "app.main.is_tiny" ])
 
 let () =
   let lookups = lazy (make_call_edge_lookups Fixtures.Mir.impls_inheriting_a_provided_method) in

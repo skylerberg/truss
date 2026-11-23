@@ -1,7 +1,3 @@
-module Arguments_table = Hashtbl.Make (Structural_key.Make (struct
-  type t = Z.t list
-end))
-
 let example : Path.module_ = { package = { owner = None; name = "example" }; modules = [] }
 let example_file : Path.file = { module_ = example; name = "main" }
 let standard_package_database = lazy (Workspace.For_testing.load_standard_package_database ())
@@ -17,7 +13,9 @@ let solver =
 let c_compiler =
   lazy
     (match
-       C_compiler.find ~objects:(Filename.concat (Filename.get_temp_dir_name ()) "truss-proof-fuzz")
+       C_compiler.find
+         ~objects:(Filename.concat (Filename.get_temp_dir_name ()) "truss-proof-fuzz")
+         ()
      with
     | Ok c_compiler -> c_compiler
     | Error message -> failwith message)
@@ -27,7 +25,7 @@ let load text =
   if Database.list_file_diagnostics database example_file <> [] then None else Some database
 
 let make_backend database =
-  Backend.create ~evaluation_time_limit_ms:2000
+  Backend.create ~evaluation_cpu_time_limit_ms:2000
     (match Database.find_lowered_lookups database [ example.package ] with
     | Ok lookups -> lookups
     | Error message -> failwith message)
@@ -50,6 +48,7 @@ type candidate = {
   path : Path.t;
   key : Resolve.Names.key;
   signature : Types.signature;
+  result : Types.ty;
   admits : string list;
   ranges : (int * bool) list;
 }
@@ -57,7 +56,7 @@ type candidate = {
 let list_runnable database =
   let mir = Database.For_testing.make_mir_lookups database in
   let interface = Database.make_interface_lookups database in
-  let lookups = Database.make_proof_lookups database in
+  let lookups = Database.For_testing.make_proof_lookups database in
   List.filter_map
     (fun (declaration : Resolve.Names.declaration) ->
       let key = declaration.key in
@@ -93,7 +92,15 @@ let list_runnable database =
           | ranges_written
             when List.length ranges_written = List.length ranges
                  && not (List.exists (fun admit -> String.includes ~affix:"==>" admit) admits) ->
-              Some { path = key.path; key; signature; admits; ranges = ranges_written }
+              Some
+                {
+                  path = key.path;
+                  key;
+                  signature;
+                  result = output;
+                  admits;
+                  ranges = ranges_written;
+                }
           | _ -> None)
       | _ -> None)
     (lookups.interface.names.list_declarations example)
@@ -101,10 +108,10 @@ let list_runnable database =
 let is_proven (names : Resolve.Names.lookups) key states =
   let base = (names.read_place key).base and text = names.read_text key in
   List.for_all
-    (fun (state : Source.span Prover.state) ->
+    (fun (state : Database.proof_state) ->
       state.site.span.stop <= base
       || state.site.span.start >= base + String.length text
-      || state.failure = None)
+      || state.is_proven)
     states
 
 let make_admitting_source index candidate =
@@ -116,6 +123,26 @@ let make_admitting_source index candidate =
           candidate.signature.parameters))
     (String.concat " && " candidate.admits)
 
+let name_sample kind index sample = Printf.sprintf "fuzz_%s_%d_%d" kind index sample
+
+let make_sample_source index candidate sample arguments =
+  let call callee =
+    Printf.sprintf "%s(%s)" callee
+      (String.concat ", "
+         (List.map2
+            (fun (parameter : Types.parameter_info) argument ->
+              if Types.is_builtin Bool parameter.type_ then
+                string_of_bool (not (Z.equal argument Z.zero))
+              else Z.to_string argument)
+            candidate.signature.parameters arguments))
+  in
+  let define kind type_ callee =
+    Printf.sprintf "\npublic let %s: %s = %s\n" (name_sample kind index sample) type_ (call callee)
+  in
+  (if candidate.admits = [] then ""
+   else define "admits" "Bool" (Printf.sprintf "fuzz_requires_%d" index))
+  ^ define "result" (Types.show candidate.result) (Path.show candidate.path)
+
 let failures = ref 0
 let checked = ref 0
 let functions = ref 0
@@ -126,71 +153,75 @@ let run_mutant ~samples text =
   | None -> ()
   | Some database -> (
       incr checked;
-      let states =
-        Prover.list_states
-          (Prover.decide ~runs:[]
-             (Database.make_proof_lookups database)
-             (Lazy.force solver)
-             (Database.list_proofs (Database.prove database [ example_file ])))
-          example_file
-      in
+      Database.decide (Database.prove database (In_files [ example_file ])) solver;
+      let states = Database.list_proof_states database example_file in
       let candidates =
-        List.filter
-          (fun candidate -> is_proven (Database.make_name_lookups database) candidate.key states)
-          (list_runnable database)
-      in
-      let with_admitting =
-        text
-        ^ String.concat ""
-            (List.mapi
-               (fun index candidate ->
-                 if candidate.admits = [] then "" else make_admitting_source index candidate)
-               candidates)
-      in
-      match load with_admitting with
-      | None -> ()
-      | Some running ->
-          List.iteri
-            (fun index candidate ->
-              incr functions;
-              let call function_ values =
-                let arguments = List.map (fun value -> Lowered.Item.Integer value) values in
-                Database.For_testing.add_root running (Call_evaluation { function_; arguments });
-                Backend.For_testing.evaluate_call (make_backend running) ~function_ ~arguments
-              in
-              let is_admitted arguments =
-                candidate.admits = []
-                ||
-                match
-                  call
-                    (Top { module_ = example; name = Printf.sprintf "fuzz_requires_%d" index })
-                    arguments
-                with
-                | Ok (Ran (Static_scalar (Bool true))) -> true
-                | _ -> false
-              in
-              let tried = Arguments_table.create 16 in
-              List.iter
-                (fun arguments ->
-                  if (not (Arguments_table.mem tried arguments)) && is_admitted arguments then begin
-                    Arguments_table.replace tried arguments ();
-                    incr runs;
-                    match call candidate.path arguments with
-                    | Ok (Stopped report) ->
-                        incr failures;
-                        Printf.printf "PROVEN BUT FAILS: %s (%s)\n%s\n%s\n\n"
-                          (Path.show candidate.path)
-                          (String.concat ", " (List.map Z.to_string arguments))
-                          report text
-                    | _ -> ()
-                  end)
+        List.map
+          (fun candidate ->
+            ( candidate,
+              List.sort_uniq compare
                 (List.init samples (fun sample ->
                      List.map
                        (fun range ->
                          let edges = list_extremes range in
                          if sample < List.length edges then List.nth edges sample
                          else draw_random range)
-                       candidate.ranges)))
+                       candidate.ranges)) ))
+          (List.filter
+             (fun candidate -> is_proven (Database.make_name_lookups database) candidate.key states)
+             (list_runnable database))
+      in
+      let with_samples =
+        text
+        ^ String.concat ""
+            (List.mapi
+               (fun index (candidate, drawn) ->
+                 (if candidate.admits = [] then "" else make_admitting_source index candidate)
+                 ^ String.concat "" (List.mapi (make_sample_source index candidate) drawn))
+               candidates)
+      in
+      match load with_samples with
+      | None ->
+          List.iter
+            (fun (diagnostic : Diagnostic.t) -> prerr_endline diagnostic.message)
+            (Database.list_file_diagnostics (build_example_database with_samples) example_file);
+          failwith ("the samples of a mutant have errors:\n" ^ with_samples)
+      | Some running ->
+          let evaluate names =
+            let constants =
+              List.map (fun name -> Lowered.Item.Constant (Top { module_ = example; name })) names
+            in
+            List.iter (Database.For_testing.add_root running) constants;
+            Database.For_testing.lower_roots running;
+            Backend.evaluate (make_backend running) constants
+          in
+          List.iteri
+            (fun index (candidate, drawn) ->
+              incr functions;
+              let samples = List.mapi (fun sample arguments -> (sample, arguments)) drawn in
+              let name_samples kind = List.map (fun (sample, _) -> name_sample kind index sample) in
+              let admitted =
+                if candidate.admits = [] then samples
+                else
+                  List.filter_map
+                    (fun (sample, admits) ->
+                      if admits = Backend.Ran (Lowered.Static_scalar (Bool true)) then Some sample
+                      else None)
+                    (List.combine samples (evaluate (name_samples "admits" samples)))
+              in
+              List.iter2
+                (fun (_, arguments) ran ->
+                  incr runs;
+                  match ran with
+                  | Backend.Stopped report ->
+                      incr failures;
+                      Printf.printf "PROVEN BUT FAILS: %s (%s)\n%s\n%s\n\n"
+                        (Path.show candidate.path)
+                        (String.concat ", " (List.map Z.to_string arguments))
+                        report text
+                  | _ -> ())
+                admitted
+                (evaluate (name_samples "result" admitted)))
             candidates)
 
 let list_mutants text =
@@ -249,14 +280,8 @@ let () =
             in
             match load text with
             | Some database ->
-                let unproven =
-                  Prover.list_diagnostics
-                    (Prover.decide ~runs:[]
-                       (Database.make_proof_lookups database)
-                       (Lazy.force solver)
-                       (Database.list_proofs (Database.prove database [ example_file ])))
-                    example_file
-                in
+                Database.decide (Database.prove database (In_files [ example_file ])) solver;
+                let unproven = Database.list_proof_diagnostics database example_file in
                 print_diagnostics unproven;
                 unproven = []
             | None ->
@@ -279,4 +304,8 @@ let () =
   Printf.printf "%d mutants checked, %d functions that prove, run %d times\n" !checked !functions
     !runs;
   Printf.printf "%d proofs that should not have been made\n" !failures;
+  if !runs = 0 then begin
+    prerr_endline "No proven function was run, so nothing was checked.";
+    exit 2
+  end;
   exit (if !failures > 0 then 1 else 0)

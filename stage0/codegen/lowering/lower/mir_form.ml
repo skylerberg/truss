@@ -173,9 +173,9 @@ and lower_basic state (basic : Mir.basic) ~origin =
       in
       lower_call_into state call destination ~origin
   | Lend { part; call } -> lend state part call ~origin
-  | Template { destination; call; _ } ->
-      lower_call_into state call (Mir_places.lower_place state destination) ~origin
-  | Live _ | Loan_start _ | Loan_end _ | Ghost_assert _ | Path_note _ | Proof _ -> ()
+  | Live _ | Loan_start _ | Loan_end _ | Ghost_assert _ | Path_note _ | Proof _ | Evaluated_assert _
+    ->
+      ()
   | Dead locals -> List.iter (Mir_drops.end_local state) locals
   | Assert condition ->
       let holds = Mir_places.lower_operand state condition in
@@ -764,15 +764,9 @@ and lend_part state ~(mode : Language.Mode.t) (part : Mir.yielded) =
         in
         Emit_c.Ir_builder.emit state.builder
           (Assign (destination, Build { ty; variant; fields = List.map fst built }));
-        let is_indirect variant =
-          List.exists
-            (fun (shape : Memory_layout.variant_shape) -> shape.name = variant && shape.indirect)
-            (match Memory_layout.compute_shape state.context.env ty with
-            | Sum shapes -> shapes
-            | _ -> [])
-        in
         (match variant with
-          | Some variant when is_indirect variant -> [ ([], Deferred_free variant) ]
+          | Some variant when Memory_layout.is_indirect state.context.env ty variant ->
+              [ ([], Deferred_free variant) ]
           | _ -> [])
         @ List.concat_map snd built
   in

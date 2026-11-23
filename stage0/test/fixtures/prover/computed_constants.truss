@@ -1,0 +1,59 @@
+type Point(x: Int64, y: Int64)
+
+type Shape =
+  | Circle(radius: Float64)
+  | Square(side: Float64)
+
+fn to_seconds(hours: UInt64) -> UInt64
+  requires hours <= 24
+{
+  hours * 60 * 60
+}
+
+fn is_even(value: UInt64) -> Bool {
+  value % 2 == 0
+}
+
+fn make_corner() -> Option[Point] {
+  Option.Some(Point(x: 3, y: 4))
+}
+
+fn make_shape() -> Shape {
+  Shape.Circle(radius: 1.5)
+}
+
+let hours_per_day: UInt64 = 12 + 12
+let seconds_per_day: UInt64 = to_seconds(hours_per_day)
+let day_is_even: Bool = is_even(seconds_per_day)
+let corner: Option[Point] = make_corner()
+let shape: Shape = make_shape()
+
+fn read_seconds() -> UInt64
+  ensures result == 86400
+{
+  seconds_per_day
+}
+
+fn read_evenness() -> Bool
+  ensures result
+{
+  day_is_even
+}
+
+fn read_corner() -> Int64
+  ensures result == 4
+{
+  match corner {
+    Some(point) => point.y
+    None => 0
+  }
+}
+
+fn read_radius() -> Float64
+  ensures result == 1.5
+{
+  match shape {
+    Circle(radius) => radius
+    Square(side) => side
+  }
+}

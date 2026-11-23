@@ -1,6 +1,10 @@
 module Lookups = Lookups
 module Path_table = Hashtbl.Make (Path)
 
+module Key_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Resolve.Names.key
+end))
+
 module Parameter_table = Hashtbl.Make (Structural_key.Make (struct
   type t = Types.parameter
 end))
@@ -11,10 +15,6 @@ end))
 
 module Grown_node_table = Hashtbl.Make (Structural_key.Make (struct
   type t = (Path.t * int) * bool
-end))
-
-module Field_default_table = Hashtbl.Make (Structural_key.Make (struct
-  type t = Path.t * string option * string
 end))
 
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Package_checks" format
@@ -58,17 +58,20 @@ let check_location (declaration : Resolve.Names.declaration) spans (definition :
             (Types.show impl.for_type)))
 
 let check_sealed (lookups : Lookups.t) (declaration : Resolve.Names.declaration) =
-  let package = declaration.key.module_.package in
+  let is_sealed =
+    match declaration.key.path with
+    | Impl { trait; _ } -> Option.is_some (Types.find_sealed_implementors trait.path)
+    | _ -> false
+  in
   match
-    ( List.find_opt
-        (fun (_, impl) -> Path.equal impl declaration.key.path)
-        (lookups.interface.names.list_impls package),
-      read_definition lookups declaration )
+    if is_sealed then Resolve.Namespace.find_impl_heads lookups.interface.names declaration.key.path
+    else None
   with
-  | Some ((trait, type_), _), (definition, spans) -> (
+  | Some (trait, type_) -> (
       match (Types.find_sealed_implementors trait, Well_known.find_builtin_type type_) with
       | Some builtins, Some builtin when List.mem builtin builtins -> []
       | Some _, _ ->
+          let definition, spans = read_definition lookups declaration in
           let implementors, reason =
             if Well_known.is Floating_point trait then
               ( "the built-in float types",
@@ -84,7 +87,7 @@ let check_sealed (lookups : Lookups.t) (declaration : Resolve.Names.declaration)
                  (Path.show trait) (Path.show type_) reason);
           ]
       | None, _ -> [])
-  | _ -> []
+  | None -> []
 
 let impls_overlap (first : Types.impl_interface) (second : Types.impl_interface) =
   let variables =
@@ -235,8 +238,10 @@ let list_type_arguments arguments =
 let list_contained_types (lookups : Lookups.t) path =
   let list_bounds =
     match Interface.Definition.find_type_interface lookups.interface path with
-    | Some interface -> Types.list_bounds interface.type_generics
-    | None -> fun _ -> []
+    | Some interface ->
+        Interface.Properties.Bounds.close lookups.interface
+          (Types.list_bounds interface.type_generics)
+    | None -> Interface.Properties.Bounds.none
   in
   List.concat_map
     (fun (((variant : Types.variant option), (field : Types.field)) as written) ->
@@ -430,7 +435,9 @@ let check_associated_types (lookups : Lookups.t) ~list_contained
     (declaration : Resolve.Names.declaration) spans (definition : Syntax.definition)
     (impl : Types.impl_interface) =
   let key = declaration.key in
-  let list_bounds = Types.list_bounds impl.impl_generics in
+  let list_bounds =
+    Interface.Properties.Bounds.close lookups.interface (Types.list_bounds impl.impl_generics)
+  in
   let find_written name =
     match definition.kind with
     | Impl { members; _ } ->
@@ -488,8 +495,7 @@ let check_associated_types (lookups : Lookups.t) ~list_contained
               (Interface.Impls.collect_contents lookups.interface ~list_bounds type_).recursions)))
     impl.implements.associated
 
-let list_instantiation_edges (lookups : Lookups.t) (key : Resolve.Names.key) =
-  let form = lookups.read_core key in
+let list_instantiations (key : Resolve.Names.key) (form : Core.t) =
   let grows = function
     | Types.Type (Types.Named { arguments; _ }) ->
         let mentions =
@@ -515,21 +521,20 @@ let list_instantiation_edges (lookups : Lookups.t) (key : Resolve.Names.key) =
     form.definition;
   List.rev !edges
 
+let is_checked_for_instantiation (declaration : Resolve.Names.declaration) =
+  declaration.generic && declaration.key.ordinal = 0
+  && (declaration.kind = Function || declaration.kind = Method)
+
 let check_instantiation (lookups : Lookups.t) (package : Path.package) =
   let generic =
-    List.filter
-      (fun (declaration : Resolve.Names.declaration) ->
-        declaration.generic && declaration.key.ordinal = 0
-        && (declaration.kind = Function || declaration.kind = Method))
+    List.filter is_checked_for_instantiation
       (lookups.interface.names.list_package_declarations package)
   in
   let edges = Path_table.create 64 in
   List.iter
-    (fun (declaration : Resolve.Names.declaration) ->
-      Path_table.replace edges declaration.key.path
-        (list_instantiation_edges lookups declaration.key))
-    generic;
-  let list_outgoing path = Option.value ~default:[] (Path_table.find_opt edges path) in
+    (fun (caller, callee, grows) -> Path_table.add edges caller (callee, grows))
+    (lookups.list_instantiations package);
+  let list_outgoing path = List.rev (Path_table.find_all edges path) in
   let component_index = Path_table.create 64 in
   List.iteri
     (fun index members ->
@@ -582,18 +587,17 @@ let check_overlaps (lookups : Lookups.t) (declaration : Resolve.Names.declaratio
       let trait = impl.implements.trait in
       let rec list_before = function
         | [] -> []
-        | ((indexed_trait, indexed_type), path) :: rest ->
-            if Path.equal path declaration.key.path then []
-            else if Path.equal indexed_trait trait && Path.equal indexed_type type_ then
-              path :: list_before rest
-            else list_before rest
+        | impl :: rest ->
+            if Path.equal impl declaration.key.path then [] else impl :: list_before rest
       in
       let earlier =
         List.filter
           (fun (other : Types.impl_interface) -> List.mem package (list_outer_packages other))
           (List.filter_map
              (Interface.Definition.find_impl_interface lookups.interface)
-             (list_before (lookups.interface.names.list_impls package)))
+             (list_before
+                (Interface.Impls.list_impls_of_trait_for_type lookups.interface ~trait ~type_
+                   package)))
       in
       let dependencies =
         List.concat_map
@@ -633,122 +637,6 @@ let check_type lookups ~list_contained (declaration : Resolve.Names.declaration)
   let definition, spans = read_definition lookups declaration in
   check_recursion lookups ~list_contained declaration spans definition
 
-let read_constant_value (lookups : Lookups.t) path =
-  match Option.map lookups.read_core (lookups.interface.names.find_key path) with
-  | Some { definition = Constant (Some value); _ } -> Some value
-  | _ -> None
-
-let find_field_default (lookups : Lookups.t) (type_ : Types.ty) variant field =
-  match type_ with
-  | Named { path; _ } -> (
-      match Option.map lookups.read_core (lookups.interface.names.find_key path) with
-      | Some { definition = Type { defaults; _ }; _ } ->
-          List.find_map
-            (fun (default_variant, default_field, value) ->
-              if
-                Option.equal String.equal default_variant variant
-                && String.equal default_field field
-              then Some (path, value)
-              else None)
-            defaults
-      | _ -> None)
-  | _ -> None
-
-type named_constant = { origin : Core.origin; constant : Path.t; omitted_field : string option }
-
-let list_named_constants (lookups : Lookups.t) (value : Core.expression) =
-  let named = ref [] in
-  let entered_defaults = Field_default_table.create 8 in
-  let rec visit ~through (value : Core.expression) =
-    Core_walk.walk_expression
-      {
-        Core_walk.ignore_all with
-        place =
-          (function
-          | Constant { path; origin; _ } ->
-              let origin, omitted_field =
-                match through with
-                | Some (origin, field) -> (origin, Some field)
-                | None -> (origin, None)
-              in
-              named := { origin; constant = path; omitted_field } :: !named
-          | Local _ | Field _ | Element _ | Range _ | Lent _ | Temporary _ -> ());
-        expression =
-          (fun (node : Core.expression) ->
-            match node.kind with
-            | Construct { variant; fields } ->
-                List.iter
-                  (fun (field, operand) ->
-                    if Option.is_none operand then
-                      match find_field_default lookups node.type_ variant field with
-                      | Some (type_path, default) ->
-                          let entered = (type_path, variant, field) in
-                          if not (Field_default_table.mem entered_defaults entered) then begin
-                            Field_default_table.replace entered_defaults entered ();
-                            let through =
-                              match through with
-                              | Some _ -> through
-                              | None -> Some (node.origin, field)
-                            in
-                            visit ~through default
-                          end
-                      | None -> ())
-                  fields
-            | _ -> ());
-      }
-      value
-  in
-  visit ~through:None value;
-  List.sort_uniq compare !named
-
-let describe_constant_cycle ~cyclic (named : named_constant) =
-  let is_itself = Path.equal named.constant cyclic in
-  let constant = Path.show named.constant and cyclic = Path.show cyclic in
-  let consequence = Printf.sprintf "so `%s` would be computed from itself." cyclic in
-  match (named.omitted_field, is_itself) with
-  | None, true -> Printf.sprintf "This reads `%s` in its own value, %s" constant consequence
-  | None, false ->
-      Printf.sprintf "This reads `%s`, whose value depends on `%s`, %s" constant cyclic consequence
-  | Some field, true ->
-      Printf.sprintf "This leaves out the field `%s`, whose default reads `%s`, %s" field constant
-        consequence
-  | Some field, false ->
-      Printf.sprintf
-        "This leaves out the field `%s`, whose default reads `%s`. The value of `%s` depends on \
-         `%s`, %s"
-        field constant constant cyclic consequence
-
-let check_constant (lookups : Lookups.t) (declaration : Resolve.Names.declaration) =
-  let path = declaration.key.path in
-  match read_constant_value lookups path with
-  | None -> []
-  | Some value ->
-      let visited = Path_table.create 16 in
-      let rec depends_on_constant named =
-        Path.equal named path
-        || (not (Path_table.mem visited named))
-           && begin
-             Path_table.replace visited named ();
-             match read_constant_value lookups named with
-             | Some named_value ->
-                 List.exists
-                   (fun (further : named_constant) -> depends_on_constant further.constant)
-                   (list_named_constants lookups named_value)
-             | None -> false
-           end
-      in
-      let key = declaration.key in
-      let spans = lookups.interface.names.read_spans key in
-      List.filter_map
-        (fun (named : named_constant) ->
-          if depends_on_constant named.constant then
-            Some
-              (make_diagnostic key Constant_cycle
-                 spans.(Core_walk.locate_origin named.origin)
-                 (describe_constant_cycle ~cyclic:path named))
-          else None)
-        (list_named_constants lookups value)
-
 let must_be_used (lookups : Lookups.t) (declaration : Resolve.Names.declaration) =
   (match declaration.visibility with Private | Internal -> true | Public | Public_opaque -> false)
   && declaration.key.ordinal = 0
@@ -760,7 +648,7 @@ let must_be_used (lookups : Lookups.t) (declaration : Resolve.Names.declaration)
   | Function | Method | Constant | Member_constant -> true
   | Type | Trait | Capability | Theorem | Impl | Test | Law_proof -> false
 
-let list_used_paths (lookups : Lookups.t) key =
+let list_uses (form : Core.t) =
   let used = ref [] in
   let use path = used := path :: !used in
   let use_constant : Core.pattern_constant -> unit = function
@@ -796,7 +684,7 @@ let list_used_paths (lookups : Lookups.t) key =
               use_bound stop
           | Wildcard | Bind _ | Variant _ | Record _ | Alternatives _ -> ());
     }
-    (lookups.read_core key).definition;
+    form.definition;
   !used
 
 let locate_name (spans : Source.Definition_span.t array) (definition : Syntax.definition) =
@@ -834,10 +722,14 @@ let report_unused (lookups : Lookups.t) (declaration : Resolve.Names.declaration
   }
 
 let check_unexported (lookups : Lookups.t) package =
+  let used_by = Key_table.create 64 in
+  List.iter (fun (key, path) -> Key_table.add used_by key path) (lookups.list_uses package);
   let uses =
     List.map
-      (fun declaration ->
-        (declaration, must_be_used lookups declaration, list_used_paths lookups declaration.key))
+      (fun (declaration : Resolve.Names.declaration) ->
+        ( declaration,
+          must_be_used lookups declaration,
+          List.rev (Key_table.find_all used_by declaration.key) ))
       (lookups.interface.names.list_package_declarations package)
   in
   let uses_of_unexported = Path_table.create 64 in
@@ -875,35 +767,17 @@ type check =
   | Sealed of Resolve.Names.key
   | Impl of Resolve.Names.key
   | Type of Resolve.Names.key
-  | Constant of Resolve.Names.key
   | Instantiations
   | Tests
   | Unexported
   | Dependencies
-
-let list_checks (declarations : Resolve.Names.declaration list) =
-  List.concat_map
-    (fun (declaration : Resolve.Names.declaration) ->
-      if declaration.key.ordinal <> 0 then []
-      else
-        match declaration.kind with
-        | Impl -> [ Sealed declaration.key; Impl declaration.key ]
-        | Type -> [ Type declaration.key ]
-        | Constant | Member_constant -> [ Constant declaration.key ]
-        | _ -> [])
-    declarations
-  @ [ Instantiations; Tests; Unexported; Dependencies ]
 
 let describe_unused_dependency ~package dependency =
   Printf.sprintf "Nothing in `%s` uses `%s`. Delete its entry." (Path.show_package package)
     (Path.show_package dependency)
 
 let list_unused_dependencies (lookups : Lookups.t) package =
-  let used =
-    List.concat_map
-      (fun (declaration : Resolve.Names.declaration) -> lookups.list_used_packages declaration.key)
-      (lookups.interface.names.list_package_declarations package)
-  in
+  let used = lookups.list_used_packages package in
   List.filter
     (fun dependency -> not (List.mem dependency used))
     (lookups.interface.names.list_dependency_names package)
@@ -932,7 +806,6 @@ let run (lookups : Lookups.t) package check =
   | Sealed key -> check_definition lookups key (check_sealed lookups)
   | Impl key -> check_definition lookups key (check_impl lookups ~list_contained)
   | Type key -> check_definition lookups key (check_type lookups ~list_contained)
-  | Constant key -> check_definition lookups key (check_constant lookups)
   | Instantiations -> Placed (check_instantiation lookups package)
   | Tests -> Placed (check_tests lookups package)
   | Unexported -> Placed (check_unexported lookups package)

@@ -18,11 +18,8 @@ val lower_source_code :
 
 val lower_generated : context -> Lowered.Item.generated -> Emit_c.fragment
 
-type constant = Folded of Lowered.data | Run of Ground.ty
+type evaluated = Folded of Lowered.data | Run of Ground.ty
 
-val lower_constant : context -> Path.t -> constant
-val lower_evaluator : context -> Path.t -> Emit_c.fragment
+val lower_evaluated : context -> Lowered.Item.t -> evaluated
+val lower_evaluator : context -> Lowered.Item.t -> Emit_c.fragment
 val lower_table : context -> Lowered.Item.table -> Lowered.table
-
-val lower_call_evaluation :
-  context -> function_:Path.t -> arguments:Lowered.Item.argument list -> Emit_c.fragment

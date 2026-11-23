@@ -678,6 +678,17 @@ let () =
       expect_one_diagnostic Fixtures.Ownership.map_literal_of_an_own_name "ownership.needs_owned");
   Harness.test "a constant's value and a default may hold a constant without a copy" (fun () ->
       expect_fine Fixtures.Ownership.constants_and_defaults_holding_a_constant);
+  Harness.test "a constant's value cannot be a view of a temporary" (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.constant_viewing_a_temporary "ownership.view_escapes"
+        ~says:"A constant is a view only of another constant.");
+  Harness.test "a constant's value may be a view of a constant, or of a view that a call returns"
+    (fun () -> expect_fine Fixtures.Ownership.constants_viewing_constants);
+  Harness.test "a constant's value cannot pass a constant to an `own` parameter" (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.constant_passing_a_constant_to_an_own_parameter
+        "ownership.not_owned");
+  Harness.test "the condition of an assertion by evaluation cannot move a constant" (fun () ->
+      expect_one_diagnostic Fixtures.Ownership.assertion_by_evaluation_moving_a_constant
+        "ownership.not_owned");
   List.iter
     (fun (place, text, fixed) ->
       Harness.test
@@ -1082,7 +1093,7 @@ let count_disjoint_obligations text =
     (fun total (declaration : Resolve.Names.declaration) ->
       match Database.For_testing.read_ownership database declaration.key with
       | Value must_be_disjoint -> total + List.length must_be_disjoint
-      | Failed _ | Blocked -> total)
+      | Failed | Blocked -> total)
     0
     ((Support.make_names packages).list_declarations_in file)
 

@@ -1306,18 +1306,20 @@ and parse_statement cursor : Syntax.statement =
   | Keyword Assert ->
       Cursor.advance cursor;
       let value = parse_expression cursor in
-      let by_bit_vector =
+      let by : Language.Proof_method.t option =
         match
           ( Contextual_keyword.of_token (Cursor.peek_kind cursor),
             Contextual_keyword.of_token (Cursor.peek_ahead cursor 1) )
         with
-        | Some By, Some Bit_vector ->
-            Cursor.advance cursor;
-            Cursor.advance cursor;
-            true
-        | _ -> false
+        | Some By, Some Bit_vector -> Some Bit_vector
+        | Some By, Some Evaluation -> Some Evaluation
+        | _ -> None
       in
-      make_statement_node (Assert { value; by_bit_vector })
+      if Option.is_some by then begin
+        Cursor.advance cursor;
+        Cursor.advance cursor
+      end;
+      make_statement_node (Assert { value; by })
   | Reserved Loop when Cursor.peek_ahead cursor 1 = Punctuation (Open Curly) ->
       let loop_token = Cursor.take cursor in
       Habits.report_loop cursor ~loop_token;

@@ -12,8 +12,7 @@ type LayoutInput =
   | Finish(position: UInt64, first_line_break: Option[source.Span], blank_line: Bool, ends_unterminated: Bool)
   derives Equal
 
-type LayoutMode = FileMode(recovery: Bool) | InterpolationMode
-  derives Equal
+type LayoutMode = FileMode(recovery: Bool) | InterpolationMode(state: InterpolationState)
 
 type Opener(bracket: token.Bracket, span: source.Span, index: UInt64)
   derives Equal
@@ -291,7 +290,7 @@ fn list_closing_fixes(scanner: Scanner, run: Run, openers: Slice[Opener], title:
   uses Panic
 {
   match find_closing_edits(scanner, run, openers) {
-    Some(edits) => [source.make_fix(title, edits: edits.copy())]
+    Some(edits) => [source.make_fix(title, own edits)]
     None => []
   }
 }
@@ -303,7 +302,6 @@ fn close_all(scanner: mut Scanner, run: mut Run, position: UInt64, reason: Strin
   let Some(innermost) = openers.get(0) else {
     return
   }
-  let innermost_opener = innermost
   var closers = ""
   for opener in openers {
     mut closers.push(spell_closer(opener.bracket))
@@ -320,8 +318,8 @@ fn close_all(scanner: mut Scanner, run: mut Run, position: UInt64, reason: Strin
   report(
     mut scanner,
     code: "lexer.unclosed_bracket",
-    span: innermost_opener.span,
-    message: "This `${spell_opener(innermost_opener.bracket)}` is never closed${reason}.",
+    span: innermost.span,
+    message: "This `${spell_opener(innermost.bracket)}` is never closed${reason}.",
     notes: own notes,
     fixes: own fixes,
   )
@@ -342,13 +340,12 @@ fn close_bracket(scanner: mut Scanner, run: mut Run, current: token.Token, brack
     return
   }
   while run.stack.last() is Some(opener) && opener.bracket != bracket {
-    let unclosed = opener
-    let fixes = list_closing_fixes(scanner, run, openers: [unclosed], title: "Insert `${spell_closer(unclosed.bracket)}`")
+    let fixes = list_closing_fixes(scanner, run, openers: [opener], title: "Insert `${spell_closer(opener.bracket)}`")
     report(
       mut scanner,
       code: "lexer.unclosed_bracket",
-      span: unclosed.span,
-      message: "This `${spell_opener(unclosed.bracket)}` is never closed.",
+      span: opener.span,
+      message: "This `${spell_opener(opener.bracket)}` is never closed.",
       notes: [
         source.Note(span, message: "This `${spell_closer(bracket)}` closes an earlier `${spell_opener(bracket)}` first."),
       ],
@@ -367,7 +364,7 @@ fn finish_run(
   first_line_break: Option[source.Span],
   blank_line: Bool,
   ends_unterminated: Bool,
-) -> TokenRange
+)
   uses Panic, RunForever
 {
   if !run.stack.is_empty() {
@@ -379,13 +376,13 @@ fn finish_run(
     } else {
       close_all(mut scanner, mut run, position: compute_closer_position(first_line_break, position), reason: " before the end of the file")
     }
-    InterpolationMode => if ends_unterminated {
+    InterpolationMode(_) => if ends_unterminated {
       close_silently(mut run, position)
     } else {
       close_all(mut scanner, mut run, position, reason: " before the end of the interpolation")
     }
   }
-  if mode != LayoutMode.InterpolationMode && run.previous is Some(previous_kind) && token.can_end(previous_kind) {
+  if mode is FileMode(_) && run.previous is Some(previous_kind) && token.can_end(previous_kind) {
     let newline_span = match first_line_break {
       Some(line_break) => line_break
       None => source.make_zero_width(position)
@@ -402,26 +399,12 @@ fn finish_run(
       is_inserted_closer: false,
     ),
   )
-  let first = scanner.tables.tokens.length()
-  let output = own run.output
-  run.output = []
-  mut scanner.tables.tokens.append(own output)
-  TokenRange(first, stop: scanner.tables.tokens.length(), open_at_end: run.open_at_end)
 }
 
-fn read_next_input(scanner: mut Scanner, mode: LayoutMode, state: mut InterpolationState) -> LayoutInput
-  uses Panic, RunForever
-{
-  match mode {
-    FileMode(_) => lex_next(mut scanner)
-    InterpolationMode => read_interpolation_input(mut scanner, mut state)
-  }
-}
+type CodeFrame(run: Run, mode: LayoutMode, pending: List[Pending])
 
-fn run_layout(scanner: mut Scanner, mode: LayoutMode, state: mut InterpolationState) -> TokenRange
-  uses Panic, RunForever
-{
-  var run = Run(
+fn make_code_frame(mode: LayoutMode) -> CodeFrame {
+  let run = Run(
     output: [],
     closers: [],
     stack: [],
@@ -432,53 +415,140 @@ fn run_layout(scanner: mut Scanner, mode: LayoutMode, state: mut InterpolationSt
     open_at_end: false,
     unterminated_strings: [],
   )
-  while true {
-    match read_next_input(mut scanner, mode, mut state) {
-      Finish(position, first_line_break, blank_line, ends_unterminated) => {
-        return finish_run(mut scanner, mut run, mode, position, first_line_break, blank_line, ends_unterminated)
-      }
-      Next(kind, span, first_line_break, blank_line, unterminated_string) => {
-        if mode == LayoutMode.FileMode(recovery: true) && !run.stack.is_empty()
-          && token_starts_definition(scanner.source, first_line_break, kind, offset: span.start)
-        {
-          close_all(
-            mut scanner,
-            mut run,
-            position: compute_closer_position(first_line_break, position: span.start),
-            reason: " before the next definition",
-          )
-        }
-        let ignores_line_breaks = match run.stack.last() {
-          Some(opener) => opener.bracket != token.Bracket.Curly
-          None => false
-        }
-        if first_line_break is Some(line_break) && run.previous is Some(previous_kind) && !ignores_line_breaks
-          && token.can_end(previous_kind) && token.can_begin(kind)
-        {
-          emit(mut run, current: token.make_token(token.Kind.Newline, span: line_break))
-        }
-        if unterminated_string {
-          mut run.unterminated_strings.push(span.start)
-        }
-        let current = token.Token(
-          kind,
-          span,
-          line_break_before: first_line_break.is_some(),
-          blank_line_before: blank_line,
-          is_inserted_closer: false,
+  CodeFrame(own run, mode, pending: [])
+}
+
+fn lay_out(scanner: mut Scanner, run: mut Run, mode: LayoutMode, input: LayoutInput) -> Bool
+  uses Panic, RunForever
+{
+  match input {
+    Finish(position, first_line_break, blank_line, ends_unterminated) => {
+      finish_run(mut scanner, mut run, mode, position, first_line_break, blank_line, ends_unterminated)
+      true
+    }
+    Next(kind, span, first_line_break, blank_line, unterminated_string) => {
+      if mode is FileMode(recovery: true) && !run.stack.is_empty()
+        && token_starts_definition(scanner.source, first_line_break, kind, offset: span.start)
+      {
+        close_all(
+          mut scanner,
+          mut run,
+          position: compute_closer_position(first_line_break, position: span.start),
+          reason: " before the next definition",
         )
-        match kind {
-          Punctuation(punctuation) => match punctuation {
-            Open(bracket) => {
-              push_opener(mut run, bracket, span)
-              emit(mut run, current)
-            }
-            Close(bracket) => close_bracket(mut scanner, mut run, current, bracket)
-            _ => emit(mut run, current)
+      }
+      let ignores_line_breaks = match run.stack.last() {
+        Some(opener) => opener.bracket != token.Bracket.Curly
+        None => false
+      }
+      if first_line_break is Some(line_break) && run.previous is Some(previous_kind) && !ignores_line_breaks
+        && token.can_end(previous_kind) && token.can_begin(kind)
+      {
+        emit(mut run, current: token.make_token(token.Kind.Newline, span: line_break))
+      }
+      if unterminated_string {
+        mut run.unterminated_strings.push(span.start)
+      }
+      let current = token.Token(
+        kind,
+        span,
+        line_break_before: first_line_break.is_some(),
+        blank_line_before: blank_line,
+        is_inserted_closer: false,
+      )
+      match kind {
+        Punctuation(punctuation) => match punctuation {
+          Open(bracket) => {
+            push_opener(mut run, bracket, span)
+            emit(mut run, current)
           }
+          Close(bracket) => close_bracket(mut scanner, mut run, current, bracket)
           _ => emit(mut run, current)
         }
+        _ => emit(mut run, current)
       }
+      false
+    }
+  }
+}
+
+fn accept_item(scanner: mut Scanner, frame: mut CodeFrame, item: Item) -> Bool
+  uses Panic, RunForever
+{
+  let input = match mut frame.mode {
+    FileMode(_) => match item {
+      LineEnd => {
+        let line_break = consume_line_break(mut scanner)
+        note_line_break(mut scanner, line_break)
+        return false
+      }
+      End => LayoutInput.Finish(
+        position: scanner.length,
+        first_line_break: scanner.first_line_break,
+        blank_line: scanner.blank_line,
+        ends_unterminated: scanner.unterminated_at_end,
+      )
+      Lexed(scanned) => LayoutInput.Next(
+        kind: scanned.kind,
+        span: source.make_span(scanned.start, stop: scanned.stop),
+        first_line_break: scanned.first_line_break,
+        blank_line: scanned.blank_line,
+        unterminated_string: scanned.ending == Ending.Unterminated,
+      )
+    }
+    InterpolationMode(state) => read_interpolation_item(mut scanner, mut state, item)
+  }
+  lay_out(mut scanner, run: mut frame.run, mode: frame.mode, input: input)
+}
+
+type CodeStep = CodeFinished | StringOpened(string: StringFrame, request: InterpolationRequest)
+
+fn deliver(scanner: mut Scanner, frame: mut CodeFrame, item: Item) -> Bool
+  uses Panic, RunForever
+{
+  var settled = item
+  if !frame.pending.is_empty() {
+    let Some(resolved) = settle(mut scanner, pending: mut frame.pending, arrived: item) else {
+      return false
+    }
+    settled = resolved
+  }
+  if settled is Lexed(scanned) {
+    scanner.previous = Some(scanned)
+  }
+  accept_item(mut scanner, mut frame, item: settled)
+}
+
+fn step_code(scanner: mut Scanner, frame: mut CodeFrame, arriving: Option[Item]) -> CodeStep
+  uses Panic, RunForever
+{
+  let inline = frame.mode is InterpolationMode(_)
+  let nesting = match frame.mode {
+    FileMode(_) => 0
+    InterpolationMode(state) => state.nesting + 1
+  }
+  if arriving is Some(arrived) && deliver(mut scanner, mut frame, item: arrived) {
+    return CodeStep.CodeFinished
+  }
+  while true {
+    if frame.pending.is_empty() {
+      if frame.mode is InterpolationMode(state) && state.is_finished {
+        let _ = lay_out(mut scanner, run: mut frame.run, mode: frame.mode, input: finish_input(scanner.position, ending: state.ending))
+        return CodeStep.CodeFinished
+      }
+      if mut scanner.held.pop() is Some(held) {
+        if deliver(mut scanner, mut frame, item: held) {
+          return CodeStep.CodeFinished
+        }
+        continue
+      }
+    }
+    match scan_item(mut scanner, inline, nesting) {
+      Ready(item) => if deliver(mut scanner, mut frame, item) {
+        return CodeStep.CodeFinished
+      }
+      Awaiting(pending) => mut frame.pending.push(own pending)
+      Opened(string, request) => return CodeStep.StringOpened(own string, request)
     }
   }
 }
@@ -486,20 +556,47 @@ fn run_layout(scanner: mut Scanner, mode: LayoutMode, state: mut InterpolationSt
 fn lex_file(scanner: mut Scanner, recovery: Bool) -> TokenRange
   uses Panic, RunForever
 {
-  var state = InterpolationState(
-    start: 0,
-    nesting: 0,
-    braces: 0,
-    count: 0,
-    is_finished: false,
-    is_closed: false,
-    ending: Ending.Closed,
-  )
-  run_layout(mut scanner, mode: LayoutMode.FileMode(recovery), state: mut state)
-}
-
-fn lex_interpolation(scanner: mut Scanner, state: mut InterpolationState) -> TokenRange
-  uses Panic, RunForever
-{
-  run_layout(mut scanner, mode: LayoutMode.InterpolationMode, state: mut state)
+  var codes: List[CodeFrame] = [make_code_frame(mode: LayoutMode.FileMode(recovery))]
+  var strings: List[StringFrame] = []
+  var arriving: Option[Item] = None
+  var interpolated: Option[InterpolationResult] = None
+  while true {
+    if codes.length() > strings.length() {
+      let step = step_code(mut scanner, frame: mut codes.element(codes.length() - 1), arriving: arriving)
+      arriving = None
+      match own step {
+        CodeFinished => {
+          let Some(finished) = mut codes.pop() else {
+            Panic.crash("a code frame is active")
+          }
+          let first = scanner.tables.tokens.length()
+          mut scanner.tables.tokens.append(own finished.run.output)
+          let range = TokenRange(first, stop: scanner.tables.tokens.length(), open_at_end: finished.run.open_at_end)
+          match finished.mode {
+            FileMode(_) => return range
+            InterpolationMode(state) => interpolated = Some(finish_interpolation(mut scanner, state, range))
+          }
+        }
+        StringOpened(string, request) => {
+          mut strings.push(own string)
+          mut codes.push(begin_interpolation(mut scanner, request))
+        }
+      }
+    } else {
+      if strings.is_empty() {
+        Panic.crash("a string frame is active")
+      }
+      let progress = continue_string(mut scanner, frame: mut strings.element(strings.length() - 1), interpolated: interpolated)
+      interpolated = None
+      match progress {
+        Interpolates(request) => mut codes.push(begin_interpolation(mut scanner, request))
+        Ended(ending, stop) => {
+          let Some(ended) = mut strings.pop() else {
+            Panic.crash("a string frame is active")
+          }
+          arriving = Some(finish_string(mut scanner, frame: own ended, ending: ending, stop: stop))
+        }
+      }
+    }
+  }
 }

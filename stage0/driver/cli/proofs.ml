@@ -12,48 +12,39 @@ let make_solver () =
   | Ok solver -> solver
   | Error message -> Outcome.raise_cannot_run "%s" message
 
-type t = {
-  proofs : Database.proofs;
-  warnings : Prover.warnings Lazy.t;
-  verdicts : Prover.verdicts Lazy.t;
-}
+type t = { database : Database.t; proofs : Database.proofs; decided : unit Lazy.t }
 
-let run_template_checks backend checks =
-  List.map
-    (fun ({ function_; literals } as check : Prover.Obligation.template_check) ->
-      match Backend.evaluate_predicate backend ~function_ ~arguments:[ Literals literals ] with
-      | Ok run -> (check, run)
-      | Error message ->
-          Outcome.raise_cannot_run "The check of a template's text could not be built: %s" message)
-    checks
+let evaluate database snapshot packages proofs =
+  match Database.list_evaluations proofs with
+  | [] -> ()
+  | evaluated ->
+      ignore
+        (Backend.evaluate
+           (Workspace_backend.create snapshot
+              (Workspace_backend.require_lowered_lookups database packages)
+              Development)
+           evaluated)
 
-let list_runs database snapshot packages proofs =
-  match Database.list_template_checks proofs with
-  | [] -> []
-  | checks ->
-      run_template_checks
-        (Workspace_backend.create snapshot
-           (Workspace_backend.require_lowered_lookups database packages)
-           Development)
-        checks
-
-let check database snapshot packages files =
-  let proofs = Database.prove database files in
-  let lookups = Database.make_proof_lookups database in
+let check database snapshot packages scope =
+  let proofs = Database.prove database scope in
   {
+    database;
     proofs;
-    warnings = lazy (Prover.collect_warnings lookups (Database.list_proofs proofs));
-    verdicts =
+    decided =
       lazy
-        (let solver = make_solver () in
-         Prover.decide
-           ~runs:(list_runs database snapshot packages proofs)
-           lookups solver (Database.list_proofs proofs));
+        (evaluate database snapshot packages proofs;
+         Database.decide proofs (lazy (make_solver ())));
   }
 
-let list_diagnostics checked file = Prover.list_diagnostics (Lazy.force checked.verdicts) file
-let list_warnings checked file = Prover.list_warnings (Lazy.force checked.warnings) file
-let list_states checked file = Prover.list_states (Lazy.force checked.verdicts) file
+let list_diagnostics checked file =
+  Lazy.force checked.decided;
+  Database.list_proof_diagnostics checked.database file
+
+let list_warnings checked file = Database.list_proof_warnings checked.database file
+
+let list_states checked file =
+  Lazy.force checked.decided;
+  Database.list_proof_states checked.database file
 
 let list_holes snapshot checked ~reached =
   List.map

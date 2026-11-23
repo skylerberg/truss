@@ -128,10 +128,10 @@ fn parse_upper_path(cursor: mut TokenCursor, expected: StringSlice) -> Result[sy
   Ok(syntax.NamePath(own modules, last: parse_upper_name(mut cursor, expected)?))
 }
 
-fn make_text(cursor: mut TokenCursor, text: token.Text) -> syntax.Text
+fn make_text(cursor: mut TokenCursor, text: own token.Text) -> syntax.Text
   uses Panic
 {
-  syntax.Text(value: text.value.copy(), id: allocate_token_id(mut cursor, span: text.span))
+  syntax.Text(value: own text.value, id: allocate_token_id(mut cursor, span: text.span))
 }
 
 type InterpolationMode = ParseInterpolations | RejectInterpolations
@@ -148,19 +148,19 @@ fn make_string_literal(
 {
   let string_token = cursor.peek()
   advance(mut cursor)
-  let literal = cursor.tables.literal(literal_index)
-  let tag = match literal.tag {
+  let literal = cursor.tables.literal(literal_index).copy()
+  let tag = match own literal.tag {
     Some(written) => Some(
       syntax.NamePath(
         own modules,
-        last: syntax.Name(text: written.name.copy(), case: syntax.Case.Upper, id: allocate_token_id(mut cursor, span: written.span)),
+        last: syntax.Name(text: own written.name, case: syntax.Case.Upper, id: allocate_token_id(mut cursor, span: written.span)),
       ),
     )
     None => None
   }
-  let first = make_text(mut cursor, text: literal.first)
+  let first = make_text(mut cursor, text: own literal.first)
   var rest: List[syntax.Interpolated] = []
-  for segment in literal.rest {
+  for segment in own literal.rest {
     let value = match mode {
       ParseInterpolations => parse_interpolation(mut cursor, inner: segment.interpolation)
       RejectInterpolations => {
@@ -173,7 +173,7 @@ fn make_string_literal(
         return Err(Failure.Failed)
       }
     }
-    mut rest.push(syntax.Interpolated(own value, text: make_text(mut cursor, text: segment.text)))
+    mut rest.push(syntax.Interpolated(own value, text: make_text(mut cursor, text: own segment.text)))
   }
   Ok(
     syntax.StringLiteral(
@@ -194,6 +194,7 @@ type ContextualKeyword =
   | Potential
   | By
   | BitVector
+  | Evaluation
   derives Equal
 
 fn spell_contextual(word: ContextualKeyword) -> StringSlice {
@@ -205,6 +206,7 @@ fn spell_contextual(word: ContextualKeyword) -> StringSlice {
     Potential => "potential"
     By => "by"
     BitVector => "bit_vector"
+    Evaluation => "evaluation"
   }
 }
 
@@ -227,6 +229,7 @@ fn find_contextual(text: StringSlice) -> Option[ContextualKeyword] {
     "potential" => Some(ContextualKeyword.Potential)
     "by" => Some(ContextualKeyword.By)
     "bit_vector" => Some(ContextualKeyword.BitVector)
+    "evaluation" => Some(ContextualKeyword.Evaluation)
     _ => None
   }
 }
@@ -284,7 +287,7 @@ fn expect_contextual(
   accepted: Slice[ContextualKeyword],
   category: StringSlice,
   expected: StringSlice,
-  suggested: Option[List[ContextualKeyword]] = None,
+  suggested: own Option[List[ContextualKeyword]] = None,
 ) -> Result[ContextualKeyword, Failure]
   uses Panic
 {
@@ -300,9 +303,9 @@ fn expect_contextual(
   if !is_name {
     return Err(fail(mut cursor, expected))
   }
-  let name = cursor.name(current.kind).to_string()
-  let words = match suggested {
-    Some(list) => list.copy()
+  let name = cursor.name(current.kind)
+  let words = match own suggested {
+    Some(list) => list
     None => accepted.to_list()
   }
   var spelled: List[String] = []

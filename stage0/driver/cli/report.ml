@@ -17,7 +17,9 @@ let gather ~proofs database snapshot packages =
   let program_packages = Command_packages.list_program_packages snapshot packages in
   let files = Command_packages.list_files snapshot program_packages in
   let proofs =
-    if proofs then Some (lazy (Proofs.check database snapshot packages files)) else None
+    if proofs then
+      Some (lazy (Proofs.check database snapshot packages (In_packages program_packages)))
+    else None
   in
   {
     checked =

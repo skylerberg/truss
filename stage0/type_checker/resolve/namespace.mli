@@ -1,39 +1,20 @@
-type t
+type declared_definition = {
+  declaration : Names.declaration;
+  file : Path.file;
+  position : int;
+  container : Names.key option;
+  item : Syntax.definition Syntax.item;
+}
 
-val build :
-  Names.lookups ->
-  Path.package ->
-  (Path.module_ * (Path.file * Syntax.file * string) list) list ->
-  t
+type module_declarations = {
+  definitions : declared_definition list;
+  imports : (Path.file * (string * Path.module_) list) list;
+  impls : ((Path.t * Path.t) * Path.t) list;
+  law_proofs : (Names.law_proof_name * Names.key) list;
+}
 
-val empty : t
-
-type change =
-  | Module of Path.module_
-  | Entry of Path.module_ * string
-  | Entries of Path.module_
-  | Imports of Names.key
-  | Declaration of Names.key
-  | Tree of Names.key
-  | Positions of Names.key
-  | Text of Names.key
-  | Place of Names.key
-  | Container of Names.key
-  | Contained of Names.key
-  | Module_declarations of Path.module_
-  | File_declarations of Path.file
-  | Package_declarations
-  | Members of Path.t * string
-  | Traits_declaring of string
-  | Impl_index
-  | Impls_of_type of Path.t
-  | Impls_of_trait of Path.t
-  | Law_proofs of Names.law_proof_name
-
-val list_changes : t -> t -> change list
-
-val make_lookups :
-  read_namespace:(Path.package -> t) ->
-  split_module:(string list -> Path.module_ option) ->
-  list_dependency_names:(Path.package -> Path.package list) ->
-  Names.lookups
+val builtin_entries : Names.entry list
+val list_entries : Syntax.file -> Names.entry list
+val declare : Names.lookups -> (Path.file * Syntax.file * string) list -> module_declarations
+val find_impl_heads : Names.lookups -> Path.t -> (Path.t * Path.t) option
+val compare_key : Names.key -> Names.key -> int

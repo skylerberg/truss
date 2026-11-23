@@ -1,0 +1,10 @@
+fn is_accepted(value: UInt64) -> Bool {
+  value % 7 == 6
+}
+
+fn accept(value: UInt64) -> UInt64
+  requires is_accepted(value)
+{
+  value
+}
+

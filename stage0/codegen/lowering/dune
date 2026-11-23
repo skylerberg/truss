@@ -17,6 +17,7 @@
   lowered
   moves
   emit_c
+  profile
   cbor
   blake3
   monomorphic

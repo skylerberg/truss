@@ -113,27 +113,25 @@ let list_signatures snapshot trial =
   let is_in_project path = List.mem (Path.locate_package path) project_packages in
   let changed =
     List.filter
-      (fun part ->
-        Signatures.is_signature part
-        &&
-        match Database.Part.find_definition part with
-        | Some path -> not (is_in_project path)
-        | None -> false)
+      (fun (change : Database.change) -> change.is_signature && not (is_in_project change.changed))
       (Database.list_changes database upgraded)
   in
-  ignore
-    (Database.prove database
-       (List.concat_map (Workspace.list_package_files snapshot) project_packages));
+  ignore (Database.prove database (In_packages project_packages));
   let dependents = Path_table.create 16 in
   List.iter
-    (fun ({ dependent; dependency } : Database.read) ->
-      match (Database.Part.find_definition dependent, Database.Part.find_definition dependency) with
-      | Some reader, Some path when is_in_project reader && List.mem dependency changed ->
-          Path_table.replace dependents path
-            (reader :: Option.value (Path_table.find_opt dependents path) ~default:[])
-      | _ -> ())
+    (fun ({ reader; read; read_kind; _ } : Database.read) ->
+      if
+        is_in_project reader
+        && List.exists
+             (fun (change : Database.change) ->
+               Path.equal change.changed read && change.kind = read_kind)
+             changed
+      then
+        Path_table.replace dependents read
+          (reader :: Option.value (Path_table.find_opt dependents read) ~default:[]))
     (Database.list_dependents database
-       (List.sort_uniq Path.compare (List.filter_map Database.Part.find_definition changed)));
+       (List.sort_uniq Path.compare
+          (List.map (fun (change : Database.change) -> change.changed) changed)));
   let find_text database path =
     Signatures.find_signature (Database.make_name_lookups database) path
   in

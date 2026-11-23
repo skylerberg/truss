@@ -4,7 +4,6 @@ val find_source :
   Lookups.t -> Path.t -> (State.source * Types.substitution * Interface.form_origin) option
 
 val make_trait_substitution : Lookups.t -> Types.trait_reference -> Types.ty -> Types.substitution
-val find_clauses : Lookups.t -> Path.t -> State.source -> State.clauses option
 
 val list_law_proofs :
   Lookups.t ->
@@ -28,14 +27,15 @@ val list_law_holes :
 
 val list_declared_clauses : State.contract -> State.clauses list
 val select_precondition_clauses : State.contract -> State.clauses
-val find_function_contract : Lookups.t -> Path.t -> State.contract option
 val find_declared_clauses : Lookups.t -> Path.t -> State.clauses option
-val find_capability_contract : Lookups.t -> Path.t -> string -> State.contract option
-val find_capability_clauses : Lookups.t -> Path.t -> string -> State.clauses option
+val read_signature : State.context -> Path.t -> Types.signature option
+val find_callee_clauses : State.context -> Path.t -> State.clauses option
+val find_function_contract : State.context -> Path.t -> State.contract option
+val find_capability_contract : State.context -> Path.t -> string -> State.contract option
+val find_capability_clauses : State.context -> Path.t -> string -> State.clauses option
 
 val list_restated_clauses :
-  Lookups.t ->
-  list_bounds:Interface.Impls.bounds ->
+  State.context ->
   packages:Path.package list ->
   self_type:Types.ty ->
   Path.t ->
@@ -44,7 +44,7 @@ val list_restated_clauses :
   (Types.trait_reference * State.clauses) list
 
 val find_method_contract :
-  Lookups.t ->
+  State.context ->
   Types.trait_reference ->
   string ->
   Path.receiver ->

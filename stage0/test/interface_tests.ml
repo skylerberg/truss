@@ -510,8 +510,7 @@ let () =
       { trait = app "Feeds"; trait_arguments = []; associated = [] }
     in
     match
-      Interface.Impls.find_evidence interface
-        ~list_bounds:(fun _ -> [])
+      Interface.Impls.find_evidence interface ~list_bounds:Interface.Impls.list_no_bounds
         (Types.make_named (app "Reader") [])
         feeds
     with
@@ -556,7 +555,8 @@ let expect_property name expected text make_type check =
   Harness.test name (fun () ->
       let packages = Support.setup [ ("app.main", text) ] in
       let actual =
-        check (make_interface packages) ~list_bounds:(fun _ -> []) (make_type packages)
+        check (make_interface packages) ~list_bounds:Interface.Impls.list_no_bounds
+          (make_type packages)
       in
       if actual <> expected then Harness.fail "expected %b" expected)
 
@@ -634,8 +634,7 @@ let expect_decision name expected type_ property =
       let actual =
         Interface.Impls.decide_property property
           (make_interface (Support.setup [ ("app.main", "") ]))
-          ~list_bounds:(fun _ -> [])
-          type_
+          ~list_bounds:Interface.Impls.list_no_bounds type_
       in
       if actual <> expected then
         Harness.fail "expected %s, got %s" (show_decision expected) (show_decision actual))
@@ -655,8 +654,7 @@ let () =
       match
         Interface.Impls.is_plain
           (make_interface (Support.setup [ ("app.main", "") ]))
-          ~list_bounds:(fun _ -> [])
-          (option Types.Hole)
+          ~list_bounds:Interface.Impls.list_no_bounds (option Types.Hole)
       with
       | exception Compiler_bug.Bug _ -> ()
       | holds -> Harness.fail "answered %b" holds)
@@ -739,8 +737,7 @@ let () =
       let packages = Support.setup [] in
       match
         Interface.Impls.project_associated_type (make_interface packages)
-          ~list_bounds:(fun _ -> [])
-          int64 (trait "Add" [ int64 ]) "Output"
+          ~list_bounds:Interface.Impls.list_no_bounds int64 (trait "Add" [ int64 ]) "Output"
       with
       | Some output when Types.equal output int64 -> ()
       | Some output -> Harness.fail "output %s" (Types.show output)
@@ -750,8 +747,7 @@ let () =
       if
         Option.is_some
           (Interface.Impls.find_evidence (make_interface packages)
-             ~list_bounds:(fun _ -> [])
-             int64
+             ~list_bounds:Interface.Impls.list_no_bounds int64
              (trait "Add" [ Types.make_builtin Int32 ]))
       then Harness.fail "found an impl");
   Harness.test "a derived impl holds when its conditions do" (fun () ->
@@ -759,8 +755,7 @@ let () =
       if
         Option.is_none
           (Interface.Impls.find_evidence (make_interface packages)
-             ~list_bounds:(fun _ -> [])
-             (option int64) (trait "Equal" []))
+             ~list_bounds:Interface.Impls.list_no_bounds (option int64) (trait "Equal" []))
       then Harness.fail "no impl");
   Harness.test "a derived impl does not hold when its conditions do not" (fun () ->
       let packages = Support.setup [ ("app.main", "type Opaque(x: Int64)\n") ] in
@@ -768,17 +763,15 @@ let () =
       if
         Option.is_some
           (Interface.Impls.find_evidence (make_interface packages)
-             ~list_bounds:(fun _ -> [])
-             (option opaque) (trait "Equal" []))
+             ~list_bounds:Interface.Impls.list_no_bounds (option opaque) (trait "Equal" []))
       then Harness.fail "found an impl");
   Harness.test "an impl of a conversion is found by the argument's type" (fun () ->
       let packages = Support.setup [ ("app.main", Fixtures.Interface.meters_from_numbers) ] in
       let interface = make_interface packages in
       let meters = Types.make_named (app "Meters") [] in
       let find_from source =
-        Interface.Impls.find_evidence interface
-          ~list_bounds:(fun _ -> [])
-          meters (trait "From" [ source ])
+        Interface.Impls.find_evidence interface ~list_bounds:Interface.Impls.list_no_bounds meters
+          (trait "From" [ source ])
       in
       if Option.is_none (find_from int64) then Harness.fail "no impl of From[Int64]";
       if Option.is_some (find_from (Types.make_builtin Int32)) then
@@ -789,8 +782,7 @@ let () =
   let read_impl packages type_ wanted : Path.t =
     match
       Interface.Impls.find_evidence (make_interface packages)
-        ~list_bounds:(fun _ -> [])
-        type_ wanted
+        ~list_bounds:Interface.Impls.list_no_bounds type_ wanted
     with
     | Some (From_impl { impl; _ }) -> impl
     | _ -> failwith "no impl"
@@ -882,7 +874,7 @@ let () =
       in
       ignore
         (Interface.Impls.is_copyable (make_interface packages)
-           ~list_bounds:(fun _ -> [])
+           ~list_bounds:Interface.Impls.list_no_bounds
            (Types.make_named (app "Nested") [ int64 ])));
   Harness.test "an impl's method may have the trait method's own generic parameters" (fun () ->
       expect_no_diagnostics [ ("app.main", Fixtures.Interface.impl_method_with_its_own_generic) ]);
@@ -915,7 +907,7 @@ let () =
       if
         not
           (Interface.Impls.is_copyable (make_interface packages)
-             ~list_bounds:(fun _ -> [])
+             ~list_bounds:Interface.Impls.list_no_bounds
              (Types.make_named (app "Box") [ int64 ]))
       then Harness.fail "not Copyable");
   Harness.test "only some traits can be derived" (fun () ->
@@ -975,8 +967,7 @@ let () =
       if
         Option.is_some
           (Interface.Impls.find_evidence (make_interface packages)
-             ~list_bounds:(fun _ -> [])
-             Types.Never (trait "Hash" []))
+             ~list_bounds:Interface.Impls.list_no_bounds Types.Never (trait "Hash" []))
       then Harness.fail "it does");
   Harness.test "an any value implements its trait only with the same arguments" (fun () ->
       let packages = Support.setup [] in
@@ -984,8 +975,7 @@ let () =
       if
         Option.is_some
           (Interface.Impls.find_evidence (make_interface packages)
-             ~list_bounds:(fun _ -> [])
-             any
+             ~list_bounds:Interface.Impls.list_no_bounds any
              (trait "From" [ Types.make_builtin Int32 ]))
       then Harness.fail "it does")
 

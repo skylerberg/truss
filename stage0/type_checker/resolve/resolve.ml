@@ -47,22 +47,27 @@ type resolved = {
   names : target option array;
   brackets : bracket option array;
   holes : (Syntax.id * (string * value) list) list;
-  used_imports : string list;
 }
+
+type resolution = { resolved : resolved; used_imports : string list }
 
 let sections = [ Interface; Contract; Body ]
 
 let merge = function
-  | [] -> { names = [||]; brackets = [||]; holes = []; used_imports = [] }
+  | [] -> { names = [||]; brackets = [||]; holes = [] }
   | first :: _ as parts ->
       let pick select index = List.find_map (fun part -> (select part).(index)) parts in
       {
         names = Array.init (Array.length first.names) (pick (fun part -> part.names));
         brackets = Array.init (Array.length first.brackets) (pick (fun part -> part.brackets));
         holes = List.concat_map (fun part -> part.holes) parts;
-        used_imports =
-          List.sort_uniq compare (List.concat_map (fun part -> part.used_imports) parts);
       }
+
+let list_referenced_definitions resolved =
+  List.sort_uniq Path.compare
+    (List.filter_map
+       (function Some (Definition (_, path) | Variant (path, _)) -> Some path | _ -> None)
+       (Array.to_list resolved.names))
 
 type head = {
   name : Syntax.name;
@@ -103,19 +108,25 @@ let find_value_name (definition : Syntax.definition) : Syntax.name option =
       Some name
   | _ -> None
 
-let resolve (lookups : Names.lookups) (key : Names.key) section =
-  let definition = lookups.read_definition key and spans = lookups.read_spans key in
+let resolve (lookups : Names.lookups) (key : Names.key) =
+  let definition = lookups.read_definition key
+  and spans = lookups.read_spans key
+  and syntax_errors = lookups.list_syntax_errors key in
+  let is_broken part =
+    Option.is_some (Parts.find_syntax_error ~spans ~syntax_errors definition part)
+  in
   let module_ = key.module_ in
-  let state = Walk.create lookups key ~spans ~walked:section in
+  let state = Walk.create lookups key ~spans ~syntax_errors in
+  let container_key = lookups.find_container key in
   let container =
     Option.map
       (fun (container : Names.key) -> (container.path, lookups.read_definition container))
-      (lookups.find_container key)
+      container_key
   in
   let is_walked =
-    (not (Names.is_broken lookups key Header))
+    (not (is_broken Header))
     &&
-    match lookups.find_container key with
+    match container_key with
     | Some container -> not (Names.is_broken lookups container Header)
     | None -> true
   in
@@ -161,18 +172,13 @@ let resolve (lookups : Names.lookups) (key : Names.key) section =
              (Path.show_module submodule) (Path.show_module module_) name.text
              (Path.show_module submodule))
   | Some _ | None -> ());
-  let compute_outcome () =
+  let compute_outcome section =
     let walked = Walk.lookup_section_names state section in
     let resolved =
-      {
-        names = walked.names;
-        brackets = walked.brackets;
-        holes = List.rev walked.holes;
-        used_imports = List.sort compare walked.used_imports;
-      }
+      { names = walked.names; brackets = walked.brackets; holes = List.rev walked.holes }
     in
     match walked.diagnostics with
-    | [] -> Ok resolved
+    | [] -> Ok { resolved; used_imports = List.sort compare walked.used_imports }
     | diagnostics ->
         Error
           (List.sort
@@ -180,14 +186,18 @@ let resolve (lookups : Names.lookups) (key : Names.key) section =
                compare left.span right.span)
              diagnostics)
   in
-  let is_parsed =
-    match section with
-    | Interface | Contract -> is_walked
-    | Body -> is_walked && not (Names.is_broken lookups key Body)
-  in
-  if is_parsed || (Walk.lookup_section_names state section).diagnostics <> [] then
-    Some (compute_outcome ())
-  else None
+  List.map
+    (fun section ->
+      let is_parsed =
+        match section with
+        | Interface | Contract -> is_walked
+        | Body -> is_walked && not (is_broken Body)
+      in
+      ( section,
+        if is_parsed || (Walk.lookup_section_names state section).diagnostics <> [] then
+          Some (compute_outcome section)
+        else None ))
+    sections
 
 let list_file_diagnostics (lookups : Names.lookups) (path : Path.file) (file : Syntax.file) ~text
     ~(used : string list option) =

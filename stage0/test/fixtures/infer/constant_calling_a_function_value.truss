@@ -1,0 +1,7 @@
+type Handler(run: fn(Int64) -> Int64)
+
+fn apply(handler: Handler) -> Int64 {
+  0
+}
+
+let applied: Int64 = apply(Handler(run: fn(value) { value }))

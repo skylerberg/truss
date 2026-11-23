@@ -147,17 +147,17 @@ let list_names (written : Core.expression) =
     written;
   List.rev !names
 
-let make_literal_place text type_ = { Tree.root = Literal { text; type_ }; projections = [] }
+let make_literal_place value type_ = { Tree.root = Literal { value; type_ }; projections = [] }
 
-let read_literal text type_ origin =
-  Tree.Borrow { place = make_literal_place text type_; type_; mode = Read; origin }
+let read_literal value type_ origin =
+  Tree.Borrow { place = make_literal_place value type_; type_; mode = Read; origin }
 
 let lower_pattern_constant (pattern : Core.pattern) (value : Core.pattern_constant) : Tree.operand =
   let type_ = pattern.type_ in
   match value with
   | Boolean_constant value -> Immediate { value = Boolean value; type_ }
   | Integer_constant value -> Immediate { value = Integer value; type_ }
-  | String_constant text -> read_literal text type_ pattern.origin
+  | String_constant text -> read_literal (Text text) type_ pattern.origin
   | Named_constant path ->
       Use { place = { root = Constant path; projections = [] }; type_; origin = pattern.origin }
 
@@ -205,17 +205,7 @@ let rec lower_expression builder (node : Core.expression) : Tree.operand option 
     | Integer value -> Some (Immediate { value = Integer value; type_ = node.type_ })
     | Float value -> Some (Immediate { value = Float value; type_ = node.type_ })
     | Boolean value -> Some (Immediate { value = Boolean value; type_ = node.type_ })
-    | String text -> hold (Copy (read_literal text node.type_ origin))
-    | Template { literals; call = { kind = Call called; _ } } ->
-        let* call = lower_call builder called ~node:node.id ~origin:node.origin in
-        let local = Emitter.allocate_temporary builder node.type_ origin in
-        Emitter.emit builder
-          (Basic (Template { destination = Emitter.make_local_place local; literals; call }))
-          origin;
-        Some
-          (Tree.Use
-             { place = Emitter.make_local_place local; type_ = node.type_; origin = node.origin })
-    | Template _ -> raise_bug "a tagged template whose value is not a call"
+    | Literal value -> hold (Copy (read_literal value node.type_ origin))
     | Use place_ ->
         let* place_ = lower_place builder place_ in
         Some (Tree.Use { place = place_; type_ = node.type_; origin = node.origin })
@@ -583,7 +573,7 @@ and lower_place builder (written : Core.place) : Tree.place option =
                   origin;
                 }))
     | Lent lending -> lower_lent builder lending ~duration:Tree.Rest_of_statement
-    | Temporary { kind = String text; type_; _ } -> Some (make_literal_place text type_)
+    | Temporary { kind = Literal value; type_; _ } -> Some (make_literal_place value type_)
     | Temporary written ->
         let* value = lower_expression builder written in
         let local =
@@ -1283,11 +1273,13 @@ and lower_statement builder (node : Core.statement) =
           Emitter.emit builder
             (Basic (Proof (of_proof ~entry_locals:(Emitter.entry_locals builder) ~origin proof)))
             origin
-      | Assert { condition = { value; executable = true }; by_bit_vector = false } -> (
+      | Assert { condition = { value; _ }; by = Some Evaluation } ->
+          Emitter.emit builder (Basic (Evaluated_assert (of_expression value))) value.origin
+      | Assert { condition = { value; executable = true }; by = None } -> (
           match lower_expression builder value with
           | Some condition -> Emitter.emit builder (Basic (Assert condition)) value.origin
           | None -> ())
-      | Assert { condition = { value; executable = true }; by_bit_vector = true } -> (
+      | Assert { condition = { value; executable = true }; by = Some Bit_vector } -> (
           let code = Emitter.build_block builder (fun () -> lower_expression builder value) in
           match code.value with
           | Some condition ->
@@ -1299,10 +1291,14 @@ and lower_statement builder (node : Core.statement) =
               in
               Emitter.emit builder (Assert_by_bit_vector { condition; names; code }) value.origin
           | None -> ())
-      | Assert { condition = { value; executable = false }; by_bit_vector } ->
+      | Assert { condition = { value; executable = false }; by = (Some Bit_vector | None) as by } ->
           Emitter.emit builder
             (Basic
-               (Ghost_assert { condition = lower_attached_formula builder value; by_bit_vector }))
+               (Ghost_assert
+                  {
+                    condition = lower_attached_formula builder value;
+                    by_bit_vector = Option.is_some by;
+                  }))
             origin
       | Yield { mode; part = written } -> (
           match lower_yielded builder mode written with
@@ -1641,7 +1637,7 @@ and lower_loop_clauses builder (clauses : Core.loop_clause Core.conditional list
           Cost { origin; amortized; resource; bound = lower_bound written; holds_when })
     clauses
 
-let of_expression (written : Core.expression) =
+and of_expression (written : Core.expression) =
   let builder = Emitter.create ~entry_locals:[] () in
   Emitter.run_in_scope builder written.origin (fun () ->
       Emitter.run_in_statement builder written.origin (fun () ->

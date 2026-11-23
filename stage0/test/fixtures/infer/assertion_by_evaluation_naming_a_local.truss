@@ -1,0 +1,11 @@
+fn is_small(value: UInt64) -> Bool {
+  value < 10
+}
+
+fn f() -> UInt64 {
+  let chosen: UInt64 = 3
+  proof {
+    assert is_small(chosen) by evaluation
+  }
+  chosen
+}

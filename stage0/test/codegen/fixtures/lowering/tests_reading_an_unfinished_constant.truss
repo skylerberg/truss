@@ -1,0 +1,14 @@
+fn build_table() -> List[UInt64] {
+  todo
+}
+
+let table: List[UInt64] = build_table()
+let finished: UInt64 = 3
+
+test "reads an unfinished constant" {
+  assert table.length() == 0
+}
+
+test "reads a finished constant" {
+  assert finished == 3
+}

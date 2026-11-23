@@ -1,7 +1,11 @@
 (library
  (name database)
+ (foreign_stubs
+  (language c)
+  (names sql_stubs))
  (libraries
   structural_key
+  language
   compiler_bug
   path
   grant
@@ -23,7 +27,14 @@
   package_checks
   lowering
   lowered
+  c_compiler
+  profile
   ground
   libc
   prover
+  inspect
+  solver
+  well_known
+  sqlite3
+  unix
   zarith))

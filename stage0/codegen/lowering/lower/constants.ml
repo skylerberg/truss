@@ -121,43 +121,47 @@ let fold_literal state ty (constant : Mir.constant) =
   | Boolean boolean -> make_static_bool boolean
   | Unit -> None
 
-let fold_literal_value (state : Lowering.state) ty text =
-  let element = Ground.make_builtin UInt8 in
-  let elements =
-    List.init (String.length text) (fun index ->
-        Lowered.Static_scalar (Integer (UInt8, Z.of_int (Char.code text.[index]))))
-  in
-  match Monomorphic.compute_shape state.context.monomorphic ty with
-  | Record [ (field, Typed storage) ] when Option.is_some (Storage.find_storage_element storage) ->
-      Some (Lowered.Static_record [ (field, Static_storage { element; elements }) ])
-  | Record [ (field, Typed view) ] when Option.is_some (Storage.find_view_element view) ->
-      Some (Lowered.Static_record [ (field, Static_view { element; elements }) ])
-  | _ -> None
-
-let make_constant_state (context : Definitions.context) path =
-  let ({ source; form = mir } : Mir.Graph.t Mir.sourced) =
-    match Mir.read_initializer_graph context.lookups.mir path with
-    | Some graph -> graph
-    | None -> Definitions.raise_bug "%s is not a constant" (Path.show path)
-  in
-  let ty =
-    Monomorphic.ground context.monomorphic Types.no_substitution
-      (Interface.Definition.read_constant_type context.lookups.interface path)
-  in
-  let code =
+let enter_evaluated (context : Definitions.context) ~item ~(source : Resolve.Names.key) =
+  Lowering.enter_item context ~item
     {
       (Definitions.make_unwritten_code ~definition:source.path ~substitution:Types.no_substitution
          ~result:(Returns Types.unit))
       with
       written = Some (Definitions.read_written context source);
     }
-  in
-  let state = Lowering.enter_item context ~item:(Evaluator path) code in
-  (state, mir, ty)
 
-let rec fold_initializer context ~visiting path =
-  let state, mir, ty = make_constant_state context path in
-  (ty, fold_body ~visiting:(path :: visiting) ~depth:call_depth ~steps:(ref step_limit) state mir [])
+let make_evaluated_state (context : Definitions.context) (evaluated : Lowered.Item.t) =
+  let source, mir, ty =
+    match evaluated with
+    | Constant path -> (
+        match Mir.read_initializer_graph context.lookups.mir path with
+        | Some { source; form = mir } ->
+            ( source,
+              mir,
+              Monomorphic.ground context.monomorphic Types.no_substitution
+                (Interface.Definition.read_constant_type context.lookups.interface path) )
+        | None -> Definitions.raise_bug "%s is not a constant" (Path.show path))
+    | Assertion { definition; condition } -> (
+        match
+          match Mir.read_code context.lookups.mir definition with
+          | Some _ as code -> code
+          | None -> Mir.read_initializer context.lookups.mir definition
+        with
+        | Some { source; form = code } -> (
+            match List.assoc_opt condition (Mir.list_evaluated_asserts code) with
+            | Some asserted -> (source, Mir.expand asserted, Ground.make_builtin Bool)
+            | None ->
+                Definitions.raise_bug "%s has no assertion by evaluation at %d"
+                  (Path.show definition) condition)
+        | None -> Definitions.raise_bug "%s has no code" (Path.show definition))
+    | item -> Definitions.raise_bug "%s is not evaluated" (Lowered.Item.to_string item)
+  in
+  (enter_evaluated context ~item:(Evaluator evaluated) ~source, mir, ty)
+
+let rec fold_evaluated context ~visiting (evaluated : Lowered.Item.t) =
+  let state, mir, ty = make_evaluated_state context evaluated in
+  let visiting = match evaluated with Constant path -> path :: visiting | _ -> visiting in
+  (ty, fold_body ~visiting ~depth:call_depth ~steps:(ref step_limit) state mir [])
 
 and fold_body ~visiting ~depth ~steps state (mir : Mir.Graph.t)
     (arguments : Lowered.static_value list) =
@@ -177,8 +181,11 @@ and fold_body ~visiting ~depth ~steps state (mir : Mir.Graph.t)
       | Local local -> Hashtbl.find_opt locals local
       | Constant path ->
           if List.exists (Path.equal path) visiting then None
-          else snd (fold_initializer state.context ~visiting path)
-      | Literal { text; type_ } -> fold_literal_value state (Lowering.ground state type_) text
+          else snd (fold_evaluated state.context ~visiting (Constant path))
+      | Literal { value; type_ } ->
+          Some
+            (Targets.make_static_literal state.context.monomorphic (Lowering.ground state type_)
+               value)
     in
     project_static_value whole place.projections
   in
@@ -232,10 +239,19 @@ and fold_body ~visiting ~depth ~steps state (mir : Mir.Graph.t)
   in
   let fold_call (destination : Mir.place option) (called : Mir.call) =
     match (called.callee.target, called.arguments) with
-    | Intrinsic { operation = Buffer Storage_with_capacity; type_arguments = [ Type element ] }, _
-      ->
-        assign destination
-          (Lowered.Static_storage { element = Lowering.ground state element; elements = [] })
+    | ( Intrinsic { operation = Buffer Storage_with_capacity; type_arguments = [ Type element ] },
+        [ Passed { value = capacity; _ } ] ) -> (
+        let* capacity = fold_operand capacity in
+        match capacity with
+        | Static_scalar (Integer (_, capacity)) when Z.fits_int capacity ->
+            assign destination
+              (Lowered.Static_storage
+                 {
+                   element = Lowering.ground state element;
+                   elements = [];
+                   capacity = Z.to_int capacity;
+                 })
+        | _ -> None)
     | ( Intrinsic { operation = Buffer Storage_push; _ },
         [
           Passed { value = Borrow { place = { root = Local storage; projections = [] }; _ }; _ };
@@ -243,7 +259,7 @@ and fold_body ~visiting ~depth ~steps state (mir : Mir.Graph.t)
         ] ) -> (
         let* element = fold_operand element in
         match Hashtbl.find_opt locals storage with
-        | Some (Static_storage contents) ->
+        | Some (Static_storage contents) when List.length contents.elements < contents.capacity ->
             Hashtbl.replace locals storage
               (Static_storage { contents with elements = contents.elements @ [ element ] });
             Some ()
@@ -254,7 +270,12 @@ and fold_body ~visiting ~depth ~steps state (mir : Mir.Graph.t)
         match array with
         | Static_array elements ->
             assign destination
-              (Lowered.Static_storage { element = Lowering.ground state element; elements })
+              (Lowered.Static_storage
+                 {
+                   element = Lowering.ground state element;
+                   elements;
+                   capacity = List.length elements;
+                 })
         | _ -> None)
     | Function { path; instantiation }, arguments when depth > 0 ->
         let* { form = callee_mir; _ } = Mir.read_graph state.context.lookups.mir path in
@@ -289,10 +310,11 @@ and fold_body ~visiting ~depth ~steps state (mir : Mir.Graph.t)
     | Basic (Call { destination; call = called }) -> fold_call destination called
     | Basic (Assert condition) -> (
         match fold_operand condition with Some (Static_scalar (Bool true)) -> Some () | _ -> None)
-    | Basic (Live _ | Dead _ | Loan_start _ | Loan_end _ | Path_note _ | Ghost_assert _ | Proof _)
-      ->
+    | Basic
+        ( Live _ | Dead _ | Loan_start _ | Loan_end _ | Path_note _ | Ghost_assert _ | Proof _
+        | Evaluated_assert _ ) ->
         Some ()
-    | Basic (Assign _ | Lend _ | Template _ | Echo _) | Provide_start _ | Provide_end -> None
+    | Basic (Assign _ | Lend _ | Echo _) | Provide_start _ | Provide_end -> None
   in
   let rec run block =
     if !steps <= 0 then None
@@ -316,11 +338,11 @@ and fold_body ~visiting ~depth ~steps state (mir : Mir.Graph.t)
   in
   run 0
 
-type constant = Folded of Lowered.data | Run of Ground.ty
+type evaluated = Folded of Lowered.data | Run of Ground.ty
 
-let compile_constant context path =
-  match fold_initializer context ~visiting:[] path with
-  | ty, Some value -> Folded { data_item = Constant path; ty; value }
+let compile context evaluated =
+  match fold_evaluated context ~visiting:[] evaluated with
+  | ty, Some value -> Folded { data_item = evaluated; ty; value }
   | ty, None -> Run ty
 
 let write_fully = Well_known.make_path Write_fully
@@ -351,8 +373,8 @@ let write_output (state : Lowering.state) output =
     ~destination:(Lowering.allocate_temporary state result)
     ~site:None ()
 
-let build_evaluator context path : Emit_c.fragment =
-  let state, mir, ty = make_constant_state context path in
+let build_evaluator (context : Definitions.context) evaluated : Emit_c.fragment =
+  let (state : Lowering.state), mir, ty = make_evaluated_state context evaluated in
   Emit_c.Ir_builder.start state.builder (Emit_c.Ir_builder.allocate_block state.builder);
   Lowering.run_in_scope state (fun () ->
       let place = Lowering.allocate_temporary state ty in

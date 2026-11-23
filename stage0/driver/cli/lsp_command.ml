@@ -62,13 +62,13 @@ let encode_diagnostic encoding ~uri source (diagnostic : Diagnostic.t) =
              diagnostic.notes) );
     ]
 
-let encode_state encoding source (state : Source.span Prover.state) =
+let encode_state encoding source (state : Database.proof_state) =
   Json.Object
     [
       ("range", encode_range encoding source state.site.span);
-      ("code", Json.String (Diagnostic.Code.name (Prover state.site.code)));
+      ("code", Json.String state.site.code);
       ("shows", Json.String state.site.shows);
-      ("proven", Json.Bool (state.failure = None));
+      ("proven", Json.Bool state.is_proven);
       ("trustsCompiledCode", Json.Bool state.trusts_compiled_code);
     ]
 
@@ -100,7 +100,8 @@ let check ~root encoding (buffers : (string * string) list) =
   in
   let database = Workspace.open_database trial in
   let proofs =
-    Proofs.check database trial packages (List.filter_map (fun (_, _, file) -> file) opened)
+    Proofs.check database trial packages
+      (In_files (List.filter_map (fun (_, _, file) -> file) opened))
   in
   Json.Object
     [

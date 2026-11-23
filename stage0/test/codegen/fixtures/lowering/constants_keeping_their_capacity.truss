@@ -1,0 +1,22 @@
+fn build() -> List[UInt64]
+  ensures result.capacity() >= 64
+{
+  var items: List[UInt64] = []
+  mut items.reserve(64)
+  items
+}
+
+let roomy: List[UInt64] = build()
+let folded: List[UInt64] = List.with_capacity(8)
+let literal: List[UInt64] = [1, 2, 3]
+
+test "a constant keeps the capacity that its evaluation gave" {
+  assert roomy.capacity() >= 64
+  let run: List[UInt64] = List.with_capacity(8)
+  assert folded.capacity() == run.capacity()
+  let written: List[UInt64] = [1, 2, 3]
+  assert literal.capacity() == written.capacity()
+  let copied = roomy.copy()
+  assert copied.capacity() >= 64
+  assert copied.length() == 0
+}

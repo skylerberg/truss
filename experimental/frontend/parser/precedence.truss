@@ -1,6 +1,5 @@
 use frontend.source
 use frontend.syntax
-use frontend.token
 
 type Group =
   | ArithmeticGroup
@@ -125,12 +124,8 @@ let longest_titled_expression: UInt64 = 80
 fn make_titled_fix(cursor: TokenCursor, fallback: StringSlice, whole: UInt64, edits: own List[source.Edit]) -> source.Fix
   uses Panic, RunForever
 {
-  var insertions: List[token.Insertion] = []
-  for edit in edits {
-    mut insertions.push(token.Insertion(at: edit.span.start, text: edit.replacement.copy()))
-  }
   let span = cursor.read_file_span(whole)
-  let spelled = if span.stop - span.start > longest_titled_expression { None } else { cursor.spell(span, insertions) }
+  let spelled = if span.stop - span.start > longest_titled_expression { None } else { cursor.spell(span, insertions: edits) }
   match spelled {
     Some(fixed) => source.make_fix("Write `${fixed}`", own edits)
     None => source.make_fix(fallback, own edits)
@@ -411,7 +406,7 @@ fn check_operand(cursor: mut TokenCursor, context: Option[Parent], value: syntax
 {
   check_precedence(mut cursor, value: operand, context: Some(Parent(group: parent, is_right)))
   if group_of(operand) is Some(child) && find_problem(parent, child, is_right, operand) is Some(problem) {
-    report_problem(mut cursor, context, whole: value, operand: operand, is_right: is_right, problem: problem.copy())
+    report_problem(mut cursor, context, whole: value, operand: operand, is_right: is_right, problem: problem)
   }
 }
 

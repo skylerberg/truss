@@ -15,7 +15,7 @@ let encode_call env builder ~output ty (place : Lowered.place) =
 let encode env ty =
   let builder = Emit_c.Ir_builder.create env ~item:(Encode ty) in
   let parameter = Emit_c.Ir_builder.allocate_local builder (Writing.make_value_parameter ty) in
-  let value : Lowered.place = { root = Local parameter; projections = [ Deref ] } in
+  let value = Lowered.make_deref_place parameter in
   let output_pointer =
     Emit_c.Ir_builder.allocate_local builder (Writing.make_output_parameter env)
   in
@@ -53,7 +53,10 @@ let encode env ty =
         encode_call element (Storage.index_element value (Copy (Lowered.make_local_place index))))
   in
   (match (Storage.find_view_element ty, Representation.classify env ty) with
-  | Some element, _ | None, Storage element -> encode_elements element
+  | Some element, _ -> encode_elements element
+  | None, Storage element ->
+      append_bytes (Storage.project_capacity value) (Memory_layout.compute_integer_size UInt64);
+      encode_elements element
   | None, Handle -> raise_bug "a handle cannot be computed while compiling"
   | None, Shared _ -> raise_bug "a shared value cannot be computed while compiling"
   | None, Any -> raise_bug "an any value cannot be computed while compiling"
@@ -134,7 +137,9 @@ let decode env ty encoded : Lowered.static_value =
     else
       match (Storage.find_view_element ty, Representation.classify env ty) with
       | Some element, _ -> Static_view { element; elements = decode_elements element }
-      | None, Storage element -> Static_storage { element; elements = decode_elements element }
+      | None, Storage element ->
+          let capacity = Z.to_int (decode_integer reader UInt64) in
+          Static_storage { element; elements = decode_elements element; capacity }
       | None, Handle -> raise_bug "a handle computed while compiling"
       | None, Shared _ -> raise_bug "a shared value computed while compiling"
       | None, Any -> raise_bug "an any value computed while compiling"

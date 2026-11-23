@@ -114,7 +114,7 @@ says, and is an ordinary name elsewhere:
 | `identical(a, b)` | Whether two values of one type are the same value, inside a specification |
 | `visited` | In a `for` loop's clauses, the `Sequence` of the values of the iterations before |
 | `final(result)` | In a lending method's `ensures`, the lent part as the caller left it |
-| `by`, `bit_vector` | After an `assert`'s condition: `assert condition by bit_vector` |
+| `by`, `bit_vector`, `evaluation` | After an `assert`'s condition: `assert condition by bit_vector`, `assert condition by evaluation` |
 | `generic` | In a `uses` list, before the name of a capability parameter |
 | `tuple` | Before `type`: a tuple type (see [Tuple types](#tuple-types)) |
 
@@ -727,15 +727,36 @@ constant_name = LOWER_NAME | type_head "." LOWER_NAME ;
 public let pi: Float64 = 3.141592653589793
 public let UInt8.maximum: UInt8 = 255
 public let seconds_per_day: Int64 = 24 * 60 * 60
+public let greeting_length: UInt64 = "hello".length()
+public let word: Regex = Regex"[a-z]+"
 ```
 
-- The value is a *constant expression*: literals, arithmetic on numbers,
-  other constants, and records, variants, collection literals, and strings
+- A *constant expression* is made of literals, arithmetic on numbers, other
+  constants, and the records, variants, collection literals, and strings
   built from those. It calls no function except the `from_elements` or
-  `from_entries` of a collection literal, and is evaluated when the program
-  is compiled.
-- A constant's value does not depend on itself, through another constant or
-  through the default of a field that a record or variant in it leaves out.
+  `from_entries` of a collection literal.
+- The value of a constant is a constant expression whose parts may also be
+  calls: a call of a function or a method, an operator or an index of any
+  type, a tagged template, an interpolated string, and a quantifier over a
+  range or a collection. Other code, such as an `if`, a `match`, or a
+  lambda, goes in a function that the value calls.
+- The value uses no capability, so each call in it terminates and cannot
+  panic. Each call meets its callee's `requires`.
+- The value is evaluated when the code is checked, and the program holds
+  the result as data. An evaluation that uses more than 10 seconds of CPU
+  time is an error.
+- A proof that reads a constant knows its value. Where the value calls a
+  function, the proof knows the result of the evaluation as far as it sees
+  the type: a number, a `Bool`, a `Character`, and each field of a record or
+  a variant whose fields are visible to it. It knows a collection, and a type
+  whose fields it does not see, by the contracts of the calls.
+- A constant's type is not a function type or an `any` type, and holds no
+  value of either, no handle, and no state that tasks share.
+- A constant's value does not depend on itself: through another constant,
+  through the default of a field that a record or variant in it leaves out,
+  or through the code that it calls.
+- A constant that a type names, as in `Array[UInt8, digest_size]`, has a
+  constant expression as its value.
 - Reading a constant or taking a view of it allocates nothing.
 
 ## Functions
@@ -1633,7 +1654,7 @@ statement = "let" binding_pattern "=" expression [ "else" block ]
           | "concurrent" block
           | "concurrent" "for" binding_pattern "in" expression { loop_clause } block
           | "proof" block
-          | "assert" expression [ "by" "bit_vector" ] ;
+          | "assert" expression [ "by" ( "bit_vector" | "evaluation" ) ] ;
 
 binding_pattern = pattern [ ":" type ] | tuple_pattern ;
 assignment_operator = "=" | "+=" | "-=" | "*=" | "/=" | "%="
@@ -1678,6 +1699,15 @@ fn summarize(scores: List[Int64]) -> Result[Summary, SummaryError] {
   holds where it is written. It names only integers and booleans. A fact it
   needs from the proof around it is a hypothesis it states:
   `assert used < 64 ==> (word >> used) == 0 by bit_vector`.
+- `assert condition by evaluation` is proven by evaluating its condition
+  when the code is checked, and then holds where it is written. The
+  condition is an expression that the value of a constant can be (see
+  [Constants](#constants)), so it names no variable and no parameter, and it
+  mentions no type parameter of the code around it. It is code, in a theorem
+  too: it uses no capability, and each call in it meets its callee's
+  `requires`. It is not evaluated when the program or a test runs. An
+  evaluation that gives `false`, that reaches a `todo`, or that uses more
+  than 10 seconds of CPU time is an error.
 
 ### Patterns
 
@@ -2485,7 +2515,8 @@ provided without `mut` has no mutex.
   a view of it, and binding it with `let` cost nothing. Where an owned
   `String` is needed, as in a `var`, an `own` argument, or a returned value,
   the literal is copied, and a copy of a non-empty literal counts as one
-  allocation.
+  allocation. The literal text of a [tagged template](#tagged-templates) is
+  a constant without a name by the same rules.
 - A string literal without `${...}` where a `StringSlice` is expected is a
   `StringSlice` of the constant's bytes.
 - `StringSlice` is the view of a `String`.
@@ -2509,9 +2540,17 @@ let pattern = Regex"[a-z]+@${domain}"
   literal text as `text.Literal` values, which only the compiler makes, and
   the converted values.
 - A tag's `is_valid_template` states the rules for valid literal text, and
-  `from_template` requires it. The literal text is known when the code is
-  compiled, so the check is evaluated then. `Regex"[a-z"` is an error, and so
-  is a check that panics or reaches `todo`.
+  `from_template` requires it.
+- The literal text of a template is a `List[text.Literal]` constant without
+  a name, as a string literal is a `String` constant without a name.
+- A tagged template is the call of its tag's `from_template`, after
+  `assert Tag.is_valid_template(literals) by evaluation` on that constant
+  (see [Statements and blocks](#statements-and-blocks)). `Regex"[a-z"` is
+  therefore an error when the code is checked, and so is a check that
+  reaches `todo`.
+- Where the tag mentions a type parameter of the code around it, nothing is
+  evaluated, and the `requires` of `from_template` is proven as any other
+  is.
 
 ```truss
 impl FromTemplate for Regex {
@@ -2987,6 +3026,10 @@ public opaque type Session = todo
   definitions whose contracts those proofs read, and the `impl`s whose
   methods that code calls or passes to generic code. In a development
   build, a `todo` that runs stops the program and reports its position.
+- A constant whose evaluation reaches a `todo` has no value. A proof knows
+  the constant by the contracts of the calls in its value, a test that can
+  reach the constant is incomplete, and a program that can reach it is not
+  built.
 - A type defined as `todo` can be named, but its contents cannot be used.
 
 ## Debug output

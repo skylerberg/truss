@@ -1,3 +1,9 @@
 (library
  (name language)
- (modules_without_implementation comparison quantifier loop_mode connective))
+ (modules_without_implementation
+  comparison
+  quantifier
+  loop_mode
+  connective
+  literal
+  proof_method))

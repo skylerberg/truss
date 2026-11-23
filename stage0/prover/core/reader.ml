@@ -115,8 +115,8 @@ let describe_local : Mir.local_kind -> string = function
 let read_root context frame run (root : Mir.root) =
   match root with
   | Constant path -> Values.evaluate_constant context frame path
-  | Literal { text; type_ } ->
-      Values.make_text_value context frame (Facts.substitute_type context frame type_) text
+  | Literal { value; type_ } ->
+      Values.make_literal_value context frame (Facts.substitute_type context frame type_) value
   | Local local -> (
       match Locals.make_key run.infos local with
       | Core_local Self -> (
@@ -357,9 +357,6 @@ let compute_changes ?(also = []) run (frame : State.frame) (blocks : Mir.block l
             Option.iter note_assigned destination;
             note_passed call
         | Basic (Lend { call; _ }) -> note_passed call
-        | Basic (Template { destination; call; _ }) ->
-            note_assigned destination;
-            note_passed call
         | Provide { target; provided; _ } ->
             note_assigned target;
             List.iter note (list_mut_provided_places provided)
@@ -370,7 +367,7 @@ let compute_changes ?(also = []) run (frame : State.frame) (blocks : Mir.block l
             Option.iter (fun (_, local) -> note { root = Local local; projections = [] }) returned
         | Basic
             ( Live _ | Dead _ | Assert _ | Echo _ | Loan_start _ | Loan_end _ | Ghost_assert _
-            | Path_note _ | Proof _ )
+            | Path_note _ | Proof _ | Evaluated_assert _ )
         | Assert_by_bit_vector _ | While _ | Fork _ | Resume _
         | For { iteration = Range _; _ }
         | Yield { mode = Read | Own; _ }
@@ -387,20 +384,6 @@ let compute_changes ?(also = []) run (frame : State.frame) (blocks : Mir.block l
     reassigned = List.sort_uniq compare !reassigned;
   }
 
-let make_float_literal (exponent, significand) value =
-  let bits =
-    if exponent = 8 then Z.extract (Z.of_int32 (Int32.bits_of_float value)) 0 32
-    else Z.extract (Z.of_int64 (Int64.bits_of_float value)) 0 64
-  in
-  let fraction = significand - 1 in
-  Logic.Operation
-    ( Fp,
-      [
-        Logic.Bits (1, Z.extract bits (exponent + fraction) 1);
-        Logic.Bits (exponent, Z.extract bits fraction exponent);
-        Logic.Bits (fraction, Z.extract bits 0 fraction);
-      ] )
-
 let read_operand context frame run (operand : Mir.operand) =
   match operand with
   | Use { place; _ } | Borrow { place; _ } | Take { place; _ } -> read_place context frame run place
@@ -413,7 +396,7 @@ let read_operand context frame run (operand : Mir.operand) =
       | Integer number -> Logic.Integer number
       | Float number -> (
           match Facts.find_float_format ty with
-          | Some format -> make_float_literal format number
+          | Some format -> Operations.make_float_literal format number
           | None -> Facts.raise_unsupported Whole_definition "a float literal without a float type")
       | Boolean truth -> Logic.Boolean truth)
 
@@ -516,7 +499,12 @@ let read_call context frame run (call : Mir.call) ~result_type =
   | ( Trait_method { trait; name; receiver; _ },
       [
         Passed { value = tested; _ };
-        Passed { value = Borrow { place = { root = Literal { text; _ }; projections = [] }; _ }; _ };
+        Passed
+          {
+            value =
+              Borrow { place = { root = Literal { value = Text text; _ }; projections = [] }; _ };
+            _;
+          };
       ] )
     when Well_known.is_method Equal_equal (Method { owner = trait.trait; name; receiver }) ->
       let ty = compute_operand_type context frame tested in
@@ -681,8 +669,8 @@ let oblige_unreachable context frame location =
 let lend_part context (frame : State.frame) origin (mode : Language.Mode.t) ~handed ~lends
     ~write_back =
   let location = Facts.locate context frame.source origin in
-  match (context.yielded_part, context.yield_ensures, frame.yielded_so_far) with
-  | Some part_type, Some (each, _), Some before ->
+  match (context.lending, frame.yielded_so_far) with
+  | Some { part_type; part_postconditions; _ }, Some before ->
       List.iter
         (fun (clause : Mir.formula) ->
           let _, term =
@@ -698,7 +686,7 @@ let lend_part context (frame : State.frame) origin (mode : Language.Mode.t) ~han
               Text "` may not hold for the part lent here.";
             ]
             term)
-        each;
+        part_postconditions;
       Lambdas.check_valid context frame location part_type handed ~deep:true
         ~when_:"for the part lent here";
       let frame, part_after =
@@ -742,7 +730,7 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
       let term = translate_operand copied_operand in
       let literal =
         match copied_operand with
-        | Borrow { place = { root = Literal { text; _ }; projections = [] }; _ } -> Some text
+        | Borrow { place = { root = Literal { value; _ }; projections = [] }; _ } -> Some value
         | _ -> None
       in
       (Values.copy_value ?literal context frame ty term, term)
@@ -1480,19 +1468,51 @@ and read_basic context frame run (statement : Mir.statement) (basic : Mir.basic)
       Some frame
   | Proof code ->
       Some (Facts.restrict frame (Logic.not_ (Values.run_ghost_code context frame code)))
+  | Evaluated_assert code ->
+      let symbol =
+        Logic.Symbol.Evaluated
+          (Assertion
+             {
+               definition = frame.source.key.path;
+               condition = Core_walk.locate_origin statement.origin;
+             })
+      in
+      Facts.declare context (Logic.Constant (symbol, Logic.Bool));
+      let _, holds =
+        Validity.run_as_specification context (fun () ->
+            Amounts.run_code context frame code ~type_:Types.bool)
+      in
+      Facts.assume context frame (Logic.equal (Logic.Symbol symbol) holds);
+      let location = Facts.locate context frame.source statement.origin in
+      Facts.oblige context frame Assertion location
+        (match statement.origin with
+        | Written _ ->
+            [ Text "`"; Facts.quote frame.source statement.origin; Text "` may not hold." ]
+        | Desugared _ ->
+            let callee =
+              List.find_map
+                (fun (asserted : Mir.statement) ->
+                  match asserted.kind with
+                  | Basic (Call { call; _ }) ->
+                      (Mir.Call_edges.resolve_callee context.lookups.interface frame.substitution
+                         call.callee.target)
+                        .target
+                  | _ -> None)
+                (List.rev code.body.code.statements)
+            in
+            [
+              Text
+                (String.capitalize_ascii
+                   (Facts.describe_call context location
+                      ?callee:(Option.map Facts.show_callee callee)
+                      ()));
+              Text " may not give `true`.";
+            ])
+        holds;
+      Some frame
   | Path_note note ->
       note_path context frame note;
       Some frame
-  | Template { destination; literals; call } ->
-      (match call.arguments with
-      | [ Passed { value = template; _ } ] ->
-          Calls.assume_template_check context frame ~origin:call.origin
-            (make_unit_callee call.callee.target)
-            ~literals
-            ~template_type:(compute_operand_type context frame template)
-            (read_operand context frame run template)
-      | _ -> Facts.raise_bug "a tagged template whose call does not pass one template");
-      read_call_statement context frame run ~destination:(Some destination) call
 
 and read_call_statement context frame run ~destination (call : Mir.call) =
   let result_type =

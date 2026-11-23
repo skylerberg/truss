@@ -34,7 +34,7 @@ let lower (context : Context.t) (runtime : Intrinsic.runtime) =
         Emit_c.Ir_builder.emit builder
           (Assign (Lowered.make_local_place typed, Use (Copy (Lowered.make_local_place block))));
         Emit_c.Ir_builder.emit builder
-          (Assign ({ root = Local typed; projections = [ Deref ] }, Use (read_operand 0)))
+          (Assign (Lowered.make_deref_place typed, Use (read_operand 0)))
       end;
       set (Builtin_records.Shared.build ty ~value:(Copy (Lowered.make_local_place block)))
   | Shared_key ->

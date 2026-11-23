@@ -90,14 +90,16 @@ let list_uses ~is_moving (statement : Mir.Graph.statement) =
   | Basic (Call { destination; call }) ->
       list_call_uses ~is_moving call
       @ Option.fold ~none:[] ~some:(list_index_uses ~is_moving) destination
-  | Basic (Lend { call; _ } | Template { call; _ }) -> list_call_uses ~is_moving call
+  | Basic (Lend { call; _ }) -> list_call_uses ~is_moving call
   | Basic (Assert operand | Echo operand) -> list_operand_uses ~is_moving ~by_value:false operand
   | Provide_start { provided; _ } ->
       List.concat_map
         (fun (provided : Mir.provided) ->
           list_operand_uses ~is_moving ~by_value:false provided.value)
         provided
-  | Basic (Live _ | Dead _ | Loan_start _ | Loan_end _ | Ghost_assert _ | Path_note _ | Proof _)
+  | Basic
+      ( Live _ | Dead _ | Loan_start _ | Loan_end _ | Ghost_assert _ | Path_note _ | Proof _
+      | Evaluated_assert _ )
   | Provide_end ->
       []
 
@@ -145,10 +147,9 @@ let list_inits (statement : Mir.Graph.statement) : Mir.place list =
   | Basic (Assign { target; _ }) -> [ target ]
   | Basic (Call { destination; _ }) -> Option.to_list destination
   | Basic (Lend { part; _ }) -> [ { root = Local part; projections = [] } ]
-  | Basic (Template { destination; _ }) -> [ destination ]
   | Basic
       ( Live _ | Dead _ | Assert _ | Echo _ | Loan_start _ | Loan_end _ | Ghost_assert _
-      | Path_note _ | Proof _ )
+      | Path_note _ | Proof _ | Evaluated_assert _ )
   | Provide_start _ | Provide_end ->
       []
 
@@ -370,7 +371,24 @@ let make_owner_test ?(find_passed = fun _ -> None) (body : Mir.Graph.body) =
   in
   (owns, is_lent_mut)
 
-let analyse ?find_passed ?(is_moving = fun _ -> true) ~tracks:needs_drop (body : Mir.Graph.body) =
+module Type_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Types.ty
+end))
+
+let decide_each_type_once is_moving =
+  let decided = Type_table.create 16 in
+  fun type_ ->
+    match Type_table.find_opt decided type_ with
+    | Some moves -> moves
+    | None ->
+        let moves = is_moving type_ in
+        Type_table.replace decided type_ moves;
+        moves
+
+let analyse ?find_passed ?is_moving ~tracks:needs_drop (body : Mir.Graph.body) =
+  let is_moving =
+    match is_moving with Some is_moving -> decide_each_type_once is_moving | None -> fun _ -> true
+  in
   let owns, is_lent_mut = make_owner_test ?find_passed body in
   let tracks local = owns local || is_lent_mut local in
   let list_statement_moves = list_moves ~is_moving

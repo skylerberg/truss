@@ -33,4 +33,4 @@ val instantiate :
   Types.signature ->
   instance
 
-val find_function_signature : Lookups.t -> Path.t -> Types.signature option
+val find_function_signature : Signatures.t -> Lookups.t -> Path.t -> Types.signature option

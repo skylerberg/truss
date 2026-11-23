@@ -88,7 +88,7 @@ and check_named_method_call state env ?expected (value : Syntax.expression)
   | Variant (type_path, variant) ->
       Calls.construct state env ?expected value type_path (Some variant) arguments
   | Definition ((Function | Theorem), path) -> (
-      match Instantiation.find_function_signature state.lookups path with
+      match Instantiation.find_function_signature state.signatures state.lookups path with
       | Some signature ->
           Calls.check_named_call state env ?expected value path signature
             ~type_arguments:(Option.value ~default:[] type_arguments)
@@ -303,7 +303,9 @@ and check_static_call state env ?expected (value : Syntax.expression) type_ (mem
       let static_method = Members.lookup_method state path member.text Static in
       match static_method with
       | Visible method_path -> (
-          match Instantiation.find_function_signature state.lookups method_path with
+          match
+            Instantiation.find_function_signature state.signatures state.lookups method_path
+          with
           | Some signature -> (
               let instance =
                 Instantiation.instantiate state ~written:value.id ~declared_on:method_path signature
@@ -548,7 +550,7 @@ and check_capability_call state env (value : Syntax.expression) capability (memb
       let instance =
         Instantiation.instantiate state ~written:value.id
           ~declared_on:(Method { owner = capability; name = member.text; receiver = Static })
-          (Members.read_method_signature state.lookups capability method_)
+          (Members.read_method_signature state.signatures state.lookups capability method_)
       in
       match
         Calls.check_arguments state env Argument_matching.Call value instance.signature.parameters
@@ -720,7 +722,7 @@ and check_method_call state env ?expected (value : Syntax.expression) (base : Sy
 and check_method_with_receiver state env ?expected ?(type_arguments = [])
     (value : Syntax.expression) ~(receiver : Syntax.expression) ~receiver_type method_path arguments
     =
-  match Instantiation.find_function_signature state.lookups method_path with
+  match Instantiation.find_function_signature state.signatures state.lookups method_path with
   | None -> State.raise_bug "the method `%s` has no signature" (Path.show method_path)
   | Some signature -> (
       let instance =

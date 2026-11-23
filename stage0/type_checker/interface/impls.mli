@@ -57,7 +57,7 @@ val list_dispatched_methods : Lookups.t -> Types.trait_reference -> dispatched l
 val classify_through_any :
   Lookups.t -> any:Types.trait_reference -> trait:Path.t -> Types.trait_method -> through_any
 
-type bounds = Types.parameter -> Types.trait_reference list
+type bounds = Properties.Bounds.t
 
 val list_no_bounds : bounds
 
@@ -113,7 +113,7 @@ val normalize_capabilities :
 val decide_condition :
   Lookups.t -> list_bounds:bounds -> ?depth:int -> Types.condition -> Types.condition option
 
-val add_condition_bounds : bounds -> Types.condition -> bounds
+val add_condition_bounds : Lookups.t -> bounds -> Types.condition -> bounds
 
 val implies_condition :
   Lookups.t -> list_bounds:bounds -> Types.condition -> Types.condition -> bool
@@ -122,9 +122,7 @@ val normalize : Lookups.t -> list_bounds:bounds -> ?defining:Path.t list ref -> 
 
 module Conformance : sig
   val find_implementation_of : Lookups.t -> Types.impl_interface -> implementation option
-
-  val list_impl_bounds :
-    Types.impl_interface -> list_bounds:bounds -> Types.parameter -> Types.trait_reference list
+  val list_impl_bounds : Lookups.t -> Types.impl_interface -> list_bounds:bounds -> bounds
 
   val normalize_capabilities_in_impl :
     Lookups.t ->
@@ -141,7 +139,7 @@ module Conformance : sig
 end
 
 val read_signature : Lookups.t -> Path.t -> Types.signature option
-val read_scope : Lookups.t -> Resolve.Names.key -> Environment.scope
+val read_scope : Lookups.t -> Resolve.Names.key -> Environment.known_bounds Environment.scope
 
 type declaring_clause =
   | Own_uses

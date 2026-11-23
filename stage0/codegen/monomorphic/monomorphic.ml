@@ -1,6 +1,6 @@
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Monomorphic" format
 
-exception Todo_type of Ground.ty
+exception Todo_type of Path.t
 
 type context = {
   find_type_interface : Path.t -> Types.type_interface option;
@@ -165,7 +165,7 @@ let find_builtin_shape (ty : Ground.ty) : Memory_layout.shape option =
         (fun builtin -> compute_named_builtin_shape ty builtin arguments)
         (Well_known.find_builtin_type path)
 
-let compute_defined_shape context ty path arguments : Memory_layout.shape =
+let compute_defined_shape context path arguments : Memory_layout.shape =
   match context.find_type_interface path with
   | None -> raise_bug "%s is not a type" (Path.show path)
   | Some interface -> (
@@ -184,11 +184,11 @@ let compute_defined_shape context ty path arguments : Memory_layout.shape =
                  })
                variants)
       | Builtin_type _ -> raise_bug "a built-in type under a path that is not built in"
-      | Types.Todo_type -> raise (Todo_type ty))
+      | Types.Todo_type -> raise (Todo_type path))
 
 let compute_shape context (ty : Ground.ty) =
   match (find_builtin_shape ty, ty) with
   | Some shape, _ -> shape
-  | None, Named { path; arguments } -> compute_defined_shape context ty path arguments
+  | None, Named { path; arguments } -> compute_defined_shape context path arguments
   | None, (Never | Function _ | Any _) ->
       raise_bug "the unnamed type %s has no built-in shape" (Ground.to_string ty)

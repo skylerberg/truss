@@ -388,12 +388,9 @@ let is_present cache key =
 
 let derive_result_key = Blake3.derive_key ~context:"truss 2026-11-17 cache result key"
 
-type result_kind = Package_database | Test_result | Solver_answer
+type result_kind = Test_result | Solver_answer
 
-let show_result_kind = function
-  | Package_database -> "package database"
-  | Test_result -> "test result"
-  | Solver_answer -> "solver answer"
+let show_result_kind = function Test_result -> "test result" | Solver_answer -> "solver answer"
 
 let make_result_key ~kind ~key =
   derive_result_key (Cbor.encode (Cbor.Array [ Cbor.Text (show_result_kind kind); Cbor.Bytes key ]))
@@ -419,6 +416,9 @@ let make_evictable_directory cache = Filename.concat cache.root "caches"
 
 let make_objects_directory cache =
   make_directory (Filename.concat (make_evictable_directory cache) "objects")
+
+let make_package_databases_directory cache =
+  make_directory (Filename.concat (make_evictable_directory cache) "package-databases")
 
 let make_packages_directory cache = make_directory (Filename.concat cache.root "packages")
 let make_programs_directory cache = make_directory (Filename.concat cache.root "programs")

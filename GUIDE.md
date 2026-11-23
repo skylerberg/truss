@@ -572,6 +572,52 @@ test "a constant" {
 }
 ```
 
+A constant's value can call functions. `truss check` runs them, and the
+program holds the result as data, so a table costs nothing when the program
+starts:
+
+```truss
+fn to_seconds(hours: UInt64) -> UInt64
+  requires hours <= 24
+{
+  hours * 60 * 60
+}
+
+let seconds_per_day: UInt64 = to_seconds(24)
+let greeting: String = "A day has ${seconds_per_day} seconds."
+
+test "constants that call functions" {
+  assert seconds_per_day == 86400
+  assert greeting.length() == 24
+}
+```
+
+- **The value is made of literals, other constants, operators, and calls,**
+  and of the records, variants, collections, and strings built from them.
+  An `if` or a loop goes in a function that the value calls.
+- **A function that a constant calls uses no capability.** The compiler has
+  no clock, console, or file to give it, and such a function cannot panic or
+  run forever. A call of `Clock.now()` in a constant is an error:
+
+  ```text
+  main.truss:1:24: error[capabilities.not_available]: This call uses `Clock`, but the value of a constant may use no capability. A constant is computed when the program is compiled, and a build has no capabilities.
+    | let started: Instant = Clock.now()
+    |                        ^^^^^^^^^^^
+
+  1 error
+  ```
+
+- **A proof knows the value.** A function that returns `seconds_per_day`
+  can ensure `result == 86400`, although `to_seconds` has no `ensures`,
+  because the check has run it. A proof knows a number, a `Bool`, a
+  `Character`, and the fields of a record or a variant that it can see. It
+  knows a collection, and a type whose fields are hidden from it, by the
+  contracts of the calls that build it.
+- **A constant is data,** so its type holds no function, no `any` value, and
+  nothing that exists only while the program runs, such as an open file.
+- **A constant cannot depend on itself,** through another constant or
+  through a function that it calls.
+
 Truss has no mutable global variables: a top-level `let` never changes, and
 `var` appears only inside functions. State that changes lives in variables,
 in the values passed to functions, or behind a capability.
@@ -3808,6 +3854,15 @@ a `todo` in a proof that the program relies on, such as the body of a
 theorem that its code calls. In a development build from `truss run`, a
 `todo` that runs stops the program and reports where.
 
+A constant whose value reaches a `todo` is unfinished too. A test that
+reaches the constant is incomplete, and names the constant:
+
+```text
+shop "discounts are coming": incomplete
+    the constant shop.rates is not computed: todo reached
+      at main.truss:2:3
+```
+
 ### echo
 
 `echo expression` records the value's debug output with its position, and
@@ -4294,8 +4349,68 @@ test "proofs" {
 - `assert condition by bit_vector` proves a fact about bitwise operations,
   treating the integers it names as bits. It names only integers and
   booleans, and states as a hypothesis any fact it needs from around it.
+- `assert condition by evaluation` proves a fact by running it, as the
+  next section shows.
 - A theorem is called only in specifications and proofs. It has no compiled
   body.
+
+### Proving a fact by running it
+
+Some facts are about data that code computes, and no contract states them.
+`assert condition by evaluation` asks the compiler to run the condition when
+it checks the code. If the result is `true`, the proof can use the fact:
+
+```truss
+fn build_squares() -> List[UInt64] {
+  var squares: List[UInt64] = []
+  for index in 0..16
+    invariant squares.length() == index
+  {
+    mut squares.push(index * index)
+  }
+  squares
+}
+
+let squares: List[UInt64] = build_squares()
+
+fn square_of_five() -> UInt64
+  ensures result == 25
+{
+  proof {
+    assert squares.length() == 16 by evaluation
+    assert forall index in 0..16 => squares[index] == index * index by evaluation
+  }
+  squares[5]
+}
+
+test "a fact proven by evaluation" {
+  assert square_of_five() == 25
+}
+```
+
+- **`build_squares` has no `ensures`,** so without the two assertions the
+  prover knows nothing about the table, not even that `squares[5]` is in
+  bounds. The first assertion gives its length, and the second gives every
+  element.
+- **The condition is what the value of a constant can be:** literals,
+  constants, operators, calls, and quantifiers over ranges and collections.
+  It names no variable and no parameter, because it is run before the
+  program is. A fact about a variable is a `requires` or an ordinary
+  `assert`.
+- **The condition is code.** It calls only functions that use no
+  capability, as a constant's value does, and each call must meet its
+  callee's `requires`.
+- **It costs nothing when the program runs.** The compiler runs it once, and
+  again only when the code it reaches changes.
+- **A condition that is false is an error:**
+
+  ```text
+  main.truss:17:12: error[prover.assertion]: `squares.length() == 17` may not hold. This fails every time the code reaches it.
+    |     assert squares.length() == 17 by evaluation
+    |            ^^^^^^^^^^^^^^^^^^^^^^
+
+  1 error
+  ```
 
 ### When the prover needs help
 
@@ -4743,7 +4858,7 @@ test "tagged templates" {
   compiled. An invalid one is a compile error:
 
   ```text
-  main.truss:4:14: error[prover.requires]: `Self.is_valid_template(template.literals)` may not hold for this call to `Regex.from_template`. This fails every time the code reaches it. The clause that must hold is at `standard/text/text.truss:16`.
+  main.truss:4:14: error[prover.assertion]: The call to `Regex.is_valid_template` that `regex.Regex"[a-z"` makes may not give `true`. This fails every time the code reaches it.
     |   let word = regex.Regex"[a-z"
     |              ^^^^^^^^^^^^^^^^^
 
@@ -4756,12 +4871,16 @@ test "tagged templates" {
 - The standard library's tags include `regex.Regex`, `html.Html`,
   `url.Url`, `json.Value`, `files.Glob`, `processes.Command`,
   `http.Route`, and `time.Layout`.
+- A template can be the value of a constant, as in
+  `let word: regex.Regex = regex.Regex"[a-z]+"`. The compiler then builds
+  the value once, and the program holds it as data.
 - `Character"é"` and `UInt8"\n"` use the same syntax, and are checked to
   hold exactly one character.
 
 A type becomes a tag by implementing the prelude trait `FromTemplate`. Its
 `is_valid_template` method states which literal text is valid, and the
-compiler checks each template's text with it when the code is compiled. See
+compiler runs it on each template's text when it checks the code, as it
+runs the condition of an `assert ... by evaluation`. See
 [Tagged templates](SPECIFICATION.md#tagged-templates).
 
 ### Overloads by receiver mode
@@ -4807,7 +4926,7 @@ elsewhere:
 | `visited` | The values a loop has visited, in a loop's clauses |
 | `final(result)` | The lent part as the caller left it, in a lending method's `ensures` |
 | `log(n)`, `power(base, exponent)` | Functions on exact integers, in a specification |
-| `by bit_vector` | After an `assert`'s condition |
+| `by bit_vector`, `by evaluation` | After an `assert`'s condition |
 | `generic` | In a `uses` list, before the name of a capability parameter |
 
 ## Appendix B: Operators

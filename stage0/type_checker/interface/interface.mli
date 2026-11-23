@@ -5,10 +5,14 @@ module Elaborator : sig
   type t = Elaborator.t
 
   val create :
-    Lookups.t -> Resolve.resolved -> spans:Source.Definition_span.t array -> Environment.scope -> t
+    Lookups.t ->
+    Resolve.resolved ->
+    spans:Source.Definition_span.t array ->
+    Environment.known_bounds Environment.scope ->
+    t
 
   val read_span : t -> Syntax.id -> Source.Definition_span.t
-  val list_bounds : t -> Types.parameter -> Types.trait_reference list
+  val list_known_bounds : t -> Properties.Bounds.t
   val find_self_type : t -> Types.ty option
   val list_diagnostics : t -> Diagnostic.in_definition list
   val list_named_types : t -> (Syntax.id * Types.ty) list
@@ -54,20 +58,24 @@ module Definition = Definition
 module Properties : sig
   exception Recursion_limit of string
 
+  module Bounds : sig
+    type t = Properties.Bounds.t
+
+    val none : t
+    val of_known : (Types.parameter * Types.trait_reference list) list -> t
+    val close : Lookups.t -> (Types.parameter -> Types.trait_reference list) -> t
+    val append : t -> t -> t
+    val list : t -> Types.parameter -> Types.trait_reference list
+  end
+
   val list_bound_closure :
     Lookups.t -> self:Types.ty -> Types.trait_reference -> Types.trait_reference list
 
   val list_known_bounds :
-    Lookups.t ->
-    list_bounds:(Types.parameter -> Types.trait_reference list) ->
-    Types.ty ->
-    Types.trait_reference list
+    Lookups.t -> list_bounds:Bounds.t -> Types.ty -> Types.trait_reference list
 
   val list_rigid_members :
-    Lookups.t ->
-    list_bounds:(Types.parameter -> Types.trait_reference list) ->
-    Types.ty ->
-    Language.Builtin_type.t list
+    Lookups.t -> list_bounds:Bounds.t -> Types.ty -> Language.Builtin_type.t list
 
   type property = Properties.property = Copyable | Plain | View | Holds_function
   type decision = Properties.decision = Holds | Fails | Depends_on of Types.ty

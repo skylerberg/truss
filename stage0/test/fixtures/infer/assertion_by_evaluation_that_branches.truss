@@ -1,0 +1,6 @@
+fn f() -> UInt64 {
+  proof {
+    assert (if true { true } else { false }) by evaluation
+  }
+  1
+}

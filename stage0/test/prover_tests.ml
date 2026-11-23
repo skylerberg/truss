@@ -246,6 +246,189 @@ let () =
       expect_proven Fixtures.Prover.run_forever_of_a_callee_that_runs_forever)
 
 let () =
+  let expect_one_cycle = Support.expect_one_diagnostic ~check in
+  Harness.test "constants whose values read each other are an error at each of them" (fun () ->
+      match list_codes "let first: Int64 = second + 1\nlet second: Int64 = first + 1\n" with
+      | [ "prover.constant_cycle"; "prover.constant_cycle" ] -> ()
+      | found -> Harness.fail "found [%s]" (String.concat "; " found));
+  Harness.test "a constant whose value reads itself is an error" (fun () ->
+      expect_one_cycle "let count: Int64 = count + 1\n" "prover.constant_cycle"
+        ~says:"This reads `app.main.count` in its own value" ~at:("count", 2));
+  Harness.test "a constant built with a field default that reads the constant is an error"
+    (fun () ->
+      expect_one_cycle
+        "type Point(x: Int64, y: Int64 = origin.x)\nlet origin: Point = Point(x: 1)\n"
+        "prover.constant_cycle" ~says:"leaves out the field `y`, whose default reads");
+  Harness.test "a constant that sets the field whose default reads the constant is fine" (fun () ->
+      expect_proven
+        "type Point(x: Int64, y: Int64 = origin.x)\nlet origin: Point = Point(x: 1, y: 2)\n");
+  Harness.test "a constant whose value calls a function that reads the constant is an error"
+    (fun () ->
+      expect_one_cycle Fixtures.Prover.constant_read_by_the_function_it_calls
+        "prover.constant_cycle"
+        ~says:
+          "This calls `next_after_limit`, whose code depends on `app.main.limit`, so \
+           `app.main.limit` would be computed from itself."
+        ~at:("next_after_limit()", 2));
+  Harness.test "a constant read by an impl that its value passes to generic code is an error"
+    (fun () ->
+      expect_one_cycle Fixtures.Prover.constant_read_by_the_impl_it_supplies "prover.constant_cycle"
+        ~says:"This uses `Coin.weight`, whose code depends on");
+  Harness.test "a call in a constant's value meets its callee's requires" (fun () ->
+      expect_not_proven Fixtures.Prover.constant_calling_outside_a_requires "prover.requires")
+
+let list_evaluated_definitions text =
+  let database = Support.make_database (Support.setup [ ("app.main", text) ]) in
+  List.map
+    (fun item -> Option.fold ~none:"" ~some:Path.show (Lowered.Item.find_definition item))
+    (Database.list_evaluations (Support.prove database (Support.parse_file "app.main")))
+
+let expect_proven_trusting_compiled_code text ~code ~count =
+  let database = Support.make_database (Support.setup [ ("app.main", text) ]) in
+  let states =
+    List.filter
+      (fun (state : Database.proof_state) -> state.site.code = code)
+      (Support.list_proof_states database (Support.parse_file "app.main"))
+  in
+  if List.length states <> count then Harness.fail "%d %s states" (List.length states) code;
+  List.iter
+    (fun (state : Database.proof_state) ->
+      if (not state.is_proven) || not state.trusts_compiled_code then
+        Harness.fail "a %s state is not proven by an evaluation" code)
+    states
+
+let unfinished_constant = "fn build() -> UInt64 {\n  todo\n}\n\nlet unfinished: UInt64 = build()\n"
+
+let () =
+  Harness.test "the proofs of a file ask for each constant whose value calls a function" (fun () ->
+      match list_evaluated_definitions Fixtures.Prover.computed_constants with
+      | [ "app.main.corner"; "app.main.day_is_even"; "app.main.seconds_per_day"; "app.main.shape" ]
+        ->
+          ()
+      | evaluated -> Harness.fail "evaluates [%s]" (String.concat "; " evaluated));
+  Harness.test "code that reads a computed constant knows its value, and trusts compiled code"
+    (fun () ->
+      expect_proven_trusting_compiled_code Fixtures.Prover.computed_constants ~code:"prover.ensures"
+        ~count:4);
+  Harness.test "a proof that needs the value of an unfinished constant says that it has none"
+    (fun () ->
+      Support.expect_one_diagnostic ~check
+        (unfinished_constant ^ "\nfn f() -> UInt64\n  ensures result == 4\n{\n  unfinished\n}\n")
+        "prover.ensures"
+        ~says:
+          "The evaluation of `app.main.unfinished` stopped, so its value is not known: todo reached");
+  Harness.test "a constant computed from an unfinished constant is unfinished, and no error"
+    (fun () ->
+      expect_proven
+        (unfinished_constant
+       ^ "\n\
+          fn double(value: UInt64) -> UInt64 {\n\
+         \  value.saturating_add(value)\n\
+          }\n\n\
+          let twice: UInt64 = double(unfinished)\n"));
+  Harness.test
+    "a constant computed from a cyclic constant is unfinished: only the cycle is an error, and a \
+     proof that needs the value says that it has none" (fun () ->
+      match
+        List.sort compare
+          (List.map
+             (fun (diagnostic : Diagnostic.t) ->
+               (Diagnostic.Code.name diagnostic.code, diagnostic.message))
+             (list_diagnostics
+                (Fixtures.Prover.constant_computed_from_a_cyclic_constant
+               ^ "\nfn f() -> UInt64\n  ensures result == 4\n{\n  twice\n}\n")))
+      with
+      | [ ("prover.constant_cycle", _); ("prover.ensures", message) ] ->
+          if
+            not
+              (String.includes
+                 ~affix:
+                   "The evaluation of `app.main.twice` stopped, so its value is not known: the \
+                    value of app.main.limit depends on itself"
+                 message)
+          then Harness.fail "%s" message
+      | diagnostics ->
+          Harness.fail "[%s]" (String.concat "; " (List.map (fun (code, _) -> code) diagnostics)));
+  Harness.test "a member constant's value is proven and evaluated as a constant's is" (fun () ->
+      match List.sort compare (list_codes Fixtures.Prover.member_constants_computed_by_calls) with
+      | [ "prover.constant_cycle"; "prover.requires" ] -> ()
+      | codes -> Harness.fail "codes [%s]" (String.concat "; " codes));
+  Harness.test "a constant for specifications only is not evaluated" (fun () ->
+      match
+        list_evaluated_definitions
+          "fn twice(value: Integer) -> Integer {\n\
+          \  value * 2\n\
+           }\n\n\
+           let big: Integer = twice(1_000_000_000_000_000_000_000)\n\n\
+           fn f(value: Int64) -> Int64\n\
+          \  requires value < big\n\
+           {\n\
+          \  value\n\
+           }\n"
+      with
+      | [] -> ()
+      | evaluated -> Harness.fail "evaluates [%s]" (String.concat "; " evaluated))
+
+let () =
+  let accepted = Fixtures.Prover.accepted_values in
+  let assert_then condition result =
+    Printf.sprintf "fn f() -> UInt64 {\n  proof {\n    assert %s by evaluation\n  }\n  %s\n}\n"
+      condition result
+  in
+  let expect_codes text expected =
+    match List.sort compare (list_codes text) with
+    | codes when codes = expected -> ()
+    | codes -> Harness.fail "codes [%s]" (String.concat "; " codes)
+  in
+  Harness.test "an assertion by evaluation that holds proves its fact, and trusts compiled code"
+    (fun () ->
+      let text = accepted ^ assert_then "is_accepted(97)" "accept(97)" in
+      expect_proven text;
+      expect_proven_trusting_compiled_code text ~code:"prover.assertion" ~count:1);
+  Harness.test "an assertion by evaluation that is false fails every time" (fun () ->
+      Support.expect_one_diagnostic ~check
+        (accepted ^ assert_then "is_accepted(98)" "98")
+        "prover.assertion"
+        ~says:"`is_accepted(98)` may not hold. This fails every time the code reaches it."
+        ~at:("is_accepted(98)", 1));
+  Harness.test "a call in the condition of an assertion by evaluation meets its requires" (fun () ->
+      expect_not_proven (accepted ^ assert_then "accept(5) == 5" "5") "prover.requires");
+  Harness.test "an assertion by evaluation that reaches a todo says where" (fun () ->
+      Support.expect_one_diagnostic ~check
+        ("fn unfinished() -> Bool {\n  todo\n}\n\n" ^ assert_then "unfinished()" "1")
+        "prover.assertion" ~says:"Its evaluation stopped, so its result is not known: todo reached");
+  Harness.test "a function cannot assert its own result by evaluation" (fun () ->
+      expect_codes
+        "fn lies() -> Bool\n\
+        \  ensures result\n\
+         {\n\
+        \  proof {\n\
+        \    assert lies() by evaluation\n\
+        \  }\n\
+        \  false\n\
+         }\n"
+        [ "prover.ensures"; "prover.termination" ]);
+  Harness.test "a constant cannot be asserted by evaluation in the function that computes it"
+    (fun () ->
+      expect_codes
+        "fn count() -> Int64\n\
+        \  ensures result > 0\n\
+         {\n\
+        \  proof {\n\
+        \    assert counted > 0 by evaluation\n\
+        \  }\n\
+        \  0\n\
+         }\n\n\
+         let counted: Int64 = count()\n"
+        [ "prover.constant_cycle"; "prover.ensures" ]);
+  Harness.test "an assertion by evaluation is proven in each place where an assertion is written"
+    (fun () ->
+      expect_proven Fixtures.Prover.assertions_by_evaluation_in_each_place;
+      match list_evaluated_definitions Fixtures.Prover.assertions_by_evaluation_in_each_place with
+      | [ _; _; _; _; _; _ ] -> ()
+      | evaluated -> Harness.fail "evaluates [%s]" (String.concat "; " evaluated))
+
+let () =
   Harness.test "a loop with an invariant" (fun () ->
       expect_proven Fixtures.Prover.loop_with_an_invariant);
   Harness.test "a loop invariant that an iteration breaks" (fun () ->
@@ -441,7 +624,7 @@ let () =
               caller.key
           with
           | Some Blocked -> ()
-          | Some (Value _ | Failed _) -> Harness.fail "the proof is computed"
+          | Some (Value _ | Failed) -> Harness.fail "the proof is computed"
           | None -> Harness.fail "the caller has no proof"))
     [
       ("a type error", Fixtures.Prover.double_with_an_ill_typed_ensures);
@@ -479,7 +662,7 @@ let () =
           caller.key
       with
       | Some Blocked -> ()
-      | Some (Value _ | Failed _) -> Harness.fail "the proof is computed"
+      | Some (Value _ | Failed) -> Harness.fail "the proof is computed"
       | None -> Harness.fail "the caller has no proof");
   Harness.test "a function that passes a derived impl where a bound needs one is proven" (fun () ->
       expect_not_proven Fixtures.Prover.same_of_a_derived_version_ensured_false "prover.ensures");
@@ -519,7 +702,7 @@ let () =
       | Some (Value (Obligations _)) -> ()
       | Some (Value (Unsupported _ | Not_proven_here)) ->
           Harness.fail "the caller has no obligations"
-      | Some (Failed _ | Blocked) -> Harness.fail "the proof is blocked"
+      | Some (Failed | Blocked) -> Harness.fail "the proof is blocked"
       | None -> Harness.fail "the caller has no proof");
   Harness.test "a body that calls a broken signature blocks no caller's proof" (fun () ->
       let packages =
@@ -549,7 +732,7 @@ let () =
       | Some (Value (Obligations _)) -> ()
       | Some (Value (Unsupported _ | Not_proven_here)) ->
           Harness.fail "the caller has no obligations"
-      | Some (Failed _ | Blocked) -> Harness.fail "the proof is blocked"
+      | Some (Failed | Blocked) -> Harness.fail "the proof is blocked"
       | None -> Harness.fail "the caller has no proof")
 
 let () =
@@ -587,7 +770,7 @@ let () =
           | Some (Value (Obligations _)) -> ()
           | Some (Value (Unsupported _ | Not_proven_here)) ->
               Harness.fail "%s has no obligations" (Path.show declaration.key.path)
-          | Some (Failed _ | Blocked) ->
+          | Some (Failed | Blocked) ->
               Harness.fail "the proof of %s is blocked" (Path.show declaration.key.path)
           | None -> Harness.fail "%s has no proof" (Path.show declaration.key.path))
         ((Support.make_names packages).list_declarations_in main))
@@ -1042,9 +1225,36 @@ let () =
       let message = read_message (shout ^ Fixtures.Prover.shout_of_a_copied_name) in
       if
         not
-          (String.includes ~affix:"may not hold for this call to `Shout.from_template`" message
-          && String.includes ~affix:"This fails every time the code reaches it." message)
+          (String.includes
+             ~affix:
+               "The call to `Shout.is_valid_template` that `Shout\"hey ${name.copy()}\"` makes may \
+                not give `true`. This fails every time the code reaches it."
+             message)
       then Harness.fail "message %S" message);
+  Harness.test "a proof knows the length and the text of a template's literals with no evaluation"
+    (fun () ->
+      let tag = Fixtures.Prover.generic_tag_whose_check_states_its_result in
+      let of_any_tone ?(parameters = "") template =
+        Printf.sprintf "fn of_any_tone[Tone](%s) -> Shout[Tone] {\n  %s\n}\n" parameters template
+      in
+      (match list_evaluated_definitions (tag ^ of_any_tone "Shout\"hey\"") with
+      | [] -> ()
+      | evaluated -> Harness.fail "evaluates [%s]" (String.concat "; " evaluated));
+      expect_proven (tag ^ of_any_tone "Shout\"hey\"");
+      expect_not_proven
+        (tag ^ of_any_tone ~parameters:"name: String" "Shout\"hey ${name.copy()}\"")
+        "prover.requires";
+      expect_not_proven (tag ^ of_any_tone "Shout\"hello\"") "prover.requires");
+  Harness.test "a template copies its literal text once, as a string literal is copied" (fun () ->
+      let count = Fixtures.Prover.template_counting_its_literals in
+      let of_count clause = Printf.sprintf "fn f() -> Count\n  %s\n{\n  Count\"hey\"\n}\n" clause in
+      expect_proven (count ^ of_count "cost allocations == 1");
+      expect_not_proven (count ^ of_count "cost allocations == 0") "prover.cost");
+  Harness.test "a generic tag at a type without type parameters is checked by evaluation" (fun () ->
+      (match list_evaluated_definitions Fixtures.Prover.generic_tag_without_a_stated_check with
+      | [ "app.main.loud" ] -> ()
+      | evaluated -> Harness.fail "evaluates [%s]" (String.concat "; " evaluated));
+      expect_proven Fixtures.Prover.generic_tag_without_a_stated_check);
   Harness.test "an impl's from_template cannot require more than the tag's check" (fun () ->
       expect_not_proven Fixtures.Prover.shout_with_a_stronger_requires "prover.requires");
   Harness.test "an obligation that the facts refute says it fails every time it is reached"
@@ -1977,6 +2187,27 @@ let () =
             (String.concat "; "
                (List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) actual)));
   Harness.test
+    "a proof in another package does not know the fields of an evaluated constant of an opaque type"
+    (fun () ->
+      let token =
+        "public opaque type Token(code: UInt64)\n\n\
+         fn make_token() -> Token {\n\
+        \  Token(code: 7)\n\
+         }\n\n\
+         public let token: Token = make_token()\n\n\
+         public fn Token.read_code(self) -> UInt64 {\n\
+        \  self.code\n\
+         }\n"
+      in
+      (match
+         Support.list_codes
+           (check_across token
+              "fn f() -> UInt64\n  ensures result == 7\n{\n  numbers.token.read_code()\n}\n")
+       with
+      | [ "prover.ensures" ] -> ()
+      | codes -> Harness.fail "codes [%s]" (String.concat "; " codes));
+      expect_proven (token ^ "\nfn inside() -> UInt64\n  ensures result == 7\n{\n  token.code\n}\n"));
+  Harness.test
     "a caller of another package's function that passes a derived impl where a bound needs one is \
      proven" (fun () ->
       match
@@ -2351,9 +2582,7 @@ let () =
       let states =
         Support.list_proof_states (Support.make_database packages) (Support.parse_file "app.main")
       in
-      let failed =
-        List.filter (fun (state : Source.span Prover.state) -> state.failure <> None) states
-      in
+      let failed = List.filter (fun (state : Database.proof_state) -> not state.is_proven) states in
       if List.length failed <> 1 || List.length states < 2 then
         Harness.fail "%d states, %d failed" (List.length states) (List.length failed));
   Harness.test "a call's requires that may not hold has a note at the clause" (fun () ->
@@ -2633,14 +2862,8 @@ let () =
               (Support.setup [ ("app.main", Fixtures.Prover.addition_that_can_overflow) ])
           in
           let file = Support.parse_file "app.main" in
-          match
-            Prover.list_diagnostics
-              (Prover.decide ~runs:[]
-                 (Database.make_proof_lookups database)
-                 solver
-                 (Database.list_proofs (Support.prove database file)))
-              file
-          with
+          Database.decide (Support.prove database file) (Lazy.from_val solver);
+          match Database.list_proof_diagnostics database file with
           | [ diagnostic ] ->
               if
                 not

@@ -1,0 +1,11 @@
+fn next_after_limit() -> UInt64 {
+  limit.saturating_add(1)
+}
+
+let limit: UInt64 = next_after_limit()
+
+fn double(value: UInt64) -> UInt64 {
+  value.saturating_add(value)
+}
+
+let twice: UInt64 = double(limit)

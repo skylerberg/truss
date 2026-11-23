@@ -274,7 +274,7 @@ fn show_clause(clause: syntax.Clause) -> String
     Cost(clause: cost_clause) => show_cost(cost_clause)
     ClauseError => "error"
   }
-  show_conditional(own shown, condition: clause.condition.copy())
+  show_conditional(own shown, condition: clause.condition)
 }
 
 fn show_expressions(values: Slice[syntax.Expression]) -> List[String]
@@ -519,7 +519,7 @@ fn show_loop_clause(clause: syntax.LoopClause) -> String
     LoopDecreases(measures) => make_form("decreases", parts: show_expressions(measures))
     LoopCost(clause: cost_clause) => show_cost(cost_clause)
   }
-  show_conditional(own shown, condition: clause.condition.copy())
+  show_conditional(own shown, condition: clause.condition)
 }
 
 fn show_statement(statement: syntax.Statement) -> String
@@ -562,10 +562,10 @@ fn show_statement(statement: syntax.Statement) -> String
     Parallel(body) => make_form("parallel", parts: [show_block(body)])
     Concurrent(body) => make_form("concurrent", parts: [show_block(body)])
     Proof(body) => make_form("proof", parts: [show_block(body)])
-    Assert(value, by_bit_vector) => if by_bit_vector {
-      make_form("assert", parts: [show_expression(value), "by", "bit_vector"])
-    } else {
-      make_form("assert", parts: [show_expression(value)])
+    Assert(value, by) => match by {
+      Some(BitVector) => make_form("assert", parts: [show_expression(value), "by", "bit_vector"])
+      Some(Evaluation) => make_form("assert", parts: [show_expression(value), "by", "evaluation"])
+      None => make_form("assert", parts: [show_expression(value)])
     }
     StatementError => "error"
   }
@@ -772,7 +772,7 @@ fn show_capability_list(capabilities: Slice[syntax.CapabilityReference]) -> Stri
   make_form("uses", parts: shown)
 }
 
-fn show_definition(definition: syntax.Definition, methods: Slice[String]) -> String
+fn show_definition(definition: syntax.Definition, methods: own List[String]) -> String
   uses RunForever
 {
   let body = match definition.kind {
@@ -791,7 +791,7 @@ fn show_definition(definition: syntax.Definition, methods: Slice[String]) -> Str
             let variant_name = if variant.is_indirect { "indirect ${variant.name.text}" } else { variant.name.text.copy() }
             let text = match variant.fields {
               Some(fields) => make_form(variant_name, parts: [show_fields(fields)])
-              None => variant_name.copy()
+              None => own variant_name
             }
             mut shown_variants.push(own text)
           }
@@ -832,9 +832,7 @@ fn show_definition(definition: syntax.Definition, methods: Slice[String]) -> Str
         }
         mut parts.push(own text)
       }
-      for method in methods {
-        mut parts.push(method.copy())
-      }
+      mut parts.append(own methods)
       make_form("trait", parts)
     }
     Impl(implemented_trait, implementing_type, capabilities, members) => {
@@ -858,9 +856,7 @@ fn show_definition(definition: syntax.Definition, methods: Slice[String]) -> Str
         }
         mut parts.push(own text)
       }
-      for method in methods {
-        mut parts.push(method.copy())
-      }
+      mut parts.append(own methods)
       make_form("impl", parts)
     }
     Capability(name, members) => {
@@ -868,9 +864,7 @@ fn show_definition(definition: syntax.Definition, methods: Slice[String]) -> Str
       for _ in members {
         mut parts.push("error")
       }
-      for method in methods {
-        mut parts.push(method.copy())
-      }
+      mut parts.append(own methods)
       make_form("capability", parts)
     }
     Constant(name, annotation, value) => make_form(
@@ -918,7 +912,7 @@ internal fn show_file(file: syntax.File) -> String
     for method in top_level.methods {
       mut methods.push(show_definition(method.value, methods: []))
     }
-    mut lines.push(show_definition(top_level.definition.value, methods))
+    mut lines.push(show_definition(top_level.definition.value, own methods))
   }
   lines.join("\n")
 }

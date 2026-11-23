@@ -17,6 +17,9 @@ val find_shadowed_constant :
 val is_external_test : Lookups.t -> Path.t -> bool
 val find_real_implementation : Lookups.t -> Path.t -> Path.t option
 
+val find_method_of_trait :
+  Types.trait_interface -> name:string -> receiver:Path.receiver -> Types.trait_method option
+
 val find_trait_method :
   Lookups.t -> Path.t -> name:string -> receiver:Path.receiver -> Types.trait_method option
 

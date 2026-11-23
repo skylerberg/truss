@@ -4,6 +4,7 @@ type counters = { mutable next_node_id : int; mutable next_synthetic_local : int
 
 type t = {
   lookups : Lookups.t;
+  signatures : Signatures.t;
   resolved : Resolve.resolved;
   tables : Tables.t;
   tables_with_holes : Tables.t option;
@@ -73,7 +74,7 @@ let rewrite_origin : Core.origin -> Core.origin = function
 let make_place (node : Core.expression) : Core.place =
   match node.kind with Use place -> place | _ -> Temporary node
 
-let list_bounds form = Interface.Elaborator.list_bounds form.context
+let list_bounds form = Interface.Elaborator.list_known_bounds form.context
 
 let with_condition form condition =
   { form with context = Interface.Elaborator.add_condition form.context condition }
@@ -87,11 +88,12 @@ let find_evidence form type_ trait =
     (Types.map_trait (normalize form) trait)
 
 let make_callee form (target : Core.operand Core.target) =
-  Callee_uses.make_callee form.lookups.interface ~list_bounds:(list_bounds form) target
+  Callee_uses.make_callee form.signatures form.lookups.interface ~list_bounds:(list_bounds form)
+    target
 
 let make_call form ~callee ~arguments ~lends =
-  Callee_uses.make_call form.lookups.interface ~list_bounds:(list_bounds form) ~callee ~arguments
-    ~lends
+  Callee_uses.make_call form.signatures form.lookups.interface ~list_bounds:(list_bounds form)
+    ~callee ~arguments ~lends
 
 let is_plain form type_ =
   Interface.Impls.is_plain form.lookups.interface ~list_bounds:(list_bounds form) type_
@@ -434,14 +436,15 @@ let is_executable form (condition : Core.expression) =
   let is_specification_only (callee : Core.callee) =
     match callee.target with
     | Function { path; _ } -> (
-        match Instantiation.find_function_signature form.lookups path with
+        match Instantiation.find_function_signature form.signatures form.lookups path with
         | Some signature -> signature.specification_only
         | _ -> false)
     | Trait_method { trait; name; receiver; _ } ->
         List.exists
           (fun (method_ : Types.trait_method) ->
             method_.method_receiver = receiver
-            && (Members.read_method_signature form.lookups trait.trait method_).specification_only)
+            && (Members.read_method_signature form.signatures form.lookups trait.trait method_)
+                 .specification_only)
           (Members.list_trait_methods form.lookups trait.trait name)
     | Capability_method _ | Intrinsic _ | Indirect _ -> false
   in
@@ -632,7 +635,8 @@ and build_kind form env (value : Syntax.expression) : Core.kind =
           build_tagged_string form env value literal ~from_template ~part ~part_conversions
       | Some (Template (Interpolated { displays })) ->
           build_interpolated_string form env ~origin:(make_rewrite_origin value.id) literal displays
-      | None when Option.is_none literal.tag && literal.rest = [] -> String literal.first.value
+      | None when Option.is_none literal.tag && literal.rest = [] ->
+          Literal (Text literal.first.value)
       | _ -> raise_unexpected ())
   | True | False -> Boolean (value.kind = True)
   | Todo -> Todo
@@ -1184,7 +1188,7 @@ and build_interpolated_string form env ~origin (literal : Syntax.string_literal)
       (Let
          {
            pattern = make_binding form ~origin ~is_var:true ~mode:Own Types.string_type text;
-           value = Operands.build Own (make Types.string_type (String literal.first.value));
+           value = Operands.build Own (make Types.string_type (Literal (Text literal.first.value)));
            else_ = None;
          })
   in
@@ -1207,7 +1211,7 @@ and build_interpolated_string form env ~origin (literal : Syntax.string_literal)
                                 Value
                                   (make
                                      (Types.make_named (Well_known.make_path String_slice) [])
-                                     (String pushed.value));
+                                     (Literal (Text pushed.value)));
                             };
                         ]
                       ~lends:None))));
@@ -1248,19 +1252,15 @@ and build_tagged_string form env (value : Syntax.expression) (literal : Syntax.s
       (Types.make_named (Well_known.make_path List) [ element ])
       (build_list_literal form ~origin element elements)
   in
-  let literal_type = Types.make_named (Well_known.make_path Literal) [] in
-  let texts =
-    List.map
-      (fun (written : Syntax.text) ->
-        make literal_type
-          (build_record
-             [
-               ( Literal_text,
-                 make
-                   (Types.make_named (Well_known.make_path String_slice) [])
-                   (String written.value) );
-             ]))
-      (literal.first :: List.map snd literal.rest)
+  let make_literals () =
+    make
+      (Types.make_named (Well_known.make_path List)
+         [ Types.make_named (Well_known.make_path Literal) [] ])
+      (Literal
+         (Elements
+            (List.map
+               (fun (written : Syntax.text) -> Language.Literal.Text written.value)
+               (literal.first :: List.map snd literal.rest))))
   in
   let parts =
     List.map2
@@ -1273,26 +1273,49 @@ and build_tagged_string form env (value : Syntax.expression) (literal : Syntax.s
         | None -> build_expression form env written)
       literal.rest part_conversions
   in
-  let texts = make_list literal_type texts in
   let template =
     make
       (Types.make_named (Well_known.make_path Template) [ part ])
-      (build_record [ (Template_literals, texts); (Template_parts, make_list part parts) ])
+      (build_record
+         [ (Template_literals, make_literals ()); (Template_parts, make_list part parts) ])
   in
-  Template
-    {
-      literals =
-        List.map
-          (fun (written : Syntax.text) -> written.value)
-          (literal.first :: List.map snd literal.rest);
-      call =
-        make from_template.callee_result
-          (Call
-             (make_call form
-                ~callee:(convert_callee form from_template.callee)
-                ~arguments:[ Operands.build_argument Read template ]
-                ~lends:None));
-    }
+  let call_tag callee type_ argument : Core.expression =
+    make type_
+      (Call
+         (make_call form ~callee:(convert_callee form callee)
+            ~arguments:[ Operands.build_argument Read argument ]
+            ~lends:None))
+  in
+  let call = call_tag from_template.callee from_template.callee_result template in
+  let mentions_type_parameter =
+    Types.exists (function Types.Parameter _ | Projection _ -> true | _ -> false)
+  in
+  match from_template.callee with
+  | Trait_method ({ self_type; trait; _ } as tag)
+    when not
+           (List.exists mentions_type_parameter
+              (self_type
+              :: List.filter_map
+                   (function Types.Type type_ -> Some type_ | Value _ -> None)
+                   trait.trait_arguments)) ->
+      let { Well_known.name; receiver; _ } =
+        Well_known.locate_method From_template_is_valid_template
+      in
+      let is_valid =
+        call_tag (Trait_method { tag with name; receiver }) Types.bool (make_literals ())
+      in
+      Block
+        {
+          statements =
+            [
+              make_statement form ~origin
+                (Assert
+                   { condition = { value = is_valid; executable = true }; by = Some Evaluation });
+            ];
+          value = Some call;
+        }
+  | Function _ | Trait_method _ | Capability_method _ | Constructor _ | Indirect | Intrinsic _ ->
+      call.kind
 
 and build_collection_literal form (value : Syntax.expression) (elements : Core.expression list) :
     Core.kind =
@@ -1713,9 +1736,9 @@ and build_statement_kind form env (written : Syntax.statement) : Core.statement_
       let branches = List.map (build_statement form env) body.statements in
       Concurrent branches
   | Proof body -> Proof (build_block form env body)
-  | Assert { value; by_bit_vector } ->
+  | Assert { value; by } ->
       let value = build_expression form env value in
-      Assert { condition = { value; executable = is_executable form value }; by_bit_vector }
+      Assert { condition = { value; executable = is_executable form value }; by }
   | Statement_error -> raise_bug "an erroneous statement is built"
 
 and build_block form env (written : Syntax.block) : Core.block =
@@ -2015,13 +2038,14 @@ let build_law_proof form ~holds_body (written : Syntax.block) : Core.definition 
     }
 
 let build_definition form ~(key : Resolve.Names.key) ~(definition : Syntax.definition)
-    ~(elaborated : Interface.Environment.elaborated_interface) ~checks_body : Core.definition =
+    ~(elaborated : Interface.Environment.elaborated_interface) ~checks_body ~has_syntax_error :
+    Core.definition =
   let is_broken (part : Resolve.Parts.part) =
-    Resolve.Names.is_broken form.lookups.interface.names key part || (part = Body && not checks_body)
+    has_syntax_error part || (part = Body && not checks_body)
   in
   let holds_body = checks_body in
   let read_effective_signature () =
-    match Interface.Impls.read_signature form.lookups.interface key.path with
+    match Signatures.read form.signatures form.lookups.interface key.path with
     | Some signature -> signature
     | None -> raise_bug "a function with an interface has no signature"
   in
@@ -2072,8 +2096,8 @@ let rec replace_holes type_ =
 and replace_capability_holes capabilities =
   Types.map_capability_types replace_holes (Types.map_trait replace_holes) capabilities
 
-let build lookups ~resolved ~tables ~context ~package ~text ~key ~definition ~elaborated
-    ~law_parameters ~checks_body : Core.t =
+let build lookups ~signatures ~resolved ~tables ~context ~package ~text ~key ~definition ~elaborated
+    ~law_parameters ~checks_body ~has_syntax_error : Core.t =
   let tables_with_holes =
     if Tables.exists_type (function Types.Hole -> true | _ -> false) tables then Some tables
     else None
@@ -2081,6 +2105,7 @@ let build lookups ~resolved ~tables ~context ~package ~text ~key ~definition ~el
   let form =
     {
       lookups;
+      signatures;
       resolved;
       tables =
         (match tables_with_holes with
@@ -2098,7 +2123,7 @@ let build lookups ~resolved ~tables ~context ~package ~text ~key ~definition ~el
     }
   in
   {
-    definition = build_definition form ~key ~definition ~elaborated ~checks_body;
+    definition = build_definition form ~key ~definition ~elaborated ~checks_body ~has_syntax_error;
     origin = Written definition.id;
   }
 

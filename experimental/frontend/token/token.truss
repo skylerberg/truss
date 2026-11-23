@@ -208,11 +208,11 @@ internal fn Tables.name(self, index: UInt64) -> StringSlice
   }
 }
 
-internal fn Tables.literal(self, index: UInt64) -> StringLiteral
+internal fn Tables.literal(self, index: UInt64) lends StringLiteral
   uses Panic
 {
   if index < self.literals.length() {
-    self.literals[index].copy()
+    self.literals[index]
   } else {
     Panic.crash("a literal index past the table")
   }
@@ -519,9 +519,6 @@ internal fn joins_neighbor(before: Option[UInt8], after: Option[UInt8], code: St
   }
 }
 
-internal type Insertion(at: UInt64, text: String)
-  derives Equal
-
 fn escape_spelling(text: StringSlice) -> String
   uses Panic
 {
@@ -573,10 +570,10 @@ fn format_lowercase_hexadecimal(byte: UInt8) -> String
   }
 }
 
-fn spell_inserted(insertions: Slice[Insertion], offset: UInt64, buffer: mut String) {
+fn spell_inserted(insertions: Slice[source.Edit], offset: UInt64, buffer: mut String) {
   for insertion in insertions {
-    if insertion.at == offset {
-      mut buffer.push(insertion.text)
+    if insertion.span.start == offset {
+      mut buffer.push(insertion.replacement)
     }
   }
 }
@@ -633,7 +630,7 @@ fn spell_string(tables: Tables, literal: StringLiteral) -> Option[String]
   Some(own text)
 }
 
-internal fn spell_tokens(tables: Tables, tokens: Slice[Token], insertions: Slice[Insertion]) -> Option[String]
+internal fn spell_tokens(tables: Tables, tokens: Slice[Token], insertions: Slice[source.Edit]) -> Option[String]
   uses Panic, RunForever
 {
   var buffer = ""

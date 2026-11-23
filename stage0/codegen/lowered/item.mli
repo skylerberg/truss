@@ -7,8 +7,8 @@ type t =
   | Any_drop of Ground.ty
   | Any_copy of Ground.ty
   | Encode of Ground.ty
-  | Evaluator of Path.t
-  | Call_evaluation of { function_ : Path.t; arguments : argument list }
+  | Evaluator of t
+  | Assertion of { definition : Path.t; condition : int }
   | Generated of generated
   | Table of table
 
@@ -29,8 +29,6 @@ and table =
   | Any_table of { impl : Path.t; type_arguments : Ground.argument list }
   | Locked_table of Path.t
 
-and argument = Integer of Z.t | Literals of string list
-
 and impl_method = {
   impl : Path.t;
   name : string;
@@ -39,6 +37,7 @@ and impl_method = {
 }
 
 val make_method_path : impl_method -> Path.t
+val find_definition : t -> Path.t option
 val make_code : Path.t -> Ground.instantiation -> t
 val make_method_code : impl_method -> t
 val compare : t -> t -> int

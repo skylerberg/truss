@@ -20,8 +20,21 @@ val list_code_supplied_to_generics :
   Types.substitution ->
   Path.t list
 
+type dependency_kind = Read | Direct_call | Supplied of supplier
+
+type dependency = {
+  path : Path.t;
+  kind : dependency_kind;
+  origin : Core.origin;
+  omitted_field : string option;
+}
+
+val list_dependencies : lookups -> Types.substitution -> Tree.t -> dependency list
 val resolve_node : lookups -> Path.t -> Types.substitution -> Path.t
 val list_path_edges : lookups -> Path.t -> Path.t list
+
+val find_implemented_declaration :
+  Interface.Lookups.t -> Types.impl_interface -> impl:Path.t -> Path.t -> Path.t option
 
 type node = Definition | Trait_method_declaration
 

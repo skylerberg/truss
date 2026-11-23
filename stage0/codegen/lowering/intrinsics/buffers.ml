@@ -210,7 +210,7 @@ let lower (context : Context.t) (buffer : Intrinsic.buffer) =
         Emit_c.Ir_builder.emit builder
           (Assign (Lowered.make_local_place typed, Use (Copy (Lowered.make_local_place untyped))));
         Emit_c.Ir_builder.emit builder
-          (Assign ({ root = Local typed; projections = [ Deref ] }, Use (read_operand 0)))
+          (Assign (Lowered.make_deref_place typed, Use (read_operand 0)))
       end;
       add_to_length (Lowered.make_local_place result) (Constant (Integer (UInt64, count)));
       set (Use (Move (Lowered.make_local_place result)))
@@ -237,7 +237,7 @@ let lower (context : Context.t) (buffer : Intrinsic.buffer) =
         in
         Emit_c.Ir_builder.emit builder
           (Assign (Lowered.make_local_place typed, Use (Copy (Lowered.make_local_place untyped))));
-        set (Use (Move { root = Local typed; projections = [ Deref ] }))
+        set (Use (Move (Lowered.make_deref_place typed)))
       end;
       Emit_c.Ir_builder.emit_when builder
         (Test (Storage.make_owned_block_test moved_storage))

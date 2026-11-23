@@ -510,9 +510,27 @@ User code never owns a writer that it could drop unflushed.
 
 Rules: [Constants](SPECIFICATION.md#constants).
 
+**A constant's value may call any function that uses no capability.** Such a
+function is pure, terminates, and cannot panic, and its result is the same
+on every machine (*determinism*), so the compiler can run it. Truss
+therefore has no second kind of function for compile time, as Rust has
+`const fn` and C++ has `constexpr`: the `uses` clause already says which
+functions can run. A lookup table or a `Regex` is then data in the program.
+No code builds it at startup, and no mutable global holds it.
+
 | Rule | Reason |
 |---|---|
-| A constant expression calls no function. | A constant can appear in a type, as in `Array[UInt8, digest_size]`, so type checking never waits for code to run. |
+| `truss check` evaluates a constant whose value calls a function. | The prover then knows the value, as it knows the value of `24 * 60 * 60`, and an evaluation that fails is an error of the check and not of a later build. The result is stored under a key over the code that the evaluation reaches, so a later check evaluates nothing until that code changes. |
+| A proof knows an evaluated value as far as it sees the type: every scalar, and every field of a record or a variant whose fields are visible to it. | The whole value reaches the prover, which states it with the constructors that the proof's own query declares. An opaque type of another package is abstract there, so its fields are never stated, and `opaque` hides the representation from an evaluated value as it does from an `ensures`. |
+| A proof knows a collection, and an opaque type of another package, by the contracts of the calls that build it. | To such a proof the value is its model, and `model()` returns a type that exists only in specifications, so no evaluation computes it yet. |
+| A constant that a type names calls no function. | A constant can appear in a type, as in `Array[UInt8, digest_size]`, so type checking never waits for code to run. |
+| The value holds no `if`, `match`, or lambda of its own. | Every stage reads a value as one expression with no local variable. A function holds the other code, at the cost of one name. |
+| A constant's type holds no function, `any` value, handle, or state that tasks share. | The value is data in the program. A function and an `any` value hold the address of code. A handle stands for something that the operating system holds only while the program runs. State that tasks share would be a mutable global. |
+| A constant cannot depend on itself through the code that it calls. | The compiler would need the value to compute the value. A read of a constant is an edge of the call graph, so the check that finds a recursion finds this cycle. |
+| An evaluation is limited by the CPU time that it uses. | A wall-clock limit would fail a build on a busy machine that an idle machine passes, and agents and CI jobs share machines. CPU time varies only with the speed of the processor, and the limit is far above the need of any constant. A count of steps would vary with nothing, but the count would be compiled into every function that an evaluation and a test both reach, or into a second copy of each. |
+| The evaluations that a check or a build needs run as the entries of one program, in the test runner. | A program for each evaluation costs a C compilation and a link for each computed constant and each tagged template. An evaluator is to the runner what a test is: a function with no parameter, whose output the runner captures, and which may panic, reach a `todo`, or pass a limit. The runner isolates each entry in a worker process and uses every core. An evaluator that reads an evaluated constant holds that value as data, so it is compiled after that constant is evaluated: the evaluations run in layers, and one program holds one layer. |
+| A `todo` that an evaluation reaches leaves the tests that reach the constant incomplete. | The constant is unfinished code, as a function with a `todo` body is, and the tests of the code beside it still run. |
+| A constant computed from a constant that depends on itself is unfinished, as one whose evaluation reaches a `todo` is. | The check reports the cycle once, at the constant that depends on itself. An evaluation error at each constant computed from it would be a cascading error, a second diagnostic for the same mistake. A proof that needs the value still fails, and says why the value is not known. |
 
 ## Functions
 
@@ -1164,7 +1182,8 @@ values, which makes an injection attack impossible by construction:
 | Rule | Reason |
 |---|---|
 | The tag is a type. | The tag names the type of the result. |
-| Malformed literal text is a compile error. | A tag states the rules for its literal text in `is_valid_template`, which `from_template` requires. A function in a specification is pure and terminates, so the compiler can run the check at compile time, and constructing the value cannot fail. The feature reuses `requires`, purity, and termination. |
+| Malformed literal text is a compile error. | A tag states the rules for its literal text in `is_valid_template`, which `from_template` requires. A tagged template is that call after `assert Tag.is_valid_template(literals) by evaluation`, so the check runs when the code is checked, and constructing the value cannot fail. |
+| A tagged template is ordinary code after type checking. | The literal text is a constant without a name, as a string literal is, so the assertion and the call name one value. Ownership, the prover, and code generation then have no rule for templates: the feature is `requires`, a constant, and an assertion by evaluation. A second mechanism for the check would have to be kept equal to the first in each of them. |
 | A check cannot read anything outside the code, such as a live database schema. | A build has no capabilities. |
 | A character and a byte use the syntax of a tagged template: `Character"é"` and `UInt8"\n"`. | They need no lexer rule of their own and no second set of escapes. |
 
@@ -1364,6 +1383,10 @@ only, to state the definition.
 | A method of a trait or of an `impl` is known by its contract too. | An `impl` states what it adds to the trait's contract in its own `ensures`: `Int64.compare` ensures the order of the integers. An edit to a provided body then changes no fact that callers know. An edit to an `impl`'s body re-proves that method and the `impl`'s laws alone. |
 | A clause applies only where every name it mentions is visible. | An `ensures` that reads the fields of an opaque type is a fact inside the type's package and no fact elsewhere, so `opaque` hides the representation from proofs too. |
 | A public `requires` or `cost` names only public definitions, and an `ensures` may name a private function. | The proofs of callers in other packages read a `requires` and a `cost`, and a clause applies only where every name it mentions is visible. The `ensures` lets callers inside the package know a result in terms of private helpers. |
+| A constant is known by its value, which an evaluation gives where the value calls a function. | The declaration of the constant asks for the evaluation, as a tagged template asks for its check, so the place that makes a proof depend on a callee's body is written. A proof that used an evaluated value trusts the compiled code, and the tools report that. |
+| A fact that the solver cannot derive is requested with `assert ... by evaluation`, which runs the condition when the code is checked. | A proof needs facts about data that code computes, such as "this table is sorted", and no contract can state every one in advance. The condition is closed, so it has one value, and the compiler computes that value by running the code that the program would run. Lean's `native_decide` is the precedent. The alternative is to evaluate every call on constants without being asked, and then a patch release of a dependency that changes a result within its contract could break a proof at a site that names no evaluation. |
+| The condition of `assert ... by evaluation` is code, and can be whatever the value of a constant can be. | One rule says which code the compiler runs: no variable, no capability, and so no panic and no loop without an end. A template's check, a constant's value, and this assertion are then one mechanism, a symbol whose value an evaluation gives. |
+| A function cannot assert a fact about itself by evaluation, nor about a constant that it computes. | The proof would assume the function's own `ensures` for the call that the assertion evaluates, and would then prove that `ensures` from the assumption. The calls and the constants of an assertion are edges of the call graph, so the check that finds a recursion without a measure finds this one. |
 | A bit-level fact is requested with `assert ... by bit_vector`. | Bit-blasting is slow on most queries, so only the assertion that asks for it is proven that way, as with Verus's `by (bit_vector)`. |
 | A quantifier over a range or a collection is also an expression in code. | The binder carries its range, so the body may rely on it. The standard library therefore has no `all` or `any` methods, and a test of every element has *one spelling*. |
 

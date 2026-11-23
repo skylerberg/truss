@@ -15,7 +15,11 @@ type local_info = {
 type constant = Unit | Integer of Z.t | Float of float | Boolean of bool
 
 type place = { root : root; projections : projection list }
-and root = Local of local | Constant of Path.t | Literal of { text : string; type_ : Types.ty }
+
+and root =
+  | Local of local
+  | Constant of Path.t
+  | Literal of { value : Language.Literal.t; type_ : Types.ty }
 
 and projection =
   | Field of string
@@ -191,7 +195,6 @@ and basic =
   | Assign of { target : place; value : rvalue }
   | Call of { destination : place option; call : call }
   | Lend of { part : local; call : call }
-  | Template of { destination : place; literals : string list; call : call }
   | Live of local list
   | Dead of local list
   | Assert of operand
@@ -206,6 +209,7 @@ and basic =
   | Ghost_assert of { condition : formula; by_bit_vector : bool }
   | Path_note of path_note
   | Proof of t
+  | Evaluated_assert of t
 
 and statement_kind =
   | Basic of basic

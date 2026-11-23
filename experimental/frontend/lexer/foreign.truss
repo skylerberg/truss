@@ -152,7 +152,7 @@ fn report_foreign_escape(scanner: mut Scanner, buffer: mut String, start: UInt64
   uses Panic
 {
   let replacement = "\\u{${format_hexadecimal(value, minimum_digits: 1)}}"
-  let written = scanner.text(start, stop).to_string()
+  let written = scanner.text(start, stop)
   report(
     mut scanner,
     code: "lexer.invalid_escape",
@@ -378,8 +378,8 @@ fn lex_character_literal(scanner: mut Scanner, tag: StringSlice, literal_start: 
   uses Panic
 {
   let start = scanner.position
-  let content = scanner.text(start + 1, stop: stop - 1).to_string()
-  let as_ordinary: StringSlice = if content == "\"" { "\\\"" } else if content == "\\'" { "'" } else { content.slice() }
+  let content = scanner.text(start + 1, stop: stop - 1)
+  let as_ordinary: StringSlice = if content == "\"" { "\\\"" } else if content == "\\'" { "'" } else { content }
   let value = decode_character_escape(content)
   let replacement = "${tag}\"${as_ordinary}\""
   let noun = if tag == "UInt8" { "byte" } else { "character" }
@@ -460,28 +460,35 @@ fn classify_prefix(prefix: StringSlice) -> PrefixKind {
   }
 }
 
-fn lex_prefixed_string(scanner: mut Scanner, prefix: StringSlice, start: UInt64, nesting: UInt64) -> ScannedString
+fn open_prefixed_string(scanner: mut Scanner, start: UInt64, nesting: UInt64, inline: Bool) -> ItemScan
   uses Panic, RunForever
 {
   let quote_start = scanner.position
   let quotes = scanner.run_length(quote_start, byte: 34)
-  let is_empty = quotes == 2
-  let kind_of_prefix = classify_prefix(prefix)
-  let remove_prefix = source.replace(source.make_span(start, stop: quote_start), replacement: "")
-  let scanned = if kind_of_prefix == PrefixKind.RawTextPrefix && quotes == 1 {
+  let origin = StringOrigin.PrefixedString(start, quote_start, quotes)
+  if classify_prefix(scanner.text(start, stop: quote_start)) == PrefixKind.RawTextPrefix && quotes == 1 {
     scanner.position = quote_start + 1
-    scan_one_line_raw(
+    return open_one_line_raw(
       mut scanner,
       tag: None,
       form: token.Form.Raw(quotes: 3, dollars: 0, multi_line: false),
       nesting: nesting,
+      inline: inline,
+      origin: origin,
       literal_start: start,
       dollars: 0,
       quotes: 1,
     )
-  } else {
-    scan_string(mut scanner, tag: None, nesting: nesting)
   }
+  open_string(mut scanner, tag: None, nesting: nesting, inline: inline, origin: origin)
+}
+
+fn report_prefixed_string(scanner: mut Scanner, start: UInt64, quote_start: UInt64, quotes: UInt64, scanned: ScannedString)
+  uses Panic, RunForever
+{
+  let is_empty = quotes == 2
+  let kind_of_prefix = classify_prefix(scanner.text(start, stop: quote_start))
+  let remove_prefix = source.replace(source.make_span(start, stop: quote_start), replacement: "")
   let delimiter = if is_empty { 1 } else { quotes }
   let text_start = quote_start + delimiter
   let text_stop = scanner.position - delimiter
@@ -501,6 +508,7 @@ fn lex_prefixed_string(scanner: mut Scanner, prefix: StringSlice, start: UInt64,
   if text_stop > 0 && scanner.is_at(text_stop - 1, byte: 92) {
     contains_quote_at_end = true
   }
+  let prefix = scanner.text(start, stop: quote_start)
   var message = ""
   var fixes: List[source.Fix] = []
   match kind_of_prefix {
@@ -508,11 +516,11 @@ fn lex_prefixed_string(scanner: mut Scanner, prefix: StringSlice, start: UInt64,
       message = "Truss has no `${prefix}` strings. Every string interpolates with `\${...}`, as in `\"Hello \${name}\"`."
       if is_closed && !has_interpolations {
         if is_empty {
-          mut fixes.push(source.make_fix("Remove the prefix", edits: [remove_prefix.copy()]))
+          mut fixes.push(source.make_fix("Remove the prefix", edits: [own remove_prefix]))
         } else if !(quotes >= 3 && contains_backslash) {
           if format_field_edits(scanner, start: text_start, stop: text_stop) is Some(edits) {
-            var all_edits = [remove_prefix.copy()]
-            mut all_edits.append(edits.copy())
+            var all_edits = [own remove_prefix]
+            mut all_edits.append(own edits)
             let title = if quotes == 1 { "Write an ordinary string" } else { "Write a raw string" }
             mut fixes.push(source.make_fix(title, edits: own all_edits))
           }
@@ -523,7 +531,7 @@ fn lex_prefixed_string(scanner: mut Scanner, prefix: StringSlice, start: UInt64,
       message = "Truss has no `${prefix}` strings. A raw string, which has no escapes, is written between `\"\"\"`s, as in `\"\"\"\\d+\"\"\"`."
       if is_closed && !has_interpolations {
         if is_empty || quotes >= 3 {
-          mut fixes.push(source.make_fix("Remove the prefix", edits: [remove_prefix.copy()]))
+          mut fixes.push(source.make_fix("Remove the prefix", edits: [own remove_prefix]))
         } else if !contains_quote_at_end && !closes_on_doubled_quote {
           mut fixes.push(
             source.make_fix(
@@ -549,7 +557,6 @@ fn lex_prefixed_string(scanner: mut Scanner, prefix: StringSlice, start: UInt64,
     message: message,
     fixes: own reported_fixes,
   )
-  scanned
 }
 
 fn read_hash_raw_text(scanner: mut Scanner, text_start: UInt64, text_stop: UInt64) -> String
@@ -587,7 +594,7 @@ fn hash_raw_string(scanner: mut Scanner, start: UInt64) -> Option[token.Kind]
   let Some(text_stop) = close else {
     return None
   }
-  let written = scanner.text(text_start, stop: text_stop).to_string()
+  let written = scanner.text(text_start, stop: text_stop)
   var longest: UInt64 = 0
   var at = text_start
   while at < text_stop {
@@ -652,11 +659,16 @@ fn find_closing_delimiter(scanner: Scanner, start: UInt64, delimiter: UInt8) -> 
   None
 }
 
-fn lex_quoted_string(scanner: mut Scanner, nesting: UInt64, delimiter: UInt8) -> ScannedString
+fn open_quoted_string(scanner: mut Scanner, nesting: UInt64, inline: Bool, delimiter: UInt8) -> ItemScan
   uses Panic, RunForever
 {
   let start = scanner.position
-  let scanned = scan_ordinary(mut scanner, tag: None, nesting: nesting, closing: delimiter)
+  open_ordinary(mut scanner, tag: None, nesting: nesting, inline: inline, origin: StringOrigin.QuotedString(start, delimiter), closing: delimiter)
+}
+
+fn report_quoted_string(scanner: mut Scanner, start: UInt64, delimiter: UInt8, scanned: ScannedString)
+  uses Panic, RunForever
+{
   let stop = scanner.position
   var interpolation_spans: List[source.Span] = []
   if scanned.kind is String(literal) {
@@ -697,7 +709,6 @@ fn lex_quoted_string(scanner: mut Scanner, nesting: UInt64, delimiter: UInt8) ->
     "A string is written between `\"`s."
   }
   report(mut scanner, code: "lexer.string_delimiter", span: source.make_span(start, stop: start + 1), message: message, fixes: own fixes)
-  scanned
 }
 
 fn lex_curly_quoted_string(scanner: mut Scanner, opening_length: UInt64, closing: StringSlice) -> Option[token.Kind]
@@ -748,14 +759,14 @@ fn lex_curly_quoted_string(scanner: mut Scanner, opening_length: UInt64, closing
   )
 }
 
-fn scan_string_form(scanner: mut Scanner, nesting: UInt64) -> Option[StringFormScan]
+fn scan_string_form(scanner: mut Scanner, inline: Bool, nesting: UInt64) -> Option[StringFormScan]
   uses Panic, RunForever
 {
   let start = scanner.position
   if scanner.is_at(start, byte: 39) {
     if find_character_literal_end(scanner, start) is Some(stop) {
       let kind = lex_character_literal(mut scanner, tag: "Character", literal_start: start, stop: stop)
-      return Some(StringFormScan.LexedString(kind, ending: Ending.Closed))
+      return Some(StringFormScan.FormScanned(ItemScan.Ready(lexed(mut scanner, inline, start, kind))))
     }
     let is_apostrophe = touches_word_before(scanner, index: start)
     let closes = match find_closing_delimiter(scanner, start, delimiter: 39) {
@@ -763,8 +774,7 @@ fn scan_string_form(scanner: mut Scanner, nesting: UInt64) -> Option[StringFormS
       None => false
     }
     if closes {
-      let scanned = lex_quoted_string(mut scanner, nesting, delimiter: 39)
-      return Some(StringFormScan.LexedString(kind: scanned.kind, ending: scanned.ending))
+      return Some(StringFormScan.FormScanned(open_quoted_string(mut scanner, nesting, inline, delimiter: 39)))
     }
     let starts_name = start + 1 < scanner.length && (is_ascii_letter(scanner.lookup(start + 1)) || scanner.lookup(start + 1) == 95)
     if !is_apostrophe && starts_name {
@@ -785,44 +795,42 @@ fn scan_string_form(scanner: mut Scanner, nesting: UInt64) -> Option[StringFormS
   }
   if scanner.is_at(start, byte: 96) {
     if find_closing_delimiter(scanner, start, delimiter: 96).is_some() {
-      let scanned = lex_quoted_string(mut scanner, nesting, delimiter: 96)
-      return Some(StringFormScan.LexedString(kind: scanned.kind, ending: scanned.ending))
+      return Some(StringFormScan.FormScanned(open_quoted_string(mut scanner, nesting, inline, delimiter: 96)))
     }
     reject(mut scanner, length: 1, message: "The backtick is not used in Truss.")
     return Some(StringFormScan.Skipped)
   }
   if (scanner.is_at(start, byte: 64) || scanner.is_at(start, byte: 36)) && scanner.is_at(start + 1, byte: 34) {
-    let prefix = if scanner.is_at(start, byte: 64) { "@" } else { "$" }
     scanner.position = start + 1
-    let scanned = lex_prefixed_string(mut scanner, prefix, start, nesting)
-    return Some(StringFormScan.LexedString(kind: scanned.kind, ending: scanned.ending))
+    return Some(StringFormScan.FormScanned(open_prefixed_string(mut scanner, start, nesting, inline)))
   }
   None
 }
 
-fn lex_after_name(scanner: mut Scanner, nesting: UInt64, start: UInt64, name: token.Kind) -> Option[ScannedString]
+fn lex_after_name(scanner: mut Scanner, inline: Bool, nesting: UInt64, start: UInt64, name: token.Kind) -> Option[ItemScan]
   uses Panic, RunForever
 {
   let Lower(_) = name else {
     return None
   }
   let stop = scanner.position
-  let spelling = scanner.text(start, stop).to_string()
+  let spelling = scanner.text(start, stop)
   if spelling == "r" && scanner.is_at(stop, byte: 35) {
     return match hash_raw_string(mut scanner, start) {
-      Some(kind) => Some(ScannedString(kind, ending: Ending.Closed))
+      Some(kind) => Some(ItemScan.Ready(lexed(mut scanner, inline, start, kind)))
       None => None
     }
   }
   let is_prefix = spelling == "f" || spelling == "r" || spelling == "b"
   if is_prefix && scanner.is_at(stop, byte: 34) && (spelling != "b" || scanner.run_length(stop, byte: 34) <= 2) {
-    return Some(lex_prefixed_string(mut scanner, prefix: spelling, start: start, nesting: nesting))
+    return Some(open_prefixed_string(mut scanner, start, nesting, inline))
   }
   if spelling == "b" && scanner.is_at(stop, byte: 39) {
     return match find_character_literal_end(scanner, start: stop, after_prefix: true) {
-      Some(literal_stop) => Some(
-        ScannedString(kind: lex_character_literal(mut scanner, tag: "UInt8", literal_start: start, stop: literal_stop), ending: Ending.Closed),
-      )
+      Some(literal_stop) => {
+        let kind = lex_character_literal(mut scanner, tag: "UInt8", literal_start: start, stop: literal_stop)
+        Some(ItemScan.Ready(lexed(mut scanner, inline, start, kind)))
+      }
       None => None
     }
   }

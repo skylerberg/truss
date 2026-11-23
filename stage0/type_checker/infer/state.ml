@@ -91,6 +91,8 @@ type state = {
   definition : Syntax.definition;
   resolved : Resolve.resolved;
   text : string Lazy.t;
+  signatures : Signatures.t;
+  visible_packages : Path.package list Lazy.t;
   tables : Tables.t;
   mutable diagnostics : Diagnostic.in_definition list;
   unifier : Unify.t;
@@ -266,7 +268,7 @@ let make_fresh_generic_arguments state generics (source_of : Types.generic -> so
       argument)
     generics
 
-let lookup_bounds state parameter = Interface.Elaborator.list_bounds (read_context state) parameter
+let lookup_bounds state = Interface.Elaborator.list_known_bounds (read_context state)
 
 let reduce_condition state (condition : Types.condition) =
   Interface.Impls.decide_condition state.lookups.interface ~list_bounds:(lookup_bounds state)

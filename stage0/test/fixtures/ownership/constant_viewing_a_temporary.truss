@@ -1,0 +1,5 @@
+fn make() -> List[Int64] {
+  [1, 2, 3]
+}
+
+let rest: Slice[Int64] = make()[0..2]

@@ -41,9 +41,10 @@ let split_module ~is_package = function
 type file = { module_ : module_; name : string }
 
 let list_file_names file = file.module_.modules @ [ file.name ^ ".truss" ]
+let show_package_directory package = String.concat "/" (list_package_parts package)
 
 let show_file file =
-  String.concat "/" (list_package_parts file.module_.package @ list_file_names file)
+  String.concat "/" (show_package_directory file.module_.package :: list_file_names file)
 
 type receiver = Static | Instance of Language.Mode.t
 

@@ -109,20 +109,33 @@ let make_type_frame context frame source (ty : Types.ty) ~self =
     substitution;
   }
 
-let find_type_source (context : State.context) (ty : Types.ty) =
+let find_type_declaration (context : State.context) (ty : Types.ty) =
   match ty with
-  | Types.Named { path; _ }
-    when Resolve.Names.find_kind context.lookups.interface.names path = Some Type ->
-      Option.map (fun (source, _, _) -> source) (Contracts.find_source context.lookups path)
+  | Types.Named { path; _ } -> (
+      match Tables.Path_table.find_opt context.type_clauses path with
+      | Some declaration -> declaration
+      | None ->
+          let declaration =
+            if Resolve.Names.find_kind context.lookups.interface.names path = Some Type then
+              Option.map
+                (fun (source, _, _) ->
+                  ( source,
+                    lazy
+                      (Option.map
+                         (fun ({ form; _ } : Mir.type_clauses Mir.sourced) -> form)
+                         (Mir.read_type_clauses context.lookups.mir path)) ))
+                (Contracts.find_source context.lookups path)
+            else None
+          in
+          Tables.Path_table.replace context.type_clauses path declaration;
+          declaration)
   | _ -> None
 
-let find_type_clauses context (ty : Types.ty) =
-  match (ty, find_type_source context ty) with
-  | Types.Named { path; _ }, Some source ->
-      Option.map
-        (fun ({ form; _ } : Mir.type_clauses Mir.sourced) -> (source, form))
-        (Mir.read_type_clauses context.lookups.mir path)
-  | _ -> None
+let find_type_source context ty = Option.map fst (find_type_declaration context ty)
+
+let find_type_clauses context ty =
+  Option.bind (find_type_declaration context ty) (fun (source, clauses) ->
+      Option.map (fun clauses -> (source, clauses)) (Lazy.force clauses))
 
 let list_invariants (clauses : Mir.loop_clause list) =
   List.filter_map (function Mir.Invariant value -> Some value | _ -> None) clauses
@@ -355,7 +368,7 @@ let make_callee_substitution (frame : State.frame) (signature : Types.signature)
     (Types.substitute_instantiation frame.substitution instantiation)
 
 let find_callee_declaration (context : State.context) frame (invocation : Invocation.t) =
-  let read path = Interface.Impls.read_signature context.lookups.interface path in
+  let read path = Contracts.read_signature context path in
   match invocation.callee with
   | Function { path; instantiation } ->
       Option.map
@@ -385,10 +398,7 @@ let read_callee_callback (context : State.context) frame (invocation : Invocatio
     read =
   match find_callee_declaration context frame invocation with
   | Some (path, _, substitution) -> (
-      match
-        Option.bind (Contracts.find_source context.lookups path) (fun (callee, _, _) ->
-            Contracts.find_clauses context.lookups path callee)
-      with
+      match Contracts.find_callee_clauses context path with
       | Some clauses -> (
           match List.assoc_opt position clauses.callbacks with
           | Some callback ->

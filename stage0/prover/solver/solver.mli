@@ -12,6 +12,7 @@ val make_request :
   ?symbols:Logic.symbol list -> ?terms:(Logic.symbol * Logic.term) list -> Logic.query -> request
 
 val show_input : request * Logic.query -> string
+val solve : t -> request * Logic.query -> answer
 val solve_all : t -> (request * Logic.query) list -> answer list
 
 module For_testing : sig

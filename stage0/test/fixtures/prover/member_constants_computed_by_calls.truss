@@ -1,0 +1,17 @@
+type Timer(ticks: UInt64)
+
+fn half(value: UInt64) -> UInt64
+  requires value % 2 == 0
+{
+  value / 2
+}
+
+let Timer.half_day: UInt64 = half(86400)
+let Timer.half_of_three: UInt64 = half(3)
+let Timer.endless: UInt64 = Timer.endless + 1
+
+fn read_half_day() -> UInt64
+  ensures result == 43200
+{
+  Timer.half_day
+}

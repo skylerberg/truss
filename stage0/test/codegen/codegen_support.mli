@@ -87,7 +87,7 @@ val make_example_package : (Path.file * string) list -> Project.package list
 
 val make_backend :
   ?results:Backend.results ->
-  ?evaluation_time_limit_ms:int ->
+  ?evaluation_cpu_time_limit_ms:int ->
   ?profile:Backend.profile ->
   Database.t ->
   Backend.t

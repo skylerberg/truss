@@ -1,12 +1,8 @@
 module Obligation = Obligation
 module Lookups = Lookups
 
-module Key_table = Hashtbl.Make (Structural_key.Make (struct
-  type t = Resolve.Names.key
-end))
-
-module Template_check_table = Hashtbl.Make (Structural_key.Make (struct
-  type t = Obligation.template_check
+module Evaluation_table = Hashtbl.Make (Structural_key.Make (struct
+  type t = Obligation.evaluation
 end))
 
 type proof =
@@ -26,7 +22,7 @@ let translate_impl (lookups : Lookups.t) (key : Resolve.Names.key) source =
   match Contracts.list_impl_holes lookups key with
   | _ :: _ as holes ->
       if Contracts.has_impl_obligations lookups interface.implements.trait then
-        [ { Obligation.obligations = []; holes; warnings = [] } ]
+        [ { Obligation.obligations = []; holes; warnings = []; evaluation = None } ]
       else []
   | [] ->
       Translate.translate_laws lookups source ~impl:key.path ~trait:interface.implements
@@ -159,8 +155,10 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
                   List.sort_uniq compare
                     (List.concat_map (fun (outcome : Obligation.outcome) -> outcome.holes) outcomes);
                 warnings;
+                evaluation = None;
               })
-    | Constant -> Obligations (Translate.translate_constant lookups source ~path:key.path)
+    | Constant | Member_constant ->
+        Obligations (Translate.translate_constant lookups source ~path:key.path)
     | Impl ->
         let outcomes = translate_impl lookups key source in
         Obligations
@@ -169,6 +167,7 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
               List.concat_map (fun (outcome : Obligation.outcome) -> outcome.obligations) outcomes;
             holes = List.concat_map (fun (outcome : Obligation.outcome) -> outcome.holes) outcomes;
             warnings = [];
+            evaluation = None;
           }
     | Type -> (
         let has_defaults () =
@@ -187,7 +186,7 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
         | Some { form = { potential; _ }; _ } when Option.is_some potential || has_defaults () ->
             Obligations (Translate.translate_type lookups source ~path:key.path)
         | Some _ | None -> Not_proven_here)
-    | Trait | Capability | Member_constant | Law_proof -> Not_proven_here
+    | Trait | Capability | Law_proof -> Not_proven_here
   with Facts.Unsupported { location; construct; foreign_definition } ->
     Unsupported
       ( location,
@@ -396,23 +395,16 @@ let render_fix lookups ({ title; edits } : Obligation.fix) =
          Diagnostic.replace at (render lookups replacement))
        edits)
 
-let locate_citation (lookups : Lookups.t) ((key : Resolve.Names.key), origin) =
-  let place = lookups.interface.names.read_place key in
-  ( place,
-    Source.Definition_span.to_file ~base:place.base
-      (Source.Definition_span.locate
-         (lookups.interface.names.read_spans key)
-         (Core_walk.locate_origin origin)) )
+type site = { code : Diagnostic.Code.prover; span : Source.Definition_span.t; shows : string }
+type citation = { cited : Resolve.Names.key; clause : Source.Definition_span.t }
 
-type 'span site = { code : Diagnostic.Code.prover; span : 'span; shows : string }
-
-type 'span state = {
-  site : 'span site;
-  failure : 'span Diagnostic.diagnostic option;
+type state = {
+  site : site;
+  is_proven : bool;
   trusts_compiled_code : bool;
+  failure : Source.Definition_span.t Diagnostic.diagnostic option;
+  citation : citation option;
 }
-
-type verdict = (Source.Definition_span.t state * (Resolve.Names.key * Core.origin) option) list
 
 let explain_unknown = function
   | Solver.Out_of_steps ->
@@ -423,55 +415,98 @@ let explain_unknown = function
          proof or a counterexample. Z3 gives the reason `%s`."
         reason
 
-let list_template_checks = function
+let find_declared_evaluation : Logic.declaration -> Obligation.evaluation option = function
+  | Constant (Evaluated evaluation, _) -> Some evaluation
+  | Constant _ | Function _ | Datatype _ | Definition _ -> None
+
+let list_evaluations = function
   | Obligations outcome ->
       List.sort_uniq compare
-        (List.concat_map
-           (fun (obligation : Obligation.t) ->
-             List.filter_map
-               (function
-                 | Logic.Constant (Template_check { function_; literals }, _) ->
-                     Some { Obligation.function_; literals }
-                 | _ -> None)
-               obligation.query.declarations)
-           outcome.obligations)
+        (Option.to_list outcome.evaluation
+        @ List.concat_map
+            (fun (obligation : Obligation.t) ->
+              List.filter_map find_declared_evaluation obligation.query.declarations)
+            outcome.obligations)
   | Unsupported _ | Not_proven_here -> []
 
-type posed = {
-  site : Source.Definition_span.t site;
+type posed_obligation = {
+  site : site;
   obligation : Obligation.t;
   query : Logic.query;
   has_run_result : bool;
-  failed_runs : (Obligation.template_check * string) list;
+  failed_runs : (Obligation.evaluation * string) list;
 }
+
+let rec state_value (declarations : Logic.declaration list) (term : Logic.term) (sort : Logic.sort)
+    (value : Obligation.value) : Logic.term list =
+  let raise_bug format = Compiler_bug.raise_bug ~stage:"Prover" format in
+  match (sort, value) with
+  | Bool, Boolean holds -> [ Logic.equal term (Boolean holds) ]
+  | Int, Integer number -> [ Logic.equal term (Integer number) ]
+  | Float (exponent, significand), Float number ->
+      [ Logic.equal term (Operations.make_float_literal (exponent, significand) number) ]
+  | Type_sort _, Elements _ -> []
+  | Type_sort ty, Constructed { variant; fields } -> (
+      match
+        List.find_map
+          (function
+            | Logic.Datatype (declared, constructors) when Types.equal declared ty ->
+                Some constructors
+            | Datatype _ | Constant _ | Function _ | Definition _ -> None)
+          declarations
+      with
+      | None | Some [ (Unit, []) ] -> []
+      | Some constructors -> (
+          match
+            List.find_opt
+              (fun ((constructor : Logic.symbol), _) ->
+                match constructor with
+                | Constructor { variant = declared; _ } -> declared = variant
+                | _ -> false)
+              constructors
+          with
+          | Some (constructor, selectors) ->
+              Logic.Is (constructor, term)
+              :: List.concat_map
+                   (fun ((selector : Logic.symbol), field_sort) ->
+                     match selector with
+                     | Field { field; _ } -> (
+                         match List.assoc_opt field fields with
+                         | Some field_value ->
+                             state_value declarations
+                               (Logic.Apply (selector, [ term ]))
+                               field_sort field_value
+                         | None -> raise_bug "an evaluation gave no value for the field %s" field)
+                     | _ -> raise_bug "a datatype's selector is not a field")
+                   selectors
+          | None -> raise_bug "an evaluation gave a variant that `%s` does not have" (Types.show ty)
+          ))
+  | (Int | Bool | Float _ | Type_sort _ | Function_sort _), _ ->
+      raise_bug "an evaluation gave a value of another sort"
 
 let pose_obligation runs site (obligation : Obligation.t) =
   List.fold_left
     (fun posed (declaration : Logic.declaration) ->
-      match declaration with
-      | Constant ((Template_check { function_; literals } as symbol), _) -> (
-          let check = { Obligation.function_; literals } in
-          match Template_check_table.find_opt runs check with
-          | Some (Ok holds) ->
-              {
-                posed with
-                query =
+      match (declaration, find_declared_evaluation declaration) with
+      | Constant (symbol, sort), Some evaluation -> (
+          match Evaluation_table.find_opt runs evaluation with
+          | Some (Obligation.Evaluated value) -> (
+              match state_value obligation.query.declarations (Logic.Symbol symbol) sort value with
+              | [] -> posed
+              | facts ->
                   {
-                    posed.query with
-                    facts =
-                      posed.query.facts
-                      @ [ Logic.equal (Logic.Symbol symbol) (Logic.Boolean holds) ];
-                  };
-                has_run_result = true;
-              }
-          | Some (Error report) ->
-              { posed with failed_runs = posed.failed_runs @ [ (check, report) ] }
+                    posed with
+                    query = { posed.query with facts = posed.query.facts @ facts };
+                    has_run_result = true;
+                  })
+          | Some (Unfinished report | Failed report) ->
+              { posed with failed_runs = posed.failed_runs @ [ (evaluation, report) ] }
           | None -> posed)
       | _ -> posed)
     { site; obligation; query = obligation.query; has_run_result = false; failed_runs = [] }
     obligation.query.declarations
 
-let make_request ({ obligation; query; _ } : posed) =
+let make_request ({ obligation; query; _ } : posed_obligation) =
   let terms =
     List.map (fun (term, _) -> (Logic.Symbol.Named_term term, term)) obligation.locals
     @ List.concat
@@ -481,16 +516,19 @@ let make_request ({ obligation; query; _ } : posed) =
   in
   (Solver.make_request ~symbols:(List.map fst obligation.values) ~terms query, query)
 
-let make_refutation_request ({ query; _ } : posed) =
+let make_refutation_request ({ query; _ } : posed_obligation) =
   let refutation = { query with goal = Logic.not_ query.goal } in
   (Solver.make_request refutation, refutation)
 
-type posed_proof = Unreadable of Source.Definition_span.t site | Posed of posed list
+type posed =
+  | Unreadable of site
+  | Posed of { obligations : posed_obligation list; failed_evaluation : site option }
 
-let pose_proof (lookups : Lookups.t) runs key proof =
+let pose (lookups : Lookups.t) ~runs key proof =
+  let runs = Evaluation_table.of_seq (List.to_seq runs) in
   let resolve location = resolve_location lookups.interface.names key location in
   match proof with
-  | Not_proven_here -> Posed []
+  | Not_proven_here -> Posed { obligations = []; failed_evaluation = None }
   | Unsupported (location, construct) ->
       Unreadable
         {
@@ -502,238 +540,162 @@ let pose_proof (lookups : Lookups.t) runs key proof =
         }
   | Obligations outcome ->
       Posed
-        (List.map
-           (fun (obligation : Obligation.t) ->
-             pose_obligation runs
-               {
-                 code = obligation.code;
-                 span = resolve obligation.location;
-                 shows = render lookups obligation.message;
-               }
-               obligation)
-           outcome.obligations)
+        {
+          obligations =
+            List.map
+              (fun (obligation : Obligation.t) ->
+                pose_obligation runs
+                  {
+                    code = obligation.code;
+                    span = resolve obligation.location;
+                    shows = render lookups obligation.message;
+                  }
+                  obligation)
+              outcome.obligations;
+          failed_evaluation =
+            Option.bind outcome.evaluation (fun (evaluation : Obligation.evaluation) ->
+                match (evaluation, Evaluation_table.find_opt runs evaluation) with
+                | Constant_value path, Some (Failed report) ->
+                    Some
+                      {
+                        code = Evaluation;
+                        span = resolve Whole_definition;
+                        shows =
+                          Printf.sprintf "The value of `%s` cannot be computed: %s" (Path.show path)
+                            report;
+                      }
+                | Constant_value _, (Some (Evaluated _ | Unfinished _) | None) -> None
+                | Assertion _, _ ->
+                    Compiler_bug.raise_bug ~stage:"Prover"
+                      "a definition's own evaluation is not of a constant");
+        }
 
-let pose_proofs ~runs lookups proofs =
-  let runs = Template_check_table.of_seq (List.to_seq runs) in
-  List.map (fun (key, proof) -> (key, pose_proof lookups runs key proof)) proofs
+let list_posed = function Unreadable _ -> [] | Posed { obligations; _ } -> obligations
+let list_requests posed = List.map make_request (list_posed posed)
 
-let list_posed = function Unreadable _ -> [] | Posed posed -> posed
+let is_refutable (posed : posed_obligation) = function
+  | Solver.Counterexample _ -> not posed.obligation.is_rejection
+  | Proven | Unknown _ -> false
+
+let list_refutation_requests posed answers =
+  List.filter_map
+    (fun (obligation, answer) ->
+      if is_refutable obligation answer then Some (make_refutation_request obligation) else None)
+    (List.combine (list_posed posed) answers)
 
 let explain_failed_runs failed_runs =
   String.concat ""
     (List.map
-       (fun (({ function_; literals } : Obligation.template_check), report) ->
-         Printf.sprintf
-           " Running `%s` on the template text `%s` failed, so its result is not known: %s"
-           (Facts.show_callee function_) (String.concat "${...}" literals) report)
+       (fun ((evaluation : Obligation.evaluation), report) ->
+         match evaluation with
+         | Constant_value path ->
+             Printf.sprintf " The evaluation of `%s` stopped, so its value is not known: %s"
+               (Path.show path) report
+         | Assertion _ ->
+             Printf.sprintf " Its evaluation stopped, so its result is not known: %s" report)
        failed_runs)
 
-let make_state (lookups : Lookups.t) (posed : posed) answer ~is_refuted =
-  let { site; obligation; _ } = posed in
-  let others =
-    match site.code with
-    | Overflow | Division | Shift ->
-        " It can also be checked first with an `if`, or done with the checked operation."
-    | Out_of_bounds ->
-        " It can also be checked first with an `if`, or, for one element, read with `get`."
-    | _ -> ""
-  in
-  let find_failure explained =
-    Some
-      {
-        (make_diagnostic site.code site.span (site.shows ^ explained ^ others)) with
-        fixes = List.map (render_fix lookups) obligation.fixes;
-      }
-  in
-  ( {
-      site;
-      failure =
-        (match answer with
-        | Solver.Proven -> None
-        | Counterexample _ when is_refuted ->
-            find_failure " This fails every time the code reaches it."
-        | Counterexample values ->
-            find_failure
-              (show_counterexample (Logic.list_members posed.query) obligation values
-              ^ explain_failed_runs posed.failed_runs)
-        | Unknown unknown ->
-            find_failure
-              (explain_unknown unknown
-             ^ " If the code is correct, a `proof` block or a theorem can lead the solver to the \
-                proof."
-              ^ (if obligation.has_untriggered_written_fact then
-                   " A quantified fact in the query has no trigger, so an `assert` of that fact at \
-                    the term the proof needs may be enough."
-                 else "")
-              ^ explain_failed_runs posed.failed_runs));
-      trusts_compiled_code = answer = Proven && posed.has_run_result;
-    },
-    obligation.cited )
+let note_cited_clause (failure : Source.span Diagnostic.diagnostic) clause =
+  { failure with notes = failure.notes @ [ (clause, "This is the clause that must hold.") ] }
 
-type warnings = {
-  lookups : Lookups.t;
-  table : Source.Definition_span.t Diagnostic.diagnostic list Key_table.t;
-}
+let name_cited_clause (failure : Source.span Diagnostic.diagnostic) ~path ~line =
+  {
+    failure with
+    message = failure.message ^ Printf.sprintf " The clause that must hold is at `%s:%d`." path line;
+  }
 
-let collect_warnings lookups proofs =
-  let table = Key_table.create (List.length proofs) in
-  List.iter
-    (fun (key, proof) ->
-      match proof with
-      | Obligations outcome when outcome.Obligation.warnings <> [] ->
-          Key_table.replace table key outcome.warnings
-      | Obligations _ | Unsupported _ | Not_proven_here -> ())
-    proofs;
-  { lookups; table }
+let explain_failure (posed : posed_obligation) answer ~is_refuted =
+  match answer with
+  | Solver.Proven -> None
+  | Counterexample _ when is_refuted -> Some " This fails every time the code reaches it."
+  | Counterexample values ->
+      Some
+        (show_counterexample (Logic.list_members posed.query) posed.obligation values
+        ^ explain_failed_runs posed.failed_runs)
+  | Unknown unknown ->
+      Some
+        (explain_unknown unknown
+       ^ " If the code is correct, a `proof` block or a theorem can lead the solver to the proof."
+        ^ (if posed.obligation.has_untriggered_written_fact then
+             " A quantified fact in the query has no trigger, so an `assert` of that fact at the \
+              term the proof needs may be enough."
+           else "")
+        ^ explain_failed_runs posed.failed_runs)
 
-type verdicts = { lookups : Lookups.t; verdicts : verdict Key_table.t; warnings : warnings }
+let advise_other_ways : Diagnostic.Code.prover -> string = function
+  | Overflow | Division | Shift ->
+      " It can also be checked first with an `if`, or done with the checked operation."
+  | Out_of_bounds ->
+      " It can also be checked first with an `if`, or, for one element, read with `get`."
+  | _ -> ""
 
-let decide ~runs lookups solver proofs =
-  let posed_proofs = pose_proofs ~runs lookups proofs in
-  let posed = List.concat_map (fun (_, posed_proof) -> list_posed posed_proof) posed_proofs in
-  let answers = Solver.solve_all solver (List.map make_request posed) in
-  let is_refutable (posed : posed) = function
-    | Solver.Counterexample _ -> not posed.obligation.is_rejection
-    | Proven | Unknown _ -> false
-  in
-  let countered =
-    List.filter_map
-      (fun (posed, answer) -> if is_refutable posed answer then Some posed else None)
-      (List.combine posed answers)
-  in
-  let refutations =
-    Queue.of_seq
-      (List.to_seq (Solver.solve_all solver (List.map make_refutation_request countered)))
-  in
-  let decided =
-    Queue.of_seq
-      (List.to_seq
-         (List.map2
-            (fun posed answer ->
-              let is_refuted = is_refutable posed answer && Queue.pop refutations = Solver.Proven in
-              (posed, answer, is_refuted))
-            posed answers))
-  in
-  let verdicts = Key_table.create (List.length proofs) in
-  let warnings = collect_warnings lookups proofs in
-  List.iter
-    (fun (key, posed_proof) ->
-      Key_table.replace verdicts key
-        (match posed_proof with
-        | Unreadable site ->
-            [
-              ( {
-                  site;
-                  failure = Some (make_diagnostic site.code site.span site.shows);
-                  trusts_compiled_code = false;
-                },
-                None );
-            ]
-        | Posed posed ->
-            List.map
-              (fun _ ->
-                let posed, answer, is_refuted = Queue.pop decided in
-                make_state lookups posed answer ~is_refuted)
-              posed))
-    posed_proofs;
-  { lookups; verdicts; warnings }
+let fail_site (site : site) =
+  {
+    site;
+    is_proven = false;
+    trusts_compiled_code = false;
+    failure = Some (make_diagnostic site.code site.span site.shows);
+    citation = None;
+  }
 
-let list_file_definitions (lookups : Lookups.t) table file =
-  List.filter_map
-    (fun (declaration : Resolve.Names.declaration) ->
-      let key = declaration.key in
-      Option.map
-        (fun recorded -> ((lookups.interface.names.read_place key).base, recorded))
-        (Key_table.find_opt table key))
-    (lookups.interface.names.list_declarations_in file)
+let list_states (lookups : Lookups.t) posed ~answers ~refutations =
+  match posed with
+  | Unreadable site -> [ fail_site site ]
+  | Posed { obligations; failed_evaluation } ->
+      let refutations = Queue.of_seq (List.to_seq refutations) in
+      let _, states =
+        List.fold_left2
+          (fun (reported, states) (posed : posed_obligation) answer ->
+            let { site; obligation; _ } = posed in
+            let is_refuted = is_refutable posed answer && Queue.pop refutations = Solver.Proven in
+            let explained = explain_failure posed answer ~is_refuted in
+            let is_reported = List.mem (site.code, site.shows) reported in
+            let failure =
+              match explained with
+              | Some explained when not is_reported ->
+                  Some
+                    {
+                      (make_diagnostic site.code site.span
+                         (site.shows ^ explained ^ advise_other_ways site.code))
+                      with
+                      fixes = List.map (render_fix lookups) obligation.fixes;
+                    }
+              | Some _ | None -> None
+            in
+            ( (if Option.is_some failure then (site.code, site.shows) :: reported else reported),
+              states
+              @ [
+                  {
+                    site;
+                    is_proven = explained = None;
+                    trusts_compiled_code = answer = Solver.Proven && posed.has_run_result;
+                    failure;
+                    citation =
+                      Option.bind failure (fun _ ->
+                          Option.map
+                            (fun ((cited : Resolve.Names.key), origin) ->
+                              {
+                                cited;
+                                clause =
+                                  Source.Definition_span.locate
+                                    (lookups.interface.names.read_spans cited)
+                                    (Core_walk.locate_origin origin);
+                              })
+                            obligation.cited);
+                  };
+                ] ))
+          ([], []) obligations answers
+      in
+      states @ List.map fail_site (Option.to_list failed_evaluation)
 
-let locate_site ~base site = { site with span = Source.Definition_span.to_file ~base site.span }
-
-let list_file_states { lookups; verdicts; _ } file =
-  List.map
-    (fun (base, verdict) ->
-      List.map
-        (fun ((state : Source.Definition_span.t state), cited) ->
-          let cited = Option.map (locate_citation lookups) cited in
-          let note =
-            match cited with
-            | Some ((place : Resolve.Names.place), span) when place.file = file ->
-                Some (span, "This is the clause that must hold.")
-            | _ -> None
-          in
-          let elsewhere =
-            match cited with
-            | Some ((place : Resolve.Names.place), span) when place.file <> file -> (
-                match lookups.read_source place.file with
-                | source ->
-                    let line, _ = Source.compute_position source span.start in
-                    Printf.sprintf " The clause that must hold is at `%s:%d`." (Source.path source)
-                      line
-                | exception Not_found -> "")
-            | _ -> ""
-          in
-          {
-            state with
-            site = locate_site ~base state.site;
-            failure =
-              Option.map
-                (fun failure ->
-                  let failure =
-                    Diagnostic.map_spans (Source.Definition_span.to_file ~base) failure
-                  in
-                  let failure = { failure with message = failure.message ^ elsewhere } in
-                  match note with
-                  | Some note -> { failure with notes = failure.notes @ [ note ] }
-                  | None -> failure)
-                state.failure;
-          })
-        verdict)
-    (list_file_definitions lookups verdicts file)
-
-let compare_sites left right = compare (left.span, left.code) (right.span, right.code)
-
-let sort_diagnostics list =
-  List.sort
-    (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
-      compare (left.span, left.code) (right.span, right.code))
-    list
-
-let list_states verdicts file =
-  List.concat (list_file_states verdicts file)
-  |> List.sort (fun (left : Source.span state) (right : Source.span state) ->
-      compare_sites left.site right.site)
-
-let list_warnings { lookups; table } file =
-  List.concat_map
-    (fun (base, warnings) ->
-      List.map (Diagnostic.map_spans (Source.Definition_span.to_file ~base)) warnings)
-    (list_file_definitions lookups table file)
-
-let list_diagnostics verdicts file =
-  List.concat_map
-    (fun states ->
-      List.fold_left
-        (fun (reported, diagnostics) state ->
-          match state.failure with
-          | Some failure when not (List.mem (state.site.code, state.site.shows) reported) ->
-              ((state.site.code, state.site.shows) :: reported, failure :: diagnostics)
-          | _ -> (reported, diagnostics))
-        ([], []) states
-      |> snd)
-    (list_file_states verdicts file)
-  |> List.append (list_warnings verdicts.warnings file)
-  |> sort_diagnostics
+let list_warnings = function
+  | Obligations outcome -> outcome.warnings
+  | Unsupported _ | Not_proven_here -> []
 
 module For_testing = struct
-  let list_queries ~runs lookups proofs file =
-    List.concat_map
-      (fun (base, posed_proof) ->
-        List.map
-          (fun (posed : posed) ->
-            (locate_site ~base posed.site, Solver.show_input (make_request posed)))
-          (list_posed posed_proof))
-      (list_file_definitions lookups
-         (Key_table.of_seq (List.to_seq (pose_proofs ~runs lookups proofs)))
-         file)
-    |> List.sort (fun (left, _) (right, _) -> compare_sites left right)
+  let list_queries posed =
+    List.map
+      (fun (obligation : posed_obligation) ->
+        (obligation.site, Solver.show_input (make_request obligation)))
+      (list_posed posed)
 end

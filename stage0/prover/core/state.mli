@@ -21,6 +21,11 @@ type contract = {
   result_kind : [ `Returns | `Lends ];
 }
 
+type known_callee = {
+  known_signature : Types.signature option Lazy.t;
+  known_clauses : (Interface.form_origin * clauses option) option Lazy.t;
+}
+
 type frame = {
   source : source;
   locals : Logic.term Locals.t;
@@ -92,6 +97,12 @@ type stated = Tables.stated =
   | Range_elements of Types.ty
   | Non_negative_rank of Types.ty
 
+type lending = {
+  part_type : Types.ty;
+  part_postconditions : Mir.formula list;
+  return_postconditions : Mir.formula list;
+}
+
 type context = {
   lookups : Lookups.t;
   current : Path.t;
@@ -103,6 +114,9 @@ type context = {
   declared : Logic.sort list Tables.Symbol_table.t;
   definitions : unit Tables.Symbol_table.t;
   datatypes : unit Tables.Type_table.t;
+  visible_types : (Types.type_interface * Types.substitution) option Tables.Type_table.t;
+  type_clauses : (source * Mir.type_clauses option Lazy.t) option Tables.Path_table.t;
+  callees : known_callee Tables.Path_table.t;
   stated : unit Tables.Stated_table.t;
   mutable facts : Logic.term list;
   mutable obligations : Obligation.t list;
@@ -120,8 +134,7 @@ type context = {
   axioms_of : open_axiom Tables.Symbol_table.t;
   disjoint : (Core.id list * Core.id list) list;
   mutable indexes : (Core.id * noted_place) list;
-  mutable yielded_part : Types.ty option;
-  mutable yield_ensures : (Mir.formula list * Mir.formula list) option;
+  mutable lending : lending option;
   home : Resolve.Names.key;
   mutable laws_assumed : (Types.trait_reference * Types.ty) list;
   mutable counters : Costs.counter list;

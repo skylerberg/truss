@@ -151,7 +151,7 @@ let check_defaults state env (written : Syntax.parameter list) (signature : Type
                   let actual = Expressions.check_expression state env ~expected:info.type_ value in
                   Conversions.coerce state env ~argument:info.mode value ~actual
                     ~expected:info.type_);
-              Constant.check state ~default:true value
+              Constant.check state Default value
           | Some { has_default = true; _ }, None ->
               State.raise_bug "`%s` has no default, and its signature has one" name.text
           | (Some _ | None), _ -> ())
@@ -205,7 +205,7 @@ let check_bit_vector_names state (form : Core.t) =
          Core_walk.ignore_all with
          statement =
            (function
-           | { kind = Assert { condition; by_bit_vector = true }; _ } -> check_names condition.value
+           | { kind = Assert { condition; by = Some Bit_vector }; _ } -> check_names condition.value
            | _ -> ());
        })
     form.definition
@@ -227,14 +227,13 @@ let check_deserialized_invariants state (elaborated : Interface.Environment.elab
   | _ -> ()
 
 let check_definition (state : State.state) (elaborated : Interface.Environment.elaborated_interface)
-    ~checks_body =
+    ~checks_body ~has_syntax_error =
   let definition = state.definition in
   let is_broken (part : Resolve.Parts.part) =
-    Resolve.Names.is_broken state.lookups.interface.names state.key part
-    || (part = Body && not checks_body)
+    has_syntax_error part || (part = Body && not checks_body)
   in
   let read_effective_signature () =
-    match Interface.Impls.read_signature state.lookups.interface state.key.path with
+    match Signatures.read state.signatures state.lookups.interface state.key.path with
     | Some signature -> signature
     | None -> State.raise_bug "a function with an interface has no signature"
   in
@@ -277,7 +276,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                       Solver.run_in_statement state constant_expression
                         (State.read_span state value.id) (fun () ->
                           Expressions.check state constant_expression value elaborated.field_type);
-                      Constant.check state ~default:true value
+                      Constant.check state Default value
                   | None -> ())
               | _ -> ())
             fields
@@ -324,7 +323,8 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
                   check_body state { env with output = Some (Returns Types.bool) } law.body
             | Associated_type _ | Associated_capability _ | Trait_member_error -> ())
           members
-    | Constant { value; _ }, Constant_interface constant ->
+    | Constant { type_; value; _ }, Constant_interface constant ->
+        Constant.check_type state type_ constant.constant_type;
         if not (is_broken Body) then begin
           let env =
             {
@@ -335,7 +335,7 @@ let check_definition (state : State.state) (elaborated : Interface.Environment.e
           in
           Solver.run_in_statement state env (State.read_span state value.id) (fun () ->
               Expressions.check state env value constant.constant_type);
-          Constant.check state ~default:false value
+          Constant.check state Value value
         end
     | Test { body = written; _ }, _ ->
         if not (is_broken Body) then
@@ -408,6 +408,10 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
   let module_ = key.module_ in
   let definition = lookups.interface.names.read_definition key in
   let spans = lookups.interface.names.read_spans key in
+  let syntax_errors = lookups.interface.names.list_syntax_errors key in
+  let has_syntax_error part =
+    Option.is_some (Resolve.Parts.find_syntax_error ~spans ~syntax_errors definition part)
+  in
   let context =
     Interface.Elaborator.create lookups.interface resolved ~spans
       (Interface.Impls.read_scope lookups.interface key)
@@ -421,12 +425,15 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
       definition;
       resolved;
       text;
+      signatures = Signatures.create ();
+      visible_packages =
+        lazy (Resolve.Names.list_visible_packages lookups.interface.names module_.package);
       tables = Tables.create (definition.id + 1);
       diagnostics = [];
       unifier =
         Unify.create ~context ~list_rigid_members:(fun context rigid ->
             Interface.Properties.list_rigid_members lookups.interface
-              ~list_bounds:(Interface.Elaborator.list_bounds context)
+              ~list_bounds:(Interface.Elaborator.list_known_bounds context)
               rigid);
       locals = Hashtbl.create 32;
       law_parameters = list_law_parameters lookups elaborated.interface;
@@ -449,7 +456,7 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
     }
   in
   Solver.run_in_statement state no_output (State.read_span state definition.id) (fun () ->
-      check_definition state elaborated ~checks_body);
+      check_definition state elaborated ~checks_body ~has_syntax_error);
   List.iter (fun check -> check ()) (List.rev state.final_type_checks);
   state.diagnostics <- Interface.Elaborator.list_diagnostics context @ state.diagnostics;
   state.diagnostics <-
@@ -466,13 +473,14 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
   Exported_parts.check state;
   let is_clean tables =
     state.diagnostics = []
-    && (not (Resolve.Names.is_broken lookups.interface.names key Header))
-    && (not (checks_body && Resolve.Names.is_broken lookups.interface.names key Body))
+    && (not (has_syntax_error Header))
+    && (not (checks_body && has_syntax_error Body))
     && not (Tables.exists_type Types.is_error tables)
   in
   let build tables =
-    Form.build lookups ~resolved ~tables ~context ~package:state.package ~text ~key ~definition
-      ~elaborated ~law_parameters:state.law_parameters ~checks_body
+    Form.build lookups ~signatures:state.signatures ~resolved ~tables ~context
+      ~package:state.package ~text ~key ~definition ~elaborated ~law_parameters:state.law_parameters
+      ~checks_body ~has_syntax_error
   in
   let checked = if is_clean tables then Some (build tables) else None in
   let requires_run_forever =

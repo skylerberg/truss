@@ -470,8 +470,8 @@ fn derive_parameter_name(callee: syntax.Expression) -> String
     }
     _ => None
   }
-  match candidate {
-    Some(name) => if name != "it" && token.find_word(name).is_none() { name.copy() } else { "element".to_string() }
+  match own candidate {
+    Some(name) => if name != "it" && token.find_word(name).is_none() { name } else { "element".to_string() }
     None => "element".to_string()
   }
 }

@@ -135,7 +135,7 @@ let scratch = lazy (Harness.make_scratch_directory "codegen")
 
 let c_compiler =
   lazy
-    (match C_compiler.find ~objects:(Cache.make_objects_directory (Workspace.open_cache ())) with
+    (match C_compiler.find ~objects:(Cache.make_objects_directory (Workspace.open_cache ())) () with
     | Ok c_compiler -> C_compiler.For_testing.reject_warnings c_compiler
     | Error message -> failwith message)
 
@@ -158,15 +158,17 @@ let run_program ?(extra = []) ?env ?input ?(profile = Backend.Development)
   let fragments = List.map (fun program_fragment -> program_fragment env) program in
   match
     C_compiler.build_executable (Lazy.force c_compiler) Development
-      ~units:
+      ~sources:
         [
-          ("the runtime", Startup.render_runtime ~tests:false);
-          ( "the program",
-            Emit_c.render_file env profile ~resolve_position:test_position
-              (List.map (fun fragment -> (fragment, Emit_c.External)) fragments) );
-          ("main", Startup.For_testing.render_main_start (Emit_c.make_symbol (code_item "entry")));
-          ("sites", Emit_c.render_sites_file ~resolve_position:test_position fragments);
-          ("capabilities", Emit_c.render_capabilities_file fragments);
+          C_compiler.make_source ~name:"the runtime" (Startup.render_runtime ~tests:false);
+          C_compiler.make_source ~name:"the program"
+            (Emit_c.render_file env profile ~resolve_position:test_position
+               (List.map (fun fragment -> (fragment, Emit_c.External)) fragments));
+          C_compiler.make_source ~name:"main"
+            (Startup.For_testing.render_main_start (Emit_c.make_symbol (code_item "entry")));
+          C_compiler.make_source ~name:"sites"
+            (Emit_c.render_sites_file ~resolve_position:test_position
+               (List.concat_map Emit_c.sites fragments));
         ]
       ~output
   with
@@ -188,21 +190,20 @@ let make_database packages =
 let make_example_package files : Project.package list =
   [ { name = { owner = None; name = "example" }; dependencies = []; files } ]
 
-let create_backend ?results ?evaluation_time_limit_ms ?(profile = Backend.Development) ~package
+let create_backend ?results ?evaluation_cpu_time_limit_ms ?(profile = Backend.Development) ~package
     database =
-  Backend.create ?results ?evaluation_time_limit_ms
+  Database.For_testing.lower_roots database;
+  Backend.create ?results ?evaluation_cpu_time_limit_ms
     (match Database.find_lowered_lookups database [ package ] with
     | Ok lookups -> lookups
     | Error message -> failwith message)
     (Lazy.force c_compiler) profile
 
-let make_backend ?results ?evaluation_time_limit_ms ?profile database =
-  create_backend ?results ?evaluation_time_limit_ms ?profile ~package:example.package database
+let make_backend ?results ?evaluation_cpu_time_limit_ms ?profile database =
+  create_backend ?results ?evaluation_cpu_time_limit_ms ?profile ~package:example.package database
 
 let extend_standard_library files =
-  Database.For_testing.extend_package
-    ~loaded:[ Lazy.force standard_package_database ]
-    ~package:Path.standard_package files
+  Database.For_testing.extend_package ~loaded:(Lazy.force standard_package_database) files
 
 let load_standard_probe ?(roots = []) (file : Path.file) text =
   let database = extend_standard_library [ (file, text) ] in

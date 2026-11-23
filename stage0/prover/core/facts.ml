@@ -567,6 +567,65 @@ let reject_uncompared_recursion (context : State.context) frame location recursi
           (Logic.Boolean false))
       recursive_callee
 
+let is_constant_expression (code : Mir.t) =
+  let is_made_for_a_literal : Mir.operand Core.target -> bool = function
+    | Function { path; _ } -> Path.equal path (Well_known.make_method_path List_from_storage)
+    | Trait_method { trait; _ } ->
+        Path.equal trait.trait (Well_known.make_path From_elements)
+        || Path.equal trait.trait (Well_known.make_path From_entries)
+    | Intrinsic _ -> true
+    | Capability_method _ | Indirect _ -> false
+  in
+  let calls_function = ref false in
+  Mir.iter_code
+    (fun statement ->
+      match Mir.find_callee statement with
+      | Some callee when not (is_made_for_a_literal callee.target) -> calls_function := true
+      | Some _ | None -> ())
+    code;
+  not !calls_function
+
+let is_evaluated_constant (context : State.context) path code =
+  (not (is_constant_expression code))
+  && context.lookups.list_recursion_group path = []
+  && Option.is_none
+       (Types.find_specification_only_type
+          (Interface.Definition.read_constant_type context.lookups.interface path))
+
+let describe_constant_cycle ~cyclic (dependency : Mir.Call_edges.dependency) =
+  let cyclic_name = Path.show cyclic in
+  let consequence = Printf.sprintf "so `%s` would be computed from itself." cyclic_name in
+  let verb, name, part =
+    match dependency.kind with
+    | Read -> ("reads", Path.show dependency.path, "value")
+    | Direct_call -> ("calls", show_callee dependency.path, "code")
+    | Supplied _ -> ("uses", show_callee dependency.path, "code")
+  in
+  match (dependency.omitted_field, Path.equal dependency.path cyclic) with
+  | None, true -> Printf.sprintf "This %s `%s` in its own value, %s" verb name consequence
+  | None, false ->
+      Printf.sprintf "This %s `%s`, whose %s depends on `%s`, %s" verb name part cyclic_name
+        consequence
+  | Some field, true ->
+      Printf.sprintf "This leaves out the field `%s`, whose default %s `%s`, %s" field verb name
+        consequence
+  | Some field, false ->
+      Printf.sprintf
+        "This leaves out the field `%s`, whose default %s `%s`. The %s of `%s` depends on `%s`, %s"
+        field verb name part name cyclic_name consequence
+
+let reject_constant_cycle (context : State.context) (frame : State.frame) (code : Mir.t) =
+  if context.lookups.list_recursion_group context.node <> [] then
+    List.iter
+      (fun (dependency : Mir.Call_edges.dependency) ->
+        if is_in_recursion_group context dependency.path then
+          oblige context frame Constant_cycle (Node dependency.origin)
+            [ Text (describe_constant_cycle ~cyclic:context.node dependency) ]
+            (Logic.Boolean false))
+      (Mir.Call_edges.list_dependencies
+         { interface = context.lookups.interface; mir = context.lookups.mir }
+         Types.no_substitution code)
+
 let quote (source : State.source) origin = Obligation.Quote (source.key, origin)
 
 let quote_origin (context : State.context) (frame : State.frame) origin =
@@ -597,13 +656,19 @@ let is_standard_equal = Well_known.is Equal
 let find_visible_type (context : State.context) (ty : Types.ty) =
   match ty with
   | Named { path; arguments } when Types.find_builtin ty = None -> (
-      match Interface.Definition.find_interface context.lookups.interface path with
-      | Some (Interface.Environment.Type_interface interface)
-        when (not interface.opaque)
-             || Path.locate_package path = Path.locate_package context.current ->
-          let substitution = Types.make_substitution interface.type_generics arguments in
-          Some (interface, substitution)
-      | _ -> None)
+      match Tables.Type_table.find_opt context.visible_types ty with
+      | Some visible -> visible
+      | None ->
+          let visible =
+            match Interface.Definition.find_interface context.lookups.interface path with
+            | Some (Interface.Environment.Type_interface interface)
+              when (not interface.opaque)
+                   || Path.locate_package path = Path.locate_package context.current ->
+                Some (interface, Types.make_substitution interface.type_generics arguments)
+            | _ -> None
+          in
+          Tables.Type_table.replace context.visible_types ty visible;
+          visible)
   | _ -> None
 
 let find_constructors context ty =
@@ -747,8 +812,9 @@ let list_definition_bounds (lookups : Lookups.t) ~(current : Path.t) ~(condition
         ]
     | None -> []
   in
-  Interface.Impls.add_condition_bounds
-    (fun parameter -> list_self_bounds parameter @ Types.list_bounds generics parameter)
+  Interface.Impls.add_condition_bounds lookups.interface
+    (Interface.Properties.Bounds.close lookups.interface (fun parameter ->
+         list_self_bounds parameter @ Types.list_bounds generics parameter))
     condition
 
 let substitute_type (context : State.context) (frame : State.frame) ty =
@@ -981,13 +1047,13 @@ let merge context ?value_type ~condition
       | None -> Some (choose values)
   in
   let yielded_so_far =
-    match (context.yielded_part, find_held (fun frame -> frame.yielded_so_far)) with
-    | Some part, Some values ->
+    match (context.lending, find_held (fun frame -> frame.yielded_so_far)) with
+    | Some { part_type; _ }, Some values ->
         Some
           (define "parts"
              (declare_sort context
                 (Types.Named
-                   { path = Well_known.make_path Sequence; arguments = [ Types.Type part ] }))
+                   { path = Well_known.make_path Sequence; arguments = [ Types.Type part_type ] }))
              values)
     | _ -> first.yielded_so_far
   in

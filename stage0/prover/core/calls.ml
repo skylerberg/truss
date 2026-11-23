@@ -23,7 +23,10 @@ let list_required_fixes (context : State.context) (frame : State.frame) (clauses
   let clause = requirement.clause in
   let is_fixed name =
     List.mem name context.entry
-    || match name with Logic.Symbol.Constant _ | Logic.Symbol.Text_literal _ -> true | _ -> false
+    ||
+    match name with
+    | Logic.Symbol.Constant _ | Evaluated (Constant_value _) | Literal _ -> true
+    | _ -> false
   in
   let is_simple text =
     String.for_all
@@ -102,7 +105,7 @@ let is_datatype ty = match ty with Types.Named _ -> Types.find_builtin ty = None
 let calls_update_step (context : State.context) (invocation : Invocation.t) =
   match invocation.callee with
   | Function { path; _ } -> (
-      match Interface.Impls.read_signature context.lookups.interface path with
+      match Contracts.read_signature context path with
       | Some signature -> signature.is_update_step
       | None -> false)
   | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _ -> false
@@ -152,7 +155,7 @@ let add_restated_clauses (context : State.context) ~self_type ~bind trait name r
             clauses with
             bindings = bind subtrait (Path.Method { owner = subtrait.trait; name; receiver });
           })
-        (Contracts.list_restated_clauses context.lookups ~list_bounds:context.bounds
+        (Contracts.list_restated_clauses context
            ~packages:(Operations.list_impl_packages context self_type)
            ~self_type trait name receiver);
   }
@@ -901,7 +904,7 @@ let make_callback_cost (context : State.context) frame (metric : Language.Metric
       (match term with
       | Logic.Symbol (Function_value { callee; _ }) ->
           Option.iter state_value
-            (Option.bind (Interface.Impls.read_signature context.lookups.interface callee)
+            (Option.bind (Contracts.read_signature context callee)
                (fun (signature : Types.signature) ->
                  Costs.find_stated_operand signature.costs metric))
       | _ -> ());
@@ -975,7 +978,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
     (fun (passed : State.passed) ->
       match passed.shape with
       | Named_function { origin; path; _ } -> (
-          match Contracts.find_function_contract context.lookups path with
+          match Contracts.find_function_contract context path with
           | Some contract ->
               Laws.check_named_callback context frame invocation passed ~origin path contract values
           | None -> ())
@@ -1021,30 +1024,27 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
       (fun (name, argument) -> (name, Types.substitute_capabilities frame.substitution argument))
       instantiation.capability_arguments
   in
-  let read_signature path = Interface.Impls.read_signature context.lookups.interface path in
-  let list_generics path =
-    match read_signature path with
-    | Some (signature : Types.signature) ->
-        List.map (fun (generic : Types.generic) -> generic.generic) signature.generics
-    | None -> []
-  in
-  let list_capability_parameters path =
-    match read_signature path with
-    | Some (signature : Types.signature) -> signature.capability_parameters
-    | None -> []
-  in
-  let bind_parameters parameters arguments ~fixed =
+  let bind_callee path arguments capability_arguments ~fixed =
+    let generics, capability_parameters =
+      match Contracts.read_signature context path with
+      | Some (signature : Types.signature) ->
+          ( List.map (fun (generic : Types.generic) -> generic.generic) signature.generics,
+            signature.capability_parameters )
+      | None -> ([], [])
+    in
     let rec bind_remaining substitution parameters arguments =
       match (parameters, arguments) with
       | parameter :: parameters, argument :: arguments ->
           bind_remaining (Types.bind_argument parameter argument substitution) parameters arguments
       | _ -> substitution
     in
-    bind_remaining fixed
-      (List.filter
-         (fun parameter -> Option.is_none (Types.find_argument parameter fixed))
-         parameters)
-      arguments
+    Types.combine_substitutions
+      (bind_remaining fixed
+         (List.filter
+            (fun parameter -> Option.is_none (Types.find_argument parameter fixed))
+            generics)
+         arguments)
+      (Types.make_capability_substitution capability_parameters capability_arguments)
   in
   let resolution, recursive_callee =
     Facts.find_recursive_callee context frame location invocation.callee
@@ -1068,15 +1068,14 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
     | Function { path; instantiation } ->
         let arguments = list_arguments instantiation.type_arguments in
         let substitution =
-          Types.combine_substitutions
-            (bind_parameters (list_generics path) arguments ~fixed:Types.no_substitution)
-            (Types.make_capability_substitution (list_capability_parameters path)
-               (list_capability_arguments instantiation))
+          bind_callee path arguments
+            (list_capability_arguments instantiation)
+            ~fixed:Types.no_substitution
         in
         with_contract
           ~substitution_of:(fun _ -> substitution)
           ~type_arguments:arguments path
-          (Contracts.find_function_contract context.lookups path)
+          (Contracts.find_function_contract context path)
     | Trait_method { trait; name; receiver; evidence; self_type; instantiation } -> (
         let arguments = list_arguments instantiation.type_arguments in
         let capability_arguments = list_capability_arguments instantiation in
@@ -1115,12 +1114,8 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
               (Some (frame, Operations.make_equality context frame self_type left right))
         | _ ->
             let trait_substitution =
-              Types.combine_substitutions
-                (bind_parameters (list_generics trait_path) arguments
-                   ~fixed:(Contracts.make_trait_substitution context.lookups trait self_type))
-                (Types.make_capability_substitution
-                   (list_capability_parameters trait_path)
-                   capability_arguments)
+              bind_callee trait_path arguments capability_arguments
+                ~fixed:(Contracts.make_trait_substitution context.lookups trait self_type)
             in
             let path, callee_substitution =
               match evidence with
@@ -1129,23 +1124,15 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
                     Types.substitute_substitution frame.substitution substitution
                   in
                   let path = Path.Method { owner = impl; name; receiver } in
-                  ( path,
-                    Types.combine_substitutions
-                      (bind_parameters (list_generics path) arguments ~fixed:impl_substitution)
-                      (Types.make_capability_substitution (list_capability_parameters path)
-                         capability_arguments) )
+                  (path, bind_callee path arguments capability_arguments ~fixed:impl_substitution)
               | _ -> (trait_path, trait_substitution)
             in
             let compute_substitution (clauses : State.clauses) =
               if clauses.inherited then trait_substitution else callee_substitution
             in
             let bind_restated subtrait restated =
-              Types.combine_substitutions
-                (bind_parameters (list_generics restated) arguments
-                   ~fixed:(Contracts.make_trait_substitution context.lookups subtrait self_type))
-                (Types.make_capability_substitution
-                   (list_capability_parameters restated)
-                   capability_arguments)
+              bind_callee restated arguments capability_arguments
+                ~fixed:(Contracts.make_trait_substitution context.lookups subtrait self_type)
             in
             with_contract ~substitution_of:compute_substitution
               ~type_arguments:(Facts.list_method_type_arguments ~self_type arguments)
@@ -1153,7 +1140,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
               (Option.map
                  (add_restated_clauses context ~self_type ~bind:bind_restated trait.trait name
                     receiver)
-                 (Contracts.find_method_contract context.lookups trait name receiver evidence)))
+                 (Contracts.find_method_contract context trait name receiver evidence)))
     | Indirect () ->
         Laws.check_callback_requires context frame site through values;
         let frame = havoc_mut frame in
@@ -1210,7 +1197,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
     | Capability_method { capability; name } ->
         with_contract
           (Path.make_capability_method capability name)
-          (Contracts.find_capability_contract context.lookups capability name)
+          (Contracts.find_capability_contract context capability name)
     | Intrinsic { operation; type_arguments } ->
         let frame =
           match operation with
@@ -1250,51 +1237,3 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
           ^ " may not end: it calls back here, and the prover reads the call without the callee's \
              `decreases` clause.");
       result
-
-let assume_template_check context (frame : State.frame) ~origin (from_template : Invocation.callee)
-    ~literals ~template_type template =
-  match from_template with
-  | Trait_method ({ evidence = Impl { impl; substitution }; _ } as trait_method)
-    when Types.is_empty_substitution substitution ->
-      let { Well_known.name; receiver; _ } =
-        Well_known.locate_method From_template_is_valid_template
-      in
-      let literals_type =
-        Types.make_named (Well_known.make_path List)
-          [ Types.make_named (Well_known.make_path Literal) [] ]
-      in
-      let literals_term =
-        Validity.select_field context template_type None
-          (Well_known.show_field Template_literals)
-          (name_term context template_type template)
-      in
-      Option.iter
-        (fun (_, holds) ->
-          let symbol =
-            Logic.Symbol.Template_check
-              { function_ = Path.Method { owner = impl; name; receiver }; literals }
-          in
-          Facts.declare context (Logic.Constant (symbol, Logic.Bool));
-          Facts.assume context frame (Logic.equal (Logic.Symbol symbol) holds))
-        (Validity.run_as_specification context (fun () ->
-             apply_call context
-               { frame with makes_obligations = false }
-               { origin; type_ = Types.bool }
-               {
-                 callee = Trait_method { trait_method with name; receiver };
-                 lends = None;
-                 uses = Types.no_capabilities;
-               }
-               ~through:None
-               [
-                 {
-                   position = 0;
-                   mode = Read;
-                   shape = Other;
-                   origin = None;
-                   passed_place = None;
-                   type_ = literals_type;
-                   term = literals_term;
-                 };
-               ]))
-  | Trait_method _ | Function _ | Capability_method _ | Intrinsic _ | Indirect _ -> ()

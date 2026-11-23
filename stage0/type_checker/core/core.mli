@@ -76,8 +76,7 @@ and kind =
   | Integer of Z.t
   | Float of float
   | Boolean of bool
-  | String of string
-  | Template of { literals : string list; call : expression }
+  | Literal of Language.Literal.t
   | Use of place
   | Copy of operand
   | Function_value of { path : Path.t; instantiation : Types.instantiation }
@@ -164,7 +163,7 @@ and statement_kind =
   | Parallel of statement list
   | Concurrent of statement list
   | Proof of block
-  | Assert of { condition : condition; by_bit_vector : bool }
+  | Assert of { condition : condition; by : Language.Proof_method.t option }
   | Yield of { mode : Language.Mode.t; part : operand }
 
 and iteration =

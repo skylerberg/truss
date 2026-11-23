@@ -176,7 +176,7 @@ let is_built_in context (ty : Types.ty) =
       (Types.is_self_parameter parameter && is_integer_trait owner)
       || List.exists
            (fun (bound : Types.trait_reference) -> is_integer_trait bound.trait)
-           (context.bounds parameter)
+           (Interface.Properties.Bounds.list context.bounds parameter)
   | Projection { trait; _ } -> is_integer_trait trait.trait
   | _ -> Option.is_some (Types.find_builtin ty)
 
@@ -354,15 +354,16 @@ let check_semantics context (form : Core.t) =
 
 let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolve.Names.key option)
     (form : Core.t) =
-  let list_bounds parameter =
+  let list_bounds =
     let of_key key =
-      Option.value ~default:[]
-        (List.assoc_opt parameter (interface.read_elaborated_interface key).scope.bounds)
+      Interface.Properties.Bounds.of_known (interface.read_elaborated_interface key).scope.bounds
     in
     match key with
     | Some key ->
-        of_key key @ Option.fold ~none:[] ~some:of_key (interface.names.find_container key)
-    | None -> []
+        Interface.Properties.Bounds.append (of_key key)
+          (Option.fold ~none:Interface.Properties.Bounds.none ~some:of_key
+             (interface.names.find_container key))
+    | None -> Interface.Properties.Bounds.none
   in
   let normalize = Interface.Impls.normalize interface ~list_bounds in
   let at = ref None in

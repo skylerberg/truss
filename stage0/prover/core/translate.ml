@@ -27,6 +27,9 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       declared = Tables.Symbol_table.create 64;
       definitions = Tables.Symbol_table.create 8;
       datatypes = Tables.Type_table.create 16;
+      visible_types = Tables.Type_table.create 16;
+      type_clauses = Tables.Path_table.create 16;
+      callees = Tables.Path_table.create 16;
       stated = Tables.Stated_table.create 64;
       facts = [];
       scopes = [];
@@ -46,8 +49,7 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       open_axioms = [];
       axioms_of = Tables.Symbol_table.create 16;
       axiom_clauses = Tables.Axiom_clause_table.create 16;
-      yielded_part = None;
-      yield_ensures = None;
+      lending = None;
       callbacks = [];
       counters = [];
       bounded_counters = [];
@@ -82,6 +84,7 @@ let make_outcome (context : State.context) =
     Obligation.obligations = List.rev context.obligations;
     holes = List.rev context.holes;
     warnings = [];
+    evaluation = None;
   }
 
 let make_empty_frame source =
@@ -355,11 +358,14 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
   let start =
     match signature with
     | Some { output = Lends (_, part); _ } ->
-        context.yielded_part <- Some part;
-        context.yield_ensures <-
+        context.lending <-
           Some
-            ( List.filter Amounts.mentions_result declared_ensures,
-              List.filter (fun clause -> not (Amounts.mentions_result clause)) declared_ensures );
+            {
+              part_type = part;
+              part_postconditions = List.filter Amounts.mentions_result declared_ensures;
+              return_postconditions =
+                List.filter (fun clause -> not (Amounts.mentions_result clause)) declared_ensures;
+            };
         { start with yielded_so_far = Some (Intrinsics.make_empty_parts context start part) }
     | _ -> start
   in
@@ -558,8 +564,8 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
           Lambdas.check_valid context frame Whole_definition self_type self ~deep:true
             ~when_:"for `self` when the method returns"
       | _ -> ());
-      (match (context.yield_ensures, frame.yielded_so_far) with
-      | Some (_, at_end), Some yielded_so_far ->
+      (match (context.lending, frame.yielded_so_far) with
+      | Some { return_postconditions; _ }, Some yielded_so_far ->
           List.iter
             (fun (ensured : Mir.formula) ->
               let _, term =
@@ -575,7 +581,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
                   Text "` may not hold when the method ends.";
                 ]
                 term)
-            at_end
+            return_postconditions
       | _ ->
           List.iter
             (fun (ensured : Mir.formula) ->
@@ -701,6 +707,7 @@ let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_sub
       List.sort_uniq compare
         (List.concat_map (fun (outcome : Obligation.outcome) -> outcome.holes) outcomes);
     warnings = [];
+    evaluation = None;
   }
 
 let translate_laws (lookups : Lookups.t) (source : State.source) ~impl ~trait ~for_type ~proofs ~at
@@ -790,7 +797,10 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
   let lookups = context.State.lookups in
   let name = restated.restated_name and receiver = restated.restated_receiver in
   let restated_path = Path.Method { owner = trait.Types.trait; name; receiver } in
-  let list_bounds = Types.list_bounds impl_interface.Types.impl_generics in
+  let list_bounds =
+    Interface.Properties.Bounds.close lookups.interface
+      (Types.list_bounds impl_interface.Types.impl_generics)
+  in
   let declared =
     match
       List.find_opt
@@ -840,7 +850,7 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
             Types.bind_argument parameter argument substitution)
           fixed unbound generic_arguments
       in
-      match Contracts.find_method_contract lookups declared name receiver evidence with
+      match Contracts.find_method_contract context declared name receiver evidence with
       | None -> Facts.raise_bug "`%s` has no contract" (Path.show method_path)
       | Some contract ->
           let read_place (parameter : Mir.parameter) (frame : State.frame) =
@@ -1091,12 +1101,19 @@ let translate_constant (lookups : Lookups.t) (source : State.source) ~path =
     make_context lookups ~home ~current:path ~terminates:false ~measures:[]
       ~inherits_precondition:false
   in
-  (match Mir.read_initializer lookups.mir path with
+  match Mir.read_initializer lookups.mir path with
   | Some { form = code; _ } ->
+      let frame = make_empty_frame source in
+      Facts.reject_constant_cycle context frame code;
       ignore
-        (Amounts.run_code context (make_empty_frame source) code
-           ~type_:(Interface.Definition.read_constant_type context.lookups.interface path))
-  | None -> Facts.raise_bug "the constant `%s` has no MIR" (Path.show path));
-  make_outcome context
+        (Amounts.run_code context frame code
+           ~type_:(Interface.Definition.read_constant_type context.lookups.interface path));
+      {
+        (make_outcome context) with
+        evaluation =
+          (if Facts.is_evaluated_constant context path code then Some (Constant_value path)
+           else None);
+      }
+  | None -> Facts.raise_bug "the constant `%s` has no MIR" (Path.show path)
 
 let translate_theorem lookups source ~path = translate_function ~proof:true lookups source ~path

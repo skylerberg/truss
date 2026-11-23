@@ -180,7 +180,7 @@ let allocate_parameter state ?(in_scope = true) ?name ~owned (mode : Language.Mo
   | None -> (None, allocate_temporary state ty)
   | Some (Lowered.Pointer _ as pointer) ->
       let arrives = Emit_c.Ir_builder.allocate_local state.builder ?name pointer in
-      let place : Lowered.place = { root = Local arrives; projections = [ Deref ] } in
+      let place = Lowered.make_deref_place arrives in
       own place;
       (Some arrives, place)
   | Some passed ->
@@ -232,7 +232,7 @@ let set_result_slot state (convention : Convention.result) =
 
 let find_result_place state : Lowered.place option =
   match state.result with
-  | Through pointer -> Some { root = Local pointer; projections = [ Deref ] }
+  | Through pointer -> Some (Lowered.make_deref_place pointer)
   | Returned_in local -> Some (Lowered.make_local_place local)
   | No_result -> None
 

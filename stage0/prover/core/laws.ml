@@ -128,7 +128,7 @@ let has_method_cost (context : State.context) (callee : Invocation.callee) (path
     when Path.equal owner trait.trait ->
       true
   | Trait_method _, _ -> (
-      match Interface.Impls.read_signature context.lookups.interface path with
+      match Contracts.read_signature context path with
       | Some (signature : Types.signature) -> Types.terminates signature.uses
       | None -> true)
   | (Function _ | Capability_method _ | Intrinsic _ | Indirect ()), _ -> false

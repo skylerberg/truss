@@ -21,8 +21,7 @@ let check_definition (lookups : Lookups.t) (key : Resolve.Names.key) : result =
   let context : Context.context =
     {
       lookups;
-      list_bounds =
-        (fun parameter -> Option.value ~default:[] (List.assoc_opt parameter scope.bounds));
+      list_bounds = Interface.Properties.Bounds.of_known scope.bounds;
       spans = lazy (lookups.interface.names.read_spans key);
       text = lazy (lookups.interface.names.read_text key);
       mode_keywords = Hashtbl.create 8;
@@ -33,37 +32,43 @@ let check_definition (lookups : Lookups.t) (key : Resolve.Names.key) : result =
       literal_views = Context.Local_table.create 4;
       owned_scrutinees = Context.Local_table.create 4;
       types = Context.Local_table.create 32;
+      decided_types = Context.Type_table.create 16;
       parameters = [];
       implements_capability = implements_capability lookups key;
+      is_constant = (match elaborated.interface with Constant_interface _ -> true | _ -> false);
       mutable_locals = [];
       diagnostics = [];
       must_be_disjoint = [];
     }
   in
-  let mir =
-    if Interface.Definition.is_specification elaborated.interface then None
-    else lookups.find_graph key
+  let check_graph (mir : Mir.Graph.t) ~returns_to_caller =
+    Context.collect context mir ~mode_keywords:(lookups.list_mode_keywords key);
+    let move_analyses =
+      List.map
+        (fun body -> (body, Move_rules.analyse context body))
+        (mir.body :: Array.to_list mir.lambdas)
+    in
+    let read_moves body = List.assq body move_analyses in
+    Move_rules.check context mir ~read_moves ~returns_to_caller;
+    Borrows.check context ~read_moves ~returns_to_caller mir;
+    Task_loops.check context mir;
+    Lent_variants.check context mir
   in
   Option.iter
-    (fun (mir : Mir.Graph.t) ->
-      Context.collect context mir ~mode_keywords:(lookups.list_mode_keywords key);
+    (fun (code : Mir.code) ->
       List.iter
         (fun (origin, needs) -> Hashtbl.replace context.places_without_keyword origin needs)
         (lookups.list_places_without_keyword key);
-      let returns_to_caller =
-        match elaborated.interface with Function_interface _ -> true | _ -> false
-      in
-      let move_analyses =
-        List.map
-          (fun body -> (body, Move_rules.analyse context body))
-          (mir.body :: Array.to_list mir.lambdas)
-      in
-      let read_moves body = List.assq body move_analyses in
-      Move_rules.check context mir ~read_moves ~returns_to_caller;
-      Borrows.check context ~read_moves ~returns_to_caller mir;
-      Task_loops.check context mir;
-      Lent_variants.check context mir)
-    mir;
+      if not (Interface.Definition.is_specification elaborated.interface) then
+        check_graph code.graph
+          ~returns_to_caller:
+            (match elaborated.interface with
+            | Function_interface _ | Constant_interface _ -> true
+            | _ -> false);
+      List.iter
+        (fun (_, asserted) -> check_graph (Mir.expand asserted) ~returns_to_caller:false)
+        (Mir.list_evaluated_asserts code.tree))
+    (lookups.find_code key);
   {
     diagnostics =
       List.sort

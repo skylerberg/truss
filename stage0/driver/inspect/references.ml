@@ -36,6 +36,9 @@ let list_member_targets (tables : Infer.tables) (definition : Syntax.definition)
   Syntax_walk.visit_definition visit definition;
   !members
 
+let list_named_members tables definition =
+  List.sort_uniq Path.compare (List.map snd (list_member_targets tables definition))
+
 let list_occurrences ~(path : Path.t) (spans : Source.Definition_span.t array)
     (definition : Syntax.definition) (resolved : Resolve.resolved) (tables : Infer.tables option) =
   let make_occurrence span target = { span; target } in

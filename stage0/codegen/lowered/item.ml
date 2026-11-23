@@ -7,8 +7,8 @@ type t =
   | Any_drop of Ground.ty
   | Any_copy of Ground.ty
   | Encode of Ground.ty
-  | Evaluator of Path.t
-  | Call_evaluation of { function_ : Path.t; arguments : argument list }
+  | Evaluator of t
+  | Assertion of { definition : Path.t; condition : int }
   | Generated of generated
   | Table of table
 
@@ -28,8 +28,6 @@ and table =
   | Impl_table of { impl : Path.t; type_arguments : Ground.argument list }
   | Any_table of { impl : Path.t; type_arguments : Ground.argument list }
   | Locked_table of Path.t
-
-and argument = Integer of Z.t | Literals of string list
 
 and impl_method = {
   impl : Path.t;
@@ -66,11 +64,9 @@ let rec to_string = function
   | Encode ty -> "encode " ^ Ground.to_string ty
   | Any_drop ty -> "any drop " ^ Ground.to_string ty
   | Any_copy ty -> "any copy " ^ Ground.to_string ty
-  | Evaluator path -> "evaluator " ^ Path.show path
-  | Call_evaluation { function_; arguments } ->
-      "evaluation " ^ Path.show function_ ^ "("
-      ^ String.concat ", " (List.map show_argument arguments)
-      ^ ")"
+  | Evaluator evaluated -> "evaluator " ^ to_string evaluated
+  | Assertion { definition; condition } ->
+      Printf.sprintf "assertion %d of %s" condition (Path.show definition)
   | Generated (Adapter { function_; instantiation; _ }) ->
       "adapter " ^ to_string (make_code function_ instantiation)
   | Generated (Any_entry impl_method) -> "any entry " ^ to_string (make_method_code impl_method)
@@ -85,10 +81,6 @@ let rec to_string = function
   | Table (Impl_table { impl; type_arguments }) ->
       "table " ^ Path.show impl ^ show_arguments type_arguments
 
-and show_argument = function
-  | Integer value -> Z.to_string value
-  | Literals literals -> "[" ^ String.concat ", " (List.map (Printf.sprintf "%S") literals) ^ "]"
-
 and show_arguments = function
   | [] -> ""
   | arguments -> "[" ^ String.concat ", " (List.map Ground.show_argument arguments) ^ "]"
@@ -99,3 +91,23 @@ and show_capability_arguments arguments =
        (fun (name, set) ->
          Printf.sprintf " generic %s = {%s}" name (String.concat ", " (List.map Path.show_name set)))
        arguments)
+
+let find_type_definition : Ground.ty -> Path.t option = function
+  | Named { path; _ } -> Some path
+  | Any { trait; _ } -> Some trait
+  | Function _ | Never -> None
+
+let rec find_definition : t -> Path.t option = function
+  | Code { path; _ }
+  | Constant path
+  | Assertion { definition = path; _ }
+  | Generated
+      ( Locked_entry { capability = path; _ }
+      | Adapter { function_ = path; _ }
+      | Program_main path
+      | Test_main path )
+  | Table (Impl_table { impl = path; _ } | Any_table { impl = path; _ } | Locked_table path) ->
+      Some path
+  | Evaluator evaluated -> find_definition evaluated
+  | Drop ty | Copy ty | Debug ty | Any_drop ty | Any_copy ty | Encode ty -> find_type_definition ty
+  | Generated (Entry impl_method | Any_entry impl_method) -> Some (make_method_path impl_method)

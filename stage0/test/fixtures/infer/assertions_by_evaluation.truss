@@ -1,0 +1,33 @@
+type Point(x: Int64, y: Int64) derives Equal
+
+fn is_small(value: UInt64) -> Bool {
+  value < 10
+}
+
+fn make_point() -> Point {
+  Point(x: 1, y: 2)
+}
+
+let limits: List[UInt64] = [1, 2, 3]
+
+fn f(count: UInt64) -> UInt64 {
+  proof {
+    assert is_small(3) by evaluation
+    assert limits.length() == 3 && limits[0] == 1 by evaluation
+    assert make_point() == Point(x: 1, y: 2) by evaluation
+    assert forall limit in limits => is_small(limit) by evaluation
+    assert exists index in 0..3 => limits[index] == 2 by evaluation
+    assert "${limits.length()}" == "3" by evaluation
+  }
+  count
+}
+
+theorem three_is_small()
+  ensures is_small(3)
+{
+  assert is_small(3) by evaluation
+}
+
+test "an assertion by evaluation in a test" {
+  assert is_small(4) by evaluation
+}

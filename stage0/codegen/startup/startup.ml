@@ -55,7 +55,7 @@ static int truss_report = -1;
 
 void truss_runtime_report_tests_to(int32_t descriptor) { truss_report = descriptor; }
 
-enum { truss_passed, truss_failed, truss_panicked, truss_incomplete, truss_echoed };
+enum { truss_passed, truss_failed, truss_panicked, truss_incomplete, truss_echoed, truss_timed_out };
 
 static char truss_text[65536];
 static size_t truss_text_length;
@@ -2097,8 +2097,40 @@ let tests_table =
   {|
 typedef void (*truss_test)(void);
 const truss_test *truss_runtime_tests;
+uint64_t truss_runtime_cpu_limit_milliseconds;
 
-void truss_runtime_run_test(uint32_t index) { truss_runtime_tests[index](); }
+static void truss_cpu_limit_reached(int signal) {
+  (void)signal;
+  (void)pthread_mutex_trylock(&truss_text_lock);
+  truss_text_length = 0;
+  truss_text_string("it used more than ");
+  truss_text_number(truss_runtime_cpu_limit_milliseconds);
+  truss_text_string(" ms of CPU time");
+  truss_end(truss_timed_out, "", 101);
+}
+
+static void truss_limit_cpu_time(uint64_t milliseconds) {
+  struct itimerval limit;
+  memset(&limit, 0, sizeof limit);
+  limit.it_value.tv_sec = (time_t)(milliseconds / 1000u);
+  limit.it_value.tv_usec = (suseconds_t)(milliseconds % 1000u * 1000u);
+  setitimer(ITIMER_PROF, &limit, NULL);
+}
+
+void truss_runtime_run_test(uint32_t index) {
+  if (truss_runtime_cpu_limit_milliseconds == 0) {
+    truss_runtime_tests[index]();
+    return;
+  }
+  signal(SIGPROF, truss_cpu_limit_reached);
+  sigset_t timer;
+  sigemptyset(&timer);
+  sigaddset(&timer, SIGPROF);
+  pthread_sigmask(SIG_UNBLOCK, &timer, NULL);
+  truss_limit_cpu_time(truss_runtime_cpu_limit_milliseconds);
+  truss_runtime_tests[index]();
+  truss_limit_cpu_time(0);
+}
 |}
 
 let runtime_line_control = "#line 1 \"<runtime>\"\n"
@@ -2149,7 +2181,7 @@ let render_main_start entry =
     ~requested_workers:0
     (Printf.sprintf "program->status = %s()" entry)
 
-let render_tests_start ~time_limit_ms ~runner tests =
+let render_tests_start ~time_limit_ms ~cpu_time_limit_ms ~runner tests =
   let test_declarations =
     String.concat "" (List.map (fun symbol -> Printf.sprintf "void %s(void);\n" symbol) tests)
   in
@@ -2158,18 +2190,17 @@ let render_tests_start ~time_limit_ms ~runner tests =
       (Printf.sprintf
          "typedef void (*truss_test)(void);\n\
           extern const truss_test *truss_runtime_tests;\n\
+          extern uint64_t truss_runtime_cpu_limit_milliseconds;\n\
           int32_t %s(uint32_t count, uint32_t time_limit_milliseconds);\n\
           %sstatic const truss_test truss_tests[] = { %s };\n"
          runner test_declarations
          (if tests = [] then "0" else String.concat ", " tests))
-    ~before_start:"  truss_runtime_tests = truss_tests;\n" ~requested_workers:1
-    (Printf.sprintf "program->status = %s(%d, %d)" runner (List.length tests) time_limit_ms)
-
-let render_evaluator_start entry =
-  render_start
-    ~declarations:(Printf.sprintf "void %s(void);\n" entry)
+    ~before_start:
+      (Printf.sprintf
+         "  truss_runtime_tests = truss_tests;\n  truss_runtime_cpu_limit_milliseconds = %d;\n"
+         cpu_time_limit_ms)
     ~requested_workers:1
-    (Printf.sprintf "(void)program;\n  %s()" entry)
+    (Printf.sprintf "program->status = %s(%d, %d)" runner (List.length tests) time_limit_ms)
 
 let render_program_start entry =
   render_start

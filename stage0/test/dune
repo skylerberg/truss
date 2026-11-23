@@ -67,6 +67,8 @@
   prover
   database
   lowered
+  lowering
+  profile
   types
   intrinsic
   interface

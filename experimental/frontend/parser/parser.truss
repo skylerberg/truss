@@ -54,8 +54,8 @@ fn attach_lexer_errors[Value](
   lexer_diagnostics: Slice[source.Diagnostic],
   nested: Slice[Piece],
   piece: Piece,
-  finished: own Finished[Value],
-) -> Finished[Value]
+  finished: mut Finished[Value],
+)
   uses Panic
 {
   var errors: List[source.Span] = []
@@ -75,27 +75,19 @@ fn attach_lexer_errors[Value](
     }
   }
   if errors.is_empty() {
-    return finished
+    return
   }
-  let item = own finished.item
-  var syntax_errors: List[source.Span] = []
+  let base = finished.item.base
+  let item_stop = finished.item.stop
   for span in errors {
-    let start = if span.start > item.base { span.start } else { item.base }
-    let stop = if span.stop < item.stop { span.stop } else { item.stop }
-    mut syntax_errors.push(source.of_file(base: item.base, span: source.make_span(start, stop)))
+    let start = if span.start > base { span.start } else { base }
+    let stop = if span.stop < item_stop { span.stop } else { item_stop }
+    mut finished.item.positions.syntax_errors.push(source.of_file(base, span: source.make_span(start, stop)))
   }
-  mut syntax_errors.append(item.positions.syntax_errors.copy())
-  let positions = syntax.Positions(spans: own item.positions.spans, syntax_errors: sort_unique(own syntax_errors))
-  var diagnostics: List[source.Diagnostic] = []
-  for diagnostic in own finished.diagnostics {
-    var stripped = own diagnostic
-    stripped.fixes = []
-    mut diagnostics.push(own stripped)
+  finished.item.positions.syntax_errors = sort_unique(own finished.item.positions.syntax_errors)
+  for diagnostic in mut finished.diagnostics {
+    diagnostic.fixes = []
   }
-  Finished(
-    item: syntax.Item(base: item.base, stop: item.stop, value: own item.value, own positions),
-    own diagnostics,
-  )
 }
 
 fn check_parsed_definition(cursor: mut TokenCursor, definition: syntax.Definition)
@@ -123,22 +115,22 @@ fn parse_top_level(cursor: mut TokenCursor, lexer_diagnostics: Slice[source.Diag
   let parsed = parse_definition(mut cursor)
   check_parsed_definition(mut cursor, definition: parsed.definition)
   let container = container_of(parsed.definition)
-  let finished = finish_piece(mut cursor, piece, value: own parsed.definition)
-  let attached = attach_lexer_errors(cursor, lexer_diagnostics, nested: parsed.methods, piece: piece, finished: own finished)
-  var diagnostics = own attached.diagnostics
+  var finished = finish_piece(mut cursor, piece, value: own parsed.definition)
+  attach_lexer_errors(cursor, lexer_diagnostics, nested: parsed.methods, piece: piece, finished: mut finished)
+  var diagnostics = own finished.diagnostics
   var methods: List[syntax.Item[syntax.Definition]] = []
   if container is Some(kind) {
     for method_piece in parsed.methods {
       begin_piece(mut cursor, piece: method_piece)
       let method = parse_method(mut cursor, container: kind)
       check_parsed_definition(mut cursor, definition: method)
-      let method_finished = finish_piece(mut cursor, piece: method_piece, value: own method)
-      let method_attached = attach_lexer_errors(cursor, lexer_diagnostics, nested: [], piece: method_piece, finished: own method_finished)
-      mut methods.push(own method_attached.item)
-      mut diagnostics.append(own method_attached.diagnostics)
+      var method_finished = finish_piece(mut cursor, piece: method_piece, value: own method)
+      attach_lexer_errors(cursor, lexer_diagnostics, nested: [], piece: method_piece, finished: mut method_finished)
+      mut methods.push(own method_finished.item)
+      mut diagnostics.append(own method_finished.diagnostics)
     }
   }
-  ParsedTopLevel(top_level: syntax.TopLevel(definition: own attached.item, own methods), own diagnostics)
+  ParsedTopLevel(top_level: syntax.TopLevel(definition: own finished.item, own methods), own diagnostics)
 }
 
 fn parse_module_name(cursor: mut TokenCursor) -> Result[syntax.Name, Failure]
@@ -220,14 +212,15 @@ internal fn parse(lexed: own token.Lexed, lexer_diagnostics: Slice[source.Diagno
   for piece in pieces {
     if cursor.tables.token(piece.first).kind == token.Kind.Keyword(token.Keyword.Use) {
       let line = parse_use_line(mut cursor, piece)
-      mut diagnostics.append(line.diagnostics.copy())
+      mut diagnostics.append(own line.diagnostics)
       if definitions.is_empty() {
         destination = Some(cursor.compute_line_stop(piece))
       } else if destination is Some(target) {
         mut diagnostics.push(use_after_definition(cursor, piece, base: line.item.base, stop: line.item.stop, destination: target))
       }
-      if line.item.value is Some(path) {
-        mut imports.push(syntax.Item(base: line.item.base, stop: line.item.stop, value: path.copy(), positions: line.item.positions.copy()))
+      match own line.item.value {
+        Some(path) => mut imports.push(syntax.Item(base: line.item.base, stop: line.item.stop, value: own path, positions: own line.item.positions))
+        None => {}
       }
     } else {
       let parsed = parse_top_level(mut cursor, lexer_diagnostics, piece)

@@ -1,0 +1,15 @@
+fn spin() -> UInt64 {
+  var state: UInt64 = 1
+  for round in 0..30_000_000
+    invariant state < 1_000_003
+  {
+    state = (state * 3 + round) % 1_000_003
+  }
+  state
+}
+
+let spun: UInt64 = spin()
+
+test "reads it" {
+  assert spun == 915_721
+}

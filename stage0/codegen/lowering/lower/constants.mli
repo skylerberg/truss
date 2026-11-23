@@ -1,5 +1,4 @@
-type constant = Folded of Lowered.data | Run of Ground.ty
+type evaluated = Folded of Lowered.data | Run of Ground.ty
 
-val compile_constant : Definitions.context -> Path.t -> constant
-val write_output : Lowering.state -> Lowered.place -> unit
-val build_evaluator : Definitions.context -> Path.t -> Emit_c.fragment
+val compile : Definitions.context -> Lowered.Item.t -> evaluated
+val build_evaluator : Definitions.context -> Lowered.Item.t -> Emit_c.fragment
