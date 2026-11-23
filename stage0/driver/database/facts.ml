@@ -72,12 +72,14 @@ let interface : Interface.Environment.interface Tracker.view =
   Tracker.make_view ~stage:Elaborate ~table:"interface" ~id_column:"definition" ~fixed:[]
     ~target:Interface ~columns:[ "value" ] ~decode:(fun cells -> Tracker.unmarshal cells.(0))
 
-let require_checked_signature view =
-  Tracker.guard_view view ~stage:Check_signature ~target:Signature_check ~table:"signature_check"
+let require_checked_signature view ~targets =
+  Tracker.guard_view view ~stage:Check_signature ~table:"signature_check" ~targets
     ~id_column:"definition"
 
-let checked_interface = require_checked_signature interface
-let checked_elaborated = require_checked_signature elaborated.whole
+let checked_interface = require_checked_signature interface ~targets:[ Checked_interface ]
+
+let checked_elaborated =
+  require_checked_signature elaborated.whole ~targets:[ Checked_interface; Elaboration ]
 
 let derived_interface : Types.impl_interface Tracker.fact =
   make_marshaled ~stage:Derive_interface ~table:"derived_interface" ~id_column:"path"

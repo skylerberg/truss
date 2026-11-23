@@ -62,9 +62,9 @@ type any_fact = Any : 'value fact -> any_fact
 val guard_view :
   'value view ->
   stage:Kind.stage ->
-  target:Kind.fact ->
   table:string ->
   id_column:string ->
+  targets:Kind.fact list ->
   'value view
 
 val make_fact :
@@ -87,7 +87,12 @@ val make_view :
   decode:(Store.cell array -> 'value) ->
   'value view
 
-type description = { table : string; id_column : string; targets : Kind.fact list }
+type description = {
+  table : string;
+  id_column : string;
+  targets : Kind.fact list;
+  read_targets : Kind.fact list;
+}
 
 val describe : any_fact -> description
 val marshal : 'value -> Store.cell

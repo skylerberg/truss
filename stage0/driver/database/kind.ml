@@ -99,6 +99,7 @@ type fact =
   | Derived_interface
   | Type_facts
   | Signature_check
+  | Checked_interface
   | Contract
   | Body_form
   | Body_tables
@@ -133,6 +134,7 @@ let facts =
     Derived_interface;
     Type_facts;
     Signature_check;
+    Checked_interface;
     Contract;
     Body_form;
     Body_tables;
@@ -290,7 +292,7 @@ let show_fact = function
   | Trait_header -> "trait header"
   | Constant_value -> "value"
   | Header -> "header"
-  | Interface | Elaboration -> "interface"
+  | Interface | Elaboration | Checked_interface -> "interface"
   | Derived_interface -> "derived interface"
   | Type_facts -> "type facts"
   | Signature_check -> "signature check"
@@ -336,12 +338,22 @@ let show_lookup = function
 
 let is_signature = function
   | Header | Trait_header | Constant_value | Interface | Elaboration | Derived_interface
-  | Type_facts | Signature_check | Contract | Contract_mir ->
+  | Type_facts | Signature_check | Checked_interface | Contract | Contract_mir ->
       true
   | Resolved _ | Grant | Body_form | Body_tables | Run_forever | Ownership_modes | Body_mir
   | Generated_mir | Call_node | Callees | Recursion_group | Usage_check | Ownership
   | Unused_dependencies | Proof | Lowered | Test_key | Evaluation | Unit _ ->
       false
+
+let list_read_targets = function
+  | Interface -> [ Interface; Checked_interface ]
+  | Signature_check -> [ Checked_interface ]
+  | ( Resolved _ | Grant | Trait_header | Constant_value | Header | Elaboration | Derived_interface
+    | Type_facts | Checked_interface | Contract | Body_form | Body_tables | Run_forever
+    | Ownership_modes | Body_mir | Contract_mir | Generated_mir | Call_node | Callees
+    | Recursion_group | Usage_check | Ownership | Unused_dependencies | Proof | Lowered | Test_key
+    | Evaluation | Unit _ ) as fact ->
+      [ fact ]
 
 let lookups_of_definition = [ Imports; Declaration; Tree; Text; Place; Container; Contained ]
 let facts_of_definition = facts
