@@ -89,14 +89,17 @@ let attach_loaded (database : t) loaded =
        loaded);
   Store.write_meta database.store loaded_meta (Marshal.to_string loaded [])
 
-let create ?on_bug ?(loaded = []) (packages : Project.package list) : t =
-  let database = Tracker.create (Store.create_memory ()) in
+let create_in_memory ?on_bug ~loaded ~records_reads (packages : Project.package list) : t =
+  let database = Tracker.create (Store.create_memory ()) ~records_reads in
   attach_loaded database loaded;
   Store.replace_project database.store
     (List.map (fun (package : Project.package) -> package.name) packages);
   List.iter (add_package database) packages;
   drain database ?on_bug ~through:last_checking_stage ~scope:Everything ();
   database
+
+let create ?on_bug ?(loaded = []) packages =
+  create_in_memory ?on_bug ~loaded ~records_reads:true packages
 
 let update ?on_bug (database : t) changes =
   List.iter
@@ -240,7 +243,7 @@ let open_saved path ~compiler =
         with
         | Some saved_compiler, Some paths
           when saved_compiler = compiler && List.for_all Sys.file_exists paths ->
-            let database = Tracker.create store in
+            let database = Tracker.create store ~records_reads:true in
             attach_loaded database paths;
             Store.replace_project store
               (List.filter_map Path.parse_package (Store.list_packages store Main));
@@ -266,7 +269,7 @@ let open_file ?on_bug path ~compiler ~loaded packages =
     | Some database -> database
     | None ->
         remove_database_file path;
-        let database = Tracker.create (Store.open_file path) in
+        let database = Tracker.create (Store.open_file path) ~records_reads:true in
         Store.write_meta database.store compiler_meta compiler;
         attach_loaded database loaded;
         Store.replace_project database.store
@@ -283,6 +286,7 @@ let close_uncommitted (database : t) = Store.close_uncommitted database.store
 
 let copy (database : t) : t =
   {
+    database with
     store = Store.copy database.store;
     bugs = Hashtbl.copy database.bugs;
     broken = Hashtbl.copy database.broken;
@@ -953,7 +957,7 @@ let list_changes (database : t) (other : t) =
        replaced)
 
 let build_package ~loaded (package : Project.package) ~into =
-  let database = create ~loaded [ package ] in
+  let database = create_in_memory ~loaded ~records_reads:false [ package ] in
   Fun.protect
     ~finally:(fun () -> Store.close database.store)
     (fun () ->
@@ -1189,7 +1193,7 @@ module For_testing = struct
     List.map (fun key -> Marshal.from_string key 0) (Store.list_item_keys database.store)
 
   let extend_package ~loaded files =
-    let database = Tracker.create (Store.copy_file loaded) in
+    let database = Tracker.create (Store.copy_file loaded) ~records_reads:true in
     Store.replace_project database.store
       (List.filter_map Path.parse_package (Store.list_packages database.store Main));
     List.iter

@@ -1,10 +1,13 @@
 type t = {
   store : Store.t;
+  records_reads : bool;
   bugs : (int * int, Compiler_bug.t) Hashtbl.t;
   broken : (int * int, unit) Hashtbl.t;
 }
 
-let create store = { store; bugs = Hashtbl.create 8; broken = Hashtbl.create 8 }
+let create store ~records_reads =
+  { store; records_reads; bugs = Hashtbl.create 8; broken = Hashtbl.create 8 }
+
 let failing_unit : (Kind.stage * int * exn option) option ref = ref None
 
 let with_failing_unit ?raising stage id run =
@@ -41,12 +44,14 @@ let locate_unit stage id : Store.endpoint = { kind = Kind.rank_stage stage; id; 
 let mark_stale tracker stage id = Store.mark_stale tracker.store ~stage:(Kind.rank_stage stage) ~id
 
 let mark_readers tracker target id name =
-  Store.mark_sources_stale tracker.store ~target:(locate target id name) ~markers:reads
+  if tracker.records_reads then
+    Store.mark_sources_stale tracker.store ~target:(locate target id name) ~markers:reads
 
 let mark_readers_of_all tracker targets =
-  Store.mark_readers_of_targets tracker.store
-    ~targets:(List.map (fun (target, id, name) -> locate target id name) targets)
-    ~markers:reads
+  if tracker.records_reads then
+    Store.mark_readers_of_targets tracker.store
+      ~targets:(List.map (fun (target, id, name) -> locate target id name) targets)
+      ~markers:reads
 
 let stages_holding_positions =
   List.fold_left
@@ -54,8 +59,9 @@ let stages_holding_positions =
     0 [ Kind.Prove; Lower; Decide ]
 
 let mark_position_holders tracker target id name =
-  Store.mark_position_holders_stale tracker.store ~target:(locate target id name) ~markers:reads
-    ~stages:stages_holding_positions
+  if tracker.records_reads then
+    Store.mark_position_holders_stale tracker.store ~target:(locate target id name) ~markers:reads
+      ~stages:stages_holding_positions
 
 let import_kind = Kind.rank_target (Entity Import)
 let definition_kind = Kind.rank_target (Entity Definition)
@@ -143,6 +149,14 @@ let count_reads noted =
     (fun _ markers count -> if Kind.has_marker markers Reads then count + 1 else count)
     noted 0
 
+let list_noted_edges tracker noted =
+  Hashtbl.fold
+    (fun target markers edges ->
+      match if tracker.records_reads then markers else markers land lnot reads with
+      | 0 -> edges
+      | markers -> { Store.target; markers } :: edges)
+    noted []
+
 let record_observed tracker ?package stage id compute =
   let noted = Hashtbl.create 16 in
   let read_count = ref 0 in
@@ -155,9 +169,7 @@ let record_observed tracker ?package stage id compute =
   let result = compute { note } in
   !observer
     (Computed { stage; ids = [ id ]; reads = !read_count; distinct_reads = count_reads noted });
-  ( result,
-    replace_edges tracker ?package stage id
-      (Hashtbl.fold (fun target markers edges -> { Store.target; markers } :: edges) noted []) )
+  (result, replace_edges tracker ?package stage id (list_noted_edges tracker noted))
 
 let record tracker ?package stage id compute =
   fst (record_observed tracker ?package stage id compute)
@@ -176,9 +188,7 @@ let record_group tracker stage ids ~own compute =
   in
   let result = compute { note } in
   !observer (Computed { stage; ids; reads = !read_count; distinct_reads = count_reads noted });
-  let edges =
-    Hashtbl.fold (fun target markers edges -> { Store.target; markers } :: edges) noted []
-  in
+  let edges = list_noted_edges tracker noted in
   List.iter (fun id -> ignore (replace_edges tracker stage id edges)) ids;
   result
 
