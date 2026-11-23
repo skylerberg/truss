@@ -118,6 +118,7 @@ type item_graph = {
   item_kind : int;
   references : int;
   claims : int;
+  claim_kinds : int list;
 }
 
 val mark_items_stale : t -> stage:int -> unit
