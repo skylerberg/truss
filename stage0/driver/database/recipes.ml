@@ -971,7 +971,6 @@ let render_unit (database : Tracker.t) recorder profile item =
 
 let record_evaluation (database : Tracker.t) item (result : Lowering.evaluation) =
   let id = Ids.of_item item in
-  ignore (Store.unmark_stale database.store ~stage:(Kind.rank_stage Evaluate) ~id);
   Tracker.record database Evaluate id (fun recorder ->
       match
         ( Tracker.read database recorder Facts.lowered.whole (Lookups.locate_items database) ~id,
@@ -989,7 +988,8 @@ let record_evaluation (database : Tracker.t) item (result : Lowering.evaluation)
       | Value (Ok (Evaluate (evaluator, _))), (Unfinished _ | Stopped _) ->
           recorder.note Reads (Fact Test_key) (Ids.of_item evaluator) ""
       | (Value (Ok (Compiled _ | Folded _) | Error _) | Failed | Blocked), _ -> ());
-  ignore (Tracker.write database Facts.evaluation ~id (Some (Value result)))
+  ignore (Tracker.write database Facts.evaluation ~id (Some (Value result)));
+  ignore (Store.unmark_stale database.store ~stage:(Kind.rank_stage Evaluate) ~id)
 
 let run_render profile (database : Tracker.t) id =
   let item = read_item database id in
@@ -1385,8 +1385,9 @@ let list_stale_units (database : Tracker.t) (stage : Kind.stage) ~scope =
        ~scope)
 
 let guard_units (database : Tracker.t) ?on_bug (stage : Kind.stage) ids run =
+  let mark_stale () = List.iter (Tracker.mark_stale database stage) ids in
   let fail bug =
-    List.iter (Tracker.mark_stale database stage) ids;
+    mark_stale ();
     Tracker.record_bug database stage ids bug;
     match on_bug with Some on_bug -> on_bug bug | None -> raise (Compiler_bug.Bug bug)
   in
@@ -1403,6 +1404,10 @@ let guard_units (database : Tracker.t) ?on_bug (stage : Kind.stage) ids run =
           message = "a stage after the checks reached a recursion limit: " ^ message;
           doing = [];
         }
+  | exception raised ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      mark_stale ();
+      Printexc.raise_with_backtrace raised backtrace
 
 let run_units (database : Tracker.t) ?on_bug (stage : Kind.stage) ids run =
   List.iter
