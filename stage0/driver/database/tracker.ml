@@ -199,7 +199,7 @@ type 'value view = {
   guard : guard option;
 }
 
-and guard = { guard_stage : Kind.stage; guard_target : Kind.fact; guard_table : string }
+and guard = { guard_stage : Kind.stage; guard_table : string }
 
 type 'value fact = {
   whole : 'value view;
@@ -251,11 +251,12 @@ let make_view ~stage ~table ~id_column ~fixed ~target ~columns ~decode =
     guard = None;
   }
 
-let guard_view view ~stage ~target ~table ~id_column =
+let guard_view view ~stage ~table ~id_column ~targets =
   {
     view with
+    targets;
     stored = Store.guard_fact view.stored ~table ~id_column;
-    guard = Some { guard_stage = stage; guard_target = target; guard_table = table };
+    guard = Some { guard_stage = stage; guard_table = table };
   }
 
 let marshal value = Store.Blob (Marshal.to_string value [])
@@ -284,11 +285,10 @@ let encode fact : _ outcome -> Store.cell list = function
   | Blocked -> Integer 2 :: List.init fact.whole.width (fun _ -> Store.Null)
 
 let find_row tracker recorder view package ~id =
-  let guards = Option.to_list view.guard in
-  List.iter
-    (fun target -> recorder.note Reads (Fact target) id "")
-    (view.targets @ List.map (fun guard -> guard.guard_target) guards);
-  let stages = view.stage :: List.map (fun guard -> guard.guard_stage) guards in
+  List.iter (fun target -> recorder.note Reads (Fact target) id "") view.targets;
+  let stages =
+    view.stage :: List.map (fun guard -> guard.guard_stage) (Option.to_list view.guard)
+  in
   let find_in schema =
     Store.find_fact tracker.store schema view.stored ~id ~stages:(List.map Kind.rank_stage stages)
   in
@@ -371,7 +371,9 @@ let write tracker fact ~id outcome =
           Store.replace_fact tracker.store stored ~id cells;
         changed
   in
-  List.iter (fun target -> mark_readers tracker (Fact target) id "") changed;
+  List.iter
+    (fun target -> mark_readers tracker (Fact target) id "")
+    (List.concat_map Kind.list_read_targets changed);
   !observer
     (if changed = [] then Unchanged { stage = fact.whole.stage; id }
      else Written { stage = fact.whole.stage; id; is_removal = Option.is_none outcome });
@@ -426,7 +428,17 @@ let replace_definition_diagnostics tracker stage ~package ~definition diagnostic
     (replace_placed_diagnostics tracker stage ~package ~unit:definition
        (List.map (fun diagnostic -> (definition, diagnostic)) diagnostics))
 
-type description = { table : string; id_column : string; targets : Kind.fact list }
+type description = {
+  table : string;
+  id_column : string;
+  targets : Kind.fact list;
+  read_targets : Kind.fact list;
+}
 
 let describe (Any fact) : description =
-  { table = fact.whole.table; id_column = fact.whole.id_column; targets = fact.whole.targets }
+  {
+    table = fact.whole.table;
+    id_column = fact.whole.id_column;
+    targets = fact.whole.targets;
+    read_targets = List.concat_map Kind.list_read_targets fact.whole.targets;
+  }

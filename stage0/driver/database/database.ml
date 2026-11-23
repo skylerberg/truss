@@ -157,9 +157,9 @@ let mark_readers_of_replaced_packages (database : t) ~routes_before ~routes_afte
            (fun (lookup, scope, name) -> (Kind.Lookup lookup, scope, name))
            (Declarations.list_replaced_lookups database.store ~before ~after)
         @ List.concat_map
-            (fun ({ table; id_column; targets } : Tracker.description) ->
+            (fun ({ table; id_column; read_targets; _ } : Tracker.description) ->
               List.concat_map
-                (fun id -> List.map (fun fact -> (Kind.Fact fact, id, "")) targets)
+                (fun id -> List.map (fun fact -> (Kind.Fact fact, id, "")) read_targets)
                 (list_differing_ids database ~table ~id_column ~before ~after))
             (Tracker.describe (Any Facts.grant) :: Recipes.list_definition_facts ()));
       Tracker.mark_callers_to_group database
@@ -933,7 +933,7 @@ let list_changes (database : t) (other : t) =
                ~finally:(fun () -> Store.detach database.store after)
                (fun () ->
                  List.concat_map
-                   (fun ({ table; id_column; targets } : Tracker.description) ->
+                   (fun ({ table; id_column; read_targets; _ } : Tracker.description) ->
                      let ids =
                        list_differing_ids database ~table ~id_column ~before:(Some left)
                          ~after:(Some right)
@@ -947,7 +947,7 @@ let list_changes (database : t) (other : t) =
                                kind = Kind.show_fact fact;
                                is_signature = Kind.is_signature fact;
                              })
-                           targets)
+                           read_targets)
                        (Store.list_definitions_identified database.store ~ids))
                    (Recipes.list_definition_facts ())))
        replaced)
@@ -1071,11 +1071,13 @@ module For_testing = struct
 
   let list_unread (database : t) =
     let list_of ?section fact =
-      let ({ table; id_column; targets } : Tracker.description) = Tracker.describe fact in
+      let ({ table; id_column; targets; read_targets } : Tracker.description) =
+        Tracker.describe fact
+      in
       List.map
         (fun name -> Printf.sprintf "the %s of %s" (Kind.show_fact (List.hd targets)) name)
         (Store.list_unread database.store ~table ~id_column ~section
-           ~target_kinds:(List.map (fun fact -> Kind.rank_target (Fact fact)) targets))
+           ~target_kinds:(List.map (fun fact -> Kind.rank_target (Fact fact)) read_targets))
     in
     List.concat
       (List.mapi

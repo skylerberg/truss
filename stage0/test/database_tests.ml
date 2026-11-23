@@ -105,9 +105,9 @@ let list_targets : read -> (Database.Kind.target * int * string) list = function
       in
       match part with
       | Resolved (_, section) -> of_facts [ Resolved section ]
-      | Interface _ -> of_facts [ Interface; Elaboration ]
+      | Interface _ -> of_facts [ Interface; Elaboration; Checked_interface ]
       | Type_facts _ -> of_facts [ Type_facts ]
-      | Signature_check _ -> of_facts [ Signature_check ]
+      | Signature_check _ -> of_facts [ Checked_interface ]
       | Contract _ -> of_facts [ Contract ]
       | Checked_body _ -> of_facts [ Body_form; Body_tables; Run_forever; Ownership_modes ]
       | Body_mir _ -> of_facts [ Body_mir ]
@@ -654,6 +654,42 @@ let () =
         (Checked_body (make_main_key "caller"))
         ~includes:[ Stored (Signature_check (make_main_key "callee")) ]
         ~excludes:[]);
+  Harness.test "a checked body records one read of its callee's interface and signature check"
+    (fun () ->
+      let database =
+        check_text
+          "fn callee(x: Int64) -> Int64 { x + 1 }\npublic fn caller() -> Int64 { callee(1) }\n"
+      in
+      let callee = Database.For_testing.identify_key (make_main_key "callee") in
+      let caller = locate (Checked_body (make_main_key "caller")) in
+      match
+        List.filter
+          (fun ((target : Database.Kind.target), id, _) ->
+            id = callee
+            &&
+            match target with
+            | Fact fact ->
+                List.mem (Database.Kind.show_fact fact) [ "interface"; "signature check" ]
+            | Lookup _ | Entity _ | Selection _ -> false)
+          (Database.For_testing.list_reads database caller.stage caller.id)
+      with
+      | [ _ ] -> ()
+      | reads -> Harness.fail "recorded %d reads" (List.length reads));
+  Harness.test
+    "an edit that fails a callee's signature check, and leaves its interface as it was, checks the \
+     caller's body again" (fun () ->
+      let make_program visibility =
+        [
+          ( "app.main",
+            visibility
+            ^ "type Inner(value: Int64)\n\
+               public fn callee(count: Int64, inner: Option[Inner] = None) -> Int64 { count }\n\
+               public fn caller() -> Int64 { callee(1) }\n" );
+        ]
+      in
+      expect_included
+        (list_propagated ~before:(make_program "public ") ~after:(make_program ""))
+        ~parts:[ Signature_check (make_main_key "callee"); Checked_body (make_main_key "caller") ]);
   Harness.test "a type's facts read interfaces and type facts, and no signature check" (fun () ->
       expect_reads
         (check_text "type Inner(value: Int64)\ntype Outer(inner: Inner)\n")

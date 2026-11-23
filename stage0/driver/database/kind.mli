@@ -50,6 +50,7 @@ type fact =
   | Derived_interface
   | Type_facts
   | Signature_check
+  | Checked_interface
   | Contract
   | Body_form
   | Body_tables
@@ -112,6 +113,7 @@ val show_stage : stage -> string
 val show_fact : fact -> string
 val show_lookup : lookup -> string
 val is_signature : fact -> bool
+val list_read_targets : fact -> fact list
 val lookups_of_definition : lookup list
 val facts_of_definition : fact list
 
