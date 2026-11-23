@@ -1,4 +1,4 @@
-fn first(values: List[Int64]) -> Int64
+fn first(values: Slice[Int64]) -> Int64
   requires values.length() > 0
 {
   values.first().expect("the list is not empty")

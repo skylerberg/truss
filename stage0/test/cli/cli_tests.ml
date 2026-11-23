@@ -274,7 +274,7 @@ let () =
         make_package
           [
             ( "main.truss",
-              "fn main(arguments: List[String]) -> ExitCode {\n\
+              "fn main(arguments: Slice[String]) -> ExitCode {\n\
               \  if arguments.length() == 2 { ExitCode.success } else { ExitCode.failure }\n\
                }\n" );
           ]
@@ -1183,7 +1183,7 @@ let make_speaker_calling called =
            {\n\
           \  Speaker.%s(\"hello\")\n\
            }\n\n\
-           fn main(arguments: List[String]) -> ExitCode {\n\
+           fn main(arguments: Slice[String]) -> ExitCode {\n\
           \  provide Quiet() {\n\
           \    speak()\n\
           \  }\n\
@@ -1289,7 +1289,7 @@ let () =
             ("weather/daily/daily.truss", "public fn forecast() -> UInt64 {\n  1\n}\n");
             ( "main.truss",
               "use demo.weather\n\n\
-               fn main(arguments: List[String]) -> ExitCode {\n\
+               fn main(arguments: Slice[String]) -> ExitCode {\n\
               \  let _ = weather.daily.forecast()\n\
               \  ExitCode.success\n\
                }\n" );
@@ -1310,7 +1310,7 @@ let () =
             ("weather/daily/daily.truss", "public fn forecast() -> UInt64 {\n  1\n}\n");
             ( "main.truss",
               "use demo.weather\n\n\
-               fn main(arguments: List[String]) -> ExitCode {\n\
+               fn main(arguments: Slice[String]) -> ExitCode {\n\
               \  let _ = weather.total([1]) + weather.daily.forecast()\n\
               \  ExitCode.success\n\
                }\n" );
@@ -1558,7 +1558,7 @@ let () =
       | [ hole ] ->
           if read_string_field "type" hole <> "String" then fail "the type is not String";
           expect_strings
-            ~expected:[ "count: Int64"; "header: String"; "title: String" ]
+            ~expected:[ "count: Int64"; "header: String"; "title: StringSlice" ]
             (List.map
                (fun binding ->
                  read_string_field "name" binding ^ ": " ^ read_string_field "type" binding)
@@ -2440,7 +2440,7 @@ let () =
         make_package
           [
             ( "main.truss",
-              "fn main(arguments: List[String]) -> ExitCode {\n\
+              "fn main(arguments: Slice[String]) -> ExitCode {\n\
               \  ExitCode.success\n\
                }\n\n\
                fn helper() -> Int64 {\n\
@@ -2464,7 +2464,7 @@ let make_package_with_two_warnings () =
   make_package
     [
       ( "main.truss",
-        "fn main(arguments: List[String]) -> ExitCode {\n\
+        "fn main(arguments: Slice[String]) -> ExitCode {\n\
         \  ExitCode.success\n\
          }\n\n\
          fn helper() -> Int64 {\n\

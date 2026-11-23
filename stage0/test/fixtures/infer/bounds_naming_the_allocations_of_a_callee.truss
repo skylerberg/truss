@@ -1,4 +1,4 @@
-fn each(items: List[Int64], visit: (fn(Int64) uses generic Granted))
+fn each(items: Slice[Int64], visit: (fn(Int64) uses generic Granted))
   uses generic Granted
   cost allocations <= items.length() * allocations(visit)
   cost allocated_bytes <= items.length() * allocated_bytes(visit)
@@ -8,7 +8,7 @@ fn each(items: List[Int64], visit: (fn(Int64) uses generic Granted))
   }
 }
 
-fn each_of_an_order(items: List[Int64], visit: (fn(Int64) uses generic Granted))
+fn each_of_an_order(items: Slice[Int64], visit: (fn(Int64) uses generic Granted))
   uses generic Granted
   cost allocations O(items.length() * allocations(visit))
   cost allocated_bytes O(items.length() * allocated_bytes(visit))

@@ -19,7 +19,7 @@ fn count[Item: Shape](item: Item) -> Int64 {
   item.sides()
 }
 
-fn main(arguments: List[String]) -> ExitCode {
+fn main(arguments: Slice[String]) -> ExitCode {
   proof {
     todo
   }

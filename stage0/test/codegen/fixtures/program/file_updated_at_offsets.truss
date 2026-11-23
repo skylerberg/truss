@@ -1,14 +1,14 @@
 use standard.files
 use standard.streams
 
-fn report(label: String, outcome: Result[UInt64, SystemError]) uses Console {
+fn report(label: StringSlice, outcome: Result[UInt64, SystemError]) uses Console {
   match outcome {
     Ok(count) => Console.print_line("${label} ${count}".slice())
     Err(_) => Console.print_line("${label} failed".slice())
   }
 }
 
-fn main(arguments: List[String]) -> ExitCode
+fn main(arguments: Slice[String]) -> ExitCode
   uses Console, FileRead, FileWrite, Handles
 {
   let path = Path.new(arguments[1].slice())

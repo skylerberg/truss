@@ -10,7 +10,7 @@ fn count_up(index: UInt64, count: UInt64) -> UInt64
   if index >= count { index } else { count_up(index + 1, count: count) }
 }
 
-fn visit_each(items: List[Int64], visit: fn(Int64))
+fn visit_each(items: Slice[Int64], visit: fn(Int64))
   cost time O(items.length() * time(visit))
 {
   var index: UInt64 = 0

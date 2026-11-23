@@ -8,7 +8,7 @@ fn Bag.element(self, position: UInt64) lends String {
   self.items[position]
 }
 
-fn total_length(words: List[String]) -> UInt64
+fn total_length(words: Slice[String]) -> UInt64
   uses Tasks
 {
   concurrent for word in words {

@@ -25,6 +25,7 @@ module Symbol = struct
     | Rank of Types.ty
     | Capacity of Types.ty
     | Owner_of_view of Types.ty
+    | Slice_of of Types.ty
     | Model of Types.ty
     | Sequence_range of Types.ty
     | Slack of Types.ty
@@ -252,6 +253,7 @@ let rec show_symbol : symbol -> string = function
   | Rank ty -> "rank." ^ Types.show ty
   | Capacity ty -> "capacity." ^ Types.show ty
   | Owner_of_view owner -> "owner_of_view." ^ Types.show owner
+  | Slice_of sequence -> "slice_of." ^ Types.show sequence
   | Model ty -> "model." ^ Types.show ty
   | Sequence_range element -> "sequence.range." ^ Types.show element
   | Slack ty -> "slack." ^ Types.show ty

@@ -1,4 +1,4 @@
-fn main(arguments: List[String]) -> ExitCode
+fn main(arguments: Slice[String]) -> ExitCode
   uses Console, RunForever
 {
   while Console.read_line() is Some(line) {

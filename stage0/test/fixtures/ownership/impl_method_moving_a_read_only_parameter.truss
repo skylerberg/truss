@@ -1,9 +1,9 @@
 trait Eater {
-  fn eat(self, items: List[Int64])
+  fn eat(self, other: Bag)
 }
 
 impl Eater for Bag {
-  fn eat(self, items: List[Int64]) {
-    keep(own items)
+  fn eat(self, other: Bag) {
+    keep(own other.items)
   }
 }

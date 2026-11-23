@@ -74,6 +74,9 @@ let apply_slice context (frame : State.frame) ~node (site : Invocation.site) ~(b
       | None -> Facts.raise_unsupported location "a slice of `%s`" (Types.show base_type)
   in
   let length = Models.make_sequence_length context element model in
+  let is_whole =
+    match (low, high) with Logic.Integer start, None -> Z.equal start Z.zero | _ -> false
+  in
   let high =
     match high with
     | Some high -> high
@@ -81,15 +84,23 @@ let apply_slice context (frame : State.frame) ~node (site : Invocation.site) ~(b
         Facts.assume context frame (Logic.less_equal (Logic.int 0) length);
         length
   in
-  Facts.oblige context frame Out_of_bounds location
-    [ Text "`"; Facts.quote frame.source site.origin; Text "` may not be within the collection." ]
-    Logic.(less_equal (int 0) low &&& less_equal low high &&& less_equal high length);
+  if not is_whole then
+    Facts.oblige context frame Out_of_bounds location
+      [ Text "`"; Facts.quote frame.source site.origin; Text "` may not be within the collection." ]
+      Logic.(less_equal (int 0) low &&& less_equal low high &&& less_equal high length);
   let range = make_sequence_range context element model ~start:low ~stop:high in
   if is_sequence then (frame, range, low, high)
   else begin
     Validity.note_place context frame ~node ~origin:site.origin (Run (low, high));
     let slice_type = Facts.substitute_type context frame site.type_ in
-    let viewed = Facts.arrive context frame "slice" slice_type in
+    let symbol = Logic.Symbol.Slice_of base_type in
+    Facts.declare context
+      (Logic.Function
+         ( symbol,
+           [ Facts.declare_sort context base_type; Logic.Int; Logic.Int ],
+           Facts.declare_sort context slice_type ));
+    let viewed = Logic.Apply (symbol, [ collection; low; high ]) in
+    Facts.assume context frame (Facts.make_in_range slice_type viewed);
     (match Models.find_model context slice_type viewed ~element with
     | Some viewed_model -> Facts.assume context frame (Logic.equal viewed_model range)
     | None -> ());

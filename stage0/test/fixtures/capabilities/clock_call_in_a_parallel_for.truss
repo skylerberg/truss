@@ -1,4 +1,4 @@
-fn f(rows: List[Int64])
+fn f(rows: Slice[Int64])
   uses Clock
 {
   parallel for row in rows {

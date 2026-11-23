@@ -123,7 +123,7 @@ let () =
         ~says:"`count <= count` compares a value with itself, so it is always true.");
   Harness.test "an element compared with itself through one index is an error" (fun () ->
       expect_one_diagnostic
-        "fn f(items: List[Int64], index: UInt64) -> Bool\n\
+        "fn f(items: Slice[Int64], index: UInt64) -> Bool\n\
         \  requires index < items.length()\n\
          {\n\
         \  items[index] < items[index]\n\

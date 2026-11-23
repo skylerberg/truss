@@ -1,6 +1,6 @@
 trait Named {
   fn into_name(own self) -> String
-  fn rename(mut self, tag: String)
+  fn rename(mut self, tag: own String)
 }
 
 type Dog(tag: String)
@@ -10,8 +10,8 @@ impl Named for Dog {
     self.tag
   }
 
-  fn rename(mut self, tag: String) {
-    self.tag = tag.copy()
+  fn rename(mut self, tag: own String) {
+    self.tag = own tag
   }
 }
 

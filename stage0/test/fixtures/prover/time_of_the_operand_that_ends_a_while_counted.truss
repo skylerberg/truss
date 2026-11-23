@@ -1,4 +1,4 @@
-fn f(items: List[Int64], limit: UInt64)
+fn f(items: Slice[Int64], limit: UInt64)
   cost time O(limit + items.length())
 {
   var index: UInt64 = 0

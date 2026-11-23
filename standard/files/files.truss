@@ -1087,7 +1087,7 @@ fn parse_class(pattern: StringSlice, from: UInt64) -> Result[ParsedClass, GlobEr
 impl FromTemplate for Glob {
   type Part = Never
 
-  fn is_valid_template(literals: List[text.Literal]) -> Bool
+  fn is_valid_template(literals: Slice[text.Literal]) -> Bool
     ensures result ==> literals.length() == 1
   {
     literals.length() == 1 && Glob.parse(literals[0].text()) is Ok(_)

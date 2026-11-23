@@ -3,6 +3,6 @@ fn bump(items: mut List[Int64]) -> Bool {
   true
 }
 
-fn f(items: List[Int64])
+fn f(items: own List[Int64])
   requires bump(mut items)
 {}

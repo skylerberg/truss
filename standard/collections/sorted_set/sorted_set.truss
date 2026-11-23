@@ -236,8 +236,8 @@ fn merged[Element: Ordered](first: own List[Element], second: own List[Element])
 }
 
 fn combined[Element: Ordered + Copyable](
-  first: List[Element],
-  second: List[Element],
+  first: Slice[Element],
+  second: Slice[Element],
   keeps_first_only: Bool,
   keeps_shared: Bool,
   keeps_second_only: Bool,

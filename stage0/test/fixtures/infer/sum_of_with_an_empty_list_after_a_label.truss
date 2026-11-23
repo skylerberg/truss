@@ -1,7 +1,7 @@
-fn sum_of(first: List[Int64], second: List[Int64]) -> Int64 {
+fn sum_of(first: Slice[Int64], second: Slice[Int64]) -> Int64 {
   0
 }
 
-fn f(items: List[Int64]) -> Int64 {
+fn f(items: Slice[Int64]) -> Int64 {
   sum_of(first: items, [])
 }

@@ -13,7 +13,7 @@ impl Shape for Rectangle {
   fn area(self) -> Int64 { self.width * self.height }
 }
 
-fn total(shapes: List[any Shape]) -> Int64 {
+fn total(shapes: Slice[any Shape]) -> Int64 {
   var sum = 0
   for shape in shapes {
     sum += shape.area()

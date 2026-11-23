@@ -1,6 +1,6 @@
-fn f(counts: mut Map[String, Int64], word: String) {
+fn f(counts: mut Map[String, Int64], word: StringSlice) {
   match word.length() {
     0 if counts.get("empty") is Some(_) => {}
-    _ => counts[word.copy()] = 1
+    _ => counts[word.to_string()] = 1
   }
 }

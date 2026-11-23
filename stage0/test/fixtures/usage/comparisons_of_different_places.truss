@@ -1,6 +1,6 @@
 type Pair(first: Int64, second: Int64)
 
-fn f(pair: Pair, items: List[Int64], index: UInt64, other: UInt64) -> Bool
+fn f(pair: Pair, items: Slice[Int64], index: UInt64, other: UInt64) -> Bool
   requires index < items.length()
   requires other < items.length()
   requires items.length() > 1

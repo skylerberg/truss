@@ -1,4 +1,4 @@
-fn f(rows: List[Slice[Int64]])
+fn f(rows: Slice[Slice[Int64]])
   uses Panic
 {
   parallel for row in rows {

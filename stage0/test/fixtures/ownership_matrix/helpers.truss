@@ -18,7 +18,7 @@ fn Holder.reset(mut self) {
   self.items = []
 }
 
-fn first_of(items: List[Int64]) -> Slice[Int64] {
+fn first_of(items: Slice[Int64]) -> Slice[Int64] {
   items[0..1]
 }
 

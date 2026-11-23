@@ -1,0 +1,9 @@
+trait Merged {
+  fn merged_length(self, other: Self) -> UInt64
+}
+
+impl Merged for List[Element] {
+  fn merged_length(self, other: List[Element]) -> UInt64 {
+    self.length() + other.length()
+  }
+}

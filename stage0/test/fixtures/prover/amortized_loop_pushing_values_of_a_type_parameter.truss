@@ -1,6 +1,6 @@
 fn f[Output](
   results: mut List[Output],
-  source: List[Int64],
+  source: Slice[Int64],
   transform: (fn(Int64) -> Output uses generic Granted),
 )
   uses generic Granted

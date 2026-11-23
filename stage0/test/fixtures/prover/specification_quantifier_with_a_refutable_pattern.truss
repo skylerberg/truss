@@ -1,4 +1,4 @@
-fn has_a_present_value(options: List[Option[Int64]]) -> Bool
+fn has_a_present_value(options: Slice[Option[Int64]]) -> Bool
   requires exists Some(value) in options => value == 3
   ensures result
 {

@@ -142,6 +142,13 @@ val lower_literal_place : Lowering.state -> Ground.ty -> Language.Literal.t -> L
 val lower_owner_of_view :
   Lowering.state -> owner:Ground.ty -> view:Ground.ty -> Lowered.place -> Lowered.place -> unit
 
+val lower_slice :
+  Lowering.state ->
+  element:Ground.ty ->
+  buffer:Lowered.operand ->
+  length:Lowered.operand ->
+  Lowered.place
+
 val lower_static_constant : Lowering.state -> Path.t -> Lowered.place
 val read_list_parts : Monomorphic.context -> Ground.ty -> string * Ground.ty * Ground.ty
 

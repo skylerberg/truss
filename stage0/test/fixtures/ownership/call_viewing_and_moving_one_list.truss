@@ -1,4 +1,4 @@
-fn both(first: List[Int64], second: own List[Int64]) {}
+fn both(first: Slice[Int64], second: own List[Int64]) {}
 
 fn f(items: own List[Int64]) {
   both(items, second: own items)

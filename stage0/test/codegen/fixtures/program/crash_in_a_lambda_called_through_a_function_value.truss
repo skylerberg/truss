@@ -4,7 +4,7 @@ fn apply(action: (fn(Int64) -> Int64 uses Panic), value: Int64) -> Int64
   action(value)
 }
 
-fn main(arguments: List[String]) -> ExitCode
+fn main(arguments: Slice[String]) -> ExitCode
   uses Panic
 {
   let result = apply(fn(value) {

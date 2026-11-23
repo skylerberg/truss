@@ -1,4 +1,4 @@
-fn f(items: List[Int64]) -> UInt64
+fn f(items: Slice[Int64]) -> UInt64
   uses RunForever
 {
   var boxed: any Cursor[Element = Int64] = any items.cursor()

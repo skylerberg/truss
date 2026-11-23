@@ -1,4 +1,4 @@
-fn f(items: List[String]) {
+fn f(items: Slice[String]) {
   var view = items[..]
   for item in mut view {
     mut item.push("x")

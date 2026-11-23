@@ -11,6 +11,6 @@ fn next(n: UInt64) -> UInt64 {
   n + 1
 }
 
-fn main(arguments: List[String]) -> ExitCode {
+fn main(arguments: Slice[String]) -> ExitCode {
   if next(arguments.length()) > 5 { ExitCode.failure } else { ExitCode.success }
 }

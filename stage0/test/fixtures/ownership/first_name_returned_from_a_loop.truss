@@ -1,4 +1,4 @@
-fn first(names: List[String]) -> Option[StringSlice] {
+fn first(names: Slice[String]) -> Option[StringSlice] {
   for name in names {
     return Some(name.slice())
   }

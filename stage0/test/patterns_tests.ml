@@ -118,7 +118,7 @@ let () =
               ("type Entry = {\n\
                \  name: String\n\
                 }\n\n\
-                fn built(name: String) -> Entry {\n\
+                fn built(name: own String) -> Entry {\n\
                \  Entry(name: " ^ argument ^ ")\n}\n")
           with
           | [] -> ()

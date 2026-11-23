@@ -1,6 +1,6 @@
 use lib.arith
 
-fn main(arguments: List[String]) -> ExitCode {
+fn main(arguments: Slice[String]) -> ExitCode {
   let _ = arith.two()
   ExitCode.success
 }

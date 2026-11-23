@@ -19,7 +19,7 @@ impl Cursor for Countdown {
   }
 }
 
-fn g(items: List[Int64], code: ExitCode, start: Countdown) -> UInt64
+fn g(items: Slice[Int64], code: ExitCode, start: Countdown) -> UInt64
   uses Meter, RunForever
 {
   var left = start
