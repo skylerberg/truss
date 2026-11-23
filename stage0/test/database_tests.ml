@@ -1971,6 +1971,34 @@ let () =
             (String.concat "; " (List.map show_counts counts)))
 
 let () =
+  Harness.test "a package build writes no edge that only records a read" (fun () ->
+      let package =
+        List.hd
+          (Support.setup
+             [
+               ( "lib.tools",
+                 "public fn first() -> Int64 { 1 }\npublic fn second() -> Int64 { first() }\n" );
+             ])
+      in
+      let loaded = [ Lazy.force standard ] in
+      let count_edge_steps build =
+        List.fold_left
+          (fun steps (count : Database.statement_count) ->
+            if String.includes ~affix:"INTO main.edge" count.statement then steps + count.steps
+            else steps)
+          0
+          (snd (Database.count_statements build))
+      in
+      let steps_as_package =
+        count_edge_steps (fun () ->
+            Database.build_package ~loaded package
+              ~into:(Filename.concat (Harness.make_scratch_directory "package") "package.sqlite"))
+      and steps_as_project =
+        count_edge_steps (fun () -> ignore (Database.create ~loaded [ package ]))
+      in
+      if 4 * steps_as_package > steps_as_project then
+        Harness.fail "wrote its edges in %d steps as a package and in %d as a project"
+          steps_as_package steps_as_project);
   Harness.test "a package database records the diagnostics of its package, and none when it checks"
     (fun () ->
       let clean = load_package [ ("lib.tools", "public fn first() -> Int64 { 1 }\n") ] in

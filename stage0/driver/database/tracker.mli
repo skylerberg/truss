@@ -1,10 +1,11 @@
 type t = {
   store : Store.t;
+  records_reads : bool;
   bugs : (int * int, Compiler_bug.t) Hashtbl.t;
   broken : (int * int, unit) Hashtbl.t;
 }
 
-val create : Store.t -> t
+val create : Store.t -> records_reads:bool -> t
 val with_failing_unit : Kind.stage -> int -> (unit -> 'result) -> 'result
 val fail_for_test : Kind.stage -> int list -> unit
 val reset_broken : t -> unit
