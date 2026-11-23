@@ -98,6 +98,7 @@ val read : t -> recorder -> 'value view -> Path.package -> id:int -> 'value outc
 val read_value : t -> recorder -> 'value view -> Path.package -> id:int -> 'value
 val find_value : t -> recorder -> 'value view -> Path.package -> id:int -> 'value option
 val write : t -> 'value fact -> id:int -> 'value outcome option -> state option
+val write_observed : t -> 'value fact -> id:int -> 'value outcome option -> state option * bool
 val report : Kind.stage -> int -> is_changed:bool -> unit
 val report_computed : Kind.stage -> int list -> unit
 val list_facts : Kind.stage -> any_fact list
