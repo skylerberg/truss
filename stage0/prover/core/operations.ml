@@ -123,58 +123,14 @@ let list_impl_packages (context : State.context) (ty : Types.ty) =
     ((match ty with Types.Named { path; _ } -> [ Path.locate_package path ] | _ -> [])
     @ [ Path.locate_package context.current; Path.standard_package ])
 
-let find_concrete_impl (context : State.context) (trait : Types.trait_reference) (ty : Types.ty) =
-  match ty with
-  | Types.Named { path; _ } ->
-      let is_own impl =
-        Path.equal impl context.current
-        || match context.current with Method { owner; _ } -> Path.equal owner impl | _ -> false
-      in
-      let list_bounds = context.bounds in
-      let packages =
-        List.sort_uniq compare [ Path.locate_package context.current; Path.locate_package path ]
-      in
-      List.find_map
-        (fun package ->
-          List.find_map
-            (fun impl ->
-              let interface =
-                Interface.Definition.read_impl_interface context.lookups.interface impl
-              in
-              let variables =
-                List.map (fun (generic : Types.generic) -> generic.generic) interface.impl_generics
-              in
-              match
-                Option.bind
-                  (Interface.Impls.match_type ~variables Types.no_substitution interface.for_type ty)
-                  (fun arguments ->
-                    Interface.Impls.match_arguments ~variables arguments
-                      interface.implements.trait_arguments trait.trait_arguments)
-              with
-              | Some arguments
-                when is_own impl
-                     || List.for_all
-                          (fun (argument, bound) ->
-                            Option.is_some
-                              (Interface.Impls.find_evidence context.lookups.interface ~list_bounds
-                                 argument bound))
-                          (Interface.Impls.list_required_bounds interface.impl_generics arguments)
-                ->
-                  Some (impl, arguments)
-              | _ -> None)
-            (Interface.Impls.list_impls_of_trait_for_type context.lookups.interface
-               ~trait:trait.trait ~type_:path package))
-        packages
-  | _ -> None
-
 let find_written_equal context ty left right =
   let equal = Well_known.locate_method Equal_equal in
   let trait : Types.trait_reference =
     { trait = Well_known.make_path equal.owner; trait_arguments = []; associated = [] }
   in
-  match find_concrete_impl context trait ty with
+  match Facts.find_impl context trait ty with
   | Some (((Impl _ : Path.t) as impl), substitution) -> (
-      let evidence : Core.evidence = Impl { impl; substitution } in
+      let evidence : Types.evidence = Impl { impl; substitution } in
       match Contracts.find_method_contract context trait equal.name equal.receiver evidence with
       | Some contract when contract.is_logic_function ->
           let symbol =

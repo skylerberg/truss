@@ -351,7 +351,7 @@ and lower_rvalue_into ?types_ty state (rvalue : Mir.rvalue) (destination : Lower
       Definitions.raise_bug "the owner of a view written outside its lent local"
   | To_any { value = inner; trait; evidence } ->
       let impl, type_arguments =
-        Targets.resolve_impl state.context state.frame.code.substitution ~trait
+        Targets.read_impl state.context state.frame.code.substitution ~trait
           ~self_type:(Mir.extract_operand_type inner) ~evidence
       in
       Targets.lower_any_into state ~any_ty:ty

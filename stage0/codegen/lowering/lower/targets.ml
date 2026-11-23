@@ -1,50 +1,42 @@
-let resolve_impl (context : Definitions.context) substitution ~(trait : Types.trait_reference)
-    ~self_type ~(evidence : Core.evidence) =
-  let substitute = Types.substitute substitution in
-  let impl, arguments =
-    match evidence with
-    | Impl { impl; substitution = impl_substitution } ->
-        (impl, Types.substitute_substitution substitution impl_substitution)
-    | Bound -> (
-        let self = context.monomorphic.normalize (substitute self_type) in
-        match
-          Interface.Impls.find_evidence context.lookups.interface
-            ~list_bounds:Interface.Impls.list_no_bounds self
-            (let trait = Types.substitute_trait substitution trait in
-             {
-               trait with
-               trait_arguments =
-                 List.map
-                   (function
-                     | Types.Type ty -> Types.Type (context.monomorphic.normalize ty)
-                     | argument -> argument)
-                   trait.trait_arguments;
-             })
-        with
-        | Some (From_impl { impl; substitution }) -> (impl, substitution)
-        | _ ->
-            Definitions.raise_bug "no impl of %s for %s" (Types.show_trait trait) (Types.show self))
-    | Dynamic -> Definitions.raise_bug "a call through any, which reaches no single impl"
-  in
-  let impl_interface = Definitions.read_impl_interface context impl in
-  let impl_arguments =
-    List.map
-      (fun (generic : Types.generic) ->
-        match Types.find_argument generic.generic arguments with
-        | Some argument ->
-            Monomorphic.ground_argument context.monomorphic Types.no_substitution argument
-        | None -> Definitions.raise_bug "the impl's parameter %s is not bound" generic.generic.name)
-      impl_interface.impl_generics
-  in
-  (impl, impl_arguments)
+let find_impl (context : Definitions.context) substitution ~(trait : Types.trait_reference)
+    ~self_type ~(evidence : Types.evidence) =
+  match
+    Interface.Impls.resolve_evidence context.lookups.interface substitution ~self_type ~trait
+      evidence
+  with
+  | Impl { impl; substitution = arguments } ->
+      Some
+        ( impl,
+          List.map
+            (fun (generic : Types.generic) ->
+              match Types.find_argument generic.generic arguments with
+              | Some argument ->
+                  Monomorphic.ground_argument context.monomorphic Types.no_substitution argument
+              | None ->
+                  Definitions.raise_bug "the impl's parameter %s is not bound" generic.generic.name)
+            (Definitions.read_impl_interface context impl).impl_generics )
+  | Dynamic -> None
+  | Bound ->
+      Definitions.raise_bug "no impl of %s for %s" (Types.show_trait trait)
+        (Types.show (Types.substitute substitution self_type))
 
-let make_trait_method_item context substitution ~(trait : Types.trait_reference) ~name ~receiver
-    ~self_type ~(instantiation : Types.instantiation) ~(evidence : Core.evidence) =
-  let impl, impl_arguments = resolve_impl context substitution ~trait ~self_type ~evidence in
-  let own = Monomorphic.ground_instantiation context.monomorphic substitution instantiation in
-  Lowered.Item.make_code
-    (Method { owner = impl; name; receiver })
-    { own with type_arguments = impl_arguments @ own.type_arguments }
+let read_impl context substitution ~(trait : Types.trait_reference) ~self_type ~evidence =
+  match find_impl context substitution ~trait ~self_type ~evidence with
+  | Some selected -> selected
+  | None ->
+      Definitions.raise_bug "`%s` implements %s through any, which reaches no single impl"
+        (Types.show (Types.substitute substitution self_type))
+        (Types.show_trait trait)
+
+let find_trait_method (context : Definitions.context) substitution ~(trait : Types.trait_reference)
+    ~name ~receiver ~self_type ~(instantiation : Types.instantiation) ~(evidence : Types.evidence) :
+    (Path.t * Ground.instantiation) option =
+  Option.map
+    (fun (impl, impl_arguments) ->
+      let own = Monomorphic.ground_instantiation context.monomorphic substitution instantiation in
+      ( Path.Method { owner = impl; name; receiver },
+        { own with type_arguments = impl_arguments @ own.type_arguments } ))
+    (find_impl context substitution ~trait ~self_type ~evidence)
 
 let convert_operand state (mode : Language.Mode.t) ty (place : Lowered.place)
     (passed : Lowered.ty option) =

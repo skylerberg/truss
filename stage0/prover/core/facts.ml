@@ -529,9 +529,6 @@ let reject_recursion_through_supplied_code (context : State.context) (frame : St
       (Mir.Call_edges.list_statement_edges context.lookups.interface frame.substitution statement)
 
 let find_recursive_callee (context : State.context) (frame : State.frame) location callee =
-  let resolution =
-    Mir.Call_edges.resolve_callee context.lookups.interface frame.substitution callee
-  in
   let reject target origin =
     oblige context frame Termination location
       [
@@ -546,16 +543,15 @@ let find_recursive_callee (context : State.context) (frame : State.frame) locati
       (Logic.Boolean false);
     None
   in
-  let recursive_callee =
-    match resolution.target with
-    | Some target when frame.makes_obligations && is_in_recursion_group context target -> (
-        match context.lookups.mir.find_form_origin target with
-        | Some (Derived _, _) when context.terminates -> reject target "derives"
-        | Some (Inherited _, _) when context.terminates -> reject target "inherits from its trait"
-        | Some ((Written _ | Derived _ | Inherited _), _) | None -> Some target)
-    | Some _ | None -> None
-  in
-  (resolution, recursive_callee)
+  match
+    (Mir.Call_edges.resolve_callee context.lookups.interface frame.substitution callee).target
+  with
+  | Some target when frame.makes_obligations && is_in_recursion_group context target -> (
+      match context.lookups.mir.find_form_origin target with
+      | Some (Derived _, _) when context.terminates -> reject target "derives"
+      | Some (Inherited _, _) when context.terminates -> reject target "inherits from its trait"
+      | Some ((Written _ | Derived _ | Inherited _), _) | None -> Some target)
+  | Some _ | None -> None
 
 let reject_uncompared_recursion (context : State.context) frame location recursive_callee ~describe
     =
@@ -827,6 +823,14 @@ let substitute_type (context : State.context) (frame : State.frame) ty =
 
 let find_local_type context frame local =
   Option.map (substitute_type context frame) (Locals.find_opt local frame.types)
+
+let find_impl (context : State.context) (trait : Types.trait_reference) (ty : Types.ty) =
+  match
+    Interface.Impls.resolve_evidence context.lookups.interface Types.no_substitution ~self_type:ty
+      ~trait Bound
+  with
+  | Impl { impl; substitution } -> Some (impl, substitution)
+  | Bound | Dynamic -> None
 
 let is_potential = function
   | Logic.Apply ((Logic.Symbol.Potential _ | Logic.Symbol.Slack _), _) -> true

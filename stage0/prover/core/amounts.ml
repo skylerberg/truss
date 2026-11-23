@@ -645,7 +645,7 @@ let find_method_cost_bound context (metric : Language.Metric.t) (method_ : Path.
         else None
       else
         let reference : Types.trait_reference = { trait; trait_arguments; associated = [] } in
-        match Operations.find_concrete_impl context reference self_type with
+        match Facts.find_impl context reference self_type with
         | Some (impl, substitution) -> (
             let path = Path.Method { owner = impl; name; receiver } in
             let makes_no_potential =

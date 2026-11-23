@@ -11,11 +11,7 @@ type lookups = { interface : Interface.Lookups.t; mir : Parts.lookups }
 
 let find_head (ty : Types.ty) = match ty with Named { path; _ } -> Some path | _ -> None
 
-type resolution = {
-  target : Path.t option;
-  evidence : Core.evidence option;
-  supplied : Path.t list Lazy.t;
-}
+type resolution = { target : Path.t option; supplied : Path.t list Lazy.t }
 
 let normalize interface ty =
   Interface.Impls.normalize interface ~list_bounds:Interface.Impls.list_no_bounds ty
@@ -31,10 +27,6 @@ let substitute_argument interface instance argument =
 let substitute_trait interface instance (trait : Types.trait_reference) =
   let trait = Types.substitute_trait instance trait in
   { trait with trait_arguments = List.map (normalize_argument interface) trait.trait_arguments }
-
-let find_evidence interface type_ trait =
-  Interface.Impls.find_evidence interface ~list_bounds:Interface.Impls.list_no_bounds
-    ~checks_conditions:false type_ trait
 
 let list_trait_methods interface trait =
   List.map
@@ -84,15 +76,18 @@ let rec list_code_of_impl_for interface ((type_ : Types.ty), (bound : Types.trai
     (fun (required : Types.trait_reference) ->
       if is_self_of_enclosing_trait type_ then list_trait_methods interface required.trait
       else
-        match find_evidence interface type_ required with
-        | Some (From_impl { impl; substitution }) ->
+        match
+          Interface.Impls.resolve_evidence interface Types.no_substitution ~self_type:type_
+            ~trait:required Bound
+        with
+        | Impl { impl; substitution } ->
             list_impl_methods interface impl
             @ List.concat_map (list_code_of_impl_for interface)
                 (Interface.Impls.list_required_bounds
                    (Interface.Definition.read_impl_interface interface impl).impl_generics
                    substitution)
-        | Some From_any -> list_trait_methods interface required.trait
-        | Some (From_bound | Built_in | Accepted _) | None -> [])
+        | Dynamic -> list_trait_methods interface required.trait
+        | Bound -> [])
     (Interface.Properties.list_bound_closure interface ~self:type_ bound)
 
 let list_code_supplied_to_bound interface instance (type_, bound) =
@@ -135,25 +130,17 @@ let resolve_callee (interface : Interface.Lookups.t) instance (callee : _ Core.t
   | Function { path; instantiation } ->
       {
         target = Some path;
-        evidence = None;
         supplied = lazy (list_code_supplied_by_function_value interface instance path instantiation);
       }
   | Trait_method { trait; name; receiver; self_type; evidence; instantiation } ->
+      let evidence =
+        Interface.Impls.resolve_evidence interface instance ~self_type ~trait evidence
+      in
       let self_type = substitute_type interface instance self_type in
       let trait = substitute_trait interface instance trait in
       let declaration = Path.Method { owner = trait.trait; name; receiver } in
       let type_arguments =
         List.map (substitute_argument interface instance) instantiation.type_arguments
-      in
-      let evidence : Core.evidence =
-        match evidence with
-        | Impl { impl; substitution } ->
-            Impl { impl; substitution = Types.substitute_substitution instance substitution }
-        | Bound -> (
-            match find_evidence interface self_type trait with
-            | Some (From_impl { impl; substitution }) -> Impl { impl; substitution }
-            | Some (From_bound | From_any | Built_in | Accepted _) | None -> Bound)
-        | Dynamic -> Dynamic
       in
       let list_code_supplied_to path ~bound_by_owner =
         list_code_supplied_to_callee interface Types.no_substitution path ~bound_by_owner
@@ -176,9 +163,8 @@ let resolve_callee (interface : Interface.Lookups.t) instance (callee : _ Core.t
             ( (if is_self_of_enclosing_trait self_type then Some declaration else None),
               lazy (list_code_supplied_to_declaration ()) )
       in
-      { target; evidence = Some evidence; supplied }
-  | Capability_method _ | Intrinsic _ | Indirect _ ->
-      { target = None; evidence = None; supplied = lazy [] }
+      { target; supplied }
+  | Capability_method _ | Intrinsic _ | Indirect _ -> { target = None; supplied = lazy [] }
 
 let resolve_node (lookups : lookups) (declaration : Path.t) instance =
   let find_inheriting_method owner name receiver =
@@ -200,9 +186,12 @@ let resolve_node (lookups : lookups) (declaration : Path.t) instance =
       }
     in
     let* method_ =
-      match find_evidence lookups.interface self trait with
-      | Some (From_impl { impl; _ }) -> Some (Path.Method { owner = impl; name; receiver })
-      | Some (From_bound | From_any | Built_in | Accepted _) | None -> None
+      match
+        Interface.Impls.resolve_evidence lookups.interface Types.no_substitution ~self_type:self
+          ~trait Bound
+      with
+      | Impl { impl; _ } -> Some (Path.Method { owner = impl; name; receiver })
+      | Bound | Dynamic -> None
     in
     match lookups.mir.find_form_origin method_ with
     | Some (Inherited key, _) when Path.equal key.path declaration -> Some method_

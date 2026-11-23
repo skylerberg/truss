@@ -73,9 +73,9 @@ let describe_missing ~subject ~of_ capability =
      for `%s` in `truss.toml`."
     subject (show_as_written capability) of_ (show_as_written capability) of_
 
-let rec list_evidence_uses lookups ~list_bounds (evidence : Impls.evidence) =
+let rec list_evidence_uses lookups ~list_bounds (evidence : Impls.solution) =
   match evidence with
-  | From_impl { impl; substitution } -> (
+  | Evidence (Impl { impl; substitution }) -> (
       match Definition.find_impl_interface lookups impl with
       | None -> []
       | Some interface ->

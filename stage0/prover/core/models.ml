@@ -168,13 +168,7 @@ let find_model_impl (context : State.context) (ty : Types.ty) ~(model : Types.ty
     Interface.Impls.normalize interface ~list_bounds
       (Projection { base = ty; trait = model_trait; name = Well_known.show_associated Model_value })
   in
-  if value = model then
-    match
-      Interface.Impls.find_evidence interface ~list_bounds ~checks_conditions:false ty model_trait
-    with
-    | Some (From_impl { impl; _ }) -> Some impl
-    | _ -> None
-  else None
+  if value = model then Option.map fst (Facts.find_impl context model_trait ty) else None
 
 let compute_model_function (context : State.context) (ty : Types.ty) ~(model : Types.ty) =
   match find_model_impl context ty ~model with

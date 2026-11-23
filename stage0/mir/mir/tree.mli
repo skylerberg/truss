@@ -95,7 +95,7 @@ type rvalue =
       value : operand;
       converts_function_expression : bool;
     }
-  | To_any of { value : operand; trait : Types.trait_reference; evidence : Core.evidence }
+  | To_any of { value : operand; trait : Types.trait_reference; evidence : Types.evidence }
   | Copy of operand
   | Function_value of { path : Path.t; instantiation : Types.instantiation; is_argument : bool }
   | Lambda of { body : int; captures : capture list; is_argument : bool }

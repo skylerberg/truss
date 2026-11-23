@@ -513,7 +513,7 @@ let () =
           (Types.make_named both [ Types.Parameter parameter ])
           described
       with
-      | Some (From_impl { impl; _ }) -> impl
+      | Some (Evidence (Impl { impl; _ })) -> impl
       | _ -> failwith "no impl"
     in
     match

@@ -125,13 +125,11 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
             let reference : Types.trait_reference =
               { trait = Well_known.make_path owner; trait_arguments = []; associated = [] }
             in
-            let evidence : Core.evidence =
+            let evidence : Types.evidence =
               match
                 Interface.Impls.find_evidence lookups.interface ~list_bounds of_type reference
               with
-              | Some (From_impl { impl; substitution }) -> Impl { impl; substitution }
-              | Some From_bound -> Bound
-              | Some From_any -> Dynamic
+              | Some (Evidence evidence) -> evidence
               | Some Built_in | Some (Accepted _) | None ->
                   raise_bug "`%s` is derived for a type with a field that has none"
                     (Path.show reference.trait)
@@ -858,7 +856,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                         Interface.Impls.find_evidence lookups.interface ~list_bounds string_type
                           reference
                       with
-                      | Some (From_impl { impl; substitution }) ->
+                      | Some (Evidence (Impl { impl; substitution })) ->
                           Callee_uses.make_callee signatures lookups.interface ~list_bounds
                             (Trait_method
                                {

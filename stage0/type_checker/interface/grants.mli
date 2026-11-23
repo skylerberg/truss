@@ -12,7 +12,7 @@ val describe_missing : subject:string -> of_:Path.package -> Path.t -> string
 val list_evidence_uses :
   Lookups.t ->
   list_bounds:Impls.bounds ->
-  Impls.evidence ->
+  Impls.solution ->
   (Path.t * Types.impl_interface * Types.capability_set) list
 
 val describe_missing_in_impls :

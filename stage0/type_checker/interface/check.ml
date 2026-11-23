@@ -588,7 +588,7 @@ let check (state : Checking.state) =
               Checking.report state No_impl state.spans.(type_.id)
                 (Printf.sprintf "`%s` does not implement `%s`, so it has no law of it to keep."
                    (Types.show for_type) (Types.show_trait trait))
-          | Some (Impls.From_impl { impl; _ }) ->
+          | Some (Impls.Evidence (Impl { impl; _ })) ->
               Option.iter
                 (check_proof_bounds state type_ generics)
                 (Definition.find_impl_interface lookups impl)
