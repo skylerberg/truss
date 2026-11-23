@@ -247,10 +247,10 @@ and check_lambda (state : State.state) env ?expected (value : Syntax.expression)
     | Some ((Types.Error _ | Types.Hole) as unknown) -> make_untyped unknown
     | _ ->
         let remedy =
-          match Option.bind expected (State.find_variable_source state) with
+          match Option.bind expected (State.find_variable_origin state) with
           | Some (Generic_argument { declared_on; parameter; _ }) ->
-              Solver.make_bracket_remedy declared_on parameter
-          | Some (List_literal _ | Map_literal _ | Unbounded_range _) | None ->
+              Failures.make_bracket_remedy declared_on parameter
+          | Some (List_literal _ | Map_literal _) | None ->
               "Bind it with a typed `let`, such as `let double: fn(Int64) -> Int64 = fn(x) { x * 2 \
                }`."
         in

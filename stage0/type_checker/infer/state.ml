@@ -35,10 +35,9 @@ type cause =
   | Any_conversion of { at : Source.Definition_span.t; any_type : Types.ty }
   | Excluded of (Types.ty -> Diagnostic.reported)
 
-type source =
+type origin =
   | List_literal of Syntax.id
   | Map_literal of Syntax.id
-  | Unbounded_range of Syntax.id
   | Generic_argument of { written : Syntax.id; parameter : Types.generic; declared_on : Path.t }
 
 type goal = {
@@ -75,7 +74,7 @@ type entry =
       report_excluded : Types.ty -> Diagnostic.reported;
     }
   | Local of Syntax.id
-  | Source of source
+  | Origin of origin
   | Decided of {
       site : decision_site;
       decided_type : Types.ty;
@@ -235,36 +234,26 @@ let list_class_log state index =
        (fun (logged : logged) -> Unify.read_root state.unifier logged.member = root)
        state.log)
 
-let find_class_source state index =
+let find_class_origin state index =
   List.find_map
-    (function { member; entry = Source source } -> Some (member, source) | _ -> None)
+    (function { member; entry = Origin origin } -> Some (member, origin) | _ -> None)
     (list_class_log state index)
 
-let find_variable_source state (type_ : Types.ty) =
+let find_variable_origin state (type_ : Types.ty) =
   match resolve state type_ with
-  | Types.Variable index -> Option.map snd (find_class_source state index)
+  | Types.Variable index -> Option.map snd (find_class_origin state index)
   | _ -> None
 
-let make_goal_decided_type state = Unify.make_fresh_type state.unifier
-
-let make_fresh_type state source =
-  let fresh = make_goal_decided_type state in
-  record_in_log state state.unifier.next (Source source);
+let make_fresh_type state origin =
+  let fresh = Unify.make_fresh_type state.unifier in
+  record_in_log state state.unifier.next (Origin origin);
   fresh
 
-let make_goal_decided_argument state (generic : Types.generic) =
-  match generic.kind with
-  | Value_generic -> Types.Value (Unify.make_fresh_value state.unifier)
-  | Type_generic _ -> Types.Type (make_goal_decided_type state)
-
-let make_goal_decided_arguments state generics =
-  List.map (make_goal_decided_argument state) generics
-
-let make_fresh_generic_arguments state generics (source_of : Types.generic -> source) =
+let make_fresh_generic_arguments state generics (origin_of : Types.generic -> origin) =
   List.map
     (fun generic ->
-      let argument = make_goal_decided_argument state generic in
-      record_in_log state state.unifier.next (Source (source_of generic));
+      let argument = Unify.make_fresh_argument state.unifier generic in
+      record_in_log state state.unifier.next (Origin (origin_of generic));
       argument)
     generics
 
@@ -411,7 +400,7 @@ let unify_as_hint state actual expected =
   let skip_outputs type_ =
     Types.map
       (function
-        | Types.Variable index when is_output index -> Some (make_goal_decided_type state)
+        | Types.Variable index when is_output index -> Some (Unify.make_fresh_type state.unifier)
         | _ -> None)
       (zonk state type_)
   in

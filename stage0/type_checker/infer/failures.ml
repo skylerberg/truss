@@ -65,6 +65,16 @@ let explain_decision (site : State.decision_site) ~name ~decided =
 
 let make_declaration_remedy name = Printf.sprintf "Declare `%s` with a type." name
 
+let show_declaration : Path.t -> string = function
+  | Method { owner; name; _ } -> Path.show_name owner ^ "." ^ name
+  | path -> Path.show_name path
+
+let make_bracket_remedy declared_on (parameter : Types.generic) =
+  Printf.sprintf "Give `%s` its %s in brackets." (show_declaration declared_on)
+    (match parameter.kind with
+    | Types.Type_generic _ -> "type arguments"
+    | Value_generic -> "arguments")
+
 let find_log_report (state : State.state) ~fixes code span message (root, wanted) =
   let entries =
     List.map (fun (logged : State.logged) -> logged.entry) (State.list_class_log state root)
@@ -82,7 +92,7 @@ let find_log_report (state : State.state) ~fixes code span message (root, wanted
             State.is_within state wanted Types.number_types
             && not (State.is_within state wanted allowed)
         | State.Decided { decided_type; _ } -> not (Types.equal decided_type wanted_type)
-        | State.Local _ | State.Source _ -> false)
+        | State.Local _ | State.Origin _ -> false)
       entries
   with
   | Some (State.Literal { allowed; _ })
@@ -132,7 +142,7 @@ let find_log_report (state : State.state) ~fixes code span message (root, wanted
       in
       Unify.poison state.unifier root report;
       Some report
-  | Some (State.Literal _ | State.Local _ | State.Source _) | None -> None
+  | Some (State.Literal _ | State.Local _ | State.Origin _) | None -> None
 
 let add_mismatch_diagnostic (state : State.state) ?(fixes = []) code
     (span : Source.Definition_span.t) ~(sides : (Types.ty * Types.ty) list) message =

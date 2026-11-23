@@ -344,7 +344,8 @@ and lookup_trait_static_methods (state : State.state) path name =
              {
                path;
                arguments =
-                 State.make_goal_decided_arguments state
+                 List.map
+                   (Unify.make_fresh_argument state.unifier)
                    (Instantiation.read_type_generics state path);
              })
           name))

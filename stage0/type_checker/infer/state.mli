@@ -34,10 +34,9 @@ type cause =
   | Any_conversion of { at : Source.Definition_span.t; any_type : Types.ty }
   | Excluded of (Types.ty -> Diagnostic.reported)
 
-type source =
+type origin =
   | List_literal of Syntax.id
   | Map_literal of Syntax.id
-  | Unbounded_range of Syntax.id
   | Generic_argument of { written : Syntax.id; parameter : Types.generic; declared_on : Path.t }
 
 type goal = {
@@ -74,7 +73,7 @@ type entry =
       report_excluded : Types.ty -> Diagnostic.reported;
     }
   | Local of Syntax.id
-  | Source of source
+  | Origin of origin
   | Decided of {
       site : decision_site;
       decided_type : Types.ty;
@@ -167,16 +166,14 @@ val read_context : state -> Interface.Elaborator.t
 val check_when_final : state -> (unit -> unit) -> unit
 val resolve : state -> Types.ty -> Types.ty
 val zonk : state -> Types.ty -> Types.ty
-val make_fresh_type : state -> source -> Types.ty
-val make_goal_decided_type : state -> Types.ty
+val make_fresh_type : state -> origin -> Types.ty
 
 val make_fresh_generic_arguments :
-  state -> Types.generic list -> (Types.generic -> source) -> Types.argument list
+  state -> Types.generic list -> (Types.generic -> origin) -> Types.argument list
 
-val make_goal_decided_arguments : state -> Types.generic list -> Types.argument list
 val list_class_log : state -> int -> logged list
-val find_class_source : state -> int -> (int * source) option
-val find_variable_source : state -> Types.ty -> source option
+val find_class_origin : state -> int -> (int * origin) option
+val find_variable_origin : state -> Types.ty -> origin option
 val lookup_bounds : state -> Interface.Properties.Bounds.t
 val normalize : state -> Types.ty -> Types.ty
 val find_domain : state -> Types.ty -> Language.Builtin_type.t list option

@@ -444,7 +444,7 @@ and check_trait_method_through_type state env ?expected:_ ?trait_arguments
       check_trait_method_call state env value self_type trait method_ arguments ~trait_arguments
   | None ->
       check_trait_method_call state env value self_type trait method_ arguments
-        ~trait_arguments:(State.make_goal_decided_arguments state trait_generics)
+        ~trait_arguments:(List.map (Unify.make_fresh_argument state.unifier) trait_generics)
 
 and check_trait_method_call state env (value : Syntax.expression) self_type
     (trait : Types.trait_reference) (method_ : Types.trait_method) arguments ~trait_arguments =
@@ -505,7 +505,7 @@ and check_trait_call_in_full state env (value : Syntax.expression) trait ~trait_
   with
   | Some method_ ->
       check_trait_method_through_type state env ?trait_arguments value
-        (State.make_goal_decided_type state)
+        (Unify.make_fresh_type state.unifier)
         (Instantiation.make_fresh_trait_reference state trait)
         method_ arguments
   | None when Members.list_trait_methods state.lookups trait member.text <> [] ->
@@ -528,7 +528,7 @@ and check_trait_call_in_full state env (value : Syntax.expression) trait ~trait_
                  ~name:member.text ~receiver:wanted))
       with
       | Some (declared_by, method_) ->
-          let self_type = State.make_goal_decided_type state in
+          let self_type = Unify.make_fresh_type state.unifier in
           Solver.require state
             (Method_call (State.read_span state value.id))
             self_type

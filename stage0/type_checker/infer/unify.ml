@@ -44,6 +44,11 @@ let make_fresh_number unifier domain =
 
 let make_fresh_value unifier = Types.Value_variable (allocate_unknown unifier)
 
+let make_fresh_argument unifier (generic : Types.generic) =
+  match generic.kind with
+  | Value_generic -> Types.Value (make_fresh_value unifier)
+  | Type_generic _ -> Types.Type (make_fresh_type unifier)
+
 let make_fresh_capability_variable unifier =
   unifier.capability_variable_count <- unifier.capability_variable_count + 1;
   Types.make_capability_set [ Types.Capability_variable unifier.capability_variable_count ]

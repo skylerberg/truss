@@ -54,7 +54,7 @@ let rec flatten_into (state : State.state) cause ~projections ~add type_ =
             | Some output -> output
             | None ->
                 let flatten = flatten_into state cause ~projections ~add in
-                let output = State.make_goal_decided_type state in
+                let output = Unify.make_fresh_type state.unifier in
                 projections := (projection, output) :: !projections;
                 let goal =
                   make_goal state (flatten base)
@@ -193,7 +193,8 @@ let select (state : State.state) (goal : State.goal) trait ~subject
       in
       let substitution =
         Types.combine_substitutions substitution
-          (Types.make_substitution unbound (State.make_goal_decided_arguments state unbound))
+          (Types.make_substitution unbound
+             (List.map (Unify.make_fresh_argument state.unifier) unbound))
       in
       if
         not
@@ -474,16 +475,6 @@ let list_frame_unknowns (state : State.state) (frame : State.frame) =
 
 let list_goal_unknowns state goal = list_goal_inputs state goal @ list_output_unknowns state goal
 
-let show_declaration : Path.t -> string = function
-  | Method { owner; name; _ } -> Path.show_name owner ^ "." ^ name
-  | path -> Path.show_name path
-
-let make_bracket_remedy declared_on (parameter : Types.generic) =
-  Printf.sprintf "Give `%s` its %s in brackets." (show_declaration declared_on)
-    (match parameter.kind with
-    | Types.Type_generic _ -> "type arguments"
-    | Value_generic -> "arguments")
-
 let report_undetermined (state : State.state) (frame : State.frame) unsolved =
   let quote id = State.quote_span state (State.read_span state id) in
   let holds_unsolved id =
@@ -503,15 +494,15 @@ let report_undetermined (state : State.state) (frame : State.frame) unsolved =
         (Printf.sprintf "The type of `%s` cannot be inferred from this statement alone. %s" name
            (Failures.make_declaration_remedy name))
   | None -> (
-      let sources =
+      let origins =
         List.sort
           (fun (first, _) (second, _) -> Int.compare first second)
           (List.filter_map
              (fun (Unify.Unknown_type index | Unknown_value index) ->
-               State.find_class_source state index)
+               State.find_class_origin state index)
              unsolved)
       in
-      match sources with
+      match origins with
       | (_, Generic_argument { written; parameter; declared_on }) :: _ ->
           let kind =
             match parameter.kind with
@@ -520,8 +511,9 @@ let report_undetermined (state : State.state) (frame : State.frame) unsolved =
           in
           report written
             (Printf.sprintf "Nothing here determines `%s`, %s of `%s`. %s" parameter.generic.name
-               kind (show_declaration declared_on)
-               (make_bracket_remedy declared_on parameter))
+               kind
+               (Failures.show_declaration declared_on)
+               (Failures.make_bracket_remedy declared_on parameter))
       | (_, List_literal literal) :: _ ->
           report literal
             (Printf.sprintf
@@ -534,9 +526,6 @@ let report_undetermined (state : State.state) (frame : State.frame) unsolved =
                "Nothing here determines the key and value types of `%s`. Bind the map with a typed \
                 `let`, such as `let ages: Map[String, UInt8] = [:]`."
                (quote literal))
-      | (_, Unbounded_range range) :: _ ->
-          report range
-            (Printf.sprintf "Nothing here determines the bound type of `%s`." (quote range))
       | [] ->
           State.add_diagnostic state Cannot_infer frame.span
             "The types here cannot be inferred from this code alone.")

@@ -102,7 +102,7 @@ and check_operator_call state call ~method_ ~output ~left:((left : Syntax.expres
       ~arguments:(List.map (fun (_, right_type) -> Types.Type right_type) (Option.to_list right))
       (Well_known.make_path owner)
   in
-  let result = State.make_goal_decided_type state in
+  let result = Unify.make_fresh_type state.unifier in
   State.elaborate state call
     (Call
        (Tables.make_method_call reference method_ ~self_type:left_type ~result

@@ -155,7 +155,7 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
               start_type
             end
         | Some only, None | None, Some only -> check_expression state env only
-        | None, None -> State.make_fresh_type state (Unbounded_range value.id)
+        | None, None -> Types.Error Diagnostic.reported_elsewhere
       in
       Types.Named { path = Well_known.make_path Range; arguments = [ Types.Type element ] }
   | Quantified { binder; body; _ } ->

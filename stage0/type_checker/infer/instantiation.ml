@@ -40,14 +40,15 @@ let read_type_generics (state : State.state) (path : Path.t) =
   | Some interface -> interface.type_generics
   | None -> []
 
-let make_generic_source ~written ~declared_on parameter : State.source =
+let make_generic_origin ~written ~declared_on parameter : State.origin =
   Generic_argument { written; parameter; declared_on }
 
 let make_fresh_trait_reference (state : State.state) (trait : Path.t) =
   Types.make_trait_reference trait
     ~arguments:
       (match Interface.Definition.find_trait_interface state.lookups.interface trait with
-      | Some interface -> State.make_goal_decided_arguments state interface.trait_generics
+      | Some interface ->
+          List.map (Unify.make_fresh_argument state.unifier) interface.trait_generics
       | None -> [])
 
 let require_type_bounds (state : State.state) span path arguments =
@@ -62,7 +63,7 @@ let require_type_bounds (state : State.state) span path arguments =
 let instantiate_type state ~written path =
   let arguments =
     State.make_fresh_generic_arguments state (read_type_generics state path)
-      (make_generic_source ~written ~declared_on:path)
+      (make_generic_origin ~written ~declared_on:path)
   in
   require_type_bounds state (State.read_span state written) path arguments;
   arguments
@@ -168,7 +169,7 @@ let instantiate (state : State.state) ~written ~declared_on ?(extra = Types.no_s
     {
       type_arguments =
         State.make_fresh_generic_arguments state signature.generics
-          (make_generic_source ~written ~declared_on);
+          (make_generic_origin ~written ~declared_on);
       capability_arguments =
         List.map
           (fun (parameter : Types.parameter) ->
