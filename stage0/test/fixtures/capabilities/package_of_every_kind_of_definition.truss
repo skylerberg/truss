@@ -7,6 +7,10 @@ public trait Sided {
   fn corners(self) -> Int64 {
     self.sides()
   }
+
+  law sides_are_stable(shape: Self) {
+    shape.sides() == shape.sides()
+  }
 }
 
 impl Sided for Square {
@@ -15,11 +19,26 @@ impl Sided for Square {
   }
 }
 
+proof Sided.sides_are_stable for Square {
+  assert shape.sides() == 4
+}
+
 public capability Ledger {
   fn record(amount: Int64)
 }
 
 public let limit: Int64 = 10
+
+public let Square.smallest_side: Int64 = 1
+
+public fn count_sides(square: Square) -> Int64 {
+  square.sides()
+}
+
+theorem limit_is_ten()
+  ensures limit == 10
+{
+}
 
 fn Square.width(self) -> Int64 {
   self.side

@@ -1125,6 +1125,10 @@ module For_testing = struct
          (list_proof_keys proofs))
 
   let find_proof proofs key = find_proof proofs.database key
+
+  let block_proof (database : t) (key : Resolve.Names.key) =
+    ignore (Tracker.write database Facts.proof ~id:(Ids.of_key key) (Some Blocked))
+
   let lower_roots ?on_bug (database : t) = drain_claimed_items database ?on_bug None
 
   let propagate ?on_bug (database : t) =

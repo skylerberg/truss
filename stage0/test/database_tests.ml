@@ -2045,10 +2045,8 @@ let () =
     ~prepare:(fun database -> ignore (Support.list_proof_states database first_part))
     (fun database -> ignore (Support.list_proof_states database first_part));
   let decide_package database = Support.decide database (In_packages [ app ]) in
-  expect_the_same_work_at_two_sizes
-    "selecting the stale proofs of a package, after every proof is decided," ~prepare:decide_package
-    ~is_counted:(fun count -> String.includes ~affix:"main.stale" count.statement)
-    decide_package;
+  expect_the_same_work_at_two_sizes "deciding a package again, after every proof is decided,"
+    ~prepare:decide_package decide_package;
   Harness.test "listing a file's diagnostics reads no part" (fun () ->
       let database = build [ ("app.main", "fn caller() -> Int64 { \"one\" }\n") ] in
       match
@@ -2059,6 +2057,57 @@ let () =
       | diagnostics, counts ->
           Harness.fail "listed %d diagnostics and counted %s" (List.length diagnostics)
             (String.concat "; " (List.map show_counts counts)))
+
+let () =
+  Harness.test "a blocked proof in a package with no error is a compiler bug" (fun () ->
+      let database = build [ ("app.main", "public fn one() -> Int64 { 1 }\n") ] in
+      let main = Support.parse_file "app.main" in
+      ignore (Support.prove database main);
+      Database.For_testing.block_proof database
+        { module_ = main.module_; path = Support.make_top_path "app.main" "one"; ordinal = 0 };
+      List.iter
+        (fun (scope : Database.proof_scope) ->
+          match Database.prove database scope with
+          | _ -> Harness.fail "no bug is raised"
+          | exception Compiler_bug.Bug bug when String.includes ~affix:"is blocked" bug.message ->
+              ()
+          | exception Compiler_bug.Bug bug -> Harness.fail "raised %s" (Compiler_bug.to_string bug))
+        [ In_packages [ app ]; In_files [ main ] ]);
+  Harness.test "every kind of written definition has a proof" (fun () ->
+      let packages =
+        Support.setup [ ("app.main", Fixtures.Capabilities.package_of_every_kind_of_definition) ]
+      in
+      let proofs = Database.prove (Support.make_database packages) (In_packages [ app ]) in
+      let declarations = Support.list_declarations packages (Support.parse_module "app.main") in
+      List.iter
+        (fun (declaration : Resolve.Names.declaration) ->
+          match Database.For_testing.find_proof proofs declaration.key with
+          | Some (Value _) -> ()
+          | Some (Failed | Blocked) ->
+              Harness.fail "the proof of %s is blocked" (Resolve.Names.show_key declaration.key)
+          | None -> Harness.fail "%s has no proof" (Resolve.Names.show_key declaration.key))
+        declarations;
+      List.iter
+        (fun (kind : Resolve.Names.kind) ->
+          if
+            not
+              (List.exists
+                 (fun (declaration : Resolve.Names.declaration) -> declaration.kind = kind)
+                 declarations)
+          then Harness.fail "the package lacks %s" (Resolve.Names.show_kind kind))
+        [
+          Function;
+          Type;
+          Trait;
+          Capability;
+          Constant;
+          Theorem;
+          Method;
+          Member_constant;
+          Impl;
+          Test;
+          Law_proof;
+        ])
 
 let () =
   Harness.test "a package build writes no edge that only records a read" (fun () ->
