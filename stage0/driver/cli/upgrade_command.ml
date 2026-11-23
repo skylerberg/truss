@@ -107,8 +107,7 @@ type signature = {
   dependents : Path.t list;
 }
 
-let list_signatures snapshot trial =
-  let database = Workspace.open_database snapshot and upgraded = Workspace.open_database trial in
+let list_signatures snapshot ~database ~upgraded =
   let project_packages = List.map snd (Workspace.list_packages snapshot) in
   let is_in_project path = List.mem (Path.locate_package path) project_packages in
   let changed =
@@ -148,10 +147,9 @@ let list_signatures snapshot trial =
          :: signatures)
        dependents [])
 
-let list_new_errors snapshot trial =
+let list_new_errors snapshot upgraded_snapshot ~database ~upgraded =
   let project_packages = List.map snd (Workspace.list_packages snapshot) in
-  let list_diagnostics (snapshot : Workspace.snapshot) =
-    let database = Workspace.open_database snapshot in
+  let list_diagnostics (snapshot : Workspace.snapshot) database =
     List.map Project.show_problem (Workspace.problems snapshot)
     @ List.concat_map
         (fun file ->
@@ -161,8 +159,10 @@ let list_new_errors snapshot trial =
             (Database.list_file_diagnostics database file))
         (List.concat_map (Workspace.list_package_files snapshot) project_packages)
   in
-  let now = list_diagnostics snapshot in
-  List.filter (fun diagnostic -> not (List.mem diagnostic now)) (list_diagnostics trial)
+  let now = list_diagnostics snapshot database in
+  List.filter
+    (fun diagnostic -> not (List.mem diagnostic now))
+    (list_diagnostics upgraded_snapshot upgraded)
 
 let encode_signature (changed : signature) =
   Json.Object
@@ -220,9 +220,18 @@ let run ~names =
         0
       end
       else begin
-        let trial = Workspace.make_trial snapshot [ (Project.lock_file, Some plan.text) ] in
-        let signatures = list_signatures snapshot trial in
-        let broken = list_new_errors snapshot trial in
+        let upgraded_snapshot =
+          Workspace.make_overlay snapshot [ (Project.lock_file, Some plan.text) ]
+        in
+        let database = Database.copy (Workspace.open_database snapshot) in
+        let signatures, broken =
+          Fun.protect
+            ~finally:(fun () -> Database.close_uncommitted database)
+            (fun () ->
+              let upgraded = Workspace.open_database upgraded_snapshot in
+              ( list_signatures snapshot ~database ~upgraded,
+                list_new_errors snapshot upgraded_snapshot ~database ~upgraded ))
+        in
         Command_packages.write_file (lock_file snapshot) plan.text;
         report ~lock ~signatures ~broken;
         if broken = [] then 0 else 1
