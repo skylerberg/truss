@@ -462,6 +462,7 @@ impl Default for Set[Element: Hash + Ordered] {
     ensures result.length() == 0
     ensures forall value: Element => !result.model().contains(value)
     cost time O(1)
+    cost amortized time O(1)
     cost allocations == 0
   {
     Set(map: map.Map.default())

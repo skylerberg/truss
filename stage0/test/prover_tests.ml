@@ -2545,6 +2545,8 @@ let () =
     (fun () -> expect_proven Fixtures.Prover.derived_methods_of_constant_time_fields);
   Harness.test "a derived default spends its fields' defaults" (fun () ->
       expect_proven Fixtures.Prover.derived_default_of_settings);
+  Harness.test "a derived default of standard collections and numbers is constant time" (fun () ->
+      expect_proven Fixtures.Prover.derived_default_of_a_registry);
   Harness.test "a derived default spends the allocation of a written list default" (fun () ->
       expect_not_proven Fixtures.Prover.derived_default_of_settings_without_allocations
         "prover.cost");

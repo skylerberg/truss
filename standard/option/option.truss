@@ -286,6 +286,7 @@ impl Default for Option[Value] {
   fn default() -> Option[Value]
     ensures result is None
     cost time O(1)
+    cost amortized time O(1)
     cost allocations == 0
   {
     None

@@ -659,13 +659,13 @@ let is_static ~has_own_generics (amount : Mir.formula) =
            | Identical _ | Applied _ | Method_cost _ | Map _ | Quantified _ -> false))
 
 let find_static_bound context frame (metric : Language.Metric.t) (clauses : State.clauses)
-    ~has_own_generics ~substitution ~self_type =
+    ~has_own_generics ~is_amortized ~substitution ~self_type =
   let counter = Costs.make_operand_counter metric in
   let substitution = Types.combine_substitutions substitution clauses.bindings in
   List.find_map
     (fun (cost : Mir.cost) ->
       if
-        cost.amortized
+        cost.amortized <> is_amortized
         || (not (is_same_resource cost ~locals:Locals.empty counter))
         || not (Conditions.holds_here context ~substitution cost.holds_when)
       then None
@@ -687,7 +687,7 @@ let find_body_cost (context : State.context) frame (metric : Language.Metric.t) 
     ~self_type =
   match (Contracts.find_source context.lookups path, Mir.read_code context.lookups.mir path) with
   | Some (source, _, _), Some { form = code; _ } -> (
-      let counter = Costs.make_operand_counter metric in
+      let counter = { (Costs.make_operand_counter metric) with amortized = metric = Time } in
       let outer_counters = context.counters in
       context.counters <- [ counter ];
       let start =
@@ -755,23 +755,42 @@ let find_method_cost_bound context frame (metric : Language.Metric.t) (method_ :
                   && (match signature.receiver with Some (Mut, ty) -> not (holds ty) | _ -> true)
                   && match signature.output with Returns ty -> not (holds ty) | _ -> false
                 in
+                let changes_no_argument_potential =
+                  List.for_all
+                    (fun (parameter : Types.parameter_info) ->
+                      parameter.mode = Language.Mode.Read || not (holds parameter.type_))
+                    signature.parameters
+                  &&
+                  match signature.receiver with
+                  | Some ((Mut | Own), ty) -> not (holds ty)
+                  | Some (Read, _) | None -> true
+                in
+                let find_stated_bound ~is_amortized =
+                  Option.bind
+                    (Contracts.find_method_contract context reference name receiver
+                       (Impl { impl; substitution }))
+                    (fun contract ->
+                      List.find_map
+                        (fun (clauses : State.clauses) ->
+                          find_static_bound context frame metric clauses ~has_own_generics
+                            ~is_amortized
+                            ~substitution:
+                              (if clauses.inherited then
+                                 Contracts.make_trait_substitution context.lookups reference
+                                   self_type
+                               else substitution)
+                            ~self_type:(Some self_type))
+                        (Contracts.list_declared_clauses contract))
+                in
                 let stated_bound =
-                  if includes_potential_made && not makes_no_potential then None
-                  else
-                    Option.bind
-                      (Contracts.find_method_contract context reference name receiver
-                         (Impl { impl; substitution }))
-                      (fun contract ->
-                        List.find_map
-                          (fun (clauses : State.clauses) ->
-                            find_static_bound context frame metric clauses ~has_own_generics
-                              ~substitution:
-                                (if clauses.inherited then
-                                   Contracts.make_trait_substitution context.lookups reference
-                                     self_type
-                                 else substitution)
-                              ~self_type:(Some self_type))
-                          (Contracts.list_declared_clauses contract))
+                  match
+                    if includes_potential_made && not makes_no_potential then None
+                    else find_stated_bound ~is_amortized:false
+                  with
+                  | Some bound -> Some bound
+                  | None when includes_potential_made && changes_no_argument_potential ->
+                      find_stated_bound ~is_amortized:true
+                  | None -> None
                 in
                 match (stated_bound, impl) with
                 | Some bound, _ -> Some bound
@@ -795,7 +814,7 @@ let find_function_value_cost context frame (metric : Language.Metric.t) callee ~
         (fun (clauses : State.clauses) ->
           find_static_bound context frame metric clauses
             ~has_own_generics:(signature.capability_parameters <> [])
-            ~substitution ~self_type:None)
+            ~is_amortized:false ~substitution ~self_type:None)
         (Contracts.list_declared_clauses contract)
   | _ -> None
 

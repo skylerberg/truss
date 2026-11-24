@@ -660,6 +660,7 @@ fn divide_magnitudes(dividend: Slice[UInt64], divisor: Slice[UInt64]) -> DigitDi
 public fn BigInteger.zero() -> BigInteger
   ensures result.model() == 0
   cost time O(1)
+  cost amortized time O(1)
   cost allocations == 0
 {
   BigInteger(negative: false, magnitude: [])
@@ -1328,6 +1329,7 @@ proof Ordered.transitive for BigInteger {
 impl Default for BigInteger {
   fn default() -> BigInteger
     cost time O(1)
+    cost amortized time O(1)
     cost allocations == 0
   {
     BigInteger.zero()
@@ -1417,6 +1419,7 @@ public fn Decimal.new(coefficient: own BigInteger, scale: Int32) -> Decimal
 
 public fn Decimal.zero() -> Decimal
   cost time O(1)
+  cost amortized time O(1)
   cost allocations == 0
 {
   Decimal(coefficient: BigInteger.zero(), scale: 0)
@@ -1776,6 +1779,7 @@ proof Hash.agrees_with_equal for Decimal {
 impl Default for Decimal {
   fn default() -> Decimal
     cost time O(1)
+    cost amortized time O(1)
     cost allocations == 0
   {
     Decimal.zero()

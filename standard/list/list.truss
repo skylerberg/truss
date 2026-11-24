@@ -851,6 +851,7 @@ impl Default for List[Element] {
   fn default() -> List[Element]
     ensures result.length() == 0
     cost time O(1)
+    cost amortized time O(1)
     cost allocations == 0
   {
     []

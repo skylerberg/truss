@@ -653,6 +653,7 @@ impl Default for Map[Key: Hash + Ordered, Value] {
     ensures result.length() == 0
     ensures forall key: Key => !result.model().contains_key(key)
     cost time O(1)
+    cost amortized time O(1)
     cost allocations == 0
   {
     Map(keys: [], values: [], index: HashIndex(places: [], slots: [], overflow: Tree.Leaf))
