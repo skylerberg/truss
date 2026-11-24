@@ -17,6 +17,7 @@ module Elaborator : sig
   val list_diagnostics : t -> Diagnostic.in_definition list
   val list_named_types : t -> (Syntax.id * Types.ty) list
   val show_path : Syntax.path -> string
+  val split_field_path : Syntax.expression -> (string * Syntax.name list) option
   val elaborate_type : t -> Syntax.type_expression -> Types.ty
   val elaborate_condition : t -> Syntax.condition -> Types.condition
   val add_condition : t -> Types.condition -> t

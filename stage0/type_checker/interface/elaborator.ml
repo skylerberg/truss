@@ -971,11 +971,9 @@ let elaborate_modifies context (signature : Types.signature) (clauses : Syntax.c
         | Some position -> Some (value, root, { Types.position; field_path = fields }))
   in
   let remove_entry (entries : Syntax.expression list) index =
-    let locate position = context.spans.((List.nth entries position).id) in
-    if index = 0 then
-      Diagnostic.delete (Source.Definition_span.make (locate 0).start (locate 1).start)
-    else
-      Diagnostic.delete (Source.Definition_span.make (locate (index - 1)).stop (locate index).stop)
+    Diagnostic.delete_list_entry
+      (List.map (fun (entry : Syntax.expression) -> context.spans.(entry.id)) entries)
+      index
   in
   let is_contained ~index (part : Types.modified) ~other_index (other : Types.modified) =
     other_index <> index && other.position = part.position

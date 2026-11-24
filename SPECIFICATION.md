@@ -1058,6 +1058,12 @@ fn Reader.start_word(mut self) -> UInt64
   `modifies` changes the parts that it names of its arguments. A change
   outside the clause is an error, since the proofs of the callers take
   every other part to keep its value.
+- **A part that the clause names and the body never changes is a
+  warning,** since the proofs of the callers do not learn that the part
+  keeps its value. Where no part of a parameter that the clause names
+  changes, the parameter need not be `mut`. A trait's method is not
+  checked, since its clause bounds what every implementation changes, and
+  neither is a body with a `todo`.
 - A caller that cannot see the fields of a parameter's type, because the
   type is opaque in another package, takes every part of the argument as
   changed.

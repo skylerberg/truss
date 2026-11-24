@@ -212,6 +212,7 @@ module Code = struct
     | Unused_function
     | Unused_constant
     | Unused_run_forever
+    | Unmodified_part
     | Unreachable_code
     | Self_comparison
 
@@ -510,6 +511,7 @@ module Code = struct
     | Unused_function -> "unused_function"
     | Unused_constant -> "unused_constant"
     | Unused_run_forever -> "unused_run_forever"
+    | Unmodified_part -> "unmodified_part"
     | Unreachable_code -> "unreachable_code"
     | Self_comparison -> "self_comparison"
 
@@ -620,6 +622,16 @@ let fix title edits = { title; edits }
 let replace span replacement = { span; replacement }
 let insert at replacement = { span = at; replacement }
 let delete span = { span; replacement = "" }
+
+let delete_list_entry (entries : Source.Definition_span.t list) index =
+  match (index, List.nth_opt entries index) with
+  | 0, Some first -> (
+      match List.nth_opt entries 1 with
+      | Some second -> delete (Source.Definition_span.make first.start second.start)
+      | None -> invalid_arg "Diagnostic.delete_list_entry: the only entry of a list")
+  | _, Some entry ->
+      delete (Source.Definition_span.make (List.nth entries (index - 1)).stop entry.stop)
+  | _, None -> invalid_arg "Diagnostic.delete_list_entry: an index past the list"
 
 let find_closest text candidates =
   let limit = max 1 (String.length text / 3) in

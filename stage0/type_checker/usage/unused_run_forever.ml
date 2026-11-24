@@ -23,6 +23,18 @@ let rec skip_spaces_after text position =
     skip_spaces_after text (position + 1)
   else position
 
+let delete_clause ~text ~is_only_clause (clause : Source.Definition_span.t) =
+  let start = skip_spaces_before text clause.start in
+  let brace = skip_spaces_after text clause.stop in
+  let is_brace_on_own_line =
+    brace < String.length text
+    && text.[brace] = '{'
+    && String.contains (String.sub text clause.stop (brace - clause.stop)) '\n'
+  in
+  if is_only_clause && is_brace_on_own_line then
+    Diagnostic.replace (Source.Definition_span.make start brace) " "
+  else Diagnostic.delete (Source.Definition_span.make start clause.stop)
+
 let locate_use spans (use : Syntax.capability_use) =
   let locate id = Source.Definition_span.locate spans id in
   let capability = locate use.capability.id in
@@ -36,24 +48,10 @@ let locate_use spans (use : Syntax.capability_use) =
 
 let make_removal ~text ~spans (signature : Syntax.signature) (clause : Syntax.clause)
     (uses : Syntax.capability_use list) index =
-  let locate_entry position = locate_use spans (List.nth uses position) in
   if List.length uses = 1 then
-    let clause_span = Source.Definition_span.locate spans clause.id in
-    let start = skip_spaces_before text clause_span.start in
-    let brace = skip_spaces_after text clause_span.stop in
-    let is_brace_on_own_line =
-      brace < String.length text
-      && text.[brace] = '{'
-      && String.contains (String.sub text clause_span.stop (brace - clause_span.stop)) '\n'
-    in
-    if signature.clauses = [ clause ] && is_brace_on_own_line then
-      Diagnostic.replace (Source.Definition_span.make start brace) " "
-    else Diagnostic.delete (Source.Definition_span.make start clause_span.stop)
-  else if index = 0 then
-    Diagnostic.delete (Source.Definition_span.make (locate_entry 0).start (locate_entry 1).start)
-  else
-    Diagnostic.delete
-      (Source.Definition_span.make (locate_entry (index - 1)).stop (locate_entry index).stop)
+    delete_clause ~text ~is_only_clause:(signature.clauses = [ clause ])
+      (Source.Definition_span.locate spans clause.id)
+  else Diagnostic.delete_list_entry (List.map (locate_use spans) uses) index
 
 let list_run_forever_entries (signature : Syntax.signature) =
   List.concat_map

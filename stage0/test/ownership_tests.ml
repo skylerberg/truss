@@ -32,8 +32,11 @@ let () =
          \  }\n\
           }\n");
       let step body =
-        scanner ^ "public fn step(scanner: mut Scanner)\n  modifies scanner.region.stop\n{\n" ^ body
-        ^ "\n}\n"
+        scanner
+        ^ "public fn step(scanner: mut Scanner)\n\
+          \  modifies scanner.region.stop\n\
+           {\n\
+          \  scanner.region.stop = 1\n" ^ body ^ "\n}\n"
       in
       expect_one_diagnostic (step "  scanner.count = 1") "ownership.undeclared_change"
         ~says:"`scanner.count` changes here, and the `modifies` clause of `step` does not name it."
@@ -42,6 +45,7 @@ let () =
          ^ "public fn step(scanner: mut Scanner)\n\
            \  modifies scanner.region.stop, scanner.count\n\
             {\n\
+           \  scanner.region.stop = 1\n\
            \  scanner.count = 1\n\
             }\n");
       expect_one_diagnostic (step "  advance(mut scanner)") "ownership.undeclared_change"
@@ -57,6 +61,21 @@ let () =
          \  scanner = own other\n\
           }\n")
         "ownership.undeclared_change" ~says:"All of `scanner` changes here");
+  Harness.test "a modifies entry that the body never changes is a warning" (fun () ->
+      let scanner = "public type Scanner(position: UInt64, count: UInt64)\n" in
+      let changing ~parts ~body =
+        scanner ^ "public fn f(scanner: mut Scanner)\n  modifies " ^ parts ^ "\n{\n" ^ body
+        ^ "\n}\n"
+      in
+      expect_one_diagnostic
+        (changing ~parts:"scanner.position, scanner.count" ~body:"  scanner.position = 0")
+        "usage.unmodified_part"
+        ~says:"`f` never changes `scanner.count`, so the proofs of its callers do not learn"
+        ~fixed:(changing ~parts:"scanner.position" ~body:"  scanner.position = 0");
+      expect_one_diagnostic
+        (changing ~parts:"scanner.count" ~body:"  let _ = scanner.position")
+        "usage.unmodified_part" ~says:"`scanner` need not be `mut`";
+      expect_fine (changing ~parts:"scanner.count" ~body:"  todo"));
   Harness.test "an impl's method without a modifies clause changes only its trait's parts"
     (fun () ->
       expect_one_diagnostic
