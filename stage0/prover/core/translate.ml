@@ -53,6 +53,7 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       callbacks = [];
       counters = [];
       bounded_counters = [];
+      recursive_costs_assumed = 0;
       fresh_order = Tables.Symbol_table.create 64;
       logs = [];
       powers = [];

@@ -1,0 +1,15 @@
+fn linear(count: UInt64) -> UInt64
+  cost time O(count)
+{
+  count
+}
+
+fn f(count: UInt64) -> UInt64
+  cost time O(1)
+{
+  var total: UInt64 = 0
+  for _ in 0..1114112 {
+    total = linear(count)
+  }
+  total
+}

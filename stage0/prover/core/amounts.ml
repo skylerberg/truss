@@ -62,16 +62,18 @@ let compute_amount_within context frame (counter : Costs.counter) bound =
   | Units -> bound
   | At_most | Exactly -> declare_bounded_amount context frame bound
 
-let compute_promised_amount context frame (counter : Costs.counter) (bound : Mir.bound) ~evaluate
-    ~is_recursive_call ~exact_target ~change =
+let compute_promised_amount (context : State.context) frame (counter : Costs.counter)
+    (bound : Mir.bound) ~evaluate ~is_recursive_call ~exact_target ~change =
   match (bound, counter.counting) with
   | Order_of amount, Units ->
       let amount = evaluate amount in
       let amount =
-        if is_recursive_call then
+        if is_recursive_call then begin
+          context.recursive_costs_assumed <- context.recursive_costs_assumed + 1;
           let hypothesis = Costs.at_least_zero (Costs.bound amount) in
           if counter.resource = Metric Time then Costs.plus hypothesis (Logic.int 1) else hypothesis
-        else Costs.units amount
+        end
+        else Costs.units (if change = Costs.zero then Costs.reduce_constants amount else amount)
       in
       Costs.minus amount change
   | (At_most amount | Exactly amount), Units ->
@@ -674,11 +676,16 @@ let find_static_bound context frame (metric : Language.Metric.t) (clauses : Stat
         | (Units, Order_of amount | (At_most | Exactly), (At_most amount | Exactly amount))
           when is_static ~has_own_generics amount -> (
             try
+              let bound =
+                snd
+                  (Validity.read_specification context
+                     (make_static_frame frame clauses.callee ~substitution ~self_type)
+                     amount)
+              in
               Some
-                (snd
-                   (Validity.read_specification context
-                      (make_static_frame frame clauses.callee ~substitution ~self_type)
-                      amount))
+                (match counter.counting with
+                | Units -> Costs.reduce_constants bound
+                | At_most | Exactly -> bound)
             with Facts.Unsupported _ -> None)
         | (Units | At_most | Exactly), (Order_of _ | At_most _ | Exactly _) -> None)
     clauses.costs
