@@ -95,5 +95,8 @@ let check (context : Context.context) (key : Resolve.Names.key) (tree : Mir.t) =
                   | Some _ | None -> ())
               | Constant _ | Literal _ -> ())
             (Mir.list_changed_places
-               ~list_modified:(Mir.list_callee_modified_fields interface Types.no_substitution)
+               ~list_modified:
+                 (Mir.list_callee_modified_fields
+                    ~read_signature:(Interface.Impls.read_signature interface)
+                    interface Types.no_substitution)
                [ tree.body.code ]))

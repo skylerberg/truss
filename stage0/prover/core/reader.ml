@@ -309,8 +309,9 @@ let compute_changes ?(also = []) context run (frame : State.frame) (blocks : Mir
          (fun (_, place) -> list_parts place)
          (Mir.list_changed_places
             ~list_modified:
-              (Mir.list_callee_modified_fields (context : State.context).lookups.interface
-                 frame.substitution)
+              (Mir.list_callee_modified_fields
+                 ~read_signature:(Contracts.read_signature context)
+                 context.lookups.interface frame.substitution)
             blocks)
       @ List.concat_map list_parts also)
   in
