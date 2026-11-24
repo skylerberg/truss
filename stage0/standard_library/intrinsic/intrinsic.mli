@@ -44,6 +44,7 @@ type scalar =
 
 type buffer =
   | Compare_bytes
+  | Find_byte
   | Storage_empty
   | Storage_with_capacity
   | Storage_length

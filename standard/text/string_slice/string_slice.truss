@@ -468,6 +468,47 @@ internal fn StringSlice.advance(self, pattern: StringSlice, table: Slice[UInt64]
   if self.byte(index) == pattern.byte(current) { current + 1 } else { current }
 }
 
+internal fn StringSlice.find_byte(self, byte: UInt8, from: UInt64) -> UInt64
+  requires from <= self.length()
+  ensures from <= result
+  ensures result <= self.length()
+  ensures result < self.length() ==> self.model()[result] == byte
+  cost time O(result - from)
+  cost allocations == 0
+{
+  from + intrinsic.find_byte(intrinsic.view_slice(self.bytes, start: from, stop: self.length()), byte: byte)
+}
+
+let count_block_length: UInt64 = 192
+
+internal fn StringSlice.count_byte(self, byte: UInt8) -> UInt64
+  ensures result <= self.length()
+  cost time O(self.length())
+  cost allocations == 0
+{
+  var count: UInt64 = 0
+  var start: UInt64 = 0
+  while start < self.length()
+    invariant start <= self.length()
+    invariant count <= start
+    decreases self.length() - start
+    cost time O(start)
+    cost allocations == 0
+  {
+    let stop = if self.length() - start > count_block_length { start + count_block_length } else { self.length() }
+    var block_count: UInt8 = 0
+    for index in start..stop
+      invariant block_count <= index - start
+      cost allocations == 0
+    {
+      block_count += if intrinsic.view_at(self.bytes, index: index) == byte { 1 } else { 0 }
+    }
+    count += intrinsic.convert(block_count)
+    start = stop
+  }
+  count
+}
+
 internal fn StringSlice.find_first(self, pattern: StringSlice, table: Slice[UInt64]) -> Option[UInt64]
   requires pattern.length() > 0
   requires table.length() == pattern.length()
@@ -476,6 +517,7 @@ internal fn StringSlice.find_first(self, pattern: StringSlice, table: Slice[UInt
     && !(offset + pattern.length() <= self.length() && self.is_boundary(offset)))
   cost time O(self.length())
 {
+  let first_byte = pattern.byte(0)
   var has_match = false
   var first: UInt64 = 0
   var matched: UInt64 = 0
@@ -488,6 +530,12 @@ internal fn StringSlice.find_first(self, pattern: StringSlice, table: Slice[UInt
     decreases self.length() - index
     cost time O(2 * index - matched)
   {
+    if matched == 0 {
+      index = self.find_byte(first_byte, from: index)
+      if index == self.length() {
+        break
+      }
+    }
     matched = self.advance(pattern, table: table, matched: matched, index: index)
     index += 1
     if matched == pattern.length() {
@@ -517,6 +565,14 @@ public fn StringSlice.find(self, pattern: StringSlice) -> Option[UInt64]
   if pattern.is_empty() {
     return if self.is_boundary(0) { Some(0) } else { None }
   }
+  if pattern.length() == 1 {
+    let byte = pattern.byte(0)
+    if (byte & 0xC0) == 0x80 {
+      return None
+    }
+    let offset = self.find_byte(byte, from: 0)
+    return if offset < self.length() { Some(offset) } else { None }
+  }
   let table = failure_table(pattern)
   self.find_first(pattern, table: table.slice())
 }
@@ -530,6 +586,7 @@ public fn StringSlice.find_last(self, pattern: StringSlice) -> Option[UInt64]
     return Some(self.length())
   }
   let table = failure_table(pattern)
+  let first_byte = pattern.byte(0)
   var has_match = false
   var last: UInt64 = 0
   var matched: UInt64 = 0
@@ -542,6 +599,12 @@ public fn StringSlice.find_last(self, pattern: StringSlice) -> Option[UInt64]
     decreases self.length() - index
     cost time O(2 * index - matched)
   {
+    if matched == 0 {
+      index = self.find_byte(first_byte, from: index)
+      if index == self.length() {
+        break
+      }
+    }
     matched = self.advance(pattern, table: table.slice(), matched: matched, index: index)
     index += 1
     if matched == pattern.length() {
@@ -590,7 +653,12 @@ public fn StringSlice.occurrences(self, pattern: StringSlice) -> UInt64
   if pattern.is_empty() {
     Panic.crash("the pattern is empty")
   }
+  if pattern.length() == 1 {
+    let byte = pattern.byte(0)
+    return if (byte & 0xC0) == 0x80 { 0 } else { self.count_byte(byte) }
+  }
   let table = failure_table(pattern)
+  let first_byte = pattern.byte(0)
   var count: UInt64 = 0
   var matched: UInt64 = 0
   var index: UInt64 = 0
@@ -602,6 +670,12 @@ public fn StringSlice.occurrences(self, pattern: StringSlice) -> UInt64
     decreases self.length() - index
     cost time O(2 * index - matched)
   {
+    if matched == 0 {
+      index = self.find_byte(first_byte, from: index)
+      if index == self.length() {
+        break
+      }
+    }
     matched = self.advance(pattern, table: table.slice(), matched: matched, index: index)
     index += 1
     if matched == pattern.length() {
@@ -771,6 +845,7 @@ public fn StringSlice.split(self, separator: StringSlice) -> List[StringSlice]
   }
   var parts: List[StringSlice] = []
   let table = failure_table(separator)
+  let first_byte = separator.byte(0)
   var start: UInt64 = 0
   var matched: UInt64 = 0
   var index: UInt64 = 0
@@ -782,6 +857,12 @@ public fn StringSlice.split(self, separator: StringSlice) -> List[StringSlice]
     decreases self.length() - index
     cost time O(2 * index - matched)
   {
+    if matched == 0 {
+      index = self.find_byte(first_byte, from: index)
+      if index == self.length() {
+        break
+      }
+    }
     matched = self.advance(separator, table: table.slice(), matched: matched, index: index)
     index += 1
     if matched == separator.length() {
@@ -813,6 +894,7 @@ public fn StringSlice.split_at_most(self, separator: StringSlice, parts: UInt64)
   }
   var pieces: List[StringSlice] = []
   let table = failure_table(separator)
+  let first_byte = separator.byte(0)
   var start: UInt64 = 0
   var matched: UInt64 = 0
   var index: UInt64 = 0
@@ -827,6 +909,12 @@ public fn StringSlice.split_at_most(self, separator: StringSlice, parts: UInt64)
     decreases self.length() - index
     cost time O(2 * index - matched)
   {
+    if matched == 0 {
+      index = self.find_byte(first_byte, from: index)
+      if index == self.length() {
+        break
+      }
+    }
     matched = self.advance(separator, table: table.slice(), matched: matched, index: index)
     index += 1
     if matched == separator.length() {
@@ -955,6 +1043,7 @@ public fn StringSlice.replace(self, pattern: StringSlice, replacement: StringSli
   let capacity = self.length() + budget
   var output: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(capacity)
   let table = failure_table(pattern)
+  let first_byte = pattern.byte(0)
   var copied: UInt64 = 0
   var matched: UInt64 = 0
   var index: UInt64 = 0
@@ -967,6 +1056,12 @@ public fn StringSlice.replace(self, pattern: StringSlice, replacement: StringSli
     decreases self.length() - index
     cost time O(2 * index - matched + intrinsic.storage_length(output))
   {
+    if matched == 0 {
+      index = self.find_byte(first_byte, from: index)
+      if index == self.length() {
+        break
+      }
+    }
     matched = self.advance(pattern, table: table.slice(), matched: matched, index: index)
     index += 1
     if matched == pattern.length() {

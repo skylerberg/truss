@@ -604,6 +604,17 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
       Facts.assume context frame (Logic.equal (view known) (storage (read_operand 0)));
       known
   | Compare_bytes -> make_byte_order context (view (read_operand 0)) (view (read_operand 1))
+  | Find_byte ->
+      let bytes = view (read_operand 0) and byte = read_operand 1 in
+      let limit = make_index_name () in
+      Facts.assume context frame
+        Logic.(
+          less_equal (int 0) known
+          &&& less_equal known (length bytes)
+          &&& (less known (length bytes) ==> equal (at bytes known) byte));
+      Facts.assume context frame
+        (all limit (Logic.int 0) known Logic.(not_ (equal (at bytes (Symbol limit)) byte)));
+      known
   | View_slice ->
       let start = read_operand 1 and stop = read_operand 2 in
       let whole = view (read_operand 0) and part = view known in
@@ -769,7 +780,7 @@ let translate_intrinsic context frame ~(site : Invocation.site) (operation : Int
   | Buffer buffer ->
       let element =
         match (buffer, types) with
-        | Compare_bytes, _ -> Types.make_builtin UInt8
+        | (Compare_bytes | Find_byte), _ -> Types.make_builtin UInt8
         | _, element :: _ -> element
         | _, [] -> Facts.raise_bug "`%s` has no element type" (Intrinsic.show_operation operation)
       in

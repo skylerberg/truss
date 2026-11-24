@@ -289,8 +289,8 @@ let find_generic_argument context frame (operation : Intrinsic.operation) type_a
       | _ -> None)
     (List.combine generics type_arguments)
 
-let compute_step_amount context frame (invocation : Invocation.t) (values : State.passed list)
-    (counter : Costs.counter) =
+let compute_step_amount ?result context frame (invocation : Invocation.t)
+    (values : State.passed list) (counter : Costs.counter) =
   match invocation.callee with
   | Intrinsic { operation; type_arguments } -> (
       let cost = Intrinsic_signatures.classify_cost operation in
@@ -312,7 +312,11 @@ let compute_step_amount context frame (invocation : Invocation.t) (values : Stat
                       | _ -> Operations.declare_unknown_amount context frame counter)
                   | _ -> Operations.declare_unknown_amount context frame counter)
               | None -> Operations.declare_unknown_amount context frame counter)
-          | (Linear_in _ | Unbounded_time), _ ->
+          | Linear_in_result, Units -> (
+              match result with
+              | Some result -> result
+              | None -> Operations.declare_unknown_amount context frame counter)
+          | (Linear_in _ | Linear_in_result | Unbounded_time), _ ->
               Operations.declare_unknown_amount context frame counter)
       | Metric (Allocations | Allocated_bytes) -> (
           match (cost.allocations, counter.resource, counter.counting) with

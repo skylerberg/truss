@@ -1218,7 +1218,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
         in
         let frame =
           Operations.spend context frame
-            (Amounts.compute_step_amount context frame invocation values)
+            (Amounts.compute_step_amount ~result context frame invocation values)
         in
         Without_contract (Some (frame, result))
   in

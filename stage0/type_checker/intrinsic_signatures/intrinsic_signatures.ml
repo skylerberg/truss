@@ -141,6 +141,12 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
           input "left" (make_view_type (Types.make_builtin UInt8));
           input "right" (make_view_type (Types.make_builtin UInt8));
         ]
+  | Buffer Find_byte ->
+      make ~output:(Returns uint64)
+        [
+          input "bytes" (make_view_type (Types.make_builtin UInt8));
+          input "byte" (Types.make_builtin UInt8);
+        ]
   | Buffer Storage_empty ->
       make ~generics:[ "Element" ] ~output:(Returns (make_storage_type element)) []
   | Buffer Storage_with_capacity ->
@@ -320,7 +326,7 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
   | Runtime (Libc_number number) ->
       make ~output:(Returns (make_libc_scalar_type (Libc.classify_number number))) []
 
-type time = Constant_time | Linear_in of int | Unbounded_time
+type time = Constant_time | Linear_in of int | Linear_in_result | Unbounded_time
 type amount = Argument of int | Generic of string
 type allocations = No_allocations | One_if_positive of amount | Unknown_allocations
 type cost = { time : time; allocations : allocations }
@@ -347,6 +353,7 @@ let classify_cost (operation : Intrinsic.operation) =
   | Runtime Holds_invariant -> { time = Unbounded_time; allocations = Unknown_allocations }
   | Buffer (Compare_bytes | Storage_remove | Storage_insert) | Runtime Environment_entry ->
       { time = Linear_in 0; allocations = No_allocations }
+  | Buffer Find_byte -> { time = Linear_in_result; allocations = No_allocations }
   | Buffer Storage_set_capacity -> { time = Linear_in 0; allocations = Unknown_allocations }
   | Buffer Storage_with_capacity ->
       { time = Constant_time; allocations = One_if_positive (Argument 0) }
