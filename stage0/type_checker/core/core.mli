@@ -97,7 +97,6 @@ and kind =
   | Connective of { connective : Language.Connective.t; left : expression; right : expression }
   | Matches of { value : operand; pattern : pattern }
   | Convert of { conversion : conversion; value : expression }
-  | To_any of { value : expression; trait : Types.trait_reference; evidence : Types.evidence }
   | If of { condition : expression; then_ : block; else_ : block option }
   | Match of { scrutinees : operand list; arms : arm list }
   | Block of block

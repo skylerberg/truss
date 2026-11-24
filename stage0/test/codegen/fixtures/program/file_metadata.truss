@@ -1,6 +1,6 @@
 use standard.files
 
-fn main(arguments: List[String]) -> ExitCode
+fn main(arguments: Slice[String]) -> ExitCode
   uses Console, FileRead, FileWrite, Handles
 {
   let directory = Path.new(arguments[1].slice())

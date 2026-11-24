@@ -403,32 +403,11 @@ let run_list_calls database (row : Store.definition) =
   let path = (Declarations.decode_key row.key).path in
   run_fact database List_calls Facts.call_node row ~id:row.path (fun recorder ->
       let lookups = Lookups.make_call_edges database recorder in
-      (match path with
-      | Method
-          { owner = (Impl { trait = { path = trait; _ }; _ } | Derived { trait; _ }) as impl; _ }
-        when List.exists (Path.equal impl)
-               (lookups.interface.names.list_impls_of_trait (Path.locate_package impl) trait) -> (
-          match Interface.Definition.find_impl_interface lookups.interface impl with
-          | exception Tracker.Reads_failed_fact ->
-              recorder.note Implements (Entity Unknown_implementation) (Ids.of_path trait) ""
-          | None -> ()
-          | Some impl_interface -> (
-              match
-                Mir.Call_edges.find_implemented_declaration lookups.interface impl_interface ~impl
-                  path
-              with
-              | Some declaration ->
-                  recorder.note Implements (Entity Definition) (Ids.of_path declaration) ""
-              | None | (exception Tracker.Reads_failed_fact) -> ()))
-      | Top _ | Method _ | Member_constant _ | Impl _ | Derived _ | Test _ | Law_proof _
-      | Unresolved _ ->
-          ());
       let callees = Mir.Call_edges.list_path_edges lookups path in
-      let node = Mir.Call_edges.find_node lookups path in
       List.iter
         (fun callee -> recorder.note Calls (Entity Definition) (Ids.of_path callee) "")
         callees;
-      (Value { Facts.node; callees }, []))
+      (Value callees, []))
 
 module Integer_node = struct
   type t = int
@@ -440,33 +419,21 @@ end
 
 let group_recursion (database : Tracker.t) ~is_node (rows : Store.definition list) =
   let rank = Kind.rank_stage Group_recursion in
-  let names = Lookups.make_names database Tracker.untracked in
   List.iter
     (fun package ->
       let package_name = Path.show_package package in
-      let visible =
-        List.map Path.show_package
-          (package :: Resolve.Names.list_transitive_dependencies names package)
-      in
-      let graph = Tracker.make_call_graph ~visible in
       let seeds =
-        List.filter_map
-          (fun (row : Store.definition) ->
-            if List.mem row.package visible then Some row.path else None)
-          rows
-      in
-      let own_seeds =
         List.filter_map
           (fun (row : Store.definition) ->
             if row.package = package_name then Some row.path else None)
           rows
       in
       if seeds <> [] then begin
-        let nodes = Store.list_cycle_nodes database.store graph ~seeds in
+        let nodes = Store.list_cycle_nodes database.store Tracker.call_graph ~seeds in
         let successors = Hashtbl.create 64 in
         List.iter
           (fun (source, target) -> Hashtbl.add successors source target)
-          (Store.list_call_pairs database.store graph ~nodes);
+          (Store.list_call_pairs database.store Tracker.call_graph ~nodes);
         let members_of = Hashtbl.create 64 in
         List.iter
           (fun component ->
@@ -485,41 +452,22 @@ let group_recursion (database : Tracker.t) ~is_node (rows : Store.definition lis
              ~paths:
                (List.sort_uniq Int.compare
                   (Hashtbl.fold (fun _ members ids -> members @ ids) members_of [])));
-        let blocked = Hashtbl.create 16 in
-        (match
-           Store.list_targets_of_kind database.store
-             ~kind:(Kind.rank_target (Entity Unknown_implementation))
-             ~visible
-         with
-        | [] -> ()
-        | traits ->
-            List.iter
-              (fun node -> Hashtbl.replace blocked node ())
-              (Store.list_callers_closure database.store graph
-                 ~seeds:(Store.list_paths_owned_by database.store ~owners:traits)));
         let targets =
           List.sort_uniq Int.compare
-            (own_seeds @ List.filter (fun node -> is_node ~package:package_name node) nodes)
+            (seeds @ List.filter (fun node -> is_node ~package:package_name node) nodes)
         in
         Tracker.report_computed Group_recursion targets;
-        let flipped =
-          List.filter
-            (fun node ->
-              ignore (Store.unmark_stale database.store ~stage:rank ~id:node);
-              let outcome : Path.t list Tracker.outcome option =
-                if Hashtbl.mem blocked node then Some Blocked
-                else
-                  Option.map
-                    (fun members : _ Tracker.outcome ->
+        List.iter
+          (fun node ->
+            ignore (Store.unmark_stale database.store ~stage:rank ~id:node);
+            ignore
+              (Tracker.write database Facts.recursion_group ~id:node
+                 (Option.map
+                    (fun members : Path.t list Tracker.outcome ->
                       Value
                         (List.sort Path.compare (List.filter_map (Hashtbl.find_opt paths) members)))
-                    (Hashtbl.find_opt members_of node)
-              in
-              let state_before = Tracker.write database Facts.recursion_group ~id:node outcome in
-              state_before = Some Tracker.Is_blocked <> Hashtbl.mem blocked node)
-            targets
-        in
-        if flipped <> [] then Tracker.mark_callers_to_group database ~seeds:flipped
+                    (Hashtbl.find_opt members_of node))))
+          targets
       end)
     (Store.list_project database.store)
 
@@ -892,17 +840,7 @@ let find_call_edges (database : Tracker.t) (recorder : Tracker.recorder) path =
   match
     Tracker.find database recorder Facts.call_node.whole (Path.locate_package path) ~id:node
   with
-  | Some (Value { node = Definition; callees }) -> Some callees
-  | Some (Value { node = Trait_method_declaration; callees }) ->
-      Some
-        (callees
-        @ List.map
-            (fun (_, key) -> (Declarations.decode_key key).path)
-            (Store.list_keys_of_paths database.store
-               ~paths:
-                 (Store.list_implementers database.store
-                    (Tracker.make_call_graph ~visible:(Store.list_all_packages database.store))
-                    ~node)))
+  | Some (Value callees) -> Some callees
   | Some (Failed | Blocked) -> Some []
   | None -> None
 

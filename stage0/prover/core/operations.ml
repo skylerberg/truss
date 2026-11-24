@@ -106,18 +106,6 @@ let declare_unknown_amount context frame (counter : Costs.counter) =
   Facts.assume context frame (Logic.less_equal (Costs.least_amount counter.resource) amount);
   amount
 
-let convert_to_any context frame (site : Invocation.site) =
-  let frame =
-    spend context frame (fun (counter : Costs.counter) ->
-        match (counter.resource, counter.counting) with
-        | Metric Allocations, _ -> Logic.int 1
-        | Metric Allocated_bytes, Units -> Logic.int 1
-        | Metric Allocated_bytes, (At_most | Exactly) ->
-            declare_unknown_amount context frame counter
-        | (Metric Time | Calls _), _ -> Costs.zero)
-  in
-  (frame, Facts.arrive context frame "any" (Facts.substitute_type context frame site.type_))
-
 let list_impl_packages (context : State.context) (ty : Types.ty) =
   List.sort_uniq compare
     ((match ty with Types.Named { path; _ } -> [ Path.locate_package path ] | _ -> [])

@@ -10,7 +10,7 @@ fn apply(value: Int64, change: (fn(Int64) -> Int64 uses generic Granted)) -> Int
   change(value)
 }
 
-fn each(items: List[Int64], visit: (fn(Int64) uses generic Granted))
+fn each(items: Slice[Int64], visit: (fn(Int64) uses generic Granted))
   uses generic Granted
   cost allocations <= items.length() * allocations(visit)
 {

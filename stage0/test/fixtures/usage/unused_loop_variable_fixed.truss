@@ -1,4 +1,4 @@
-fn f(items: List[Int64]) -> Int64 {
+fn f(items: Slice[Int64]) -> Int64 {
   var count = 0
   for _ in items {
     count = count + 1

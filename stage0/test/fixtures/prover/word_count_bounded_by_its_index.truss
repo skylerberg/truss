@@ -1,4 +1,4 @@
-fn f(words: List[String]) -> Map[String, UInt64] {
+fn f(words: Slice[String]) -> Map[String, UInt64] {
   var counts: Map[String, UInt64] = [:]
   var index: UInt64 = 0
   while index < words.length()

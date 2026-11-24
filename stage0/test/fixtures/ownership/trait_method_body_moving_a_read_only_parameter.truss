@@ -1,5 +1,7 @@
+type Pile(items: List[Int64])
+
 trait Eater {
-  fn eat(self, items: List[Int64]) {
-    keep(own items)
+  fn eat(self, pile: Pile) {
+    keep(own pile.items)
   }
 }

@@ -24,9 +24,6 @@ public fn encode(bytes: Slice[UInt8], uppercase: Bool = false) -> String
   cost time O(bytes.length())
   cost allocations <= 1
 {
-  if bytes.length() > UInt64.maximum / 2 {
-    intrinsic.crash("a string cannot hold that many bytes")
-  }
   var output: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(2 * bytes.length())
   for index in 0..bytes.length()
     invariant intrinsic.storage_length(output) == 2 * index

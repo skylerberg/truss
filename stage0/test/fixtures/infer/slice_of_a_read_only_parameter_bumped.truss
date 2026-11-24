@@ -4,8 +4,8 @@ fn bump(items: mut Slice[Int64])
   items[0] = 9
 }
 
-fn f(items: List[Int64]) -> UInt64 {
-  var part = items.slice()
+fn f(items: Slice[Int64]) -> UInt64 {
+  var part = items
   bump(mut part)
   items.length()
 }

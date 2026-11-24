@@ -1,7 +1,6 @@
 type ty =
   | Named of { path : Path.t; arguments : argument list }
   | Function of function_type
-  | Any of { trait : Path.t; arguments : argument list; associated : (string * ty) list }
   | Never
 
 and argument = Type of ty | Value of Z.t
@@ -38,13 +37,6 @@ let rec to_string = function
         "(" ^ text ^ " uses "
         ^ String.concat ", " (List.map Path.show_name function_type.uses)
         ^ ")"
-  | Any { trait; arguments; associated } ->
-      let items =
-        List.map show_argument arguments
-        @ List.map (fun (name, ty) -> name ^ " = " ^ to_string ty) associated
-      in
-      "any " ^ Path.show_name trait
-      ^ if items = [] then "" else "[" ^ String.concat ", " items ^ "]"
   | Never -> "Never"
 
 and show_argument = function Type ty -> to_string ty | Value value -> Z.to_string value

@@ -18,14 +18,14 @@ let () =
       let packages =
         Support.setup
           [
-            ("app.main", "fn count(items: List[Int64], limit: own Int64 = 3) -> UInt64 { todo }\n");
+            ("app.main", "fn count(items: Slice[Int64], limit: own Int64 = 3) -> UInt64 { todo }\n");
           ]
       in
       match
         Interface.Definition.find_declared_signature (make_interface packages) (app "count")
       with
       | Some { parameters = [ items; limit ]; output = Returns output; _ } ->
-          if Types.show items.type_ <> "List[Int64]" then
+          if Types.show items.type_ <> "Slice[Int64]" then
             Harness.fail "items: %s" (Types.show items.type_);
           if limit.mode <> Own || not limit.has_default then Harness.fail "limit";
           if not (Types.is_builtin UInt64 output) then Harness.fail "output %s" (Types.show output)
@@ -60,6 +60,30 @@ let () =
       expect_one_diagnostic ~file:"app" "fn main() -> ExitCode { todo }\n" "types.main_signature");
   Harness.test "main with its fixed signature is accepted" (fun () ->
       expect_no_diagnostics [ ("app", Fixtures.Interface.main_with_arguments_and_exit_code) ]);
+  Harness.test "a read-only `List` parameter is an error with a fix to a slice" (fun () ->
+      expect_one_diagnostic "fn total(items: List[Int64]) -> UInt64 {\n  items.length()\n}\n"
+        "types.read_only_owning_parameter" ~at:("List", 1)
+        ~fixed:"fn total(items: Slice[Int64]) -> UInt64 {\n  items.length()\n}\n");
+  Harness.test "a read-only `String` parameter is an error with a fix to a string slice" (fun () ->
+      expect_one_diagnostic "fn width(name: String) -> UInt64 {\n  name.length()\n}\n"
+        "types.read_only_owning_parameter" ~at:("String", 1)
+        ~fixed:"fn width(name: StringSlice) -> UInt64 {\n  name.length()\n}\n");
+  Harness.test "a trait's read-only `List` parameter is an error" (fun () ->
+      expect_one_diagnostic "trait Summed {\n  fn total(self, items: List[Int64]) -> Int64\n}\n"
+        "types.read_only_owning_parameter" ~at:("List", 1)
+        ~fixed:"trait Summed {\n  fn total(self, items: Slice[Int64]) -> Int64\n}\n");
+  Harness.test "a read-only `List` input of a function type is an error with a fix to a slice"
+    (fun () ->
+      expect_one_diagnostic "fn apply(visit: fn(List[Int64])) {}\n"
+        "types.read_only_owning_parameter" ~at:("List", 1)
+        ~fixed:"fn apply(visit: fn(Slice[Int64])) {}\n");
+  Harness.test "a `mut` or `own` parameter may be a `List` or a `String`" (fun () ->
+      expect_no_diagnostics
+        [
+          ("app.main", "fn f(items: mut List[Int64], name: own String, visit: fn(own String)) {}\n");
+        ]);
+  Harness.test "an impl's method restates its trait's `Self` parameter as a `List`" (fun () ->
+      expect_no_diagnostics [ ("app.main", Fixtures.Interface.merged_impl_for_a_list) ]);
   Harness.test "a main outside the root module may have any signature" (fun () ->
       expect_no_diagnostics [ ("app.menu", "fn main() -> ExitCode { todo }\n") ]);
   Harness.test "a default may build a record from constants" (fun () ->
@@ -221,7 +245,7 @@ let () =
       expect_no_diagnostics
         [
           ( "app",
-            "fn main(arguments: List[String]) -> ExitCode\n\
+            "fn main(arguments: Slice[String]) -> ExitCode\n\
             \  uses Panic, RunForever, Console, Clock\n\
              {\n\
             \  todo\n\
@@ -268,8 +292,7 @@ let () =
           (List.init levels make_level_source
           @ [
               Printf.sprintf "trait T%d {}\n\n" levels;
-              "fn measure[Value: T0](value: Value) -> UInt64 {\n  value.size()\n}\n\n";
-              "fn measure_any(value: any T0) -> UInt64 {\n  value.size()\n}\n";
+              "fn measure[Value: T0](value: Value) -> UInt64 {\n  value.size()\n}\n";
             ])
       in
       let started = Sys.time () in
@@ -827,7 +850,6 @@ let () =
         | [], None -> ()
         | _ -> Harness.fail "another number of generic parameters")
     | Bound -> Harness.fail "a bound"
-    | Dynamic -> Harness.fail "dynamic evidence"
   in
   Harness.test "evidence by a bound is the impl once a substitution makes its type concrete"
     (fun () ->
@@ -839,7 +861,7 @@ let () =
       let interface, value = read () in
       match resolve interface Types.no_substitution (Parameter value) Bound with
       | Bound -> ()
-      | Impl _ | Dynamic -> Harness.fail "not a bound");
+      | Impl _ -> Harness.fail "not a bound");
   Harness.test "an impl is selected for a type whose argument has no bound in scope" (fun () ->
       let interface, value = read () in
       expect_impl interface
@@ -851,12 +873,7 @@ let () =
       expect_impl interface
         (resolve interface (bind_to_tag value) crate
            (resolve interface Types.no_substitution crate Bound))
-        ~for_type:"Crate[Item]" ~item:(Some "Tag"));
-  Harness.test "evidence for an `any` type is dynamic" (fun () ->
-      let interface, _ = read () in
-      match resolve interface Types.no_substitution (Any named) Bound with
-      | Dynamic -> ()
-      | Impl _ | Bound -> Harness.fail "not dynamic")
+        ~for_type:"Crate[Item]" ~item:(Some "Tag"))
 
 let () =
   let text = Fixtures.Interface.described in
@@ -1034,8 +1051,6 @@ let () =
                 (Database.For_testing.list_diagnostics [ Interface ]
                    (Support.make_database packages) (Support.parse_file "app.main"))))
       then Harness.fail "accepted");
-  Harness.test "any must fix every associated type" (fun () ->
-      expect_one_diagnostic "fn f(items: any Iterable) {}\n" "types.associated_type_not_fixed");
   Harness.test "nothing can implement Copyable" (fun () ->
       expect_one_diagnostic Fixtures.Interface.copyable_impl "types.implements_built_in");
   Harness.test "a public constant cannot have a private type" (fun () ->
@@ -1049,15 +1064,6 @@ let () =
         Option.is_some
           (Interface.Impls.find_evidence (make_interface packages)
              ~list_bounds:Interface.Impls.list_no_bounds Types.Never (trait "Hash" []))
-      then Harness.fail "it does");
-  Harness.test "an any value implements its trait only with the same arguments" (fun () ->
-      let packages = Support.setup [] in
-      let any = Types.Any (trait "From" [ int64 ]) in
-      if
-        Option.is_some
-          (Interface.Impls.find_evidence (make_interface packages)
-             ~list_bounds:Interface.Impls.list_no_bounds any
-             (trait "From" [ Types.make_builtin Int32 ]))
       then Harness.fail "it does")
 
 let () =

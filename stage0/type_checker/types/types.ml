@@ -5,7 +5,6 @@ type ty =
   | Parameter of parameter
   | Projection of { base : ty; trait : trait_reference; name : string }
   | Function of function_type
-  | Any of trait_reference
   | Never
   | Integer
   | Variable of int
@@ -328,7 +327,6 @@ let rec substitute substitution type_ =
         | Some fixed -> fixed
         | None -> Projection { base; trait; name })
     | Function function_type -> Function (substitute_function substitution function_type)
-    | Any trait -> Any (substitute_trait substitution trait)
     | Never | Integer | Variable _ | Hole | Error _ -> type_
 
 and substitute_argument substitution = function
@@ -398,12 +396,12 @@ let substitute_substitution outer =
   map_substitution ~argument:(substitute_argument outer)
     ~capabilities:(substitute_capabilities outer)
 
-type evidence = Impl of { impl : Path.t; substitution : substitution } | Bound | Dynamic
+type evidence = Impl of { impl : Path.t; substitution : substitution } | Bound
 
 let substitute_evidence outer = function
   | Impl { impl; substitution } ->
       Impl { impl; substitution = substitute_substitution outer substitution }
-  | (Bound | Dynamic) as evidence -> evidence
+  | Bound -> Bound
 
 let extract_result_type = function Returns type_ | Lends (_, type_) -> type_
 let find_lent_mode = function Lends (mode, _) -> Some mode | Returns _ -> None
@@ -442,7 +440,6 @@ let rec map ?(map_capabilities = Fun.id) transform type_ =
               output = map function_type.output;
               uses = map_capabilities function_type.uses;
             }
-      | Any reference -> Any (map_trait map reference)
       | Parameter _ | Never | Integer | Variable _ | Hole | Error _ -> type_)
 
 let rec exists ?(resolve = Fun.id) transform type_ =
@@ -460,7 +457,6 @@ let rec exists ?(resolve = Fun.id) transform type_ =
   | Projection { base; trait = reference; _ } -> exists base || trait_exists reference
   | Function { inputs; output; _ } ->
       List.exists (fun (_, type_) -> exists type_) inputs || exists output
-  | Any reference -> trait_exists reference
   | Parameter _ | Never | Integer | Variable _ | Hole | Error _ -> false
 
 let is_specification_only = function
@@ -493,7 +489,6 @@ let rec contains_unsolved = function
   | Projection { base; trait; _ } -> contains_unsolved base || is_unsolved_trait trait
   | Function { inputs; output; _ } ->
       List.exists (fun (_, type_) -> contains_unsolved type_) inputs || contains_unsolved output
-  | Any trait -> is_unsolved_trait trait
   | Parameter _ | Never | Integer | Error _ -> false
 
 and is_unsolved_argument = function
@@ -572,7 +567,6 @@ and show = function
   | Parameter { name; _ } -> name
   | Projection { base; name; _ } -> show base ^ "." ^ name
   | Function function_type -> show_function function_type
-  | Any trait -> "any " ^ show_trait trait
   | Never -> "Never"
   | Integer -> "Integer"
   | Variable _ | Hole | Error _ -> "_"

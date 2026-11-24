@@ -144,7 +144,7 @@ test "a shared value of no size" {
 
 fn release(reference: own intrinsic.Shared[Counter]) {}
 
-fn main(arguments: List[String]) -> ExitCode
+fn main(arguments: Slice[String]) -> ExitCode
   uses Console
 {
   let counter = intrinsic.shared_new(Counter(count: 0, label: "threads ${1}"))

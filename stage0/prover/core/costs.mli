@@ -24,5 +24,10 @@ val grows_with : varies:(Logic.term -> bool) -> Logic.term -> bool
 val find_cost_bound :
   varies:(Logic.term -> bool) -> facts:Logic.term list -> Logic.term -> Logic.term option
 
+val list_unbounded_parts :
+  varies:(Logic.term -> bool) -> facts:Logic.term list -> Logic.term -> Logic.term list
+
+val mentions_part : part:Logic.term -> Logic.term -> bool
+
 val list_upper_bounds :
   varies:(Logic.term -> bool) -> facts:Logic.term list -> Logic.term -> Logic.term list

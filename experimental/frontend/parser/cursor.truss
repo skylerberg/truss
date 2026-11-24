@@ -69,7 +69,7 @@ fn continues_type_arguments(kind: token.Kind) -> Bool {
       _ => false
     }
     Keyword(keyword) => match keyword {
-      SelfType | Any | Fn | Mut | Own | Capability => true
+      SelfType | Fn | Mut | Own | Capability => true
       _ => false
     }
     _ => false

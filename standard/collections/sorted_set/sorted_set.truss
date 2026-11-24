@@ -236,8 +236,8 @@ fn merged[Element: Ordered](first: own List[Element], second: own List[Element])
 }
 
 fn combined[Element: Ordered + Copyable](
-  first: List[Element],
-  second: List[Element],
+  first: Slice[Element],
+  second: Slice[Element],
   keeps_first_only: Bool,
   keeps_shared: Bool,
   keeps_second_only: Bool,
@@ -249,71 +249,67 @@ fn combined[Element: Ordered + Copyable](
   ensures !keeps_second_only ==> result.length() <= first.length()
   cost time O((first.length() + second.length()) * (time(Element.compare) + time(Element.copy)))
 {
-  match first.length().checked_add(second.length()) {
-    Some(steps) => {
-      let room = if keeps_second_only { steps } else { first.length() }
-      var output: intrinsic.Storage[Element] = intrinsic.storage_with_capacity(room)
-      var index: UInt64 = 0
-      var other_index: UInt64 = 0
-      for _ in 0..steps
-        invariant intrinsic.storage_capacity(output) == room
-        invariant index <= first.length()
-        invariant other_index <= second.length()
-        invariant intrinsic.storage_length(output) <= index + other_index
-        invariant !keeps_second_only ==> intrinsic.storage_length(output) <= index
-        invariant strictly_ascending(intrinsic.storage_model(output))
-        invariant forall i in 0..intrinsic.storage_length(output) => forall j in index..first.length() =>
-          intrinsic.storage_model(output)[i] < first.model()[j]
-        invariant forall i in 0..intrinsic.storage_length(output) => forall j in other_index..second.length() =>
-          intrinsic.storage_model(output)[i] < second.model()[j]
-      {
-        if index < first.length() && other_index < second.length() {
-          match first[index].compare(second[other_index]) {
-            Less => {
-              if keeps_first_only {
-                proof {
-                  ascending_above(second.model(), element: first.model()[index], first: other_index)
-                }
-                intrinsic.storage_push(mut output, value: first[index].copy())
-              }
-              index += 1
-            }
-            Greater => {
-              if keeps_second_only {
-                proof {
-                  ascending_above(first.model(), element: second.model()[other_index], first: index)
-                }
-                intrinsic.storage_push(mut output, value: second[other_index].copy())
-              }
-              other_index += 1
-            }
-            Equal => {
-              if keeps_shared {
-                proof {
-                  ascending_above(second.model(), element: first.model()[index], first: other_index)
-                }
-                intrinsic.storage_push(mut output, value: first[index].copy())
-              }
-              index += 1
-              other_index += 1
-            }
-          }
-        } else if index < first.length() {
+  let steps = first.length() + second.length()
+  let room = if keeps_second_only { steps } else { first.length() }
+  var output: intrinsic.Storage[Element] = intrinsic.storage_with_capacity(room)
+  var index: UInt64 = 0
+  var other_index: UInt64 = 0
+  for _ in 0..steps
+    invariant intrinsic.storage_capacity(output) == room
+    invariant index <= first.length()
+    invariant other_index <= second.length()
+    invariant intrinsic.storage_length(output) <= index + other_index
+    invariant !keeps_second_only ==> intrinsic.storage_length(output) <= index
+    invariant strictly_ascending(intrinsic.storage_model(output))
+    invariant forall i in 0..intrinsic.storage_length(output) => forall j in index..first.length() =>
+      intrinsic.storage_model(output)[i] < first.model()[j]
+    invariant forall i in 0..intrinsic.storage_length(output) => forall j in other_index..second.length() =>
+      intrinsic.storage_model(output)[i] < second.model()[j]
+  {
+    if index < first.length() && other_index < second.length() {
+      match first[index].compare(second[other_index]) {
+        Less => {
           if keeps_first_only {
+            proof {
+              ascending_above(second.model(), element: first.model()[index], first: other_index)
+            }
             intrinsic.storage_push(mut output, value: first[index].copy())
           }
           index += 1
-        } else if other_index < second.length() {
+        }
+        Greater => {
           if keeps_second_only {
+            proof {
+              ascending_above(first.model(), element: second.model()[other_index], first: index)
+            }
             intrinsic.storage_push(mut output, value: second[other_index].copy())
           }
           other_index += 1
         }
+        Equal => {
+          if keeps_shared {
+            proof {
+              ascending_above(second.model(), element: first.model()[index], first: other_index)
+            }
+            intrinsic.storage_push(mut output, value: first[index].copy())
+          }
+          index += 1
+          other_index += 1
+        }
       }
-      List(storage: own output)
+    } else if index < first.length() {
+      if keeps_first_only {
+        intrinsic.storage_push(mut output, value: first[index].copy())
+      }
+      index += 1
+    } else if other_index < second.length() {
+      if keeps_second_only {
+        intrinsic.storage_push(mut output, value: second[other_index].copy())
+      }
+      other_index += 1
     }
-    None => intrinsic.crash("two sorted sets cannot hold that many elements")
   }
+  List(storage: own output)
 }
 
 public fn collections.SortedSet[Element: Ordered].collect[Source: Cursor[Element = Element]](
@@ -707,8 +703,12 @@ impl Hash for collections.SortedSet[Element: Ordered + Hash] {
 }
 
 impl Default for collections.SortedSet[Element: Ordered] {
-  fn default() -> collections.SortedSet[Element] {
-    []
+  fn default() -> collections.SortedSet[Element]
+    ensures result.length() == 0
+    cost time O(1)
+    cost allocations == 0
+  {
+    collections.SortedSet(elements: [])
   }
 }
 

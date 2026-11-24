@@ -205,11 +205,6 @@ fn parse_prefix(cursor: mut TokenCursor) -> Result[syntax.Expression, Failure]
         let inner = parse_postfix(mut cursor)?
         make_expression_node(mut cursor, start, kind: syntax.ExpressionKind.Mode(mode: syntax.Mode.Own, own inner))
       }
-      Any => {
-        advance(mut cursor)
-        let inner = parse_postfix(mut cursor)?
-        make_expression_node(mut cursor, start, kind: syntax.ExpressionKind.Any(own inner))
-      }
       Forall | Exists => parse_quantified(mut cursor)?
       Echo => {
         advance(mut cursor)
@@ -1096,7 +1091,7 @@ fn find_rightmost(value: syntax.Expression) -> Option[syntax.Expression]
       Some(inner) => find_rightmost(inner)
       None => None
     }
-    Echo(inner) | Mode(inner, ..) | Any(inner) => find_rightmost(inner)
+    Echo(inner) | Mode(inner, ..) => find_rightmost(inner)
     _ => None
   }
 }

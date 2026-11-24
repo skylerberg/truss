@@ -171,14 +171,7 @@ let expect_no_diagnostics ~check files =
                   (fun (diagnostic : Diagnostic.t) ->
                     Diagnostic.Code.name diagnostic.code ^ " " ^ diagnostic.message)
                   reported)));
-      ignore
-        (Core_lint.check_file
-           (Database.make_interface_lookups database)
-           ~find_core:(fun key ->
-             Option.map
-               (fun (checked : Infer.checked) -> checked.form)
-               (Database.read_checked_body database key))
-           (parse_file name)))
+      ignore (Core_lint.check_file database (parse_file name)))
     files
 
 let expect_one_diagnostic ~check ?(setup = fun files -> setup files) ?(file = "app.main")

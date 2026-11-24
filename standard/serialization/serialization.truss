@@ -90,7 +90,7 @@ public fn optional[Field: Deserialize, Source: Deserializer](
   }
 }
 
-public fn unknown_variant[Source: Deserializer](source: Source, name: String) -> Error {
+public fn unknown_variant[Source: Deserializer](source: Source, name: StringSlice) -> Error {
   var message = "there is no variant `"
   mut message.push(name)
   mut message.push("`")

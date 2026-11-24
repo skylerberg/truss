@@ -42,7 +42,7 @@ fn noise(count: UInt64) -> List[UInt8] {
   bytes
 }
 
-fn input_of(name: String) -> List[UInt8] {
+fn input_of(name: StringSlice) -> List[UInt8] {
   if name == "short" {
     "Hello, zstd and Brotli!".bytes().to_list()
   } else if name == "text_3000" {

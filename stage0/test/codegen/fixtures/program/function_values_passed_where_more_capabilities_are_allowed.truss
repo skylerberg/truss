@@ -30,7 +30,7 @@ fn rolled_twice() -> UInt64
   Dice.roll().saturating_add(Dice.roll())
 }
 
-fn main(arguments: List[String]) -> ExitCode
+fn main(arguments: Slice[String]) -> ExitCode
   uses Console
 {
   let by_lambda: (fn() -> UInt64 uses Dice) = fn() { Dice.roll() }

@@ -38,19 +38,6 @@ val match_arguments :
   Types.substitution option
 
 type solution = Evidence of Types.evidence | Built_in | Accepted of Types.ty
-type through_any = Callable | Has_generics | Names_self
-
-type dispatched = {
-  declared_by : Types.trait_reference;
-  trait_method : Types.trait_method;
-  through_any : through_any;
-}
-
-val list_dispatched_methods : Lookups.t -> Types.trait_reference -> dispatched list
-
-val classify_through_any :
-  Lookups.t -> any:Types.trait_reference -> trait:Path.t -> Types.trait_method -> through_any
-
 type bounds = Properties.Bounds.t
 
 val list_no_bounds : bounds
@@ -99,15 +86,6 @@ val project_associated_type :
   Types.trait_reference ->
   string ->
   Types.ty option
-
-val project_capability_set :
-  Lookups.t ->
-  list_bounds:bounds ->
-  ?depth:int ->
-  Types.ty ->
-  Types.trait_reference ->
-  string ->
-  Types.capability_set
 
 val normalize_capabilities :
   Lookups.t -> list_bounds:bounds -> ?depth:int -> Types.capability_set -> Types.capability_set

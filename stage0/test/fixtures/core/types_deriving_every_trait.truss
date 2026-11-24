@@ -1,0 +1,10 @@
+use standard.serialization
+
+type Point(label: String = "origin", x: Int64)
+  derives Equal, Hash, Ordered, Default, serialization.Serialize, serialization.Deserialize
+
+type Shape =
+  | Circle(radius: Int64)
+  | Labeled(label: String)
+  | Empty
+  derives Equal, Hash, Ordered, serialization.Serialize, serialization.Deserialize

@@ -4,8 +4,7 @@ type t =
   | Drop of Ground.ty
   | Copy of Ground.ty
   | Debug of Ground.ty
-  | Any_drop of Ground.ty
-  | Any_copy of Ground.ty
+  | Untyped_drop of Ground.ty
   | Encode of Ground.ty
   | Evaluator of t
   | Assertion of { definition : Path.t; condition : int }
@@ -14,7 +13,6 @@ type t =
 
 and generated =
   | Entry of impl_method
-  | Any_entry of impl_method
   | Locked_entry of { capability : Path.t; name : string }
   | Adapter of {
       function_ : Path.t;
@@ -26,7 +24,6 @@ and generated =
 
 and table =
   | Impl_table of { impl : Path.t; type_arguments : Ground.argument list }
-  | Any_table of { impl : Path.t; type_arguments : Ground.argument list }
   | Locked_table of Path.t
 
 and impl_method = {

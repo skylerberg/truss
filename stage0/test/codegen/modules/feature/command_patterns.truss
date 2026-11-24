@@ -3,7 +3,7 @@ use example.feature.command_patterns
 let limit: Int64 = 10
 let origin: Int64 = 0
 
-fn command(text: String) -> Int64 {
+fn command(text: StringSlice) -> Int64 {
   match text {
     "quit" => 0
     "help" => 1

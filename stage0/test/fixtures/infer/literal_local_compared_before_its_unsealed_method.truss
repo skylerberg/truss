@@ -8,7 +8,7 @@ impl Describe for UInt8 {
   }
 }
 
-fn both(same: Bool, text: String) -> Bool {
+fn both(same: Bool, text: StringSlice) -> Bool {
   same && text.length() > 0
 }
 

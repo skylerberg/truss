@@ -235,11 +235,6 @@ fn parse_type_expression_inner(cursor: mut TokenCursor) -> Result[syntax.TypeExp
     }
     return Ok(make_type_node(mut cursor, start, kind: syntax.TypeKind.SelfType(own associated)))
   }
-  if first == token.Kind.Keyword(token.Keyword.Any) {
-    advance(mut cursor)
-    let path_type = parse_path_type(mut cursor)?
-    return Ok(make_type_node(mut cursor, start, kind: syntax.TypeKind.AnyType(own path_type)))
-  }
   if first == token.Kind.Keyword(token.Keyword.Fn) {
     let function_type = parse_function_type(mut cursor, with_clauses: false)?
     return Ok(make_type_node(mut cursor, start, kind: syntax.TypeKind.FunctionType(own function_type)))

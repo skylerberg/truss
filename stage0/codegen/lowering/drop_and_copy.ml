@@ -24,7 +24,7 @@ and has_trivial_representation context ty =
     List.for_all (fun (_, member) -> is_trivial_member context member) fields
   in
   match Representation.classify context.env ty with
-  | Storage _ | Handle | Shared _ | Any -> false
+  | Storage _ | Handle | Shared _ -> false
   | Shape (Scalar _) -> true
   | Shape (Record fields) -> are_trivial fields
   | Shape (Array (_, 0)) -> true
@@ -40,36 +40,6 @@ and is_trivial_member context : Memory_layout.member -> bool = function
   | Raw _ -> true
 
 let needs_drop context member = not (is_trivial_member context member)
-let any_drop_slot = 0
-let any_copy_slot = 1
-
-let make_box_signature result : Lowered.signature =
-  { parameters = [ Raw (Pointer Opaque) ]; result; returns = true }
-
-let any_drop_signature = make_box_signature None
-let any_copy_signature = make_box_signature (Some (Raw (Pointer Opaque)))
-
-let list_any_entries ty ~is_copyable =
-  (Lowered.Item.Any_drop ty, any_drop_signature)
-  :: (if is_copyable then [ (Lowered.Item.Any_copy ty, any_copy_signature) ] else [])
-
-let compute_first_method_slot ~is_copyable =
-  if is_copyable then any_copy_slot + 1 else any_drop_slot + 1
-
-let allocate_box context builder ty =
-  let layout = Memory_layout.of_type context.env ty in
-  let box = Emit_c.Ir_builder.allocate_local builder (Raw (Pointer Opaque)) in
-  Emit_c.Ir_builder.emit builder
-    (Call
-       {
-         target = Intrinsic Allocate;
-         arguments =
-           [
-             Lowered.make_uint64_constant layout.size; Lowered.make_uint64_constant layout.alignment;
-           ];
-         result = Returned (Lowered.make_local_place box);
-       });
-  box
 
 let project_variant_field place (variant : Memory_layout.variant_shape) field =
   Lowered.project place (Variant_field { variant = variant.name; field })
@@ -94,28 +64,6 @@ let drop context ty =
   let value = Lowered.make_deref_place pointer in
   Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
   (match Representation.classify context.env ty with
-  | Any ->
-      Emit_c.Ir_builder.emit builder
-        (Call
-           {
-             target =
-               Table_call
-                 {
-                   table = Copy (Builtin_records.Any.project_vtable value);
-                   value = Copy (Builtin_records.Any.project_value value);
-                   slot = any_drop_slot;
-                   signature = any_drop_signature;
-                 };
-             arguments = [];
-             result = Discarded;
-           });
-      Emit_c.Ir_builder.emit builder
-        (Call
-           {
-             target = Intrinsic Free;
-             arguments = [ Copy (Builtin_records.Any.project_value value) ];
-             result = Discarded;
-           })
   | Handle ->
       Emit_c.Ir_builder.emit builder
         (Call
@@ -196,8 +144,8 @@ let drop context ty =
   Emit_c.Ir_builder.finish builder (Return None);
   Emit_c.Ir_builder.build builder { parameters = [ pointer ]; result = None; returns = true }
 
-let build_any_drop context ty =
-  let builder = Emit_c.Ir_builder.create context.env ~item:(Any_drop ty) in
+let build_untyped_drop context ty =
+  let builder = Emit_c.Ir_builder.create context.env ~item:(Untyped_drop ty) in
   let untyped = Emit_c.Ir_builder.allocate_local builder (Raw (Pointer Opaque)) in
   Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
   if not (is_trivial context ty) then begin
@@ -284,28 +232,6 @@ let copy context ty =
   Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
   (match Representation.classify context.env ty with
   | Handle -> raise_bug "a copy of a handle, which is not Copyable"
-  | Any ->
-      let copied = Emit_c.Ir_builder.allocate_local builder (Raw (Pointer Opaque)) in
-      Emit_c.Ir_builder.emit builder
-        (Call
-           {
-             target =
-               Table_call
-                 {
-                   table = Copy (Builtin_records.Any.project_vtable self);
-                   value = Copy (Builtin_records.Any.project_value self);
-                   slot = any_copy_slot;
-                   signature = any_copy_signature;
-                 };
-             arguments = [];
-             result = Returned (Lowered.make_local_place copied);
-           });
-      Emit_c.Ir_builder.emit builder
-        (Assign
-           ( result,
-             Builtin_records.Any.build ty
-               ~value:(Copy (Lowered.make_local_place copied))
-               ~vtable:(Copy (Builtin_records.Any.project_vtable self)) ))
   | Shape (Scalar _) -> raise_bug "a copy of the scalar %s, which is trivial" (Ground.to_string ty)
   | Shared _ ->
       Emit_c.Ir_builder.emit builder
@@ -394,30 +320,6 @@ let copy context ty =
       result = (copy_signature context ty).result;
       returns = true;
     }
-
-let build_any_copy context ty =
-  let builder = Emit_c.Ir_builder.create context.env ~item:(Any_copy ty) in
-  let original = Emit_c.Ir_builder.allocate_local builder (Raw (Pointer Opaque)) in
-  Emit_c.Ir_builder.start builder (Emit_c.Ir_builder.allocate_block builder);
-  let copied = allocate_box context builder ty in
-  if not (Memory_layout.has_zero_size context.env ty) then begin
-    let source =
-      Emit_c.Ir_builder.allocate_local builder (Pointer { target = Value ty; writable = false })
-    in
-    let destination =
-      Emit_c.Ir_builder.allocate_local builder (Pointer { target = Value ty; writable = true })
-    in
-    Emit_c.Ir_builder.emit builder
-      (Assign (Lowered.make_local_place source, Use (Copy (Lowered.make_local_place original))));
-    Emit_c.Ir_builder.emit builder
-      (Assign (Lowered.make_local_place destination, Use (Copy (Lowered.make_local_place copied))));
-    copy_into context builder
-      ~destination:(Lowered.make_deref_place destination)
-      ~source:(Lowered.make_deref_place source) ty
-  end;
-  Emit_c.Ir_builder.finish builder (Return (Some (Copy (Lowered.make_local_place copied))));
-  Emit_c.Ir_builder.build builder
-    { parameters = [ original ]; result = Some (Raw (Pointer Opaque)); returns = true }
 
 module For_testing = struct
   let copy_signature = copy_signature

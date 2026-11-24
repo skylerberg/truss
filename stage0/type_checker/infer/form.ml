@@ -175,7 +175,7 @@ let read_evidence form self_type trait : Types.evidence =
   match find_evidence form self_type trait with
   | Some (Evidence evidence) -> evidence
   | Some (Built_in | Accepted _) | None ->
-      raise_bug "`%s` does not implement `%s` by an impl, a bound, or `any`" (Types.show self_type)
+      raise_bug "`%s` does not implement `%s` by an impl or a bound" (Types.show self_type)
         (Types.show_trait trait)
 
 let make_method_target form (method_ : Well_known.method_) ~self_type : Core.operand Core.target =
@@ -688,12 +688,6 @@ and build_kind form env (value : Syntax.expression) : Core.kind =
       | Some (Call call) -> build_call_kind form env value call
       | None -> build_operator form env value Intrinsic.Negate [ inner ]
       | Some _ -> raise_unexpected ())
-  | Any inner -> (
-      let inner = build_expression form env inner in
-      match read_type form value with
-      | Types.Any trait ->
-          To_any { value = inner; trait; evidence = read_evidence form inner.type_ trait }
-      | converted -> raise_bug "an `any` conversion has the type `%s`" (Types.show converted))
   | Binary { operator = Connective connective; left; right; _ } ->
       let left = build_expression form env left in
       let right = build_expression form env right in
@@ -1309,7 +1303,13 @@ and build_tagged_string form env (value : Syntax.expression) (literal : Syntax.s
         Well_known.locate_method From_template_is_valid_template
       in
       let is_valid =
-        call_tag (Trait_method { tag with name; receiver }) Types.bool (make_literals ())
+        call_tag
+          (Trait_method { tag with name; receiver })
+          Types.bool
+          (apply_conversion form value.id (make_literals ())
+             ( Tables.Owned_to_view,
+               Types.make_named (Well_known.make_path Slice)
+                 [ Types.make_named (Well_known.make_path Literal) [] ] ))
       in
       Block
         {

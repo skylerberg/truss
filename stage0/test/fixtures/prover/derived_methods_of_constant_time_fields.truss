@@ -1,0 +1,31 @@
+type Reading(value: Float64, sensor: UInt32)
+  derives Equal
+
+type Key =
+  | Plain(id: Int64)
+  | Tagged(id: Int64, tag: Character)
+  derives Equal, Hash
+
+type Profile(name: String, nickname: Option[String], scores: List[Int64], level: Float64)
+  derives Default
+
+fn same(first: Reading, second: Reading) -> Bool
+  cost time O(1)
+  cost allocations == 0
+{
+  first == second
+}
+
+fn digest(key: Key) -> Hasher
+  cost time O(1)
+  cost allocations == 0
+{
+  key.hash(Hasher.new())
+}
+
+fn blank() -> Profile
+  cost time O(1)
+  cost allocations == 0
+{
+  Profile.default()
+}

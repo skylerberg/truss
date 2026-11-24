@@ -1,7 +1,6 @@
 let rec visit_type_expression on_expression (type_ : Syntax.type_expression) =
   match type_.kind with
   | Path_type path -> visit_path_type on_expression path
-  | Any_type path -> visit_path_type on_expression path
   | Function_type { inputs; output; clauses; _ } ->
       List.iter
         (fun (input : Syntax.function_input) -> visit_type_expression on_expression input.type_)
@@ -66,7 +65,6 @@ let visit_expression_parts ~on_expression ~on_statement (value : Syntax.expressi
   | Try inner
   | Prefix (_, inner)
   | Mode (_, inner)
-  | Any inner
   | Echo inner
   | Parenthesized inner ->
       on_expression inner
@@ -295,7 +293,7 @@ let walk_names ~on_name (definition : Syntax.definition) =
   in
   let rec walk_type (type_ : Syntax.type_expression) =
     match type_.kind with
-    | Path_type path | Any_type path -> walk_path_type path
+    | Path_type path -> walk_path_type path
     | Self_type key -> Option.iter on_name key
     | Associated (base, key) ->
         on_name base;

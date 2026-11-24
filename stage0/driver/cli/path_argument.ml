@@ -13,7 +13,11 @@ let parse text =
   | Some (last :: rest) -> { prefix = List.rev rest; last; member = None }
   | Some [] | None -> refuse ()
 
-type target = Package of Path.package | Module of Path.module_ | Definition of Path.t
+type target =
+  | Package of Path.package
+  | Module of Path.module_
+  | Definition of Path.t
+  | Trait_member of { member : Path.t; impl : Path.t }
 
 let is_visible packages (module_ : Path.module_) visibility =
   Resolve.Names.is_public visibility
@@ -24,9 +28,12 @@ let is_visible packages (module_ : Path.module_) visibility =
 let is_shown packages (declaration : Resolve.Names.declaration) =
   is_visible packages declaration.key.module_ declaration.visibility
 
-let list_shown_declarations (names : Resolve.Names.lookups) packages =
+let list_shown_packages (names : Resolve.Names.lookups) packages =
   List.sort_uniq Path.compare_package
     (packages @ List.concat_map (Resolve.Names.list_transitive_dependencies names) packages)
+
+let list_shown_declarations (names : Resolve.Names.lookups) packages =
+  list_shown_packages names packages
   |> List.concat_map names.list_package_declarations
   |> List.filter (fun (declaration : Resolve.Names.declaration) ->
       declaration.key.ordinal = 0 && is_shown packages declaration)
@@ -114,37 +121,119 @@ let list_view_methods declarations type_ =
           | _ -> false)
         declarations
 
-let resolve_members declarations owners member =
-  let candidates =
-    List.filter
-      (fun (declaration : Resolve.Names.declaration) ->
-        match find_member declaration.key.path with
-        | Some (_, name) -> name = member
-        | None -> false)
-      declarations
+let list_named_members declarations member =
+  List.filter
+    (fun (declaration : Resolve.Names.declaration) ->
+      match find_member declaration.key.path with Some (_, name) -> name = member | None -> false)
+    declarations
+
+let list_implemented_traits (names : Resolve.Names.lookups) packages type_ =
+  let list_impls type_ =
+    List.concat_map
+      (fun package -> names.list_impls_of_type package type_)
+      (list_shown_packages names packages)
   in
-  List.concat_map
-    (fun owner ->
-      List.map
-        (fun (declaration : Resolve.Names.declaration) -> Definition declaration.key.path)
-        (List.filter (is_member_of owner) candidates @ list_view_methods candidates owner))
-    owners
+  List.fold_left
+    (fun traits (trait, impl) ->
+      if List.exists (fun (kept, _) -> Path.equal kept trait) traits then traits
+      else traits @ [ (trait, impl) ])
+    []
+    (list_impls type_ @ Option.fold ~none:[] ~some:list_impls (Well_known.find_view type_))
+
+let list_type_members names packages candidates type_ =
+  let is_written_in impl (declaration : Resolve.Names.declaration) =
+    match find_member declaration.key.path with
+    | Some (owner, _) -> Path.equal owner impl
+    | None -> false
+  in
+  let list_trait_members (trait, impl) =
+    if List.exists (is_written_in impl) candidates then []
+    else
+      List.filter_map
+        (fun (declaration : Resolve.Names.declaration) ->
+          match declaration.key.path with
+          | Method { owner; _ } when Path.equal owner trait ->
+              Some (Trait_member { member = declaration.key.path; impl })
+          | _ -> None)
+        candidates
+  in
+  List.map
+    (fun (declaration : Resolve.Names.declaration) -> Definition declaration.key.path)
+    (List.filter (is_member_of type_) candidates @ list_view_methods candidates type_)
+  @ List.concat_map list_trait_members (list_implemented_traits names packages type_)
+
+let list_owners (names : Resolve.Names.lookups) packages argument declarations =
+  let written = argument.prefix @ [ argument.last ] in
+  match
+    List.filter_map
+      (function Definition path -> Some path | Package _ | Module _ | Trait_member _ -> None)
+      (resolve_exactly names packages written)
+  with
+  | [] ->
+      List.filter_map
+        (fun (declaration : Resolve.Names.declaration) ->
+          if is_top_named written declaration.key.path then Some declaration.key.path else None)
+        (Lazy.force declarations)
+  | owners -> owners
 
 let resolve names packages argument =
-  let written = argument.prefix @ [ argument.last ] in
-  let exact = resolve_exactly names packages written in
   let declarations = lazy (list_shown_declarations names packages) in
   match argument.member with
-  | None -> if exact = [] then resolve_by_suffix (Lazy.force declarations) written else exact
+  | None -> (
+      let written = argument.prefix @ [ argument.last ] in
+      match resolve_exactly names packages written with
+      | [] -> resolve_by_suffix (Lazy.force declarations) written
+      | exact -> exact)
   | Some member ->
-      let owners =
-        match List.filter_map (function Definition path -> Some path | _ -> None) exact with
-        | [] ->
-            List.filter_map
-              (fun (declaration : Resolve.Names.declaration) ->
-                if is_top_named written declaration.key.path then Some declaration.key.path
-                else None)
-              (Lazy.force declarations)
-        | owners -> owners
-      in
-      resolve_members (Lazy.force declarations) owners member
+      let candidates = list_named_members (Lazy.force declarations) member in
+      List.concat_map
+        (list_type_members names packages candidates)
+        (list_owners names packages argument declarations)
+
+let is_related ~type_ other =
+  let name = Path.show_name type_ and other_name = Path.show_name other in
+  (not (Path.equal type_ other))
+  && (String.includes ~affix:name other_name
+     || String.includes ~affix:other_name name
+     || Option.exists (Path.equal other) (Well_known.find_view type_)
+     || Option.exists (Path.equal type_) (Well_known.find_view other))
+
+let explain_missing names packages text =
+  let argument = parse text in
+  let declarations = lazy (list_shown_declarations names packages) in
+  match argument.member with
+  | None -> Printf.sprintf "Nothing named `%s` is visible here." text
+  | Some member -> (
+      match list_owners names packages argument declarations with
+      | [] -> Printf.sprintf "Nothing named `%s` is visible here." text
+      | owners ->
+          let candidates = list_named_members (Lazy.force declarations) member in
+          let types =
+            List.sort_uniq Path.compare
+              (List.filter_map
+                 (fun (declaration : Resolve.Names.declaration) ->
+                   if
+                     declaration.kind = Type
+                     && List.exists (fun type_ -> is_related ~type_ declaration.key.path) owners
+                   then Some declaration.key.path
+                   else None)
+                 (Lazy.force declarations))
+          in
+          let related =
+            List.sort_uniq String.compare
+              (List.filter_map
+                 (fun type_ ->
+                   if list_type_members names packages candidates type_ = [] then None
+                   else Some (Printf.sprintf "`%s.%s`" (Path.show_name type_) member))
+                 types)
+          in
+          let existing =
+            match related with
+            | [] -> ""
+            | [ only ] -> Printf.sprintf " %s exists." only
+            | _ -> Printf.sprintf " %s exist." (Output.show_list related)
+          in
+          Printf.sprintf
+            "`%s` has no member `%s`.%s `truss show %s` lists its methods and its impls."
+            argument.last member existing
+            (String.concat "." (argument.prefix @ [ argument.last ])))

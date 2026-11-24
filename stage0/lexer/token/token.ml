@@ -1,5 +1,4 @@
 type keyword =
-  | Any
   | Assert
   | Break
   | Capability
@@ -173,7 +172,6 @@ let list_interpolations literal = Array.map fst literal.rest
 
 let keywords =
   [
-    ("any", Any);
     ("assert", Assert);
     ("break", Break);
     ("capability", Capability);
@@ -441,7 +439,7 @@ let can_begin = function
   | Foreign (Star_star | Colon_equal | Colon_colon | Pipe_greater) -> false
   | Punctuation (Open _ | Minus | Bang | Tilde) -> true
   | Keyword
-      ( Any | Assert | Break | Capability | Concurrent | Continue | Echo | Exists | False | Fn | For
+      ( Assert | Break | Capability | Concurrent | Continue | Echo | Exists | False | Fn | For
       | Forall | If | Impl | Internal | Law | Let | Match | Mut | Own | Parallel | Proof | Provide
       | Public | Return | Self_value | Self_type | Test | Theorem | Todo | Trait | True | Type
       | Unreachable | Use | Var | While ) ->

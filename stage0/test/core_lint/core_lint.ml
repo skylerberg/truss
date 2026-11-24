@@ -324,16 +324,7 @@ let check_semantics context (form : Core.t) =
                      context.report
                        "an arithmetic operator on `%s` is a call of `%s`, not an Operator"
                        (Types.show self_type) (show_target call.callee.target)
-                 | Trait_method { self_type = Any _; evidence = Impl _ | Bound; _ } ->
-                     context.report "a call of `%s` on an `any` value is not dynamic"
-                       (show_target call.callee.target)
-                 | Trait_method { self_type; evidence = Dynamic; _ }
-                   when match self_type with Any _ -> false | _ -> true ->
-                     context.report "a call of `%s` on `%s` is dynamic"
-                       (show_target call.callee.target) (Types.show self_type)
                  | _ -> ())
-             | To_any { evidence = Dynamic; _ } ->
-                 context.report "a conversion to `any` has dynamic evidence"
              | Operator { operation; arguments } ->
                  check_operator_types context node operation arguments
              | Compare { left; right; _ } -> compare_types context left right
@@ -454,7 +445,6 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
         List.iter (fun (_, input) -> check_type subject input) inputs;
         check_capabilities subject uses;
         check_type subject output
-    | Any reference -> check_trait subject reference
     | Never | Integer -> ()
     | Variable _ | Hole | Error _ ->
         report "%s has the type `%s`, which is not fully inferred" subject (Types.show ty)
@@ -490,7 +480,7 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
             List.iter
               (fun (_, inner) -> check_argument "an `impl`'s type argument" inner)
               (Types.For_testing.list_arguments substitution)
-        | Bound | Dynamic -> ())
+        | Bound -> ())
     | Intrinsic { type_arguments; _ } ->
         List.iter (check_argument "an intrinsic's type argument") type_arguments
     | Capability_method _ | Indirect _ -> ()
@@ -686,7 +676,6 @@ let check_form (interface : Interface.Lookups.t) ~(path : Path.t) ~(key : Resolv
                    (fun ({ local; type_ } : Core.capture) ->
                      check_place (Local { local; type_; origin = node.origin }))
                    captures
-             | To_any { trait = reference; _ } -> check_trait "a conversion to `any`" reference
              | Provide { implementations; _ } ->
                  List.iter
                    (fun (implementation : Core.implementation) ->
@@ -897,14 +886,61 @@ let check_derived interface path form =
   check_form interface ~path ~key:None form;
   check_derived_origins path form
 
-let check_file (interface : Interface.Lookups.t) ~find_core (file : Path.file) =
+let list_provided_methods interface (impl : Types.impl_interface) =
+  match Interface.Definition.find_trait_interface interface impl.implements.trait with
+  | Some trait ->
+      List.filter_map
+        (fun (method_ : Types.trait_method) ->
+          if method_.provided then Some method_.method_name else None)
+        trait.methods
+  | None -> []
+
+let check_derived_impls database interface (type_ : Path.t) =
+  let is_todo =
+    match Interface.Definition.find_type_interface interface type_ with
+    | Some { shape = Todo_type; _ } -> true
+    | Some _ | None -> false
+  in
+  let check_impl count (impl : Path.t) =
+    match Interface.Definition.find_impl_interface interface impl with
+    | None -> Harness.fail "`%s` has no interface" (Path.show impl)
+    | Some impl_interface ->
+        let provided = list_provided_methods interface impl_interface in
+        List.fold_left
+          (fun count (name, receiver) ->
+            let path : Path.t = Method { owner = impl; name; receiver } in
+            match Database.For_testing.read_derived_form database path with
+            | Some form ->
+                check_derived interface path form;
+                count + 1
+            | None when List.mem name provided -> count
+            | None -> Harness.fail "`%s` has no core form for `%s`" (Path.show impl) name
+            | exception Compiler_bug.Bug bug ->
+                Harness.fail "`%s`, `%s`: %s" (Path.show impl) name (Compiler_bug.to_string bug))
+          count impl_interface.impl_methods
+  in
+  if is_todo then 0
+  else
+    List.fold_left
+      (fun count (_, (impl : Path.t)) ->
+        match impl with
+        | Derived { type_ = derived; _ } when Path.equal derived type_ -> check_impl count impl
+        | _ -> count)
+      0
+      (interface.names.list_impls_of_type (Path.locate_package type_) type_)
+
+let check_file database (file : Path.file) =
+  let interface = Database.make_interface_lookups database in
   List.fold_left
     (fun count (declaration : Resolve.Names.declaration) ->
       let key = declaration.key in
-      match find_core key with
-      | Some form ->
-          check interface key form;
-          count + 1
-      | None -> count)
+      let written =
+        match Database.read_checked_body database key with
+        | Some checked ->
+            check interface key checked.form;
+            1
+        | None -> 0
+      in
+      count + written + check_derived_impls database interface key.path)
     0
     (interface.names.list_declarations_in file)

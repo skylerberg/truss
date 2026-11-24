@@ -481,6 +481,10 @@ let () =
       expect_proven Fixtures.Prover.allocations_of_a_default_that_the_caller_applies;
       expect_not_proven Fixtures.Prover.allocations_of_a_default_left_out_of_the_callers_cost
         "prover.cost");
+  Harness.test "a construction spends the allocations of a field default that it applies" (fun () ->
+      expect_proven Fixtures.Prover.allocations_of_a_field_default_that_the_construct_applies;
+      expect_not_proven
+        Fixtures.Prover.allocations_of_a_field_default_left_out_of_the_constructs_cost "prover.cost");
   Harness.test "a call through a bound has the clauses that the bound's trait restates" (fun () ->
       expect_proven Fixtures.Prover.restated_clause_through_a_bound);
   Harness.test "a call that names the restating trait has the restated clauses" (fun () ->
@@ -545,11 +549,6 @@ let () =
       Support.expect_one_diagnostic ~check Fixtures.Prover.impl_condition_beyond_its_trait
         "prover.requires" ~says:"may not follow from the trait's condition after `Panic unless`";
       expect_proven Fixtures.Prover.impl_condition_within_its_trait);
-  Harness.test "a call through `any` is ruled out once where the caller's condition holds"
-    (fun () ->
-      Support.expect_one_diagnostic ~check
-        Fixtures.Prover.call_through_any_where_the_condition_holds "prover.panic"
-        ~says:"This call may panic where `count < 50` holds");
   Harness.test "a call through a bound without `Panic` proves the trait's condition on values"
     (fun () ->
       Support.expect_one_diagnostic ~check
@@ -684,8 +683,6 @@ let () =
       | None -> Harness.fail "the caller has no proof");
   Harness.test "a function that passes a derived impl where a bound needs one is proven" (fun () ->
       expect_not_proven Fixtures.Prover.same_of_a_derived_version_ensured_false "prover.ensures");
-  Harness.test "a function that converts a value with a derived impl to `any` is proven" (fun () ->
-      expect_not_proven Fixtures.Prover.digest_of_a_derived_version_ensured_eight "prover.ensures");
   Harness.test
     "a written default that calls a function that calls a derived default is not recursion"
     (fun () ->
@@ -1204,6 +1201,10 @@ let () =
       expect_proven Fixtures.Prover.slice_element_read);
   Harness.test "a list passed as a slice is a view with its model" (fun () ->
       expect_proven Fixtures.Prover.count_of_a_list_as_a_slice);
+  Harness.test "two views of one list are one slice, so a function of them agrees" (fun () ->
+      expect_proven Fixtures.Prover.short_list_passed_where_a_short_slice_is_required);
+  Harness.test "two views of one string are one slice, so a function of them agrees" (fun () ->
+      expect_proven Fixtures.Prover.short_text_passed_where_a_short_slice_is_required);
   Harness.test "a slice must be within its collection" (fun () ->
       expect_not_proven Fixtures.Prover.slice_past_the_end "prover.out_of_bounds");
   Harness.test "two slices lent together must not overlap" (fun () ->
@@ -1223,6 +1224,10 @@ let () =
       expect_proven Fixtures.Prover.length_of_a_string_with_an_accent);
   Harness.test "a long string literal has its length without a fact for each byte" (fun () ->
       expect_proven Fixtures.Prover.length_of_a_long_string_literal);
+  Harness.test "a string's length plus one, a sum of two, and the room below the maximum fit"
+    (fun () -> expect_proven Fixtures.Prover.sums_of_lengths_that_fit);
+  Harness.test "a sum of three string lengths may overflow" (fun () ->
+      expect_not_proven Fixtures.Prover.sum_of_three_lengths "prover.overflow");
   Harness.test "pushing text onto a string adds its length" (fun () ->
       expect_proven Fixtures.Prover.string_push);
   Harness.test "a string pattern matches text with its bytes" (fun () ->
@@ -1245,8 +1250,8 @@ let () =
         not
           (String.includes
              ~affix:
-               "The call to `Shout.is_valid_template` that `Shout\"hey ${name.copy()}\"` makes may \
-                not give `true`. This fails every time the code reaches it."
+               "The call to `Shout.is_valid_template` that `Shout\"hey ${name.to_string()}\"` \
+                makes may not give `true`. This fails every time the code reaches it."
              message)
       then Harness.fail "message %S" message);
   Harness.test "a proof knows the length and the text of a template's literals with no evaluation"
@@ -1260,7 +1265,7 @@ let () =
       | evaluated -> Harness.fail "evaluates [%s]" (String.concat "; " evaluated));
       expect_proven (tag ^ of_any_tone "Shout\"hey\"");
       expect_not_proven
-        (tag ^ of_any_tone ~parameters:"name: String" "Shout\"hey ${name.copy()}\"")
+        (tag ^ of_any_tone ~parameters:"name: StringSlice" "Shout\"hey ${name.to_string()}\"")
         "prover.requires";
       expect_not_proven (tag ^ of_any_tone "Shout\"hello\"") "prover.requires");
   Harness.test "a template copies its literal text once, as a string literal is copied" (fun () ->
@@ -1371,8 +1376,6 @@ let () =
       expect_proven Fixtures.Prover.empty_sorted_set_literal);
   Harness.test "a literal of a type that implements FromElements is proven against its impl"
     (fun () -> expect_proven Fixtures.Prover.literal_of_a_type_with_from_elements);
-  Harness.test "any is one allocation" (fun () ->
-      expect_proven Fixtures.Prover.any_of_a_value_with_one_allocation);
   Harness.test "a provided implementation's calls keep the capability's contract" (fun () ->
       expect_proven (dice ^ Fixtures.Prover.fixed_dice_provided));
   Harness.test "an implementation of a capability keeps the capability's contract" (fun () ->
@@ -1908,25 +1911,7 @@ let () =
   Harness.test "provided methods that call each other are recursion" (fun () ->
       expect_only_codes Fixtures.Prover.ping_and_pong_provided_methods [ "prover.termination" ]);
   Harness.test "an implementation that calls the function providing it is recursion" (fun () ->
-      expect_only_codes Fixtures.Prover.looper_provided_by_its_own_caller [ "prover.termination" ]);
-  Harness.test "a call through any that reaches back is recursion" (fun () ->
-      expect_only_codes Fixtures.Prover.step_reaching_back_through_any [ "prover.termination" ]);
-  Harness.test
-    "a method that calls itself through any is recursion at the conversion and at the call"
-    (fun () ->
-      match
-        List.sort compare
-          (list_termination_failures Fixtures.Prover.check_calling_itself_through_any)
-      with
-      | [ call; conversion ]
-        when String.starts_with ~prefix:"This call to `Check.check` may not end" call
-             && String.starts_with
-                  ~prefix:
-                    "This conversion to `any` gives `app.main.impl app.main.Check for \
-                     app.main.Loop`, whose methods call back here"
-                  conversion ->
-          ()
-      | messages -> Harness.fail "%s" (String.concat "; " messages))
+      expect_only_codes Fixtures.Prover.looper_provided_by_its_own_caller [ "prover.termination" ])
 
 let () =
   Harness.test "an impl's method that calls itself through its type is recursion" (fun () ->
@@ -2071,12 +2056,7 @@ let () =
   Harness.test "a trait's method is given the impls of its own type arguments" (fun () ->
       Support.expect_one_diagnostic ~check
         ~says:"uses `app.main.impl app.main.Grow for app.main.Seed` where a bound needs it"
-        Fixtures.Prover.visit_given_a_seed_that_calls_it_back "prover.termination");
-  Harness.test "a call through any in a function that an impl's method calls is recursion"
-    (fun () ->
-      match list_codes Fixtures.Prover.step_of_a_node_reaching_back_through_any with
-      | [ "prover.termination"; "prover.termination" ] -> ()
-      | codes -> Harness.fail "codes %s" (String.concat ", " codes))
+        Fixtures.Prover.visit_given_a_seed_that_calls_it_back "prover.termination")
 
 let () =
   Harness.test "a constant's value is well defined" (fun () ->
@@ -2265,6 +2245,54 @@ let () =
       with
       | [] -> ()
       | codes -> Harness.fail "codes %s" (String.concat ", " codes))
+
+let expect_a_message_saying ~says diagnostics =
+  let messages = List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) diagnostics in
+  if not (List.exists (String.includes ~affix:says) messages) then
+    Harness.fail "no message says %S: %s" says (String.concat "; " messages)
+
+let () =
+  Harness.test "a loop that calls a function with no cost clause names the function" (fun () ->
+      expect_a_message_saying
+        ~says:
+          "This loop calls `is_even`, which states no `cost time`, so the prover cannot bound the \
+           cost of an iteration. Give `is_even` a `cost time` clause, such as `cost time O(1)`."
+        (list_diagnostics Fixtures.Prover.loop_calling_a_helper_without_a_cost_clause));
+  Harness.test "a loop that calls functions with no cost clauses names each of them" (fun () ->
+      expect_a_message_saying
+        ~says:
+          "This loop calls `is_even` and `is_negative`, which state no `cost time`, so the prover \
+           cannot bound the cost of an iteration. Give each a `cost time` clause, such as `cost \
+           time O(1)`."
+        (list_diagnostics Fixtures.Prover.loop_calling_helpers_without_cost_clauses));
+  Harness.test "a loop's cost is counted once the function it calls states a cost" (fun () ->
+      expect_proven Fixtures.Prover.loop_calling_a_helper_with_a_cost_clause);
+  Harness.test
+    "a loop that calls another package's function with no cost clause asks no change of it"
+    (fun () ->
+      let diagnostics =
+        check_across Fixtures.Prover.public_is_even_without_a_cost_clause
+          Fixtures.Prover.loop_calling_another_packages_function_without_a_cost_clause
+      in
+      expect_a_message_saying
+        ~says:
+          "This loop calls `is_even`, which states no `cost time`, so the prover cannot bound the \
+           cost of an iteration."
+        diagnostics;
+      if
+        List.exists
+          (fun (diagnostic : Diagnostic.t) -> String.includes ~affix:"Give" diagnostic.message)
+          diagnostics
+      then Harness.fail "a message asks for a change to another package");
+  Harness.test "a loop that pushes on one path names the push and the list it changes" (fun () ->
+      expect_a_message_saying
+        ~says:
+          "The amortized cost of `kept.push(value)` depends on the potential of `kept`, which this \
+           loop changes, so the prover cannot bound the cost of an iteration by the values the \
+           loop does not mutate. Give the loop a `cost` clause."
+        (list_diagnostics Fixtures.Prover.loop_pushing_in_one_branch));
+  Harness.test "a loop that pushes on one path is counted by its cost clause" (fun () ->
+      expect_proven Fixtures.Prover.loop_pushing_in_one_branch_with_a_cost_clause)
 
 let () =
   Harness.test
@@ -2569,12 +2597,37 @@ let () =
       expect_not_proven (applying ^ Fixtures.Prover.nested_lambda_wrongly_constant) "prover.ensures")
 
 let () =
+  Harness.test "a lambda in a lambda's body knows the enclosing lambda's argument it captures"
+    (fun () -> expect_proven Fixtures.Prover.filter_in_a_lambda_capturing_its_argument);
+  Harness.test
+    "a lambda in the body of a lambda that may panic knows the enclosing lambda's argument it \
+     captures" (fun () ->
+      expect_proven Fixtures.Prover.filter_in_a_lambda_that_may_panic_capturing_its_argument)
+
+let () =
   Harness.test "a contract with branches, called under a quantifier on no bound value, holds there"
     (fun () -> expect_proven Fixtures.Prover.used_bits_under_a_quantifier);
   Harness.test "a derived ordering of a one-field record is its field's, for every value" (fun () ->
       expect_proven Fixtures.Prover.day_ordering_theorem);
   Harness.test "a derived ordering compares fields in order, for every value" (fun () ->
       expect_proven Fixtures.Prover.pair_ordering_theorem)
+
+let () =
+  Harness.test "sorting is n log n where the element's ordering is constant time" (fun () ->
+      expect_proven Fixtures.Prover.sorts_in_n_log_n);
+  Harness.test "sorting records with a derived ordering of a string field is not n log n" (fun () ->
+      expect_not_proven Fixtures.Prover.sort_of_derived_people_in_n_log_n "prover.cost");
+  Harness.test "a derived ordering of a recursive type has no constant time bound" (fun () ->
+      expect_not_proven Fixtures.Prover.derived_ordering_of_a_chain_in_constant_time "prover.cost");
+  Harness.test "a derived equality spends the equality of a list field" (fun () ->
+      expect_not_proven Fixtures.Prover.derived_equality_of_tags_in_constant_time "prover.cost");
+  Harness.test "derived methods of constant-time fields are constant time and allocate nothing"
+    (fun () -> expect_proven Fixtures.Prover.derived_methods_of_constant_time_fields);
+  Harness.test "a derived default spends its fields' defaults" (fun () ->
+      expect_proven Fixtures.Prover.derived_default_of_settings);
+  Harness.test "a derived default spends the allocation of a written list default" (fun () ->
+      expect_not_proven Fixtures.Prover.derived_default_of_settings_without_allocations
+        "prover.cost")
 
 let () =
   Harness.test "a proof for a generic impl names its own generic parameters" (fun () ->

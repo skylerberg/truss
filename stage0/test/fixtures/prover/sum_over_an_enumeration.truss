@@ -1,4 +1,4 @@
-fn total(numbers: List[UInt8]) -> UInt8 {
+fn total(numbers: Slice[UInt8]) -> UInt8 {
   var sum: UInt8 = 0
   for entry in numbers.enumerate() {
     sum += entry.element

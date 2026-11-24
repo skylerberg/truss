@@ -9,7 +9,7 @@ fn fib(n: UInt64) -> UInt64 {
   left.wrapping_add(right)
 }
 
-fn main(arguments: List[String]) -> ExitCode
+fn main(arguments: Slice[String]) -> ExitCode
   uses Console
 {
   Console.print_line("${fib(30)}")

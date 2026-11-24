@@ -530,11 +530,11 @@ let () =
         Codegen_support.run_main ~arguments:[ path ]
           {|use standard.network
 
-fn say(text: String) uses Console {
-  Console.print_line(text.slice())
+fn say(text: StringSlice) uses Console {
+  Console.print_line(text)
 }
 
-fn main(arguments: List[String]) -> ExitCode
+fn main(arguments: Slice[String]) -> ExitCode
   uses Console, NetworkServer, NetworkClient, Handles
 {
   let path = Path.new(arguments[1].slice())

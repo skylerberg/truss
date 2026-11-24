@@ -968,7 +968,7 @@ impl From[Regex] for Part {
 impl FromTemplate for Regex {
   type Part = Part
 
-  fn is_valid_template(literals: List[text.Literal]) -> Bool
+  fn is_valid_template(literals: Slice[text.Literal]) -> Bool
   {
     var pattern = ""
     var index: UInt64 = 0

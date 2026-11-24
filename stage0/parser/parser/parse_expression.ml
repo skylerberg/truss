@@ -123,9 +123,6 @@ let rec parse_type_expression cursor : Syntax.type_expression =
         else None
       in
       Atoms.make_type_node cursor start (Self_type associated)
-  | Keyword Any, _, _ ->
-      Cursor.advance cursor;
-      Atoms.make_type_node cursor start (Any_type (parse_path_type cursor))
   | Keyword Fn, _, _ ->
       Atoms.make_type_node cursor start (Function_type (parse_function_type cursor ~clauses:false))
   | Punctuation (Open Paren), _, _ -> parse_parenthesized_function_type cursor
@@ -645,9 +642,6 @@ and parse_prefix cursor : Syntax.expression =
     | Keyword Own ->
         Cursor.advance cursor;
         Atoms.make_expression_node cursor start (Mode (Own, parse_postfix cursor))
-    | Keyword Any ->
-        Cursor.advance cursor;
-        Atoms.make_expression_node cursor start (Any (parse_postfix cursor))
     | Keyword (Forall | Exists) -> parse_quantified cursor
     | Keyword Echo ->
         Cursor.advance cursor;
@@ -1228,8 +1222,7 @@ and find_trailing_callee (statement : Syntax.statement) =
   let rec find_rightmost (value : Syntax.expression) =
     match value.kind with
     | Name _ | Member _ -> Some value
-    | Binary { right = inner; _ } | Return (Some inner) | Echo inner | Mode (_, inner) | Any inner
-      ->
+    | Binary { right = inner; _ } | Return (Some inner) | Echo inner | Mode (_, inner) ->
         find_rightmost inner
     | _ -> None
   in

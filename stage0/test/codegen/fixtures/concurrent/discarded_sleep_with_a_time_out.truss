@@ -21,7 +21,7 @@ fn run_or_time_out() -> String
   }
 }
 
-fn main(arguments: List[String]) -> ExitCode
+fn main(arguments: Slice[String]) -> ExitCode
   uses Tasks, Clock, Console, Processes
 {
   Console.print_line(run_or_time_out())

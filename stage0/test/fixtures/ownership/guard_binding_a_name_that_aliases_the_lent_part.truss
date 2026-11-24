@@ -1,4 +1,4 @@
-fn show(text: String) {}
+fn show(text: StringSlice) {}
 
 fn f(names: Map[Int64, String], id: Int64) {
   match id {

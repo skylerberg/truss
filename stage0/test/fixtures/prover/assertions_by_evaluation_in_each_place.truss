@@ -46,7 +46,7 @@ proof Tagged.tag_is_stable for Box {
   assert is_small(6) by evaluation
 }
 
-fn count_of[Item](items: List[Item]) -> List[Bool] {
+fn count_of[Item](items: Slice[Item]) -> List[Bool] {
   proof {
     assert is_small(7) by evaluation
   }

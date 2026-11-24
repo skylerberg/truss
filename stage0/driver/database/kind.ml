@@ -108,7 +108,6 @@ type fact =
   | Body_mir
   | Contract_mir
   | Generated_mir
-  | Call_node
   | Callees
   | Recursion_group
   | Usage_check
@@ -143,7 +142,6 @@ let facts =
     Body_mir;
     Contract_mir;
     Generated_mir;
-    Call_node;
     Callees;
     Recursion_group;
     Usage_check;
@@ -207,10 +205,10 @@ let lookups =
     Tests;
   ]
 
-type entity = Definition | Import | Package | Unknown_implementation | Item
+type entity = Definition | Import | Package | Item
 type selection = Unresolved | Import_references | Package_references
 
-let entities = [ Definition; Import; Package; Unknown_implementation; Item ]
+let entities = [ Definition; Import; Package; Item ]
 let selections = [ Unresolved; Import_references; Package_references ]
 
 type target = Fact of fact | Lookup of lookup | Entity of entity | Selection of selection
@@ -292,7 +290,7 @@ let show_fact = function
   | Body_mir -> "MIR of the body"
   | Contract_mir -> "MIR of the contract"
   | Generated_mir -> "generated MIR"
-  | Call_node | Callees -> "call edges"
+  | Callees -> "call edges"
   | Recursion_group -> "recursion group"
   | Usage_check -> "usage check"
   | Ownership -> "ownership check"
@@ -332,8 +330,8 @@ let is_signature = function
   | Type_facts | Signature_check | Checked_interface | Contract | Contract_mir ->
       true
   | Resolved _ | Grant | Body_form | Body_tables | Run_forever | Ownership_modes | Body_mir
-  | Generated_mir | Call_node | Callees | Recursion_group | Usage_check | Ownership | Dependency_use
-  | Proof | Lowered | Test_key | Evaluation | Unit _ ->
+  | Generated_mir | Callees | Recursion_group | Usage_check | Ownership | Dependency_use | Proof
+  | Lowered | Test_key | Evaluation | Unit _ ->
       false
 
 let list_read_targets = function
@@ -341,15 +339,15 @@ let list_read_targets = function
   | Signature_check -> [ Checked_interface ]
   | ( Resolved _ | Grant | Trait_header | Constant_value | Header | Elaboration | Derived_interface
     | Type_facts | Checked_interface | Contract | Body_form | Body_tables | Run_forever
-    | Ownership_modes | Body_mir | Contract_mir | Generated_mir | Call_node | Callees
-    | Recursion_group | Usage_check | Ownership | Dependency_use | Proof | Lowered | Test_key
-    | Evaluation | Unit _ ) as fact ->
+    | Ownership_modes | Body_mir | Contract_mir | Generated_mir | Callees | Recursion_group
+    | Usage_check | Ownership | Dependency_use | Proof | Lowered | Test_key | Evaluation | Unit _ )
+    as fact ->
       [ fact ]
 
 let lookups_of_definition = [ Imports; Declaration; Tree; Text; Place; Container; Contained ]
 let facts_of_definition = facts
 
-type marker = Reads | References | Calls | Instantiates | Grows | Claims | Implements
+type marker = Reads | References | Calls | Instantiates | Grows | Claims
 
 let rank_marker = function
   | Reads -> 1
@@ -358,7 +356,6 @@ let rank_marker = function
   | Instantiates -> 8
   | Grows -> 16
   | Claims -> 32
-  | Implements -> 64
 
 let encode_markers markers =
   List.fold_left (fun encoded marker -> encoded lor rank_marker marker) 0 markers

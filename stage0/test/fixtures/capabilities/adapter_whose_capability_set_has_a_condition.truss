@@ -18,7 +18,7 @@ impl Cursor for Evens[Source: Cursor[Element = Int64]] {
   }
 }
 
-fn first_even(values: List[Int64]) -> Option[Int64] {
+fn first_even(values: Slice[Int64]) -> Option[Int64] {
   var evens = Evens(source: values.cursor())
   mut evens.next()
 }

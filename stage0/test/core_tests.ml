@@ -48,10 +48,7 @@ and show_expression (node : Core.expression) =
         match callee.target with
         | Trait_method { self_type; evidence; _ } ->
             Printf.sprintf " for %s by %s" (Types.show self_type)
-              (match evidence with
-              | Impl { impl; _ } -> Path.show impl
-              | Bound -> "a bound"
-              | Dynamic -> "any")
+              (match evidence with Impl { impl; _ } -> Path.show impl | Bound -> "a bound")
         | _ -> ""
       in
       Printf.sprintf "%s%s(%s)"
@@ -166,7 +163,7 @@ let () =
                  fn take(count: Int64) -> Int64 {\n\
                 \  count\n\
                  }\n\n\
-                 fn g(items: List[Int64], config: Config) -> Int64\n\
+                 fn g(items: Slice[Int64], config: Config) -> Int64\n\
                 \  uses RunForever\n\
                  {\n\
                 \  var hole = todo\n\
@@ -366,7 +363,7 @@ let () =
             Some
               (Printf.sprintf "%s(%s) for %s by %s" (Language.Metric.show metric)
                  (Core_lint.show_target method_) (Types.show self_type)
-                 (match evidence with Bound -> "a bound" | Impl _ -> "an impl" | Dynamic -> "any"))
+                 (match evidence with Bound -> "a bound" | Impl _ -> "an impl"))
         | Method_cost { metric; method_ } ->
             Some
               (Printf.sprintf "%s(%s)" (Language.Metric.show metric) (Core_lint.show_target method_))
@@ -384,7 +381,7 @@ let () =
     ];
   expect "the allocations of a callback are a specification function of the resource"
     Fixtures.Core.cost_naming_allocations_of_a_callback_and_a_bounds_method list_applied
-    [ "call standard.list.List.length"; "allocations"; "allocated_bytes" ];
+    [ "call standard.list.Slice.length"; "allocations"; "allocated_bytes" ];
   Harness.test "in a trait, `time(Self.method)` names the trait's own method" (fun () ->
       Support.expect_no_diagnostics
         ~check:(fun packages module_ ->
@@ -414,18 +411,13 @@ let () =
         (Support.list_declarations packages (Support.parse_module "app.main")))
 
 let () =
-  let packages = Support.setup [] in
+  let database = Support.make_database (Support.setup []) in
   let forms = ref 0 in
   List.iter
     (fun ((file : Path.file), _) ->
       Harness.test
         (Printf.sprintf "%s's core forms satisfy the invariants" (Path.show_file file))
-        (fun () ->
-          forms :=
-            !forms
-            + Core_lint.check_file
-                (Database.make_interface_lookups (Support.make_database packages))
-                ~find_core:(find_core packages) file))
+        (fun () -> forms := !forms + Core_lint.check_file database file))
     Standard_library.files;
   Harness.test "the standard library has core forms" (fun () ->
       if !forms < 500 then Harness.fail "only %d of its definitions have one" !forms)
@@ -444,52 +436,15 @@ let () =
       in
       if Database.For_testing.read_derived_form (Support.make_database packages) path <> None then
         Harness.fail "it has a core form");
-  Harness.test
-    "every method of a derived impl in the standard library has a core form that satisfies the \
-     invariants" (fun () ->
-      let packages = Support.setup [] in
-      let interface = Database.make_interface_lookups (Support.make_database packages) in
-      let derived =
-        List.concat_map
-          (fun (declaration : Resolve.Names.declaration) ->
-            List.filter_map
-              (fun (_, (impl : Path.t)) -> match impl with Derived _ -> Some impl | _ -> None)
-              (interface.names.list_impls_of_type Path.standard_package declaration.key.path))
-          (interface.names.list_package_declarations Path.standard_package)
+  Harness.test "every derived method of a record and of a sum type satisfies the invariants"
+    (fun () ->
+      let packages = Support.setup [ ("app.main", Fixtures.Core.types_deriving_every_trait) ] in
+      let forms =
+        Core_lint.check_file (Support.make_database packages) (Support.parse_file "app.main")
       in
-      if derived = [] then Harness.fail "the standard library derives nothing";
-      List.iter
-        (fun impl ->
-          match Interface.Definition.find_impl_interface interface impl with
-          | None -> Harness.fail "`%s` has no interface" (Path.show impl)
-          | Some impl_interface ->
-              let provided =
-                match
-                  Interface.Definition.find_trait_interface interface
-                    impl_interface.implements.trait
-                with
-                | Some trait ->
-                    List.filter_map
-                      (fun (method_ : Types.trait_method) ->
-                        if method_.provided then Some method_.method_name else None)
-                      trait.methods
-                | None -> []
-              in
-              List.iter
-                (fun (name, receiver) ->
-                  let path : Path.t = Method { owner = impl; name; receiver } in
-                  match
-                    Database.For_testing.read_derived_form (Support.make_database packages) path
-                  with
-                  | Some form -> Core_lint.check_derived interface path form
-                  | None ->
-                      if not (List.mem name provided) then
-                        Harness.fail "`%s` has no core form for `%s`" (Path.show impl) name
-                  | exception Compiler_bug.Bug bug ->
-                      Harness.fail "`%s`, `%s`: %s" (Path.show impl) name
-                        (Compiler_bug.to_string bug))
-                impl_interface.impl_methods)
-        derived)
+      if forms <> 13 then
+        Harness.fail
+          "the lint checked %d core forms, not the 2 types' and their 11 derived methods'" forms)
 
 let () =
   let text = Fixtures.Core.described_both in

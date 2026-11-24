@@ -1,9 +1,6 @@
 let ( ++ ) = C_text.( ++ )
 
-type kind =
-  | Functions of { nested : int; weight : int }
-  | Static_data
-  | Table_entries of Path.t option
+type kind = Functions of { nested : int; weight : int } | Static_data | Table_entries of Path.t
 
 type function_text = {
   symbol : string;

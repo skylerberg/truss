@@ -5,7 +5,7 @@ fn find[Key: Hash + Ordered](key: Key, counts: Map[Key, Int64]) -> Bool {
 fn f(
   counts: mut Map[String, Int64],
   names: Set[String],
-  listed: List[String],
+  listed: Slice[String],
   tables: Map[List[UInt8], Int64],
   word: StringSlice,
   bytes: Slice[UInt8],

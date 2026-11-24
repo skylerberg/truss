@@ -290,7 +290,7 @@ let () =
                {\n\
               \  value * 2\n\
                }\n\
-               fn main(arguments: List[String]) -> ExitCode {\n\
+               fn main(arguments: Slice[String]) -> ExitCode {\n\
               \  if double(21) == 42 { ExitCode.success } else { ExitCode.failure }\n\
                }\n"
           in

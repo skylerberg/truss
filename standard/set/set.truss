@@ -461,6 +461,8 @@ impl Default for Set[Element: Hash + Ordered] {
   fn default() -> Set[Element]
     ensures result.length() == 0
     ensures forall value: Element => !result.model().contains(value)
+    cost time O(1)
+    cost allocations == 0
   {
     Set(map: map.Map.default())
   }

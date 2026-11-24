@@ -1,4 +1,4 @@
-fn f(pair: Array[Int64, 2], name: String, pairs: List[Array[Int64, 2]]) -> UInt64 {
+fn f(pair: Array[Int64, 2], name: own String, pairs: own List[Array[Int64, 2]]) -> UInt64 {
   let copied = pair
   let viewed = name
   var count: UInt64 = 0

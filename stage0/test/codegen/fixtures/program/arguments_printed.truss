@@ -1,4 +1,4 @@
-fn main(arguments: List[String]) -> ExitCode
+fn main(arguments: Slice[String]) -> ExitCode
   uses Console
 {
   Console.print_line("${arguments.length()} [${arguments[1]}] [${arguments[2]}]".slice())

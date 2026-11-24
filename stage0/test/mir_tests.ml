@@ -29,8 +29,7 @@ let list_written (place : Mir.place) =
   | _ -> (list_place_locals place, [])
 
 let rec list_rvalue_locals : Mir.rvalue -> Mir.local list = function
-  | Operand value | Not value | Convert { value; _ } | To_any { value; _ } | Copy value ->
-      list_operand_locals value
+  | Operand value | Not value | Convert { value; _ } | Copy value -> list_operand_locals value
   | Operation { operands; _ } | Array operands -> List.concat_map list_operand_locals operands
   | Compare { left; right; _ } -> list_operand_locals left @ list_operand_locals right
   | Construct { fields; _ } ->
@@ -177,7 +176,6 @@ let validate definition (body : Mir.Graph.body) =
                     | Array _ -> "array"
                     | Is_variant _ -> "is_variant"
                     | Convert _ -> "convert"
-                    | To_any _ -> "to_any"
                     | Copy _ -> "copy"
                     | Function_value _ -> "function"
                     | Lambda _ -> "lambda"
@@ -1499,20 +1497,7 @@ let () =
   Harness.test "a call resolved to a derived method is a call edge to that method" (fun () ->
       expect_edges
         (Support.make_top_path "app.main" "make")
-        ~expected:[ "derived standard.core.Default for app.main.Config.default" ]);
-  Harness.test "a trait's method reaches the derived methods of the trait's impls" (fun () ->
-      let implementations =
-        List.map Path.show
-          (Mir.Call_edges.list_implementations (Lazy.force lookups)
-             ~calling_package:(Support.parse_module "app.main").package
-             (Well_known.make_method_path Equal_equal))
-      in
-      List.iter
-        (fun expected ->
-          if not (List.mem expected implementations) then
-            Harness.fail "the implementations lack %s: [%s]" expected
-              (String.concat "; " implementations))
-        [ meters_equal; "derived standard.core.Equal for app.main.Span.equal" ])
+        ~expected:[ "derived standard.core.Default for app.main.Config.default" ])
 
 let () =
   let lookups = lazy (make_call_edge_lookups Fixtures.Mir.code_reading_constants) in
@@ -1656,13 +1641,6 @@ let () =
         (List.filter
            (fun edge -> Path.locate_package edge <> Path.standard_package)
            (list_edges (Method { owner = level; name = "raised"; receiver = Instance Read }))));
-  Harness.test "a trait's method reaches the method of every impl, written or inherited" (fun () ->
-      expect_paths
-        ~expected:
-          [ method_of "Shelf" "raised"; method_of "Stair" "raised"; method_of "Pot" "raised" ]
-        (Mir.Call_edges.list_implementations (Lazy.force lookups)
-           ~calling_package:(Support.parse_module "app.main").package
-           (Method { owner = level; name = "raised"; receiver = Instance Read })));
   Harness.test "a call of a generic impl's method has edges to the impl of the type argument"
     (fun () ->
       expect_paths

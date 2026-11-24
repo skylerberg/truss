@@ -162,13 +162,7 @@ let mark_readers_of_replaced_packages (database : t) ~routes_before ~routes_afte
               List.concat_map
                 (fun id -> List.map (fun fact -> (Kind.Fact fact, id, "")) read_targets)
                 (list_differing_ids database ~table ~id_column ~before ~after))
-            (Tracker.describe (Any Facts.grant) :: Recipes.list_definition_facts ()));
-      Tracker.mark_callers_to_group database
-        ~seeds:
-          (List.concat_map
-             (fun (table, id_column) ->
-               list_differing_ids database ~table ~id_column ~before ~after)
-             [ ("edge", "source"); ("call_node", "path") ]))
+            (Tracker.describe (Any Facts.grant) :: Recipes.list_definition_facts ())))
     (List.sort_uniq compare
        (List.filter_map
           (fun package ->
@@ -975,7 +969,7 @@ let build_package ~loaded (package : Project.package) ~into =
   Fun.protect
     ~finally:(fun () -> Store.close database.store)
     (fun () ->
-      Store.keep_for_dependents database.store ~markers:(Kind.encode_markers [ Calls; Implements ]);
+      Store.keep_for_dependents database.store ~markers:(Kind.encode_markers [ Calls ]);
       Store.save database.store ~into)
 
 let list_package_diagnostics path package =

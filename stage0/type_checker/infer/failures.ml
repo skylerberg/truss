@@ -157,8 +157,8 @@ let add_mismatch_diagnostic (state : State.state) ?(fixes = []) code
       | Some report -> report
       | None -> State.add_diagnostic state ~fixes code span message)
 
-let add_mismatch (state : State.state) (span : Source.Definition_span.t) ~expected ~actual =
-  add_mismatch_diagnostic state Mismatch span
+let add_mismatch ?fixes (state : State.state) (span : Source.Definition_span.t) ~expected ~actual =
+  add_mismatch_diagnostic state ?fixes Mismatch span
     ~sides:[ (actual, expected); (expected, actual) ]
     (Printf.sprintf "Expected %s, found %s." (State.describe state expected)
        (State.describe state actual))
@@ -202,8 +202,8 @@ let add_operand_mismatch (state : State.state) ~(at : Source.Definition_span.t)
   end
   else add_mismatch state right_span ~expected:left ~actual:right
 
-let report_mismatch (state : State.state) span ~expected ~actual =
-  ignore (add_mismatch state span ~expected ~actual)
+let report_mismatch ?fixes (state : State.state) span ~expected ~actual =
+  ignore (add_mismatch ?fixes state span ~expected ~actual)
 
 let describe_associated state type_ =
   match State.zonk state type_ with
@@ -305,15 +305,7 @@ let report_requirement (state : State.state) (goal : State.goal) ?associated ~un
         (match goal.cause with Loop _ | Quantifier _ -> Not_indexable | _ -> No_impl)
         at
         (does_not_implement trait ^ "." ^ unmet)
-  | Any_conversion { at; any_type }, Implements trait ->
-      State.add_diagnostic state No_impl at
-        ((match associated with
-           | None -> does_not_implement trait ^ "."
-           | Some (name, found, _) ->
-               Printf.sprintf "`%s` is expected, and the `%s` of `%s` is `%s`."
-                 (Types.show any_type) name (Types.show shown) (State.show state found))
-        ^ unmet)
-  | (Bound _ | Operator _ | Method_call _ | Loop _ | Quantifier _ | Any_conversion _), Within _ ->
+  | (Bound _ | Operator _ | Method_call _ | Loop _ | Quantifier _), Within _ ->
       State.raise_bug "a goal's cause does not fit its requirement"
 
 let report_failure (state : State.state) (goal : State.goal) ?associated subject =

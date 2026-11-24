@@ -164,12 +164,12 @@ let () =
    in
    Harness.test "a lending method forwards a part that a key it owns selects" (fun () ->
        expect_fine
-         (make_lending_source "title" "(self, prefix: String) lends String"
-            "  let key = prefix.copy()\n  self.titles[key]\n"));
+         (make_lending_source "title" "(self, prefix: StringSlice) lends String"
+            "  let key = prefix.to_string()\n  self.titles[key]\n"));
    Harness.test "a lending method forwards a part inside a constructor" (fun () ->
        expect_fine
-         (make_lending_source "find" "(self, prefix: String) lends Option[String]"
-            "  let key = prefix.copy()\n\
+         (make_lending_source "find" "(self, prefix: StringSlice) lends Option[String]"
+            "  let key = prefix.to_string()\n\
             \  if self.titles.contains(key) {\n\
             \    Some(self.titles[key])\n\
             \  } else {\n\
@@ -177,46 +177,46 @@ let () =
             \  }\n"));
    Harness.test "a lending method cannot forward a part of a map it owns" (fun () ->
        expect_one_diagnostic ~says:"a view of `copied`"
-         (make_lending_source "title" "(self, key: String) lends String"
+         (make_lending_source "title" "(self, key: StringSlice) lends String"
             "  let copied = self.titles.copy()\n  copied[key]\n")
          "ownership.view_escapes");
    Harness.test "a lending method cannot forward a part of a map it owns inside a constructor"
      (fun () ->
        expect_one_diagnostic ~says:"a view of `copied`"
-         (make_lending_source "find" "(self, key: String) lends Option[String]"
+         (make_lending_source "find" "(self, key: StringSlice) lends Option[String]"
             "  let copied = self.titles.copy()\n  Some(copied[key])\n")
          "ownership.view_escapes");
    Harness.test "a lending method cannot lend a part of a parameter that is not its first"
      (fun () ->
        expect_one_diagnostic ~says:"a part of `other`"
-         (make_lending_source "first_of" "(self, other: List[String]) lends String" "  other[0]\n")
+         (make_lending_source "first_of" "(self, other: Slice[String]) lends String" "  other[0]\n")
          "ownership.lends_other_parameter");
    Harness.test "a lending method cannot forward a part of a map that is not its first parameter"
      (fun () ->
        expect_one_diagnostic ~says:"a part of `other`"
          (make_lending_source "title_in"
-            "(self, other: Map[String, String], key: String) lends String" "  other[key]\n")
+            "(self, other: Map[String, String], key: StringSlice) lends String" "  other[key]\n")
          "ownership.lends_other_parameter");
    Harness.test "a lending method can lend a `Plain` part of a parameter that is not its first"
      (fun () ->
        expect_fine
-         (make_lending_source "count_of" "(self, other: List[UInt64]) lends UInt64" "  other[0]\n")));
+         (make_lending_source "count_of" "(self, other: Slice[UInt64]) lends UInt64" "  other[0]\n")));
   (let shelves = "type Shelves(titles: Map[String, List[String]])\n\n" in
    let make_lending_source name signature body =
      shelves ^ "fn Shelves." ^ name ^ signature ^ " {\n" ^ body ^ "}\n"
    in
    Harness.test "a lending method forwards an element of a list that a lending call lent" (fun () ->
        expect_fine
-         (make_lending_source "first" "(self, shelf: String) lends String"
+         (make_lending_source "first" "(self, shelf: StringSlice) lends String"
             "  self.titles[shelf][0]\n"));
    Harness.test "a lending method cannot forward an element of a list in a map it owns" (fun () ->
        expect_one_diagnostic ~says:"a view of `copied`"
-         (make_lending_source "first" "(self, shelf: String) lends String"
+         (make_lending_source "first" "(self, shelf: StringSlice) lends String"
             "  let copied = self.titles.copy()\n  copied[shelf][0]\n")
          "ownership.view_escapes");
    Harness.test "an element of a list that a lending call lent is not bound with `let`" (fun () ->
        expect_one_diagnostic
-         (make_lending_source "first_length" "(self, shelf: String) -> UInt64"
+         (make_lending_source "first_length" "(self, shelf: StringSlice) -> UInt64"
             "  let first = self.titles[shelf][0]\n  first.length()\n")
          "ownership.lent_part_escapes"));
   Harness.test "a lent constructor is not lent one place `mut` twice" (fun () ->
@@ -296,12 +296,6 @@ let () =
     Fixtures.Ownership.slice_of_an_own_parameter_returned "ownership.view_escapes";
   expect_accepted "a view copied out of an `own` parameter can be returned"
     Fixtures.Ownership.view_field_of_an_own_parameter_returned;
-  expect_rejected "an `any` that stores a view of a local cannot be returned"
-    Fixtures.Ownership.any_runner_viewing_a_local "ownership.view_escapes";
-  expect_rejected "the place that an `any` views cannot be mutated while the `any` is live"
-    Fixtures.Ownership.push_while_an_any_views_the_list "ownership.mutated_while_viewed";
-  expect_accepted "an `any` made from owned data can be returned"
-    Fixtures.Ownership.any_runner_of_owned_items;
   expect_rejected "a capturing lambda cannot be returned as a wider function type"
     Fixtures.Ownership.capturing_lambda_returned_as_a_wider_type "ownership.view_escapes";
   expect_rejected "the value of an `if` has the views of its branches' tail expressions"
@@ -595,7 +589,7 @@ let () =
   Harness.test "a field can be moved out by itself" (fun () ->
       expect_fine Fixtures.Ownership.field_of_a_config_moved_out);
   Harness.test "a read-only parameter cannot be moved" (fun () ->
-      expect_one_diagnostic (keep ^ Fixtures.Ownership.read_only_list_moved) "ownership.not_owned");
+      expect_one_diagnostic (keep ^ Fixtures.Ownership.read_only_pile_moved) "ownership.not_owned");
   Harness.test "a field moved out of a `mut` parameter must be reinitialized" (fun () ->
       expect_one_diagnostic Fixtures.Ownership.field_moved_out_of_a_mut_config
         "ownership.not_reinitialized");
@@ -696,14 +690,14 @@ let () =
         (fun () -> expect_one_diagnostic text "ownership.not_owned" ~fixed))
     [
       ( "a read-only parameter in a list literal",
-        Fixtures.Ownership.list_of_a_string_parameter,
-        Fixtures.Ownership.list_of_a_copied_string_parameter );
+        Fixtures.Ownership.list_of_a_name_parameter,
+        Fixtures.Ownership.list_of_a_copied_name_parameter );
       ( "a read-only parameter passed to an `own` parameter",
-        keep ^ Fixtures.Ownership.read_only_list_passed_without_own,
-        keep ^ Fixtures.Ownership.read_only_list_passed_without_own_fixed );
+        keep ^ Fixtures.Ownership.read_only_pile_passed_without_own,
+        keep ^ Fixtures.Ownership.read_only_pile_passed_without_own_fixed );
       ( "a read-only parameter used as a map key",
-        Fixtures.Ownership.map_assignment_with_a_viewed_key,
-        Fixtures.Ownership.map_assignment_with_a_copied_key );
+        Fixtures.Ownership.map_assignment_with_a_viewed_host,
+        Fixtures.Ownership.map_assignment_with_a_copied_host );
       ( "a read-only receiver of a method that takes `own self`",
         Fixtures.Ownership.read_only_receiver_moved,
         Fixtures.Ownership.read_only_receiver_copied );
@@ -724,9 +718,9 @@ let () =
         (fun () -> expect_one_diagnostic text code ~fixed))
     [
       ( "a read-only parameter passed `own`",
-        keep ^ Fixtures.Ownership.read_only_list_moved,
+        keep ^ Fixtures.Ownership.read_only_pile_moved,
         "ownership.not_owned",
-        keep ^ Fixtures.Ownership.read_only_list_passed_without_own_fixed );
+        keep ^ Fixtures.Ownership.read_only_pile_passed_without_own_fixed );
       ( "a `let` bound to a string literal and moved into a `var`",
         Fixtures.Ownership.string_literal_let_moved_into_a_var,
         "ownership.not_owned",
@@ -736,9 +730,9 @@ let () =
         "ownership.not_owned",
         Fixtures.Ownership.var_initialized_from_an_element_fixed );
       ( "a read-only parameter moved into a list literal",
-        Fixtures.Ownership.list_of_a_moved_string_parameter,
+        Fixtures.Ownership.list_of_a_moved_name_parameter,
         "ownership.not_owned",
-        Fixtures.Ownership.list_of_a_copied_string_parameter );
+        Fixtures.Ownership.list_of_a_copied_name_parameter );
       ( "a place moved into a `var` and used afterward",
         Fixtures.Ownership.list_moved_into_a_var_then_read,
         "ownership.use_after_move",

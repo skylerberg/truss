@@ -274,7 +274,7 @@ let () =
         make_package
           [
             ( "main.truss",
-              "fn main(arguments: List[String]) -> ExitCode {\n\
+              "fn main(arguments: Slice[String]) -> ExitCode {\n\
               \  if arguments.length() == 2 { ExitCode.success } else { ExitCode.failure }\n\
                }\n" );
           ]
@@ -1150,6 +1150,63 @@ let () =
       expect_strings
         ~expected:[ "trait Shape {"; "type Square(side: Int64)"; "impl Shape for Square {" ]
         (list_headers (run_show root "demo.shapes")));
+  test "a trait's method is shown through a type that implements the trait" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.Cli.point_with_a_sum_method) ] in
+      let status, output = run_truss [ "show"; "-C"; root; "Int64.checked_add" ] in
+      if
+        status <> 0
+        || not
+             (String.includes
+                ~affix:
+                  "`Int64` has `checked_add` from its impl of `FixedWidthInteger`.\n\
+                   standard/numbers/integers/integers.truss:"
+                output)
+      then fail "status %d: %s" status output;
+      match list_shown root "Int64.checked_add" with
+      | [ shown ] ->
+          expect_string ~expected:"fn checked_add(self, other: Self) -> Option[Self]"
+            (read_header (read_string_field "text" shown));
+          expect_string
+            ~expected:
+              "standard.numbers.signed.impl standard.numbers.integers.FixedWidthInteger for \
+               standard.intrinsic.Int64"
+            (read_string_field "impl" shown)
+      | shown -> fail "found %d" (List.length shown));
+  test "a derived trait's method is shown through the type that derives it" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.Cli.interval_deriving_an_ordering) ] in
+      let status, output = run_truss [ "show"; "-C"; root; "demo.Interval.compare" ] in
+      if
+        status <> 0
+        || not
+             (String.includes ~affix:"`Interval` has `compare` because it derives `Ordered`." output)
+      then fail "status %d: %s" status output;
+      expect_strings
+        ~expected:[ "fn compare(self, other: Self) -> Ordering" ]
+        (list_headers (run_show root "demo.Interval.compare")));
+  test "a missing member is reported with the member of that name on a related type" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.Cli.point_with_a_sum_method) ] in
+      let status, output = run_truss [ "show"; "-C"; root; "Slice.characters" ] in
+      if
+        status <> 2
+        || not
+             (String.includes
+                ~affix:
+                  "`Slice` has no member `characters`. `StringSlice.characters` exists. `truss \
+                   show Slice` lists its methods and its impls."
+                output)
+      then fail "status %d: %s" status output);
+  test "a missing member with no related one is reported with the type's listing" (fun () ->
+      let root = make_package [ ("main.truss", Fixtures.Cli.point_with_a_sum_method) ] in
+      let status, output = run_truss [ "show"; "-C"; root; "demo.Point.scale" ] in
+      if
+        status <> 2
+        || not
+             (String.includes
+                ~affix:
+                  "`Point` has no member `scale`. `truss show demo.Point` lists its methods and \
+                   its impls."
+                output)
+      then fail "status %d: %s" status output);
   test "a built-in type that no definition names is shown as having nothing to show" (fun () ->
       let root = make_package [ ("main.truss", Fixtures.Cli.point_with_a_sum_method) ] in
       let status, output = run_truss [ "show"; "-C"; root; "Never" ] in
@@ -1183,7 +1240,7 @@ let make_speaker_calling called =
            {\n\
           \  Speaker.%s(\"hello\")\n\
            }\n\n\
-           fn main(arguments: List[String]) -> ExitCode {\n\
+           fn main(arguments: Slice[String]) -> ExitCode {\n\
           \  provide Quiet() {\n\
           \    speak()\n\
           \  }\n\
@@ -1289,7 +1346,7 @@ let () =
             ("weather/daily/daily.truss", "public fn forecast() -> UInt64 {\n  1\n}\n");
             ( "main.truss",
               "use demo.weather\n\n\
-               fn main(arguments: List[String]) -> ExitCode {\n\
+               fn main(arguments: Slice[String]) -> ExitCode {\n\
               \  let _ = weather.daily.forecast()\n\
               \  ExitCode.success\n\
                }\n" );
@@ -1310,7 +1367,7 @@ let () =
             ("weather/daily/daily.truss", "public fn forecast() -> UInt64 {\n  1\n}\n");
             ( "main.truss",
               "use demo.weather\n\n\
-               fn main(arguments: List[String]) -> ExitCode {\n\
+               fn main(arguments: Slice[String]) -> ExitCode {\n\
               \  let _ = weather.total([1]) + weather.daily.forecast()\n\
               \  ExitCode.success\n\
                }\n" );
@@ -1558,7 +1615,7 @@ let () =
       | [ hole ] ->
           if read_string_field "type" hole <> "String" then fail "the type is not String";
           expect_strings
-            ~expected:[ "count: Int64"; "header: String"; "title: String" ]
+            ~expected:[ "count: Int64"; "header: String"; "title: StringSlice" ]
             (List.map
                (fun binding ->
                  read_string_field "name" binding ^ ": " ^ read_string_field "type" binding)
@@ -2440,7 +2497,7 @@ let () =
         make_package
           [
             ( "main.truss",
-              "fn main(arguments: List[String]) -> ExitCode {\n\
+              "fn main(arguments: Slice[String]) -> ExitCode {\n\
               \  ExitCode.success\n\
                }\n\n\
                fn helper() -> Int64 {\n\
@@ -2464,7 +2521,7 @@ let make_package_with_two_warnings () =
   make_package
     [
       ( "main.truss",
-        "fn main(arguments: List[String]) -> ExitCode {\n\
+        "fn main(arguments: Slice[String]) -> ExitCode {\n\
         \  ExitCode.success\n\
          }\n\n\
          fn helper() -> Int64 {\n\

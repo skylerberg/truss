@@ -31,7 +31,6 @@ type cause =
   | Method_call of Source.Definition_span.t
   | Loop of Source.Definition_span.t
   | Quantifier of Source.Definition_span.t
-  | Any_conversion of { at : Source.Definition_span.t; any_type : Types.ty }
   | Excluded of (Types.ty -> Diagnostic.reported)
 
 type origin =

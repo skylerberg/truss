@@ -1,4 +1,4 @@
-fn total(items: List[Int64] = [1, 2, 3]) -> Int64 {
+fn total(items: Slice[Int64] = [1, 2, 3]) -> Int64 {
   var sum = 0
   for item in items {
     sum += item
@@ -6,7 +6,7 @@ fn total(items: List[Int64] = [1, 2, 3]) -> Int64 {
   sum
 }
 
-fn first(names: List[String] = ["a", "b"]) -> UInt64 {
+fn first(names: Slice[String] = ["a", "b"]) -> UInt64 {
   names[0].length()
 }
 

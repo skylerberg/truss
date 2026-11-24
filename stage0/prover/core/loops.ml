@@ -30,6 +30,7 @@ type loop_start = {
   preserved :
     (Obligation.message * Types.ty * Logic.term * (State.frame -> Logic.term option)) list;
   havocked : State.frame;
+  changed : State.changed;
 }
 
 type while_loop = {
@@ -197,6 +198,135 @@ let find_constant_count bounds =
       | _ -> None)
     bounds
 
+let describe_local (context : State.context) (frame : State.frame) local : Obligation.message =
+  match
+    ( Tables.Local_table.find_opt context.local_names local,
+      Tables.Local_table.find_opt context.local_origins local )
+  with
+  | Some name, _ -> [ Text (Printf.sprintf "`%s`" name) ]
+  | None, Some origin -> [ Text "`"; Facts.quote frame.source origin; Text "`" ]
+  | None, None -> [ Text "a temporary" ]
+
+let join_with_and (items : Obligation.message list) : Obligation.message =
+  let last = List.length items - 1 in
+  List.concat
+    (List.mapi
+       (fun index item ->
+         if index = 0 then item
+         else
+           Obligation.Text (if index < last then ", " else if last = 1 then " and " else ", and ")
+           :: item)
+       items)
+
+let is_written_in_home_package (context : State.context) callee =
+  match context.lookups.mir.find_form_origin callee with
+  | Some (Written key, _) ->
+      Path.compare_package (Path.locate_package key.path) (Path.locate_package context.home.path)
+      = 0
+  | Some ((Derived _ | Inherited _), _) | None -> false
+
+let explain_unstated_costs context (counter : Costs.counter) metric callees : Obligation.message =
+  let quote_callees callees =
+    join_with_and
+      (List.map
+         (fun callee -> [ Obligation.Text (Printf.sprintf "`%s`" (Facts.show_callee callee)) ])
+         callees)
+  in
+  let clause = Printf.sprintf "`cost %s`" metric in
+  let example =
+    match counter.counting with
+    | Units -> Printf.sprintf ", such as `cost %s O(1)`" metric
+    | At_most | Exactly -> ""
+  in
+  let advice : Obligation.message =
+    let editable = List.filter (is_written_in_home_package context) callees in
+    let recipients : Obligation.message =
+      match editable with
+      | [ _ ] -> quote_callees editable
+      | _ when List.length editable = List.length callees -> [ Text "each" ]
+      | _ -> quote_callees editable @ [ Text " each" ]
+    in
+    if editable = [] then []
+    else
+      (Obligation.Text " Give " :: recipients)
+      @ [ Text (Printf.sprintf " a %s clause%s." clause example) ]
+  in
+  (Obligation.Text "This loop calls " :: quote_callees callees)
+  @ Obligation.Text
+      (Printf.sprintf ", which %s no %s, so the prover cannot bound the cost of an iteration."
+         (match callees with [ _ ] -> "states" | _ -> "state")
+         clause)
+    :: advice
+
+let explain_changing_cost context (head : State.frame) (call : State.call_amount)
+    ~(changed : State.changed) ~parts : Obligation.message =
+  let is_mentioned = function
+    | Some term -> List.exists (fun part -> Costs.mentions_part ~part:term part) parts
+    | None -> false
+  in
+  let values =
+    List.filter_map
+      (fun local ->
+        if is_mentioned (Locals.find_opt local head.locals) then
+          Some (describe_local context head local)
+        else None)
+      changed.changed_locals
+    @
+    if changed.changes_self && is_mentioned head.self then [ [ Obligation.Text "`self`" ] ] else []
+  in
+  let cost, dependency =
+    if List.exists Facts.mentions_potential parts then ("amortized cost", "the potential of ")
+    else ("cost", "")
+  in
+  match values with
+  | [] ->
+      [
+        Text (Printf.sprintf "The prover cannot bound the %s of `" cost);
+        call.call;
+        Text
+          "` by the values this loop does not mutate, so it cannot count the loop's cost: give the \
+           loop a `cost` clause.";
+      ]
+  | values ->
+      Obligation.Text (Printf.sprintf "The %s of `" cost)
+      :: call.call
+      :: Text ("` depends on " ^ dependency)
+      :: join_with_and values
+      @ [
+          Text
+            ", which this loop changes, so the prover cannot bound the cost of an iteration by the \
+             values the loop does not mutate. Give the loop a `cost` clause.";
+        ]
+
+let explain_unbounded_iteration (context : State.context) (head : State.frame)
+    (counter : Costs.counter) ~changed ~parts : Obligation.message =
+  let list_call_parts (call : State.call_amount) =
+    if call.counter = counter then
+      List.filter (fun part -> Costs.mentions_part ~part call.amount) parts
+    else []
+  in
+  let calls =
+    List.filter (fun call -> list_call_parts call <> []) (List.rev context.call_amounts)
+  in
+  let unstated =
+    List.fold_left
+      (fun callees (call : State.call_amount) ->
+        if call.states_cost || List.exists (Path.equal call.callee) callees then callees
+        else callees @ [ call.callee ])
+      [] calls
+  in
+  match (counter.resource, unstated, calls) with
+  | Metric metric, _ :: _, _ ->
+      explain_unstated_costs context counter (Language.Metric.show metric) unstated
+  | Metric _, [], call :: _ ->
+      explain_changing_cost context head call ~changed ~parts:(list_call_parts call)
+  | (Metric _ | Calls _), _, _ ->
+      [
+        Text
+          "The prover cannot bound the cost of one iteration of this loop by the values the loop \
+           does not mutate, so it cannot count the loop's cost: give the loop a `cost` clause.";
+      ]
+
 let check_loop_iterations context loop_at (head : State.frame) (start : loop_start) ~iterations
     ~iteration_bounds ~facts ~ends ~breaks =
   let location = Facts.locate context head.source loop_at in
@@ -256,30 +386,36 @@ let check_loop_iterations context loop_at (head : State.frame) (start : loop_sta
             @ List.map (fun exit_frame -> (exit_frame, "where the loop is left")) breaks)
       | Per_iteration per_iteration -> (
           let facts = facts @ List.map (fun (frame : State.frame) -> frame.condition) frames in
-          let find_bounded (gain, per) =
-            if gain <> No_gain && not spends_potential then None
-            else
-              let gained_before = cost.measure_gained gain head in
-              let measure_iteration (frame : State.frame) =
-                let gained = Costs.minus (cost.measure_gained gain frame) gained_before in
-                if gain = No_gain then measure_spent frame
-                else Costs.normalize (Costs.plus (measure_spent frame) gained)
-              in
-              let spent = List.map measure_iteration frames in
-              let amortize amount = Costs.normalize (Facts.take_potential_as_zero amount) in
-              let most =
-                match
-                  if gain = Potential_without_elements then List.map amortize spent else spent
-                with
-                | [] -> Costs.zero
-                | first :: rest -> List.fold_left Costs.larger first rest
-              in
-              Option.map
-                (fun bound -> (gain, per, spent, bound))
-                (Costs.find_cost_bound ~varies ~facts most)
+          let measure_most (gain, per) =
+            let gained_before = cost.measure_gained gain head in
+            let measure_iteration (frame : State.frame) =
+              let gained = Costs.minus (cost.measure_gained gain frame) gained_before in
+              if gain = No_gain then measure_spent frame
+              else Costs.normalize (Costs.plus (measure_spent frame) gained)
+            in
+            let spent = List.map measure_iteration frames in
+            let amortize amount = Costs.normalize (Facts.take_potential_as_zero amount) in
+            let most =
+              match
+                if gain = Potential_without_elements then List.map amortize spent else spent
+              with
+              | [] -> Costs.zero
+              | first :: rest -> List.fold_left Costs.larger first rest
+            in
+            (per, spent, most)
           in
-          match List.find_map find_bounded per_iteration.rules with
-          | Some (gain, per, spent, bound) ->
+          let rec find_bounded unbounded = function
+            | [] -> Error unbounded
+            | (gain, _) :: rules when gain <> No_gain && not spends_potential ->
+                find_bounded unbounded rules
+            | ((gain, _) as rule) :: rules -> (
+                let per, spent, most = measure_most rule in
+                match Costs.find_cost_bound ~varies ~facts most with
+                | Some bound -> Ok (gain, per, spent, bound)
+                | None -> find_bounded (most :: unbounded) rules)
+          in
+          match find_bounded [] per_iteration.rules with
+          | Ok (gain, per, spent, bound) ->
               Facts.add_frame_fact context head (Logic.equal per bound);
               (match constant_count with
               | Some (iterations, count)
@@ -301,14 +437,14 @@ let check_loop_iterations context loop_at (head : State.frame) (start : loop_sta
                     ]
                     (make_count_bound ~counter:cost.counter ~at:spent ~bound:per))
                 frames spent
-          | None ->
+          | Error unbounded ->
+              let parts =
+                match List.map (Costs.list_unbounded_parts ~varies ~facts) unbounded with
+                | [] -> []
+                | first :: rest -> List.filter (fun part -> List.for_all (List.mem part) rest) first
+              in
               Facts.oblige context head Cost location
-                [
-                  Text
-                    "The prover cannot bound the cost of one iteration of this loop by the values \
-                     the loop does not mutate, so it cannot count the loop's cost: give the loop a \
-                     `cost` clause.";
-                ]
+                (explain_unbounded_iteration context head cost.counter ~changed:start.changed ~parts)
                 (Logic.Boolean false)))
     start.loop_costs
 
@@ -427,20 +563,11 @@ let list_validity_obligations context (entry : State.frame) (changed : State.cha
     | Logic.Boolean true -> None
     | valid -> Some (described, ty, valid, read)
   in
-  let describe local : Obligation.message =
-    match
-      ( Tables.Local_table.find_opt context.local_names local,
-        Tables.Local_table.find_opt context.local_origins local )
-    with
-    | Some name, _ -> [ Text (Printf.sprintf "`%s`" name) ]
-    | None, Some origin -> [ Text "`"; Facts.quote entry.source origin; Text "`" ]
-    | None, None -> [ Text "a temporary" ]
-  in
   List.filter_map
     (fun local ->
       match (Facts.find_local_type context entry local, Locals.find_opt local entry.locals) with
       | Some ty, Some before ->
-          find_obligation (describe local) ty before (fun (at : State.frame) ->
+          find_obligation (describe_local context entry local) ty before (fun (at : State.frame) ->
               Locals.find_opt local at.locals)
       | _ -> None)
     changed.changed_locals
@@ -523,6 +650,7 @@ let enter_loop ?holds context frame ~entry clauses ~changed =
     recursive_costs_mark = context.recursive_costs_assumed;
     preserved;
     havocked = head;
+    changed;
   }
 
 let end_scope ~(outer : State.frame) (frame : State.frame) =
@@ -750,7 +878,7 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
     | Impl { impl; substitution } ->
         ( Well_known.make_impl_method_path Cursor_next ~impl,
           Types.combine_substitutions substitution self_binding )
-    | Bound | Dynamic -> (Well_known.make_method_path Cursor_next, self_binding)
+    | Bound -> (Well_known.make_method_path Cursor_next, self_binding)
   in
   let cursor_next = Well_known.locate_method Cursor_next in
   let contract =

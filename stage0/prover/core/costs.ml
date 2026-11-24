@@ -299,6 +299,34 @@ let find_cost_bound ~varies ~facts cost =
   Option.map rewrite_most_as_choices
     (find_bound_within_depth 12 (normalize (rewrite_choices_as_most cost)))
 
+let list_unbounded_parts ~varies ~facts cost =
+  let rec list_within_depth depth cost =
+    List.concat_map
+      (fun (part, polarity) ->
+        let bound =
+          if depth = 0 || polarity = Both then None
+          else
+            Option.map
+              (fun bound -> if polarity = Shrinks then Logic.negate bound else bound)
+              (find_part_bound ~varies ~facts part polarity)
+        in
+        match bound with
+        | None -> [ part ]
+        | Some bound -> (
+            match list_within_depth (depth - 1) (normalize (rewrite_choices_as_most bound)) with
+            | [] -> []
+            | parts -> part :: parts))
+      (list_varying_parts varies cost)
+  in
+  List.fold_left
+    (fun parts part -> if List.mem part parts then parts else parts @ [ part ])
+    []
+    (list_within_depth 12 (normalize (rewrite_choices_as_most cost)))
+
+let mentions_part ~part amount =
+  let rec holds term = term = part || List.exists holds (Logic.list_arguments term) in
+  holds (normalize (rewrite_choices_as_most amount))
+
 let list_upper_bounds ~varies ~facts term =
   List.filter_map
     (fun (smaller, larger) -> if smaller = term && not (varies larger) then Some larger else None)

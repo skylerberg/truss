@@ -2,13 +2,7 @@ type failure = Unmet | Unmet_associated of (string * Types.ty * Types.ty) | Refu
 type decision = Holds | Waits | Fails of failure | Becomes of State.goal list
 
 let read_cause_span : State.cause -> Source.Definition_span.t = function
-  | Bound { at; _ }
-  | Operator { at; _ }
-  | Method_call at
-  | Loop at
-  | Quantifier at
-  | Any_conversion { at; _ } ->
-      at
+  | Bound { at; _ } | Operator { at; _ } | Method_call at | Loop at | Quantifier at -> at
   | Excluded _ -> State.raise_bug "a requirement of a set has no span of its own"
 
 let list_goal_arguments (goal : State.goal) =
@@ -263,7 +257,7 @@ let decide_implements state (goal : State.goal) trait =
   | Types.Named _, None, _, None ->
       if has_unknowns state wanted.trait_arguments then Waits
       else select state goal trait ~subject ~wanted
-  | (Types.Parameter _ | Projection _ | Any _), None, _, None ->
+  | (Types.Parameter _ | Projection _), None, _, None ->
       decide_by_bounds state goal trait ~subject ~wanted
   | (Types.Function _ | Never | Integer | Error _), None, _, None -> Fails Unmet
 

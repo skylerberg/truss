@@ -124,16 +124,17 @@ let add_quantified_fact (context : State.context) (frame : State.frame) ~capture
     | Some closed -> Facts.add_fact context closed
     | None -> ()
 
-let make_input_variables context label (function_type : Types.function_type) =
+let make_input_variables context ~start_fresh (function_type : Types.function_type) =
   List.mapi
     (fun index (_, input) ->
-      (Facts.make_variable label ~numbers:[ index ], Facts.declare_sort context input))
+      ( Facts.make_variable "lambda.argument" ~numbers:[ start_fresh; index ],
+        Facts.declare_sort context input ))
     function_type.inputs
 
 let add_lambda_facts (context : State.context) (frame : State.frame) ~capture_free
     (function_type : Types.function_type) term ~called ~arguments ~start_fresh ~end_fresh
     ~start_declarations ~premises ~shown ~ended =
-  let parameters = make_input_variables context "lambda.argument" function_type in
+  let parameters = make_input_variables context ~start_fresh function_type in
   let lift =
     make_lifting context frame ~called ~arguments ~start_fresh ~end_fresh ~start_declarations
       parameters
@@ -162,7 +163,7 @@ let add_lambda_facts (context : State.context) (frame : State.frame) ~capture_fr
 let add_lambda_relation (context : State.context) (frame : State.frame) ~capture_free
     (function_type : Types.function_type) term ~called ~arguments ~start_fresh ~end_fresh
     ~start_declarations ~premises ~shown ~ended ~read_exits =
-  let inputs = make_input_variables context "lambda.argument" function_type in
+  let inputs = make_input_variables context ~start_fresh function_type in
   let changed =
     List.filter_map
       (fun (index, ((mode : Language.Mode.t), input)) ->
@@ -170,7 +171,7 @@ let add_lambda_relation (context : State.context) (frame : State.frame) ~capture
         | Mut ->
             Some
               ( index,
-                ( Facts.make_variable "lambda.changed" ~numbers:[ index ],
+                ( Facts.make_variable "lambda.changed" ~numbers:[ start_fresh; index ],
                   Facts.declare_sort context input ) )
         | Read | Own -> None)
       (List.mapi (fun index input -> (index, input)) function_type.inputs)
@@ -178,7 +179,7 @@ let add_lambda_relation (context : State.context) (frame : State.frame) ~capture
   let returned =
     if returns_value function_type then
       [
-        ( Facts.make_variable "lambda.result" ~numbers:[],
+        ( Facts.make_variable "lambda.result" ~numbers:[ start_fresh ],
           Facts.declare_sort context function_type.output );
       ]
     else []
@@ -240,8 +241,14 @@ let add_lambda_relation (context : State.context) (frame : State.frame) ~capture
 let add_logic_relation (context : State.context) (frame : State.frame) ~capture_free
     (function_type : Types.function_type) term =
   if returns_value function_type then begin
-    let inputs = make_input_variables context "lambda.argument" function_type in
-    let returned = Facts.make_variable "lambda.result" ~numbers:[] in
+    let inputs =
+      List.mapi
+        (fun index (_, input) ->
+          ( Facts.make_variable "relation.argument" ~numbers:[ index ],
+            Facts.declare_sort context input ))
+        function_type.inputs
+    in
+    let returned = Facts.make_variable "relation.result" ~numbers:[] in
     let entries = List.map (fun (name, _) -> Logic.Symbol name) inputs in
     let holds =
       make_callback_ensures context function_type term ~entries ~exits:entries

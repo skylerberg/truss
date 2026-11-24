@@ -180,6 +180,27 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
               (node (Types.make_builtin UInt64) (Integer (Z.of_int count)))
           in
           let read place : Core.argument = { mode = Read; value = Place place } in
+          let build_view_argument string_place =
+            Operands.build_argument Read
+              (node
+                 (Types.make_named (Well_known.make_path String_slice) [])
+                 (Call
+                    (Callee_uses.make_call signatures lookups.interface ~list_bounds
+                       ~callee:
+                         (Function
+                            {
+                              path =
+                                Method
+                                  {
+                                    owner = Well_known.make_path String;
+                                    name = "slice";
+                                    receiver = Instance Read;
+                                  };
+                              instantiation = Types.no_instantiation;
+                            })
+                       ~arguments:[ read string_place ]
+                       ~lends:None)))
+          in
           let variants =
             match shape with
             | Sum variants ->
@@ -447,16 +468,22 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                         {
                           variant = None;
                           fields =
-                            List.map
-                              (fun (field : Types.field) ->
-                                ( field.field_name,
-                                  if field.field_has_default then None
-                                  else
-                                    Some
-                                      (Core.Value
-                                         (make_method_call Default_default field.field_type []
-                                            field.field_type)) ))
-                              (record_fields ());
+                            (let defaulted, given =
+                               List.partition
+                                 (fun (field : Types.field) -> field.field_has_default)
+                                 (record_fields ())
+                             in
+                             List.map
+                               (fun (field : Types.field) ->
+                                 ( field.field_name,
+                                   Some
+                                     (Core.Value
+                                        (make_method_call Default_default field.field_type []
+                                           field.field_type)) ))
+                               given
+                             @ List.map
+                                 (fun (field : Types.field) -> (field.field_name, None))
+                                 defaulted);
                         }))
             | Serialize_serialize ->
                 let sink, sink_type =
@@ -717,17 +744,17 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                            variant;
                            fields =
                              List.map
-                               (fun (field : Types.field) ->
+                               (fun ((field : Types.field), local) ->
                                  ( field.field_name,
-                                   match List.assq_opt field read with
-                                   | Some local ->
-                                       Some
-                                         (Core.Value
-                                            (node field.field_type
-                                               (Use
-                                                  (Local { local; type_ = field.field_type; origin }))))
-                                   | None -> None ))
-                               fields;
+                                   Some
+                                     (Core.Value
+                                        (node field.field_type
+                                           (Use (Local { local; type_ = field.field_type; origin }))))
+                                 ))
+                               read
+                             @ List.map
+                                 (fun (field : Types.field) -> (field.field_name, None))
+                                 defaulted;
                          })
                   in
                   let updates =
@@ -902,7 +929,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                                                           ~arguments:
                                                             [
                                                               make_source_argument Read;
-                                                              read name_place;
+                                                              build_view_argument name_place;
                                                             ]
                                                           ~lends:None)))) );
                                         ];
@@ -948,6 +975,62 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                 ]
             | _ -> []
           in
+          let costs =
+            match derived_method with
+            | Equal_equal | Ordered_compare | Hash_hash ->
+                let fields =
+                  match variants with
+                  | Some variants -> List.concat_map snd variants
+                  | None -> record_fields ()
+                in
+                let integer kind = node Types.Integer kind in
+                let { Well_known.owner; name; receiver } =
+                  Well_known.locate_method derived_method
+                in
+                let field_cost metric (field : Types.field) =
+                  integer
+                    (Method_cost
+                       {
+                         metric;
+                         method_ =
+                           Trait_method
+                             {
+                               trait =
+                                 {
+                                   trait = Well_known.make_path owner;
+                                   trait_arguments = [];
+                                   associated = [];
+                                 };
+                               name;
+                               receiver;
+                               self_type = field.field_type;
+                               instantiation = Types.no_instantiation;
+                               evidence = Bound;
+                             };
+                       })
+                in
+                let sum_field_costs metric ~start =
+                  List.fold_left
+                    (fun total field ->
+                      integer
+                        (Operator
+                           { operation = Add; arguments = [ total; field_cost metric field ] }))
+                    (integer (Integer start)) fields
+                in
+                let make_cost metric bound : Core.cost Core.conditional =
+                  {
+                    holds_when = [];
+                    clause = { origin; amortized = false; resource = Metric metric; bound };
+                  }
+                in
+                [
+                  make_cost Time (Order_of (sum_field_costs Time ~start:Z.one));
+                  make_cost Allocations (At_most (sum_field_costs Allocations ~start:Z.zero));
+                  make_cost Allocated_bytes
+                    (At_most (sum_field_costs Allocated_bytes ~start:Z.zero));
+                ]
+            | _ -> []
+          in
           Some
             {
               definition =
@@ -964,7 +1047,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                               { holds_when = []; clause })
                             ensures;
                         decreases = [];
-                        costs = [];
+                        costs;
                       };
                     body = Some body;
                   };

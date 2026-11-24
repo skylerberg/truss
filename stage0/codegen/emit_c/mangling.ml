@@ -63,7 +63,6 @@ and mangle_reference ({ path = trait; arguments; associated } : Path.reference) 
 and mangle_path_argument : Path.argument -> string = function
   | Named named -> mangle_reference named
   | Parameter name -> render_marker "Parameter" ^ mangle_text name
-  | Any trait -> render_marker "Any" ^ mangle_reference trait
   | Count value -> render_marker "Count" ^ mangle_text (Z.to_string value)
   | Constant constant -> render_marker "Constant" ^ mangle_path constant
 
@@ -86,14 +85,7 @@ let rec mangle_ty (ty : Ground.ty) =
         | [] -> ""
         | uses ->
             render_marker "Uses" ^ String.concat (render_marker "And") (List.map mangle_path uses))
-      ^ render_marker "End"
-  | Any { trait; arguments; associated } ->
-      render_marker "Any" ^ mangle_path trait ^ mangle_arguments arguments
-      ^ String.concat ""
-          (List.map
-             (fun (name, ty) -> render_marker "Assoc" ^ name ^ render_marker "Is" ^ mangle_ty ty)
-             associated)
-      ^ render_marker "End"
+      ^ render_marker "End" ^ render_marker "End"
   | Never -> render_marker "Never"
 
 and mangle_argument = function
@@ -127,8 +119,7 @@ let rec mangle : Lowered.Item.t -> string = function
   | Copy ty -> render_marker "Copy" ^ mangle_ty ty
   | Debug ty -> render_marker "Debug" ^ mangle_ty ty
   | Encode ty -> render_marker "Encode" ^ mangle_ty ty
-  | Any_drop ty -> render_marker "AnyDrop" ^ mangle_ty ty
-  | Any_copy ty -> render_marker "AnyCopy" ^ mangle_ty ty
+  | Untyped_drop ty -> render_marker "UntypedDrop" ^ mangle_ty ty
   | Evaluator evaluated -> render_marker "Evaluator" ^ mangle evaluated
   | Assertion { definition; condition } ->
       render_marker "Assertion" ^ mangle_path definition ^ render_marker "Value"
@@ -137,8 +128,6 @@ let rec mangle : Lowered.Item.t -> string = function
       render_marker "Adapter"
       ^ mangle (Lowered.Item.make_code function_ instantiation)
       ^ render_marker "As" ^ mangle_ty (Function ty)
-  | Generated (Any_entry impl_method) ->
-      render_marker "Dynamic" ^ mangle (Lowered.Item.make_method_code impl_method)
   | Generated (Locked_entry { capability; name }) ->
       render_marker "LockedEntry" ^ mangle_path capability ^ render_marker "Method"
       ^ mangle_text name
@@ -146,8 +135,6 @@ let rec mangle : Lowered.Item.t -> string = function
       render_marker "Entry" ^ mangle (Lowered.Item.make_method_code impl_method)
   | Generated (Program_main main) -> render_marker "Program" ^ mangle_path main
   | Generated (Test_main test) -> render_marker "TestMain" ^ mangle_path test
-  | Table (Any_table { impl; type_arguments }) ->
-      render_marker "Vtable" ^ mangle_path impl ^ mangle_arguments type_arguments
   | Table (Locked_table capability) -> render_marker "LockedTable" ^ mangle_path capability
   | Table (Impl_table { impl; type_arguments }) ->
       render_marker "Table" ^ mangle_path impl ^ mangle_arguments type_arguments

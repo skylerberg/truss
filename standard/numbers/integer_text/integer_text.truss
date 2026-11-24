@@ -76,7 +76,7 @@ internal fn format_magnitude(
   ensures result.length() <= minimum_digits + 66
   cost time O(minimum_digits + 64)
 {
-  if minimum_digits > UInt64.maximum / 2 {
+  if minimum_digits > core.maximum_length {
     intrinsic.crash("a string cannot hold that many bytes")
   }
   let base: UInt64 = intrinsic.convert(radix)

@@ -36,7 +36,7 @@ fn tail(items: Slice[Int64]) -> Slice[Int64]
   items[1..]
 }
 
-fn port(ports: Map[String, UInt16], name: String) -> UInt16
+fn port(ports: Map[String, UInt16], name: StringSlice) -> UInt16
   uses Panic
 {
   ports[name]

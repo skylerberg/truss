@@ -1,7 +1,7 @@
-fn f(table: Map[String, Int64], key: String) -> Int64
+fn f(table: Map[String, Int64], key: StringSlice) -> Int64
   ensures result == 7
 {
   var copy = table.copy()
-  mut copy.insert(key.copy(), value: 7)
+  mut copy.insert(key.to_string(), value: 7)
   copy[key]
 }

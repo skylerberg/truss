@@ -1,7 +1,6 @@
 type ty =
   | Named of { path : Path.t; arguments : argument list }
   | Function of function_type
-  | Any of { trait : Path.t; arguments : argument list; associated : (string * ty) list }
   | Never
 
 and argument = Type of ty | Value of Z.t
