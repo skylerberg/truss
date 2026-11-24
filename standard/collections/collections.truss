@@ -45,6 +45,7 @@ internal type Numbered[Key, Value](key: Key, ordinal: UInt64, value: Value)
 internal fn sorted_by_key[Key: Ordered, Value](items: own List[Numbered[Key, Value]]) -> List[Numbered[Key, Value]]
   ensures result.length() == items.length()
   cost time O(items.length() * log(items.length()) * (1 + time(Key.compare)))
+  cost allocations <= 3 * items.length() * log(items.length()) * allocations(Key.compare)
 {
   var sorted = own items
   mut sorted.sort_by(fn(first, second) {

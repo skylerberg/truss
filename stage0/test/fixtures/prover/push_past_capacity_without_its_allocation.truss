@@ -1,0 +1,6 @@
+fn grow(items: mut List[Int64], item: Int64)
+  requires items.length() == items.capacity()
+  cost allocations == 0
+{
+  mut items.push(item)
+}

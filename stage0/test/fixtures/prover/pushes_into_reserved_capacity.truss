@@ -1,0 +1,18 @@
+fn squares(count: UInt64) -> List[UInt64]
+  requires count < 1000
+  cost allocations <= 1
+{
+  var items: List[UInt64] = List.with_capacity(count)
+  var index: UInt64 = 0
+  while index < count
+    invariant index <= count
+    invariant items.length() == index
+    invariant items.capacity() == count
+    decreases count - index
+    cost allocations <= 0
+  {
+    mut items.push(index * index)
+    index += 1
+  }
+  items
+}

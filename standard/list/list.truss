@@ -169,7 +169,9 @@ impl Model for Slice[Element] {
 
 public fn List[Element].with_capacity(capacity: UInt64) -> List[Element]
   ensures result.model().length() == 0
+  ensures result.capacity() == capacity
   cost time O(1)
+  cost allocations <= (if capacity > 0 { 1 } else { 0 })
 {
   List(storage: intrinsic.storage_with_capacity(capacity))
 }
@@ -192,7 +194,9 @@ public fn List[Element].length(self) -> UInt64
 
 public fn List[Element].push(mut self, item: own Element)
   ensures identical(self.model(), old(self.model()).append(item))
+  ensures old(self.length()) < old(self.capacity()) ==> self.capacity() == old(self.capacity())
   cost amortized time O(1)
+  cost allocations <= (if self.length() < self.capacity() { 0 } else { 1 })
 {
   growth.push(mut self.storage, value: own item)
 }
@@ -597,7 +601,9 @@ public fn List[Element].capacity(self) -> UInt64
 public fn List[Element].reserve(mut self, additional: UInt64)
   ensures identical(self.model(), old(self.model()))
   ensures self.capacity() >= self.length() + additional
+  ensures old(self.length()) + additional <= old(self.capacity()) ==> self.capacity() == old(self.capacity())
   cost amortized time O(additional)
+  cost allocations <= (if self.length() + additional > self.capacity() { 1 } else { 0 })
 {
   growth.reserve(mut self.storage, additional: additional)
 }
@@ -605,6 +611,7 @@ public fn List[Element].reserve(mut self, additional: UInt64)
 public fn List[Element].shrink_to_fit(mut self)
   ensures identical(self.model(), old(self.model()))
   cost time O(self.length())
+  cost allocations <= 1
 {
   intrinsic.storage_set_capacity(mut self.storage, capacity: self.length())
 }

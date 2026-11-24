@@ -113,13 +113,16 @@ fn ordered_entries[Key: Ordered, Value](entries: own List[map.Entry[Key, Value]]
   ensures strictly_ascending(result.model())
   ensures result.length() <= entries.length()
   cost time O(entries.length() * (1 + log(entries.length())) * (1 + time(Key.compare)))
+  cost allocations <= 2 + entries.length() + (3 * entries.length() * log(entries.length()) + entries.length()) * allocations(Key.compare)
 {
   let count = entries.length()
   var numbered: List[collections.Numbered[Key, Value]] = List.with_capacity(count)
   for entry in own entries
     invariant numbered.length() == visited.length()
     invariant numbered.length() <= count
+    invariant numbered.capacity() == count
     cost time O(visited.length())
+    cost allocations <= 0
   {
     let ordinal = count - numbered.length()
     mut numbered.push(collections.Numbered(key: own entry.key, ordinal: ordinal, value: own entry.value))
@@ -130,6 +133,7 @@ fn ordered_entries[Key: Ordered, Value](entries: own List[map.Entry[Key, Value]]
     invariant strictly_ascending(ascending.model())
     invariant ascending.length() <= visited.length()
     cost time O(visited.length() * (1 + time(Key.compare)))
+    cost allocations <= visited.length() * (1 + allocations(Key.compare))
   {
     if ascending.length() == 0 || ascending[ascending.length() - 1].key < item.key {
       let entry = map.Entry(key: own item.key, value: own item.value)
@@ -825,6 +829,7 @@ impl FromEntries for collections.SortedMap[Key: Ordered, Value] {
       i < j ==> !(entries.model()[i].key == entries.model()[j].key)
     ensures result.length() <= entries.length()
     cost time O(entries.length() * (1 + log(entries.length())) * (1 + time(Key.compare)))
+    cost allocations <= 2 + entries.length() + (3 * entries.length() * log(entries.length()) + entries.length()) * allocations(Key.compare)
   {
     collections.SortedMap(entries: ordered_entries(own entries))
   }

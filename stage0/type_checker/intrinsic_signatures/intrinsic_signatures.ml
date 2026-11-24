@@ -347,7 +347,8 @@ let classify_cost (operation : Intrinsic.operation) =
   | Runtime Holds_invariant -> { time = Unbounded_time; allocations = Unknown_allocations }
   | Buffer (Compare_bytes | Storage_remove | Storage_insert) | Runtime Environment_entry ->
       { time = Linear_in 0; allocations = No_allocations }
-  | Buffer Storage_set_capacity -> { time = Linear_in 0; allocations = Unknown_allocations }
+  | Buffer Storage_set_capacity ->
+      { time = Linear_in 0; allocations = One_if_positive (Argument 1) }
   | Buffer Storage_with_capacity ->
       { time = Constant_time; allocations = One_if_positive (Argument 0) }
   | Buffer Storage_from_array ->
