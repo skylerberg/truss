@@ -273,8 +273,53 @@ let write_resolved context frame run (place : Mir.place) new_value =
       | key ->
           Facts.bind frame key (Facts.substitute_type context frame run.infos.(local).type_) whole)
 
-let write_place context frame run (place : Mir.place) new_value =
-  match resolve_aliases frame run place with
+let compute_enclosing_potential_change context ~(before : State.frame) ~(after : State.frame) run
+    (place : Mir.place) =
+  let measure_declared (at : State.frame) prefix =
+    let ty = compute_place_type context at run prefix in
+    if Amounts.has_declared_potential context ty then
+      Amounts.compute_declared_potential context at ty
+        (read_resolved context { at with makes_obligations = false } run prefix)
+    else Costs.zero
+  in
+  snd
+    (List.fold_left
+       (fun (prefix, total) (projection : Mir.projection) ->
+         let base = { place with Mir.projections = prefix } in
+         ( prefix @ [ projection ],
+           match projection with
+           | Field _ | Variant_field _ ->
+               Costs.plus total
+                 (Costs.minus (measure_declared after base) (measure_declared before base))
+           | Element _ | Range _ -> total ))
+       ([], Costs.zero) place.Mir.projections)
+
+let spend_enclosing_potential_change context ~before ~after run alternatives =
+  let parts =
+    List.filter
+      (fun (_, (place : Mir.place)) ->
+        place.projections <> [] && match place.root with Local _ -> true | _ -> false)
+      alternatives
+  in
+  if
+    parts = []
+    || not (List.exists (fun (counter : Costs.counter) -> counter.amortized) context.State.counters)
+  then after
+  else
+    let change =
+      lazy
+        (List.fold_left
+           (fun total (condition, place) ->
+             Costs.plus total
+               (Amounts.make_conditional_amount condition
+                  (compute_enclosing_potential_change context ~before ~after run place)))
+           Costs.zero parts)
+    in
+    Operations.spend context after (fun (counter : Costs.counter) ->
+        if counter.amortized then Lazy.force change else Costs.zero)
+
+let write_alternatives context frame run alternatives new_value =
+  match alternatives with
   | [ (_, place) ] -> write_resolved context frame run place new_value
   | alternatives ->
       List.fold_left
@@ -297,6 +342,11 @@ let write_place context frame run (place : Mir.place) new_value =
                         (Logic.ite condition after before)
                   | _ -> written)))
         frame alternatives
+
+let write_place context frame run (place : Mir.place) new_value =
+  let alternatives = resolve_aliases frame run place in
+  spend_enclosing_potential_change context ~before:frame run alternatives
+    ~after:(write_alternatives context frame run alternatives new_value)
 
 let list_mut_provided_places (provided : Mir.provided list) =
   List.filter_map
@@ -681,10 +731,9 @@ let lend_part context (frame : State.frame) origin (mode : Language.Mode.t) ~han
       Lambdas.check_valid context frame location part_type handed ~deep:true
         ~when_:"for the part lent here";
       let frame, part_after =
-        if mode = Language.Mode.Mut && lends then (
+        if mode = Language.Mode.Mut && lends then
           let part_after = Facts.arrive context frame "lent" part_type in
-          context.lent_back <- (part_type, handed, part_after) :: context.lent_back;
-          (write_back frame part_after, part_after))
+          (write_back frame part_after, part_after)
         else (frame, handed)
       in
       Some
@@ -1011,9 +1060,15 @@ and read_statement context frame run (statement : Mir.statement) =
         List.fold_left
           (fun frame place ->
             let root = { (expand_place frame run place) with Mir.projections = [] } in
-            refresh_place context frame
-              (compute_place_type context frame run root)
-              (make_passed_place context run root))
+            let ty = compute_place_type context frame run root in
+            let refreshed = refresh_place context frame ty (make_passed_place context run root) in
+            let measure (at : State.frame) =
+              Amounts.compute_potential context at ty
+                (read_place context { at with makes_obligations = false } run root)
+            in
+            Operations.spend context refreshed (fun (counter : Costs.counter) ->
+                if counter.amortized then Costs.minus (measure refreshed) (measure frame)
+                else Costs.zero))
           frame
           (list_mut_provided_places provided)
       in

@@ -1258,8 +1258,21 @@ fn List[Element].push(mut self, item: own Element)
   in the potential of the values the function mutates or returns, is within
   `O(f)`. `amortized` works with every resource that takes an `O(...)` bound.
 - A function may state a plain and an amortized bound on one resource. A
-  caller with an amortized bound counts the amortized one, and any other
-  caller the plain one.
+  caller counts each call by the bound of its own kind.
+- A caller with an amortized bound counts a callee's amortized bound as
+  stated, and never reads the potential that the callee changes. It counts
+  a callee that states only a plain bound at that bound plus the change in
+  the potential of the values the call mutates, consumes, or returns. A
+  view owns none of the elements it reaches, so a view that a call returns
+  makes no potential.
+- A caller with an amortized bound also counts the potential that its own
+  code makes. A value it builds counts its type's potential. A write counts
+  the change in the potential of the values that contain the written place.
+- A caller with a plain bound counts a callee's plain bound. Where the
+  callee states only an amortized bound, the caller counts that bound less
+  the change in potential. A function that pushes only onto a list it
+  creates empty therefore has a plain bound, since the list starts with no
+  potential to spend.
 
 ### Function types
 

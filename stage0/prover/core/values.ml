@@ -546,6 +546,11 @@ let apply_construct context frame (site : Invocation.site) variant
           Logic.Apply (Facts.make_constructor_symbol ty variant, List.map read_field_value shaped)
         in
         check_built context frame site ty built;
+        let frame =
+          Operations.spend context frame (fun (counter : Costs.counter) ->
+              if counter.amortized then Amounts.compute_declared_potential context frame ty built
+              else Costs.zero)
+        in
         (frame, built)
     | None -> (frame, Facts.arrive context frame "built" ty)
 
@@ -650,15 +655,15 @@ let copy_value ?literal (context : State.context) frame ty term =
         (Well_known.make_method_path Copyable_copy)
         ~trait_arguments:[] ty
     in
+    let compute_copy_potential () =
+      try Amounts.compute_potential context frame ty term with Facts.Unsupported _ -> Costs.zero
+    in
     Operations.spend context frame (fun (counter : Costs.counter) ->
         match (literal, counter.resource, counter.counting) with
         | _, Metric Time, Units ->
             let time = match literal with Some _ -> Costs.zero | None -> declare_copy_cost Time in
-            let copy_potential =
-              try Amounts.compute_potential context frame ty term
-              with Facts.Unsupported _ -> Costs.zero
-            in
-            Costs.minus (Costs.plus time (Logic.int 1)) copy_potential
+            let amount = Costs.plus time (Logic.int 1) in
+            if counter.amortized then amount else Costs.minus amount (compute_copy_potential ())
         | Some literal, Metric (Allocations | Allocated_bytes), Units
         | Some literal, Metric Allocations, _ ->
             Logic.int (match literal with Text "" | Elements [] -> 0 | Text _ | Elements _ -> 1)
@@ -668,6 +673,9 @@ let copy_value ?literal (context : State.context) frame ty term =
             Operations.declare_unknown_amount context frame counter
         | Some _, Calls _, _ -> Costs.zero
         | None, Metric ((Allocations | Allocated_bytes) as metric), _ ->
-            Amounts.compute_amount_within context frame counter (declare_copy_cost metric)
+            Amounts.compute_counted_amount context frame counter
+              ~potential_change:
+                (Some (fun () -> Amounts.compute_made_potential context frame ty term))
+              (Amounts.compute_amount_within context frame counter (declare_copy_cost metric))
         | _, Metric Time, (At_most | Exactly) | None, Calls _, _ ->
             Operations.declare_unknown_amount context frame counter)

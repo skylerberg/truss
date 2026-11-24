@@ -43,7 +43,6 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       local_origins = Tables.Local_table.create 16;
       returns = [];
       enclosing_provides = [];
-      lent_back = [];
       instantiating = [];
       axiomatizing = [];
       open_axioms = [];
@@ -154,11 +153,10 @@ let describe_difference (promise : promise) =
   | Exactly -> ("more or less than", "states")
 
 let keep_promise ?message context (frame : State.frame) (promise : promise) ~(at : State.frame)
-    ~location ~compute_change =
+    ~location =
   let spent =
     match List.assoc_opt promise.counter frame.spent with Some term -> term | None -> Costs.zero
   in
-  let spent = if promise.clause.amortized then Costs.plus spent (compute_change ()) else spent in
   let amount =
     match promise.clause.bound with
     | Order_of amount | At_most amount | Exactly amount ->
@@ -599,45 +597,6 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
                 ]
                 term)
             declared_ensures);
-      let compute_change () =
-        let potential_change =
-          List.fold_left
-            (fun total (parameter : Mir.parameter) ->
-              let entry, later, ty =
-                match parameter.local with
-                | Self -> (start.self, frame.self, frame.self_type)
-                | local ->
-                    ( Locals.find_opt (Core_local local) start.locals,
-                      Locals.find_opt (Core_local local) frame.locals,
-                      Facts.find_local_type context frame (Core_local local) )
-              in
-              match (parameter.mode, entry, ty) with
-              | (Language.Mode.Mut | Language.Mode.Own), Some entry, Some ty ->
-                  let potential_after =
-                    match (parameter.mode, later) with
-                    | Language.Mode.Mut, Some later ->
-                        Amounts.compute_potential context frame ty later
-                    | _ -> Costs.zero
-                  in
-                  Costs.plus total
-                    (Costs.minus potential_after (Amounts.compute_potential context frame ty entry))
-              | _ -> total)
-            Costs.zero parameters
-        in
-        let potential_change =
-          List.fold_left
-            (fun total (ty, handed, back) ->
-              Costs.minus total
-                (Costs.minus
-                   (Amounts.compute_potential context frame ty back)
-                   (Amounts.compute_potential context frame ty handed)))
-            potential_change context.lent_back
-        in
-        match (returned, output) with
-        | Some term, Some output ->
-            Costs.plus potential_change (Amounts.compute_potential context frame output term)
-        | _ -> potential_change
-      in
       let under_trait = Facts.restrict frame trait_requires in
       List.iter
         (fun promise ->
@@ -646,13 +605,12 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
             | Some (_, inside) ->
                 keep_promise context under_trait promise
                   ~at:{ inside with locals = inside.old_locals; self = inside.old_self }
-                  ~location:Whole_definition ~compute_change
+                  ~location:Whole_definition
             | None -> ()
           else
             keep_promise context frame promise
               ~at:{ frame with locals = frame.old_locals; self = frame.old_self; result = returned }
-              ~location:(Facts.locate context source promise.clause.origin)
-              ~compute_change)
+              ~location:(Facts.locate context source promise.clause.origin))
         promised;
       match find_trait_frame frame ~result:returned with
       | Some (clauses, inside) ->
@@ -981,24 +939,6 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
             (fun promise ->
               let difference, verb = describe_difference promise in
               keep_promise context after promise ~at:entry_reading ~location
-                ~compute_change:(fun () ->
-                  List.fold_left
-                    (fun total (parameter : Mir.parameter) ->
-                      let ty = Types.substitute subtrait_substitution parameter.type_ in
-                      let before =
-                        Amounts.compute_potential context after ty (read_place parameter entry)
-                      in
-                      match parameter.mode with
-                      | Language.Mode.Mut ->
-                          Costs.plus total
-                            (Costs.minus
-                               (Amounts.compute_potential context after ty
-                                  (read_place parameter after))
-                               before)
-                      | Own -> Costs.minus total before
-                      | Read -> total)
-                    (Amounts.compute_potential context after result_type result)
-                    clauses.parameters)
                 ~message:
                   [
                     Text

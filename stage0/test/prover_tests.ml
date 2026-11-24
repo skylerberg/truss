@@ -1684,6 +1684,21 @@ let () =
       if actual <> [ "prover.cost" ] then Harness.fail "%s" (String.concat ", " actual));
   Harness.test "a caller that lowers a lent part's potential is paid by it" (fun () ->
       expect_proven (meter ^ bag ^ Fixtures.Prover.meter_credit_spent_through_a_lent_part));
+  Harness.test "a write that raises a declared potential pays for it" (fun () ->
+      expect_not_proven Fixtures.Prover.credit_set_by_a_write "prover.cost");
+  Harness.test "a value that a provided capability changes pays for its potential" (fun () ->
+      expect_not_proven
+        (meter ^ Fixtures.Prover.meter_credit_raised_by_a_provided_capability)
+        "prover.cost");
+  Harness.test "a callee with only a plain bound pays for the potential of its result" (fun () ->
+      expect_not_proven
+        (meter ^ Fixtures.Prover.meter_built_by_a_plain_callee_then_spent)
+        "prover.cost");
+  Harness.test "a construction pays for the potential its type declares" (fun () ->
+      expect_proven (meter ^ Fixtures.Prover.meter_built_with_its_credit));
+  Harness.test "a construction whose potential exceeds the bound is not amortized constant"
+    (fun () ->
+      expect_not_proven (meter ^ Fixtures.Prover.meter_built_in_constant_time) "prover.cost");
   Harness.test "a potential below zero" (fun () ->
       expect_not_proven "type Debt(owed: Int64)\n  cost potential owed\n" "prover.cost");
   Harness.test "a potential its invariant keeps at or above zero" (fun () ->
@@ -2098,6 +2113,11 @@ let () =
     (fun () ->
       expect_not_proven Fixtures.Prover.loop_pushing_values_of_a_type_parameter_within_a_small_bound
         "prover.cost");
+  Harness.test
+    "an amortized push onto a list that a callback returned pays for the list's potential"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.amortized_push_onto_a_list_that_a_callback_returns
+        "prover.cost");
   Harness.test "a push onto a list that a callback returned spends the list's potential" (fun () ->
       expect_not_proven Fixtures.Prover.loop_pushing_onto_a_list_that_a_callback_returns
         "prover.cost");
@@ -2247,15 +2267,22 @@ let () =
           (fun (diagnostic : Diagnostic.t) -> String.includes ~affix:"Give" diagnostic.message)
           diagnostics
       then Harness.fail "a message asks for a change to another package");
-  Harness.test "a loop that pushes on one path names the push and the list it changes" (fun () ->
+  Harness.test "a loop that pushes on one path is amortized linear" (fun () ->
+      expect_proven Fixtures.Prover.loop_pushing_in_one_branch);
+  Harness.test "a loop that pushes on one path onto a fresh list is linear" (fun () ->
+      expect_proven Fixtures.Prover.loop_pushing_in_one_branch_within_a_plain_bound);
+  Harness.test "a loop that pushes on one path onto a `mut` parameter is amortized linear"
+    (fun () -> expect_proven Fixtures.Prover.loop_pushing_onto_a_parameter_in_one_branch);
+  Harness.test "a loop that pushes on one path is counted by its cost clause" (fun () ->
+      expect_proven Fixtures.Prover.loop_pushing_in_one_branch_with_a_cost_clause);
+  Harness.test "an amortized loop names a mutating callee that states no amortized bound" (fun () ->
       expect_a_message_saying
         ~says:
-          "The amortized cost of `kept.push(value)` depends on the potential of `kept`, which this \
-           loop changes, so the prover cannot bound the cost of an iteration by the values the \
-           loop does not mutate. Give the loop a `cost` clause."
-        (list_diagnostics Fixtures.Prover.loop_pushing_in_one_branch));
-  Harness.test "a loop that pushes on one path is counted by its cost clause" (fun () ->
-      expect_proven Fixtures.Prover.loop_pushing_in_one_branch_with_a_cost_clause)
+          "`drop_last` states no `cost amortized time`, so the prover counts `drop_last(mut kept)` \
+           at its plain cost plus the change in potential of the values it mutates or returns. The \
+           prover cannot bound that change by the values this loop does not mutate. Give \
+           `drop_last` a `cost amortized time` clause."
+        (list_diagnostics Fixtures.Prover.loop_calling_a_mutating_callee_without_an_amortized_bound))
 
 let () =
   Harness.test

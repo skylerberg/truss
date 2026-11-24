@@ -703,6 +703,15 @@ potential. Mutable value semantics guarantees that no value is shared, so
 amortized bounds compose. A value's potential includes the potential of its
 parts, so a push onto a list inside a list is paid for by the inner list.
 
+**A caller with an amortized bound counts an amortized callee at its
+bound.** The callee's bound already counts the change in the potential of
+the values it changes, so the caller's proof never reads the potential of a
+type that the caller does not define. The caller pays only for the
+potential that its own code makes: the values it builds, the fields it
+writes, and the results and changes of a callee that states only a plain
+bound. A caller with a plain bound counts the potential that an amortized
+callee may spend, which is none for a list that the caller creates empty.
+
 **There are no expected-time bounds.** A hash map is O(1) only on average,
 on the assumption that hashes behave randomly. No proof can promise that
 against input chosen by an attacker, and proving expected bounds needs
@@ -715,6 +724,7 @@ worst case instead.
 | `O(f)` bounds the cost for every input, not only for large inputs. | The textbook definition is a limit, which a prover handles poorly, and it gives wrong answers for bounds in several variables. |
 | A bound can mention `result`. | An output-sensitive bound, such as the bound of a function that returns its matches, cannot be stated otherwise. |
 | The `time` of a generic function counts the methods of its bounds. | `O(self.length())` would be false for `contains` on a list of strings, where one comparison is not one step. `String` could not keep a promise of `O(1)` on `Equal.equal`, and a second trait for constant-time comparison would give every generic method two overloads. |
+| A caller with an amortized bound counts an amortized callee at the callee's bound, not at its actual cost less the potential it makes. | Counting actual cost made every caller cancel each callee's potential against its own, through the capacity of `List`'s storage. In a loop the cancellation was syntactic, so a loop that pushed on one path and not the other failed to prove. |
 | A function that calls a callback bounds its allocations with `allocations(visit)`, and its allocated bytes with `allocated_bytes(visit)`. | `Option.map` allocates what its callback allocates. Without the term it states no allocation bound, and a function with `cost allocations <= 0` then calls no combinator, even with a lambda that allocates nothing. The alternative is an allocation clause on the type of every callback, which rejects each function that states none. |
 
 ### Function types

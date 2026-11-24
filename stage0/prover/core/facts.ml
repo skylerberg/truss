@@ -898,6 +898,93 @@ let name_path_condition context (frame : State.frame) condition =
       add_frame_fact context frame (Logic.equal path condition);
       path
 
+let find_shared_potential_summands
+    (values : (Logic.term * (Logic.term * Logic.term) list * Logic.term) list) =
+  let joined_terms = List.concat_map (fun (_, renamings, _) -> List.map snd renamings) values in
+  let linear =
+    List.map (fun (on, renamings, amount) -> (on, renamings, Costs.linearize amount)) values
+  in
+  let find_coefficient sums atom = Option.value (List.assoc_opt atom sums) ~default:Z.zero in
+  let joined_atoms =
+    List.fold_left
+      (fun atoms (_, _, (sums, _)) ->
+        List.fold_left
+          (fun atoms (atom, _) ->
+            if
+              is_potential atom
+              && List.exists (fun joined -> Costs.mentions_part ~part:joined atom) joined_terms
+              && not (List.mem atom atoms)
+            then atoms @ [ atom ]
+            else atoms)
+          atoms sums)
+      [] linear
+  in
+  let align linear atom =
+    match
+      List.find_map
+        (fun (_, _, (sums, _)) ->
+          let coefficient = find_coefficient sums atom in
+          if Z.equal coefficient Z.zero then None else Some coefficient)
+        linear
+    with
+    | None -> linear
+    | Some target ->
+        List.map
+          (fun (on, renamings, (sums, constant)) ->
+            let difference = Z.sub target (find_coefficient sums atom) in
+            if Z.equal difference Z.zero then (on, renamings, (sums, constant))
+            else
+              let on_path =
+                List.fold_left
+                  (fun atom (incoming, joined) -> Logic.replace ~from:joined ~into:incoming atom)
+                  atom renamings
+              in
+              ( on,
+                renamings,
+                Costs.linearize
+                  (Costs.plus
+                     (Costs.combine (sums, constant))
+                     (Costs.times (Logic.Integer difference) (Costs.minus atom on_path))) ))
+          linear
+  in
+  let is_misaligned atom =
+    match linear with
+    | (_, _, (first_sums, _)) :: rest ->
+        let coefficient = find_coefficient first_sums atom in
+        List.exists
+          (fun (_, _, (sums, _)) -> not (Z.equal (find_coefficient sums atom) coefficient))
+          rest
+    | [] -> false
+  in
+  match List.filter is_misaligned joined_atoms with
+  | [] -> None
+  | misaligned ->
+      let aligned = List.fold_left align linear misaligned in
+      let shared =
+        match aligned with
+        | (_, _, (first_sums, _)) :: rest ->
+            List.filter
+              (fun (atom, coefficient) ->
+                is_potential atom
+                && List.for_all
+                     (fun (_, _, (sums, _)) ->
+                       match List.assoc_opt atom sums with
+                       | Some other -> Z.equal other coefficient
+                       | None -> false)
+                     rest)
+              first_sums
+        | [] -> []
+      in
+      Some
+        ( Costs.combine (shared, Z.zero),
+          List.map
+            (fun (on, _, (sums, constant)) ->
+              ( on,
+                Costs.combine
+                  (List.filter (fun (atom, _) -> not (List.mem_assoc atom shared)) sums, constant)
+              ))
+            aligned )
+
 let merge context ?value_type ~condition
     (paths : (Logic.term * State.frame * Logic.term option) list) =
   let first = match paths with (_, first, _) :: _ -> first | [] -> raise_bug "no paths meet" in
@@ -987,22 +1074,19 @@ let merge context ?value_type ~condition
     | Some ty, Some values -> Some (define "self" (declare_sort context ty) values)
     | _ -> first.self
   in
-  let rename_into_joined (frame : State.frame) amount =
-    let renamed =
+  let list_renamings (frame : State.frame) =
+    let renamings =
       Locals.fold
-        (fun id joined renamed ->
+        (fun id joined renamings ->
           match Locals.find_opt id frame.locals with
           | Some incoming when incoming != joined && incoming <> joined ->
-              (incoming, joined) :: renamed
-          | _ -> renamed)
+              (incoming, joined) :: renamings
+          | _ -> renamings)
         locals []
     in
-    let renamed =
-      match (frame.self, self) with
-      | Some incoming, Some joined when incoming <> joined -> (incoming, joined) :: renamed
-      | _ -> renamed
-    in
-    List.fold_left (fun amount (from, into) -> Logic.replace ~from ~into amount) amount renamed
+    match (frame.self, self) with
+    | Some incoming, Some joined when incoming <> joined -> (incoming, joined) :: renamings
+    | _ -> renamings
   in
   let spent =
     List.map
@@ -1010,31 +1094,47 @@ let merge context ?value_type ~condition
         let values =
           List.map
             (fun (on, (frame : State.frame), _) ->
+              let renamings = list_renamings frame in
               ( on,
-                rename_into_joined frame
+                renamings,
+                List.fold_left
+                  (fun amount (from, into) -> Logic.replace ~from ~into amount)
                   (match List.assoc_opt key frame.spent with
                   | Some spent_term -> spent_term
-                  | None -> term) ))
+                  | None -> term)
+                  renamings ))
             paths
         in
+        let choose_amount values =
+          match List.rev values with
+          | (_, last) :: earlier ->
+              List.fold_left
+                (fun otherwise (on, value) -> Logic.ite on value otherwise)
+                last earlier
+          | [] -> term
+        in
+        let name_amount choice =
+          if Logic.mentions first.bound choice || mentions_potential choice then choice
+          else
+            let symbol = declare_fresh context first "spent" Logic.Int in
+            add_frame_fact context first (Logic.equal symbol choice);
+            symbol
+        in
         match values with
-        | (_, first_value) :: rest
-          when List.for_all (fun (_, other) -> other == first_value || other = first_value) rest ->
+        | (_, _, first_value) :: rest
+          when List.for_all (fun (_, _, other) -> other == first_value || other = first_value) rest
+          ->
             (key, first_value)
-        | _ ->
-            let choice =
-              match List.rev values with
-              | (_, last) :: earlier ->
-                  List.fold_left
-                    (fun otherwise (on, value) -> Logic.ite on value otherwise)
-                    last earlier
-              | [] -> term
-            in
-            if Logic.mentions first.bound choice || mentions_potential choice then (key, choice)
-            else
-              let symbol = declare_fresh context first "spent" Logic.Int in
-              add_frame_fact context first (Logic.equal symbol choice);
-              (key, symbol))
+        | _ -> (
+            match find_shared_potential_summands values with
+            | None ->
+                ( key,
+                  name_amount (choose_amount (List.map (fun (on, _, value) -> (on, value)) values))
+                )
+            | Some (shared, (_, first_rest) :: others)
+              when List.for_all (fun (_, other) -> other = first_rest) others ->
+                (key, Costs.plus shared first_rest)
+            | Some (shared, rests) -> (key, Costs.plus shared (name_amount (choose_amount rests)))))
       first.spent
   in
   let value =

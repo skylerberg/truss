@@ -1,3 +1,4 @@
+val keeps_potential : Intrinsic.operation -> bool
 val declare_buffer_slack : State.context -> Types.ty -> Logic.term -> Logic.term
 
 val assume_same_length :
