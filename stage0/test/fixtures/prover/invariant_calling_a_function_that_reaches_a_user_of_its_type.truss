@@ -1,0 +1,10 @@
+public opaque type Counter(count: UInt64)
+  invariant count <= bound()
+
+fn bound() -> UInt64 {
+  widest()
+}
+
+fn widest() -> UInt64 {
+  Counter(count: 0).count
+}

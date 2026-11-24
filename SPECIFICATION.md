@@ -525,6 +525,16 @@ public type Interval =
 
 - `self` names the value, and a record's fields can be named directly.
 - Repeated invariants all hold, and each may rely on the ones before it.
+- An invariant cannot depend on a definition that uses a value of the
+  invariant's type. Such a definition assumes the invariant, so the
+  invariant would be proven from itself: a circular proof, in which a false
+  postcondition can be proven. The invariant depends on each function it
+  calls and each constant it reads. A definition depends on the functions it
+  calls and the constants it reads, in its body and in its contract, on the
+  code supplied to its generic callees, and on the invariants of the types
+  whose values it uses. A definition uses a type when a parameter, a result,
+  or a local has that type or a type that holds it. An invariant may call a
+  function of a field's type, as `invariant used <= span.width()` does.
 - Invariants are proven, never checked when the program runs. An invariant
   holds wherever other code can observe the value: when it is built,
   directly or with `with`, passed to a call, or returned, and when its

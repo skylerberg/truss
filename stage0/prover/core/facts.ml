@@ -586,31 +586,36 @@ let is_evaluated_constant (context : State.context) path code =
        (Types.find_specification_only_type
           (Interface.Definition.read_constant_type context.lookups.interface path))
 
+let name_dependency (dependency : Mir.Call_edges.dependency) =
+  match dependency.kind with
+  | Read -> Path.show dependency.path
+  | Direct_call | Supplied _ -> show_callee dependency.path
+
+let describe_dependency (dependency : Mir.Call_edges.dependency) =
+  let verb =
+    match dependency.kind with Read -> "reads" | Direct_call -> "calls" | Supplied _ -> "uses"
+  in
+  let name = name_dependency dependency in
+  match dependency.omitted with
+  | None -> Printf.sprintf "This %s `%s`" verb name
+  | Some (Field field) ->
+      Printf.sprintf "This leaves out the field `%s`, whose default %s `%s`" field verb name
+  | Some (Argument parameter) ->
+      Printf.sprintf "This leaves out the argument `%s`, whose default %s `%s`" parameter verb name
+
 let describe_constant_cycle ~cyclic (dependency : Mir.Call_edges.dependency) =
   let cyclic_name = Path.show cyclic in
   let consequence = Printf.sprintf "so `%s` would be computed from itself." cyclic_name in
-  let verb, name, part =
-    match dependency.kind with
-    | Read -> ("reads", Path.show dependency.path, "value")
-    | Direct_call -> ("calls", show_callee dependency.path, "code")
-    | Supplied _ -> ("uses", show_callee dependency.path, "code")
-  in
-  let describe_omitted : Mir.Call_edges.omitted -> string = function
-    | Field field -> Printf.sprintf "field `%s`" field
-    | Argument parameter -> Printf.sprintf "argument `%s`" parameter
-  in
+  let part = match dependency.kind with Read -> "value" | Direct_call | Supplied _ -> "code" in
+  let described = describe_dependency dependency in
   match (dependency.omitted, Path.equal dependency.path cyclic) with
-  | None, true -> Printf.sprintf "This %s `%s` in its own value, %s" verb name consequence
+  | None, true -> Printf.sprintf "%s in its own value, %s" described consequence
   | None, false ->
-      Printf.sprintf "This %s `%s`, whose %s depends on `%s`, %s" verb name part cyclic_name
-        consequence
-  | Some omitted, true ->
-      Printf.sprintf "This leaves out the %s, whose default %s `%s`, %s" (describe_omitted omitted)
-        verb name consequence
-  | Some omitted, false ->
-      Printf.sprintf
-        "This leaves out the %s, whose default %s `%s`. The %s of `%s` depends on `%s`, %s"
-        (describe_omitted omitted) verb name part name cyclic_name consequence
+      Printf.sprintf "%s, whose %s depends on `%s`, %s" described part cyclic_name consequence
+  | Some _, true -> Printf.sprintf "%s, %s" described consequence
+  | Some _, false ->
+      Printf.sprintf "%s. The %s of `%s` depends on `%s`, %s" described part
+        (name_dependency dependency) cyclic_name consequence
 
 let reject_constant_cycle (context : State.context) (frame : State.frame) (code : Mir.t) =
   if context.lookups.list_recursion_group context.node <> [] then
@@ -623,6 +628,30 @@ let reject_constant_cycle (context : State.context) (frame : State.frame) (code 
       (Mir.Call_edges.list_dependencies
          { interface = context.lookups.interface; mir = context.lookups.mir }
          Types.no_substitution code)
+
+let describe_invariant_cycle ~type_name (dependency : Mir.Call_edges.dependency) ~user =
+  let consequence =
+    Printf.sprintf
+      "uses a value of type `%s` and so assumes this invariant, so the invariant would be proven \
+       from itself."
+      type_name
+  in
+  if Path.equal dependency.path user then
+    Printf.sprintf "%s, which %s" (describe_dependency dependency) consequence
+  else
+    Printf.sprintf "%s, which reaches `%s`. `%s` %s" (describe_dependency dependency)
+      (show_callee user) (show_callee user) consequence
+
+let list_invariant_cycles (context : State.context) =
+  Mir.Call_edges.list_invariant_cycles
+    { interface = context.lookups.interface; mir = context.lookups.mir }
+    context.node
+
+let reject_invariant_cycle context frame ~type_name ((dependency : Mir.Call_edges.dependency), user)
+    =
+  oblige context frame Invariant_cycle (Node dependency.origin)
+    [ Text (describe_invariant_cycle ~type_name dependency ~user) ]
+    (Logic.Boolean false)
 
 let quote (source : State.source) origin = Obligation.Quote (source.key, origin)
 

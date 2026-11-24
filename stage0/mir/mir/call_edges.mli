@@ -26,5 +26,6 @@ type dependency = {
 }
 
 val list_dependencies : lookups -> Types.substitution -> Tree.t -> dependency list
+val list_invariant_cycles : lookups -> Path.t -> (dependency * Path.t) list
 val resolve_node : lookups -> Path.t -> Types.substitution -> Path.t
 val list_path_edges : lookups -> Path.t -> Path.t list

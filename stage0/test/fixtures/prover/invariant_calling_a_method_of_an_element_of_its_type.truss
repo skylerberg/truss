@@ -1,0 +1,11 @@
+public type Chain =
+  | Stop
+  | Link(value: UInt64, rest: List[Chain])
+  invariant !(self is Link(value, rest) && rest.length() > 0 && rest[0].head() > value)
+
+public fn Chain.head(self) -> UInt64 {
+  match self {
+    Stop => 0
+    Link(value, rest: _) => value
+  }
+}

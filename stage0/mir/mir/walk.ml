@@ -135,50 +135,64 @@ let visit_statement_places visit (statement : Tree.statement) =
   | While _ | Fork _ | Resume _ ->
       ()
 
-let rec visit_block ~on_value visit (block : Tree.block) =
+let rec visit_block ~on_locals ~on_value visit (block : Tree.block) =
   List.iter
     (fun (statement : Tree.statement) ->
       visit statement;
       (match statement.kind with
-      | Basic (Ghost_assert { condition; _ }) -> visit_formula ~on_value visit condition
-      | Basic (Proof code | Evaluated_assert code) -> visit_code ~on_value visit code
-      | While { loop; _ } | For { loop; _ } -> visit_loop ~on_value visit loop
+      | Basic (Ghost_assert { condition; _ }) -> visit_formula ~on_locals ~on_value visit condition
+      | Basic (Proof code | Evaluated_assert code) -> visit_code ~on_locals ~on_value visit code
+      | While { loop; _ } | For { loop; _ } -> visit_loop ~on_locals ~on_value visit loop
       | Basic
           ( Assign _ | Call _ | Lend _ | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _
           | Loan_end _ | Path_note _ )
       | Choose _ | Assert_by_bit_vector _ | Fork _ | Provide _ | Resume _ | Yield _ | Jump _ ->
           ());
-      List.iter (visit_block ~on_value visit) (list_nested_blocks statement))
+      List.iter (visit_block ~on_locals ~on_value visit) (list_nested_blocks statement))
     block.statements;
   Option.iter on_value block.value
 
-and visit_formula ~on_value visit (formula : Tree.formula) =
-  visit_block ~on_value visit formula.value;
-  Array.iter (visit_body ~on_value visit) formula.lambdas
+and visit_formula ~on_locals ~on_value visit (formula : Tree.formula) =
+  on_locals formula.locals;
+  visit_block ~on_locals ~on_value visit formula.value;
+  Array.iter (visit_body ~on_locals ~on_value visit) formula.lambdas
 
-and visit_loop ~on_value visit (loop : Tree.loop) =
+and visit_loop ~on_locals ~on_value visit (loop : Tree.loop) =
   List.iter
     (function
-      | Tree.Invariant clause -> visit_formula ~on_value visit clause
-      | Decreases measures -> List.iter (visit_formula ~on_value visit) measures
+      | Tree.Invariant clause -> visit_formula ~on_locals ~on_value visit clause
+      | Decreases measures -> List.iter (visit_formula ~on_locals ~on_value visit) measures
       | Cost { bound = Order_of amount | At_most amount | Exactly amount; _ } ->
-          visit_formula ~on_value visit amount)
+          visit_formula ~on_locals ~on_value visit amount)
     loop.clauses
 
-and visit_body ~on_value visit (body : Tree.body) = visit_block ~on_value visit body.code
+and visit_body ~on_locals ~on_value visit (body : Tree.body) =
+  on_locals body.locals;
+  visit_block ~on_locals ~on_value visit body.code
 
-and visit_code ~on_value visit (code : Tree.t) =
-  visit_body ~on_value visit code.body;
-  Array.iter (visit_body ~on_value visit) code.lambdas
+and visit_code ~on_locals ~on_value visit (code : Tree.t) =
+  visit_body ~on_locals ~on_value visit code.body;
+  Array.iter (visit_body ~on_locals ~on_value visit) code.lambdas
 
-let iter_code visit code = visit_code ~on_value:ignore visit code
-let iter_formula visit formula = visit_formula ~on_value:ignore visit formula
+let iter_code visit code = visit_code ~on_locals:ignore ~on_value:ignore visit code
+let iter_formula visit formula = visit_formula ~on_locals:ignore ~on_value:ignore visit formula
 
 let iter_places visit code =
-  visit_code ~on_value:(visit_operand visit) (visit_statement_places visit) code
+  visit_code ~on_locals:ignore ~on_value:(visit_operand visit) (visit_statement_places visit) code
 
 let iter_formula_places visit formula =
-  visit_formula ~on_value:(visit_operand visit) (visit_statement_places visit) formula
+  visit_formula ~on_locals:ignore ~on_value:(visit_operand visit) (visit_statement_places visit)
+    formula
+
+let visit_local_types visit (locals : Tree.local_info array) =
+  Array.iter (fun (info : Tree.local_info) -> visit info.type_) locals
+
+let iter_local_types visit code =
+  visit_code ~on_locals:(visit_local_types visit) ~on_value:ignore ignore code
+
+let iter_formula_local_types visit (formula : Tree.formula) =
+  visit formula.type_;
+  visit_formula ~on_locals:(visit_local_types visit) ~on_value:ignore ignore formula
 
 let list_evaluated_asserts (code : Tree.t) =
   let evaluated = ref [] in

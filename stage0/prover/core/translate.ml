@@ -1044,7 +1044,7 @@ let translate_type (lookups : Lookups.t) (source : State.source) ~path =
       ~inherits_precondition:false
   in
   (match Mir.read_type_clauses lookups.mir path with
-  | Some { form = { invariants; potential }; _ } ->
+  | Some { form = { invariants; potential }; _ } -> (
       let ty =
         match Interface.Definition.find_interface lookups.interface path with
         | Some (Interface.Environment.Type_interface interface) ->
@@ -1061,28 +1061,34 @@ let translate_type (lookups : Lookups.t) (source : State.source) ~path =
                    ~type_:(Facts.substitute_type context start default.type_)))
             defaults
       | Some { form = Parameter_defaults _; _ } | None -> ());
-      let value_ = Facts.arrive context start "value" ty in
-      Facts.assume context start
-        (Validity.make_validity context start ~assuming:true ~includes_invariants:false ty value_);
-      let at_value = { start with self = Some value_; old_self = Some value_ } in
-      List.iter
-        (fun (invariant : Mir.requirement) ->
-          let after, holds = Validity.read_specification context at_value invariant.clause in
-          Facts.assume context after holds)
-        invariants;
-      Option.iter
-        (fun (written : Mir.formula) ->
-          let _, potential_term = Validity.read_specification context at_value written in
-          Facts.oblige context at_value Cost
-            (Facts.locate context at_value.source written.origin)
-            [
-              Text
-                (Printf.sprintf
-                   "The potential of `%s` may be below zero for a value that meets its invariants."
-                   (Types.show ty));
-            ]
-            (Logic.less_equal (Logic.int 0) potential_term))
-        potential
+      match Facts.list_invariant_cycles context with
+      | _ :: _ as cycles ->
+          List.iter (Facts.reject_invariant_cycle context start ~type_name:(Types.show ty)) cycles
+      | [] ->
+          let value_ = Facts.arrive context start "value" ty in
+          Facts.assume context start
+            (Validity.make_validity context start ~assuming:true ~includes_invariants:false ty
+               value_);
+          let at_value = { start with self = Some value_; old_self = Some value_ } in
+          List.iter
+            (fun (invariant : Mir.requirement) ->
+              let after, holds = Validity.read_specification context at_value invariant.clause in
+              Facts.assume context after holds)
+            invariants;
+          Option.iter
+            (fun (written : Mir.formula) ->
+              let _, potential_term = Validity.read_specification context at_value written in
+              Facts.oblige context at_value Cost
+                (Facts.locate context at_value.source written.origin)
+                [
+                  Text
+                    (Printf.sprintf
+                       "The potential of `%s` may be below zero for a value that meets its \
+                        invariants."
+                       (Types.show ty));
+                ]
+                (Logic.less_equal (Logic.int 0) potential_term))
+            potential)
   | None -> ());
   make_outcome context
 

@@ -249,6 +249,42 @@ let () =
   Harness.test "a call in a constant's value meets its callee's requires" (fun () ->
       expect_not_proven Fixtures.Prover.constant_calling_outside_a_requires "prover.requires")
 
+let () =
+  let expect_one_cycle = Support.expect_one_diagnostic ~check in
+  Harness.test "an invariant that calls a method of its type is an error" (fun () ->
+      expect_one_cycle Fixtures.Prover.invariant_calling_a_method_of_its_type
+        "prover.invariant_cycle"
+        ~says:
+          "This calls `Counter.value`, which uses a value of type `Counter` and so assumes this \
+           invariant, so the invariant would be proven from itself."
+        ~at:("self.value()", 1));
+  Harness.test "an invariant that calls a function that builds a value of its type is an error"
+    (fun () ->
+      expect_one_cycle Fixtures.Prover.invariant_calling_a_function_that_builds_its_type
+        "prover.invariant_cycle" ~says:"This calls `through`, which uses a value of type `Counter`"
+        ~at:("through(count)", 1));
+  Harness.test "an invariant that reaches a user of its type through a call is an error" (fun () ->
+      expect_one_cycle Fixtures.Prover.invariant_calling_a_function_that_reaches_a_user_of_its_type
+        "prover.invariant_cycle"
+        ~says:"This calls `bound`, which reaches `widest`. `widest` uses a value of type `Counter`"
+        ~at:("bound()", 1));
+  Harness.test "an invariant that reaches a user of its type through a contract is an error"
+    (fun () ->
+      expect_one_cycle
+        Fixtures.Prover.invariant_calling_a_function_whose_contract_calls_a_user_of_its_type
+        "prover.invariant_cycle" ~says:"This calls `stated`, which reaches `measured`."
+        ~at:("stated(count)", 1));
+  Harness.test "invariants of two types that build each other are an error at each type" (fun () ->
+      match list_codes Fixtures.Prover.invariants_of_two_types_that_build_each_other with
+      | [ "prover.invariant_cycle"; "prover.invariant_cycle" ] -> ()
+      | found -> Harness.fail "found [%s]" (String.concat "; " found));
+  Harness.test "an invariant that calls a method of an element of its own type is an error"
+    (fun () ->
+      expect_one_cycle Fixtures.Prover.invariant_calling_a_method_of_an_element_of_its_type
+        "prover.invariant_cycle" ~says:"This calls `Chain.head`" ~at:("rest[0].head()", 1));
+  Harness.test "an invariant may call a function of a field's type" (fun () ->
+      expect_proven Fixtures.Prover.invariant_calling_a_function_of_a_field)
+
 let list_evaluated_definitions text =
   let database = Support.make_database (Support.setup [ ("app.main", text) ]) in
   List.map
