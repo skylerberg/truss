@@ -1,5 +1,5 @@
-fn f(other: Slice[Int64]) -> UInt64 {
-  var outer = other[..]
+fn f(other: List[Int64]) -> UInt64 {
+  var outer: view List[Int64] = other
   {
     let list = make()
     outer = list[0..2]

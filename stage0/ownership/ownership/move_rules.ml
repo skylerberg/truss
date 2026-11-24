@@ -68,14 +68,29 @@ let decide_move context (place : Place.t) ~origin ~type_ ~is_returned ~is_captur
                    (if views_literal then "views a string literal" else "is not owned here")))
   else if List.exists (function Place.Element _ | Range _ -> true | Field _ -> false) place.steps
   then
-    refuse
-      (Printf.sprintf
-         "`%s` is %s, which cannot be moved out of its collection. Copy it, or take it out with a \
-          method such as `remove`."
-         shown
-         (match List.rev place.steps with
-         | Element _ :: _ -> "an element"
-         | Range _ :: _ | Field _ :: _ | [] -> "part of an element"))
+    match List.rev place.steps with
+    | Range _ :: _ ->
+        Refused
+          (fun context at type_ ->
+            Context.report context Not_owned at
+              ~fixes:(Context.copy_fix context "Copy it." type_ origin)
+              (Printf.sprintf
+                 "`%s` is a range of a collection, and elements cannot be moved out of their \
+                  collection. Copy it, or keep a view of it in a place of type `%s`."
+                 shown
+                 (Types.show (Types.make_view type_))))
+    | Element _ :: _ ->
+        refuse
+          (Printf.sprintf
+             "`%s` is an element, which cannot be moved out of its collection. Copy it, or take it \
+              out with a method such as `remove`."
+             shown)
+    | Field _ :: _ | [] ->
+        refuse
+          (Printf.sprintf
+             "`%s` is part of an element, which cannot be moved out of its collection. Copy it, or \
+              take it out with a method such as `remove`."
+             shown)
   else
     match (root_mode, place.root) with
     | Read, Constant _ ->

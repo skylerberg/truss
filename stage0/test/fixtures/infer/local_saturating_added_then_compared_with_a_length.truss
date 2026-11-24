@@ -1,4 +1,4 @@
-fn f(items: Slice[Int64]) -> Bool {
+fn f(items: List[Int64]) -> Bool {
   var count = 0
   count = count.saturating_add(1)
   count == items.length()

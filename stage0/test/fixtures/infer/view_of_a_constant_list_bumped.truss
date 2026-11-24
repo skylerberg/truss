@@ -1,0 +1,14 @@
+fn bump(items: mut List[Int64])
+  modifies items[..]
+  requires items.length() > 0
+{
+  items[0] = 9
+}
+
+let primes: List[Int64] = [2, 3, 5]
+
+fn f() -> UInt64 {
+  var part: view List[Int64] = primes
+  bump(mut part)
+  primes.length()
+}

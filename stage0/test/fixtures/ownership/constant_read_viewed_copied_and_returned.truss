@@ -1,14 +1,14 @@
 let limit: Int64 = 10
 
-fn first() -> Slice[Int64] {
+fn first() -> view List[Int64] {
   names[0..1]
 }
 
 fn f() -> Int64 {
   look(names)
   keep(names.copy())
-  let view = names
-  look(view)
+  let viewed = names
+  look(viewed)
   var count = limit
   count += 1
   count

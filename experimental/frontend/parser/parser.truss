@@ -51,8 +51,8 @@ fn TokenCursor.overlaps(self, piece: Piece, span: source.Span) -> Bool
 
 fn attach_lexer_errors[Value](
   cursor: TokenCursor,
-  lexer_diagnostics: Slice[source.Diagnostic],
-  nested: Slice[Piece],
+  lexer_diagnostics: List[source.Diagnostic],
+  nested: List[Piece],
   piece: Piece,
   finished: mut Finished[Value],
 )
@@ -108,7 +108,7 @@ fn container_of(definition: syntax.Definition) -> Option[Container] {
 
 type ParsedTopLevel(top_level: syntax.TopLevel, diagnostics: List[source.Diagnostic])
 
-fn parse_top_level(cursor: mut TokenCursor, lexer_diagnostics: Slice[source.Diagnostic], piece: Piece) -> ParsedTopLevel
+fn parse_top_level(cursor: mut TokenCursor, lexer_diagnostics: List[source.Diagnostic], piece: Piece) -> ParsedTopLevel
   uses Panic, RunForever
 {
   begin_piece(mut cursor, piece)
@@ -194,7 +194,7 @@ fn use_after_definition(cursor: TokenCursor, piece: Piece, base: UInt64, stop: U
   )
 }
 
-internal fn parse(lexed: own token.Lexed, lexer_diagnostics: Slice[source.Diagnostic]) -> ParseResult
+internal fn parse(lexed: own token.Lexed, lexer_diagnostics: List[source.Diagnostic]) -> ParseResult
   uses Panic, RunForever
 {
   let first = lexed.first

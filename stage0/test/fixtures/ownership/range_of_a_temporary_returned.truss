@@ -1,0 +1,3 @@
+fn f() -> view List[Int64] {
+  make()
+}

@@ -586,7 +586,7 @@ let havoc context frame (changed : State.changed_part list) =
       | Some (None, _) -> Facts.raise_bug "a loop changes a local that has a value and no type"
       | Some (Some ty, whole) -> (
           match
-            Validity.replace_part context ty whole part.fields (fun part_type ->
+            Validity.replace_part context ty whole part.fields (fun part_type _ ->
                 Facts.arrive context frame "loop" part_type)
           with
           | None ->

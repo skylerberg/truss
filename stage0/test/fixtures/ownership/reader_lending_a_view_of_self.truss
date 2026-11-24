@@ -1,4 +1,4 @@
-fn Reader.window(self) lends Slice[Int64] {
+fn Reader.window(self) lends view List[Int64] {
   self.buffer[..1]
 }
 

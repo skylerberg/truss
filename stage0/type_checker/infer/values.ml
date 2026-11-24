@@ -54,15 +54,7 @@ let rec check_string_literal state env ?expected (value : Syntax.expression)
                                (Types.show part_type));
                           None)
                     parts)));
-      let is_view_expected =
-        parts = []
-        &&
-        match Option.map (Conversions.read_expected_head state) expected with
-        | Some expected -> Types.is_well_known String_slice expected
-        | None -> false
-      in
-      if is_view_expected then Types.make_named (Well_known.make_path String_slice) []
-      else Types.string_type
+      Types.string_type
   | Some tag -> (
       match State.find_target state tag.last with
       | Some (Definition (Type, tag_path)) ->
@@ -192,7 +184,9 @@ and check_map_literal state env ?expected (value : Syntax.expression) entries =
   | expected ->
       let map =
         match expected with
-        | Some collection when takes_literal state collection from_entries -> collection
+        | Some collection when takes_literal state collection from_entries ->
+            if Option.is_some (State.find_evidence state collection from_entries) then collection
+            else Types.erase_views collection
         | _ ->
             Types.make_named (Well_known.make_path Map)
               [
@@ -325,6 +319,10 @@ and check_if state env ?expected (test : Syntax.expression) then_ else_ =
           (else_type, else_span, else_end);
         ]
 
+and check_block state env ?expected (body : Syntax.block) =
+  let type_ = Statements.check_block_value state env ?expected body in
+  join state env ~expected [ (type_, State.read_span state body.id, find_block_value body) ]
+
 and find_block_value (written : Syntax.block) =
   match List.rev written.statements with
   | { kind = Expression value; _ } :: _ -> Some value
@@ -344,13 +342,38 @@ and join state env ~expected branches =
           Conversions.convert state env ?expression span ~actual ~expected)
         live;
       expected
-  | (first, _, _) :: rest, None ->
-      List.iter
-        (fun (type_, span, _) ->
-          if not (State.unify state first type_) then
-            Failures.report_mismatch state span ~expected:first ~actual:type_)
-        rest;
-      first
+  | (first, _, _) :: rest, None -> (
+      let is_view (type_, _, _) = Types.is_view (Conversions.read_expected_head state type_) in
+      let is_borrowed_place ((type_, _, (expression : Syntax.expression option)) as branch) =
+        (not (is_view branch))
+        && Types.is_viewable (Conversions.read_expected_head state type_)
+        &&
+        match expression with
+        | Some written -> Places.is_borrowed state.State.resolved state.State.tables written
+        | None -> false
+      in
+      let joined_view =
+        match List.find_opt is_view live with
+        | Some branch -> Some branch
+        | None when env.State.binds_view && List.for_all is_borrowed_place live ->
+            Some (List.hd live)
+        | None -> None
+      in
+      match joined_view with
+      | Some (view, _, _) ->
+          let view = Types.make_view (Conversions.read_expected_head state view) in
+          List.iter
+            (fun (actual, span, expression) ->
+              Conversions.convert state env ?expression span ~actual ~expected:view)
+            live;
+          view
+      | None ->
+          List.iter
+            (fun (type_, span, _) ->
+              if not (State.unify state first type_) then
+                Failures.report_mismatch state span ~expected:first ~actual:type_)
+            rest;
+          first)
 
 and match_ state env ?expected scrutinees arms =
   let types =

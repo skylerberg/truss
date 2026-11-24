@@ -269,6 +269,32 @@ let check_recursion_depth ~depth type_ trait =
              stops there: bounds that ask for ever larger types never finish."
             (Types.show type_) (Types.show_trait trait) Properties.recursion_limit))
 
+let reads_self_only lookups (trait : Path.t) =
+  let self = Types.make_self_parameter trait in
+  let rec holds_self (type_ : Types.ty) =
+    match type_ with
+    | Parameter parameter -> parameter = self
+    | Named { arguments; _ } -> List.exists holds_self_argument arguments
+    | Projection { trait; _ } -> List.exists holds_self_argument trait.trait_arguments
+    | Function { inputs; output; _ } ->
+        List.exists (fun (_, input) -> holds_self input) inputs || holds_self output
+    | Never | Integer | Variable _ | Hole | Error _ -> false
+  and holds_self_argument = function Types.Type type_ -> holds_self type_ | Value _ -> false in
+  match Definition.find_trait_interface lookups trait with
+  | Some interface ->
+      (not interface.is_capability)
+      && List.for_all
+           (fun (method_ : Types.trait_method) ->
+             let signature = Definition.read_method_signature lookups ~owner:trait method_ in
+             method_.method_receiver = Instance Read
+             && (not (holds_self (Types.extract_result_type signature.output)))
+             && List.for_all
+                  (fun (parameter : Types.parameter_info) ->
+                    parameter.mode = Read || not (holds_self parameter.type_))
+                  signature.parameters)
+           interface.methods
+  | None -> false
+
 let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_conditions = true)
     (type_ : Types.ty) (wanted : Types.trait_reference) : solution option =
   let broken_trait =
@@ -290,6 +316,11 @@ let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_cond
         | Types.Parameter _ | Types.Projection _ ->
             if list_matching_bounds lookups ~list_bounds type_ wanted <> [] then
               Some (Evidence Bound)
+            else None
+        | Types.Named _ when Types.is_view type_ ->
+            if reads_self_only lookups wanted.trait then
+              find_evidence lookups ~list_bounds ~depth ~checks_conditions (Types.strip_view type_)
+                wanted
             else None
         | Types.Named _ ->
             List.find_map

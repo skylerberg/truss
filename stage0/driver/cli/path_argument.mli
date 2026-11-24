@@ -11,7 +11,9 @@ type target =
 val resolve : Resolve.Names.lookups -> Path.package list -> t -> target list
 val explain_missing : Resolve.Names.lookups -> Path.package list -> string -> string
 val is_shown : Path.package list -> Resolve.Names.declaration -> bool
-val list_view_methods : Resolve.Names.declaration list -> Path.t -> Resolve.Names.declaration list
+
+val list_array_methods_of_list :
+  Resolve.Names.declaration list -> Path.t -> Resolve.Names.declaration list
 
 val list_shown_declarations :
   Resolve.Names.lookups -> Path.package list -> Resolve.Names.declaration list

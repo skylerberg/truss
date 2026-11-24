@@ -1,4 +1,4 @@
-fn costly(items: Slice[Int64]) -> Bool
+fn costly(items: List[Int64]) -> Bool
   ensures !result
   cost time O(items.length())
 {

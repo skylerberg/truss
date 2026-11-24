@@ -1,4 +1,4 @@
-fn count_spaces(text: StringSlice) -> UInt64
+fn count_spaces(text: String) -> UInt64
   cost amortized time O(text.length())
 {
   let characters = text.characters().to_list()

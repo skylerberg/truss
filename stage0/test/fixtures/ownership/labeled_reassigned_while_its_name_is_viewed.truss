@@ -1,6 +1,6 @@
-fn f(items: Slice[Int64]) -> UInt64 {
-  var labeled = Labeled(view: items[..], name: "a".copy())
-  let name = labeled.name.slice()
-  labeled = Labeled(view: items[..], name: "b".copy())
+fn f(items: List[Int64]) -> UInt64 {
+  var labeled = Labeled(viewed: items[..], name: "a".copy())
+  let name = labeled.name
+  labeled = Labeled(viewed: items[..], name: "b".copy())
   name.length()
 }

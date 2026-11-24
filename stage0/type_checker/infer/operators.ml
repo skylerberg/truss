@@ -135,7 +135,7 @@ and check_operands state env (left : Syntax.expression) (right : Syntax.expressi
 
 and is_string state (operand : Syntax.expression) type_ =
   let type_ = Conversions.read_actual_head state operand type_ in
-  Types.is_well_known String type_ || Types.is_well_known String_slice type_
+  Types.is_well_known String (Types.strip_view type_)
 
 and check_binary state (env : State.env) ?expected (value : Syntax.expression) operator
     (left : Syntax.expression) (right : Syntax.expression) =
@@ -177,27 +177,29 @@ and check_binary state (env : State.env) ?expected (value : Syntax.expression) o
           else begin
             let left_head = Conversions.read_actual_head state left left_type in
             let right_head = Conversions.read_actual_head state right right_type in
+            let left_self = Types.strip_view left_head
+            and right_self = Types.strip_view right_head in
+            let is_array type_ = Option.is_some (Types.find_list_of_array type_) in
             let compared_type =
-              match
-                ( Conversions.find_view_as ~owned:right_head ~view:left_head,
-                  Conversions.find_view_as ~owned:left_head ~view:right_head )
-              with
-              | Some _, _ ->
-                  Conversions.coerce state env ~argument:Language.Mode.Read right ~actual:right_type
-                    ~expected:left_type;
-                  left_type
-              | None, Some _ ->
-                  Conversions.coerce state env ~argument:Language.Mode.Read left ~actual:left_type
-                    ~expected:right_type;
-                  right_type
-              | None, None ->
-                  if not (State.unify state left_type right_type) then
-                    ignore
-                      (Failures.add_operand_mismatch state ~at:(State.read_span state value.id)
-                         ~left:(State.read_span state left.id, left_type)
-                         ~right:(State.read_span state right.id, right_type));
-                  left_type
+              if is_array left_self && Types.is_well_known List right_self then right_self
+              else if Types.is_view left_head then left_self
+              else left_type
             in
+            let compares_as_list = Types.is_well_known List (State.normalize state compared_type) in
+            let view_as_compared (operand : Syntax.expression) self_type actual =
+              if is_array self_type && compares_as_list then begin
+                Conversions.coerce state env ~argument:Language.Mode.Read operand ~actual
+                  ~expected:compared_type;
+                true
+              end
+              else State.unify ~modulo_views:true state actual compared_type
+            in
+            let left_fits = view_as_compared left left_self left_type in
+            if not (left_fits && view_as_compared right right_self right_type) then
+              ignore
+                (Failures.add_operand_mismatch state ~at:(State.read_span state value.id)
+                   ~left:(State.read_span state left.id, left_type)
+                   ~right:(State.read_span state right.id, right_type));
             let method_, result =
               match comparison with
               | Equal | Not_equal -> (Well_known.Equal_equal, Types.bool)

@@ -2,7 +2,7 @@ use standard.cryptography
 use standard.hex
 use standard.random
 
-fn bytes_of(text: StringSlice) -> List[UInt8] {
+fn bytes_of(text: String) -> List[UInt8] {
   match hex.decode(text) {
     Ok(bytes) => own bytes
     Err(_) => []
@@ -18,7 +18,7 @@ let pss_signature: String = "35616005c4d478d08bb0f12f226d768bafa9ffa49166b667562
 fn public_key() -> cryptography.RsaPublicKey
   uses Panic
 {
-  cryptography.RsaPublicKey.new(bytes_of(modulus.slice()), exponent: bytes_of("010001")).expect("a 2048-bit key")
+  cryptography.RsaPublicKey.new(bytes_of(modulus), exponent: bytes_of("010001")).expect("a 2048-bit key")
 }
 
 fn private_key() -> cryptography.RsaPrivateKey
@@ -39,13 +39,13 @@ test "RSA signatures OpenSSL made verify with PKCS #1 v1.5 and PSS, and changed 
   let key = public_key()
   let message = "hello truss".bytes()
   assert key.bits() == 2048
-  assert key.verify_pkcs1(cryptography.HashFunction.Sha256, message: message, signature: bytes_of(pkcs1_signature.slice()))
-  assert !key.verify_pkcs1(cryptography.HashFunction.Sha256, message: "hello trust".bytes(), signature: bytes_of(pkcs1_signature.slice()))
-  assert key.verify_pss(cryptography.HashFunction.Sha256, message: message, signature: bytes_of(pss_signature.slice()))
-  var changed = bytes_of(pss_signature.slice())
+  assert key.verify_pkcs1(cryptography.HashFunction.Sha256, message: message, signature: bytes_of(pkcs1_signature))
+  assert !key.verify_pkcs1(cryptography.HashFunction.Sha256, message: "hello trust".bytes(), signature: bytes_of(pkcs1_signature))
+  assert key.verify_pss(cryptography.HashFunction.Sha256, message: message, signature: bytes_of(pss_signature))
+  var changed = bytes_of(pss_signature)
   changed[100] = changed[100] ^ 4
   assert !key.verify_pss(cryptography.HashFunction.Sha256, message: message, signature: changed)
-  assert !key.verify_pkcs1(cryptography.HashFunction.Sha256, message: message, signature: bytes_of(pss_signature.slice()))
+  assert !key.verify_pkcs1(cryptography.HashFunction.Sha256, message: message, signature: bytes_of(pss_signature))
 }
 
 test "an RSA private key signs with PKCS #1 v1.5 as OpenSSL does, and with PSS that verifies" uses Panic, RunForever {

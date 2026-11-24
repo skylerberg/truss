@@ -1,8 +1,8 @@
-fn count_of[Item](items: Slice[Item]) -> UInt64 {
+fn count_of[Item](items: List[Item]) -> UInt64 {
   items.length()
 }
 
-fn f[Item](items: Slice[Item]) -> UInt64 {
+fn f[Item](items: List[Item]) -> UInt64 {
   proof {
     assert count_of[Item]([]) == 0 by evaluation
   }

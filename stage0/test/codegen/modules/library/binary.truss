@@ -45,12 +45,12 @@ test "reading past the end says how much was needed and reads nothing" {
   assert "${binary.DecodeError.UnexpectedEnd(needed: 4, available: 3)}" == "the bytes end: 4 needed, 3 left"
 }
 
-fn variable(bytes: Slice[UInt8]) -> Result[UInt64, binary.DecodeError] {
+fn variable(bytes: List[UInt8]) -> Result[UInt64, binary.DecodeError] {
   var decoder = binary.Decoder.new(bytes)
   mut decoder.variable_uint64()
 }
 
-fn signed(bytes: Slice[UInt8]) -> Result[Int64, binary.DecodeError] {
+fn signed(bytes: List[UInt8]) -> Result[Int64, binary.DecodeError] {
   var decoder = binary.Decoder.new(bytes)
   mut decoder.variable_int64()
 }

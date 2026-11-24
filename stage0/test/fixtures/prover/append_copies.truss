@@ -1,4 +1,4 @@
-fn append_copies[Element: Copyable](list: mut List[Element], items: Slice[Element])
+fn append_copies[Element: Copyable](list: mut List[Element], items: List[Element])
   cost amortized time O(items.length() * (1 + time(Element.copy)))
 {
   for item in items {

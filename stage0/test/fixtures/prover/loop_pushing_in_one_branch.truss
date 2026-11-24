@@ -1,4 +1,4 @@
-fn evens(values: Slice[Int64]) -> List[Int64]
+fn evens(values: List[Int64]) -> List[Int64]
   cost amortized time O(values.length())
 {
   var kept: List[Int64] = []

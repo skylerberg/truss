@@ -6,21 +6,23 @@ include Parts
 
 let expand_formula = Expansion.expand_formula
 
-let list_callee_modified_fields ~read_signature (lookups : Interface.Lookups.t) substitution
-    (callee : Tree.callee) position =
-  let path : Path.t option =
-    match callee.target with
-    | Function { path; _ } -> Some path
-    | Trait_method { trait; name; receiver; evidence; self_type; _ } -> (
-        match Interface.Impls.resolve_evidence lookups substitution ~self_type ~trait evidence with
-        | Impl { impl; _ } -> Some (Method { owner = impl; name; receiver })
-        | Bound -> Some (Method { owner = trait.trait; name; receiver }))
-    | Capability_method { capability; name } -> Some (Path.make_capability_method capability name)
-    | Intrinsic _ | Indirect _ -> None
+let list_callee_modified_parts ~read_signature (lookups : Interface.Lookups.t) substitution
+    (callee : Tree.callee) position : Types.modified list option =
+  let list_parts_of path =
+    Option.bind (read_signature path) (fun signature ->
+        Types.list_modified_parts signature position)
   in
-  Option.bind path (fun path ->
-      Option.bind (read_signature path) (fun signature ->
-          Types.list_modified_fields signature position))
+  match callee.target with
+  | Function { path; _ } -> list_parts_of path
+  | Trait_method { trait; name; receiver; evidence; self_type; _ } -> (
+      match Interface.Impls.resolve_evidence lookups substitution ~self_type ~trait evidence with
+      | Impl { impl; _ } -> list_parts_of (Method { owner = impl; name; receiver })
+      | Bound -> list_parts_of (Method { owner = trait.trait; name; receiver }))
+  | Capability_method { capability; name } ->
+      list_parts_of (Path.make_capability_method capability name)
+  | Intrinsic { operation = Buffer Storage_swap | Lend Storage_at; _ } when position = 0 ->
+      Some [ { position; field_path = []; is_elements = true } ]
+  | Intrinsic _ | Indirect _ -> None
 
 let make_code tree : Parts.code = { tree; graph = Expansion.expand tree }
 

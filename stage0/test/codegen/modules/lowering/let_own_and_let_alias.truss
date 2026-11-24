@@ -3,7 +3,7 @@ fn keep(items: own List[Int64]) -> List[Int64] {
   held
 }
 
-fn count(items: Slice[Int64]) -> UInt64 {
+fn count(items: List[Int64]) -> UInt64 {
   let seen = items
   seen.length()
 }

@@ -1,6 +1,6 @@
 type overload =
   | Type_overload of Path.t
-  | View_overload of Path.t
+  | List_overload of Path.t
   | Trait_overload of Types.trait_reference * Types.trait_method
 
 val classify_receiver_mode : Syntax.argument list -> Language.Mode.t

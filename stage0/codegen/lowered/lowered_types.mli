@@ -145,7 +145,6 @@ type static_value =
   | Static_variant of string * (string * static_value) list
   | Static_array of static_value list
   | Static_storage of { element : Ground.ty; elements : static_value list; capacity : int }
-  | Static_view of { element : Ground.ty; elements : static_value list }
 
 type rvalue =
   | Use of operand

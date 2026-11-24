@@ -208,12 +208,6 @@ and assign state (target : Mir.place) (value : Mir.rvalue) ~origin =
   match (target, value) with
   | { root = Local local; projections = [] }, Operand (Borrow { place = source; mode; _ }) ->
       Mir_places.alias state local (Mir_places.lower_place state source) ~writable:(mode = Mut)
-  | { root = Local local; projections = [] }, Convert { conversion = View_to_owned; value; _ } ->
-      Targets.lower_owner_of_view state
-        ~owner:(Lowering.ground state (Mir_places.lookup_local_info state local).type_)
-        ~view:(Mir_places.compute_operand_type state value)
-        (Mir_places.lower_operand_place state value)
-        (Mir_places.lower_place state target)
   | _ -> (
       let ty = Mir_places.compute_target_type state target value in
       let types_ty =
@@ -294,10 +288,8 @@ and lower_rvalue_into ?types_ty state (rvalue : Mir.rvalue) (destination : Lower
            (List.map
               (fun operand ->
                 let operand_ty = Mir_places.compute_operand_type state operand in
-                if
-                  Storage.find_storage_element operand_ty <> None
-                  || Storage.find_view_element operand_ty <> None
-                then Intrinsics.Place (Mir_places.lower_operand_place state operand)
+                if Storage.find_storage_element operand_ty <> None then
+                  Intrinsics.Place (Mir_places.lower_operand_place state operand)
                 else Intrinsics.Value (Mir_places.lower_operand state operand))
               operands)
            ~destination:(Some destination)
@@ -347,8 +339,9 @@ and lower_rvalue_into ?types_ty state (rvalue : Mir.rvalue) (destination : Lower
       | _ -> Mir_places.write_operand state inner destination)
   | Convert { conversion = To_integer | From_integer; _ } ->
       Definitions.raise_bug "a conversion that exists only in specifications"
-  | Convert { conversion = View_to_owned; _ } ->
-      Definitions.raise_bug "the owner of a view written outside its lent local"
+  | Convert { conversion = To_view; value; _ } ->
+      Emit_c.Ir_builder.emit state.builder
+        (Assign (destination, Use (Copy (Mir_places.lower_operand_place state value))))
   | Copy source ->
       Drop_and_copy.copy_into state.context.drop_and_copy state.builder ~destination
         ~source:(Mir_places.lower_operand_place state source)

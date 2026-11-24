@@ -60,6 +60,7 @@ internal type TypeKind =
   | SelfType(name: Option[Name])
   | Associated(parameter: Name, name: Name)
   | indirect FunctionType(function_type: FunctionType)
+  | indirect ViewType(viewed: TypeExpression)
   | TypeError
   derives Equal
 

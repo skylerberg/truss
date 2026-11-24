@@ -1,4 +1,4 @@
-fn Encoder.bytes(mut self, bytes: Slice[UInt8])
+fn Encoder.bytes(mut self, bytes: List[UInt8])
   cost amortized time O(bytes.length())
 {
   for index in 0..bytes.length() {

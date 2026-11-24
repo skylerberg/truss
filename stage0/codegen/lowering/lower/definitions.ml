@@ -18,7 +18,7 @@ let make_monomorphic_context (interface : Interface.Lookups.t) : Monomorphic.con
   }
 
 let uint64 = Ground.make_builtin UInt64
-let string_slice : Ground.ty = Named { path = Well_known.make_path String_slice; arguments = [] }
+let string : Ground.ty = Named { path = Well_known.make_path String; arguments = [] }
 
 let make_context ~env (lookups : Lookups.t) =
   let monomorphic = make_monomorphic_context lookups.interface in
@@ -27,7 +27,7 @@ let make_context ~env (lookups : Lookups.t) =
     env;
     drop_and_copy = Drop_and_copy.create env;
     monomorphic;
-    types = { uint64; string_slice };
+    types = { uint64; string };
     bool = Ground.make_builtin Bool;
   }
 

@@ -25,7 +25,7 @@ internal fn LineInput.next_line(mut self, descriptor: Int32) -> Result[Option[St
     invariant has_newline ==> !searching
   {
     if end < intrinsic.storage_length(self.unread) {
-      if intrinsic.view_at(intrinsic.storage_view(self.unread), index: end) == 10 {
+      if intrinsic.storage_at(self.unread, index: end) == 10 {
         has_newline = true
         searching = false
       } else {
@@ -51,7 +51,7 @@ internal fn LineInput.next_line(mut self, descriptor: Int32) -> Result[Option[St
       invariant intrinsic.storage_length(line) == index - start
       invariant intrinsic.storage_capacity(line) == end - start
     {
-      intrinsic.storage_push(mut line, value: intrinsic.view_at(intrinsic.storage_view(self.unread), index: index))
+      intrinsic.storage_push(mut line, value: intrinsic.storage_at(self.unread, index: index))
     }
     self.consumed = if has_newline { end + 1 } else { end }
     Ok(Some(String.from_bytes(own line)))
@@ -71,7 +71,7 @@ fn LineInput.discard_consumed(mut self, room_to_read_into: UInt64)
     invariant intrinsic.storage_length(remaining) == index - start
     invariant intrinsic.storage_capacity(remaining) == length - start + room_to_read_into
   {
-    intrinsic.storage_push(mut remaining, value: intrinsic.view_at(intrinsic.storage_view(self.unread), index: index))
+    intrinsic.storage_push(mut remaining, value: intrinsic.storage_at(self.unread, index: index))
   }
   self.unread = own remaining
   self.consumed = 0

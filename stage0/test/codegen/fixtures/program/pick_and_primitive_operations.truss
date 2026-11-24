@@ -1,4 +1,4 @@
-fn pick(items: Slice[Int64], top: UInt64) -> UInt64
+fn pick(items: List[Int64], top: UInt64) -> UInt64
   requires items[top] >= 0
 {
   top
@@ -25,7 +25,7 @@ test "shift" {
   let _ = one << amount
 }
 
-test "slice" {
+test "range" {
   let items: List[Int64] = [1, 2]
   let _ = items[1..9]
 }

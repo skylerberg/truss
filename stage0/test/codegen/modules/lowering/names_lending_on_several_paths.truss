@@ -38,11 +38,11 @@ fn Names.slot(mut self, index: UInt64) lends mut Slot {
   Slot(index: index, name: mut self.others[index])
 }
 
-fn rename_first(names: mut Names, to: StringSlice) -> Bool {
+fn rename_first(names: mut Names, to: String) -> Bool {
   if names.others.length() == 0 {
     return false
   }
-  mut names.slot(0).name = to.to_string()
+  mut names.slot(0).name = to.copy()
   true
 }
 

@@ -1,10 +1,11 @@
-fn bump(items: mut Slice[Int64])
+fn bump(items: mut List[Int64])
+  modifies items[..]
   requires items.length() > 0
 {
   items[0] = 9
 }
 
-type Window(rest: Slice[Int64])
+type Window(rest: view List[Int64])
 
 fn narrow(window: mut Window, count: UInt64) {
   window.rest = window.rest[..count]

@@ -22,10 +22,10 @@ fn read_line(connection: network.Connection, inbox: mut List[UInt8]) -> Option[S
   }
 }
 
-fn reply(connection: network.Connection, text: StringSlice)
+fn reply(connection: network.Connection, text: String)
   uses Handles, Tasks, RunForever
 {
-  let _ = connection.send_all("${text}\r\n".slice().bytes())
+  let _ = connection.send_all("${text}\r\n".bytes())
 }
 
 fn serve_once(listener: mut network.Listener, transcript: tasks.Cell[List[String]])
@@ -44,11 +44,11 @@ fn serve_once(listener: mut network.Listener, transcript: tasks.Cell[List[String
     }
     let recorded = line.copy()
     transcript.update(fn(listed) { mut listed.push(recorded.copy()) })
-    if line.slice().starts_with("EHLO") {
+    if line.starts_with("EHLO") {
       reply(connection, text: "250-mail.example.test")
       reply(connection, text: "250-AUTH PLAIN LOGIN")
       reply(connection, text: "250 8BITMIME")
-    } else if line.slice().starts_with("AUTH PLAIN") {
+    } else if line.starts_with("AUTH PLAIN") {
       reply(connection, text: "235 accepted")
     } else if line == "DATA" {
       reply(connection, text: "354 go ahead")
@@ -61,7 +61,7 @@ fn serve_once(listener: mut network.Listener, transcript: tasks.Cell[List[String
         if body_line == "." {
           break
         }
-        mut data.push(body_line.slice())
+        mut data.push(body_line)
         mut data.push("\n")
       }
       let content = data.copy()
@@ -127,7 +127,7 @@ test "send speaks SMTP: AUTH PLAIN, every recipient including Bcc, and a dot-stu
     assert seen[5] == "RCPT TO:<alan@example.test>"
     assert seen[6] == "RCPT TO:<hidden@example.test>"
     assert seen[7] == "DATA"
-    let data = seen[8].slice()
+    let data = seen[8]
     assert data.contains("From: \"Ada Lovelace\" <ada@example.test>\n")
     assert data.contains("To: <grace@example.test>\n")
     assert data.contains("Cc: =?UTF-8?B?Wm/Dqw==?= <alan@example.test>\n")

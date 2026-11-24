@@ -530,7 +530,7 @@ public fn collections.SortedMap[Key: Ordered, Value].after(self, key: Key) lends
   }
 }
 
-public fn collections.SortedMap[Key: Ordered, Value].in_range(self, range: Range[Key]) -> Slice[map.Entry[Key, Value]]
+public fn collections.SortedMap[Key: Ordered, Value].in_range(self, range: Range[Key]) -> view List[map.Entry[Key, Value]]
   ensures forall i in 0..result.length() => range.contains(result.model()[i].key)
   cost time O(1 + log(self.length()) * time(Key.compare))
 {
@@ -697,21 +697,21 @@ public fn collections.SortedMap[Key: Ordered, Value].reversed(self) -> list.Reve
   ensures result.count() == self.length()
   cost time O(1)
 {
-  self.entries.slice().reversed()
+  self.entries.reversed()
 }
 
 public fn collections.SortedMap[Key: Ordered, Value].keys(self) -> collections.SortedMapKeys[Key, Value]
   ensures result.count() == self.length()
   cost time O(1)
 {
-  collections.SortedMapKeys(entries: self.entries.slice())
+  collections.SortedMapKeys(entries: self.entries)
 }
 
 public fn collections.SortedMap[Key: Ordered, Value].values(self) -> collections.SortedMapValues[Key, Value]
   ensures result.count() == self.length()
   cost time O(1)
 {
-  collections.SortedMapValues(entries: self.entries.slice())
+  collections.SortedMapValues(entries: self.entries)
 }
 
 public fn collections.SortedMap[Key: Ordered, Value].value_at(mut self, position: UInt64) lends mut Value

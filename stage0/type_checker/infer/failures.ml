@@ -222,15 +222,6 @@ let report_unmet_bound (state : State.state) ~at ~of_type ~sides ~unmet subject
       (Types.show subject) (Types.show_trait bound)
   in
   let frame = State.read_current_frame state in
-  let is_slice = Types.is_well_known Slice subject || Types.is_well_known String_slice subject in
-  let has_mut_self_method =
-    match Interface.Definition.find_trait_interface state.lookups.interface bound.trait with
-    | Some trait ->
-        List.exists
-          (fun (method_ : Types.trait_method) -> method_.method_receiver = Instance Mut)
-          trait.methods
-    | None -> false
-  in
   match
     List.find_opt
       (fun (reported, reported_bound, _) -> Types.equal reported subject && reported_bound = bound)
@@ -241,11 +232,10 @@ let report_unmet_bound (state : State.state) ~at ~of_type ~sides ~unmet subject
       let report =
         add_mismatch_diagnostic state Unsatisfied_bound at ~sides
           ((match associated with
-             | None when is_slice && has_mut_self_method ->
+             | None when Types.is_view subject ->
                  needs
-                 ^ ", which does not hold: a slice implements no trait with a `mut self` method. \
-                    Generic code could call the method on a copy of the slice, and a copy views \
-                    the same elements."
+                 ^ ", which does not hold: a view implements a trait only where each method that \
+                    an `impl` writes takes `Self` through read-only parameters alone."
              | None -> needs ^ ", which does not hold."
              | Some (name, found, _) ->
                  Printf.sprintf "%s, and its `%s` is `%s`." needs name (State.show state found))

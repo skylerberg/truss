@@ -1,5 +1,5 @@
-fn f(items: mut List[Int64], others: Slice[Int64]) {
-  var part = others
-  take(mut items, view: part)
+fn f(items: mut List[Int64], others: List[Int64]) {
+  var part: view List[Int64] = others
+  take(mut items, viewed: part)
   measure(mut items, count: items.length())
 }

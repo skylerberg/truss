@@ -105,8 +105,8 @@ let lower_intrinsic state ?reported (operation : Intrinsic.operation) ~type_argu
                 Intrinsics.Place (Mir_places.lower_operand_place state borrowed)
             | passed ->
                 let ty = Mir_places.compute_operand_type state passed in
-                if Storage.find_storage_element ty <> None || Storage.find_view_element ty <> None
-                then Intrinsics.Place (Mir_places.lower_operand_place state passed)
+                if Storage.find_storage_element ty <> None then
+                  Intrinsics.Place (Mir_places.lower_operand_place state passed)
                 else Intrinsics.Value (Mir_places.lower_operand state passed))
           arguments
       in

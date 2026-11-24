@@ -1,4 +1,4 @@
-fn pick(values: Slice[Int64], items: mut List[Int64], index: UInt64) -> Int64
+fn pick(values: List[Int64], items: mut List[Int64], index: UInt64) -> Int64
   requires forall i in 0..index => i < index
 {
   mut items.push(1)

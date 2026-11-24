@@ -278,7 +278,7 @@ public fn Md5.new() -> Md5
   )
 }
 
-public fn Md5.update(mut self, bytes: Slice[UInt8])
+public fn Md5.update(mut self, bytes: List[UInt8])
   cost time O(bytes.length())
   cost allocations == 0
 {
@@ -324,7 +324,7 @@ public fn Md5.finish(own self) -> Array[UInt8, 16]
   digest
 }
 
-public fn md5(bytes: Slice[UInt8]) -> Array[UInt8, 16]
+public fn md5(bytes: List[UInt8]) -> Array[UInt8, 16]
   cost time O(bytes.length())
   cost allocations == 0
 {
@@ -360,7 +360,7 @@ internal fn Sha1.new() -> Sha1
   )
 }
 
-internal fn Sha1.update(mut self, bytes: Slice[UInt8])
+internal fn Sha1.update(mut self, bytes: List[UInt8])
   cost time O(bytes.length())
   cost allocations == 0
 {
@@ -410,7 +410,7 @@ internal fn Sha1.finish(own self) -> Array[UInt8, 20]
   ]
 }
 
-public fn sha256(bytes: Slice[UInt8]) -> Array[UInt8, 32]
+public fn sha256(bytes: List[UInt8]) -> Array[UInt8, 32]
   cost time O(bytes.length())
   cost allocations == 0
 {
@@ -419,7 +419,7 @@ public fn sha256(bytes: Slice[UInt8]) -> Array[UInt8, 32]
   own hasher.finish()
 }
 
-public fn sha512(bytes: Slice[UInt8]) -> Array[UInt8, 64]
+public fn sha512(bytes: List[UInt8]) -> Array[UInt8, 64]
   cost time O(bytes.length())
   cost allocations == 0
 {
@@ -428,7 +428,7 @@ public fn sha512(bytes: Slice[UInt8]) -> Array[UInt8, 64]
   own hasher.finish()
 }
 
-public fn sha384(bytes: Slice[UInt8]) -> Array[UInt8, 48]
+public fn sha384(bytes: List[UInt8]) -> Array[UInt8, 48]
   cost time O(bytes.length())
   cost allocations == 0
 {
@@ -437,7 +437,7 @@ public fn sha384(bytes: Slice[UInt8]) -> Array[UInt8, 48]
   own hasher.finish()
 }
 
-fn fill_32(bytes: Slice[UInt8]) -> Array[UInt8, 32] {
+fn fill_32(bytes: List[UInt8]) -> Array[UInt8, 32] {
   var filled: Array[UInt8, 32] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
   let width: UInt64 = 32
   for index in 0..width {
@@ -448,12 +448,12 @@ fn fill_32(bytes: Slice[UInt8]) -> Array[UInt8, 32] {
   filled
 }
 
-public fn sha3_256(bytes: Slice[UInt8]) -> Array[UInt8, 32] {
+public fn sha3_256(bytes: List[UInt8]) -> Array[UInt8, 32] {
   let digest = keccak.hash(136, message: bytes, suffix: 6, count: 32)
-  fill_32(digest.slice())
+  fill_32(digest)
 }
 
-public fn sha3_512(bytes: Slice[UInt8]) -> Array[UInt8, 64] {
+public fn sha3_512(bytes: List[UInt8]) -> Array[UInt8, 64] {
   let digest = keccak.hash(72, message: bytes, suffix: 6, count: 64)
   var filled: Array[UInt8, 64] = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -468,15 +468,15 @@ public fn sha3_512(bytes: Slice[UInt8]) -> Array[UInt8, 64] {
   filled
 }
 
-public fn shake128(bytes: Slice[UInt8], length: UInt64) -> List[UInt8] {
+public fn shake128(bytes: List[UInt8], length: UInt64) -> List[UInt8] {
   keccak.hash(168, message: bytes, suffix: 31, count: length)
 }
 
-public fn shake256(bytes: Slice[UInt8], length: UInt64) -> List[UInt8] {
+public fn shake256(bytes: List[UInt8], length: UInt64) -> List[UInt8] {
   keccak.hash(136, message: bytes, suffix: 31, count: length)
 }
 
-public fn sha1(bytes: Slice[UInt8]) -> Array[UInt8, 20]
+public fn sha1(bytes: List[UInt8]) -> Array[UInt8, 20]
   cost time O(bytes.length())
   cost allocations == 0
 {
@@ -485,7 +485,7 @@ public fn sha1(bytes: Slice[UInt8]) -> Array[UInt8, 20]
   own hasher.finish()
 }
 
-public fn hmac_sha1(key: Slice[UInt8], message: Slice[UInt8]) -> Array[UInt8, 20]
+public fn hmac_sha1(key: List[UInt8], message: List[UInt8]) -> Array[UInt8, 20]
   cost time O(key.length() + message.length())
   cost allocations == 0
 {
@@ -513,7 +513,7 @@ public fn hmac_sha1(key: Slice[UInt8], message: Slice[UInt8]) -> Array[UInt8, 20
     mixed[index] = padded[index] ^ 0x36
   }
   var inner = Sha1.new()
-  mut inner.update(mixed.slice())
+  mut inner.update(mixed)
   mut inner.update(message)
   let digest = inner.finish()
   for index in 0..width
@@ -522,12 +522,12 @@ public fn hmac_sha1(key: Slice[UInt8], message: Slice[UInt8]) -> Array[UInt8, 20
     mixed[index] = padded[index] ^ 0x5c
   }
   var outer = Sha1.new()
-  mut outer.update(mixed.slice())
-  mut outer.update(digest.slice())
+  mut outer.update(mixed)
+  mut outer.update(digest)
   outer.finish()
 }
 
-public fn blake3(bytes: Slice[UInt8]) -> Array[UInt8, 32]
+public fn blake3(bytes: List[UInt8]) -> Array[UInt8, 32]
   cost time O(bytes.length())
   cost allocations == 0
 {
@@ -564,7 +564,7 @@ public fn Sha256.new() -> Sha256
   )
 }
 
-public fn Sha256.update(mut self, bytes: Slice[UInt8])
+public fn Sha256.update(mut self, bytes: List[UInt8])
   cost time O(bytes.length())
   cost allocations == 0
 {
@@ -648,7 +648,7 @@ public fn Sha512.new() -> Sha512
   )
 }
 
-public fn Sha512.update(mut self, bytes: Slice[UInt8])
+public fn Sha512.update(mut self, bytes: List[UInt8])
   cost time O(bytes.length())
   cost allocations == 0
 {
@@ -758,7 +758,7 @@ public fn Sha384.new() -> Sha384
   ]))
 }
 
-public fn Sha384.update(mut self, bytes: Slice[UInt8])
+public fn Sha384.update(mut self, bytes: List[UInt8])
   cost time O(bytes.length())
   cost allocations == 0
 {
@@ -1189,7 +1189,7 @@ public fn Blake3.keyed(key: Array[UInt8, 32]) -> Blake3
   Blake3.with_key(little_endian_words(key), flags: 16)
 }
 
-public fn Blake3.update(mut self, bytes: Slice[UInt8])
+public fn Blake3.update(mut self, bytes: List[UInt8])
   cost allocations == 0
   cost time O(bytes.length())
 {
@@ -1264,7 +1264,7 @@ public fn Blake3.finish_extended(own self, length: UInt64) -> List[UInt8]
 
 internal type HmacSha256(inner: Sha256, outer: Sha256)
 
-internal fn HmacSha256.new(key: Slice[UInt8]) -> HmacSha256
+internal fn HmacSha256.new(key: List[UInt8]) -> HmacSha256
   cost time O(key.length())
   cost allocations == 0
 {
@@ -1292,18 +1292,18 @@ internal fn HmacSha256.new(key: Slice[UInt8]) -> HmacSha256
     mixed[index] = padded[index] ^ 0x36
   }
   var inner = Sha256.new()
-  mut inner.update(mixed.slice())
+  mut inner.update(mixed)
   for index in 0..width
     cost allocations == 0
   {
     mixed[index] = padded[index] ^ 0x5c
   }
   var outer = Sha256.new()
-  mut outer.update(mixed.slice())
+  mut outer.update(mixed)
   HmacSha256(inner: own inner, outer: own outer)
 }
 
-internal fn HmacSha256.update(mut self, bytes: Slice[UInt8])
+internal fn HmacSha256.update(mut self, bytes: List[UInt8])
   cost time O(bytes.length())
   cost allocations == 0
 {
@@ -1316,13 +1316,13 @@ internal fn HmacSha256.finish(own self) -> Array[UInt8, 32]
 {
   var code = own self
   let digest = own code.inner.finish()
-  mut code.outer.update(digest.slice())
+  mut code.outer.update(digest)
   own code.outer.finish()
 }
 
 internal type HmacSha512(inner: Sha512, outer: Sha512)
 
-internal fn HmacSha512.new(key: Slice[UInt8]) -> HmacSha512
+internal fn HmacSha512.new(key: List[UInt8]) -> HmacSha512
   cost time O(key.length())
   cost allocations == 0
 {
@@ -1350,18 +1350,18 @@ internal fn HmacSha512.new(key: Slice[UInt8]) -> HmacSha512
     mixed[index] = padded[index] ^ 0x36
   }
   var inner = Sha512.new()
-  mut inner.update(mixed.slice())
+  mut inner.update(mixed)
   for index in 0..width
     cost allocations == 0
   {
     mixed[index] = padded[index] ^ 0x5c
   }
   var outer = Sha512.new()
-  mut outer.update(mixed.slice())
+  mut outer.update(mixed)
   HmacSha512(inner: own inner, outer: own outer)
 }
 
-internal fn HmacSha512.update(mut self, bytes: Slice[UInt8])
+internal fn HmacSha512.update(mut self, bytes: List[UInt8])
   cost time O(bytes.length())
   cost allocations == 0
 {
@@ -1374,13 +1374,13 @@ internal fn HmacSha512.finish(own self) -> Array[UInt8, 64]
 {
   var code = own self
   let digest = own code.inner.finish()
-  mut code.outer.update(digest.slice())
+  mut code.outer.update(digest)
   own code.outer.finish()
 }
 
 internal type HmacSha384(inner: Sha384, outer: Sha384)
 
-internal fn HmacSha384.new(key: Slice[UInt8]) -> HmacSha384
+internal fn HmacSha384.new(key: List[UInt8]) -> HmacSha384
   cost time O(key.length())
   cost allocations == 0
 {
@@ -1408,18 +1408,18 @@ internal fn HmacSha384.new(key: Slice[UInt8]) -> HmacSha384
     mixed[index] = padded[index] ^ 0x36
   }
   var inner = Sha384.new()
-  mut inner.update(mixed.slice())
+  mut inner.update(mixed)
   for index in 0..width
     cost allocations == 0
   {
     mixed[index] = padded[index] ^ 0x5c
   }
   var outer = Sha384.new()
-  mut outer.update(mixed.slice())
+  mut outer.update(mixed)
   HmacSha384(inner: own inner, outer: own outer)
 }
 
-internal fn HmacSha384.update(mut self, bytes: Slice[UInt8])
+internal fn HmacSha384.update(mut self, bytes: List[UInt8])
   cost time O(bytes.length())
   cost allocations == 0
 {
@@ -1432,11 +1432,11 @@ internal fn HmacSha384.finish(own self) -> Array[UInt8, 48]
 {
   var code = own self
   let digest = own code.inner.finish()
-  mut code.outer.update(digest.slice())
+  mut code.outer.update(digest)
   own code.outer.finish()
 }
 
-public fn hmac_sha256(key: Slice[UInt8], message: Slice[UInt8]) -> Array[UInt8, 32]
+public fn hmac_sha256(key: List[UInt8], message: List[UInt8]) -> Array[UInt8, 32]
   cost time O(key.length() + message.length())
   cost allocations == 0
 {
@@ -1445,7 +1445,7 @@ public fn hmac_sha256(key: Slice[UInt8], message: Slice[UInt8]) -> Array[UInt8, 
   own code.finish()
 }
 
-public fn hmac_sha384(key: Slice[UInt8], message: Slice[UInt8]) -> Array[UInt8, 48]
+public fn hmac_sha384(key: List[UInt8], message: List[UInt8]) -> Array[UInt8, 48]
   cost time O(key.length() + message.length())
   cost allocations == 0
 {
@@ -1454,7 +1454,7 @@ public fn hmac_sha384(key: Slice[UInt8], message: Slice[UInt8]) -> Array[UInt8, 
   own code.finish()
 }
 
-public fn hmac_sha512(key: Slice[UInt8], message: Slice[UInt8]) -> Array[UInt8, 64]
+public fn hmac_sha512(key: List[UInt8], message: List[UInt8]) -> Array[UInt8, 64]
   cost time O(key.length() + message.length())
   cost allocations == 0
 {
@@ -1467,19 +1467,19 @@ internal fn hkdf_block_sha256(
   key: Array[UInt8, 32],
   previous: Array[UInt8, 32],
   index: UInt64,
-  information: Slice[UInt8],
+  information: List[UInt8],
 ) -> Array[UInt8, 32]
   requires index < 255
   cost time O(information.length())
   cost allocations == 0
 {
-  var code = HmacSha256.new(key.slice())
+  var code = HmacSha256.new(key)
   if index > 0 {
-    mut code.update(previous.slice())
+    mut code.update(previous)
   }
   mut code.update(information)
   let counter: Array[UInt8, 1] = [intrinsic.convert(index + 1)]
-  mut code.update(counter.slice())
+  mut code.update(counter)
   own code.finish()
 }
 
@@ -1487,23 +1487,23 @@ internal fn hkdf_block_sha384(
   key: Array[UInt8, 48],
   previous: Array[UInt8, 48],
   index: UInt64,
-  information: Slice[UInt8],
+  information: List[UInt8],
 ) -> Array[UInt8, 48]
   requires index < 255
   cost time O(information.length())
   cost allocations == 0
 {
-  var code = HmacSha384.new(key.slice())
+  var code = HmacSha384.new(key)
   if index > 0 {
-    mut code.update(previous.slice())
+    mut code.update(previous)
   }
   mut code.update(information)
   let counter: Array[UInt8, 1] = [intrinsic.convert(index + 1)]
-  mut code.update(counter.slice())
+  mut code.update(counter)
   own code.finish()
 }
 
-internal fn append_prefix(output: mut intrinsic.Storage[UInt8], block: Slice[UInt8], limit: UInt64)
+internal fn append_prefix(output: mut intrinsic.Storage[UInt8], block: List[UInt8], limit: UInt64)
   requires intrinsic.storage_length(output) <= limit
   requires intrinsic.storage_capacity(output) == limit
   requires block.length() <= 64
@@ -1529,9 +1529,9 @@ internal fn append_prefix(output: mut intrinsic.Storage[UInt8], block: Slice[UIn
 }
 
 public fn hkdf_sha256(
-  secret: Slice[UInt8],
-  salt: Slice[UInt8],
-  information: Slice[UInt8],
+  secret: List[UInt8],
+  salt: List[UInt8],
+  information: List[UInt8],
   length: UInt64,
 ) -> List[UInt8]
   uses Panic unless length <= 8160
@@ -1552,16 +1552,16 @@ public fn hkdf_sha256(
   {
     if intrinsic.storage_length(output) < length {
       previous = hkdf_block_sha256(key, previous: previous, index: index, information: information)
-      append_prefix(mut output, block: previous.slice(), limit: length)
+      append_prefix(mut output, block: previous, limit: length)
     }
   }
   List(storage: own output)
 }
 
 public fn hkdf_sha384(
-  secret: Slice[UInt8],
-  salt: Slice[UInt8],
-  information: Slice[UInt8],
+  secret: List[UInt8],
+  salt: List[UInt8],
+  information: List[UInt8],
   length: UInt64,
 ) -> List[UInt8]
   uses Panic unless length <= 12240
@@ -1582,15 +1582,15 @@ public fn hkdf_sha384(
   {
     if intrinsic.storage_length(output) < length {
       previous = hkdf_block_sha384(key, previous: previous, index: index, information: information)
-      append_prefix(mut output, block: previous.slice(), limit: length)
+      append_prefix(mut output, block: previous, limit: length)
     }
   }
   List(storage: own output)
 }
 
 public fn pbkdf2_hmac_sha256(
-  password: Slice[UInt8],
-  salt: Slice[UInt8],
+  password: List[UInt8],
+  salt: List[UInt8],
   iterations: UInt32,
   length: UInt64,
 ) -> List[UInt8]
@@ -1614,7 +1614,7 @@ public fn pbkdf2_hmac_sha256(
       intrinsic.convert((block >> 24) & 255), intrinsic.convert((block >> 16) & 255),
       intrinsic.convert((block >> 8) & 255), intrinsic.convert(block & 255),
     ]
-    mut first.update(number.slice())
+    mut first.update(number)
     var round = own first.finish()
     var total = round
     var done: UInt32 = 1
@@ -1623,7 +1623,7 @@ public fn pbkdf2_hmac_sha256(
       decreases iterations - done
     {
       var next = keyed.copy()
-      mut next.update(round.slice())
+      mut next.update(round)
       round = own next.finish()
       for position in 0..width {
         total[position] = total[position] ^ round[position]
@@ -1732,7 +1732,7 @@ internal fn blake2b_compress(state: mut Array[UInt64, 8], block: Array[UInt64, 1
   }
 }
 
-internal fn blake2b_block(input: Slice[UInt8], from: UInt64) -> Array[UInt64, 16]
+internal fn blake2b_block(input: List[UInt8], from: UInt64) -> Array[UInt64, 16]
   requires from <= input.length()
   cost time O(1)
 {
@@ -1748,7 +1748,7 @@ internal fn blake2b_block(input: Slice[UInt8], from: UInt64) -> Array[UInt64, 16
   block
 }
 
-internal fn blake2b(input: Slice[UInt8], output_length: UInt64) -> List[UInt8]
+internal fn blake2b(input: List[UInt8], output_length: UInt64) -> List[UInt8]
   requires 1 <= output_length && output_length <= 64
   ensures result.length() == output_length
 {
@@ -1794,7 +1794,7 @@ internal fn push_length_32(output: mut List[UInt8], length: UInt64)
   push_little_endian_32(mut output, value: intrinsic.convert(length))
 }
 
-internal fn argon2_long_hash(input: Slice[UInt8], length: UInt64) -> List[UInt8]
+internal fn argon2_long_hash(input: List[UInt8], length: UInt64) -> List[UInt8]
   requires 1 <= length && length <= UInt32.maximum
 {
   var prefixed: List[UInt8] = []
@@ -1803,10 +1803,10 @@ internal fn argon2_long_hash(input: Slice[UInt8], length: UInt64) -> List[UInt8]
     mut prefixed.push(byte)
   }
   if length <= 64 {
-    return blake2b(prefixed.slice(), output_length: length)
+    return blake2b(prefixed, output_length: length)
   }
   var output: List[UInt8] = []
-  var chained = blake2b(prefixed.slice(), output_length: 64)
+  var chained = blake2b(prefixed, output_length: 64)
   var left = length
   while left > 64
     invariant chained.length() == 64
@@ -1819,10 +1819,10 @@ internal fn argon2_long_hash(input: Slice[UInt8], length: UInt64) -> List[UInt8]
     }
     left -= 32
     if left > 64 {
-      chained = blake2b(chained.slice(), output_length: 64)
+      chained = blake2b(chained, output_length: 64)
     }
   }
-  let last = blake2b(chained.slice(), output_length: left)
+  let last = blake2b(chained, output_length: left)
   for byte in last {
     mut output.push(byte)
   }
@@ -1840,7 +1840,7 @@ let argon2_zero_block: Array[UInt64, 128] = [
   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ]
 
-internal fn argon2_block_from_bytes(bytes: Slice[UInt8]) -> Array[UInt64, 128]
+internal fn argon2_block_from_bytes(bytes: List[UInt8]) -> Array[UInt64, 128]
   cost time O(1)
 {
   var block = argon2_zero_block
@@ -2066,8 +2066,8 @@ internal fn argon2_xor(first: Array[UInt64, 128], second: Array[UInt64, 128]) ->
 }
 
 public fn hash_password(
-  password: Slice[UInt8],
-  salt: Slice[UInt8],
+  password: List[UInt8],
+  salt: List[UInt8],
   password_cost: PasswordCost = PasswordCost(),
 ) -> Array[UInt8, 32]
   uses Panic unless salt.length() >= 8 && password_cost.is_usable()
@@ -2092,8 +2092,8 @@ public fn hash_password(
 }
 
 internal fn argon2id(
-  password: Slice[UInt8],
-  salt: Slice[UInt8],
+  password: List[UInt8],
+  salt: List[UInt8],
   password_cost: PasswordCost,
   length: UInt64,
 ) -> List[UInt8]
@@ -2130,7 +2130,7 @@ internal fn argon2id(
   }
   push_little_endian_32(mut parameters, value: 0)
   push_little_endian_32(mut parameters, value: 0)
-  let seed = blake2b(parameters.slice(), output_length: 64)
+  let seed = blake2b(parameters, output_length: 64)
   var memory: List[Array[UInt64, 128]] = List.filled(argon2_zero_block, count: block_count)
   for lane in 0..lanes
     invariant memory.length() == block_count
@@ -2142,7 +2142,7 @@ internal fn argon2id(
       var input = seed.copy()
       push_little_endian_32(mut input, value: column)
       push_length_32(mut input, length: lane)
-      let block = argon2_block_from_bytes(argon2_long_hash(input.slice(), length: 1024).slice())
+      let block = argon2_block_from_bytes(argon2_long_hash(input, length: 1024))
       memory[shape.block_index(block_count, lane: lane, column: intrinsic.convert(column))] = block
     }
   }
@@ -2164,10 +2164,10 @@ internal fn argon2id(
   for lane in 0..lanes {
     last = argon2_xor(last, second: memory[shape.block_index(block_count, lane: lane, column: shape.lane_length - 1)])
   }
-  argon2_long_hash(argon2_block_to_bytes(last).slice(), length: length)
+  argon2_long_hash(argon2_block_to_bytes(last), length: length)
 }
 
-public fn constant_time_equal(first: Slice[UInt8], second: Slice[UInt8]) -> Bool
+public fn constant_time_equal(first: List[UInt8], second: List[UInt8]) -> Bool
   cost time O(first.length() + second.length())
   cost allocations == 0
 {
@@ -2302,7 +2302,7 @@ internal fn chacha20_block(key: Array[UInt32, 8], counter: UInt32, nonce: Array[
 
 internal fn chacha20_xor(
   output: mut intrinsic.Storage[UInt8],
-  input: Slice[UInt8],
+  input: List[UInt8],
   key: Array[UInt32, 8],
   nonce: Array[UInt8, 12],
 )
@@ -2440,7 +2440,7 @@ internal fn Poly1305.push_byte(mut self, byte: UInt8)
   }
 }
 
-internal fn Poly1305.update(mut self, bytes: Slice[UInt8])
+internal fn Poly1305.update(mut self, bytes: List[UInt8])
   cost time O(bytes.length())
   cost allocations == 0
 {
@@ -2544,8 +2544,8 @@ fn tag_bytes(first: UInt64, second: UInt64, third: UInt64, fourth: UInt64) -> Ar
 internal fn chacha20_poly1305_tag(
   key: Array[UInt32, 8],
   nonce: Array[UInt8, 12],
-  associated_data: Slice[UInt8],
-  ciphertext: Slice[UInt8],
+  associated_data: List[UInt8],
+  ciphertext: List[UInt8],
 ) -> Array[UInt8, 16]
   cost time O(associated_data.length() + ciphertext.length())
   cost allocations == 0
@@ -2582,8 +2582,8 @@ internal fn push_tag(output: mut intrinsic.Storage[UInt8], tag: Array[UInt8, 16]
 internal fn chacha20_poly1305_seal(
   key: Array[UInt8, 32],
   nonce: Array[UInt8, 12],
-  plaintext: Slice[UInt8],
-  associated_data: Slice[UInt8],
+  plaintext: List[UInt8],
+  associated_data: List[UInt8],
 ) -> List[UInt8]
   requires plaintext.length() <= UInt64.maximum - 16
   ensures result.length() == plaintext.length() + 16
@@ -2596,7 +2596,7 @@ internal fn chacha20_poly1305_seal(
     words,
     nonce: nonce,
     associated_data: associated_data,
-    ciphertext: Slice(elements: intrinsic.storage_view(output)),
+    ciphertext: intrinsic.storage_as(output),
   )
   push_tag(mut output, tag: tag)
   List(storage: own output)
@@ -2605,8 +2605,8 @@ internal fn chacha20_poly1305_seal(
 internal fn chacha20_poly1305_open(
   key: Array[UInt8, 32],
   nonce: Array[UInt8, 12],
-  sealed: Slice[UInt8],
-  associated_data: Slice[UInt8],
+  sealed: List[UInt8],
+  associated_data: List[UInt8],
 ) -> Result[List[UInt8], AuthenticationError]
   requires sealed.length() >= 16
   ensures match result {
@@ -3302,7 +3302,7 @@ internal fn Ghash.push_byte(mut self, byte: UInt8)
   }
 }
 
-internal fn Ghash.update(mut self, bytes: Slice[UInt8])
+internal fn Ghash.update(mut self, bytes: List[UInt8])
   cost time O(bytes.length())
   cost allocations == 0
 {
@@ -3359,7 +3359,7 @@ internal fn aes_gcm_counter_block(nonce: Array[UInt8, 12], counter: UInt32) -> A
 
 internal fn aes_gcm_xor(
   output: mut intrinsic.Storage[UInt8],
-  input: Slice[UInt8],
+  input: List[UInt8],
   keys: AesSliced,
   nonce: Array[UInt8, 12],
 )
@@ -3397,8 +3397,8 @@ internal fn aes_gcm_xor(
 internal fn aes_gcm_tag(
   keys: AesSliced,
   nonce: Array[UInt8, 12],
-  associated_data: Slice[UInt8],
-  ciphertext: Slice[UInt8],
+  associated_data: List[UInt8],
+  ciphertext: List[UInt8],
 ) -> Array[UInt8, 16]
   cost time O(associated_data.length() + ciphertext.length())
   cost allocations == 0
@@ -3425,8 +3425,8 @@ internal fn aes_gcm_tag(
 internal fn aes256_gcm_seal(
   key: Array[UInt8, 32],
   nonce: Array[UInt8, 12],
-  plaintext: Slice[UInt8],
-  associated_data: Slice[UInt8],
+  plaintext: List[UInt8],
+  associated_data: List[UInt8],
 ) -> List[UInt8]
   requires plaintext.length() <= UInt64.maximum - 16
   ensures result.length() == plaintext.length() + 16
@@ -3439,7 +3439,7 @@ internal fn aes256_gcm_seal(
     keys,
     nonce: nonce,
     associated_data: associated_data,
-    ciphertext: Slice(elements: intrinsic.storage_view(output)),
+    ciphertext: intrinsic.storage_as(output),
   )
   push_tag(mut output, tag: tag)
   List(storage: own output)
@@ -3448,8 +3448,8 @@ internal fn aes256_gcm_seal(
 internal fn aes256_gcm_open(
   key: Array[UInt8, 32],
   nonce: Array[UInt8, 12],
-  sealed: Slice[UInt8],
-  associated_data: Slice[UInt8],
+  sealed: List[UInt8],
+  associated_data: List[UInt8],
 ) -> Result[List[UInt8], AuthenticationError]
   requires sealed.length() >= 16
   ensures match result {
@@ -3473,8 +3473,8 @@ internal fn aes256_gcm_open(
 internal fn aes128_gcm_seal(
   key: Array[UInt8, 16],
   nonce: Array[UInt8, 12],
-  plaintext: Slice[UInt8],
-  associated_data: Slice[UInt8],
+  plaintext: List[UInt8],
+  associated_data: List[UInt8],
 ) -> List[UInt8]
   requires plaintext.length() <= UInt64.maximum - 16
   ensures result.length() == plaintext.length() + 16
@@ -3487,7 +3487,7 @@ internal fn aes128_gcm_seal(
     keys,
     nonce: nonce,
     associated_data: associated_data,
-    ciphertext: Slice(elements: intrinsic.storage_view(output)),
+    ciphertext: intrinsic.storage_as(output),
   )
   push_tag(mut output, tag: tag)
   List(storage: own output)
@@ -3496,8 +3496,8 @@ internal fn aes128_gcm_seal(
 internal fn aes128_gcm_open(
   key: Array[UInt8, 16],
   nonce: Array[UInt8, 12],
-  sealed: Slice[UInt8],
-  associated_data: Slice[UInt8],
+  sealed: List[UInt8],
+  associated_data: List[UInt8],
 ) -> Result[List[UInt8], AuthenticationError]
   requires sealed.length() >= 16
   ensures match result {
@@ -3521,8 +3521,8 @@ internal fn aes128_gcm_open(
 public fn seal(
   key: SecretKey,
   nonce: Nonce,
-  plaintext: Slice[UInt8],
-  associated_data: Slice[UInt8] = [],
+  plaintext: List[UInt8],
+  associated_data: List[UInt8] = [],
   cipher: Cipher = Cipher.ChaCha20Poly1305,
 ) -> List[UInt8]
   ensures result.length() == plaintext.length() + 16
@@ -3547,8 +3547,8 @@ public fn seal(
 public fn open(
   key: SecretKey,
   nonce: Nonce,
-  sealed: Slice[UInt8],
-  associated_data: Slice[UInt8] = [],
+  sealed: List[UInt8],
+  associated_data: List[UInt8] = [],
   cipher: Cipher = Cipher.ChaCha20Poly1305,
 ) -> Result[List[UInt8], AuthenticationError]
   ensures match result {
@@ -4059,7 +4059,7 @@ internal fn scalar_is_below_order(scalar: Array[UInt8, 32]) -> Bool
 internal fn signing_scalar(seed: Array[UInt8, 32]) -> Array[UInt8, 64]
   cost time O(1)
 {
-  var expanded = sha512(seed.slice())
+  var expanded = sha512(seed)
   expanded[0] = expanded[0] & 248
   expanded[31] = (expanded[31] & 127) | 64
   expanded
@@ -4142,19 +4142,19 @@ public fn SigningKey.verifying_key(self) -> VerifyingKey
   VerifyingKey(bytes: self.verifying_key)
 }
 
-public fn SigningKey.sign(self, message: Slice[UInt8]) -> Signature
+public fn SigningKey.sign(self, message: List[UInt8]) -> Signature
   cost time O(message.length())
 {
   let expanded = signing_scalar(self.seed)
   let scalar = first_half(expanded)
   var nonce_hash = Sha512.new()
-  mut nonce_hash.update(second_half(expanded).slice())
+  mut nonce_hash.update(second_half(expanded))
   mut nonce_hash.update(message)
   let nonce = scalar_from_hash(own nonce_hash.finish())
   let commitment = EdwardsPoint.base().multiply(nonce).to_bytes()
   var challenge_hash = Sha512.new()
-  mut challenge_hash.update(commitment.slice())
-  mut challenge_hash.update(self.verifying_key.slice())
+  mut challenge_hash.update(commitment)
+  mut challenge_hash.update(self.verifying_key)
   mut challenge_hash.update(message)
   let challenge = scalar_from_hash(own challenge_hash.finish())
   let response = scalar_multiply_add(challenge, and: scalar, plus: nonce)
@@ -4185,7 +4185,7 @@ public fn VerifyingKey.bytes(self) -> Array[UInt8, 32]
   self.bytes
 }
 
-public fn VerifyingKey.verify(self, message: Slice[UInt8], signature: Signature) -> Bool
+public fn VerifyingKey.verify(self, message: List[UInt8], signature: Signature) -> Bool
   cost time O(message.length())
 {
   let commitment = first_half(signature.bytes)
@@ -4198,12 +4198,12 @@ public fn VerifyingKey.verify(self, message: Slice[UInt8], signature: Signature)
     None => return false
   }
   var challenge_hash = Sha512.new()
-  mut challenge_hash.update(commitment.slice())
-  mut challenge_hash.update(self.bytes.slice())
+  mut challenge_hash.update(commitment)
+  mut challenge_hash.update(self.bytes)
   mut challenge_hash.update(message)
   let challenge = scalar_from_hash(own challenge_hash.finish())
   let expected = negated_key.multiply(challenge).add(EdwardsPoint.base().multiply(response)).to_bytes()
-  constant_time_equal(expected.slice(), second: commitment.slice())
+  constant_time_equal(expected, second: commitment)
 }
 
 public opaque type AgreementKey(bytes: Array[UInt8, 32])
@@ -4257,7 +4257,7 @@ fn curve_of(curve: Curve) -> elliptic.Curve
   }.expect("the curve's constants make a field")
 }
 
-fn digest_for(curve: Curve, message: Slice[UInt8]) -> List[UInt8] {
+fn digest_for(curve: Curve, message: List[UInt8]) -> List[UInt8] {
   match curve {
     P256 => {
       let digest = sha256(message)
@@ -4270,7 +4270,7 @@ fn digest_for(curve: Curve, message: Slice[UInt8]) -> List[UInt8] {
   }
 }
 
-fn keyed_hash(curve: Curve, key: Slice[UInt8], message: Slice[UInt8]) -> List[UInt8] {
+fn keyed_hash(curve: Curve, key: List[UInt8], message: List[UInt8]) -> List[UInt8] {
   match curve {
     P256 => {
       let code = hmac_sha256(key, message: message)
@@ -4283,23 +4283,23 @@ fn keyed_hash(curve: Curve, key: Slice[UInt8], message: Slice[UInt8]) -> List[UI
   }
 }
 
-fn scalar_of_digest(elliptic_curve: elliptic.Curve, digest: Slice[UInt8]) -> List[UInt64] {
+fn scalar_of_digest(elliptic_curve: elliptic.Curve, digest: List[UInt8]) -> List[UInt64] {
   let size = elliptic_curve.size()
   let used = if digest.length() > size { digest[..size] } else { digest }
   var scalar = modular.limbs_from_bytes(used, count: size / 4)
   let order = elliptic_curve.order()
-  if !modular.is_less(scalar.slice(), second: order.slice()) {
+  if !modular.is_less(scalar, second: order) {
     let scalars = elliptic_curve.scalars()
-    scalar = scalars.subtract(scalar.slice(), second: order.slice())
+    scalar = scalars.subtract(scalar, second: order)
   }
   scalar
 }
 
-fn deterministic_nonce(curve: Curve, elliptic_curve: elliptic.Curve, private: Slice[UInt8], digest: Slice[UInt8]) -> List[UInt64]
+fn deterministic_nonce(curve: Curve, elliptic_curve: elliptic.Curve, private: List[UInt8], digest: List[UInt8]) -> List[UInt64]
   uses RunForever
 {
   let size = elliptic_curve.size()
-  let hashed = modular.limbs_to_bytes(scalar_of_digest(elliptic_curve, digest: digest).slice(), length: size)
+  let hashed = modular.limbs_to_bytes(scalar_of_digest(elliptic_curve, digest: digest), length: size)
   let length = digest_for(curve, message: []).length()
   var value: List[UInt8] = List.filled(1, count: length)
   var key: List[UInt8] = List.filled(0, count: length)
@@ -4308,25 +4308,25 @@ fn deterministic_nonce(curve: Curve, elliptic_curve: elliptic.Curve, private: Sl
     var input = value.copy()
     mut input.push(separator)
     mut input.append_slice(private)
-    mut input.append_slice(hashed.slice())
-    key = keyed_hash(curve, key: key.slice(), message: input.slice())
-    value = keyed_hash(curve, key: key.slice(), message: value.slice())
+    mut input.append_slice(hashed)
+    key = keyed_hash(curve, key: key, message: input)
+    value = keyed_hash(curve, key: key, message: value)
   }
   var attempts: UInt64 = 0
   while attempts < 64 {
     var stream: List[UInt8] = []
     while stream.length() < size {
-      value = keyed_hash(curve, key: key.slice(), message: value.slice())
-      mut stream.append_slice(value.slice())
+      value = keyed_hash(curve, key: key, message: value)
+      mut stream.append_slice(value)
     }
     let candidate = modular.limbs_from_bytes(stream[..size], count: size / 4)
-    if elliptic_curve.is_valid_scalar(candidate.slice()) {
+    if elliptic_curve.is_valid_scalar(candidate) {
       return candidate
     }
     var input = value.copy()
     mut input.push(0)
-    key = keyed_hash(curve, key: key.slice(), message: input.slice())
-    value = keyed_hash(curve, key: key.slice(), message: value.slice())
+    key = keyed_hash(curve, key: key, message: input)
+    value = keyed_hash(curve, key: key, message: value)
     attempts += 1
   }
   modular.limbs_from_bytes([1], count: size / 4)
@@ -4335,7 +4335,7 @@ fn deterministic_nonce(curve: Curve, elliptic_curve: elliptic.Curve, private: Sl
 public opaque type EcdsaVerifyingKey(curve: Curve, point: List[UInt8])
   derives Equal, Copyable
 
-public fn EcdsaVerifyingKey.from_sec1(curve: Curve, bytes: Slice[UInt8]) -> Option[EcdsaVerifyingKey]
+public fn EcdsaVerifyingKey.from_sec1(curve: Curve, bytes: List[UInt8]) -> Option[EcdsaVerifyingKey]
   uses Panic
 {
   let elliptic_curve = curve_of(curve)
@@ -4349,17 +4349,17 @@ public fn EcdsaVerifyingKey.curve(self) -> Curve {
   self.curve
 }
 
-public fn EcdsaVerifyingKey.sec1(self) -> Slice[UInt8] {
-  self.point.slice()
+public fn EcdsaVerifyingKey.sec1(self) -> view List[UInt8] {
+  self.point
 }
 
-public fn EcdsaVerifyingKey.verify(self, message: Slice[UInt8], signature: Slice[UInt8]) -> Bool
+public fn EcdsaVerifyingKey.verify(self, message: List[UInt8], signature: List[UInt8]) -> Bool
   uses Panic
 {
-  self.verify_digest(digest_for(self.curve, message: message).slice(), signature: signature)
+  self.verify_digest(digest_for(self.curve, message: message), signature: signature)
 }
 
-public fn EcdsaVerifyingKey.verify_digest(self, digest: Slice[UInt8], signature: Slice[UInt8]) -> Bool
+public fn EcdsaVerifyingKey.verify_digest(self, digest: List[UInt8], signature: List[UInt8]) -> Bool
   uses Panic
 {
   let elliptic_curve = curve_of(self.curve)
@@ -4367,31 +4367,31 @@ public fn EcdsaVerifyingKey.verify_digest(self, digest: Slice[UInt8], signature:
   if signature.length() != 2 * size {
     return false
   }
-  let point = match elliptic_curve.decode(self.point.slice()) {
+  let point = match elliptic_curve.decode(self.point) {
     Some(point) => own point
     None => return false
   }
   let count = size / 4
   let r = modular.limbs_from_bytes(signature[..size], count: count)
   let s = modular.limbs_from_bytes(signature[size..], count: count)
-  if !elliptic_curve.is_valid_scalar(r.slice()) || !elliptic_curve.is_valid_scalar(s.slice()) {
+  if !elliptic_curve.is_valid_scalar(r) || !elliptic_curve.is_valid_scalar(s) {
     return false
   }
   let scalars = elliptic_curve.scalars()
-  let e = scalars.to_montgomery(scalar_of_digest(elliptic_curve, digest: digest).slice())
-  let w = scalars.invert(scalars.to_montgomery(s.slice()).slice())
-  let first = scalars.from_montgomery(scalars.multiply(e.slice(), second: w.slice()).slice())
-  let second = scalars.from_montgomery(scalars.multiply(scalars.to_montgomery(r.slice()).slice(), second: w.slice()).slice())
-  let first_point = elliptic_curve.multiply(modular.limbs_to_bytes(first.slice(), length: size).slice(), point: elliptic_curve.base())
-  let second_point = elliptic_curve.multiply(modular.limbs_to_bytes(second.slice(), length: size).slice(), point: point)
+  let e = scalars.to_montgomery(scalar_of_digest(elliptic_curve, digest: digest))
+  let w = scalars.invert(scalars.to_montgomery(s))
+  let first = scalars.from_montgomery(scalars.multiply(e, second: w))
+  let second = scalars.from_montgomery(scalars.multiply(scalars.to_montgomery(r), second: w))
+  let first_point = elliptic_curve.multiply(modular.limbs_to_bytes(first, length: size), point: elliptic_curve.base())
+  let second_point = elliptic_curve.multiply(modular.limbs_to_bytes(second, length: size), point: point)
   match elliptic_curve.affine(elliptic_curve.add(first_point, second: second_point)) {
     Some(affine) => {
       var x = affine.x.copy()
       let order = elliptic_curve.order()
-      if !modular.is_less(x.slice(), second: order.slice()) {
-        x = scalars.subtract(x.slice(), second: order.slice())
+      if !modular.is_less(x, second: order) {
+        x = scalars.subtract(x, second: order)
       }
-      scalars.equal(x.slice(), second: r.slice())
+      scalars.equal(x, second: r)
     }
     None => false
   }
@@ -4416,7 +4416,7 @@ fn random_scalar(curve: Curve) -> List[UInt8]
         }
       }
     }
-    if elliptic_curve.is_valid_scalar(modular.limbs_from_bytes(bytes.slice(), count: size / 4).slice()) {
+    if elliptic_curve.is_valid_scalar(modular.limbs_from_bytes(bytes, count: size / 4)) {
       return bytes
     }
   }
@@ -4428,59 +4428,59 @@ public fn EcdsaSigningKey.generate(curve: Curve) -> EcdsaSigningKey
   EcdsaSigningKey(curve: curve, scalar: random_scalar(curve))
 }
 
-public fn EcdsaSigningKey.from_scalar(curve: Curve, bytes: Slice[UInt8]) -> Option[EcdsaSigningKey]
+public fn EcdsaSigningKey.from_scalar(curve: Curve, bytes: List[UInt8]) -> Option[EcdsaSigningKey]
   uses Panic
 {
   let elliptic_curve = curve_of(curve)
   if bytes.length() != elliptic_curve.size()
-    || !elliptic_curve.is_valid_scalar(modular.limbs_from_bytes(bytes, count: bytes.length() / 4).slice())
+    || !elliptic_curve.is_valid_scalar(modular.limbs_from_bytes(bytes, count: bytes.length() / 4))
   {
     return None
   }
   Some(EcdsaSigningKey(curve: curve, scalar: bytes.to_list()))
 }
 
-public fn EcdsaSigningKey.expose_scalar(self) -> Slice[UInt8] {
-  self.scalar.slice()
+public fn EcdsaSigningKey.expose_scalar(self) -> view List[UInt8] {
+  self.scalar
 }
 
 public fn EcdsaSigningKey.verifying_key(self) -> EcdsaVerifyingKey
   uses Panic
 {
   let elliptic_curve = curve_of(self.curve)
-  let point = elliptic_curve.multiply(self.scalar.slice(), point: elliptic_curve.base())
+  let point = elliptic_curve.multiply(self.scalar, point: elliptic_curve.base())
   let affine = elliptic_curve.affine(point).expect("a valid scalar times the base point is not the identity")
   EcdsaVerifyingKey(curve: self.curve, point: elliptic_curve.encode(affine))
 }
 
-public fn EcdsaSigningKey.sign(self, message: Slice[UInt8]) -> List[UInt8]
+public fn EcdsaSigningKey.sign(self, message: List[UInt8]) -> List[UInt8]
   uses Panic, RunForever
 {
-  self.sign_digest(digest_for(self.curve, message: message).slice())
+  self.sign_digest(digest_for(self.curve, message: message))
 }
 
-public fn EcdsaSigningKey.sign_digest(self, digest: Slice[UInt8]) -> List[UInt8]
+public fn EcdsaSigningKey.sign_digest(self, digest: List[UInt8]) -> List[UInt8]
   uses Panic, RunForever
 {
   let elliptic_curve = curve_of(self.curve)
   let size = elliptic_curve.size()
   let scalars = elliptic_curve.scalars()
-  let nonce = deterministic_nonce(self.curve, elliptic_curve: elliptic_curve, private: self.scalar.slice(), digest: digest)
-  let point = elliptic_curve.multiply(modular.limbs_to_bytes(nonce.slice(), length: size).slice(), point: elliptic_curve.base())
+  let nonce = deterministic_nonce(self.curve, elliptic_curve: elliptic_curve, private: self.scalar, digest: digest)
+  let point = elliptic_curve.multiply(modular.limbs_to_bytes(nonce, length: size), point: elliptic_curve.base())
   let affine = elliptic_curve.affine(point).expect("a valid nonce times the base point is not the identity")
   var r = affine.x.copy()
   let order = elliptic_curve.order()
-  if !modular.is_less(r.slice(), second: order.slice()) {
-    r = scalars.subtract(r.slice(), second: order.slice())
+  if !modular.is_less(r, second: order) {
+    r = scalars.subtract(r, second: order)
   }
-  let d = modular.limbs_from_bytes(self.scalar.slice(), count: size / 4)
+  let d = modular.limbs_from_bytes(self.scalar, count: size / 4)
   let e = scalar_of_digest(elliptic_curve, digest: digest)
-  let product = scalars.multiply(scalars.to_montgomery(r.slice()).slice(), second: scalars.to_montgomery(d.slice()).slice())
-  let sum = scalars.add(scalars.to_montgomery(e.slice()).slice(), second: product.slice())
-  let inverse = scalars.invert(scalars.to_montgomery(nonce.slice()).slice())
-  let s = scalars.from_montgomery(scalars.multiply(inverse.slice(), second: sum.slice()).slice())
-  var signature = modular.limbs_to_bytes(r.slice(), length: size)
-  mut signature.append(modular.limbs_to_bytes(s.slice(), length: size))
+  let product = scalars.multiply(scalars.to_montgomery(r), second: scalars.to_montgomery(d))
+  let sum = scalars.add(scalars.to_montgomery(e), second: product)
+  let inverse = scalars.invert(scalars.to_montgomery(nonce))
+  let s = scalars.from_montgomery(scalars.multiply(inverse, second: sum))
+  var signature = modular.limbs_to_bytes(r, length: size)
+  mut signature.append(modular.limbs_to_bytes(s, length: size))
   signature
 }
 
@@ -4492,7 +4492,7 @@ public fn EcdhKey.generate(curve: Curve) -> EcdhKey
   EcdhKey(curve: curve, scalar: random_scalar(curve))
 }
 
-public fn EcdhKey.from_scalar(curve: Curve, bytes: Slice[UInt8]) -> Option[EcdhKey]
+public fn EcdhKey.from_scalar(curve: Curve, bytes: List[UInt8]) -> Option[EcdhKey]
   uses Panic
 {
   match EcdsaSigningKey.from_scalar(curve, bytes: bytes) {
@@ -4507,13 +4507,13 @@ public fn EcdhKey.public_key(self) -> List[UInt8]
   EcdsaSigningKey(curve: self.curve, scalar: self.scalar.copy()).verifying_key().point
 }
 
-public fn EcdhKey.agree(own self, peer: Slice[UInt8]) -> Option[List[UInt8]]
+public fn EcdhKey.agree(own self, peer: List[UInt8]) -> Option[List[UInt8]]
   uses Panic
 {
   let elliptic_curve = curve_of(self.curve)
   let point = elliptic_curve.decode(peer)?
-  let shared = elliptic_curve.affine(elliptic_curve.multiply(self.scalar.slice(), point: point))?
-  Some(modular.limbs_to_bytes(shared.x.slice(), length: elliptic_curve.size()))
+  let shared = elliptic_curve.affine(elliptic_curve.multiply(self.scalar, point: point))?
+  Some(modular.limbs_to_bytes(shared.x, length: elliptic_curve.size()))
 }
 
 public type HashFunction = Sha256 | Sha384 | Sha512
@@ -4529,7 +4529,7 @@ public fn HashFunction.length(self) -> UInt64
   }
 }
 
-public fn HashFunction.digest(self, message: Slice[UInt8]) -> List[UInt8] {
+public fn HashFunction.digest(self, message: List[UInt8]) -> List[UInt8] {
   match self {
     Sha256 => {
       let digest = sha256(message)
@@ -4554,7 +4554,7 @@ fn digest_info(function: HashFunction) -> List[UInt8] {
   }
   var bytes: List[UInt8] = []
   var index: UInt64 = 0
-  let text = prefix.slice()
+  let text = prefix
   while index < text.length() && text.length() - index >= 2
     decreases text.length() - index
   {
@@ -4566,7 +4566,7 @@ fn digest_info(function: HashFunction) -> List[UInt8] {
   bytes
 }
 
-fn mask_generation(function: HashFunction, seed: Slice[UInt8], length: UInt64) -> List[UInt8] {
+fn mask_generation(function: HashFunction, seed: List[UInt8], length: UInt64) -> List[UInt8] {
   var mask: List[UInt8] = []
   var counter: UInt32 = 0
   while mask.length() < length && counter < 65536
@@ -4577,7 +4577,7 @@ fn mask_generation(function: HashFunction, seed: Slice[UInt8], length: UInt64) -
     mut input.push(intrinsic.convert((counter >> 16) & 255))
     mut input.push(intrinsic.convert((counter >> 8) & 255))
     mut input.push(intrinsic.convert(counter & 255))
-    mut mask.append(function.digest(input.slice()))
+    mut mask.append(function.digest(input))
     counter += 1
   }
   mut mask.truncate(length)
@@ -4587,7 +4587,7 @@ fn mask_generation(function: HashFunction, seed: Slice[UInt8], length: UInt64) -
 public opaque type RsaPublicKey(modulus: List[UInt8], exponent: List[UInt8])
   derives Equal, Copyable
 
-fn trimmed(bytes: Slice[UInt8]) -> List[UInt8] {
+fn trimmed(bytes: List[UInt8]) -> List[UInt8] {
   var start: UInt64 = 0
   while start < bytes.length() && bytes[start] == 0
     invariant start <= bytes.length()
@@ -4598,7 +4598,7 @@ fn trimmed(bytes: Slice[UInt8]) -> List[UInt8] {
   bytes[start..].to_list()
 }
 
-public fn RsaPublicKey.new(modulus: Slice[UInt8], exponent: Slice[UInt8]) -> Option[RsaPublicKey] {
+public fn RsaPublicKey.new(modulus: List[UInt8], exponent: List[UInt8]) -> Option[RsaPublicKey] {
   let n = trimmed(modulus)
   let e = trimmed(exponent)
   if n.length() < 128 || n.length() > 2048 || e.is_empty() || e.length() > 8 || n[n.length() - 1] % 2 == 0 {
@@ -4607,36 +4607,36 @@ public fn RsaPublicKey.new(modulus: Slice[UInt8], exponent: Slice[UInt8]) -> Opt
   Some(RsaPublicKey(modulus: own n, exponent: own e))
 }
 
-public fn RsaPublicKey.modulus(self) -> Slice[UInt8] {
-  self.modulus.slice()
+public fn RsaPublicKey.modulus(self) -> view List[UInt8] {
+  self.modulus
 }
 
-public fn RsaPublicKey.exponent(self) -> Slice[UInt8] {
-  self.exponent.slice()
+public fn RsaPublicKey.exponent(self) -> view List[UInt8] {
+  self.exponent
 }
 
 public fn RsaPublicKey.bits(self) -> UInt64 {
-  modular.bit_length(modular.limbs_from_bytes(self.modulus.slice(), count: (self.modulus.length() + 3) / 4).slice())
+  modular.bit_length(modular.limbs_from_bytes(self.modulus, count: (self.modulus.length() + 3) / 4))
 }
 
-fn public_operation(key: RsaPublicKey, signature: Slice[UInt8]) -> Option[List[UInt8]] {
+fn public_operation(key: RsaPublicKey, signature: List[UInt8]) -> Option[List[UInt8]] {
   let size = key.modulus.length()
   if signature.length() != size {
     return None
   }
   let count = (size + 3) / 4
-  let modulus = modular.limbs_from_bytes(key.modulus.slice(), count: count)
+  let modulus = modular.limbs_from_bytes(key.modulus, count: count)
   let value = modular.limbs_from_bytes(signature, count: count)
-  if !modular.is_less(value.slice(), second: modulus.slice()) {
+  if !modular.is_less(value, second: modulus) {
     return None
   }
   let field = modular.Field.new(own modulus)?
-  let exponent = modular.limbs_from_bytes(key.exponent.slice(), count: 2)
-  let raised = field.power(field.to_montgomery(value.slice()).slice(), exponent: exponent.slice())
-  Some(modular.limbs_to_bytes(field.from_montgomery(raised.slice()).slice(), length: size))
+  let exponent = modular.limbs_from_bytes(key.exponent, count: 2)
+  let raised = field.power(field.to_montgomery(value), exponent: exponent)
+  Some(modular.limbs_to_bytes(field.from_montgomery(raised), length: size))
 }
 
-fn pkcs1_encoding(function: HashFunction, digest: Slice[UInt8], size: UInt64) -> Option[List[UInt8]] {
+fn pkcs1_encoding(function: HashFunction, digest: List[UInt8], size: UInt64) -> Option[List[UInt8]] {
   var info = digest_info(function)
   mut info.append_slice(digest)
   if size < info.length() + 11 {
@@ -4651,24 +4651,24 @@ fn pkcs1_encoding(function: HashFunction, digest: Slice[UInt8], size: UInt64) ->
   Some(own encoded)
 }
 
-public fn RsaPublicKey.verify_pkcs1(self, function: HashFunction, message: Slice[UInt8], signature: Slice[UInt8]) -> Bool {
+public fn RsaPublicKey.verify_pkcs1(self, function: HashFunction, message: List[UInt8], signature: List[UInt8]) -> Bool {
   match public_operation(self, signature: signature) {
-    Some(encoded) => match pkcs1_encoding(function, digest: function.digest(message).slice(), size: self.modulus.length()) {
-      Some(expected) => constant_time_equal(encoded.slice(), second: expected.slice())
+    Some(encoded) => match pkcs1_encoding(function, digest: function.digest(message), size: self.modulus.length()) {
+      Some(expected) => constant_time_equal(encoded, second: expected)
       None => false
     }
     None => false
   }
 }
 
-fn pss_hash(function: HashFunction, digest: Slice[UInt8], salt: Slice[UInt8]) -> List[UInt8] {
+fn pss_hash(function: HashFunction, digest: List[UInt8], salt: List[UInt8]) -> List[UInt8] {
   var input: List[UInt8] = List.filled(0, count: 8)
   mut input.append_slice(digest)
   mut input.append_slice(salt)
-  function.digest(input.slice())
+  function.digest(input)
 }
 
-public fn RsaPublicKey.verify_pss(self, function: HashFunction, message: Slice[UInt8], signature: Slice[UInt8]) -> Bool {
+public fn RsaPublicKey.verify_pss(self, function: HashFunction, message: List[UInt8], signature: List[UInt8]) -> Bool {
   let encoded = match public_operation(self, signature: signature) {
     Some(encoded) => own encoded
     None => return false
@@ -4722,8 +4722,8 @@ public fn RsaPublicKey.verify_pss(self, function: HashFunction, message: Slice[U
     return false
   }
   let salt = block[zeros + 1..]
-  let expected = pss_hash(function, digest: function.digest(message).slice(), salt: salt)
-  constant_time_equal(expected.slice(), second: hashed)
+  let expected = pss_hash(function, digest: function.digest(message), salt: salt)
+  constant_time_equal(expected, second: hashed)
 }
 
 public opaque type RsaPrivateKey(
@@ -4739,12 +4739,12 @@ public opaque type RsaPrivateKey(
 
 public fn RsaPrivateKey.new(
   public_key: RsaPublicKey,
-  exponent: Slice[UInt8],
-  first_prime: Slice[UInt8],
-  second_prime: Slice[UInt8],
-  first_exponent: Slice[UInt8],
-  second_exponent: Slice[UInt8],
-  coefficient: Slice[UInt8],
+  exponent: List[UInt8],
+  first_prime: List[UInt8],
+  second_prime: List[UInt8],
+  first_exponent: List[UInt8],
+  second_exponent: List[UInt8],
+  coefficient: List[UInt8],
 ) -> Option[RsaPrivateKey] {
   let key = RsaPrivateKey(
     public_key: public_key.copy(),
@@ -4759,8 +4759,8 @@ public fn RsaPrivateKey.new(
   if message.length() > 0 {
     message[0] = 0
   }
-  match private_operation(key, value: message.slice()) {
-    Some(signed) => if public_operation(public_key, signature: signed.slice()) == Some(own message) { Some(own key) } else { None }
+  match private_operation(key, value: message) {
+    Some(signed) => if public_operation(public_key, signature: signed) == Some(own message) { Some(own key) } else { None }
     None => None
   }
 }
@@ -4789,50 +4789,50 @@ public fn RsaPrivateKey.public_key(self) -> RsaPublicKey {
   self.public_key.copy()
 }
 
-fn exponentiate_modulo(prime: Slice[UInt8], exponent: Slice[UInt8], value: Slice[UInt64]) -> Option[List[UInt64]] {
+fn exponentiate_modulo(prime: List[UInt8], exponent: List[UInt8], value: List[UInt64]) -> Option[List[UInt64]] {
   let count = (prime.length() + 3) / 4
   let field = modular.Field.new(modular.limbs_from_bytes(prime, count: count))?
   let base = field.reduce(value)
-  Some(field.from_montgomery(field.power_secret(base.slice(), exponent: exponent).slice()))
+  Some(field.from_montgomery(field.power_secret(base, exponent: exponent)))
 }
 
-fn private_operation(key: RsaPrivateKey, value: Slice[UInt8]) -> Option[List[UInt8]] {
+fn private_operation(key: RsaPrivateKey, value: List[UInt8]) -> Option[List[UInt8]] {
   let size = key.public_key.modulus.length()
   let count = (size + 3) / 4
   let limbs = modular.limbs_from_bytes(value, count: count)
-  let first = exponentiate_modulo(key.first_prime.slice(), exponent: key.first_exponent.slice(), value: limbs.slice())?
-  let second = exponentiate_modulo(key.second_prime.slice(), exponent: key.second_exponent.slice(), value: limbs.slice())?
+  let first = exponentiate_modulo(key.first_prime, exponent: key.first_exponent, value: limbs)?
+  let second = exponentiate_modulo(key.second_prime, exponent: key.second_exponent, value: limbs)?
   let prime_count = (key.first_prime.length() + 3) / 4
-  let field = modular.Field.new(modular.limbs_from_bytes(key.first_prime.slice(), count: prime_count))?
-  let second_reduced = field.reduce(second.slice())
-  let difference = field.subtract(field.to_montgomery(first.slice()).slice(), second: second_reduced.slice())
-  let coefficient = field.to_montgomery(modular.limbs_from_bytes(key.coefficient.slice(), count: prime_count).slice())
-  let height = field.from_montgomery(field.multiply(difference.slice(), second: coefficient.slice()).slice())
-  let second_prime = modular.limbs_from_bytes(key.second_prime.slice(), count: (key.second_prime.length() + 3) / 4)
-  var result = modular.multiply_plain(height.slice(), second: second_prime.slice())
-  modular.add_plain(mut result, amount: second.slice())
-  Some(modular.limbs_to_bytes(result.slice(), length: size))
+  let field = modular.Field.new(modular.limbs_from_bytes(key.first_prime, count: prime_count))?
+  let second_reduced = field.reduce(second)
+  let difference = field.subtract(field.to_montgomery(first), second: second_reduced)
+  let coefficient = field.to_montgomery(modular.limbs_from_bytes(key.coefficient, count: prime_count))
+  let height = field.from_montgomery(field.multiply(difference, second: coefficient))
+  let second_prime = modular.limbs_from_bytes(key.second_prime, count: (key.second_prime.length() + 3) / 4)
+  var result = modular.multiply_plain(height, second: second_prime)
+  modular.add_plain(mut result, amount: second)
+  Some(modular.limbs_to_bytes(result, length: size))
 }
 
-fn signed_or_crash(key: RsaPrivateKey, encoded: Slice[UInt8]) -> List[UInt8]
+fn signed_or_crash(key: RsaPrivateKey, encoded: List[UInt8]) -> List[UInt8]
   uses Panic
 {
   let signed = private_operation(key, value: encoded).expect("a key that RsaPrivateKey.new accepted signs")
-  if public_operation(key.public_key, signature: signed.slice()) != Some(encoded.to_list()) {
+  if public_operation(key.public_key, signature: signed) != Some(encoded.to_list()) {
     Panic.crash("an RSA signature did not verify, so the computation was faulty")
   }
   signed
 }
 
-public fn RsaPrivateKey.sign_pkcs1(self, function: HashFunction, message: Slice[UInt8]) -> List[UInt8]
+public fn RsaPrivateKey.sign_pkcs1(self, function: HashFunction, message: List[UInt8]) -> List[UInt8]
   uses Panic
 {
   let size = self.public_key.modulus.length()
-  let encoded = pkcs1_encoding(function, digest: function.digest(message).slice(), size: size).expect("the modulus holds the digest")
-  signed_or_crash(self, encoded: encoded.slice())
+  let encoded = pkcs1_encoding(function, digest: function.digest(message), size: size).expect("the modulus holds the digest")
+  signed_or_crash(self, encoded: encoded)
 }
 
-public fn RsaPrivateKey.sign_pss(self, function: HashFunction, message: Slice[UInt8]) -> List[UInt8]
+public fn RsaPrivateKey.sign_pss(self, function: HashFunction, message: List[UInt8]) -> List[UInt8]
   uses Random, Panic, RunForever
 {
   let bits = self.public_key.bits()
@@ -4852,11 +4852,11 @@ public fn RsaPrivateKey.sign_pss(self, function: HashFunction, message: Slice[UI
       }
     }
   }
-  let hashed = pss_hash(function, digest: function.digest(message).slice(), salt: salt.slice())
+  let hashed = pss_hash(function, digest: function.digest(message), salt: salt)
   var plain_block: List[UInt8] = List.filled(0, count: length.saturating_subtract(hash_length + hash_length + 2))
   mut plain_block.push(1)
-  mut plain_block.append_slice(salt.slice())
-  let mask = mask_generation(function, seed: hashed.slice(), length: plain_block.length())
+  mut plain_block.append_slice(salt)
+  let mask = mask_generation(function, seed: hashed, length: plain_block.length())
   var block: List[UInt8] = List.with_capacity(plain_block.length())
   for index in 0..plain_block.length() {
     mut block.push(plain_block[index] ^ (if index < mask.length() { mask[index] } else { 0 }))
@@ -4869,7 +4869,7 @@ public fn RsaPrivateKey.sign_pss(self, function: HashFunction, message: Slice[UI
   mut encoded.append(own block)
   mut encoded.append(own hashed)
   mut encoded.push(188)
-  signed_or_crash(self, encoded: encoded.slice())
+  signed_or_crash(self, encoded: encoded)
 }
 
 public opaque type DecapsulationKey(bytes: List[UInt8])
@@ -4896,7 +4896,7 @@ public fn DecapsulationKey.generate() -> DecapsulationKey
   DecapsulationKey(bytes: own pair.decapsulation)
 }
 
-public fn DecapsulationKey.from_bytes(bytes: Slice[UInt8]) -> Option[DecapsulationKey] {
+public fn DecapsulationKey.from_bytes(bytes: List[UInt8]) -> Option[DecapsulationKey] {
   if bytes.length() == mlkem.decapsulation_key_length && mlkem.is_valid_decapsulation_key(bytes)
     && mlkem.is_valid_encapsulation_key(bytes[1152..2336])
   {
@@ -4906,8 +4906,8 @@ public fn DecapsulationKey.from_bytes(bytes: Slice[UInt8]) -> Option[Decapsulati
   }
 }
 
-public fn DecapsulationKey.bytes(self) -> Slice[UInt8] {
-  self.bytes.slice()
+public fn DecapsulationKey.bytes(self) -> view List[UInt8] {
+  self.bytes
 }
 
 public fn DecapsulationKey.encapsulation_key(self) -> EncapsulationKey {
@@ -4916,32 +4916,32 @@ public fn DecapsulationKey.encapsulation_key(self) -> EncapsulationKey {
   EncapsulationKey(bytes: self.bytes[start..stop].to_list())
 }
 
-public fn DecapsulationKey.decapsulate(self, ciphertext: Slice[UInt8]) -> Option[SecretKey]
+public fn DecapsulationKey.decapsulate(self, ciphertext: List[UInt8]) -> Option[SecretKey]
   uses RunForever
 {
   if ciphertext.length() != mlkem.ciphertext_length {
     return None
   }
-  let shared = mlkem.decapsulate(self.bytes.slice(), ciphertext: ciphertext)
+  let shared = mlkem.decapsulate(self.bytes, ciphertext: ciphertext)
   if shared.length() != 32 {
     return None
   }
-  Some(SecretKey(bytes: fill_32(shared.slice())))
+  Some(SecretKey(bytes: fill_32(shared)))
 }
 
-public fn EncapsulationKey.from_bytes(bytes: Slice[UInt8]) -> Option[EncapsulationKey] {
+public fn EncapsulationKey.from_bytes(bytes: List[UInt8]) -> Option[EncapsulationKey] {
   if mlkem.is_valid_encapsulation_key(bytes) { Some(EncapsulationKey(bytes: bytes.to_list())) } else { None }
 }
 
-public fn EncapsulationKey.bytes(self) -> Slice[UInt8] {
-  self.bytes.slice()
+public fn EncapsulationKey.bytes(self) -> view List[UInt8] {
+  self.bytes
 }
 
 public fn EncapsulationKey.encapsulate_with(self, message: Array[UInt8, 32]) -> Encapsulation
   uses RunForever
 {
-  let encapsulated = mlkem.encapsulate(self.bytes.slice(), message: message[..])
-  Encapsulation(ciphertext: own encapsulated.ciphertext, shared: SecretKey(bytes: fill_32(encapsulated.shared.slice())))
+  let encapsulated = mlkem.encapsulate(self.bytes, message: message[..])
+  Encapsulation(ciphertext: own encapsulated.ciphertext, shared: SecretKey(bytes: fill_32(encapsulated.shared)))
 }
 
 public fn EncapsulationKey.encapsulate(self) -> Encapsulation

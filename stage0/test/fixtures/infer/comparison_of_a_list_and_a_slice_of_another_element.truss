@@ -1,3 +1,0 @@
-fn f(items: Slice[Int64], part: Slice[String]) -> Bool {
-  items == part
-}

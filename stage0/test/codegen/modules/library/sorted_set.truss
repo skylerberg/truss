@@ -1,6 +1,6 @@
 use standard.collections
 
-fn set_of(elements: Slice[Int64]) -> collections.SortedSet[Int64] {
+fn set_of(elements: List[Int64]) -> collections.SortedSet[Int64] {
   var sorted: collections.SortedSet[Int64] = []
   for element in elements {
     mut sorted.insert(element)
@@ -178,7 +178,7 @@ test "a sorted set orders text by its bytes" {
   mut sorted.insert("apple")
   var order = ""
   for element in sorted {
-    mut order.push(element.slice())
+    mut order.push(element)
     mut order.push(" ")
   }
   assert order == "apple fig pear " && sorted.contains("fig") && !sorted.contains("plum")

@@ -132,18 +132,7 @@ let is_model_built_from_contents : Path.t -> bool = function
       && (Well_known.find_builtin_type for_type = Some Array
          || List.exists
               (fun name -> Path.equal for_type (Well_known.make_path name))
-              [
-                List;
-                Slice;
-                List_cursor;
-                String;
-                String_slice;
-                Literal;
-                Set;
-                Sorted_set;
-                Map;
-                Sorted_map;
-              ])
+              [ List; List_cursor; String; Literal; Set; Sorted_set; Map; Sorted_map ])
   | Top _ | Method _ | Member_constant _ | Derived _ | Test _ | Law_proof _ | Unresolved _ -> false
 
 let rank_model (context : State.context) (ty : Types.ty) ~(model : Types.ty) ~impl symbol =
@@ -165,8 +154,10 @@ let find_model_impl (context : State.context) (ty : Types.ty) ~(model : Types.ty
     { trait = Well_known.make_path Model; trait_arguments = []; associated = [] }
   in
   let value =
-    Interface.Impls.normalize interface ~list_bounds
-      (Projection { base = ty; trait = model_trait; name = Well_known.show_associated Model_value })
+    Types.erase_views
+      (Interface.Impls.normalize interface ~list_bounds
+         (Projection
+            { base = ty; trait = model_trait; name = Well_known.show_associated Model_value }))
   in
   if value = model then Option.map fst (Facts.find_impl context model_trait ty) else None
 

@@ -2,13 +2,14 @@ let raise_bug format = Compiler_bug.raise_bug ~stage:"Debug_output" format
 
 type form = Structure | Text | Sequence
 
-let classify_form : Ground.ty -> form = function
+let classify_form (ty : Ground.ty) : form =
+  match Option.value ~default:ty (Ground.find_viewed ty) with
   | Named { path; _ } -> (
       match Well_known.of_path path with
-      | Some (String | String_slice) -> Text
-      | Some (List | Slice) -> Sequence
+      | Some String -> Text
+      | Some List -> Sequence
       | _ -> Structure)
-  | _ -> Structure
+  | Function _ | Never -> Structure
 
 let int64 = Ground.make_builtin Int64
 let uint64 = Ground.make_builtin UInt64
@@ -79,11 +80,11 @@ let build_debug env ty =
           (fun () -> write_output_text ", ");
         emit_output_call element (index_element (Lowered.Copy (Lowered.make_local_place index))));
     write_output_text "]"
-  and write_storage_or_view field_ty (place : Lowered.place) ~as_text =
+  and write_storage field_ty (place : Lowered.place) ~as_text =
     let element =
-      match (Storage.find_storage_element field_ty, Storage.find_view_element field_ty) with
-      | Some element, _ | None, Some element -> element
-      | None, None -> raise_bug "%s is not storage or a view" (Ground.to_string field_ty)
+      match Storage.find_storage_element field_ty with
+      | Some element -> element
+      | None -> raise_bug "%s is not storage" (Ground.to_string field_ty)
     in
     let buffer = Storage.project_buffer place and count = Storage.project_length place in
     if as_text then
@@ -114,10 +115,9 @@ let build_debug env ty =
         write_output_text ")"
   in
   (match (classify_form ty, Representation.classify env ty) with
+  | _, View viewed -> emit_output_call viewed value
   | (Text | Sequence), Shape (Record [ (field, Typed field_ty) ]) ->
-      write_storage_or_view field_ty
-        (Lowered.project value (Field field))
-        ~as_text:(classify_form ty = Text)
+      write_storage field_ty (Lowered.project value (Field field)) ~as_text:(classify_form ty = Text)
   | _, Handle -> write_output_text "Handle"
   | _, Shared _ -> write_output_text "Shared"
   | _, Storage element ->

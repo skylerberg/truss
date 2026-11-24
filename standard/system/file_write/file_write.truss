@@ -9,14 +9,14 @@ internal type SystemFileWrite()
 impl FileWrite for SystemFileWrite
   uses RunForever, capabilities.System
 {
-  fn write(self, file: Path, contents: Slice[UInt8]) -> Result[Unit, SystemError] {
+  fn write(self, file: Path, contents: List[UInt8]) -> Result[Unit, SystemError] {
     var handle = handles.open_to_write_from_empty(file)?
-    handles.write_all(mut handle, bytes: contents.elements)
+    handles.write_all(mut handle, bytes: contents.storage)
   }
 
-  fn write_text(self, file: Path, contents: StringSlice) -> Result[Unit, SystemError] {
+  fn write_text(self, file: Path, contents: String) -> Result[Unit, SystemError] {
     var handle = handles.open_to_write_from_empty(file)?
-    handles.write_all(mut handle, bytes: contents.bytes)
+    handles.write_all(mut handle, bytes: contents.storage)
   }
 
   fn open(self, file: Path, mode: files.WriteMode) -> Result[files.File, SystemError] {
@@ -31,22 +31,22 @@ impl FileWrite for SystemFileWrite
   }
 
   fn create_directory(self, directory: Path) -> Result[Unit, SystemError] {
-    handles.with_file_error(calls.make_directory(directory.text.slice().bytes))
+    handles.with_file_error(calls.make_directory(directory.text.storage))
   }
 
   fn remove(self, path: Path) -> Result[Unit, SystemError] {
-    handles.with_file_error(calls.remove(path.text.slice().bytes))
+    handles.with_file_error(calls.remove(path.text.storage))
   }
 
   fn rename(self, from: Path, to: Path) -> Result[Unit, SystemError] {
-    handles.with_file_error(calls.rename(from.text.slice().bytes, to: to.text.slice().bytes))
+    handles.with_file_error(calls.rename(from.text.storage, to: to.text.storage))
   }
 
   fn link(self, target: Path, link: Path, kind: files.LinkKind) -> Result[Unit, SystemError] {
     handles.with_file_error(
       calls.make_link(
-        target.text.slice().bytes,
-        link: link.text.slice().bytes,
+        target.text.storage,
+        link: link.text.storage,
         symbolic: kind == files.LinkKind.Symbolic,
       ),
     )
@@ -54,7 +54,7 @@ impl FileWrite for SystemFileWrite
 
   fn set_permissions(self, path: Path, permissions: files.Permissions) -> Result[Unit, SystemError] {
     let mode: Int32 = intrinsic.convert(permissions.mode())
-    handles.with_file_error(calls.set_mode(path.text.slice().bytes, mode: mode))
+    handles.with_file_error(calls.set_mode(path.text.storage, mode: mode))
   }
 
   fn set_modified(self, path: Path, time: Instant) -> Result[Unit, SystemError] {
@@ -63,7 +63,7 @@ impl FileWrite for SystemFileWrite
     let seconds = if part < 0 { whole - 1 } else { whole }
     let nanoseconds = if part < 0 { part + 1000000000 } else { part }
     handles.with_file_error(
-      calls.set_modified(path.text.slice().bytes, seconds: seconds, nanoseconds: nanoseconds),
+      calls.set_modified(path.text.storage, seconds: seconds, nanoseconds: nanoseconds),
     )
   }
 }

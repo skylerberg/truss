@@ -1,4 +1,4 @@
-fn f(text: StringSlice) -> UInt64
+fn f(text: String) -> UInt64
   cost time O(text.length())
 {
   var total: UInt64 = 0
