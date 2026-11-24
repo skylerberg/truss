@@ -212,6 +212,7 @@ module Code : sig
     | Unused_function
     | Unused_constant
     | Unused_run_forever
+    | Unmodified_part
     | Unreachable_code
     | Self_comparison
 
@@ -320,6 +321,7 @@ val fix : string -> 'span edit list -> 'span fix
 val replace : 'span -> string -> 'span edit
 val insert : 'span -> string -> 'span edit
 val delete : 'span -> 'span edit
+val delete_list_entry : Source.Definition_span.t list -> int -> Source.Definition_span.t edit
 val list_spelling_fixes : 'span -> written:string -> string list -> 'span fix list
 val show_count : int -> string -> string -> string
 

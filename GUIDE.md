@@ -4050,7 +4050,8 @@ fn add_two_to(tally: mut Tally)
 The second call's `requires` holds because the first call keeps `limit`.
 Without `modifies`, nothing would say so. A body that changes a part the
 clause does not name is an error, and `truss check --fix` adds the part to
-the clause.
+the clause. A part that the clause names and the body never changes is a
+warning, whose fix removes the part.
 
 ### Invariants
 
