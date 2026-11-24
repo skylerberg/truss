@@ -2557,6 +2557,8 @@ let () =
     (fun () -> expect_proven Fixtures.Prover.derived_methods_of_constant_time_fields);
   Harness.test "a derived default spends its fields' defaults" (fun () ->
       expect_proven Fixtures.Prover.derived_default_of_settings);
+  Harness.test "a derived equality of a range field is constant time" (fun () ->
+      expect_proven Fixtures.Prover.derived_equality_of_a_window_in_constant_time);
   Harness.test "a derived default spends the allocation of a written list default" (fun () ->
       expect_not_proven Fixtures.Prover.derived_default_of_settings_without_allocations
         "prover.cost")

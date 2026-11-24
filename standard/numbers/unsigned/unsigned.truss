@@ -47,6 +47,7 @@ impl Add[UInt8] for UInt8 {
   fn add_is_defined(self, right: UInt8) -> Bool
     ensures result == (UInt8.minimum <= self + right && self + right <= UInt8.maximum)
     cost time O(1)
+    cost allocations == 0
   {
     !intrinsic.add_overflows(self, right: right)
   }
@@ -55,6 +56,7 @@ impl Add[UInt8] for UInt8 {
     uses Panic unless UInt8.minimum <= self + right && self + right <= UInt8.maximum
     ensures result == self + right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.add(self, right)
   }
@@ -66,6 +68,7 @@ impl Subtract[UInt8] for UInt8 {
   fn subtract_is_defined(self, right: UInt8) -> Bool
     ensures result == (UInt8.minimum <= self - right && self - right <= UInt8.maximum)
     cost time O(1)
+    cost allocations == 0
   {
     !intrinsic.subtract_overflows(self, right: right)
   }
@@ -74,6 +77,7 @@ impl Subtract[UInt8] for UInt8 {
     uses Panic unless UInt8.minimum <= self - right && self - right <= UInt8.maximum
     ensures result == self - right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.subtract(self, right)
   }
@@ -85,6 +89,7 @@ impl Multiply[UInt8] for UInt8 {
   fn multiply_is_defined(self, right: UInt8) -> Bool
     ensures result == (UInt8.minimum <= self * right && self * right <= UInt8.maximum)
     cost time O(1)
+    cost allocations == 0
   {
     !intrinsic.multiply_overflows(self, right: right)
   }
@@ -93,6 +98,7 @@ impl Multiply[UInt8] for UInt8 {
     uses Panic unless UInt8.minimum <= self * right && self * right <= UInt8.maximum
     ensures result == self * right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.multiply(self, right)
   }
@@ -104,6 +110,7 @@ impl Divide[UInt8] for UInt8 {
   fn divide_is_defined(self, right: UInt8) -> Bool
     ensures result == (right != 0)
     cost time O(1)
+    cost allocations == 0
   {
     right != 0
   }
@@ -112,6 +119,7 @@ impl Divide[UInt8] for UInt8 {
     uses Panic unless right != 0
     ensures result == self / right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.divide(self, right)
   }
@@ -123,6 +131,7 @@ impl Remainder[UInt8] for UInt8 {
   fn remainder_is_defined(self, right: UInt8) -> Bool
     ensures result == (right != 0)
     cost time O(1)
+    cost allocations == 0
   {
     right != 0
   }
@@ -131,6 +140,7 @@ impl Remainder[UInt8] for UInt8 {
     uses Panic unless right != 0
     ensures result == self % right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.remainder(self, right)
   }
@@ -195,6 +205,7 @@ impl Add[UInt16] for UInt16 {
   fn add_is_defined(self, right: UInt16) -> Bool
     ensures result == (UInt16.minimum <= self + right && self + right <= UInt16.maximum)
     cost time O(1)
+    cost allocations == 0
   {
     !intrinsic.add_overflows(self, right: right)
   }
@@ -203,6 +214,7 @@ impl Add[UInt16] for UInt16 {
     uses Panic unless UInt16.minimum <= self + right && self + right <= UInt16.maximum
     ensures result == self + right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.add(self, right)
   }
@@ -214,6 +226,7 @@ impl Subtract[UInt16] for UInt16 {
   fn subtract_is_defined(self, right: UInt16) -> Bool
     ensures result == (UInt16.minimum <= self - right && self - right <= UInt16.maximum)
     cost time O(1)
+    cost allocations == 0
   {
     !intrinsic.subtract_overflows(self, right: right)
   }
@@ -222,6 +235,7 @@ impl Subtract[UInt16] for UInt16 {
     uses Panic unless UInt16.minimum <= self - right && self - right <= UInt16.maximum
     ensures result == self - right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.subtract(self, right)
   }
@@ -233,6 +247,7 @@ impl Multiply[UInt16] for UInt16 {
   fn multiply_is_defined(self, right: UInt16) -> Bool
     ensures result == (UInt16.minimum <= self * right && self * right <= UInt16.maximum)
     cost time O(1)
+    cost allocations == 0
   {
     !intrinsic.multiply_overflows(self, right: right)
   }
@@ -241,6 +256,7 @@ impl Multiply[UInt16] for UInt16 {
     uses Panic unless UInt16.minimum <= self * right && self * right <= UInt16.maximum
     ensures result == self * right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.multiply(self, right)
   }
@@ -252,6 +268,7 @@ impl Divide[UInt16] for UInt16 {
   fn divide_is_defined(self, right: UInt16) -> Bool
     ensures result == (right != 0)
     cost time O(1)
+    cost allocations == 0
   {
     right != 0
   }
@@ -260,6 +277,7 @@ impl Divide[UInt16] for UInt16 {
     uses Panic unless right != 0
     ensures result == self / right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.divide(self, right)
   }
@@ -271,6 +289,7 @@ impl Remainder[UInt16] for UInt16 {
   fn remainder_is_defined(self, right: UInt16) -> Bool
     ensures result == (right != 0)
     cost time O(1)
+    cost allocations == 0
   {
     right != 0
   }
@@ -279,6 +298,7 @@ impl Remainder[UInt16] for UInt16 {
     uses Panic unless right != 0
     ensures result == self % right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.remainder(self, right)
   }
@@ -343,6 +363,7 @@ impl Add[UInt32] for UInt32 {
   fn add_is_defined(self, right: UInt32) -> Bool
     ensures result == (UInt32.minimum <= self + right && self + right <= UInt32.maximum)
     cost time O(1)
+    cost allocations == 0
   {
     !intrinsic.add_overflows(self, right: right)
   }
@@ -351,6 +372,7 @@ impl Add[UInt32] for UInt32 {
     uses Panic unless UInt32.minimum <= self + right && self + right <= UInt32.maximum
     ensures result == self + right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.add(self, right)
   }
@@ -362,6 +384,7 @@ impl Subtract[UInt32] for UInt32 {
   fn subtract_is_defined(self, right: UInt32) -> Bool
     ensures result == (UInt32.minimum <= self - right && self - right <= UInt32.maximum)
     cost time O(1)
+    cost allocations == 0
   {
     !intrinsic.subtract_overflows(self, right: right)
   }
@@ -370,6 +393,7 @@ impl Subtract[UInt32] for UInt32 {
     uses Panic unless UInt32.minimum <= self - right && self - right <= UInt32.maximum
     ensures result == self - right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.subtract(self, right)
   }
@@ -381,6 +405,7 @@ impl Multiply[UInt32] for UInt32 {
   fn multiply_is_defined(self, right: UInt32) -> Bool
     ensures result == (UInt32.minimum <= self * right && self * right <= UInt32.maximum)
     cost time O(1)
+    cost allocations == 0
   {
     !intrinsic.multiply_overflows(self, right: right)
   }
@@ -389,6 +414,7 @@ impl Multiply[UInt32] for UInt32 {
     uses Panic unless UInt32.minimum <= self * right && self * right <= UInt32.maximum
     ensures result == self * right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.multiply(self, right)
   }
@@ -400,6 +426,7 @@ impl Divide[UInt32] for UInt32 {
   fn divide_is_defined(self, right: UInt32) -> Bool
     ensures result == (right != 0)
     cost time O(1)
+    cost allocations == 0
   {
     right != 0
   }
@@ -408,6 +435,7 @@ impl Divide[UInt32] for UInt32 {
     uses Panic unless right != 0
     ensures result == self / right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.divide(self, right)
   }
@@ -419,6 +447,7 @@ impl Remainder[UInt32] for UInt32 {
   fn remainder_is_defined(self, right: UInt32) -> Bool
     ensures result == (right != 0)
     cost time O(1)
+    cost allocations == 0
   {
     right != 0
   }
@@ -427,6 +456,7 @@ impl Remainder[UInt32] for UInt32 {
     uses Panic unless right != 0
     ensures result == self % right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.remainder(self, right)
   }
@@ -491,6 +521,7 @@ impl Add[UInt64] for UInt64 {
   fn add_is_defined(self, right: UInt64) -> Bool
     ensures result == (UInt64.minimum <= self + right && self + right <= UInt64.maximum)
     cost time O(1)
+    cost allocations == 0
   {
     !intrinsic.add_overflows(self, right: right)
   }
@@ -499,6 +530,7 @@ impl Add[UInt64] for UInt64 {
     uses Panic unless UInt64.minimum <= self + right && self + right <= UInt64.maximum
     ensures result == self + right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.add(self, right)
   }
@@ -510,6 +542,7 @@ impl Subtract[UInt64] for UInt64 {
   fn subtract_is_defined(self, right: UInt64) -> Bool
     ensures result == (UInt64.minimum <= self - right && self - right <= UInt64.maximum)
     cost time O(1)
+    cost allocations == 0
   {
     !intrinsic.subtract_overflows(self, right: right)
   }
@@ -518,6 +551,7 @@ impl Subtract[UInt64] for UInt64 {
     uses Panic unless UInt64.minimum <= self - right && self - right <= UInt64.maximum
     ensures result == self - right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.subtract(self, right)
   }
@@ -529,6 +563,7 @@ impl Multiply[UInt64] for UInt64 {
   fn multiply_is_defined(self, right: UInt64) -> Bool
     ensures result == (UInt64.minimum <= self * right && self * right <= UInt64.maximum)
     cost time O(1)
+    cost allocations == 0
   {
     !intrinsic.multiply_overflows(self, right: right)
   }
@@ -537,6 +572,7 @@ impl Multiply[UInt64] for UInt64 {
     uses Panic unless UInt64.minimum <= self * right && self * right <= UInt64.maximum
     ensures result == self * right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.multiply(self, right)
   }
@@ -548,6 +584,7 @@ impl Divide[UInt64] for UInt64 {
   fn divide_is_defined(self, right: UInt64) -> Bool
     ensures result == (right != 0)
     cost time O(1)
+    cost allocations == 0
   {
     right != 0
   }
@@ -556,6 +593,7 @@ impl Divide[UInt64] for UInt64 {
     uses Panic unless right != 0
     ensures result == self / right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.divide(self, right)
   }
@@ -567,6 +605,7 @@ impl Remainder[UInt64] for UInt64 {
   fn remainder_is_defined(self, right: UInt64) -> Bool
     ensures result == (right != 0)
     cost time O(1)
+    cost allocations == 0
   {
     right != 0
   }
@@ -575,6 +614,7 @@ impl Remainder[UInt64] for UInt64 {
     uses Panic unless right != 0
     ensures result == self % right
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.remainder(self, right)
   }
@@ -597,6 +637,7 @@ impl FixedWidthInteger for UInt8 {
   fn minimum_value() -> UInt8
     ensures result == UInt8.minimum
     cost time O(1)
+    cost allocations == 0
   {
     UInt8.minimum
   }
@@ -604,6 +645,7 @@ impl FixedWidthInteger for UInt8 {
   fn maximum_value() -> UInt8
     ensures result == UInt8.maximum
     cost time O(1)
+    cost allocations == 0
   {
     UInt8.maximum
   }
@@ -611,6 +653,7 @@ impl FixedWidthInteger for UInt8 {
   fn bit_width() -> UInt64
     ensures result == UInt8.bits
     cost time O(1)
+    cost allocations == 0
   {
     UInt8.bits
   }
@@ -619,12 +662,14 @@ impl FixedWidthInteger for UInt8 {
 
   fn to_big_endian_bytes(self) -> Array[UInt8, 1]
     cost time O(1)
+    cost allocations == 0
   {
     [self]
   }
 
   fn to_little_endian_bytes(self) -> Array[UInt8, 1]
     cost time O(1)
+    cost allocations == 0
   {
     [self]
   }
@@ -632,6 +677,7 @@ impl FixedWidthInteger for UInt8 {
   fn from_big_endian_bytes(bytes: Array[UInt8, 1]) -> UInt8
     ensures result == (bytes[0])
     cost time O(1)
+    cost allocations == 0
   {
     bytes[0]
   }
@@ -639,12 +685,14 @@ impl FixedWidthInteger for UInt8 {
   fn from_little_endian_bytes(bytes: Array[UInt8, 1]) -> UInt8
     ensures result == (bytes[0])
     cost time O(1)
+    cost allocations == 0
   {
     bytes[0]
   }
 
   fn reverse_bits(self) -> UInt8
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.convert(integers.reverse_uint64_bits(intrinsic.convert(self)) >> 56)
   }
@@ -685,6 +733,7 @@ impl FixedWidthInteger for UInt16 {
   fn minimum_value() -> UInt16
     ensures result == UInt16.minimum
     cost time O(1)
+    cost allocations == 0
   {
     UInt16.minimum
   }
@@ -692,6 +741,7 @@ impl FixedWidthInteger for UInt16 {
   fn maximum_value() -> UInt16
     ensures result == UInt16.maximum
     cost time O(1)
+    cost allocations == 0
   {
     UInt16.maximum
   }
@@ -699,6 +749,7 @@ impl FixedWidthInteger for UInt16 {
   fn bit_width() -> UInt64
     ensures result == UInt16.bits
     cost time O(1)
+    cost allocations == 0
   {
     UInt16.bits
   }
@@ -707,12 +758,14 @@ impl FixedWidthInteger for UInt16 {
 
   fn to_big_endian_bytes(self) -> Array[UInt8, 2]
     cost time O(1)
+    cost allocations == 0
   {
     [intrinsic.convert((self >> 8) & 255), intrinsic.convert((self >> 0) & 255)]
   }
 
   fn to_little_endian_bytes(self) -> Array[UInt8, 2]
     cost time O(1)
+    cost allocations == 0
   {
     [intrinsic.convert((self >> 0) & 255), intrinsic.convert((self >> 8) & 255)]
   }
@@ -720,6 +773,7 @@ impl FixedWidthInteger for UInt16 {
   fn from_big_endian_bytes(bytes: Array[UInt8, 2]) -> UInt16
     ensures result == ((intrinsic.convert[UInt8, UInt16](bytes[0]) << 8) | intrinsic.convert[UInt8, UInt16](bytes[1]))
     cost time O(1)
+    cost allocations == 0
   {
     (intrinsic.convert[UInt8, UInt16](bytes[0]) << 8) | intrinsic.convert[UInt8, UInt16](bytes[1])
   }
@@ -727,12 +781,14 @@ impl FixedWidthInteger for UInt16 {
   fn from_little_endian_bytes(bytes: Array[UInt8, 2]) -> UInt16
     ensures result == (intrinsic.convert[UInt8, UInt16](bytes[0]) | (intrinsic.convert[UInt8, UInt16](bytes[1]) << 8))
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.convert[UInt8, UInt16](bytes[0]) | (intrinsic.convert[UInt8, UInt16](bytes[1]) << 8)
   }
 
   fn reverse_bits(self) -> UInt16
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.convert(integers.reverse_uint64_bits(intrinsic.convert(self)) >> 48)
   }
@@ -773,6 +829,7 @@ impl FixedWidthInteger for UInt32 {
   fn minimum_value() -> UInt32
     ensures result == UInt32.minimum
     cost time O(1)
+    cost allocations == 0
   {
     UInt32.minimum
   }
@@ -780,6 +837,7 @@ impl FixedWidthInteger for UInt32 {
   fn maximum_value() -> UInt32
     ensures result == UInt32.maximum
     cost time O(1)
+    cost allocations == 0
   {
     UInt32.maximum
   }
@@ -787,6 +845,7 @@ impl FixedWidthInteger for UInt32 {
   fn bit_width() -> UInt64
     ensures result == UInt32.bits
     cost time O(1)
+    cost allocations == 0
   {
     UInt32.bits
   }
@@ -795,12 +854,14 @@ impl FixedWidthInteger for UInt32 {
 
   fn to_big_endian_bytes(self) -> Array[UInt8, 4]
     cost time O(1)
+    cost allocations == 0
   {
     [intrinsic.convert((self >> 24) & 255), intrinsic.convert((self >> 16) & 255), intrinsic.convert((self >> 8) & 255), intrinsic.convert((self >> 0) & 255)]
   }
 
   fn to_little_endian_bytes(self) -> Array[UInt8, 4]
     cost time O(1)
+    cost allocations == 0
   {
     [intrinsic.convert((self >> 0) & 255), intrinsic.convert((self >> 8) & 255), intrinsic.convert((self >> 16) & 255), intrinsic.convert((self >> 24) & 255)]
   }
@@ -808,6 +869,7 @@ impl FixedWidthInteger for UInt32 {
   fn from_big_endian_bytes(bytes: Array[UInt8, 4]) -> UInt32
     ensures result == ((intrinsic.convert[UInt8, UInt32](bytes[0]) << 24) | (intrinsic.convert[UInt8, UInt32](bytes[1]) << 16) | (intrinsic.convert[UInt8, UInt32](bytes[2]) << 8) | intrinsic.convert[UInt8, UInt32](bytes[3]))
     cost time O(1)
+    cost allocations == 0
   {
     (intrinsic.convert[UInt8, UInt32](bytes[0]) << 24) | (intrinsic.convert[UInt8, UInt32](bytes[1]) << 16) | (intrinsic.convert[UInt8, UInt32](bytes[2]) << 8) | intrinsic.convert[UInt8, UInt32](bytes[3])
   }
@@ -815,12 +877,14 @@ impl FixedWidthInteger for UInt32 {
   fn from_little_endian_bytes(bytes: Array[UInt8, 4]) -> UInt32
     ensures result == (intrinsic.convert[UInt8, UInt32](bytes[0]) | (intrinsic.convert[UInt8, UInt32](bytes[1]) << 8) | (intrinsic.convert[UInt8, UInt32](bytes[2]) << 16) | (intrinsic.convert[UInt8, UInt32](bytes[3]) << 24))
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.convert[UInt8, UInt32](bytes[0]) | (intrinsic.convert[UInt8, UInt32](bytes[1]) << 8) | (intrinsic.convert[UInt8, UInt32](bytes[2]) << 16) | (intrinsic.convert[UInt8, UInt32](bytes[3]) << 24)
   }
 
   fn reverse_bits(self) -> UInt32
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.convert(integers.reverse_uint64_bits(intrinsic.convert(self)) >> 32)
   }
@@ -861,6 +925,7 @@ impl FixedWidthInteger for UInt64 {
   fn minimum_value() -> UInt64
     ensures result == UInt64.minimum
     cost time O(1)
+    cost allocations == 0
   {
     UInt64.minimum
   }
@@ -868,6 +933,7 @@ impl FixedWidthInteger for UInt64 {
   fn maximum_value() -> UInt64
     ensures result == UInt64.maximum
     cost time O(1)
+    cost allocations == 0
   {
     UInt64.maximum
   }
@@ -875,6 +941,7 @@ impl FixedWidthInteger for UInt64 {
   fn bit_width() -> UInt64
     ensures result == UInt64.bits
     cost time O(1)
+    cost allocations == 0
   {
     UInt64.bits
   }
@@ -883,12 +950,14 @@ impl FixedWidthInteger for UInt64 {
 
   fn to_big_endian_bytes(self) -> Array[UInt8, 8]
     cost time O(1)
+    cost allocations == 0
   {
     [intrinsic.convert((self >> 56) & 255), intrinsic.convert((self >> 48) & 255), intrinsic.convert((self >> 40) & 255), intrinsic.convert((self >> 32) & 255), intrinsic.convert((self >> 24) & 255), intrinsic.convert((self >> 16) & 255), intrinsic.convert((self >> 8) & 255), intrinsic.convert((self >> 0) & 255)]
   }
 
   fn to_little_endian_bytes(self) -> Array[UInt8, 8]
     cost time O(1)
+    cost allocations == 0
   {
     [intrinsic.convert((self >> 0) & 255), intrinsic.convert((self >> 8) & 255), intrinsic.convert((self >> 16) & 255), intrinsic.convert((self >> 24) & 255), intrinsic.convert((self >> 32) & 255), intrinsic.convert((self >> 40) & 255), intrinsic.convert((self >> 48) & 255), intrinsic.convert((self >> 56) & 255)]
   }
@@ -896,6 +965,7 @@ impl FixedWidthInteger for UInt64 {
   fn from_big_endian_bytes(bytes: Array[UInt8, 8]) -> UInt64
     ensures result == ((intrinsic.convert[UInt8, UInt64](bytes[0]) << 56) | (intrinsic.convert[UInt8, UInt64](bytes[1]) << 48) | (intrinsic.convert[UInt8, UInt64](bytes[2]) << 40) | (intrinsic.convert[UInt8, UInt64](bytes[3]) << 32) | (intrinsic.convert[UInt8, UInt64](bytes[4]) << 24) | (intrinsic.convert[UInt8, UInt64](bytes[5]) << 16) | (intrinsic.convert[UInt8, UInt64](bytes[6]) << 8) | intrinsic.convert[UInt8, UInt64](bytes[7]))
     cost time O(1)
+    cost allocations == 0
   {
     (intrinsic.convert[UInt8, UInt64](bytes[0]) << 56) | (intrinsic.convert[UInt8, UInt64](bytes[1]) << 48) | (intrinsic.convert[UInt8, UInt64](bytes[2]) << 40) | (intrinsic.convert[UInt8, UInt64](bytes[3]) << 32) | (intrinsic.convert[UInt8, UInt64](bytes[4]) << 24) | (intrinsic.convert[UInt8, UInt64](bytes[5]) << 16) | (intrinsic.convert[UInt8, UInt64](bytes[6]) << 8) | intrinsic.convert[UInt8, UInt64](bytes[7])
   }
@@ -903,12 +973,14 @@ impl FixedWidthInteger for UInt64 {
   fn from_little_endian_bytes(bytes: Array[UInt8, 8]) -> UInt64
     ensures result == (intrinsic.convert[UInt8, UInt64](bytes[0]) | (intrinsic.convert[UInt8, UInt64](bytes[1]) << 8) | (intrinsic.convert[UInt8, UInt64](bytes[2]) << 16) | (intrinsic.convert[UInt8, UInt64](bytes[3]) << 24) | (intrinsic.convert[UInt8, UInt64](bytes[4]) << 32) | (intrinsic.convert[UInt8, UInt64](bytes[5]) << 40) | (intrinsic.convert[UInt8, UInt64](bytes[6]) << 48) | (intrinsic.convert[UInt8, UInt64](bytes[7]) << 56))
     cost time O(1)
+    cost allocations == 0
   {
     intrinsic.convert[UInt8, UInt64](bytes[0]) | (intrinsic.convert[UInt8, UInt64](bytes[1]) << 8) | (intrinsic.convert[UInt8, UInt64](bytes[2]) << 16) | (intrinsic.convert[UInt8, UInt64](bytes[3]) << 24) | (intrinsic.convert[UInt8, UInt64](bytes[4]) << 32) | (intrinsic.convert[UInt8, UInt64](bytes[5]) << 40) | (intrinsic.convert[UInt8, UInt64](bytes[6]) << 48) | (intrinsic.convert[UInt8, UInt64](bytes[7]) << 56)
   }
 
   fn reverse_bits(self) -> UInt64
     cost time O(1)
+    cost allocations == 0
   {
     integers.reverse_uint64_bits(self)
   }
