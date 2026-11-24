@@ -5155,9 +5155,11 @@ library's, and a prelude name alone:
 
 The methods of the built-in integer types belong to the traits
 `FixedWidthInteger`, `SignedInteger`, and `UnsignedInteger`: `truss show
-FixedWidthInteger` lists them. `truss show standard` prints every public
-definition of the standard library, over ten thousand lines, so show one
-module at a time.
+FixedWidthInteger` lists them. `truss show Int64.checked_add` shows one of
+them and names the impl that gives it to `Int64`, and a derived trait's
+method is shown through its type the same way. `truss show standard` prints
+every public definition of the standard library, over ten thousand lines,
+so show one module at a time.
 
 ## Appendix D: The Standard Library
 
