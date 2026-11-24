@@ -1,0 +1,17 @@
+use standard.core
+
+fn after_text(text: StringSlice) -> UInt64 {
+  text.length() + 1
+}
+
+fn after_string(text: own String) -> UInt64 {
+  text.length() + 1
+}
+
+fn joined(first: own String, second: StringSlice) -> UInt64 {
+  first.length() + second.length()
+}
+
+fn room(text: own String) -> UInt64 {
+  core.maximum_length - text.length()
+}

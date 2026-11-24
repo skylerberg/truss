@@ -1,3 +1,4 @@
+use standard.core
 use standard.growth
 use standard.intrinsic
 use standard.numbers.float_text
@@ -53,6 +54,7 @@ impl Model for Literal {
 
 public fn String.length(self) -> UInt64
   ensures result == self.model().length()
+  ensures result <= core.maximum_length
   cost time O(1)
   cost allocations == 0
 {
@@ -163,6 +165,7 @@ fn utf8_sequence(bytes: intrinsic.View[UInt8], at: UInt64) -> UInt64
 
 public fn StringSlice.length(self) -> UInt64
   ensures result == self.model().length()
+  ensures result <= core.maximum_length
   cost time O(1)
   cost allocations == 0
 {

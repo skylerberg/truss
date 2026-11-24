@@ -1224,6 +1224,10 @@ let () =
       expect_proven Fixtures.Prover.length_of_a_string_with_an_accent);
   Harness.test "a long string literal has its length without a fact for each byte" (fun () ->
       expect_proven Fixtures.Prover.length_of_a_long_string_literal);
+  Harness.test "a string's length plus one, a sum of two, and the room below the maximum fit"
+    (fun () -> expect_proven Fixtures.Prover.sums_of_lengths_that_fit);
+  Harness.test "a sum of three string lengths may overflow" (fun () ->
+      expect_not_proven Fixtures.Prover.sum_of_three_lengths "prover.overflow");
   Harness.test "pushing text onto a string adds its length" (fun () ->
       expect_proven Fixtures.Prover.string_push);
   Harness.test "a string pattern matches text with its bytes" (fun () ->

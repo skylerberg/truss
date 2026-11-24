@@ -2303,6 +2303,11 @@ directly or through a callee such as `expect`, and where an integer
 operation fails. Running out of memory and overflowing the stack are the
 exceptions.
 
+No allocation holds more than `core.maximum_length` elements, which is
+`Int64.maximum`, so the `length` of a `String` or a `StringSlice` ensures
+`result <= core.maximum_length`. A length plus one, or the sum of two
+lengths, therefore cannot overflow `UInt64`.
+
 Every operation that can fail is a proof obligation, in every function and
 every test: integer overflow, division by zero, indexing or slicing out of
 bounds, a shift that is too large, and `unreachable`. Where the compiler

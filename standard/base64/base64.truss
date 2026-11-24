@@ -70,9 +70,6 @@ public fn encode(bytes: Slice[UInt8], alphabet: Alphabet = Alphabet.Standard, pa
   cost allocations <= 1
 {
   let count = bytes.length()
-  if count > UInt64.maximum / 2 {
-    intrinsic.crash("a string cannot hold that many bytes")
-  }
   var output: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(4 * ((count + 2) / 3))
   var index: UInt64 = 0
   while index + 3 <= count
