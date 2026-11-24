@@ -1007,7 +1007,7 @@ public fn StringSlice.repeated(self, times: UInt64) -> String
   if self.length() == 0 || times == 0 {
     return String(storage: intrinsic.storage_empty())
   }
-  if times > UInt64.maximum / 2 / self.length() {
+  if times > core.maximum_length / self.length() {
     intrinsic.crash("a string cannot hold that many bytes")
   }
   let total = self.length() * times

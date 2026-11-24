@@ -1,3 +1,5 @@
+use standard.core
+
 fn after_text(text: StringSlice) -> UInt64 {
   text.length() + 1
 }
@@ -6,6 +8,10 @@ fn after_string(text: String) -> UInt64 {
   text.length() + 1
 }
 
-fn joined(items: List[UInt8], view: Slice[UInt8]) -> UInt64 {
-  items.length() + view.length()
+fn joined(first: String, second: StringSlice) -> UInt64 {
+  first.length() + second.length()
+}
+
+fn room(text: String) -> UInt64 {
+  core.maximum_length - text.length()
 }

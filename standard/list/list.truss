@@ -184,7 +184,6 @@ internal fn List[Element].from_storage(storage: own intrinsic.Storage[Element]) 
 
 public fn List[Element].length(self) -> UInt64
   ensures result == self.model().length()
-  ensures result <= UInt64.maximum / 2
   cost time O(1)
   cost allocations == 0
 {
@@ -431,7 +430,6 @@ public fn Slice[Element: Plain].cursor(self) -> SliceCursor[Element]
 
 public fn Slice[Element].length(self) -> UInt64
   ensures result == self.model().length()
-  ensures result <= UInt64.maximum / 2
   cost time O(1)
   cost allocations == 0
 {
