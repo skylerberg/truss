@@ -681,6 +681,7 @@ public fn Slice[Element].swap(mut self, first: UInt64, second: UInt64)
     i == first || i == second || identical(self.model()[i], old(self.model())[i])
   ensures self.model().is_permutation_of(old(self.model()))
   cost time O(1)
+  cost allocations == 0
 {
   if first >= self.length() || second >= self.length() {
     Panic.crash("index out of bounds")
@@ -1613,6 +1614,7 @@ fn sift_down_by[Element](
   decreases room
   ensures items.model().is_permutation_of(old(items.model()))
   cost time O(log(room) * time(compare))
+  cost allocations <= 2 * log(room) * allocations(compare)
 {
   if room >= 2 && position <= limit / 2 {
     var largest = 2 * position
@@ -1630,6 +1632,7 @@ fn build_heap_by[Element](items: mut Slice[Element], compare: (fn(Element, Eleme
   uses generic Granted
   ensures items.model().is_permutation_of(old(items.model()))
   cost time O(items.length() * log(items.length()) * time(compare))
+  cost allocations <= items.length() * log(items.length()) * allocations(compare)
 {
   let count = items.length()
   var position = count / 2
@@ -1639,6 +1642,7 @@ fn build_heap_by[Element](items: mut Slice[Element], compare: (fn(Element, Eleme
     invariant position <= count / 2
     decreases position
     cost time O((count / 2 - position) * log(count) * time(compare))
+    cost allocations <= (count / 2 - position) * 2 * log(count) * allocations(compare)
   {
     sift_down_by(mut items, position: position, limit: count, room: count, compare: compare)
     position -= 1
@@ -1649,6 +1653,7 @@ fn drain_heap_by[Element](items: mut Slice[Element], compare: (fn(Element, Eleme
   uses generic Granted
   ensures items.model().is_permutation_of(old(items.model()))
   cost time O(items.length() * log(items.length()) * time(compare))
+  cost allocations <= 2 * items.length() * log(items.length()) * allocations(compare)
 {
   let count = items.length()
   var unsorted = count
@@ -1658,6 +1663,7 @@ fn drain_heap_by[Element](items: mut Slice[Element], compare: (fn(Element, Eleme
     invariant unsorted <= count
     decreases unsorted
     cost time O((count - unsorted) * log(count) * time(compare))
+    cost allocations <= (count - unsorted) * 2 * log(count) * allocations(compare)
   {
     unsorted -= 1
     mut items.swap(0, second: unsorted)
@@ -1670,6 +1676,7 @@ public fn Slice[Element].sort_by(mut self, compare: (fn(Element, Element) -> Ord
   ensures self.model().is_permutation_of(old(self.model()))
   ensures forall i in 0..self.length() => old(self.model()).contains(self[i])
   cost time O(self.length() * log(self.length()) * time(compare))
+  cost allocations <= 3 * self.length() * log(self.length()) * allocations(compare)
 {
   build_heap_by(mut self, compare: compare)
   drain_heap_by(mut self, compare: compare)

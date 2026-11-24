@@ -1,0 +1,13 @@
+use standard.collections
+
+type Catalog(
+  ordered: collections.SortedMap[Int64, Int64] = [1: 10, 2: 20],
+  seen: collections.SortedSet[Int64] = [3],
+)
+  derives Default
+
+fn fresh() -> Catalog
+  cost allocations <= 10
+{
+  Catalog.default()
+}

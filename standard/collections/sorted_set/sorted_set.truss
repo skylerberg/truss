@@ -142,12 +142,15 @@ fn ordered_elements[Element: Ordered](elements: own List[Element]) -> List[Eleme
   ensures strictly_ascending(result.model())
   ensures result.length() <= elements.length()
   cost time O(elements.length() * (1 + log(elements.length())) * (1 + time(Element.compare)))
+  cost allocations <= 2 + elements.length() + (3 * elements.length() * log(elements.length()) + elements.length()) * allocations(Element.compare)
 {
   let count = elements.length()
   var numbered: List[collections.Numbered[Element, Unit]] = List.with_capacity(count)
   for element in own elements
     invariant numbered.length() == visited.length()
+    invariant numbered.capacity() == count
     cost time O(visited.length())
+    cost allocations <= 0
   {
     let ordinal = numbered.length()
     mut numbered.push(collections.Numbered(key: own element, ordinal: ordinal, value: Unit))
@@ -158,6 +161,7 @@ fn ordered_elements[Element: Ordered](elements: own List[Element]) -> List[Eleme
     invariant strictly_ascending(ascending.model())
     invariant ascending.length() <= visited.length()
     cost time O(visited.length() * (1 + time(Element.compare)))
+    cost allocations <= visited.length() * (1 + allocations(Element.compare))
   {
     if ascending.length() == 0 || ascending[ascending.length() - 1] < item.key {
       proof {
@@ -718,6 +722,7 @@ impl FromElements for collections.SortedSet[Element: Ordered] {
   fn from_elements(elements: own List[Element]) -> collections.SortedSet[Element]
     ensures result.length() <= elements.length()
     cost time O(elements.length() * (1 + log(elements.length())) * (1 + time(Element.compare)))
+    cost allocations <= 2 + elements.length() + (3 * elements.length() * log(elements.length()) + elements.length()) * allocations(Element.compare)
   {
     collections.SortedSet(elements: ordered_elements(own elements))
   }

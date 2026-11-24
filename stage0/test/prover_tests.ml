@@ -2625,6 +2625,12 @@ let () =
     (fun () -> expect_proven Fixtures.Prover.derived_methods_of_constant_time_fields);
   Harness.test "a derived default spends its fields' defaults" (fun () ->
       expect_proven Fixtures.Prover.derived_default_of_settings);
+  Harness.test "pushing into a list's reserved capacity allocates nothing" (fun () ->
+      expect_proven Fixtures.Prover.pushes_into_reserved_capacity);
+  Harness.test "a derived default of sorted collection literals bounds its allocations" (fun () ->
+      expect_proven Fixtures.Prover.derived_default_of_sorted_literals);
+  Harness.test "pushing onto a full list may allocate" (fun () ->
+      expect_not_proven Fixtures.Prover.push_past_capacity_without_its_allocation "prover.cost");
   Harness.test "a derived default spends the allocation of a written list default" (fun () ->
       expect_not_proven Fixtures.Prover.derived_default_of_settings_without_allocations
         "prover.cost")
