@@ -342,7 +342,13 @@ and check_statement checking scope (statement : Core.statement) =
         (Types.make_capability_set [ tasks ]);
       List.iter (check_statement checking scope) branches
   | For { mode; pattern; iteration; clauses; body } ->
-      Core_walk.walk_iteration (make_visitor checking scope (`Statement statement)) iteration;
+      let visit = make_visitor checking scope (`Statement statement) in
+      Core_walk.walk_iteration
+        (match iteration with
+        | Cursor { next_origin; _ } ->
+            { visit with callee = require_callee_uses checking scope next_origin }
+        | Integer_range _ | Elements _ -> visit)
+        iteration;
       (match (iteration, Core_walk.find_measure_condition clauses) with
       | Cursor { cursor; _ }, None ->
           let cursor_type =

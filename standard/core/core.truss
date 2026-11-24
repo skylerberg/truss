@@ -421,6 +421,12 @@ public trait Iterable {
   }
 }
 
+public trait IterableMut: Iterable {
+  fn element(mut self, position: UInt64) lends mut Self.Element
+    requires position < self.count()
+    ensures self.count() == old(self.count())
+}
+
 public trait Cursor {
   type Element
   capability Uses
@@ -550,6 +556,12 @@ public trait FiniteCursor: Cursor {
   fn next(mut self) -> Option[Self.Element]
     uses Self.Uses
     ensures (result is Some(_)) ==> self.remaining() < old(self.remaining())
+}
+
+public trait IntoCursor {
+  type Cursor: Cursor
+
+  fn cursor(own self) -> Self.Cursor
 }
 
 public trait Countable: Ordered + Plain {

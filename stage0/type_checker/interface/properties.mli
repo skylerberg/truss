@@ -3,7 +3,9 @@ exception Recursion_limit of string
 val recursion_limit : int
 
 val list_bound_closure_over :
-  find_requirements:(Path.t -> (Types.generic list * Types.trait_reference list) option) ->
+  find_requirements:
+    (Path.t ->
+    (Types.generic list * Types.trait_reference list * Types.associated_type list) option) ->
   self:Types.ty ->
   Types.trait_reference ->
   Types.trait_reference list

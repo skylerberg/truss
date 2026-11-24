@@ -18,14 +18,6 @@ public fn Shape.open(self) -> UInt64 {
   self.secret() + self.shared() + Shape.private_default + Shape.hidden_maker().sides
 }
 
-fn Shape.count(self) -> UInt64 {
-  self.sides
-}
-
-fn Shape.element(self, position: UInt64) lends UInt64 {
-  self.sides
-}
-
 trait Measured {
   fn measure(self) -> UInt64
   fn sample() -> Self

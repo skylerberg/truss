@@ -116,17 +116,16 @@ impl Iterable for Array[Element, count: UInt64] {
   }
 }
 
-public fn Array[Element, count: UInt64].element(mut self, position: UInt64) lends mut Element
-  uses Panic unless position < self.count()
-  ensures identical(result, old(self.model())[position])
-  ensures identical(self.model(), old(self.model()).update(position, value: final(result)))
-  cost time O(1)
-  cost allocations == 0
-{
-  if position >= self.count() {
-    Panic.crash("index out of bounds")
+impl IterableMut for Array[Element, count: UInt64] {
+  fn element(mut self, position: UInt64) lends mut Element
+    requires position < self.count()
+    ensures identical(result, old(self.model())[position])
+    ensures identical(self.model(), old(self.model()).update(position, value: final(result)))
+    cost time O(1)
+    cost allocations == 0
+  {
+    mut self[position]
   }
-  mut self[position]
 }
 
 public fn Array[Element, count: UInt64].map_each[Output](

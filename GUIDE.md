@@ -4860,15 +4860,21 @@ test "a cursor's provided methods" {
   Source: FiniteCursor` and measures the loop
   `decreases self.source.remaining() when Source: FiniteCursor`. Over a
   list's cursor it then ends, and its callers need no `RunForever`.
-- `items.cursor()` makes a cursor that owns a collection's elements, which
-  is what `for item in own items` pulls. It measures itself, as
-  `text.characters()` does.
+- `items.cursor()`, the method of the prelude trait `IntoCursor`, makes a
+  cursor that owns a collection's elements, which is what
+  `for item in own items` pulls. It measures itself, as `text.characters()`
+  does.
 
 ### Loops over your own types
 
-A `for` loop over a value that is not a cursor reads it by position. A type
-supports this with two methods: `count(self) -> UInt64`, and
-`element(self, position: UInt64)`, which lends the element at a position.
+A `for` loop over a value that is not a cursor reads it by position,
+through the methods of a prelude trait:
+
+| Loop | Trait | Methods |
+|---|---|---|
+| `for item in items` | `Iterable` | `count(self) -> UInt64`, and `element(self, position: UInt64)`, which lends the element at a position |
+| `for item in mut items` | `IterableMut` | `element(mut self, position: UInt64)`, which lends the element `mut` |
+| `for item in own items` | `IntoCursor` | `cursor(own self)`, which returns a cursor that owns the elements |
 
 ### Indexing your own types
 
@@ -4896,16 +4902,18 @@ impl Index for Board {
   }
 }
 
-fn Board.count(self) -> UInt64
-  ensures result == self.cells.length()
-{
-  self.cells.length()
-}
+impl Iterable for Board {
+  type Element = Bool
 
-fn Board.element(self, position: UInt64) lends Bool
-  requires position < self.cells.length()
-{
-  self.cells[position]
+  fn count(self) -> UInt64
+    ensures result == self.cells.length()
+  {
+    self.cells.length()
+  }
+
+  fn element(self, position: UInt64) lends Bool {
+    self.cells[position]
+  }
 }
 
 fn filled(board: Board) -> UInt64 {
@@ -4928,9 +4936,10 @@ test "indexing and looping over a board" {
 - `contains_key` says which keys the board has. `at`'s `requires` must
   follow from the trait's `requires self.contains_key(key)`, and the
   `ensures` on `contains_key` is what lets the prover see that it does.
-- `count`'s `ensures` lets the loop prove that each position it passes to
-  `element` is in bounds. Without it, the prover knows nothing about what
-  `count` returns.
+- `Iterable` declares `element` with `requires position < self.count()`,
+  and `count`'s `ensures` turns that into a bound on `cells`. Without it,
+  the prover knows nothing about what `count` returns.
+- `Board` also gets `Iterable`'s `map`, `filter`, and `fold`.
 - `IndexAssign` gives `collection[key] = value` its meaning for a type, such
   as a `Map`, that inserts keys rather than lending a place for them.
 

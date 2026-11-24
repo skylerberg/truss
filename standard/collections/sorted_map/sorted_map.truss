@@ -681,12 +681,16 @@ impl Iterable for collections.SortedMap[Key: Ordered, Value] {
   }
 }
 
-public fn collections.SortedMap[Key: Ordered, Value].cursor(own self) -> list.ListCursor[map.Entry[Key, Value]]
-  ensures result.remaining() == self.length()
-  cost time O(self.length())
-  cost amortized time O(self.length())
-{
-  own self.entries.cursor()
+impl IntoCursor for collections.SortedMap[Key: Ordered, Value] {
+  type Cursor = list.ListCursor[map.Entry[Key, Value]]
+
+  fn cursor(own self) -> list.ListCursor[map.Entry[Key, Value]]
+    ensures result.remaining() == self.length()
+    cost time O(self.length())
+    cost amortized time O(self.length())
+  {
+    own self.entries.cursor()
+  }
 }
 
 public fn collections.SortedMap[Key: Ordered, Value].reversed(self) -> list.Reversed[map.Entry[Key, Value]]

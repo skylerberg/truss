@@ -1,0 +1,27 @@
+type Draws(left: UInt8)
+
+impl Cursor for Draws {
+  type Element = UInt8
+
+  fn next(mut self) -> Option[UInt8] {
+    if self.left == 0 {
+      return None
+    }
+    self.left -= 1
+    Some(self.left)
+  }
+}
+
+type Deck(size: UInt8)
+
+fn Deck.cursor(own self) -> Draws {
+  Draws(left: self.size)
+}
+
+fn total(deck: own Deck) -> UInt8 {
+  var sum: UInt8 = 0
+  for card in own deck {
+    sum = sum.wrapping_add(card)
+  }
+  sum
+}

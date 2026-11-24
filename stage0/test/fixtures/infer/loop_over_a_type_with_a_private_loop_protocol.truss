@@ -1,9 +1,0 @@
-use app.shapes
-
-fn f(shape: shapes.Shape) -> UInt64 {
-  var total: UInt64 = 0
-  for side in shape {
-    total = side
-  }
-  total
-}

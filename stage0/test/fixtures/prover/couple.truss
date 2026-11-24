@@ -1,21 +1,25 @@
 type Couple(first: Int64, second: Int64)
 
-fn Couple.count(self) -> UInt64
-  ensures result == 2
-  cost time O(1)
-{
-  2
-}
+impl Iterable for Couple {
+  type Element = Int64
 
-fn Couple.element(self, position: UInt64) lends Int64
-  requires position < 2
-  ensures result == self.first || result == self.second
-  cost time O(1)
-{
-  if position == 0 {
-    self.first
-  } else {
-    self.second
+  fn count(self) -> UInt64
+    ensures result == 2
+    cost time O(1)
+  {
+    2
+  }
+
+  fn element(self, position: UInt64) lends Int64
+    requires position < 2
+    ensures result == self.first || result == self.second
+    cost time O(1)
+  {
+    if position == 0 {
+      self.first
+    } else {
+      self.second
+    }
   }
 }
 

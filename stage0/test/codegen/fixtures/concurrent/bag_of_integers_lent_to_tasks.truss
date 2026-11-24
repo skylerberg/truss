@@ -1,11 +1,15 @@
 type Bag(items: List[Int64])
 
-fn Bag.count(self) -> UInt64 {
-  self.items.count()
-}
+impl Iterable for Bag {
+  type Element = Int64
 
-fn Bag.element(self, position: UInt64) lends Int64 {
-  self.items[position]
+  fn count(self) -> UInt64 {
+    self.items.count()
+  }
+
+  fn element(self, position: UInt64) lends Int64 {
+    self.items[position]
+  }
 }
 
 fn run() -> ExitCode

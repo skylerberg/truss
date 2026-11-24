@@ -1451,7 +1451,7 @@ and build_collection_place form env (iterable : Syntax.expression) (mode : Langu
         Some (make_binding_match ~origin scrutinee pattern) )
 
 and build_elements form ~origin (collection : Core.place) ~(count : Tables.call)
-    ~(element : Tables.call) ~(lends : Language.Mode.t) : Core.elements =
+    ~(element : Tables.element_access) ~(lends : Language.Mode.t) : Core.elements =
   let uint64 = Types.make_builtin UInt64 in
   let local = allocate_synthetic_local form in
   let make_receiver mode : Core.argument = { mode; value = Place collection } in
@@ -1466,17 +1466,23 @@ and build_elements form ~origin (collection : Core.place) ~(count : Tables.call)
               ~lends:None));
     position = make_binding form ~origin ~is_var:false ~mode:Own uint64 local;
     element =
-      (match Types.find_sequence_element (Core_walk.compute_place_type collection) with
-      | Some element_type ->
+      (match element with
+      | Sequence_element ->
+          let sequence = Core_walk.compute_place_type collection in
           Element
             {
               id = allocate_node_id form;
               base = collection;
               index = position;
-              type_ = element_type;
+              type_ =
+                (match Types.find_sequence_element sequence with
+                | Some element_type -> element_type
+                | None ->
+                    raise_bug "the checker visits the elements of `%s` as places"
+                      (Types.show sequence));
               origin;
             }
-      | None ->
+      | Lent_by_call element ->
           Lent
             (make_synthetic_expression form ~origin element.callee_result
                (Call

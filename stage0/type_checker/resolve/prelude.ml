@@ -29,8 +29,10 @@ let items : Well_known.t list =
     Index_assign;
     Model;
     Iterable;
+    Iterable_mut;
     Cursor;
     Finite_cursor;
+    Into_cursor;
     Range;
     Exit_code;
     String;

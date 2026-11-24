@@ -15,8 +15,10 @@ type t =
   | Index_mut
   | Index_assign
   | Iterable
+  | Iterable_mut
   | Cursor
   | Finite_cursor
+  | Into_cursor
   | Model
   | Add
   | Subtract
@@ -93,8 +95,12 @@ type method_ =
   | Index_at
   | Index_mut_at
   | Index_assign_assign
+  | Iterable_count
+  | Iterable_element
+  | Iterable_mut_element
   | Cursor_next
   | Finite_cursor_remaining
+  | Into_cursor_cursor
   | Fixed_width_integer_minimum_value
   | Fixed_width_integer_maximum_value
   | Fixed_width_integer_bit_width
@@ -139,7 +145,9 @@ type associated =
   | Negate_output
   | Index_key
   | Index_output
+  | Iterable_element_type
   | Cursor_element
+  | Into_cursor_cursor_type
   | Model_value
   | From_template_part
   | From_elements_element
@@ -188,8 +196,10 @@ let items =
     (Index_mut, [ "core" ], "IndexMut");
     (Index_assign, [ "core" ], "IndexAssign");
     (Iterable, [ "core" ], "Iterable");
+    (Iterable_mut, [ "core" ], "IterableMut");
     (Cursor, [ "core" ], "Cursor");
     (Finite_cursor, [ "core" ], "FiniteCursor");
+    (Into_cursor, [ "core" ], "IntoCursor");
     (Model, [ "core" ], "Model");
     (Add, [ "core" ], "Add");
     (Subtract, [ "core" ], "Subtract");
@@ -268,8 +278,12 @@ let methods =
     (Index_at, Index, "at", Instance Read);
     (Index_mut_at, Index_mut, "at", Instance Mut);
     (Index_assign_assign, Index_assign, "assign", Instance Mut);
+    (Iterable_count, Iterable, "count", Instance Read);
+    (Iterable_element, Iterable, "element", Instance Read);
+    (Iterable_mut_element, Iterable_mut, "element", Instance Mut);
     (Cursor_next, Cursor, "next", Instance Mut);
     (Finite_cursor_remaining, Finite_cursor, "remaining", Instance Read);
+    (Into_cursor_cursor, Into_cursor, "cursor", Instance Own);
     (Fixed_width_integer_minimum_value, Fixed_width_integer, "minimum_value", Static);
     (Fixed_width_integer_maximum_value, Fixed_width_integer, "maximum_value", Static);
     (Fixed_width_integer_bit_width, Fixed_width_integer, "bit_width", Static);
@@ -316,7 +330,9 @@ let associated_types =
     (Negate_output, Negate, "Output");
     (Index_key, Index, "Key");
     (Index_output, Index, "Output");
+    (Iterable_element_type, Iterable, "Element");
     (Cursor_element, Cursor, "Element");
+    (Into_cursor_cursor_type, Into_cursor, "Cursor");
     (Model_value, Model, "Value");
     (From_template_part, From_template, "Part");
     (From_elements_element, From_elements, "Element");

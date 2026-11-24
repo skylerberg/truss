@@ -408,17 +408,15 @@ and check_collection_element state env ~(quantifier : Syntax.expression)
       element
   | _, (Types.Error _ | Types.Hole) -> collection_type
   | _ -> (
+      let at = State.read_span state collection.id in
       match
-        Name_lookup.find_elements_calls state
-          ~cause:(Quantifier (State.read_span state collection.id))
-          collection collection_type Language.Mode.Read
+        Statements.find_elements_loop state ~cause:(Quantifier at) ~at collection_type
+          Language.Mode.Read
       with
-      | Visible (loop, element, _) ->
+      | Some (loop, element, _) ->
           State.elaborate state quantifier.id (Loop loop);
           element
-      | Hidden hidden ->
-          Members.make_hidden_error state (State.read_span state collection.id) hidden
-      | Absent ->
-          State.make_error_type state Not_indexable
-            (State.read_span state collection.id)
-            (Printf.sprintf "`%s` cannot be looped over." (Types.show collection_type)))
+      | None ->
+          State.make_error_type state Not_iterable at
+            (Printf.sprintf "A quantifier cannot go over %s: it does not implement `Iterable`."
+               (State.describe state collection_type)))

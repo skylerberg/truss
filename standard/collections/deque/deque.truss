@@ -249,30 +249,33 @@ impl Iterable for collections.Deque[Element] {
   }
 }
 
-public fn collections.Deque[Element].element(mut self, position: UInt64) lends mut Element
-  uses Panic unless position < self.count()
-  ensures self.front.length() == old(self.front.length())
-  ensures self.back.length() == old(self.back.length())
-  cost time O(1)
-{
-  if position >= self.count() {
-    Panic.crash("index out of bounds")
-  }
-  if position < self.front.length() {
-    mut self.front[self.front.length() - 1 - position]
-  } else {
-    mut self.back[position - self.front.length()]
+impl IterableMut for collections.Deque[Element] {
+  fn element(mut self, position: UInt64) lends mut Element
+    requires position < self.count()
+    ensures self.front.length() == old(self.front.length())
+    ensures self.back.length() == old(self.back.length())
+    cost time O(1)
+  {
+    if position < self.front.length() {
+      mut self.front[self.front.length() - 1 - position]
+    } else {
+      mut self.back[position - self.front.length()]
+    }
   }
 }
 
-public fn collections.Deque[Element].cursor(own self) -> list.ListCursor[Element]
-  cost time O(self.length())
-  cost amortized time O(self.length())
-{
-  var items = own self.front
-  mut items.reverse()
-  mut items.append(own self.back)
-  own items.cursor()
+impl IntoCursor for collections.Deque[Element] {
+  type Cursor = list.ListCursor[Element]
+
+  fn cursor(own self) -> list.ListCursor[Element]
+    cost time O(self.length())
+    cost amortized time O(self.length())
+  {
+    var items = own self.front
+    mut items.reverse()
+    mut items.append(own self.back)
+    own items.cursor()
+  }
 }
 
 impl Equal for collections.Deque[Element: Equal] {

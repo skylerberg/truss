@@ -132,7 +132,10 @@ fn sort_stably[Item](items: own List[Item], read_start: fn(Item) -> UInt64) -> L
   }
   var sorted: List[Item] = []
   for rank in ranked {
-    let Some(item) = mut slots.element(rank.sequence).take() else {
+    if rank.sequence >= slots.length() {
+      Panic.crash("each rank is the sequence number of an item")
+    }
+    let Some(item) = mut slots[rank.sequence].take() else {
       Panic.crash("each item is taken once")
     }
     mut sorted.push(own item)

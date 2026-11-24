@@ -302,7 +302,7 @@ let report_requirement (state : State.state) (goal : State.goal) ?associated ~un
         ^ unmet)
   | (Method_call at | Loop at | Quantifier at), Implements trait ->
       State.add_diagnostic state
-        (match goal.cause with Loop _ | Quantifier _ -> Not_indexable | _ -> No_impl)
+        (match goal.cause with Loop _ | Quantifier _ -> Not_iterable | _ -> No_impl)
         at
         (does_not_implement trait ^ "." ^ unmet)
   | (Bound _ | Operator _ | Method_call _ | Loop _ | Quantifier _), Within _ ->

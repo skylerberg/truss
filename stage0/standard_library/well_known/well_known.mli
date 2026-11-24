@@ -15,8 +15,10 @@ type t =
   | Index_mut
   | Index_assign
   | Iterable
+  | Iterable_mut
   | Cursor
   | Finite_cursor
+  | Into_cursor
   | Model
   | Add
   | Subtract
@@ -93,8 +95,12 @@ type method_ =
   | Index_at
   | Index_mut_at
   | Index_assign_assign
+  | Iterable_count
+  | Iterable_element
+  | Iterable_mut_element
   | Cursor_next
   | Finite_cursor_remaining
+  | Into_cursor_cursor
   | Fixed_width_integer_minimum_value
   | Fixed_width_integer_maximum_value
   | Fixed_width_integer_bit_width
@@ -139,7 +145,9 @@ type associated =
   | Negate_output
   | Index_key
   | Index_output
+  | Iterable_element_type
   | Cursor_element
+  | Into_cursor_cursor_type
   | Model_value
   | From_template_part
   | From_elements_element

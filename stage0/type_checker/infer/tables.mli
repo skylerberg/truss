@@ -40,10 +40,11 @@ type resolution =
 val show_resolution : resolution -> string
 
 type literal = Integer_value of Z.t | Float_value of float
+type element_access = Sequence_element | Lent_by_call of call
 
 type loop =
   | Integer_range of { element : Types.ty; inclusive : bool }
-  | Elements of { count : call; element : call; lends : Language.Mode.t }
+  | Elements of { count : call; element : element_access; lends : Language.Mode.t }
   | Pulled of {
       cursor : Types.ty;
       cursor_call : call option;

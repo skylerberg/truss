@@ -86,7 +86,7 @@ let () =
       expect_one_diagnostic "fn f() {\n  Panic.crash(\"no\")\n}\n" "capabilities.not_available"
         ~says:"This call uses `Panic`, which is not available here. Declare it with `uses Panic`.");
   Harness.test "a call that a `for` loop makes is named by the loop" (fun () ->
-      expect_one_diagnostic Fixtures.Capabilities.panicking_bag_in_a_for_loop
+      expect_one_diagnostic Fixtures.Capabilities.panicking_cursor_in_a_for_loop
         "capabilities.not_available" ~at:("bag", 2)
         ~says:"The call that this `for` loop makes uses `Panic`, which is not available here.");
   Harness.test "a `concurrent` block needs `Tasks`" (fun () ->
@@ -150,11 +150,6 @@ let () =
   Harness.test "a lambda's uses must fit the function type it is passed as" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.lambda_using_clock_passed_as_plain
         "capabilities.lambda_uses");
-  Harness.test "a loop over a value needs the capabilities that its `element` uses" (fun () ->
-      expect_one_diagnostic Fixtures.Capabilities.loop_over_a_ticker_without_uses
-        "capabilities.not_available");
-  Harness.test "a loop over a value can use the function's capabilities" (fun () ->
-      expect_fine Fixtures.Capabilities.loop_over_a_ticker_using_clock);
   Harness.test
     "a capability parameter is instantiated with the capabilities of the lambdas passed for it"
     (fun () -> expect_fine Fixtures.Capabilities.for_each_of_lambdas);

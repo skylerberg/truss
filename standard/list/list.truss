@@ -257,20 +257,19 @@ impl Iterable for List[Element] {
   }
 }
 
-public fn List[Element].element(mut self, position: UInt64) lends mut Element
-  uses Panic unless position < self.count()
-  ensures identical(result, old(self.model())[position])
-  ensures identical(self.model(), old(self.model()).update(position, value: final(result)))
-  ensures self.length() == old(self.length())
-  ensures self.capacity() == old(self.capacity())
-  cost time O(1)
-  cost amortized time O(1)
-  cost allocations == 0
-{
-  if position >= self.count() {
-    Panic.crash("index out of bounds")
+impl IterableMut for List[Element] {
+  fn element(mut self, position: UInt64) lends mut Element
+    requires position < self.count()
+    ensures identical(result, old(self.model())[position])
+    ensures identical(self.model(), old(self.model()).update(position, value: final(result)))
+    ensures self.length() == old(self.length())
+    ensures self.capacity() == old(self.capacity())
+    cost time O(1)
+    cost amortized time O(1)
+    cost allocations == 0
+  {
+    mut self[position]
   }
-  mut self[position]
 }
 
 public fn List[Element].swap(mut self, first: UInt64, second: UInt64)
@@ -360,15 +359,19 @@ impl Cursor for ListCursor[Element] {
   }
 }
 
-public fn List[Element].cursor(own self) -> ListCursor[Element]
-  ensures result.remaining() == self.length()
-  ensures identical(result.model(), self.model())
-  cost time O(self.length())
-  cost amortized time O(self.length())
-{
-  var reversed = own self
-  mut reversed.reverse()
-  ListCursor(reversed: own reversed)
+impl IntoCursor for List[Element] {
+  type Cursor = ListCursor[Element]
+
+  fn cursor(own self) -> ListCursor[Element]
+    ensures result.remaining() == self.length()
+    ensures identical(result.model(), self.model())
+    cost time O(self.length())
+    cost amortized time O(self.length())
+  {
+    var reversed = own self
+    mut reversed.reverse()
+    ListCursor(reversed: own reversed)
+  }
 }
 
 public fn Array[Element, count: UInt64].to_list(own self) -> List[Element]
@@ -378,13 +381,17 @@ public fn Array[Element, count: UInt64].to_list(own self) -> List[Element]
   List(storage: intrinsic.storage_from_array(own self))
 }
 
-public fn Array[Element, count: UInt64].cursor(own self) -> ListCursor[Element]
-  ensures result.remaining() == count
-  ensures identical(result.model(), self.model())
-  cost time O(count)
-  cost amortized time O(count)
-{
-  own self.to_list().cursor()
+impl IntoCursor for Array[Element, count: UInt64] {
+  type Cursor = ListCursor[Element]
+
+  fn cursor(own self) -> ListCursor[Element]
+    ensures result.remaining() == count
+    ensures identical(result.model(), self.model())
+    cost time O(count)
+    cost amortized time O(count)
+  {
+    own self.to_list().cursor()
+  }
 }
 
 public type SliceCursor[Element: Plain](elements: Slice[Element], offset: UInt64)
@@ -455,20 +462,6 @@ impl Iterable for Slice[Element] {
   {
     self[position]
   }
-}
-
-public fn Slice[Element].element(mut self, position: UInt64) lends mut Element
-  uses Panic unless position < self.count()
-  ensures identical(result, old(self.model())[position])
-  ensures identical(self.model(), old(self.model()).update(position, value: final(result)))
-  cost time O(1)
-  cost amortized time O(1)
-  cost allocations == 0
-{
-  if position >= self.count() {
-    Panic.crash("index out of bounds")
-  }
-  mut self[position]
 }
 
 impl Index for List[Element] {

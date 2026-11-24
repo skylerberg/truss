@@ -158,6 +158,7 @@ module Code = struct
     | Not_structural
     | Wrong_receiver
     | Not_indexable
+    | Not_iterable
     | Implements_built_in
     | Not_derivable
     | Not_a_type
@@ -444,6 +445,7 @@ module Code = struct
     | Decided_in_specification -> "decided_in_specification"
     | Wrong_receiver -> "wrong_receiver"
     | Not_indexable -> "not_indexable"
+    | Not_iterable -> "not_iterable"
     | Implements_built_in -> "implements_built_in"
     | Not_derivable -> "not_derivable"
     | Not_a_type -> "not_a_type"

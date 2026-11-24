@@ -1,19 +1,42 @@
+let constrain_declared_types (associated_types : Types.associated_type list)
+    ~(by : Types.trait_reference) (reference : Types.trait_reference) =
+  let is_declared name =
+    List.exists
+      (fun (associated : Types.associated_type) -> associated.associated_name = name)
+      associated_types
+  in
+  {
+    reference with
+    associated =
+      reference.associated
+      @ List.filter
+          (fun (name, _) -> is_declared name && not (List.mem_assoc name reference.associated))
+          by.associated;
+  }
+
 let list_bound_closure_over ~find_requirements ~self (bound : Types.trait_reference) =
   let closure = ref [] in
-  let rec visit ancestors (bound : Types.trait_reference) =
-    if not (List.exists (Path.equal bound.trait) ancestors || List.mem bound !closure) then begin
-      closure := bound :: !closure;
-      match find_requirements bound.trait with
-      | Some (trait_generics, requires) ->
+  let rec visit ancestors (reference : Types.trait_reference) =
+    let requirements = find_requirements reference.trait in
+    let reference =
+      match requirements with
+      | Some (_, _, associated_types) ->
+          constrain_declared_types associated_types ~by:bound reference
+      | None -> reference
+    in
+    if not (List.exists (Path.equal reference.trait) ancestors || List.mem reference !closure) then begin
+      closure := reference :: !closure;
+      match requirements with
+      | Some (trait_generics, requires, _) ->
           let substitution =
             Types.bind_argument
-              (Types.make_self_parameter bound.trait)
+              (Types.make_self_parameter reference.trait)
               (Types.Type self)
-              (Types.make_substitution trait_generics bound.trait_arguments)
+              (Types.make_substitution trait_generics reference.trait_arguments)
           in
           List.iter
             (fun required ->
-              visit (bound.trait :: ancestors) (Types.substitute_trait substitution required))
+              visit (reference.trait :: ancestors) (Types.substitute_trait substitution required))
             requires
       | None -> ()
     end
@@ -33,6 +56,12 @@ let list_bound_closure lookups ~self (bound : Types.trait_reference) =
       List.fold_left
         (fun closure supertrait ->
           let supertrait = Types.substitute_trait substitution supertrait in
+          let supertrait =
+            match Definition.find_trait_interface lookups supertrait.trait with
+            | Some declaring ->
+                constrain_declared_types declaring.associated_types ~by:bound supertrait
+            | None -> supertrait
+          in
           if List.mem supertrait closure then closure else closure @ [ supertrait ])
         [ bound ] interface.supertraits
   | None -> [ bound ]
