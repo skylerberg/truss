@@ -106,6 +106,7 @@ internal type ClauseKind =
   | Requires(value: Expression)
   | Ensures(value: Expression)
   | Decreases(measures: List[Expression])
+  | Modifies(parts: List[Expression])
   | Cost(clause: CostClause)
   | ClauseError
   derives Equal

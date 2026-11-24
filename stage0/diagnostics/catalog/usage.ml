@@ -28,6 +28,13 @@ type t =
       entry : Core.origin range;
       siblings : Core.origin siblings;
     }
+  | Unmodified_part of {
+      entry : Core.origin;
+      function_ : Path.t;
+      parameter : string;
+      fields : string list;
+      change : part_change;
+    }
   | Unused_definition of {
       name : Core.origin;
       definition : Path.t;
@@ -35,6 +42,11 @@ type t =
       visibility : visibility;
       is_used_by_unused : bool;
     }
+
+and part_change =
+  | Named_part_changed of Core.origin siblings
+  | Unnamed_part_changed
+  | Parameter_unchanged
 
 and definition_kind = Function | Constant
 and visibility = Internal | Private
@@ -177,6 +189,34 @@ let describe = function
                "Nothing in `%s` may run forever, so its `RunForever` is unused. Remove it."
                (Path.show function_));
         ]
+  | Unmodified_part { entry; function_; parameter; fields; change } ->
+      let shown = show_field_path parameter fields in
+      let function_name = show_function_name function_ in
+      make Unmodified_part (at entry) ~severity:Warning
+        ~fixes:
+          (match change with
+          | Named_part_changed siblings ->
+              [
+                {
+                  title = [ Text (Printf.sprintf "Remove `%s` from the `modifies` clause." shown) ];
+                  edits = [ remove_entry { covering = [ entry ] } siblings ];
+                };
+              ]
+          | Unnamed_part_changed | Parameter_unchanged -> [])
+        [
+          Text
+            (match change with
+            | Named_part_changed _ | Unnamed_part_changed ->
+                Printf.sprintf
+                  "`%s` never changes `%s`, so the proofs of its callers do not learn that `%s` \
+                   keeps its value. Remove it from `modifies`."
+                  function_name shown shown
+            | Parameter_unchanged ->
+                Printf.sprintf
+                  "`%s` changes no part of `%s` that its `modifies` clause names, nor any other: \
+                   `%s` need not be `mut`."
+                  function_name parameter parameter);
+        ]
 
 let binding = example "binding"
 and later = example "later"
@@ -260,6 +300,22 @@ let list_examples : Diagnostic.Code.usage -> t list = function
             is_used_by_unused = true;
           };
       ]
+  | Unmodified_part ->
+      List.map
+        (fun change ->
+          Unmodified_part
+            {
+              entry = binding;
+              function_ = example_path;
+              parameter = "scanner";
+              fields = [ "position" ];
+              change;
+            })
+        [
+          Named_part_changed (Next { covering = [ later ] });
+          Unnamed_part_changed;
+          Parameter_unchanged;
+        ]
   | Unused_constant ->
       [
         Unused_definition

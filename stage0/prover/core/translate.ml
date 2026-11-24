@@ -900,16 +900,6 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
                    })
                  clauses.parameters)
               ~recursive_callee:None ~lent_final:None
-              ~havoc_mut:(fun frame ->
-                List.fold_left
-                  (fun frame (parameter : Mir.parameter) ->
-                    match parameter.mode with
-                    | Language.Mode.Mut ->
-                        write_place parameter frame
-                          (Facts.arrive context frame "changed"
-                             (Types.substitute subtrait_substitution parameter.type_))
-                    | Read | Own -> frame)
-                  frame clauses.parameters)
               ~substitution_of:(fun _ -> callee_substitution)
               ~type_arguments:
                 (Facts.list_method_type_arguments ~self_type:for_type generic_arguments)

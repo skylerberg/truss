@@ -26,6 +26,7 @@ type keyword =
   | Lends
   | Let
   | Match
+  | Modifies
   | Mut
   | Opaque
   | Own
@@ -199,6 +200,7 @@ let keywords =
     ("lends", Lends);
     ("let", Let);
     ("match", Match);
+    ("modifies", Modifies);
     ("mut", Mut);
     ("opaque", Opaque);
     ("own", Own);
@@ -446,7 +448,7 @@ let can_begin = function
       true
   | Keyword
       ( Cost | Decreases | Derives | Else | Ensures | In | Indirect | Invariant | Is | Lends
-      | Opaque | Requires | Unless | Uses | When | With ) ->
+      | Modifies | Opaque | Requires | Unless | Uses | When | With ) ->
       false
   | Punctuation _ | Newline | End_of_file -> false
 

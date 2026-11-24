@@ -152,6 +152,41 @@ type t =
   | Trait_cycle of { at : Core.origin }
   | Restated_requires of { at : Core.origin; name : string; declared_by : string }
   | Restated_decreases of { at : Core.origin; name : string; declared_by : string }
+  | Restated_modifies of { at : Core.origin; name : string; declared_by : string }
+  | Indexed_modified_part of { at : Core.origin }
+  | Not_a_modified_part of { at : Core.origin }
+  | Modified_non_parameter of { at : Core.origin; name : string }
+  | Modified_whole_parameter of { at : Core.origin; parameter : string }
+  | Read_only_part of { at : Core.origin; parameter : string; fields : string list }
+  | Repeated_part of {
+      at : Core.origin;
+      parameter : string;
+      fields : string list;
+      container : string list;
+      siblings : Core.origin siblings;
+    }
+  | Fieldless_part of {
+      at : Core.origin;
+      parameter : string;
+      prefix : string list;
+      fields : string list;
+      type_ : Types.ty;
+      has_variants : bool;
+    }
+  | Opaque_part of { at : Core.origin; type_ : Types.ty }
+  | Unknown_part_field of {
+      at : Core.origin;
+      type_ : Types.ty;
+      field : string;
+      candidates : string list;
+    }
+  | Impl_modifies of {
+      at : Core.origin;
+      name : string;
+      parameter : string;
+      fields : string list;
+      trait : string;
+    }
   | Restated_default of { at : Core.origin; name : string; declared_by : string }
   | Restated_body of { at : Core.origin; name : string; declared_by : string }
   | Redeclared_method of {
@@ -623,6 +658,98 @@ let describe = function
               "`%s` restates `%s.%s`, so it adds only `ensures` and `cost` clauses. It has no \
                body, so it has no recursion to measure."
               name declared_by name))
+  | Restated_modifies { at = origin; name; declared_by } ->
+      make Restated_method_clause (at origin)
+        (say
+           (Printf.sprintf
+              "`%s` restates `%s.%s`, so it adds only `ensures` and `cost` clauses. The parts that \
+               its implementations change are those that `%s.%s` names."
+              name declared_by name declared_by name))
+  | Indexed_modified_part { at = origin } ->
+      make Not_a_field_path (at origin)
+        (say
+           "An element of a collection is not a fixed part, so a `modifies` clause names the field \
+            that holds the collection.")
+  | Not_a_modified_part { at = origin } ->
+      make Not_a_field_path (at origin)
+        (say "A `modifies` clause names fields of `mut` parameters, such as `scanner.position`.")
+  | Modified_non_parameter { at = origin; name } ->
+      make Not_a_field_path (at origin)
+        (say
+           (Printf.sprintf
+              "`%s` is not a parameter, and a `modifies` clause names fields of `mut` parameters."
+              name))
+  | Modified_whole_parameter { at = origin; parameter } ->
+      make Not_a_field_path (at origin)
+        (say
+           (Printf.sprintf
+              "`%s` is a whole parameter. A `mut` parameter that the clause does not name may \
+               change in every part already, so name the fields of `%s` that change, or remove \
+               `%s`."
+              parameter parameter parameter))
+  | Read_only_part { at = origin; parameter; fields } ->
+      make Read_only_part (at origin)
+        (say
+           (Printf.sprintf
+              "`%s` is not `mut`, so the function changes no part of it. Remove `%s` from the \
+               clause, or take `%s` as `mut`."
+              parameter
+              (show_field_path parameter fields)
+              parameter))
+  | Repeated_part { at = origin; parameter; fields; container; siblings } ->
+      make Repeated_part (at origin)
+        ~fixes:
+          [
+            {
+              title = say "Remove it.";
+              edits = [ remove_entry { covering = [ origin ] } siblings ];
+            };
+          ]
+        (say
+           (if container = fields then
+              Printf.sprintf "The clause names `%s` twice." (show_field_path parameter fields)
+            else
+              Printf.sprintf "`%s` is a part of `%s`, which the clause names already."
+                (show_field_path parameter fields)
+                (show_field_path parameter container)))
+  | Fieldless_part { at = origin; parameter; prefix; fields; type_; has_variants } ->
+      let reason =
+        if has_variants then "whose fields belong to its variants and so are not fixed parts"
+        else "which has no fields to name"
+      in
+      make Not_a_field_path (at origin)
+        (say
+           (match prefix with
+           | [] ->
+               Printf.sprintf
+                 "`%s` is of type `%s`, %s, so a `modifies` clause names no part of it. Remove \
+                  `%s`."
+                 parameter (Types.show type_) reason
+                 (show_field_path parameter fields)
+           | _ :: _ ->
+               Printf.sprintf "`%s` is of type `%s`, %s. Name `%s` whole in `modifies`."
+                 (show_field_path parameter prefix)
+                 (Types.show type_) reason
+                 (show_field_path parameter prefix)))
+  | Opaque_part { at = origin; type_ } ->
+      make Private_field (at origin)
+        (say
+           (Printf.sprintf "`%s` is opaque, so its fields can be named only in its own package."
+              (Types.show type_)))
+  | Unknown_part_field { at = origin; type_; field; candidates } ->
+      make Unknown_member (at origin)
+        ~fixes:(list_spelling_fixes origin ~written:field candidates)
+        (say (Printf.sprintf "`%s` has no field `%s`." (Types.show type_) field))
+  | Impl_modifies { at = origin; name; parameter; fields; trait } ->
+      make Impl_modifies (at origin)
+        (say
+           (Printf.sprintf
+              "`%s` names `%s` in `modifies`, and the `modifies` clause of `%s.%s` names no part \
+               that holds it. An implementation changes only the parts that its trait's method \
+               names."
+              name
+              (show_field_path parameter fields)
+              trait name))
   | Restated_default { at = origin; name; declared_by } ->
       make Restated_method_default (at origin)
         (say
@@ -856,6 +983,62 @@ let examples : t list =
     Trait_cycle { at = example "at" };
     Restated_requires { at = example "at"; name = "‹name›"; declared_by = "‹declared_by›" };
     Restated_decreases { at = example "at"; name = "‹name›"; declared_by = "‹declared_by›" };
+    Restated_modifies { at = example "at"; name = "‹name›"; declared_by = "‹declared_by›" };
+    Indexed_modified_part { at = example "at" };
+    Not_a_modified_part { at = example "at" };
+    Modified_non_parameter { at = example "at"; name = "‹name›" };
+    Modified_whole_parameter { at = example "at"; parameter = "‹parameter›" };
+    Read_only_part { at = example "at"; parameter = "‹parameter›"; fields = [ "‹field›" ] };
+    Repeated_part
+      {
+        at = example "at";
+        parameter = "‹parameter›";
+        fields = [ "‹field›" ];
+        container = [ "‹field›" ];
+        siblings = Next { covering = [ example "next" ] };
+      };
+    Repeated_part
+      {
+        at = example "at";
+        parameter = "‹parameter›";
+        fields = [ "‹container›"; "‹field›" ];
+        container = [ "‹container›" ];
+        siblings = Previous { covering = [ example "next" ] };
+      };
+    Fieldless_part
+      {
+        at = example "at";
+        parameter = "‹parameter›";
+        prefix = [];
+        fields = [ "‹field›" ];
+        type_ = example_type;
+        has_variants = false;
+      };
+    Fieldless_part
+      {
+        at = example "at";
+        parameter = "‹parameter›";
+        prefix = [ "‹prefix›" ];
+        fields = [ "‹prefix›"; "‹field›" ];
+        type_ = example_type;
+        has_variants = true;
+      };
+    Opaque_part { at = example "at"; type_ = example_type };
+    Unknown_part_field
+      {
+        at = example "at";
+        type_ = example_type;
+        field = "‹field›";
+        candidates = [ "‹candidates›" ];
+      };
+    Impl_modifies
+      {
+        at = example "at";
+        name = "‹name›";
+        parameter = "‹parameter›";
+        fields = [ "‹field›" ];
+        trait = "‹trait›";
+      };
     Restated_default { at = example "at"; name = "‹name›"; declared_by = "‹declared_by›" };
     Restated_body { at = example "at"; name = "‹name›"; declared_by = "‹declared_by›" };
     Redeclared_method

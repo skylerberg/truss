@@ -12,13 +12,14 @@ type expected =
   | Function_type_clauses_end
   | Calls_target_end
   | Uses_separator
+  | Modifies_separator
   | Self_capability_set
   | Type_arguments_end
   | Capability_member
   | Trait_member
   | Impl_member
   | Potential_word
-  | Function_type_clause
+  | Function_type_clause of Token.keyword
   | Body_start
   | Cost_bound
   | Resource
@@ -150,6 +151,7 @@ type problem =
   | Lends_own
   | Repeated_uses
   | Repeated_decreases
+  | Repeated_modifies
   | Repeated_loop_decreases
   | Missing_body
   | One_field_tuple
@@ -235,6 +237,7 @@ let show_expected = function
   | Parameters_start -> "`(` to start the parameters"
   | Function_type_clauses_end -> "`)` after the clauses of the function type"
   | Calls_target_end -> "`)` after the target of `calls`"
+  | Modifies_separator -> "`,` or the end of the `modifies` clause, which takes no condition"
   | Uses_separator ->
       "`,` or the end of the `uses` clause; a capability's condition follows `unless`, as in `uses \
        RunForever unless Source: FiniteCursor`"
@@ -245,8 +248,9 @@ let show_expected = function
   | Trait_member -> "`fn`, `type`, `capability`, or `law` to start a member of the trait"
   | Impl_member -> "`fn`, `type`, or `capability` to start a member of the `impl`"
   | Potential_word -> "`potential`; a type's only cost clause is `cost potential expression`"
-  | Function_type_clause ->
-      "`uses`, `cost`, `requires`, or `ensures`; a function type has no `decreases`"
+  | Function_type_clause keyword ->
+      Printf.sprintf "`uses`, `cost`, `requires`, or `ensures`; a function type has no `%s`"
+        (Token.spell_keyword keyword)
   | Body_start -> "`{` to start the body"
   | Cost_bound -> "a bound: `O(...)`, `<=`, or `==`"
   | Resource ->
@@ -372,7 +376,8 @@ let find_code : problem -> Diagnostic.Code.parser = function
   | Misplaced_visibility _ -> Misplaced_visibility
   | Self_outside_method | Self_not_first | Self_in_capability -> Misplaced_self
   | Lends_own -> Lends_own
-  | Repeated_uses | Repeated_decreases | Repeated_loop_decreases -> Repeated_clause
+  | Repeated_uses | Repeated_decreases | Repeated_modifies | Repeated_loop_decreases ->
+      Repeated_clause
   | Missing_body -> Missing_body
   | One_field_tuple | Misplaced_tuple_word _ -> Misplaced_tuple
   | Interpolated_test_name | Interpolated_pattern -> Interpolation_not_allowed
@@ -569,6 +574,9 @@ let describe_problem = function
   | Repeated_decreases ->
       "A signature has at most one `decreases` clause; list several measures in one, separated by \
        commas."
+  | Repeated_modifies ->
+      "A signature has at most one `modifies` clause; list every part that the function changes in \
+       one, separated by commas."
   | Repeated_loop_decreases ->
       "A loop has at most one `decreases` clause; list several measures in one, separated by \
        commas."
@@ -794,7 +802,9 @@ let examples : t list =
     };
     {
       at = Source.make_span 0 1;
-      problem = Unexpected { expected = Function_type_clause; found = Token.Lower "‹found›" };
+      problem =
+        Unexpected
+          { expected = Function_type_clause Token.Decreases; found = Token.Lower "‹found›" };
       fixes = [];
     };
     {
@@ -1219,6 +1229,17 @@ let examples : t list =
     { at = Source.make_span 0 1; problem = Lends_own; fixes = [] };
     { at = Source.make_span 0 1; problem = Repeated_uses; fixes = [] };
     { at = Source.make_span 0 1; problem = Repeated_decreases; fixes = [] };
+    { at = Source.make_span 0 1; problem = Repeated_modifies; fixes = [] };
+    {
+      at = Source.make_span 0 1;
+      problem = Unexpected { expected = Function_type_clause Token.Modifies; found = Token.Newline };
+      fixes = [];
+    };
+    {
+      at = Source.make_span 0 1;
+      problem = Unexpected { expected = Modifies_separator; found = Token.Keyword Token.When };
+      fixes = [];
+    };
     { at = Source.make_span 0 1; problem = Repeated_loop_decreases; fixes = [] };
     { at = Source.make_span 0 1; problem = Missing_body; fixes = [] };
     { at = Source.make_span 0 1; problem = One_field_tuple; fixes = [] };
@@ -1348,7 +1369,8 @@ let examples : t list =
     };
     {
       at = Source.make_span 0 1;
-      problem = Unexpected { expected = Function_type_clause; found = Token.Newline };
+      problem =
+        Unexpected { expected = Function_type_clause Token.Decreases; found = Token.Newline };
       fixes = [];
     };
     {

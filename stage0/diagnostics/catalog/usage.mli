@@ -25,6 +25,13 @@ type t =
       entry : Core.origin Description.range;
       siblings : Core.origin Description.siblings;
     }
+  | Unmodified_part of {
+      entry : Core.origin;
+      function_ : Path.t;
+      parameter : string;
+      fields : string list;
+      change : part_change;
+    }
   | Unused_definition of {
       name : Core.origin;
       definition : Path.t;
@@ -32,6 +39,11 @@ type t =
       visibility : visibility;
       is_used_by_unused : bool;
     }
+
+and part_change =
+  | Named_part_changed of Core.origin Description.siblings
+  | Unnamed_part_changed
+  | Parameter_unchanged
 
 and definition_kind = Function | Constant
 and visibility = Internal | Private

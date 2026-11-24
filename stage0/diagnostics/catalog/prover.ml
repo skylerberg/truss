@@ -16,6 +16,8 @@ type value =
   | Compiler_local
   | Lent_part
 
+type changed_part = { root : value; fields : string list }
+
 type invariant_moment =
   | When_lend_ends
   | When_passed of call
@@ -61,7 +63,7 @@ type unbounded =
       editable : Path.t list;
       counts_units : bool;
     }
-  | Changing_cost of { is_amortized : bool; call : quoted; values : value list }
+  | Changing_cost of { is_amortized : bool; call : quoted; values : changed_part list }
   | Unbounded_iteration
 
 type promiser = Trait_promiser | Capability_promiser
@@ -298,6 +300,14 @@ let describe_value = function
   | Compiler_local -> [ Text "a local that the compiler introduces" ]
   | Lent_part -> [ Text "a lent part" ]
 
+let describe_changed_part { root; fields } =
+  let suffix = String.concat "" (List.map (fun field -> "." ^ field) fields) in
+  match root with
+  | Named name -> [ Text (Printf.sprintf "`%s%s`" name suffix) ]
+  | Self_value -> [ Text (Printf.sprintf "`self%s`" suffix) ]
+  | Quoted quoted -> [ Text "`"; quote_in quoted; Text (suffix ^ "`") ]
+  | Temporary | Compiler_local | Lent_part -> describe_value root
+
 let describe_invariant_moment = function
   | When_lend_ends -> say "when the lend of this part ends"
   | When_passed call -> Text "when it is passed to " :: describe_call call
@@ -404,7 +414,7 @@ let describe_unbounded = function
           Text (Printf.sprintf "The %s of `" cost)
           :: quote_in call
           :: Text ("` depends on " ^ dependency)
-          :: join_with_and (List.map describe_value values)
+          :: join_with_and (List.map describe_changed_part values)
           @ [
               Text
                 ", which this loop changes, so the prover cannot bound the cost of an iteration by \
@@ -1975,7 +1985,11 @@ let examples : t list =
                {
                  is_amortized = false;
                  call = { key = example_key; origin = example "call" };
-                 values = [ Named "‹values›" ];
+                 values =
+                   [
+                     { root = Named "‹values›"; fields = [] };
+                     { root = Self_value; fields = [ "‹field›" ] };
+                   ];
                });
         failure =
           Counterexample

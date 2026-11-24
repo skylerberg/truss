@@ -99,6 +99,13 @@ type t =
   | Not_reinitialized_at_return of { at : Core.origin; moved : Core.origin; place : place }
   | Not_reinitialized_at_scope_end of { moved : Core.origin; place : place }
   | Not_reinitialized_in_branch of { moved : Core.origin; place : place }
+  | Undeclared_change of {
+      at : Core.origin;
+      function_ : Path.t;
+      parameter : string;
+      fields : string list;
+      last_entry : Core.origin option;
+    }
 
 let make ?(notes = []) ?(fixes = []) code location message =
   { code = Ownership code; severity = Error; location; message; notes; fixes }
@@ -527,6 +534,30 @@ let describe = function
                the `concurrent` block early, the code after the block does not run, so each branch \
                must reinitialize each place lent `mut` that it moves out of.";
           ])
+  | Undeclared_change { at = origin; function_; parameter; fields; last_entry } ->
+      let shown = show_field_path parameter fields in
+      make Undeclared_change (at origin)
+        ~fixes:
+          (match (fields, last_entry) with
+          | _ :: _, Some last ->
+              [
+                {
+                  title = [ Text (Printf.sprintf "Add `%s` to the `modifies` clause." shown) ];
+                  edits = [ insert_after last [ Text (", " ^ shown) ] ];
+                };
+              ]
+          | [], _ | _, None -> [])
+        [
+          Text
+            (Printf.sprintf
+               "%s changes here, and the `modifies` clause of `%s` does not name it. The proofs of \
+                its callers take every part of `%s` that the clause does not name to keep its \
+                value."
+               (match fields with
+               | [] -> Printf.sprintf "All of `%s`" shown
+               | _ :: _ -> Printf.sprintf "`%s`" shown)
+               (show_function_name function_) parameter);
+        ]
 
 let origin = example "origin"
 let other = example "other"
@@ -615,4 +646,23 @@ let list_examples : Diagnostic.Code.ownership -> t list = function
         Not_reinitialized_at_return { at = origin; moved = other; place = items };
         Not_reinitialized_at_scope_end { moved = other; place = items };
         Not_reinitialized_in_branch { moved = other; place = items };
+      ]
+  | Undeclared_change ->
+      [
+        Undeclared_change
+          {
+            at = origin;
+            function_ = example_path;
+            parameter = "scanner";
+            fields = [ "position" ];
+            last_entry = Some other;
+          };
+        Undeclared_change
+          {
+            at = origin;
+            function_ = example_path;
+            parameter = "scanner";
+            fields = [];
+            last_entry = None;
+          };
       ]

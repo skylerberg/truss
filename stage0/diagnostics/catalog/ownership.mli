@@ -96,6 +96,13 @@ type t =
   | Not_reinitialized_at_return of { at : Core.origin; moved : Core.origin; place : place }
   | Not_reinitialized_at_scope_end of { moved : Core.origin; place : place }
   | Not_reinitialized_in_branch of { moved : Core.origin; place : place }
+  | Undeclared_change of {
+      at : Core.origin;
+      function_ : Path.t;
+      parameter : string;
+      fields : string list;
+      last_entry : Core.origin option;
+    }
 
 val describe : t -> Nodes.description
 val list_examples : Diagnostic.Code.ownership -> t list

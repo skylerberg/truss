@@ -36,6 +36,19 @@ let list_types (signature : Types.signature) =
        signature);
   List.rev !types
 
+let find_unallowed_part ~(expected : Types.signature) ~(written : Types.signature) =
+  List.find_map
+    (fun (part : Types.modified) ->
+      match Types.list_modified_fields expected part.position with
+      | Some allowed
+        when not
+               (List.exists
+                  (fun prefix -> Types.is_field_path_prefix prefix part.field_path)
+                  allowed) ->
+          Some (part.position, part.field_path)
+      | Some _ | None -> None)
+    written.modifies
+
 let signatures_agree (expected : Types.signature) (written : Types.signature) =
   let sort_bounds (signature : Types.signature) =
     { signature with generics = Types.map_bounds (List.sort compare) signature.generics }
@@ -46,6 +59,7 @@ let signatures_agree (expected : Types.signature) (written : Types.signature) =
       capability_parameters = List.sort compare signature.capability_parameters;
       uses = Types.no_capabilities;
       costs = [];
+      modifies = [];
     }
   in
   let holds_error = Types.exists Types.is_error in
@@ -288,7 +302,7 @@ let list_callback_contracts (definition : Syntax.definition) ~text ~spans =
                   match clause.kind with
                   | Requires value -> Some ("requires " ^ quote value)
                   | Ensures value -> Some ("ensures " ^ quote value)
-                  | Uses _ | Cost _ | Decreases _ | Clause_error -> None)
+                  | Uses _ | Cost _ | Decreases _ | Modifies _ | Clause_error -> None)
                 clauses )
       | Named_parameter _ | Self_parameter _ | Parameter_error -> None)
     parameters
@@ -345,7 +359,7 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
           | None ->
               Checking.report state
                 (Undeclared_method { at = Written name.id; trait = shown_trait; name = name.text }))
-      | Some implemented ->
+      | Some implemented -> (
           if trait.is_capability && not (receiver = Instance Read || receiver = Instance Mut) then
             Checking.report state (Capability_method_receiver { at = Written name.id })
           else if
@@ -401,4 +415,16 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
                 Checking.report state
                   (Panic_beyond_condition
                      { at = Written name.id; name = name.text; trait = shown_trait })
-              else check_callback_contracts state name ~shown_trait implemented.declaration)
+              else
+                match find_unallowed_part ~expected ~written with
+                | Some (position, fields) ->
+                    Checking.report state
+                      (Impl_modifies
+                         {
+                           at = Written name.id;
+                           name = name.text;
+                           parameter = (Types.read_parameter_at written position).name;
+                           fields;
+                           trait = shown_trait;
+                         })
+                | None -> check_callback_contracts state name ~shown_trait implemented.declaration))

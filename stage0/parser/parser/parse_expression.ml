@@ -1,5 +1,5 @@
 let is_clause_keyword = function
-  | Token.Keyword (Uses | Requires | Ensures | Decreases | Cost) -> true
+  | Token.Keyword (Uses | Requires | Ensures | Decreases | Modifies | Cost) -> true
   | _ -> false
 
 type operator = Binary_operator of Syntax.binary | Is_operator | Range_operator of bool
@@ -205,7 +205,8 @@ and parse_function_type cursor ~clauses:with_clauses =
       let rec gather clauses =
         match Cursor.peek_kind cursor with
         | Keyword (Uses | Cost | Requires | Ensures) -> gather (parse_clause cursor :: clauses)
-        | Keyword Decreases -> Cursor.fail cursor Function_type_clause
+        | Keyword Decreases -> Cursor.fail cursor (Function_type_clause Token.Decreases)
+        | Keyword Modifies -> Cursor.fail cursor (Function_type_clause Token.Modifies)
         | _ -> List.rev clauses
       in
       gather []
@@ -220,7 +221,7 @@ and parse_function_type cursor ~clauses:with_clauses =
               (fun (use : Syntax.capability_use) ->
                 Option.is_some use.unless || use.unless_values <> [])
               uses
-        | Requires _ | Ensures _ | Decreases _ | Cost _ | Clause_error -> false
+        | Requires _ | Ensures _ | Decreases _ | Modifies _ | Cost _ | Clause_error -> false
       in
       if Option.is_some clause.condition || has_unless then
         Cursor.report cursor
@@ -236,7 +237,7 @@ and parse_function_type cursor ~clauses:with_clauses =
           | _ ->
               Cursor.report cursor (Cursor.read_file_span cursor amount.id) Function_type_cost_bound
           )
-      | Requires _ | Ensures _ | Decreases _ | Uses _ | Clause_error -> ())
+      | Requires _ | Ensures _ | Decreases _ | Modifies _ | Uses _ | Clause_error -> ())
     clauses;
   let is_named (input : Syntax.function_input) = Option.is_some input.name in
   let has_callback_contract =
@@ -408,12 +409,15 @@ and parse_clause cursor : Syntax.clause =
     | Keyword Requires -> Requires (parse_expression cursor)
     | Keyword Ensures -> Ensures (parse_expression cursor)
     | Keyword Decreases -> Decreases (parse_expression_list cursor)
+    | Keyword Modifies -> Modifies (parse_expression_list cursor)
     | Keyword Cost -> Cost (parse_cost cursor)
     | _ -> Cursor.fail cursor Clause
   in
   let condition =
     match kind with
     | Uses _ -> if Cursor.is_keyword cursor When then Cursor.fail cursor Uses_separator else None
+    | Modifies _ ->
+        if Cursor.is_keyword cursor When then Cursor.fail cursor Modifies_separator else None
     | Requires _ | Ensures _ | Decreases _ | Cost _ | Clause_error ->
         parse_condition_after cursor When
   in

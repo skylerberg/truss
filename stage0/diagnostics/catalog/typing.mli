@@ -148,6 +148,41 @@ type t =
   | Trait_cycle of { at : Core.origin }
   | Restated_requires of { at : Core.origin; name : string; declared_by : string }
   | Restated_decreases of { at : Core.origin; name : string; declared_by : string }
+  | Restated_modifies of { at : Core.origin; name : string; declared_by : string }
+  | Indexed_modified_part of { at : Core.origin }
+  | Not_a_modified_part of { at : Core.origin }
+  | Modified_non_parameter of { at : Core.origin; name : string }
+  | Modified_whole_parameter of { at : Core.origin; parameter : string }
+  | Read_only_part of { at : Core.origin; parameter : string; fields : string list }
+  | Repeated_part of {
+      at : Core.origin;
+      parameter : string;
+      fields : string list;
+      container : string list;
+      siblings : Core.origin Description.siblings;
+    }
+  | Fieldless_part of {
+      at : Core.origin;
+      parameter : string;
+      prefix : string list;
+      fields : string list;
+      type_ : Types.ty;
+      has_variants : bool;
+    }
+  | Opaque_part of { at : Core.origin; type_ : Types.ty }
+  | Unknown_part_field of {
+      at : Core.origin;
+      type_ : Types.ty;
+      field : string;
+      candidates : string list;
+    }
+  | Impl_modifies of {
+      at : Core.origin;
+      name : string;
+      parameter : string;
+      fields : string list;
+      trait : string;
+    }
   | Restated_default of { at : Core.origin; name : string; declared_by : string }
   | Restated_body of { at : Core.origin; name : string; declared_by : string }
   | Redeclared_method of {

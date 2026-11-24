@@ -90,9 +90,9 @@ Reserved everywhere:
 ```text
 assert break capability concurrent continue cost decreases derives echo else
 ensures exists false fn for forall if impl in indirect internal invariant is law
-lends let match mut opaque own parallel proof provide public requires return self
-Self test theorem todo trait true type unless unreachable use uses var when
-while with
+lends let match modifies mut opaque own parallel proof provide public requires
+return self Self test theorem todo trait true type unless unreachable use uses
+var when while with
 ```
 
 Reserved for later use, and an error if written:
@@ -872,7 +872,9 @@ clause               = "uses" capability_use { "," capability_use }
                      | "requires" expression [ "when" condition ]
                      | "ensures" expression [ "when" condition ]
                      | "decreases" expression { "," expression } [ "when" condition ]
+                     | "modifies" field_path { "," field_path }
                      | "cost" cost [ "when" condition ] ;
+field_path           = ( LOWER_NAME | "self" ) "." LOWER_NAME { "." LOWER_NAME } ;
 capability_use       = capability_reference [ "unless" unless_condition ] ;
 capability_list      = capability_reference { "," capability_reference } ;
 capability_reference = path_type
@@ -901,6 +903,7 @@ public fn binary_search[Element: Ordered](sorted: Slice[Element], target: Elemen
 | `requires` | A precondition, proven at every call | Any |
 | `ensures` | A postcondition, proven for the body | Any |
 | `decreases` | A measure that proves recursion ends | At most one |
+| `modifies` | The parts of `mut` parameters that the function changes. Without it, every part of a `mut` parameter may change. | At most one |
 | `cost` | A proven bound on a resource | Any |
 
 - Repeated clauses all hold. Each `requires` may rely on the `requires`
@@ -912,9 +915,9 @@ public fn binary_search[Element: Ordered](sorted: Slice[Element], target: Elemen
 - No clause is evaluated when the program runs.
 - `Self.Uses` and `Source.Uses` name an associated capability set (see
   [Associated capability sets](#associated-capability-sets)).
-- Every clause but `uses` can end with `when` and a condition, and each
-  capability in `uses` with `unless` and a condition (see
-  [Conditions](#conditions)).
+- Every clause but `uses` and `modifies` can end with `when` and a
+  condition, and each capability in `uses` with `unless` and a condition
+  (see [Conditions](#conditions)).
 
 ### Conditions
 
@@ -1010,6 +1013,65 @@ public fn Option[Value].expect(own self, message: StringSlice) -> Value
   the value reaches is chosen when the program runs. A capability's method,
   a written function type, and a `when` condition take no condition on
   values.
+
+### Changed parts
+
+```truss
+type Reader(text: String, position: UInt64, lines: UInt64)
+  invariant position <= text.length()
+
+fn Reader.skip_spaces(mut self)
+  modifies self.position
+  ensures old(self.position) <= self.position
+{
+  while self.position < self.text.length() && self.text.byte(self.position) == 32
+    invariant old(self.position) <= self.position
+  {
+    self.position += 1
+  }
+}
+
+fn Reader.start_word(mut self) -> UInt64
+  modifies self.position
+  ensures self.lines == old(self.lines)
+{
+  mut self.skip_spaces()
+  self.position
+}
+```
+
+- **`modifies` names the parts of `mut` parameters that a function
+  changes.** A part is a `mut` parameter or `self` followed by one or more
+  field names, such as `self.position` or `cursor.region.stop`. The fields
+  are those of record types: an element of a collection and a field of a
+  variant are not fixed parts, so the clause names the field that holds
+  them.
+- **Every other part of a parameter that the clause names keeps its
+  value.** `start_word` ensures that `lines` is unchanged although
+  `skip_spaces` states nothing of it: a caller's proof keeps what it knew of
+  every part that the callee does not name.
+- **A `mut` parameter that the clause does not name may change in every
+  part,** as every `mut` parameter of a function without `modifies` may.
+- **The body changes only the parts named.** An assignment changes its
+  target. A `mut` argument, a `mut` binding, a `mut` loop variable, and a
+  part lent `mut` change their place, and a call of a function with
+  `modifies` changes the parts that it names of its arguments. A change
+  outside the clause is an error, since the proofs of the callers take
+  every other part to keep its value.
+- **A part that the clause names and the body never changes is a
+  warning,** since the proofs of the callers do not learn that the part
+  keeps its value. Where no part of a parameter that the clause names
+  changes, the parameter need not be `mut`. A trait's method is not
+  checked, since its clause bounds what every implementation changes, and
+  neither is a body with a `todo`.
+- A caller that cannot see the fields of a parameter's type, because the
+  type is opaque in another package, takes every part of the argument as
+  changed.
+- **An `impl`'s method changes only the parts that its trait's method names
+  for each parameter.** Its own `modifies` can name fewer, and without one
+  it has the trait's.
+- A function type has no `modifies`, so a call through a function value
+  changes every part of its `mut` arguments.
 
 ### Termination
 
@@ -1976,6 +2038,12 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
 - A `while` whose condition is the literal `true`, and that no `break`
   exits, has type `Never`.
 - `invariant` holds at the start of every iteration and when the loop ends.
+- **A loop's proof keeps every part that its body does not change.** The
+  body changes the places that it assigns, passes `mut`, and lends `mut`,
+  and the parts that its callees' `modifies` clauses name. At the start of
+  an iteration, the proof knows of a changed part only what the invariants
+  state: a loop that assigns `reader.position` keeps what the proof knew of
+  `reader.lines`.
 - `decreases` names an integer measure that every iteration makes smaller
   and that never goes below zero. It holds in every function, including
   one that uses `RunForever`. A `while` compares its measure before each

@@ -97,6 +97,26 @@ let calls_update_step (context : State.context) (invocation : Invocation.t) =
       | None -> false)
   | Trait_method _ | Capability_method _ | Intrinsic _ | Indirect _ -> false
 
+let havoc_mut context (frame : State.frame) (values : State.passed list) ~is_update_step
+    ~list_modified =
+  List.fold_left
+    (fun (frame : State.frame) (passed : State.passed) ->
+      match (passed.mode, passed.passed_place) with
+      | Language.Mode.Mut, Some place ->
+          if is_update_step && passed.position = 0 then place.note_changed_in_place ();
+          let arrive ty = Facts.arrive context frame "changed" ty in
+          let changed =
+            Option.bind (list_modified passed.position) (fun field_paths ->
+                List.fold_left
+                  (fun whole fields ->
+                    Option.bind whole (fun whole ->
+                        Validity.replace_part context passed.type_ whole fields arrive))
+                  (Some passed.term) field_paths)
+          in
+          place.write frame (match changed with Some term -> term | None -> arrive passed.type_)
+      | _ -> frame)
+    frame values
+
 let list_structural_parameters context (frame : State.frame) (clauses : State.clauses) =
   List.concat
     (List.mapi
@@ -149,7 +169,7 @@ let add_restated_clauses (context : State.context) ~self_type ~bind trait name r
 
 let call_contract context (frame : State.frame) (site : Invocation.site) (invocation : Invocation.t)
     path (contract : State.contract) (values : State.passed list) ~recursive_callee ~lent_final
-    ~havoc_mut ~substitution_of ~type_arguments =
+    ~substitution_of ~type_arguments =
   let substitution_of (clauses : State.clauses) =
     Types.combine_substitutions (substitution_of clauses) clauses.bindings
   in
@@ -351,7 +371,11 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
              snd (Validity.read_specification context (read_entry_frame clauses) requirement))
            (Facts.list_clauses clauses.requires))
   in
-  let after = havoc_mut frame in
+  let after =
+    havoc_mut context frame values
+      ~is_update_step:(calls_update_step context invocation)
+      ~list_modified:(Contracts.list_modified_fields context path)
+  in
   let in_quantifier = is_logic_call && frame.binders <> [] in
   let state term =
     if in_quantifier then Facts.add_frame_fact context after term
@@ -942,15 +966,8 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
             Lambdas.check_valid context frame location passed.type_ passed.term ~deep:true
               ~moment:(When_passed { at = location; callee = None }))
         values);
-  let havoc_mut frame =
-    List.fold_left
-      (fun frame (passed : State.passed) ->
-        match (passed.mode, passed.passed_place) with
-        | Language.Mode.Mut, Some place ->
-            if is_update_step && passed.position = 0 then place.note_changed_in_place ();
-            place.write frame (Facts.arrive context frame "changed" passed.type_)
-        | _ -> frame)
-      frame values
+  let havoc_whole_arguments frame =
+    havoc_mut context frame values ~is_update_step ~list_modified:(fun _ -> None)
   in
   let list_arguments (type_arguments : Types.argument list) =
     List.map
@@ -993,9 +1010,12 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
     | Some contract ->
         By_contract
           (call_contract ~recursive_callee ~lent_final:leave_lent context frame site invocation path
-             contract values ~havoc_mut ~substitution_of ~type_arguments)
+             contract values ~substitution_of ~type_arguments)
     | None ->
-        let frame = havoc_mut frame in
+        let frame =
+          havoc_mut context frame values ~is_update_step
+            ~list_modified:(Contracts.list_modified_fields context path)
+        in
         let frame =
           Operations.spend context frame
             (Amounts.compute_step_amount context frame invocation values)
@@ -1087,7 +1107,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
                  (Contracts.find_method_contract context trait name receiver evidence)))
     | Indirect () ->
         Laws.check_callback_requires context frame site through values;
-        let frame = havoc_mut frame in
+        let frame = havoc_whole_arguments frame in
         let frame =
           match through with
           | _ when context.counters = [] -> frame
@@ -1146,7 +1166,7 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
         let frame =
           match operation with
           | Lend _ -> frame
-          | Scalar _ | Buffer _ | Runtime _ -> havoc_mut frame
+          | Scalar _ | Buffer _ | Runtime _ -> havoc_whole_arguments frame
         in
         let changed =
           List.map

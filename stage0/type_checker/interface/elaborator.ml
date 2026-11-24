@@ -873,6 +873,93 @@ let report_time_of_parameters_that_run_forever context ~(parameters : Types.para
       | _ -> ())
     clauses
 
+let rec split_field_path (value : Syntax.expression) =
+  match value.kind with
+  | Name name -> Some (name.text, [])
+  | Self_value -> Some ("self", [])
+  | Member (base, field) ->
+      Option.map (fun (root, fields) -> (root, fields @ [ field ])) (split_field_path base)
+  | _ -> None
+
+let elaborate_modifies context (signature : Types.signature) (clauses : Syntax.clause list) =
+  let report diagnostic = ignore (record_diagnostic context.diagnostics diagnostic) in
+  let rec has_index (value : Syntax.expression) =
+    match value.kind with
+    | Bracket _ -> true
+    | Member (base, _) | Call (base, _) | Parenthesized base -> has_index base
+    | _ -> false
+  in
+  let rec is_resolved (value : Syntax.expression) =
+    match value.kind with
+    | Name name -> Option.is_some (find_target context name)
+    | Member (base, _) -> is_resolved base
+    | _ -> true
+  in
+  let elaborate_entry (value : Syntax.expression) =
+    let at : Core.origin = Written value.id in
+    match split_field_path value with
+    | None ->
+        report
+          (if has_index value then Indexed_modified_part { at } else Not_a_modified_part { at });
+        None
+    | Some (parameter, names) -> (
+        let fields = List.map (fun (name : Syntax.name) -> name.text) names in
+        match Types.find_parameter_position signature parameter with
+        | None ->
+            if is_resolved value then report (Modified_non_parameter { at; name = parameter });
+            None
+        | Some position when (Types.read_parameter_at signature position).mode <> Mut ->
+            report (Read_only_part { at; parameter; fields });
+            None
+        | Some _ when fields = [] ->
+            report (Modified_whole_parameter { at; parameter });
+            None
+        | Some position -> Some (value, parameter, { Types.position; field_path = fields }))
+  in
+  let is_contained ~index (part : Types.modified) ~other_index (other : Types.modified) =
+    other_index <> index && other.position = part.position
+    && Types.is_field_path_prefix other.field_path part.field_path
+    && (other.field_path <> part.field_path || other_index < index)
+  in
+  List.concat_map
+    (fun (clause : Syntax.clause) ->
+      match clause.kind with
+      | Modifies entries -> (
+          let entry_parts = List.map elaborate_entry entries in
+          match List.filter_map Fun.id entry_parts with
+          | parts when List.length parts < List.length entry_parts -> []
+          | parts ->
+              let numbered_parts = List.mapi (fun index part -> (index, part)) parts in
+              List.filter_map
+                (fun (index, ((value : Syntax.expression), parameter, (part : Types.modified))) ->
+                  match
+                    List.find_map
+                      (fun (other_index, (_, _, other)) ->
+                        if is_contained ~index part ~other_index other then Some other else None)
+                      numbered_parts
+                  with
+                  | Some (container : Types.modified) ->
+                      report
+                        (Repeated_part
+                           {
+                             at = Written value.id;
+                             parameter;
+                             fields = part.field_path;
+                             container = container.field_path;
+                             siblings =
+                               Catalog.read_entry_siblings
+                                 (List.map
+                                    (fun (entry : Syntax.expression) ->
+                                      { Catalog.covering = [ Core.Written entry.id ] })
+                                    entries)
+                                 index;
+                           });
+                      None
+                  | None -> Some part)
+                numbered_parts)
+      | Uses _ | Requires _ | Ensures _ | Decreases _ | Cost _ | Clause_error -> [])
+    clauses
+
 let elaborate_signature context ~owner ~head ~self_type (written : Syntax.signature) :
     Types.signature =
   let own = elaborate_generics context owner written.generics in
@@ -908,29 +995,33 @@ let elaborate_signature context ~owner ~head ~self_type (written : Syntax.signat
   let uses = elaborate_uses context written.clauses in
   report_time_of_run_forever context ~uses written.clauses;
   report_time_of_parameters_that_run_forever context ~parameters written.clauses;
-  {
-    generics = generics_;
-    capability_parameters =
-      Array.fold_left
-        (fun listed -> function
-          | Some (Resolve.Capability_parameter (parameter : Types.parameter))
-            when Path.equal parameter.owner owner && not (List.mem parameter listed) ->
-              listed @ [ parameter ]
-          | _ -> listed)
-        [] context.resolved.names;
-    receiver;
-    parameters;
-    output;
-    uses;
-    costs = list_constant_costs written.clauses;
-    specification_only =
-      Well_known.is Model owner
-      || Types.mentions_specification_only_type parameters output
-      || Option.is_some
-           (Option.bind receiver (fun (_, self) -> Types.find_specification_only_type self));
-    is_update_step = false;
-    capture_free_parameters = Types.list_capture_free_parameters parameters;
-  }
+  let signature : Types.signature =
+    {
+      generics = generics_;
+      capability_parameters =
+        Array.fold_left
+          (fun listed -> function
+            | Some (Resolve.Capability_parameter (parameter : Types.parameter))
+              when Path.equal parameter.owner owner && not (List.mem parameter listed) ->
+                listed @ [ parameter ]
+            | _ -> listed)
+          [] context.resolved.names;
+      receiver;
+      parameters;
+      output;
+      uses;
+      costs = list_constant_costs written.clauses;
+      modifies = [];
+      specification_only =
+        Well_known.is Model owner
+        || Types.mentions_specification_only_type parameters output
+        || Option.is_some
+             (Option.bind receiver (fun (_, self) -> Types.find_specification_only_type self));
+      is_update_step = false;
+      capture_free_parameters = Types.list_capture_free_parameters parameters;
+    }
+  in
+  { signature with modifies = elaborate_modifies context signature written.clauses }
 
 let elaborate_type_head context owner (head : Syntax.type_head) =
   let generics = elaborate_generics context owner head.generics in
@@ -1432,6 +1523,7 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
                      output = Returns Types.unit;
                      uses = elaborate_capabilities context uses;
                      costs = [];
+                     modifies = [];
                      specification_only = false;
                      is_update_step = false;
                      capture_free_parameters = [];

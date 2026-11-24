@@ -61,6 +61,12 @@ let describe_call (origin : Core.origin) =
       | Derived -> [ Text "the call that the derived `"; quote origin; Text "` makes" ]
       | Rewrite | Try -> [ Text "the call that `"; quote origin; Text "` makes" ])
 
+let show_field_path parameter fields = String.concat "." (parameter :: fields)
+
+let show_function_name : Path.t -> string = function
+  | Top { name; _ } | Method { name; _ } -> name
+  | path -> Path.show path
+
 let example_names =
   [
     "amount";

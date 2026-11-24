@@ -10,13 +10,14 @@ type expected =
   | Function_type_clauses_end
   | Calls_target_end
   | Uses_separator
+  | Modifies_separator
   | Self_capability_set
   | Type_arguments_end
   | Capability_member
   | Trait_member
   | Impl_member
   | Potential_word
-  | Function_type_clause
+  | Function_type_clause of Token.keyword
   | Body_start
   | Cost_bound
   | Resource
@@ -148,6 +149,7 @@ type problem =
   | Lends_own
   | Repeated_uses
   | Repeated_decreases
+  | Repeated_modifies
   | Repeated_loop_decreases
   | Missing_body
   | One_field_tuple

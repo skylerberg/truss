@@ -16,6 +16,8 @@ val list_spelling_fixes : Core.origin -> written:string -> string list -> node f
 val write_hidden : Path.t -> Language.Visibility.t -> string
 val describe_call : Core.origin -> node piece list
 val add_lines_after : Core.origin -> node piece list list -> node edit
+val show_field_path : string -> string list -> string
+val show_function_name : Path.t -> string
 val example_names : string list
 val example : string -> Core.origin
 val find_example_name : Core.origin -> string option

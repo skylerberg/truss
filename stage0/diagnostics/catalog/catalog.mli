@@ -56,6 +56,7 @@ type description = node t
 
 val make_reported : _ t -> Diagnostic.reported
 val find_example_name : Core.origin -> string option
+val read_entry_siblings : Core.origin range list -> int -> Core.origin siblings
 
 module Usage : module type of struct
   include Usage

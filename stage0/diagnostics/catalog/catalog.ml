@@ -52,6 +52,14 @@ type node = Nodes.node =
 type description = node t
 
 let find_example_name = Build.find_example_name
+
+let read_entry_siblings (entries : Core.origin range list) index : Core.origin siblings =
+  match (index, entries) with
+  | 0, _ :: next :: _ -> Next next
+  | 0, ([] | [ _ ]) ->
+      Compiler_bug.raise_bug ~stage:"Catalog" "the siblings of the only entry of a list"
+  | _, _ -> Previous (List.nth entries (index - 1))
+
 let make_reported (_ : _ t) = Diagnostic.reported_elsewhere
 
 module Usage = Usage

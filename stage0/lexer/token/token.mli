@@ -26,6 +26,7 @@ type keyword =
   | Lends
   | Let
   | Match
+  | Modifies
   | Mut
   | Opaque
   | Own

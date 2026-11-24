@@ -12,6 +12,8 @@ type value =
   | Compiler_local
   | Lent_part
 
+type changed_part = { root : value; fields : string list }
+
 type invariant_moment =
   | When_lend_ends
   | When_passed of call
@@ -57,7 +59,7 @@ type unbounded =
       editable : Path.t list;
       counts_units : bool;
     }
-  | Changing_cost of { is_amortized : bool; call : quoted; values : value list }
+  | Changing_cost of { is_amortized : bool; call : quoted; values : changed_part list }
   | Unbounded_iteration
 
 type promiser = Trait_promiser | Capability_promiser

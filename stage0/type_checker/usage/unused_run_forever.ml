@@ -26,8 +26,7 @@ let find_siblings (signature : Syntax.signature) (clause : Syntax.clause) uses i
     Core.origin Catalog.siblings =
   match uses with
   | [ _ ] -> Alone { clause = Written clause.id; is_only_clause = signature.clauses = [ clause ] }
-  | _ when index = 0 -> Next (cover_use (List.nth uses 1))
-  | _ -> Previous (cover_use (List.nth uses (index - 1)))
+  | _ -> Catalog.read_entry_siblings (List.map cover_use uses) index
 
 let list_run_forever_entries (signature : Syntax.signature) =
   List.concat_map
@@ -38,7 +37,7 @@ let list_run_forever_entries (signature : Syntax.signature) =
             (List.mapi
                (fun index use -> if names_run_forever use then [ (clause, uses, index) ] else [])
                uses)
-      | Requires _ | Ensures _ | Decreases _ | Cost _ | Clause_error -> [])
+      | Requires _ | Ensures _ | Decreases _ | Modifies _ | Cost _ | Clause_error -> [])
     signature.clauses
 
 let find (lookups : Lookups.t) (key : Resolve.Names.key) (definition : Syntax.definition) =

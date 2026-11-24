@@ -374,6 +374,9 @@ let check_restated (state : Checking.state) (signature : Syntax.signature) ~has_
           | Decreases _ ->
               Checking.report state
                 (Restated_decreases { at = Written clause.id; name = name.text; declared_by })
+          | Modifies _ ->
+              Checking.report state
+                (Restated_modifies { at = Written clause.id; name = name.text; declared_by })
           | Ensures _ | Cost _ | Uses _ | Clause_error -> ())
         signature.clauses;
       if Impl_checks.has_default original then
@@ -477,6 +480,62 @@ let check_proof_bounds (state : Checking.state) (written : Syntax.type_head)
       (List.combine generics impl.impl_generics)
   end
 
+let check_modifies (state : Checking.state) (written : Syntax.signature)
+    (signature : Types.signature) =
+  let package = Path.locate_package state.key.path in
+  let check_entry (value : Syntax.expression) =
+    match Elaborator.split_field_path value with
+    | None -> ()
+    | Some (parameter, names) -> (
+        let fields = List.map (fun (name : Syntax.name) -> name.text) names in
+        match Types.find_parameter_position signature parameter with
+        | Some position when List.mem { Types.position; field_path = fields } signature.modifies
+          -> (
+            match
+              Definition.find_field_path_type state.lookups ~package
+                (Types.read_parameter_at signature position).type_ fields
+            with
+            | Ok _ | Error Broken_type -> ()
+            | Error (No_fields { type_; prefix }) ->
+                Checking.report state
+                  (Fieldless_part
+                     {
+                       at = Written value.id;
+                       parameter;
+                       prefix;
+                       fields;
+                       type_;
+                       has_variants = false;
+                     })
+            | Error (Variant_fields { type_; prefix }) ->
+                Checking.report state
+                  (Fieldless_part
+                     {
+                       at = Written value.id;
+                       parameter;
+                       prefix;
+                       fields;
+                       type_;
+                       has_variants = true;
+                     })
+            | Error (Hidden_fields type_) ->
+                Checking.report state (Opaque_part { at = Written value.id; type_ })
+            | Error (Unknown_field { type_; field; candidates }) ->
+                let at : Core.origin =
+                  match List.find_opt (fun (name : Syntax.name) -> name.text = field) names with
+                  | Some name -> Written name.id
+                  | None -> Written value.id
+                in
+                Checking.report state (Unknown_part_field { at; type_; field; candidates }))
+        | Some _ | None -> ())
+  in
+  List.iter
+    (fun (clause : Syntax.clause) ->
+      match clause.kind with
+      | Modifies entries -> List.iter check_entry entries
+      | Uses _ | Requires _ | Ensures _ | Decreases _ | Cost _ | Clause_error -> ())
+    written.clauses
+
 let check (state : Checking.state) =
   let lookups = state.lookups in
   let definition = state.definition in
@@ -484,6 +543,11 @@ let check (state : Checking.state) =
   let is_broken part = Resolve.Names.is_broken lookups.names state.key part in
   check_bounds state;
   let resolved = lookups.read_resolved Interface state.key in
+  (match (definition.kind, state.elaborated.interface) with
+  | (Function { signature; _ } | Method_declaration signature), Function_interface written
+    when not (is_broken Header) ->
+      check_modifies state signature written
+  | _ -> ());
   if not (is_broken Header) then
     match (lookups.names.find_container state.key, definition.kind, state.elaborated.interface) with
     | ( Some container,

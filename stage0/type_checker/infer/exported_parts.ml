@@ -26,7 +26,7 @@ let check_clauses (state : State.state) (name : Syntax.name) clauses =
       (fun (clause : Syntax.clause) ->
         match clause.kind with
         | Requires _ | Cost _ -> Some (State.read_span state clause.id)
-        | Ensures _ | Uses _ | Decreases _ | Clause_error -> None)
+        | Ensures _ | Uses _ | Decreases _ | Modifies _ | Clause_error -> None)
       clauses
   in
   if is_called_from_other_packages state && requires_and_costs <> [] then begin

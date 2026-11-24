@@ -5,6 +5,23 @@ include Walk
 include Parts
 
 let expand_formula = Expansion.expand_formula
+
+let list_callee_modified_fields ~read_signature (lookups : Interface.Lookups.t) substitution
+    (callee : Tree.callee) position =
+  let path : Path.t option =
+    match callee.target with
+    | Function { path; _ } -> Some path
+    | Trait_method { trait; name; receiver; evidence; self_type; _ } -> (
+        match Interface.Impls.resolve_evidence lookups substitution ~self_type ~trait evidence with
+        | Impl { impl; _ } -> Some (Method { owner = impl; name; receiver })
+        | Bound -> Some (Method { owner = trait.trait; name; receiver }))
+    | Capability_method { capability; name } -> Some (Path.make_capability_method capability name)
+    | Intrinsic _ | Indirect _ -> None
+  in
+  Option.bind path (fun path ->
+      Option.bind (read_signature path) (fun signature ->
+          Types.list_modified_fields signature position))
+
 let make_code tree : Parts.code = { tree; graph = Expansion.expand tree }
 
 let make_body_part ?interface (form : Core.t) : body_part =

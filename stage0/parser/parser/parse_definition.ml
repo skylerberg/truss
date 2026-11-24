@@ -145,6 +145,7 @@ let parse_clauses cursor =
       | Uses _ -> reject_repeated (function Uses _ -> true | _ -> false) Repeated_uses
       | Decreases _ ->
           reject_repeated (function Decreases _ -> true | _ -> false) Repeated_decreases
+      | Modifies _ -> reject_repeated (function Modifies _ -> true | _ -> false) Repeated_modifies
       | _ -> ());
       gather (clause :: clauses)
   in

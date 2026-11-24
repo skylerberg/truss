@@ -177,6 +177,8 @@ type parameter_info = { name : string; mode : Language.Mode.t; type_ : ty; has_d
 val list_capture_free_parameters : parameter_info list -> string list
 val mentions_specification_only_type : parameter_info list -> result -> bool
 
+type modified = { position : int; field_path : string list }
+
 type signature = {
   generics : generic list;
   capability_parameters : parameter list;
@@ -185,10 +187,16 @@ type signature = {
   output : result;
   uses : capability_set;
   costs : cost list;
+  modifies : modified list;
   specification_only : bool;
   is_update_step : bool;
   capture_free_parameters : string list;
 }
+
+val is_field_path_prefix : string list -> string list -> bool
+val find_parameter_position : signature -> string -> int option
+val read_parameter_at : signature -> int -> parameter_info
+val list_modified_fields : signature -> int -> string list list option
 
 type instantiation = {
   type_arguments : argument list;

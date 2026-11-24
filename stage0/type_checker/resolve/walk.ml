@@ -401,6 +401,7 @@ and resolve_clause state scope (clause : Syntax.clause) =
            :: (if scope.is_lending_method then [ ("final", Meaning Final) ] else [])))
         value
   | Decreases measures -> List.iter (resolve_expression state (enter_specification scope)) measures
+  | Modifies parts -> List.iter (resolve_expression state scope) parts
   | Cost cost -> resolve_cost state scope ~clause_words:[] cost
   | Clause_error -> ()
 
@@ -908,7 +909,7 @@ and list_used_generic_capabilities (clauses : Syntax.clause list) =
             (fun (use : Syntax.capability_use) ->
               match use.capability.kind with Generic_capability name -> Some name | _ -> None)
             uses
-      | Requires _ | Ensures _ | Decreases _ | Cost _ | Clause_error -> [])
+      | Requires _ | Ensures _ | Decreases _ | Modifies _ | Cost _ | Clause_error -> [])
     clauses
 
 let declare_capability_parameters state scope ~(owner : Path.t)
@@ -1012,7 +1013,7 @@ let resolve_clauses state scope (clauses_ : Syntax.clause list) =
       match clause_.kind with
       | Requires _ | Ensures _ | Decreases _ ->
           run_in_section state Contract (fun () -> resolve_clause state scope clause_)
-      | Uses _ | Cost _ | Clause_error -> resolve_clause state scope clause_)
+      | Uses _ | Modifies _ | Cost _ | Clause_error -> resolve_clause state scope clause_)
     clauses_
 
 let resolve_signature state scope ~owner ~(broken : bool) (signature_ : Syntax.signature) =

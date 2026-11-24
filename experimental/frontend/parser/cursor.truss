@@ -198,8 +198,7 @@ fn TokenCursor.is_lower_named(self, kind: token.Kind, text: StringSlice) -> Bool
 
 fn record_syntax_error(cursor: mut TokenCursor, span: source.Span)
   uses Panic
-  ensures cursor.index == old(cursor.index)
-  ensures cursor.region.stop == old(cursor.region.stop)
+  modifies cursor.syntax_errors
 {
   let recorded = if span.start == span.stop && cursor.index > cursor.region.first {
     let previous_start = cursor.lookup_token(cursor.index - 1).span.start
@@ -212,7 +211,7 @@ fn record_syntax_error(cursor: mut TokenCursor, span: source.Span)
 
 fn advance(cursor: mut TokenCursor)
   uses Panic
-  ensures cursor.region.stop == old(cursor.region.stop)
+  modifies cursor.region.after_inserted_closer, cursor.index, cursor.syntax_errors
   ensures cursor.index >= old(cursor.index)
   ensures old(cursor.index) < cursor.region.stop ==> cursor.index == old(cursor.index) + 1
 {
@@ -486,7 +485,7 @@ fn TokenCursor.find_angle_closer(self) -> Option[UInt64]
 
 fn skip_to(cursor: mut TokenCursor, limit: UInt64)
   uses Panic
-  ensures cursor.region.stop == old(cursor.region.stop)
+  modifies cursor.region.after_inserted_closer, cursor.index, cursor.syntax_errors
   ensures cursor.index >= old(cursor.index)
   ensures cursor.index >= limit || cursor.index >= cursor.region.stop
 {
@@ -494,7 +493,6 @@ fn skip_to(cursor: mut TokenCursor, limit: UInt64)
   let bound = if limit < stop { limit } else { stop }
   let start = cursor.index
   while cursor.index < bound
-    invariant cursor.region.stop == stop
     invariant cursor.index >= start
   {
     advance(mut cursor)
@@ -503,7 +501,7 @@ fn skip_to(cursor: mut TokenCursor, limit: UInt64)
 
 fn skip_one(cursor: mut TokenCursor)
   uses Panic
-  ensures cursor.region.stop == old(cursor.region.stop)
+  modifies cursor.region.after_inserted_closer, cursor.index, cursor.syntax_errors
   ensures old(cursor.index) < cursor.region.stop ==> cursor.index > old(cursor.index)
 {
   if cursor.index < cursor.region.stop {
