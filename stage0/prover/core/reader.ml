@@ -201,18 +201,6 @@ let read_place context frame run (place : Mir.place) =
             later
       | [] -> Facts.raise_bug "a place that is no place")
 
-let replace_field context ty variant field whole new_value =
-  match Option.bind (Facts.find_constructors context ty) (List.assoc_opt variant) with
-  | Some fields ->
-      Logic.Apply
-        ( Facts.make_constructor_symbol ty variant,
-          List.map
-            (fun (name, _) ->
-              if name = field then new_value
-              else Validity.select_field context ty variant name whole)
-            fields )
-  | None -> Facts.raise_unsupported Whole_definition "the fields of `%s`" (Types.show ty)
-
 let write_resolved context frame run (place : Mir.place) new_value =
   let rec rebuild prefix whole = function
     | [] -> new_value
@@ -225,7 +213,7 @@ let write_resolved context frame run (place : Mir.place) new_value =
         let rebuilt part = rebuild (prefix @ [ projection ]) part rest in
         let replace_part variant field =
           let part = Values.project_field context frame base_type variant field part_type whole in
-          replace_field context base_type variant field whole (rebuilt part)
+          Validity.replace_field context base_type variant field whole (rebuilt part)
         in
         match projection with
         | Field field -> replace_part None field
@@ -298,91 +286,44 @@ let write_place context frame run (place : Mir.place) new_value =
                   | _ -> written)))
         frame alternatives
 
-let list_mut_provided_places (provided : Mir.provided list) =
-  List.filter_map
-    (fun (implementation : Mir.provided) ->
-      match (implementation.mode, implementation.value) with
-      | Language.Mode.Mut, Borrow { place; _ } -> Some place
-      | Mut, (Use _ | Take _ | Immediate _) | (Read | Own), _ -> None)
-    provided
-
-let compute_changes ?(also = []) run (frame : State.frame) (blocks : Mir.block list) : State.changed
-    =
-  let locals = ref [] and self = ref false and reassigned = ref [] in
-  let note (place : Mir.place) =
-    List.iter
+let compute_changes ?(also = []) context run (frame : State.frame) (blocks : Mir.block list) =
+  let is_bound : Locals.local -> bool = function
+    | Core_local Self -> Option.is_some frame.self
+    | key -> Locals.mem key frame.locals
+  in
+  let list_parts (place : Mir.place) =
+    List.filter_map
       (fun (_, (place : Mir.place)) ->
         match place.Mir.root with
-        | Local local -> (
-            match Locals.make_key run.infos local with
-            | Core_local Self -> self := true
-            | key -> if Locals.mem key frame.locals then locals := key :: !locals)
-        | Constant _ | Literal _ -> ())
+        | Local local ->
+            let root = Locals.make_key run.infos local in
+            if is_bound root then
+              Some { State.root; fields = Mir.list_leading_fields place.Mir.projections }
+            else None
+        | Constant _ | Literal _ -> None)
       (resolve_aliases frame run place)
   in
-  let note_assigned (place : Mir.place) =
-    (match place with
-    | { root = Local local; projections = [] } -> (
-        match Locals.make_key run.infos local with
-        | Core_local Self -> ()
-        | key -> if Locals.mem key frame.locals then reassigned := key :: !reassigned)
-    | _ -> ());
-    note place
+  let parts =
+    List.sort_uniq compare
+      (List.concat_map
+         (fun (_, place) -> list_parts place)
+         (Mir.list_changed_places
+            ~list_modified:
+              (Mir.list_callee_modified_fields
+                 ~read_signature:(Contracts.read_signature context)
+                 context.lookups.interface frame.substitution)
+            blocks)
+      @ List.concat_map list_parts also)
   in
-  let note_passed (call : Mir.call) =
-    List.iter
-      (fun (argument : Mir.argument) ->
-        match argument with
-        | { mode = Language.Mode.Mut; value = Borrow { place; _ } | Use { place; _ }; _ } ->
-            note place
-        | { mode = Mut; value = Take _ | Immediate _; _ } | { mode = Read | Own; _ } -> ())
-      call.arguments
-  in
-  let rec note_lent : Mir.yielded -> unit = function
-    | Part (Borrow { place; _ }) -> note place
-    | Part _ -> ()
-    | Built { fields; _ } -> List.iter (fun (_, field) -> Option.iter note_lent field) fields
-  in
-  let rec visit (block : Mir.block) =
-    List.iter
-      (fun (statement : Mir.statement) ->
-        (match statement.kind with
-        | Basic
-            (Assign { target; value = Operand (Borrow { place; mode = Language.Mode.Mut; _ }); _ })
-          ->
-            note target;
-            note place
-        | Basic (Assign { target; _ }) | Choose { target; _ } -> note_assigned target
-        | Basic (Call { destination; call }) ->
-            Option.iter note_assigned destination;
-            note_passed call
-        | Basic (Lend { call; _ }) -> note_passed call
-        | Provide { target; provided; _ } ->
-            note_assigned target;
-            List.iter note (list_mut_provided_places provided)
-        | For { iteration = Pull { cursor; _ }; _ } -> note cursor
-        | Yield { mode = Language.Mode.Mut; part } -> note_lent part
-        | Jump (Cancel { winner; returned; _ }) ->
-            note { root = Local winner; projections = [] };
-            Option.iter (fun (_, local) -> note { root = Local local; projections = [] }) returned
-        | Basic
-            ( Live _ | Dead _ | Assert _ | Echo _ | Loan_start _ | Loan_end _ | Ghost_assert _
-            | Path_note _ | Proof _ | Evaluated_assert _ )
-        | Assert_by_bit_vector _ | While _ | Fork _ | Resume _
-        | For { iteration = Range _; _ }
-        | Yield { mode = Read | Own; _ }
-        | Jump (Return _ | Break | Continue | Unreachable | Written_unreachable | Todo) ->
-            ());
-        List.iter visit (Mir.list_nested_blocks statement))
-      block.statements
-  in
-  List.iter visit blocks;
-  List.iter note also;
-  {
-    changed_locals = List.sort_uniq compare !locals;
-    changes_self = !self && frame.self <> None;
-    reassigned = List.sort_uniq compare !reassigned;
-  }
+  List.filter
+    (fun (part : State.changed_part) ->
+      not
+        (List.exists
+           (fun (other : State.changed_part) ->
+             other <> part && other.root = part.root
+             && Types.is_field_path_prefix other.fields part.fields)
+           parts))
+    parts
 
 let read_operand context frame run (operand : Mir.operand) =
   match operand with
@@ -1015,7 +956,7 @@ and read_statement context frame run (statement : Mir.statement) =
               (compute_place_type context frame run root)
               (make_passed_place context run root))
           frame
-          (list_mut_provided_places provided)
+          (Mir.list_mut_provided_places provided)
       in
       let read =
         read_providing context run provided ~refresh (fun () -> read_block context frame run body)
@@ -1098,7 +1039,8 @@ and read_statement context frame run (statement : Mir.statement) =
       in
       let forget_other_branches (index, (exited : State.frame)) =
         Loops.havoc context exited
-          (compute_changes run exited (List.filteri (fun other _ -> other <> index) branches))
+          (compute_changes context run exited
+             (List.filteri (fun other _ -> other <> index) branches))
       in
       let joined =
         Facts.join_frames context (Option.to_list ended @ List.map forget_other_branches exits)
@@ -1132,7 +1074,7 @@ and read_statement context frame run (statement : Mir.statement) =
         {
           while_at = loop.origin;
           while_clauses = Loops.keep_holding_clauses context loop.clauses;
-          changed = compute_changes run frame (Mir.list_nested_blocks statement);
+          changed = compute_changes context run frame (Mir.list_nested_blocks statement);
           bind_parts = (fun frame -> bind_parts context frame run);
           test = (fun head -> read_block context head run condition);
           run_body =
@@ -1240,7 +1182,7 @@ and read_statement context frame run (statement : Mir.statement) =
         let breaks =
           match loop.schedule with
           | Concurrent ->
-              let changed = compute_changes run inside [ loop_bindings; body ] in
+              let changed = compute_changes context run inside [ loop_bindings; body ] in
               List.map
                 (fun exited ->
                   let forgotten = Loops.havoc context exited changed in
@@ -1334,8 +1276,9 @@ and read_statement context frame run (statement : Mir.statement) =
                               { root = Local lent; projections = [] })));
           bind_element;
           compute_changed_in =
-            (fun frame -> compute_changes ~also:iterated run frame [ loop_bindings; body ]);
-          compute_changed_by_body = (fun frame -> compute_changes run frame [ loop_bindings; body ]);
+            (fun frame -> compute_changes ~also:iterated context run frame [ loop_bindings; body ]);
+          compute_changed_by_body =
+            (fun frame -> compute_changes context run frame [ loop_bindings; body ]);
           run_body;
           bind_parts = (fun frame -> bind_parts context frame run);
         }

@@ -139,6 +139,7 @@ and show_clause (clause : Syntax.clause) =
     | Requires value -> make_form "requires" [ show_expression value ]
     | Ensures value -> make_form "ensures" [ show_expression value ]
     | Decreases measures -> make_form "decreases" (list show_expression measures)
+    | Modifies parts -> make_form "modifies" (list show_expression parts)
     | Cost cost_ -> show_cost cost_
     | Clause_error -> "error")
     clause.condition

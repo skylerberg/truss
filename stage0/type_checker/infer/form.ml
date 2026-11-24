@@ -1865,7 +1865,7 @@ let build_contract form env (clauses : Syntax.clause list) : Core.contract =
               (fun (use : Syntax.capability_use) ->
                 List.map (build_expression form env) use.unless_values)
               uses
-        | Requires _ | Ensures _ | Decreases _ | Cost _ | Clause_error -> [])
+        | Requires _ | Ensures _ | Decreases _ | Modifies _ | Cost _ | Clause_error -> [])
       clauses
   in
   { panics_unless; requires; ensures; decreases; costs }

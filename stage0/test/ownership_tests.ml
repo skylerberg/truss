@@ -8,6 +8,93 @@ let expect_fine text = Support.expect_no_diagnostics ~check [ ("app.main", text)
 let keep = Fixtures.Ownership.keep
 
 let () =
+  Harness.test "a body changes only the parts that its modifies clause names" (fun () ->
+      let scanner =
+        "public type Region(first: UInt64, stop: UInt64)\n\
+         public type Scanner(position: UInt64, count: UInt64, region: Region, items: List[UInt64])\n\
+         public fn advance(scanner: mut Scanner)\n\
+        \  modifies scanner.position\n\
+         {\n\
+        \  scanner.position = 0\n\
+         }\n"
+      in
+      expect_fine
+        (scanner
+       ^ "public fn step(scanner: mut Scanner)\n\
+         \  uses Panic\n\
+         \  modifies scanner.position, scanner.region.stop, scanner.items\n\
+          {\n\
+         \  advance(mut scanner)\n\
+         \  scanner.region.stop = 1\n\
+         \  mut scanner.items.push(1)\n\
+         \  for item in mut scanner.items {\n\
+         \    item = 2\n\
+         \  }\n\
+          }\n");
+      let step body =
+        scanner ^ "public fn step(scanner: mut Scanner)\n  modifies scanner.region.stop\n{\n" ^ body
+        ^ "\n}\n"
+      in
+      expect_one_diagnostic (step "  scanner.count = 1") "ownership.undeclared_change"
+        ~says:"`scanner.count` changes here, and the `modifies` clause of `step` does not name it."
+        ~fixed:
+          (scanner
+         ^ "public fn step(scanner: mut Scanner)\n\
+           \  modifies scanner.region.stop, scanner.count\n\
+            {\n\
+           \  scanner.count = 1\n\
+            }\n");
+      expect_one_diagnostic (step "  advance(mut scanner)") "ownership.undeclared_change"
+        ~says:"`scanner.position` changes here";
+      expect_one_diagnostic
+        (step "  scanner.region = Region(first: 0, stop: 0)")
+        "ownership.undeclared_change" ~says:"`scanner.region` changes here";
+      expect_one_diagnostic
+        (scanner
+       ^ "public fn replace(scanner: mut Scanner, other: own Scanner)\n\
+         \  modifies scanner.position\n\
+          {\n\
+         \  scanner = own other\n\
+          }\n")
+        "ownership.undeclared_change" ~says:"All of `scanner` changes here");
+  Harness.test "an impl's method without a modifies clause changes only its trait's parts"
+    (fun () ->
+      expect_one_diagnostic
+        "public type Journal(entries: List[UInt64], total: UInt64)\n\
+         public type Quiet()\n\
+         public trait Recorder {\n\
+        \  fn record(self, log: mut Journal)\n\
+        \    modifies log.entries\n\
+         }\n\
+         impl Recorder for Quiet {\n\
+        \  fn record(self, log: mut Journal) {\n\
+        \    log.total = 1\n\
+        \  }\n\
+         }\n"
+        "ownership.undeclared_change" ~says:"`log.total` changes here");
+  Harness.test "an impl's method keeps its trait's parts of a type opaque to its package" (fun () ->
+      expect_one_diagnostic
+        ~setup:(Support.setup ~dependencies:[ ("app", "lib") ])
+        ~others:
+          [
+            ( "lib.journal",
+              "public opaque type Journal(entries: List[UInt64], total: UInt64)\n\
+               public fn Journal.reset(mut self) {\n\
+              \  self.total = 0\n\
+               }\n\
+               public trait Recorder {\n\
+              \  fn record(self, log: mut Journal)\n\
+              \    modifies log.entries\n\
+               }\n" );
+          ]
+        "use lib.journal\n\
+         public type Quiet()\n\
+         impl journal.Recorder for Quiet {\n\
+        \  fn record(self, log: mut journal.Journal) {\n\
+        \    mut log.reset()\n\
+        \  }\n\
+         }\n"
+        "ownership.undeclared_change" ~says:"All of `log` changes here");
   Harness.test "ranges of a `var` and of a `mut` parameter can be written through" (fun () ->
       expect_fine Fixtures.Ownership.writes_through_ranges_of_a_var_and_a_mut_parameter);
   Harness.test

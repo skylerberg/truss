@@ -57,6 +57,7 @@ let make_signature (operation : Intrinsic.operation) : Types.signature =
       output;
       uses = Types.make_capability_set (list_uses operation);
       costs = [];
+      modifies = [];
       specification_only = false;
       is_update_step = false;
       capture_free_parameters = [];

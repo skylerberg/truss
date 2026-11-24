@@ -36,6 +36,19 @@ let list_types (signature : Types.signature) =
        signature);
   List.rev !types
 
+let find_unallowed_part ~(expected : Types.signature) ~(written : Types.signature) =
+  List.find_map
+    (fun (part : Types.modified) ->
+      match Types.list_modified_fields expected part.position with
+      | Some allowed
+        when not
+               (List.exists
+                  (fun prefix -> Types.is_field_path_prefix prefix part.field_path)
+                  allowed) ->
+          Some (part.position, part.field_path)
+      | Some _ | None -> None)
+    written.modifies
+
 let signatures_agree (expected : Types.signature) (written : Types.signature) =
   let sort_bounds (signature : Types.signature) =
     { signature with generics = Types.map_bounds (List.sort compare) signature.generics }
@@ -46,6 +59,7 @@ let signatures_agree (expected : Types.signature) (written : Types.signature) =
       capability_parameters = List.sort compare signature.capability_parameters;
       uses = Types.no_capabilities;
       costs = [];
+      modifies = [];
     }
   in
   let holds_error = Types.exists Types.is_error in
@@ -275,7 +289,7 @@ let list_callback_contracts (definition : Syntax.definition) ~text ~spans =
                   match clause.kind with
                   | Requires value -> Some ("requires " ^ quote value)
                   | Ensures value -> Some ("ensures " ^ quote value)
-                  | Uses _ | Cost _ | Decreases _ | Clause_error -> None)
+                  | Uses _ | Cost _ | Decreases _ | Modifies _ | Clause_error -> None)
                 clauses )
       | Named_parameter _ | Self_parameter _ | Parameter_error -> None)
     parameters
@@ -339,7 +353,7 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
               Checking.report state Extra_member state.spans.(name.id)
                 (Printf.sprintf "`%s` declares no method `%s` with this receiver." shown_trait
                    name.text))
-      | Some implemented ->
+      | Some implemented -> (
           if trait.is_capability && not (receiver = Instance Read || receiver = Instance Mut) then
             Checking.report state Wrong_receiver state.spans.(name.id)
               "A capability's implementation takes `self`, or `mut self` if it mutates its own \
@@ -402,4 +416,16 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
                       `Panic` without one, so it could panic where that condition holds. Declare \
                       `uses Panic unless` a condition that `%s`'s implies."
                      shown_trait name.text name.text shown_trait)
-              else check_callback_contracts state name ~shown_trait implemented.declaration)
+              else
+                match find_unallowed_part ~expected ~written with
+                | Some (position, field_path) ->
+                    let parameter = (Types.read_parameter_at written position).name in
+                    Checking.report state Impl_modifies state.spans.(name.id)
+                      (Printf.sprintf
+                         "`%s` names `%s` in `modifies`, and the `modifies` clause of `%s.%s` \
+                          names no part that holds it. An implementation changes only the parts \
+                          that its trait's method names."
+                         name.text
+                         (String.concat "." (parameter :: field_path))
+                         shown_trait name.text)
+                | None -> check_callback_contracts state name ~shown_trait implemented.declaration))

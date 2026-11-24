@@ -154,6 +154,11 @@ let parse_clauses cursor =
             (function Decreases _ -> true | _ -> false)
             "A signature has at most one `decreases` clause; list several measures in one, \
              separated by commas."
+      | Modifies _ ->
+          reject_repeated
+            (function Modifies _ -> true | _ -> false)
+            "A signature has at most one `modifies` clause; list every part that the function \
+             changes in one, separated by commas."
       | _ -> ());
       gather (clause :: clauses)
   in

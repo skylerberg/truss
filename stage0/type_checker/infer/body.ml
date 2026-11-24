@@ -92,7 +92,7 @@ let check_clauses state env ~uses (clauses : Syntax.clause list) =
                 (fun (use : Syntax.capability_use) ->
                   List.iter (Clauses.check_condition state env) use.unless_values)
                 uses
-          | Clause_error -> ()))
+          | Modifies _ | Clause_error -> ()))
     clauses
 
 let check_callback_contracts state env (written : Syntax.parameter list)

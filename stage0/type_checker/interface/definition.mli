@@ -3,6 +3,21 @@ val find_interface : Lookups.t -> Path.t -> Environment.interface option
 val find_type_interface : Lookups.t -> Path.t -> Types.type_interface option
 val read_type_interface : Lookups.t -> Path.t -> Types.type_interface
 val find_declared_signature : Lookups.t -> Path.t -> Types.signature option
+
+type field_path_error =
+  | Broken_type
+  | No_fields of { type_ : Types.ty; prefix : string list }
+  | Variant_fields of { type_ : Types.ty; prefix : string list }
+  | Hidden_fields of Types.ty
+  | Unknown_field of { type_ : Types.ty; field : string; candidates : string list }
+
+val find_field_path_type :
+  Lookups.t ->
+  package:Path.package ->
+  Types.ty ->
+  string list ->
+  (Types.ty, field_path_error) result
+
 val read_method_signature : Lookups.t -> owner:Path.t -> Types.trait_method -> Types.signature
 val find_trait_interface : Lookups.t -> Path.t -> Types.trait_interface option
 val read_trait_interface : Lookups.t -> Path.t -> Types.trait_interface

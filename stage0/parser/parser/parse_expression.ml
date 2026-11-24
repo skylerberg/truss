@@ -1,5 +1,5 @@
 let is_clause_keyword = function
-  | Token.Keyword (Uses | Requires | Ensures | Decreases | Cost) -> true
+  | Token.Keyword (Uses | Requires | Ensures | Decreases | Modifies | Cost) -> true
   | _ -> false
 
 type operator = Binary_operator of Syntax.binary | Is_operator | Range_operator of bool
@@ -209,6 +209,9 @@ and parse_function_type cursor ~clauses:with_clauses =
         | Keyword Decreases ->
             Cursor.fail cursor
               "`uses`, `cost`, `requires`, or `ensures`; a function type has no `decreases`"
+        | Keyword Modifies ->
+            Cursor.fail cursor
+              "`uses`, `cost`, `requires`, or `ensures`; a function type has no `modifies`"
         | _ -> List.rev clauses
       in
       gather []
@@ -223,7 +226,7 @@ and parse_function_type cursor ~clauses:with_clauses =
               (fun (use : Syntax.capability_use) ->
                 Option.is_some use.unless || use.unless_values <> [])
               uses
-        | Requires _ | Ensures _ | Decreases _ | Cost _ | Clause_error -> false
+        | Requires _ | Ensures _ | Decreases _ | Modifies _ | Cost _ | Clause_error -> false
       in
       if Option.is_some clause.condition || has_unless then
         Cursor.report cursor Misplaced_condition
@@ -244,7 +247,7 @@ and parse_function_type cursor ~clauses:with_clauses =
                  `O(1)` or `<= 2`, since the type holds a number and not an expression. State a \
                  bound that depends on a value in the enclosing function's own `cost` clause, \
                  which names the callback's cost as `time(visit)`.")
-      | Requires _ | Ensures _ | Decreases _ | Uses _ | Clause_error -> ())
+      | Requires _ | Ensures _ | Decreases _ | Modifies _ | Uses _ | Clause_error -> ())
     clauses;
   let is_named (input : Syntax.function_input) = Option.is_some input.name in
   let has_callback_contract =
@@ -432,6 +435,7 @@ and parse_clause cursor : Syntax.clause =
     | Keyword Requires -> Requires (parse_expression cursor)
     | Keyword Ensures -> Ensures (parse_expression cursor)
     | Keyword Decreases -> Decreases (parse_expression_list cursor)
+    | Keyword Modifies -> Modifies (parse_expression_list cursor)
     | Keyword Cost -> Cost (parse_cost cursor)
     | _ -> Cursor.fail cursor "a clause"
   in
@@ -442,6 +446,10 @@ and parse_clause cursor : Syntax.clause =
           Cursor.fail cursor
             "`,` or the end of the `uses` clause; a capability's condition follows `unless`, as in \
              `uses RunForever unless Source: FiniteCursor`"
+        else None
+    | Modifies _ ->
+        if Cursor.is_keyword cursor When then
+          Cursor.fail cursor "`,` or the end of the `modifies` clause, which takes no condition"
         else None
     | Requires _ | Ensures _ | Decreases _ | Cost _ | Clause_error ->
         parse_condition_after cursor When

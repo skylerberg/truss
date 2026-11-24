@@ -192,10 +192,13 @@ fn parse_clauses(cursor: mut TokenCursor) -> List[syntax.Clause]
     }
     let is_uses = clause.kind is Uses(_)
     let is_decreases = clause.kind is Decreases(_)
-    if is_uses || is_decreases {
+    let is_modifies = clause.kind is Modifies(_)
+    if is_uses || is_decreases || is_modifies {
       var is_repeated = false
       for earlier in clauses {
-        if (is_uses && earlier.kind is Uses(_)) || (is_decreases && earlier.kind is Decreases(_)) {
+        if (is_uses && earlier.kind is Uses(_)) || (is_decreases && earlier.kind is Decreases(_))
+          || (is_modifies && earlier.kind is Modifies(_))
+        {
           is_repeated = true
         }
       }
@@ -203,8 +206,10 @@ fn parse_clauses(cursor: mut TokenCursor) -> List[syntax.Clause]
         let span = cursor.lookup_token(start).span
         let message = if is_uses {
           "A signature has at most one `uses` clause; list every capability in one, separated by commas."
-        } else {
+        } else if is_decreases {
           "A signature has at most one `decreases` clause; list several measures in one, separated by commas."
+        } else {
+          "A signature has at most one `modifies` clause; list every part that the function changes in one, separated by commas."
         }
         report(mut cursor, code: "parser.repeated_clause", span: span, message: message)
       }

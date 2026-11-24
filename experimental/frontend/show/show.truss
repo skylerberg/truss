@@ -270,6 +270,7 @@ fn show_clause(clause: syntax.Clause) -> String
     Requires(value) => make_form("requires", parts: [show_expression(value)])
     Ensures(value) => make_form("ensures", parts: [show_expression(value)])
     Decreases(measures) => make_form("decreases", parts: show_expressions(measures))
+    Modifies(parts) => make_form("modifies", parts: show_expressions(parts))
     Cost(clause: cost_clause) => show_cost(cost_clause)
     ClauseError => "error"
   }

@@ -82,8 +82,8 @@ fn follows_joining_confusable(scanner: Scanner, start: UInt64, replacement: Stri
 
 fn report_confusable(scanner: mut Scanner, start: UInt64, length: UInt64, replacement: StringSlice, name: StringSlice)
   uses Panic
+  modifies scanner.diagnostics, scanner.position, scanner.line_is_blank
   requires scanner.position <= start + length
-  ensures scanner.continues(old(scanner))
   ensures scanner.position == start + length
 {
   let span = source.make_span(start, stop: start + length)
@@ -106,9 +106,10 @@ fn report_confusable(scanner: mut Scanner, start: UInt64, length: UInt64, replac
 
 fn scan_confusable(scanner: mut Scanner, code: UInt32, length: UInt64) -> Option[ConfusableScan]
   uses Panic
+  modifies scanner.diagnostics, scanner.position, scanner.line_is_blank, scanner.tables
   requires 1 <= length
-  ensures scanner.continues(old(scanner))
   ensures result is Some(_) ==> old(scanner.position) < scanner.position
+  ensures old(scanner.position) <= scanner.position
 {
   let start = scanner.position
   let Some(confusable) = find_confusable(code) else {
@@ -156,8 +157,8 @@ fn read_hexadecimal(scanner: Scanner, position: UInt64, count: UInt64) -> UInt64
 
 fn report_foreign_escape(scanner: mut Scanner, buffer: mut String, start: UInt64, stop: UInt64, value: UInt32) -> Bool
   uses Panic
+  modifies scanner.diagnostics, scanner.position
   requires scanner.position <= stop
-  ensures scanner.continues(old(scanner))
   ensures scanner.position == stop
   ensures result
 {
@@ -180,10 +181,11 @@ fn report_foreign_escape(scanner: mut Scanner, buffer: mut String, start: UInt64
 
 fn check_hexadecimal_escape(scanner: mut Scanner, buffer: mut String, start: UInt64, count: UInt64) -> Bool
   uses Panic
+  modifies scanner.diagnostics, scanner.position
   requires scanner.position <= start
-  ensures scanner.continues(old(scanner))
   ensures result ==> old(scanner.position) < scanner.position
   ensures !result ==> scanner.position == old(scanner.position)
+  ensures old(scanner.position) <= scanner.position
 {
   if !are_hexadecimal_digits(scanner, position: start + 2, count: count) {
     return false
@@ -197,9 +199,10 @@ fn check_hexadecimal_escape(scanner: mut Scanner, buffer: mut String, start: UIn
 
 fn scan_foreign_escape(scanner: mut Scanner, buffer: mut String) -> Bool
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics, scanner.position
   ensures result ==> old(scanner.position) < scanner.position
   ensures !result ==> scanner.position == old(scanner.position)
+  ensures old(scanner.position) <= scanner.position
 {
   let start = scanner.position
   if scanner.is_at_end(start + 1) {
@@ -396,9 +399,10 @@ fn decode_character_escape(content: StringSlice) -> String
 
 fn lex_character_literal(scanner: mut Scanner, tag: StringSlice, literal_start: UInt64, stop: UInt64) -> token.Kind
   uses Panic
+  modifies scanner.diagnostics, scanner.position, scanner.tables
   requires scanner.position <= stop
-  ensures scanner.continues(old(scanner))
   ensures stop <= scanner.position
+  ensures old(scanner.position) <= scanner.position
 {
   let start = scanner.position
   let content = scanner.text(start + 1, stop: stop - 1)
@@ -485,8 +489,10 @@ fn classify_prefix(prefix: StringSlice) -> PrefixKind {
 
 fn open_prefixed_string(scanner: mut Scanner, start: UInt64, nesting: UInt64, inline: Bool) -> ItemScan
   uses Panic
+  modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank,
+    scanner.unterminated_at_end, scanner.semicolons, scanner.tables
   requires scanner.is_at(scanner.position, byte: 34)
-  ensures scanner.continues(old(scanner))
+  ensures old(scanner.position) <= scanner.position
 {
   let quote_start = scanner.position
   let quotes = scanner.run_length(quote_start, byte: 34)
@@ -510,7 +516,7 @@ fn open_prefixed_string(scanner: mut Scanner, start: UInt64, nesting: UInt64, in
 
 fn report_prefixed_string(scanner: mut Scanner, start: UInt64, quote_start: UInt64, quotes: UInt64, scanned: ScannedString)
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics
 {
   let is_empty = quotes == 2
   let kind_of_prefix = classify_prefix(scanner.text(start, stop: quote_start))
@@ -587,13 +593,13 @@ fn report_prefixed_string(scanner: mut Scanner, start: UInt64, quote_start: UInt
 
 fn read_hash_raw_text(scanner: mut Scanner, text_start: UInt64, text_stop: UInt64) -> String
   uses Panic
+  modifies scanner.diagnostics, scanner.position
   requires scanner.position <= text_start
-  ensures scanner.continues(old(scanner))
+  ensures old(scanner.position) <= scanner.position
 {
   var buffer = String.with_capacity(text_stop - text_start)
   scanner.position = text_start
   while scanner.position < text_stop
-    invariant scanner.continues(old(scanner))
   {
     copy_plain(mut scanner, mut buffer, special: Special.RawSpecial)
     if scanner.position < text_stop {
@@ -605,7 +611,8 @@ fn read_hash_raw_text(scanner: mut Scanner, text_start: UInt64, text_stop: UInt6
 
 fn hash_raw_string(scanner: mut Scanner, start: UInt64) -> Option[token.Kind]
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics, scanner.position, scanner.tables
+  ensures old(scanner.position) <= scanner.position
 {
   let hashes = scanner.run_length(scanner.position, byte: 35)
   let text_start = scanner.position + hashes + 1
@@ -694,7 +701,8 @@ fn find_closing_delimiter(scanner: Scanner, start: UInt64, delimiter: UInt8) -> 
 
 fn open_quoted_string(scanner: mut Scanner, nesting: UInt64, inline: Bool, delimiter: UInt8) -> ItemScan
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank,
+    scanner.semicolons, scanner.tables
   ensures old(scanner.position) < scanner.position
 {
   let start = scanner.position
@@ -703,7 +711,7 @@ fn open_quoted_string(scanner: mut Scanner, nesting: UInt64, inline: Bool, delim
 
 fn report_quoted_string(scanner: mut Scanner, start: UInt64, delimiter: UInt8, scanned: ScannedString)
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics
 {
   let stop = scanner.position
   var interpolation_spans: List[source.Span] = []
@@ -749,9 +757,10 @@ fn report_quoted_string(scanner: mut Scanner, start: UInt64, delimiter: UInt8, s
 
 fn lex_curly_quoted_string(scanner: mut Scanner, opening_length: UInt64, closing: StringSlice) -> Option[token.Kind]
   uses Panic
+  modifies scanner.diagnostics, scanner.position, scanner.tables
   requires 1 <= opening_length
-  ensures scanner.continues(old(scanner))
   ensures result is Some(_) ==> old(scanner.position) < scanner.position
+  ensures old(scanner.position) <= scanner.position
 {
   let start = scanner.position
   let text_start = start + opening_length
@@ -800,9 +809,11 @@ fn lex_curly_quoted_string(scanner: mut Scanner, opening_length: UInt64, closing
 
 fn scan_string_form(scanner: mut Scanner, inline: Bool, nesting: UInt64) -> Option[StringFormScan]
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank,
+    scanner.unterminated_at_end, scanner.semicolons, scanner.tables
   ensures result is None ==> scanner.position == old(scanner.position)
   ensures result is Some(_) ==> old(scanner.position) < scanner.position
+  ensures old(scanner.position) <= scanner.position
 {
   let start = scanner.position
   if scanner.is_at(start, byte: 39) {
@@ -854,7 +865,9 @@ fn scan_string_form(scanner: mut Scanner, inline: Bool, nesting: UInt64) -> Opti
 
 fn lex_after_name(scanner: mut Scanner, inline: Bool, nesting: UInt64, start: UInt64, name: token.Kind) -> Option[ItemScan]
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank,
+    scanner.unterminated_at_end, scanner.semicolons, scanner.tables
+  ensures old(scanner.position) <= scanner.position
 {
   let Lower(_) = name else {
     return None

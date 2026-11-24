@@ -64,7 +64,7 @@ let list_run_forever_entries (signature : Syntax.signature) =
             (List.mapi
                (fun index use -> if names_run_forever use then [ (clause, uses, index) ] else [])
                uses)
-      | Requires _ | Ensures _ | Decreases _ | Cost _ | Clause_error -> [])
+      | Requires _ | Ensures _ | Decreases _ | Modifies _ | Cost _ | Clause_error -> [])
     signature.clauses
 
 let find (lookups : Lookups.t) (key : Resolve.Names.key) (definition : Syntax.definition) =

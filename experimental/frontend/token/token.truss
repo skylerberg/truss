@@ -29,6 +29,7 @@ internal type Keyword =
   | Lends
   | Let
   | Match
+  | Modifies
   | Mut
   | Opaque
   | Own
@@ -258,6 +259,7 @@ internal fn find_word(spelling: StringSlice) -> Option[Kind] {
     "lends" => Some(Kind.Keyword(Keyword.Lends))
     "let" => Some(Kind.Keyword(Keyword.Let))
     "match" => Some(Kind.Keyword(Keyword.Match))
+    "modifies" => Some(Kind.Keyword(Keyword.Modifies))
     "mut" => Some(Kind.Keyword(Keyword.Mut))
     "opaque" => Some(Kind.Keyword(Keyword.Opaque))
     "own" => Some(Kind.Keyword(Keyword.Own))
@@ -327,6 +329,7 @@ internal fn spell_keyword(keyword: Keyword) -> StringSlice {
     Lends => "lends"
     Let => "let"
     Match => "match"
+    Modifies => "modifies"
     Mut => "mut"
     Opaque => "opaque"
     Own => "own"
@@ -475,8 +478,8 @@ internal fn can_begin(kind: Kind) -> Bool {
       _ => false
     }
     Keyword(keyword) => match keyword {
-      Cost | Decreases | Derives | Else | Ensures | In | Indirect | Invariant | Is | Lends | Opaque
-        | Requires | Unless | Uses | When | With => false
+      Cost | Decreases | Derives | Else | Ensures | In | Indirect | Invariant | Is | Lends | Modifies
+        | Opaque | Requires | Unless | Uses | When | With => false
       _ => true
     }
     Newline | EndOfFile => false

@@ -404,6 +404,12 @@ let check_restated (state : Checking.state) (signature : Syntax.signature) ~has_
                    "`%s` restates `%s.%s`, so it adds only `ensures` and `cost` clauses. It has no \
                     body, so it has no recursion to measure."
                    name.text declared_by name.text)
+          | Modifies _ ->
+              Checking.report state Restated_method_clause state.spans.(clause.id)
+                (Printf.sprintf
+                   "`%s` restates `%s.%s`, so it adds only `ensures` and `cost` clauses. The parts \
+                    that its implementations change are those that `%s.%s` names."
+                   name.text declared_by name.text declared_by name.text)
           | Ensures _ | Cost _ | Uses _ | Clause_error -> ())
         signature.clauses;
       if Impl_checks.has_default original then
@@ -525,6 +531,62 @@ let check_proof_bounds (state : Checking.state) (written : Syntax.type_head)
       (List.combine generics impl.impl_generics)
   end
 
+let check_modifies (state : Checking.state) (written : Syntax.signature)
+    (signature : Types.signature) =
+  let package = Path.locate_package state.key.path in
+  let check_entry (value : Syntax.expression) =
+    match Elaborator.split_field_path value with
+    | None -> ()
+    | Some (root, names) -> (
+        let fields = List.map (fun (name : Syntax.name) -> name.text) names in
+        match Types.find_parameter_position signature root with
+        | Some position when List.mem { Types.position; field_path = fields } signature.modifies
+          -> (
+            let shown prefix = String.concat "." (root :: prefix) in
+            match
+              Definition.find_field_path_type state.lookups ~package
+                (Types.read_parameter_at signature position).type_ fields
+            with
+            | Ok _ | Error Broken_type -> ()
+            | Error ((No_fields { type_; prefix } | Variant_fields { type_; prefix }) as error) ->
+                let reason =
+                  match error with
+                  | Variant_fields _ ->
+                      "whose fields belong to its variants and so are not fixed parts"
+                  | _ -> "which has no fields to name"
+                in
+                Checking.report state Not_a_field_path state.spans.(value.id)
+                  (if prefix = [] then
+                     Printf.sprintf
+                       "`%s` is of type `%s`, %s, so a `modifies` clause names no part of it. \
+                        Remove `%s`."
+                       root (Types.show type_) reason (shown fields)
+                   else
+                     Printf.sprintf "`%s` is of type `%s`, %s. Name `%s` whole in `modifies`."
+                       (shown prefix) (Types.show type_) reason (shown prefix))
+            | Error (Hidden_fields type_) ->
+                Checking.report state Private_field state.spans.(value.id)
+                  (Printf.sprintf
+                     "`%s` is opaque, so its fields can be named only in its own package."
+                     (Types.show type_))
+            | Error (Unknown_field { type_; field; candidates }) ->
+                let span =
+                  match List.find_opt (fun (name : Syntax.name) -> name.text = field) names with
+                  | Some name -> state.spans.(name.id)
+                  | None -> state.spans.(value.id)
+                in
+                Checking.report state Unknown_member span
+                  ~fixes:(Diagnostic.list_spelling_fixes span ~written:field candidates)
+                  (Printf.sprintf "`%s` has no field `%s`." (Types.show type_) field))
+        | Some _ | None -> ())
+  in
+  List.iter
+    (fun (clause : Syntax.clause) ->
+      match clause.kind with
+      | Modifies entries -> List.iter check_entry entries
+      | Uses _ | Requires _ | Ensures _ | Decreases _ | Cost _ | Clause_error -> ())
+    written.clauses
+
 let check (state : Checking.state) =
   let lookups = state.lookups in
   let definition = state.definition in
@@ -532,6 +594,11 @@ let check (state : Checking.state) =
   let is_broken part = Resolve.Names.is_broken lookups.names state.key part in
   check_bounds state;
   let resolved = lookups.read_resolved Interface state.key in
+  (match (definition.kind, state.elaborated.interface) with
+  | (Function { signature; _ } | Method_declaration signature), Function_interface written
+    when not (is_broken Header) ->
+      check_modifies state signature written
+  | _ -> ());
   if not (is_broken Header) then
     match (lookups.names.find_container state.key, definition.kind, state.elaborated.interface) with
     | ( Some container,
