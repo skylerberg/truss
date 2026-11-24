@@ -619,7 +619,7 @@ let assume_element_potential_change context frame (sequence : Types.ty) ~before 
       with Facts.Unsupported _ -> ())
   | None -> ()
 
-let make_static_frame (frame : State.frame) source ~substitution ~self_type =
+let make_static_frame (frame : State.frame) source ~substitution ~(self_type : Types.ty option) =
   {
     frame with
     State.source;
@@ -634,7 +634,7 @@ let make_static_frame (frame : State.frame) source ~substitution ~self_type =
     bound = [];
     binders = [];
     substitution;
-    self_type = Some self_type;
+    self_type;
     yielded = None;
     yielded_so_far = None;
     spent = [];
@@ -692,7 +692,7 @@ let find_body_cost (context : State.context) frame (metric : Language.Metric.t) 
       context.counters <- [ counter ];
       let start =
         {
-          (make_static_frame frame source ~substitution ~self_type) with
+          (make_static_frame frame source ~substitution ~self_type:(Some self_type)) with
           spent = [ (counter, Costs.zero) ];
         }
       in
@@ -770,7 +770,7 @@ let find_method_cost_bound context frame (metric : Language.Metric.t) (method_ :
                                    Contracts.make_trait_substitution context.lookups reference
                                      self_type
                                  else substitution)
-                              ~self_type)
+                              ~self_type:(Some self_type))
                           (Contracts.list_declared_clauses contract))
                 in
                 match (stated_bound, impl) with
@@ -782,6 +782,21 @@ let find_method_cost_bound context frame (metric : Language.Metric.t) (method_ :
                 | None, _ -> None)
             | None -> None)
         | None -> None)
+  | _ -> None
+
+let find_function_value_cost context frame (metric : Language.Metric.t) callee ~type_arguments =
+  match
+    (Contracts.read_signature context callee, Contracts.find_function_contract context callee)
+  with
+  | Some (signature : Types.signature), Some contract
+    when List.length signature.generics = List.length type_arguments ->
+      let substitution = Types.make_substitution signature.generics type_arguments in
+      List.find_map
+        (fun (clauses : State.clauses) ->
+          find_static_bound context frame metric clauses
+            ~has_own_generics:(signature.capability_parameters <> [])
+            ~substitution ~self_type:None)
+        (Contracts.list_declared_clauses contract)
   | _ -> None
 
 let declare_method_cost context frame (metric : Language.Metric.t) (method_ : Path.t)

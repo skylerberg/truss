@@ -1,0 +1,20 @@
+type Box[Item](item: Item)
+
+fn by_item[Item: Ordered](first: Box[Item], second: Box[Item]) -> Ordering
+  cost time O(1 + time(Item.compare))
+{
+  first.item.compare(second.item)
+}
+
+fn decide[Item](first: Item, second: Item, compare: (fn(Item, Item) -> Ordering uses generic Granted)) -> Ordering
+  uses generic Granted
+  cost time O(1 + time(compare))
+{
+  compare(first, second)
+}
+
+fn order(first: Box[String], second: Box[String]) -> Ordering
+  cost time O(1)
+{
+  decide(first, second: second, compare: by_item)
+}

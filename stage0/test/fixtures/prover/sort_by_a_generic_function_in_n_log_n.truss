@@ -1,0 +1,25 @@
+type Box[Item](item: Item)
+
+fn by_item[Item: Ordered](first: Box[Item], second: Box[Item]) -> Ordering
+  cost time O(1 + time(Item.compare))
+{
+  first.item.compare(second.item)
+}
+
+fn by_elements[count: UInt64](first: Array[Int64, count], second: Array[Int64, count]) -> Ordering
+  cost time O(1 + count)
+{
+  first.compare(second)
+}
+
+fn order(boxes: mut List[Box[Int64]])
+  cost time O(boxes.length() * log(boxes.length()))
+{
+  mut boxes.sort_by(by_item)
+}
+
+fn order_keys(keys: mut List[Array[Int64, 4]])
+  cost time O(keys.length() * log(keys.length()))
+{
+  mut keys.sort_by(by_elements)
+}
