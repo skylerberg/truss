@@ -157,6 +157,7 @@ val substitute : (symbol * term) list -> term -> term
 val replace : from:term -> into:term -> term -> term
 val has_untriggered_fact : ?is_counted:(term -> bool) -> query -> bool
 val prune : query -> query
+val list_conjunct_queries : query -> query list
 val show_query : ?cardinality_bound:int -> query -> string
 val has_uninterpreted_sort : query -> bool
 

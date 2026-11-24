@@ -49,7 +49,12 @@ let compute_key text =
   "smt1-blake3-"
   ^ Blake3.hash_to_hex
       (Printf.sprintf
-         "z3 %s\nentry format %d\ncardinality bounds %s\nretried without quantified facts\n%s%s"
+         "z3 %s\n\
+          entry format %d\n\
+          cardinality bounds %s\n\
+          retried without quantified facts\n\
+          retried one conjunct at a time\n\
+          %s%s"
          version entry_format_version
          (String.concat ", " (List.map string_of_int cardinality_bounds))
          header text)
@@ -296,9 +301,26 @@ let is_proven_from_ground_facts solver request (query : Logic.query) =
   | Unsatisfiable, _ -> true
   | (Satisfiable _ | Undecided _), _ -> false
 
+let is_proven_one_conjunct_at_a_time solver request (query : Logic.query) =
+  match Logic.list_conjunct_queries query with
+  | [] -> false
+  | conjuncts ->
+      List.for_all
+        (fun conjunct ->
+          match
+            run_check solver
+              { request with requested = []; value_arguments = [] }
+              (Logic.show_query conjunct)
+          with
+          | Unsatisfiable, _ -> true
+          | (Satisfiable _ | Undecided _), _ -> false)
+        conjuncts
+
 let search_model solver request query text =
   match run_check solver request text with
   | Undecided _, _ when is_proven_from_ground_facts solver request query -> (Unsatisfiable, [])
+  | Undecided Out_of_steps, _ when is_proven_one_conjunct_at_a_time solver request query ->
+      (Unsatisfiable, [])
   | (Undecided _, _) as undecided when Logic.has_uninterpreted_sort query ->
       let rec search_from = function
         | [] -> undecided

@@ -2822,6 +2822,32 @@ let () =
       goal = Logic.Operation (operator, [ Logic.Symbol symbol; Logic.Symbol symbol ]);
     }
   in
+  Harness.test "a conjunction under a premise splits into one pruned query per conjunct" (fun () ->
+      let make_symbol label = Logic.Symbol.Variable { label; numbers = [] } in
+      let premise = make_symbol "premise"
+      and first = make_symbol "first"
+      and second = make_symbol "second" in
+      let query =
+        {
+          Logic.declarations =
+            List.map (fun symbol -> Logic.Constant (symbol, Logic.Bool)) [ premise; first; second ];
+          facts = [ Logic.Symbol first ];
+          goal =
+            Logic.( ==> ) (Logic.Symbol premise)
+              (Logic.( &&& ) (Logic.Symbol first) (Logic.Symbol second));
+        }
+      in
+      match Logic.list_conjunct_queries query with
+      | [ about_first; about_second ] ->
+          if about_first.goal <> Logic.( ==> ) (Logic.Symbol premise) (Logic.Symbol first) then
+            Harness.fail "the first query's goal is not the first conjunct";
+          if about_second.goal <> Logic.( ==> ) (Logic.Symbol premise) (Logic.Symbol second) then
+            Harness.fail "the second query's goal is not the second conjunct";
+          if about_first.facts <> [ Logic.Symbol first ] then
+            Harness.fail "the first query lost the fact it reads";
+          if about_second.facts <> [] then
+            Harness.fail "the second query keeps a fact that its goal does not reach"
+      | queries -> Harness.fail "%d queries" (List.length queries));
   Harness.test "an answer in the cache is read, and the solver is not run" (fun () ->
       let query = make_self_comparison Logic.Greater_equal in
       let request = Solver.make_request query in

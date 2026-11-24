@@ -703,6 +703,17 @@ type numbering = {
   sort_order : sort Dynarray.t;
 }
 
+let list_conjunct_queries query =
+  let rec list_conjuncts = function
+    | Operation (And, parts) -> List.concat_map list_conjuncts parts
+    | Operation (Implies, [ premise; conclusion ]) ->
+        List.map (fun part -> Operation (Implies, [ premise; part ])) (list_conjuncts conclusion)
+    | goal -> [ goal ]
+  in
+  match list_conjuncts query.goal with
+  | [] | [ _ ] -> []
+  | goals -> List.map (fun goal -> prune { query with goal }) goals
+
 let rec render_sort_name numbering = function
   | Int -> "Int"
   | Bool -> "Bool"
