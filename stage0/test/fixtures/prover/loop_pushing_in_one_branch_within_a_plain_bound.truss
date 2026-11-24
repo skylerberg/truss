@@ -1,0 +1,11 @@
+fn f(values: Slice[Int64]) -> List[Int64]
+  cost time O(values.length())
+{
+  var kept: List[Int64] = []
+  for value in values {
+    if value % 2 == 0 {
+      mut kept.push(value)
+    }
+  }
+  kept
+}

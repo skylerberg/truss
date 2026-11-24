@@ -1,0 +1,9 @@
+fn f(values: Slice[Int64], kept: mut List[Int64])
+  cost amortized time O(values.length())
+{
+  for value in values {
+    if value % 2 == 0 {
+      mut kept.push(value)
+    }
+  }
+}

@@ -2297,13 +2297,12 @@ let () =
           (fun (diagnostic : Diagnostic.t) -> String.includes ~affix:"Give" diagnostic.message)
           diagnostics
       then Harness.fail "a message asks for a change to another package");
-  Harness.test "a loop that pushes on one path names the push and the list it changes" (fun () ->
-      expect_a_message_saying
-        ~says:
-          "The amortized cost of `kept.push(value)` depends on the potential of `kept`, which this \
-           loop changes, so the prover cannot bound the cost of an iteration by the values the \
-           loop does not mutate. Give the loop a `cost` clause."
-        (list_diagnostics Fixtures.Prover.loop_pushing_in_one_branch));
+  Harness.test "a loop that pushes on one path is amortized linear" (fun () ->
+      expect_proven Fixtures.Prover.loop_pushing_in_one_branch);
+  Harness.test "a loop that pushes on one path onto a fresh list is linear" (fun () ->
+      expect_proven Fixtures.Prover.loop_pushing_in_one_branch_within_a_plain_bound);
+  Harness.test "a loop that pushes on one path onto a `mut` parameter is amortized linear"
+    (fun () -> expect_proven Fixtures.Prover.loop_pushing_onto_a_parameter_in_one_branch);
   Harness.test "a loop that pushes on one path is counted by its cost clause" (fun () ->
       expect_proven Fixtures.Prover.loop_pushing_in_one_branch_with_a_cost_clause)
 
