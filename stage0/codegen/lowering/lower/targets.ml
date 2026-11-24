@@ -40,29 +40,23 @@ let convert_operand state (mode : Language.Mode.t) ty (place : Lowered.place)
 let pass state (mode : Language.Mode.t) ty place =
   convert_operand state mode ty place (Convention.classify_parameter state.context.env mode ty)
 
-let lookup_method_slot (context : Definitions.context) ~owner ~handle_missing
-    (methods : Types.trait_method list) ~is_wanted =
-  match List.find_index is_wanted methods with
-  | Some index ->
-      ( index,
-        Interface.Definition.read_method_signature context.lookups.interface ~owner
-          (List.nth methods index) )
-  | None -> handle_missing ()
-
 let raise_lending_capability_method capability name =
   Lowering.raise_unsupported "`%s.%s`, a capability method that lends" (Path.show capability) name
 
 let lookup_capability_method (context : Definitions.context) capability name =
-  let slot, signature =
-    lookup_method_slot context ~owner:capability
-      (Definitions.read_trait_interface context capability).methods
-      ~is_wanted:(fun (declared : Types.trait_method) -> declared.method_name = name)
-      ~handle_missing:(fun () ->
-        Definitions.raise_bug "%s has no method %s" (Path.show capability) name)
-  in
-  match signature.output with
-  | Returns _ -> (slot, signature)
-  | Lends _ -> raise_lending_capability_method capability name
+  let methods = (Definitions.read_trait_interface context capability).methods in
+  match
+    List.find_index (fun (declared : Types.trait_method) -> declared.method_name = name) methods
+  with
+  | None -> Definitions.raise_bug "%s has no method %s" (Path.show capability) name
+  | Some slot -> (
+      let signature =
+        Interface.Definition.read_method_signature context.lookups.interface ~owner:capability
+          (List.nth methods slot)
+      in
+      match signature.output with
+      | Returns _ -> (slot, signature)
+      | Lends _ -> raise_lending_capability_method capability name)
 
 let make_entry_signature context (signature : Types.signature) =
   let entry, result =

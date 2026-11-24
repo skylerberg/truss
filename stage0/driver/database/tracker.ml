@@ -65,20 +65,13 @@ let mark_position_holders tracker target id name =
 
 let import_kind = Kind.rank_target (Entity Import)
 let definition_kind = Kind.rank_target (Entity Definition)
-let unknown_implementation_kind = Kind.rank_target (Entity Unknown_implementation)
 
-let make_call_graph ~visible : Store.call_graph =
+let call_graph : Store.call_graph =
   {
     unit_kind = Kind.rank_stage List_calls;
     node_kind = definition_kind;
     calls = Kind.encode_markers [ Calls ];
-    implements = Kind.encode_markers [ Implements ];
-    visible;
   }
-
-let mark_callers_to_group tracker ~seeds =
-  Store.mark_paths_stale tracker.store ~stage:(Kind.rank_stage Group_recursion)
-    ~paths:(Store.list_callers_closure tracker.store (make_call_graph ~visible:[]) ~seeds)
 
 let package_kind = Kind.rank_target (Entity Package)
 
@@ -119,28 +112,17 @@ let follow_edge_changes tracker (stage : Kind.stage) id changes =
       if change.changed.kind = import_kind && differs change References then
         mark_readers tracker (Selection Import_references) change.changed.id "")
     changes;
-  if stage = List_calls then begin
-    if
+  if stage = List_calls then
+    begin if
       List.exists
         (fun (change : Store.edge_change) ->
-          change.changed.kind = definition_kind
-          && (differs change Calls || differs change Implements))
+          change.changed.kind = definition_kind && differs change Calls)
         changes
     then begin
       mark_stale tracker Group_recursion id;
       Store.mark_group_stale tracker.store ~stage:(Kind.rank_stage Group_recursion) ~path:id
-    end;
-    match
-      List.filter_map
-        (fun (change : Store.edge_change) ->
-          if change.changed.kind = unknown_implementation_kind then Some change.changed.id else None)
-        changes
-    with
-    | [] -> ()
-    | traits ->
-        mark_callers_to_group tracker
-          ~seeds:(Store.list_paths_owned_by tracker.store ~owners:traits)
-  end
+    end
+    end
 
 let replace_edges tracker stage id edges =
   let changes = Store.replace_edges tracker.store ~source:(locate_unit stage id) edges in

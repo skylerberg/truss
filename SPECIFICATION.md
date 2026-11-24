@@ -1100,7 +1100,8 @@ fn serve(listener: mut Listener)
   A provided method that an `impl` inherits runs the trait's body for that
   `impl`, so a call on `Self` in the body runs the same `impl`'s method. The
   body is also checked once, for every `impl`. In that check a call on `Self`
-  is followed to the method of every `impl` of the trait.
+  is followed to the trait's method, so provided methods that call each
+  other are a recursion.
 - **Code that supplies other code to a callee is followed to all of the
   supplied code:**
 

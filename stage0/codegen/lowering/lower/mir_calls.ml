@@ -2,25 +2,23 @@ let ground_instantiation (state : Lowering.state) instantiation =
   Monomorphic.ground_instantiation state.context.monomorphic state.frame.code.substitution
     instantiation
 
-let resolve_callee state (callee : Mir.callee) : (Path.t * Ground.instantiation) option =
+let resolve_item state (callee : Mir.callee) : Path.t * Ground.instantiation =
   match callee.target with
-  | Function { path; instantiation } -> Some (path, ground_instantiation state instantiation)
+  | Function { path; instantiation } -> (path, ground_instantiation state instantiation)
   | Trait_method { trait; name; receiver; self_type; instantiation; evidence } ->
-      Some
-        (Targets.resolve_trait_method state.context state.frame.code.substitution ~trait ~name
-           ~receiver ~self_type ~instantiation ~evidence)
-  | Capability_method _ | Intrinsic _ | Indirect _ -> None
+      Targets.resolve_trait_method state.context state.frame.code.substitution ~trait ~name
+        ~receiver ~self_type ~instantiation ~evidence
+  | Capability_method _ | Intrinsic _ | Indirect _ ->
+      Definitions.raise_bug "a callee that is not a function or a method"
 
 let read_callee_signature (state : Lowering.state) path instantiation =
   let signature = Definitions.read_signature state.context path in
   (signature, Monomorphic.make_signature_substitution signature instantiation)
 
 let resolve_call_signature state (callee : Mir.callee) =
-  match resolve_callee state callee with
-  | Some (path, instantiation) ->
-      let signature, substitution = read_callee_signature state path instantiation in
-      (path, Lowered.Item.make_code path instantiation, signature, substitution)
-  | None -> Definitions.raise_bug "a callee that is not a function or a method"
+  let path, instantiation = resolve_item state callee in
+  let signature, substitution = read_callee_signature state path instantiation in
+  (path, Lowered.Item.make_code path instantiation, signature, substitution)
 
 let compute_result_type state (callee : Mir.callee) =
   let path, _, signature, substitution = resolve_call_signature state callee in

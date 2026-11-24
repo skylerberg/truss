@@ -59,7 +59,6 @@ type fact =
   | Body_mir
   | Contract_mir
   | Generated_mir
-  | Call_node
   | Callees
   | Recursion_group
   | Usage_check
@@ -95,7 +94,7 @@ type lookup =
   | Law_proofs
   | Tests
 
-type entity = Definition | Import | Package | Unknown_implementation | Item
+type entity = Definition | Import | Package | Item
 type selection = Unresolved | Import_references | Package_references
 type target = Fact of fact | Lookup of lookup | Entity of entity | Selection of selection
 
@@ -109,7 +108,7 @@ val list_read_targets : fact -> fact list
 val lookups_of_definition : lookup list
 val facts_of_definition : fact list
 
-type marker = Reads | References | Calls | Instantiates | Grows | Claims | Implements
+type marker = Reads | References | Calls | Instantiates | Grows | Claims
 
 val encode_markers : marker list -> int
 val has_marker : int -> marker -> bool

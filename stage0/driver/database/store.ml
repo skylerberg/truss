@@ -473,50 +473,30 @@ let mark_position_holders_stale store ~(target : endpoint) ~markers ~stages =
      unit = source))"
     [ Integer target.kind; Integer target.id; Text target.name; Integer markers; Integer stages ]
 
-type call_graph = {
-  unit_kind : int;
-  node_kind : int;
-  calls : int;
-  implements : int;
-  visible : string list;
-}
+type call_graph = { unit_kind : int; node_kind : int; calls : int }
 
 let list_schema_names store = "main" :: List.map snd store.attached
 
 let make_successor_arms store ~of_ =
-  List.concat_map
+  List.map
     (fun schema ->
-      [
-        Printf.sprintf
-          "SELECT e.target FROM %s CROSS JOIN %s.edge e ON e.source_kind = ?1 AND e.source = \
-           %s.node AND e.target_kind = ?2 WHERE (e.markers & ?3) != 0"
-          of_ schema of_;
-        Printf.sprintf
-          "SELECT e.source FROM %s CROSS JOIN %s.edge e ON e.target_kind = ?2 AND e.target = \
-           %s.node AND e.name = '' CROSS JOIN %s.definition d ON d.path = e.source WHERE \
-           e.source_kind = ?1 AND (e.markers & ?4) != 0 AND d.package IN (SELECT value FROM \
-           json_each(?5))"
-          of_ schema of_ schema;
-      ])
+      Printf.sprintf
+        "SELECT e.target FROM %s CROSS JOIN %s.edge e ON e.source_kind = ?1 AND e.source = %s.node \
+         AND e.target_kind = ?2 WHERE (e.markers & ?3) != 0"
+        of_ schema of_)
     (list_schema_names store)
 
 let make_predecessor_arms store ~of_ =
-  List.concat_map
+  List.map
     (fun schema ->
-      [
-        Printf.sprintf
-          "SELECT e.source FROM %s CROSS JOIN %s.edge e ON e.target_kind = ?2 AND e.target = \
-           %s.node AND e.name = '' WHERE e.source_kind = ?1 AND (e.markers & ?3) != 0"
-          of_ schema of_;
-        Printf.sprintf
-          "SELECT e.target FROM %s CROSS JOIN %s.edge e ON e.source_kind = ?1 AND e.source = \
-           %s.node AND e.target_kind = ?2 WHERE (e.markers & ?4) != 0"
-          of_ schema of_;
-      ])
+      Printf.sprintf
+        "SELECT e.source FROM %s CROSS JOIN %s.edge e ON e.target_kind = ?2 AND e.target = %s.node \
+         AND e.name = '' WHERE e.source_kind = ?1 AND (e.markers & ?3) != 0"
+        of_ schema of_)
     (list_schema_names store)
 
 let make_closure name arms =
-  Printf.sprintf "%s(node) AS (SELECT value FROM json_each(?6) UNION %s)" name
+  Printf.sprintf "%s(node) AS (SELECT value FROM json_each(?4) UNION %s)" name
     (String.concat " UNION " arms)
 
 let bind_call_graph graph ~seeds : cell list =
@@ -524,8 +504,6 @@ let bind_call_graph graph ~seeds : cell list =
     Integer graph.unit_kind;
     Integer graph.node_kind;
     Integer graph.calls;
-    Integer graph.implements;
-    Text (encode_texts graph.visible);
     Text (encode_integers seeds);
   ]
 
@@ -538,63 +516,20 @@ let list_cycle_nodes store graph ~seeds =
     (bind_call_graph graph ~seeds)
     (fun row -> Sql.read_integer row 0)
 
-let list_callers_closure store graph ~seeds =
-  Sql.list_rows store.sql
-    (Printf.sprintf "WITH RECURSIVE %s SELECT node FROM backward"
-       (make_closure "backward" (make_predecessor_arms store ~of_:"backward")))
-    (bind_call_graph graph ~seeds)
-    (fun row -> Sql.read_integer row 0)
-
 let list_call_pairs store graph ~nodes =
   Sql.list_rows store.sql
-    (Printf.sprintf "WITH scope(node) AS (SELECT value FROM json_each(?6)) %s"
+    (Printf.sprintf "WITH scope(node) AS (SELECT value FROM json_each(?4)) %s"
        (String.concat " UNION "
-          (List.concat_map
+          (List.map
              (fun schema ->
-               [
-                 Printf.sprintf
-                   "SELECT scope.node, e.target FROM scope CROSS JOIN %s.edge e ON e.source_kind = \
-                    ?1 AND e.source = scope.node AND e.target_kind = ?2 WHERE (e.markers & ?3) != \
-                    0 AND +e.target IN (SELECT node FROM scope)"
-                   schema;
-                 Printf.sprintf
-                   "SELECT scope.node, e.source FROM scope CROSS JOIN %s.edge e ON e.target_kind = \
-                    ?2 AND e.target = scope.node AND e.name = '' CROSS JOIN %s.definition d ON \
-                    d.path = e.source WHERE e.source_kind = ?1 AND (e.markers & ?4) != 0 AND \
-                    d.package IN (SELECT value FROM json_each(?5)) AND +e.source IN (SELECT node \
-                    FROM scope)"
-                   schema schema;
-               ])
+               Printf.sprintf
+                 "SELECT scope.node, e.target FROM scope CROSS JOIN %s.edge e ON e.source_kind = \
+                  ?1 AND e.source = scope.node AND e.target_kind = ?2 WHERE (e.markers & ?3) != 0 \
+                  AND +e.target IN (SELECT node FROM scope)"
+                 schema)
              (list_schema_names store))))
     (bind_call_graph graph ~seeds:nodes)
     (fun row -> (Sql.read_integer row 0, Sql.read_integer row 1))
-
-let list_implementers store graph ~node =
-  Sql.list_rows store.sql
-    (String.concat " UNION "
-       (List.map
-          (fun schema ->
-            Printf.sprintf
-              "SELECT e.source FROM %s.edge e CROSS JOIN %s.definition d ON d.path = e.source \
-               WHERE e.target_kind = ?1 AND e.target = ?2 AND e.name = '' AND e.source_kind = ?3 \
-               AND (e.markers & ?4) != 0 AND d.package IN (SELECT value FROM json_each(?5))"
-              schema schema)
-          (list_schema_names store)))
-    [
-      Integer graph.node_kind;
-      Integer node;
-      Integer graph.unit_kind;
-      Integer graph.implements;
-      Text (encode_texts graph.visible);
-    ]
-    (fun row -> Sql.read_integer row 0)
-
-let list_all_packages store =
-  List.concat_map
-    (fun schema ->
-      Sql.list_rows store.sql (Printf.sprintf "SELECT name FROM %s.package" schema) [] (fun row ->
-          Sql.read_text row 0))
-    (list_schema_names store)
 
 type read_edge = { source_kind : int; source : int; target_kind : int; target : int }
 
@@ -637,30 +572,11 @@ let list_definitions_identified store ~ids =
         (fun row -> (Sql.read_integer row 0, Sql.read_integer row 1, Sql.read_blob row 2)))
     (list_schema_names store)
 
-let list_targets_of_kind store ~kind ~visible =
-  Sql.list_rows store.sql
-    "SELECT DISTINCT e.target FROM main.edge e CROSS JOIN main.definition d ON d.path = e.source \
-     WHERE e.target_kind = ?1 AND d.package IN (SELECT value FROM json_each(?2))"
-    [ Integer kind; Text (encode_texts visible) ]
-    (fun row -> Sql.read_integer row 0)
-
 let mark_paths_stale store ~stage ~paths =
   Sql.run store.sql
     "INSERT OR IGNORE INTO main.stale (stage, id) SELECT DISTINCT ?1, path FROM main.definition \
      WHERE path IN (SELECT value FROM json_each(?2))"
     [ Integer stage; Text (encode_integers paths) ]
-
-let list_paths_owned_by store ~owners =
-  List.concat_map
-    (fun schema ->
-      Sql.list_rows store.sql
-        (Printf.sprintf
-           "SELECT DISTINCT path FROM %s.definition WHERE owner IN (SELECT value FROM \
-            json_each(?1))"
-           schema)
-        [ Text (encode_integers owners) ]
-        (fun row -> Sql.read_integer row 0))
-    (list_schema_names store)
 
 let list_keys_of_paths store ~paths =
   List.concat_map
