@@ -1,21 +1,21 @@
 use standard.regex
 
-fn compiled(pattern: StringSlice) -> regex.Regex {
+fn compiled(pattern: String) -> regex.Regex {
   match regex.Regex.parse(pattern) {
     Ok(parsed) => parsed
     Err(_) => regex.Regex"x^"
   }
 }
 
-fn finds(pattern: StringSlice, text: StringSlice, start: UInt64, end: UInt64) -> Bool {
+fn finds(pattern: String, text: String, start: UInt64, end: UInt64) -> Bool {
   compiled(pattern).find(text) == Some(regex.Match(start: start, end: end))
 }
 
-fn misses(pattern: StringSlice, text: StringSlice) -> Bool {
+fn misses(pattern: String, text: String) -> Bool {
   regex.Regex.parse(pattern) is Ok(parsed) && parsed.find(text) is None && !parsed.is_match(text)
 }
 
-fn refuses(pattern: StringSlice, kind: regex.PatternErrorKind, offset: UInt64) -> Bool {
+fn refuses(pattern: String, kind: regex.PatternErrorKind, offset: UInt64) -> Bool {
   regex.Regex.parse(pattern) is Err(error) && error.kind == kind && error.offset == offset
 }
 
@@ -169,14 +169,14 @@ test "a match of the whole text, a search from an offset, and escaped text" {
   assert compiled("^a").find_from("aba", offset: 1) is None
   assert compiled("a").find_from("abc", offset: 3) is None
   assert regex.escape("a.b*c(d)[e]{f}|g^h\u{24}i\\j-k") == "a\\.b\\*c\\(d\\)\\[e\\]\\{f\\}\\|g\\^h\\\u{24}i\\\\j\\-k"
-  assert compiled(regex.escape("1+1=2?").slice()).is_full_match("1+1=2?")
+  assert compiled(regex.escape("1+1=2?")).is_full_match("1+1=2?")
   assert compiled("a+").pattern() == "a+" && compiled("a+") == compiled("a+") && compiled("a+") != compiled("a*")
   assert "${compiled("[a-z]+")}" == "[a-z]+"
 }
 
 test "a template puts each value in as text to match, and a pattern in as a pattern" {
-  let name = "a.b"
-  let address = regex.Regex"^${name.slice()}@example\\.com\u{24}"
+  let name: view String = "a.b"
+  let address = regex.Regex"^${name}@example\\.com\u{24}"
   assert address.is_match("a.b@example.com") && !address.is_match("aXb@example.com")
   let repeated = regex.Regex"${"ab"}+!"
   assert repeated.is_full_match("ababab!") && !repeated.is_full_match("abbb!")

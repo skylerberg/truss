@@ -143,7 +143,7 @@ and resolve_argument (lookups : Names.lookups) ~file ~imports ~spell ~parameters
           arguments = List.map (fun name -> Path.Parameter name) parameters;
           associated = [];
         }
-  | Self_type (Some _) | Associated _ | Function_type _ | Type_error ->
+  | Self_type (Some _) | Associated _ | Function_type _ | View_type _ | Type_error ->
       Named { path = make_unresolved_path file [ spell type_.id ]; arguments = []; associated = [] }
 
 let resolve_header (lookups : Names.lookups) ~file ~imports ~spell (trait_ : Syntax.path_type)

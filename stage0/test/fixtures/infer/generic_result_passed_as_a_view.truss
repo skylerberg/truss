@@ -8,7 +8,7 @@ fn identity[Value](value: own Value) -> Value {
   value
 }
 
-fn measure(text: StringSlice) -> UInt64 {
+fn measure(text: String) -> UInt64 {
   text.length()
 }
 

@@ -1,7 +1,0 @@
-trait Poke {
-  fn poke(mut self)
-}
-
-impl Poke for Slice[Element] {
-  fn poke(mut self) {}
-}

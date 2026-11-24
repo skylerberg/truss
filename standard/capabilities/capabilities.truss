@@ -7,9 +7,9 @@ use standard.processes
 use standard.streams
 
 public capability Console {
-  fn print(text: StringSlice)
-  fn print_line(text: StringSlice)
-  fn print_error(text: StringSlice)
+  fn print(text: String)
+  fn print_line(text: String)
+  fn print_error(text: String)
   fn read_line() -> Option[String]
   fn input() -> console.Input
   fn output() -> console.Output
@@ -28,8 +28,8 @@ public capability FileRead {
 }
 
 public capability FileWrite {
-  fn write(file: Path, contents: Slice[UInt8]) -> Result[Unit, SystemError]
-  fn write_text(file: Path, contents: StringSlice) -> Result[Unit, SystemError]
+  fn write(file: Path, contents: List[UInt8]) -> Result[Unit, SystemError]
+  fn write_text(file: Path, contents: String) -> Result[Unit, SystemError]
   fn open(file: Path, mode: files.WriteMode) -> Result[files.File, SystemError]
   fn create_directory(directory: Path) -> Result[Unit, SystemError]
   fn remove(path: Path) -> Result[Unit, SystemError]
@@ -40,7 +40,7 @@ public capability FileWrite {
 }
 
 public capability NetworkClient {
-  fn resolve(host: StringSlice) -> Result[List[network.IpAddress], SystemError]
+  fn resolve(host: String) -> Result[List[network.IpAddress], SystemError]
   fn connect(address: network.SocketAddress, timeout: Option[Duration]) -> Result[network.Connection, SystemError]
   fn connect_local(path: Path) -> Result[network.LocalConnection, SystemError]
   fn open_datagram() -> Result[network.DatagramSocket, SystemError]
@@ -59,7 +59,7 @@ public capability Handles {
   fn read(handle: streams.Handle, buffer: mut List[UInt8], limit: UInt64) -> Result[UInt64, SystemError]
     ensures !(result is Ok(count) && (count > limit || buffer.length() != old(buffer.length()) + count))
     ensures !(result is Err(_) && buffer.length() != old(buffer.length()))
-  fn write(handle: streams.Handle, bytes: Slice[UInt8]) -> Result[UInt64, SystemError]
+  fn write(handle: streams.Handle, bytes: List[UInt8]) -> Result[UInt64, SystemError]
     ensures !(result is Ok(count) && count > bytes.length())
   fn read_at(
     handle: streams.Handle,
@@ -69,7 +69,7 @@ public capability Handles {
   ) -> Result[UInt64, SystemError]
     ensures !(result is Ok(count) && (count > limit || buffer.length() != old(buffer.length()) + count))
     ensures !(result is Err(_) && buffer.length() != old(buffer.length()))
-  fn write_at(handle: streams.Handle, offset: UInt64, bytes: Slice[UInt8]) -> Result[UInt64, SystemError]
+  fn write_at(handle: streams.Handle, offset: UInt64, bytes: List[UInt8]) -> Result[UInt64, SystemError]
     ensures !(result is Ok(count) && count > bytes.length())
   fn seek(handle: streams.Handle, to: streams.Position) -> Result[UInt64, SystemError]
   fn set_length(handle: streams.Handle, length: UInt64) -> Result[Unit, SystemError]
@@ -87,7 +87,7 @@ public capability Handles {
   fn configure(socket: streams.Handle, option: network.SocketOption) -> Result[Unit, SystemError]
   fn send_to(
     socket: streams.Handle,
-    bytes: Slice[UInt8],
+    bytes: List[UInt8],
     address: network.SocketAddress,
   ) -> Result[UInt64, SystemError]
   fn receive_from(
@@ -112,13 +112,13 @@ public capability Random {
 }
 
 public capability Environment {
-  fn variable(name: StringSlice) -> Option[String]
+  fn variable(name: String) -> Option[String]
   fn variables() -> List[environment.Variable]
   fn current_directory() -> Result[Path, SystemError]
   fn platform() -> environment.Platform
   fn location(location: environment.Location) -> Option[Path]
   fn local_zone() -> Option[String]
-  fn zone_rules(name: StringSlice) -> Option[List[UInt8]]
+  fn zone_rules(name: String) -> Option[List[UInt8]]
 }
 
 public capability Processes {
@@ -127,7 +127,7 @@ public capability Processes {
 }
 
 public capability Signals {
-  fn wait(signals: Slice[processes.Signal]) -> Option[processes.Signal]
+  fn wait(signals: List[processes.Signal]) -> Option[processes.Signal]
 }
 
 public capability Tasks {
@@ -137,7 +137,7 @@ public capability Tasks {
   fn cancel(task_group: UInt64) -> Bool
   fn cancelled() -> Bool
   fn watch(key: UInt64) -> UInt64
-  fn wait(key: UInt64, ticket: UInt64, reason: StringSlice)
+  fn wait(key: UInt64, ticket: UInt64, reason: String)
   fn wake(key: UInt64)
   fn lock(mutex: UInt64)
   fn unlock(mutex: UInt64)
@@ -150,7 +150,7 @@ public capability Log {
 }
 
 public capability Panic {
-  fn crash(message: StringSlice) -> Never
+  fn crash(message: String) -> Never
     cost time O(1)
 }
 

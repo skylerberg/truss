@@ -125,6 +125,9 @@ let rec parse_type_expression cursor : Syntax.type_expression =
       Atoms.make_type_node cursor start (Self_type associated)
   | Keyword Fn, _, _ ->
       Atoms.make_type_node cursor start (Function_type (parse_function_type cursor ~clauses:false))
+  | Keyword View, _, _ ->
+      Cursor.advance cursor;
+      Atoms.make_type_node cursor start (View_type (parse_type_expression cursor))
   | Punctuation (Open Paren), _, _ -> parse_parenthesized_function_type cursor
   | Upper _, Punctuation Dot, Upper _ ->
       let parameter = Atoms.make_name cursor (Cursor.take cursor) in

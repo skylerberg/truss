@@ -1,0 +1,7 @@
+fn f(items: List[Int64]) -> Int64
+  requires items.length() > 3
+  ensures result == items[2]
+{
+  let part = items[1..3]
+  part[1]
+}

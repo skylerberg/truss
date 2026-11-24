@@ -7,6 +7,7 @@ let rec visit_type_expression on_expression (type_ : Syntax.type_expression) =
         inputs;
       Option.iter (visit_type_expression on_expression) output;
       List.iter (visit_clause on_expression) clauses
+  | View_type viewed -> visit_type_expression on_expression viewed
   | Self_type _ | Associated _ | Type_error -> ()
 
 and visit_path_type on_expression (path : Syntax.path_type) =
@@ -307,6 +308,7 @@ let walk_names ~on_name (definition : Syntax.definition) =
           inputs;
         Option.iter walk_type output;
         List.iter walk_clause clauses
+    | View_type viewed -> walk_type viewed
     | Type_error -> ()
   and walk_path_type (path_type : Syntax.path_type) =
     walk_path path_type.path;

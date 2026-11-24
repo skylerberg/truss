@@ -1,4 +1,4 @@
-fn moved(ports: mut Map[String, Int64], name: StringSlice) -> Option[Int64]
+fn moved(ports: mut Map[String, Int64], name: String) -> Option[Int64]
   ensures !ports.contains(name)
 {
   mut ports.take(name)

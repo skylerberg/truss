@@ -236,8 +236,8 @@ fn merged[Element: Ordered](first: own List[Element], second: own List[Element])
 }
 
 fn combined[Element: Ordered + Copyable](
-  first: Slice[Element],
-  second: Slice[Element],
+  first: List[Element],
+  second: List[Element],
   keeps_first_only: Bool,
   keeps_shared: Bool,
   keeps_second_only: Bool,
@@ -468,7 +468,7 @@ public fn collections.SortedSet[Element: Ordered].at_or_after(self, element: Ele
   }
 }
 
-public fn collections.SortedSet[Element: Ordered].in_range(self, range: Range[Element]) -> Slice[Element]
+public fn collections.SortedSet[Element: Ordered].in_range(self, range: Range[Element]) -> view List[Element]
   ensures forall i in 0..result.length() => range.contains(result.model()[i])
   cost time O(1 + log(self.length()) * time(Element.compare))
 {
@@ -683,7 +683,7 @@ public fn collections.SortedSet[Element: Ordered].reversed(self) -> list.Reverse
   ensures result.count() == self.length()
   cost time O(1)
 {
-  self.elements.slice().reversed()
+  self.elements.reversed()
 }
 
 impl Equal for collections.SortedSet[Element: Ordered] {

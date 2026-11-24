@@ -1,4 +1,4 @@
-fn largest_is_greatest(scores: Slice[Int64]) -> Bool
+fn largest_is_greatest(scores: List[Int64]) -> Bool
   requires scores.length() > 0
   ensures result
 {

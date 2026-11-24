@@ -57,7 +57,7 @@ test "the file name and the extension can be replaced" {
 test "components are the names between separators" {
   var names: List[String] = []
   for component in Path.new("/usr//local/bin/").components() {
-    mut names.push(component.to_string())
+    mut names.push(component.copy())
   }
   assert names.length() == 3
   assert names[0] == "usr"
@@ -118,11 +118,11 @@ test "normalizing keeps the double dots that lead out of a relative path, and no
   assert Path.new("/usr//local/./bin/").normalized().text() == Some("/usr/local/bin")
 }
 
-fn joins_to(base: StringSlice, part: StringSlice, expected: StringSlice) -> Bool {
+fn joins_to(base: String, part: String, expected: String) -> Bool {
   Path.new(base).join_confined(Path.new(part)) == Ok(Path.new(expected))
 }
 
-fn refused(base: StringSlice, part: StringSlice) -> Bool {
+fn refused(base: String, part: String) -> Bool {
   Path.new(base).join_confined(Path.new(part)) == Err(SystemError.PermissionDenied)
 }
 
@@ -144,7 +144,7 @@ test "joining within a directory refuses a part that would leave it" {
   assert refused("data", part: "/x")
 }
 
-fn path_of(text: StringSlice) -> Path {
+fn path_of(text: String) -> Path {
   Path.new(text)
 }
 
@@ -461,14 +461,14 @@ test "files within a directory resolve a path to one below the directory, or ref
   }
 }
 
-fn glob_matches(pattern: StringSlice, path: StringSlice) -> Bool {
+fn glob_matches(pattern: String, path: String) -> Bool {
   match files.Glob.parse(pattern) {
     Ok(glob) => glob.matches(Path.new(path))
     Err(_) => false
   }
 }
 
-fn glob_error(pattern: StringSlice) -> Option[UInt64] {
+fn glob_error(pattern: String) -> Option[UInt64] {
   match files.Glob.parse(pattern) {
     Ok(_) => None
     Err(error) => Some(error.offset)

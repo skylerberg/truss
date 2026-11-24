@@ -9,6 +9,7 @@ type env = {
   loop_element : Types.ty option;
   compile_time : bool;
   in_quantifier : bool;
+  binds_view : bool;
 }
 
 let runs (env : env) = not (env.specification || env.compile_time)
@@ -386,8 +387,8 @@ and finalize_argument state = function
       | Types.Value_variable _ -> Types.Type (Types.Error (read_unsolved_report state))
       | value -> Types.Value value)
 
-let unify state left right =
-  Unify.unify state.unifier (normalize state left) (normalize state right)
+let unify ?modulo_views state left right =
+  Unify.unify ?modulo_views state.unifier (normalize state left) (normalize state right)
 
 let unify_as_hint state actual expected =
   let is_output index =

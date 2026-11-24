@@ -1,6 +1,6 @@
 use standard.environment
 
-fn say(text: StringSlice) uses Console {
+fn say(text: String) uses Console {
   Console.print_line(text)
 }
 
@@ -8,7 +8,7 @@ fn shown(path: Option[Path]) -> String {
   if path is Some(present) && present.text() is Some(text) { "${text}" } else { "none".copy() }
 }
 
-fn main(arguments: Slice[String]) -> ExitCode
+fn main(arguments: List[String]) -> ExitCode
   uses Console, Environment, FileRead
 {
   var marked = 0
@@ -19,7 +19,7 @@ fn main(arguments: Slice[String]) -> ExitCode
     }
   }
   say("marked ${marked}")
-  if Environment.variable("TRUSS_TEST_MARK".slice()) is Some(value) {
+  if Environment.variable("TRUSS_TEST_MARK") is Some(value) {
     say("read ${value}")
   }
   if Environment.current_directory() is Ok(directory) {
@@ -46,9 +46,9 @@ fn main(arguments: Slice[String]) -> ExitCode
   if Environment.local_zone() is Some(zone) {
     say("zone ${zone}")
   }
-  if Environment.zone_rules("UTC".slice()) is Some(rules) && rules.length() > 4 {
+  if Environment.zone_rules("UTC") is Some(rules) && rules.length() > 4 {
     say("rules start ${rules[0]} ${rules[1]} ${rules[2]} ${rules[3]}")
   }
-  say("outside ${Environment.zone_rules("../../../etc/hosts".slice()) is Some(_)}")
+  say("outside ${Environment.zone_rules("../../../etc/hosts") is Some(_)}")
   ExitCode(0)
 }

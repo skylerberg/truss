@@ -65,6 +65,7 @@ let token_of_kind (kind : Token.kind) : Truss.token option =
         | Use -> USE
         | Uses -> USES
         | Var -> VAR
+        | View -> VIEW
         | When -> WHEN
         | While -> WHILE
         | With -> WITH)

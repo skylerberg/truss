@@ -1,4 +1,4 @@
-fn claimed(numbers: Slice[Int64]) -> Bool
+fn claimed(numbers: List[Int64]) -> Bool
   uses Tasks
   ensures !result
 {

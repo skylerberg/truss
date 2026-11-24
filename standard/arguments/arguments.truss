@@ -77,7 +77,7 @@ impl Display for Error {
   }
 }
 
-public fn Parser.new(name: StringSlice, about: StringSlice = "") -> Parser {
+public fn Parser.new(name: String, about: String = "") -> Parser {
   Parser(name: name.to_string(), about: about.to_string(), parameters: [], commands: [])
 }
 
@@ -89,7 +89,7 @@ fn Parser.with_parameter(own self, parameter: own Parameter) -> Parser {
   changed
 }
 
-public fn Parser.flag(own self, name: StringSlice, help: StringSlice, short: Option[Character] = None) -> Parser {
+public fn Parser.flag(own self, name: String, help: String, short: Option[Character] = None) -> Parser {
   own self.with_parameter(Parameter(
     name: name.to_string(),
     short: short,
@@ -103,8 +103,8 @@ public fn Parser.flag(own self, name: StringSlice, help: StringSlice, short: Opt
 
 public fn Parser.option(
   own self,
-  name: StringSlice,
-  help: StringSlice,
+  name: String,
+  help: String,
   short: Option[Character] = None,
   default: Option[String] = None,
   required: Bool = false,
@@ -121,7 +121,7 @@ public fn Parser.option(
   ))
 }
 
-public fn Parser.positional(own self, name: StringSlice, help: StringSlice, required: Bool = true) -> Parser {
+public fn Parser.positional(own self, name: String, help: String, required: Bool = true) -> Parser {
   own self.with_parameter(Parameter(
     name: name.to_string(),
     short: None,
@@ -133,7 +133,7 @@ public fn Parser.positional(own self, name: StringSlice, help: StringSlice, requ
   ))
 }
 
-public fn Parser.rest(own self, name: StringSlice, help: StringSlice) -> Parser {
+public fn Parser.rest(own self, name: String, help: String) -> Parser {
   own self.with_parameter(Parameter(
     name: name.to_string(),
     short: None,
@@ -151,7 +151,7 @@ public fn Parser.command(own self, command: own Parser) -> Parser {
   changed
 }
 
-fn Parser.find_long(self, name: StringSlice) -> UInt64
+fn Parser.find_long(self, name: String) -> UInt64
   ensures result <= self.parameters.length()
 {
   var index: UInt64 = 0
@@ -211,7 +211,7 @@ fn Parser.positional_at(self, count: UInt64) -> UInt64
   rest
 }
 
-fn Parser.find_command(self, name: StringSlice) -> UInt64
+fn Parser.find_command(self, name: String) -> UInt64
   ensures result <= self.commands.length()
 {
   var index: UInt64 = 0
@@ -227,7 +227,7 @@ fn Parser.find_command(self, name: StringSlice) -> UInt64
   self.commands.length()
 }
 
-fn Parsed.index_of(self, name: StringSlice) -> UInt64
+fn Parsed.index_of(self, name: String) -> UInt64
   ensures result <= self.options.length()
 {
   var index: UInt64 = 0
@@ -243,7 +243,7 @@ fn Parsed.index_of(self, name: StringSlice) -> UInt64
   self.options.length()
 }
 
-fn add_value(parsed: mut Parsed, name: StringSlice, value: StringSlice, repeated: Bool)
+fn add_value(parsed: mut Parsed, name: String, value: String, repeated: Bool)
 {
   let position = parsed.index_of(name)
   if position == parsed.options.length() {
@@ -256,7 +256,7 @@ fn add_value(parsed: mut Parsed, name: StringSlice, value: StringSlice, repeated
   }
 }
 
-fn set_flag(parsed: mut Parsed, name: StringSlice)
+fn set_flag(parsed: mut Parsed, name: String)
 {
   if !parsed.flag(name) {
     mut parsed.switches.push(name.to_string())
@@ -267,15 +267,15 @@ fn Parser.take_option_value(
   self,
   parsed: mut Parsed,
   position: UInt64,
-  attached: Option[StringSlice],
-  arguments: Slice[String],
+  attached: Option[String],
+  arguments: List[String],
   next: UInt64,
 ) -> Result[UInt64, Error]
   requires position < self.parameters.length()
   requires next <= arguments.length()
   ensures !(result is Ok(after) && (after < next || after > arguments.length()))
 {
-  let name = self.parameters[position].name.slice()
+  let name = self.parameters[position].name
   let repeated = self.parameters[position].repeated
   if attached is Some(value) {
     add_value(mut parsed, name: name, value: value, repeated: repeated)
@@ -291,8 +291,8 @@ fn Parser.take_option_value(
 fn Parser.parse_long_option(
   self,
   parsed: mut Parsed,
-  body: StringSlice,
-  arguments: Slice[String],
+  body: String,
+  arguments: List[String],
   next: UInt64,
 ) -> Result[UInt64, Error]
   requires next <= arguments.length()
@@ -300,7 +300,7 @@ fn Parser.parse_long_option(
 {
   let split = body.split_once("=")
   let name = if split is Some(pair) { pair.first } else { body }
-  let attached: Option[StringSlice] = if split is Some(pair) { Some(pair.second) } else { None }
+  let attached: Option[view String] = if split is Some(pair) { Some(pair.second) } else { None }
   let position = self.find_long(name)
   if position == self.parameters.length() {
     if name.length() == 4 && name.starts_with("help") {
@@ -323,8 +323,8 @@ fn Parser.parse_long_option(
 fn Parser.parse_short_options(
   self,
   parsed: mut Parsed,
-  body: StringSlice,
-  arguments: Slice[String],
+  body: String,
+  arguments: List[String],
   next: UInt64,
 ) -> Result[UInt64, Error]
   requires next <= arguments.length()
@@ -342,7 +342,7 @@ fn Parser.parse_short_options(
     }
     if self.parameters[position].kind != Kind.Flag {
       let rest = body.get_substring(offset + letter.utf8_length(), to: body.length())
-      let attached: Option[StringSlice] = if rest is Some(text) && text.length() > 0 { Some(text) } else { None }
+      let attached: Option[view String] = if rest is Some(text) && text.length() > 0 { Some(text) } else { None }
       return self.take_option_value(mut parsed, position: position, attached: attached, arguments: arguments, next: next)
     }
     set_flag(mut parsed, name: self.parameters[position].name)
@@ -350,7 +350,7 @@ fn Parser.parse_short_options(
   Ok(next)
 }
 
-fn Parser.is_short_options(self, body: StringSlice) -> Bool
+fn Parser.is_short_options(self, body: String) -> Bool
 {
   match body.first_character() {
     Some(letter) => {
@@ -374,7 +374,7 @@ fn Parser.finalize(self, parsed: own Parsed, positional_count: UInt64) -> Result
     invariant seen <= index
     decreases self.parameters.length() - index
   {
-    let name = self.parameters[index].name.slice()
+    let name = self.parameters[index].name
     let kind = self.parameters[index].kind
     if kind == Kind.Option && finished.index_of(name) == finished.options.length() {
       if self.parameters[index].default is Some(text) {
@@ -394,7 +394,7 @@ fn Parser.finalize(self, parsed: own Parsed, positional_count: UInt64) -> Result
   Ok(own finished)
 }
 
-public fn Parser.parse(self, arguments: Slice[String]) -> Result[Parsed, Error]
+public fn Parser.parse(self, arguments: List[String]) -> Result[Parsed, Error]
   decreases arguments.length()
 {
   var parsed = Parsed(switches: [], options: [], command_name: None, command: [])
@@ -406,7 +406,7 @@ public fn Parser.parse(self, arguments: Slice[String]) -> Result[Parsed, Error]
     invariant positional_count <= index
     decreases arguments.length() - index
   {
-    let argument = arguments[index].slice()
+    let argument = arguments[index]
     index += 1
     let long = if literal { None } else { argument.strip_prefix("--") }
     let short = if literal || long is Some(_) { None } else { argument.strip_prefix("-") }
@@ -445,7 +445,7 @@ public fn Parser.parse(self, arguments: Slice[String]) -> Result[Parsed, Error]
 
 fn Parameter.write_usage(self, text: mut String)
 {
-  let name = self.name.slice()
+  let name = self.name
   let open = if self.required { "" } else { "[" }
   let close = if self.required { "" } else { "]" }
   if self.kind == Kind.Flag {
@@ -475,7 +475,7 @@ fn Parameter.write_usage(self, text: mut String)
 
 fn Parameter.label(self) -> String
 {
-  let name = self.name.slice()
+  let name = self.name
   var text = ""
   if self.kind == Kind.Flag || self.kind == Kind.Option {
     if self.short is Some(letter) {
@@ -530,7 +530,7 @@ fn Parser.label_width(self) -> UInt64
   width
 }
 
-fn write_row(text: mut String, label: StringSlice, width: UInt64, help: StringSlice)
+fn write_row(text: mut String, label: String, width: UInt64, help: String)
 {
   mut text.push("  ")
   mut text.push(label.pad_end(width))
@@ -541,7 +541,7 @@ fn write_row(text: mut String, label: StringSlice, width: UInt64, help: StringSl
   mut text.push("\n")
 }
 
-fn Parser.write_section(self, text: mut String, title: StringSlice, options: Bool, width: UInt64)
+fn Parser.write_section(self, text: mut String, title: String, options: Bool, width: UInt64)
 {
   var written = false
   var index: UInt64 = 0
@@ -622,7 +622,7 @@ public fn Parser.help(self) -> String
   text
 }
 
-public fn Parsed.flag(self, name: StringSlice) -> Bool
+public fn Parsed.flag(self, name: String) -> Bool
 {
   var index: UInt64 = 0
   while index < self.switches.length()
@@ -637,25 +637,25 @@ public fn Parsed.flag(self, name: StringSlice) -> Bool
   false
 }
 
-public fn Parsed.value(self, name: StringSlice) -> Option[StringSlice]
+public fn Parsed.value(self, name: String) -> Option[view String]
 {
   let position = self.index_of(name)
   if position == self.options.length() {
     return None
   }
-  self.options[position].values.last().map(fn(text) { text.slice() })
+  self.options[position].values.last().map(fn(text) { text })
 }
 
-public fn Parsed.values(self, name: StringSlice) -> Slice[String]
+public fn Parsed.values(self, name: String) -> view List[String]
 {
   let position = self.index_of(name)
   if position == self.options.length() {
-    return no_values.slice()
+    return no_values
   }
-  self.options[position].values.slice()
+  self.options[position].values
 }
 
-public fn Parsed.value_as[Target: text.Parse](self, name: StringSlice) -> Result[Option[Target], Error] {
+public fn Parsed.value_as[Target: text.Parse](self, name: String) -> Result[Option[Target], Error] {
   match self.value(name) {
     Some(text) => match Target.parse(text) {
       Ok(parsed) => Ok(Some(own parsed))
@@ -665,10 +665,10 @@ public fn Parsed.value_as[Target: text.Parse](self, name: StringSlice) -> Result
   }
 }
 
-public fn Parsed.command_name(self) -> Option[StringSlice]
+public fn Parsed.command_name(self) -> Option[view String]
   cost time O(1)
 {
-  self.command_name.map(fn(name) { name.slice() })
+  self.command_name.map(fn(name) { name })
 }
 
 public fn Parsed.command(self) lends Option[Parsed]

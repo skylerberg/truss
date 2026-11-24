@@ -1,7 +1,7 @@
 use standard.html
 
-fn clean(input: StringSlice) -> String {
-  html.sanitize(input).text().to_string()
+fn clean(input: String) -> String {
+  html.sanitize(input).text().copy()
 }
 
 test "sanitize keeps allowed formatting and links, and gives links rel=nofollow" {

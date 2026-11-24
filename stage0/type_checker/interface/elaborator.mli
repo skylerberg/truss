@@ -22,7 +22,7 @@ val record_diagnostic :
   Diagnostic.reported
 
 val list_trait_closure : Lookups.t -> Path.t -> Path.t list
-val split_field_path : Syntax.expression -> (string * Syntax.name list) option
+val split_part : Syntax.expression -> (string * Syntax.name list * bool) option
 val find_bounded_type : t -> Syntax.expression -> Types.ty option
 
 type bound_method = {

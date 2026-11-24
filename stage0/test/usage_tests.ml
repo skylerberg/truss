@@ -123,7 +123,7 @@ let () =
         ~says:"`count <= count` compares a value with itself, so it is always true.");
   Harness.test "an element compared with itself through one index is an error" (fun () ->
       expect_one_diagnostic
-        "fn f(items: Slice[Int64], index: UInt64) -> Bool\n\
+        "fn f(items: List[Int64], index: UInt64) -> Bool\n\
         \  requires index < items.length()\n\
          {\n\
         \  items[index] < items[index]\n\
@@ -155,7 +155,7 @@ let () =
   Harness.test "a RunForever that nothing uses is reported, and removing it joins the brace"
     (fun () ->
       expect_removed Fixtures.Usage.run_forever_that_nothing_uses
-        "fn f(values: Slice[UInt64]) -> UInt64 {\n\
+        "fn f(values: List[UInt64]) -> UInt64 {\n\
         \  var total: UInt64 = 0\n\
         \  for value in values {\n\
         \    total = value\n\
@@ -165,15 +165,15 @@ let () =
   Harness.test "removing a RunForever listed after another capability keeps that capability"
     (fun () ->
       expect_removed Fixtures.Usage.run_forever_listed_after_another_capability
-        "fn f(values: Slice[UInt64]) -> UInt64\n  uses Panic\n{\n  values.length() + 1\n}\n");
+        "fn f(values: List[UInt64]) -> UInt64\n  uses Panic\n{\n  values.length() + 1\n}\n");
   Harness.test "removing a RunForever listed before another capability keeps that capability"
     (fun () ->
       expect_removed Fixtures.Usage.run_forever_listed_before_another_capability
-        "fn f(values: Slice[UInt64]) -> UInt64\n  uses Panic\n{\n  values.length() + 1\n}\n");
+        "fn f(values: List[UInt64]) -> UInt64\n  uses Panic\n{\n  values.length() + 1\n}\n");
   Harness.test "removing a RunForever before another clause keeps the brace on its own line"
     (fun () ->
       expect_removed Fixtures.Usage.run_forever_before_an_ensures
-        "fn f(values: Slice[UInt64]) -> UInt64\n\
+        "fn f(values: List[UInt64]) -> UInt64\n\
         \  ensures result == values.length()\n\
          {\n\
         \  values.length()\n\

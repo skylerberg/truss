@@ -1,4 +1,4 @@
-fn f(left: Slice[Int64], right: Slice[Int64]) -> Bool
+fn f(left: List[Int64], right: List[Int64]) -> Bool
   uses Panic
 {
   parallel {

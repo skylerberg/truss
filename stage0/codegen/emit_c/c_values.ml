@@ -522,8 +522,6 @@ let rec render_initializer (emission : Emission.t) ty (value : Lowered.static_va
   | Zero_size, _ -> None
   | _, Static_storage { element; elements; capacity } ->
       render_sequence (list_storage_fields capacity) element elements
-  | _, Static_view { element; elements } ->
-      render_sequence Storage.list_view_fields element elements
   | Scalar _, Static_scalar constant -> Some (fst (render_constant emission constant))
   | Struct fields, Static_record values ->
       Some (C_text.render_braces (render_fields fields values ""))

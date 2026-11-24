@@ -227,11 +227,11 @@ public fn Cell[Value: Storable].update[Output: Storable](self, change: fn(mut Va
   })
 }
 
-public fn Cell[Value: Storable].read[Output: Storable](self, view: fn(Value) -> Output) -> Output
+public fn Cell[Value: Storable].read[Output: Storable](self, viewed: fn(Value) -> Output) -> Output
   uses Tasks
 {
   intrinsic.shared_update(self.state, input: 0, change: fn(value, _) {
-    view(value)
+    viewed(value)
   })
 }
 
@@ -359,7 +359,7 @@ internal fn Scheduler.open(mut self) -> UInt64 {
 internal fn Scheduler.group_index(self, task_group: UInt64) -> Option[UInt64]
   ensures !(result is Some(index) && index >= self.groups.length())
 {
-  self.groups.slice().find_index(fn(group) { group.identifier == task_group })
+  self.groups.find_index(fn(group) { group.identifier == task_group })
 }
 
 internal fn Scheduler.accepts_tasks(self, task_group: UInt64) -> Bool {
@@ -379,7 +379,7 @@ internal fn Scheduler.add_task(mut self, task_group: UInt64, coroutine: UInt64) 
     ticket: 0,
     woken: false,
   )
-  match self.tasks.slice().find_index(fn(other) { other.status is Finished }) {
+  match self.tasks.find_index(fn(other) { other.status is Finished }) {
     Some(finished) => self.tasks[finished] = own task
     None => mut self.tasks.push(own task)
   }
@@ -720,7 +720,7 @@ impl Tasks for SeededTasks
     })
   }
 
-  fn wait(self, key: UInt64, ticket: UInt64, reason: StringSlice) {
+  fn wait(self, key: UInt64, ticket: UInt64, reason: String) {
     let blocked = intrinsic.shared_update(
       self.scheduler,
       input: reason.to_string(),

@@ -1,6 +1,0 @@
-fn f(items: Slice[UInt64]) {
-  var view = items[..]
-  for item in mut view {
-    item = 7
-  }
-}

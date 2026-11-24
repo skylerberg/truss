@@ -6,12 +6,12 @@ use standard.url
 test "a form reads repeated names and plus signs, and encodes back" {
   match http.Form.parse("a=1&b=two+words&a=3%26") {
     Ok(form) => {
-      assert form.get("a") == Some("1".slice())
+      assert form.get("a") == Some("1")
       assert form.all("a").length() == 2 && form.all("a")[1] == "3&"
-      assert form.get("b") == Some("two words".slice())
+      assert form.get("b") == Some("two words")
       assert form.get("c") is None
       let encoded = form.encode()
-      assert http.Form.parse(encoded.slice()) == Ok(form.copy())
+      assert http.Form.parse(encoded) == Ok(form.copy())
     }
     Err(_) => assert false
   }
@@ -22,10 +22,10 @@ fn receive(request: own http.Request, responder: mut http.Responder)
 {
   if request.matches(http.Route"POST /form") is Some(_) {
     let reply = match own request.form() {
-      Ok(form) => "${form.get("name").unwrap_or("none".slice())} ${form.all("tag").length()}"
+      Ok(form) => "${form.get("name").unwrap_or("none")} ${form.all("tag").length()}"
       Err(error) => "failed: ${error}"
     }
-    let _ = mut responder.send(http.Response.text(reply.slice()))
+    let _ = mut responder.send(http.Response.text(reply))
     return
   }
   var parts: List[String] = []
@@ -47,10 +47,10 @@ fn receive(request: own http.Request, responder: mut http.Responder)
   }
   var joined = ""
   for part in parts {
-    mut joined.push(part.slice())
+    mut joined.push(part)
     mut joined.push("|")
   }
-  let _ = mut responder.send(http.Response.text(joined.slice()))
+  let _ = mut responder.send(http.Response.text(joined))
 }
 
 fn submit() -> List[String]
@@ -68,21 +68,21 @@ fn submit() -> List[String]
       var headers = http.Headers.new()
       mut headers.add("Content-Type", value: "application/x-www-form-urlencoded")
       let encoded = form.encode()
-      match http.send(http.Method.Post, url: url.Url"http://localhost:8091/form", headers: headers, body: encoded.slice().bytes().to_list()) {
+      match http.send(http.Method.Post, url: url.Url"http://localhost:8091/form", headers: headers, body: encoded.bytes().to_list()) {
         Ok(response) => mut seen.push(response.text_body().unwrap_or(""))
         Err(error) => mut seen.push("failed: ${error}")
       }
       var fields = http.Form.new()
       mut fields.add("title", value: "notes ✓")
       let large: List[UInt8] = List.filled(120, count: 100000)
-      let tricky = "\r\n--truss-not-the-boundary\r\n--".slice().bytes().to_list()
+      let tricky = "\r\n--truss-not-the-boundary\r\n--".bytes().to_list()
       let files: List[http.FilePart] = [
         http.FilePart(name: "document", filename: "a \"quoted\" name.txt", content_type: "text/plain", bytes: own large),
         http.FilePart(name: "tricky", filename: "tricky.bin", content_type: "application/octet-stream", bytes: own tricky),
       ]
       let multipart = http.encode_multipart(fields, files: files)
       var multipart_headers = http.Headers.new()
-      mut multipart_headers.add("Content-Type", value: multipart.content_type.slice())
+      mut multipart_headers.add("Content-Type", value: multipart.content_type)
       match http.send(http.Method.Post, url: url.Url"http://localhost:8091/upload", headers: multipart_headers, body: multipart.body.copy()) {
         Ok(response) => mut seen.push(response.text_body().unwrap_or(""))
         Err(error) => mut seen.push("failed: ${error}")

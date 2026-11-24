@@ -1,11 +1,11 @@
-fn keep(held: mut List[Slice[Int64]], view: Slice[Int64]) {
-  mut held.push(view)
+fn keep(held: mut List[view List[Int64]], viewed: view List[Int64]) {
+  mut held.push(viewed)
 }
 
 fn f() -> UInt64 {
   var data: List[Int64] = [1, 2, 3]
-  var views: List[Slice[Int64]] = []
-  keep(mut views, view: data[0..2])
+  var views: List[view List[Int64]] = []
+  keep(mut views, viewed: data[0..2])
   mut data.push(4)
   views.length()
 }

@@ -15,7 +15,7 @@ impl Flags for Flag {
   }
 }
 
-fn main(arguments: Slice[String]) -> ExitCode
+fn main(arguments: List[String]) -> ExitCode
   uses Tasks, Console, RunForever
 {
   var flag = Flag(raised: false)

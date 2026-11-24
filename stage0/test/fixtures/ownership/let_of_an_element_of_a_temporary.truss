@@ -1,0 +1,6 @@
+fn rows() -> List[List[Int64]] { [[1, 2, 3]] }
+
+fn f() -> UInt64 {
+  let first = rows()[0]
+  first.length()
+}

@@ -1,5 +1,5 @@
 type argument = Context.argument = Place of Lowered.place | Value of Lowered.operand
-type types = Context.types = { uint64 : Ground.ty; string_slice : Ground.ty }
+type types = Context.types = { uint64 : Ground.ty; string : Ground.ty }
 
 let list_consumed_places : Intrinsic.operation -> int list = function
   | Buffer Array_from_storage -> [ 0 ]

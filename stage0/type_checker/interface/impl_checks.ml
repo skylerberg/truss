@@ -39,13 +39,10 @@ let list_types (signature : Types.signature) =
 let find_unallowed_part ~(expected : Types.signature) ~(written : Types.signature) =
   List.find_map
     (fun (part : Types.modified) ->
-      match Types.list_modified_fields expected part.position with
+      match Types.list_modified_parts expected part.position with
       | Some allowed
-        when not
-               (List.exists
-                  (fun prefix -> Types.is_field_path_prefix prefix part.field_path)
-                  allowed) ->
-          Some (part.position, part.field_path)
+        when not (List.exists (fun container -> Types.is_part_within ~container part) allowed) ->
+          Some part
       | Some _ | None -> None)
     written.modifies
 
@@ -248,20 +245,7 @@ let check_impl (state : Checking.state) (written_members : Syntax.impl_member Sy
           if (not trait.is_capability) && impl.impl_uses <> Types.no_capabilities then
             Checking.report state Impl_uses state.spans.(trait_path.id)
               "Only an `impl` of a capability can have `uses`. A trait's methods can use only the \
-               capabilities the trait declares.";
-          if
-            (Types.is_well_known Slice impl.for_type
-            || Types.is_well_known String_slice impl.for_type)
-            && List.exists
-                 (fun (method_ : Types.trait_method) -> method_.method_receiver = Instance Mut)
-                 trait.methods
-          then
-            Checking.report state Mut_self_for_slice state.spans.(trait_path.id)
-              (Printf.sprintf
-                 "`%s` has a `mut self` method, so it cannot be implemented for `%s`. Generic code \
-                  could call the method on a copy of a slice, and a copy views the same elements, \
-                  so the write would reach elements that were lent read-only."
-                 shown_trait (Types.show impl.for_type)))
+               capabilities the trait declares.")
 
 let list_callback_contracts (definition : Syntax.definition) ~text ~spans =
   let parameters =
@@ -418,14 +402,14 @@ let check_impl_method (state : Checking.state) (name : Syntax.name) (receiver : 
                      shown_trait name.text name.text shown_trait)
               else
                 match find_unallowed_part ~expected ~written with
-                | Some (position, field_path) ->
-                    let parameter = (Types.read_parameter_at written position).name in
+                | Some part ->
+                    let parameter = (Types.read_parameter_at written part.position).name in
                     Checking.report state Impl_modifies state.spans.(name.id)
                       (Printf.sprintf
                          "`%s` names `%s` in `modifies`, and the `modifies` clause of `%s.%s` \
                           names no part that holds it. An implementation changes only the parts \
                           that its trait's method names."
                          name.text
-                         (String.concat "." (parameter :: field_path))
+                         (Types.show_modified_part ~root:parameter part)
                          shown_trait name.text)
                 | None -> check_callback_contracts state name ~shown_trait implemented.declaration))

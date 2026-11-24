@@ -1,4 +1,4 @@
-fn render(title: StringSlice, count: Int64) -> String {
+fn render(title: String, count: Int64) -> String {
   let header = "${title}: ${count}"
   let _ = header
   todo

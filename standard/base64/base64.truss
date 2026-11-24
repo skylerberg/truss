@@ -64,7 +64,7 @@ internal fn symbol_value(byte: UInt8, alphabet: Alphabet) -> UInt8
   }
 }
 
-public fn encode(bytes: Slice[UInt8], alphabet: Alphabet = Alphabet.Standard, padding: Bool = true) -> String
+public fn encode(bytes: List[UInt8], alphabet: Alphabet = Alphabet.Standard, padding: Bool = true) -> String
   ensures result.length() <= 4 * ((bytes.length() + 2) / 3)
   cost time O(bytes.length())
   cost allocations <= 1
@@ -112,7 +112,7 @@ public fn encode(bytes: Slice[UInt8], alphabet: Alphabet = Alphabet.Standard, pa
 }
 
 public fn encode_onto(
-  bytes: Slice[UInt8],
+  bytes: List[UInt8],
   output: mut String,
   alphabet: Alphabet = Alphabet.Standard,
   padding: Bool = true,
@@ -123,7 +123,7 @@ public fn encode_onto(
   mut output.push(text)
 }
 
-internal fn unpadded_length(text: StringSlice) -> UInt64
+internal fn unpadded_length(text: String) -> UInt64
   ensures result <= text.length()
   ensures text.length() - result <= 2
   cost time O(1)
@@ -139,7 +139,7 @@ internal fn unpadded_length(text: StringSlice) -> UInt64
   length
 }
 
-internal fn symbol_at(text: StringSlice, index: UInt64, alphabet: Alphabet) -> Result[UInt8, DecodeError]
+internal fn symbol_at(text: String, index: UInt64, alphabet: Alphabet) -> Result[UInt8, DecodeError]
   requires index < text.length()
   ensures !(result is Ok(value) && value >= 64)
   cost time O(1)
@@ -150,7 +150,7 @@ internal fn symbol_at(text: StringSlice, index: UInt64, alphabet: Alphabet) -> R
 }
 
 internal fn decode_group(
-  text: StringSlice,
+  text: String,
   index: UInt64,
   alphabet: Alphabet,
   bytes: mut intrinsic.Storage[UInt8],
@@ -175,7 +175,7 @@ internal fn decode_group(
 }
 
 internal fn decode_tail(
-  text: StringSlice,
+  text: String,
   index: UInt64,
   tail_symbols: UInt64,
   alphabet: Alphabet,
@@ -205,7 +205,7 @@ internal fn decode_tail(
   Ok(Unit)
 }
 
-public fn decode(text: StringSlice, alphabet: Alphabet = Alphabet.Standard) -> Result[List[UInt8], DecodeError]
+public fn decode(text: String, alphabet: Alphabet = Alphabet.Standard) -> Result[List[UInt8], DecodeError]
   cost time O(text.length())
   cost allocations <= 1
 {

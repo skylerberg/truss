@@ -112,6 +112,7 @@ val bind : State.frame -> Locals.key -> Types.ty -> Logic.term -> State.frame
 val list_definition_bounds :
   Lookups.t -> current:Path.t -> condition:Types.condition -> Interface.Impls.bounds
 
+val substitute_declared_type : State.context -> State.frame -> Types.ty -> Types.ty
 val substitute_type : State.context -> State.frame -> Types.ty -> Types.ty
 
 val find_impl :

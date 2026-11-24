@@ -154,12 +154,12 @@ fn parse_range_stop(cursor: mut TokenCursor, open_range: Bool, is_inclusive: Boo
   Err(open_range_error(mut cursor, operator, part: "end"))
 }
 
-fn open_range_message(part: StringSlice) -> String {
+fn open_range_message(part: String) -> String {
   let article = if part == "end" { "n" } else { "" }
   "A range without a${article} ${part} is only allowed directly in brackets, as in `items[2..]`."
 }
 
-fn open_range_error(cursor: mut TokenCursor, operator: token.Token, part: StringSlice) -> Failure
+fn open_range_error(cursor: mut TokenCursor, operator: token.Token, part: String) -> Failure
   uses Panic
 {
   report(mut cursor, code: "parser.open_range", span: operator.span, message: open_range_message(part))

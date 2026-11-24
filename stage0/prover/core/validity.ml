@@ -113,7 +113,7 @@ let rec find_part context ty term = function
 
 let rec replace_part context ty whole fields make_part =
   match fields with
-  | [] -> Some (make_part ty)
+  | [] -> Some (make_part ty whole)
   | field :: fields ->
       Option.bind (find_record_field_type context ty field) (fun field_type ->
           Option.map
@@ -390,7 +390,7 @@ let bind_arguments frame (clauses : State.clauses) ~arguments ~substitution =
     old_locals = locals;
     self = Option.map fst self;
     old_self = Option.map fst self;
-    self_type = Option.map (fun (_, ty) -> Types.substitute substitution ty) self;
+    self_type = Option.map (fun (_, ty) -> Types.substitute_erased substitution ty) self;
     result = None;
     makes_obligations = false;
     substitution;
@@ -415,7 +415,7 @@ let find_callee_declaration (context : State.context) frame (invocation : Invoca
             {
               trait with
               trait_arguments =
-                List.map (Types.substitute_argument frame.substitution) trait.trait_arguments;
+                List.map (Types.substitute_argument_erased frame.substitution) trait.trait_arguments;
             }
           in
           ( path,
@@ -496,7 +496,7 @@ let find_parameter_type (context : State.context) frame (invocation : Invocation
         (match signature.receiver with Some (_, ty) -> [ ty ] | None -> [])
         @ List.map (fun (info : Types.parameter_info) -> info.type_) signature.parameters
       in
-      Option.map (Types.substitute substitution) (List.nth_opt types index))
+      Option.map (Types.substitute_erased substitution) (List.nth_opt types index))
 
 let has_callback_promises context frame invocation position =
   read_callee_callback context frame invocation position []

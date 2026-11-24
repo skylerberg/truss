@@ -24,19 +24,19 @@ fn negated(value: Int64) -> Int64
   -value
 }
 
-fn second(items: Slice[Int64]) -> Int64
+fn second(items: List[Int64]) -> Int64
   uses Panic
 {
   items[1]
 }
 
-fn tail(items: Slice[Int64]) -> Slice[Int64]
+fn tail(items: List[Int64]) -> view List[Int64]
   uses Panic
 {
   items[1..]
 }
 
-fn port(ports: Map[String, UInt16], name: StringSlice) -> UInt16
+fn port(ports: Map[String, UInt16], name: String) -> UInt16
   uses Panic
 {
   ports[name]

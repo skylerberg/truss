@@ -1,7 +1,7 @@
 use standard.serialization
 use standard.toml
 
-fn parsed(text: StringSlice) -> Map[String, toml.Value]
+fn parsed(text: String) -> Map[String, toml.Value]
   uses RunForever
 {
   match toml.parse(text) {
@@ -10,7 +10,7 @@ fn parsed(text: StringSlice) -> Map[String, toml.Value]
   }
 }
 
-fn rejects(text: StringSlice) -> Bool
+fn rejects(text: String) -> Bool
   uses RunForever
 {
   toml.parse(text) is Err(_)
@@ -112,5 +112,5 @@ test "to_text writes keys that need quotes, and floats with a point" uses RunFor
   table["inner"] = toml.Value.Table(entries: own inner)
   let text = toml.to_text(table)
   assert text == "\"a b\" = 1.0\nplain = \"line\\nnext\"\n\n[inner]\nx = 1\n"
-  assert toml.parse(text.slice()) == Ok(own table)
+  assert toml.parse(text) == Ok(own table)
 }

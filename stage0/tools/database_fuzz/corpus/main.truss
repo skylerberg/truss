@@ -41,6 +41,6 @@ test "the larger of two points" {
   assert largest(corner(), right: Point(x: 1, y: 1)) == 1
 }
 
-fn main(arguments: Slice[String]) -> ExitCode {
+fn main(arguments: List[String]) -> ExitCode {
   if measure(Shape.Dot(at: corner())) == 1 { ExitCode.success } else { ExitCode.failure }
 }

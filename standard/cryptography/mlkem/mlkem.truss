@@ -157,7 +157,7 @@ fn encode(output: mut List[UInt8], coefficients: Array[UInt64, 256], bits: UInt6
   }
 }
 
-fn decode(bytes: Slice[UInt8], bits: UInt64) -> Array[UInt64, 256] {
+fn decode(bytes: List[UInt8], bits: UInt64) -> Array[UInt64, 256] {
   var coefficients: Array[UInt64, 256] = Array.filled(0)
   if bits == 0 || bits > 12 {
     return coefficients
@@ -224,13 +224,13 @@ fn decompressed(coefficients: Array[UInt64, 256], bits: UInt64) -> Array[UInt64,
   result
 }
 
-fn sample_ntt(rho: Slice[UInt8], column: UInt8, row: UInt8) -> Array[UInt64, 256]
+fn sample_ntt(rho: List[UInt8], column: UInt8, row: UInt8) -> Array[UInt64, 256]
   uses RunForever
 {
   var seed = rho.to_list()
   mut seed.push(column)
   mut seed.push(row)
-  var sponge = keccak.absorb(168, message: seed.slice(), suffix: 31)
+  var sponge = keccak.absorb(168, message: seed, suffix: 31)
   var coefficients: Array[UInt64, 256] = Array.filled(0)
   var count: UInt64 = 0
   var stream: List[UInt8] = []
@@ -261,10 +261,10 @@ fn sample_ntt(rho: Slice[UInt8], column: UInt8, row: UInt8) -> Array[UInt64, 256
   coefficients
 }
 
-fn sample_noise(seed: Slice[UInt8], nonce: UInt8) -> Array[UInt64, 256] {
+fn sample_noise(seed: List[UInt8], nonce: UInt8) -> Array[UInt64, 256] {
   var input = seed.to_list()
   mut input.push(nonce)
-  let bytes = keccak.hash(136, message: input.slice(), suffix: 31, count: 128)
+  let bytes = keccak.hash(136, message: input, suffix: 31, count: 128)
   var coefficients: Array[UInt64, 256] = Array.filled(0)
   let count: UInt64 = 256
   for index in 0..count {
@@ -279,7 +279,7 @@ fn sample_noise(seed: Slice[UInt8], nonce: UInt8) -> Array[UInt64, 256] {
 
 type Matrix(rows: Array[Array[Array[UInt64, 256], 3], 3])
 
-fn matrix(rho: Slice[UInt8]) -> Matrix
+fn matrix(rho: List[UInt8]) -> Matrix
   uses RunForever
 {
   var rows: Array[Array[Array[UInt64, 256], 3], 3] = Array.filled(Array.filled(Array.filled(0)))
@@ -292,22 +292,22 @@ fn matrix(rho: Slice[UInt8]) -> Matrix
   Matrix(rows: rows)
 }
 
-fn split_512(input: Slice[UInt8]) -> List[UInt8] {
+fn split_512(input: List[UInt8]) -> List[UInt8] {
   keccak.hash(72, message: input, suffix: 6, count: 64)
 }
 
-internal fn hash_256(input: Slice[UInt8]) -> List[UInt8] {
+internal fn hash_256(input: List[UInt8]) -> List[UInt8] {
   keccak.hash(136, message: input, suffix: 6, count: 32)
 }
 
 internal type KeyPair(encapsulation: List[UInt8], decapsulation: List[UInt8])
 
-fn generate_pke(seed: Slice[UInt8]) -> KeyPair
+fn generate_pke(seed: List[UInt8]) -> KeyPair
   uses RunForever
 {
   var input = seed.to_list()
   mut input.push(3)
-  let expanded = split_512(input.slice())
+  let expanded = split_512(input)
   if expanded.length() != 64 {
     return KeyPair(encapsulation: [], decapsulation: [])
   }
@@ -341,7 +341,7 @@ fn generate_pke(seed: Slice[UInt8]) -> KeyPair
   KeyPair(encapsulation: own encapsulation, decapsulation: own decapsulation)
 }
 
-fn encrypt(encapsulation: Slice[UInt8], message: Slice[UInt8], randomness: Slice[UInt8]) -> List[UInt8]
+fn encrypt(encapsulation: List[UInt8], message: List[UInt8], randomness: List[UInt8]) -> List[UInt8]
   uses RunForever
 {
   if encapsulation.length() != encapsulation_key_length {
@@ -380,7 +380,7 @@ fn encrypt(encapsulation: Slice[UInt8], message: Slice[UInt8], randomness: Slice
   ciphertext
 }
 
-fn decrypt(decapsulation: Slice[UInt8], ciphertext: Slice[UInt8]) -> List[UInt8] {
+fn decrypt(decapsulation: List[UInt8], ciphertext: List[UInt8]) -> List[UInt8] {
   if decapsulation.length() < 1152 || ciphertext.length() != ciphertext_length {
     return []
   }
@@ -404,25 +404,25 @@ fn decrypt(decapsulation: Slice[UInt8], ciphertext: Slice[UInt8]) -> List[UInt8]
   message
 }
 
-internal fn generate(seed: Slice[UInt8], rejection: Slice[UInt8]) -> KeyPair
+internal fn generate(seed: List[UInt8], rejection: List[UInt8]) -> KeyPair
   uses RunForever
 {
   let pair = generate_pke(seed)
   var decapsulation = pair.decapsulation.copy()
-  mut decapsulation.append_slice(pair.encapsulation.slice())
-  mut decapsulation.append(hash_256(pair.encapsulation.slice()))
+  mut decapsulation.append_slice(pair.encapsulation)
+  mut decapsulation.append(hash_256(pair.encapsulation))
   mut decapsulation.append_slice(rejection)
   KeyPair(encapsulation: own pair.encapsulation, decapsulation: own decapsulation)
 }
 
 internal type Encapsulated(shared: List[UInt8], ciphertext: List[UInt8])
 
-internal fn encapsulate(encapsulation: Slice[UInt8], message: Slice[UInt8]) -> Encapsulated
+internal fn encapsulate(encapsulation: List[UInt8], message: List[UInt8]) -> Encapsulated
   uses RunForever
 {
   var input = message.to_list()
   mut input.append(hash_256(encapsulation))
-  let expanded = split_512(input.slice())
+  let expanded = split_512(input)
   if expanded.length() != 64 {
     return Encapsulated(shared: [], ciphertext: [])
   }
@@ -430,7 +430,7 @@ internal fn encapsulate(encapsulation: Slice[UInt8], message: Slice[UInt8]) -> E
   Encapsulated(shared: expanded[0..32].to_list(), ciphertext: own ciphertext)
 }
 
-internal fn decapsulate(decapsulation: Slice[UInt8], ciphertext: Slice[UInt8]) -> List[UInt8]
+internal fn decapsulate(decapsulation: List[UInt8], ciphertext: List[UInt8]) -> List[UInt8]
   uses RunForever
 {
   if decapsulation.length() != decapsulation_key_length || ciphertext.length() != ciphertext_length {
@@ -439,14 +439,14 @@ internal fn decapsulate(decapsulation: Slice[UInt8], ciphertext: Slice[UInt8]) -
   let message = decrypt(decapsulation[0..1152], ciphertext: ciphertext)
   var input = message.copy()
   mut input.append_slice(decapsulation[2336..2368])
-  let expanded = split_512(input.slice())
+  let expanded = split_512(input)
   if expanded.length() != 64 {
     return []
   }
   var rejection_input = decapsulation[2368..2400].to_list()
   mut rejection_input.append_slice(ciphertext)
-  let rejected = keccak.hash(136, message: rejection_input.slice(), suffix: 31, count: 32)
-  let again = encrypt(decapsulation[1152..2336], message: message.slice(), randomness: expanded[32..64])
+  let rejected = keccak.hash(136, message: rejection_input, suffix: 31, count: 32)
+  let again = encrypt(decapsulation[1152..2336], message: message, randomness: expanded[32..64])
   var difference: UInt8 = 0
   if again.length() != ciphertext.length() {
     difference = 1
@@ -468,7 +468,7 @@ internal fn decapsulate(decapsulation: Slice[UInt8], ciphertext: Slice[UInt8]) -
   shared
 }
 
-internal fn is_valid_encapsulation_key(encapsulation: Slice[UInt8]) -> Bool {
+internal fn is_valid_encapsulation_key(encapsulation: List[UInt8]) -> Bool {
   if encapsulation.length() != encapsulation_key_length {
     return false
   }
@@ -485,7 +485,7 @@ internal fn is_valid_encapsulation_key(encapsulation: Slice[UInt8]) -> Bool {
   true
 }
 
-internal fn is_valid_decapsulation_key(decapsulation: Slice[UInt8]) -> Bool {
+internal fn is_valid_decapsulation_key(decapsulation: List[UInt8]) -> Bool {
   if decapsulation.length() != decapsulation_key_length {
     return false
   }

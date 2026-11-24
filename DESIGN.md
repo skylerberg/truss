@@ -14,7 +14,7 @@ the types, the capabilities, the contract, and the cost of a function, and the
 compiler proves that the body meets them:
 
 ```truss
-public fn binary_search(sorted: Slice[Int64], target: Int64) -> Option[UInt64]
+public fn binary_search(sorted: List[Int64], target: Int64) -> Option[UInt64]
   requires is_sorted(sorted)
   ensures match result {
     Some(index) => sorted[index] == target
@@ -348,7 +348,7 @@ Rules: [Views](SPECIFICATION.md#views).
 
 A view is a read-only reference to a value that another variable owns.
 While a view is live, its original cannot be mutated or moved. This prevents
-a dangling view: a `push` may reallocate the list that a slice views.
+a dangling view: a `push` may reallocate the list that a range views.
 
 Three decisions let views exist without lifetimes.
 
@@ -372,14 +372,15 @@ rule excludes `Plain` arguments, such as indexes, so that case is rare.
 
 | Rule | Reason |
 |---|---|
-| Whether a type is a view is derived from its fields, and a record that holds a view is a view. | Nothing is declared, and a view cannot escape inside a record. |
+| Whether a type is a view is derived from its fields and its type arguments, and a record that holds a view is a view. | A view cannot escape inside a record or a collection, and only the part that is a view is declared. |
 | Generic code that keeps a value requires `Storable`. | A type parameter may stand for a view, and the bound stops generic code from storing one. |
 | `mut` access is never stored. | It lasts for one call, one iteration, or one `provide mut` block, so the ownership check tracks no mutable reference from one statement to the next. |
-| A slice's elements are written only through a `mut Slice` parameter or a range of a mutable place, and a slice held in a variable, a field, or an element is read-only. | Write access then always names the place it writes, so the ownership check compares the written place with every other argument and view, and the prover writes the callee's changes back to that place. Write access held in a variable would let `var target = items[1..5]` overwrite elements that `items[0..4]`, passed beside it, still views. |
-| A `mut Slice` parameter cannot be assigned, and a slice is passed `mut` only to a `mut Slice` parameter. | A callee that assigned the slice another one would leave the caller's elements unchanged while the caller read the callee's contract as a write to them, and would carry write access to elements lent read-only. A slice's length is then fixed for the call, so the prover knows it with no clause, and the slice is passed by value. |
-| A slice implements no trait with a `mut self` method, so `Slice` has no `IndexMut`. | Generic code can copy a value of its type parameter, and a copy of a slice views the same elements, so a `mut self` method called on the copy would write through a read-only view. |
-| A view is passed as its owning type to a read-only parameter whose declared type is a type parameter or an associated type. | Generic code cannot name the view of its type parameter, so `Map.get`, which takes `key: Key`, would make a lookup in a `Map[String, Int64]` allocate a `String`. A callee cannot mutate, move, drop, or store a read-only parameter, so it cannot tell a view from an owned value. |
-| A read-only parameter is declared as `Slice` or `StringSlice`, never as `List` or `String`. | A read-only `List` parameter takes only a `List`, so a caller that holds a slice copies it into a new list for the call: an allocation that the signature alone forces. If the parameter took a view instead, `List` and `Slice` would accept the same arguments, and every signature would choose between two spellings for no reason. A `mut` or `own` `List` parameter takes no view, since it grows or keeps the list. |
+| A view is a mode of `List` and `String`, written `view T`, and not a second type. | A second type doubles every signature's choices and every method: `List` and its view each need `contains`, and a caller that holds one copies to call a function that takes the other. One type with one set of methods leaves a single question, whether a value owns its elements, and only a field, a type argument, a result, and a kept parameter answer it in writing. |
+| A view is read-only, and elements are written through a range of a mutable place, as in `sort(mut items[1..])`. | Write access then always names the place it writes, so the ownership check compares the written place with every other argument and view, and the prover writes the callee's changes back to that place. Write access held in a variable would let `var target = items[1..5]` overwrite elements that `items[0..4]`, passed beside it, still views. |
+| A range is passed `mut` only to a parameter that its function declares `modifies items[..]`. | A range has no capacity of its own, so a `push` through it would write over the elements that follow it. The clause states that the callee keeps the length, which the body check enforces and the caller's proof uses, so one function serves a whole list and a range of one. |
+| A read-only argument is compared with its parameter's type without `view`, so a `List[view String]` passes to a `List[String]` parameter and a `view String` looks up a `Map[String, Int64]`. | A view has the layout of the type that it views, and a callee cannot mutate, move, drop, or store a read-only parameter, so it cannot tell a view from an owned value. Without the rule a lookup would allocate a `String`, and a function over a list of texts would be written twice. |
+| A parameter declared `T` is lent for the call, and one declared `view T` may be stored. | Most functions only read their arguments, so the plain type is the short spelling and promises the caller that nothing stays borrowed. A function that keeps a view says so in its signature, where the caller's ownership check reads it: the argument then stays borrowed while the stored view is live. |
+| A view implements a trait of its viewed type only when every method of the trait takes `self` read-only and takes `Self` only in read-only parameters. | The view calls the viewed type's methods, which are compiled for an owner. A method that took `self` or a `Self` argument by `own` would drop the elements that the view only borrows: a double free. |
 
 ### Lending methods
 
@@ -389,7 +390,7 @@ Rules: [Lending methods](SPECIFICATION.md#lending-methods),
 A method cannot return `mut` access to a part of `self`, because `mut`
 access is never stored, and `scores[i] += 1` needs that access. A lending
 method lends the part to the caller instead, for the rest of the caller's
-statement. Indexing a type other than a `List`, a `Slice`, or an `Array` is
+statement. Indexing a type other than a `List` or an `Array` is
 a lending method of the prelude trait `Index`, so a user's collection gets
 the syntax of a `List`.
 
@@ -414,7 +415,7 @@ mutated. Such a type takes the new value in an ordinary method, as
 | A method may lend a value that it computes, and a mutation of that value is not written back. | Writing back would be code after the lend. |
 | A method lends a part of its first parameter, or a whole value that it made, and never a part inside a value it owns. | Nothing of the method then has to outlive its call except the part, which the caller holds. So the method can be compiled as a function and call itself. Swift's accessors lend such a part by keeping the accessor's frame alive. |
 | A lending call lends its whole receiver. | The method was proven on the assumption that nothing else uses `self` while the part is lent. |
-| An element or a range of a `List`, a `Slice`, or an `Array` is a place, as a field is, and calls no method. | A lending call lends its whole receiver, so `mut items[0]` passed beside `items[1]` would conflict, and the ownership check and the prover would not see which element a call wrote. As places, elements are parts of the sequence: disjoint parts pass side by side, and a write changes one element of the prover's model. |
+| An element or a range of a `List` or an `Array` is a place, as a field is, and calls no method. | A lending call lends its whole receiver, so `mut items[0]` passed beside `items[1]` would conflict, and the ownership check and the prover would not see which element a call wrote. As places, elements are parts of the sequence: disjoint parts pass side by side, and a write changes one element of the prover's model. |
 
 ### Loops
 
@@ -428,7 +429,7 @@ it needs rules for the code that runs when the loop exits early. That is
 the coroutine that lending methods avoid.
 
 In a loop by position, the collection's code runs only inside `count` and
-`element`. A loop over a `List`, a `Slice`, or an `Array` calls no
+`element`. A loop over a `List` or an `Array` calls no
 `element`: each iteration is lent the element place `items[position]`. The
 ownership check, the prover, and code generation therefore treat the loop as
 a loop over a range of positions, and it compiles to a plain loop. The
@@ -446,7 +447,7 @@ positions. [Cursors](#cursors) cover both cases.
 |---|---|
 | A `for` loop calls `count`, `element`, and `cursor` through `Iterable`, `IterableMut`, and `IntoCursor`, never a method found by its name. | A method found by its name cannot be named in a bound, so generic code could not loop over a type parameter, and a type with such methods would have loops but not `Iterable`'s `map`, `filter`, or `fold`. The trait also states what every loop relies on: `element` requires a position below `count`, and a `mut` element leaves `count` as it was. |
 | Lending elements to read and to mutate are separate traits, `Iterable` and `IterableMut`. | A collection that packs its elements, such as a `BitSet`, has no place to lend `mut`. |
-| Consuming a collection is a trait of its own, `IntoCursor`, whose `type Cursor: Cursor` is the cursor's type. | A view such as a `Slice` or a map's `Keys` is iterable but owns no elements to give up, and a `Heap` gives up its elements in order but has no positions. |
+| Consuming a collection is a trait of its own, `IntoCursor`, whose `type Cursor: Cursor` is the cursor's type. | A view such as a `view List` or a map's `Keys` is iterable but owns no elements to give up, and a `Heap` gives up its elements in order but has no positions. |
 
 ### Cursors
 
@@ -761,11 +762,11 @@ A method can be overloaded on the mode of `self`, and on nothing else. One
 `iter`, `iter_mut`, and `into_iter`.
 
 **An overload set has one author.** The overloads of a name come only from
-the type's own methods, from the methods of its view, from the methods that
-an `impl` in the type's package writes, and from a trait together with the
-traits it requires. A type and its view are defined in one package. If
-overloads were collected from every visible `impl`, a package added to a
-build could capture an existing call.
+the type's own methods, from the methods that an `Array` has from `List`,
+from the methods that an `impl` in the type's package writes, and from a
+trait together with the traits it requires. `Array` and `List` are defined
+in one package. If overloads were collected from every visible `impl`, a
+package added to a build could capture an existing call.
 
 **There is no overloading by parameter type.** It would cost three things:
 
@@ -1287,10 +1288,10 @@ Rules: [Method lookup](SPECIFICATION.md#method-lookup).
 |---|---|
 | A trait method needs no import. | A forgotten import is a common error in the languages that need one. |
 | A method call finds only the traits of the standard library, of the calling package, and of the packages that its manifest lists. | An edit deep in the dependency graph cannot break a distant call. |
-| A call skips a method that its module cannot see before it chooses an overload, and reports a hidden method only when it finds nothing it can see. | A private or `internal` method is a detail of its module or package, so adding, renaming, or removing one changes no call outside it. Every other name is looked up the same way. The cost is that one call can reach different methods in different modules: if `String` had a private `trim`, `name.trim()` would call it in its module and `StringSlice.trim` elsewhere. Both are written in one package. |
+| A call skips a method that its module cannot see before it chooses an overload, and reports a hidden method only when it finds nothing it can see. | A private or `internal` method is a detail of its module or package, so adding, renaming, or removing one changes no call outside it. Every other name is looked up the same way. The cost is that one call can reach different methods in different modules: if a type had a private `trim` and a trait's `trim` of the same mode, `name.trim()` would call the private one in its module and the trait's elsewhere. |
 | Two candidates for one name are an error, never a silent choice. | In Rust a type's own method wins over a trait's, so adding a method can silently change an existing call. In Truss an upgrade can break a call only with an error that names both candidates. A release that only adds names is still compatible, because otherwise no type could ever gain a method. |
-| A `String` has the methods of `StringSlice`, and a `List` and an `Array` those of `Slice`. | `self` is a parameter, and an argument of the owned type converts to its view. Without the rule, every method of a view needs a forwarding method on the owned type, whose contract is stated and proven a second time, and a view's method that has none cannot be called on the owned value. |
-| A type's own method hides its view's method of the same name and mode. | The owned type can do better where it owns the storage: `String.to_bytes(own self)` hands over its buffer, and `StringSlice.to_bytes(self)` copies. Both are written in one package, so no other package can change which one a call reaches. |
+| An `Array` has the methods of the `List` of its elements. | `self` is a parameter, and an `Array` converts to the range of all its elements. Without the rule, every method of a `List` needs a forwarding method on `Array`, whose contract is stated and proven a second time. |
+| An `Array`'s own method hides the `List` method of the same name and mode. | The array can do better where its length is a constant. Both are written in one package, so no other package can change which one a call reaches. |
 
 ### Dispatch
 
@@ -1380,7 +1381,7 @@ function whose body is its definition, such as `is_sorted`, states the body
 in its `ensures`:
 
 ```truss
-fn is_sorted(items: Slice[Int64]) -> Bool
+fn is_sorted(items: List[Int64]) -> Bool
   ensures result == (forall index in 1..items.length() => items[index - 1] <= items[index])
 ```
 
@@ -1582,7 +1583,7 @@ clause can promise. This is why a key is `Ordered` as well as `Hash`.
 
 | Convention | Reason |
 |---|---|
-| A method that needs no ownership of the storage is declared once, on the view type. | A `String`, a `List`, and an `Array` have the methods of their views ([Method lookup](#method-lookup)), so `mut names.sort()` works without `names[..]`, and a second declaration on the owning type would only forward. The owning type declares a method of that name where it uses its storage: `List.reverse` keeps the list's capacity. |
+| A method is declared once, on `List` or `String`, with `self` read-only where it needs no ownership of the storage. | A view has the read-only methods of the type that it views, and an `Array` has the methods of `List` ([Method lookup](#method-lookup)), so no second declaration forwards to the first. A method that changes elements and keeps the length declares `modifies self[..]`, so it takes a range too: `mut names[1..].sort()`. |
 | A method that every integer type has, or both float types have, is declared once, in a sealed trait. | Generic code over the trait can call the method, and the method's contract in the trait holds for every type. A method declared on each type is a separate function per type, which generic code cannot call. |
 | `FloatingPoint` is sealed: only `Float32` and `Float64` implement it. | The trait describes their IEEE 754 formats, which its `Bits` and methods such as `is_nan` expose. In generic code over the trait, `is_nan` and the `ieee_` comparisons then mean what IEEE 754 defines, for every instantiation. |
 | A capability declares only primitive operations. | A narrowing implementation or a fake has few methods to write. |

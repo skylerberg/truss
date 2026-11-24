@@ -63,12 +63,12 @@ let () =
 
 let () =
   Codegen_support.test
-    "an index of a list, a slice, or an array, and a loop over one, call no lending method"
+    "an index of a list, a range, or an array, and a loop over one, call no lending method"
     (fun () ->
       let names =
         [
           "list_at";
-          "slice_at";
+          "range_at";
           "array_at";
           "list_add";
           "array_add";
@@ -90,7 +90,7 @@ let () =
           "fn list_at(items: own List[Int64]) -> Int64 {\n\
           \  items[2]\n\
            }\n\n\
-           fn slice_at(items: Slice[Int64]) -> Int64 {\n\
+           fn range_at(items: List[Int64]) -> Int64 {\n\
           \  items[2]\n\
            }\n\n\
            fn array_at(items: Array[Int64, 4]) -> Int64 {\n\
@@ -145,7 +145,7 @@ let () =
       in
       let _, backend =
         Codegen_support.load ~roots:[ sum ]
-          "fn sum(items: Slice[Int64]) -> Int64 {\n\
+          "fn sum(items: List[Int64]) -> Int64 {\n\
           \  var total: Int64 = 0\n\
           \  for item in items {\n\
           \    total += item\n\

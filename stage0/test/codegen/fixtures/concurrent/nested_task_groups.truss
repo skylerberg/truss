@@ -1,5 +1,5 @@
 
-fn main(arguments: Slice[String]) -> ExitCode
+fn main(arguments: List[String]) -> ExitCode
   uses Tasks, Clock, Console
 {
   var counter = Counter(count: 0)

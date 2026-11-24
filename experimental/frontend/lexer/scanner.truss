@@ -94,9 +94,9 @@ fn Scanner.is_at(self, index: UInt64, byte: UInt8) -> Bool
 
 fn report(
   scanner: mut Scanner,
-  code: StringSlice,
+  code: String,
   span: source.Span,
-  message: StringSlice,
+  message: String,
   notes: own List[source.Note] = [],
   fixes: own List[source.Fix] = [],
 )
@@ -105,7 +105,7 @@ fn report(
   mut scanner.diagnostics.push(source.make_diagnostic(code, span, message, own notes, own fixes))
 }
 
-fn Scanner.text(self, start: UInt64, stop: UInt64) -> StringSlice
+fn Scanner.text(self, start: UInt64, stop: UInt64) -> view String
   uses Panic
 {
   self.source.text.substring(start, to: stop)
@@ -199,13 +199,13 @@ fn Scanner.byte_after(self, index: UInt64) -> Option[UInt8]
   if index < self.length { Some(self.lookup(index)) } else { None }
 }
 
-fn Scanner.joins_neighbor(self, span: source.Span, code: StringSlice) -> Bool
+fn Scanner.joins_neighbor(self, span: source.Span, code: String) -> Bool
   uses Panic
 {
   token.joins_neighbor(self.byte_before(span.start), after: self.byte_after(span.stop), code: code)
 }
 
-fn Scanner.list_code_fixes(self, span: source.Span, codes: Slice[String]) -> List[source.Fix]
+fn Scanner.list_code_fixes(self, span: source.Span, codes: List[String]) -> List[source.Fix]
   uses Panic
 {
   var fixes: List[source.Fix] = []
@@ -221,7 +221,7 @@ fn is_continuation(byte: UInt8) -> Bool {
   byte >= 128 && byte <= 191
 }
 
-fn decode_text(text: StringSlice, index: UInt64) -> Decoded
+fn decode_text(text: String, index: UInt64) -> Decoded
   uses Panic
   ensures 1 <= result.length && result.length <= 4
 {
@@ -371,7 +371,7 @@ fn Scanner.has_only_spaces_before(self, offset: UInt64) -> Bool
   self.count_spaces_before(offset) == self.source.compute_line_start(offset)
 }
 
-fn hexadecimal_digit(value: UInt32) -> StringSlice
+fn hexadecimal_digit(value: UInt32) -> view String
   uses Panic
 {
   "0123456789ABCDEF".substring(UInt64.from_integer(value), to: UInt64.from_integer(value) + 1)
@@ -422,7 +422,7 @@ fn Scanner.show_character(self, index: UInt64) -> String
   "`${self.text(index, stop: index + decoded.length)}` (U+${format_hexadecimal(decoded.code, minimum_digits: 4)})"
 }
 
-fn in_ranges(ranges: Slice[UInt32], value: UInt32) -> Bool
+fn in_ranges(ranges: List[UInt32], value: UInt32) -> Bool
   uses Panic
 {
   var low: UInt64 = 0
@@ -542,7 +542,7 @@ fn report_forbidden_run(scanner: mut Scanner, context: Context)
       has_invisible = true
     }
   }
-  var reasons: List[StringSlice] = []
+  var reasons: List[view String] = []
   if has_bidi {
     mut reasons.push("Bidirectional controls can make code display differently from how it compiles.")
   }
@@ -692,7 +692,7 @@ fn note_line_break(scanner: mut Scanner, line_break: source.Span)
   scanner.line_is_blank = true
 }
 
-fn reject(scanner: mut Scanner, length: UInt64, message: StringSlice, code: StringSlice = "lexer.unexpected_character")
+fn reject(scanner: mut Scanner, length: UInt64, message: String, code: String = "lexer.unexpected_character")
   uses Panic
   modifies scanner.diagnostics, scanner.position, scanner.line_is_blank
   ensures scanner.position == old(scanner.position) + length

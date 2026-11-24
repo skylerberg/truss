@@ -1,4 +1,4 @@
-fn first_or_crash(values: Slice[Int64]) -> Int64
+fn first_or_crash(values: List[Int64]) -> Int64
   uses Panic
   cost time O(1)
 {

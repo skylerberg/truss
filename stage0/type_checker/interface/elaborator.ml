@@ -14,7 +14,6 @@ type t = {
   self_associated : (string * Types.ty) list;
   self_capabilities : (string * Types.capability_set) list;
   is_in_capability : bool;
-  is_in_impl : bool;
   diagnostics : Diagnostic.in_definition list ref;
   named : (Syntax.id * Types.ty) list ref;
   spans : Source.Definition_span.t array;
@@ -41,7 +40,6 @@ let create_with lookups resolved ~spans (scope : _ Environment.scope) ~known_bou
     self_associated = scope.self_associated;
     self_capabilities = scope.self_capabilities;
     is_in_capability = false;
-    is_in_impl = false;
     diagnostics = ref [];
     named = ref [];
     spans;
@@ -178,6 +176,16 @@ let rec elaborate_type context (written : Syntax.type_expression) : Types.ty =
       match elaborate_function_type context function_type with
       | Ok function_type -> Types.Function function_type
       | Error report -> Types.Error report)
+  | View_type viewed -> (
+      match elaborate_type context viewed with
+      | (Types.Error _ | Types.Hole) as unknown -> unknown
+      | type_ when Types.is_viewable type_ -> Types.make_view type_
+      | type_ ->
+          report_error_type context Not_viewable context.spans.(written.id)
+            (Printf.sprintf
+               "`view` applies to a `String` and to a `List`, and this type is `%s`. A value of \
+                another type is viewed by a read-only parameter, a `let`, or a lending method."
+               (Types.show type_)))
   | Type_error -> Types.Error Diagnostic.reported_elsewhere
 
 and elaborate_self context (span : Source.Definition_span.t) =
@@ -492,42 +500,13 @@ and elaborate_mode = function
   | Some Syntax.Mut -> Language.Mode.Mut
   | Some Own -> Language.Mode.Own
 
-and elaborate_parameter_type context mode (written : Syntax.type_expression) =
-  let type_ = elaborate_type context written in
-  let report_owning_type ~written_path ~view ~copy ~takes =
-    Types.Error
-      (record_diagnostic context.diagnostics Read_only_owning_parameter
-         ~fixes:
-           [
-             Diagnostic.fix
-               (Printf.sprintf "Write `%s`." view)
-               [ Diagnostic.replace context.spans.(written_path.Syntax.last.id) view ];
-           ]
-         context.spans.(written.id)
-         (Printf.sprintf
-            "A read-only `%s` parameter makes every caller that holds a `%s` copy it into a new \
-             %s. Declare it as `%s`, which takes %s."
-            (show_path written_path) view copy view takes))
-  in
-  match (mode, type_, written.kind) with
-  | Language.Mode.Read, Types.Named { path; _ }, Path_type { path = written_path; _ }
-    when not context.is_in_impl ->
-      if Well_known.is List path then
-        report_owning_type ~written_path ~view:"Slice" ~copy:"list"
-          ~takes:"a `List`, an `Array`, and a range of either"
-      else if Well_known.is String path then
-        report_owning_type ~written_path ~view:"StringSlice" ~copy:"string"
-          ~takes:"a `String`, a string literal, and a part of a string"
-      else type_
-  | _ -> type_
-
 and elaborate_function_type context (written : Syntax.function_type) :
     (Types.function_type, Diagnostic.reported) Stdlib.result =
   let inputs =
     List.map
       (fun (input : Syntax.function_input) ->
         let mode = elaborate_mode input.mode in
-        (mode, elaborate_parameter_type context mode input.type_))
+        (mode, elaborate_type context input.type_))
       written.inputs
   in
   let output =
@@ -915,7 +894,11 @@ let rec split_field_path (value : Syntax.expression) =
       Option.map (fun (root, fields) -> (root, fields @ [ field ])) (split_field_path base)
   | _ -> None
 
-let show_field_path root fields = String.concat "." (root :: fields)
+let split_part (value : Syntax.expression) =
+  match value.kind with
+  | Bracket (base, [ Item { kind = Range { start = None; stop = None; _ }; _ } ]) ->
+      Option.map (fun (root, fields) -> (root, fields, true)) (split_field_path base)
+  | _ -> Option.map (fun (root, fields) -> (root, fields, false)) (split_field_path value)
 
 let elaborate_modifies context (signature : Types.signature) (clauses : Syntax.clause list) =
   let report ?fixes code (value : Syntax.expression) message =
@@ -934,16 +917,19 @@ let elaborate_modifies context (signature : Types.signature) (clauses : Syntax.c
     | _ -> true
   in
   let elaborate_entry (value : Syntax.expression) =
-    match split_field_path value with
+    match split_part value with
     | None ->
         report Not_a_field_path value
           (if has_index value then
-             "An element of a collection is not a fixed part, so a `modifies` clause names the \
-              field that holds the collection."
+             "One element or a narrower range is not a fixed part. A `modifies` clause names every \
+              element of a list with `[..]`, as in `items[..]`, or the field that holds the \
+              collection."
            else "A `modifies` clause names fields of `mut` parameters, such as `scanner.position`.");
         None
-    | Some (root, names) -> (
+    | Some (root, names, is_elements) -> (
         let fields = List.map (fun (name : Syntax.name) -> name.text) names in
+        let part position : Types.modified = { position; field_path = fields; is_elements } in
+        let shown = Types.show_modified_part ~root (part 0) in
         match Types.find_parameter_position signature root with
         | None ->
             if is_resolved value then
@@ -958,9 +944,9 @@ let elaborate_modifies context (signature : Types.signature) (clauses : Syntax.c
               (Printf.sprintf
                  "`%s` is not `mut`, so the function changes no part of it. Remove `%s` from the \
                   clause, or take `%s` as `mut`."
-                 root (show_field_path root fields) root);
+                 root shown root);
             None
-        | Some _ when fields = [] ->
+        | Some _ when fields = [] && not is_elements ->
             report Not_a_field_path value
               (Printf.sprintf
                  "`%s` is a whole parameter. A `mut` parameter that the clause does not name may \
@@ -968,7 +954,7 @@ let elaborate_modifies context (signature : Types.signature) (clauses : Syntax.c
                   `%s`."
                  root root root);
             None
-        | Some position -> Some (value, root, { Types.position; field_path = fields }))
+        | Some position -> Some (value, root, part position))
   in
   let remove_entry (entries : Syntax.expression list) index =
     Diagnostic.delete_list_entry
@@ -976,9 +962,9 @@ let elaborate_modifies context (signature : Types.signature) (clauses : Syntax.c
       index
   in
   let is_contained ~index (part : Types.modified) ~other_index (other : Types.modified) =
-    other_index <> index && other.position = part.position
-    && Types.is_field_path_prefix other.field_path part.field_path
-    && (other.field_path <> part.field_path || other_index < index)
+    other_index <> index
+    && Types.is_part_within ~container:other part
+    && (other <> part || other_index < index)
   in
   List.concat_map
     (fun (clause : Syntax.clause) ->
@@ -1000,13 +986,13 @@ let elaborate_modifies context (signature : Types.signature) (clauses : Syntax.c
                   | Some container ->
                       report Repeated_part value
                         ~fixes:[ Diagnostic.fix "Remove it." [ remove_entry entries index ] ]
-                        (if container.field_path = part.field_path then
+                        (if container = part then
                            Printf.sprintf "The clause names `%s` twice."
-                             (show_field_path root part.field_path)
+                             (Types.show_modified_part ~root part)
                          else
                            Printf.sprintf "`%s` is a part of `%s`, which the clause names already."
-                             (show_field_path root part.field_path)
-                             (show_field_path root container.field_path));
+                             (Types.show_modified_part ~root part)
+                             (Types.show_modified_part ~root container));
                       None
                   | None -> Some part)
                 numbered_parts)
@@ -1033,7 +1019,7 @@ let elaborate_signature context ~owner ~head ~self_type (written : Syntax.signat
               {
                 Types.name = name.text;
                 mode;
-                type_ = elaborate_parameter_type context mode type_;
+                type_ = elaborate_type context type_;
                 has_default = Option.is_some default;
               }
         | Self_parameter _ | Parameter_error -> None)
@@ -1461,16 +1447,15 @@ let elaborate_member (lookups : Lookups.t) ~path ~spans resolved (definition : S
   let context = create_declared lookups resolved ~spans header.container_scope in
   match definition.kind with
   | Function { signature; _ } | Method_declaration signature ->
-      let is_in_capability, is_in_impl =
+      let is_in_capability =
         match header.container with
-        | Capability_parts -> (true, false)
-        | Trait_parts _ -> (false, false)
-        | Impl_parts _ -> (false, true)
+        | Capability_parts -> true
+        | Trait_parts _ | Impl_parts _ -> false
       in
       make_elaborated_interface context
         (Function_interface
            (elaborate_signature
-              { context with self_capabilities = []; is_in_capability; is_in_impl }
+              { context with self_capabilities = []; is_in_capability }
               ~owner:path ~head:[] ~self_type:header.container_scope.self_type signature))
   | _ -> make_elaborated_interface context (Error_interface Diagnostic.reported_elsewhere)
 

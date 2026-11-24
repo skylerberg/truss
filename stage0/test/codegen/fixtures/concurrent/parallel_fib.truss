@@ -10,7 +10,7 @@ fn fib(n: Int64) -> Int64 {
   left.wrapping_add(right)
 }
 
-fn main(arguments: Slice[String]) -> ExitCode
+fn main(arguments: List[String]) -> ExitCode
   uses Tasks, Console
 {
   var counter = Counter(count: 0)

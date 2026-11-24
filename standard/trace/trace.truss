@@ -4,7 +4,7 @@ use standard.random
 public type Context(trace_id: List[UInt8], span_id: List[UInt8], is_sampled: Bool)
   derives Equal
 
-fn is_lower_hex(text: StringSlice) -> Bool {
+fn is_lower_hex(text: String) -> Bool {
   for byte in text.bytes() {
     if !((byte >= 48 && byte <= 57) || (byte >= 97 && byte <= 102)) {
       return false
@@ -13,7 +13,7 @@ fn is_lower_hex(text: StringSlice) -> Bool {
   true
 }
 
-fn is_zero(bytes: Slice[UInt8]) -> Bool {
+fn is_zero(bytes: List[UInt8]) -> Bool {
   for byte in bytes {
     if byte != 0 {
       return false
@@ -22,7 +22,7 @@ fn is_zero(bytes: Slice[UInt8]) -> Bool {
   true
 }
 
-fn field(text: StringSlice, from: UInt64, length: UInt64) -> Option[StringSlice] {
+fn field(text: String, from: UInt64, length: UInt64) -> Option[view String] {
   if from > text.length() || text.length() - from < length {
     return None
   }
@@ -30,7 +30,7 @@ fn field(text: StringSlice, from: UInt64, length: UInt64) -> Option[StringSlice]
   if is_lower_hex(part) { Some(part) } else { None }
 }
 
-public fn Context.parse(header: StringSlice) -> Option[Context] {
+public fn Context.parse(header: String) -> Option[Context] {
   let text = header.trim()
   if text.length() < 55 {
     return None
@@ -52,7 +52,7 @@ public fn Context.parse(header: StringSlice) -> Option[Context] {
   let trace_id = hex.decode(field(text, from: 3, length: 32)?).ok()?
   let span_id = hex.decode(field(text, from: 36, length: 16)?).ok()?
   let flags = hex.decode(field(text, from: 53, length: 2)?).ok()?
-  if is_zero(trace_id.slice()) || is_zero(span_id.slice()) || flags.is_empty() {
+  if is_zero(trace_id) || is_zero(span_id) || flags.is_empty() {
     return None
   }
   Some(Context(trace_id: own trace_id, span_id: own span_id, is_sampled: (flags[0] & 1) == 1))
@@ -62,7 +62,7 @@ fn nonzero_bytes(count: UInt64) -> List[UInt8]
   uses Random
 {
   var bytes = random.bytes(count)
-  if is_zero(bytes.slice()) && !bytes.is_empty() {
+  if is_zero(bytes) && !bytes.is_empty() {
     bytes[0] = 1
   }
   bytes
@@ -81,13 +81,13 @@ public fn Context.child(self) -> Context
 }
 
 public fn Context.header(self) -> String {
-  "00-${hex.encode(self.trace_id.slice())}-${hex.encode(self.span_id.slice())}-${if self.is_sampled { "01" } else { "00" }}"
+  "00-${hex.encode(self.trace_id)}-${hex.encode(self.span_id)}-${if self.is_sampled { "01" } else { "00" }}"
 }
 
 public fn Context.trace_text(self) -> String {
-  hex.encode(self.trace_id.slice())
+  hex.encode(self.trace_id)
 }
 
 public fn Context.span_text(self) -> String {
-  hex.encode(self.span_id.slice())
+  hex.encode(self.span_id)
 }

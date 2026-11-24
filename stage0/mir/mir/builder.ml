@@ -128,6 +128,9 @@ and list_extended_by (value : Core.expression) =
       List.concat_map (fun (_, update) -> list_extended_by update) updates
   | Collection_literal { elements; construction = Array } ->
       List.concat_map list_extended_by elements
+  | Convert { conversion = To_view; value = { kind = Use viewed; _ } } ->
+      list_extended_by_base viewed
+  | Convert { conversion = To_view; value = viewed } -> viewed.id :: list_extended_by viewed
   | _ -> []
 
 and list_extended_by_base (base : Core.place) =
@@ -264,16 +267,17 @@ let rec lower_expression builder (node : Core.expression) : Tree.operand option 
     | Connective _ | Matches _ -> lower_truth builder node
     | Convert { conversion = Widen; value = converted } when is_function_expression converted ->
         Option.map fst (lower_function_expression builder node ~is_argument:false)
-    | Convert { conversion = View_to_owned as conversion; value = view } ->
-        let* value = lower_expression builder view in
-        let owner = Emitter.allocate_local builder (Lent Read) node.type_ origin in
-        Emitter.add_temporary builder owner;
-        Emitter.assign builder (Emitter.make_local_place owner)
-          (Convert { conversion; value; converts_function_expression = false })
-          origin;
-        Some
-          (Tree.Borrow
-             { place = Emitter.make_local_place owner; type_ = node.type_; mode = Read; origin })
+    | Convert { conversion = To_view as conversion; value = viewed } ->
+        let* place =
+          lower_place builder (match viewed.kind with Use place -> place | _ -> Temporary viewed)
+        in
+        hold
+          (Convert
+             {
+               conversion;
+               value = Borrow { place; type_ = viewed.type_; mode = Read; origin = viewed.origin };
+               converts_function_expression = false;
+             })
     | Convert { conversion; value = converted } ->
         let* value = lower_expression builder converted in
         hold (Convert { conversion; value; converts_function_expression = false })

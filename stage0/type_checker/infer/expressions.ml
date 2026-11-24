@@ -1,5 +1,10 @@
-let rec check_expression (state : State.state) env ?expected (value : Syntax.expression) : Types.ty
-    =
+let rec check_expression (state : State.state) (env : State.env) ?expected
+    (value : Syntax.expression) : Types.ty =
+  let env =
+    match value.kind with
+    | If _ | Match _ | Block _ | Parenthesized _ -> env
+    | _ -> if env.binds_view then { env with binds_view = false } else env
+  in
   let type_ =
     if Hashtbl.mem state.lent_tails value.id then check_lent_part state env value
     else check_expression_kind state env ?expected value
@@ -202,7 +207,7 @@ and check_expression_kind state env ?expected (value : Syntax.expression) : Type
         (fun implementation -> ignore (check_expression state env implementation))
         implementations;
       Statements.check_block_value state env ?expected body
-  | Block body -> Statements.check_block_value state env ?expected body
+  | Block body -> Values.check_block state env ?expected body
   | Expression_error -> Types.Error Diagnostic.reported_elsewhere
 
 and check_member_value state env (value : Syntax.expression) (base : Syntax.expression)
@@ -269,19 +274,21 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
       match (model_element, Types.find_sequence_element base_type, base_type) with
       | Some element, _, _ ->
           Types.Named { path = Well_known.make_path Sequence; arguments = [ Types.Type element ] }
-      | None, Some element, _ ->
-          Types.Named { path = Well_known.make_path Slice; arguments = [ Types.Type element ] }
-      | None, None, Types.Named { path; _ }
-        when Well_known.is String path || Well_known.is String_slice path ->
+      | None, Some element, _ -> Types.make_named (Well_known.make_path List) [ element ]
+      | None, None, _
+        when Types.is_well_known String (Types.strip_view base_type)
+             && state.package = Path.standard_package ->
+          Types.string_type
+      | None, None, _ when Types.is_well_known String (Types.strip_view base_type) ->
           State.make_error_type state Not_indexable (State.read_span state value.id)
             "Strings cannot be indexed: say which you mean with `bytes()` or `characters()`."
       | None, None, (Types.Error _ | Types.Hole) -> base_type
       | None, None, _ ->
           State.make_error_type state Not_indexable (State.read_span state value.id)
-            (Printf.sprintf "%s cannot be sliced."
+            (Printf.sprintf "%s has no ranges: only a `List` and an `Array` have."
                (String.capitalize_ascii (State.describe state base_type))))
   | [ Item key ] -> (
-      if Types.is_well_known String base_type || Types.is_well_known String_slice base_type then begin
+      if Types.is_well_known String (Types.strip_view base_type) then begin
         State.make_error_type state Not_indexable (State.read_span state value.id)
           "Strings cannot be indexed: say which you mean with `bytes()` or `characters()`."
       end
@@ -309,8 +316,7 @@ and check_index state env ?expected:_ (value : Syntax.expression) (base : Syntax
                 let key_type = resolve_associated Index_key
                 and output = resolve_associated Index_output in
                 let actual = check_expression state env ~expected:key_type key in
-                Conversions.coerce state env ~argument:Read ~takes_view_as_owner:true key ~actual
-                  ~expected:key_type;
+                Conversions.coerce state env ~argument:Read key ~actual ~expected:key_type;
                 State.elaborate state value.id
                   (Call
                      (Tables.make_method_call ~lends:Read index_trait Index_at ~self_type:base_type

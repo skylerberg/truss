@@ -1,5 +1,4 @@
 let make_storage_type element = Ground.make_builtin Storage ~arguments:[ Type element ]
-let make_view_type element = Ground.make_builtin View ~arguments:[ Type element ]
 
 let find_element builtin (ty : Ground.ty) =
   match ty with
@@ -8,8 +7,9 @@ let find_element builtin (ty : Ground.ty) =
       Some element
   | _ -> None
 
-let find_storage_element ty = find_element Storage ty
-let find_view_element ty = find_element View ty
+let find_storage_element ty =
+  find_element Storage (Option.value ~default:ty (Ground.find_viewed ty))
+
 let buffer_field = "buffer"
 let length_field = "length"
 let capacity_field = "capacity"
@@ -23,9 +23,6 @@ let make_storage_shape element : Memory_layout.shape =
       (length_field, Typed uint64);
       (capacity_field, Typed uint64);
     ]
-
-let make_view_shape element : Memory_layout.shape =
-  Record [ (buffer_field, Raw (Pointer (Data element))); (length_field, Typed uint64) ]
 
 let project_buffer sequence = Lowered.project sequence (Lowered.Field buffer_field)
 let project_length sequence = Lowered.project sequence (Lowered.Field length_field)
@@ -46,8 +43,3 @@ let build_borrowed ty ~buffer ~length = build_storage ty ~buffer ~length ~capaci
 let build_empty ty =
   build_storage ty ~buffer:(Constant empty_buffer) ~length:(Lowered.make_uint64_constant 0)
     ~capacity:(Lowered.make_uint64_constant 0)
-
-let list_view_fields ~buffer ~length = [ (buffer_field, buffer); (length_field, length) ]
-
-let build_view ty ~buffer ~length : Lowered.rvalue =
-  Build { ty; variant = None; fields = list_view_fields ~buffer ~length }

@@ -611,11 +611,6 @@ and check_literal_pattern state id (span : Source.Definition_span.t) literal typ
       | None -> check_string_pattern state span type_)
 
 and check_string_pattern state span type_ =
-  if
-    not
-      (Types.is_well_known String type_
-      || Types.is_well_known String_slice type_
-      || Types.is_error type_)
-  then
+  if not (Types.is_well_known String (Types.strip_view type_) || Types.is_error type_) then
     State.report state Mismatch span
       (Printf.sprintf "A string pattern matches a string, not `%s`." (Types.show type_))

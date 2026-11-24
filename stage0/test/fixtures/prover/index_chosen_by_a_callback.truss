@@ -1,7 +1,7 @@
 type Card(rank: UInt8, suit: UInt8)
 
 fn pick[Item: Copyable](
-  items: Slice[Item],
+  items: List[Item],
   choose: (fn(count: UInt64) -> UInt64 uses generic Granted requires count > 0 ensures result < count),
 ) -> Item
   uses generic Granted
@@ -10,7 +10,7 @@ fn pick[Item: Copyable](
   items[choose(items.length())].copy()
 }
 
-fn deal(deck: Slice[Card]) -> Card
+fn deal(deck: List[Card]) -> Card
   uses Random
   requires deck.length() > 0
 {

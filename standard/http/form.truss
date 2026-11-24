@@ -8,42 +8,42 @@ public fn Form.new() -> Form {
   Form(fields: [])
 }
 
-public fn Form.parse(text: StringSlice) -> Result[Form, Error] {
+public fn Form.parse(text: String) -> Result[Form, Error] {
   match url.decode_query(text) {
     Ok(fields) => Ok(Form(fields: own fields))
     Err(_) => Err(malformed("a form whose percent-encoding is not valid"))
   }
 }
 
-public fn Form.get(self, name: StringSlice) -> Option[StringSlice] {
+public fn Form.get(self, name: String) -> Option[view String] {
   for field in self.fields {
     if field.name == name {
-      return Some(field.value.slice())
+      return Some(field.value)
     }
   }
   None
 }
 
-public fn Form.all(self, name: StringSlice) -> List[StringSlice] {
-  var values: List[StringSlice] = []
+public fn Form.all(self, name: String) -> List[view String] {
+  var values: List[view String] = []
   for field in self.fields {
     if field.name == name {
-      mut values.push(field.value.slice())
+      mut values.push(field.value)
     }
   }
   values
 }
 
-public fn Form.entries(self) -> Slice[url.Parameter] {
-  self.fields.slice()
+public fn Form.entries(self) -> view List[url.Parameter] {
+  self.fields
 }
 
-public fn Form.add(mut self, name: StringSlice, value: StringSlice) {
+public fn Form.add(mut self, name: String, value: String) {
   mut self.fields.push(url.Parameter(name: name.to_string(), value: value.to_string()))
 }
 
 public fn Form.encode(self) -> String {
-  url.encode_query(self.fields.slice())
+  url.encode_query(self.fields)
 }
 
 fn media_type(headers: Headers) -> String {
@@ -69,7 +69,7 @@ public fn Request.form(own self) -> Result[Form, Error]
   Form.parse(text)
 }
 
-fn parameter_of(value: StringSlice, name: StringSlice) -> Option[String] {
+fn parameter_of(value: String, name: String) -> Option[String] {
   for piece in value.split(";") {
     let part = piece.trim()
     match part.find("=") {
@@ -106,7 +106,7 @@ public fn Request.multipart(own self, header_limit: UInt64 = 16384) -> Result[Mu
   if media_type(self.headers) != "multipart/form-data" {
     return Err(Error.Unsupported(message: "a body that is not multipart/form-data"))
   }
-  let boundary = match parameter_of(self.headers.get("Content-Type").unwrap_or("".slice()), name: "boundary") {
+  let boundary = match parameter_of(self.headers.get("Content-Type").unwrap_or(""), name: "boundary") {
     Some(boundary) => own boundary
     None => return Err(malformed("a multipart body with no boundary"))
   }
@@ -114,11 +114,11 @@ public fn Request.multipart(own self, header_limit: UInt64 = 16384) -> Result[Mu
     return Err(malformed("a multipart boundary that is empty or longer than 70 characters"))
   }
   var delimiter: List[UInt8] = [13, 10, 45, 45]
-  mut delimiter.append_slice(boundary.slice().bytes())
+  mut delimiter.append_slice(boundary.bytes())
   Ok(Multipart(body: own self.body, delimiter: own delimiter, buffer: [13, 10], section: Section.Preamble, header_limit: header_limit))
 }
 
-fn index_of(haystack: Slice[UInt8], needle: Slice[UInt8]) -> Option[UInt64]
+fn index_of(haystack: List[UInt8], needle: List[UInt8]) -> Option[UInt64]
   ensures !(result is Some(at) && (at > haystack.length() || haystack.length() - at < needle.length()))
 {
   if needle.is_empty() || haystack.length() < needle.length() {
@@ -153,7 +153,7 @@ fn content_piece(multipart: mut Multipart, limit: UInt64) -> Result[Option[List[
   uses Handles, Tasks, RunForever
 {
   while true {
-    match index_of(multipart.buffer.bytes(), needle: multipart.delimiter.slice()) {
+    match index_of(multipart.buffer.bytes(), needle: multipart.delimiter) {
       Some(at) => {
         if at > 0 {
           return Ok(Some(mut multipart.buffer.take(if at < limit { at } else { limit })))
@@ -205,7 +205,7 @@ fn read_part_headers(multipart: mut Multipart) -> Result[Headers, Error]
       mut multipart.buffer.skip(2)
       return Ok(Headers.new())
     }
-    match index_of(unread[searched..], needle: ending.slice()) {
+    match index_of(unread[searched..], needle: ending) {
       Some(offset) => {
         let block = mut multipart.buffer.take(searched + offset)
         mut multipart.buffer.skip(4)
@@ -214,7 +214,7 @@ fn read_part_headers(multipart: mut Multipart) -> Result[Headers, Error]
           Err(_) => return Err(malformed("part headers that are not UTF-8"))
         }
         var headers = Headers.new()
-        for line in text.slice().split("\r\n") {
+        for line in text.split("\r\n") {
           match line.find(":") {
             Some(colon) => mut headers.add(line.part(0, to: colon).trim(), value: line.part(colon + 1, to: line.length()).trim())
             None => return Err(malformed("a part header line without a colon"))
@@ -245,7 +245,7 @@ public fn Multipart.next_part(mut self) -> Result[Option[Part], Error]
     return Ok(None)
   }
   let headers = read_part_headers(mut self)?
-  let disposition = headers.get("Content-Disposition").unwrap_or("".slice())
+  let disposition = headers.get("Content-Disposition").unwrap_or("")
   let name = match parameter_of(disposition, name: "name") {
     Some(name) => own name
     None => return Err(malformed("a form-data part with no name"))
@@ -300,7 +300,7 @@ public fn Multipart.copy_to[Sink: streams.Writer](mut self, sink: mut Sink) -> R
   while self.section == Section.Body {
     match content_piece(mut self, limit: 65536)? {
       Some(piece) => {
-        system(mut sink.write_all(piece.slice()))?
+        system(mut sink.write_all(piece))?
         copied = copied.saturating_add(piece.length())
       }
       None => {}
@@ -315,13 +315,13 @@ public type FilePart(name: String, filename: String, content_type: String, bytes
 public type Encoded(content_type: String, body: List[UInt8])
   derives Equal
 
-fn quoted(text: StringSlice) -> String {
+fn quoted(text: String) -> String {
   let without_quotes = text.replace("\"", replacement: "%22")
-  let without_returns = without_quotes.slice().replace("\r", replacement: "%0D")
-  without_returns.slice().replace("\n", replacement: "%0A")
+  let without_returns = without_quotes.replace("\r", replacement: "%0D")
+  without_returns.replace("\n", replacement: "%0A")
 }
 
-public fn encode_multipart(fields: Form, files: Slice[FilePart] = []) -> Encoded
+public fn encode_multipart(fields: Form, files: List[FilePart] = []) -> Encoded
   uses Random
 {
   let boundary = "truss-${Random.next().format(radix: 16, minimum_digits: 16)}${Random.next().format(radix: 16, minimum_digits: 16)}"
@@ -333,7 +333,7 @@ public fn encode_multipart(fields: Form, files: Slice[FilePart] = []) -> Encoded
   }
   for file in files {
     push_text(mut body, text: "--${boundary}\r\nContent-Disposition: form-data; name=\"${quoted(file.name)}\"; filename=\"${quoted(file.filename)}\"\r\nContent-Type: ${file.content_type}\r\n\r\n")
-    mut body.append_slice(file.bytes.slice())
+    mut body.append_slice(file.bytes)
     push_text(mut body, text: "\r\n")
   }
   push_text(mut body, text: "--${boundary}--\r\n")

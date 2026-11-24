@@ -1,6 +1,6 @@
 use standard.core
 
-fn f(data: Slice[UInt8]) -> UInt64 {
+fn f(data: List[UInt8]) -> UInt64 {
   var total = 0
   for (index, element): core.Indexed[UInt8] in data.enumerate() {
     total += index

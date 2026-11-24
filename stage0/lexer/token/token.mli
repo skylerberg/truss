@@ -49,6 +49,7 @@ type keyword =
   | Use
   | Uses
   | Var
+  | View
   | When
   | While
   | With
