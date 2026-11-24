@@ -402,13 +402,17 @@ impl Iterable for Set[Element: Hash + Ordered] {
   }
 }
 
-public fn Set[Element: Hash + Ordered].cursor(own self) -> list.ListCursor[Element]
-  ensures result.remaining() == self.length()
-  ensures identical(result.model().elements(), self.model())
-  cost time O(self.length())
-  cost amortized time O(self.length())
-{
-  own self.map.keys.cursor()
+impl IntoCursor for Set[Element: Hash + Ordered] {
+  type Cursor = list.ListCursor[Element]
+
+  fn cursor(own self) -> list.ListCursor[Element]
+    ensures result.remaining() == self.length()
+    ensures identical(result.model().elements(), self.model())
+    cost time O(self.length())
+    cost amortized time O(self.length())
+  {
+    own self.map.keys.cursor()
+  }
 }
 
 impl Equal for Set[Element: Hash + Ordered] {

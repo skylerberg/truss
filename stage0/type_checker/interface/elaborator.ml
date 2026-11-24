@@ -758,12 +758,7 @@ let find_trait_parts (lookups : Lookups.t) trait =
   | Some { container = Capability_parts | Impl_parts _; _ } | None -> None
 
 let list_bound_closure lookups ~self (bound : Types.trait_reference) =
-  Properties.list_bound_closure_over
-    ~find_requirements:(fun trait ->
-      Option.map
-        (fun (trait_generics, requires, _) -> (trait_generics, requires))
-        (find_trait_parts lookups trait))
-    ~self bound
+  Properties.list_bound_closure_over ~find_requirements:(find_trait_parts lookups) ~self bound
 
 let close_scope lookups (scope : Environment.declared_bounds Environment.scope) :
     Environment.known_bounds Environment.scope =
@@ -1291,8 +1286,8 @@ let list_supertraits (lookups : Lookups.t) (key : Resolve.Names.key) trait_gener
     Properties.list_bound_closure_over
       ~find_requirements:(fun trait ->
         match Option.bind (lookups.names.find_key trait) lookups.find_header with
-        | Some { container = Trait_parts { trait_generics; requires; _ }; _ } ->
-            Some (trait_generics, requires)
+        | Some { container = Trait_parts { trait_generics; requires; associated_types; _ }; _ } ->
+            Some (trait_generics, requires, associated_types)
         | Some { container = Capability_parts | Impl_parts _; _ } | None -> None)
       ~self:(Types.Parameter (Types.make_self_parameter key.path))
       {

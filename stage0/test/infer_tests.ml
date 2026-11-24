@@ -724,22 +724,7 @@ let () =
       let text = Fixtures.Infer.literal_for_an_associated_type_of_a_literal_local_argument in
       expect_fine text;
       expect_type text "5" "UInt8";
-      expect_type text "first" ~occurrence:2 "UInt8");
-  Harness.test
-    "a loop over an unknown type whose element takes an associated type as its position cannot be \
-     inferred" (fun () ->
-      match
-        Support.list_codes
-          (check
-             (Support.setup
-                [
-                  ( "app.main",
-                    Fixtures.Infer.loop_over_an_unknown_whose_element_takes_an_associated_type );
-                ])
-             (Support.parse_file "app.main"))
-      with
-      | [ "types.cannot_infer"; "types.not_indexable" ] -> ()
-      | reported -> Harness.fail "reported [%s]" (String.concat "; " reported))
+      expect_type text "first" ~occurrence:2 "UInt8")
 
 let () =
   Harness.test "a local's type is the same whichever statement decides it first" (fun () ->
@@ -1338,18 +1323,6 @@ let () =
             .call_of_a_visible_trait_method_named_like_another_modules_private_trait_method );
           ("app.shapes", shapes);
         ]);
-  List.iter
-    (fun (construct, fixture) ->
-      Harness.test
-        (Printf.sprintf
-           "%s over another module's private `count` and `element` names the hidden method"
-           construct) (fun () ->
-          expect_one_diagnostic ~others fixture "types.member_not_visible"
-            ~says:"`app.shapes.Shape.count` is private to its module"))
-    [
-      ("a loop", Fixtures.Infer.loop_over_a_type_with_a_private_loop_protocol);
-      ("a quantifier", Fixtures.Infer.quantifier_over_a_type_with_a_private_loop_protocol);
-    ];
   Harness.test "reading another module's private method as a field does not reveal the method"
     (fun () ->
       expect_one_diagnostic ~others Fixtures.Infer.field_read_of_another_modules_private_method
@@ -1821,62 +1794,45 @@ let () =
       expect_fine Fixtures.Infer.list_literal_as_a_deque);
   Harness.test "a map literal is a sorted map where a sorted map is expected" (fun () ->
       expect_fine Fixtures.Infer.map_literal_as_a_sorted_map);
-  Harness.test
-    "a loop over a generic trait's elements leaves the trait's arguments to inference, not its \
-     parameter" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.loop_over_the_elements_of_a_generic_trait
-        "types.cannot_infer"
-        ~says:
-          "This loop does not determine the arguments of `Bag`, whose methods give its elements."
-        ~at:("pair {", 1));
-  Harness.test "a quantifier over a generic trait's elements names the quantifier" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.quantifier_over_the_elements_of_a_generic_trait
-        "types.cannot_infer"
-        ~says:
-          "This quantifier does not determine the arguments of `Bag`, whose methods give its \
-           elements."
-        ~at:("pair =>", 1));
-  Harness.test
-    "an annotated loop over a generic trait's elements is an error at the loop, since nothing \
-     gives the arguments of its count" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.annotated_loop_over_the_elements_of_a_generic_trait
-        "types.cannot_infer"
-        ~says:
-          "This loop does not determine the arguments of `Bag`, whose methods give its elements."
-        ~at:("pair {", 1));
-  Harness.test "a loop's annotation chooses the impl whose element gives that type" (fun () ->
-      let text = Fixtures.Infer.loop_annotated_with_one_of_two_element_types in
-      expect_fine text;
-      match
-        List.find_map
-          (fun (node : Core.expression) ->
-            match node.kind with
-            | Call { callee = { target = Trait_method { name = "element"; evidence; _ }; _ }; _ } ->
-                Some evidence
-            | _ -> None)
-          (list_core_at text "pair {" 1)
-      with
-      | Some
-          (Impl
-             {
-               impl =
-                 Impl
-                   {
-                     trait = { arguments = [ Named { path = Top { name = "String"; _ }; _ } ]; _ };
-                     _;
-                   };
-               _;
-             }) ->
-          ()
-      | Some (Impl { impl; _ }) ->
-          Harness.fail "the loop calls the `element` of %s" (Path.show impl)
-      | Some (Bound | Dynamic) -> Harness.fail "the loop calls an `element` of no impl"
-      | None -> Harness.fail "the loop calls no `element`");
-  Harness.test "a loop whose element type has no impl of the trait is an error at the loop"
+  Harness.test "a loop over a type with its own `count` and `element` and no `Iterable` is an error"
     (fun () ->
-      expect_one_diagnostic Fixtures.Infer.loop_annotated_with_an_element_type_without_an_impl
-        "types.not_indexable" ~says:"`Pair` does not implement `Positioned[Float64]`."
+      expect_one_diagnostic Fixtures.Infer.loop_over_a_type_with_its_own_count_and_element
+        "types.not_iterable"
+        ~says:"A `for` loop cannot go over `Pair`: it implements neither `Iterable` nor `Cursor`."
         ~at:("pair {", 1));
+  Harness.test
+    "a quantifier over a type with its own `count` and `element` and no `Iterable` is an error"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.quantifier_over_a_type_with_its_own_count_and_element
+        "types.not_iterable"
+        ~says:"A quantifier cannot go over `Pair`: it does not implement `Iterable`."
+        ~at:("pair =>", 1));
+  Harness.test "an `own` loop over a type with its own `cursor` and no `IntoCursor` is an error"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.own_loop_over_a_type_with_its_own_cursor
+        "types.not_iterable"
+        ~says:"A `for` loop cannot consume `Deck`: it implements neither `IntoCursor` nor `Cursor`."
+        ~at:("deck {", 1));
+  Harness.test
+    "loops over type parameters read, mutate, and consume through `Iterable`, `IterableMut`, and \
+     `IntoCursor`" (fun () -> expect_fine Fixtures.Infer.loops_over_type_parameters_by_their_traits);
+  Harness.test "a bound fixes the associated types that the traits it requires declare" (fun () ->
+      expect_fine Fixtures.Infer.bounds_fixing_associated_types_of_required_traits);
+  Harness.test
+    "an `own` loop over an `IntoCursor` impl whose `Cursor` is no cursor reports only the impl"
+    (fun () ->
+      match
+        Support.list_codes
+          (check
+             (Support.setup
+                [
+                  ( "app.main",
+                    Fixtures.Infer.own_loop_over_an_into_cursor_whose_cursor_is_not_a_cursor );
+                ])
+             (Support.parse_file "app.main"))
+      with
+      | [ "types.unsatisfied_bound" ] -> ()
+      | reported -> Harness.fail "reported [%s]" (String.concat "; " reported));
   Harness.test "a list literal is a type that implements FromElements" (fun () ->
       expect_fine Fixtures.Infer.list_literal_as_a_type_with_from_elements;
       expect_type Fixtures.Infer.list_literal_as_a_type_with_from_elements "[1, 2, 3]"
@@ -2024,8 +1980,9 @@ let () =
       expect_one_diagnostic Fixtures.Infer.bitwise_assignment_to_a_string "types.no_impl");
   Harness.test "a method written in full takes its receiver's mode" (fun () ->
       expect_one_diagnostic Fixtures.Infer.push_written_in_full "types.wrong_receiver");
-  Harness.test "a for loop takes the `element` overload from the type or from a trait" (fun () ->
-      expect_fine Fixtures.Infer.loop_over_a_bag_with_an_element_overload);
+  Harness.test
+    "a for loop reads through `Iterable`'s `element` and mutates through `IterableMut`'s overload"
+    (fun () -> expect_fine Fixtures.Infer.loop_over_a_bag_with_an_element_overload);
   Harness.test "a call picks an overload among a type's own and its family of traits'" (fun () ->
       expect_fine Fixtures.Infer.overloads_of_label_across_traits);
   Harness.test "two traits that give one overload of a name are ambiguous at the call" (fun () ->
@@ -2201,7 +2158,7 @@ let () =
       expect_fine text;
       expect_type text "middle + 1..items.length()" "Range[Integer]");
   Harness.test "a quantifier's range is of integers or characters, as a `for` loop's is" (fun () ->
-      expect_one_diagnostic Fixtures.Infer.quantifier_over_a_float_range "types.not_indexable";
+      expect_one_diagnostic Fixtures.Infer.quantifier_over_a_float_range "types.not_iterable";
       expect_fine Fixtures.Infer.quantifier_over_a_character_range);
   Harness.test "a local of type Integer in a compiled body" (fun () ->
       expect_one_diagnostic Fixtures.Infer.integer_local_in_a_body "types.specification_only"

@@ -562,7 +562,7 @@ fn lex_file(scanner: mut Scanner, recovery: Bool) -> TokenRange
   var interpolated: Option[InterpolationResult] = None
   while true {
     if codes.length() > strings.length() {
-      let step = step_code(mut scanner, frame: mut codes.element(codes.length() - 1), arriving: arriving)
+      let step = step_code(mut scanner, frame: mut codes[codes.length() - 1], arriving: arriving)
       arriving = None
       match own step {
         CodeFinished => {
@@ -586,7 +586,7 @@ fn lex_file(scanner: mut Scanner, recovery: Bool) -> TokenRange
       if strings.is_empty() {
         Panic.crash("a string frame is active")
       }
-      let progress = continue_string(mut scanner, frame: mut strings.element(strings.length() - 1), interpolated: interpolated)
+      let progress = continue_string(mut scanner, frame: mut strings[strings.length() - 1], interpolated: interpolated)
       interpolated = None
       match progress {
         Interpolates(request) => mut codes.push(begin_interpolation(mut scanner, request))

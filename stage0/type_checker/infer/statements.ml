@@ -1,3 +1,5 @@
+let make_trait known = Types.make_trait_reference ~arguments:[] (Well_known.make_path known)
+
 let record_integer_range state ~(loop : Syntax.id) ~described ~admits_integer
     (range : Syntax.expression) element ~inclusive =
   State.check_when_final state (fun () ->
@@ -9,7 +11,7 @@ let record_integer_range state ~(loop : Syntax.id) ~described ~admits_integer
             :: (if admits_integer then [ Language.Builtin_type.Integer ] else []))
       then State.elaborate state loop (Loop (Integer_range { element; inclusive }))
       else if not (Types.is_error element) then
-        State.report state Not_indexable (State.read_span state range.id)
+        State.report state Not_iterable (State.read_span state range.id)
           (Printf.sprintf "%s range is of integers, not `%s`." described (Types.show element)))
 
 let statement_diverges (state : State.state) =
@@ -217,14 +219,14 @@ and assigns_through_index state env (written : Syntax.statement) (target : Synta
   | Bracket (base, [ Item key ]), (Some Index | None) -> (
       let base_type = Conversions.read_checked_head state env base in
       let { Well_known.owner; name; receiver } = Well_known.locate_method Index_assign_assign in
-      let trait = Types.make_trait_reference ~arguments:[] (Well_known.make_path owner) in
+      let trait = make_trait owner in
       match
         ( State.find_evidence state base_type trait,
           Interface.Definition.find_trait_method state.lookups.interface trait.trait ~name ~receiver
         )
       with
       | Some (Interface.Impls.Evidence (Impl _) | Evidence Bound | Evidence Dynamic), Some _ ->
-          let index = Types.make_trait_reference ~arguments:[] (Well_known.make_path Index) in
+          let index = make_trait Index in
           let make_parameter parameter_name type_ : Types.parameter_info =
             { name = parameter_name; mode = Own; type_; has_default = false }
           in
@@ -271,10 +273,25 @@ and record_loop (state : State.state) (written : Syntax.statement) (loop : Table
   | Pulled pulled ->
       State.check_when_final state (fun () ->
           State.elaborate state written.id
-            (Loop
-               (Pulled
-                  { pulled with remaining = Name_lookup.find_remaining_call state pulled.cursor })))
+            (Loop (Pulled { pulled with remaining = find_remaining_call state pulled.cursor })))
   | Integer_range _ | Elements _ -> ()
+
+and find_remaining_call state cursor =
+  let finite_cursor = make_trait Finite_cursor in
+  let call =
+    Tables.make_method_call finite_cursor Finite_cursor_remaining ~self_type:cursor
+      ~result:(Types.make_builtin UInt64) []
+  in
+  let is_on_a_parameter (bound : Types.bound_condition) =
+    match bound.subject with Types.Parameter _ -> true | _ -> false
+  in
+  match State.find_evidence state cursor finite_cursor with
+  | Some _ -> Some ([], call)
+  | None -> (
+      match State.reduce_condition state [ { subject = cursor; bound = finite_cursor } ] with
+      | Some (_ :: _ as condition) when List.for_all is_on_a_parameter condition ->
+          Some (condition, call)
+      | Some _ | None -> None)
 
 and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable : Syntax.expression)
     =
@@ -288,52 +305,105 @@ and check_loop_iterable state env (written : Syntax.statement) ~mode (iterable :
           (element, mode)
       | _ -> State.raise_bug "a range is not of the range type")
   | _ -> (
-      let span = State.read_span state iterable.id in
+      let at = State.read_span state iterable.id in
       let type_ = Conversions.read_checked_head state env iterable in
       match type_ with
       | Types.Error _ | Types.Hole -> (type_, mode)
       | _ -> (
-          let cursor = Types.make_trait_reference ~arguments:[] (Well_known.make_path Cursor) in
-          let by_position : (Tables.loop * Types.ty * Language.Mode.t) Resolve.Names.lookup =
-            if mode = Language.Mode.Own then Absent
-            else
-              Name_lookup.find_elements_calls state
-                ~cause:(Loop (State.read_span state iterable.id))
-                iterable type_ mode
-          and consumed : (Tables.loop * Types.ty) Resolve.Names.lookup =
-            if mode = Language.Mode.Own then Name_lookup.find_consuming_cursor state iterable type_
-            else Absent
+          let cause : State.cause = Loop at and cursor = make_trait Cursor in
+          let by_mode =
+            match mode with
+            | Language.Mode.Read | Mut -> find_elements_loop state ~cause ~at type_ mode
+            | Own -> find_consuming_loop state ~cause ~at type_
           in
-          match (by_position, consumed, State.find_evidence state type_ cursor) with
-          | Visible (loop, element, lends), _, _ ->
+          match by_mode with
+          | Some (loop, element, lends) ->
               record_loop state written loop;
               (element, lends)
-          | _, Visible (loop, element), _ ->
-              record_loop state written loop;
-              (element, Language.Mode.Own)
-          | _, _, Some _ ->
+          | None when require_if_implemented state ~cause type_ cursor ->
               record_loop state written
                 (Pulled { cursor = type_; cursor_call = None; remaining = None });
-              ( Solver.resolve_associated_type state type_ cursor Cursor_element ~at:span,
-                Language.Mode.Own )
-          | Hidden hidden, _, None | _, Hidden hidden, None ->
-              (Members.make_hidden_error state span hidden, mode)
-          | Absent, Absent, None ->
-              ( State.make_error_type state Not_indexable span
+              (Solver.resolve_associated_type state type_ cursor Cursor_element ~at, Own)
+          | None ->
+              ( State.make_error_type state Not_iterable at
                   (match mode with
                   | Language.Mode.Read ->
                       Printf.sprintf
-                        "A `for` loop cannot go over %s: it is not a `Cursor`, and it has no \
-                         `count` and `element` to visit it by position."
+                        "A `for` loop cannot go over %s: it implements neither `Iterable` nor \
+                         `Cursor`."
                         (State.describe state type_)
                   | Mut ->
                       Printf.sprintf
-                        "A `for` loop cannot mutate the elements of `%s`: it has no `element` that \
-                         takes `mut self`."
-                        (Types.show type_)
+                        "A `for` loop cannot mutate the elements of %s: it implements neither \
+                         `IterableMut` nor `Cursor`."
+                        (State.describe state type_)
                   | Own ->
                       Printf.sprintf
-                        "A `for` loop cannot consume `%s`: it has no `cursor` that takes `own \
-                         self`."
-                        (Types.show type_)),
+                        "A `for` loop cannot consume %s: it implements neither `IntoCursor` nor \
+                         `Cursor`."
+                        (State.describe state type_)),
                 mode )))
+
+and find_elements_loop state ~cause ~at type_ (lends : Language.Mode.t) =
+  let iterable = make_trait Iterable in
+  let lending_method =
+    match (Types.find_sequence_element type_, lends) with
+    | Some _, _ -> None
+    | None, Mut -> Some (make_trait Iterable_mut, Well_known.Iterable_mut_element)
+    | None, (Read | Own) -> Some (iterable, Iterable_element)
+  in
+  let required = match lending_method with Some (trait, _) -> trait | None -> iterable in
+  if require_if_implemented state ~cause type_ required then
+    let element = Solver.resolve_associated_type state type_ iterable Iterable_element_type ~at in
+    Some
+      ( Tables.Elements
+          {
+            count =
+              Tables.make_method_call iterable Iterable_count ~self_type:type_
+                ~result:(Types.make_builtin UInt64) [];
+            element =
+              (match lending_method with
+              | None -> Sequence_element
+              | Some (trait, method_) ->
+                  Lent_by_call
+                    (Tables.make_method_call ~lends trait method_ ~self_type:type_ ~result:element
+                       []));
+            lends;
+          },
+        element,
+        lends )
+  else None
+
+and find_consuming_loop state ~cause ~at type_ =
+  let into_cursor = make_trait Into_cursor and cursor_trait = make_trait Cursor in
+  if require_if_implemented state ~cause type_ into_cursor then
+    let cursor =
+      Solver.resolve_associated_type state type_ into_cursor Into_cursor_cursor_type ~at
+    in
+    Some
+      ( Tables.Pulled
+          {
+            cursor;
+            cursor_call =
+              Some
+                (Tables.make_method_call into_cursor Into_cursor_cursor ~self_type:type_
+                   ~result:cursor []);
+            remaining = None;
+          },
+        (match State.find_evidence state cursor cursor_trait with
+        | Some _ -> Solver.resolve_associated_type state cursor cursor_trait Cursor_element ~at
+        | None ->
+            State.make_error_type state Not_iterable at
+              (Printf.sprintf
+                 "The `IntoCursor` impl of `%s` gives `%s` as its `Cursor`, which does not \
+                  implement `Cursor`."
+                 (Types.show type_) (Types.show cursor))),
+        Language.Mode.Own )
+  else None
+
+and require_if_implemented state ~cause type_ trait =
+  match State.find_evidence state type_ trait with
+  | Some _ ->
+      Solver.require state cause type_ trait;
+      true
+  | None -> false

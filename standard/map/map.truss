@@ -866,12 +866,16 @@ impl Cursor for EntryCursor[Key, Value] {
   }
 }
 
-public fn Map[Key: Hash + Ordered, Value].cursor(own self) -> EntryCursor[Key, Value]
-  ensures result.remaining() == self.length()
-  cost time O(self.length())
-  cost amortized time O(self.length())
-{
-  EntryCursor(keys: own self.keys.cursor(), values: own self.values.cursor())
+impl IntoCursor for Map[Key: Hash + Ordered, Value] {
+  type Cursor = EntryCursor[Key, Value]
+
+  fn cursor(own self) -> EntryCursor[Key, Value]
+    ensures result.remaining() == self.length()
+    cost time O(self.length())
+    cost amortized time O(self.length())
+  {
+    EntryCursor(keys: own self.keys.cursor(), values: own self.values.cursor())
+  }
 }
 
 theorem distinct_after_swap[Key: Equal](before: Sequence[Key], after: Sequence[Key], first: Integer, second: Integer)

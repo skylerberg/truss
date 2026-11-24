@@ -543,7 +543,7 @@ let report_unsolved (state : State.state) (frame : State.frame) =
       List.filter_map
         (fun (goal : State.goal) ->
           match (goal.cause, goal.requirement) with
-          | ((Method_call at | Loop at | Quantifier at) as cause), Implements trait
+          | Method_call at, Implements trait
             when (not (Types.contains_unsolved (State.zonk state goal.subject)))
                  && List.exists
                       (fun unknown -> List.mem unknown unsolved)
@@ -551,16 +551,8 @@ let report_unsolved (state : State.state) (frame : State.frame) =
               Some
                 ( State.add_diagnostic state Cannot_infer at
                     (Printf.sprintf
-                       (match cause with
-                       | Loop _ ->
-                           "This loop does not determine the arguments of `%s`, whose methods give \
-                            its elements."
-                       | Quantifier _ ->
-                           "This quantifier does not determine the arguments of `%s`, whose \
-                            methods give its elements."
-                       | _ ->
-                           "This call does not determine the arguments of `%s`. Write the call in \
-                            full with them.")
+                       "This call does not determine the arguments of `%s`. Write the call in full \
+                        with them."
                        (match trait.trait with Top { name; _ } -> name | path -> Path.show path)),
                   list_trait_unknowns trait )
           | _ -> None)

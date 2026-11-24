@@ -52,16 +52,3 @@ val resolve_overloads :
   Types.ty ->
   string ->
   ((Path.receiver * overload) list Resolve.Names.lookup, Types.trait_reference list) Result.t
-
-val find_elements_calls :
-  State.state ->
-  cause:State.cause ->
-  Syntax.expression ->
-  Types.ty ->
-  Language.Mode.t ->
-  (Tables.loop * Types.ty * Language.Mode.t) Resolve.Names.lookup
-
-val find_consuming_cursor :
-  State.state -> Syntax.expression -> Types.ty -> (Tables.loop * Types.ty) Resolve.Names.lookup
-
-val find_remaining_call : State.state -> Types.ty -> (Types.condition * Tables.call) option

@@ -1126,10 +1126,10 @@ let () =
       expect_strings
         ~expected:
           [
-            "public fn List[Element].cursor(own self) -> ListCursor[Element]";
-            "public fn Slice[Element: Plain].cursor(self) -> SliceCursor[Element]";
+            "public fn String.to_bytes(own self) -> List[UInt8]";
+            "public fn StringSlice.to_bytes(self) -> List[UInt8]";
           ]
-        (list_headers (run_show root "List.cursor")));
+        (list_headers (run_show root "String.to_bytes")));
   test "a type is shown with its view's methods and without its view's impls" (fun () ->
       let root = make_package [ ("main.truss", Fixtures.Cli.point_with_a_sum_method) ] in
       let headers = list_headers (run_show root "List") in

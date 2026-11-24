@@ -635,7 +635,7 @@ let () =
           (list_statements body)
       then Harness.fail "the loop lends its element through a call");
   Harness.test "a loop over another collection is lent each element by its `element`" (fun () ->
-      let body = (lower_graph Fixtures.Mir.for_loop_over_a_row_with_its_own_element).body in
+      let body = (lower_graph Fixtures.Mir.for_loop_over_an_iterable_row).body in
       match
         List.find_map
           (fun (_, (terminator : Mir.Graph.terminator)) ->

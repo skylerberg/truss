@@ -961,8 +961,8 @@ let () =
       expect_not_proven
         (couple ^ Fixtures.Prover.couple_loop_with_one_known_element)
         "prover.invariant");
-  Harness.test "a loop that mutates a collection's elements must keep their count" (fun () ->
-      expect_not_proven Fixtures.Prover.row_loop_changing_counts "prover.invariant");
+  Harness.test "an `IterableMut` impl's `element` must keep the collection's count" (fun () ->
+      expect_not_proven Fixtures.Prover.row_loop_changing_counts "prover.ensures");
   Harness.test "a loop over a range has visited its indexes" (fun () ->
       expect_proven Fixtures.Prover.range_loop_counted_by_visited);
   Harness.test "a range loop's index in its clauses is the next index" (fun () ->
@@ -2517,12 +2517,32 @@ let () =
   Harness.test "a counterexample says when a `let ... else` runs its `else`" (fun () ->
       expect_message_saying Fixtures.Prover.found_or_zero
         "On that path, `Some(found)` does not match, so the `else` runs.");
+  let expect_messages_saying text expected =
+    let packages = Support.setup [ ("app.main", text) ] in
+    let messages =
+      List.map
+        (fun (diagnostic : Diagnostic.t) -> diagnostic.message)
+        (check packages (Support.parse_file "app.main"))
+    in
+    List.iter
+      (fun says ->
+        if not (List.exists (String.includes ~affix:says) messages) then
+          Harness.fail "no message says %S: %s" says (String.concat "; " messages))
+      expected
+  in
+  let impl_precondition = "may not follow from the trait's precondition" in
   Harness.test "a precondition of a `for` loop's call names the loop" (fun () ->
-      expect_message_saying Fixtures.Prover.sum_over_a_short_bag
-        "may not hold for the call to `Bag.element` that this `for` loop makes.");
+      expect_messages_saying Fixtures.Prover.sum_over_a_short_bag
+        [
+          impl_precondition;
+          "may not hold for the call to `Bag.element` that this `for` loop makes.";
+        ]);
   Harness.test "a precondition of a quantifier's call names the quantifier" (fun () ->
-      expect_message_saying Fixtures.Prover.all_small_in_a_short_bag
-        "may not hold for the call to `Bag.element` that this quantifier makes.");
+      expect_messages_saying Fixtures.Prover.all_small_in_a_short_bag
+        [
+          impl_precondition;
+          "may not hold for the call to `Bag.element` that this quantifier makes.";
+        ]);
   Harness.test "a panic condition of an operator's call names the operator" (fun () ->
       expect_message_saying Fixtures.Prover.sum_of_capped_money
         "may not hold for the call to `Money.add` that `left + right` makes, so the call may panic.")

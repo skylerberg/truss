@@ -1,0 +1,14 @@
+fn first_or_zero[Items: FiniteCursor[Element = Int64]](items: mut Items) -> Int64
+  uses Items.Uses
+{
+  match mut items.next() {
+    Some(value) => value + 0
+    None => 0
+  }
+}
+
+fn reset_all[Items: IndexMut[Key = UInt64, Output = Int64]](items: mut Items, key: UInt64) {
+  if items.contains_key(key) {
+    items[key] = 0
+  }
+}

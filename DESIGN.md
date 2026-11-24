@@ -443,6 +443,12 @@ collection must have positions. Such a loop cannot advance two sequences
 together, so it cannot express `zip`, a merge, or `peek`. A tree has no
 positions. [Cursors](#cursors) cover both cases.
 
+| Rule | Reason |
+|---|---|
+| A `for` loop calls `count`, `element`, and `cursor` through `Iterable`, `IterableMut`, and `IntoCursor`, never a method found by its name. | A method found by its name cannot be named in a bound, so generic code could not loop over a type parameter, and a type with such methods would have loops but not `Iterable`'s `map`, `filter`, or `fold`. The trait also states what every loop relies on: `element` requires a position below `count`, and a `mut` element leaves `count` as it was. |
+| Lending elements to read and to mutate are separate traits, `Iterable` and `IterableMut`. | A collection that packs its elements, such as a `BitSet`, has no place to lend `mut`. |
+| Consuming a collection is a trait of its own, `IntoCursor`, whose `type Cursor: Cursor` is the cursor's type. | A view such as a `Slice` or a map's `Keys` is iterable but owns no elements to give up, and a `Heap` gives up its elements in order but has no positions. |
+
 ### Cursors
 
 Rules: [Cursors](SPECIFICATION.md#cursors).

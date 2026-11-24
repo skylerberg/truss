@@ -484,11 +484,15 @@ type_arguments = "[" type_argument { "," type_argument } [ "," ] "]" ;
 type_argument  = type | INTEGER | LOWER_NAME | UPPER_NAME "=" type ;
 ```
 
-- `Items.Element` names an associated type of a type parameter.
+- `Items.Element` names an associated type of a type parameter. It names
+  no associated type of an associated type: `Source.Cursor.Element` is
+  written through a parameter, as in
+  `[Items: Cursor, Source: IntoCursor[Cursor = Items]]` and `Items.Element`.
 - An `INTEGER` or `LOWER_NAME` argument is the value of a `UInt64` generic
   parameter, as in `Array[UInt8, 32]`.
 - `UPPER_NAME "=" type` constrains an associated type, as in
-  `Iterable[Element = Int64]`.
+  `Iterable[Element = Int64]`, including one that a required trait
+  declares, as in `IterableMut[Element = Int64]`.
 
 ### Generic parameters
 
@@ -1574,12 +1578,14 @@ fn Slice[Element].get(self, index: UInt64) lends Option[Element] {
 #### Contracts of lending methods
 
 ```truss
-fn List[Element].element(mut self, position: UInt64) lends mut Element
-  requires position < self.count()
-  ensures identical(result, old(self.model())[position])
-  ensures identical(self.model(), old(self.model()).update(position, value: final(result)))
-{
-  mut self[position]
+impl IterableMut for List[Element] {
+  fn element(mut self, position: UInt64) lends mut Element
+    requires position < self.count()
+    ensures identical(result, old(self.model())[position])
+    ensures identical(self.model(), old(self.model()).update(position, value: final(result)))
+  {
+    mut self[position]
+  }
 }
 ```
 
@@ -1918,20 +1924,37 @@ fn load_config(file: Path) -> Result[Config, ConfigError]
 | `for item in own items { ... }` | Move each element out. |
 | `while low < high { ... }` | Loop while a condition holds. |
 
+- **A `for` loop calls the methods of a prelude trait,** as an operator
+  does, and never a method found by its name:
+
+  | Loop | The iterable implements | Each iteration |
+  |---|---|---|
+  | `for item in items` | `Iterable` | Is lent `items.element(position)` |
+  | `for item in mut items` | `IterableMut` | Is lent `mut items.element(position)` |
+  | `for item in own items` | `IntoCursor` | Owns a value of the cursor that `items.cursor()` returns |
+  | `for item in cursor` | `Cursor` | Owns the value that `cursor.next()` returns |
+
+  An iterable that does not implement its loop's trait is pulled as a
+  `Cursor`, and one that implements neither is an error.
 - **A `for` loop over a collection visits its elements by position.**
   `for item in items` evaluates `items.count()` once, and each iteration is
   lent `items.element(position)`, for each position from zero up to the
-  count. A type supports `for` by defining `count(self) -> UInt64` and
-  `element(self, position: UInt64)`, a lending method, as its own methods or
-  by implementing `Iterable`. An iteration over a `List`, a `Slice`, or an
-  `Array` is lent the element place `items[position]` instead, and calls no
-  `element`.
-- `for item in mut items` is lent each element by the overload of `element`
-  that takes `mut self`, or the element place `mut items[position]`. A
-  `mut` loop mutates elements but does not add or remove them: each
-  iteration leaves the collection's `count` as it was.
+  count. An iteration over a `List`, a `Slice`, or an `Array` is lent the
+  element place `items[position]` instead, and calls no `element`.
+- `List`, `Slice`, and `Array` implement `Iterable`, and `List` and `Array`
+  implement `IterableMut` for generic code. `Slice` does not: a slice
+  implements no trait with a `mut self` method ([Views](#views)). A `mut`
+  loop over a `Slice` is lent its element places, so it needs no
+  `IterableMut`.
+- A `mut` loop mutates elements but does not add or remove them: each
+  iteration leaves the collection's `count` as it was, as
+  `IterableMut.element` promises.
+- The methods of `Iterable` and `IterableMut` use no capability, as those of
+  `Index` do not, so a loop by position uses none and terminates. A
+  collection whose elements need a capability to reach, such as lines read
+  from a file, is a `Cursor`, whose `Uses` names the capabilities.
 - `for item in own items` moves each element out: it pulls the cursor that
-  `items.cursor()` returns, where `cursor` takes `own self`.
+  `items.cursor()` returns.
 - **A `for` loop over a cursor pulls it until it has no more values.** Each
   iteration owns the value that `next` returned. A cursor in a variable is
   advanced in place, so it can be pulled again after a `break`.
@@ -2689,9 +2712,7 @@ trait Ordered: Equal {
 - A call's arguments give the trait's arguments, and so does a type
   parameter's one bound of the trait, which its signature states. The
   `impl`s of a type never do: where `Pair` implements only `Bag[Int64]`,
-  `pair.count()` is an error, and is written `Bag[Int64].count(pair)`. A loop
-  over a `Pair` whose elements come from the methods of `Bag` is an error for
-  the same reason.
+  `pair.count()` is an error, and is written `Bag[Int64].count(pair)`.
 
 ### Associated types
 
@@ -2705,8 +2726,19 @@ trait Index {
 }
 ```
 
-A trait's associated type is chosen by each `impl`, with `type Key = ...`,
-which appears only in an `impl`.
+```truss
+trait IntoCursor {
+  type Cursor: Cursor
+  fn cursor(own self) -> Self.Cursor
+}
+```
+
+- A trait's associated type is chosen by each `impl`, with
+  `type Key = ...`, which appears only in an `impl`.
+- **A bound on an associated type holds for every `impl`.** The type that an
+  `impl` chooses for `type Cursor: Cursor` implements `Cursor`, so code
+  bounded by `Source: IntoCursor` calls `Cursor`'s methods on
+  `Source.Cursor`.
 
 ### Associated capability sets
 
@@ -3114,8 +3146,9 @@ The prelude is in scope in every file, and all its names are
   `Set`
 - the core traits, such as `Equal`, `Ordered`, `From`, `TryFrom`, `Default`,
   `Copyable`, `Plain`, `Storable`, `Index`, `IndexMut`, `IndexAssign`,
-  `Iterable`, `Cursor`, `FiniteCursor`, `FromTemplate`, `FromElements`,
-  `FromEntries`, `Model`, and the arithmetic traits
+  `Iterable`, `IterableMut`, `Cursor`, `FiniteCursor`, `IntoCursor`,
+  `FromTemplate`, `FromElements`, `FromEntries`, `Model`, and the arithmetic
+  traits
 - `Integer`, `Sequence`, `FiniteSet`, and `FiniteMap`
 - the standard capabilities, and `Path`, `Instant`, `Duration`, and
   `SystemError`

@@ -227,9 +227,13 @@ impl Cursor for collections.HeapCursor[Element: Ordered] {
   }
 }
 
-public fn collections.Heap[Element: Ordered].cursor(own self) -> collections.HeapCursor[Element]
-  ensures result.remaining() == self.length()
-  cost time O(1)
-{
-  collections.HeapCursor(heap: own self)
+impl IntoCursor for collections.Heap[Element: Ordered] {
+  type Cursor = collections.HeapCursor[Element]
+
+  fn cursor(own self) -> collections.HeapCursor[Element]
+    ensures result.remaining() == self.length()
+    cost time O(1)
+  {
+    collections.HeapCursor(heap: own self)
+  }
 }

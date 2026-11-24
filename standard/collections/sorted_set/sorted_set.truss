@@ -671,12 +671,16 @@ impl Iterable for collections.SortedSet[Element: Ordered] {
   }
 }
 
-public fn collections.SortedSet[Element: Ordered].cursor(own self) -> list.ListCursor[Element]
-  ensures result.remaining() == self.length()
-  cost time O(self.length())
-  cost amortized time O(self.length())
-{
-  own self.elements.cursor()
+impl IntoCursor for collections.SortedSet[Element: Ordered] {
+  type Cursor = list.ListCursor[Element]
+
+  fn cursor(own self) -> list.ListCursor[Element]
+    ensures result.remaining() == self.length()
+    cost time O(self.length())
+    cost amortized time O(self.length())
+  {
+    own self.elements.cursor()
+  }
 }
 
 public fn collections.SortedSet[Element: Ordered].reversed(self) -> list.Reversed[Element]
