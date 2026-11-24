@@ -211,6 +211,14 @@ test "a search skips to the first byte of the pattern and keeps a partial match"
   assert parts[1] == "c<"
 }
 
+test "occurrences counts a byte across blocks of the text" {
+  assert "abc".repeated(200).occurrences("a") == 200
+  assert "abc".repeated(200).occurrences("c") == 200
+  assert "x".repeated(192).occurrences("x") == 192
+  assert "x".repeated(193).occurrences("x") == 193
+  assert "x".repeated(385).occurrences("x") == 385
+}
+
 test "split gives the parts between separators, empty ones included" {
   var parts: List[String] = []
   for part in "a,b,,c".split(",") {
