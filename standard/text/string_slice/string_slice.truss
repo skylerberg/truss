@@ -468,6 +468,42 @@ internal fn StringSlice.advance(self, pattern: StringSlice, table: Slice[UInt64]
   if self.byte(index) == pattern.byte(current) { current + 1 } else { current }
 }
 
+internal fn StringSlice.find_byte(self, byte: UInt8, from: UInt64) -> UInt64
+  requires from <= self.length()
+  ensures from <= result
+  ensures result <= self.length()
+  ensures result < self.length() ==> self.model()[result] == byte
+  cost time O(result - from)
+  cost allocations == 0
+{
+  var index = from
+  while index < self.length() && self.byte(index) != byte
+    invariant from <= index
+    invariant index <= self.length()
+    decreases self.length() - index
+    cost time O(index - from)
+    cost allocations == 0
+  {
+    index += 1
+  }
+  index
+}
+
+internal fn StringSlice.count_byte(self, byte: UInt8) -> UInt64
+  ensures result <= self.length()
+  cost time O(self.length())
+  cost allocations == 0
+{
+  var count: UInt64 = 0
+  for index in 0..self.length()
+    invariant count <= index
+    cost allocations == 0
+  {
+    count += if self.byte(index) == byte { 1 } else { 0 }
+  }
+  count
+}
+
 internal fn StringSlice.find_first(self, pattern: StringSlice, table: Slice[UInt64]) -> Option[UInt64]
   requires pattern.length() > 0
   requires table.length() == pattern.length()
@@ -516,6 +552,14 @@ public fn StringSlice.find(self, pattern: StringSlice) -> Option[UInt64]
 {
   if pattern.is_empty() {
     return if self.is_boundary(0) { Some(0) } else { None }
+  }
+  if pattern.length() == 1 {
+    let byte = pattern.byte(0)
+    if (byte & 0xC0) == 0x80 {
+      return None
+    }
+    let offset = self.find_byte(byte, from: 0)
+    return if offset < self.length() { Some(offset) } else { None }
   }
   let table = failure_table(pattern)
   self.find_first(pattern, table: table.slice())
@@ -589,6 +633,10 @@ public fn StringSlice.occurrences(self, pattern: StringSlice) -> UInt64
 {
   if pattern.is_empty() {
     Panic.crash("the pattern is empty")
+  }
+  if pattern.length() == 1 {
+    let byte = pattern.byte(0)
+    return if (byte & 0xC0) == 0x80 { 0 } else { self.count_byte(byte) }
   }
   let table = failure_table(pattern)
   var count: UInt64 = 0

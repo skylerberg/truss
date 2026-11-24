@@ -182,6 +182,19 @@ test "contains and occurrences count matches that do not overlap" {
   assert "".occurrences("x") == 0
 }
 
+test "a one-byte pattern matches each of its bytes beside multibyte characters" {
+  let text = "caf\u{e9} au lait"
+  assert text.find("a") == Some(1)
+  assert text.find("t") == Some(12)
+  assert text.find("x") is None
+  assert text.contains("u")
+  assert text.occurrences("a") == 3
+  assert text.occurrences(" ") == 2
+  assert text.occurrences("x") == 0
+  assert "a".find("a") == Some(0)
+  assert "a".occurrences("a") == 1
+}
+
 test "split gives the parts between separators, empty ones included" {
   var parts: List[String] = []
   for part in "a,b,,c".split(",") {
