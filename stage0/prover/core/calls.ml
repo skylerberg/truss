@@ -871,11 +871,9 @@ let make_callback_cost (context : State.context) frame (metric : Language.Metric
         Facts.add_frame_fact context frame (Logic.equal cost (Costs.larger least value))
       in
       (match term with
-      | Logic.Symbol (Function_value { callee; _ }) ->
+      | Logic.Symbol (Function_value { callee; type_arguments }) ->
           Option.iter state_value
-            (Option.bind (Contracts.read_signature context callee)
-               (fun (signature : Types.signature) ->
-                 Costs.find_stated_operand signature.costs metric))
+            (Amounts.find_function_value_cost context frame metric callee ~type_arguments)
       | _ -> ());
       (match List.assoc_opt (term, metric) context.lambda_costs with
       | Some (bound, showing) ->

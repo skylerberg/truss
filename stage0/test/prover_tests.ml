@@ -2547,7 +2547,11 @@ let () =
       expect_proven Fixtures.Prover.derived_default_of_settings);
   Harness.test "a derived default spends the allocation of a written list default" (fun () ->
       expect_not_proven Fixtures.Prover.derived_default_of_settings_without_allocations
-        "prover.cost")
+        "prover.cost");
+  Harness.test "sorting by a generic function costs the function's bound at its type arguments"
+    (fun () -> expect_proven Fixtures.Prover.sort_by_a_generic_function_in_n_log_n);
+  Harness.test "a generic function of a string passed as a value is not constant time" (fun () ->
+      expect_not_proven Fixtures.Prover.function_of_a_string_passed_in_constant_time "prover.cost")
 
 let () =
   Harness.test "a proof for a generic impl names its own generic parameters" (fun () ->

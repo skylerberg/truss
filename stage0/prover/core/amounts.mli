@@ -66,5 +66,13 @@ val declare_method_cost :
   Types.ty ->
   Logic.term
 
+val find_function_value_cost :
+  State.context ->
+  State.frame ->
+  Language.Metric.t ->
+  Path.t ->
+  type_arguments:Types.argument list ->
+  Logic.term option
+
 val compute_method_cost :
   State.context -> State.frame -> Language.Metric.t -> Invocation.callee -> Logic.term

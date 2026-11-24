@@ -1423,7 +1423,7 @@ type, and the terms `time(visit)`, `allocations(visit)`,
   | The function passed | `time(visit)`, `allocations(visit)`, `allocated_bytes(visit)` | `visit.ensures(...)` |
   |---|---|---|
   | A lambda | A bound on its body for every argument | Where its body may return that result for those arguments |
-  | A named function | For `time`, a constant where its clause is `O(n)` for a literal `n`. For `allocations` and `allocated_bytes`, `n` where its clause is `<= n` or `== n` for a literal `n`. | Where its `ensures` holds |
+  | A named function | The value of its bound at its type arguments, where the bound reads no parameter, `result`, or `old`: `1 + time(Int64.compare)` for `by_item` at `Int64`, whose bound is `O(1 + time(Item.compare))`. A function with capability parameters takes a value only from an integer bound. | Where its `ensures` holds |
   | A parameter of the caller | The caller's own term | The caller's own `visit.ensures` |
 
   A function that states no bound on a resource has no value for that term,
