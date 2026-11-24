@@ -2226,6 +2226,54 @@ let () =
       | [] -> ()
       | codes -> Harness.fail "codes %s" (String.concat ", " codes))
 
+let expect_a_message_saying ~says diagnostics =
+  let messages = List.map (fun (diagnostic : Diagnostic.t) -> diagnostic.message) diagnostics in
+  if not (List.exists (String.includes ~affix:says) messages) then
+    Harness.fail "no message says %S: %s" says (String.concat "; " messages)
+
+let () =
+  Harness.test "a loop that calls a function with no cost clause names the function" (fun () ->
+      expect_a_message_saying
+        ~says:
+          "This loop calls `is_even`, which states no `cost time`, so the prover cannot bound the \
+           cost of an iteration. Give `is_even` a `cost time` clause, such as `cost time O(1)`."
+        (list_diagnostics Fixtures.Prover.loop_calling_a_helper_without_a_cost_clause));
+  Harness.test "a loop that calls functions with no cost clauses names each of them" (fun () ->
+      expect_a_message_saying
+        ~says:
+          "This loop calls `is_even` and `is_negative`, which state no `cost time`, so the prover \
+           cannot bound the cost of an iteration. Give each a `cost time` clause, such as `cost \
+           time O(1)`."
+        (list_diagnostics Fixtures.Prover.loop_calling_helpers_without_cost_clauses));
+  Harness.test "a loop's cost is counted once the function it calls states a cost" (fun () ->
+      expect_proven Fixtures.Prover.loop_calling_a_helper_with_a_cost_clause);
+  Harness.test
+    "a loop that calls another package's function with no cost clause asks no change of it"
+    (fun () ->
+      let diagnostics =
+        check_across Fixtures.Prover.public_is_even_without_a_cost_clause
+          Fixtures.Prover.loop_calling_another_packages_function_without_a_cost_clause
+      in
+      expect_a_message_saying
+        ~says:
+          "This loop calls `is_even`, which states no `cost time`, so the prover cannot bound the \
+           cost of an iteration."
+        diagnostics;
+      if
+        List.exists
+          (fun (diagnostic : Diagnostic.t) -> String.includes ~affix:"Give" diagnostic.message)
+          diagnostics
+      then Harness.fail "a message asks for a change to another package");
+  Harness.test "a loop that pushes on one path names the push and the list it changes" (fun () ->
+      expect_a_message_saying
+        ~says:
+          "The amortized cost of `kept.push(value)` depends on the potential of `kept`, which this \
+           loop changes, so the prover cannot bound the cost of an iteration by the values the \
+           loop does not mutate. Give the loop a `cost` clause."
+        (list_diagnostics Fixtures.Prover.loop_pushing_in_one_branch));
+  Harness.test "a loop that pushes on one path is counted by its cost clause" (fun () ->
+      expect_proven Fixtures.Prover.loop_pushing_in_one_branch_with_a_cost_clause)
+
 let () =
   Harness.test
     "a recursive function proves a plain and an amortized bound, each by its own counting"

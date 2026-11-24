@@ -98,6 +98,14 @@ type stated = Tables.stated =
   | Non_negative_rank of Types.ty
   | Method_cost_bound of Logic.symbol
 
+type call_amount = {
+  call : Obligation.piece;
+  callee : Path.t;
+  states_cost : bool;
+  counter : Costs.counter;
+  amount : Logic.term;
+}
+
 type lending = {
   part_type : Types.ty;
   part_postconditions : Mir.formula list;
@@ -145,6 +153,7 @@ type context = {
   mutable powers : (Logic.term * Logic.term) list;
   mutable lambda_costs : ((Logic.term * Language.Metric.t) * (Logic.term * Obligation.t list)) list;
   mutable lambda_captures : (Logic.term * Core.local list) list;
+  mutable call_amounts : call_amount list;
   lambda_definitions : Logic.term Tables.Symbol_table.t;
   mutable potentials : Logic.term list;
   models : (Logic.term -> Logic.term) option Tables.Model_table.t;
