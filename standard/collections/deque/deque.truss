@@ -368,9 +368,10 @@ impl Default for collections.Deque[Element] {
   fn default() -> collections.Deque[Element]
     ensures result.length() == 0
     cost time O(1)
+    cost amortized time O(1)
     cost allocations == 0
   {
-    []
+    collections.Deque(front: [], back: [])
   }
 }
 

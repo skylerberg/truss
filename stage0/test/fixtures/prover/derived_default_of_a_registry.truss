@@ -1,0 +1,20 @@
+use standard.collections
+use standard.math
+
+type Registry(
+  entries: Map[Int64, Int64],
+  names: Set[String],
+  pending: collections.Deque[Int64],
+  ordered: collections.SortedMap[Int64, Int64],
+  seen: collections.SortedSet[Int64],
+  total: math.BigInteger,
+  price: math.Decimal,
+)
+  derives Default
+
+fn fresh() -> Registry
+  cost time O(1)
+  cost allocations == 0
+{
+  Registry.default()
+}

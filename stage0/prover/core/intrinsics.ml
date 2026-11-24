@@ -483,10 +483,14 @@ let translate_buffer_operation context frame ~(site : Invocation.site)
       Models.make_array_model context frame array.type_ array.term
   | Storage_empty ->
       Facts.assume context frame (Logic.equal (length (storage known)) (Logic.int 0));
+      Facts.assume context frame
+        (each_sum (fun sum _ -> Logic.equal (sum (storage known)) (Logic.int 0)));
       known
   | Storage_with_capacity ->
       Facts.assume context frame
         Logic.(equal (length (storage known)) (int 0) &&& equal (capacity known) (read_operand 0));
+      Facts.assume context frame
+        (each_sum (fun sum _ -> Logic.equal (sum (storage known)) (Logic.int 0)));
       known
   | Storage_length -> length (storage (read_operand 0))
   | View_length -> length (view (read_operand 0))

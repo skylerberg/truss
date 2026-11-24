@@ -1215,10 +1215,12 @@ is one number for the function: it cannot depend on the arguments of a call.
   only from a bound that is an integer. Its other bounds can name those
   parameters, and a term such as `time(Item.serialize)` supplies no
   argument for them.
-- `time(...)` has no value for a method that returns a value with
-  potential or takes one as `mut`, since a plain bound does not count the
-  potential that the call makes. A derived `Default` is the exception: the
-  cost of its body includes the potential of its value.
+- A plain bound gives `time(...)` no value for a method that returns a
+  value with potential or takes one as `mut`, since the bound does not count
+  the potential that the call makes. An `amortized` bound gives the value
+  instead where no `own` or `mut` parameter holds potential: the call then
+  makes only its result's potential, which the bound counts. A derived
+  `Default`'s body counts the potential of its value as well.
 - `time(...)` has no value for a type argument whose `impl` of the method
   may run forever (see [Termination](#termination)), and `allocations(...)`
   and `allocated_bytes(...)` have none where the `impl` states no bound on

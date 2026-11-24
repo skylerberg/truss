@@ -9,6 +9,7 @@ internal type SystemConsole(input: lines.LineInput)
 impl Default for SystemConsole {
   fn default() -> SystemConsole
     cost time O(1)
+    cost amortized time O(1)
     cost allocations == 0
   {
     SystemConsole(input: lines.LineInput.new())
