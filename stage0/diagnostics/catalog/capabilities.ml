@@ -1,6 +1,3 @@
-open Description
-open Build
-
 type subject =
   | Call of Core.origin
   | Unmeasured_loop
@@ -84,15 +81,15 @@ type t =
       parameter : string;
     }
 
-let make ?(notes = []) ?(fixes = []) code location message =
+let make ?(notes = []) ?(fixes = []) code location message : Nodes.description =
   { code = Capabilities code; severity = Error; location; message; notes; fixes }
 
 let capitalize = function
-  | Text text :: rest -> Text (String.capitalize_ascii text) :: rest
+  | Description.Text text :: rest -> Description.Text (String.capitalize_ascii text) :: rest
   | pieces -> pieces
 
 let describe_subject = function
-  | Call origin -> capitalize (describe_call origin)
+  | Call origin -> capitalize (Build.describe_call origin)
   | Unmeasured_loop -> [ Text "This loop has no measure, so it" ]
   | Conditionally_measured_loop condition ->
       [
@@ -187,15 +184,16 @@ let write_not_granted granted package capability =
 
 let describe = function
   | Not_granted { at = origin; granted; package; capability } ->
-      make Not_granted (at origin) [ Text (write_not_granted granted package capability) ]
+      make Not_granted (Build.at origin) [ Text (write_not_granted granted package capability) ]
   | Lambda_uses { lambda; capability; use } ->
       let shown = Types.show_capability capability in
-      make Lambda_uses (at lambda)
+      make Lambda_uses (Build.at lambda)
         ~notes:
           (match use with
           | Some (origin, subject) ->
               [
-                (at origin, describe_subject subject @ [ Text (Printf.sprintf " uses `%s`." shown) ]);
+                ( Build.at origin,
+                  describe_subject subject @ [ Text (Printf.sprintf " uses `%s`." shown) ] );
               ]
           | None -> [])
         [
@@ -206,7 +204,7 @@ let describe = function
         ]
   | Must_terminate { at = origin; subject; restriction; alternative } ->
       let description, _, _ = describe_restriction restriction in
-      make Not_available (at origin)
+      make Not_available (Build.at origin)
         (describe_subject subject
         @ [
             Text
@@ -215,7 +213,7 @@ let describe = function
           ])
   | Not_in_restriction { at = origin; subject; capability; restriction; allowed } ->
       let description, reason, is_within_code = describe_restriction restriction in
-      make Not_available (at origin)
+      make Not_available (Build.at origin)
         (describe_subject subject
         @ [
             Text
@@ -227,7 +225,7 @@ let describe = function
           ])
   | Not_available { at = origin; subject; capability; declaration; can_provide; alternative } ->
       let shown = Types.show_capability capability in
-      make Not_available (at origin)
+      make Not_available (Build.at origin)
         (describe_subject subject
         @ [
             Text
@@ -249,29 +247,29 @@ let describe = function
                     (add_alternative ~sentence_start:true alternative));
           ])
   | Not_an_implementation { implementation; type_ } ->
-      make Not_an_implementation (at implementation)
+      make Not_an_implementation (Build.at implementation)
         [
           Text
             (Printf.sprintf "`%s` implements no capability, so it provides nothing."
                (Types.show type_));
         ]
   | Provide_missing_mut { implementation } ->
-      make Provide_mode (at implementation)
+      make Provide_mode (Build.at implementation)
         ~fixes:
           [
             {
               title = [ Text "Provide it `mut`." ];
-              edits = [ insert_before implementation [ Text "mut " ] ];
+              edits = [ Build.insert_before implementation [ Text "mut " ] ];
             };
           ]
         [ Text "This implementation mutates its own state, so the place is provided `mut`." ]
   | Provide_needless_mut { implementation; place } ->
-      make Provide_mode (at implementation)
+      make Provide_mode (Build.at implementation)
         ~fixes:
           [
             {
               title = [ Text "Remove the `mut`." ];
-              edits = [ delete (Start implementation) (Start place) ];
+              edits = [ Build.delete (Start implementation) (Start place) ];
             };
           ]
         [
@@ -280,7 +278,7 @@ let describe = function
              `mut`.";
         ]
   | Monitor_needs_tasks { implementation; type_ } ->
-      make Monitor_needs_tasks (at implementation)
+      make Monitor_needs_tasks (Build.at implementation)
         [
           Text
             (Printf.sprintf
@@ -293,7 +291,7 @@ let describe = function
                (Types.show type_));
         ]
   | Callback_may_deadlock { implementation; capability; method_name; parameter } ->
-      make Callback_may_deadlock (at implementation)
+      make Callback_may_deadlock (Build.at implementation)
         [
           Text
             (Printf.sprintf
@@ -305,8 +303,8 @@ let describe = function
                (Path.show_name capability) method_name parameter);
         ]
 
-let origin = example "origin"
-let place = example "place"
+let origin = Build.example "origin"
+let place = Build.example "place"
 let console = Path.make_standard_path [ "console" ] "Console"
 let point = Types.make_builtin Int64
 let capability = Types.Capability console

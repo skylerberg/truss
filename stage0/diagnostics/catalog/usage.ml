@@ -1,6 +1,3 @@
-open Description
-open Build
-
 type removal =
   | Wildcard
   | Field_wildcard
@@ -25,8 +22,8 @@ type t =
     }
   | Unused_run_forever of {
       function_ : Path.t;
-      entry : Core.origin range;
-      siblings : Core.origin siblings;
+      entry : Core.origin Description.range;
+      siblings : Core.origin Description.siblings;
     }
   | Unmodified_part of {
       entry : Core.origin;
@@ -44,14 +41,14 @@ type t =
     }
 
 and part_change =
-  | Named_part_changed of Core.origin siblings
+  | Named_part_changed of Core.origin Description.siblings
   | Unnamed_part_changed
   | Parameter_unchanged
 
 and definition_kind = Function | Constant
 and visibility = Internal | Private
 
-let make ?(severity = Diagnostic.Error) ?(fixes = []) code location message =
+let make ?(severity = Diagnostic.Error) ?(fixes = []) code location message : Nodes.description =
   { code = Usage code; severity; location; message; notes = []; fixes }
 
 let describe_removal name = function
@@ -63,9 +60,9 @@ let describe_removal name = function
 
 let make_removal_edit name (occurrence : occurrence) =
   match occurrence.removal with
-  | Wildcard -> replace occurrence.binding [ Text "_" ]
-  | Field_wildcard -> replace occurrence.binding [ Text (name ^ ": _") ]
-  | Field_deletion { field; next } -> delete (Start field) (Start next)
+  | Wildcard -> Build.replace occurrence.binding [ Text "_" ]
+  | Field_wildcard -> Build.replace occurrence.binding [ Text (name ^ ": _") ]
+  | Field_deletion { field; next } -> Build.delete (Start field) (Start next)
 
 let show_comparison : Language.Comparison.t -> string * bool = function
   | Equal -> ("==", true)
@@ -85,7 +82,7 @@ let describe_unused_definition ~name ~definition ~kind ~visibility ~is_used_by_u
     | Internal -> ("internal", Diagnostic.Error)
     | Private -> ("private", Warning)
   in
-  make code (at name) ~severity
+  make code (Build.at name) ~severity
     [
       Text
         (if is_used_by_unused then
@@ -101,7 +98,7 @@ let describe = function
   | Unused_definition { name; definition; kind; visibility; is_used_by_unused } ->
       describe_unused_definition ~name ~definition ~kind ~visibility ~is_used_by_unused
   | Unread_variable { binding; name } ->
-      make Unused_variable (at binding)
+      make Unused_variable (Build.at binding)
         [
           Text
             (Printf.sprintf
@@ -117,21 +114,25 @@ let describe = function
               Printf.sprintf "Remove `%s` from every alternative." name )
       in
       let removal =
-        { title = [ Text title ]; edits = List.map (make_removal_edit name) occurrences }
+        {
+          Description.title = [ Text title ];
+          edits = List.map (make_removal_edit name) occurrences;
+        }
       in
       match constant with
       | Some constant ->
           let written = Path.show constant in
           let qualification =
             {
-              title = [ Text (Printf.sprintf "Write `%s`." written) ];
+              Description.title = [ Text (Printf.sprintf "Write `%s`." written) ];
               edits =
                 List.map
-                  (fun (occurrence : occurrence) -> replace occurrence.binding [ Text written ])
+                  (fun (occurrence : occurrence) ->
+                    Build.replace occurrence.binding [ Text written ])
                   occurrences;
             }
           in
-          make Unused_variable (at binding.binding) ~fixes:[ qualification; removal ]
+          make Unused_variable (Build.at binding.binding) ~fixes:[ qualification; removal ]
             [
               Text
                 (Printf.sprintf
@@ -140,15 +141,15 @@ let describe = function
                    name written);
             ]
       | None ->
-          make Unused_variable (at binding.binding) ~fixes:[ removal ]
+          make Unused_variable (Build.at binding.binding) ~fixes:[ removal ]
             [ Text (Printf.sprintf "`%s` is never used. %s" name instruction) ])
   | Unreachable_code { first; last } ->
-      make Unreachable_code (at first)
+      make Unreachable_code (Build.at first)
         ~fixes:
           [
             {
               title = [ Text "Delete the unreachable code." ];
-              edits = [ remove_lines { covering = [ first; last ] } ];
+              edits = [ Build.remove_lines { covering = [ first; last ] } ];
             };
           ]
         [ Text "This code is unreachable: the statement before it diverges." ]
@@ -156,33 +157,39 @@ let describe = function
       let shown, is_always_true = show_comparison operator in
       let outcome =
         [
-          Text "`";
-          quote operand;
+          Description.Text "`";
+          Build.quote operand;
           Text (" " ^ shown ^ " ");
-          quote operand;
+          Build.quote operand;
           Text (Printf.sprintf "` compares a value with itself, so it is always %b." is_always_true);
         ]
       in
       match operator with
       | (Equal | Not_equal) when is_float ->
-          let test = [ quote operand; Text ".is_nan()" ] in
-          let replacement = if operator = Equal then Text "!" :: test else test in
-          make Self_comparison (at comparison)
+          let test = [ Build.quote operand; Text ".is_nan()" ] in
+          let replacement = if operator = Equal then Description.Text "!" :: test else test in
+          make Self_comparison (Build.at comparison)
             ~fixes:
               [
                 {
-                  title = (Text "Write `" :: replacement) @ [ Text "`." ];
-                  edits = [ replace comparison replacement ];
+                  title = (Description.Text "Write `" :: replacement) @ [ Text "`." ];
+                  edits = [ Build.replace comparison replacement ];
                 };
               ]
             (outcome
-            @ (Text " `==` treats every NaN as equal to itself, so a test for NaN calls `" :: test)
+            @ Description.Text
+                " `==` treats every NaN as equal to itself, so a test for NaN calls `" :: test
             @ [ Text "`." ])
-      | _ -> make Self_comparison (at comparison) outcome)
+      | _ -> make Self_comparison (Build.at comparison) outcome)
   | Unused_run_forever { function_; entry; siblings } ->
-      make Unused_run_forever (over entry) ~severity:Warning
+      make Unused_run_forever (Build.over entry) ~severity:Warning
         ~fixes:
-          [ { title = [ Text "Remove `RunForever`" ]; edits = [ remove_entry entry siblings ] } ]
+          [
+            {
+              title = [ Text "Remove `RunForever`" ];
+              edits = [ Build.remove_entry entry siblings ];
+            };
+          ]
         [
           Text
             (Printf.sprintf
@@ -190,16 +197,16 @@ let describe = function
                (Path.show function_));
         ]
   | Unmodified_part { entry; function_; parameter; fields; change } ->
-      let shown = show_field_path parameter fields in
-      let function_name = show_function_name function_ in
-      make Unmodified_part (at entry) ~severity:Warning
+      let shown = Build.show_field_path parameter fields in
+      let function_name = Build.show_function_name function_ in
+      make Unmodified_part (Build.at entry) ~severity:Warning
         ~fixes:
           (match change with
           | Named_part_changed siblings ->
               [
                 {
                   title = [ Text (Printf.sprintf "Remove `%s` from the `modifies` clause." shown) ];
-                  edits = [ remove_entry { covering = [ entry ] } siblings ];
+                  edits = [ Build.remove_entry { covering = [ entry ] } siblings ];
                 };
               ]
           | Unnamed_part_changed | Parameter_unchanged -> [])
@@ -218,9 +225,9 @@ let describe = function
                   function_name parameter parameter);
         ]
 
-let binding = example "binding"
-and later = example "later"
-and next = example "next"
+let binding = Build.example "binding"
+and later = Build.example "later"
+and next = Build.example "next"
 
 and example_path =
   Path.Top

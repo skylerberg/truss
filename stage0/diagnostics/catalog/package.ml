@@ -1,7 +1,3 @@
-open Description
-open Nodes
-open Build
-
 type holder = Own | Of_view of Types.ty
 
 type clash =
@@ -38,7 +34,7 @@ type t =
   | Instantiation_cycle of { header : Core.origin }
   | Duplicate_test of { name : string }
 
-let make ?(fixes = []) code location message =
+let make ?(fixes = []) code location message : Nodes.description =
   { code = Package code; severity = Error; location; message; notes = []; fixes }
 
 let not_strictly_positive =
@@ -52,7 +48,7 @@ let describe_holder method_name = function
 
 let describe = function
   | Impl_location { header; trait; for_type } ->
-      make Impl_location (at header)
+      make Impl_location (Build.at header)
         [
           Text
             (Printf.sprintf
@@ -68,7 +64,7 @@ let describe = function
              and methods such as `is_nan` expose" )
         else ("the built-in integer types", "generic code over the trait is proven for each of them")
       in
-      make Sealed_trait_impl (at header)
+      make Sealed_trait_impl (Build.at header)
         [
           Text
             (Printf.sprintf "Only %s implement `%s`, so `%s` cannot: %s." implementors
@@ -76,7 +72,7 @@ let describe = function
         ]
   | Method_name_clash { header; for_type; method_name; holder; clash } ->
       let held = describe_holder method_name holder in
-      make Method_name_clash (at header)
+      make Method_name_clash (Build.at header)
         [
           Text
             (match clash with
@@ -94,7 +90,7 @@ let describe = function
                   (Types.show for_type) held method_name (Types.show_trait trait));
         ]
   | Overlapping_impls { header; trait; for_type } ->
-      make Overlapping_impls (at header)
+      make Overlapping_impls (Build.at header)
         [
           Text
             (Printf.sprintf
@@ -103,12 +99,12 @@ let describe = function
                (Types.show_trait trait) (Types.show for_type));
         ]
   | Variant_in_place { variant } ->
-      make Needs_indirect (at variant)
+      make Needs_indirect (Build.at variant)
         ~fixes:
           [
             {
               title = [ Text "Declare the variant `indirect`." ];
-              edits = [ insert_before variant [ Text "indirect " ] ];
+              edits = [ Build.insert_before variant [ Text "indirect " ] ];
             };
           ]
         [
@@ -117,7 +113,7 @@ let describe = function
              variant `indirect` to keep its fields on the heap.";
         ]
   | Record_in_place { header } ->
-      make Needs_indirect (at header)
+      make Needs_indirect (Build.at header)
         [
           Text
             "This record contains itself in place, so it would be infinitely large. A record has \
@@ -125,7 +121,7 @@ let describe = function
              collection.";
         ]
   | Associated_type_in_place { member; name; recursive } ->
-      make Needs_indirect (at member)
+      make Needs_indirect (Build.at member)
         [
           Text
             (Printf.sprintf
@@ -135,7 +131,7 @@ let describe = function
                name (Types.show recursive) name);
         ]
   | Function_input_field { field; type_name } ->
-      make Not_strictly_positive (at field)
+      make Not_strictly_positive (Build.at field)
         [
           Text
             (Printf.sprintf
@@ -144,7 +140,7 @@ let describe = function
                type_name type_name not_strictly_positive);
         ]
   | Associated_function_input { member; name; recursive } ->
-      make Not_strictly_positive (at member)
+      make Not_strictly_positive (Build.at member)
         [
           Text
             (Printf.sprintf
@@ -153,14 +149,14 @@ let describe = function
                name (Types.show recursive) (Types.show recursive) not_strictly_positive);
         ]
   | Growing_type { header } ->
-      make Growing_type (at header)
+      make Growing_type (Build.at header)
         [
           Text
             "This type contains itself with different type arguments, so it has no fixed set of \
              instances, and generic code is compiled once for each set of arguments.";
         ]
   | Instantiation_cycle { header } ->
-      make Instantiation_cycle (at header)
+      make Instantiation_cycle (Build.at header)
         [
           Text
             "This generic code instantiates itself with type arguments that grow each time around, \
@@ -170,7 +166,7 @@ let describe = function
       make Duplicate_test (At Definition)
         [ Text (Printf.sprintf "Another test of this package is named %S." name) ]
 
-let header = example "header"
+let header = Build.example "header"
 
 let point =
   Path.Top

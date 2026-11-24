@@ -1,7 +1,3 @@
-open Description
-open Nodes
-open Build
-
 type quoted = { key : Path.key; origin : Core.origin }
 type location = Node of Core.origin | Whole_definition
 type call = { at : location; callee : Path.t option }
@@ -236,14 +232,14 @@ type t =
   | Unevaluated of { path : Path.t; report : string }
 
 let make ?(fixes = []) code location message =
-  { code = Prover code; severity = Error; location; message; notes = []; fixes }
+  { Description.code = Prover code; severity = Error; location; message; notes = []; fixes }
 
-let say text = [ Text text ]
-let quote_in { key; origin } = Quote (In_definition (key, origin))
-let tick quoted = [ Text "`"; quote_in quoted; Text "`" ]
+let say text : _ Description.piece list = [ Text text ]
+let quote_in { key; origin } = Description.Quote (Nodes.In_definition (key, origin))
+let tick quoted = [ Description.Text "`"; quote_in quoted; Text "`" ]
 
 let capitalize = function
-  | Text text :: rest -> Text (String.capitalize_ascii text) :: rest
+  | Description.Text text :: rest -> Description.Text (String.capitalize_ascii text) :: rest
   | pieces -> pieces
 
 let rec show_callee (path : Path.t) =
@@ -262,21 +258,21 @@ let describe_call { at; callee } =
     | None -> "call"
   in
   match at with
-  | Whole_definition -> [ Text ("a " ^ call) ]
+  | Whole_definition -> [ Description.Text ("a " ^ call) ]
   | Node (Written _) -> [ Text ("this " ^ call) ]
   | Node (Desugared { desugaring; _ } as origin) ->
       let maker =
         match desugaring with
-        | For_loop -> [ Text "this `for` loop" ]
+        | For_loop -> [ Description.Text "this `for` loop" ]
         | Quantifier -> [ Text "this quantifier" ]
-        | Derived -> [ Text "the derived `"; quote origin; Text "`" ]
-        | Rewrite | Try -> [ Text "`"; quote origin; Text "`" ]
+        | Derived -> [ Text "the derived `"; Build.quote origin; Text "`" ]
+        | Rewrite | Try -> [ Text "`"; Build.quote origin; Text "`" ]
       in
-      (Text ("the " ^ call ^ " that ") :: maker) @ [ Text " makes" ]
+      (Description.Text ("the " ^ call ^ " that ") :: maker) @ [ Text " makes" ]
 
 let describe_recursive_call call =
   match call.at with
-  | Node (Written _) -> [ Text "This recursive call" ]
+  | Node (Written _) -> [ Description.Text "This recursive call" ]
   | Node (Desugared _) | Whole_definition -> capitalize (describe_call call)
 
 let join_with_and items =
@@ -285,15 +281,19 @@ let join_with_and items =
     (List.mapi
        (fun index item ->
          if index = 0 then item
-         else Text (if index < last then ", " else if last = 1 then " and " else ", and ") :: item)
+         else
+           Description.Text (if index < last then ", " else if last = 1 then " and " else ", and ")
+           :: item)
        items)
 
 let join separator items =
   List.concat
-    (List.mapi (fun index item -> (if index = 0 then [] else [ Text separator ]) @ item) items)
+    (List.mapi
+       (fun index item -> (if index = 0 then [] else [ Description.Text separator ]) @ item)
+       items)
 
 let describe_value = function
-  | Named name -> [ Text (Printf.sprintf "`%s`" name) ]
+  | Named name -> [ Description.Text (Printf.sprintf "`%s`" name) ]
   | Quoted quoted -> tick quoted
   | Temporary -> [ Text "a temporary" ]
   | Self_value -> [ Text "`self`" ]
@@ -303,7 +303,7 @@ let describe_value = function
 let describe_changed_part { root; fields } =
   let suffix = String.concat "" (List.map (fun field -> "." ^ field) fields) in
   match root with
-  | Named name -> [ Text (Printf.sprintf "`%s%s`" name suffix) ]
+  | Named name -> [ Description.Text (Printf.sprintf "`%s%s`" name suffix) ]
   | Self_value -> [ Text (Printf.sprintf "`self%s`" suffix) ]
   | Quoted quoted -> [ Text "`"; quote_in quoted; Text (suffix ^ "`") ]
   | Temporary | Compiler_local | Lent_part -> describe_value root
@@ -317,7 +317,8 @@ let describe_invariant_moment = function
   | Mut_parameter_at_return name -> say (Printf.sprintf "for `%s` when the function returns" name)
   | Self_at_return -> say "for `self` when the method returns"
   | Built_here -> say "for the value built here"
-  | At_scope_end value -> (Text "for " :: describe_value value) @ [ Text " when its scope ends" ]
+  | At_scope_end value ->
+      (Description.Text "for " :: describe_value value) @ [ Text " when its scope ends" ]
   | Element_changed -> say "for the element changed here"
   | Part_lent -> say "for the part lent here"
 
@@ -376,7 +377,9 @@ let describe_unbounded = function
       let metric = Language.Metric.show metric in
       let quote_callees callees =
         join_with_and
-          (List.map (fun callee -> [ Text (Printf.sprintf "`%s`" (show_callee callee)) ]) callees)
+          (List.map
+             (fun callee -> [ Description.Text (Printf.sprintf "`%s`" (show_callee callee)) ])
+             callees)
       in
       let clause = Printf.sprintf "`cost %s`" metric in
       let example = if counts_units then Printf.sprintf ", such as `cost %s O(1)`" metric else "" in
@@ -389,9 +392,10 @@ let describe_unbounded = function
         in
         if editable = [] then []
         else
-          (Text " Give " :: recipients) @ [ Text (Printf.sprintf " a %s clause%s." clause example) ]
+          (Description.Text " Give " :: recipients)
+          @ [ Text (Printf.sprintf " a %s clause%s." clause example) ]
       in
-      (Text "This loop calls " :: quote_callees callees)
+      (Description.Text "This loop calls " :: quote_callees callees)
       @ Text
           (Printf.sprintf ", which %s no %s, so the prover cannot bound the cost of an iteration."
              (match callees with [ _ ] -> "states" | _ -> "state")
@@ -411,7 +415,7 @@ let describe_unbounded = function
                the loop a `cost` clause.";
           ]
       | values ->
-          Text (Printf.sprintf "The %s of `" cost)
+          Description.Text (Printf.sprintf "The %s of `" cost)
           :: quote_in call
           :: Text ("` depends on " ^ dependency)
           :: join_with_and (List.map describe_changed_part values)
@@ -429,7 +433,7 @@ let describe_promise = function
   | Own_promise { counting; clause } ->
       let difference, verb = describe_difference counting in
       [
-        Text (Printf.sprintf "This may spend %s `" difference);
+        Description.Text (Printf.sprintf "This may spend %s `" difference);
         quote_in clause;
         Text (Printf.sprintf "` %s." verb);
       ]
@@ -491,7 +495,7 @@ let describe_obligation = function
         ]
   | Measure_may_not_decrease { call; measures } ->
       capitalize (describe_call call)
-      @ Text " may not decrease `"
+      @ Description.Text " may not decrease `"
         :: join ", " (List.map (fun measure -> [ quote_in measure ]) measures)
       @ [ Text "`." ]
   | Recursion_through_impl { call; impl } ->
@@ -535,18 +539,18 @@ let describe_obligation = function
            (Path.show owner))
   | Constant_cycle { cyclic; dependency } -> say (describe_constant_cycle ~cyclic dependency)
   | Precondition_may_fail { clause; call } ->
-      tick clause @ (Text " may not hold for " :: describe_call call) @ [ Text "." ]
+      tick clause @ (Description.Text " may not hold for " :: describe_call call) @ [ Text "." ]
   | Precondition_may_panic { clause; call } ->
       tick clause
-      @ (Text " may not hold for " :: describe_call call)
+      @ (Description.Text " may not hold for " :: describe_call call)
       @ [ Text ", so the call may panic." ]
   | Panics_where_ruled_out { call; condition } ->
       capitalize (describe_call call)
-      @ Text " may panic where `"
+      @ Description.Text " may panic where `"
         :: join " && " (List.map (fun part -> [ quote_in part ]) condition)
       @ [ Text "` holds, which the function's `uses Panic unless` rules out." ]
   | Upper_bound_in_exact_cost { metric; call } ->
-      Text
+      Description.Text
         (Printf.sprintf "Only an upper bound is known for the `%s` of "
            (Language.Metric.show metric))
       :: describe_call call
@@ -559,11 +563,11 @@ let describe_obligation = function
   | Intrinsic_requirement { at; requirement } ->
       tick at @ [ Text (Printf.sprintf " may not %s." (show_requirement requirement)) ]
   | Invariant_may_fail { type_; moment } ->
-      Text (Printf.sprintf "The invariant of `%s` may not hold " (Types.show type_))
+      Description.Text (Printf.sprintf "The invariant of `%s` may not hold " (Types.show type_))
       :: describe_invariant_moment moment
       @ [ Text "." ]
   | Preserved_invariant { type_; value } ->
-      Text (Printf.sprintf "The invariant of `%s` may not hold for " (Types.show type_))
+      Description.Text (Printf.sprintf "The invariant of `%s` may not hold for " (Types.show type_))
       :: describe_value value
       @ [ Text " after an iteration." ]
   | Derived_default_invariant ->
@@ -599,7 +603,7 @@ let describe_obligation = function
            | Allocated_bytes -> "allocates no more bytes"))
   | Callback_precondition { clause; call; name } ->
       tick clause
-      @ (Text " may not hold for " :: describe_call call)
+      @ (Description.Text " may not hold for " :: describe_call call)
       @ [ Text (Printf.sprintf " through `%s`." name) ]
   | Parameter_contract { path; clause } ->
       [
@@ -784,22 +788,26 @@ let find_code : obligation -> Diagnostic.Code.prover = function
   | Law_may_fail _ -> Law
   | May_alias _ | Duplicate_key _ -> Disjoint
 
-let locate : location -> _ = function Node origin -> at origin | Whole_definition -> At Definition
+let locate : location -> _ = function
+  | Node origin -> Build.at origin
+  | Whole_definition -> At Definition
 
 let describe_path_note = function
   | Arm_taken patterns ->
-      (Text "the arm `" :: join ", " (List.map (fun pattern -> [ quote pattern ]) patterns))
+      Description.Text "the arm `"
+      :: join ", " (List.map (fun pattern -> [ Build.quote pattern ]) patterns)
       @ [ Text "` is taken" ]
   | Condition_holds { condition; holds } ->
-      [ Text "`"; quote condition; Text (Printf.sprintf "` is %b" holds) ]
-  | Else_runs pattern -> [ Text "`"; quote pattern; Text "` does not match, so the `else` runs" ]
-  | Returns_early tried -> [ Text "`"; quote tried; Text "` returns early" ]
+      [ Text "`"; Build.quote condition; Text (Printf.sprintf "` is %b" holds) ]
+  | Else_runs pattern ->
+      [ Text "`"; Build.quote pattern; Text "` does not match, so the `else` runs" ]
+  | Returns_early tried -> [ Text "`"; Build.quote tried; Text "` returns early" ]
 
 let describe_failed_runs failed_runs =
   List.map
     (function
       | Constant_run { path; report } ->
-          Text
+          Description.Text
             (Printf.sprintf " The evaluation of `%s` stopped, so its value is not known: %s"
                (Path.show path) report)
       | Assertion_run report ->
@@ -813,7 +821,7 @@ let describe_failure = function
         | [] -> []
         | values ->
             [
-              Text
+              Description.Text
                 (" For example, when "
                 ^ String.concat ", "
                     (List.map (fun (name, value) -> Printf.sprintf "`%s` is %s" name value) values)
@@ -822,7 +830,8 @@ let describe_failure = function
       @ (match path with
         | [] -> []
         | path ->
-            (Text " On that path, " :: join ", " (List.map describe_path_note path)) @ [ Text "." ])
+            (Description.Text " On that path, " :: join ", " (List.map describe_path_note path))
+            @ [ Text "." ])
       @ describe_failed_runs failed_runs
   | Undecided { unknown; has_untriggered_fact; failed_runs } ->
       Text
@@ -850,13 +859,15 @@ let advise_other_ways : Diagnostic.Code.prover -> _ = function
   | _ -> []
 
 let describe_required = function
-  | Code code -> Text code
+  | Code code -> Description.Text code
   | Substituted_clause { clause = { key; origin }; replacements; type_names } ->
       Substituted
         {
-          clause = In_definition (key, origin);
+          clause = Nodes.In_definition (key, origin);
           replacements =
-            List.map (fun (replaced, code) -> (In_definition (key, replaced), code)) replacements;
+            List.map
+              (fun (replaced, code) -> (Nodes.In_definition (key, replaced), code))
+              replacements;
           type_names;
         }
 
@@ -870,11 +881,11 @@ let describe_fix = function
       in
       let required =
         match premise with
-        | Some premise -> (Text ("(" ^ premise ^ ") ==> (") :: required) @ [ Text ")" ]
+        | Some premise -> (Description.Text ("(" ^ premise ^ ") ==> (") :: required) @ [ Text ")" ]
         | None -> required
       in
       {
-        title = (Text "Add `requires " :: required) @ [ Text "`" ];
+        Description.title = (Description.Text "Add `requires " :: required) @ [ Text "`" ];
         edits = [ Add_line_before (Nodes.Node body, Text "requires " :: required) ];
       }
   | Add_panic place ->
@@ -883,8 +894,8 @@ let describe_fix = function
         edits =
           [
             (match place with
-            | After_uses uses -> insert_after uses [ Text ", Panic" ]
-            | Before_clause first -> insert_before first [ Text "uses Panic\n  " ]
+            | After_uses uses -> Build.insert_after uses [ Text ", Panic" ]
+            | Before_clause first -> Build.insert_before first [ Text "uses Panic\n  " ]
             | Before_body body -> Add_line_before (Nodes.Node body, [ Text "uses Panic" ]));
           ];
       }
@@ -931,7 +942,7 @@ let describe_instance = function
   | [] -> []
   | instance ->
       [
-        Text
+        Description.Text
           ("Where "
           ^ String.concat " and "
               (List.map
@@ -958,7 +969,7 @@ let describe = function
               | Some name -> Printf.sprintf "%s, in `%s`" (show_construct construct) name
               | None -> show_construct construct)))
   | Unevaluated { path; report } ->
-      make Evaluation (At Definition)
+      make Evaluation (At Nodes.Definition)
         (say (Printf.sprintf "The value of `%s` cannot be computed: %s" (Path.show path) report))
 
 let describe_citation = function
@@ -969,1022 +980,1093 @@ let examples : t list =
   [
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
-          Assertion_may_fail { clause = { key = example_key; origin = example "clause" } };
+          Assertion_may_fail
+            { clause = { key = Build.example_key; origin = Build.example "clause" } };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Bit_vector_assertion_may_fail
-            { clause = { key = example_key; origin = example "clause" } };
+            { clause = { key = Build.example_key; origin = Build.example "clause" } };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Desugared_assertion_may_fail
-            { call = { at = Node (example "at"); callee = Some example_path } };
+            { call = { at = Node (Build.example "at"); callee = Some Build.example_path } };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Recursion_not_on_part
             {
-              call = { at = Node (example "at"); callee = Some example_path };
+              call = { at = Node (Build.example "at"); callee = Some Build.example_path };
               compared = [ "‹compared›" ];
             };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Recursion_may_not_end
             {
-              call = { at = Node (example "at"); callee = Some example_path };
+              call = { at = Node (Build.example "at"); callee = Some Build.example_path };
               is_self_call = false;
             };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Recursion_may_not_end
-            { call = { at = Node (example "at"); callee = Some example_path }; is_self_call = true };
+            {
+              call = { at = Node (Build.example "at"); callee = Some Build.example_path };
+              is_self_call = true;
+            };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
-          Uncompared_recursion { call = { at = Node (example "at"); callee = Some example_path } };
+          Uncompared_recursion
+            { call = { at = Node (Build.example "at"); callee = Some Build.example_path } };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Measure_may_not_decrease
             {
-              call = { at = Node (example "at"); callee = Some example_path };
-              measures = [ { key = example_key; origin = example "measures" } ];
+              call = { at = Node (Build.example "at"); callee = Some Build.example_path };
+              measures = [ { key = Build.example_key; origin = Build.example "measures" } ];
             };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Recursion_through_impl
-            { call = { at = Node (example "at"); callee = Some example_path }; impl = Derives };
+            {
+              call = { at = Node (Build.example "at"); callee = Some Build.example_path };
+              impl = Derives;
+            };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Recursion_through_impl
-            { call = { at = Node (example "at"); callee = Some example_path }; impl = Inherits };
+            {
+              call = { at = Node (Build.example "at"); callee = Some Build.example_path };
+              impl = Inherits;
+            };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
-        obligation = Recursion_through_supply (Named_function example_path);
+        obligation = Recursion_through_supply (Named_function Build.example_path);
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Recursion_through_supply
             (Bound_through_call
                {
-                 call = { at = Node (example "at"); callee = Some example_path };
-                 owner = example_path;
+                 call = { at = Node (Build.example "at"); callee = Some Build.example_path };
+                 owner = Build.example_path;
                });
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Recursion_through_supply
-            (Bound_through_name { path = example_path; owner = example_path });
+            (Bound_through_name { path = Build.example_path; owner = Build.example_path });
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
-        obligation = Recursion_through_supply (Provided example_path);
+        obligation = Recursion_through_supply (Provided Build.example_path);
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Constant_cycle
             {
-              cyclic = example_path;
+              cyclic = Build.example_path;
               dependency =
-                { kind = Reads; path = example_path; omitted = Some (Omitted_field "‹omitted›") };
+                {
+                  kind = Reads;
+                  path = Build.example_path;
+                  omitted = Some (Omitted_field "‹omitted›");
+                };
             };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Precondition_may_fail
             {
-              clause = { key = example_key; origin = example "clause" };
-              call = { at = Node (example "at"); callee = Some example_path };
+              clause = { key = Build.example_key; origin = Build.example "clause" };
+              call = { at = Node (Build.example "at"); callee = Some Build.example_path };
             };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Precondition_may_panic
             {
-              clause = { key = example_key; origin = example "clause" };
-              call = { at = Node (example "at"); callee = Some example_path };
+              clause = { key = Build.example_key; origin = Build.example "clause" };
+              call = { at = Node (Build.example "at"); callee = Some Build.example_path };
             };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Panics_where_ruled_out
             {
-              call = { at = Node (example "at"); callee = Some example_path };
-              condition = [ { key = example_key; origin = example "condition" } ];
+              call = { at = Node (Build.example "at"); callee = Some Build.example_path };
+              condition = [ { key = Build.example_key; origin = Build.example "condition" } ];
             };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Upper_bound_in_exact_cost
             {
               metric = Language.Metric.Time;
-              call = { at = Node (example "at"); callee = Some example_path };
+              call = { at = Node (Build.example "at"); callee = Some Build.example_path };
             };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
-        obligation = Out_of_bounds { at = { key = example_key; origin = example "at" } };
+        obligation = Out_of_bounds { at = { key = Build.example_key; origin = Build.example "at" } };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
-        instance = [];
-        obligation =
-          Intrinsic_requirement
-            { at = { key = example_key; origin = example "at" }; requirement = Room_written };
-        failure =
-          Counterexample
-            {
-              values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
-              failed_runs = [];
-            };
-        fixes = [];
-      };
-    Unproven
-      {
-        location = Node (example "at");
-        instance = [];
-        obligation =
-          Intrinsic_requirement
-            { at = { key = example_key; origin = example "at" }; requirement = Elements_mutated };
-        failure =
-          Counterexample
-            {
-              values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
-              failed_runs = [];
-            };
-        fixes = [];
-      };
-    Unproven
-      {
-        location = Node (example "at");
-        instance = [];
-        obligation =
-          Intrinsic_requirement
-            { at = { key = example_key; origin = example "at" }; requirement = Elements_read };
-        failure =
-          Counterexample
-            {
-              values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
-              failed_runs = [];
-            };
-        fixes = [];
-      };
-    Unproven
-      {
-        location = Node (example "at");
-        instance = [];
-        obligation =
-          Intrinsic_requirement
-            { at = { key = example_key; origin = example "at" }; requirement = Ends_with_zero };
-        failure =
-          Counterexample
-            {
-              values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
-              failed_runs = [];
-            };
-        fixes = [];
-      };
-    Unproven
-      {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Intrinsic_requirement
             {
-              at = { key = example_key; origin = example "at" };
+              at = { key = Build.example_key; origin = Build.example "at" };
+              requirement = Room_written;
+            };
+        failure =
+          Counterexample
+            {
+              values = [ ("‹name›", "‹value›") ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
+              failed_runs = [];
+            };
+        fixes = [];
+      };
+    Unproven
+      {
+        location = Node (Build.example "at");
+        instance = [];
+        obligation =
+          Intrinsic_requirement
+            {
+              at = { key = Build.example_key; origin = Build.example "at" };
+              requirement = Elements_mutated;
+            };
+        failure =
+          Counterexample
+            {
+              values = [ ("‹name›", "‹value›") ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
+              failed_runs = [];
+            };
+        fixes = [];
+      };
+    Unproven
+      {
+        location = Node (Build.example "at");
+        instance = [];
+        obligation =
+          Intrinsic_requirement
+            {
+              at = { key = Build.example_key; origin = Build.example "at" };
+              requirement = Elements_read;
+            };
+        failure =
+          Counterexample
+            {
+              values = [ ("‹name›", "‹value›") ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
+              failed_runs = [];
+            };
+        fixes = [];
+      };
+    Unproven
+      {
+        location = Node (Build.example "at");
+        instance = [];
+        obligation =
+          Intrinsic_requirement
+            {
+              at = { key = Build.example_key; origin = Build.example "at" };
+              requirement = Ends_with_zero;
+            };
+        failure =
+          Counterexample
+            {
+              values = [ ("‹name›", "‹value›") ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
+              failed_runs = [];
+            };
+        fixes = [];
+      };
+    Unproven
+      {
+        location = Node (Build.example "at");
+        instance = [];
+        obligation =
+          Intrinsic_requirement
+            {
+              at = { key = Build.example_key; origin = Build.example "at" };
               requirement = Elements_at_both_indexes;
             };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Intrinsic_requirement
             {
-              at = { key = example_key; origin = example "at" };
+              at = { key = Build.example_key; origin = Build.example "at" };
               requirement = Length_within_storage;
             };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Intrinsic_requirement
-            { at = { key = example_key; origin = example "at" }; requirement = Element_to_pop };
+            {
+              at = { key = Build.example_key; origin = Build.example "at" };
+              requirement = Element_to_pop;
+            };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Intrinsic_requirement
-            { at = { key = example_key; origin = example "at" }; requirement = Element_at_index };
+            {
+              at = { key = Build.example_key; origin = Build.example "at" };
+              requirement = Element_at_index;
+            };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Intrinsic_requirement
-            { at = { key = example_key; origin = example "at" }; requirement = Index_within_length };
+            {
+              at = { key = Build.example_key; origin = Build.example "at" };
+              requirement = Index_within_length;
+            };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Intrinsic_requirement
-            { at = { key = example_key; origin = example "at" }; requirement = Range_within_view };
+            {
+              at = { key = Build.example_key; origin = Build.example "at" };
+              requirement = Range_within_view;
+            };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Intrinsic_requirement
-            { at = { key = example_key; origin = example "at" }; requirement = Count_of_array };
+            {
+              at = { key = Build.example_key; origin = Build.example "at" };
+              requirement = Count_of_array;
+            };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
-        obligation = Invariant_may_fail { type_ = example_type; moment = When_lend_ends };
+        obligation = Invariant_may_fail { type_ = Build.example_type; moment = When_lend_ends };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Invariant_may_fail
             {
-              type_ = example_type;
-              moment = When_passed { at = Node (example "at"); callee = Some example_path };
+              type_ = Build.example_type;
+              moment =
+                When_passed { at = Node (Build.example "at"); callee = Some Build.example_path };
             };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
-        obligation = Invariant_may_fail { type_ = example_type; moment = Lambda_result };
+        obligation = Invariant_may_fail { type_ = Build.example_type; moment = Lambda_result };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
-        instance = [];
-        obligation = Invariant_may_fail { type_ = example_type; moment = Lambda_mut_parameter };
-        failure =
-          Counterexample
-            {
-              values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
-              failed_runs = [];
-            };
-        fixes = [];
-      };
-    Unproven
-      {
-        location = Node (example "at");
-        instance = [];
-        obligation = Invariant_may_fail { type_ = example_type; moment = Returned_value };
-        failure =
-          Counterexample
-            {
-              values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
-              failed_runs = [];
-            };
-        fixes = [];
-      };
-    Unproven
-      {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
-          Invariant_may_fail { type_ = example_type; moment = Mut_parameter_at_return "‹moment›" };
+          Invariant_may_fail { type_ = Build.example_type; moment = Lambda_mut_parameter };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
-        obligation = Invariant_may_fail { type_ = example_type; moment = Self_at_return };
+        obligation = Invariant_may_fail { type_ = Build.example_type; moment = Returned_value };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
-        instance = [];
-        obligation = Invariant_may_fail { type_ = example_type; moment = Built_here };
-        failure =
-          Counterexample
-            {
-              values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
-              failed_runs = [];
-            };
-        fixes = [];
-      };
-    Unproven
-      {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
-          Invariant_may_fail { type_ = example_type; moment = At_scope_end (Named "‹moment›") };
+          Invariant_may_fail
+            { type_ = Build.example_type; moment = Mut_parameter_at_return "‹moment›" };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
-        obligation = Invariant_may_fail { type_ = example_type; moment = Element_changed };
+        obligation = Invariant_may_fail { type_ = Build.example_type; moment = Self_at_return };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
-        obligation = Invariant_may_fail { type_ = example_type; moment = Part_lent };
+        obligation = Invariant_may_fail { type_ = Build.example_type; moment = Built_here };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
-        obligation = Preserved_invariant { type_ = example_type; value = Named "‹value›" };
+        obligation =
+          Invariant_may_fail
+            { type_ = Build.example_type; moment = At_scope_end (Named "‹moment›") };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
+        instance = [];
+        obligation = Invariant_may_fail { type_ = Build.example_type; moment = Element_changed };
+        failure =
+          Counterexample
+            {
+              values = [ ("‹name›", "‹value›") ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
+              failed_runs = [];
+            };
+        fixes = [];
+      };
+    Unproven
+      {
+        location = Node (Build.example "at");
+        instance = [];
+        obligation = Invariant_may_fail { type_ = Build.example_type; moment = Part_lent };
+        failure =
+          Counterexample
+            {
+              values = [ ("‹name›", "‹value›") ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
+              failed_runs = [];
+            };
+        fixes = [];
+      };
+    Unproven
+      {
+        location = Node (Build.example "at");
+        instance = [];
+        obligation = Preserved_invariant { type_ = Build.example_type; value = Named "‹value›" };
+        failure =
+          Counterexample
+            {
+              values = [ ("‹name›", "‹value›") ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
+              failed_runs = [];
+            };
+        fixes = [];
+      };
+    Unproven
+      {
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Preserved_invariant
-            { type_ = example_type; value = Quoted { key = example_key; origin = example "value" } };
+            {
+              type_ = Build.example_type;
+              value = Quoted { key = Build.example_key; origin = Build.example "value" };
+            };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
-        obligation = Preserved_invariant { type_ = example_type; value = Temporary };
+        obligation = Preserved_invariant { type_ = Build.example_type; value = Temporary };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
-        obligation = Preserved_invariant { type_ = example_type; value = Self_value };
+        obligation = Preserved_invariant { type_ = Build.example_type; value = Self_value };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
-        obligation = Preserved_invariant { type_ = example_type; value = Compiler_local };
+        obligation = Preserved_invariant { type_ = Build.example_type; value = Compiler_local };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
-        obligation = Preserved_invariant { type_ = example_type; value = Lent_part };
+        obligation = Preserved_invariant { type_ = Build.example_type; value = Lent_part };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation = Derived_default_invariant;
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Loop_invariant
-            { clause = { key = example_key; origin = example "clause" }; moment = On_entry };
+            {
+              clause = { key = Build.example_key; origin = Build.example "clause" };
+              moment = On_entry;
+            };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Loop_invariant
-            { clause = { key = example_key; origin = example "clause" }; moment = After_iteration };
+            {
+              clause = { key = Build.example_key; origin = Build.example "clause" };
+              moment = After_iteration;
+            };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Loop_invariant
-            { clause = { key = example_key; origin = example "clause" }; moment = Where_left };
+            {
+              clause = { key = Build.example_key; origin = Build.example "clause" };
+              moment = Where_left;
+            };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
-        obligation = Lambda_promise { promise = { key = example_key; origin = example "promise" } };
+        obligation =
+          Lambda_promise { promise = { key = Build.example_key; origin = Build.example "promise" } };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
-        obligation = Lambda_cost { counting = Upper_bound; type_ = example_type };
+        obligation = Lambda_cost { counting = Upper_bound; type_ = Build.example_type };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
-        obligation = Lambda_cost { counting = Exact; type_ = example_type };
+        obligation = Lambda_cost { counting = Exact; type_ = Build.example_type };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation = Lambda_call_above_bound { metric = Language.Metric.Time };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Callback_precondition
             {
-              clause = { key = example_key; origin = example "clause" };
-              call = { at = Node (example "at"); callee = Some example_path };
+              clause = { key = Build.example_key; origin = Build.example "clause" };
+              call = { at = Node (Build.example "at"); callee = Some Build.example_path };
               name = "‹name›";
             };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Parameter_contract
-            { path = example_path; clause = { key = example_key; origin = example "clause" } };
+            {
+              path = Build.example_path;
+              clause = { key = Build.example_key; origin = Build.example "clause" };
+            };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Loop_cost_clause
-            { clause = { key = example_key; origin = example "clause" }; moment = On_entry };
+            {
+              clause = { key = Build.example_key; origin = Build.example "clause" };
+              moment = On_entry;
+            };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Loop_cost_clause
-            { clause = { key = example_key; origin = example "clause" }; moment = After_iteration };
+            {
+              clause = { key = Build.example_key; origin = Build.example "clause" };
+              moment = After_iteration;
+            };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Loop_cost_clause
-            { clause = { key = example_key; origin = example "clause" }; moment = Where_left };
+            {
+              clause = { key = Build.example_key; origin = Build.example "clause" };
+              moment = Where_left;
+            };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation = Iteration_above_inferred_bound;
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Unbounded_iteration_cost
             (Unstated_costs
                {
                  metric = Language.Metric.Time;
-                 callees = [ example_path ];
-                 editable = [ example_path ];
+                 callees = [ Build.example_path ];
+                 editable = [ Build.example_path ];
                  counts_units = false;
                });
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Unbounded_iteration_cost
             (Changing_cost
                {
                  is_amortized = false;
-                 call = { key = example_key; origin = example "call" };
+                 call = { key = Build.example_key; origin = Build.example "call" };
                  values =
                    [
                      { root = Named "‹values›"; fields = [] };
@@ -1995,135 +2077,147 @@ let examples : t list =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation = Unbounded_iteration_cost Unbounded_iteration;
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation = Visited_out_of_order;
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation = Loop_measure_may_not_decrease;
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation = Element_count_changes;
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
-          Out_of_range { at = { key = example_key; origin = example "at" }; type_ = example_type };
+          Out_of_range
+            {
+              at = { key = Build.example_key; origin = Build.example "at" };
+              type_ = Build.example_type;
+            };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
-        obligation = Divisor_may_be_zero { at = { key = example_key; origin = example "at" } };
+        obligation =
+          Divisor_may_be_zero { at = { key = Build.example_key; origin = Build.example "at" } };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Division_overflow
-            { at = { key = example_key; origin = example "at" }; type_ = example_type };
+            {
+              at = { key = Build.example_key; origin = Build.example "at" };
+              type_ = Build.example_type;
+            };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
-          Overflow { at = { key = example_key; origin = example "at" }; type_ = example_type };
+          Overflow
+            {
+              at = { key = Build.example_key; origin = Build.example "at" };
+              type_ = Build.example_type;
+            };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Shift_amount
             {
-              amount = { key = example_key; origin = example "amount" };
+              amount = { key = Build.example_key; origin = Build.example "amount" };
               is_operand = false;
               bits = 64;
             };
@@ -2131,19 +2225,19 @@ let examples : t list =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Shift_amount
             {
-              amount = { key = example_key; origin = example "amount" };
+              amount = { key = Build.example_key; origin = Build.example "amount" };
               is_operand = true;
               bits = 64;
             };
@@ -2151,89 +2245,98 @@ let examples : t list =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Float_conversion
-            { at = { key = example_key; origin = example "at" }; target = example_type };
+            {
+              at = { key = Build.example_key; origin = Build.example "at" };
+              target = Build.example_type;
+            };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
-        obligation = Not_a_scalar_value { at = { key = example_key; origin = example "at" } };
+        obligation =
+          Not_a_scalar_value { at = { key = Build.example_key; origin = Build.example "at" } };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation = Unreachable_reached;
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
-        obligation = Lent_part_ensures { clause = { key = example_key; origin = example "clause" } };
+        obligation =
+          Lent_part_ensures
+            { clause = { key = Build.example_key; origin = Build.example "clause" } };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Cost_promise
             (Own_promise
-               { counting = Upper_bound; clause = { key = example_key; origin = example "clause" } });
+               {
+                 counting = Upper_bound;
+                 clause = { key = Build.example_key; origin = Build.example "clause" };
+               });
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Cost_promise
@@ -2241,469 +2344,548 @@ let examples : t list =
                {
                  counting = Upper_bound;
                  promiser = Trait_promiser;
-                 clause = { key = example_key; origin = example "clause" };
+                 clause = { key = Build.example_key; origin = Build.example "clause" };
                });
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Cost_promise
             (Restated_promise
                {
                  counting = Upper_bound;
-                 for_type = example_type;
+                 for_type = Build.example_type;
                  name = "‹name›";
-                 clause = { key = example_key; origin = example "clause" };
-                 trait = example_trait;
-                 declared = example_trait;
+                 clause = { key = Build.example_key; origin = Build.example "clause" };
+                 trait = Build.example_trait;
+                 declared = Build.example_trait;
                });
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
-        instance = [];
-        obligation = Impl_precondition { clause = { key = example_key; origin = example "clause" } };
-        failure =
-          Counterexample
-            {
-              values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
-              failed_runs = [];
-            };
-        fixes = [];
-      };
-    Unproven
-      {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
-          Impl_panic_condition { clause = { key = example_key; origin = example "clause" } };
+          Impl_precondition
+            { clause = { key = Build.example_key; origin = Build.example "clause" } };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
-          Ensures_at_method_end { clause = { key = example_key; origin = example "clause" } };
+          Impl_panic_condition
+            { clause = { key = Build.example_key; origin = Build.example "clause" } };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
-        obligation = Ensures_at_return { clause = { key = example_key; origin = example "clause" } };
+        obligation =
+          Ensures_at_method_end
+            { clause = { key = Build.example_key; origin = Build.example "clause" } };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
+        instance = [];
+        obligation =
+          Ensures_at_return
+            { clause = { key = Build.example_key; origin = Build.example "clause" } };
+        failure =
+          Counterexample
+            {
+              values = [ ("‹name›", "‹value›") ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
+              failed_runs = [];
+            };
+        fixes = [];
+      };
+    Unproven
+      {
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Promiser_ensures
-            { promiser = Trait_promiser; clause = { key = example_key; origin = example "clause" } };
+            {
+              promiser = Trait_promiser;
+              clause = { key = Build.example_key; origin = Build.example "clause" };
+            };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Promiser_ensures
             {
               promiser = Capability_promiser;
-              clause = { key = example_key; origin = example "clause" };
+              clause = { key = Build.example_key; origin = Build.example "clause" };
             };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
-        obligation = Law_may_fail { trait = example_trait; law = "‹law›"; for_type = example_type };
+        obligation =
+          Law_may_fail { trait = Build.example_trait; law = "‹law›"; for_type = Build.example_type };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Restated_contract
             {
-              for_type = example_type;
+              for_type = Build.example_type;
               name = "‹name›";
-              clause = { key = example_key; origin = example "clause" };
-              trait = example_trait;
-              declared = example_trait;
+              clause = { key = Build.example_key; origin = Build.example "clause" };
+              trait = Build.example_trait;
+              declared = Build.example_trait;
             };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
-        obligation = Negative_potential { type_ = example_type };
+        obligation = Negative_potential { type_ = Build.example_type };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           May_alias
             {
-              first = { key = example_key; origin = example "first" };
-              second = { key = example_key; origin = example "second" };
+              first = { key = Build.example_key; origin = Build.example "first" };
+              second = { key = Build.example_key; origin = Build.example "second" };
             };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Callback_requirement
             {
               name = "‹name›";
               reason = Used_as_unpromising_value;
-              clause = { key = example_key; origin = example "clause" };
+              clause = { key = Build.example_key; origin = Build.example "clause" };
             };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Callback_requirement
             {
               name = "‹name›";
               reason = Passed_for_unpromising_parameter;
-              clause = { key = example_key; origin = example "clause" };
+              clause = { key = Build.example_key; origin = Build.example "clause" };
             };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Callback_promise
             {
-              promise = { key = example_key; origin = example "promise" };
+              promise = { key = Build.example_key; origin = Build.example "promise" };
               unpromised = Nothing_promises;
             };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Callback_promise
             {
-              promise = { key = example_key; origin = example "promise" };
+              promise = { key = Build.example_key; origin = Build.example "promise" };
               unpromised = Type_may_not_promise "‹unpromised›";
             };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Callback_promise
             {
-              promise = { key = example_key; origin = example "promise" };
+              promise = { key = Build.example_key; origin = Build.example "promise" };
               unpromised = Type_promises_nothing "‹unpromised›";
             };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Callback_promise
             {
-              promise = { key = example_key; origin = example "promise" };
-              unpromised = Ensures_may_not_promise example_path;
+              promise = { key = Build.example_key; origin = Build.example "promise" };
+              unpromised = Ensures_may_not_promise Build.example_path;
             };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
-        obligation = Duplicate_key { key = Some { key = example_key; origin = example "key" } };
+        obligation =
+          Duplicate_key { key = Some { key = Build.example_key; origin = Build.example "key" } };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation = Duplicate_key { key = None };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
           Value_contract
             {
-              path = example_path;
-              type_ = example_type;
-              clause = { key = example_key; origin = example "clause" };
+              path = Build.example_path;
+              type_ = Build.example_type;
+              clause = { key = Build.example_key; origin = Build.example "clause" };
             };
         failure =
           Counterexample
             {
               values = [ ("‹name›", "‹value›") ];
-              path = [ Condition_holds { condition = example "condition"; holds = true } ];
+              path = [ Condition_holds { condition = Build.example "condition"; holds = true } ];
               failed_runs = [];
             };
         fixes = [];
       };
-    Unreadable { location = Node (example "at"); construct = Potential_of_elements; foreign = None };
+    Unreadable
+      { location = Node (Build.example "at"); construct = Potential_of_elements; foreign = None };
     Unreadable
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         construct = Metric_of_non_trait_method Language.Metric.Time;
         foreign = None;
       };
-    Unreadable { location = Node (example "at"); construct = Calls_target; foreign = None };
-    Unreadable { location = Node (example "at"); construct = Unsolved_size; foreign = None };
-    Unreadable
-      { location = Node (example "at"); construct = Elements_of example_type; foreign = None };
-    Unreadable { location = Node (example "at"); construct = Sequence_elements; foreign = None };
-    Unreadable { location = Node (example "at"); construct = Function_value_costs; foreign = None };
+    Unreadable { location = Node (Build.example "at"); construct = Calls_target; foreign = None };
+    Unreadable { location = Node (Build.example "at"); construct = Unsolved_size; foreign = None };
     Unreadable
       {
-        location = Node (example "at");
-        construct = Intrinsic_at_parameter { operation = "‹operation›"; parameter = example_type };
+        location = Node (Build.example "at");
+        construct = Elements_of Build.example_type;
         foreign = None;
       };
     Unreadable
-      { location = Node (example "at"); construct = Negation_of example_type; foreign = None };
-    Unreadable { location = Node (example "at"); construct = Shift_of example_type; foreign = None };
-    Unreadable { location = Node (example "at"); construct = Slice_of example_type; foreign = None };
+      { location = Node (Build.example "at"); construct = Sequence_elements; foreign = None };
     Unreadable
-      { location = Node (example "at"); construct = Unreadable_parameter_type; foreign = None };
-    Unreadable
-      { location = Node (example "at"); construct = Unreadable_cursor example_type; foreign = None };
-    Unreadable { location = Node (example "at"); construct = Field "‹field›"; foreign = None };
-    Unreadable
-      { location = Node (example "at"); construct = Alternatives_binding_mut; foreign = None };
-    Unreadable
-      { location = Node (example "at"); construct = Hidden_field_of example_type; foreign = None };
-    Unreadable
-      { location = Node (example "at"); construct = Fields_of example_type; foreign = None };
-    Unreadable { location = Node (example "at"); construct = Constant_assignment; foreign = None };
-    Unreadable
-      { location = Node (example "at"); construct = Float_literal_without_type; foreign = None };
+      { location = Node (Build.example "at"); construct = Function_value_costs; foreign = None };
     Unreadable
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
+        construct =
+          Intrinsic_at_parameter { operation = "‹operation›"; parameter = Build.example_type };
+        foreign = None;
+      };
+    Unreadable
+      {
+        location = Node (Build.example "at");
+        construct = Negation_of Build.example_type;
+        foreign = None;
+      };
+    Unreadable
+      {
+        location = Node (Build.example "at");
+        construct = Shift_of Build.example_type;
+        foreign = None;
+      };
+    Unreadable
+      {
+        location = Node (Build.example "at");
+        construct = Slice_of Build.example_type;
+        foreign = None;
+      };
+    Unreadable
+      {
+        location = Node (Build.example "at");
+        construct = Unreadable_parameter_type;
+        foreign = None;
+      };
+    Unreadable
+      {
+        location = Node (Build.example "at");
+        construct = Unreadable_cursor Build.example_type;
+        foreign = None;
+      };
+    Unreadable { location = Node (Build.example "at"); construct = Field "‹field›"; foreign = None };
+    Unreadable
+      { location = Node (Build.example "at"); construct = Alternatives_binding_mut; foreign = None };
+    Unreadable
+      {
+        location = Node (Build.example "at");
+        construct = Hidden_field_of Build.example_type;
+        foreign = None;
+      };
+    Unreadable
+      {
+        location = Node (Build.example "at");
+        construct = Fields_of Build.example_type;
+        foreign = None;
+      };
+    Unreadable
+      { location = Node (Build.example "at"); construct = Constant_assignment; foreign = None };
+    Unreadable
+      {
+        location = Node (Build.example "at");
+        construct = Float_literal_without_type;
+        foreign = None;
+      };
+    Unreadable
+      {
+        location = Node (Build.example "at");
         construct = Lent_part_outside_lending_method;
         foreign = None;
       };
     Unreadable
-      { location = Node (example "at"); construct = Hidden_variant_of example_type; foreign = None };
+      {
+        location = Node (Build.example "at");
+        construct = Hidden_variant_of Build.example_type;
+        foreign = None;
+      };
     Unreadable
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         construct = Nonreturning_specification_call;
         foreign = None;
       };
     Unreadable
       {
-        location = Node (example "at");
-        construct = Compiler_restated_method { trait = example_trait; declared_by = example_path };
+        location = Node (Build.example "at");
+        construct =
+          Compiler_restated_method { trait = Build.example_trait; declared_by = Build.example_path };
         foreign = None;
       };
     Unreadable
-      { location = Node (example "at"); construct = Literal_of example_type; foreign = None };
+      {
+        location = Node (Build.example "at");
+        construct = Literal_of Build.example_type;
+        foreign = None;
+      };
     Unreadable
-      { location = Node (example "at"); construct = Unreadable_function_value; foreign = None };
+      {
+        location = Node (Build.example "at");
+        construct = Unreadable_function_value;
+        foreign = None;
+      };
     Unreadable
-      { location = Node (example "at"); construct = String_pattern_on example_type; foreign = None };
+      {
+        location = Node (Build.example "at");
+        construct = String_pattern_on Build.example_type;
+        foreign = None;
+      };
     Unreadable
-      { location = Node (example "at"); construct = Specification_function; foreign = None };
+      { location = Node (Build.example "at"); construct = Specification_function; foreign = None };
     Unreadable
       { location = Whole_definition; construct = Calls_target; foreign = Some "‹definition›" };
-    Unevaluated { path = example_path; report = "‹report›" };
+    Unevaluated { path = Build.example_path; report = "‹report›" };
     Proves
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [ ("‹parameter›", Language.Builtin_type.Int64) ];
         obligation = Unreachable_reached;
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
-          Overflow { at = { key = example_key; origin = example "at" }; type_ = example_type };
+          Overflow
+            {
+              at = { key = Build.example_key; origin = Build.example "at" };
+              type_ = Build.example_type;
+            };
         failure = Refuted;
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
-          Overflow { at = { key = example_key; origin = example "at" }; type_ = example_type };
+          Overflow
+            {
+              at = { key = Build.example_key; origin = Build.example "at" };
+              type_ = Build.example_type;
+            };
         failure =
           Counterexample
             {
               values = [];
               path =
                 [
-                  Arm_taken [ example "pattern" ];
-                  Else_runs (example "pattern");
-                  Returns_early (example "tried");
+                  Arm_taken [ Build.example "pattern" ];
+                  Else_runs (Build.example "pattern");
+                  Returns_early (Build.example "tried");
                 ];
               failed_runs =
                 [
-                  Constant_run { path = example_path; report = "‹report›" };
+                  Constant_run { path = Build.example_path; report = "‹report›" };
                   Assertion_run "‹report›";
                 ];
             };
@@ -2711,20 +2893,28 @@ let examples : t list =
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
-          Overflow { at = { key = example_key; origin = example "at" }; type_ = example_type };
+          Overflow
+            {
+              at = { key = Build.example_key; origin = Build.example "at" };
+              type_ = Build.example_type;
+            };
         failure =
           Undecided { unknown = Out_of_steps; has_untriggered_fact = true; failed_runs = [] };
         fixes = [];
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
         obligation =
-          Overflow { at = { key = example_key; origin = example "at" }; type_ = example_type };
+          Overflow
+            {
+              at = { key = Build.example_key; origin = Build.example "at" };
+              type_ = Build.example_type;
+            };
         failure =
           Undecided
             { unknown = Incomplete "‹reason›"; has_untriggered_fact = false; failed_runs = [] };
@@ -2732,31 +2922,32 @@ let examples : t list =
       };
     Unproven
       {
-        location = Node (example "at");
+        location = Node (Build.example "at");
         instance = [];
-        obligation = Divisor_may_be_zero { at = { key = example_key; origin = example "at" } };
+        obligation =
+          Divisor_may_be_zero { at = { key = Build.example_key; origin = Build.example "at" } };
         failure = Refuted;
         fixes =
           [
             Add_requires
               {
-                body = example "body";
+                body = Build.example "body";
                 required =
                   [
                     Code "‹code›";
                     Substituted_clause
                       {
-                        clause = { key = example_key; origin = example "clause" };
-                        replacements = [ (example "argument", "‹code›") ];
+                        clause = { key = Build.example_key; origin = Build.example "clause" };
+                        replacements = [ (Build.example "argument", "‹code›") ];
                         type_names = [];
                       };
                   ];
                 premise = Some "‹premise›";
-                condition = example_condition;
+                condition = Build.example_condition;
               };
-            Add_panic (After_uses (example "uses"));
-            Add_panic (Before_clause (example "clause"));
-            Add_panic (Before_body (example "body"));
+            Add_panic (After_uses (Build.example "uses"));
+            Add_panic (Before_clause (Build.example "clause"));
+            Add_panic (Before_body (Build.example "body"));
           ];
       };
   ]

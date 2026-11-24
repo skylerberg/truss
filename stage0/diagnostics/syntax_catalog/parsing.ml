@@ -1,5 +1,3 @@
-open Description
-
 type expected =
   | Token_punctuation of Token.punctuation
   | Token_keyword of Token.keyword
@@ -224,7 +222,7 @@ type action =
 type fix = { action : action; edits : Source.span Diagnostic.edit list }
 type t = { at : Source.span; problem : problem; fixes : fix list }
 
-let say text = [ Text text ]
+let say text : _ Description.piece list = [ Text text ]
 
 let show_expected = function
   | Token_punctuation punctuation -> Printf.sprintf "`%s`" (Token.spell_punctuation punctuation)
@@ -704,7 +702,7 @@ let describe ({ at; problem; fixes } : t) : Source.span Description.t =
             edits =
               List.map
                 (fun (edit : Source.span Diagnostic.edit) ->
-                  Replace (edit.span, [ Text edit.replacement ]))
+                  Description.Replace (edit.span, [ Text edit.replacement ]))
                 edits;
           })
         fixes;

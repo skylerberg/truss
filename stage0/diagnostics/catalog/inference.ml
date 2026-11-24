@@ -1,7 +1,3 @@
-open Description
-open Nodes
-open Build
-
 type shown = Some_integer | Some_float | Exactly of Types.ty
 type decision_site = Use | Statement_end | Actual_head | Method_call
 type mutation = Assignment | Passed_mut
@@ -383,10 +379,10 @@ type t =
 let raise_bug format = Compiler_bug.raise_bug ~stage:"Catalog" format
 
 let make ?(fixes = []) ?(notes = []) code location message =
-  { code = Types code; severity = Error; location; message; notes; fixes }
+  { Description.code = Types code; severity = Error; location; message; notes; fixes }
 
-let say text = [ Text text ]
-let fix title edits = { title = say title; edits }
+let say text : _ Description.piece list = [ Text text ]
+let fix title edits = { Description.title = say title; edits }
 let show_count = Diagnostic.show_count
 let show_owner = function Variant_name name -> name | Type_named type_ -> Types.show type_
 let show_names names = String.concat ", " (List.map (fun name -> "`" ^ name ^ "`") names)
@@ -421,10 +417,14 @@ let write_impl_need = function
   | None -> ""
 
 let label_fix field argument =
-  fix (Printf.sprintf "Label it `%s`." field) [ insert_before argument [ Text (field ^ ": ") ] ]
+  fix
+    (Printf.sprintf "Label it `%s`." field)
+    [ Build.insert_before argument [ Text (field ^ ": ") ] ]
 
-let insert_mut_fix at = fix "Pass it `mut`." [ insert_before at [ Text "mut " ] ]
-let remove_keyword_fix at inner = fix "Remove the keyword." [ delete (Start at) (Start inner) ]
+let insert_mut_fix at = fix "Pass it `mut`." [ Build.insert_before at [ Text "mut " ] ]
+
+let remove_keyword_fix at inner =
+  fix "Remove the keyword." [ Build.delete (Start at) (Start inner) ]
 
 let show_cost_callee = function
   | Function_parameter name -> name
@@ -443,14 +443,16 @@ let describe_associated (type_ : Types.ty) =
 
 let explain_decision (site : decision_site) ~name ~decided =
   let took where =
-    name @ [ Text (Printf.sprintf " took its default type, `%s`, %s." decided where) ]
+    name @ [ Description.Text (Printf.sprintf " took its default type, `%s`, %s." decided where) ]
   in
   let needs user =
-    (Text (user ^ " needs the type of ") :: name)
-    @ (Text ", so " :: name)
+    (Description.Text (user ^ " needs the type of ") :: name)
+    @ (Description.Text ", so " :: name)
     @ [ Text (Printf.sprintf " takes its default type `%s` here." decided) ]
   in
-  let is_decided prefix = (Text prefix :: name) @ [ Text (Printf.sprintf " is `%s`." decided) ] in
+  let is_decided prefix =
+    (Description.Text prefix :: name) @ [ Text (Printf.sprintf " is `%s`." decided) ]
+  in
   match site with
   | Use ->
       ( is_decided "An earlier statement decided that the type of ",
@@ -458,11 +460,12 @@ let explain_decision (site : decision_site) ~name ~decided =
   | Statement_end -> (took "at an earlier statement", needs "This statement")
   | Actual_head ->
       ( took "where the type of an earlier value was needed",
-        (Text "The type of this value is needed here, so " :: name)
+        (Description.Text "The type of this value is needed here, so " :: name)
         @ [ Text (Printf.sprintf " takes its default type `%s`." decided) ] )
   | Method_call -> (took "at an earlier method call", needs "Method lookup")
 
-let describe_mismatch : mismatch -> Diagnostic.Code.types * string * node fix list = function
+let describe_mismatch : mismatch -> Diagnostic.Code.types * string * Nodes.node Description.fix list
+    = function
   | Expected { expected; actual; copy } ->
       let fixes =
         match copy with
@@ -472,11 +475,14 @@ let describe_mismatch : mismatch -> Diagnostic.Code.types * string * node fix li
               fix title
                 [
                   (match edit with
-                  | Rename_copy name -> replace name [ Text copy_method ]
-                  | Append_copy written -> insert_after written [ Text ("." ^ copy_method ^ "()") ]
+                  | Rename_copy name -> Build.replace name [ Text copy_method ]
+                  | Append_copy written ->
+                      Build.insert_after written [ Text ("." ^ copy_method ^ "()") ]
                   | Wrap_copy written ->
-                      replace written
-                        [ Text "("; quote written; Text (Printf.sprintf ").%s()" copy_method) ]);
+                      Build.replace written
+                        [
+                          Text "("; Build.quote written; Text (Printf.sprintf ").%s()" copy_method);
+                        ]);
                 ];
             ]
         | None -> []
@@ -502,8 +508,8 @@ let describe_mismatch : mismatch -> Diagnostic.Code.types * string * node fix li
                    (match side with Left -> "left" | Right -> "right")
                    (Types.show target))
                 [
-                  replace operand
-                    [ Text (Types.show target ^ ".from_integer("); quote operand; Text ")" ];
+                  Build.replace operand
+                    [ Text (Types.show target ^ ".from_integer("); Build.quote operand; Text ")" ];
                 ];
             ]
         | None -> [] )
@@ -531,10 +537,10 @@ let describe_mismatch : mismatch -> Diagnostic.Code.types * string * node fix li
 let describe_undetermined at = function
   | Binding_type ->
       [
-        Text "The type of `";
-        quote at;
+        Description.Text "The type of `";
+        Build.quote at;
         Text "` cannot be inferred from this statement alone. Declare `";
-        quote at;
+        Build.quote at;
         Text "` with a type.";
       ]
   | Generic_argument { parameter; is_type; declared_on } ->
@@ -546,13 +552,13 @@ let describe_undetermined at = function
   | List_element ->
       [
         Text "Nothing here determines the element type of `";
-        quote at;
+        Build.quote at;
         Text "`. Bind the list with a typed `let`, such as `let names: List[String] = []`.";
       ]
   | Map_entries ->
       [
         Text "Nothing here determines the key and value types of `";
-        quote at;
+        Build.quote at;
         Text "`. Bind the map with a typed `let`, such as `let ages: Map[String, UInt8] = [:]`.";
       ]
 
@@ -581,13 +587,13 @@ let show_method_owner = function
   | Path_owner path -> Path.show path
 
 let write_labeled_form form =
-  Text "("
+  Description.Text "("
   :: List.concat
        (List.mapi
           (fun index (label, entry) ->
-            (if index = 0 then [] else [ Text ", " ])
-            @ (match label with Some field -> [ Text (field ^ ": ") ] | None -> [])
-            @ [ quote entry ])
+            (if index = 0 then [] else [ Description.Text ", " ])
+            @ (match label with Some field -> [ Description.Text (field ^ ": ") ] | None -> [])
+            @ [ Build.quote entry ])
           form)
   @ [ Text ")" ]
 
@@ -595,45 +601,47 @@ let describe = function
   | Mismatch { at = origin; mismatch; decision } -> (
       let code, message, fixes = describe_mismatch mismatch in
       match decision with
-      | None -> make ~fixes code (at origin) (say message)
+      | None -> make ~fixes code (Build.at origin) (say message)
       | Some { name; decided; site; decided_at; declares } ->
           let explanation, note =
             explain_decision site
-              ~name:[ Text "`"; quote name; Text "`" ]
+              ~name:[ Text "`"; Build.quote name; Text "`" ]
               ~decided:(Types.show decided)
           in
           make
             ~fixes:
               (match site with Use -> fixes | Statement_end | Actual_head | Method_call -> [])
-            ~notes:[ (at decided_at, note) ]
-            code (at origin)
-            ((Text (message ^ " ") :: explanation)
-            @ if declares then [ Text " Declare `"; quote name; Text "` with a type." ] else []))
+            ~notes:[ (Build.at decided_at, note) ]
+            code (Build.at origin)
+            ((Description.Text (message ^ " ") :: explanation)
+            @
+            if declares then [ Text " Declare `"; Build.quote name; Text "` with a type." ] else []
+            ))
   | Integer_for_float { at = origin; wanted; literals } ->
-      make Integer_for_float (at origin)
-        (Text
+      make Integer_for_float (Build.at origin)
+        (Description.Text
            (Printf.sprintf "An integer literal is never a float, and %s is expected here. Write "
               (show_shown wanted))
          :: List.concat
               (List.mapi
                  (fun index (literal, number) ->
-                   (if index = 0 then [] else [ Text " and " ])
+                   (if index = 0 then [] else [ Description.Text " and " ])
                    @ [
                        Text "`";
-                       quote literal;
+                       Build.quote literal;
                        Text (Printf.sprintf "` as `%s.0`" (Z.to_string number));
                      ])
                  literals)
         @ [ Text "." ])
   | Decided_in_specification { at = origin; local } ->
-      make Decided_in_specification (at origin)
+      make Decided_in_specification (Build.at origin)
         (match local with
         | Some local ->
             [
               Text "A specification cannot decide the type of `";
-              quote local;
+              Build.quote local;
               Text "`. Declare `";
-              quote local;
+              Build.quote local;
               Text "` with a type.";
             ]
         | None ->
@@ -641,7 +649,7 @@ let describe = function
               "A specification cannot decide a type that code computes with. Give the call its \
                type arguments.")
   | Operator_output { at = origin; found; wanted; impl_need } ->
-      make Mismatch (at origin)
+      make Mismatch (Build.at origin)
         (say
            ((match found with
               | Projection _ ->
@@ -653,32 +661,32 @@ let describe = function
                     (describe_associated wanted))
            ^ write_impl_need impl_need))
   | Operator_not_implemented { at = origin; subject; trait; impl_need } ->
-      make No_impl (at origin)
+      make No_impl (Build.at origin)
         (say
            (Printf.sprintf "`%s` does not implement `%s`, so the operator does not apply.%s"
               (Types.show subject) (Types.show_trait trait) (write_impl_need impl_need)))
   | Not_implemented { at = origin; subject; trait; is_iteration; impl_need } ->
       make
         (if is_iteration then Not_iterable else No_impl)
-        (at origin)
+        (Build.at origin)
         (say
            (Printf.sprintf "`%s` does not implement `%s`.%s" (Types.show subject)
               (Types.show_trait trait) (write_impl_need impl_need)))
   | Body_ends_without_value { body; output } ->
-      make Mismatch (after body)
+      make Mismatch (Build.after body)
         (say (Printf.sprintf "This body must end with a value of type `%s`." (Types.show output)))
   | Last_statement_without_value { statement; output } ->
-      make Mismatch (at statement)
+      make Mismatch (Build.at statement)
         (say (Printf.sprintf "This body must end with a value of type `%s`." (Types.show output)))
   | Not_bit_vector { at = origin; type_ } ->
-      make Not_bit_vector (at origin)
+      make Not_bit_vector (Build.at origin)
         (say
            (Printf.sprintf
               "An assertion `by bit_vector` can name only integers and booleans, and this is a \
                `%s`."
               (Types.show type_)))
   | Unchecked_invariant { at = origin } ->
-      make Cannot_derive (at origin)
+      make Cannot_derive (Build.at origin)
         (say
            "This invariant cannot be checked at run time, so `serialization.Deserialize` cannot be \
             derived: a value read from data might break it. Write the `impl`, which checks the \
@@ -687,7 +695,7 @@ let describe = function
       let given_text = show_count given "is" "are" in
       make
         (if given < expected then Missing_argument else Too_many_arguments)
-        (at origin)
+        (Build.at origin)
         (say
            (match callee with
            | Fields_of owner ->
@@ -703,62 +711,62 @@ let describe = function
                  (show_count expected "argument" "arguments")
                  given_text))
   | Label_in_indirect_call { label; value } ->
-      make Unknown_label (at label)
-        ~fixes:[ fix "Remove the label." [ delete (Start label) (Start value) ] ]
+      make Unknown_label (Build.at label)
+        ~fixes:[ fix "Remove the label." [ Build.delete (Start label) (Start value) ] ]
         (say "A call through a function value passes its arguments by position, without labels.")
   | Not_callable { at = origin; callee } ->
-      make Not_callable (at origin)
+      make Not_callable (Build.at origin)
         (say
            (Printf.sprintf "%s is not a function, so it cannot be called."
               (show_shown_capitalized callee)))
   | Missing_parameter { at = origin; parameter } ->
-      make Missing_argument (at origin)
+      make Missing_argument (Build.at origin)
         (say (Printf.sprintf "`%s` is not given, and has no default." parameter))
   | Unknown_variant { at = origin; type_; variant; candidates } ->
-      make Unknown_variant (at origin)
-        ~fixes:(list_spelling_fixes origin ~written:variant candidates)
+      make Unknown_variant (Build.at origin)
+        ~fixes:(Build.list_spelling_fixes origin ~written:variant candidates)
         (say (Printf.sprintf "`%s` has no variant `%s`." (Types.show type_) variant))
   | Variant_without_fields { at = origin; variant } ->
-      make Too_many_arguments (at origin) (say (Printf.sprintf "`%s` has no fields." variant))
+      make Too_many_arguments (Build.at origin) (say (Printf.sprintf "`%s` has no fields." variant))
   | Not_a_record_construction { at = origin; type_ } ->
-      make Not_a_record (at origin)
+      make Not_a_record (Build.at origin)
         (say
            (Printf.sprintf "`%s` is not a record, so it cannot be built this way."
               (Types.show type_)))
   | Opaque_construction { at = origin; type_ } ->
-      make Private_field (at origin)
+      make Private_field (Build.at origin)
         (say
            (Printf.sprintf "`%s` is opaque, so only its own package can build it."
               (Types.show type_)))
   | Mut_base_of_with { at = origin } ->
-      make Wrong_mode (at origin)
+      make Wrong_mode (Build.at origin)
         (say "`with` takes ownership of its base, so the base is passed `own`, not `mut`.")
   | Unknown_label { label; written; owner; candidates } ->
-      make Unknown_label (at label)
-        ~fixes:(list_spelling_fixes label ~written candidates)
+      make Unknown_label (Build.at label)
+        ~fixes:(Build.list_spelling_fixes label ~written candidates)
         (say
            (match owner with
            | None -> Printf.sprintf "No parameter is named `%s`." written
            | Some owner -> Printf.sprintf "`%s` has no field `%s`." (show_owner owner) written))
   | Positional_after_labeled { argument; label } ->
-      make Positional_after_labeled (at argument)
+      make Positional_after_labeled (Build.at argument)
         ~fixes:(Option.to_list (Option.map (fun field -> label_fix field argument) label))
         (say
            "A positional argument cannot follow a labeled argument. Label it, or move it before \
             the labeled arguments.")
   | Tuple_argument_out_of_order { argument; owner; filled; field } ->
-      make Out_of_order (at argument)
+      make Out_of_order (Build.at argument)
         ~fixes:[ label_fix field argument ]
         [
           Text (Printf.sprintf "`%s` is a tuple type, built by position, so `" (show_owner owner));
-          quote argument;
+          Build.quote argument;
           Text
             (Printf.sprintf
                "` here fills the field `%s`. Label it, or move it to the position of `%s`." filled
                field);
         ]
   | Bare_value { argument; owner; fields; label } ->
-      make Missing_label (at argument)
+      make Missing_label (Build.at argument)
         ~fixes:(Option.to_list (Option.map (fun field -> label_fix field argument) label))
         (say
            (match owner with
@@ -777,18 +785,18 @@ let describe = function
                   or a variable with its field's name."
                  (show_owner owner) (List.length fields) (show_names fields)))
   | Repeated_argument { at = origin; name; is_pattern } ->
-      make Repeated_argument (at origin)
+      make Repeated_argument (Build.at origin)
         (say
            (Printf.sprintf "`%s` is %s more than once." name
               (if is_pattern then "matched" else "given")))
   | Not_an_integer { at = origin; subject; excluded } ->
-      make Mismatch (at origin)
+      make Mismatch (Build.at origin)
         (say
            (Printf.sprintf "%s is an integer, not %s." (show_integer_subject subject)
               (show_shown excluded)))
   | No_method { at = origin; owner; name; candidates } ->
-      make Unknown_member (at origin)
-        ~fixes:(list_spelling_fixes origin ~written:name candidates)
+      make Unknown_member (Build.at origin)
+        ~fixes:(Build.list_spelling_fixes origin ~written:name candidates)
         (say
            (match owner with
            | Type_owner { type_; view = Some view } ->
@@ -796,16 +804,16 @@ let describe = function
                  (Types.show type_) name (Types.show view)
            | owner -> Printf.sprintf "`%s` has no method `%s`." (show_method_owner owner) name))
   | Counted_not_a_capability { at = origin; written } ->
-      make Not_a_capability (at origin)
+      make Not_a_capability (Build.at origin)
         (say
            (Printf.sprintf "`calls` counts the calls of a capability, and `%s` is not one." written))
   | Counted_not_a_function { at = origin; name; type_ } ->
-      make Not_callable (at origin)
+      make Not_callable (Build.at origin)
         (say
            (Printf.sprintf "`calls` counts the calls through a function, and `%s` is a `%s`." name
               (Types.show type_)))
   | Counted_neither { at = origin; name } ->
-      make Not_callable (at origin)
+      make Not_callable (Build.at origin)
         (say
            (Printf.sprintf
               "`calls` counts the calls of a capability or through a function parameter, and `%s` \
@@ -813,12 +821,12 @@ let describe = function
               name))
   | Cost_of_other_metric { at = origin; operand; cost_function_name; bounded } ->
       let bounded = Language.Metric.show bounded in
-      make Cost_of_other_resource (at origin)
+      make Cost_of_other_resource (Build.at origin)
         ~fixes:
           [
             fix
               (Printf.sprintf "Write `%s`." bounded)
-              [ replace cost_function_name [ Text bounded ] ];
+              [ Build.replace cost_function_name [ Text bounded ] ];
           ]
         (say
            (Printf.sprintf
@@ -828,14 +836,14 @@ let describe = function
               (Language.Metric.show operand.cost_function)
               bounded bounded (show_cost_callee operand.callee)))
   | Cost_of_calls { at = origin; operand } ->
-      make Cost_of_other_resource (at origin)
+      make Cost_of_other_resource (Build.at origin)
         (say
            (Printf.sprintf
               "`%s` bounds the `%s` of one call, not the calls it makes, which this clause counts."
               (show_cost_operand operand)
               (Language.Metric.show operand.cost_function)))
   | Upper_bound_in_exact_bound { at = origin; operand } ->
-      make Upper_bound_in_exact_bound (at origin)
+      make Upper_bound_in_exact_bound (Build.at origin)
         (say
            (Printf.sprintf
               "`%s` is an upper bound on one call, and a call may spend less, so an exact amount \
@@ -844,9 +852,13 @@ let describe = function
   | Unbounded_time { clause; condition; has_condition } ->
       let shown = Types.show_condition condition in
       let added = (if has_condition then "&& " else "when ") ^ shown in
-      make Unbounded_time (at clause)
+      make Unbounded_time (Build.at clause)
         ~fixes:
-          [ fix (Printf.sprintf "Add `%s`." added) [ insert_after clause [ Text (" " ^ added) ] ] ]
+          [
+            fix
+              (Printf.sprintf "Add `%s`." added)
+              [ Build.insert_after clause [ Text (" " ^ added) ] ];
+          ]
         (say
            (Printf.sprintf
               "This function uses `RunForever unless %s`, so it may run forever where the \
@@ -854,43 +866,43 @@ let describe = function
                implies `%s`."
               shown shown))
   | Clause_never_holds { at = origin } ->
-      make Decided_condition (at origin)
+      make Decided_condition (Build.at origin)
         (say
            "This clause's condition never holds where it is written, so the clause would bind \
             nothing. Remove the clause, or name a type parameter in its condition.")
   | Constant_out_of_range { at = origin; constant; type_; low; high } ->
-      make Constant_overflow (at origin)
+      make Constant_overflow (Build.at origin)
         (say
            (Printf.sprintf "This is %s, which does not fit in `%s`, which holds %s to %s."
               (Z.to_string constant) (Types.show type_) (Z.to_string low) (Z.to_string high)))
   | Division_by_zero { at = origin } ->
-      make Constant_overflow (at origin) (say "This divides by zero.")
+      make Constant_overflow (Build.at origin) (say "This divides by zero.")
   | Default_not_constant { at = origin } ->
-      make Default_not_constant (at origin)
+      make Default_not_constant (Build.at origin)
         (say
            "A default must be a constant expression: literals, arithmetic, constants, and records, \
             variants, and collections built from them. It cannot call a function or name a \
             parameter.")
   | Not_constant { at = origin } ->
-      make Not_constant (at origin)
+      make Not_constant (Build.at origin)
         (say
            "The value of a constant is made of literals, other constants, operators, calls, \
             quantifiers over ranges and collections, and the records, variants, collections, and \
             strings built from them. Move this into a function, and call the function here.")
   | Condition_not_constant { at = origin } ->
-      make Condition_not_constant (at origin)
+      make Condition_not_constant (Build.at origin)
         (say
            "An assertion `by evaluation` is evaluated when the code is checked, before any \
             variable has a value. Its condition is made of literals, constants, operators, calls, \
             quantifiers over ranges and collections, and the records, variants, collections, and \
             strings built from them. Move this into a function, and call the function here.")
   | Condition_names_parameter { at = origin } ->
-      make Condition_not_constant (at origin)
+      make Condition_not_constant (Build.at origin)
         (say
            "An assertion `by evaluation` is evaluated once, when the code is checked, so its \
             condition cannot mention a type parameter or a value parameter of the code around it.")
   | Constant_not_data { at = origin; part } ->
-      make Constant_not_data (at origin)
+      make Constant_not_data (Build.at origin)
         (say
            (Printf.sprintf
               "A constant is stored in the compiled program as data, so its type cannot be or hold \
@@ -901,7 +913,7 @@ let describe = function
               | Shared_state -> "state that tasks share")))
   | Hidden_in_public_clause { at = origin; name; hidden } ->
       let hidden = Path.show hidden in
-      make Private_in_public (at origin)
+      make Private_in_public (Build.at origin)
         (say
            (Printf.sprintf
               "Other packages can call `%s`, so the proofs of its callers there read this clause, \
@@ -909,12 +921,12 @@ let describe = function
                functions and constants that are public."
               name hidden hidden))
   | Float_too_large { at = origin; target } ->
-      make Literal_out_of_range (at origin)
+      make Literal_out_of_range (Build.at origin)
         (say
            (Printf.sprintf "This literal is too large for %s; it would round to infinity."
               (show_shown target)))
   | Runs_in_formula { at = origin; construct } ->
-      make Not_in_specification (at origin)
+      make Not_in_specification (Build.at origin)
         (say
            (Printf.sprintf
               "%s runs, so it cannot be part of a specification, a proof, or a quantifier's body, \
@@ -922,53 +934,54 @@ let describe = function
                calls."
               (show_construct construct)))
   | Self_outside_method { at = origin } ->
-      make Not_a_value (at origin)
+      make Not_a_value (Build.at origin)
         (say "`self` is a method's receiver, and this is not a method that takes one.")
   | Self_type_as_value { at = origin } ->
-      make Not_a_value (at origin)
+      make Not_a_value (Build.at origin)
         (say "`Self` is a type. Build a value of it, or call one of its methods.")
   | Quantifier_over_type_in_code { at = origin } ->
-      make Specification_only (at origin)
+      make Specification_only (Build.at origin)
         (say
            "A quantifier over a whole type cannot run, so it is only for specifications and the \
             bodies of functions for specifications only. Quantify over a range or a collection.")
   | Static_method_as_value { at = origin; name } ->
-      make Not_a_value (at origin)
+      make Not_a_value (Build.at origin)
         (say (Printf.sprintf "`%s` is a method; call it with `(...)`." name))
   | Method_with_type_arguments_as_value { at = origin } ->
-      make Not_a_value (at origin)
+      make Not_a_value (Build.at origin)
         (say "A method with type arguments is called: write `(...)` after it.")
   | String_indexed { at = origin } ->
-      make Not_indexable (at origin)
+      make Not_indexable (Build.at origin)
         (say "Strings cannot be indexed: say which you mean with `bytes()` or `characters()`.")
   | Not_sliceable { at = origin; base } ->
-      make Not_indexable (at origin)
+      make Not_indexable (Build.at origin)
         (say (Printf.sprintf "%s cannot be sliced." (show_shown_capitalized base)))
   | Not_indexable { at = origin; base } ->
-      make Not_indexable (at origin)
+      make Not_indexable (Build.at origin)
         (say (Printf.sprintf "%s cannot be indexed." (show_shown_capitalized base)))
-  | Several_indexes { at = origin } -> make Not_indexable (at origin) (say "An index is one value.")
+  | Several_indexes { at = origin } ->
+      make Not_indexable (Build.at origin) (say "An index is one value.")
   | Parameter_with_arguments { at = origin; name } ->
-      make Arity (at origin)
+      make Arity (Build.at origin)
         (say (Printf.sprintf "`%s` is a generic parameter, which takes no arguments." name))
   | Type_arity { at = origin; type_path; expected; given } ->
-      make Arity (at origin)
+      make Arity (Build.at origin)
         (say
            (Printf.sprintf "`%s` takes %s, and %s given."
               (Types.show (Named { path = type_path; arguments = [] }))
               (show_count expected "argument" "arguments")
               (show_count given "is" "are")))
   | Associated_in_type_arguments { at = origin } ->
-      make Arity (at origin)
+      make Arity (Build.at origin)
         (say
            "An associated type is fixed in a bound, as in `Source: Cursor[Element = Int64]`, not \
             among type arguments in an expression.")
   | Not_a_type_argument { at = origin } ->
-      make Not_a_type (at origin) (say "A type argument is a type, or a `UInt64` value.")
+      make Not_a_type (Build.at origin) (say "A type argument is a type, or a `UInt64` value.")
   | Hidden_member { at = origin; hidden; visibility } ->
-      make Member_not_visible (at origin) (say (write_hidden hidden visibility))
+      make Member_not_visible (Build.at origin) (say (Build.write_hidden hidden visibility))
   | No_receiver_overload { at = origin; name } ->
-      make Wrong_receiver (at origin)
+      make Wrong_receiver (Build.at origin)
         (say
            (Printf.sprintf
               "`%s` has no overload for this receiver's mode; pass the receiver `mut` or `own` as \
@@ -977,30 +990,30 @@ let describe = function
   | Old_arity { at = origin; given } ->
       make
         (if given = 0 then Missing_argument else Too_many_arguments)
-        (at origin)
+        (Build.at origin)
         (say "`old` takes one value: `old(value)`.")
   | Final_misused { at = origin } ->
-      make Not_callable (at origin)
+      make Not_callable (Build.at origin)
         (say
            "`final` takes the part that a lending method lends: `final(result)` is that part as \
             the caller left it.")
   | Identical_arity { at = origin; given } ->
       make
         (if given < 2 then Missing_argument else Too_many_arguments)
-        (at origin)
+        (Build.at origin)
         (say "`identical` takes two values of one type.")
   | Not_a_function_or_type { at = origin; name } ->
-      make Not_callable (at origin)
+      make Not_callable (Build.at origin)
         (say (Printf.sprintf "`%s` is not a function or a type, so it cannot be called." name))
   | Callback_ensures_in_code { at = origin; name } ->
-      make Specification_only (at origin)
+      make Specification_only (Build.at origin)
         (say
            (Printf.sprintf
               "`%s.ensures` names the postcondition of the function passed for `%s`, so it appears \
                only in specifications."
               name name))
   | Callback_ensures_label { at = origin; name } ->
-      make Unknown_label (at origin)
+      make Unknown_label (Build.at origin)
         (say
            (Printf.sprintf
               "`%s.ensures` takes its arguments by position, as a call through `%s` does." name name))
@@ -1017,13 +1030,13 @@ let describe = function
       let expected = List.length shape in
       make
         (if given < expected then Missing_argument else Too_many_arguments)
-        (at origin)
+        (Build.at origin)
         (say
            (Printf.sprintf "`%s.ensures` takes %d %s: %s." name expected
               (if expected = 1 then "argument" else "arguments")
               (if shape = [] then "none" else String.concat ", " shape)))
   | Ensures_of_non_parameter { at = origin; name } ->
-      make Not_callable (at origin)
+      make Not_callable (Build.at origin)
         (say
            (Printf.sprintf
               "`%s` is not a parameter of this definition, and `.ensures` names the postcondition \
@@ -1031,7 +1044,7 @@ let describe = function
                output)`."
               name))
   | Ensures_without_function { at = origin; base } ->
-      make Not_callable (at origin)
+      make Not_callable (Build.at origin)
         (say
            (Printf.sprintf
               "`.ensures` follows a function parameter, as in `transform.ensures(value, output)`, \
@@ -1039,7 +1052,7 @@ let describe = function
               (show_shown base)))
   | Cost_operand_not_callee { at = origin; metric; operand } ->
       let cost_function = Language.Metric.show metric in
-      make Not_callable (at origin)
+      make Not_callable (Build.at origin)
         (say
            (Printf.sprintf
               "`%s` takes a function parameter, as in `%s(visit)`, or a method of a bound, as in \
@@ -1051,12 +1064,12 @@ let describe = function
                   Printf.sprintf "`%s` is a `%s`" name (Types.show type_)
               | Name_is_neither name -> Printf.sprintf "`%s` is neither" name)))
   | No_bound_method { at = origin; type_; name } ->
-      make Unknown_member (at origin)
+      make Unknown_member (Build.at origin)
         (say
            (Printf.sprintf "`%s` has no method `%s`: no trait that bounds it declares one."
               (Types.show type_) name))
   | Ambiguous_cost_method { at = origin; type_; name; metric } ->
-      make Ambiguous_method (at origin)
+      make Ambiguous_method (Build.at origin)
         (say
            (Printf.sprintf
               "`%s` has more than one method `%s`, and none of them is the only one that takes \
@@ -1064,18 +1077,18 @@ let describe = function
               (Types.show type_) name (Language.Metric.show metric)))
   | New_on_literal_type { at = origin; type_; literal; call } ->
       let literal = match literal with Empty_list -> "[]" | Empty_map -> "[:]" in
-      make Unknown_member (at origin)
+      make Unknown_member (Build.at origin)
         ~fixes:
           (Option.to_list
              (Option.map
                 (fun call ->
-                  fix (Printf.sprintf "Write `%s`." literal) [ replace call [ Text literal ] ])
+                  fix (Printf.sprintf "Write `%s`." literal) [ Build.replace call [ Text literal ] ])
                 call))
         (say
            (Printf.sprintf "`%s` has no method `new`. The literal `%s` is an empty `%s`."
               (Types.show type_) literal (Types.show type_)))
   | Ambiguous_static_method { at = origin; type_; name; traits } ->
-      make Ambiguous_method (at origin)
+      make Ambiguous_method (Build.at origin)
         (say
            (Printf.sprintf
               "More than one trait gives `%s` a method `%s`: %s. Call it through the trait to say \
@@ -1084,27 +1097,27 @@ let describe = function
               (String.concat ", "
                  (List.map (fun trait -> "`" ^ Types.show_trait trait ^ "`") traits))))
   | Trait_arity { at = origin; trait; expected; given } ->
-      make Arity (at origin)
+      make Arity (Build.at origin)
         (say
            (Printf.sprintf "`%s` takes %s, and %s given." (Types.show_trait trait)
               (show_count expected "type argument" "type arguments")
               (show_count given "is" "are")))
   | Receiver_missing_in_full_call { at = origin } ->
-      make Missing_argument (at origin)
+      make Missing_argument (Build.at origin)
         (say "A method written in full takes its receiver as its first argument, without a label.")
   | Wrong_receiver_overload { at = origin; name; wanted; overloads } ->
-      make Wrong_receiver (at origin)
+      make Wrong_receiver (Build.at origin)
         (say
            (Printf.sprintf "`%s` has no overload that takes %s here; it has %s." name
               (Path.show_receiver wanted)
               (String.concat ", " (List.map Path.show_receiver overloads))))
   | Missing_receiver_mode { receiver; name } ->
-      make Missing_mode (at receiver)
+      make Missing_mode (Build.at receiver)
         ~fixes:[ insert_mut_fix receiver ]
         (say
            (Printf.sprintf "`%s` takes `mut self`, so the call site passes its receiver `mut`." name))
   | Ambiguous_method_call { at = origin; call; type_; name; receiver; arguments; traits } ->
-      make Ambiguous_method (at origin)
+      make Ambiguous_method (Build.at origin)
         ~fixes:
           (List.map
              (fun (trait : Types.trait_reference) ->
@@ -1112,11 +1125,11 @@ let describe = function
                fix
                  (Printf.sprintf "Call `%s`'s `%s`." trait_name name)
                  [
-                   replace call
-                     (Text (Printf.sprintf "%s.%s(" trait_name name)
-                      :: quote receiver
+                   Build.replace call
+                     (Description.Text (Printf.sprintf "%s.%s(" trait_name name)
+                      :: Build.quote receiver
                       :: List.concat_map
-                           (fun argument -> [ Text ", "; quote_over argument ])
+                           (fun argument -> [ Description.Text ", "; Build.quote_over argument ])
                            arguments
                      @ [ Text ")" ]);
                  ])
@@ -1126,7 +1139,7 @@ let describe = function
               "More than one trait gives `%s` a method `%s`. Write the call in full to say which."
               (Types.show type_) name))
   | Index_not_mutable { at = origin; by; self_type; assigns } ->
-      make (code_of_mutation by) (at origin)
+      make (code_of_mutation by) (Build.at origin)
         (say
            (Printf.sprintf
               "An element of `%s` cannot be mutated in place: `%s` implements `Index`, which lends \
@@ -1134,7 +1147,7 @@ let describe = function
               (Types.show self_type) (Types.show self_type)
               (if assigns then " Assign the whole element with `=`." else "")))
   | Stored_slice_written { at = origin; by; stored } ->
-      make (code_of_mutation by) (at origin)
+      make (code_of_mutation by) (Build.at origin)
         (say
            (Printf.sprintf
               "%s, so its elements cannot be written through it: a slice held in a variable, a \
@@ -1147,7 +1160,7 @@ let describe = function
               | In_element -> "This slice is an element of a collection"
               | Lent_by_a_call -> "This slice is lent by a call")))
   | Slice_parameter_assigned { at = origin; parameter } ->
-      make Not_assignable (at origin)
+      make Not_assignable (Build.at origin)
         (say
            (Printf.sprintf
               "`%s` is a `mut` slice parameter, so it cannot be assigned: the caller lends it \
@@ -1155,100 +1168,100 @@ let describe = function
                to elements the caller did not lend. Write its elements instead."
               parameter))
   | Slice_passed_to_generic { at = origin } ->
-      make Wrong_mode (at origin)
+      make Wrong_mode (Build.at origin)
         (say
            "A slice is passed `mut` only to a `mut Slice` parameter, and this parameter's declared \
             type is a type parameter or an associated type. The callee could assign it a different \
             slice, which would leave the elements the caller lent unchanged while its contract \
             describes them as written.")
   | Mutation_in_formula { at = origin; by } ->
-      make Not_in_specification (at origin)
+      make Not_in_specification (Build.at origin)
         (say
            (Printf.sprintf
               "Nothing in a specification, a proof, or a quantifier's body can be %s: the prover \
                reads them as formulas, which mutate nothing."
               (show_mutation by)))
   | Captured_mutation { at = origin; by; name } ->
-      make (code_of_mutation by) (at origin)
+      make (code_of_mutation by) (Build.at origin)
         (say
            (Printf.sprintf
               "A lambda cannot mutate its captures, and `%s` is from outside it. Return the new \
                value instead, or use a loop."
               name))
   | Read_only_mutation { at = origin; by; name } ->
-      make (code_of_mutation by) (at origin)
+      make (code_of_mutation by) (Build.at origin)
         (say
            (Printf.sprintf
               "`%s` cannot be mutated here: only a `var`, a `mut` parameter, or `mut self`, and \
                their parts, can be %s."
               name (show_mutation by)))
   | Lent_read_only_assigned { at = origin } ->
-      make Not_assignable (at origin)
+      make Not_assignable (Build.at origin)
         ~fixes:[ insert_mut_fix origin ]
         (say
            "This part is lent read-only, so it cannot be mutated. Pass the place it is lent from \
             `mut`, so that it is lent `mut`.")
   | Mode_on_assignment_target { at = origin; inner; keyword } ->
-      make Redundant_mode (at origin)
+      make Redundant_mode (Build.at origin)
         ~fixes:[ remove_keyword_fix origin inner ]
         [
           Text "An assignment writes its target, so `";
-          quote inner;
+          Build.quote inner;
           Text (Printf.sprintf "` takes no `%s`." (show_mode_keyword keyword));
         ]
   | Not_assignable_place { at = origin } ->
-      make Not_assignable (at origin)
+      make Not_assignable (Build.at origin)
         (say "Only a place, such as a variable, a field, or an element, can be assigned.")
   | Mode_on_read_argument { at = origin; inner; parameter } ->
-      make Redundant_mode (at origin)
+      make Redundant_mode (Build.at origin)
         ~fixes:[ remove_keyword_fix origin inner ]
         (say
            (Printf.sprintf "`%s` only reads its argument, so it takes no mode keyword." parameter))
   | Missing_mut_argument { at = origin; parameter } ->
-      make Missing_mode (at origin)
+      make Missing_mode (Build.at origin)
         ~fixes:[ insert_mut_fix origin ]
         (say
            (Printf.sprintf "`%s` may mutate its argument, so the call site passes it `mut`."
               parameter))
   | Lent_read_only_argument { at = origin; parameter } ->
-      make Wrong_mode (at origin)
+      make Wrong_mode (Build.at origin)
         (say
            (Printf.sprintf
               "`%s` may mutate its argument, and this part is lent read-only. Pass the place it is \
                lent from `mut`, so that it is lent `mut`."
               parameter))
   | Temporary_passed_mut { at = origin; parameter } ->
-      make Wrong_mode (at origin)
+      make Wrong_mode (Build.at origin)
         (say
            (Printf.sprintf "`%s` mutates its argument in place, so it must be a place passed `mut`."
               parameter))
   | Redundant_own { at = origin; inner; type_ } ->
-      make Redundant_mode (at origin)
+      make Redundant_mode (Build.at origin)
         ~fixes:[ remove_keyword_fix origin inner ]
         (say (Printf.sprintf "`%s` copies implicitly, so it needs no `own`." (Types.show type_)))
   | Mut_for_own { at = origin; parameter } ->
-      make Wrong_mode (at origin)
+      make Wrong_mode (Build.at origin)
         (say
            (Printf.sprintf "`%s` takes ownership of its argument, so it is passed `own`, not `mut`."
               parameter))
   | Type_parameter_as_value { at = origin; name } ->
-      make Not_a_value (at origin) (say (Printf.sprintf "`%s` is a type, not a value." name))
+      make Not_a_value (Build.at origin) (say (Printf.sprintf "`%s` is a type, not a value." name))
   | Theorem_as_value { at = origin; name } ->
-      make Not_a_value (at origin)
+      make Not_a_value (Build.at origin)
         (say
            (Printf.sprintf
               "`%s` is a theorem, so it is not a value. Call it in a proof to use its `ensures`."
               name))
   | Type_as_value { at = origin; name } ->
-      make Not_a_value (at origin)
+      make Not_a_value (Build.at origin)
         (say (Printf.sprintf "`%s` is a type. Build a value with `%s(...)`." name name))
   | Trait_as_value { at = origin; name } ->
-      make Not_a_value (at origin) (say (Printf.sprintf "`%s` is not a value." name))
+      make Not_a_value (Build.at origin) (say (Printf.sprintf "`%s` is not a value." name))
   | Specification_function_as_value { at = origin; name } ->
-      make Not_a_value (at origin)
+      make Not_a_value (Build.at origin)
         (say (Printf.sprintf "`%s` is applied to its subject, as in `%s(...)`." name name))
   | Variant_with_fields_as_function { at = origin; variant; fields } ->
-      make Not_a_value (at origin)
+      make Not_a_value (Build.at origin)
         (say
            (Printf.sprintf
               "`%s` has %d fields, so it is not a function: a function takes its arguments by \
@@ -1256,31 +1269,31 @@ let describe = function
               variant (List.length fields) variant
               (String.concat ", " (List.map (fun field -> field ^ ": ...") fields))))
   | No_variants { at = origin; type_ } ->
-      make Unknown_variant (at origin)
+      make Unknown_variant (Build.at origin)
         (say (Printf.sprintf "`%s` has no variants." (Types.show type_)))
   | Unknown_field { at = origin; base; name; candidates } ->
-      make Unknown_member (at origin)
-        ~fixes:(list_spelling_fixes origin ~written:name candidates)
+      make Unknown_member (Build.at origin)
+        ~fixes:(Build.list_spelling_fixes origin ~written:name candidates)
         (say (Printf.sprintf "%s has no field `%s`." (show_shown_capitalized base) name))
   | Opaque_field_read { at = origin; type_ } ->
-      make Private_field (at origin)
+      make Private_field (Build.at origin)
         (say
            (Printf.sprintf "`%s` is opaque, so its fields can be read only in its own package."
               (Types.show type_)))
   | Method_as_field { at = origin; name } ->
-      make Not_a_value (at origin)
+      make Not_a_value (Build.at origin)
         (say (Printf.sprintf "`%s` is a method, so it is called: `%s()`." name name))
   | Lending_function_value { at = origin } ->
-      make Not_a_value (at origin)
+      make Not_a_value (Build.at origin)
         [
           Text "`";
-          quote origin;
+          Build.quote origin;
           Text
             "` lends a part, and a function value cannot lend. Call it where the part is used, or \
              write a lambda that returns a copy of the part.";
         ]
   | No_member { at = origin; type_; name; view } ->
-      make Unknown_member (at origin)
+      make Unknown_member (Build.at origin)
         (say
            (match view with
            | Some view ->
@@ -1289,19 +1302,19 @@ let describe = function
                  (Types.show type_) name view name
            | None -> Printf.sprintf "`%s` has no member `%s`." (Types.show type_) name))
   | Type_argument_count { at = origin; expected; given } ->
-      make Arity (at origin)
+      make Arity (Build.at origin)
         (say
            (Printf.sprintf "This takes %s, and %s given."
               (show_count expected "type argument" "type arguments")
               (show_count given "is" "are")))
   | Type_for_value_argument { at = origin } ->
-      make Argument_kind (at origin)
+      make Argument_kind (Build.at origin)
         (say "A type argument is given where a `UInt64` value is expected.")
   | Value_for_type_argument { at = origin } ->
-      make Argument_kind (at origin)
+      make Argument_kind (Build.at origin)
         (say "A `UInt64` value is given where a type argument is expected.")
   | Specification_call_in_code { at = origin; name; call } ->
-      make Specification_only (at origin)
+      make Specification_only (Build.at origin)
         (say
            (match call with
            | Theorem_call ->
@@ -1318,7 +1331,7 @@ let describe = function
                Printf.sprintf
                  "`%s` is for specifications only, so it is called only in specifications." name))
   | Not_an_integer_operand { at = origin; operator; excluded } ->
-      make No_impl (at origin)
+      make No_impl (Build.at origin)
         (say
            (Printf.sprintf
               (match operator with
@@ -1327,59 +1340,60 @@ let describe = function
               | Complement -> "`~` works on built-in integers, not %s.")
               (show_shown excluded)))
   | Shift_amount_not_unsigned { at = origin; excluded } ->
-      make Mismatch (at origin)
+      make Mismatch (Build.at origin)
         (say
            (Printf.sprintf "A shift amount is an unsigned integer, not %s." (show_shown excluded)))
   | Try_error_mismatch { at = origin; output_error; error } ->
-      make Wrong_try (at origin)
+      make Wrong_try (Build.at origin)
         (say
            (Printf.sprintf
               "`?` returns the error unchanged, so it needs the function's error type `%s`, not \
                `%s`. Convert it first with `map_error`."
               (Types.show output_error) (Types.show error)))
   | Try_misused { at = origin } ->
-      make Wrong_try (at origin)
+      make Wrong_try (Build.at origin)
         (say
            "`?` works on a `Result` in a function that returns a `Result`, and on an `Option` in a \
             function that returns an `Option`. Convert between them with `ok_or` or `ok`.")
   | Implies_in_code { at = origin } ->
-      make Specification_only (at origin)
+      make Specification_only (Build.at origin)
         (say
            "`==>` is only for specifications and the bodies of functions for specifications only; \
             in code, write `!a || b`.")
   | String_addition { at = origin; join } ->
       let write_piece = function
-        | Fragment fragment -> [ quote fragment ]
-        | Interpolated side -> [ Text "${"; quote side; Text "}" ]
+        | Fragment fragment -> [ Build.quote fragment ]
+        | Interpolated side -> [ Text "${"; Build.quote side; Text "}" ]
       in
-      make String_addition (at origin)
+      make String_addition (Build.at origin)
         ~fixes:
           (match join with
           | Some (left, right) ->
               [
                 fix "Join them with interpolation."
                   [
-                    replace origin
-                      ((Text "\"" :: write_piece left) @ write_piece right @ [ Text "\"" ]);
+                    Build.replace origin
+                      ((Description.Text "\"" :: write_piece left)
+                      @ write_piece right @ [ Text "\"" ]);
                   ];
               ]
           | None -> [])
         (say "Strings have no `+`. Join them with interpolation, or with methods such as `push`.")
   | Alternative_type_mismatch { at = origin; name; first; here } ->
-      make Mismatch (at origin)
+      make Mismatch (Build.at origin)
         (say
            (Printf.sprintf
               "`%s` is a `%s` in the first alternative, and a `%s` here; every alternative binds \
                it with one type."
               name (Types.show first) (Types.show here)))
   | Range_pattern_type { at = origin; excluded } ->
-      make Mismatch (at origin)
+      make Mismatch (Build.at origin)
         (say
            (Printf.sprintf "A range pattern matches an integer or a `Character`, not %s."
               (show_shown excluded)))
   | Variant_pattern_without_fields { at = origin; variant } ->
-      make Missing_argument (at origin)
-        ~fixes:[ fix "Match its fields with `..`." [ insert_after origin [ Text "(..)" ] ] ]
+      make Missing_argument (Build.at origin)
+        ~fixes:[ fix "Match its fields with `..`." [ Build.insert_after origin [ Text "(..)" ] ] ]
         (say
            (Printf.sprintf "`%s` has fields, so its pattern names them, or writes `(..)`." variant))
   | Parenthesized_tuple_pattern { at = origin; patterns; type_ } ->
@@ -1388,11 +1402,11 @@ let describe = function
         | first :: _, last :: _ -> (first, last)
         | _ -> raise_bug "a parenthesized tuple pattern has no patterns"
       in
-      make Missing_label (at origin)
+      make Missing_label (Build.at origin)
         ~fixes:
           [
             fix "Remove the parentheses."
-              [ delete (Start origin) (Start first); delete (Stop last) (Stop origin) ];
+              [ Build.delete (Start origin) (Start first); Build.delete (Stop last) (Stop origin) ];
           ]
         [
           Text
@@ -1400,19 +1414,19 @@ let describe = function
                "`%s` is a tuple type, so a list of patterns without parentheses matches its fields \
                 by position, as in `"
                (Types.show type_));
-          quote_over patterns;
+          Build.quote_over patterns;
           Text "`. In parentheses, fields match by name.";
         ]
   | Not_a_record_pattern { at = origin; type_ } ->
-      make Not_a_record (at origin)
+      make Not_a_record (Build.at origin)
         (say (Printf.sprintf "%s is not a record." (show_shown_capitalized type_)))
   | Not_a_tuple_type_pattern { at = origin; type_ } ->
-      make Not_a_tuple_type (at origin)
+      make Not_a_tuple_type (Build.at origin)
         (say
            (Printf.sprintf "%s is not a tuple type, so a list of patterns cannot match it."
               (show_shown_capitalized type_)))
   | Tuple_pattern_arity { at = origin; type_; fields; given } ->
-      make Arity (at origin)
+      make Arity (Build.at origin)
         (say
            (Printf.sprintf
               "`%s` has %d fields, %s, so its tuple pattern has %d patterns, not %d. `_` skips a \
@@ -1421,37 +1435,37 @@ let describe = function
   | Tuple_pattern_for_record { at = origin; type_; fields; form } -> (
       match form with
       | Some form ->
-          make Not_a_tuple_type (at origin)
+          make Not_a_tuple_type (Build.at origin)
             ~fixes:
               [
                 fix "Match its fields by name, in parentheses."
-                  [ replace origin (write_labeled_form form) ];
+                  [ Build.replace origin (write_labeled_form form) ];
               ]
-            (Text
+            (Description.Text
                (Printf.sprintf
                   "`%s` is not a tuple type, so its fields match by name, in parentheses, as in `"
                   (Types.show type_))
              :: write_labeled_form form
             @ [ Text "`." ])
       | None ->
-          make Not_a_tuple_type (at origin)
+          make Not_a_tuple_type (Build.at origin)
             (say
                (Printf.sprintf
                   "`%s` is not a tuple type, so its fields, %s, match by name, in parentheses."
                   (Types.show type_) (show_names fields))))
   | Opaque_pattern { at = origin; type_ } ->
-      make Private_field (at origin)
+      make Private_field (Build.at origin)
         (say
            (Printf.sprintf "`%s` is opaque, so only its own package can match on it."
               (Types.show type_)))
   | Tuple_pattern_out_of_order { at = origin; type_; name; bound_field; reorder } ->
-      make Out_of_order (at origin)
+      make Out_of_order (Build.at origin)
         ~fixes:
           (Option.to_list
              (Option.map
                 (fun fields ->
                   fix "Put the patterns in the order of the fields."
-                    [ replace origin [ Text (String.concat ", " fields) ] ])
+                    [ Build.replace origin [ Text (String.concat ", " fields) ] ])
                 reorder))
         (say
            (Printf.sprintf
@@ -1459,13 +1473,13 @@ let describe = function
                field by its position, so `%s` here would bind the field `%s`."
               (Types.show type_) name bound_field))
   | Unmatched_fields { at = origin; missing } ->
-      make Missing_argument (at origin)
+      make Missing_argument (Build.at origin)
         (say
            (Printf.sprintf "This pattern does not match %s. Name %s, or write `..` for the rest."
               (show_names missing)
               (match missing with [ _ ] -> "it" | _ -> "them")))
   | Not_structural { at = origin; type_; constant } ->
-      make Not_structural (at origin)
+      make Not_structural (Build.at origin)
         (say
            (Printf.sprintf
               "A constant in a pattern needs a type with structural equality, whose `==` compares \
@@ -1475,55 +1489,56 @@ let describe = function
                Match with a guard instead, as in `value if value == %s`."
               (Types.show type_) constant))
   | Not_a_constant { at = origin } ->
-      make Unknown_member (at origin) (say "This names no constant.")
+      make Unknown_member (Build.at origin) (say "This names no constant.")
   | Literal_does_not_fit { at = origin; number; excluded; low; high } ->
-      make Literal_out_of_range (at origin)
+      make Literal_out_of_range (Build.at origin)
         (say
            (Printf.sprintf "`%s` does not fit in %s, which holds %s to %s." (Z.to_string number)
               (show_shown excluded) (Z.to_string low) (Z.to_string high)))
   | Negated_unsigned { at = origin; excluded; is_unsigned } ->
-      make Negated_unsigned (at origin)
+      make Negated_unsigned (Build.at origin)
         (say
            (Printf.sprintf "%s %s unsigned, so it cannot be negated."
               (show_shown_capitalized excluded)
               (if is_unsigned then "is" else "may be")))
   | Literal_fits_no_integer { at = origin; number } ->
-      make Literal_out_of_range (at origin)
+      make Literal_out_of_range (Build.at origin)
         (say (Printf.sprintf "`%s` does not fit in any integer type." (Z.to_string number)))
   | Character_literal { at = origin; tag } ->
-      make Character_scalar_count (at origin)
+      make Character_scalar_count (Build.at origin)
         (say
            (match tag with
            | Character ->
                "`Character\"...\"` holds exactly one Unicode scalar value, with no `${...}`."
            | _ -> "`UInt8\"...\"` holds exactly one ASCII character, with no `${...}`."))
   | Integer_pattern_type { at = origin; excluded } ->
-      make Mismatch (at origin)
+      make Mismatch (Build.at origin)
         (say
            (Printf.sprintf "An integer pattern matches an integer, not %s." (show_shown excluded)))
   | String_pattern_type { at = origin; type_ } ->
-      make Mismatch (at origin)
+      make Mismatch (Build.at origin)
         (say (Printf.sprintf "A string pattern matches a string, not `%s`." (Types.show type_)))
   | Capability_mismatch { at = origin; left; right } ->
-      make Mismatch (at origin)
+      make Mismatch (Build.at origin)
         (say
            (Printf.sprintf
               "Two function types here must use the same capabilities, and one uses `%s` where the \
                other uses `%s`."
               (Types.show_capabilities left) (Types.show_capabilities right)))
   | Undetermined { at = origin; undetermined } ->
-      make Cannot_infer (at origin) (describe_undetermined origin undetermined)
+      make Cannot_infer (Build.at origin) (describe_undetermined origin undetermined)
   | Types_undetermined { at = origin } ->
-      make Cannot_infer (at origin) (say "The types here cannot be inferred from this code alone.")
+      make Cannot_infer (Build.at origin)
+        (say "The types here cannot be inferred from this code alone.")
   | Trait_arguments_undetermined { at = origin; trait } ->
-      make Cannot_infer (at origin)
+      make Cannot_infer (Build.at origin)
         (say
            (Printf.sprintf
               "This call does not determine the arguments of `%s`. Write the call in full with \
                them."
               (show_trait_name trait)))
   | Lambda_needs_type { at = origin; remedy } ->
-      make Lambda_needs_type (at origin)
+      make Lambda_needs_type (Build.at origin)
         (say
            ("A lambda's parameter types come from where it is used, and nothing here gives them. "
            ^
@@ -1533,7 +1548,7 @@ let describe = function
                "Bind it with a typed `let`, such as `let double: fn(Int64) -> Int64 = fn(x) { x * \
                 2 }`."))
   | Range_not_integer { at = origin; owner; element } ->
-      make Not_iterable (at origin)
+      make Not_iterable (Build.at origin)
         (say
            (Printf.sprintf "%s range is of integers, not `%s`."
               (match owner with
@@ -1541,19 +1556,19 @@ let describe = function
               | Range_of_quantifier -> "A quantifier's")
               (Types.show element)))
   | Unused_value { at = origin; type_ } ->
-      make Unused_value (at origin)
-        ~fixes:[ fix "Discard it on purpose." [ insert_before origin [ Text "let _ = " ] ] ]
+      make Unused_value (Build.at origin)
+        ~fixes:[ fix "Discard it on purpose." [ Build.insert_before origin [ Text "let _ = " ] ] ]
         (say
            (Printf.sprintf
               "This value of type `%s` is not used. Use it, or discard it with `let _ =`."
               (Types.show type_)))
   | Let_else_falls_through { at = origin } ->
-      make Mismatch (at origin)
+      make Mismatch (Build.at origin)
         (say
            "The `else` of a `let` must leave the block, with `return`, `break`, `continue`, or \
             `unreachable`.")
   | Not_iterable_loop { at = origin; mode; type_ } ->
-      make Not_iterable (at origin)
+      make Not_iterable (Build.at origin)
         (say
            (match mode with
            | Read ->
@@ -1570,54 +1585,55 @@ let describe = function
                  "A `for` loop cannot consume %s: it implements neither `IntoCursor` nor `Cursor`."
                  (show_shown type_)))
   | Cursor_not_cursor { at = origin; type_; cursor } ->
-      make Not_iterable (at origin)
+      make Not_iterable (Build.at origin)
         (say
            (Printf.sprintf
               "The `IntoCursor` impl of `%s` gives `%s` as its `Cursor`, which does not implement \
                `Cursor`."
               (Types.show type_) (Types.show cursor)))
   | Not_displayable { at = origin; type_ } ->
-      make No_impl (at origin)
+      make No_impl (Build.at origin)
         (say
            (Printf.sprintf "`%s` does not implement `Display`, so it cannot be interpolated."
               (Types.show type_)))
   | Template_part_conversion { at = origin; part_type; part; tag_type } ->
-      make No_impl (at origin)
+      make No_impl (Build.at origin)
         (say
            (Printf.sprintf "`%s` cannot become a `%s`, the part type of `%s`."
               (Types.show part_type) (Types.show part) (Types.show tag_type)))
   | Not_a_tag { at = origin; tag_type } ->
-      make No_impl (at origin)
+      make No_impl (Build.at origin)
         (say
            (Printf.sprintf "`%s` does not implement `FromTemplate`, so it is not a tag."
               (Types.show tag_type)))
-  | Tag_not_a_type { at = origin } -> make Not_a_type (at origin) (say "A string's tag is a type.")
+  | Tag_not_a_type { at = origin } ->
+      make Not_a_type (Build.at origin) (say "A string's tag is a type.")
   | Array_length { at = origin; given; count } ->
-      make Mismatch (at origin)
+      make Mismatch (Build.at origin)
         (say
            (Printf.sprintf "This array has %d elements, and its type says %s." given
               (Z.to_string count)))
   | Lambda_arity { at = origin; given; function_type; expected } ->
-      make Mismatch (at origin)
+      make Mismatch (Build.at origin)
         (say
            (Printf.sprintf "This lambda takes %d parameters, and `%s` takes %d." given
               (Types.show function_type) expected))
   | Arm_pattern_count { at = origin; given; expected } ->
-      make Mismatch (at origin)
+      make Mismatch (Build.at origin)
         (say
            (Printf.sprintf "This arm has %d patterns, and the `match` has %d values." given expected))
   | Not_iterable_quantifier { at = origin; type_ } ->
-      make Not_iterable (at origin)
+      make Not_iterable (Build.at origin)
         (say
            (Printf.sprintf "A quantifier cannot go over %s: it does not implement `Iterable`."
               (show_shown type_)))
   | Specification_only_type { at = origin; subject; type_; specification_type } ->
       let subject =
         match subject with
-        | Binding_subject binding -> [ Text "`"; quote binding; Text "`" ]
+        | Binding_subject binding -> [ Description.Text "`"; Build.quote binding; Text "`" ]
         | Value_subject -> [ Text "This value" ]
       in
-      make Specification_only (at origin)
+      make Specification_only (Build.at origin)
         (subject
         @ say
             (if Types.equal type_ specification_type then
@@ -1636,339 +1652,373 @@ let examples : t list =
   [
     Mismatch
       {
-        at = example "at";
+        at = Build.example "at";
         mismatch =
           Expected
             {
               expected = Some_integer;
               actual = Some_integer;
-              copy = Some { copy_method = "‹copy_method›"; edit = Rename_copy (example "edit") };
+              copy =
+                Some { copy_method = "‹copy_method›"; edit = Rename_copy (Build.example "edit") };
             };
         decision =
           Some
             {
-              name = example "name";
-              decided = example_type;
+              name = Build.example "name";
+              decided = Build.example_type;
               site = Use;
-              decided_at = example "decided_at";
+              decided_at = Build.example "decided_at";
               declares = false;
             };
       };
     Mismatch
       {
-        at = example "at";
+        at = Build.example "at";
         mismatch = Loop_element { element = Some_integer; annotated = Some_integer };
         decision =
           Some
             {
-              name = example "name";
-              decided = example_type;
+              name = Build.example "name";
+              decided = Build.example_type;
               site = Use;
-              decided_at = example "decided_at";
+              decided_at = Build.example "decided_at";
               declares = false;
             };
       };
     Mismatch
       {
-        at = example "at";
+        at = Build.example "at";
         mismatch =
           Mismatched_integers
             {
-              left = example_type;
-              right = example_type;
-              widening = Some { side = Left; operand = example "operand"; target = example_type };
+              left = Build.example_type;
+              right = Build.example_type;
+              widening =
+                Some { side = Left; operand = Build.example "operand"; target = Build.example_type };
             };
         decision =
           Some
             {
-              name = example "name";
-              decided = example_type;
+              name = Build.example "name";
+              decided = Build.example_type;
               site = Use;
-              decided_at = example "decided_at";
+              decided_at = Build.example "decided_at";
               declares = false;
             };
       };
     Mismatch
       {
-        at = example "at";
+        at = Build.example "at";
         mismatch =
           Unsatisfied_bound
             {
-              of_type = Some example_type;
-              subject = example_type;
-              bound = example_trait;
+              of_type = Some Build.example_type;
+              subject = Build.example_type;
+              bound = Build.example_trait;
               unmet = Does_not_hold;
-              impl_need = Some { needing = example_type; condition = example_trait };
+              impl_need = Some { needing = Build.example_type; condition = Build.example_trait };
             };
         decision =
           Some
             {
-              name = example "name";
-              decided = example_type;
+              name = Build.example "name";
+              decided = Build.example_type;
               site = Use;
-              decided_at = example "decided_at";
+              decided_at = Build.example "decided_at";
               declares = false;
             };
       };
     Mismatch
       {
-        at = example "at";
+        at = Build.example "at";
         mismatch =
           Expected
             {
               expected = Some_integer;
               actual = Some_integer;
-              copy = Some { copy_method = "‹copy_method›"; edit = Rename_copy (example "edit") };
+              copy =
+                Some { copy_method = "‹copy_method›"; edit = Rename_copy (Build.example "edit") };
             };
         decision = None;
       };
     Integer_for_float
       {
-        at = example "at";
+        at = Build.example "at";
         wanted = Some_integer;
-        literals = [ (example "literals", Z.of_int 300) ];
+        literals = [ (Build.example "literals", Z.of_int 300) ];
       };
     Integer_for_float
-      { at = example "at"; wanted = Some_float; literals = [ (example "literals", Z.of_int 300) ] };
+      {
+        at = Build.example "at";
+        wanted = Some_float;
+        literals = [ (Build.example "literals", Z.of_int 300) ];
+      };
     Integer_for_float
       {
-        at = example "at";
-        wanted = Exactly example_type;
-        literals = [ (example "literals", Z.of_int 300) ];
+        at = Build.example "at";
+        wanted = Exactly Build.example_type;
+        literals = [ (Build.example "literals", Z.of_int 300) ];
       };
-    Decided_in_specification { at = example "at"; local = Some (example "local") };
-    Decided_in_specification { at = example "at"; local = None };
+    Decided_in_specification { at = Build.example "at"; local = Some (Build.example "local") };
+    Decided_in_specification { at = Build.example "at"; local = None };
     Operator_output
       {
-        at = example "at";
-        found = example_type;
-        wanted = example_type;
-        impl_need = Some { needing = example_type; condition = example_trait };
+        at = Build.example "at";
+        found = Build.example_type;
+        wanted = Build.example_type;
+        impl_need = Some { needing = Build.example_type; condition = Build.example_trait };
       };
     Operator_output
-      { at = example "at"; found = example_type; wanted = example_type; impl_need = None };
-    Operator_not_implemented
       {
-        at = example "at";
-        subject = example_type;
-        trait = example_trait;
-        impl_need = Some { needing = example_type; condition = example_trait };
+        at = Build.example "at";
+        found = Build.example_type;
+        wanted = Build.example_type;
+        impl_need = None;
       };
     Operator_not_implemented
-      { at = example "at"; subject = example_type; trait = example_trait; impl_need = None };
+      {
+        at = Build.example "at";
+        subject = Build.example_type;
+        trait = Build.example_trait;
+        impl_need = Some { needing = Build.example_type; condition = Build.example_trait };
+      };
+    Operator_not_implemented
+      {
+        at = Build.example "at";
+        subject = Build.example_type;
+        trait = Build.example_trait;
+        impl_need = None;
+      };
     Not_implemented
       {
-        at = example "at";
-        subject = example_type;
-        trait = example_trait;
+        at = Build.example "at";
+        subject = Build.example_type;
+        trait = Build.example_trait;
         is_iteration = false;
-        impl_need = Some { needing = example_type; condition = example_trait };
+        impl_need = Some { needing = Build.example_type; condition = Build.example_trait };
       };
     Not_implemented
       {
-        at = example "at";
-        subject = example_type;
-        trait = example_trait;
+        at = Build.example "at";
+        subject = Build.example_type;
+        trait = Build.example_trait;
         is_iteration = true;
-        impl_need = Some { needing = example_type; condition = example_trait };
+        impl_need = Some { needing = Build.example_type; condition = Build.example_trait };
       };
     Not_implemented
       {
-        at = example "at";
-        subject = example_type;
-        trait = example_trait;
+        at = Build.example "at";
+        subject = Build.example_type;
+        trait = Build.example_trait;
         is_iteration = false;
         impl_need = None;
       };
-    Body_ends_without_value { body = example "body"; output = example_type };
-    Last_statement_without_value { statement = example "statement"; output = example_type };
-    Not_bit_vector { at = example "at"; type_ = example_type };
-    Unchecked_invariant { at = example "at" };
+    Body_ends_without_value { body = Build.example "body"; output = Build.example_type };
+    Last_statement_without_value
+      { statement = Build.example "statement"; output = Build.example_type };
+    Not_bit_vector { at = Build.example "at"; type_ = Build.example_type };
+    Unchecked_invariant { at = Build.example "at" };
     Argument_count
-      { at = example "at"; callee = Fields_of (Variant_name "‹callee›"); expected = 2; given = 3 };
-    Argument_count { at = example "at"; callee = Method_besides_self; expected = 2; given = 3 };
-    Argument_count { at = example "at"; callee = Plain_function; expected = 2; given = 3 };
-    Label_in_indirect_call { label = example "label"; value = example "value" };
-    Not_callable { at = example "at"; callee = Some_integer };
-    Not_callable { at = example "at"; callee = Some_float };
-    Not_callable { at = example "at"; callee = Exactly example_type };
-    Missing_parameter { at = example "at"; parameter = "‹parameter›" };
+      {
+        at = Build.example "at";
+        callee = Fields_of (Variant_name "‹callee›");
+        expected = 2;
+        given = 3;
+      };
+    Argument_count
+      { at = Build.example "at"; callee = Method_besides_self; expected = 2; given = 3 };
+    Argument_count { at = Build.example "at"; callee = Plain_function; expected = 2; given = 3 };
+    Label_in_indirect_call { label = Build.example "label"; value = Build.example "value" };
+    Not_callable { at = Build.example "at"; callee = Some_integer };
+    Not_callable { at = Build.example "at"; callee = Some_float };
+    Not_callable { at = Build.example "at"; callee = Exactly Build.example_type };
+    Missing_parameter { at = Build.example "at"; parameter = "‹parameter›" };
     Unknown_variant
       {
-        at = example "at";
-        type_ = example_type;
+        at = Build.example "at";
+        type_ = Build.example_type;
         variant = "‹variant›";
         candidates = [ "‹candidates›" ];
       };
-    Variant_without_fields { at = example "at"; variant = "‹variant›" };
-    Not_a_record_construction { at = example "at"; type_ = example_type };
-    Opaque_construction { at = example "at"; type_ = example_type };
-    Mut_base_of_with { at = example "at" };
+    Variant_without_fields { at = Build.example "at"; variant = "‹variant›" };
+    Not_a_record_construction { at = Build.example "at"; type_ = Build.example_type };
+    Opaque_construction { at = Build.example "at"; type_ = Build.example_type };
+    Mut_base_of_with { at = Build.example "at" };
     Unknown_label
       {
-        label = example "label";
+        label = Build.example "label";
         written = "‹written›";
         owner = Some (Variant_name "‹owner›");
         candidates = [ "‹candidates›" ];
       };
     Unknown_label
       {
-        label = example "label";
+        label = Build.example "label";
         written = "‹written›";
         owner = None;
         candidates = [ "‹candidates›" ];
       };
-    Positional_after_labeled { argument = example "argument"; label = Some "‹label›" };
-    Positional_after_labeled { argument = example "argument"; label = None };
+    Positional_after_labeled { argument = Build.example "argument"; label = Some "‹label›" };
+    Positional_after_labeled { argument = Build.example "argument"; label = None };
     Tuple_argument_out_of_order
       {
-        argument = example "argument";
+        argument = Build.example "argument";
         owner = Variant_name "‹owner›";
         filled = "‹filled›";
         field = "‹field›";
       };
     Tuple_argument_out_of_order
       {
-        argument = example "argument";
-        owner = Type_named example_type;
+        argument = Build.example "argument";
+        owner = Type_named Build.example_type;
         filled = "‹filled›";
         field = "‹field›";
       };
     Bare_value
       {
-        argument = example "argument";
+        argument = Build.example "argument";
         owner = Pattern_owner { owner = Variant_name "‹owner›"; is_tuple_type = false };
         fields = [ "‹fields›" ];
         label = Some "‹label›";
       };
     Bare_value
       {
-        argument = example "argument";
+        argument = Build.example "argument";
         owner = Construction_owner (Variant_name "‹owner›");
         fields = [ "‹fields›" ];
         label = Some "‹label›";
       };
     Bare_value
       {
-        argument = example "argument";
+        argument = Build.example "argument";
         owner = Pattern_owner { owner = Variant_name "‹owner›"; is_tuple_type = false };
         fields = [ "‹fields›" ];
         label = None;
       };
-    Repeated_argument { at = example "at"; name = "‹name›"; is_pattern = false };
-    Repeated_argument { at = example "at"; name = "‹name›"; is_pattern = true };
-    Not_an_integer { at = example "at"; subject = Potential; excluded = Some_integer };
-    Not_an_integer { at = example "at"; subject = Decreases_measure; excluded = Some_integer };
-    Not_an_integer { at = example "at"; subject = Cost_bound; excluded = Some_integer };
-    Not_an_integer { at = example "at"; subject = Log_argument; excluded = Some_integer };
-    Not_an_integer { at = example "at"; subject = Power_argument; excluded = Some_integer };
-    Not_an_integer { at = example "at"; subject = Potential; excluded = Some_float };
-    Not_an_integer { at = example "at"; subject = Potential; excluded = Exactly example_type };
+    Repeated_argument { at = Build.example "at"; name = "‹name›"; is_pattern = false };
+    Repeated_argument { at = Build.example "at"; name = "‹name›"; is_pattern = true };
+    Not_an_integer { at = Build.example "at"; subject = Potential; excluded = Some_integer };
+    Not_an_integer { at = Build.example "at"; subject = Decreases_measure; excluded = Some_integer };
+    Not_an_integer { at = Build.example "at"; subject = Cost_bound; excluded = Some_integer };
+    Not_an_integer { at = Build.example "at"; subject = Log_argument; excluded = Some_integer };
+    Not_an_integer { at = Build.example "at"; subject = Power_argument; excluded = Some_integer };
+    Not_an_integer { at = Build.example "at"; subject = Potential; excluded = Some_float };
+    Not_an_integer
+      { at = Build.example "at"; subject = Potential; excluded = Exactly Build.example_type };
     No_method
       {
-        at = example "at";
-        owner = Type_owner { type_ = example_type; view = Some example_type };
+        at = Build.example "at";
+        owner = Type_owner { type_ = Build.example_type; view = Some Build.example_type };
         name = "‹name›";
         candidates = [ "‹candidates›" ];
       };
     No_method
       {
-        at = example "at";
+        at = Build.example "at";
         owner = Named_owner "‹owner›";
         name = "‹name›";
         candidates = [ "‹candidates›" ];
       };
     No_method
       {
-        at = example "at";
-        owner = Path_owner example_path;
+        at = Build.example "at";
+        owner = Path_owner Build.example_path;
         name = "‹name›";
         candidates = [ "‹candidates›" ];
       };
-    Counted_not_a_capability { at = example "at"; written = "‹written›" };
-    Counted_not_a_function { at = example "at"; name = "‹name›"; type_ = example_type };
-    Counted_neither { at = example "at"; name = "‹name›" };
+    Counted_not_a_capability { at = Build.example "at"; written = "‹written›" };
+    Counted_not_a_function { at = Build.example "at"; name = "‹name›"; type_ = Build.example_type };
+    Counted_neither { at = Build.example "at"; name = "‹name›" };
     Cost_of_other_metric
       {
-        at = example "at";
+        at = Build.example "at";
         operand = { cost_function = Language.Metric.Time; callee = Function_parameter "‹callee›" };
-        cost_function_name = example "cost_function_name";
+        cost_function_name = Build.example "cost_function_name";
         bounded = Language.Metric.Time;
       };
     Cost_of_calls
       {
-        at = example "at";
+        at = Build.example "at";
         operand = { cost_function = Language.Metric.Time; callee = Function_parameter "‹callee›" };
       };
     Upper_bound_in_exact_bound
       {
-        at = example "at";
+        at = Build.example "at";
         operand = { cost_function = Language.Metric.Time; callee = Function_parameter "‹callee›" };
       };
     Unbounded_time
-      { clause = example "clause"; condition = example_condition; has_condition = false };
+      {
+        clause = Build.example "clause";
+        condition = Build.example_condition;
+        has_condition = false;
+      };
     Unbounded_time
-      { clause = example "clause"; condition = example_condition; has_condition = true };
-    Clause_never_holds { at = example "at" };
+      { clause = Build.example "clause"; condition = Build.example_condition; has_condition = true };
+    Clause_never_holds { at = Build.example "at" };
     Constant_out_of_range
       {
-        at = example "at";
+        at = Build.example "at";
         constant = Z.of_int 300;
-        type_ = example_type;
+        type_ = Build.example_type;
         low = Z.of_int 300;
         high = Z.of_int 300;
       };
-    Division_by_zero { at = example "at" };
-    Default_not_constant { at = example "at" };
-    Not_constant { at = example "at" };
-    Condition_not_constant { at = example "at" };
-    Condition_names_parameter { at = example "at" };
-    Constant_not_data { at = example "at"; part = Function_type };
-    Constant_not_data { at = example "at"; part = Handle };
-    Constant_not_data { at = example "at"; part = Shared_state };
-    Hidden_in_public_clause { at = example "at"; name = "‹name›"; hidden = example_path };
-    Float_too_large { at = example "at"; target = Some_integer };
-    Float_too_large { at = example "at"; target = Some_float };
-    Float_too_large { at = example "at"; target = Exactly example_type };
-    Runs_in_formula { at = example "at"; construct = Unreachable_expression };
-    Runs_in_formula { at = example "at"; construct = Break_expression };
-    Runs_in_formula { at = example "at"; construct = Continue_expression };
-    Runs_in_formula { at = example "at"; construct = Return_expression };
-    Runs_in_formula { at = example "at"; construct = Try_expression };
-    Runs_in_formula { at = example "at"; construct = Var_binding };
-    Runs_in_formula { at = example "at"; construct = For_statement };
-    Runs_in_formula { at = example "at"; construct = While_statement };
-    Runs_in_formula { at = example "at"; construct = Concurrent_block };
-    Runs_in_formula { at = example "at"; construct = Parallel_block };
-    Self_outside_method { at = example "at" };
-    Self_type_as_value { at = example "at" };
-    Quantifier_over_type_in_code { at = example "at" };
-    Static_method_as_value { at = example "at"; name = "‹name›" };
-    Method_with_type_arguments_as_value { at = example "at" };
-    String_indexed { at = example "at" };
-    Not_sliceable { at = example "at"; base = Some_integer };
-    Not_sliceable { at = example "at"; base = Some_float };
-    Not_sliceable { at = example "at"; base = Exactly example_type };
-    Not_indexable { at = example "at"; base = Some_integer };
-    Not_indexable { at = example "at"; base = Some_float };
-    Not_indexable { at = example "at"; base = Exactly example_type };
-    Several_indexes { at = example "at" };
-    Parameter_with_arguments { at = example "at"; name = "‹name›" };
-    Type_arity { at = example "at"; type_path = example_path; expected = 2; given = 3 };
-    Associated_in_type_arguments { at = example "at" };
-    Not_a_type_argument { at = example "at" };
+    Division_by_zero { at = Build.example "at" };
+    Default_not_constant { at = Build.example "at" };
+    Not_constant { at = Build.example "at" };
+    Condition_not_constant { at = Build.example "at" };
+    Condition_names_parameter { at = Build.example "at" };
+    Constant_not_data { at = Build.example "at"; part = Function_type };
+    Constant_not_data { at = Build.example "at"; part = Handle };
+    Constant_not_data { at = Build.example "at"; part = Shared_state };
+    Hidden_in_public_clause
+      { at = Build.example "at"; name = "‹name›"; hidden = Build.example_path };
+    Float_too_large { at = Build.example "at"; target = Some_integer };
+    Float_too_large { at = Build.example "at"; target = Some_float };
+    Float_too_large { at = Build.example "at"; target = Exactly Build.example_type };
+    Runs_in_formula { at = Build.example "at"; construct = Unreachable_expression };
+    Runs_in_formula { at = Build.example "at"; construct = Break_expression };
+    Runs_in_formula { at = Build.example "at"; construct = Continue_expression };
+    Runs_in_formula { at = Build.example "at"; construct = Return_expression };
+    Runs_in_formula { at = Build.example "at"; construct = Try_expression };
+    Runs_in_formula { at = Build.example "at"; construct = Var_binding };
+    Runs_in_formula { at = Build.example "at"; construct = For_statement };
+    Runs_in_formula { at = Build.example "at"; construct = While_statement };
+    Runs_in_formula { at = Build.example "at"; construct = Concurrent_block };
+    Runs_in_formula { at = Build.example "at"; construct = Parallel_block };
+    Self_outside_method { at = Build.example "at" };
+    Self_type_as_value { at = Build.example "at" };
+    Quantifier_over_type_in_code { at = Build.example "at" };
+    Static_method_as_value { at = Build.example "at"; name = "‹name›" };
+    Method_with_type_arguments_as_value { at = Build.example "at" };
+    String_indexed { at = Build.example "at" };
+    Not_sliceable { at = Build.example "at"; base = Some_integer };
+    Not_sliceable { at = Build.example "at"; base = Some_float };
+    Not_sliceable { at = Build.example "at"; base = Exactly Build.example_type };
+    Not_indexable { at = Build.example "at"; base = Some_integer };
+    Not_indexable { at = Build.example "at"; base = Some_float };
+    Not_indexable { at = Build.example "at"; base = Exactly Build.example_type };
+    Several_indexes { at = Build.example "at" };
+    Parameter_with_arguments { at = Build.example "at"; name = "‹name›" };
+    Type_arity { at = Build.example "at"; type_path = Build.example_path; expected = 2; given = 3 };
+    Associated_in_type_arguments { at = Build.example "at" };
+    Not_a_type_argument { at = Build.example "at" };
     Hidden_member
-      { at = example "at"; hidden = example_path; visibility = Language.Visibility.Private };
-    No_receiver_overload { at = example "at"; name = "‹name›" };
-    Old_arity { at = example "at"; given = 3 };
-    Final_misused { at = example "at" };
-    Identical_arity { at = example "at"; given = 3 };
-    Not_a_function_or_type { at = example "at"; name = "‹name›" };
-    Callback_ensures_in_code { at = example "at"; name = "‹name›" };
-    Callback_ensures_label { at = example "at"; name = "‹name›" };
+      {
+        at = Build.example "at";
+        hidden = Build.example_path;
+        visibility = Language.Visibility.Private;
+      };
+    No_receiver_overload { at = Build.example "at"; name = "‹name›" };
+    Old_arity { at = Build.example "at"; given = 3 };
+    Final_misused { at = Build.example "at" };
+    Identical_arity { at = Build.example "at"; given = 3 };
+    Not_a_function_or_type { at = Build.example "at"; name = "‹name›" };
+    Callback_ensures_in_code { at = Build.example "at"; name = "‹name›" };
+    Callback_ensures_label { at = Build.example "at"; name = "‹name›" };
     Callback_ensures_arity
       {
-        at = example "at";
+        at = Build.example "at";
         name = "‹name›";
         inputs = [ Language.Mode.Read ];
         has_result = false;
@@ -1976,189 +2026,232 @@ let examples : t list =
       };
     Callback_ensures_arity
       {
-        at = example "at";
+        at = Build.example "at";
         name = "‹name›";
         inputs = [ Language.Mode.Read ];
         has_result = true;
         given = 3;
       };
-    Ensures_of_non_parameter { at = example "at"; name = "‹name›" };
-    Ensures_without_function { at = example "at"; base = Some_integer };
-    Ensures_without_function { at = example "at"; base = Some_float };
-    Ensures_without_function { at = example "at"; base = Exactly example_type };
+    Ensures_of_non_parameter { at = Build.example "at"; name = "‹name›" };
+    Ensures_without_function { at = Build.example "at"; base = Some_integer };
+    Ensures_without_function { at = Build.example "at"; base = Some_float };
+    Ensures_without_function { at = Build.example "at"; base = Exactly Build.example_type };
     Cost_operand_not_callee
-      { at = example "at"; metric = Language.Metric.Time; operand = Operand_is_neither };
+      { at = Build.example "at"; metric = Language.Metric.Time; operand = Operand_is_neither };
     Cost_operand_not_callee
       {
-        at = example "at";
+        at = Build.example "at";
         metric = Language.Metric.Time;
-        operand = Local_of_type { name = "‹name›"; type_ = example_type };
+        operand = Local_of_type { name = "‹name›"; type_ = Build.example_type };
       };
     Cost_operand_not_callee
-      { at = example "at"; metric = Language.Metric.Time; operand = Name_is_neither "‹operand›" };
-    No_bound_method { at = example "at"; type_ = example_type; name = "‹name›" };
-    Ambiguous_cost_method
-      { at = example "at"; type_ = example_type; name = "‹name›"; metric = Language.Metric.Time };
-    New_on_literal_type
       {
-        at = example "at";
-        type_ = example_type;
-        literal = Empty_list;
-        call = Some (example "call");
+        at = Build.example "at";
+        metric = Language.Metric.Time;
+        operand = Name_is_neither "‹operand›";
+      };
+    No_bound_method { at = Build.example "at"; type_ = Build.example_type; name = "‹name›" };
+    Ambiguous_cost_method
+      {
+        at = Build.example "at";
+        type_ = Build.example_type;
+        name = "‹name›";
+        metric = Language.Metric.Time;
       };
     New_on_literal_type
-      { at = example "at"; type_ = example_type; literal = Empty_map; call = Some (example "call") };
+      {
+        at = Build.example "at";
+        type_ = Build.example_type;
+        literal = Empty_list;
+        call = Some (Build.example "call");
+      };
     New_on_literal_type
-      { at = example "at"; type_ = example_type; literal = Empty_list; call = None };
+      {
+        at = Build.example "at";
+        type_ = Build.example_type;
+        literal = Empty_map;
+        call = Some (Build.example "call");
+      };
+    New_on_literal_type
+      { at = Build.example "at"; type_ = Build.example_type; literal = Empty_list; call = None };
     Ambiguous_static_method
-      { at = example "at"; type_ = example_type; name = "‹name›"; traits = [ example_trait ] };
-    Trait_arity { at = example "at"; trait = example_trait; expected = 2; given = 3 };
-    Receiver_missing_in_full_call { at = example "at" };
+      {
+        at = Build.example "at";
+        type_ = Build.example_type;
+        name = "‹name›";
+        traits = [ Build.example_trait ];
+      };
+    Trait_arity { at = Build.example "at"; trait = Build.example_trait; expected = 2; given = 3 };
+    Receiver_missing_in_full_call { at = Build.example "at" };
     Wrong_receiver_overload
       {
-        at = example "at";
+        at = Build.example "at";
         name = "‹name›";
         wanted = Path.Instance Read;
         overloads = [ Path.Instance Read ];
       };
-    Missing_receiver_mode { receiver = example "receiver"; name = "‹name›" };
+    Missing_receiver_mode { receiver = Build.example "receiver"; name = "‹name›" };
     Ambiguous_method_call
       {
-        at = example "at";
-        call = example "call";
-        type_ = example_type;
+        at = Build.example "at";
+        call = Build.example "call";
+        type_ = Build.example_type;
         name = "‹name›";
-        receiver = example "receiver";
-        arguments = [ { Description.covering = [ example "arguments" ] } ];
-        traits = [ example_trait ];
+        receiver = Build.example "receiver";
+        arguments = [ { Description.covering = [ Build.example "arguments" ] } ];
+        traits = [ Build.example_trait ];
       };
     Index_not_mutable
-      { at = example "at"; by = Assignment; self_type = example_type; assigns = false };
+      { at = Build.example "at"; by = Assignment; self_type = Build.example_type; assigns = false };
     Index_not_mutable
-      { at = example "at"; by = Passed_mut; self_type = example_type; assigns = false };
+      { at = Build.example "at"; by = Passed_mut; self_type = Build.example_type; assigns = false };
     Index_not_mutable
-      { at = example "at"; by = Assignment; self_type = example_type; assigns = true };
-    Stored_slice_written { at = example "at"; by = Assignment; stored = Held_by "‹stored›" };
-    Stored_slice_written { at = example "at"; by = Passed_mut; stored = Held_by "‹stored›" };
-    Stored_slice_written { at = example "at"; by = Assignment; stored = In_field };
-    Stored_slice_written { at = example "at"; by = Assignment; stored = In_element };
-    Stored_slice_written { at = example "at"; by = Assignment; stored = Lent_by_a_call };
-    Slice_parameter_assigned { at = example "at"; parameter = "‹parameter›" };
-    Slice_passed_to_generic { at = example "at" };
-    Mutation_in_formula { at = example "at"; by = Assignment };
-    Mutation_in_formula { at = example "at"; by = Passed_mut };
-    Captured_mutation { at = example "at"; by = Assignment; name = "‹name›" };
-    Captured_mutation { at = example "at"; by = Passed_mut; name = "‹name›" };
-    Read_only_mutation { at = example "at"; by = Assignment; name = "‹name›" };
-    Read_only_mutation { at = example "at"; by = Passed_mut; name = "‹name›" };
-    Lent_read_only_assigned { at = example "at" };
+      { at = Build.example "at"; by = Assignment; self_type = Build.example_type; assigns = true };
+    Stored_slice_written { at = Build.example "at"; by = Assignment; stored = Held_by "‹stored›" };
+    Stored_slice_written { at = Build.example "at"; by = Passed_mut; stored = Held_by "‹stored›" };
+    Stored_slice_written { at = Build.example "at"; by = Assignment; stored = In_field };
+    Stored_slice_written { at = Build.example "at"; by = Assignment; stored = In_element };
+    Stored_slice_written { at = Build.example "at"; by = Assignment; stored = Lent_by_a_call };
+    Slice_parameter_assigned { at = Build.example "at"; parameter = "‹parameter›" };
+    Slice_passed_to_generic { at = Build.example "at" };
+    Mutation_in_formula { at = Build.example "at"; by = Assignment };
+    Mutation_in_formula { at = Build.example "at"; by = Passed_mut };
+    Captured_mutation { at = Build.example "at"; by = Assignment; name = "‹name›" };
+    Captured_mutation { at = Build.example "at"; by = Passed_mut; name = "‹name›" };
+    Read_only_mutation { at = Build.example "at"; by = Assignment; name = "‹name›" };
+    Read_only_mutation { at = Build.example "at"; by = Passed_mut; name = "‹name›" };
+    Lent_read_only_assigned { at = Build.example "at" };
     Mode_on_assignment_target
-      { at = example "at"; inner = example "inner"; keyword = Language.Mode.Read };
-    Not_assignable_place { at = example "at" };
-    Mode_on_read_argument { at = example "at"; inner = example "inner"; parameter = "‹parameter›" };
-    Missing_mut_argument { at = example "at"; parameter = "‹parameter›" };
-    Lent_read_only_argument { at = example "at"; parameter = "‹parameter›" };
-    Temporary_passed_mut { at = example "at"; parameter = "‹parameter›" };
-    Redundant_own { at = example "at"; inner = example "inner"; type_ = example_type };
-    Mut_for_own { at = example "at"; parameter = "‹parameter›" };
-    Type_parameter_as_value { at = example "at"; name = "‹name›" };
-    Theorem_as_value { at = example "at"; name = "‹name›" };
-    Type_as_value { at = example "at"; name = "‹name›" };
-    Trait_as_value { at = example "at"; name = "‹name›" };
-    Specification_function_as_value { at = example "at"; name = "‹name›" };
+      { at = Build.example "at"; inner = Build.example "inner"; keyword = Language.Mode.Read };
+    Not_assignable_place { at = Build.example "at" };
+    Mode_on_read_argument
+      { at = Build.example "at"; inner = Build.example "inner"; parameter = "‹parameter›" };
+    Missing_mut_argument { at = Build.example "at"; parameter = "‹parameter›" };
+    Lent_read_only_argument { at = Build.example "at"; parameter = "‹parameter›" };
+    Temporary_passed_mut { at = Build.example "at"; parameter = "‹parameter›" };
+    Redundant_own
+      { at = Build.example "at"; inner = Build.example "inner"; type_ = Build.example_type };
+    Mut_for_own { at = Build.example "at"; parameter = "‹parameter›" };
+    Type_parameter_as_value { at = Build.example "at"; name = "‹name›" };
+    Theorem_as_value { at = Build.example "at"; name = "‹name›" };
+    Type_as_value { at = Build.example "at"; name = "‹name›" };
+    Trait_as_value { at = Build.example "at"; name = "‹name›" };
+    Specification_function_as_value { at = Build.example "at"; name = "‹name›" };
     Variant_with_fields_as_function
-      { at = example "at"; variant = "‹variant›"; fields = [ "‹fields›" ] };
-    No_variants { at = example "at"; type_ = example_type };
-    Unknown_field
-      { at = example "at"; base = Some_integer; name = "‹name›"; candidates = [ "‹candidates›" ] };
-    Unknown_field
-      { at = example "at"; base = Some_float; name = "‹name›"; candidates = [ "‹candidates›" ] };
+      { at = Build.example "at"; variant = "‹variant›"; fields = [ "‹fields›" ] };
+    No_variants { at = Build.example "at"; type_ = Build.example_type };
     Unknown_field
       {
-        at = example "at";
-        base = Exactly example_type;
+        at = Build.example "at";
+        base = Some_integer;
         name = "‹name›";
         candidates = [ "‹candidates›" ];
       };
-    Opaque_field_read { at = example "at"; type_ = example_type };
-    Method_as_field { at = example "at"; name = "‹name›" };
-    Lending_function_value { at = example "at" };
-    No_member { at = example "at"; type_ = example_type; name = "‹name›"; view = Some "‹view›" };
-    No_member { at = example "at"; type_ = example_type; name = "‹name›"; view = None };
-    Type_argument_count { at = example "at"; expected = 2; given = 3 };
-    Type_for_value_argument { at = example "at" };
-    Value_for_type_argument { at = example "at" };
-    Specification_call_in_code { at = example "at"; name = "‹name›"; call = Theorem_call };
-    Specification_call_in_code { at = example "at"; name = "‹name›"; call = Mentions example_type };
+    Unknown_field
+      {
+        at = Build.example "at";
+        base = Some_float;
+        name = "‹name›";
+        candidates = [ "‹candidates›" ];
+      };
+    Unknown_field
+      {
+        at = Build.example "at";
+        base = Exactly Build.example_type;
+        name = "‹name›";
+        candidates = [ "‹candidates›" ];
+      };
+    Opaque_field_read { at = Build.example "at"; type_ = Build.example_type };
+    Method_as_field { at = Build.example "at"; name = "‹name›" };
+    Lending_function_value { at = Build.example "at" };
+    No_member
+      { at = Build.example "at"; type_ = Build.example_type; name = "‹name›"; view = Some "‹view›" };
+    No_member { at = Build.example "at"; type_ = Build.example_type; name = "‹name›"; view = None };
+    Type_argument_count { at = Build.example "at"; expected = 2; given = 3 };
+    Type_for_value_argument { at = Build.example "at" };
+    Value_for_type_argument { at = Build.example "at" };
+    Specification_call_in_code { at = Build.example "at"; name = "‹name›"; call = Theorem_call };
     Specification_call_in_code
-      { at = example "at"; name = "‹name›"; call = Specification_function_call };
-    Not_an_integer_operand { at = example "at"; operator = Bitwise; excluded = Some_integer };
-    Not_an_integer_operand { at = example "at"; operator = Shift; excluded = Some_integer };
-    Not_an_integer_operand { at = example "at"; operator = Complement; excluded = Some_integer };
-    Not_an_integer_operand { at = example "at"; operator = Bitwise; excluded = Some_float };
+      { at = Build.example "at"; name = "‹name›"; call = Mentions Build.example_type };
+    Specification_call_in_code
+      { at = Build.example "at"; name = "‹name›"; call = Specification_function_call };
+    Not_an_integer_operand { at = Build.example "at"; operator = Bitwise; excluded = Some_integer };
+    Not_an_integer_operand { at = Build.example "at"; operator = Shift; excluded = Some_integer };
     Not_an_integer_operand
-      { at = example "at"; operator = Bitwise; excluded = Exactly example_type };
-    Shift_amount_not_unsigned { at = example "at"; excluded = Some_integer };
-    Shift_amount_not_unsigned { at = example "at"; excluded = Some_float };
-    Shift_amount_not_unsigned { at = example "at"; excluded = Exactly example_type };
-    Try_error_mismatch { at = example "at"; output_error = example_type; error = example_type };
-    Try_misused { at = example "at" };
-    Implies_in_code { at = example "at" };
+      { at = Build.example "at"; operator = Complement; excluded = Some_integer };
+    Not_an_integer_operand { at = Build.example "at"; operator = Bitwise; excluded = Some_float };
+    Not_an_integer_operand
+      { at = Build.example "at"; operator = Bitwise; excluded = Exactly Build.example_type };
+    Shift_amount_not_unsigned { at = Build.example "at"; excluded = Some_integer };
+    Shift_amount_not_unsigned { at = Build.example "at"; excluded = Some_float };
+    Shift_amount_not_unsigned { at = Build.example "at"; excluded = Exactly Build.example_type };
+    Try_error_mismatch
+      { at = Build.example "at"; output_error = Build.example_type; error = Build.example_type };
+    Try_misused { at = Build.example "at" };
+    Implies_in_code { at = Build.example "at" };
     String_addition
-      { at = example "at"; join = Some (Fragment (example "join"), Fragment (example "join")) };
-    String_addition { at = example "at"; join = None };
+      {
+        at = Build.example "at";
+        join = Some (Fragment (Build.example "join"), Fragment (Build.example "join"));
+      };
+    String_addition { at = Build.example "at"; join = None };
     Alternative_type_mismatch
-      { at = example "at"; name = "‹name›"; first = example_type; here = example_type };
-    Range_pattern_type { at = example "at"; excluded = Some_integer };
-    Range_pattern_type { at = example "at"; excluded = Some_float };
-    Range_pattern_type { at = example "at"; excluded = Exactly example_type };
-    Variant_pattern_without_fields { at = example "at"; variant = "‹variant›" };
+      {
+        at = Build.example "at";
+        name = "‹name›";
+        first = Build.example_type;
+        here = Build.example_type;
+      };
+    Range_pattern_type { at = Build.example "at"; excluded = Some_integer };
+    Range_pattern_type { at = Build.example "at"; excluded = Some_float };
+    Range_pattern_type { at = Build.example "at"; excluded = Exactly Build.example_type };
+    Variant_pattern_without_fields { at = Build.example "at"; variant = "‹variant›" };
     Parenthesized_tuple_pattern
       {
-        at = example "at";
-        patterns = { Description.covering = [ example "patterns" ] };
-        type_ = example_type;
+        at = Build.example "at";
+        patterns = { Description.covering = [ Build.example "patterns" ] };
+        type_ = Build.example_type;
       };
-    Not_a_record_pattern { at = example "at"; type_ = Some_integer };
-    Not_a_record_pattern { at = example "at"; type_ = Some_float };
-    Not_a_record_pattern { at = example "at"; type_ = Exactly example_type };
-    Not_a_tuple_type_pattern { at = example "at"; type_ = Some_integer };
-    Not_a_tuple_type_pattern { at = example "at"; type_ = Some_float };
-    Not_a_tuple_type_pattern { at = example "at"; type_ = Exactly example_type };
+    Not_a_record_pattern { at = Build.example "at"; type_ = Some_integer };
+    Not_a_record_pattern { at = Build.example "at"; type_ = Some_float };
+    Not_a_record_pattern { at = Build.example "at"; type_ = Exactly Build.example_type };
+    Not_a_tuple_type_pattern { at = Build.example "at"; type_ = Some_integer };
+    Not_a_tuple_type_pattern { at = Build.example "at"; type_ = Some_float };
+    Not_a_tuple_type_pattern { at = Build.example "at"; type_ = Exactly Build.example_type };
     Tuple_pattern_arity
-      { at = example "at"; type_ = example_type; fields = [ "‹fields›" ]; given = 3 };
+      { at = Build.example "at"; type_ = Build.example_type; fields = [ "‹fields›" ]; given = 3 };
     Tuple_pattern_for_record
       {
-        at = example "at";
-        type_ = example_type;
+        at = Build.example "at";
+        type_ = Build.example_type;
         fields = [ "‹fields›" ];
-        form = Some [ (Some "‹form›", example "form") ];
+        form = Some [ (Some "‹form›", Build.example "form") ];
       };
     Tuple_pattern_for_record
-      { at = example "at"; type_ = example_type; fields = [ "‹fields›" ]; form = None };
-    Opaque_pattern { at = example "at"; type_ = example_type };
+      { at = Build.example "at"; type_ = Build.example_type; fields = [ "‹fields›" ]; form = None };
+    Opaque_pattern { at = Build.example "at"; type_ = Build.example_type };
     Tuple_pattern_out_of_order
       {
-        at = example "at";
-        type_ = example_type;
+        at = Build.example "at";
+        type_ = Build.example_type;
         name = "‹name›";
         bound_field = "‹bound_field›";
         reorder = Some [ "‹reorder›" ];
       };
     Tuple_pattern_out_of_order
       {
-        at = example "at";
-        type_ = example_type;
+        at = Build.example "at";
+        type_ = Build.example_type;
         name = "‹name›";
         bound_field = "‹bound_field›";
         reorder = None;
       };
-    Unmatched_fields { at = example "at"; missing = [ "‹missing›" ] };
-    Not_structural { at = example "at"; type_ = example_type; constant = "‹constant›" };
-    Not_a_constant { at = example "at" };
+    Unmatched_fields { at = Build.example "at"; missing = [ "‹missing›" ] };
+    Not_structural { at = Build.example "at"; type_ = Build.example_type; constant = "‹constant›" };
+    Not_a_constant { at = Build.example "at" };
     Literal_does_not_fit
       {
-        at = example "at";
+        at = Build.example "at";
         number = Z.of_int 300;
         excluded = Some_integer;
         low = Z.of_int 300;
@@ -2166,7 +2259,7 @@ let examples : t list =
       };
     Literal_does_not_fit
       {
-        at = example "at";
+        at = Build.example "at";
         number = Z.of_int 300;
         excluded = Some_float;
         low = Z.of_int 300;
@@ -2174,78 +2267,89 @@ let examples : t list =
       };
     Literal_does_not_fit
       {
-        at = example "at";
+        at = Build.example "at";
         number = Z.of_int 300;
-        excluded = Exactly example_type;
+        excluded = Exactly Build.example_type;
         low = Z.of_int 300;
         high = Z.of_int 300;
       };
-    Negated_unsigned { at = example "at"; excluded = Some_integer; is_unsigned = false };
-    Negated_unsigned { at = example "at"; excluded = Some_float; is_unsigned = false };
-    Negated_unsigned { at = example "at"; excluded = Exactly example_type; is_unsigned = false };
-    Negated_unsigned { at = example "at"; excluded = Some_integer; is_unsigned = true };
-    Literal_fits_no_integer { at = example "at"; number = Z.of_int 300 };
-    Character_literal { at = example "at"; tag = Language.Builtin_type.Int8 };
-    Integer_pattern_type { at = example "at"; excluded = Some_integer };
-    Integer_pattern_type { at = example "at"; excluded = Some_float };
-    Integer_pattern_type { at = example "at"; excluded = Exactly example_type };
-    String_pattern_type { at = example "at"; type_ = example_type };
+    Negated_unsigned { at = Build.example "at"; excluded = Some_integer; is_unsigned = false };
+    Negated_unsigned { at = Build.example "at"; excluded = Some_float; is_unsigned = false };
+    Negated_unsigned
+      { at = Build.example "at"; excluded = Exactly Build.example_type; is_unsigned = false };
+    Negated_unsigned { at = Build.example "at"; excluded = Some_integer; is_unsigned = true };
+    Literal_fits_no_integer { at = Build.example "at"; number = Z.of_int 300 };
+    Character_literal { at = Build.example "at"; tag = Language.Builtin_type.Int8 };
+    Integer_pattern_type { at = Build.example "at"; excluded = Some_integer };
+    Integer_pattern_type { at = Build.example "at"; excluded = Some_float };
+    Integer_pattern_type { at = Build.example "at"; excluded = Exactly Build.example_type };
+    String_pattern_type { at = Build.example "at"; type_ = Build.example_type };
     Capability_mismatch
       {
-        at = example "at";
-        left = Types.make_capability_set [ example_capability ];
-        right = Types.make_capability_set [ example_capability ];
+        at = Build.example "at";
+        left = Types.make_capability_set [ Build.example_capability ];
+        right = Types.make_capability_set [ Build.example_capability ];
       };
-    Undetermined { at = example "at"; undetermined = Binding_type };
+    Undetermined { at = Build.example "at"; undetermined = Binding_type };
     Undetermined
       {
-        at = example "at";
+        at = Build.example "at";
         undetermined =
           Generic_argument
-            { parameter = "‹parameter›"; is_type = false; declared_on = example_path };
+            { parameter = "‹parameter›"; is_type = false; declared_on = Build.example_path };
       };
-    Undetermined { at = example "at"; undetermined = List_element };
-    Undetermined { at = example "at"; undetermined = Map_entries };
-    Types_undetermined { at = example "at" };
-    Trait_arguments_undetermined { at = example "at"; trait = example_path };
+    Undetermined { at = Build.example "at"; undetermined = List_element };
+    Undetermined { at = Build.example "at"; undetermined = Map_entries };
+    Types_undetermined { at = Build.example "at" };
+    Trait_arguments_undetermined { at = Build.example "at"; trait = Build.example_path };
     Lambda_needs_type
       {
-        at = example "at";
-        remedy = Bracket_arguments { declared_on = example_path; is_type = false };
+        at = Build.example "at";
+        remedy = Bracket_arguments { declared_on = Build.example_path; is_type = false };
       };
-    Lambda_needs_type { at = example "at"; remedy = Typed_let };
-    Range_not_integer { at = example "at"; owner = Range_of_loop; element = example_type };
-    Range_not_integer { at = example "at"; owner = Range_of_quantifier; element = example_type };
-    Unused_value { at = example "at"; type_ = example_type };
-    Let_else_falls_through { at = example "at" };
-    Not_iterable_loop { at = example "at"; mode = Language.Mode.Read; type_ = Some_integer };
-    Not_iterable_loop { at = example "at"; mode = Language.Mode.Read; type_ = Some_float };
-    Not_iterable_loop { at = example "at"; mode = Language.Mode.Read; type_ = Exactly example_type };
-    Cursor_not_cursor { at = example "at"; type_ = example_type; cursor = example_type };
-    Not_displayable { at = example "at"; type_ = example_type };
+    Lambda_needs_type { at = Build.example "at"; remedy = Typed_let };
+    Range_not_integer
+      { at = Build.example "at"; owner = Range_of_loop; element = Build.example_type };
+    Range_not_integer
+      { at = Build.example "at"; owner = Range_of_quantifier; element = Build.example_type };
+    Unused_value { at = Build.example "at"; type_ = Build.example_type };
+    Let_else_falls_through { at = Build.example "at" };
+    Not_iterable_loop { at = Build.example "at"; mode = Language.Mode.Read; type_ = Some_integer };
+    Not_iterable_loop { at = Build.example "at"; mode = Language.Mode.Read; type_ = Some_float };
+    Not_iterable_loop
+      { at = Build.example "at"; mode = Language.Mode.Read; type_ = Exactly Build.example_type };
+    Cursor_not_cursor
+      { at = Build.example "at"; type_ = Build.example_type; cursor = Build.example_type };
+    Not_displayable { at = Build.example "at"; type_ = Build.example_type };
     Template_part_conversion
-      { at = example "at"; part_type = example_type; part = example_type; tag_type = example_type };
-    Not_a_tag { at = example "at"; tag_type = example_type };
-    Tag_not_a_type { at = example "at" };
-    Array_length { at = example "at"; given = 3; count = Z.of_int 300 };
-    Lambda_arity { at = example "at"; given = 3; function_type = example_type; expected = 2 };
-    Arm_pattern_count { at = example "at"; given = 3; expected = 2 };
-    Not_iterable_quantifier { at = example "at"; type_ = Some_integer };
-    Not_iterable_quantifier { at = example "at"; type_ = Some_float };
-    Not_iterable_quantifier { at = example "at"; type_ = Exactly example_type };
+      {
+        at = Build.example "at";
+        part_type = Build.example_type;
+        part = Build.example_type;
+        tag_type = Build.example_type;
+      };
+    Not_a_tag { at = Build.example "at"; tag_type = Build.example_type };
+    Tag_not_a_type { at = Build.example "at" };
+    Array_length { at = Build.example "at"; given = 3; count = Z.of_int 300 };
+    Lambda_arity
+      { at = Build.example "at"; given = 3; function_type = Build.example_type; expected = 2 };
+    Arm_pattern_count { at = Build.example "at"; given = 3; expected = 2 };
+    Not_iterable_quantifier { at = Build.example "at"; type_ = Some_integer };
+    Not_iterable_quantifier { at = Build.example "at"; type_ = Some_float };
+    Not_iterable_quantifier { at = Build.example "at"; type_ = Exactly Build.example_type };
     Specification_only_type
       {
-        at = example "at";
-        subject = Binding_subject (example "subject");
-        type_ = example_type;
-        specification_type = example_type;
+        at = Build.example "at";
+        subject = Binding_subject (Build.example "subject");
+        type_ = Build.example_type;
+        specification_type = Build.example_type;
       };
     Specification_only_type
       {
-        at = example "at";
+        at = Build.example "at";
         subject = Value_subject;
-        type_ = example_type;
-        specification_type = example_type;
+        type_ = Build.example_type;
+        specification_type = Build.example_type;
       };
   ]
 

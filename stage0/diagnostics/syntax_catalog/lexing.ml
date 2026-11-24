@@ -1,5 +1,3 @@
-open Description
-
 type character =
   | Invalid_byte of int
   | Ascii of char
@@ -127,7 +125,7 @@ type t = {
   fixes : fix list;
 }
 
-let say text = [ Text text ]
+let say text : _ Description.piece list = [ Text text ]
 
 let show_character = function
   | Invalid_byte byte -> Printf.sprintf "the byte 0x%02X" byte
@@ -317,7 +315,7 @@ let describe_problem at = function
          spans lines goes in a raw string, between `\"\"\"`s."
   | Not_an_escape escape ->
       (match escape with
-        | Written_escape -> [ Text "`"; Quote at; Text "`" ]
+        | Written_escape -> [ Description.Text "`"; Quote at; Text "`" ]
         | Backslash_then character ->
             [ Text (Printf.sprintf "`\\` followed by %s" (show_character character)) ])
       @ say
@@ -493,7 +491,7 @@ let describe ({ at; problem; notes; fixes } : t) : Source.span Description.t =
     severity = Error;
     location = At at;
     message = describe_problem at problem;
-    notes = List.map (fun (span, note) -> (At span, describe_note note)) notes;
+    notes = List.map (fun (span, note) -> (Description.At span, describe_note note)) notes;
     fixes =
       List.map
         (fun ({ action; edits } : fix) : Source.span Description.fix ->
@@ -502,7 +500,7 @@ let describe ({ at; problem; notes; fixes } : t) : Source.span Description.t =
             edits =
               List.map
                 (fun (edit : Source.span Diagnostic.edit) ->
-                  Replace (edit.span, [ Text edit.replacement ]))
+                  Description.Replace (edit.span, [ Text edit.replacement ]))
                 edits;
           })
         fixes;

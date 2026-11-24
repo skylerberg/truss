@@ -1,6 +1,3 @@
-open Description
-open Build
-
 type t =
   | Shadowing_arm of {
       arm : Core.origin;
@@ -24,7 +21,7 @@ type t =
     }
   | Refutable of { pattern : Core.origin; witness : string }
 
-let make ?(fixes = []) code location message =
+let make ?(fixes = []) code location message : Nodes.description =
   { code = Patterns code; severity = Error; location; message; notes = []; fixes }
 
 let unreachable = "Earlier arms already match everything this arm matches, so it is never reached."
@@ -32,12 +29,12 @@ let unreachable = "Earlier arms already match everything this arm matches, so it
 let describe = function
   | Shadowing_arm { arm; name; constant; bindings } ->
       let written = Path.show constant in
-      make Unreachable_arm (at arm)
+      make Unreachable_arm (Build.at arm)
         ~fixes:
           [
             {
               title = [ Text (Printf.sprintf "Write `%s`." written) ];
-              edits = List.map (fun binding -> replace binding [ Text written ]) bindings;
+              edits = List.map (fun binding -> Build.replace binding [ Text written ]) bindings;
             };
           ]
         [
@@ -48,22 +45,25 @@ let describe = function
                unreachable name written);
         ]
   | Unreachable_arm { arm } ->
-      make Unreachable_arm (at arm)
+      make Unreachable_arm (Build.at arm)
         ~fixes:
           [
-            { title = [ Text "Delete the arm." ]; edits = [ remove_lines { covering = [ arm ] } ] };
+            {
+              title = [ Text "Delete the arm." ];
+              edits = [ Build.remove_lines { covering = [ arm ] } ];
+            };
           ]
         [ Text unreachable ]
   | Unreachable_alternative { alternative; previous; next; is_after_alternatives } ->
       let deletion =
         match (previous, next) with
         | Some previous, _ ->
-            remove_entry { covering = [ alternative ] } (Previous { covering = [ previous ] })
+            Build.remove_entry { covering = [ alternative ] } (Previous { covering = [ previous ] })
         | None, Some next ->
-            remove_entry { covering = [ alternative ] } (Next { covering = [ next ] })
-        | None, None -> delete (Start alternative) (Stop alternative)
+            Build.remove_entry { covering = [ alternative ] } (Next { covering = [ next ] })
+        | None, None -> Build.delete (Start alternative) (Stop alternative)
       in
-      make Unreachable_alternative (at alternative)
+      make Unreachable_alternative (Build.at alternative)
         ~fixes:[ { title = [ Text "Delete the alternative." ]; edits = [ deletion ] } ]
         [
           Text
@@ -72,7 +72,7 @@ let describe = function
              else "Earlier arms already match everything this alternative matches.");
         ]
   | Not_covered { match_; last_arm; witness; other_witnesses; may_have_more } ->
-      make Not_covered (at match_)
+      make Not_covered (Build.at match_)
         ~fixes:
           (match last_arm with
           | Some last_arm ->
@@ -81,9 +81,9 @@ let describe = function
                   title = [ Text "Add an arm for each missing case." ];
                   edits =
                     [
-                      add_lines_after last_arm
+                      Build.add_lines_after last_arm
                         (List.map
-                           (fun witness -> [ Text (witness ^ " => todo") ])
+                           (fun witness -> [ Description.Text (witness ^ " => todo") ])
                            (witness :: other_witnesses));
                     ];
                 };
@@ -99,7 +99,7 @@ let describe = function
                | others, false -> Printf.sprintf ", nor %d others" (List.length others)));
         ]
   | Refutable { pattern; witness } ->
-      make Refutable (at pattern)
+      make Refutable (Build.at pattern)
         [
           Text
             (Printf.sprintf
@@ -108,8 +108,8 @@ let describe = function
                witness);
         ]
 
-let arm = example "arm"
-let other = example "other"
+let arm = Build.example "arm"
+let other = Build.example "other"
 
 let list_examples : Diagnostic.Code.patterns -> t list = function
   | Not_covered ->

@@ -1,6 +1,3 @@
-open Description
-open Build
-
 type root =
   | Self
   | Named of string
@@ -107,13 +104,13 @@ type t =
       last_entry : Core.origin option;
     }
 
-let make ?(notes = []) ?(fixes = []) code location message =
+let make ?(notes = []) ?(fixes = []) code location message : Nodes.description =
   { code = Ownership code; severity = Error; location; message; notes; fixes }
 
 let show_root = function
-  | Self -> [ Text "self" ]
+  | Self -> [ Description.Text "self" ]
   | Named name -> [ Text name ]
-  | Unnamed origin -> [ quote origin ]
+  | Unnamed origin -> [ Build.quote origin ]
   | Temporary -> [ Text "temporary" ]
   | Constant (Top { name; _ } | Member_constant { name; _ }) -> [ Text name ]
   | Constant path -> [ Text (Path.show path) ]
@@ -121,9 +118,11 @@ let show_root = function
 
 let show_place place =
   show_root place.root
-  @ List.map (function Field name -> Text ("." ^ name) | Indexed -> Text "[...]") place.steps
+  @ List.map
+      (function Field name -> Description.Text ("." ^ name) | Indexed -> Text "[...]")
+      place.steps
 
-let code_of pieces = (Text "`" :: pieces) @ [ Text "`" ]
+let code_of pieces = (Description.Text "`" :: pieces) @ [ Text "`" ]
 
 let show_verb = function
   | Be_used -> "be used"
@@ -132,28 +131,30 @@ let show_verb = function
   | Be_moved -> "be moved"
 
 let show_lender = function
-  | Loop -> [ Text "the loop" ]
+  | Loop -> [ Description.Text "the loop" ]
   | Provide_block -> [ Text "the `provide` block" ]
   | Rest_of_statement -> [ Text "a lending call until this statement ends" ]
   | Earlier_operand -> [ Text "an earlier operand of this expression" ]
   | Alias root ->
-      (Text "a lending call until " :: code_of (show_root root)) @ [ Text " goes out of scope" ]
+      (Description.Text "a lending call until " :: code_of (show_root root))
+      @ [ Text " goes out of scope" ]
 
 let describe_loan loan =
   let through =
     match loan.through with
     | Some borrowed ->
-        (Text " through " :: code_of (show_place borrowed)) @ [ Text ", which views it" ]
+        (Description.Text " through " :: code_of (show_place borrowed))
+        @ [ Text ", which views it" ]
     | None -> []
   in
   if loan.is_mut then
     code_of (show_place loan.place)
-    @ (Text " is lent `mut` to " :: show_lender loan.lender)
+    @ (Description.Text " is lent `mut` to " :: show_lender loan.lender)
     @ through
     @ [ Text ", so it cannot be used here." ]
   else
     code_of (show_place loan.place)
-    @ Text (Printf.sprintf " cannot %s while it is lent to " (show_verb loan.verb))
+    @ Description.Text (Printf.sprintf " cannot %s while it is lent to " (show_verb loan.verb))
       :: show_lender loan.lender
     @ through @ [ Text "." ]
 
@@ -161,12 +162,12 @@ let copy_fix title = function
   | Some { moved; own_keyword } ->
       [
         {
-          title = [ Text title ];
+          Description.title = [ Text title ];
           edits =
             (match own_keyword with
-              | Some (written, operand) -> [ delete (Start written) (Start operand) ]
+              | Some (written, operand) -> [ Build.delete (Start written) (Start operand) ]
               | None -> [])
-            @ [ insert_after moved [ Text ".copy()" ] ];
+            @ [ Build.insert_after moved [ Text ".copy()" ] ];
         };
       ]
   | None -> []
@@ -181,55 +182,61 @@ let show_holder = function
   | None -> "the value built here"
 
 let describe_act = function
-  | Is -> ([ Text "is" ], "A constant is a view only of another constant.")
+  | Is -> ([ Description.Text "is" ], "A constant is a view only of another constant.")
   | Returns -> ([ Text "returns" ], "A function returns a view only of its parameters.")
   | Stores_in root ->
-      ( (Text "stores in " :: code_of (show_root root)) @ [ Text ", which outlives this function," ],
+      ( (Description.Text "stores in " :: code_of (show_root root))
+        @ [ Text ", which outlives this function," ],
         "A `mut` parameter stores only views that the function receives." )
   | Lends -> ([ Text "lends" ], "A method lends a view only of its parameters.")
 
 let scrutinee_fix scrutinee =
   {
-    title = (Text "Move " :: code_of (show_root scrutinee.scrutinee)) @ [ Text " with `own`." ];
-    edits = [ insert_before scrutinee.written [ Text "own " ] ];
+    Description.title =
+      (Description.Text "Move " :: code_of (show_root scrutinee.scrutinee))
+      @ [ Text " with `own`." ];
+    edits = [ Build.insert_before scrutinee.written [ Text "own " ] ];
   }
 
 let show_scrutinee_view scrutinee =
-  (if scrutinee.is_part then [ Text "part of " ] else []) @ code_of (show_root scrutinee.scrutinee)
+  (if scrutinee.is_part then [ Description.Text "part of " ] else [])
+  @ code_of (show_root scrutinee.scrutinee)
 
 let describe = function
-  | Conflicting_loan loan -> make Conflicting_loan (at loan.at) (describe_loan loan)
-  | Mutated_while_lent loan -> make Mutated_while_viewed (at loan.at) (describe_loan loan)
+  | Conflicting_loan loan -> make Conflicting_loan (Build.at loan.at) (describe_loan loan)
+  | Mutated_while_lent loan -> make Mutated_while_viewed (Build.at loan.at) (describe_loan loan)
   | Mutated_while_viewed { at = origin; place; verb; holder } ->
-      make Mutated_while_viewed (at origin)
+      make Mutated_while_viewed (Build.at origin)
         (code_of (show_place place)
-        @ (Text (Printf.sprintf " cannot %s while " (show_verb verb)) :: code_of (show_root holder))
+        @ Description.Text (Printf.sprintf " cannot %s while " (show_verb verb))
+          :: code_of (show_root holder)
         @ [ Text ", which views it, is still live." ])
   | Moved_out_of_lent { at = origin; copy } ->
-      make Not_owned (at origin) ~fixes:(copy_fix "Copy it." copy)
+      make Not_owned (Build.at origin) ~fixes:(copy_fix "Copy it." copy)
         [
           Text
             "This part is lent, so it cannot be moved: the loan ends when the statement ends. Copy \
              it instead.";
         ]
   | Arguments_overlap { at = range; exclusive; also; call; is_yielded } ->
-      make Conflicting_loan (over range)
+      make Conflicting_loan (Build.over range)
         (if is_yielded then
            code_of (show_place exclusive)
-           @ (Text " is lent `mut` to the yielded value, so " :: code_of (show_place also))
+           @ Description.Text " is lent `mut` to the yielded value, so "
+             :: code_of (show_place also)
            @ [ Text " cannot be lent to it too." ]
          else
            code_of (show_place exclusive)
-           @ (Text " is passed `mut` to " :: describe_call call)
-           @ (Text ", so the call cannot also use " :: code_of (show_place also))
+           @ (Description.Text " is passed `mut` to " :: Build.describe_call call)
+           @ (Description.Text ", so the call cannot also use " :: code_of (show_place also))
            @ [ Text "." ])
   | View_argument_overlap { at = range; passed; call } ->
-      make Conflicting_loan (over range)
+      make Conflicting_loan (Build.over range)
         (code_of (show_place passed)
-        @ (Text " is passed `mut` to " :: describe_call call)
+        @ (Description.Text " is passed `mut` to " :: Build.describe_call call)
         @ [ Text ", so the call cannot also take a view of it." ])
   | Temporary_dropped_while_viewed { at = origin; holder } ->
-      make Views_temporary (at origin)
+      make Views_temporary (Build.at origin)
         [
           Text
             (Printf.sprintf
@@ -241,7 +248,7 @@ let describe = function
                | None -> ""));
         ]
   | Dropped_while_viewed { at = origin; owner; holder } ->
-      make View_escapes (at origin)
+      make View_escapes (Build.at origin)
         (code_of (show_root owner)
         @ [
             Text
@@ -251,7 +258,7 @@ let describe = function
                  (show_holder holder));
           ])
   | Lent_part_bound { at = origin; copy } ->
-      make Lent_part_escapes (at origin)
+      make Lent_part_escapes (Build.at origin)
         ~fixes:(copy_fix "Copy the scrutinee." copy)
         [
           Text
@@ -259,7 +266,7 @@ let describe = function
              it in this statement, or copy it.";
         ]
   | Capturing_lambda_stored { at = origin } ->
-      make View_escapes (at origin)
+      make View_escapes (Build.at origin)
         [
           Text
             "This lambda captures local variables, and the callee may store a function that it \
@@ -267,7 +274,7 @@ let describe = function
              that captures nothing.";
         ]
   | Unowned_function_stored { at = origin; viewed } ->
-      make View_escapes (at origin)
+      make View_escapes (Build.at origin)
         (code_of (show_place viewed)
         @ [
             Text
@@ -277,8 +284,8 @@ let describe = function
           ])
   | Dangling_view { at = origin; act; viewed; is_constant } ->
       let act, fix = describe_act act in
-      make View_escapes (at origin)
-        ((Text "This " :: act)
+      make View_escapes (Build.at origin)
+        ((Description.Text "This " :: act)
         @
         match viewed with
         | Captured_variables ->
@@ -297,13 +304,13 @@ let describe = function
                    fix);
             ]
         | View_of root ->
-            (Text " a view of " :: code_of (show_root root))
+            (Description.Text " a view of " :: code_of (show_root root))
             @ [
                 Text
                   (", which is dropped when the function returns, so the view would dangle. " ^ fix);
               ])
   | Returned_view_of_implementation { at = origin } ->
-      make View_crosses_capability (at origin)
+      make View_crosses_capability (Build.at origin)
         [
           Text
             "This returns a view of the capability implementation's own state. The caller cannot \
@@ -311,8 +318,8 @@ let describe = function
              the view is in use. Return a copy.";
         ]
   | Stored_view_in_implementation { at = origin; viewed } ->
-      make View_crosses_capability (at origin)
-        ((Text "This stores a view of " :: code_of (show_root viewed))
+      make View_crosses_capability (Build.at origin)
+        ((Description.Text "This stores a view of " :: code_of (show_root viewed))
         @ [
             Text
               " in a capability implementation. The caller cannot see the implementation, so it \
@@ -320,9 +327,9 @@ let describe = function
                view. Store a copy.";
           ])
   | Self_referential_store { at = origin; root } ->
-      make Self_referential (at origin)
-        ((Text "This stores a view of a part of " :: code_of (show_root root))
-        @ (Text " in " :: code_of (show_root root))
+      make Self_referential (Build.at origin)
+        ((Description.Text "This stores a view of a part of " :: code_of (show_root root))
+        @ (Description.Text " in " :: code_of (show_root root))
         @ [
             Text
               " itself, which makes it self-referential. The caller does not know about the view, \
@@ -330,20 +337,20 @@ let describe = function
           ])
   | Stored_view_of_borrowed { at = origin; parameter; holder } ->
       let parameter = code_of (show_root parameter) in
-      make View_escapes (at origin)
-        ((Text "This stores a view of " :: parameter)
-        @ (Text " in " :: code_of (show_root holder))
-        @ (Text ", which outlives this function, but " :: parameter)
+      make View_escapes (Build.at origin)
+        ((Description.Text "This stores a view of " :: parameter)
+        @ (Description.Text " in " :: code_of (show_root holder))
+        @ (Description.Text ", which outlives this function, but " :: parameter)
         @ [
-            Text
+            Description.Text
               " is only borrowed for the call, and the caller does not expect it to stay borrowed \
                afterwards. Take ";
           ]
         @ parameter
         @ [ Text " as a view type, such as a `Slice`, to store a view of it." ])
   | Lent_owned_part { at = origin; part } ->
-      make View_escapes (at origin)
-        (Text "This lends a part of "
+      make View_escapes (Build.at origin)
+        (Description.Text "This lends a part of "
          ::
          (match part with
          | Temporary -> [ Text "a temporary" ]
@@ -355,10 +362,10 @@ let describe = function
           ])
   | Lent_other_parameter { at = origin; root } ->
       let root = code_of (show_root root) in
-      make Lends_other_parameter (at origin)
-        ((Text "This lends a part of " :: root)
+      make Lends_other_parameter (Build.at origin)
+        ((Description.Text "This lends a part of " :: root)
         @ [
-            Text
+            Description.Text
               ", which is not the method's first parameter. A caller keeps only the first argument \
                lent, so it could mutate or drop ";
           ]
@@ -369,14 +376,14 @@ let describe = function
                `Plain` value, or a whole value that it made.";
           ])
   | Branch_data_race { at = origin; schedule; place } ->
-      make Data_race (at origin)
-        (Text
+      make Data_race (Build.at origin)
+        (Description.Text
            (Printf.sprintf "Data race: one branch of this `%s` block mutates "
               (show_schedule schedule))
          :: code_of (show_place place)
         @ [ Text ", and another branch uses it." ])
   | Iteration_data_race { at = origin; schedule } ->
-      make Data_race (at origin)
+      make Data_race (Build.at origin)
         [
           Text
             (Printf.sprintf
@@ -385,7 +392,7 @@ let describe = function
                (show_schedule schedule));
         ]
   | Lent_element_race { at = origin; schedule; collection } ->
-      make Data_race (at origin)
+      make Data_race (Build.at origin)
         [
           Text
             (Printf.sprintf
@@ -400,7 +407,7 @@ let describe = function
                | None -> "the collection"));
         ]
   | Pulled_view { at = origin; element } ->
-      make Task_outlives_view (at origin)
+      make Task_outlives_view (Build.at origin)
         [
           Text
             (Printf.sprintf
@@ -411,7 +418,7 @@ let describe = function
                (Types.show element));
         ]
   | Lent_mut_in_variant { at = range; variant } ->
-      make Lent_mut_in_variant (over range)
+      make Lent_mut_in_variant (Build.over range)
         [
           Text
             (Printf.sprintf
@@ -421,9 +428,12 @@ let describe = function
                variant);
         ]
   | Needs_lent_mut { at = origin; place; copy } ->
-      make Needs_lent_mut (at origin)
+      make Needs_lent_mut (Build.at origin)
         ~fixes:
-          ({ title = [ Text "Lend it `mut`." ]; edits = [ insert_before origin [ Text "mut " ] ] }
+          ({
+             title = [ Text "Lend it `mut`." ];
+             edits = [ Build.insert_before origin [ Text "mut " ] ];
+           }
           :: copy_fix "Pass a copy." copy)
         (code_of (show_place place)
         @ [
@@ -432,23 +442,23 @@ let describe = function
                `mut`, or pass a copy.";
           ])
   | Returned_view_of_scrutinee { at = origin; place; scrutinee; copy } ->
-      make Needs_owned (at origin)
+      make Needs_owned (Build.at origin)
         ~fixes:(scrutinee_fix scrutinee :: copy_fix "Return a copy." copy)
-        ((Text "A returned value must be owned, and " :: code_of (show_place place))
-        @ (Text " views " :: show_scrutinee_view scrutinee)
-        @ (Text ". Move " :: code_of (show_root scrutinee.scrutinee))
-        @ (Text " with `own` where " :: code_of (show_root place.root))
+        ((Description.Text "A returned value must be owned, and " :: code_of (show_place place))
+        @ (Description.Text " views " :: show_scrutinee_view scrutinee)
+        @ (Description.Text ". Move " :: code_of (show_root scrutinee.scrutinee))
+        @ (Description.Text " with `own` where " :: code_of (show_root place.root))
         @ [ Text " is bound, or return a copy." ])
   | Returned_unowned { at = origin; place; views_literal; copy } ->
-      make Needs_owned (at origin) ~fixes:(copy_fix "Return a copy." copy)
-        ((Text "A returned value must be owned, and " :: code_of (show_place place))
+      make Needs_owned (Build.at origin) ~fixes:(copy_fix "Return a copy." copy)
+        ((Description.Text "A returned value must be owned, and " :: code_of (show_place place))
         @ [
             Text
               (Printf.sprintf " %s. Return a copy."
                  (if views_literal then "views a string literal" else "is not owned here"));
           ])
   | Moved_element { at = origin; place; copy } ->
-      make Not_owned (at origin) ~fixes:(copy_fix "Copy it." copy)
+      make Not_owned (Build.at origin) ~fixes:(copy_fix "Copy it." copy)
         (code_of (show_place place)
         @ [
             Text
@@ -460,7 +470,7 @@ let describe = function
                  | Field _ :: _ | [] -> "part of an element"));
           ])
   | Moved_constant { at = origin; place; copy } ->
-      make Not_owned (at origin) ~fixes:(copy_fix "Copy it." copy)
+      make Not_owned (Build.at origin) ~fixes:(copy_fix "Copy it." copy)
         (code_of (show_place place)
         @ [
             Text
@@ -468,7 +478,7 @@ let describe = function
                  (if place.steps = [] then "a constant" else "part of a constant"));
           ])
   | Moved_literal_view { at = origin; place; copy } ->
-      make Not_owned (at origin) ~fixes:(copy_fix "Copy it." copy)
+      make Not_owned (Build.at origin) ~fixes:(copy_fix "Copy it." copy)
         (code_of (show_place place)
         @ [
             Text
@@ -476,16 +486,17 @@ let describe = function
                literal's static buffer. Copy it instead.";
           ])
   | Moved_view_of_scrutinee { at = origin; place; scrutinee; copy } ->
-      make Not_owned (at origin)
+      make Not_owned (Build.at origin)
         ~fixes:(scrutinee_fix scrutinee :: copy_fix "Copy it." copy)
         (code_of (show_place place)
-        @ (Text " views " :: show_scrutinee_view scrutinee)
-        @ (Text ", so it cannot be moved. Move " :: code_of (show_root scrutinee.scrutinee))
-        @ (Text " with `own` where " :: code_of (show_root place.root))
-        @ (Text " is bound, or copy " :: code_of (show_place place))
+        @ (Description.Text " views " :: show_scrutinee_view scrutinee)
+        @ Description.Text ", so it cannot be moved. Move "
+          :: code_of (show_root scrutinee.scrutinee)
+        @ (Description.Text " with `own` where " :: code_of (show_root place.root))
+        @ (Description.Text " is bound, or copy " :: code_of (show_place place))
         @ [ Text "." ])
   | Moved_view { at = origin; place; copy } ->
-      make Not_owned (at origin) ~fixes:(copy_fix "Copy it." copy)
+      make Not_owned (Build.at origin) ~fixes:(copy_fix "Copy it." copy)
         (code_of (show_place place)
         @ [
             Text
@@ -493,23 +504,23 @@ let describe = function
                  (if place.steps = [] then "a view" else "part of a view"));
           ])
   | Needs_own_keyword { at = origin; place; copy } ->
-      make Needs_owned (at origin)
+      make Needs_owned (Build.at origin)
         ~fixes:
           ({
              title = [ Text "Move it with `own`." ];
-             edits = [ insert_before origin [ Text "own " ] ];
+             edits = [ Build.insert_before origin [ Text "own " ] ];
            }
           :: copy_fix "Copy it." copy)
-        ((Text "An owned value is needed here, and " :: code_of (show_place place))
+        ((Description.Text "An owned value is needed here, and " :: code_of (show_place place))
         @ [ Text " is a place. Pass it `own` to move it, or copy it." ])
   | Use_after_move { at = origin; place; moved; copy } ->
-      make Use_after_move (at origin)
-        ~notes:[ (at moved, code_of (show_place place) @ [ Text " is moved here." ]) ]
+      make Use_after_move (Build.at origin)
+        ~notes:[ (Build.at moved, code_of (show_place place) @ [ Text " is moved here." ]) ]
         ~fixes:(copy_fix "Pass a copy at the move instead." copy)
         (code_of (show_place place) @ [ Text " is used after it was moved." ])
   | Not_reinitialized_at_return { at = origin; moved; place } ->
-      make Not_reinitialized (at origin)
-        ~notes:[ (at moved, [ Text "It is moved out here." ]) ]
+      make Not_reinitialized (Build.at origin)
+        ~notes:[ (Build.at moved, [ Text "It is moved out here." ]) ]
         (code_of (show_place place)
         @ [
             Text
@@ -517,16 +528,17 @@ let describe = function
                before the function returns.";
           ])
   | Not_reinitialized_at_scope_end { moved; place } ->
-      make Not_reinitialized (at moved)
+      make Not_reinitialized (Build.at moved)
         (code_of (show_place place)
-        @ (Text " is moved out here and not reinitialized. " :: code_of (show_root place.root))
+        @ Description.Text " is moved out here and not reinitialized. "
+          :: code_of (show_root place.root)
         @ [
             Text
               " is lent `mut`, so every part of it must be initialized when its loop iteration, \
                its `match` arm, or its lambda ends.";
           ])
   | Not_reinitialized_in_branch { moved; place } ->
-      make Not_reinitialized (at moved)
+      make Not_reinitialized (Build.at moved)
         (code_of (show_place place)
         @ [
             Text
@@ -535,15 +547,15 @@ let describe = function
                must reinitialize each place lent `mut` that it moves out of.";
           ])
   | Undeclared_change { at = origin; function_; parameter; fields; last_entry } ->
-      let shown = show_field_path parameter fields in
-      make Undeclared_change (at origin)
+      let shown = Build.show_field_path parameter fields in
+      make Undeclared_change (Build.at origin)
         ~fixes:
           (match (fields, last_entry) with
           | _ :: _, Some last ->
               [
                 {
                   title = [ Text (Printf.sprintf "Add `%s` to the `modifies` clause." shown) ];
-                  edits = [ insert_after last [ Text (", " ^ shown) ] ];
+                  edits = [ Build.insert_after last [ Text (", " ^ shown) ] ];
                 };
               ]
           | [], _ | _, None -> [])
@@ -556,15 +568,16 @@ let describe = function
                (match fields with
                | [] -> Printf.sprintf "All of `%s`" shown
                | _ :: _ -> Printf.sprintf "`%s`" shown)
-               (show_function_name function_) parameter);
+               (Build.show_function_name function_)
+               parameter);
         ]
 
-let origin = example "origin"
-let other = example "other"
+let origin = Build.example "origin"
+let other = Build.example "other"
 let count = { root = Named "count"; steps = [] }
 let items = { root = Named "items"; steps = [ Field "first" ] }
 let copy = Some { moved = origin; own_keyword = None }
-let range = { covering = [ origin; other ] }
+let range = { Description.covering = [ origin; other ] }
 
 let loan verb =
   { at = origin; place = items; is_mut = false; lender = Rest_of_statement; through = None; verb }
@@ -652,7 +665,7 @@ let list_examples : Diagnostic.Code.ownership -> t list = function
         Undeclared_change
           {
             at = origin;
-            function_ = example_path;
+            function_ = Build.example_path;
             parameter = "scanner";
             fields = [ "position" ];
             last_entry = Some other;
@@ -660,7 +673,7 @@ let list_examples : Diagnostic.Code.ownership -> t list = function
         Undeclared_change
           {
             at = origin;
-            function_ = example_path;
+            function_ = Build.example_path;
             parameter = "scanner";
             fields = [];
             last_entry = None;
