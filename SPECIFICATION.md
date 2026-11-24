@@ -1158,6 +1158,8 @@ public fn load_configs(paths: Slice[Path]) -> Result[List[Config], ConfigError]
 - `O(f)` means that the cost is at most `c * f + d` for every input, for
   some constants `c` and `d`.
 - `time` counts abstract steps: each primitive operation and each call is one.
+- A default that a call or a construction fills in is evaluated there, and
+  its cost counts toward the enclosing function's.
 
 A bound is an expression on exact integers. It can use the parameters,
 `self`, their fields, pure methods, `result`, `+`, `*`, and `/` and `-`
@@ -1199,14 +1201,28 @@ is one number for the function: it cannot depend on the arguments of a call.
   the read-only one.
 - At a call, the cost of a callback has the value that the function passed
   gives it (see [Callback contracts](#callback-contracts)).
-- At a call, the cost of a bound's method has the value the type argument
-  gives it: `time(Element.equal)` is a constant for `Int64`, whose
-  `impl Equal` promises `cost time O(1)`, and `allocations(Element.equal)`
-  is 0, since that `impl` promises `cost allocations == 0`. `time(...)` has
-  no value for a type argument whose `impl` of the method may run forever
-  (see [Termination](#termination)), and `allocations(...)` and
-  `allocated_bytes(...)` have none where the `impl` states no bound on that
-  resource. A bound that names the term is then unbounded.
+- At a call, the cost of a bound's method has the value of the bound that
+  the type argument's `impl` states for the method, where that bound reads
+  no parameter, `result`, or `old`. `time(Element.equal)` is a constant for
+  `Int64`, whose `impl Equal` promises `cost time O(1)`, and
+  `allocations(Element.equal)` is 0, since that `impl` promises
+  `cost allocations == 0`. `time(Element.compare)` is
+  `4 * time(Int64.compare)` for `Array[Int64, 4]`, whose `impl Ordered`
+  promises `cost time O(count * time(Element.compare))`.
+- A bound that reads a parameter gives the term no value: `List`'s
+  `O(self.length() * time(Element.compare))` depends on the list.
+- A method with generic or capability parameters of its own takes a value
+  only from a bound that is an integer. Its other bounds can name those
+  parameters, and a term such as `time(Item.serialize)` supplies no
+  argument for them.
+- `time(...)` has no value for a method that returns a value with
+  potential or takes one as `mut`, since a plain bound does not count the
+  potential that the call makes. A derived `Default` is the exception: the
+  cost of its body includes the potential of its value.
+- `time(...)` has no value for a type argument whose `impl` of the method
+  may run forever (see [Termination](#termination)), and `allocations(...)`
+  and `allocated_bytes(...)` have none where the `impl` states no bound on
+  that resource. A bound that names the term is then unbounded.
 - A function with an `==` bound on a resource calls a callback only where
   the cost of the call is exact: the callback's type states an `==` bound on
   that resource, or the callback's bound is zero. The cost of any other call
@@ -2771,6 +2787,15 @@ type Priority =
 - A generic type has a derived trait only where its parameters do.
 - A derived implementation satisfies the trait's laws; a hand-written one
   proves them.
+- A derived `Equal`, `Ordered`, or `Hash` states a cost on each resource:
+  the sum of the method's cost for the type of every field of every
+  variant, plus 1 for `time`. For
+  `type Score(points: Int64, rank: UInt8)`, the derived `compare` states
+  `cost time O(1 + time(Int64.compare) + time(UInt8.compare))` and
+  `cost allocations <= allocations(Int64.compare) + allocations(UInt8.compare)`.
+- A derived `Default` takes no arguments, so its cost is the cost of its
+  body: the `default()` of each field without a written default, and the
+  evaluation of each written default.
 - `serialization.Deserialize` is derived only for a type whose `invariant`
   clauses can be evaluated at run time: none quantifies over a type, names
   `identical`, holds a value of a type that exists only in specifications,

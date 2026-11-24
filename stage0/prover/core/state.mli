@@ -96,6 +96,7 @@ type stated = Tables.stated =
   | Ranked_elements of Types.ty
   | Range_elements of Types.ty
   | Non_negative_rank of Types.ty
+  | Method_cost_bound of Logic.symbol
 
 type lending = {
   part_type : Types.ty;

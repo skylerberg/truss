@@ -481,6 +481,10 @@ let () =
       expect_proven Fixtures.Prover.allocations_of_a_default_that_the_caller_applies;
       expect_not_proven Fixtures.Prover.allocations_of_a_default_left_out_of_the_callers_cost
         "prover.cost");
+  Harness.test "a construction spends the allocations of a field default that it applies" (fun () ->
+      expect_proven Fixtures.Prover.allocations_of_a_field_default_that_the_construct_applies;
+      expect_not_proven
+        Fixtures.Prover.allocations_of_a_field_default_left_out_of_the_constructs_cost "prover.cost");
   Harness.test "a call through a bound has the clauses that the bound's trait restates" (fun () ->
       expect_proven Fixtures.Prover.restated_clause_through_a_bound);
   Harness.test "a call that names the restating trait has the restated clauses" (fun () ->
@@ -2527,6 +2531,23 @@ let () =
       expect_proven Fixtures.Prover.day_ordering_theorem);
   Harness.test "a derived ordering compares fields in order, for every value" (fun () ->
       expect_proven Fixtures.Prover.pair_ordering_theorem)
+
+let () =
+  Harness.test "sorting is n log n where the element's ordering is constant time" (fun () ->
+      expect_proven Fixtures.Prover.sorts_in_n_log_n);
+  Harness.test "sorting records with a derived ordering of a string field is not n log n" (fun () ->
+      expect_not_proven Fixtures.Prover.sort_of_derived_people_in_n_log_n "prover.cost");
+  Harness.test "a derived ordering of a recursive type has no constant time bound" (fun () ->
+      expect_not_proven Fixtures.Prover.derived_ordering_of_a_chain_in_constant_time "prover.cost");
+  Harness.test "a derived equality spends the equality of a list field" (fun () ->
+      expect_not_proven Fixtures.Prover.derived_equality_of_tags_in_constant_time "prover.cost");
+  Harness.test "derived methods of constant-time fields are constant time and allocate nothing"
+    (fun () -> expect_proven Fixtures.Prover.derived_methods_of_constant_time_fields);
+  Harness.test "a derived default spends its fields' defaults" (fun () ->
+      expect_proven Fixtures.Prover.derived_default_of_settings);
+  Harness.test "a derived default spends the allocation of a written list default" (fun () ->
+      expect_not_proven Fixtures.Prover.derived_default_of_settings_without_allocations
+        "prover.cost")
 
 let () =
   Harness.test "a proof for a generic impl names its own generic parameters" (fun () ->

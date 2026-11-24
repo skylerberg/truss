@@ -28,6 +28,7 @@ impl Ordered for Int8 {
 impl Default for Int8 {
   fn default() -> Int8
     cost time O(1)
+    cost allocations == 0
   {
     0
   }
@@ -194,6 +195,7 @@ impl Ordered for Int16 {
 impl Default for Int16 {
   fn default() -> Int16
     cost time O(1)
+    cost allocations == 0
   {
     0
   }
@@ -360,6 +362,7 @@ impl Ordered for Int32 {
 impl Default for Int32 {
   fn default() -> Int32
     cost time O(1)
+    cost allocations == 0
   {
     0
   }
@@ -526,6 +529,7 @@ impl Ordered for Int64 {
 impl Default for Int64 {
   fn default() -> Int64
     cost time O(1)
+    cost allocations == 0
   {
     0
   }

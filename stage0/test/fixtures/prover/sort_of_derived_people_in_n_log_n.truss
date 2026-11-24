@@ -1,0 +1,8 @@
+type Person(name: String, age: Int64)
+  derives Equal, Ordered
+
+fn order(people: mut List[Person])
+  cost time O(people.length() * log(people.length()))
+{
+  mut people.sort()
+}

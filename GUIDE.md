@@ -2921,6 +2921,12 @@ too.
 A derived trait needs every field to have it, and `Ordered` and `Hash` need
 a derived `Equal` too.
 
+A derived method costs what its fields' methods cost, plus a constant. A
+record of numbers compares in constant time, so sorting a list of them
+proves `cost time O(n * log(n))`. A `String` field compares in time that
+grows with its text, so a record that holds one has no constant bound on
+`compare`.
+
 #### Display
 
 `Display` is the trait that interpolation uses. Its one method pushes the
