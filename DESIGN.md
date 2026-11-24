@@ -1636,6 +1636,28 @@ Rules: [The registry](PACKAGES.md#the-registry).
 | The registry keeps an append-only public log of the hash of every version, as Go's checksum database does. | The registry cannot give two users different code under one version. |
 | The registry signs the proofs and test results that it computed for a release. | Proving a whole dependency tree on a machine that starts with nothing, such as an agent's new container, is the cost that GOALS.md sets out to remove. Each signed result is a function of its key, so a registry that signed a false result is caught by anyone who recomputes it. |
 
+## Target CPUs
+
+**An x86-64 program is built for the x86-64-v3 level:** AVX2, FMA, BMI1,
+BMI2, LZCNT, MOVBE, F16C, and the features of the levels below. An ARM64
+program is built for the C compiler's default: ARMv8.0 on Linux, and Apple
+silicon on macOS.
+
+| Option | Consequence |
+|---|---|
+| The x86-64 baseline, which Go and Rust build for | `fused_multiply_add`, `floor`, `ceiling`, `truncate`, and `round_to_even` are each a call into the C library, and `count_ones` is a sequence of about 20 instructions. The standard library's float functions are written with them ([Floats](#floats)), so they run at the level of the build. A C program calls a C library that selects its `sin` for the CPU when the program loads. |
+| x86-64-v2 | The rounding functions and `count_ones` are one instruction each. `fused_multiply_add` is still a call, and `leading_zeros` still branches on zero. |
+| x86-64-v3 | Each of them is one instruction, and a vectorized loop uses 256-bit registers. The program does not run on Intel's CPUs before Haswell (2013), on AMD's before Excavator (2015), on Atom-class cores before Gracemont (2021), or under an emulator or a virtual machine that provides no AVX. |
+| The CPU of the machine that builds | The program then depends on where it was built. A build is not reproducible, and an object in a cache that another machine restores can hold instructions that the machine lacks. |
+
+| Rule | Reason |
+|---|---|
+| The level changes no result. | Two float operations are fused only where the code calls `fused_multiply_add`, and the C compiler may not reorder float arithmetic. A cached test result holds at every level (*determinism*). |
+| A development build has the level of a release build. | At a lower level a test would run the C library's `fma` and rounding functions, and the released program the CPU's instructions. |
+| A program checks the CPU for each feature it was built for before `main` runs, and exits with status 126 after naming the first that is missing. | Without the check the program is killed by an illegal instruction signal, at whichever instruction the CPU lacks first, and neither the signal nor its address names the feature. Go's programs make the same check when they are built for a level above the baseline. |
+| The check reads the features that the C compiler assumed, not a list for one level. | A program built with `TRUSS_CFLAGS=-march=x86-64` then runs on every x86-64 CPU. |
+| ARM64 keeps the C compiler's default. | Raising the level on Linux gives the atomic instructions of ARMv8.1, and excludes the Cortex-A72 of the Raspberry Pi 4. |
+
 ## Omitted features
 
 | Feature | Reason |

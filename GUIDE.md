@@ -94,8 +94,12 @@ runs Truss code. It needs two other programs on your `PATH`:
 | A C compiler, `clang` or `cc` | Building programs | `TRUSS_CC` |
 | Z3 5.3.3, as `z3` | Proving programs correct | `TRUSS_Z3` |
 
-Truss builds programs for Linux and macOS. [README.md](README.md) says how
-to build `truss` from this repository. Check that the toolchain runs:
+Truss builds programs for Linux and macOS, on x86-64 and ARM64. A program
+built on x86-64 needs a CPU of the x86-64-v3 level, which Intel's CPUs have
+had since Haswell (2013) and AMD's since Excavator (2015).
+[Appendix C](#appendix-c-the-truss-command) says how to build for an older
+one. [README.md](README.md) says how to build `truss` from this repository.
+Check that the toolchain runs:
 
 ```text
 $ truss --version
@@ -5191,6 +5195,14 @@ From the tightest binding to the loosest:
   a minute, or at once with `truss stop`. `--no-server`, or
   `TRUSS_NO_SERVER=1`, runs a command in its own process.
 - **`TRUSS_CC`** names the C compiler, and **`TRUSS_Z3`** the Z3 executable.
+  **`TRUSS_CFLAGS`** holds flags for the C compiler, which follow Truss's
+  own, so a flag in it replaces Truss's choice.
+- **An x86-64 program is built for the x86-64-v3 level:** AVX2, FMA, BMI2,
+  and the features below them. Before `main` runs, the program checks the
+  CPU for each feature it was built for. Where one is missing, it prints the
+  feature's name and exits with status 126. An emulator or a virtual machine
+  can provide fewer features than the CPU it runs on.
+  `TRUSS_CFLAGS=-march=x86-64` builds a program for every x86-64 CPU.
 - **A release build has a line table,** so a profiler, a debugger, and
   `objdump -S` attribute machine code to the Truss line it came from. Run
   `objdump -S` in the project's directory, where the table's file names

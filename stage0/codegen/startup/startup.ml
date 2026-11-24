@@ -27,11 +27,20 @@ let headers =
 #endif
 #include <netinet/in.h>
 #include <netdb.h>
+#if defined(__x86_64__)
+#include <cpuid.h>
+#endif
 |}
 
 let failing =
   {|
-static void truss_write_all(int descriptor, const void *bytes, size_t length) {
+#if defined(__x86_64__)
+#define TRUSS_BASELINE_CPU __attribute__((target("arch=x86-64")))
+#else
+#define TRUSS_BASELINE_CPU
+#endif
+
+TRUSS_BASELINE_CPU static void truss_write_all(int descriptor, const void *bytes, size_t length) {
   const char *next = bytes;
   while (length > 0) {
     ssize_t written = write(descriptor, next, length);
@@ -208,6 +217,113 @@ static void truss_install_signal_dispositions(void) {
   sigaddset(&runtime, SIGURG);
   pthread_sigmask(SIG_UNBLOCK, &runtime, NULL);
 }
+|}
+
+let assumed_cpu_features =
+  {|
+#if defined(__x86_64__)
+enum { truss_cpuid_1_ecx, truss_cpuid_7_ebx, truss_cpuid_80000001_ecx, truss_cpuid_registers };
+enum { truss_osxsave_bit = 27, truss_xcr0_sse_and_avx_state = 6 };
+
+struct truss_cpu_feature {
+  const char *name;
+  uint8_t cpuid_register;
+  uint8_t bit;
+  uint8_t needs_avx_state;
+};
+
+static const struct truss_cpu_feature truss_assumed_cpu_features[] = {
+#ifdef __SSE3__
+    {"SSE3", truss_cpuid_1_ecx, 0, 0},
+#endif
+#ifdef __SSSE3__
+    {"SSSE3", truss_cpuid_1_ecx, 9, 0},
+#endif
+#ifdef __GCC_HAVE_SYNC_COMPARE_AND_SWAP_16
+    {"CMPXCHG16B", truss_cpuid_1_ecx, 13, 0},
+#endif
+#ifdef __SSE4_1__
+    {"SSE4.1", truss_cpuid_1_ecx, 19, 0},
+#endif
+#ifdef __SSE4_2__
+    {"SSE4.2", truss_cpuid_1_ecx, 20, 0},
+#endif
+#ifdef __POPCNT__
+    {"POPCNT", truss_cpuid_1_ecx, 23, 0},
+#endif
+#ifdef __LAHF_SAHF__
+    {"LAHF-SAHF", truss_cpuid_80000001_ecx, 0, 0},
+#endif
+#ifdef __AVX__
+    {"AVX", truss_cpuid_1_ecx, 28, 1},
+#endif
+#ifdef __AVX2__
+    {"AVX2", truss_cpuid_7_ebx, 5, 1},
+#endif
+#ifdef __FMA__
+    {"FMA", truss_cpuid_1_ecx, 12, 1},
+#endif
+#ifdef __F16C__
+    {"F16C", truss_cpuid_1_ecx, 29, 1},
+#endif
+#ifdef __BMI__
+    {"BMI1", truss_cpuid_7_ebx, 3, 0},
+#endif
+#ifdef __BMI2__
+    {"BMI2", truss_cpuid_7_ebx, 8, 0},
+#endif
+#ifdef __LZCNT__
+    {"LZCNT", truss_cpuid_80000001_ecx, 5, 0},
+#endif
+#ifdef __MOVBE__
+    {"MOVBE", truss_cpuid_1_ecx, 22, 0},
+#endif
+#ifdef __XSAVE__
+    {"OSXSAVE", truss_cpuid_1_ecx, truss_osxsave_bit, 0},
+#endif
+    {NULL, 0, 0, 0},
+};
+
+__attribute__((constructor)) TRUSS_BASELINE_CPU static void truss_require_assumed_cpu_features(void) {
+  unsigned int eax, ebx, ecx, edx;
+  unsigned int registers[truss_cpuid_registers] = {0};
+  __cpuid(0, eax, ebx, ecx, edx);
+  unsigned int highest_leaf = eax;
+  if (highest_leaf >= 1) {
+    __cpuid(1, eax, ebx, ecx, edx);
+    registers[truss_cpuid_1_ecx] = ecx;
+  }
+  if (highest_leaf >= 7) {
+    __cpuid_count(7, 0, eax, ebx, ecx, edx);
+    registers[truss_cpuid_7_ebx] = ebx;
+  }
+  __cpuid(0x80000000, eax, ebx, ecx, edx);
+  if (eax >= 0x80000001) {
+    __cpuid(0x80000001, eax, ebx, ecx, edx);
+    registers[truss_cpuid_80000001_ecx] = ecx;
+  }
+  int has_avx_state = 0;
+  if (registers[truss_cpuid_1_ecx] >> truss_osxsave_bit & 1) {
+    unsigned int low, high;
+    __asm__ __volatile__("xgetbv" : "=a"(low), "=d"(high) : "c"(0));
+    has_avx_state = (low & truss_xcr0_sse_and_avx_state) == truss_xcr0_sse_and_avx_state;
+  }
+  for (const struct truss_cpu_feature *feature = truss_assumed_cpu_features; feature->name != NULL; feature++) {
+    if ((registers[feature->cpuid_register] >> feature->bit & 1) && (has_avx_state || !feature->needs_avx_state))
+      continue;
+    static const char needs[] = "This program needs a CPU with ";
+    static const char lacks[] =
+        ", which this machine lacks. Build the program with TRUSS_CFLAGS=-march=x86-64 to run it on every "
+        "x86-64 CPU.\n";
+    size_t name_length = 0;
+    while (feature->name[name_length] != 0) name_length += 1;
+    truss_write_all(2, needs, sizeof needs - 1);
+    truss_write_all(2, feature->name, name_length);
+    truss_write_all(2, lacks, sizeof lacks - 1);
+    _exit(126);
+  }
+}
+#endif
 |}
 
 let allocation =
@@ -2143,6 +2259,7 @@ let render_runtime ~tests =
       headers;
       Emit_c.shared_structs;
       failing;
+      assumed_cpu_features;
       allocation;
       threads;
       resolving;
