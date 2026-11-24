@@ -1,4 +1,5 @@
 use standard.intrinsic
+use standard.text.utf8
 
 public type DecodeError =
   | InvalidCharacter(offset: UInt64)
@@ -23,6 +24,7 @@ impl Display for DecodeError {
 
 fn symbol(value: UInt8) -> UInt8
   requires value < 32
+  ensures result <= 127
   cost time O(1)
   cost allocations == 0
 {
@@ -93,12 +95,13 @@ public fn encode(bytes: Slice[UInt8], padding: Bool = true) -> String
   for position in 0..length
     invariant intrinsic.storage_length(output) == position
     invariant intrinsic.storage_capacity(output) == 8 * groups
+    invariant utf8.is_valid(intrinsic.storage_model(output))
     cost allocations == 0
   {
     if position < symbol_count {
-      intrinsic.storage_push(mut output, value: symbol(symbol_at(bytes, start: position / 8 * 5, position: position % 8)))
+      utf8.push_ascii(mut output, byte: symbol(symbol_at(bytes, start: position / 8 * 5, position: position % 8)))
     } else {
-      intrinsic.storage_push(mut output, value: 61)
+      utf8.push_ascii(mut output, byte: 61)
     }
   }
   String(storage: own output)

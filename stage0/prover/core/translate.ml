@@ -340,7 +340,8 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
             (match self with
             | Logic.Symbol symbol -> context.entry <- symbol :: context.entry
             | _ -> ());
-            if not is_update_step then Validity.assume_valid context frame self_type self;
+            Validity.assume_valid context frame ~includes_invariants:(not is_update_step) self_type
+              self;
             { frame with self = Some self; self_type = Some self_type }
         | local ->
             let ty = Facts.substitute_type context frame parameter.type_ in
@@ -522,7 +523,14 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
       if not promise.inherited then
         match promise.clause.bound with
         | Order_of amount | At_most amount | Exactly amount ->
-            let result = Option.map (Facts.arrive context start "result") output in
+            let result =
+              Option.map
+                (fun output ->
+                  let result = Facts.arrive context start "result" output in
+                  Validity.assume_valid context start output result;
+                  result)
+                output
+            in
             Conditions.with_obligation_condition context promise.clause.holds_when (fun () ->
                 ignore (Validity.read_specification context { start with result } amount)))
     promised;
@@ -561,10 +569,10 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
                      (Facts.read_parameter_name parameter))
           | _ -> ())
         mut_parameters;
-      (match (mut_self, is_update_step, frame.self, frame.self_type) with
-      | true, false, Some self, Some self_type ->
+      (match (mut_self, frame.self, frame.self_type) with
+      | true, Some self, Some self_type ->
           Lambdas.check_valid context frame Whole_definition self_type self ~deep:true
-            ~when_:"for `self` when the method returns"
+            ~includes_invariants:(not is_update_step) ~when_:"for `self` when the method returns"
       | _ -> ());
       (match (context.lending, frame.yielded_so_far) with
       | Some { return_postconditions; _ }, Some yielded_so_far ->
@@ -1075,11 +1083,12 @@ let translate_type (lookups : Lookups.t) (source : State.source) ~path =
       Facts.assume context start
         (Validity.make_validity context start ~assuming:true ~includes_invariants:false ty value_);
       let at_value = { start with self = Some value_; old_self = Some value_ } in
-      List.iter
-        (fun (invariant : Mir.requirement) ->
-          let after, holds = Validity.read_specification context at_value invariant.clause in
-          Facts.assume context after holds)
-        invariants;
+      Validity.run_validating context ty (fun () ->
+          List.iter
+            (fun (invariant : Mir.requirement) ->
+              let after, holds = Validity.read_specification context at_value invariant.clause in
+              Facts.assume context after holds)
+            invariants);
       Option.iter
         (fun (written : Mir.formula) ->
           let _, potential_term = Validity.read_specification context at_value written in

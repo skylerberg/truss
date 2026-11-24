@@ -3,6 +3,7 @@ use standard.numbers.float_math
 use standard.serialization
 use standard.streams
 use standard.text
+use standard.text.utf8
 
 public type Value =
   | Null
@@ -107,16 +108,16 @@ let part_marker: UInt8 = 1
 
 let no_parts: List[Value] = []
 
-fn with_position(text: StringSlice, failure: Failure) -> ParseError
+fn with_position(bytes: Slice[UInt8], failure: Failure) -> ParseError
 {
   var line: UInt64 = 1
   var column: UInt64 = 1
   var index: UInt64 = 0
-  while index < text.length() && index < failure.offset
-    invariant index <= text.length()
-    decreases text.length() - index
+  while index < bytes.length() && index < failure.offset
+    invariant index <= bytes.length()
+    decreases bytes.length() - index
   {
-    let byte = text.byte(index)
+    let byte = bytes[index]
     if byte == 10 {
       line = line.saturating_add(1)
       column = 1
@@ -154,11 +155,13 @@ fn skip_digits(text: StringSlice, from: UInt64) -> UInt64
   requires from <= text.length()
   ensures from <= result
   ensures result <= text.length()
+  ensures result > from ==> text.model()[result - 1] <= 127
 {
   var index = from
   while index < text.length() && 48 <= text.byte(index) && text.byte(index) <= 57
     invariant from <= index
     invariant index <= text.length()
+    invariant index > from ==> text.model()[index - 1] <= 127
     decreases text.length() - index
   {
     index += 1
@@ -170,6 +173,7 @@ fn parse_hex4(text: StringSlice, from: UInt64) -> Option[UInt32]
   requires from <= text.length()
   ensures !(result is Some(code) && code > 65535)
   ensures (result is Some(_)) ==> text.length() - from >= 4
+  ensures !(result is Some(_) && text.model()[from + 3] > 127)
   cost time O(1)
 {
   if text.length() - from < 4 {
@@ -187,7 +191,7 @@ fn parse_hex4(text: StringSlice, from: UInt64) -> Option[UInt32]
 
 fn parse_escape(text: StringSlice, from: UInt64, output: mut String) -> Result[UInt64, Failure]
   requires from < text.length()
-  ensures !(result is Ok(end) && (end <= from || end > text.length()))
+  ensures !(result is Ok(end) && (end <= from || end > text.length() || !text.is_boundary(end)))
 {
   if text.length() - from < 2 {
     return Err(Failure(kind: ParseErrorKind.UnexpectedEnd, offset: text.length()))
@@ -221,7 +225,7 @@ fn parse_escape(text: StringSlice, from: UInt64, output: mut String) -> Result[U
 fn parse_unicode_escape(text: StringSlice, from: UInt64, output: mut String) -> Result[UInt64, Failure]
   requires from < text.length()
   requires text.length() - from >= 2
-  ensures !(result is Ok(end) && (end <= from || end > text.length()))
+  ensures !(result is Ok(end) && (end <= from || end > text.length() || !text.is_boundary(end)))
 {
   match parse_hex4(text, from: from + 2) {
     None => Err(Failure(kind: ParseErrorKind.InvalidEscape, offset: from))
@@ -253,6 +257,7 @@ fn parse_unicode_escape(text: StringSlice, from: UInt64, output: mut String) -> 
 
 fn parse_string(text: StringSlice, from: UInt64) -> Result[ParsedString, Failure]
   requires from < text.length()
+  requires text.model()[from] == 34
   ensures !(result is Ok(step) && (step.end <= from || step.end > text.length()))
 {
   var output = ""
@@ -262,6 +267,7 @@ fn parse_string(text: StringSlice, from: UInt64) -> Result[ParsedString, Failure
     invariant from < run
     invariant run <= index
     invariant index <= text.length()
+    invariant text.is_boundary(run)
     decreases text.length() - index
   {
     let byte = text.byte(index)
@@ -536,7 +542,7 @@ public fn parse(text: StringSlice, maximum_depth: UInt64 = 128) -> Result[Value,
 {
   match parse_document(text, maximum_depth: maximum_depth, parts: no_parts.slice(), in_template: false) {
     Ok(value) => Ok(own value)
-    Err(failure) => Err(with_position(text, failure: failure))
+    Err(failure) => Err(with_position(text.bytes(), failure: failure))
   }
 }
 
@@ -545,7 +551,7 @@ public fn parse_bytes(bytes: Slice[UInt8], maximum_depth: UInt64 = 128) -> Resul
   match String.from_utf8(bytes.to_list()) {
     Ok(text) => parse(text, maximum_depth: maximum_depth)
     Err(error) => Err(with_position(
-      StringSlice(bytes: bytes.elements),
+      bytes,
       failure: Failure(kind: ParseErrorKind.InvalidUnicode, offset: error.valid_up_to),
     ))
   }
@@ -586,44 +592,50 @@ public fn quote(text: StringSlice) -> String
   }
   let capacity = text.length() + extra + 2
   var output: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(capacity)
-  intrinsic.storage_push(mut output, value: 34)
+  utf8.push_ascii(mut output, byte: 34)
   var budget = extra
+  var run: UInt64 = 0
   for index in 0..text.length()
-    invariant intrinsic.storage_length(output) + (text.length() - index) + budget + 1 <= capacity
+    invariant run <= index
+    invariant text.is_boundary(run)
+    invariant intrinsic.storage_length(output) + (text.length() - run) + budget + 1 <= capacity
     invariant intrinsic.storage_capacity(output) == capacity
+    invariant utf8.is_valid(intrinsic.storage_model(output))
+    cost time O(index + intrinsic.storage_length(output))
   {
     let byte = text.byte(index)
     let needed = escape_overhead(byte)
-    if needed == 0 || budget < needed {
-      intrinsic.storage_push(mut output, value: byte)
-    } else if needed == 1 {
-      intrinsic.storage_push(mut output, value: 92)
-      let letter: UInt8 = if byte == 8 {
-        98
-      } else if byte == 9 {
-        116
-      } else if byte == 10 {
-        110
-      } else if byte == 12 {
-        102
-      } else if byte == 13 {
-        114
+    if needed > 0 && budget >= needed {
+      text.part(run, to: index).copy_onto(mut output)
+      utf8.push_ascii(mut output, byte: 92)
+      if needed == 1 {
+        let letter: UInt8 = if byte == 8 {
+          98
+        } else if byte == 9 {
+          116
+        } else if byte == 10 {
+          110
+        } else if byte == 12 {
+          102
+        } else if byte == 13 {
+          114
+        } else {
+          byte
+        }
+        utf8.push_ascii(mut output, byte: letter)
       } else {
-        byte
+        utf8.push_ascii(mut output, byte: 117)
+        utf8.push_ascii(mut output, byte: 48)
+        utf8.push_ascii(mut output, byte: 48)
+        utf8.push_ascii(mut output, byte: (byte / 16).digit_byte(uppercase: false))
+        utf8.push_ascii(mut output, byte: (byte % 16).digit_byte(uppercase: false))
       }
-      intrinsic.storage_push(mut output, value: letter)
-      budget -= 1
-    } else {
-      intrinsic.storage_push(mut output, value: 92)
-      intrinsic.storage_push(mut output, value: 117)
-      intrinsic.storage_push(mut output, value: 48)
-      intrinsic.storage_push(mut output, value: 48)
-      intrinsic.storage_push(mut output, value: (byte / 16).digit_byte(uppercase: false))
-      intrinsic.storage_push(mut output, value: (byte % 16).digit_byte(uppercase: false))
-      budget -= 5
+      budget -= needed
+      run = index + 1
     }
   }
-  intrinsic.storage_push(mut output, value: 34)
+  text.part(run, to: text.length()).copy_onto(mut output)
+  utf8.push_ascii(mut output, byte: 34)
   String(storage: own output)
 }
 
@@ -751,6 +763,7 @@ fn pointer_token_end(path: StringSlice) -> UInt64
   requires path.length() > 0
   ensures 1 <= result
   ensures result <= path.length()
+  ensures result == path.length() || path.model()[result] == 47
 {
   var index: UInt64 = 1
   while index < path.length() && path.byte(index) != 47
@@ -771,6 +784,7 @@ fn unescaped_pointer_token(token: StringSlice) -> Option[String]
   while index < token.length()
     invariant run <= index
     invariant index <= token.length()
+    invariant token.is_boundary(run)
     decreases token.length() - index
   {
     if token.byte(index) != 126 {

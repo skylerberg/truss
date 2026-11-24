@@ -6,13 +6,15 @@ type loop_exits = {
   mutable ends : State.frame list;
 }
 
+type branch_exit = { exited : State.frame; exit_locals : Locals.local list }
+
 type run = {
   infos : Mir.local_info array;
   changed_in_place : (Mir.local, unit) Hashtbl.t;
   held_callbacks : (Mir.local, Core.local) Hashtbl.t;
   lambdas : Mir.body array;
   mutable loops : loop_exits list;
-  mutable cancelled : (Mir.task * State.frame list ref) list;
+  mutable cancelled : (Mir.task * branch_exit list ref) list;
 }
 
 let make_unit_callee : _ Core.target -> Invocation.callee = function
@@ -983,7 +985,10 @@ and read_providing (context : State.context) run provided ~refresh read =
       exits.breaks <- refresh_since ~before:breaks refresh exits.breaks;
       exits.ends <- refresh_since ~before:ends refresh exits.ends)
     loops;
-  List.iter (fun (frames, before) -> frames := refresh_since ~before refresh !frames) cancelled;
+  List.iter
+    (fun (exits, before) ->
+      exits := refresh_since ~before (fun exit -> { exit with exited = refresh exit.exited }) !exits)
+    cancelled;
   read
 
 and read_statement context frame run (statement : Mir.statement) =
@@ -1070,8 +1075,13 @@ and read_statement context frame run (statement : Mir.statement) =
           in
           match task with
           | Branch _ -> (
+              let exit_locals =
+                Locals.make_key run.infos winner
+                :: Option.to_list
+                     (Option.map (fun (_, local) -> Locals.make_key run.infos local) returned)
+              in
               match List.assoc_opt task run.cancelled with
-              | Some frames -> frames := frame :: !frames
+              | Some exits -> exits := { exited = frame; exit_locals } :: !exits
               | None -> Facts.raise_bug "an early exit of a branch that is not around it")
           | Iteration { loop } -> (
               match List.find_opt (fun (exits : loop_exits) -> exits.loop = loop) run.loops with
@@ -1092,13 +1102,22 @@ and read_statement context frame run (statement : Mir.statement) =
                 run.cancelled <- (Mir.Branch { fork; index }, cancelled) :: run.cancelled;
                 let ended = read_statements context frame run branch.statements in
                 run.cancelled <- List.tl run.cancelled;
-                (ended, exits @ List.map (fun exited -> (index, exited)) (List.rev !cancelled)))
+                (ended, exits @ List.map (fun exit -> (index, exit)) (List.rev !cancelled)))
           (Some frame, [])
           (List.mapi (fun index branch -> (index, branch)) branches)
       in
-      let forget_other_branches (index, (exited : State.frame)) =
-        Loops.havoc context exited
-          (compute_changes run exited (List.filteri (fun other _ -> other <> index) branches))
+      let forget_other_branches (index, exit) =
+        let changes =
+          compute_changes run exit.exited (List.filteri (fun other _ -> other <> index) branches)
+        in
+        Loops.havoc context exit.exited
+          {
+            changes with
+            changed_locals =
+              List.filter
+                (fun local -> not (List.mem local exit.exit_locals))
+                changes.changed_locals;
+          }
       in
       let joined =
         Facts.join_frames context (Option.to_list ended @ List.map forget_other_branches exits)

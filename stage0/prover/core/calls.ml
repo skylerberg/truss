@@ -514,10 +514,14 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
   let is_update_step = calls_update_step context invocation in
   List.iter
     (fun (passed : State.passed) ->
-      if passed.mode = Language.Mode.Mut && not (is_update_step && passed.position = 0) then
+      if passed.mode = Language.Mode.Mut then
         match List.assoc_opt passed.position changed with
         | Some term ->
-            let valid = Validity.make_validity context after ~assuming:true passed.type_ term in
+            let valid =
+              Validity.make_validity context after ~assuming:true
+                ~includes_invariants:(not (is_update_step && passed.position = 0))
+                passed.type_ term
+            in
             Facts.assume context after
               (match left_valid with Some (left, _) -> Logic.( ==> ) left valid | None -> valid)
         | None -> ())
@@ -989,9 +993,9 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
   | _ ->
       List.iter
         (fun (passed : State.passed) ->
-          if not (is_update_step && passed.position = 0) then
-            Lambdas.check_valid context frame location passed.type_ passed.term ~deep:true
-              ~when_:("when it is passed to " ^ Facts.describe_call context location ()))
+          Lambdas.check_valid context frame location passed.type_ passed.term ~deep:true
+            ~includes_invariants:(not (is_update_step && passed.position = 0))
+            ~when_:("when it is passed to " ^ Facts.describe_call context location ()))
         values);
   let havoc_mut frame =
     List.fold_left

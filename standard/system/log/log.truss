@@ -1,5 +1,4 @@
 use standard.capabilities
-use standard.intrinsic
 use standard.log
 use standard.system.calls
 
@@ -46,18 +45,19 @@ impl Log for SystemLog
 
 fn quoted(line: mut String, text: StringSlice) {
   mut line.push_byte(34)
-  let bytes = text.bytes
-  for index in 0..intrinsic.view_length(bytes) {
-    let byte = intrinsic.view_at(bytes, index: index)
-    if byte == 34 || byte == 92 {
+  var run: UInt64 = 0
+  for index in 0..text.length()
+    invariant run <= index
+    invariant text.is_boundary(run)
+  {
+    let byte = text.byte(index)
+    if byte == 34 || byte == 92 || byte == 10 {
+      mut line.push(text.part(run, to: index))
       mut line.push_byte(92)
-      mut line.push_byte(byte)
-    } else if byte == 10 {
-      mut line.push_byte(92)
-      mut line.push_byte(110)
-    } else {
-      mut line.push_byte(byte)
+      mut line.push_byte(if byte == 10 { 110 } else { byte })
+      run = index + 1
     }
   }
+  mut line.push(text.part(run, to: text.length()))
   mut line.push_byte(34)
 }

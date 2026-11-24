@@ -1,5 +1,6 @@
 use standard.intrinsic
 use standard.streams
+use standard.text.utf8
 use standard.unicode
 
 public opaque type Input(handle: streams.Handle)
@@ -255,12 +256,14 @@ internal fn sequence_end(text: StringSlice, from: UInt64) -> UInt64
   requires from <= text.length()
   ensures from <= result
   ensures result <= text.length()
+  ensures result > from ==> text.model()[result - 1] <= 127
   cost time O(result - from)
 {
   var index = from
   while index < text.length() && text.byte(index) >= 32 && text.byte(index) <= 63
     invariant from <= index
     invariant index <= text.length()
+    invariant index > from ==> text.model()[index - 1] <= 127
     decreases text.length() - index
     cost time O(index - from)
   {
@@ -274,21 +277,27 @@ public fn strip_styles(text: StringSlice) -> String
   cost time O(text.length())
 {
   var output: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(text.length())
+  var run: UInt64 = 0
   var index: UInt64 = 0
   while index < text.length()
+    invariant run <= index
     invariant index <= text.length()
-    invariant intrinsic.storage_length(output) <= index
+    invariant text.is_boundary(run)
+    invariant intrinsic.storage_length(output) <= run
     invariant intrinsic.storage_capacity(output) == text.length()
+    invariant utf8.is_valid(intrinsic.storage_model(output))
     decreases text.length() - index
-    cost time O(index)
+    cost time O(index + intrinsic.storage_length(output))
   {
     if text.byte(index) == 27 && index + 1 < text.length() && text.byte(index + 1) == 91 {
+      text.part(run, to: index).copy_onto(mut output)
       index = sequence_end(text, from: index + 2)
+      run = index
     } else {
-      intrinsic.storage_push(mut output, value: text.byte(index))
       index += 1
     }
   }
+  text.part(run, to: text.length()).copy_onto(mut output)
   String(storage: own output)
 }
 

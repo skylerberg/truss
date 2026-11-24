@@ -1,0 +1,12 @@
+public opaque type Counter(count: UInt64)
+  invariant self.value() <= 10
+
+public fn Counter.value(self) -> UInt64
+  ensures result == self.count
+{
+  self.count
+}
+
+public fn Counter.zero() -> Counter {
+  Counter(count: 0)
+}

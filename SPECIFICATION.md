@@ -525,6 +525,8 @@ public type Interval =
 
 - `self` names the value, and a record's fields can be named directly.
 - Repeated invariants all hold, and each may rely on the ones before it.
+- An invariant may pass `self` to a function, as `invariant self.value() <= 10`
+  does. The call needs no invariant of `self`, which the invariant states.
 - Invariants are proven, never checked when the program runs. An invariant
   holds wherever other code can observe the value: when it is built,
   directly or with `with`, passed to a call, or returned, and when its
@@ -540,8 +542,9 @@ public type Interval =
   the clause must hold.
 - A private method that takes `mut self` is a step of an update: the
   invariant of its `self` is neither assumed when it is called nor required
-  when it returns. A method written in a trait, a capability, or an `impl`
-  is never one: a caller that reaches it through the trait assumes that
+  when it returns. The invariants of its fields' types are both: a step
+  assumes that a `String` field holds UTF-8, and leaves it holding UTF-8.
+  A method written in a trait, a capability, or an `impl` is never one: a caller that reaches it through the trait assumes that
   `self` meets its invariant when the call returns, and would otherwise
   observe a broken value. A step states its precondition and postcondition
   with `requires` and `ensures`:
@@ -2573,6 +2576,23 @@ other than `Panic` and `RunForever`. An implementation provided without
 - A string literal without `${...}` where a `StringSlice` is expected is a
   `StringSlice` of the constant's bytes.
 - `StringSlice` is the view of a `String`.
+- A `String` and a `StringSlice` hold well-formed UTF-8: each character is
+  the shortest encoding of a Unicode scalar value, so no overlong form, no
+  surrogate, and no value above U+10FFFF appears. `standard.text.utf8`
+  defines the property as `utf8.is_valid`. The invariant
+  `utf8.is_valid(self.model())` is proven in the standard package, and other
+  packages read its consequences from contracts: `is_boundary` holds at
+  offset 0, at the end, and after a byte below 128, and the searches return
+  boundaries.
+- An offset into text counts bytes. A boundary is the end of the text or an
+  offset whose byte starts a character, and a slice starts and ends at
+  boundaries. `substring`, `split_at`, `insert`, `remove_range`, and
+  `truncate` panic at an offset that is not a boundary.
+- Bytes become text through `String.from_utf8`, which fails with the offset
+  of the first ill-formed sequence; through `String.from_utf8_lossy`, which
+  replaces each maximal subpart of an ill-formed sequence with U+FFFD; or
+  through `String.from_valid_utf8`, which requires `utf8.is_valid` of the
+  bytes and checks nothing at run time.
 - There is no concatenation operator: `+` on strings is an error, and
   adjacent literals do not join.
 - A value in `${...}` has a type that implements `Display`.
@@ -3189,6 +3209,10 @@ and the prelude changes only with a language version.
 - `opaque` appears only before `public type`. Outside its package, an opaque
   type's fields cannot be read, built, updated, or matched on. Visibility is
   set for a type as a whole.
+- Outside its package, an opaque type's invariant is neither assumed nor
+  proven. No code there can build a value of the type, so every value it
+  holds meets the invariant, and what it may rely on is stated by the
+  contracts of the type's public functions.
 - A public signature cannot mention a private or `internal` type, and
   neither can a public type's fields unless the type is opaque.
 - The `requires` and `cost` of a public function, of a method of a public

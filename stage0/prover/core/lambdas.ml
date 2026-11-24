@@ -442,8 +442,8 @@ let find_lambda_definition context frame (function_type : Types.function_type)
       | _ -> None)
   | _ -> None
 
-let check_valid context frame location ty term ~deep ~when_ =
-  match Validity.make_validity context frame ~assuming:false ~deep ty term with
+let check_valid ?includes_invariants context frame location ty term ~deep ~when_ =
+  match Validity.make_validity context frame ~assuming:false ~deep ?includes_invariants ty term with
   | Logic.Boolean true -> ()
   | valid ->
       Facts.oblige context frame Invariant location

@@ -173,14 +173,16 @@ fn Builder.group_number(self, offset: UInt64) -> Option[UInt64]
 fn escape_end(text: StringSlice, from: UInt64, to: UInt64) -> Result[UInt64, ParseError]
   requires from < to
   requires to <= text.length()
+  requires text.model()[from] == 92
   ensures !(result is Ok(end) && (end <= from || end > to))
+  ensures !(result is Ok(end) && !text.is_boundary(end))
 {
   if to - from < 2 {
     return Err(ParseError(kind: PatternErrorKind.InvalidEscape, offset: from))
   }
   let letter = text.byte(from + 1)
   if letter == 120 {
-    if to - from < 4 {
+    if to - from < 4 || text.byte(from + 2).digit_value() >= 16 || text.byte(from + 3).digit_value() >= 16 {
       return Err(ParseError(kind: PatternErrorKind.InvalidEscape, offset: from))
     }
     return Ok(from + 4)
@@ -213,6 +215,7 @@ fn class_end(text: StringSlice, from: UInt64, to: UInt64) -> Result[UInt64, Pars
   requires from < to
   requires to <= text.length()
   ensures !(result is Ok(end) && (end <= from || end > to))
+  ensures !(result is Ok(end) && !text.is_boundary(end))
 {
   var index = from + 1
   while index < to
@@ -237,6 +240,8 @@ fn group_end(text: StringSlice, from: UInt64, to: UInt64) -> Result[UInt64, Pars
   requires from < to
   requires to <= text.length()
   ensures !(result is Ok(end) && (end <= from || end > to))
+  ensures !(result is Ok(end) && !text.is_boundary(end))
+  ensures !(result is Ok(end) && text.model()[end - 1] != 41)
 {
   var depth: UInt64 = 0
   var index = from
@@ -273,7 +278,10 @@ fn group_end(text: StringSlice, from: UInt64, to: UInt64) -> Result[UInt64, Pars
 fn atom_end(text: StringSlice, from: UInt64, to: UInt64) -> Result[UInt64, ParseError]
   requires from < to
   requires to <= text.length()
+  requires text.is_boundary(from)
   ensures !(result is Ok(end) && (end <= from || end > to))
+  ensures !(result is Ok(end) && !text.is_boundary(end))
+  ensures !(result is Ok(end) && text.model()[from] == 40 && text.model()[end - 1] != 41)
 {
   let byte = text.byte(from)
   if byte == 92 {
@@ -298,12 +306,17 @@ fn atom_end(text: StringSlice, from: UInt64, to: UInt64) -> Result[UInt64, Parse
 fn branch_end(text: StringSlice, from: UInt64, to: UInt64) -> Result[UInt64, ParseError]
   requires from <= to
   requires to <= text.length()
+  requires text.is_boundary(from)
+  requires text.is_boundary(to)
   ensures !(result is Ok(end) && (end < from || end > to))
+  ensures !(result is Ok(end) && !text.is_boundary(end))
+  ensures !(result is Ok(end) && end < to && text.model()[end] != 124)
 {
   var index = from
   while index < to
     invariant from <= index
     invariant index <= to
+    invariant text.is_boundary(index)
     decreases to - index
   {
     if text.byte(index) == 124 {
@@ -320,12 +333,14 @@ fn count_at(text: StringSlice, from: UInt64, to: UInt64) -> Option[Count]
   requires from <= to
   requires to <= text.length()
   ensures !(result is Some(count) && (count.value > 1000 || count.end <= from || count.end > to))
+  ensures !(result is Some(count) && text.model()[count.end - 1] > 127)
 {
   var value: UInt64 = 0
   var index = from
   while index < to && 48 <= text.byte(index) && text.byte(index) <= 57
     invariant from <= index
     invariant index <= to
+    invariant index > from ==> text.model()[index - 1] <= 127
     invariant value <= 1000
     decreases to - index
   {
@@ -346,6 +361,8 @@ type Repetition(least: UInt64, most: UInt64, bounded: Bool, lazy: Bool, end: UIn
 fn repetition_at(text: StringSlice, from: UInt64, to: UInt64) -> Result[Repetition, ParseError]
   requires from <= to
   requires to <= text.length()
+  requires text.is_boundary(from)
+  ensures !(result is Ok(repetition) && !text.is_boundary(repetition.end))
   ensures !(result is Ok(repetition) && (repetition.end < from || repetition.end > to || repetition.least > 1000 || repetition.most > 1000))
   ensures !(result is Ok(repetition) && repetition.bounded && repetition.most < repetition.least)
 {
@@ -405,6 +422,7 @@ fn repetition_at(text: StringSlice, from: UInt64, to: UInt64) -> Result[Repetiti
 fn escaped_character(text: StringSlice, from: UInt64, to: UInt64) -> Result[UInt32, ParseError]
   requires from < to
   requires to <= text.length()
+  requires text.model()[from] == 92
 {
   let wrong = ParseError(kind: PatternErrorKind.InvalidEscape, offset: from)
   if to - from < 2 {
@@ -541,7 +559,8 @@ type ClassItem(code: UInt32, end: UInt64, shorthand: Bool)
 fn Builder.class_item(mut self, text: StringSlice, from: UInt64, to: UInt64) -> Result[ClassItem, ParseError]
   requires from < to
   requires to <= text.length()
-  ensures !(result is Ok(item) && (item.end <= from || item.end > to))
+  requires text.is_boundary(from)
+  ensures !(result is Ok(item) && (item.end <= from || item.end > to || !text.is_boundary(item.end)))
 {
   let byte = text.byte(from)
   if self.placeholders && byte == 1 {
@@ -569,6 +588,7 @@ fn Builder.class_item(mut self, text: StringSlice, from: UInt64, to: UInt64) -> 
 fn Builder.compile_class(mut self, text: StringSlice, from: UInt64, to: UInt64) -> Option[ParseError]
   requires from < to
   requires to <= text.length()
+  requires text.model()[from] == 91
 {
   if to - from < 2 {
     return failure(PatternErrorKind.UnbalancedBracket, offset: from)
@@ -584,6 +604,7 @@ fn Builder.compile_class(mut self, text: StringSlice, from: UInt64, to: UInt64) 
   while index < close
     invariant from < index
     invariant index <= close
+    invariant text.is_boundary(index)
     decreases close - index
   {
     let item = match mut self.class_item(text, from: index, to: close) {
@@ -615,6 +636,7 @@ fn Builder.compile_class(mut self, text: StringSlice, from: UInt64, to: UInt64) 
 fn Builder.compile_escape(mut self, text: StringSlice, from: UInt64, to: UInt64) -> Option[ParseError]
   requires from < to
   requires to <= text.length()
+  requires text.model()[from] == 92
 {
   if to - from < 2 {
     return failure(PatternErrorKind.InvalidEscape, offset: from)
@@ -648,6 +670,8 @@ fn Builder.compile_escape(mut self, text: StringSlice, from: UInt64, to: UInt64)
 fn Builder.compile_atom(mut self, text: StringSlice, from: UInt64, to: UInt64) -> Option[ParseError]
   requires from < to
   requires to <= text.length()
+  requires text.is_boundary(from)
+  requires text.model()[from] == 40 ==> text.model()[to - 1] == 41
   decreases to - from, 1
 {
   let byte = text.byte(from)
@@ -731,12 +755,15 @@ fn Builder.compile_atom(mut self, text: StringSlice, from: UInt64, to: UInt64) -
 fn Builder.compile_concatenation(mut self, text: StringSlice, from: UInt64, to: UInt64) -> Option[ParseError]
   requires from <= to
   requires to <= text.length()
+  requires text.is_boundary(from)
+  requires text.is_boundary(to)
   decreases to - from, 2
 {
   var index = from
   while index < to
     invariant from <= index
     invariant index <= to
+    invariant text.is_boundary(index)
     decreases to - index
   {
     let end = match atom_end(text, from: index, to: to) {
@@ -804,6 +831,8 @@ fn Builder.compile_concatenation(mut self, text: StringSlice, from: UInt64, to: 
 fn Builder.compile_alternation(mut self, text: StringSlice, from: UInt64, to: UInt64) -> Option[ParseError]
   requires from <= to
   requires to <= text.length()
+  requires text.is_boundary(from)
+  requires text.is_boundary(to)
   decreases to - from, 3
 {
   var jumps: List[UInt64] = []
@@ -811,6 +840,7 @@ fn Builder.compile_alternation(mut self, text: StringSlice, from: UInt64, to: UI
   while index <= to
     invariant from <= index
     invariant index <= to
+    invariant text.is_boundary(index)
     decreases to - index
   {
     let end = match branch_end(text, from: index, to: to) {
@@ -1190,6 +1220,7 @@ fn Regex.consumes(self, instruction: UInt64, code: UInt32) -> Bool
 
 fn Regex.run(self, text: StringSlice, from: UInt64, whole: Bool) -> Option[List[UInt64]]
   requires from <= text.length()
+  requires text.is_boundary(from)
 {
   let count = self.instructions()
   let width = self.group_names.length().saturating_add(1).saturating_multiply(2)
@@ -1220,6 +1251,7 @@ fn Regex.run(self, text: StringSlice, from: UInt64, whole: Bool) -> Option[List[
   var steps = (text.length() - from).saturating_add(1)
   while steps > 0
     invariant position <= text.length()
+    invariant text.is_boundary(position)
     decreases steps
   {
     steps -= 1
@@ -1307,6 +1339,7 @@ fn Regex.run(self, text: StringSlice, from: UInt64, whole: Bool) -> Option[List[
 
 fn match_from(slots: Slice[UInt64], text: StringSlice, offset: UInt64) -> Option[Match]
   ensures !(result is Some(matched) && (matched.start < offset || matched.end > text.length()))
+  ensures !(result is Some(matched) && !(text.is_boundary(matched.start) && text.is_boundary(matched.end)))
   cost time O(1)
 {
   if slots.length() < 2 {
@@ -1314,7 +1347,7 @@ fn match_from(slots: Slice[UInt64], text: StringSlice, offset: UInt64) -> Option
   }
   let start = slots[0]
   let end = slots[1]
-  if offset <= start && start <= end && end <= text.length() {
+  if offset <= start && start <= end && end <= text.length() && text.is_boundary(start) && text.is_boundary(end) {
     Some(Match(start: start, end: end))
   } else {
     None
@@ -1322,9 +1355,10 @@ fn match_from(slots: Slice[UInt64], text: StringSlice, offset: UInt64) -> Option
 }
 
 public fn Regex.find_from(self, text: StringSlice, offset: UInt64) -> Option[Match]
-  uses Panic unless offset <= text.length()
+  uses Panic unless offset <= text.length() && text.is_boundary(offset)
   ensures match result {
     Some(matched) => offset <= matched.start && matched.end <= text.length()
+      && text.is_boundary(matched.start) && text.is_boundary(matched.end)
     None => true
   }
   ensures identical(result, match self.run(text, from: offset, whole: false) {
@@ -1332,7 +1366,7 @@ public fn Regex.find_from(self, text: StringSlice, offset: UInt64) -> Option[Mat
       None => None
     })
 {
-  if offset > text.length() {
+  if offset > text.length() || !text.is_boundary(offset) {
     Panic.crash("slice out of bounds")
   }
   match self.run(text, from: offset, whole: false) {
@@ -1363,6 +1397,8 @@ public fn Regex.find(self, text: StringSlice) -> Option[Match]
 
 fn step_after(text: StringSlice, matched: Match) -> UInt64
   requires matched.end <= text.length()
+  requires text.is_boundary(matched.end)
+  ensures result <= text.length() ==> text.is_boundary(result)
   ensures result >= matched.end
   ensures result <= text.length() + 1
   ensures result > matched.start
@@ -1383,6 +1419,7 @@ public fn Regex.find_all(self, text: StringSlice) -> List[Match]
   var matches: List[Match] = []
   var position: UInt64 = 0
   while position <= text.length()
+    invariant position <= text.length() ==> text.is_boundary(position)
     decreases text.length() + 1 - position
   {
     match self.find_from(text, offset: position) {
@@ -1413,7 +1450,7 @@ fn Regex.captures_of(self, slots: Slice[UInt64], text: StringSlice, offset: UInt
     if group * 2 + 1 < slots.length() {
       let start = slots[group * 2]
       let end = slots[group * 2 + 1]
-      if start <= end && end <= text.length() {
+      if start <= end && end <= text.length() && text.is_boundary(start) && text.is_boundary(end) {
         entry = Some(Match(start: start, end: end))
       }
     }
@@ -1425,6 +1462,7 @@ fn Regex.captures_of(self, slots: Slice[UInt64], text: StringSlice, offset: UInt
 
 fn Regex.captures_from(self, text: StringSlice, offset: UInt64) -> Option[Captures]
   requires offset <= text.length()
+  requires text.is_boundary(offset)
 {
   match self.run(text, from: offset, whole: false) {
     Some(slots) => self.captures_of(slots.slice(), text: text, offset: offset)
@@ -1462,6 +1500,8 @@ public fn Regex.replace_all(self, text: StringSlice, replacement: StringSlice) -
   while position <= text.length()
     invariant copied_up_to <= position
     invariant copied_up_to <= text.length()
+    invariant text.is_boundary(copied_up_to)
+    invariant position <= text.length() ==> text.is_boundary(position)
     decreases text.length() + 1 - position
   {
     match self.find_from(text, offset: position) {
@@ -1493,12 +1533,14 @@ public fn Regex.replace_all_with(
   while position <= text.length()
     invariant copied_up_to <= position
     invariant copied_up_to <= text.length()
+    invariant text.is_boundary(copied_up_to)
+    invariant position <= text.length() ==> text.is_boundary(position)
     decreases text.length() + 1 - position
   {
     match self.captures_from(text, offset: position) {
       Some(captures) => {
         let whole = captures.whole()
-        if whole.start < position || whole.end > text.length() {
+        if whole.start < position || whole.end > text.length() || !text.is_boundary(whole.start) || !text.is_boundary(whole.end) {
           mut output.push(text.part(copied_up_to, to: text.length()))
           return output
         }
@@ -1525,6 +1567,8 @@ public fn Regex.split(self, text: StringSlice) -> List[StringSlice]
   while position <= text.length()
     invariant copied_up_to <= position
     invariant copied_up_to <= text.length()
+    invariant text.is_boundary(copied_up_to)
+    invariant position <= text.length() ==> text.is_boundary(position)
     decreases text.length() + 1 - position
   {
     match self.find_from(text, offset: position) {

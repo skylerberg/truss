@@ -1,4 +1,5 @@
 use standard.intrinsic
+use standard.text.utf8
 
 public type DecodeError =
   | InvalidCharacter(offset: UInt64)
@@ -21,6 +22,7 @@ impl Display for DecodeError {
 
 public fn encode(bytes: Slice[UInt8], uppercase: Bool = false) -> String
   ensures result.length() == 2 * bytes.length()
+  ensures result.is_ascii()
   cost time O(bytes.length())
   cost allocations <= 1
 {
@@ -28,10 +30,14 @@ public fn encode(bytes: Slice[UInt8], uppercase: Bool = false) -> String
   for index in 0..bytes.length()
     invariant intrinsic.storage_length(output) == 2 * index
     invariant intrinsic.storage_capacity(output) == 2 * bytes.length()
+    invariant forall i in 0..intrinsic.storage_length(output) => intrinsic.storage_model(output)[i] <= 127
   {
     let byte = bytes[index]
     intrinsic.storage_push(mut output, value: (byte / 16).digit_byte(uppercase: uppercase))
     intrinsic.storage_push(mut output, value: (byte % 16).digit_byte(uppercase: uppercase))
+  }
+  proof {
+    utf8.ascii_is_valid(intrinsic.storage_model(output))
   }
   String(storage: own output)
 }

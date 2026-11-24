@@ -2,6 +2,7 @@ use standard.core
 use standard.intrinsic
 use standard.numbers.float_text
 use standard.text
+use standard.text.utf8
 
 public trait FloatingPoint:
   Ordered
@@ -192,12 +193,18 @@ public let Float32.epsilon: Float32 = 1.1920929e-7
 fn format_fixed(value: Float64, decimals: UInt64) -> String {
   var written: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(0)
   float_text.write_fixed(mut written, value: value, decimals: decimals)
+  proof {
+    utf8.ascii_is_valid(intrinsic.storage_model(written))
+  }
   String(storage: own written)
 }
 
 fn format_scientific(value: Float64, decimals: UInt64) -> String {
   var written: intrinsic.Storage[UInt8] = intrinsic.storage_with_capacity(0)
   float_text.write_scientific(mut written, value: value, decimals: decimals)
+  proof {
+    utf8.ascii_is_valid(intrinsic.storage_model(written))
+  }
   String(storage: own written)
 }
 

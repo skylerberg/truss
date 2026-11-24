@@ -1,9 +1,11 @@
 use standard.core
 use standard.intrinsic
 use standard.text
+use standard.text.utf8
 
 internal fn UInt8.digit_value(self) -> UInt8
   ensures result <= 36
+  ensures result < 36 ==> self <= 127
   cost time O(1)
   cost allocations == 0
 {
@@ -20,6 +22,7 @@ internal fn UInt8.digit_value(self) -> UInt8
 
 internal fn UInt8.digit_byte(self, uppercase: Bool) -> UInt8
   requires self < 36
+  ensures result <= 127
   cost time O(1)
   cost allocations == 0
 {
@@ -54,6 +57,7 @@ internal fn write_digits(output: mut intrinsic.Storage[UInt8], value: UInt64, ba
   requires intrinsic.storage_length(output) + digit_count(value, base: base) <= intrinsic.storage_capacity(output)
   ensures intrinsic.storage_length(output) == old(intrinsic.storage_length(output)) + digit_count(value, base: base)
   ensures intrinsic.storage_capacity(output) == old(intrinsic.storage_capacity(output))
+  ensures utf8.is_ascii_extension(old(intrinsic.storage_model(output)), after: intrinsic.storage_model(output))
   decreases value
   cost time O(log(value))
 {
@@ -74,6 +78,7 @@ internal fn format_magnitude(
   requires 2 <= radix && radix <= 36
   ensures result.length() >= 1
   ensures result.length() <= minimum_digits + 66
+  ensures result.is_ascii()
   cost time O(minimum_digits + 64)
 {
   if minimum_digits > core.maximum_length {
@@ -90,10 +95,14 @@ internal fn format_magnitude(
   for index in 0..padding
     invariant intrinsic.storage_length(output) == sign + index
     invariant intrinsic.storage_capacity(output) == sign + padding + digits
+    invariant forall i in 0..intrinsic.storage_length(output) => intrinsic.storage_model(output)[i] <= 127
   {
     intrinsic.storage_push(mut output, value: 48)
   }
   write_digits(mut output, value: magnitude, base: base, uppercase: uppercase)
+  proof {
+    utf8.ascii_is_valid(intrinsic.storage_model(output))
+  }
   String(storage: own output)
 }
 

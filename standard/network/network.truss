@@ -375,6 +375,8 @@ internal fn parse_address(text: StringSlice) -> Result[IpAddress, AddressError]
 internal fn address_within(text: StringSlice, from: UInt64, to: UInt64) -> Result[IpAddress, AddressError]
   requires from <= to
   requires to <= text.length()
+  requires text.is_boundary(from)
+  requires text.is_boundary(to)
   ensures !(result is Err(error) && error.offset > text.length())
   cost time O(text.length())
 {

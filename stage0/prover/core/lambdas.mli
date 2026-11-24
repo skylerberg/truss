@@ -18,6 +18,7 @@ val make_parameter_symbols :
   State.context -> State.frame -> Types.function_type -> ('a Logic.Symbol.t * Logic.sort) list
 
 val check_valid :
+  ?includes_invariants:bool ->
   State.context ->
   State.frame ->
   Obligation.location ->

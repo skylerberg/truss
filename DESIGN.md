@@ -277,6 +277,9 @@ call a helper while the list is unsorted.
 | An invariant belongs to the whole type, never to one variant. | It can state a fact about the whole value, such as a tree being balanced, and a clause after the last variant is unambiguous. A condition on one variant is a `match` in the invariant, or a field whose type carries the condition. |
 | An invariant clause that calls a definition private to its type's module is opaque in other modules. | The clause can only be proven where its definition is visible, so other modules gain nothing from the definition, and each obligation that holds a value of the type would carry it: `Map`'s index invariant added about 1 MB of axioms to every obligation of `Set`, `json`, and `toml`, and some ran out of steps. A module that builds the value from its fields cannot prove the clause, so no module can make a value that breaks it. |
 | A type with an invariant can still expose its fields. | An invariant protects facts about the contents of a value. `opaque` does a different job: it controls where a value is constructed and hides the representation ([Visibility](#visibility)). |
+| A step of an update suspends only its own type's invariant. | The step exists to pass through states that break that invariant. The invariants of its fields' types are not its to break, so it assumes them and meets them when it returns. Without them, a step would prove at each call that passes a field a fact that no step changes, such as a `String` field holding UTF-8. |
+| An invariant's call of a function with `self` needs no invariant of `self`. | The invariant states it, so requiring it would make every such invariant unprovable. The function's contract still assumes the invariant, and the invariant cannot prove that contract: inside the function's own proof, the call is not its result, and a cycle through other functions is a recursion, which the termination check rejects. |
+| Other packages neither assume nor prove an opaque type's invariant. | They cannot build a value of the type, so they cannot break the invariant, and assuming it would put its clauses on every value in each of their obligations. The UTF-8 invariant of `String` made a counterexample with a `String` in scope come back unknown, and pushed a map literal of 100 string keys past the step limit. What other packages rely on is stated by the contracts of the type's public functions, as `is_boundary` states that offset 0 and the offset after a byte below 128 are boundaries. |
 
 ## Values and ownership
 
@@ -1168,6 +1171,10 @@ Rules: [Strings](SPECIFICATION.md#strings).
 |---|---|
 | Strings have no concatenation operator. | `+` stays numeric, and each allocation is written as an interpolation or a call (*nothing hidden*). |
 | Adjacent literals do not join. | A missing comma in `["a" "b", "c"]` would silently merge two elements. |
+| A `String` holds well-formed UTF-8. | A check of text then reads the characters that every later reader decodes. Without it, an overlong encoding of `/` passes a check for `/` and decodes to `/` afterwards, and a slice can split a character. |
+| The model of text is its bytes, and an offset counts bytes. | A slice at an offset costs O(1), and a proof about stored bytes needs no translation. An offset that counts characters costs a scan for each access. |
+| Bytes become text only through validation, at run time or in a proof. | `from_utf8` and `from_utf8_lossy` check each byte. `from_valid_utf8` requires `utf8.is_valid` of the bytes, so the prover checks them, and the conversion costs nothing at run time. |
+| A lossy conversion replaces each maximal subpart of an ill-formed sequence with one U+FFFD. | Unicode recommends this practice, and the WHATWG decoder follows it, so the same bytes give the same text in a browser and in Truss. Bytes from the operating system, such as a file name, convert the same way. |
 
 ### Tagged templates
 

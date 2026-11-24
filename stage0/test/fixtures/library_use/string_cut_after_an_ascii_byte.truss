@@ -1,0 +1,6 @@
+fn through(text: StringSlice, index: UInt64) -> StringSlice
+  requires index < text.length()
+  requires text.byte(index) <= 127
+{
+  text.substring(0, to: index + 1)
+}
