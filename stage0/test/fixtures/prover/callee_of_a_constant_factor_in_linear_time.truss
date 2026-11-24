@@ -1,0 +1,11 @@
+fn scaled(count: UInt64) -> UInt64
+  cost time O(1114112 * count)
+{
+  count
+}
+
+fn f(count: UInt64) -> UInt64
+  cost time O(count)
+{
+  scaled(count)
+}

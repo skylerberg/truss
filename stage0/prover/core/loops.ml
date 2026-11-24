@@ -1,8 +1,12 @@
 type gain = No_gain | Whole_potential | Potential_without_elements
+type one_iteration_bound = { spent_at_head : Logic.term; bound : Logic.term }
 
 type loop_rule =
   | Clause_bound of { written : Mir.cost; gained_at_head : Logic.term option; mutable gain : gain }
-  | Per_iteration of (gain * Logic.term) list
+  | Per_iteration of {
+      rules : (gain * Logic.term) list;
+      mutable one_iteration_bound : one_iteration_bound option;
+    }
 
 type loop_cost = {
   counter : Costs.counter;
@@ -22,6 +26,7 @@ type loop_start = {
   loop_costs : loop_cost list;
   fresh_mark : int;
   facts_mark : int;
+  recursive_costs_mark : int;
   preserved :
     (Obligation.message * Types.ty * Logic.term * (State.frame -> Logic.term option)) list;
   havocked : State.frame;
@@ -102,11 +107,15 @@ let list_loop_costs context (frame : State.frame) (clauses : Mir.loop_clause lis
         | None ->
             let needs_whole_potential = counter.amortized || counter.counting = Exactly in
             Per_iteration
-              (List.filter_map
-                 (fun gain ->
-                   if gain = Potential_without_elements && needs_whole_potential then None
-                   else Some (gain, Facts.declare_fresh context frame "per" Logic.Int))
-                 gains)
+              {
+                rules =
+                  List.filter_map
+                    (fun gain ->
+                      if gain = Potential_without_elements && needs_whole_potential then None
+                      else Some (gain, Facts.declare_fresh context frame "per" Logic.Int))
+                    gains;
+                one_iteration_bound = None;
+              }
       in
       { counter; entry; rule; measure_gained })
     context.counters
@@ -150,7 +159,7 @@ let enter_loop_head context head costs ~iterations =
                ~since:
                  (Costs.plus (Costs.minus at_head cost.entry)
                     (Option.value gained_at_head ~default:Costs.zero)))
-      | Per_iteration rules ->
+      | Per_iteration { rules; _ } ->
           List.iter
             (fun (gain, per) ->
               Facts.assume context head
@@ -180,9 +189,24 @@ let check_loop_entry context frame costs =
       | Per_iteration _ -> ())
     costs
 
-let check_loop_iterations context loop_at (head : State.frame) costs ~mark ~facts ~ends ~breaks =
+let find_constant_count bounds =
+  List.find_map
+    (fun bound ->
+      match Costs.normalize bound with
+      | Logic.Integer count when Z.gt count Z.one -> Some count
+      | _ -> None)
+    bounds
+
+let check_loop_iterations context loop_at (head : State.frame) (start : loop_start) ~iterations
+    ~iteration_bounds ~facts ~ends ~breaks =
   let location = Facts.locate context head.source loop_at in
-  let frames = ends @ breaks and varies = Facts.mentions_fresh_after context mark in
+  let frames = ends @ breaks and varies = Facts.mentions_fresh_after context start.fresh_mark in
+  let constant_count =
+    if context.recursive_costs_assumed > start.recursive_costs_mark then None
+    else
+      Option.bind iterations (fun iterations ->
+          Option.map (fun count -> (iterations, count)) (find_constant_count iteration_bounds))
+  in
   List.iter
     (fun cost ->
       let measure_spent (frame : State.frame) =
@@ -230,7 +254,7 @@ let check_loop_iterations context loop_at (head : State.frame) costs ~mark ~fact
                         (cost.measure_gained clause.gain frame))))
             (List.map (fun exit_frame -> (exit_frame, "after an iteration")) ends
             @ List.map (fun exit_frame -> (exit_frame, "where the loop is left")) breaks)
-      | Per_iteration rules -> (
+      | Per_iteration per_iteration -> (
           let facts = facts @ List.map (fun (frame : State.frame) -> frame.condition) frames in
           let find_bounded (gain, per) =
             if gain <> No_gain && not spends_potential then None
@@ -251,12 +275,21 @@ let check_loop_iterations context loop_at (head : State.frame) costs ~mark ~fact
                 | first :: rest -> List.fold_left Costs.larger first rest
               in
               Option.map
-                (fun bound -> (per, spent, bound))
+                (fun bound -> (gain, per, spent, bound))
                 (Costs.find_cost_bound ~varies ~facts most)
           in
-          match List.find_map find_bounded rules with
-          | Some (per, spent, bound) ->
+          match List.find_map find_bounded per_iteration.rules with
+          | Some (gain, per, spent, bound) ->
               Facts.add_frame_fact context head (Logic.equal per bound);
+              (match constant_count with
+              | Some (iterations, count)
+                when cost.counter.counting = Units && gain = No_gain && not spends_potential ->
+                  let spent_at_head = lookup_spent head cost.counter in
+                  let bound = Costs.plus cost.entry (Costs.at_least_zero per) in
+                  Facts.assume context head
+                    Logic.(less_equal iterations (Integer count) ==> less_equal spent_at_head bound);
+                  per_iteration.one_iteration_bound <- Some { spent_at_head; bound }
+              | _ -> ());
               List.iter2
                 (fun (frame : State.frame) spent ->
                   Facts.oblige context frame Cost location
@@ -277,7 +310,7 @@ let check_loop_iterations context loop_at (head : State.frame) costs ~mark ~fact
                      `cost` clause.";
                 ]
                 (Logic.Boolean false)))
-    costs
+    start.loop_costs
 
 let exit_loop context ~(clause_at : State.frame) (exit_ : State.frame) costs ~iterations ~most =
   let iterations = Option.value iterations ~default:Costs.zero in
@@ -305,7 +338,7 @@ let exit_loop context ~(clause_at : State.frame) (exit_ : State.frame) costs ~it
               Costs.plus
                 (Costs.minus (Costs.plus cost.entry counted) (cost.measure_gained gain clause_at))
                 (Costs.since ~start:(lookup_spent clause_at cost.counter) at) )
-        | Per_iteration rules ->
+        | Per_iteration { rules; one_iteration_bound } -> (
             List.iter
               (fun (gain, per) ->
                 let banked = Costs.plus at (cost.measure_gained gain exit_) in
@@ -324,7 +357,11 @@ let exit_loop context ~(clause_at : State.frame) (exit_ : State.frame) costs ~it
                           ==> less_equal banked (Costs.plus cost.entry (Costs.times most per))))
                     most)
               rules;
-            (cost.counter, at))
+            ( cost.counter,
+              match one_iteration_bound with
+              | Some { spent_at_head; bound } ->
+                  Costs.plus bound (Costs.since ~start:spent_at_head at)
+              | None -> at )))
       costs
   in
   { exit_ with spent }
@@ -479,7 +516,14 @@ let enter_loop ?holds context frame ~entry clauses ~changed =
   let preserved = list_validity_obligations context frame changed in
   let head = havoc context frame changed in
   assume_preserved_validity context head preserved;
-  { loop_costs = costs; fresh_mark; facts_mark; preserved; havocked = head }
+  {
+    loop_costs = costs;
+    fresh_mark;
+    facts_mark;
+    recursive_costs_mark = context.recursive_costs_assumed;
+    preserved;
+    havocked = head;
+  }
 
 let end_scope ~(outer : State.frame) (frame : State.frame) =
   { frame with locals = Locals.filter (fun id _ -> Locals.mem id outer.locals) frame.locals }
@@ -488,8 +532,8 @@ let leave_loop context frame frames =
   Option.map (end_scope ~outer:frame) (Facts.join_frames context frames)
 
 let end_iterations context (frame : State.frame) loop_at clauses (start : loop_start) ~head
-    ~(inside : State.frame) ~ends ~breaks ~with_through =
-  check_loop_iterations context loop_at head start.loop_costs ~mark:start.fresh_mark
+    ~(inside : State.frame) ~iterations ~iteration_bounds ~ends ~breaks ~with_through =
+  check_loop_iterations context loop_at head start ~iterations ~iteration_bounds
     ~facts:(Lambdas.list_facts_since context start.facts_mark @ [ inside.condition ])
     ~ends:(List.map with_through ends) ~breaks:(List.map with_through breaks);
   List.iter
@@ -570,8 +614,8 @@ let prove_receiving_loop ~prove_iteration ~most ~(for_loop : for_loop) context f
   let ends, breaks = for_loop.run_body inside received.element in
   prove_iteration ~head ~ends;
   let with_through (exit_frame : State.frame) = { exit_frame with yielded = Some through } in
-  end_iterations context frame for_loop.for_at clauses loop ~head ~inside ~ends ~breaks
-    ~with_through;
+  end_iterations context frame for_loop.for_at clauses loop ~head ~inside
+    ~iterations:(Some iterations) ~iteration_bounds:most ~ends ~breaks ~with_through;
   let ended = received.advance (Facts.restrict head (Logic.not_ received.has_another)) in
   let varies = Facts.mentions_fresh_after context loop.fresh_mark in
   let ended_facts =
@@ -911,8 +955,8 @@ let run_for_loop context frame (for_loop : for_loop) =
       let with_through (exit_frame : State.frame) =
         bind_at_index { exit_frame with yielded = Some through } (Costs.plus index (Logic.int 1))
       in
-      end_iterations context frame for_loop.for_at clauses start ~head ~inside ~ends ~breaks
-        ~with_through;
+      end_iterations context frame for_loop.for_at clauses start ~head ~inside
+        ~iterations:(Some iterations) ~iteration_bounds:[ count ] ~ends ~breaks ~with_through;
       List.iter
         (fun (end_ : State.frame) ->
           Option.iter
@@ -951,10 +995,8 @@ let run_while_loop context (frame : State.frame) (loop : while_loop) =
   let clauses = loop.while_clauses in
   let location = Facts.locate context frame.source loop.while_at in
   check_invariants context frame clauses ~when_:"on entry to the loop";
-  let { loop_costs = costs; fresh_mark = mark; facts_mark; preserved; havocked = head } =
-    enter_loop context frame ~entry:frame clauses ~changed:loop.changed
-  in
-  let head = loop.bind_parts head in
+  let start = enter_loop context frame ~entry:frame clauses ~changed:loop.changed in
+  let costs = start.loop_costs and head = loop.bind_parts start.havocked in
   let iterations = compute_iterations_so_far context head costs in
   let head = enter_loop_head context head costs ~iterations in
   assume_invariants context head clauses;
@@ -991,7 +1033,7 @@ let run_while_loop context (frame : State.frame) (loop : while_loop) =
   let start_measures = measure_terms head in
   if context.terminates && start_measures = None then
     Facts.raise_bug "a `while` loop has no measure in a body that terminates";
-  let most =
+  let iteration_bounds =
     match (start_measures, measure_terms frame, iterations) with
     | Some [ at_head ], Some [ on_entry ], Some iterations ->
         let last = Facts.declare_fresh context head "last" Logic.Int in
@@ -1003,16 +1045,17 @@ let run_while_loop context (frame : State.frame) (loop : while_loop) =
                 ==> (less_equal (int 0) last
                     &&& less_equal (add (subtract iterations (int 1)) last) on_entry
                     &&& less at_head last)));
-        [ Costs.at_least_zero (Costs.plus on_entry (Logic.int 1)) ]
+        [ Costs.plus on_entry (Logic.int 1) ]
     | _ -> []
   in
-  check_loop_iterations context loop.while_at head costs ~mark
-    ~facts:(Lambdas.list_facts_since context facts_mark @ [ inside.condition ])
+  let most = List.map Costs.at_least_zero iteration_bounds in
+  check_loop_iterations context loop.while_at head start ~iterations ~iteration_bounds
+    ~facts:(Lambdas.list_facts_since context start.facts_mark @ [ inside.condition ])
     ~ends ~breaks;
   List.iter
     (fun (end_ : State.frame) ->
       check_invariants context end_ clauses ~when_:"after an iteration";
-      check_preserved_validity context end_ location preserved;
+      check_preserved_validity context end_ location start.preserved;
       match (start_measures, measure_terms end_) with
       | Some before, Some after ->
           Facts.oblige context end_ Termination location

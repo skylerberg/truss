@@ -139,6 +139,7 @@ type context = {
   mutable laws_assumed : (Types.trait_reference * Types.ty) list;
   mutable counters : Costs.counter list;
   mutable bounded_counters : Costs.counter list;
+  mutable recursive_costs_assumed : int;
   fresh_order : int Tables.Symbol_table.t;
   mutable logs : (Logic.term * bool) list;
   mutable powers : (Logic.term * Logic.term) list;

@@ -1498,6 +1498,26 @@ let () =
       expect_proven (constant_step ^ Fixtures.Prover.range_loop_of_linear_time));
   Harness.test "a loop over a range is not constant" (fun () ->
       expect_not_proven (constant_step ^ Fixtures.Prover.range_loop_of_constant_time) "prover.cost");
+  Harness.test "a callee's cost of a constant amount of any size meets every O bound" (fun () ->
+      expect_proven Fixtures.Prover.table_of_a_constant_size_in_linear_time;
+      expect_proven Fixtures.Prover.callee_of_a_large_constant_time);
+  Harness.test "a callee's cost with a constant factor of any size meets the bound without it"
+    (fun () -> expect_proven Fixtures.Prover.callee_of_a_constant_factor_in_linear_time);
+  Harness.test "a callee's cost that grows with an argument is not constant, whatever its constants"
+    (fun () ->
+      expect_not_proven Fixtures.Prover.callee_of_a_constant_factor_in_constant_time "prover.cost";
+      expect_not_proven Fixtures.Prover.callee_of_its_argument_and_a_large_constant_in_constant_time
+        "prover.cost");
+  Harness.test "a bound's method whose impl states a constant time of any size is constant"
+    (fun () -> expect_proven Fixtures.Prover.weigh_of_an_impl_in_a_large_constant_time);
+  Harness.test "a loop with a constant count of any size meets every O bound" (fun () ->
+      expect_proven Fixtures.Prover.range_loop_of_a_large_constant_count;
+      expect_proven Fixtures.Prover.while_loop_of_a_large_constant_count;
+      expect_proven Fixtures.Prover.large_constant_loops_per_element);
+  Harness.test "a loop with a constant count of iterations that grow with an input is not constant"
+    (fun () -> expect_not_proven Fixtures.Prover.large_constant_loop_of_linear_calls "prover.cost");
+  Harness.test "a loop with a constant count of recursive calls counts every call" (fun () ->
+      expect_not_proven Fixtures.Prover.two_recursive_calls_in_a_constant_loop "prover.cost");
   Harness.test "nested loops over ranges are quadratic" (fun () ->
       expect_proven (constant_step ^ Fixtures.Prover.nested_range_loops_of_quadratic_time));
   Harness.test "a loop whose iterations cost their index is quadratic" (fun () ->

@@ -62,16 +62,18 @@ let compute_amount_within context frame (counter : Costs.counter) bound =
   | Units -> bound
   | At_most | Exactly -> declare_bounded_amount context frame bound
 
-let compute_promised_amount context frame (counter : Costs.counter) (bound : Mir.bound) ~evaluate
-    ~is_recursive_call ~exact_target ~change =
+let compute_promised_amount (context : State.context) frame (counter : Costs.counter)
+    (bound : Mir.bound) ~evaluate ~is_recursive_call ~exact_target ~change =
   match (bound, counter.counting) with
   | Order_of amount, Units ->
       let amount = evaluate amount in
       let amount =
-        if is_recursive_call then
+        if is_recursive_call then begin
+          context.recursive_costs_assumed <- context.recursive_costs_assumed + 1;
           let hypothesis = Costs.at_least_zero (Costs.bound amount) in
           if counter.resource = Metric Time then Costs.plus hypothesis (Logic.int 1) else hypothesis
-        else Costs.units amount
+        end
+        else Costs.units (if change = Costs.zero then Costs.reduce_constants amount else amount)
       in
       Costs.minus amount change
   | (At_most amount | Exactly amount), Units ->
@@ -625,9 +627,12 @@ let find_literal_bound (metric : Language.Metric.t) (costs : Mir.cost list) =
     (fun (cost : Mir.cost) ->
       if cost.amortized || not (is_same_resource cost ~locals:Locals.empty counter) then None
       else
+        let read_literal amount =
+          Option.map (fun literal -> Logic.Integer literal) (Contracts.find_integer_literal amount)
+        in
         match (counter.counting, cost.bound) with
-        | Units, Order_of amount | (At_most | Exactly), (At_most amount | Exactly amount) ->
-            Contracts.find_integer_literal amount
+        | Units, Order_of amount -> Option.map Costs.reduce_constants (read_literal amount)
+        | (At_most | Exactly), (At_most amount | Exactly amount) -> read_literal amount
         | (Units | At_most | Exactly), (Order_of _ | At_most _ | Exactly _) -> None)
     costs
 
@@ -664,11 +669,9 @@ let find_method_cost_bound context (metric : Language.Metric.t) (method_ : Path.
                 (Impl { impl; substitution })
             with
             | Some contract when makes_no_potential || not includes_potential_made ->
-                Option.map
-                  (fun literal -> Logic.Integer literal)
-                  (List.find_map
-                     (fun (clauses : State.clauses) -> find_literal_bound metric clauses.costs)
-                     (Contracts.list_declared_clauses contract))
+                List.find_map
+                  (fun (clauses : State.clauses) -> find_literal_bound metric clauses.costs)
+                  (Contracts.list_declared_clauses contract)
             | _ -> None)
         | None -> None)
   | _ -> None

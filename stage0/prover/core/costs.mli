@@ -15,6 +15,7 @@ val minus : Logic.term -> Logic.term -> Logic.term
 val times : Logic.term -> Logic.term -> Logic.term
 val at_least_zero : Logic.term -> Logic.term
 val larger : Logic.term -> Logic.term -> Logic.term
+val reduce_constants : Logic.term -> Logic.term
 val units : Logic.term -> Logic.term
 val normalize : Logic.term -> Logic.term
 val since : start:Logic.term -> Logic.term -> Logic.term
