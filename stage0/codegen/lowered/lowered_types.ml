@@ -81,6 +81,7 @@ type intrinsic =
   | Copy_bytes
   | Move_bytes
   | Compare_bytes
+  | Find_byte
   | Add_overflow
   | Subtract_overflow
   | Multiply_overflow

@@ -95,6 +95,12 @@ let lower (context : Context.t) (buffer : Intrinsic.buffer) =
           Emit_c.Ir_builder.emit builder
             (Assign (Lowered.make_local_place order, Binary (Subtract, first, second))));
       set (Convert (Copy (Lowered.make_local_place order), Integer Int8))
+  | Find_byte ->
+      let bytes = read_place 0 in
+      let offset = Context.allocate_uint64_local context in
+      call ~result:(Lowered.make_local_place offset) Find_byte
+        [ Copy (Storage.project_buffer bytes); Context.copy_length bytes; read_operand 1 ];
+      set (Use (Copy (Lowered.make_local_place offset)))
   | Storage_empty -> set (Storage.build_empty (Storage.make_storage_type (read_element_type ())))
   | Storage_with_capacity ->
       let ty = Storage.make_storage_type (read_element_type ()) in

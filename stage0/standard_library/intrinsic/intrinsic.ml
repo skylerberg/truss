@@ -51,6 +51,7 @@ type scalar =
 
 type buffer =
   | Compare_bytes
+  | Find_byte
   | Storage_empty
   | Storage_with_capacity
   | Storage_length
@@ -148,6 +149,7 @@ let list_scalar_operations =
 let list_buffer_operations =
   [
     Compare_bytes;
+    Find_byte;
     Storage_empty;
     Storage_with_capacity;
     Storage_length;
@@ -249,6 +251,7 @@ let show_scalar : scalar -> string = function
 
 let show_buffer : buffer -> string = function
   | Compare_bytes -> "compare_bytes"
+  | Find_byte -> "find_byte"
   | Storage_empty -> "storage_empty"
   | Storage_with_capacity -> "storage_with_capacity"
   | Storage_length -> "storage_length"

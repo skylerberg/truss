@@ -30,6 +30,7 @@ let render_intrinsic (emission : Emission.t) (intrinsic : Lowered.intrinsic)
   | Copy_bytes -> render_runtime_call "__builtin_memcpy" all
   | Move_bytes -> render_runtime_call "__builtin_memmove" all
   | Compare_bytes -> render_application (Emission.use_helper emission Compare_bytes) all
+  | Find_byte -> render_application (Emission.use_helper emission Find_byte) all
   | Add_overflow -> render_flag "__builtin_add_overflow"
   | Subtract_overflow -> render_flag "__builtin_sub_overflow"
   | Multiply_overflow -> render_flag "__builtin_mul_overflow"
