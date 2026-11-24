@@ -632,14 +632,8 @@ let run_prove (database : Tracker.t) (row : Store.definition) =
               | Unsupported _ | Not_proven_here -> [] ))
         | exception Tracker.Reads_failed_fact -> (Blocked, [], []))
   in
-  let state_before = Tracker.write database Facts.proof ~id:row.id (Some outcome) in
+  ignore (Tracker.write database Facts.proof ~id:row.id (Some outcome));
   Store.replace_holes database.store ~definition:row.id holes;
-  let warnings =
-    match outcome with Value proof -> Prover.list_warnings proof | Failed | Blocked -> []
-  in
-  if state_before <> None || warnings <> [] then
-    Tracker.replace_definition_diagnostics database Prove ~package:key.module_.package
-      ~definition:row.id warnings;
   follow_item_edges database ~items:roots changes
 
 type posed_unit = { posed : Prover.posed; has_unfinished_run : bool }

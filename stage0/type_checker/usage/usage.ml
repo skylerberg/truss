@@ -386,4 +386,4 @@ let check (lookups : Lookups.t) key =
   List.sort
     (fun (left : _ Diagnostic.diagnostic) (right : _ Diagnostic.diagnostic) ->
       compare left.span right.span)
-    context.diagnostics
+    (Option.to_list (Unused_run_forever.find lookups key definition) @ context.diagnostics)

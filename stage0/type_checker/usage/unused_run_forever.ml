@@ -7,22 +7,10 @@ let names_run_forever (use : Syntax.capability_use) =
   | Capability_path _ | Self_capabilities _ | Associated_capabilities _ | Generic_capability _ ->
       false
 
-let declares_run_forever (uses : Types.capability_set) =
+let contains_run_forever (uses : Types.capability_set) =
   List.exists
     (fun capability -> Types.find_base capability = Built_in Run_forever)
     (Types.list_capabilities uses)
-
-let has_written_measure (loop : Mir.loop) =
-  List.exists (function Mir.Decreases _ -> true | Invariant _ | Cost _ -> false) loop.clauses
-
-let rec has_default_measure (block : Mir.block) =
-  List.exists
-    (fun (statement : Mir.statement) ->
-      (match statement.kind with
-        | While { compared = Some _; loop; _ } -> not (has_written_measure loop)
-        | _ -> false)
-      || List.exists has_default_measure (Mir.list_nested_blocks statement))
-    block.statements
 
 let is_space character = character = ' ' || character = '\n' || character = '\r' || character = '\t'
 
@@ -79,46 +67,31 @@ let list_run_forever_entries (signature : Syntax.signature) =
       | Requires _ | Ensures _ | Decreases _ | Cost _ | Clause_error -> [])
     signature.clauses
 
-let find (lookups : Lookups.t) (key : Resolve.Names.key) =
+let find (lookups : Lookups.t) (key : Resolve.Names.key) (definition : Syntax.definition) =
   let names = lookups.interface.names in
   let declares_run_forever () =
     match Interface.Impls.read_signature lookups.interface key.path with
-    | Some (signature : Types.signature) -> declares_run_forever signature.uses
-    | None -> Facts.raise_bug "%s has a body and no signature" (Path.show key.path)
+    | Some (signature : Types.signature) -> contains_run_forever signature.uses
+    | None ->
+        Compiler_bug.raise_bug ~stage:"Usage" "%s has a body and no signature" (Path.show key.path)
   in
-  let uses_run_forever () =
-    lookups.requires_run_forever key
-    || lookups.list_recursion_group
-         (Mir.Call_edges.resolve_node
-            { interface = lookups.interface; mir = lookups.mir }
-            key.path Types.no_substitution)
-       <> []
-    ||
-    match Mir.find_code (lookups.mir.read_body_part key) with
-    | Some code -> has_default_measure code.body.code
-    | None -> true
-  in
-  match (names.read_declaration key).kind with
-  | (Function | Method) when declares_run_forever () && not (uses_run_forever ()) -> (
-      match names.read_definition key with
-      | { kind = Function { signature; _ }; _ } -> (
-          match list_run_forever_entries signature with
-          | [ (clause, uses, index) ] ->
-              let spans = names.read_spans key in
-              Some
-                (Diagnostic.make ~severity:Warning ~code:(Usage Unused_run_forever)
-                   ~fixes:
-                     [
-                       Diagnostic.fix "Remove `RunForever`"
-                         [
-                           make_removal ~text:(names.read_text key) ~spans signature clause uses
-                             index;
-                         ];
-                     ]
-                   (locate_use spans (List.nth uses index))
-                   (Printf.sprintf
-                      "Nothing in `%s` may run forever, so its `RunForever` is unused. Remove it."
-                      (Path.show key.path)))
-          | [] | _ :: _ :: _ -> None)
-      | _ -> None)
+  match ((names.read_declaration key).kind, definition.kind) with
+  | (Function | Method), Function { signature; _ }
+    when declares_run_forever ()
+         && not (lookups.uses_run_forever key || lookups.is_recursive key.path) -> (
+      match list_run_forever_entries signature with
+      | [ (clause, uses, index) ] ->
+          let spans = names.read_spans key in
+          Some
+            (Diagnostic.make ~severity:Warning ~code:(Usage Unused_run_forever)
+               ~fixes:
+                 [
+                   Diagnostic.fix "Remove `RunForever`"
+                     [ make_removal ~text:(names.read_text key) ~spans signature clause uses index ];
+                 ]
+               (locate_use spans (List.nth uses index))
+               (Printf.sprintf
+                  "Nothing in `%s` may run forever, so its `RunForever` is unused. Remove it."
+                  (Path.show key.path)))
+      | [] | _ :: _ :: _ -> None)
   | _ -> None

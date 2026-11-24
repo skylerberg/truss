@@ -22,7 +22,7 @@ let translate_impl (lookups : Lookups.t) (key : Resolve.Names.key) source =
   match Contracts.list_impl_holes lookups key with
   | _ :: _ as holes ->
       if Contracts.has_impl_obligations lookups interface.implements.trait then
-        [ { Obligation.obligations = []; holes; warnings = []; evaluation = None } ]
+        [ { Obligation.obligations = []; holes; evaluation = None } ]
       else []
   | [] ->
       Translate.translate_laws lookups source ~impl:key.path ~trait:interface.implements
@@ -126,9 +126,8 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
             ?inherited:(find_inherited_clauses lookups key.path)
             ~substitution lookups source ~path:key.path
         in
-        let warnings = Option.to_list (Unused_run_forever.find lookups key) in
         match list_integer_instances lookups key.path with
-        | [] -> Obligations { (prove_with Types.no_substitution) with warnings }
+        | [] -> Obligations (prove_with Types.no_substitution)
         | instances ->
             let outcomes =
               List.map
@@ -154,7 +153,6 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
                 holes =
                   List.sort_uniq compare
                     (List.concat_map (fun (outcome : Obligation.outcome) -> outcome.holes) outcomes);
-                warnings;
                 evaluation = None;
               })
     | Constant | Member_constant ->
@@ -166,7 +164,6 @@ let prove (lookups : Lookups.t) (key : Resolve.Names.key) =
             obligations =
               List.concat_map (fun (outcome : Obligation.outcome) -> outcome.obligations) outcomes;
             holes = List.concat_map (fun (outcome : Obligation.outcome) -> outcome.holes) outcomes;
-            warnings = [];
             evaluation = None;
           }
     | Type -> (
@@ -687,10 +684,6 @@ let list_states (lookups : Lookups.t) posed ~answers ~refutations =
           ([], []) obligations answers
       in
       states @ List.map fail_site (Option.to_list failed_evaluation)
-
-let list_warnings = function
-  | Obligations outcome -> outcome.warnings
-  | Unsupported _ | Not_proven_here -> []
 
 module For_testing = struct
   let list_queries posed =

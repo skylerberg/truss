@@ -116,7 +116,7 @@ signature_check (definition, state)
 type_facts      (definition, state, generics, copyable, plain, view, holds_function, contains)
 constant_value  (definition, state, value)
 contract        (definition, state, form)
-body            (definition, state, form, tables, requires_run_forever,
+body            (definition, state, form, tables, uses_run_forever,
                  places_without_keyword, mode_keywords)
 body_mir        (definition, state, graph)
 contract_mir    (definition, state, graph)
@@ -142,7 +142,7 @@ of the groups whose columns changed.
 | The checked interface: `interface.value` with the state of `signature_check` | Every stage after Check signatures, which takes an interface only once its signature has checked |
 | `body.form` | Build MIR |
 | `body.tables` | The usage check, `explain` |
-| `body.requires_run_forever` | The prover |
+| `body.uses_run_forever` | The usage check |
 | `body.places_without_keyword`, `mode_keywords` | The ownership check |
 | `syntax.syntax_errors` | Every stage that asks whether a part of a definition is broken |
 | `hole` | `holes`, which reads no proof |
@@ -239,13 +239,13 @@ The orchestrator runs the stages in this order. Each row is one recipe.
 | Generate MIR | Derived method | `Infer.derive_form` | Interfaces and contracts | `generated_mir` |
 | List calls | Definition, with the supplied methods | `Mir.Call_edges.list_path_edges` | MIR and interfaces | `call_node`, `calls` edges |
 | Group recursion | The definitions whose `calls` edges changed, and their groups | Strongly connected components | The definitions that both reach and are reached by a changed one, and the edges among them | `recursion_group` |
-| Check bodies | Definition | `Usage.check`, `Ownership.check` | The body's tables, its MIR, and its ownership modes | `usage_check`, `ownership` |
+| Check bodies | Definition | `Usage.check`, `Ownership.check` | The body's tables and `uses_run_forever`, the definition's `recursion_group`, its MIR, and its ownership modes | `usage_check`, `ownership` |
 | Check an impl, a type | Definition | `Package_checks.run` with `Sealed`, `Impl`, or `Type` | Interfaces | Diagnostics |
 | Check an instantiation | Generic function or method, with the other stale units of the drain | `Package_checks.find_growing_cycles`, then `Package_checks.run` with `Instantiation` | The `instantiates` edges of its body and of each body that those edges reach, each read once for the drain | Diagnostics |
 | Check a test | Test | `Package_checks.run` with `Test` | The tests of its package that have its name | Diagnostics |
 | Check unexported | Function, method, constant, or member constant, with the other stale units of the drain | `Package_checks.classify_uses`, then `Package_checks.run` with `Unexported` | The `references` edges into the definition, one user at a time, and the declaration of each user | Diagnostics |
 | Check a dependency | Dependency | `Package_checks.run` with `Dependency` | Whether a body of the package references the dependency | `dependency_use` |
-| Prove | Definition | `Prover.prove` | MIR, contracts, `ownership`, `recursion_group`, `body.requires_run_forever` | `proof`, `hole`, the prover's warnings, `claims` edges to the items of its evaluations |
+| Prove | Definition | `Prover.prove` | MIR, contracts, `ownership`, `recursion_group` | `proof`, `hole`, `claims` edges to the items of its evaluations |
 | Decide | Definition | `Prover.pose`, the solver, `Prover.list_states` | The proof, the results of running its evaluations, and the solver's answers | `verdict` |
 | Lower | Item | `Lowering.lower`, `Lowering.check_calls` | MIR and interfaces; the callees of the item's definition and of each callee | `lowered`, `references` edges to the items its code names |
 | Key tests | Item, with the items of its reference cycle | `Lowering.derive_test_keys` | `lowered`, and the test keys of the items it references | `test_key` |

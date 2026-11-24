@@ -1016,5 +1016,3 @@ let list_members query =
       | None -> entries)
     numbering.datatypes []
   |> List.sort compare
-
-let hash text = "smt1-blake3-" ^ Blake3.hash_to_hex text

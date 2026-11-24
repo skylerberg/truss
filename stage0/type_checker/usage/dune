@@ -3,6 +3,7 @@
  (modules_without_implementation lookups)
  (libraries
   language
+  compiler_bug
   diagnostic
   path
   source

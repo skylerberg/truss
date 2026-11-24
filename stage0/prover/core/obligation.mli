@@ -43,6 +43,5 @@ type t = {
 type outcome = {
   obligations : t list;
   holes : (Resolve.Names.key * location) list;
-  warnings : Source.Definition_span.t Diagnostic.diagnostic list;
   evaluation : evaluation option;
 }

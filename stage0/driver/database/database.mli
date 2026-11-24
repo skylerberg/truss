@@ -50,7 +50,6 @@ type proof_site = { code : string; span : Source.span; shows : string }
 type proof_state = { site : proof_site; is_proven : bool; trusts_compiled_code : bool }
 
 val list_proof_states : t -> Path.file -> proof_state list
-val list_proof_warnings : t -> Path.file -> Diagnostic.t list
 val list_proof_diagnostics : t -> Path.file -> Diagnostic.t list
 val list_holes : proofs -> reached:Path.t list -> (Path.file * int * int * Path.t list) list
 val make_interface_lookups : t -> Interface.Lookups.t

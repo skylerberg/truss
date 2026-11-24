@@ -4,6 +4,7 @@ type checking = {
   state : State.state;
   mutable provides : (Types.capability_set * Core.implementation list * Core.block) list;
   mutable body_requirements : Types.capability_set list;
+  mutable has_implicit_measure_loop : bool;
 }
 
 let report checking ?(fixes = []) ?(notes = []) code (origin : Core.origin) message =
@@ -256,6 +257,12 @@ let require_run_forever_unless checking scope (origin : Core.origin) condition =
     (Types.make_capability_set
        (Option.to_list (Types.make_unless (Built_in Run_forever) condition)))
 
+let rec note_implicit_measure checking scope =
+  match scope.kind with
+  | Function_body _ -> checking.has_implicit_measure_loop <- true
+  | Restricted { enclosing = Some enclosing; _ } -> note_implicit_measure checking enclosing
+  | Lambda_body _ | Restricted { enclosing = None; _ } -> ()
+
 let find_available_panic scope =
   List.find_opt
     (fun capability -> Types.find_base capability = Built_in Panic)
@@ -373,7 +380,7 @@ and check_statement checking scope (statement : Core.statement) =
   | While { condition; clauses; body; _ } ->
       (match Core_walk.find_measure_condition clauses with
       | Some [] -> ()
-      | _ when Core_walk.has_implicit_measure condition -> ()
+      | _ when Core_walk.has_implicit_measure condition -> note_implicit_measure checking scope
       | Some measured_when ->
           require_run_forever_unless checking scope statement.origin measured_when
       | None ->
@@ -675,7 +682,9 @@ let check_monitor_callbacks checking implementations =
 
 let check (state : State.state) (elaborated : Interface.Environment.elaborated_interface)
     (form : Core.t) =
-  let checking = { state; provides = []; body_requirements = [] } in
+  let checking =
+    { state; provides = []; body_requirements = []; has_implicit_measure_loop = false }
+  in
   let make_function_body_scope allowed =
     let path = state.key.path in
     make_scope ~allowed
@@ -766,13 +775,14 @@ let check (state : State.state) (elaborated : Interface.Environment.elaborated_i
           check_monitor_callbacks checking implementations;
           check_monitor_lock checking ~read_solved available implementations)
     (List.rev checking.provides);
-  List.exists
-    (fun required ->
-      List.exists
-        (fun capability -> Types.find_base capability = Built_in Run_forever)
-        (Types.list_capabilities
-           (Types.replace_capabilities
-              (function
-                | Types.Capability_variable variable -> Some (read_solved variable) | _ -> None)
-              (State.finalize_capabilities state required))))
-    checking.body_requirements
+  checking.has_implicit_measure_loop
+  || List.exists
+       (fun required ->
+         List.exists
+           (fun capability -> Types.find_base capability = Built_in Run_forever)
+           (Types.list_capabilities
+              (Types.replace_capabilities
+                 (function
+                   | Types.Capability_variable variable -> Some (read_solved variable) | _ -> None)
+                 (State.finalize_capabilities state required))))
+       checking.body_requirements
