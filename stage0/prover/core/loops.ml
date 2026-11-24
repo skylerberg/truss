@@ -537,9 +537,10 @@ let measure_held_gains context (entry : State.frame) (changed : State.changed_pa
   let measure_whole = sum_held (fun at ty term -> Amounts.compute_potential context at ty term)
   and measure_elements =
     sum_held (fun _ ty term -> Amounts.compute_elements_potential context ty term)
-  and holds_potential = List.exists (fun (ty, _) -> Amounts.has_potential context ty) held in
+  in
   lazy
-    (let whole_on_entry = measure_whole entry in
+    (let holds_potential = List.exists (fun (ty, _) -> Amounts.has_potential context ty) held in
+     let whole_on_entry = measure_whole entry in
      let elements_on_entry = measure_elements entry in
      let rec measure_gained gain (at : State.frame) =
        match gain with
