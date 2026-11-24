@@ -106,6 +106,12 @@ type call_amount = {
   amount : Logic.term;
 }
 
+type buffer = {
+  kind : Language.Builtin_type.t;
+  element : Types.ty;
+  model_of : Logic.term -> Logic.term;
+}
+
 type lending = {
   part_type : Types.ty;
   part_postconditions : Mir.formula list;
@@ -147,6 +153,7 @@ type context = {
   home : Resolve.Names.key;
   mutable laws_assumed : (Types.trait_reference * Types.ty) list;
   mutable counters : Costs.counter list;
+  mutable conditional_counters : Costs.counter list;
   mutable bounded_counters : Costs.counter list;
   mutable recursive_costs_assumed : int;
   fresh_order : int Tables.Symbol_table.t;
@@ -159,7 +166,7 @@ type context = {
   mutable potentials : Logic.term list;
   models : (Logic.term -> Logic.term) option Tables.Model_table.t;
   holds_potential : bool Tables.Type_table.t;
-  buffers : (Types.ty * (Logic.term -> Logic.term)) option Tables.Type_table.t;
+  buffers : buffer option Tables.Type_table.t;
   mutable equalities : Logic.term list;
   mutable path_notes : (string * Logic.term) list;
   mutable entry : Logic.symbol list;

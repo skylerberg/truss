@@ -921,6 +921,7 @@ let compute_function_value_amount context frame ~location (function_type : Types
         let cost = make_cost () in
         if cost <> Costs.zero then
           Facts.oblige context frame Cost location
+            ~holds_when:(Facts.find_counter_condition context counter)
             [
               Text
                 (Printf.sprintf

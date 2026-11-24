@@ -4843,6 +4843,23 @@ test "a cursor's provided methods" {
   `uses Self.Uses, RunForever unless Self: FiniteCursor`, so the second
   test, over a `Countdown`, needs no `RunForever`. A call over a channel's
   `Messages`, which may never end, uses it.
+- **Over a `FiniteCursor`, the same methods state their costs.** `to_list`
+  declares
+  `cost amortized time O((self.remaining() + 1) * time(Self.next)) when Self: FiniteCursor`
+  and `ensures result.length() <= old(self.remaining())` under the same
+  condition. `text.characters()` starts with `remaining()` equal to
+  `text.length()`, and its `next` costs `O(1)`, so
+  `text.characters().to_list()` costs `O(text.length())`, and a loop over
+  the list it returns runs at most `text.length()` times. `count`, `last`,
+  and `find` state the same bound, and `find` adds the time of its
+  predicate. The bounds are `amortized`, so the function that calls them
+  states `cost amortized`. `fold` states no cost: its total may hold
+  potential that no bound counts.
+- `time(Self.next)` has a value only where the cursor's `next` states a
+  bound that reads no parameter, and the cursor holds no potential.
+  `Characters` qualifies. A list's cursor holds the list, and `skip`'s
+  `next` reads how many values it has left to skip, so `to_list` over
+  either proves no bound.
 - `take` gives a `FiniteCursor` over any cursor, and `skip`, `step_by`,
   `enumerate`, and `zip` give one where their source does, `zip` where its
   first cursor does. `chain` and `peekable` give a plain `Cursor`: their

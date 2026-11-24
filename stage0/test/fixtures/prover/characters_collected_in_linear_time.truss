@@ -1,0 +1,12 @@
+fn count_spaces(text: StringSlice) -> UInt64
+  cost amortized time O(text.length())
+{
+  let characters = text.characters().to_list()
+  var spaces: UInt64 = 0
+  for index in 0..characters.length() {
+    if characters[index] == Character" " {
+      spaces = spaces.saturating_add(1)
+    }
+  }
+  spaces
+}

@@ -422,6 +422,9 @@ let is_panic_obligation : Diagnostic.Code.prover -> bool = function
   | Overflow | Division | Shift | Panic -> true
   | _ -> false
 
+let find_counter_condition (context : State.context) counter =
+  if List.mem counter context.conditional_counters then context.condition else []
+
 let oblige ?cited ?(fixes = []) ?holds_when (context : State.context) (frame : State.frame) code
     location message goal =
   let holds_when = Option.value holds_when ~default:context.obligation_condition in

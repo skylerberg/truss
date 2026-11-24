@@ -2814,7 +2814,9 @@ let () =
   Harness.test "the allocations of a method with two overloads that take `self` are ambiguous"
     (fun () ->
       expect_one_diagnostic Fixtures.Infer.cost_naming_allocations_of_an_overloaded_method
-        "types.ambiguous_method" ~says:"so `allocations` cannot tell which one is meant.")
+        "types.ambiguous_method" ~says:"so `allocations` cannot tell which one is meant.");
+  Harness.test "the time of a method that a bound restates names the one method" (fun () ->
+      expect_fine Fixtures.Infer.cost_naming_time_of_a_restated_method)
 
 let () =
   Harness.test "the body of an impl's method whose signature is not its trait's is not checked"

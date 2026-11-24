@@ -468,6 +468,11 @@ let () =
   Harness.test "a loop's measure with a condition is proven where the condition holds" (fun () ->
       expect_not_proven Fixtures.Prover.conditional_measure_that_does_not_decrease
         "prover.termination");
+  Harness.test "a loop's cost with a condition counts the loop only where the condition holds"
+    (fun () ->
+      expect_proven Fixtures.Prover.conditional_loop_cost_kept;
+      Support.expect_one_diagnostic ~check Fixtures.Prover.conditional_loop_cost_broken
+        "prover.cost" ~says:"may not hold after an iteration.");
   Harness.test "a condition's run reads a bound's associated type as its constraint" (fun () ->
       expect_proven Fixtures.Prover.conditional_measure_of_a_cursor_with_a_constrained_element);
   Harness.test "a requires that a call leaves undecided is proven with its condition" (fun () ->
@@ -2594,6 +2599,14 @@ let () =
       expect_proven Fixtures.Prover.day_ordering_theorem);
   Harness.test "a derived ordering compares fields in order, for every value" (fun () ->
       expect_proven Fixtures.Prover.pair_ordering_theorem)
+
+let () =
+  Harness.test "a string's characters collect into a list in time linear in its length" (fun () ->
+      expect_proven Fixtures.Prover.characters_collected_in_linear_time);
+  Harness.test "a finite cursor collects through a bound in its remaining count of nexts" (fun () ->
+      expect_proven Fixtures.Prover.finite_cursor_collected_generically);
+  Harness.test "an amortized call of a supertrait's method through a subtrait bound is counted"
+    (fun () -> expect_proven Fixtures.Prover.amortized_supertrait_method_under_a_subtrait_bound)
 
 let () =
   Harness.test "sorting is n log n where the element's ordering is constant time" (fun () ->

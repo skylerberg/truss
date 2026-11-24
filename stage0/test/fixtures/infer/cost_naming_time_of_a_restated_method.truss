@@ -1,0 +1,16 @@
+trait Counter {
+  fn next(mut self) -> UInt64
+}
+
+trait Bounded: Counter {
+  fn left(self) -> UInt64
+
+  fn next(mut self) -> UInt64
+    ensures self.left() <= old(self.left())
+}
+
+fn advance[Source: Bounded](source: mut Source) -> UInt64
+  cost time O(time(Source.next))
+{
+  mut source.next()
+}
