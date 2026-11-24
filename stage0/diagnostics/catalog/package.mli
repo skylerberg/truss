@@ -33,6 +33,3 @@ type t =
   | Growing_type of { header : Core.origin }
   | Instantiation_cycle of { header : Core.origin }
   | Duplicate_test of { name : string }
-
-val describe : t -> Nodes.description
-val list_examples : Diagnostic.Code.package -> t list

@@ -230,8 +230,3 @@ type t =
     }
   | Unreadable of { location : location; construct : construct; foreign : string option }
   | Unevaluated of { path : Path.t; report : string }
-
-val find_code : obligation -> Diagnostic.Code.prover
-val describe : t -> Nodes.description
-val describe_citation : citation -> string
-val list_examples : Diagnostic.Code.prover -> t list

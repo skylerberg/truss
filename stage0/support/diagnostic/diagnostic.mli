@@ -289,7 +289,6 @@ module Code : sig
     | Too_many_diagnostics
 
   val name : t -> string
-  val all : t list
 end
 
 type 'span edit = { span : 'span; replacement : string }

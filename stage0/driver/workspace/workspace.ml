@@ -169,7 +169,7 @@ let fetch name version ~hash =
 
 let load_published name version ~hash =
   match fetch name version ~hash with
-  | Error reason -> Error (Project_catalog.Unavailable reason)
+  | Error reason -> Error (Project_catalog.Problem.Unavailable reason)
   | Ok directory ->
       let files = Registry.Content.list_all_files directory in
       Registry.Selection.read_manifest_and_record ~read:(fun file -> List.assoc_opt file files) name
@@ -320,7 +320,7 @@ let load_package_databases snapshot =
        (fun (name, _) -> if depends_on_project [] name then None else Some (load_named name))
        hashes
 
-let describe_failed_dependency name version ~is_loaded failed : Project_catalog.problem =
+let describe_failed_dependency name version ~is_loaded failed : Project_catalog.Problem.t =
   match failed with
   | (source, (first : Diagnostic.t) :: _) :: _ ->
       let line, column = Source.compute_position source first.span.start in

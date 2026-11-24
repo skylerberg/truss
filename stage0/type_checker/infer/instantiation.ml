@@ -9,7 +9,7 @@ let check_evidence_grants (state : State.state) at evidence =
     (fun ((interface : Types.impl_interface), package, capability) ->
       ignore
         (State.report_description state
-           (Catalog.Capabilities.describe
+           (Catalog.Capabilities_description.describe
               (Not_granted
                  {
                    at;
@@ -159,7 +159,7 @@ and check_type_argument state (value : Syntax.expression) : Types.argument =
           Types.Type
             (Types.Error
                (State.report_description state
-                  (Catalog.Typing.describe
+                  (Catalog.Typing_description.describe
                      (Count_error { at = Written value.id; written = name.text; error })))))
   | _ -> (
       match find_static state value with

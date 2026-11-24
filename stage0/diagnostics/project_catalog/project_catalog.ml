@@ -1,113 +1,15 @@
-type version = int * int * int
+module Problem = Problem
 
-type manifest_problem =
-  | Unexpected_character of char
-  | Unclosed_string
-  | List_separator_expected
-  | Unclosed_list
-  | List_item_not_string
-  | Unclosed_inline_table
-  | Value_expected
-  | Line_end_expected
-  | Statement_expected
-  | Entry_outside_table of string
-  | Not_a_string of string
-  | Not_a_number of string
-  | Unknown_capability of string
-  | Not_a_package_name of string
-  | Unquoted_owned_name of string
-  | Inline_table_dependency of string
-  | Text_dependency of string
-  | Number_dependency
-  | Repeated_table of string
-  | Repeated_key of string
-  | Unknown_table of string
-  | Bad_package_name
-  | Bad_truss_version of { toolchain : string }
-  | Package_version
-  | Unknown_package_key of string
-  | Bad_time_limit
-  | Unknown_test_key of string
-  | Unknown_project_key of string
-  | Unnamed_package
-  | Dependencies_without_package
-  | Neither_table
+let show_version ((major, minor, patch) : Problem.version) =
+  Printf.sprintf "%d.%d.%d" major minor patch
 
-type lock_problem =
-  | Not_a_registry_name of string
-  | Version_major_mismatch of { written : string; major : int }
-  | Not_a_version of string
-  | Not_a_hash of string
-  | Not_a_capability of string
-  | Unexpected_after_hash
-  | Malformed_line
-  | Repeated_line of Path.package
-  | Missing_header of string
-
-type load_failure =
-  | Unfetched
-  | Unavailable of string
-  | Unreadable_manifest of { line : int; problem : manifest_problem }
-  | Unreadable_lock of { line : int; problem : lock_problem }
-  | Misnamed_manifest of Path.package
-
-type selection_problem =
-  | No_version of { name : Path.package; wanted_by : Path.package }
-  | Cannot_load of { name : Path.package; version : version; failure : load_failure }
-  | Two_contents of { name : Path.package; version : version; recorded_by : Path.package }
-
-type difference =
-  | Unlisted of { name : Path.package; version : version }
-  | Other_version of { name : Path.package; written : version; current : version }
-  | Other_hash of { name : Path.package; version : version }
-  | Other_holds of {
-      name : Path.package;
-      written : Grant.capability list;
-      current : Grant.capability list;
-    }
-  | Unused of Path.package
-
-type problem =
-  | Manifest of manifest_problem
-  | Lock of lock_problem
-  | Selection of selection_problem
-  | Stale_lock of difference list
-  | Registry_toolchain of {
-      name : Path.package;
-      version : version;
-      truss : string;
-      toolchain : string;
-    }
-  | Project_toolchain of { name : Path.package; truss : string; toolchain : string }
-  | Missing_truss_version of { toolchain : string }
-  | Nested_time_limit
-  | Standard_name
-  | Name_in_use of { name : Path.package; manifest : string }
-  | Owner_named_like of { name : string; other : Path.package }
-  | Not_a_project_package of Path.package
-  | Self_dependency of Path.package
-  | Dependency_cycle of Path.package list
-  | Ungranted_capability of { dependency : Path.package; capability : Grant.capability }
-  | Unused_dependency of { package : Path.package; dependency : Path.package }
-  | Failed_dependency of {
-      name : Path.package;
-      version : version;
-      is_loaded : bool;
-      errors : int;
-      path : string;
-      line : int;
-      column : int;
-      first : string;
-    }
-
-let show_version (major, minor, patch) = Printf.sprintf "%d.%d.%d" major minor patch
 let show = Path.show_package
 
 let name_expected =
   "a `lower_snake_case` name, or an owner and a name joined by `.`, such as `weather` or \
    `acme.geometry`"
 
-let describe_manifest_problem = function
+let describe_manifest_problem : Problem.manifest -> string = function
   | Unexpected_character character -> Printf.sprintf "`%c` cannot be written here." character
   | Unclosed_string -> "This string is not closed on its line."
   | List_separator_expected -> "Expected `,` or `]` after a list's item."
@@ -169,7 +71,7 @@ let describe_manifest_problem = function
       "`[dependencies]` are a package's, and this manifest has no `[package]`."
   | Neither_table -> "A manifest has a `[package]` table, a `[project]` table, or both."
 
-let describe_lock_problem = function
+let describe_lock_problem : Problem.lock -> string = function
   | Not_a_registry_name written ->
       Printf.sprintf
         "`%s` is not a registry package's name, which is an owner and a name joined by `.`." written
@@ -192,7 +94,7 @@ let describe_lock_problem = function
   | Repeated_line name -> Printf.sprintf "`%s` already has a line above." (show name)
   | Missing_header header -> Printf.sprintf "A lock file starts with the line `%s`." header
 
-let describe_load_failure = function
+let describe_load_failure : Problem.load_failure -> string = function
   | Unfetched -> "its files are not fetched yet"
   | Unavailable reason -> reason
   | Unreadable_manifest { line; problem } ->
@@ -204,7 +106,7 @@ let describe_load_failure = function
   | Misnamed_manifest name ->
       Printf.sprintf "its manifest does not name the package `%s`" (show name)
 
-let describe_selection_problem = function
+let describe_selection_problem : Problem.selection -> string = function
   | No_version { name; wanted_by } ->
       Printf.sprintf
         "`%s` depends on `%s`, which is not a package of this project and has no line in \
@@ -223,7 +125,7 @@ let show_capabilities = function
   | [] -> "nothing"
   | held -> String.concat ", " (List.map Grant.show_capability held)
 
-let describe_difference = function
+let describe_difference : Problem.difference -> string = function
   | Unlisted { name; version } ->
       Printf.sprintf "`%s` %s is in the build and has no line." (show name) (show_version version)
   | Other_version { name; written; current } ->
@@ -236,7 +138,7 @@ let describe_difference = function
         (show_capabilities written) (show_capabilities current)
   | Unused name -> Printf.sprintf "Nothing in the build uses `%s`." (show name)
 
-let describe = function
+let describe : Problem.t -> string = function
   | Manifest problem -> describe_manifest_problem problem
   | Lock problem -> describe_lock_problem problem
   | Selection problem -> describe_selection_problem problem
@@ -287,89 +189,3 @@ let describe = function
         errors
         (if errors = 1 then "error" else "errors")
         path line column first
-
-let example_package : Path.package = { owner = None; name = "app" }
-
-let examples : problem list =
-  [
-    Manifest (Unexpected_character '#');
-    Manifest Unclosed_string;
-    Manifest List_separator_expected;
-    Manifest Unclosed_list;
-    Manifest List_item_not_string;
-    Manifest Unclosed_inline_table;
-    Manifest Value_expected;
-    Manifest Line_end_expected;
-    Manifest Statement_expected;
-    Manifest (Entry_outside_table "‹manifest›");
-    Manifest (Not_a_string "‹manifest›");
-    Manifest (Not_a_number "‹manifest›");
-    Manifest (Unknown_capability "‹manifest›");
-    Manifest (Not_a_package_name "‹manifest›");
-    Manifest (Unquoted_owned_name "‹manifest›");
-    Manifest (Inline_table_dependency "‹manifest›");
-    Manifest (Text_dependency "‹manifest›");
-    Manifest Number_dependency;
-    Manifest (Repeated_table "‹manifest›");
-    Manifest (Repeated_key "‹manifest›");
-    Manifest (Unknown_table "‹manifest›");
-    Manifest Bad_package_name;
-    Manifest (Bad_truss_version { toolchain = "‹toolchain›" });
-    Manifest Package_version;
-    Manifest (Unknown_package_key "‹manifest›");
-    Manifest Bad_time_limit;
-    Manifest (Unknown_test_key "‹manifest›");
-    Manifest (Unknown_project_key "‹manifest›");
-    Manifest Unnamed_package;
-    Manifest Dependencies_without_package;
-    Manifest Neither_table;
-    Lock (Not_a_registry_name "‹lock›");
-    Lock (Version_major_mismatch { written = "‹written›"; major = 2 });
-    Lock (Not_a_version "‹lock›");
-    Lock (Not_a_hash "‹lock›");
-    Lock (Not_a_capability "‹lock›");
-    Lock Unexpected_after_hash;
-    Lock Malformed_line;
-    Lock (Repeated_line example_package);
-    Lock (Missing_header "‹lock›");
-    Selection (No_version { name = example_package; wanted_by = example_package });
-    Selection (Cannot_load { name = example_package; version = (1, 4, 2); failure = Unfetched });
-    Selection
-      (Two_contents { name = example_package; version = (1, 4, 2); recorded_by = example_package });
-    Stale_lock [ Unlisted { name = example_package; version = (1, 4, 2) } ];
-    Registry_toolchain
-      { name = example_package; version = (1, 4, 2); truss = "‹truss›"; toolchain = "‹toolchain›" };
-    Project_toolchain { name = example_package; truss = "‹truss›"; toolchain = "‹toolchain›" };
-    Missing_truss_version { toolchain = "‹toolchain›" };
-    Nested_time_limit;
-    Standard_name;
-    Name_in_use { name = example_package; manifest = "‹manifest›" };
-    Owner_named_like { name = "‹name›"; other = example_package };
-    Not_a_project_package example_package;
-    Self_dependency example_package;
-    Dependency_cycle [ example_package ];
-    Ungranted_capability { dependency = example_package; capability = Grant.Prelude "Clock" };
-    Unused_dependency { package = example_package; dependency = example_package };
-    Failed_dependency
-      {
-        name = example_package;
-        version = (1, 4, 2);
-        is_loaded = false;
-        errors = 2;
-        path = "‹path›";
-        line = 3;
-        column = 5;
-        first = "‹first›";
-      };
-    Failed_dependency
-      {
-        name = example_package;
-        version = (1, 4, 2);
-        is_loaded = true;
-        errors = 2;
-        path = "‹path›";
-        line = 3;
-        column = 5;
-        first = "‹first›";
-      };
-  ]

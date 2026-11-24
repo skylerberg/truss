@@ -1,32 +1,9 @@
-type t =
-  | Shadowing_arm of {
-      arm : Core.origin;
-      name : string;
-      constant : Path.t;
-      bindings : Core.origin list;
-    }
-  | Unreachable_arm of { arm : Core.origin }
-  | Unreachable_alternative of {
-      alternative : Core.origin;
-      previous : Core.origin option;
-      next : Core.origin option;
-      is_after_alternatives : bool;
-    }
-  | Not_covered of {
-      match_ : Core.origin;
-      last_arm : Core.origin option;
-      witness : string;
-      other_witnesses : string list;
-      may_have_more : bool;
-    }
-  | Refutable of { pattern : Core.origin; witness : string }
-
 let make ?(fixes = []) code location message : Nodes.description =
   { code = Patterns code; severity = Error; location; message; notes = []; fixes }
 
 let unreachable = "Earlier arms already match everything this arm matches, so it is never reached."
 
-let describe = function
+let describe : Patterns.t -> Nodes.description = function
   | Shadowing_arm { arm; name; constant; bindings } ->
       let written = Path.show constant in
       make Unreachable_arm (Build.at arm)
@@ -107,57 +84,3 @@ let describe = function
                 ... else`."
                witness);
         ]
-
-let arm = Build.example "arm"
-let other = Build.example "other"
-
-let list_examples : Diagnostic.Code.patterns -> t list = function
-  | Not_covered ->
-      [
-        Not_covered
-          {
-            match_ = arm;
-            last_arm = Some other;
-            witness = "None";
-            other_witnesses = [];
-            may_have_more = false;
-          };
-        Not_covered
-          {
-            match_ = arm;
-            last_arm = Some other;
-            witness = "Red";
-            other_witnesses = [ "Green"; "Blue" ];
-            may_have_more = false;
-          };
-        Not_covered
-          {
-            match_ = arm;
-            last_arm = Some other;
-            witness = "0";
-            other_witnesses = [ "1" ];
-            may_have_more = true;
-          };
-      ]
-  | Unreachable_arm ->
-      [
-        Unreachable_arm { arm };
-        Shadowing_arm
-          {
-            arm;
-            name = "lucky";
-            constant =
-              Path.Top
-                {
-                  module_ = { package = { owner = None; name = "app" }; modules = [ "main" ] };
-                  name = "lucky";
-                };
-            bindings = [ other ];
-          };
-      ]
-  | Unreachable_alternative ->
-      [
-        Unreachable_alternative
-          { alternative = arm; previous = Some other; next = None; is_after_alternatives = true };
-      ]
-  | Refutable -> [ Refutable { pattern = arm; witness = "None" } ]

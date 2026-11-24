@@ -221,7 +221,3 @@ type action =
 
 type fix = { action : action; edits : Source.span Diagnostic.edit list }
 type t = { at : Source.span; problem : problem; fixes : fix list }
-
-val describe : t -> Source.span Description.t
-val render : t -> Diagnostic.t
-val list_examples : Diagnostic.Code.parser -> t list

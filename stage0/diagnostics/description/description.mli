@@ -51,7 +51,6 @@ type ('node, 'span) source = {
 val render_with : ('node, 'span) source -> 'node t -> 'span Diagnostic.diagnostic
 val render_file : text:string -> Source.span t -> Diagnostic.t
 val render_spans : Source.span t -> Diagnostic.t
-val describe_hidden : count:int -> severity:Diagnostic.severity -> int -> Source.span t
 val select_shown : Diagnostic.t list -> Diagnostic.t list
 
 module For_testing : sig

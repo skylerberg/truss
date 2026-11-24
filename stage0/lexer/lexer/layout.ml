@@ -156,7 +156,8 @@ let run ~source ~diagnostics ~mode read_next_input =
   in
   let report ?(notes = []) ?(fixes = []) at problem =
     Diagnostic.Collector.add diagnostics
-      (Syntax_catalog.Lexing.render ~text:(Source.text source) { at; problem; notes; fixes })
+      (Syntax_catalog.Lexing_description.render ~text:(Source.text source)
+         { at; problem; notes; fixes })
   in
   let push bracket span =
     stack := { bracket; span; index = Dynarray.length output } :: !stack;

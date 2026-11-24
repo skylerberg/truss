@@ -33,7 +33,7 @@ let check lookups (key : Resolve.Names.key) ~checks_body =
             | [] -> Ok checked
             | descriptions -> Error descriptions)
       with Interface.Properties.Recursion_limit diagnostic ->
-        Error [ Catalog.Typing.describe diagnostic ])
+        Error [ Catalog.Typing_description.describe diagnostic ])
 
 let check_contract (lookups : Lookups.t) key =
   check lookups key

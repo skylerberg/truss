@@ -380,7 +380,7 @@ let find_counter_condition (context : State.context) counter =
 
 let oblige ?cited ?(fixes = []) ?holds_when (context : State.context) (frame : State.frame) location
     obligation goal =
-  let code = Catalog.Prover.find_code obligation in
+  let code = Catalog.Prover_description.find_code obligation in
   let holds_when = Option.value holds_when ~default:context.obligation_condition in
   if
     (is_panic_obligation code && context.panics)

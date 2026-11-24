@@ -94,4 +94,4 @@ let check_definition (lookups : Lookups.t) (key : Resolve.Names.key) : result =
 let check (lookups : Lookups.t) key =
   try check_definition lookups key
   with Interface.Properties.Recursion_limit diagnostic ->
-    { diagnostics = [ Catalog.Typing.describe diagnostic ]; must_be_disjoint = [] }
+    { diagnostics = [ Catalog.Typing_description.describe diagnostic ]; must_be_disjoint = [] }

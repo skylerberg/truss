@@ -49,16 +49,21 @@ type inference to move an error's span.
 ## The catalog
 
 Each code becomes a constructor whose payload holds the facts the message
-needs. A family is a module with its type and one function that describes
-each value:
+needs. A family is two modules. An interface-only module, such as
+`usage.mli`, defines the payload types once, and passes construct them:
 
 ```ocaml
 type t =
-  | Unused_variable of { binding : node; constant : Path.t option }
-  | Self_comparison of { comparison : node; operator : Language.Comparison.t; is_float : bool }
+  | Unused_variable of { binding : Core.origin; constant : Path.t option }
+  | Self_comparison of { comparison : Core.origin; operator : Language.Comparison.t; is_float : bool }
   | ...
+```
 
-val describe : t -> description
+A description module, such as `usage_description.ml`, describes each
+value:
+
+```ocaml
+val describe : Usage.t -> Nodes.description
 ```
 
 A `description` gives the code, the severity, the location, the message,
@@ -88,8 +93,9 @@ The catalog has four libraries in one directory, `stage0/diagnostics`:
 | `project_catalog` | The manifest, lock file, selection, and layout problems | `path`, `grant` |
 | `catalog` | Every family after parsing | `description`, `types`, `core`, `path` |
 
-The lexer and the manifest parser keep their light dependencies, and an
-audit reads one directory.
+The project family's types are `Project_catalog.Problem`. The lexer and
+the manifest parser keep their light dependencies, and an audit reads one
+directory: every sentence of a family is in its description module.
 
 ## The renderer
 
@@ -150,27 +156,6 @@ The lexer and the parser keep span edits, which they build from tokens.
 What remains for review is the `code` fields and the printers that fill
 them.
 
-## The catalog tool
-
-`stage0/tools/diagnostic_catalog` renders every diagnostic as Markdown,
-grouped by family. It is run by hand; its output is not checked in, and CI
-does not run it.
-
-```ocaml
-val list_examples : Diagnostic.Code.usage -> t list
-```
-
-The usage, package, resolve, patterns, capabilities, and ownership
-families give examples with an exhaustive match over their codes. The
-types family is shared by `Typing` and `Inference`, so those two, the
-prover, and the syntax families list one example for each constructor
-and for each alternative of an enumerated field, and `list_examples`
-selects a code's examples by their description. The tool walks
-`Diagnostic.Code.all` and ends with the codes that have no example.
-
-The tool renders a quoted node as a placeholder named by the field, such
-as `‹binding›`: an example's node is `Build.example "binding"`.
-
 ## Conversion
 
 One pull request converts everything, and the old mechanisms go in it:
@@ -183,13 +168,12 @@ One pull request converts everything, and the old mechanisms go in it:
    `read_span`, quoting, and edit helpers as its last call site goes.
 3. Remove the message parameter of `Diagnostic.make`, and remove
    `read_text` and `read_spans` from the passes' lookups.
-4. Add the catalog tool.
 
 ## Decisions
 
 | Question | Decision |
 |---|---|
 | Do payloads hold `Types.ty` and `Path.t`, or text printed by the pass? | Typed values. The catalog calls every printer, and the only text a pass produces is `code`. |
-| Does the tool render examples, or the messages that the test fixtures produce? | Examples. Each constructor has one, and the tool lists the codes that have none; fixtures miss every code no test reaches. |
+| Does a tool render every diagnostic from examples? | No. Examples for every constructor took about 5,300 lines, more than the sentences they render. The description modules are the audit. |
 | Do manifest, lock file, and registry problems, which are `Project.problem` strings today, join the catalog? | Yes, as a family with no nodes. They are shown beside diagnostics, and an audit should see them. |
 | Does a compiler bug's message join the catalog? | No. A bug's message is for the compiler's authors, and it names an internal state. |

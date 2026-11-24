@@ -222,7 +222,7 @@ let load published name version ~hash =
                 holds = [];
               })
             record )
-  | _ -> Error (Project_catalog.Unavailable "it is not there")
+  | _ -> Error (Project_catalog.Problem.Unavailable "it is not there")
 
 let make_entry name version =
   { Registry.Lock.name = parse_package name; version; hash = hash_of name version; holds = [] }

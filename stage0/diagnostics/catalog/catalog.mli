@@ -55,41 +55,23 @@ type node = Nodes.node = private
 type description = node t
 
 val make_reported : _ t -> Diagnostic.reported
-val find_example_name : Core.origin -> string option
 val read_entry_siblings : Core.origin range list -> int -> Core.origin siblings
 
-module Usage : module type of struct
-  include Usage
-end
-
-module Package : module type of struct
-  include Package
-end
-
-module Typing : module type of struct
-  include Typing
-end
-
-module Resolve : module type of struct
-  include Resolve
-end
-
-module Patterns : module type of struct
-  include Patterns
-end
-
-module Capabilities : module type of struct
-  include Capabilities
-end
-
-module Ownership : module type of struct
-  include Ownership
-end
-
-module Inference : module type of struct
-  include Inference
-end
-
-module Prover : module type of struct
-  include Prover
-end
+module Usage = Usage
+module Usage_description = Usage_description
+module Package = Package
+module Package_description = Package_description
+module Typing = Typing
+module Typing_description = Typing_description
+module Resolve = Resolve
+module Resolve_description = Resolve_description
+module Patterns = Patterns
+module Patterns_description = Patterns_description
+module Capabilities = Capabilities
+module Capabilities_description = Capabilities_description
+module Ownership = Ownership
+module Ownership_description = Ownership_description
+module Inference = Inference
+module Inference_description = Inference_description
+module Prover = Prover
+module Prover_description = Prover_description

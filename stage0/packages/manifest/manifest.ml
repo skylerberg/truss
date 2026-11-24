@@ -4,7 +4,7 @@ type t = { package : package option; time_limit_seconds : int option }
 
 let default_time_limit_seconds = 10
 
-exception Malformed of { line : int; problem : Project_catalog.manifest_problem }
+exception Malformed of { line : int; problem : Project_catalog.Problem.manifest }
 
 let raise_malformed line problem = raise (Malformed { line; problem })
 

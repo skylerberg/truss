@@ -20,6 +20,3 @@ type t =
       may_have_more : bool;
     }
   | Refutable of { pattern : Core.origin; witness : string }
-
-val describe : t -> Nodes.description
-val list_examples : Diagnostic.Code.patterns -> t list

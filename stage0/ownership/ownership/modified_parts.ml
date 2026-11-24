@@ -147,7 +147,7 @@ let check (context : Context.context) (key : Resolve.Names.key) (tree : Mir.t) =
                         else Parameter_unchanged
                       in
                       context.diagnostics <-
-                        Catalog.Usage.describe
+                        Catalog.Usage_description.describe
                           (Unmodified_part
                              {
                                entry = Written (List.nth entries index).id;

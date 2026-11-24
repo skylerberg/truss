@@ -7,7 +7,7 @@ type entry = {
 
 type t = entry list
 
-exception Malformed of { line : int; problem : Project_catalog.lock_problem }
+exception Malformed of { line : int; problem : Project_catalog.Problem.lock }
 
 let raise_malformed line problem = raise (Malformed { line; problem })
 let header = "format 1"

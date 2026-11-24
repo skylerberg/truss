@@ -126,7 +126,7 @@ let use_after_definition (tokens : Token.t array) piece (line : _ Syntax.item) ~
         ]
     | None -> []
   in
-  Syntax_catalog.Parsing.render
+  Syntax_catalog.Parsing_description.render
     { at = Source.make_span line.base line.stop; problem = Use_after_definition; fixes }
 
 let parse tokens ~lexer_diagnostics =

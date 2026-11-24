@@ -375,6 +375,3 @@ type t =
       type_ : Types.ty;
       specification_type : Types.ty;
     }
-
-val describe : t -> Nodes.description
-val list_examples : Diagnostic.Code.types -> t list

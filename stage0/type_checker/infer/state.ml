@@ -116,7 +116,7 @@ let report_description state (description : Catalog.description) =
   Catalog.make_reported description
 
 let add_diagnostic state diagnostic =
-  report_description state (Catalog.Inference.describe diagnostic)
+  report_description state (Catalog.Inference_description.describe diagnostic)
 
 let report state diagnostic = ignore (add_diagnostic state diagnostic)
 let is_formula env = env.specification || env.in_quantifier

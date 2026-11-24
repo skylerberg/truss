@@ -1,86 +1,3 @@
-type subject =
-  | Call of Core.origin
-  | Unmeasured_loop
-  | Conditionally_measured_loop of Types.condition
-  | Failing_operation
-  | Concurrent_block
-  | Concurrent_for_loop
-  | Implementation
-
-type alternative =
-  | Add_decreases
-  | Add_decreases_or_bound of Types.ty
-  | Add_decreases_or_implement of Types.ty
-
-type restriction =
-  | Parallel_branch
-  | Parallel_for
-  | Proof
-  | Specification
-  | Law
-  | Quantifier_body
-  | Evaluated_assertion
-  | Constant_value
-
-type declaring_clause =
-  | Own_uses
-  | Impl_uses
-  | Associated_capability_set of { name : string; is_defined : bool; is_named : bool }
-
-type declaration =
-  | Declared_by of declaring_clause
-  | Fixed_by_trait of { trait : Types.trait_reference; method_name : string }
-
-type granted =
-  | Function of Path.t
-  | Trait_method of { trait : Path.t; name : string }
-  | Implemented_method of { implements : Types.trait_reference; for_type : Types.ty }
-  | Provided_implementation of { capability : Path.t; for_type : Types.ty }
-
-type t =
-  | Not_granted of {
-      at : Core.origin;
-      granted : granted;
-      package : Path.package;
-      capability : Path.t;
-    }
-  | Lambda_uses of {
-      lambda : Core.origin;
-      capability : Types.capability;
-      use : (Core.origin * subject) option;
-    }
-  | Must_terminate of {
-      at : Core.origin;
-      subject : subject;
-      restriction : restriction;
-      alternative : alternative option;
-    }
-  | Not_in_restriction of {
-      at : Core.origin;
-      subject : subject;
-      capability : Types.capability;
-      restriction : restriction;
-      allowed : Types.capability list;
-    }
-  | Not_available of {
-      at : Core.origin;
-      subject : subject;
-      capability : Types.capability;
-      declaration : declaration option;
-      can_provide : bool;
-      alternative : alternative option;
-    }
-  | Not_an_implementation of { implementation : Core.origin; type_ : Types.ty }
-  | Provide_missing_mut of { implementation : Core.origin }
-  | Provide_needless_mut of { implementation : Core.origin; place : Core.origin }
-  | Monitor_needs_tasks of { implementation : Core.origin; type_ : Types.ty }
-  | Callback_may_deadlock of {
-      implementation : Core.origin;
-      capability : Path.t;
-      method_name : string;
-      parameter : string;
-    }
-
 let make ?(notes = []) ?(fixes = []) code location message : Nodes.description =
   { code = Capabilities code; severity = Error; location; message; notes; fixes }
 
@@ -89,7 +6,7 @@ let capitalize = function
   | pieces -> pieces
 
 let describe_subject = function
-  | Call origin -> capitalize (Build.describe_call origin)
+  | Capabilities.Call origin -> capitalize (Build.describe_call origin)
   | Unmeasured_loop -> [ Text "This loop has no measure, so it" ]
   | Conditionally_measured_loop condition ->
       [
@@ -103,7 +20,7 @@ let describe_subject = function
   | Implementation -> [ Text "This implementation" ]
 
 let show_alternative = function
-  | Add_decreases -> "give the loop a `decreases` clause"
+  | Capabilities.Add_decreases -> "give the loop a `decreases` clause"
   | Add_decreases_or_bound type_ ->
       Printf.sprintf "give the loop a `decreases` clause, or bound `%s` by `FiniteCursor`"
         (Types.show type_)
@@ -122,7 +39,7 @@ let value_reason =
    instead."
 
 let describe_restriction = function
-  | Parallel_branch ->
+  | Capabilities.Parallel_branch ->
       ("a `parallel` branch", "Parallel calls of one implementation could race.", true)
   | Parallel_for -> ("a `parallel for`", "Parallel calls of one implementation could race.", true)
   | Proof -> ("a proof", value_reason, true)
@@ -149,7 +66,7 @@ let show_exceptions = function
 
 let show_declaring_clause clause capability =
   match clause with
-  | Own_uses -> Printf.sprintf "`uses %s`" capability
+  | Capabilities.Own_uses -> Printf.sprintf "`uses %s`" capability
   | Impl_uses -> Printf.sprintf "`uses %s` on the `impl`" capability
   | Associated_capability_set { name; is_defined; is_named } ->
       let set =
@@ -167,7 +84,7 @@ let show_as_written : Path.t -> string = function
   | path -> raise_bug "the capability %s is not a definition of a module" (Path.show path)
 
 let describe_granted = function
-  | Function path -> Printf.sprintf "`%s`" (Path.show path)
+  | Capabilities.Function path -> Printf.sprintf "`%s`" (Path.show path)
   | Trait_method { trait; name } -> Printf.sprintf "`%s.%s`" (Path.show trait) name
   | Implemented_method { implements; for_type } ->
       Printf.sprintf "The `impl` of `%s` for `%s`" (Types.show_trait implements)
@@ -182,7 +99,7 @@ let write_not_granted granted package capability =
      for `%s` in `truss.toml`."
     (describe_granted granted) written package written package
 
-let describe = function
+let describe : Capabilities.t -> Nodes.description = function
   | Not_granted { at = origin; granted; package; capability } ->
       make Not_granted (Build.at origin) [ Text (write_not_granted granted package capability) ]
   | Lambda_uses { lambda; capability; use } ->
@@ -302,75 +219,3 @@ let describe = function
                 could deadlock. Pass the method the values that it needs instead of a callback."
                (Path.show_name capability) method_name parameter);
         ]
-
-let origin = Build.example "origin"
-let place = Build.example "place"
-let console = Path.make_standard_path [ "console" ] "Console"
-let point = Types.make_builtin Int64
-let capability = Types.Capability console
-
-let list_examples : Diagnostic.Code.capabilities -> t list = function
-  | Not_available ->
-      [
-        Not_available
-          {
-            at = origin;
-            subject = Call origin;
-            capability;
-            declaration = Some (Declared_by Own_uses);
-            can_provide = true;
-            alternative = None;
-          };
-        Not_available
-          {
-            at = origin;
-            subject = Unmeasured_loop;
-            capability = Built_in Run_forever;
-            declaration = None;
-            can_provide = false;
-            alternative = Some Add_decreases;
-          };
-        Must_terminate
-          {
-            at = origin;
-            subject = Unmeasured_loop;
-            restriction = Proof;
-            alternative = Some Add_decreases;
-          };
-        Not_in_restriction
-          {
-            at = origin;
-            subject = Call origin;
-            capability;
-            restriction = Parallel_branch;
-            allowed = [ Built_in Panic ];
-          };
-      ]
-  | Lambda_uses -> [ Lambda_uses { lambda = origin; capability; use = Some (place, Call place) } ]
-  | Not_granted ->
-      [
-        Not_granted
-          {
-            at = origin;
-            granted = Function console;
-            package = { owner = None; name = "app" };
-            capability = console;
-          };
-      ]
-  | Provide_mode ->
-      [
-        Provide_missing_mut { implementation = origin };
-        Provide_needless_mut { implementation = origin; place };
-      ]
-  | Not_an_implementation -> [ Not_an_implementation { implementation = origin; type_ = point } ]
-  | Callback_may_deadlock ->
-      [
-        Callback_may_deadlock
-          {
-            implementation = origin;
-            capability = console;
-            method_name = "read";
-            parameter = "visit";
-          };
-      ]
-  | Monitor_needs_tasks -> [ Monitor_needs_tasks { implementation = origin; type_ = point } ]

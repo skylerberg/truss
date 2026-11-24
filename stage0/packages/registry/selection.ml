@@ -10,12 +10,12 @@ type package = {
   record : Lock.t;
 }
 
-type problem = Project_catalog.selection_problem =
+type problem = Project_catalog.Problem.selection =
   | No_version of { name : Path.package; wanted_by : Path.package }
   | Cannot_load of {
       name : Path.package;
       version : Version.t;
-      failure : Project_catalog.load_failure;
+      failure : Project_catalog.Problem.load_failure;
     }
   | Two_contents of { name : Path.package; version : Version.t; recorded_by : Path.package }
 
@@ -25,11 +25,11 @@ let read_manifest_and_record ~read name =
       Lock.parse (Option.value ~default:"" (read "truss.lock")) )
   with
   | exception Manifest.Malformed { line; problem } ->
-      Error (Project_catalog.Unreadable_manifest { line; problem })
+      Error (Project_catalog.Problem.Unreadable_manifest { line; problem })
   | exception Lock.Malformed { line; problem } ->
-      Error (Project_catalog.Unreadable_lock { line; problem })
+      Error (Project_catalog.Problem.Unreadable_lock { line; problem })
   | Some { package = Some manifest; _ }, record when manifest.name = name -> Ok (manifest, record)
-  | _ -> Error (Project_catalog.Misnamed_manifest name)
+  | _ -> Error (Project_catalog.Problem.Misnamed_manifest name)
 
 let choose ~lock ~roots ~is_local ~load =
   let chosen = Package_table.create 16 in
@@ -130,9 +130,10 @@ let lock ~project packages : Lock.t =
       })
     packages
 
-let list_differences ~(written : Lock.t) ~(current : Lock.t) : Project_catalog.difference list =
+let list_differences ~(written : Lock.t) ~(current : Lock.t) :
+    Project_catalog.Problem.difference list =
   List.filter_map
-    (fun (entry : Lock.entry) : Project_catalog.difference option ->
+    (fun (entry : Lock.entry) : Project_catalog.Problem.difference option ->
       match Lock.find written entry.name with
       | None -> Some (Unlisted { name = entry.name; version = entry.version })
       | Some line when Version.compare line.version entry.version <> 0 ->
@@ -145,7 +146,7 @@ let list_differences ~(written : Lock.t) ~(current : Lock.t) : Project_catalog.d
       | Some _ -> None)
     current
   @ List.filter_map
-      (fun (line : Lock.entry) : Project_catalog.difference option ->
+      (fun (line : Lock.entry) : Project_catalog.Problem.difference option ->
         if Lock.find current line.name = None then Some (Unused line.name) else None)
       written
 

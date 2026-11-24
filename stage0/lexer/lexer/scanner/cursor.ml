@@ -53,7 +53,7 @@ let satisfies cursor index is_wanted = index < cursor.length && is_wanted cursor
 
 let report cursor ?(notes = []) ?(fixes = []) at problem =
   Diagnostic.Collector.add cursor.diagnostics
-    (Syntax_catalog.Lexing.render ~text:cursor.text { at; problem; notes; fixes })
+    (Syntax_catalog.Lexing_description.render ~text:cursor.text { at; problem; notes; fixes })
 
 let is_line_break character = character = '\n' || character = '\r'
 let is_end_of_line cursor index = is_at_end cursor index || is_line_break cursor.text.[index]

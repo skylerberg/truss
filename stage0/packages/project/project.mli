@@ -12,7 +12,7 @@ val make_file_path : directory:string -> Path.file -> string
 val find_package_directory : is_package:(string -> bool) -> string -> string option
 
 type source_file = { path : string; directory : string; file : Path.file }
-type problem = { file : string; line : int option; problem : Project_catalog.problem }
+type problem = { file : string; line : int option; problem : Project_catalog.Problem.t }
 
 val show_problem : problem -> string
 

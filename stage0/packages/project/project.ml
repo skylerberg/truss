@@ -49,7 +49,7 @@ type package = {
 }
 
 type source_file = { path : string; directory : string; file : Path.file }
-type problem = { file : string; line : int option; problem : Project_catalog.problem }
+type problem = { file : string; line : int option; problem : Project_catalog.Problem.t }
 
 let show_problem { file; line; problem } =
   let message = Project_catalog.describe problem in
@@ -191,10 +191,10 @@ let select_packages (files : files) (project_layout : layout) =
         match files.find_unavailable_reason hash with
         | Some reason ->
             failed := hash :: !failed;
-            Error (Project_catalog.Unavailable reason)
+            Error (Project_catalog.Problem.Unavailable reason)
         | None ->
             missing := (name, version, hash) :: !missing;
-            Error Project_catalog.Unfetched)
+            Error Project_catalog.Problem.Unfetched)
     | Some _ -> Registry.Selection.read_manifest_and_record ~read:(files.find_text root) name
   in
   let selected, selection_problems =

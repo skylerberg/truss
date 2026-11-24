@@ -51,8 +51,6 @@ type node = Nodes.node =
 
 type description = node t
 
-let find_example_name = Build.find_example_name
-
 let read_entry_siblings (entries : Core.origin range list) index : Core.origin siblings =
   match (index, entries) with
   | 0, _ :: next :: _ -> Next next
@@ -63,11 +61,20 @@ let read_entry_siblings (entries : Core.origin range list) index : Core.origin s
 let make_reported (_ : _ t) = Diagnostic.reported_elsewhere
 
 module Usage = Usage
+module Usage_description = Usage_description
 module Package = Package
+module Package_description = Package_description
 module Typing = Typing
+module Typing_description = Typing_description
 module Resolve = Resolve
+module Resolve_description = Resolve_description
 module Patterns = Patterns
+module Patterns_description = Patterns_description
 module Capabilities = Capabilities
+module Capabilities_description = Capabilities_description
 module Ownership = Ownership
+module Ownership_description = Ownership_description
 module Inference = Inference
+module Inference_description = Inference_description
 module Prover = Prover
+module Prover_description = Prover_description

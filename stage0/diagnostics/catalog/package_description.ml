@@ -1,39 +1,3 @@
-type holder = Own | Of_view of Types.ty
-
-type clash =
-  | Same_receiver of { receiver : Path.receiver; trait : Types.trait_reference }
-  | Other_package
-  | Unwritten of { trait : Types.trait_reference }
-
-type t =
-  | Impl_location of { header : Core.origin; trait : Types.trait_reference; for_type : Types.ty }
-  | Sealed_trait_impl of {
-      header : Core.origin;
-      trait : Path.t;
-      type_ : Path.t;
-      is_floating_point : bool;
-    }
-  | Method_name_clash of {
-      header : Core.origin;
-      for_type : Types.ty;
-      method_name : string;
-      holder : holder;
-      clash : clash;
-    }
-  | Overlapping_impls of {
-      header : Core.origin;
-      trait : Types.trait_reference;
-      for_type : Types.ty;
-    }
-  | Variant_in_place of { variant : Core.origin }
-  | Record_in_place of { header : Core.origin }
-  | Associated_type_in_place of { member : Core.origin; name : string; recursive : Types.ty }
-  | Function_input_field of { field : Core.origin; type_name : string }
-  | Associated_function_input of { member : Core.origin; name : string; recursive : Types.ty }
-  | Growing_type of { header : Core.origin }
-  | Instantiation_cycle of { header : Core.origin }
-  | Duplicate_test of { name : string }
-
 let make ?(fixes = []) code location message : Nodes.description =
   { code = Package code; severity = Error; location; message; notes = []; fixes }
 
@@ -43,10 +7,10 @@ let not_strictly_positive =
    `uses`, or pass the function the fields that it needs instead of the whole value."
 
 let describe_holder method_name = function
-  | Own -> Printf.sprintf "a `%s` of its own" method_name
+  | Package.Own -> Printf.sprintf "a `%s` of its own" method_name
   | Of_view view -> Printf.sprintf "the `%s` of its view `%s`" method_name (Types.show view)
 
-let describe = function
+let describe : Package.t -> Nodes.description = function
   | Impl_location { header; trait; for_type } ->
       make Impl_location (Build.at header)
         [
@@ -165,70 +129,3 @@ let describe = function
   | Duplicate_test { name } ->
       make Duplicate_test (At Definition)
         [ Text (Printf.sprintf "Another test of this package is named %S." name) ]
-
-let header = Build.example "header"
-
-let point =
-  Path.Top
-    { module_ = { package = { owner = None; name = "app" }; modules = [ "main" ] }; name = "Point" }
-
-let example_type = Types.Named { path = point; arguments = [] }
-
-let example_trait : Types.trait_reference =
-  { trait = Path.make_standard_path [ "core" ] "Equal"; trait_arguments = []; associated = [] }
-
-let list_examples : Diagnostic.Code.package -> t list = function
-  | Impl_location -> [ Impl_location { header; trait = example_trait; for_type = example_type } ]
-  | Sealed_trait_impl ->
-      [
-        Sealed_trait_impl
-          {
-            header;
-            trait = Path.make_standard_path [ "core" ] "Integer";
-            type_ = point;
-            is_floating_point = false;
-          };
-      ]
-  | Method_name_clash ->
-      [
-        Method_name_clash
-          {
-            header;
-            for_type = example_type;
-            method_name = "equals";
-            holder = Own;
-            clash = Same_receiver { receiver = Static; trait = example_trait };
-          };
-        Method_name_clash
-          {
-            header;
-            for_type = example_type;
-            method_name = "equals";
-            holder = Of_view example_type;
-            clash = Other_package;
-          };
-        Method_name_clash
-          {
-            header;
-            for_type = example_type;
-            method_name = "equals";
-            holder = Own;
-            clash = Unwritten { trait = example_trait };
-          };
-      ]
-  | Overlapping_impls ->
-      [ Overlapping_impls { header; trait = example_trait; for_type = example_type } ]
-  | Needs_indirect ->
-      [
-        Variant_in_place { variant = header };
-        Record_in_place { header };
-        Associated_type_in_place { member = header; name = "Item"; recursive = example_type };
-      ]
-  | Not_strictly_positive ->
-      [
-        Function_input_field { field = header; type_name = "Point" };
-        Associated_function_input { member = header; name = "Item"; recursive = example_type };
-      ]
-  | Growing_type -> [ Growing_type { header } ]
-  | Instantiation_cycle -> [ Instantiation_cycle { header } ]
-  | Duplicate_test -> [ Duplicate_test { name = "adds" } ]

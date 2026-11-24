@@ -129,7 +129,7 @@ let list_trait_closure (lookups : Lookups.t) path =
   List.rev !closure
 
 let record_diagnostic diagnostics (diagnostic : Catalog.Typing.t) =
-  let description = Catalog.Typing.describe diagnostic in
+  let description = Catalog.Typing_description.describe diagnostic in
   diagnostics := description :: !diagnostics;
   Catalog.make_reported description
 

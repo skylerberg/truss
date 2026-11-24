@@ -4,7 +4,7 @@ type t = { package : package option; time_limit_seconds : int option }
 
 val default_time_limit_seconds : int
 
-exception Malformed of { line : int; problem : Project_catalog.manifest_problem }
+exception Malformed of { line : int; problem : Project_catalog.Problem.manifest }
 
 val parse : string -> t
 val has_project_table : string -> bool

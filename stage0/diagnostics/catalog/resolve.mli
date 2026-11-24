@@ -77,8 +77,3 @@ type import =
   | Imported_twice of { item : Source.span; last : string }
   | Definition_named_like of { item : Source.span; last : string; module_ : Path.module_ }
   | Unused_import of { item : Source.span; module_ : Path.module_ }
-
-val describe : t -> Nodes.description
-val describe_import : import -> Source.span Description.t
-val list_examples : Diagnostic.Code.resolve -> t list
-val list_import_examples : Diagnostic.Code.resolve -> import list

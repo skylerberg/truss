@@ -1,114 +1,8 @@
-type root =
-  | Self
-  | Named of string
-  | Unnamed of Core.origin
-  | Temporary
-  | Constant of Path.t
-  | Environment
-
-type step = Field of string | Indexed
-type place = { root : root; steps : step list }
-type verb = Be_used | Be_passed_mut | Be_assigned | Be_moved
-type lender = Loop | Provide_block | Rest_of_statement | Earlier_operand | Alias of root
-
-type loan = {
-  at : Core.origin;
-  place : place;
-  is_mut : bool;
-  lender : lender;
-  through : place option;
-  verb : verb;
-}
-
-type copy = { moved : Core.origin; own_keyword : (Core.origin * Core.origin) option }
-type dangling_act = Is | Returns | Stores_in of root | Lends
-type dangling_view = Captured_variables | Temporary_view | View_of of root
-type scrutinee = { scrutinee : root; written : Core.origin; is_part : bool }
-
-type t =
-  | Conflicting_loan of loan
-  | Mutated_while_lent of loan
-  | Mutated_while_viewed of { at : Core.origin; place : place; verb : verb; holder : root }
-  | Moved_out_of_lent of { at : Core.origin; copy : copy option }
-  | Arguments_overlap of {
-      at : Core.origin Description.range;
-      exclusive : place;
-      also : place;
-      call : Core.origin;
-      is_yielded : bool;
-    }
-  | View_argument_overlap of {
-      at : Core.origin Description.range;
-      passed : place;
-      call : Core.origin;
-    }
-  | Temporary_dropped_while_viewed of { at : Core.origin; holder : string option }
-  | Dropped_while_viewed of { at : Core.origin; owner : root; holder : string option }
-  | Lent_part_bound of { at : Core.origin; copy : copy option }
-  | Capturing_lambda_stored of { at : Core.origin }
-  | Unowned_function_stored of { at : Core.origin; viewed : place }
-  | Dangling_view of {
-      at : Core.origin;
-      act : dangling_act;
-      viewed : dangling_view;
-      is_constant : bool;
-    }
-  | Returned_view_of_implementation of { at : Core.origin }
-  | Stored_view_in_implementation of { at : Core.origin; viewed : root }
-  | Self_referential_store of { at : Core.origin; root : root }
-  | Stored_view_of_borrowed of { at : Core.origin; parameter : root; holder : root }
-  | Lent_owned_part of { at : Core.origin; part : root }
-  | Lent_other_parameter of { at : Core.origin; root : root }
-  | Branch_data_race of { at : Core.origin; schedule : Language.Loop_mode.t; place : place }
-  | Iteration_data_race of { at : Core.origin; schedule : Language.Loop_mode.t }
-  | Lent_element_race of {
-      at : Core.origin;
-      schedule : Language.Loop_mode.t;
-      collection : Types.ty option;
-    }
-  | Pulled_view of { at : Core.origin; element : Types.ty }
-  | Lent_mut_in_variant of { at : Core.origin Description.range; variant : string }
-  | Needs_lent_mut of { at : Core.origin; place : place; copy : copy option }
-  | Returned_view_of_scrutinee of {
-      at : Core.origin;
-      place : place;
-      scrutinee : scrutinee;
-      copy : copy option;
-    }
-  | Returned_unowned of {
-      at : Core.origin;
-      place : place;
-      views_literal : bool;
-      copy : copy option;
-    }
-  | Moved_element of { at : Core.origin; place : place; copy : copy option }
-  | Moved_constant of { at : Core.origin; place : place; copy : copy option }
-  | Moved_literal_view of { at : Core.origin; place : place; copy : copy option }
-  | Moved_view_of_scrutinee of {
-      at : Core.origin;
-      place : place;
-      scrutinee : scrutinee;
-      copy : copy option;
-    }
-  | Moved_view of { at : Core.origin; place : place; copy : copy option }
-  | Needs_own_keyword of { at : Core.origin; place : place; copy : copy option }
-  | Use_after_move of { at : Core.origin; place : place; moved : Core.origin; copy : copy option }
-  | Not_reinitialized_at_return of { at : Core.origin; moved : Core.origin; place : place }
-  | Not_reinitialized_at_scope_end of { moved : Core.origin; place : place }
-  | Not_reinitialized_in_branch of { moved : Core.origin; place : place }
-  | Undeclared_change of {
-      at : Core.origin;
-      function_ : Path.t;
-      parameter : string;
-      fields : string list;
-      last_entry : Core.origin option;
-    }
-
 let make ?(notes = []) ?(fixes = []) code location message : Nodes.description =
   { code = Ownership code; severity = Error; location; message; notes; fixes }
 
 let show_root = function
-  | Self -> [ Description.Text "self" ]
+  | Ownership.Self -> [ Description.Text "self" ]
   | Named name -> [ Text name ]
   | Unnamed origin -> [ Build.quote origin ]
   | Temporary -> [ Text "temporary" ]
@@ -117,21 +11,21 @@ let show_root = function
   | Environment -> [ Text "the lambda's captured variables" ]
 
 let show_place place =
-  show_root place.root
+  show_root place.Ownership.root
   @ List.map
-      (function Field name -> Description.Text ("." ^ name) | Indexed -> Text "[...]")
+      (function Ownership.Field name -> Description.Text ("." ^ name) | Indexed -> Text "[...]")
       place.steps
 
 let code_of pieces = (Description.Text "`" :: pieces) @ [ Text "`" ]
 
 let show_verb = function
-  | Be_used -> "be used"
+  | Ownership.Be_used -> "be used"
   | Be_passed_mut -> "be passed `mut`"
   | Be_assigned -> "be assigned"
   | Be_moved -> "be moved"
 
 let show_lender = function
-  | Loop -> [ Description.Text "the loop" ]
+  | Ownership.Loop -> [ Description.Text "the loop" ]
   | Provide_block -> [ Text "the `provide` block" ]
   | Rest_of_statement -> [ Text "a lending call until this statement ends" ]
   | Earlier_operand -> [ Text "an earlier operand of this expression" ]
@@ -141,7 +35,7 @@ let show_lender = function
 
 let describe_loan loan =
   let through =
-    match loan.through with
+    match loan.Ownership.through with
     | Some borrowed ->
         (Description.Text " through " :: code_of (show_place borrowed))
         @ [ Text ", which views it" ]
@@ -159,7 +53,7 @@ let describe_loan loan =
     @ through @ [ Text "." ]
 
 let copy_fix title = function
-  | Some { moved; own_keyword } ->
+  | Some { Ownership.moved; own_keyword } ->
       [
         {
           Description.title = [ Text title ];
@@ -182,7 +76,7 @@ let show_holder = function
   | None -> "the value built here"
 
 let describe_act = function
-  | Is -> ([ Description.Text "is" ], "A constant is a view only of another constant.")
+  | Ownership.Is -> ([ Description.Text "is" ], "A constant is a view only of another constant.")
   | Returns -> ([ Text "returns" ], "A function returns a view only of its parameters.")
   | Stores_in root ->
       ( (Description.Text "stores in " :: code_of (show_root root))
@@ -193,16 +87,16 @@ let describe_act = function
 let scrutinee_fix scrutinee =
   {
     Description.title =
-      (Description.Text "Move " :: code_of (show_root scrutinee.scrutinee))
+      (Description.Text "Move " :: code_of (show_root scrutinee.Ownership.scrutinee))
       @ [ Text " with `own`." ];
     edits = [ Build.insert_before scrutinee.written [ Text "own " ] ];
   }
 
 let show_scrutinee_view scrutinee =
-  (if scrutinee.is_part then [ Description.Text "part of " ] else [])
+  (if scrutinee.Ownership.is_part then [ Description.Text "part of " ] else [])
   @ code_of (show_root scrutinee.scrutinee)
 
-let describe = function
+let describe : Ownership.t -> Nodes.description = function
   | Conflicting_loan loan -> make Conflicting_loan (Build.at loan.at) (describe_loan loan)
   | Mutated_while_lent loan -> make Mutated_while_viewed (Build.at loan.at) (describe_loan loan)
   | Mutated_while_viewed { at = origin; place; verb; holder } ->
@@ -571,111 +465,3 @@ let describe = function
                (Build.show_function_name function_)
                parameter);
         ]
-
-let origin = Build.example "origin"
-let other = Build.example "other"
-let count = { root = Named "count"; steps = [] }
-let items = { root = Named "items"; steps = [ Field "first" ] }
-let copy = Some { moved = origin; own_keyword = None }
-let range = { Description.covering = [ origin; other ] }
-
-let loan verb =
-  { at = origin; place = items; is_mut = false; lender = Rest_of_statement; through = None; verb }
-
-let scrutinee = { scrutinee = Named "pair"; written = other; is_part = true }
-
-let list_examples : Diagnostic.Code.ownership -> t list = function
-  | Conflicting_loan ->
-      [
-        Conflicting_loan { (loan Be_used) with is_mut = true };
-        Arguments_overlap
-          { at = range; exclusive = count; also = items; call = origin; is_yielded = false };
-        Arguments_overlap
-          { at = range; exclusive = count; also = items; call = origin; is_yielded = true };
-        View_argument_overlap { at = range; passed = count; call = origin };
-      ]
-  | Mutated_while_viewed ->
-      [
-        Mutated_while_lent
-          { (loan Be_assigned) with through = Some count; lender = Alias (Named "view") };
-        Mutated_while_viewed
-          { at = origin; place = items; verb = Be_passed_mut; holder = Named "view" };
-      ]
-  | Not_owned ->
-      [
-        Moved_out_of_lent { at = origin; copy };
-        Moved_element { at = origin; place = { root = Named "items"; steps = [ Indexed ] }; copy };
-        Moved_constant
-          {
-            at = origin;
-            place = { root = Constant (Path.make_standard_path [ "math" ] "pi"); steps = [] };
-            copy;
-          };
-        Moved_literal_view { at = origin; place = count; copy };
-        Moved_view_of_scrutinee { at = origin; place = count; scrutinee; copy };
-        Moved_view { at = origin; place = items; copy };
-      ]
-  | Views_temporary -> [ Temporary_dropped_while_viewed { at = origin; holder = Some "view" } ]
-  | View_escapes ->
-      [
-        Dropped_while_viewed { at = origin; owner = Named "items"; holder = None };
-        Capturing_lambda_stored { at = origin };
-        Unowned_function_stored { at = origin; viewed = count };
-        Dangling_view
-          { at = origin; act = Returns; viewed = Captured_variables; is_constant = false };
-        Dangling_view
-          { at = origin; act = Stores_in Self; viewed = Temporary_view; is_constant = false };
-        Dangling_view
-          { at = origin; act = Lends; viewed = View_of (Named "items"); is_constant = false };
-        Stored_view_of_borrowed { at = origin; parameter = Named "text"; holder = Self };
-        Lent_owned_part { at = origin; part = Temporary };
-      ]
-  | Lent_part_escapes -> [ Lent_part_bound { at = origin; copy } ]
-  | View_crosses_capability ->
-      [
-        Returned_view_of_implementation { at = origin };
-        Stored_view_in_implementation { at = origin; viewed = Named "text" };
-      ]
-  | Self_referential -> [ Self_referential_store { at = origin; root = Self } ]
-  | Lends_other_parameter -> [ Lent_other_parameter { at = origin; root = Named "other" } ]
-  | Data_race ->
-      [
-        Branch_data_race { at = origin; schedule = Parallel; place = count };
-        Iteration_data_race { at = origin; schedule = Concurrent };
-        Lent_element_race { at = origin; schedule = Parallel; collection = None };
-      ]
-  | Task_outlives_view -> [ Pulled_view { at = origin; element = Types.make_builtin Int64 } ]
-  | Lent_mut_in_variant -> [ Lent_mut_in_variant { at = range; variant = "Some" } ]
-  | Needs_lent_mut -> [ Needs_lent_mut { at = origin; place = items; copy } ]
-  | Needs_owned ->
-      [
-        Returned_view_of_scrutinee { at = origin; place = count; scrutinee; copy };
-        Returned_unowned { at = origin; place = count; views_literal = false; copy };
-        Needs_own_keyword { at = origin; place = count; copy };
-      ]
-  | Use_after_move -> [ Use_after_move { at = origin; place = count; moved = other; copy } ]
-  | Not_reinitialized ->
-      [
-        Not_reinitialized_at_return { at = origin; moved = other; place = items };
-        Not_reinitialized_at_scope_end { moved = other; place = items };
-        Not_reinitialized_in_branch { moved = other; place = items };
-      ]
-  | Undeclared_change ->
-      [
-        Undeclared_change
-          {
-            at = origin;
-            function_ = Build.example_path;
-            parameter = "scanner";
-            fields = [ "position" ];
-            last_entry = Some other;
-          };
-        Undeclared_change
-          {
-            at = origin;
-            function_ = Build.example_path;
-            parameter = "scanner";
-            fields = [];
-            last_entry = None;
-          };
-      ]

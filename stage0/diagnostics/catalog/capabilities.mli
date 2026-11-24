@@ -80,6 +80,3 @@ type t =
       method_name : string;
       parameter : string;
     }
-
-val describe : t -> Nodes.description
-val list_examples : Diagnostic.Code.capabilities -> t list

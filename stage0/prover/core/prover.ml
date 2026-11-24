@@ -98,7 +98,7 @@ let translate_derived_default (lookups : Lookups.t) (key : Resolve.Names.key)
     let outcome = Translate.translate_function lookups source ~path in
     List.map
       (fun (obligation : Obligation.t) ->
-        match Catalog.Prover.find_code obligation.obligation with
+        match Catalog.Prover_description.find_code obligation.obligation with
         | Invariant -> { obligation with obligation = Derived_default_invariant }
         | _ -> obligation)
       outcome.obligations
@@ -293,7 +293,7 @@ let resolve_location (names : Resolve.Names.lookups) (key : Resolve.Names.key)
     | Whole_definition -> (names.read_definition key).id)
 
 let render (lookups : Lookups.t) key description =
-  Renderer.render lookups.interface.names key (Catalog.Prover.describe description)
+  Renderer.render lookups.interface.names key (Catalog.Prover_description.describe description)
 
 type site = { code : Diagnostic.Code.prover; span : Source.Definition_span.t; shows : string }
 type citation = { cited : Resolve.Names.key; clause : Source.Definition_span.t }
@@ -478,12 +478,16 @@ let list_refutation_requests posed answers =
     (List.combine (list_posed posed) answers)
 
 let note_cited_clause (failure : Source.span Diagnostic.diagnostic) clause =
-  { failure with notes = failure.notes @ [ (clause, Catalog.Prover.describe_citation Cited_here) ] }
+  {
+    failure with
+    notes = failure.notes @ [ (clause, Catalog.Prover_description.describe_citation Cited_here) ];
+  }
 
 let name_cited_clause (failure : Source.span Diagnostic.diagnostic) ~path ~line =
   {
     failure with
-    message = failure.message ^ Catalog.Prover.describe_citation (Cited_at { path; line });
+    message =
+      failure.message ^ Catalog.Prover_description.describe_citation (Cited_at { path; line });
   }
 
 let explain_failure (posed : posed_obligation) answer ~is_refuted : Catalog.Prover.failure option =

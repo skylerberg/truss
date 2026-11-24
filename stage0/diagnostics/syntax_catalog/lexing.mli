@@ -124,7 +124,3 @@ type t = {
   notes : (Source.span * note) list;
   fixes : fix list;
 }
-
-val describe : t -> Source.span Description.t
-val render : text:string -> t -> Diagnostic.t
-val list_examples : Diagnostic.Code.lexer -> t list

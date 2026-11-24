@@ -271,7 +271,8 @@ let report cursor ?(fixes = []) at (problem : Syntax_catalog.Parsing.problem) =
   (match problem with
   | Missing_body -> cursor.syntax_errors := at :: !(cursor.syntax_errors)
   | _ -> record_syntax_error cursor ~index:cursor.index at);
-  Diagnostic.Collector.add cursor.diagnostics (Syntax_catalog.Parsing.render { at; problem; fixes })
+  Diagnostic.Collector.add cursor.diagnostics
+    (Syntax_catalog.Parsing_description.render { at; problem; fixes })
 
 let fail cursor expected =
   let token = peek cursor in

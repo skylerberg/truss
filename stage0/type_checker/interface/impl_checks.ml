@@ -137,7 +137,7 @@ let check_impl (state : Checking.state) (written_members : Syntax.impl_member Sy
             state.diagnostics :=
               List.map
                 (fun ((interface : Types.impl_interface), package, capability) ->
-                  Catalog.Capabilities.describe
+                  Catalog.Capabilities_description.describe
                     (Not_granted
                        {
                          at;

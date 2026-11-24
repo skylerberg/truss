@@ -1,6 +1,16 @@
 (library
  (name catalog)
- (modules_without_implementation nodes)
+ (modules_without_implementation
+  nodes
+  usage
+  package
+  typing
+  resolve
+  patterns
+  capabilities
+  ownership
+  inference
+  prover)
  (libraries
   description
   diagnostic

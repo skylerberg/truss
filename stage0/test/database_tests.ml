@@ -523,7 +523,7 @@ let count_termination_obligations database ~of_:path =
       List.length
         (List.filter
            (fun (obligation : Prover.Obligation.t) ->
-             Catalog.Prover.find_code obligation.obligation = Termination)
+             Catalog.Prover_description.find_code obligation.obligation = Termination)
            outcome.obligations)
   | Some (Value (Unsupported _ | Not_proven_here) | Failed | Blocked) | None ->
       failwith ("the proof of " ^ Path.show path ^ " makes no obligations")

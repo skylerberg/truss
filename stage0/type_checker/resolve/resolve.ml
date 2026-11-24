@@ -203,7 +203,9 @@ let list_file_diagnostics (lookups : Names.lookups) (path : Path.file) (file : S
     else used
   in
   let diagnostics = ref [] in
-  let report import = diagnostics := Catalog.Resolve.describe_import import :: !diagnostics in
+  let report import =
+    diagnostics := Catalog.Resolve_description.describe_import import :: !diagnostics
+  in
   ignore
     (List.fold_left
        (fun seen (item : Syntax.path Syntax.item) ->

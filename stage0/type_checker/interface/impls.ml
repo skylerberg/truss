@@ -800,7 +800,7 @@ let has_property property lookups ~list_bounds type_ =
   | Depends_on open_type ->
       raise_bug "whether `%s` %s depends on the open type `%s`, so it has no bool answer"
         (Types.show type_)
-        (Catalog.Typing.show_property property)
+        (Catalog.Typing_description.show_property property)
         (Types.show open_type)
 
 let is_copyable = has_property Copyable

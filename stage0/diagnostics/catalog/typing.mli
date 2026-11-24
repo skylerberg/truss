@@ -207,7 +207,3 @@ type t =
   | Proof_bound_unmet of { at : Core.origin; generic : string; bound : Types.trait_reference }
   | Unknown_law of { at : Core.origin; trait : Types.trait_reference; law : string }
   | Law_without_impl of { at : Core.origin; for_type : Types.ty; trait : Types.trait_reference }
-
-val show_property : Types.property -> string
-val describe : t -> Nodes.description
-val list_examples : Diagnostic.Code.types -> t list

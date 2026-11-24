@@ -117,7 +117,7 @@ let find_place_without_keyword context (place : Core.origin) =
   Hashtbl.find_opt context.places_without_keyword (Core_walk.locate_origin place)
 
 let report context diagnostic =
-  let (description : Catalog.description) = Catalog.Ownership.describe diagnostic in
+  let (description : Catalog.description) = Catalog.Ownership_description.describe diagnostic in
   let is_reported =
     List.exists
       (fun (reported : Catalog.description) ->

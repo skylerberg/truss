@@ -17,7 +17,7 @@ type context = {
 }
 
 let report context diagnostic =
-  context.diagnostics <- Catalog.Patterns.describe diagnostic :: context.diagnostics
+  context.diagnostics <- Catalog.Patterns_description.describe diagnostic :: context.diagnostics
 
 let compute_integer_range type_ =
   let compute_bounds signed width =

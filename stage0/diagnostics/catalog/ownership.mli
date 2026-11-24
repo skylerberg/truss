@@ -103,6 +103,3 @@ type t =
       fields : string list;
       last_entry : Core.origin option;
     }
-
-val describe : t -> Nodes.description
-val list_examples : Diagnostic.Code.ownership -> t list

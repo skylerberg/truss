@@ -47,6 +47,3 @@ and part_change =
 
 and definition_kind = Function | Constant
 and visibility = Internal | Private
-
-val describe : t -> Nodes.description
-val list_examples : Diagnostic.Code.usage -> t list

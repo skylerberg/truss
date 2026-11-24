@@ -1,64 +1,14 @@
-type removal =
-  | Wildcard
-  | Field_wildcard
-  | Field_deletion of { field : Core.origin; next : Core.origin }
-
-type occurrence = { binding : Core.origin; removal : removal }
-
-type t =
-  | Unread_variable of { binding : Core.origin; name : string }
-  | Unused_variable of {
-      name : string;
-      binding : occurrence;
-      alternatives : occurrence list;
-      constant : Path.t option;
-    }
-  | Unreachable_code of { first : Core.origin; last : Core.origin }
-  | Self_comparison of {
-      comparison : Core.origin;
-      operand : Core.origin;
-      operator : Language.Comparison.t;
-      is_float : bool;
-    }
-  | Unused_run_forever of {
-      function_ : Path.t;
-      entry : Core.origin Description.range;
-      siblings : Core.origin Description.siblings;
-    }
-  | Unmodified_part of {
-      entry : Core.origin;
-      function_ : Path.t;
-      parameter : string;
-      fields : string list;
-      change : part_change;
-    }
-  | Unused_definition of {
-      name : Core.origin;
-      definition : Path.t;
-      kind : definition_kind;
-      visibility : visibility;
-      is_used_by_unused : bool;
-    }
-
-and part_change =
-  | Named_part_changed of Core.origin Description.siblings
-  | Unnamed_part_changed
-  | Parameter_unchanged
-
-and definition_kind = Function | Constant
-and visibility = Internal | Private
-
 let make ?(severity = Diagnostic.Error) ?(fixes = []) code location message : Nodes.description =
   { code = Usage code; severity; location; message; notes = []; fixes }
 
 let describe_removal name = function
-  | Wildcard -> ("Replace it with `_`.", "Write `_`.")
+  | Usage.Wildcard -> ("Replace it with `_`.", "Write `_`.")
   | Field_wildcard ->
       (Printf.sprintf "Match its field with `%s: _`." name, Printf.sprintf "Write `%s: _`." name)
   | Field_deletion _ ->
       ("Delete it, since `..` matches its field.", Printf.sprintf "Delete `%s`." name)
 
-let make_removal_edit name (occurrence : occurrence) =
+let make_removal_edit name (occurrence : Usage.occurrence) =
   match occurrence.removal with
   | Wildcard -> Build.replace occurrence.binding [ Text "_" ]
   | Field_wildcard -> Build.replace occurrence.binding [ Text (name ^ ": _") ]
@@ -75,11 +25,11 @@ let show_comparison : Language.Comparison.t -> string * bool = function
 let describe_unused_definition ~name ~definition ~kind ~visibility ~is_used_by_unused =
   let code, noun =
     match kind with
-    | Constant -> (Diagnostic.Code.Unused_constant, "constant")
+    | Usage.Constant -> (Diagnostic.Code.Unused_constant, "constant")
     | Function -> (Unused_function, "function")
   and shown_visibility, severity =
     match visibility with
-    | Internal -> ("internal", Diagnostic.Error)
+    | Usage.Internal -> ("internal", Diagnostic.Error)
     | Private -> ("private", Warning)
   in
   make code (Build.at name) ~severity
@@ -94,7 +44,7 @@ let describe_unused_definition ~name ~definition ~kind ~visibility ~is_used_by_u
              shown_visibility noun (Path.show definition));
     ]
 
-let describe = function
+let describe : Usage.t -> Nodes.description = function
   | Unused_definition { name; definition; kind; visibility; is_used_by_unused } ->
       describe_unused_definition ~name ~definition ~kind ~visibility ~is_used_by_unused
   | Unread_variable { binding; name } ->
@@ -127,7 +77,7 @@ let describe = function
               Description.title = [ Text (Printf.sprintf "Write `%s`." written) ];
               edits =
                 List.map
-                  (fun (occurrence : occurrence) ->
+                  (fun (occurrence : Usage.occurrence) ->
                     Build.replace occurrence.binding [ Text written ])
                   occurrences;
             }
@@ -224,113 +174,3 @@ let describe = function
                    `%s` need not be `mut`."
                   function_name parameter parameter);
         ]
-
-let binding = Build.example "binding"
-and later = Build.example "later"
-and next = Build.example "next"
-
-and example_path =
-  Path.Top
-    { module_ = { package = { owner = None; name = "app" }; modules = [ "main" ] }; name = "f" }
-
-let list_examples : Diagnostic.Code.usage -> t list = function
-  | Unused_variable ->
-      [
-        Unread_variable { binding; name = "count" };
-        Unused_variable
-          {
-            name = "count";
-            binding = { binding; removal = Wildcard };
-            alternatives = [];
-            constant = None;
-          };
-        Unused_variable
-          {
-            name = "count";
-            binding = { binding; removal = Field_wildcard };
-            alternatives = [];
-            constant = None;
-          };
-        Unused_variable
-          {
-            name = "count";
-            binding = { binding; removal = Field_deletion { field = binding; next } };
-            alternatives = [];
-            constant = None;
-          };
-        Unused_variable
-          {
-            name = "count";
-            binding = { binding; removal = Wildcard };
-            alternatives = [ { binding = later; removal = Wildcard } ];
-            constant = None;
-          };
-        Unused_variable
-          {
-            name = "lucky";
-            binding = { binding; removal = Wildcard };
-            alternatives = [];
-            constant = Some example_path;
-          };
-      ]
-  | Unreachable_code -> [ Unreachable_code { first = binding; last = later } ]
-  | Self_comparison ->
-      [
-        Self_comparison { comparison = binding; operand = later; operator = Less; is_float = false };
-        Self_comparison { comparison = binding; operand = later; operator = Equal; is_float = true };
-      ]
-  | Unused_run_forever ->
-      [
-        Unused_run_forever
-          {
-            function_ = example_path;
-            entry = { covering = [ binding ] };
-            siblings = Alone { clause = later; is_only_clause = true };
-          };
-      ]
-  | Unused_function ->
-      [
-        Unused_definition
-          {
-            name = binding;
-            definition = example_path;
-            kind = Function;
-            visibility = Private;
-            is_used_by_unused = false;
-          };
-        Unused_definition
-          {
-            name = binding;
-            definition = example_path;
-            kind = Function;
-            visibility = Internal;
-            is_used_by_unused = true;
-          };
-      ]
-  | Unmodified_part ->
-      List.map
-        (fun change ->
-          Unmodified_part
-            {
-              entry = binding;
-              function_ = example_path;
-              parameter = "scanner";
-              fields = [ "position" ];
-              change;
-            })
-        [
-          Named_part_changed (Next { covering = [ later ] });
-          Unnamed_part_changed;
-          Parameter_unchanged;
-        ]
-  | Unused_constant ->
-      [
-        Unused_definition
-          {
-            name = binding;
-            definition = example_path;
-            kind = Constant;
-            visibility = Private;
-            is_used_by_unused = false;
-          };
-      ]

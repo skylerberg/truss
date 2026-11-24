@@ -131,7 +131,7 @@ let run_in_section state section walk =
   state.section <- enclosing
 
 let add_diagnostic state diagnostic =
-  let description = Catalog.Resolve.describe diagnostic in
+  let description = Catalog.Resolve_description.describe diagnostic in
   let names = lookup_current_names state in
   names.diagnostics <- description :: names.diagnostics;
   Catalog.make_reported description
