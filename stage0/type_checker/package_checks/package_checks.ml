@@ -25,11 +25,8 @@ let read_definition (lookups : Lookups.t) (declaration : Resolve.Names.declarati
   let key = declaration.key in
   (lookups.interface.names.read_definition key, lookups.interface.names.read_spans key)
 
-let locate_header (spans : Source.Definition_span.t array) (definition : Syntax.definition) =
-  match definition.kind with
-  | Impl { trait_; _ } -> spans.(trait_.id)
-  | Type_definition { name; _ } -> spans.(name.id)
-  | _ -> spans.(definition.id)
+let locate_header spans definition =
+  Source.Definition_span.locate spans (Resolve.Names.extract_header_id definition)
 
 let list_outer_packages (impl : Types.impl_interface) =
   Path.locate_package impl.implements.trait
@@ -868,7 +865,7 @@ let check_definition (lookups : Lookups.t) key check_declaration =
             key;
             diagnostic =
               Diagnostic.make ~code:(Types Recursion_limit)
-                (names.read_spans key).((names.read_definition key).id)
+                (Resolve.Names.locate_definition names key)
                 message;
           };
         ]

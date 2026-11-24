@@ -712,7 +712,7 @@ let () =
         (Type_check (make_main_key "Outer"))
         ~includes:[ Name (Tree (make_main_key "Outer")) ]
         ~excludes:[ Name (Place (make_main_key "Outer")); Name (Place (make_main_key "Inner")) ]);
-  Harness.test "a reformat inside a definition recomputes only that definition's proof" (fun () ->
+  Harness.test "a reformat inside a definition with obligations recomputes no proof" (fun () ->
       expect_recomputed
         (list_propagated
            ~before:[ ("app.main", callee_and_caller) ]
@@ -729,7 +729,6 @@ let () =
             Import_check (Support.parse_file "app.main");
             Declared (Support.parse_module "app.main");
             Parsed (Support.parse_file "app.main");
-            Proof (make_main_key "callee");
           ]);
   Harness.test "moving a definition to another file of its module recomputes no definition's part"
     (fun () ->
@@ -2638,6 +2637,33 @@ let () =
       Database.update hot [ (file, Some edited) ];
       ignore (Support.list_proof_states hot file);
       let cold = Support.make_database (Support.setup [ ("app.main", edited) ]) in
+      ignore (Support.list_proof_states cold file);
+      match Database.For_testing.list_differences hot cold with
+      | [] -> ()
+      | differences ->
+          Harness.fail "the tables differ: %s"
+            (String.concat ", "
+               (List.map
+                  (fun (table, count) -> Printf.sprintf "%s in %d rows" table count)
+                  differences)));
+  Harness.test "a reformat inside a definition decides it again, as one decided from nothing"
+    (fun () ->
+      let reformatted =
+        "fn bounded(count: UInt8) -> UInt8\n\
+        \  requires count < 255\n\
+         {\n\
+        \  count + 1\n\
+         }\n\n\
+         fn unbounded(count: UInt8) -> UInt8 {\n\n\
+        \  count + 1\n\
+         }\n"
+      in
+      let hot, _ = build_decided () in
+      Database.update hot [ (file, Some reformatted) ];
+      let _, decided = observe_deciding hot in
+      if decided <> [ locate (Verdicts (make_main_key "unbounded")) ] then
+        Harness.fail "decided %s" (show_parts decided);
+      let cold = Support.make_database (Support.setup [ ("app.main", reformatted) ]) in
       ignore (Support.list_proof_states cold file);
       match Database.For_testing.list_differences hot cold with
       | [] -> ()

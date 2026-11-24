@@ -81,12 +81,11 @@ let check_definition (lookups : Lookups.t) (key : Resolve.Names.key) : result =
 let check (lookups : Lookups.t) key =
   try check_definition lookups key
   with Interface.Properties.Recursion_limit message ->
-    let names = lookups.interface.names in
     {
       diagnostics =
         [
           Diagnostic.make ~code:(Types Recursion_limit)
-            (names.read_spans key).((names.read_definition key).id)
+            (Resolve.Names.locate_definition lookups.interface.names key)
             message;
         ];
       must_be_disjoint = [];

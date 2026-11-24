@@ -25,20 +25,17 @@ let translate_impl (lookups : Lookups.t) (key : Resolve.Names.key) source =
         [ { Obligation.obligations = []; holes; evaluation = None } ]
       else []
   | [] ->
-      Translate.translate_laws lookups source ~impl:key.path ~trait:interface.implements
-        ~for_type:interface.for_type
-        ~proofs:
-          (Contracts.list_law_proofs lookups (Path.locate_package key.path) interface.implements
-             interface.for_type)
-        ~at:Whole_definition
-      ::
-      (match lookups.interface.names.read_definition key with
-      | { kind = Impl { trait_; _ }; _ } ->
-          [
-            Translate.translate_restated_clauses lookups source ~impl:key.path
-              ~trait:interface.implements ~for_type:interface.for_type ~at:(Written trait_.id);
-          ]
-      | _ -> [])
+      [
+        Translate.translate_laws lookups source ~impl:key.path ~trait:interface.implements
+          ~for_type:interface.for_type
+          ~proofs:
+            (Contracts.list_law_proofs lookups (Path.locate_package key.path) interface.implements
+               interface.for_type)
+          ~at:Whole_definition;
+        Translate.translate_restated_clauses lookups source ~impl:key.path
+          ~trait:interface.implements ~for_type:interface.for_type
+          ~at:(Written (Resolve.Names.read_header_id lookups.interface.names key));
+      ]
 
 let list_integer_instances (lookups : Lookups.t) (path : Path.t) =
   let generics =
@@ -308,10 +305,10 @@ let make_diagnostic code span message =
 
 let resolve_location (names : Resolve.Names.lookups) (key : Resolve.Names.key)
     (location : Obligation.location) =
-  Source.Definition_span.locate (names.read_spans key)
-    (match location with
-    | Node origin -> Core_walk.locate_origin origin
-    | Whole_definition -> (names.read_definition key).id)
+  match location with
+  | Node origin ->
+      Source.Definition_span.locate (names.read_spans key) (Core_walk.locate_origin origin)
+  | Whole_definition -> Resolve.Names.locate_definition names key
 
 let is_word_character character =
   character = '_'
@@ -385,12 +382,19 @@ let render (lookups : Lookups.t) (message : Obligation.message) =
                clause replacements type_names)
        message)
 
-let render_fix lookups ({ title; edits } : Obligation.fix) =
-  Diagnostic.fix (render lookups title)
-    (List.map
-       (fun ({ at; replacement } : Obligation.edit) ->
-         Diagnostic.replace at (render lookups replacement))
-       edits)
+let render_fix (lookups : Lookups.t) key (fix : Obligation.fix) =
+  let names = lookups.interface.names in
+  match fix with
+  | Add_requires required ->
+      let clause = "requires " ^ render lookups required in
+      Option.map
+        (fun edit -> Diagnostic.fix (Printf.sprintf "Add `%s`" clause) [ edit ])
+        (Interface.Signature_edits.find_clause_insertion names key clause)
+  | Add_uses_panic ->
+      let capability = Language.Builtin_capability.show Panic in
+      Option.map
+        (fun edit -> Diagnostic.fix (Printf.sprintf "Add `uses %s`" capability) [ edit ])
+        (Interface.Signature_edits.find_capability_insertion names key capability)
 
 type site = { code : Diagnostic.Code.prover; span : Source.Definition_span.t; shows : string }
 type citation = { cited : Resolve.Names.key; clause : Source.Definition_span.t }
@@ -519,13 +523,17 @@ let make_refutation_request ({ query; _ } : posed_obligation) =
 
 type posed =
   | Unreadable of site
-  | Posed of { obligations : posed_obligation list; failed_evaluation : site option }
+  | Posed of {
+      key : Resolve.Names.key;
+      obligations : posed_obligation list;
+      failed_evaluation : site option;
+    }
 
 let pose (lookups : Lookups.t) ~runs key proof =
   let runs = Evaluation_table.of_seq (List.to_seq runs) in
   let resolve location = resolve_location lookups.interface.names key location in
   match proof with
-  | Not_proven_here -> Posed { obligations = []; failed_evaluation = None }
+  | Not_proven_here -> Posed { key; obligations = []; failed_evaluation = None }
   | Unsupported (location, construct) ->
       Unreadable
         {
@@ -538,6 +546,7 @@ let pose (lookups : Lookups.t) ~runs key proof =
   | Obligations outcome ->
       Posed
         {
+          key;
           obligations =
             List.map
               (fun (obligation : Obligation.t) ->
@@ -638,7 +647,7 @@ let fail_site (site : site) =
 let list_states (lookups : Lookups.t) posed ~answers ~refutations =
   match posed with
   | Unreadable site -> [ fail_site site ]
-  | Posed { obligations; failed_evaluation } ->
+  | Posed { key; obligations; failed_evaluation } ->
       let refutations = Queue.of_seq (List.to_seq refutations) in
       let _, states =
         List.fold_left2
@@ -655,7 +664,7 @@ let list_states (lookups : Lookups.t) posed ~answers ~refutations =
                       (make_diagnostic site.code site.span
                          (site.shows ^ explained ^ advise_other_ways site.code))
                       with
-                      fixes = List.map (render_fix lookups) obligation.fixes;
+                      fixes = List.filter_map (render_fix lookups key) obligation.fixes;
                     }
               | Some _ | None -> None
             in

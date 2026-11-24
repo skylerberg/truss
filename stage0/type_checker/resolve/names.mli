@@ -69,6 +69,9 @@ val list_transitive_dependencies : lookups -> Path.package -> Path.package list
 val is_visible_package : lookups -> from:Path.module_ -> Path.package -> bool
 val is_visible_module : lookups -> from:Path.module_ -> Path.module_ -> bool
 val find_definition : lookups -> Path.t -> (key * Syntax.definition) option
+val extract_header_id : Syntax.definition -> Syntax.id
+val read_header_id : lookups -> key -> Syntax.id
+val locate_definition : lookups -> key -> Source.Definition_span.t
 
 type generic_kind = Type_kind | Value_kind
 

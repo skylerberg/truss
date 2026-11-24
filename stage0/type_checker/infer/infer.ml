@@ -33,11 +33,10 @@ let check lookups (key : Resolve.Names.key) ~checks_body =
             | [] -> Ok checked
             | diagnostics -> Error diagnostics)
       with Interface.Properties.Recursion_limit message ->
-        let names = lookups.interface.names in
         Error
           [
             Diagnostic.make ~code:(Types Recursion_limit)
-              (names.read_spans key).((names.read_definition key).id)
+              (Resolve.Names.locate_definition lookups.interface.names key)
               message;
           ])
 

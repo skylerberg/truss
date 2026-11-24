@@ -7,6 +7,7 @@ module Properties = Properties
 module Impls = Impls
 module Grants = Grants
 module Check = Check
+module Signature_edits = Signature_edits
 
 type form_origin =
   | Written of Resolve.Names.key

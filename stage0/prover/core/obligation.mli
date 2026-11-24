@@ -23,8 +23,7 @@ type piece =
 
 type message = piece list
 type location = Node of Core.origin | Whole_definition
-type edit = { at : Source.Definition_span.t; replacement : message }
-type fix = { title : message; edits : edit list }
+type fix = Add_requires of message | Add_uses_panic
 
 type t = {
   code : Diagnostic.Code.prover;

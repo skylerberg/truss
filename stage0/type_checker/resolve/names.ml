@@ -140,6 +140,17 @@ let is_broken lookups key part = Option.is_some (find_syntax_error lookups key p
 let find_definition lookups path =
   Option.map (fun key -> (key, lookups.read_definition key)) (lookups.find_key path)
 
+let extract_header_id (definition : Syntax.definition) =
+  match definition.kind with
+  | Impl { trait_; _ } -> trait_.id
+  | Type_definition { name; _ } -> name.id
+  | _ -> definition.id
+
+let read_header_id lookups key = extract_header_id (lookups.read_definition key)
+
+let locate_definition lookups key =
+  Source.Definition_span.locate (lookups.read_spans key) (lookups.read_definition key).id
+
 type generic_kind = Type_kind | Value_kind
 
 let list_generic_kinds (generics : Syntax.generic_parameter list) =

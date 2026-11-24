@@ -148,6 +148,22 @@ let () =
             \  value + 1\n\
              }\n";
           ]);
+  Harness.test "the `uses Panic` fix goes before the first clause where no `uses` clause is written"
+    (fun () ->
+      Support.expect_error ~list_diagnostics
+        "fn increment(value: UInt8) -> UInt8\n  ensures true\n{\n  value + 1\n}\n"
+        ~code:(Prover Overflow) ~at:"value + 1"
+        ~fixed:
+          "fn increment(value: UInt8) -> UInt8\n\
+          \  ensures true\n\
+          \  requires value <= UInt8.maximum - 1\n\
+           {\n\
+          \  value + 1\n\
+           }\n"
+        ~alternatives:
+          [
+            "fn increment(value: UInt8) -> UInt8\n  uses Panic\n  ensures true\n{\n  value + 1\n}\n";
+          ]);
   Harness.test "a function that declares `uses Panic` lets its integer operations panic" (fun () ->
       expect_only_codes Fixtures.Prover.failing_operations_of_a_function_that_may_panic
         [ "prover.out_of_bounds"; "prover.requires" ]);

@@ -205,68 +205,6 @@ let locate (context : State.context) (source : State.source) origin =
 let add_hole (context : State.context) hole =
   if not (List.mem hole context.holes) then context.holes <- hole :: context.holes
 
-let insert_line_before_body (context : State.context) (line : Obligation.message) =
-  let names = context.lookups.interface.names in
-  let text = names.read_text context.home in
-  let brace =
-    match names.read_definition context.home with
-    | { kind = Function { body; _ }; _ } ->
-        Some (Source.Definition_span.locate (names.read_spans context.home) body.id).start
-    | _ -> None
-  in
-  let edit at before =
-    Some { Obligation.at; replacement = (Obligation.Text (before ^ "  ") :: line) @ [ Text "\n" ] }
-  in
-  match brace with
-  | Some at when at > 0 && text.[at - 1] = '\n' ->
-      edit (Source.Definition_span.make_zero_width at) ""
-  | Some at when at > 0 && text.[at - 1] = ' ' ->
-      edit (Source.Definition_span.make (at - 1) at) "\n"
-  | _ -> None
-
-let make_panic_fix (context : State.context) =
-  let names = context.lookups.interface.names in
-  let edit =
-    match names.read_definition context.home with
-    | { kind = Function { signature; _ }; _ } -> (
-        let locate id = Source.Definition_span.locate (names.read_spans context.home) id in
-        match
-          ( List.find_opt
-              (fun (clause : Syntax.clause) -> match clause.kind with Uses _ -> true | _ -> false)
-              signature.clauses,
-            signature.clauses )
-        with
-        | Some uses, _ ->
-            Some
-              {
-                Obligation.at = Source.Definition_span.make_zero_width (locate uses.id).stop;
-                replacement = [ Text ", Panic" ];
-              }
-        | None, first :: _ ->
-            Some
-              {
-                Obligation.at = Source.Definition_span.make_zero_width (locate first.id).start;
-                replacement = [ Text "uses Panic\n  " ];
-              }
-        | None, [] -> insert_line_before_body context [ Text "uses Panic" ])
-    | _ -> None
-  in
-  match edit with
-  | Some edit when not context.inherits_precondition ->
-      [ { Obligation.title = [ Text "Add `uses Panic`" ]; edits = [ edit ] } ]
-  | Some _ | None -> []
-
-let make_requires_fix (context : State.context) required =
-  match insert_line_before_body context (Obligation.Text "requires " :: required) with
-  | Some edit when not context.inherits_precondition ->
-      [
-        {
-          Obligation.title = (Obligation.Text "Add `requires " :: required) @ [ Text "`" ];
-          edits = [ edit ];
-        };
-      ]
-  | Some _ | None -> []
-
 let find_parameter_name (context : State.context) symbol =
   if List.mem symbol context.entry then
     match List.assoc_opt symbol context.values with Some name -> Some name | None -> Some "self"
@@ -340,19 +278,23 @@ let show_truss_goal context term =
   else None
 
 let add_requires (context : State.context) (frame : State.frame) (required : Obligation.message) =
-  let required =
-    match context.condition with
-    | [] -> required
-    | condition -> required @ [ Obligation.Text (" when " ^ Types.show_condition condition) ]
-  in
-  match frame.condition with
-  | Logic.Boolean true -> make_requires_fix context required
-  | condition -> (
-      match show_truss_goal context condition with
-      | Some premise ->
-          make_requires_fix context
-            ((Obligation.Text ("(" ^ premise ^ ") ==> (") :: required) @ [ Obligation.Text ")" ])
-      | None -> make_requires_fix context required)
+  if context.inherits_precondition then []
+  else
+    let required =
+      match context.condition with
+      | [] -> required
+      | condition -> required @ [ Obligation.Text (" when " ^ Types.show_condition condition) ]
+    in
+    match frame.condition with
+    | Logic.Boolean true -> [ Obligation.Add_requires required ]
+    | condition -> (
+        match show_truss_goal context condition with
+        | Some premise ->
+            [
+              Obligation.Add_requires
+                ((Obligation.Text ("(" ^ premise ^ ") ==> (") :: required) @ [ Obligation.Text ")" ]);
+            ]
+        | None -> [ Obligation.Add_requires required ])
 
 let rec make_closed_obligation context (frame : State.frame) code location message goal =
   if not frame.makes_obligations then None
@@ -451,8 +393,10 @@ let oblige ?cited ?(fixes = []) ?holds_when (context : State.context) (frame : S
           | fixes -> fixes
         in
         let fixes =
-          if is_panic_obligation code && context.can_declare_panic && is_home_body then
-            fixes @ make_panic_fix context
+          if
+            is_panic_obligation code && context.can_declare_panic && is_home_body
+            && not context.inherits_precondition
+          then fixes @ [ Obligation.Add_uses_panic ]
           else fixes
         in
         context.obligations <- { obligation with cited; fixes } :: context.obligations;
