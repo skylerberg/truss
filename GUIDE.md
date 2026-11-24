@@ -16,9 +16,7 @@ have proven a program correct. Each chapter builds on the ones before it,
 so read them in order the first time. The appendices at the end are for
 looking things up.
 
-[SPECIFICATION.md](SPECIFICATION.md) is the reference: it defines every rule
-precisely, and the guide links to it where a rule has details the guide
-leaves out. [DESIGN.md](DESIGN.md) gives the reason for each rule.
+[DESIGN.md](DESIGN.md) gives the reason for each rule.
 
 ### What makes Truss different
 
@@ -1111,9 +1109,15 @@ every place it passes:
 
 | Parameter | Call | The function may |
 |---|---|---|
-| `items: List[Int64]` | `total(items)` | Read the caller's value, which it sees without a copy |
+| `items: Slice[Int64]` | `total(items)` | Read the caller's value, which it sees without a copy |
 | `items: mut List[Int64]` | `clear(mut items)` | Change the caller's value, which the caller sees afterward |
 | `item: own String` | `keep(own item)` | Keep the value: the caller gives it up |
+
+A read-only parameter of a list takes a `Slice`, so a `List`, a list
+literal, and a slice of a list such as `numbers[1..]` all pass to it. A
+read-only parameter declared `List` or `String` is an error, whose fix
+declares it `Slice` or `StringSlice`. A `mut` parameter that may change the
+length, as `push` does, takes the `List`.
 
 ```truss
 fn total(numbers: Slice[Int64]) -> Int64 {
@@ -1133,6 +1137,7 @@ fn reset(numbers: mut List[Int64]) {
 test "parameter modes" {
   var numbers = [3, 4, 5]
   assert total(numbers) == 12
+  assert total(numbers[1..]) == 9
   reset(mut numbers)
   assert numbers == [0, 0, 0]
 }
@@ -4162,8 +4167,9 @@ test "loops with invariants" {
 - `all_positive`'s invariant says every element before `index` is positive.
   When the loop ends, `index` is the length, so the invariant is the
   `ensures`.
-- In the clauses of a loop over a collection, `visited` is the `Sequence` of
-  the elements the loop has visited.
+- In the clauses of a `for` loop, `visited` is the `Sequence` of the values
+  of the iterations before: the elements of a collection, or the indexes of
+  a range.
 
 ### Termination
 
@@ -4275,20 +4281,31 @@ A `cost` clause bounds a resource that a call uses, and the compiler proves
 it from the body and from the cost clauses of the calls the body makes:
 
 ```truss
-fn total(numbers: Slice[Int64]) -> Int64
-  cost time O(numbers.length())
+fn gain(change: Int64) -> Int64
+  cost time O(1)
 {
-  var sum: Int64 = 0
-  for number in numbers {
-    sum = sum.saturating_add(number)
+  if change > 0 { change } else { 0 }
+}
+
+fn total_gain(changes: Slice[Int64]) -> Int64
+  cost time O(changes.length())
+{
+  var total: Int64 = 0
+  for change in changes {
+    total = total.saturating_add(gain(change))
   }
-  sum
+  total
 }
 
 test "a cost bound" {
-  assert total([1, 2, 3]) == 6
+  assert total_gain([3, -2, 4]) == 7
 }
 ```
+
+**A function that a cost-bounded function calls states a cost too.** The
+prover bounds a call only by the callee's `cost` clause, as it knows the
+callee's result only by its `ensures`. Without `cost time O(1)` on `gain`,
+`total_gain` proves no bound.
 
 | Clause | Promises |
 |---|---|
@@ -4298,10 +4315,103 @@ test "a cost bound" {
 | `cost calls(visit) == items.length()` | Exactly one call of the parameter `visit` per item |
 | `cost amortized time O(1)` | Constant time on average over a sequence of calls, as `List.push` promises |
 
-A bound can use the parameters, their fields, pure methods, `log(n)`, `power(base, exponent)`, and `time(visit)`, the bound of a
-function parameter. The standard library states costs for every function,
-which is what lets you prove your own: `truss show List.push` shows `cost
+A bound can use the parameters, their fields, pure methods, `log(n)`,
+`power(base, exponent)`, and `time(visit)`, the bound of a function
+parameter. `log(n)` is the smallest integer at least log₂(n + 1), so
+`log(0)` is 0. The standard library states costs for every function, which
+is what lets you prove your own: `truss show List.push` shows `cost
 amortized time O(1)`.
+
+#### Costs of loops
+
+A loop needs no `cost` clause of its own where the prover can count its
+cost. The prover counts each call at the callee's stated cost, amortized
+calls such as `List.push` and `List.pop` included, so this loop needs no
+clause:
+
+```truss
+fn recorded_entries(entries: Slice[Int64]) -> List[Int64]
+  cost amortized time O(entries.length())
+{
+  var recorded: List[Int64] = []
+  for entry in entries {
+    if entry == 0 {
+      let _ = mut recorded.pop()
+    } else {
+      mut recorded.push(entry)
+    }
+  }
+  recorded
+}
+
+test "a zero undoes the entry before it" {
+  assert recorded_entries([3, 4, 0, 5]) == [3, 5]
+}
+```
+
+- **Without a `cost` clause, the prover counts a loop's cost as its
+  iterations times a bound on one iteration.** The loop's measure bounds
+  the iterations, and the values the loop does not mutate bound one
+  iteration. Here the loop runs `entries.length()` times, and each
+  iteration costs `O(1)`.
+- `recorded_entries` states `cost amortized` because `push` states only
+  `cost amortized time O(1)`. A function whose `cost` is `amortized` counts
+  each call at the callee's amortized cost.
+
+A loop needs a `cost` clause where that count fails: where it is too large,
+or where one iteration's cost depends on a value the loop mutates. A loop
+that halves a value is the first case. It runs `O(log(value))` times, but
+its measure, `remaining`, allows `value` iterations. The loop's `cost`
+clause states the loop's cost so far:
+
+```truss
+fn halvings(value: UInt64) -> UInt64
+  cost time O(log(value))
+{
+  var remaining = value
+  var count: UInt64 = 0
+  while remaining > 0
+    invariant count + remaining <= value
+    decreases remaining
+    cost time O(log(value) - log(remaining))
+  {
+    remaining = remaining / 2
+    count += 1
+  }
+  count
+}
+
+test "a value halves once for each bit" {
+  assert halvings(0) == 0
+  assert halvings(12) == 4
+}
+```
+
+- **A loop's `cost` holds at the start of every iteration and where the
+  loop ends,** as an invariant does. On entry, `remaining` is `value`, so
+  the bound is 0. Each iteration halves `remaining`, which lowers
+  `log(remaining)` by 1 and so raises the bound by 1, enough for the
+  iteration's constant cost. Where the loop ends, `remaining` is 0, so the
+  bound is `log(value)`, the function's own bound.
+- Without the clause, the prover counts up to `value` iterations, and
+  `halvings` proves no `O(log(value))` bound. The invariant keeps
+  `count += 1` from overflowing.
+- The clause's bound can name the variables in scope at the loop, a
+  range's index, and `visited`. In a range loop, `visited` is a `Sequence`
+  too, so the number of iterations so far is `visited.length()`.
+- **An inner loop that pops what earlier iterations pushed is the second
+  case.** One iteration's cost depends on the length of the stack, which
+  the outer loop mutates, so the prover cannot bound one iteration. The
+  loops' clauses state the totals instead. Where each outer iteration
+  pushes once onto a stack that starts empty, the pops so far number
+  `visited.length() - stack.length()`, so the outer loop states
+  `cost time O(2 * visited.length() - stack.length())`.
+  The inner loop states `cost time O(depth - stack.length())`, with
+  `let depth = stack.length()` before it.
+- **A loop's `cost` is never `amortized`.** The compiler rejects
+  `cost amortized` on a loop as `parser.loop_cost_bound`. The function's
+  own `cost` accounts for potential: in a function whose `cost` is
+  `amortized`, a loop's clause counts each call at its amortized cost.
 
 ### Theorems and proof blocks
 
@@ -4905,8 +5015,12 @@ test "tagged templates" {
 A type becomes a tag by implementing the prelude trait `FromTemplate`. Its
 `is_valid_template` method states which literal text is valid, and the
 compiler runs it on each template's text when it checks the code, as it
-runs the condition of an `assert ... by evaluation`. See
-[Tagged templates](SPECIFICATION.md#tagged-templates).
+runs the condition of an `assert ... by evaluation`. The trait's associated
+type `Part` is the type that each interpolated value is converted to. Its
+`from_template` method builds the value from a `Template[Part]`: the
+literal text and the converted values. `from_template` requires
+`is_valid_template`, so it never receives invalid text. `truss show
+FromTemplate` prints the trait.
 
 ### Overloads by receiver mode
 
