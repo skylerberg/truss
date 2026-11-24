@@ -1403,6 +1403,43 @@ let () =
         ~says:"so the base is passed `own`, not `mut`");
   Harness.test "a let cannot be assigned" (fun () ->
       expect_one_diagnostic Fixtures.Infer.assignment_to_a_let "types.not_assignable");
+  Harness.test "a call cannot be assigned" (fun () ->
+      expect_one_diagnostic Fixtures.Infer.assignment_to_a_call "types.not_assignable"
+        ~says:"Only a place, such as a variable, a field, or an element, can be assigned.");
+  Harness.test "a mode keyword before a call that is assigned is reported once, as not a place"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Infer.mut_before_an_assigned_call "resolve.not_a_place");
+  List.iter
+    (fun (written, text, fixed, says) ->
+      Harness.test
+        ("a mode keyword before an assigned place is redundant, with a fix that deletes it: "
+       ^ written) (fun () -> expect_one_diagnostic text "types.redundant_mode" ~fixed ~says))
+    [
+      ( "an element",
+        Fixtures.Infer.mut_before_an_assigned_element,
+        Fixtures.Infer.mut_before_an_assigned_element_fixed,
+        "An assignment writes its target, so `waits[1]` takes no `mut`." );
+      ( "a variable",
+        Fixtures.Infer.mut_before_an_assigned_variable,
+        Fixtures.Infer.mut_before_an_assigned_variable_fixed,
+        "An assignment writes its target, so `count` takes no `mut`." );
+      ( "a variable after `own`",
+        Fixtures.Infer.own_before_an_assigned_variable,
+        Fixtures.Infer.own_before_an_assigned_variable_fixed,
+        "An assignment writes its target, so `count` takes no `own`." );
+      ( "a field of `self`",
+        Fixtures.Infer.mut_before_an_assigned_field,
+        Fixtures.Infer.mut_before_an_assigned_field_fixed,
+        "An assignment writes its target, so `self.count` takes no `mut`." );
+      ( "the target of a compound assignment",
+        Fixtures.Infer.mut_before_a_compound_assignment,
+        Fixtures.Infer.mut_before_a_compound_assignment_fixed,
+        "An assignment writes its target, so `total` takes no `mut`." );
+      ( "an entry of a map",
+        Fixtures.Infer.mut_before_an_assigned_map_entry,
+        Fixtures.Infer.mut_before_an_assigned_map_entry_fixed,
+        "An assignment writes its target, so `group_of[own key]` takes no `mut`." );
+    ];
   List.iter
     (fun (written, text, code) ->
       Harness.test

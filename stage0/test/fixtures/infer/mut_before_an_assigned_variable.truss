@@ -1,0 +1,5 @@
+fn f() -> Int64 {
+  var count: Int64 = 0
+  mut count = 1
+  count
+}
