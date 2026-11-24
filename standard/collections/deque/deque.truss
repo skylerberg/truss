@@ -365,7 +365,11 @@ proof Hash.agrees_with_equal for collections.Deque[Element: Hash] {
 }
 
 impl Default for collections.Deque[Element] {
-  fn default() -> collections.Deque[Element] {
+  fn default() -> collections.Deque[Element]
+    ensures result.length() == 0
+    cost time O(1)
+    cost allocations == 0
+  {
     []
   }
 }

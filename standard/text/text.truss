@@ -631,7 +631,11 @@ public fn String.truncate(mut self, length: UInt64)
 }
 
 impl Default for String {
-  fn default() -> String {
+  fn default() -> String
+    ensures result.length() == 0
+    cost time O(1)
+    cost allocations == 0
+  {
     ""
   }
 }

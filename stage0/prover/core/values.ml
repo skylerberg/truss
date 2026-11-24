@@ -476,9 +476,11 @@ let evaluate_field_default context frame ty variant field =
           with
           | Some default ->
               let inside = Validity.make_type_frame context frame source ty ~self:None in
-              snd
-                (Amounts.run_code context inside default.value
-                   ~type_:(Facts.substitute_type context inside default.type_))
+              let evaluated, value =
+                Amounts.run_code context inside default.value
+                  ~type_:(Facts.substitute_type context inside default.type_)
+              in
+              ({ frame with spent = evaluated.spent }, value)
           | None -> Facts.raise_bug "the field %s of %s has no default" field (Types.show ty))
       | Some { form = Parameter_defaults _; _ } | None ->
           Facts.raise_bug "a type with no MIR of its defaults")
@@ -526,8 +528,8 @@ let apply_construct context frame (site : Invocation.site) variant
           match written with
           | Some term -> (frame, field_terms @ [ (field, term) ])
           | None ->
-              ( frame,
-                field_terms @ [ (field, evaluate_field_default context frame ty variant field) ] ))
+              let frame, value = evaluate_field_default context frame ty variant field in
+              (frame, field_terms @ [ (field, value) ]))
         (frame, []) fields
     in
     let frame = Operations.spend context frame (construct_amount context frame ty variant) in

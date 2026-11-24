@@ -283,7 +283,11 @@ public fn Option[Value].expect(self, message: StringSlice) lends Value
 }
 
 impl Default for Option[Value] {
-  fn default() -> Option[Value] {
+  fn default() -> Option[Value]
+    ensures result is None
+    cost time O(1)
+    cost allocations == 0
+  {
     None
   }
 }

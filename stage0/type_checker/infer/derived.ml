@@ -969,6 +969,62 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                 ]
             | _ -> []
           in
+          let costs =
+            match derived_method with
+            | Equal_equal | Ordered_compare | Hash_hash ->
+                let fields =
+                  match variants with
+                  | Some variants -> List.concat_map snd variants
+                  | None -> record_fields ()
+                in
+                let integer kind = node Types.Integer kind in
+                let { Well_known.owner; name; receiver } =
+                  Well_known.locate_method derived_method
+                in
+                let field_cost metric (field : Types.field) =
+                  integer
+                    (Method_cost
+                       {
+                         metric;
+                         method_ =
+                           Trait_method
+                             {
+                               trait =
+                                 {
+                                   trait = Well_known.make_path owner;
+                                   trait_arguments = [];
+                                   associated = [];
+                                 };
+                               name;
+                               receiver;
+                               self_type = field.field_type;
+                               instantiation = Types.no_instantiation;
+                               evidence = Bound;
+                             };
+                       })
+                in
+                let sum_field_costs metric ~start =
+                  List.fold_left
+                    (fun total field ->
+                      integer
+                        (Operator
+                           { operation = Add; arguments = [ total; field_cost metric field ] }))
+                    (integer (Integer start)) fields
+                in
+                let make_cost metric bound : Core.cost Core.conditional =
+                  {
+                    holds_when = [];
+                    clause = { origin; amortized = false; resource = Metric metric; bound };
+                  }
+                in
+                [
+                  make_cost Time (Order_of (sum_field_costs Time ~start:Z.one));
+                  make_cost Allocations (At_most (sum_field_costs Allocations ~start:Z.zero));
+                  make_cost Allocated_bytes
+                    (At_most (sum_field_costs Allocated_bytes ~start:Z.zero));
+                ]
+            | _ -> []
+          in
           Some
             {
               definition =
@@ -985,7 +1041,7 @@ let derive_form (lookups : Lookups.t) (path : Path.t) : Core.t option =
                               { holds_when = []; clause })
                             ensures;
                         decreases = [];
-                        costs = [];
+                        costs;
                       };
                     body = Some body;
                   };

@@ -707,8 +707,12 @@ impl Hash for collections.SortedSet[Element: Ordered + Hash] {
 }
 
 impl Default for collections.SortedSet[Element: Ordered] {
-  fn default() -> collections.SortedSet[Element] {
-    []
+  fn default() -> collections.SortedSet[Element]
+    ensures result.length() == 0
+    cost time O(1)
+    cost allocations == 0
+  {
+    collections.SortedSet(elements: [])
   }
 }
 

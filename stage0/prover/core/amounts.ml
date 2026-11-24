@@ -619,20 +619,101 @@ let assume_element_potential_change context frame (sequence : Types.ty) ~before 
       with Facts.Unsupported _ -> ())
   | None -> ()
 
-let find_literal_bound (metric : Language.Metric.t) (costs : Mir.cost list) =
+let make_static_frame (frame : State.frame) source ~substitution ~self_type =
+  {
+    frame with
+    State.source;
+    locals = Locals.empty;
+    types = Locals.empty;
+    old_locals = Locals.empty;
+    self = None;
+    old_self = None;
+    result = None;
+    condition = Logic.Boolean true;
+    makes_obligations = false;
+    bound = [];
+    binders = [];
+    substitution;
+    self_type = Some self_type;
+    yielded = None;
+    yielded_so_far = None;
+    spent = [];
+    aliases = Locals.empty;
+    lends = Locals.empty;
+  }
+
+let is_static ~has_own_generics (amount : Mir.formula) =
+  if has_own_generics then Option.is_some (Contracts.find_integer_literal amount)
+  else
+    let reads_a_parameter = ref false in
+    Mir.iter_formula_places
+      (fun _ (place : Mir.place) ->
+        match place.root with
+        | Local local when List.mem local amount.parameters -> reads_a_parameter := true
+        | Local _ | Constant _ | Literal _ -> ())
+      amount;
+    (not !reads_a_parameter)
+    && not
+         (holds_specification amount (function
+           | Result | Entry _ | Yielded -> true
+           | Identical _ | Applied _ | Method_cost _ | Map _ | Quantified _ -> false))
+
+let find_static_bound context frame (metric : Language.Metric.t) (clauses : State.clauses)
+    ~has_own_generics ~substitution ~self_type =
   let counter = Costs.make_operand_counter metric in
+  let substitution = Types.combine_substitutions substitution clauses.bindings in
   List.find_map
     (fun (cost : Mir.cost) ->
-      if cost.amortized || not (is_same_resource cost ~locals:Locals.empty counter) then None
+      if
+        cost.amortized
+        || (not (is_same_resource cost ~locals:Locals.empty counter))
+        || not (Conditions.holds_here context ~substitution cost.holds_when)
+      then None
       else
         match (counter.counting, cost.bound) with
-        | Units, Order_of amount | (At_most | Exactly), (At_most amount | Exactly amount) ->
-            Contracts.find_integer_literal amount
+        | (Units, Order_of amount | (At_most | Exactly), (At_most amount | Exactly amount))
+          when is_static ~has_own_generics amount -> (
+            try
+              Some
+                (snd
+                   (Validity.read_specification context
+                      (make_static_frame frame clauses.callee ~substitution ~self_type)
+                      amount))
+            with Facts.Unsupported _ -> None)
         | (Units | At_most | Exactly), (Order_of _ | At_most _ | Exactly _) -> None)
-    costs
+    clauses.costs
 
-let find_method_cost_bound context (metric : Language.Metric.t) (method_ : Path.t) ~trait_arguments
-    self_type =
+let find_body_cost (context : State.context) frame (metric : Language.Metric.t) path ~substitution
+    ~self_type =
+  match (Contracts.find_source context.lookups path, Mir.read_code context.lookups.mir path) with
+  | Some (source, _, _), Some { form = code; _ } -> (
+      let counter = Costs.make_operand_counter metric in
+      let outer_counters = context.counters in
+      context.counters <- [ counter ];
+      let start =
+        {
+          (make_static_frame frame source ~substitution ~self_type) with
+          spent = [ (counter, Costs.zero) ];
+        }
+      in
+      let find_spent () =
+        match
+          Lambdas.run_lambda_body context start ~lambdas:code.lambdas code.body ~type_:self_type
+        with
+        | Some (finished, result) -> (
+            match (List.assoc_opt counter finished.spent, metric) with
+            | Some spent, Time ->
+                Some (Costs.plus spent (compute_potential context finished self_type result))
+            | spent, (Allocations | Allocated_bytes) -> spent
+            | None, Time -> None)
+        | None -> None
+      in
+      try Fun.protect ~finally:(fun () -> context.counters <- outer_counters) find_spent
+      with Facts.Unsupported _ -> None)
+  | _ -> None
+
+let find_method_cost_bound context frame (metric : Language.Metric.t) (method_ : Path.t)
+    ~trait_arguments self_type =
   let holds ty = try has_potential context ty with Facts.Unsupported _ -> true in
   let includes_potential_made = metric = Time in
   match method_ with
@@ -648,42 +729,72 @@ let find_method_cost_bound context (metric : Language.Metric.t) (method_ : Path.
         match Facts.find_impl context reference self_type with
         | Some (impl, substitution) -> (
             let path = Path.Method { owner = impl; name; receiver } in
-            let makes_no_potential =
-              match Contracts.read_signature context path with
-              | Some (signature : Types.signature) -> (
+            match Contracts.read_signature context path with
+            | Some (signature : Types.signature) -> (
+                let impl_generics =
+                  match Interface.Definition.find_impl_interface context.lookups.interface impl with
+                  | Some interface -> interface.impl_generics
+                  | None -> []
+                in
+                let has_own_generics =
+                  signature.capability_parameters <> []
+                  || List.exists
+                       (fun (generic : Types.generic) ->
+                         not
+                           (List.exists
+                              (fun (impl_generic : Types.generic) ->
+                                impl_generic.generic = generic.generic)
+                              impl_generics))
+                       signature.generics
+                in
+                let makes_no_potential =
                   List.for_all
                     (fun (parameter : Types.parameter_info) ->
                       parameter.mode <> Language.Mode.Mut || not (holds parameter.type_))
                     signature.parameters
                   && (match signature.receiver with Some (Mut, ty) -> not (holds ty) | _ -> true)
-                  && match signature.output with Returns ty -> not (holds ty) | _ -> false)
-              | None -> false
-            in
-            match
-              Contracts.find_method_contract context reference name receiver
-                (Impl { impl; substitution })
-            with
-            | Some contract when makes_no_potential || not includes_potential_made ->
-                Option.map
-                  (fun literal -> Logic.Integer literal)
-                  (List.find_map
-                     (fun (clauses : State.clauses) -> find_literal_bound metric clauses.costs)
-                     (Contracts.list_declared_clauses contract))
-            | _ -> None)
+                  && match signature.output with Returns ty -> not (holds ty) | _ -> false
+                in
+                let stated_bound =
+                  if includes_potential_made && not makes_no_potential then None
+                  else
+                    Option.bind
+                      (Contracts.find_method_contract context reference name receiver
+                         (Impl { impl; substitution }))
+                      (fun contract ->
+                        List.find_map
+                          (fun (clauses : State.clauses) ->
+                            find_static_bound context frame metric clauses ~has_own_generics
+                              ~substitution:
+                                (if clauses.inherited then
+                                   Contracts.make_trait_substitution context.lookups reference
+                                     self_type
+                                 else substitution)
+                              ~self_type)
+                          (Contracts.list_declared_clauses contract))
+                in
+                match (stated_bound, impl) with
+                | Some bound, _ -> Some bound
+                | None, Derived _
+                  when signature.receiver = None && signature.parameters = []
+                       && not has_own_generics ->
+                    find_body_cost context frame metric path ~substitution ~self_type
+                | None, _ -> None)
+            | None -> None)
         | None -> None)
   | _ -> None
 
 let declare_method_cost context frame (metric : Language.Metric.t) (method_ : Path.t)
     ~trait_arguments self_type =
   let symbol = Logic.Symbol.Method_cost { metric; method_; trait_arguments; self_type } in
-  Facts.declare context (Logic.Constant (symbol, Logic.Int));
-  let least = Costs.least_amount (Metric metric) in
-  Facts.add_frame_fact context frame (Logic.less_equal least (Logic.Symbol symbol));
-  (match find_method_cost_bound context metric method_ ~trait_arguments self_type with
-  | Some limit ->
-      Facts.add_frame_fact context frame
-        (Logic.less_equal (Logic.Symbol symbol) (Costs.larger limit least))
-  | None -> ());
+  Facts.run_once context (Method_cost_bound symbol) (fun () ->
+      Facts.declare context (Logic.Constant (symbol, Logic.Int));
+      let least = Costs.least_amount (Metric metric) in
+      Facts.add_fact context (Logic.less_equal least (Logic.Symbol symbol));
+      Option.iter
+        (fun bound ->
+          Facts.add_fact context (Logic.less_equal (Logic.Symbol symbol) (Costs.larger bound least)))
+        (find_method_cost_bound context frame metric method_ ~trait_arguments self_type));
   Logic.Symbol symbol
 
 let compute_method_cost context frame (metric : Language.Metric.t) (callee : Invocation.callee) =

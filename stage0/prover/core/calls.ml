@@ -1076,8 +1076,17 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
         | Some Equal_equal, _, [ left; right ] when Facts.is_equality_identity context self_type ->
             Without_contract (Some (frame, Logic.equal left right))
         | Some Equal_equal, Impl { impl = Derived _; _ }, [ left; right ] ->
+            let spent =
+              Operations.spend context frame (fun counter ->
+                  Amounts.compute_callee_amount
+                    ~method_cost:(fun metric ->
+                      Amounts.compute_method_cost context frame metric invocation.callee)
+                    context frame ~is_recursive:false ~clauses:[]
+                    ~bind_frame:(fun _ -> frame)
+                    ~uses:invocation.uses ~values ~change:None counter)
+            in
             Without_contract
-              (Some (frame, Operations.make_equality context frame self_type left right))
+              (Some (spent, Operations.make_equality context frame self_type left right))
         | _ ->
             let trait_substitution =
               bind_callee trait_path arguments capability_arguments

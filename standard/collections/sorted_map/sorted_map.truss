@@ -807,8 +807,12 @@ impl Equal for collections.SortedMap[Key: Ordered, Value: Equal] {
 }
 
 impl Default for collections.SortedMap[Key: Ordered, Value] {
-  fn default() -> collections.SortedMap[Key, Value] {
-    [:]
+  fn default() -> collections.SortedMap[Key, Value]
+    ensures result.length() == 0
+    cost time O(1)
+    cost allocations == 0
+  {
+    collections.SortedMap(entries: [])
   }
 }
 
