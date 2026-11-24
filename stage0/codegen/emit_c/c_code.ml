@@ -186,16 +186,6 @@ let render_intrinsic (emission : Emission.t) (intrinsic : Lowered.intrinsic)
       Text "((void *)((const struct truss_evidence *)" ++ render_argument 0 ++ Text ")->outer["
       ++ render_argument 1 ++ Text "])"
 
-let render_through_table (emission : Emission.t) ~pointer (signature : Lowered.signature) arguments
-    =
-  Text "(("
-  ++ (match signature.result with
-    | None -> Text "void"
-    | Some ty -> C_types.render_type emission.types ty)
-  ++ Text " (*)("
-  ++ C_types.render_signature_parameters emission.types signature.parameters None
-  ++ Text "))" ++ pointer ++ Text ")(" ++ C_text.join ", " arguments ++ Text ")"
-
 let render_call (emission : Emission.t) fc (target : Lowered.target) arguments : C_text.t =
   let arguments = List.filter_map (C_values.render_operand emission fc) arguments in
   let texts = List.map fst arguments in
@@ -247,11 +237,16 @@ let render_call (emission : Emission.t) fc (target : Lowered.target) arguments :
   | Evidence_call { evidence; capability; slot; signature } ->
       Emission.record_capability_call emission ~capability ~slot;
       let evidence = render_required evidence ~description:"evidence" in
-      render_through_table emission
-        ~pointer:
-          (Text "((const struct truss_evidence *)" ++ evidence
-          ++ Text (Printf.sprintf ")->table[%d]" slot))
-        signature (evidence :: texts)
+      Text "(("
+      ++ (match signature.result with
+        | None -> Text "void"
+        | Some ty -> C_types.render_type emission.types ty)
+      ++ Text " (*)("
+      ++ C_types.render_signature_parameters emission.types signature.parameters None
+      ++ Text "))((const struct truss_evidence *)" ++ evidence
+      ++ Text (Printf.sprintf ")->table[%d])(" slot)
+      ++ C_text.join ", " (evidence :: texts)
+      ++ Text ")"
 
 let may_alias (first : Lowered.place) (second : Lowered.place) =
   let rec overlaps (first : Lowered.projection list) (second : Lowered.projection list) =

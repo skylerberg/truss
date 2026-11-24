@@ -102,9 +102,7 @@ let tables =
     keyed_by_id "generated_mir"
       ("path INTEGER PRIMARY KEY, " ^ state ^ ", body BLOB, contract BLOB")
       [];
-    keyed_by_id "call_node"
-      ("path INTEGER PRIMARY KEY, " ^ state ^ ", kind INTEGER, callees BLOB")
-      [];
+    keyed_by_id "call_node" ("path INTEGER PRIMARY KEY, " ^ state ^ ", callees BLOB") [];
     keyed_by_id "recursion_group"
       ("path INTEGER PRIMARY KEY, " ^ state ^ ", representative INTEGER, members BLOB")
       [ ("recursion_group_representative", "representative") ];

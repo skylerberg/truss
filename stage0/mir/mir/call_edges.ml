@@ -46,19 +46,6 @@ let make_impl_method trait_interface impl_interface impl (declared : Types.trait
           ~default:declared.method_receiver;
     }
 
-let find_implemented_declaration (interface : Interface.Lookups.t)
-    (impl_interface : Types.impl_interface) ~impl path =
-  let trait = impl_interface.implements.trait in
-  Option.bind (Interface.Definition.find_trait_interface interface trait) (fun trait_interface ->
-      List.find_map
-        (fun (declared : Types.trait_method) ->
-          if Path.equal (make_impl_method trait_interface impl_interface impl declared) path then
-            Some
-              (Path.Method
-                 { owner = trait; name = declared.method_name; receiver = declared.method_receiver })
-          else None)
-        trait_interface.methods)
-
 let list_impl_methods (interface : Interface.Lookups.t) impl =
   let impl_interface = Interface.Definition.read_impl_interface interface impl in
   let trait_interface =
@@ -376,41 +363,3 @@ let list_path_edges (lookups : lookups) path =
            (fun (dependency : dependency) -> dependency.path)
            (list_dependencies lookups instance code))
        code)
-
-type node = Definition | Trait_method_declaration
-
-let find_trait_interface (lookups : lookups) (path : Path.t) =
-  match path with
-  | Method { owner; _ } -> (
-      match Interface.Definition.find_interface lookups.interface owner with
-      | Some (Interface.Environment.Trait_interface trait_interface) -> Some trait_interface
-      | Some _ | None -> None)
-  | _ -> None
-
-let find_node lookups path =
-  match find_trait_interface lookups path with
-  | Some _ -> Trait_method_declaration
-  | None -> Definition
-
-let list_implementations (lookups : lookups) ~calling_package (path : Path.t) =
-  match (path, find_trait_interface lookups path) with
-  | Method { owner; name; receiver }, Some trait_interface ->
-      let declared =
-        List.filter
-          (fun (declared : Types.trait_method) ->
-            declared.method_name = name && declared.method_receiver = receiver)
-          trait_interface.methods
-      in
-      List.concat_map
-        (fun package ->
-          List.concat_map
-            (fun impl ->
-              List.map
-                (make_impl_method trait_interface
-                   (Interface.Definition.read_impl_interface lookups.interface impl)
-                   impl)
-                declared)
-            (Interface.Impls.list_impls_of_trait lookups.interface ~trait:owner package))
-        (calling_package
-        :: Resolve.Names.list_transitive_dependencies lookups.interface.names calling_package)
-  | _ -> []

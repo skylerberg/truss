@@ -76,19 +76,10 @@ val mark_stage_of_sources_stale :
 
 val mark_position_holders_stale : t -> target:endpoint -> markers:int -> stages:int -> unit
 
-type call_graph = {
-  unit_kind : int;
-  node_kind : int;
-  calls : int;
-  implements : int;
-  visible : string list;
-}
+type call_graph = { unit_kind : int; node_kind : int; calls : int }
 
 val list_cycle_nodes : t -> call_graph -> seeds:int list -> int list
-val list_callers_closure : t -> call_graph -> seeds:int list -> int list
 val list_call_pairs : t -> call_graph -> nodes:int list -> (int * int) list
-val list_implementers : t -> call_graph -> node:int -> int list
-val list_all_packages : t -> string list
 
 type read_edge = { source_kind : int; source : int; target_kind : int; target : int }
 
@@ -99,9 +90,7 @@ val list_edges_into :
   t -> target_kinds:int list -> targets:int list -> markers:int -> read_edge list
 
 val list_definitions_identified : t -> ids:int list -> (int * int * string) list
-val list_targets_of_kind : t -> kind:int -> visible:string list -> int list
 val mark_paths_stale : t -> stage:int -> paths:int list -> unit
-val list_paths_owned_by : t -> owners:int list -> int list
 val list_keys_of_paths : t -> paths:int list -> (int * string) list
 val mark_group_stale : t -> stage:int -> path:int -> unit
 

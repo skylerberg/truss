@@ -200,26 +200,11 @@ let generated_mir : (Mir.body_part * Mir.contract_part) Tracker.fact =
     ~encode:(fun (body, contract) -> [ Tracker.marshal body; Tracker.marshal contract ])
     ~decode:(fun cells -> (Tracker.unmarshal cells.(0), Tracker.unmarshal cells.(1)))
 
-type call_node = { node : Mir.Call_edges.node; callees : Path.t list }
-
-let call_node : call_node Tracker.fact =
+let call_node : Path.t list Tracker.fact =
   Tracker.make_fact ~stage:List_calls ~table:"call_node" ~id_column:"path" ~fixed:[]
-    ~groups:[ (Call_node, [ "kind" ]); (Callees, [ "callees" ]) ]
-    ~encode:(fun { node; callees } : Store.cell list ->
-      [
-        Integer (match node with Definition -> 0 | Trait_method_declaration -> 1);
-        Tracker.marshal callees;
-      ])
-    ~decode:(fun cells ->
-      {
-        node =
-          (match cells.(0) with
-          | Integer 0 -> Definition
-          | Integer 1 -> Trait_method_declaration
-          | Blob _ | Text _ | Integer _ | Null ->
-              Compiler_bug.raise_bug ~stage:"Database" "a node of the call graph has no kind");
-        callees = Tracker.unmarshal cells.(1);
-      })
+    ~groups:[ (Callees, [ "callees" ]) ]
+    ~encode:(fun callees -> [ Tracker.marshal callees ])
+    ~decode:(fun cells -> Tracker.unmarshal cells.(0))
 
 let recursion_group : Path.t list Tracker.fact =
   Tracker.make_fact ~stage:Group_recursion ~table:"recursion_group" ~id_column:"path" ~fixed:[]

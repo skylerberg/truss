@@ -112,7 +112,7 @@ let list_targets : read -> (Database.Kind.target * int * string) list = function
       | Checked_body _ -> of_facts [ Body_form; Body_tables; Run_forever; Ownership_modes ]
       | Body_mir _ -> of_facts [ Body_mir ]
       | Generated_mir _ -> of_facts [ Generated_mir ]
-      | Call_edges _ -> of_facts [ Call_node; Callees ]
+      | Call_edges _ -> of_facts [ Callees ]
       | Recursion_group _ -> of_facts [ Recursion_group ]
       | Proof _ -> of_facts [ Proof ]
       | Lowered _ -> of_facts [ Lowered ]
