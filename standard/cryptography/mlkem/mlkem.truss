@@ -334,7 +334,7 @@ fn generate_pke(seed: List[UInt8]) -> KeyPair
     }
     encode(mut encapsulation, coefficients: accumulated, bits: 12)
   }
-  mut encapsulation.append_slice(rho)
+  mut encapsulation.append_items(rho)
   for index in 0..rank {
     encode(mut decapsulation, coefficients: secret[index], bits: 12)
   }
@@ -409,9 +409,9 @@ internal fn generate(seed: List[UInt8], rejection: List[UInt8]) -> KeyPair
 {
   let pair = generate_pke(seed)
   var decapsulation = pair.decapsulation.copy()
-  mut decapsulation.append_slice(pair.encapsulation)
+  mut decapsulation.append_items(pair.encapsulation)
   mut decapsulation.append(hash_256(pair.encapsulation))
-  mut decapsulation.append_slice(rejection)
+  mut decapsulation.append_items(rejection)
   KeyPair(encapsulation: own pair.encapsulation, decapsulation: own decapsulation)
 }
 
@@ -438,13 +438,13 @@ internal fn decapsulate(decapsulation: List[UInt8], ciphertext: List[UInt8]) -> 
   }
   let message = decrypt(decapsulation[0..1152], ciphertext: ciphertext)
   var input = message.copy()
-  mut input.append_slice(decapsulation[2336..2368])
+  mut input.append_items(decapsulation[2336..2368])
   let expanded = split_512(input)
   if expanded.length() != 64 {
     return []
   }
   var rejection_input = decapsulation[2368..2400].to_list()
-  mut rejection_input.append_slice(ciphertext)
+  mut rejection_input.append_items(ciphertext)
   let rejected = keccak.hash(136, message: rejection_input, suffix: 31, count: 32)
   let again = encrypt(decapsulation[1152..2336], message: message, randomness: expanded[32..64])
   var difference: UInt8 = 0

@@ -1,4 +1,4 @@
-test "a list splits into two slices that view its elements" {
+test "a list splits into two views of its elements" {
   let items: List[Int64] = [1, 2, 3, 4, 5]
   let halves = items.split_at(2)
   assert halves.first.length() == 2
@@ -18,7 +18,7 @@ fn set_first(part: mut List[Int64], value: Int64)
   part[0] = value
 }
 
-test "an element is replaced through a slice of a list" {
+test "an element is replaced through a range of a list" {
   var items: List[Int64] = [1, 2, 3, 4]
   set_first(mut items[1..3], value: 20)
   assert items[0] == 1
@@ -213,7 +213,7 @@ test "partition_point finds where a sorted list stops satisfying a test" {
   assert none.partition_point(fn(item) { item < 6 }) == 0
 }
 
-test "slices and arrays are equal when their elements are" {
+test "ranges and arrays are equal when their elements are" {
   let first: List[Int64] = [1, 2, 3]
   let second: List[Int64] = [1, 2, 3]
   let shorter: List[Int64] = [1, 2]
@@ -230,7 +230,7 @@ test "slices and arrays are equal when their elements are" {
   assert fixed != other
 }
 
-test "equal slices hash alike, and the length is part of the hash" {
+test "equal ranges hash alike, and the length is part of the hash" {
   let first: List[Int64] = [1, 2, 3]
   let second: List[Int64] = [1, 2, 3]
   assert hash_of(first) == hash_of(second)
@@ -255,7 +255,7 @@ test "a list is displayed with brackets and commas" {
   assert "${part}" == "[4, 5]"
 }
 
-test "to_list copies a slice, and filter copies the elements that pass" {
+test "to_list copies a range, and filter copies the elements that pass" {
   let items: List[Int64] = [1, 2, 3, 4, 5, 6]
   let tail = items[2..].to_list()
   assert tail == [3, 4, 5, 6]
@@ -455,7 +455,7 @@ test "the smallest and the largest element are lent, the first of equals" {
   assert fixed.maximum() == Some(7)
 }
 
-test "a slice is repeated, and split where an element is" {
+test "a range is repeated, and split where an element is" {
   let items: List[Int64] = [1, 2]
   assert items.repeated(3) == [1, 2, 1, 2, 1, 2]
   assert items.repeated(0).length() == 0
@@ -519,18 +519,18 @@ test "binary_search finds an element of a sorted list, or reports that it is abs
   assert words.binary_search("blueberry") is None
 }
 
-test "find_slice finds the first place where a slice occurs" {
+test "find_sublist finds the first place where a sublist occurs" {
   let numbers: List[Int64] = [1, 2, 1, 2, 3, 1, 2, 3, 4]
-  assert numbers.find_slice([1, 2, 3][..]) == Some(2)
-  assert numbers.find_slice([1, 2, 3, 4][..]) == Some(5)
-  assert numbers.find_slice([4][..]) == Some(8)
-  assert numbers.find_slice([2, 2][..]) is None
-  assert numbers.find_slice([1, 2, 1, 2, 3, 1, 2, 3, 4, 5][..]) is None
+  assert numbers.find_sublist([1, 2, 3][..]) == Some(2)
+  assert numbers.find_sublist([1, 2, 3, 4][..]) == Some(5)
+  assert numbers.find_sublist([4][..]) == Some(8)
+  assert numbers.find_sublist([2, 2][..]) is None
+  assert numbers.find_sublist([1, 2, 1, 2, 3, 1, 2, 3, 4, 5][..]) is None
   let none: List[Int64] = []
-  assert numbers.find_slice(none[..]) == Some(0)
-  assert none.find_slice([1][..]) is None
+  assert numbers.find_sublist(none[..]) == Some(0)
+  assert none.find_sublist([1][..]) is None
   let repeated: List[Int64] = [0, 0, 0, 0, 1]
-  assert repeated.find_slice([0, 0, 1][..]) == Some(2)
+  assert repeated.find_sublist([0, 0, 1][..]) == Some(2)
 }
 
 test "join writes each element with the separator between them" {
@@ -672,21 +672,21 @@ test "min_by and max_by lend the least and the greatest element by a comparison"
   assert none.max_by(fn(first, second) { first.compare(second) }) is None
 }
 
-test "append_slice adds a copy of each element of a slice" {
+test "append_items adds a copy of each element of a list" {
   var numbers: List[Int64] = [1, 2]
   let more: List[Int64] = [3, 4, 5]
-  mut numbers.append_slice(more[1..])
+  mut numbers.append_items(more[1..])
   assert numbers == [1, 2, 4, 5]
-  mut numbers.append_slice(more[..0])
+  mut numbers.append_items(more[..0])
   assert numbers == [1, 2, 4, 5]
   var words: List[String] = []
   let names: List[String] = ["a", "b"]
-  mut words.append_slice(names)
-  mut words.append_slice(names)
+  mut words.append_items(names)
+  mut words.append_items(names)
   assert words == ["a", "b", "a", "b"]
   assert names == ["a", "b"]
 }
-test "lists and slices are ordered by their first different element, then by length" {
+test "lists and ranges are ordered by their first different element, then by length" {
   let low: List[Int64] = [1, 2, 3]
   let high: List[Int64] = [1, 3]
   let longer: List[Int64] = [1, 2, 3, 0]

@@ -645,7 +645,7 @@ fn decode_sequences(block: List[UInt8], literals: List[UInt8], state: mut FrameS
     if literals.length() > limit.saturating_subtract(output.length()) {
       return Err(Error.TooLarge(limit: limit))
     }
-    mut output.append_slice(literals)
+    mut output.append_items(literals)
     return Ok(Unit)
   }
   if at >= block.length() {
@@ -716,7 +716,7 @@ fn decode_sequences(block: List[UInt8], literals: List[UInt8], state: mut FrameS
     if output.length().saturating_add(literal_length).saturating_add(match_length) > limit {
       return Err(Error.TooLarge(limit: limit))
     }
-    mut output.append_slice(literals[literal_at..literal_at + literal_length])
+    mut output.append_items(literals[literal_at..literal_at + literal_length])
     literal_at = literal_at + literal_length
     if offset == 0 || offset > output.length() {
       return malformed("a match before the start of the output")
@@ -740,7 +740,7 @@ fn decode_sequences(block: List[UInt8], literals: List[UInt8], state: mut FrameS
   if literals.length() - literal_at > limit.saturating_subtract(output.length()) {
     return Err(Error.TooLarge(limit: limit))
   }
-  mut output.append_slice(literals[literal_at..])
+  mut output.append_items(literals[literal_at..])
   Ok(Unit)
 }
 
@@ -795,7 +795,7 @@ fn decode_frame(input: List[UInt8], at: UInt64, output: mut List[UInt8], limit: 
       if size > limit.saturating_subtract(output.length()) {
         return Err(Error.TooLarge(limit: limit))
       }
-      mut output.append_slice(input[index..index + size])
+      mut output.append_items(input[index..index + size])
       index += size
     } else if kind == 1 {
       if index >= input.length() {
