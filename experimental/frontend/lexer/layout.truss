@@ -214,7 +214,9 @@ fn find_closing_edits(scanner: Scanner, run: Run, openers: Slice[Opener]) -> Opt
   Some(own edits)
 }
 
-fn emit(run: mut Run, current: token.Token) {
+fn emit(run: mut Run, current: token.Token)
+  ensures run.stack.length() == old(run.stack.length())
+{
   mut run.output.push(current)
   mut run.closers.push(None)
   run.previous = Some(current.kind)
@@ -222,6 +224,7 @@ fn emit(run: mut Run, current: token.Token) {
 
 fn change_count(run: mut Run, bracket: token.Bracket, is_increase: Bool)
   uses Panic
+  ensures run.stack.length() == old(run.stack.length())
 {
   match bracket {
     Paren => run.open_paren = if is_increase { run.open_paren + 1 } else { run.open_paren - 1 }
@@ -248,6 +251,7 @@ fn push_opener(run: mut Run, bracket: token.Bracket, span: source.Span)
 
 fn pop_opener(run: mut Run, closer: token.Token)
   uses Panic
+  ensures old(run.stack.length()) > 0 ==> run.stack.length() < old(run.stack.length())
 {
   let Some(opener) = mut run.stack.pop() else {
     return
@@ -262,6 +266,7 @@ fn pop_opener(run: mut Run, closer: token.Token)
 
 fn insert_closer(run: mut Run, position: UInt64)
   uses Panic
+  ensures old(run.stack.length()) > 0 ==> run.stack.length() < old(run.stack.length())
 {
   let Some(opener) = run.stack.last() else {
     return
@@ -271,9 +276,11 @@ fn insert_closer(run: mut Run, position: UInt64)
 }
 
 fn close_silently(run: mut Run, position: UInt64)
-  uses Panic, RunForever
+  uses Panic
 {
-  while !run.stack.is_empty() {
+  while !run.stack.is_empty()
+    decreases run.stack.length()
+  {
     insert_closer(mut run, position)
   }
 }
@@ -296,7 +303,8 @@ fn list_closing_fixes(scanner: Scanner, run: Run, openers: Slice[Opener], title:
 }
 
 fn close_all(scanner: mut Scanner, run: mut Run, position: UInt64, reason: StringSlice)
-  uses Panic, RunForever
+  uses Panic
+  ensures scanner.continues(old(scanner))
 {
   let openers = innermost_first(run)
   let Some(innermost) = openers.get(0) else {
@@ -327,7 +335,8 @@ fn close_all(scanner: mut Scanner, run: mut Run, position: UInt64, reason: Strin
 }
 
 fn close_bracket(scanner: mut Scanner, run: mut Run, current: token.Token, bracket: token.Bracket)
-  uses Panic, RunForever
+  uses Panic
+  ensures scanner.continues(old(scanner))
 {
   let span = current.span
   if run.open_count(bracket) == 0 {
@@ -339,7 +348,10 @@ fn close_bracket(scanner: mut Scanner, run: mut Run, current: token.Token, brack
     )
     return
   }
-  while run.stack.last() is Some(opener) && opener.bracket != bracket {
+  while run.stack.last() is Some(opener) && opener.bracket != bracket
+    invariant scanner.continues(old(scanner))
+    decreases run.stack.length()
+  {
     let fixes = list_closing_fixes(scanner, run, openers: [opener], title: "Insert `${spell_closer(opener.bracket)}`")
     report(
       mut scanner,
@@ -365,7 +377,8 @@ fn finish_run(
   blank_line: Bool,
   ends_unterminated: Bool,
 )
-  uses Panic, RunForever
+  uses Panic
+  ensures scanner.continues(old(scanner))
 {
   if !run.stack.is_empty() {
     run.open_at_end = true
@@ -419,7 +432,9 @@ fn make_code_frame(mode: LayoutMode) -> CodeFrame {
 }
 
 fn lay_out(scanner: mut Scanner, run: mut Run, mode: LayoutMode, input: LayoutInput) -> Bool
-  uses Panic, RunForever
+  uses Panic
+  ensures scanner.continues(old(scanner))
+  ensures input is Finish(..) ==> result
 {
   match input {
     Finish(position, first_line_break, blank_line, ends_unterminated) => {
@@ -473,7 +488,11 @@ fn lay_out(scanner: mut Scanner, run: mut Run, mode: LayoutMode, input: LayoutIn
 }
 
 fn accept_item(scanner: mut Scanner, frame: mut CodeFrame, item: Item) -> Bool
-  uses Panic, RunForever
+  uses Panic
+  ensures scanner.continues(old(scanner))
+  ensures frame.pending.length() == old(frame.pending.length())
+  ensures item is End ==> result
+  ensures item is LineEnd ==> result || old(scanner.position) < scanner.position
 {
   let input = match mut frame.mode {
     FileMode(_) => match item {
@@ -504,7 +523,15 @@ fn accept_item(scanner: mut Scanner, frame: mut CodeFrame, item: Item) -> Bool
 type CodeStep = CodeFinished | StringOpened(string: StringFrame, request: InterpolationRequest)
 
 fn deliver(scanner: mut Scanner, frame: mut CodeFrame, item: Item) -> Bool
-  uses Panic, RunForever
+  uses Panic
+  ensures scanner.length == old(scanner.length)
+  ensures old(scanner.position) <= scanner.position
+  ensures old(frame.pending.length()) == 0 ==>
+    frame.pending.length() == 0 && scanner.held.length() == old(scanner.held.length())
+  ensures !(item is Lexed(_)) && 0 < old(frame.pending.length()) ==>
+    3 * frame.pending.length() + scanner.held.length() < 3 * old(frame.pending.length()) + old(scanner.held.length())
+  ensures old(frame.pending.length()) == 0 && item is End ==> result
+  ensures old(frame.pending.length()) == 0 && item is LineEnd ==> result || old(scanner.position) < scanner.position
 {
   var settled = item
   if !frame.pending.is_empty() {
@@ -520,7 +547,10 @@ fn deliver(scanner: mut Scanner, frame: mut CodeFrame, item: Item) -> Bool
 }
 
 fn step_code(scanner: mut Scanner, frame: mut CodeFrame, arriving: Option[Item]) -> CodeStep
-  uses Panic, RunForever
+  uses Panic
+  ensures scanner.length == old(scanner.length)
+  ensures old(scanner.position) <= scanner.position
+  ensures result is StringOpened(..) ==> old(scanner.position) < scanner.position && old(scanner.position) < scanner.length
 {
   let inline = frame.mode is InterpolationMode(_)
   let nesting = match frame.mode {
@@ -530,7 +560,11 @@ fn step_code(scanner: mut Scanner, frame: mut CodeFrame, arriving: Option[Item])
   if arriving is Some(arrived) && deliver(mut scanner, mut frame, item: arrived) {
     return CodeStep.CodeFinished
   }
-  while true {
+  while true
+    invariant scanner.length == old(scanner.length)
+    invariant old(scanner.position) <= scanner.position
+    decreases scanner.count_remaining(scanner.position), 3 * frame.pending.length() + scanner.held.length()
+  {
     if frame.pending.is_empty() {
       if frame.mode is InterpolationMode(state) && state.is_finished {
         let _ = lay_out(mut scanner, run: mut frame.run, mode: frame.mode, input: finish_input(scanner.position, ending: state.ending))
@@ -554,13 +588,19 @@ fn step_code(scanner: mut Scanner, frame: mut CodeFrame, arriving: Option[Item])
 }
 
 fn lex_file(scanner: mut Scanner, recovery: Bool) -> TokenRange
-  uses Panic, RunForever
+  uses Panic
+  ensures scanner.length == old(scanner.length)
+  ensures old(scanner.position) <= scanner.position
 {
   var codes: List[CodeFrame] = [make_code_frame(mode: LayoutMode.FileMode(recovery))]
   var strings: List[StringFrame] = []
   var arriving: Option[Item] = None
   var interpolated: Option[InterpolationResult] = None
-  while true {
+  while true
+    invariant scanner.length == old(scanner.length)
+    invariant old(scanner.position) <= scanner.position
+    decreases scanner.count_remaining(scanner.position), codes.length() + strings.length()
+  {
     if codes.length() > strings.length() {
       let step = step_code(mut scanner, frame: mut codes.element(codes.length() - 1), arriving: arriving)
       arriving = None

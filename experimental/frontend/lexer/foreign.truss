@@ -82,6 +82,9 @@ fn follows_joining_confusable(scanner: Scanner, start: UInt64, replacement: Stri
 
 fn report_confusable(scanner: mut Scanner, start: UInt64, length: UInt64, replacement: StringSlice, name: StringSlice)
   uses Panic
+  requires scanner.position <= start + length
+  ensures scanner.continues(old(scanner))
+  ensures scanner.position == start + length
 {
   let span = source.make_span(start, stop: start + length)
   let fixes = if follows_joining_confusable(scanner, start, replacement) {
@@ -102,7 +105,10 @@ fn report_confusable(scanner: mut Scanner, start: UInt64, length: UInt64, replac
 }
 
 fn scan_confusable(scanner: mut Scanner, code: UInt32, length: UInt64) -> Option[ConfusableScan]
-  uses Panic, RunForever
+  uses Panic
+  requires 1 <= length
+  ensures scanner.continues(old(scanner))
+  ensures result is Some(_) ==> old(scanner.position) < scanner.position
 {
   let start = scanner.position
   let Some(confusable) = find_confusable(code) else {
@@ -150,6 +156,10 @@ fn read_hexadecimal(scanner: Scanner, position: UInt64, count: UInt64) -> UInt64
 
 fn report_foreign_escape(scanner: mut Scanner, buffer: mut String, start: UInt64, stop: UInt64, value: UInt32) -> Bool
   uses Panic
+  requires scanner.position <= stop
+  ensures scanner.continues(old(scanner))
+  ensures scanner.position == stop
+  ensures result
 {
   let replacement = "\\u{${format_hexadecimal(value, minimum_digits: 1)}}"
   let written = scanner.text(start, stop)
@@ -170,6 +180,10 @@ fn report_foreign_escape(scanner: mut Scanner, buffer: mut String, start: UInt64
 
 fn check_hexadecimal_escape(scanner: mut Scanner, buffer: mut String, start: UInt64, count: UInt64) -> Bool
   uses Panic
+  requires scanner.position <= start
+  ensures scanner.continues(old(scanner))
+  ensures result ==> old(scanner.position) < scanner.position
+  ensures !result ==> scanner.position == old(scanner.position)
 {
   if !are_hexadecimal_digits(scanner, position: start + 2, count: count) {
     return false
@@ -183,6 +197,9 @@ fn check_hexadecimal_escape(scanner: mut Scanner, buffer: mut String, start: UIn
 
 fn scan_foreign_escape(scanner: mut Scanner, buffer: mut String) -> Bool
   uses Panic
+  ensures scanner.continues(old(scanner))
+  ensures result ==> old(scanner.position) < scanner.position
+  ensures !result ==> scanner.position == old(scanner.position)
 {
   let start = scanner.position
   if scanner.is_at_end(start + 1) {
@@ -300,6 +317,7 @@ fn is_simple_escape(byte: UInt8) -> Bool {
 
 fn find_character_literal_end(scanner: Scanner, start: UInt64, after_prefix: Bool = false) -> Option[UInt64]
   uses Panic
+  ensures !(result is Some(stop) && stop <= start)
 {
   if !after_prefix && touches_word_before(scanner, index: start) {
     return None
@@ -310,7 +328,9 @@ fn find_character_literal_end(scanner: Scanner, start: UInt64, after_prefix: Boo
   } else if scanner.is_at(content, byte: 92) {
     if scanner.is_at(content + 1, byte: 117) && scanner.is_at(content + 2, byte: 123) {
       var brace = content + 3
-      while brace < scanner.length && brace <= content + 10 && scanner.lookup(brace) != 125 {
+      while brace < scanner.length && brace <= content + 10 && scanner.lookup(brace) != 125
+        invariant content + 3 <= brace
+      {
         brace += 1
       }
       if scanner.is_at(brace, byte: 125) && brace - content <= 10 { Some(brace + 1) } else { None }
@@ -376,6 +396,9 @@ fn decode_character_escape(content: StringSlice) -> String
 
 fn lex_character_literal(scanner: mut Scanner, tag: StringSlice, literal_start: UInt64, stop: UInt64) -> token.Kind
   uses Panic
+  requires scanner.position <= stop
+  ensures scanner.continues(old(scanner))
+  ensures stop <= scanner.position
 {
   let start = scanner.position
   let content = scanner.text(start + 1, stop: stop - 1)
@@ -408,7 +431,7 @@ fn is_format_plain(byte: UInt8) -> Bool {
 }
 
 fn format_field_edits(scanner: Scanner, start: UInt64, stop: UInt64) -> Option[List[source.Edit]]
-  uses Panic, RunForever
+  uses Panic
 {
   var edits: List[source.Edit] = []
   var position = start
@@ -461,7 +484,9 @@ fn classify_prefix(prefix: StringSlice) -> PrefixKind {
 }
 
 fn open_prefixed_string(scanner: mut Scanner, start: UInt64, nesting: UInt64, inline: Bool) -> ItemScan
-  uses Panic, RunForever
+  uses Panic
+  requires scanner.is_at(scanner.position, byte: 34)
+  ensures scanner.continues(old(scanner))
 {
   let quote_start = scanner.position
   let quotes = scanner.run_length(quote_start, byte: 34)
@@ -484,7 +509,8 @@ fn open_prefixed_string(scanner: mut Scanner, start: UInt64, nesting: UInt64, in
 }
 
 fn report_prefixed_string(scanner: mut Scanner, start: UInt64, quote_start: UInt64, quotes: UInt64, scanned: ScannedString)
-  uses Panic, RunForever
+  uses Panic
+  ensures scanner.continues(old(scanner))
 {
   let is_empty = quotes == 2
   let kind_of_prefix = classify_prefix(scanner.text(start, stop: quote_start))
@@ -560,11 +586,15 @@ fn report_prefixed_string(scanner: mut Scanner, start: UInt64, quote_start: UInt
 }
 
 fn read_hash_raw_text(scanner: mut Scanner, text_start: UInt64, text_stop: UInt64) -> String
-  uses Panic, RunForever
+  uses Panic
+  requires scanner.position <= text_start
+  ensures scanner.continues(old(scanner))
 {
   var buffer = String.with_capacity(text_stop - text_start)
   scanner.position = text_start
-  while scanner.position < text_stop {
+  while scanner.position < text_stop
+    invariant scanner.continues(old(scanner))
+  {
     copy_plain(mut scanner, mut buffer, special: Special.RawSpecial)
     if scanner.position < text_stop {
       read_character(mut scanner, mut buffer, context: Context.RawString)
@@ -574,7 +604,8 @@ fn read_hash_raw_text(scanner: mut Scanner, text_start: UInt64, text_stop: UInt6
 }
 
 fn hash_raw_string(scanner: mut Scanner, start: UInt64) -> Option[token.Kind]
-  uses Panic, RunForever
+  uses Panic
+  ensures scanner.continues(old(scanner))
 {
   let hashes = scanner.run_length(scanner.position, byte: 35)
   let text_start = scanner.position + hashes + 1
@@ -644,10 +675,12 @@ fn hash_raw_string(scanner: mut Scanner, start: UInt64) -> Option[token.Kind]
 }
 
 fn find_closing_delimiter(scanner: Scanner, start: UInt64, delimiter: UInt8) -> Option[UInt64]
-  uses Panic, RunForever
+  uses Panic
 {
   var position = start + 1
-  while !scanner.is_end_of_line(position) {
+  while !scanner.is_end_of_line(position)
+    decreases scanner.count_remaining(position)
+  {
     if scanner.is_at(position, byte: 92) {
       position += 2
     } else if scanner.is_at(position, byte: delimiter) {
@@ -660,14 +693,17 @@ fn find_closing_delimiter(scanner: Scanner, start: UInt64, delimiter: UInt8) -> 
 }
 
 fn open_quoted_string(scanner: mut Scanner, nesting: UInt64, inline: Bool, delimiter: UInt8) -> ItemScan
-  uses Panic, RunForever
+  uses Panic
+  ensures scanner.continues(old(scanner))
+  ensures old(scanner.position) < scanner.position
 {
   let start = scanner.position
   open_ordinary(mut scanner, tag: None, nesting: nesting, inline: inline, origin: StringOrigin.QuotedString(start, delimiter), closing: delimiter)
 }
 
 fn report_quoted_string(scanner: mut Scanner, start: UInt64, delimiter: UInt8, scanned: ScannedString)
-  uses Panic, RunForever
+  uses Panic
+  ensures scanner.continues(old(scanner))
 {
   let stop = scanner.position
   var interpolation_spans: List[source.Span] = []
@@ -712,7 +748,10 @@ fn report_quoted_string(scanner: mut Scanner, start: UInt64, delimiter: UInt8, s
 }
 
 fn lex_curly_quoted_string(scanner: mut Scanner, opening_length: UInt64, closing: StringSlice) -> Option[token.Kind]
-  uses Panic, RunForever
+  uses Panic
+  requires 1 <= opening_length
+  ensures scanner.continues(old(scanner))
+  ensures result is Some(_) ==> old(scanner.position) < scanner.position
 {
   let start = scanner.position
   let text_start = start + opening_length
@@ -760,7 +799,10 @@ fn lex_curly_quoted_string(scanner: mut Scanner, opening_length: UInt64, closing
 }
 
 fn scan_string_form(scanner: mut Scanner, inline: Bool, nesting: UInt64) -> Option[StringFormScan]
-  uses Panic, RunForever
+  uses Panic
+  ensures scanner.continues(old(scanner))
+  ensures result is None ==> scanner.position == old(scanner.position)
+  ensures result is Some(_) ==> old(scanner.position) < scanner.position
 {
   let start = scanner.position
   if scanner.is_at(start, byte: 39) {
@@ -779,7 +821,10 @@ fn scan_string_form(scanner: mut Scanner, inline: Bool, nesting: UInt64) -> Opti
     let starts_name = start + 1 < scanner.length && (is_ascii_letter(scanner.lookup(start + 1)) || scanner.lookup(start + 1) == 95)
     if !is_apostrophe && starts_name {
       var name_end = start + 1
-      while scanner.is_ascii_name_byte_at(name_end) {
+      while scanner.is_ascii_name_byte_at(name_end)
+        invariant start + 1 <= name_end
+        decreases scanner.count_remaining(name_end)
+      {
         name_end += 1
       }
       reject(
@@ -808,7 +853,8 @@ fn scan_string_form(scanner: mut Scanner, inline: Bool, nesting: UInt64) -> Opti
 }
 
 fn lex_after_name(scanner: mut Scanner, inline: Bool, nesting: UInt64, start: UInt64, name: token.Kind) -> Option[ItemScan]
-  uses Panic, RunForever
+  uses Panic
+  ensures scanner.continues(old(scanner))
 {
   let Lower(_) = name else {
     return None

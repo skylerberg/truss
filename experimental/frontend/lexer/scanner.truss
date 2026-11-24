@@ -41,6 +41,7 @@ type Scanner(
   semicolons: List[UInt64],
   tables: token.Tables,
 )
+  invariant length == source.text.length()
 
 fn Scanner.create(source: own source.Source) -> Scanner
   uses Panic
@@ -65,18 +66,36 @@ fn Scanner.create(source: own source.Source) -> Scanner
   )
 }
 
-fn Scanner.is_at_end(self, index: UInt64) -> Bool {
+fn Scanner.is_at_end(self, index: UInt64) -> Bool
+  ensures result == (index >= self.length)
+{
   index >= self.length
+}
+
+fn Scanner.continues(self, earlier: Scanner) -> Bool
+  ensures result == (self.source.text == earlier.source.text && self.length == earlier.length
+    && earlier.position <= self.position && self.held.length() == earlier.held.length())
+{
+  self.source.text == earlier.source.text && self.length == earlier.length && earlier.position <= self.position
+    && self.held.length() == earlier.held.length()
+}
+
+fn Scanner.count_remaining(self, position: UInt64) -> UInt64
+  ensures position < self.length ==> result == self.length - position
+  ensures self.length <= position ==> result == 0
+{
+  if position < self.length { self.length - position } else { 0 }
 }
 
 fn Scanner.lookup(self, index: UInt64) -> UInt8
   uses Panic
+  ensures index < self.length ==> result == self.source.text.byte(index)
 {
   self.source.text.byte(index)
 }
 
 fn Scanner.is_at(self, index: UInt64, byte: UInt8) -> Bool
-  uses Panic
+  ensures result == (index < self.length && self.source.text.byte(index) == byte)
 {
   index < self.length && self.source.text.byte(index) == byte
 }
@@ -88,7 +107,10 @@ fn report(
   message: StringSlice,
   notes: own List[source.Note] = [],
   fixes: own List[source.Fix] = [],
-) {
+)
+  ensures scanner.continues(old(scanner))
+  ensures scanner.position == old(scanner.position)
+{
   mut scanner.diagnostics.push(source.make_diagnostic(code, span, message, own notes, own fixes))
 }
 
@@ -98,36 +120,51 @@ fn Scanner.text(self, start: UInt64, stop: UInt64) -> StringSlice
   self.source.text.substring(start, to: stop)
 }
 
-fn is_line_break(byte: UInt8) -> Bool {
+fn is_line_break(byte: UInt8) -> Bool
+  ensures result == (byte == 10 || byte == 13)
+{
   byte == 10 || byte == 13
 }
 
-fn is_space(byte: UInt8) -> Bool {
+fn is_space(byte: UInt8) -> Bool
+  ensures result == (byte == 32 || byte == 9)
+{
   byte == 32 || byte == 9
 }
 
-fn is_digit(byte: UInt8) -> Bool {
+fn is_digit(byte: UInt8) -> Bool
+  ensures result == (byte >= 48 && byte <= 57)
+{
   byte >= 48 && byte <= 57
 }
 
-fn is_hexadecimal_digit(byte: UInt8) -> Bool {
+fn is_hexadecimal_digit(byte: UInt8) -> Bool
+  ensures result == (is_digit(byte) || (byte >= 97 && byte <= 102) || (byte >= 65 && byte <= 70))
+{
   is_digit(byte) || (byte >= 97 && byte <= 102) || (byte >= 65 && byte <= 70)
 }
 
-fn is_ascii_letter(byte: UInt8) -> Bool {
+fn is_ascii_letter(byte: UInt8) -> Bool
+  ensures result == ((byte >= 97 && byte <= 122) || (byte >= 65 && byte <= 90))
+{
   (byte >= 97 && byte <= 122) || (byte >= 65 && byte <= 90)
 }
 
-fn is_ascii_name_byte(byte: UInt8) -> Bool {
+fn is_ascii_name_byte(byte: UInt8) -> Bool
+  ensures result == (is_ascii_letter(byte) || is_digit(byte) || byte == 95)
+{
   is_ascii_letter(byte) || is_digit(byte) || byte == 95
 }
 
-fn is_ascii(byte: UInt8) -> Bool {
+fn is_ascii(byte: UInt8) -> Bool
+  ensures result == (byte < 128)
+{
   byte < 128
 }
 
 fn Scanner.is_end_of_line(self, index: UInt64) -> Bool
   uses Panic
+  ensures !result ==> index < self.length
 {
   self.is_at_end(index) || is_line_break(self.lookup(index))
 }
@@ -140,18 +177,21 @@ fn Scanner.is_digit_at(self, index: UInt64) -> Bool
 
 fn Scanner.is_hexadecimal_digit_at(self, index: UInt64) -> Bool
   uses Panic
+  ensures result ==> index < self.length
 {
   index < self.length && is_hexadecimal_digit(self.lookup(index))
 }
 
 fn Scanner.is_space_at(self, index: UInt64) -> Bool
   uses Panic
+  ensures result ==> index < self.length
 {
   index < self.length && is_space(self.lookup(index))
 }
 
 fn Scanner.is_ascii_name_byte_at(self, index: UInt64) -> Bool
   uses Panic
+  ensures result ==> index < self.length
 {
   index < self.length && is_ascii_name_byte(self.lookup(index))
 }
@@ -192,6 +232,7 @@ fn is_continuation(byte: UInt8) -> Bool {
 
 fn decode_text(text: StringSlice, index: UInt64) -> Decoded
   uses Panic
+  ensures 1 <= result.length && result.length <= 4
 {
   let length = text.length()
   let first = text.byte(index)
@@ -259,35 +300,50 @@ fn decode_text(text: StringSlice, index: UInt64) -> Decoded
 
 fn Scanner.decode(self, index: UInt64) -> Decoded
   uses Panic
+  ensures 1 <= result.length && result.length <= 4
 {
   decode_text(self.source.text, index)
 }
 
 fn Scanner.run_length(self, index: UInt64, byte: UInt8) -> UInt64
-  uses Panic, RunForever
+  uses Panic
+  ensures self.is_at(index, byte) ==> 1 <= result
+  ensures !self.is_at(index, byte) ==> result == 0
 {
   var position = index
-  while self.is_at(position, byte) {
+  while self.is_at(position, byte)
+    invariant index <= position
+    invariant self.is_at(index, byte) || position == index
+    decreases self.count_remaining(position)
+  {
     position += 1
   }
   position - index
 }
 
 fn Scanner.skip_spaces(self, index: UInt64) -> UInt64
-  uses Panic, RunForever
+  uses Panic
+  ensures index <= result
 {
   var position = index
-  while self.is_space_at(position) {
+  while self.is_space_at(position)
+    invariant index <= position
+    decreases self.count_remaining(position)
+  {
     position += 1
   }
   position
 }
 
 fn Scanner.compute_end_of_line(self, index: UInt64) -> UInt64
-  uses Panic, RunForever
+  uses Panic
+  ensures index <= result
 {
   var position = index
-  while !self.is_end_of_line(position) {
+  while !self.is_end_of_line(position)
+    invariant index <= position
+    decreases self.count_remaining(position)
+  {
     position += 1
   }
   position
@@ -295,12 +351,13 @@ fn Scanner.compute_end_of_line(self, index: UInt64) -> UInt64
 
 fn Scanner.measure_line_break(self, index: UInt64) -> UInt64
   uses Panic
+  ensures 1 <= result && result <= 2
 {
   if self.is_at(index, byte: 13) && self.is_at(index + 1, byte: 10) { 2 } else { 1 }
 }
 
 fn Scanner.extract_indentation(self, offset: UInt64) -> String
-  uses Panic, RunForever
+  uses Panic
 {
   let start = self.source.compute_line_start(offset)
   self.text(start, stop: self.skip_spaces(start)).to_string()
@@ -435,7 +492,7 @@ type Context = Code | OrdinaryString | RawString
   derives Equal
 
 fn Scanner.remove_trivia(self, start: UInt64, stop: UInt64, line_break: Bool) -> source.Edit
-  uses Panic, RunForever
+  uses Panic
 {
   let before = self.count_spaces_before(start)
   let after = self.skip_spaces(stop)
@@ -457,11 +514,19 @@ fn Scanner.remove_trivia(self, start: UInt64, stop: UInt64, line_break: Bool) ->
 }
 
 fn report_forbidden_run(scanner: mut Scanner, context: Context)
-  uses Panic, RunForever
+  uses Panic
+  ensures scanner.continues(old(scanner))
+  ensures old(scanner.position) < scanner.position
 {
   let start = scanner.position
-  var characters: List[UInt32] = []
-  while !scanner.is_at_end(scanner.position) {
+  let first = scanner.decode(start)
+  scanner.position = start + first.length
+  var characters: List[UInt32] = [first.code]
+  while !scanner.is_at_end(scanner.position)
+    invariant scanner.continues(old(scanner))
+    invariant start < scanner.position
+    decreases scanner.count_remaining(scanner.position)
+  {
     let decoded = scanner.decode(scanner.position)
     if decoded.is_valid && is_forbidden(decoded.code) {
       scanner.position += decoded.length
@@ -532,10 +597,17 @@ fn report_forbidden_run(scanner: mut Scanner, context: Context)
 }
 
 fn report_invalid_run(scanner: mut Scanner)
-  uses Panic, RunForever
+  uses Panic
+  ensures scanner.continues(old(scanner))
+  ensures old(scanner.position) < scanner.position
 {
   let start = scanner.position
-  while !scanner.is_at_end(scanner.position) && !scanner.decode(scanner.position).is_valid {
+  scanner.position = start + 1
+  while !scanner.is_at_end(scanner.position) && !scanner.decode(scanner.position).is_valid
+    invariant scanner.continues(old(scanner))
+    invariant start < scanner.position
+    decreases scanner.count_remaining(scanner.position)
+  {
     scanner.position += 1
   }
   report(
@@ -557,11 +629,14 @@ fn is_special(special: Special, byte: UInt8) -> Bool {
 }
 
 fn copy_plain(scanner: mut Scanner, buffer: mut String, special: Special)
-  uses Panic, RunForever
+  uses Panic
+  ensures scanner.continues(old(scanner))
 {
   let start = scanner.position
   var stop = start
-  while !scanner.is_at_end(stop) {
+  while !scanner.is_at_end(stop)
+    decreases scanner.count_remaining(stop)
+  {
     let current = scanner.lookup(stop)
     if (current >= 32 && current < 127 && !is_special(special, byte: current)) || current == 9 {
       stop += 1
@@ -576,7 +651,9 @@ fn copy_plain(scanner: mut Scanner, buffer: mut String, special: Special)
 }
 
 fn read_character(scanner: mut Scanner, buffer: mut String, context: Context)
-  uses Panic, RunForever
+  uses Panic
+  ensures scanner.continues(old(scanner))
+  ensures old(scanner.position) < scanner.position
 {
   let decoded = scanner.decode(scanner.position)
   if !decoded.is_valid {
@@ -591,6 +668,8 @@ fn read_character(scanner: mut Scanner, buffer: mut String, context: Context)
 
 fn consume_line_break(scanner: mut Scanner) -> source.Span
   uses Panic
+  ensures scanner.continues(old(scanner))
+  ensures old(scanner.position) < scanner.position
 {
   let start = scanner.position
   let length = scanner.measure_line_break(start)
@@ -611,7 +690,9 @@ fn consume_line_break(scanner: mut Scanner) -> source.Span
   source.make_span(start, stop: scanner.position)
 }
 
-fn note_line_break(scanner: mut Scanner, line_break: source.Span) {
+fn note_line_break(scanner: mut Scanner, line_break: source.Span)
+  ensures scanner.continues(old(scanner))
+{
   if scanner.first_line_break.is_some() && scanner.line_is_blank {
     scanner.blank_line = true
   }
@@ -623,6 +704,8 @@ fn note_line_break(scanner: mut Scanner, line_break: source.Span) {
 
 fn reject(scanner: mut Scanner, length: UInt64, message: StringSlice, code: StringSlice = "lexer.unexpected_character")
   uses Panic
+  ensures scanner.continues(old(scanner))
+  ensures scanner.position == old(scanner.position) + length
 {
   let start = scanner.position
   scanner.position = start + length

@@ -7,7 +7,7 @@ internal type LexResult(lexed: token.Lexed, diagnostics: List[source.Diagnostic]
 type Attempt(scanner: Scanner, range: TokenRange)
 
 fn attempt(source: own source.Source, recovery: Bool) -> Attempt
-  uses Panic, RunForever
+  uses Panic
 {
   var scanner = Scanner.create(own source)
   let range = lex_file(mut scanner, recovery)
@@ -15,7 +15,7 @@ fn attempt(source: own source.Source, recovery: Bool) -> Attempt
 }
 
 fn scan_source(source: own source.Source) -> Attempt
-  uses Panic, RunForever
+  uses Panic
 {
   let first_attempt = attempt(own source, recovery: false)
   if first_attempt.range.open_at_end {
@@ -288,7 +288,7 @@ fn map_to_original(tables: mut token.Tables, placed: Slice[Placed])
 }
 
 internal fn lex(input: own source.Source) -> LexResult
-  uses Panic, RunForever
+  uses Panic
 {
   let scanned = scan_source(own input)
   var scanner = own scanned.scanner
