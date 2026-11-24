@@ -13,6 +13,7 @@ type loop_cost = {
   entry : Logic.term;
   rule : loop_rule;
   measure_gained : gain -> State.frame -> Logic.term;
+  holds_when : Types.condition;
 }
 
 type received = {
@@ -118,7 +119,19 @@ let list_loop_costs context (frame : State.frame) (clauses : Mir.loop_clause lis
                 one_iteration_bound = None;
               }
       in
-      { counter; entry; rule; measure_gained })
+      let is_conditional_clause =
+        match written with
+        | Some written ->
+            Conditions.find_obligation_condition
+              (Conditions.decide context ~substitution:Types.no_substitution written.holds_when)
+            <> Some []
+        | None -> false
+      in
+      let holds_when =
+        if is_conditional_clause then context.condition
+        else Facts.find_counter_condition context counter
+      in
+      { counter; entry; rule; measure_gained; holds_when })
     context.counters
 
 let loop_clause_holds context (at : State.frame) (counter : Costs.counter) (cost : Mir.cost) ~since
@@ -174,6 +187,7 @@ let enter_loop_head context head costs ~iterations =
 let check_loop_entry context frame costs =
   List.iter
     (fun cost ->
+      Conditions.with_obligation_condition context cost.holds_when @@ fun () ->
       match cost.rule with
       | Clause_bound { written; _ } ->
           (match written.bound with
@@ -339,6 +353,7 @@ let check_loop_iterations context loop_at (head : State.frame) (start : loop_sta
   in
   List.iter
     (fun cost ->
+      Conditions.with_obligation_condition context cost.holds_when @@ fun () ->
       let measure_spent (frame : State.frame) =
         Costs.since ~start:(lookup_spent head cost.counter) (lookup_spent frame cost.counter)
       in

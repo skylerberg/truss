@@ -377,43 +377,55 @@ let declare_held_symbol context ty term =
   Facts.declare context (Logic.Function (symbol, [ Facts.declare_sort context ty ], Logic.Int));
   Logic.Apply (symbol, [ term ])
 
-let compute_buffer_elements context (ty : Types.ty) =
+let compute_buffer context (ty : Types.ty) : State.buffer option =
   match ty with
   | Types.Named { path; arguments = [ Types.Type element; Types.Value _ ] }
     when Well_known.find_builtin_type path = Some Array ->
       Option.map
-        (fun model_of -> (element, model_of))
+        (fun model_of -> { State.kind = Array; element; model_of })
         (Models.find_model_function context ty ~model:(Models.make_sequence_type element))
   | Types.Named { path; arguments = [ Types.Type element ] }
     when Well_known.find_builtin_type path = Some Storage ->
-      Some (element, fun term -> Intrinsics.make_buffer_model context Storage element term)
+      Some
+        {
+          kind = Storage;
+          element;
+          model_of = (fun term -> Intrinsics.make_buffer_model context Storage element term);
+        }
   | Types.Named { path; arguments = [ Types.Type element ] }
     when Well_known.find_builtin_type path = Some View ->
-      Some (element, fun term -> Intrinsics.make_buffer_model context View element term)
+      Some
+        {
+          kind = View;
+          element;
+          model_of = (fun term -> Intrinsics.make_buffer_model context View element term);
+        }
   | Types.Named { path; arguments } when Types.find_builtin ty = None -> (
       match Interface.Definition.find_interface context.lookups.interface path with
       | Some (Interface.Environment.Type_interface { shape = Record [ field ]; type_generics; _ })
         -> (
           let substitution = Types.make_substitution type_generics arguments in
           match Types.substitute substitution field.field_type with
-          | Types.Named { path = field_path; arguments = [ Types.Type element ] }
-            when Well_known.find_builtin_type field_path = Some Storage
-                 || Well_known.find_builtin_type field_path = Some View ->
-              Option.map
-                (fun model_of -> (element, model_of))
-                (Models.find_model_function context ty ~model:(Models.make_sequence_type element))
+          | Types.Named { path = field_path; arguments = [ Types.Type element ] } -> (
+              match Well_known.find_builtin_type field_path with
+              | Some ((Storage | View) as kind) ->
+                  Option.map
+                    (fun model_of -> { State.kind; element; model_of })
+                    (Models.find_model_function context ty
+                       ~model:(Models.make_sequence_type element))
+              | _ -> None)
           | _ -> None)
       | _ -> None)
   | _ -> None
 
-let find_buffer_elements (context : State.context) (ty : Types.ty) =
+let find_buffer (context : State.context) (ty : Types.ty) =
   let key = ty in
   match Tables.Type_table.find_opt context.buffers key with
-  | Some elements -> elements
+  | Some buffer -> buffer
   | None ->
-      let elements = compute_buffer_elements context ty in
-      Tables.Type_table.replace context.buffers key elements;
-      elements
+      let buffer = compute_buffer context ty in
+      Tables.Type_table.replace context.buffers key buffer;
+      buffer
 
 let declare_potential_measure context element =
   let symbol = Logic.Symbol.Potential_measure element in
@@ -471,10 +483,13 @@ and holds_potential_type context ~seen (ty : Types.ty) =
   else
     match ty with
     | Parameter _ -> true
-    | Named _ when Option.is_some (find_buffer_elements context ty) -> true
+    | Named _ when find_potential_clause context ty <> None -> true
+    | Named _ when Option.is_some (find_buffer context ty) -> (
+        match find_buffer context ty with
+        | Some { kind = Storage; _ } -> true
+        | Some { element; _ } -> has_potential context ~seen:(ty :: seen) element
+        | None -> false)
     | Types.Named { path; arguments } when Types.find_builtin ty = None -> (
-        find_potential_clause context ty <> None
-        ||
         match Interface.Definition.find_interface context.lookups.interface path with
         | Some (Interface.Environment.Type_interface interface) ->
             let substitution = Types.make_substitution interface.type_generics arguments in
@@ -513,16 +528,16 @@ and compute_potential context (frame : State.frame) ?(seen = []) (ty : Types.ty)
         Logic.(
           Validity.make_validity context frame ~assuming:true ty term ==> less_equal (int 0) held);
       match (find_potential_clause context ty, Facts.find_constructors context ty) with
-      | None, None when Option.is_some (find_buffer_elements context ty) -> (
-          match find_buffer_elements context ty with
-          | Some (element, model_of) ->
+      | None, None when Option.is_some (find_buffer context ty) -> (
+          match find_buffer context ty with
+          | Some { kind; element; model_of } ->
               let sequence = model_of term in
               let slack = Intrinsics.declare_buffer_slack context ty term in
               let length = Models.make_sequence_length context element sequence in
               Facts.add_frame_fact context frame
                 Logic.(less_equal (int 0) slack &&& less_equal slack (multiply (int 2) length));
-              (match ty with
-              | Types.Named { path; _ } when Well_known.find_builtin_type path = Some Storage ->
+              (match (ty, kind) with
+              | Types.Named { path; _ }, _ when Well_known.find_builtin_type path = Some Storage ->
                   let saved =
                     Logic.subtract
                       (Logic.multiply (Logic.int 2) length)
@@ -531,9 +546,7 @@ and compute_potential context (frame : State.frame) ?(seen = []) (ty : Types.ty)
                   Facts.add_frame_fact context frame
                     (Logic.equal slack
                        (Logic.ite (Logic.greater_equal saved (Logic.int 0)) saved (Logic.int 0)))
-              | Types.Named { path; _ }
-                when Well_known.find_builtin_type path = Some View
-                     || Well_known.find_builtin_type path = Some Array ->
+              | _, (View | Array) ->
                   Facts.add_frame_fact context frame (Logic.equal slack (Logic.int 0))
               | _ -> ());
               let elements =
@@ -563,7 +576,7 @@ and compute_potential context (frame : State.frame) ?(seen = []) (ty : Types.ty)
       | _ -> ()
     end;
     match (find_potential_clause context ty, Facts.find_constructors context ty) with
-    | None, Some [ (None, fields) ] when Option.is_none (find_buffer_elements context ty) -> (
+    | None, Some [ (None, fields) ] when Option.is_none (find_buffer context ty) -> (
         try compute_parts_potential context frame ~seen ty term (None, fields)
         with Facts.Unsupported _ -> held)
     | _ -> held
@@ -599,8 +612,8 @@ let compute_elements_potential context (ty : Types.ty) term =
           in
           try choose_by_variant ty term shape sum_fields with Facts.Unsupported _ -> Costs.zero)
       | None -> (
-          match (find_potential_clause context ty, find_buffer_elements context ty) with
-          | None, Some (element, model_of) when has_potential context element ->
+          match (find_potential_clause context ty, find_buffer context ty) with
+          | None, Some { element; model_of; _ } when has_potential context element ->
               sum_element_potentials context element (model_of term)
           | _ -> Costs.zero)
   in
@@ -608,8 +621,8 @@ let compute_elements_potential context (ty : Types.ty) term =
 
 let assume_element_potential_change context frame (sequence : Types.ty) ~before ~after ~replaced
     ~written =
-  match find_buffer_elements context sequence with
-  | Some (element, model_of) -> (
+  match find_buffer context sequence with
+  | Some { element; model_of; _ } -> (
       try
         if has_potential context element then
           let sum term = sum_element_potentials context element (model_of term) in

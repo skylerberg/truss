@@ -27,6 +27,7 @@ val assume : State.context -> State.frame -> Logic.term -> unit
 val add_requires : State.context -> State.frame -> Obligation.message -> Obligation.fix list
 val show_truss_value : State.context -> Logic.term -> string option
 val remove_panic_condition : Types.capability_set -> Types.capability_set
+val find_counter_condition : State.context -> Costs.counter -> Types.condition
 
 val oblige :
   ?cited:Resolve.Names.key * Core.origin ->

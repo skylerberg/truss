@@ -740,6 +740,34 @@ let find_trait_parts (lookups : Lookups.t) trait =
 let list_bound_closure lookups ~self (bound : Types.trait_reference) =
   Properties.list_bound_closure_over ~find_requirements:(find_trait_parts lookups) ~self bound
 
+let list_required_traits lookups trait =
+  match find_trait_parts lookups trait with
+  | Some (_, requires, _) ->
+      List.map (fun (required : Types.trait_reference) -> required.trait) requires
+  | None -> []
+
+let list_requirements_first lookups (requires : Path.t list) =
+  let visited = ref [] in
+  let rec visit trait =
+    if not (List.exists (Path.equal trait) !visited) then begin
+      visited := trait :: !visited;
+      List.concat_map visit (list_required_traits lookups trait) @ [ trait ]
+    end
+    else []
+  in
+  List.concat_map visit requires
+
+let restates_required_method (lookups : Lookups.t) trait name receiver =
+  List.exists
+    (fun required ->
+      List.exists
+        (fun (member : Resolve.Names.key) ->
+          match member.path with
+          | Method { receiver = declared; _ } -> declared = receiver
+          | _ -> false)
+        (lookups.names.list_members required name))
+    (list_requirements_first lookups (list_required_traits lookups trait))
+
 let close_scope lookups (scope : Environment.declared_bounds Environment.scope) :
     Environment.known_bounds Environment.scope =
   {
@@ -825,11 +853,12 @@ let list_bound_methods context (self_type : Types.ty) name =
         (fun methods (member : Resolve.Names.key) ->
           match member.path with
           | Method { receiver; _ }
-            when not
-                   (List.exists
-                      (fun (known : bound_method) ->
-                        Path.equal known.trait.trait trait.trait && known.receiver = receiver)
-                      methods) ->
+            when (not
+                    (List.exists
+                       (fun (known : bound_method) ->
+                         Path.equal known.trait.trait trait.trait && known.receiver = receiver)
+                       methods))
+                 && not (restates_required_method context.lookups trait.trait name receiver) ->
               methods @ [ { self_type; trait = { trait with associated = [] }; name; receiver } ]
           | _ -> methods)
         methods
@@ -1218,23 +1247,6 @@ let list_methods (lookups : Lookups.t) key =
       | _ -> None)
     (lookups.names.list_contained key)
 
-let list_required_traits (lookups : Lookups.t) trait =
-  match Option.bind (lookups.names.find_key trait) lookups.find_header with
-  | Some { container = Trait_parts { requires; _ }; _ } ->
-      List.map (fun (required : Types.trait_reference) -> required.trait) requires
-  | Some { container = Capability_parts | Impl_parts _; _ } | None -> []
-
-let list_requirements_first lookups (requires : Types.trait_reference list) =
-  let visited = ref [] in
-  let rec visit trait =
-    if not (List.exists (Path.equal trait) !visited) then begin
-      visited := trait :: !visited;
-      List.concat_map visit (list_required_traits lookups trait) @ [ trait ]
-    end
-    else []
-  in
-  List.concat_map (fun (required : Types.trait_reference) -> visit required.trait) requires
-
 let split_restated_methods (lookups : Lookups.t) (requires : Types.trait_reference list) members =
   let inherited =
     List.concat_map
@@ -1246,7 +1258,8 @@ let split_restated_methods (lookups : Lookups.t) (requires : Types.trait_referen
                 ((method_.method_name, method_.method_receiver), trait))
               (list_methods lookups key)
         | None -> [])
-      (list_requirements_first lookups requires)
+      (list_requirements_first lookups
+         (List.map (fun (required : Types.trait_reference) -> required.trait) requires))
   in
   List.partition_map
     (fun (method_ : Types.trait_method) ->

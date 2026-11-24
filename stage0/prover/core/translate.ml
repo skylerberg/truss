@@ -52,6 +52,7 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       lending = None;
       callbacks = [];
       counters = [];
+      conditional_counters = [];
       bounded_counters = [];
       recursive_costs_assumed = 0;
       fresh_order = Tables.Symbol_table.create 64;
@@ -356,6 +357,7 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
       parameters
   in
   let start = { start with old_locals = start.locals; old_self = start.self } in
+  let output = Option.map (Facts.substitute_type context start) output in
   let start =
     match signature with
     | Some { output = Lends (_, part); _ } ->
@@ -436,10 +438,9 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
         list_promises context clauses.callee inside.locals clauses.costs ~inherited:true
     | None -> []
   in
-  context.counters <-
-    Contracts.deduplicate_counters
-      (List.map (fun promise -> promise.counter) promised
-      @ Lambdas.list_loop_counters start.locals mir.body);
+  Lambdas.assign_counters context
+    (List.map (fun promise -> (promise.counter, promise.clause.holds_when)) promised
+    @ Lambdas.list_loop_counters context start.locals mir.body);
   let start =
     { start with spent = List.map (fun counter -> (counter, Costs.zero)) context.counters }
   in
@@ -886,8 +887,8 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
             list_promises context clauses.callee (reading entry).locals clauses.costs
               ~inherited:true
           in
-          context.counters <-
-            Contracts.deduplicate_counters (List.map (fun promise -> promise.counter) promised);
+          Lambdas.assign_counters context
+            (List.map (fun promise -> (promise.counter, promise.clause.holds_when)) promised);
           let entry =
             { entry with spent = List.map (fun counter -> (counter, Costs.zero)) context.counters }
           in
