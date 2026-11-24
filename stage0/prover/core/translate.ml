@@ -58,6 +58,7 @@ let make_context ?node ?(condition = []) ?(keeps_termination = true) ?(keeps_fai
       powers = [];
       lambda_costs = [];
       lambda_captures = [];
+      call_amounts = [];
       lambda_definitions = Tables.Symbol_table.create 8;
       potentials = [];
       models = Tables.Model_table.create 16;

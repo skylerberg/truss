@@ -1,0 +1,14 @@
+fn is_even(value: Int64) -> Bool {
+  value % 2 == 0
+}
+
+fn has_even(values: Slice[Int64]) -> Bool
+  cost time O(values.length())
+{
+  for value in values {
+    if is_even(value) {
+      return true
+    }
+  }
+  false
+}
