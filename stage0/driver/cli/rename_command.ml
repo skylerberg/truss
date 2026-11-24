@@ -42,7 +42,7 @@ let find_renamed (names : Resolve.Names.lookups) packages : Path_argument.target
         when is_declared_here ->
           Some (Definition { path; module_; owner = Some name })
       | _ -> None)
-  | Package _ | Module _ -> None
+  | Package _ | Module _ | Trait_member _ -> None
 
 let show_target = function
   | Definition { path; _ } -> Path.show path
