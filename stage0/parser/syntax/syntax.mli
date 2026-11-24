@@ -63,6 +63,7 @@ and clause_kind =
   | Requires of expression
   | Ensures of expression
   | Decreases of expression list
+  | Modifies of expression list
   | Cost of cost
   | Clause_error
 

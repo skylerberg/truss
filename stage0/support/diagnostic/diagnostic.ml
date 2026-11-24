@@ -196,10 +196,14 @@ module Code = struct
     | Missing_required_impl
     | Implements_built_in_capability
     | Impl_uses
+    | Impl_modifies
     | Mut_self_for_slice
     | Read_only_owning_parameter
     | Unknown_associated_type
     | Unknown_associated_capability
+    | Not_a_field_path
+    | Read_only_part
+    | Repeated_part
 
   type patterns = Not_covered | Unreachable_arm | Unreachable_alternative | Refutable
 
@@ -228,6 +232,7 @@ module Code = struct
     | Lent_mut_in_variant
     | Needs_lent_mut
     | Task_outlives_view
+    | Undeclared_change
 
   type capabilities =
     | Not_available
@@ -483,10 +488,14 @@ module Code = struct
     | Missing_required_impl -> "missing_required_impl"
     | Implements_built_in_capability -> "implements_built_in_capability"
     | Impl_uses -> "impl_uses"
+    | Impl_modifies -> "impl_modifies"
     | Mut_self_for_slice -> "mut_self_for_slice"
     | Read_only_owning_parameter -> "read_only_owning_parameter"
     | Unknown_associated_type -> "unknown_associated_type"
     | Unknown_associated_capability -> "unknown_associated_capability"
+    | Not_a_field_path -> "not_a_field_path"
+    | Read_only_part -> "read_only_part"
+    | Repeated_part -> "repeated_part"
 
   let name_patterns_code code =
     match code with
@@ -522,6 +531,7 @@ module Code = struct
     | Lent_mut_in_variant -> "lent_mut_in_variant"
     | Needs_lent_mut -> "needs_lent_mut"
     | Task_outlives_view -> "task_outlives_view"
+    | Undeclared_change -> "undeclared_change"
 
   let name_capabilities_code code =
     match code with

@@ -179,7 +179,7 @@ let check_parsers_agree text =
         else
           match token.kind with
           | Keyword Cost -> true
-          | Keyword (Uses | Requires | Ensures | Decreases | Invariant | Derives)
+          | Keyword (Uses | Requires | Ensures | Decreases | Modifies | Invariant | Derives)
           | Punctuation (Open Curly)
           | Newline ->
               false

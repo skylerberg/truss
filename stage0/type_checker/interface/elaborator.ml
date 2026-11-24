@@ -878,6 +878,114 @@ let report_time_of_parameters_that_run_forever context ~(parameters : Types.para
       | _ -> ())
     clauses
 
+let rec split_field_path (value : Syntax.expression) =
+  match value.kind with
+  | Name name -> Some (name.text, [])
+  | Self_value -> Some ("self", [])
+  | Member (base, field) ->
+      Option.map (fun (root, fields) -> (root, fields @ [ field ])) (split_field_path base)
+  | _ -> None
+
+let show_field_path root fields = String.concat "." (root :: fields)
+
+let elaborate_modifies context (signature : Types.signature) (clauses : Syntax.clause list) =
+  let report ?fixes code (value : Syntax.expression) message =
+    ignore (record_diagnostic context.diagnostics ?fixes code context.spans.(value.id) message)
+  in
+  let rec has_index (value : Syntax.expression) =
+    match value.kind with
+    | Bracket _ -> true
+    | Member (base, _) | Call (base, _) | Parenthesized base -> has_index base
+    | _ -> false
+  in
+  let rec is_resolved (value : Syntax.expression) =
+    match value.kind with
+    | Name name -> Option.is_some (find_target context name)
+    | Member (base, _) -> is_resolved base
+    | _ -> true
+  in
+  let elaborate_entry (value : Syntax.expression) =
+    match split_field_path value with
+    | None ->
+        report Not_a_field_path value
+          (if has_index value then
+             "An element of a collection is not a fixed part, so a `modifies` clause names the \
+              field that holds the collection."
+           else "A `modifies` clause names fields of `mut` parameters, such as `scanner.position`.");
+        None
+    | Some (root, names) -> (
+        let fields = List.map (fun (name : Syntax.name) -> name.text) names in
+        match Types.find_parameter_position signature root with
+        | None ->
+            if is_resolved value then
+              report Not_a_field_path value
+                (Printf.sprintf
+                   "`%s` is not a parameter, and a `modifies` clause names fields of `mut` \
+                    parameters."
+                   root);
+            None
+        | Some position when (Types.read_parameter_at signature position).mode <> Mut ->
+            report Read_only_part value
+              (Printf.sprintf
+                 "`%s` is not `mut`, so the function changes no part of it. Remove `%s` from the \
+                  clause, or take `%s` as `mut`."
+                 root (show_field_path root fields) root);
+            None
+        | Some _ when fields = [] ->
+            report Not_a_field_path value
+              (Printf.sprintf
+                 "`%s` is a whole parameter. A `mut` parameter that the clause does not name may \
+                  change in every part already, so name the fields of `%s` that change, or remove \
+                  `%s`."
+                 root root root);
+            None
+        | Some position -> Some (value, root, { Types.position; field_path = fields }))
+  in
+  let remove_entry (entries : Syntax.expression list) index =
+    let locate position = context.spans.((List.nth entries position).id) in
+    if index = 0 then
+      Diagnostic.delete (Source.Definition_span.make (locate 0).start (locate 1).start)
+    else
+      Diagnostic.delete (Source.Definition_span.make (locate (index - 1)).stop (locate index).stop)
+  in
+  let is_contained ~index (part : Types.modified) ~other_index (other : Types.modified) =
+    other_index <> index && other.position = part.position
+    && Types.is_field_path_prefix other.field_path part.field_path
+    && (other.field_path <> part.field_path || other_index < index)
+  in
+  List.concat_map
+    (fun (clause : Syntax.clause) ->
+      match clause.kind with
+      | Modifies entries -> (
+          let entry_parts = List.map elaborate_entry entries in
+          match List.filter_map Fun.id entry_parts with
+          | parts when List.length parts < List.length entry_parts -> []
+          | parts ->
+              let numbered_parts = List.mapi (fun index part -> (index, part)) parts in
+              List.filter_map
+                (fun (index, ((value : Syntax.expression), root, (part : Types.modified))) ->
+                  match
+                    List.find_map
+                      (fun (other_index, (_, _, other)) ->
+                        if is_contained ~index part ~other_index other then Some other else None)
+                      numbered_parts
+                  with
+                  | Some container ->
+                      report Repeated_part value
+                        ~fixes:[ Diagnostic.fix "Remove it." [ remove_entry entries index ] ]
+                        (if container.field_path = part.field_path then
+                           Printf.sprintf "The clause names `%s` twice."
+                             (show_field_path root part.field_path)
+                         else
+                           Printf.sprintf "`%s` is a part of `%s`, which the clause names already."
+                             (show_field_path root part.field_path)
+                             (show_field_path root container.field_path));
+                      None
+                  | None -> Some part)
+                numbered_parts)
+      | Uses _ | Requires _ | Ensures _ | Decreases _ | Cost _ | Clause_error -> [])
+    clauses
+
 let elaborate_signature context ~owner ~head ~self_type (written : Syntax.signature) :
     Types.signature =
   let own = elaborate_generics context owner written.generics in
@@ -913,29 +1021,33 @@ let elaborate_signature context ~owner ~head ~self_type (written : Syntax.signat
   let uses = elaborate_uses context written.clauses in
   report_time_of_run_forever context ~uses written.clauses;
   report_time_of_parameters_that_run_forever context ~parameters written.clauses;
-  {
-    generics = generics_;
-    capability_parameters =
-      Array.fold_left
-        (fun listed -> function
-          | Some (Resolve.Capability_parameter (parameter : Types.parameter))
-            when Path.equal parameter.owner owner && not (List.mem parameter listed) ->
-              listed @ [ parameter ]
-          | _ -> listed)
-        [] context.resolved.names;
-    receiver;
-    parameters;
-    output;
-    uses;
-    costs = list_constant_costs written.clauses;
-    specification_only =
-      Well_known.is Model owner
-      || Types.mentions_specification_only_type parameters output
-      || Option.is_some
-           (Option.bind receiver (fun (_, self) -> Types.find_specification_only_type self));
-    is_update_step = false;
-    capture_free_parameters = Types.list_capture_free_parameters parameters;
-  }
+  let signature : Types.signature =
+    {
+      generics = generics_;
+      capability_parameters =
+        Array.fold_left
+          (fun listed -> function
+            | Some (Resolve.Capability_parameter (parameter : Types.parameter))
+              when Path.equal parameter.owner owner && not (List.mem parameter listed) ->
+                listed @ [ parameter ]
+            | _ -> listed)
+          [] context.resolved.names;
+      receiver;
+      parameters;
+      output;
+      uses;
+      costs = list_constant_costs written.clauses;
+      modifies = [];
+      specification_only =
+        Well_known.is Model owner
+        || Types.mentions_specification_only_type parameters output
+        || Option.is_some
+             (Option.bind receiver (fun (_, self) -> Types.find_specification_only_type self));
+      is_update_step = false;
+      capture_free_parameters = Types.list_capture_free_parameters parameters;
+    }
+  in
+  { signature with modifies = elaborate_modifies context signature written.clauses }
 
 let elaborate_type_head context owner (head : Syntax.type_head) =
   let generics = elaborate_generics context owner head.generics in
@@ -1453,6 +1565,7 @@ let elaborate_definition (lookups : Lookups.t) (key : Resolve.Names.key) =
                      output = Returns Types.unit;
                      uses = elaborate_capabilities context uses;
                      costs = [];
+                     modifies = [];
                      specification_only = false;
                      is_update_step = false;
                      capture_free_parameters = [];

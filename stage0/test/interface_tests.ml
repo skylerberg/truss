@@ -251,6 +251,62 @@ let () =
             \  todo\n\
              }\n" );
         ]);
+  Harness.test "a modifies clause names fields of records in mut parameters" (fun () ->
+      let scanner =
+        "let limit: UInt64 = 4\n\
+         type Region(stop: UInt64)\n\
+         type Scanner(position: UInt64, region: Region, last: Option[UInt64])\n"
+      in
+      expect_no_diagnostics
+        [
+          ( "app.main",
+            scanner
+            ^ "fn f(scanner: mut Scanner)\n\
+              \  modifies scanner.position, scanner.region.stop\n\
+               { todo }\n" );
+        ];
+      List.iter
+        (fun (parts, code, says) ->
+          expect_one_diagnostic
+            (scanner ^ "fn f(scanner: mut Scanner, count: UInt64)\n  modifies " ^ parts
+           ^ "\n{ todo }\n")
+            code ~says)
+        [
+          ("scanner.region[0]", "types.not_a_field_path", "An element of a collection");
+          ("limit.bits", "types.not_a_field_path", "`limit` is not a parameter");
+          ("count.bits", "types.read_only_part", "`count` is not `mut`");
+          ("scanner", "types.not_a_field_path", "`scanner` is a whole parameter");
+          ("scanner.position, scanner.position", "types.repeated_part", "`scanner.position` twice");
+          ( "scanner.region.stop, scanner.region",
+            "types.repeated_part",
+            "`scanner.region.stop` is a part of `scanner.region`" );
+          ("scanner.postion", "types.unknown_member", "`Scanner` has no field `postion`.");
+          ("scanner.position.bits", "types.not_a_field_path", "which has no fields to name");
+          ("scanner.last.value", "types.not_a_field_path", "belong to its variants");
+        ]);
+  Harness.test "an impl's method changes only the parts that its trait's method names" (fun () ->
+      let recorder =
+        "type Journal(entries: List[UInt64], total: UInt64)\n\
+         type Quiet()\n\
+         trait Recorder {\n\
+        \  fn record(self, log: mut Journal)\n\
+        \    modifies log.entries\n\
+         }\n"
+      in
+      expect_no_diagnostics
+        [
+          ( "app.main",
+            recorder
+            ^ "impl Recorder for Quiet {\n  fn record(self, log: mut Journal) { todo }\n}\n" );
+        ];
+      expect_one_diagnostic
+        (recorder
+       ^ "impl Recorder for Quiet {\n\
+         \  fn record(self, log: mut Journal)\n\
+         \    modifies log.total\n\
+         \  { todo }\n\
+          }\n")
+        "types.impl_modifies" ~says:"names `log.total` in `modifies`");
   Harness.test "a trait's impl cannot have uses" (fun () ->
       expect_one_diagnostic Fixtures.Interface.equal_impl_with_uses "types.impl_uses");
   Harness.test "a capability's impl takes a receiver and may have uses" (fun () ->

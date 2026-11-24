@@ -4022,6 +4022,36 @@ test "old values" {
 }
 ```
 
+A call with a `mut` argument may change every part of it, so after the call
+a proof knows of the argument only what the contract states. `modifies`
+names the parts that a function changes, and every other part keeps its
+value:
+
+```truss
+type Tally(count: UInt64, limit: UInt64)
+
+fn Tally.increment(mut self)
+  modifies self.count
+  requires self.count < self.limit
+  ensures self.count == old(self.count) + 1
+{
+  self.count += 1
+}
+
+fn add_two_to(tally: mut Tally)
+  requires tally.count + 2 <= tally.limit
+  ensures tally.count == old(tally.count) + 2
+{
+  mut tally.increment()
+  mut tally.increment()
+}
+```
+
+The second call's `requires` holds because the first call keeps `limit`.
+Without `modifies`, nothing would say so. A body that changes a part the
+clause does not name is an error, and `truss check --fix` adds the part to
+the clause.
+
 ### Invariants
 
 An `invariant` on a type is a fact about every value of the type:
@@ -5050,10 +5080,11 @@ copied.
 These words are reserved everywhere and cannot be names:
 
 ```text
-any assert break capability concurrent continue cost decreases derives echo else
+assert break capability concurrent continue cost decreases derives echo else
 ensures exists false fn for forall if impl in indirect internal invariant is law
-lends let match mut opaque own parallel proof provide public requires return self
-Self test theorem todo trait true type unreachable use uses var while with
+lends let match modifies mut opaque own parallel proof provide public requires
+return self Self test theorem todo trait true type unless unreachable use uses
+var when while with
 ```
 
 These are reserved for later use, and are an error if written:

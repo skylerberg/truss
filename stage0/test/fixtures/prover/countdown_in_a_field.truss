@@ -21,7 +21,6 @@ fn f(timer: mut Timer) -> UInt8
 {
   var last: UInt8 = 0
   for value in timer.countdown
-    invariant timer.ticks == old(timer.ticks)
     decreases timer.countdown.left
   {
     last = value

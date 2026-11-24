@@ -134,6 +134,10 @@ let find_callee (context : State.context) path : State.known_callee =
 
 let read_signature context path = Lazy.force (find_callee context path).known_signature
 
+let list_modified_fields context path position =
+  Option.bind (read_signature context path) (fun signature ->
+      Types.list_modified_fields signature position)
+
 let find_callee_clauses context path =
   Option.bind (Lazy.force (find_callee context path).known_clauses) snd
 

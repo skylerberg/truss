@@ -196,10 +196,14 @@ module Code : sig
     | Missing_required_impl
     | Implements_built_in_capability
     | Impl_uses
+    | Impl_modifies
     | Mut_self_for_slice
     | Read_only_owning_parameter
     | Unknown_associated_type
     | Unknown_associated_capability
+    | Not_a_field_path
+    | Read_only_part
+    | Repeated_part
 
   type patterns = Not_covered | Unreachable_arm | Unreachable_alternative | Refutable
 
@@ -228,6 +232,7 @@ module Code : sig
     | Lent_mut_in_variant
     | Needs_lent_mut
     | Task_outlives_view
+    | Undeclared_change
 
   type capabilities =
     | Not_available

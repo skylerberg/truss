@@ -30,13 +30,13 @@ type loop_start = {
   preserved :
     (Obligation.message * Types.ty * Logic.term * (State.frame -> Logic.term option)) list;
   havocked : State.frame;
-  changed : State.changed;
+  changed : State.changed_part list;
 }
 
 type while_loop = {
   while_at : Core.origin;
   while_clauses : Mir.loop_clause list;
-  changed : State.changed;
+  changed : State.changed_part list;
   bind_parts : State.frame -> State.frame;
   test : State.frame -> (State.frame * Logic.term) option;
   run_body : State.frame -> State.frame list * State.frame list;
@@ -63,8 +63,8 @@ type for_loop = {
   collection : (State.frame -> Types.ty * Logic.term) option;
   element_call : (State.frame -> Logic.term) option;
   bind_element : State.frame -> Logic.term -> State.frame;
-  compute_changed_in : State.frame -> State.changed;
-  compute_changed_by_body : State.frame -> State.changed;
+  compute_changed_in : State.frame -> State.changed_part list;
+  compute_changed_by_body : State.frame -> State.changed_part list;
   run_body : State.frame -> Logic.term -> State.frame list * State.frame list;
   bind_parts : State.frame -> State.frame;
 }
@@ -198,14 +198,32 @@ let find_constant_count bounds =
       | _ -> None)
     bounds
 
-let describe_local (context : State.context) (frame : State.frame) local : Obligation.message =
-  match
-    ( Tables.Local_table.find_opt context.local_names local,
-      Tables.Local_table.find_opt context.local_origins local )
-  with
-  | Some name, _ -> [ Text (Printf.sprintf "`%s`" name) ]
-  | None, Some origin -> [ Text "`"; Facts.quote frame.source origin; Text "`" ]
-  | None, None -> [ Text "a temporary" ]
+let describe_part (context : State.context) (frame : State.frame) (part : State.changed_part) :
+    Obligation.message =
+  let suffix = String.concat "" (List.map (fun field -> "." ^ field) part.fields) in
+  match part.root with
+  | Core_local Self -> [ Text (Printf.sprintf "`self%s`" suffix) ]
+  | root -> (
+      match
+        ( Tables.Local_table.find_opt context.local_names root,
+          Tables.Local_table.find_opt context.local_origins root )
+      with
+      | Some name, _ -> [ Text (Printf.sprintf "`%s%s`" name suffix) ]
+      | None, Some origin -> [ Text "`"; Facts.quote frame.source origin; Text (suffix ^ "`") ]
+      | None, None -> [ Text "a temporary" ])
+
+let find_root context (frame : State.frame) : Locals.local -> (Types.ty * Logic.term) option =
+  function
+  | Core_local Self -> (
+      match (frame.self_type, frame.self) with Some ty, Some term -> Some (ty, term) | _ -> None)
+  | root -> (
+      match (Facts.find_local_type context frame root, Locals.find_opt root frame.locals) with
+      | Some ty, Some term -> Some (ty, term)
+      | _ -> None)
+
+let find_changed_part context frame (part : State.changed_part) =
+  Option.bind (find_root context frame part.root) (fun (ty, term) ->
+      Validity.find_part context ty term part.fields)
 
 let join_with_and (items : Obligation.message list) : Obligation.message =
   let last = List.length items - 1 in
@@ -259,20 +277,18 @@ let explain_unstated_costs context (counter : Costs.counter) metric callees : Ob
     :: advice
 
 let explain_changing_cost context (head : State.frame) (call : State.call_amount)
-    ~(changed : State.changed) ~parts : Obligation.message =
+    ~(changed : State.changed_part list) ~parts : Obligation.message =
   let is_mentioned = function
-    | Some term -> List.exists (fun part -> Costs.mentions_part ~part:term part) parts
+    | Some (_, term) -> List.exists (fun part -> Costs.mentions_part ~part:term part) parts
     | None -> false
   in
   let values =
     List.filter_map
-      (fun local ->
-        if is_mentioned (Locals.find_opt local head.locals) then
-          Some (describe_local context head local)
+      (fun part ->
+        if is_mentioned (find_changed_part context head part) then
+          Some (describe_part context head part)
         else None)
-      changed.changed_locals
-    @
-    if changed.changes_self && is_mentioned head.self then [ [ Obligation.Text "`self`" ] ] else []
+      changed
   in
   let cost, dependency =
     if List.exists Facts.mentions_potential parts then ("amortized cost", "the potential of ")
@@ -502,18 +518,15 @@ let exit_loop context ~(clause_at : State.frame) (exit_ : State.frame) costs ~it
   in
   { exit_ with spent }
 
-let measure_held_gains context (entry : State.frame) (changed : State.changed) =
+let measure_held_gains context (entry : State.frame) (changed : State.changed_part list) =
   let held =
     List.filter_map
-      (fun id ->
+      (fun part ->
         Option.map
-          (fun ty -> (ty, fun (at : State.frame) -> Locals.find_opt id at.locals))
-          (Facts.find_local_type context entry id))
-      changed.changed_locals
-    @
-    match (changed.changes_self, entry.self_type) with
-    | true, Some ty -> [ (ty, fun (at : State.frame) -> at.self) ]
-    | _ -> []
+          (fun (ty, _) ->
+            (ty, fun (at : State.frame) -> Option.map snd (find_changed_part context at part)))
+          (find_changed_part context entry part))
+      changed
   in
   let sum_held measure (at : State.frame) =
     List.fold_left
@@ -541,42 +554,49 @@ let measure_held_gains context (entry : State.frame) (changed : State.changed) =
        @ (No_gain :: (if elements_on_entry = Costs.zero then [] else [ Potential_without_elements ])),
        measure_gained ))
 
-let havoc context frame (changed : State.changed) =
-  let frame =
-    List.fold_left
-      (fun frame local ->
-        let ty =
-          match Facts.find_local_type context frame local with
-          | Some ty -> ty
-          | None -> Types.Integer
-        in
-        { frame with locals = Locals.add local (Facts.arrive context frame "loop" ty) frame.locals })
-      frame changed.changed_locals
-  in
-  match (changed.changes_self, frame.self_type) with
-  | true, Some ty -> { frame with self = Some (Facts.arrive context frame "loop" ty) }
-  | _ -> frame
+let havoc context frame (changed : State.changed_part list) =
+  List.fold_left
+    (fun (frame : State.frame) (part : State.changed_part) ->
+      let held =
+        match part.root with
+        | Core_local Self -> Option.map (fun whole -> (frame.self_type, whole)) frame.self
+        | root ->
+            Option.map
+              (fun whole -> (Facts.find_local_type context frame root, whole))
+              (Locals.find_opt root frame.locals)
+      in
+      match held with
+      | None -> frame
+      | Some (None, _) -> Facts.raise_bug "a loop changes a local that has a value and no type"
+      | Some (Some ty, whole) -> (
+          match
+            Validity.replace_part context ty whole part.fields (fun part_type ->
+                Facts.arrive context frame "loop" part_type)
+          with
+          | None ->
+              Facts.raise_bug "a loop changes a field of `%s`, whose fields the prover cannot see"
+                (Types.show ty)
+          | Some term -> (
+              match part.root with
+              | Core_local Self -> { frame with self = Some term }
+              | root -> { frame with locals = Locals.add root term frame.locals })))
+    frame changed
 
-let list_validity_obligations context (entry : State.frame) (changed : State.changed) =
-  let find_obligation described ty before read =
-    match Validity.make_validity context entry ~assuming:false ~deep:true ty before with
-    | Logic.Boolean true -> None
-    | valid -> Some (described, ty, valid, read)
-  in
+let list_validity_obligations context (entry : State.frame) (changed : State.changed_part list) =
   List.filter_map
-    (fun local ->
-      match (Facts.find_local_type context entry local, Locals.find_opt local entry.locals) with
-      | Some ty, Some before ->
-          find_obligation (describe_local context entry local) ty before (fun (at : State.frame) ->
-              Locals.find_opt local at.locals)
-      | _ -> None)
-    changed.changed_locals
-  @
-  match (changed.changes_self, entry.self, entry.self_type) with
-  | true, Some before, Some ty ->
-      Option.to_list
-        (find_obligation [ Obligation.Text "`self`" ] ty before (fun (at : State.frame) -> at.self))
-  | _ -> []
+    (fun root ->
+      match find_root context entry root with
+      | Some (ty, before) -> (
+          match Validity.make_validity context entry ~assuming:false ~deep:true ty before with
+          | Logic.Boolean true -> None
+          | valid ->
+              Some
+                ( describe_part context entry { root; fields = [] },
+                  ty,
+                  valid,
+                  fun (at : State.frame) -> Option.map snd (find_root context at root) ))
+      | None -> None)
+    (List.sort_uniq compare (List.map (fun (part : State.changed_part) -> part.root) changed))
 
 let assume_preserved_validity context head preserved =
   List.iter
@@ -953,9 +973,6 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
       before)
     ~receive:(fun head before ->
       let cursor = cursor_access.read head in
-      let havoc_mut (frame : State.frame) =
-        cursor_access.write frame (Facts.arrive context frame "changed" cursor_type)
-      in
       let recursive_callee = Facts.find_recursive_callee context head location next.callee in
       let after, pulled =
         Calls.call_contract ~recursive_callee ~lent_final:None context head pulling next path
@@ -971,7 +988,6 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
               term = cursor;
             };
           ]
-          ~havoc_mut
           ~substitution_of:(fun _ -> callee_substitution)
           ~type_arguments:[ Types.Type cursor_type ]
       in

@@ -59,12 +59,14 @@ let check_definition (lookups : Lookups.t) (key : Resolve.Names.key) : result =
       List.iter
         (fun (origin, needs) -> Hashtbl.replace context.places_without_keyword origin needs)
         (lookups.list_places_without_keyword key);
-      if not (Interface.Definition.is_specification elaborated.interface) then
+      if not (Interface.Definition.is_specification elaborated.interface) then begin
         check_graph code.graph
           ~returns_to_caller:
             (match elaborated.interface with
             | Function_interface _ | Constant_interface _ -> true
             | _ -> false);
+        Modified_parts.check context key code.tree
+      end;
       List.iter
         (fun (_, asserted) -> check_graph (Mir.expand asserted) ~returns_to_caller:false)
         (Mir.list_evaluated_asserts code.tree))

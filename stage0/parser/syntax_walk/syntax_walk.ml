@@ -39,6 +39,7 @@ and visit_clause on_expression (clause : Syntax.clause) =
   | Uses uses -> List.iter (visit_capability_use on_expression) uses
   | Requires value | Ensures value -> on_expression value
   | Decreases measures -> List.iter on_expression measures
+  | Modifies parts -> List.iter on_expression parts
   | Cost cost -> (
       match cost.bound with Big_o value | At_most value | Exactly value -> on_expression value)
   | Clause_error -> ()
@@ -344,6 +345,7 @@ let walk_names ~on_name (definition : Syntax.definition) =
     | Uses uses -> List.iter walk_capability_use uses
     | Requires value | Ensures value -> walk_expression value
     | Decreases measures -> List.iter walk_expression measures
+    | Modifies parts -> List.iter walk_expression parts
     | Cost cost -> (
         (match cost.resource with
         | Calls (Call_parameter name) -> on_name name

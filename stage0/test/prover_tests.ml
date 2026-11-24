@@ -937,8 +937,53 @@ let () =
       expect_proven Fixtures.Prover.range_loop_with_an_index_cost_clause);
   Harness.test "a loop over a type's own cursor calls its next" (fun () ->
       expect_proven Fixtures.Prover.countdown_loop);
-  Harness.test "a loop over a cursor in a field calls its next" (fun () ->
-      expect_proven Fixtures.Prover.countdown_in_a_field);
+  Harness.test "a loop over a cursor in a field calls its next and keeps the other fields"
+    (fun () -> expect_proven Fixtures.Prover.countdown_in_a_field);
+  (let scanner =
+     "type Scanner(length: UInt64, position: UInt64, count: UInt64)\n\
+      fn advance(scanner: mut Scanner)\n\
+     \  modifies scanner.position\n\
+     \  requires scanner.position < 1000\n\
+     \  ensures scanner.position == old(scanner.position) + 1\n\
+      {\n\
+     \  scanner.position += 1\n\
+      }\n"
+   in
+   Harness.test "a call keeps the parts that its callee's modifies clause does not name" (fun () ->
+       expect_proven
+         (scanner
+        ^ "fn step(scanner: mut Scanner)\n\
+          \  requires scanner.position < 1000\n\
+          \  ensures scanner.length == old(scanner.length) && scanner.count == old(scanner.count)\n\
+           {\n\
+          \  advance(mut scanner)\n\
+           }\n");
+       expect_not_proven
+         (scanner
+        ^ "fn step(scanner: mut Scanner)\n\
+          \  requires scanner.position < 1000\n\
+          \  ensures scanner.position == old(scanner.position)\n\
+           {\n\
+          \  advance(mut scanner)\n\
+           }\n")
+         "prover.ensures");
+   Harness.test "a loop keeps the parts that its body and its callees do not change" (fun () ->
+       let loop ~body =
+         scanner
+         ^ "fn walk(scanner: mut Scanner)\n\
+           \  requires scanner.position <= scanner.length && scanner.length < 1000\n\
+           \  ensures scanner.length == old(scanner.length) && scanner.count == old(scanner.count)\n\
+            {\n\
+           \  while scanner.position < scanner.length\n\
+           \    invariant scanner.position <= scanner.length\n\
+           \    decreases scanner.length - scanner.position\n\
+           \  {\n" ^ body ^ "\n  }\n}\n"
+       in
+       expect_proven (loop ~body:"    scanner.position += 1");
+       expect_proven (loop ~body:"    advance(mut scanner)");
+       expect_not_proven
+         (loop ~body:"    scanner.position += 1\n    scanner.count += 0")
+         "prover.ensures"));
   Harness.test "a loop over a cursor counts a body that calls an amortized callee" (fun () ->
       expect_proven Fixtures.Prover.spaced_characters);
   (let samples = Fixtures.Prover.samples in

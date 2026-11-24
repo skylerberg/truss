@@ -689,6 +689,8 @@ let mentions_specification_only_type parameters output =
     (fun type_ -> Option.is_some (find_specification_only_type type_))
     (extract_result_type output :: List.map (fun parameter -> parameter.type_) parameters)
 
+type modified = { position : int; field_path : string list }
+
 type signature = {
   generics : generic list;
   capability_parameters : parameter list;
@@ -697,10 +699,45 @@ type signature = {
   output : result;
   uses : capability_set;
   costs : cost list;
+  modifies : modified list;
   specification_only : bool;
   is_update_step : bool;
   capture_free_parameters : string list;
 }
+
+let rec is_field_path_prefix prefix fields =
+  match (prefix, fields) with
+  | [], _ -> true
+  | field :: prefix, other :: fields -> field = other && is_field_path_prefix prefix fields
+  | _ :: _, [] -> false
+
+let find_parameter_position (signature : signature) name =
+  match signature.receiver with
+  | Some _ when name = "self" -> Some 0
+  | _ ->
+      let offset = match signature.receiver with Some _ -> 1 | None -> 0 in
+      Option.map
+        (fun index -> index + offset)
+        (List.find_index
+           (fun (parameter : parameter_info) -> parameter.name = name)
+           signature.parameters)
+
+let read_parameter_at (signature : signature) position =
+  match signature.receiver with
+  | Some (mode, type_) when position = 0 -> { name = "self"; mode; type_; has_default = false }
+  | _ -> (
+      let offset = match signature.receiver with Some _ -> 1 | None -> 0 in
+      match List.nth_opt signature.parameters (position - offset) with
+      | Some parameter -> parameter
+      | None ->
+          Compiler_bug.raise_bug ~stage:"Types" "a parameter at position %d of a signature of %d"
+            position
+            (List.length signature.parameters))
+
+let list_modified_fields (signature : signature) position =
+  match List.filter (fun modified -> modified.position = position) signature.modifies with
+  | [] -> None
+  | entries -> Some (List.map (fun modified -> modified.field_path) entries)
 
 type instantiation = {
   type_arguments : argument list;

@@ -113,6 +113,9 @@ fn walk_clause(cursor: mut TokenCursor, visitor: Visitor, clause: syntax.Clause)
     Decreases(measures) => for measure in measures {
       on_expression(mut cursor, visitor, value: measure)
     }
+    Modifies(parts) => for part in parts {
+      on_expression(mut cursor, visitor, value: part)
+    }
     Cost(clause: cost_clause) => walk_bound(mut cursor, visitor, bound: cost_clause.bound)
     ClauseError => {}
   }

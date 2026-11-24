@@ -89,6 +89,39 @@ let select_field context ty variant field term =
       | _ -> Logic.Apply (Facts.make_selector_symbol ty variant field, [ term ]))
   | _ -> Logic.Apply (Facts.make_selector_symbol ty variant field, [ term ])
 
+let replace_field context ty variant field whole new_value =
+  match Option.bind (Facts.find_constructors context ty) (List.assoc_opt variant) with
+  | Some fields ->
+      Logic.Apply
+        ( Facts.make_constructor_symbol ty variant,
+          List.map
+            (fun (name, _) ->
+              if name = field then new_value else select_field context ty variant name whole)
+            fields )
+  | None -> Facts.raise_unsupported Whole_definition "the fields of `%s`" (Types.show ty)
+
+let find_record_field_type context ty field =
+  match Facts.find_constructors context ty with
+  | Some [ (None, fields) ] -> List.assoc_opt field fields
+  | Some _ | None -> None
+
+let rec find_part context ty term = function
+  | [] -> Some (ty, term)
+  | field :: fields ->
+      Option.bind (find_record_field_type context ty field) (fun field_type ->
+          find_part context field_type (select_field context ty None field term) fields)
+
+let rec replace_part context ty whole fields make_part =
+  match fields with
+  | [] -> Some (make_part ty)
+  | field :: fields ->
+      Option.bind (find_record_field_type context ty field) (fun field_type ->
+          Option.map
+            (replace_field context ty None field whole)
+            (replace_part context field_type
+               (select_field context ty None field whole)
+               fields make_part))
+
 let make_type_frame context frame source (ty : Types.ty) ~self =
   let substitution =
     match Facts.find_visible_type context ty with

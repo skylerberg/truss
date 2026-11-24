@@ -44,7 +44,7 @@ fn finish(builder: own Builder, stop: UInt64) -> Finished
 }
 
 fn store_literal(scanner: mut Scanner, literal: own token.StringLiteral) -> token.Kind
-  ensures scanner.continues(old(scanner))
+  modifies scanner.tables
 {
   let index = scanner.tables.literals.length()
   mut scanner.tables.literals.push(own literal)
@@ -53,7 +53,7 @@ fn store_literal(scanner: mut Scanner, literal: own token.StringLiteral) -> toke
 
 fn make_literal(scanner: mut Scanner, tag: own Option[token.Tag], form: token.Form, builder: own Builder, stop: UInt64) -> token.Kind
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.tables
 {
   let finished = finish(own builder, stop)
   store_literal(mut scanner, literal: token.StringLiteral(own tag, form, first: own finished.first, rest: own finished.rest))
@@ -99,7 +99,7 @@ fn finish_input(position: UInt64, ending: Ending) -> LayoutInput
 
 fn read_interpolation_item(scanner: mut Scanner, state: mut InterpolationState, item: Item) -> LayoutInput
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics
   ensures !(item is Lexed(_)) ==> result is Finish(..)
 {
   match item {
@@ -148,7 +148,7 @@ type InterpolationRequest(nesting: UInt64, delimiter_length: UInt64)
 
 fn begin_interpolation(scanner: mut Scanner, request: InterpolationRequest) -> CodeFrame
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics, scanner.position, scanner.previous
   ensures old(scanner.position) < scanner.position
 {
   let start = scanner.position
@@ -181,7 +181,7 @@ fn begin_interpolation(scanner: mut Scanner, request: InterpolationRequest) -> C
 
 fn finish_interpolation(scanner: mut Scanner, state: InterpolationState, range: TokenRange) -> InterpolationResult
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics
 {
   let interpolation_span = source.make_span(state.start, stop: scanner.position)
   if state.is_closed && state.count == 0 {
@@ -249,8 +249,9 @@ type StringProgress = Interpolates(request: InterpolationRequest) | Ended(ending
 
 fn open_string(scanner: mut Scanner, tag: own Option[token.Tag], nesting: UInt64, inline: Bool, origin: StringOrigin) -> ItemScan
   uses Panic
+  modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank,
+    scanner.unterminated_at_end, scanner.semicolons, scanner.tables
   requires scanner.is_at(scanner.position, byte: 34) || scanner.is_at(scanner.position, byte: 36)
-  ensures scanner.continues(old(scanner))
   ensures old(scanner.position) < scanner.position
 {
   let start = scanner.position
@@ -316,7 +317,8 @@ fn open_string(scanner: mut Scanner, tag: own Option[token.Tag], nesting: UInt64
 
 fn open_ordinary(scanner: mut Scanner, tag: own Option[token.Tag], nesting: UInt64, inline: Bool, origin: StringOrigin, closing: UInt8) -> ItemScan
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank,
+    scanner.semicolons, scanner.tables
   ensures old(scanner.position) < scanner.position
 {
   let open_quote = scanner.position
@@ -349,7 +351,9 @@ fn open_one_line_raw(
   quotes: UInt64,
 ) -> ItemScan
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank,
+    scanner.semicolons, scanner.tables
+  ensures old(scanner.position) <= scanner.position
 {
   var builder = make_builder(scanner.position)
   match continue_one_line_raw(mut scanner, builder: mut builder, literal_start: literal_start, quotes: quotes, dollars: dollars, nesting: nesting) {
@@ -365,8 +369,9 @@ fn open_one_line_raw(
 
 fn continue_string(scanner: mut Scanner, frame: mut StringFrame, interpolated: Option[InterpolationResult]) -> StringProgress
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics, scanner.position
   ensures result is Interpolates(_) ==> scanner.position < scanner.length
+  ensures old(scanner.position) <= scanner.position
 {
   if interpolated is Some(result) {
     add_interpolation(mut frame.builder, interpolation: result.interpolation)
@@ -399,7 +404,8 @@ fn finish_text(
   inline: Bool,
 ) -> Item
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank, scanner.semicolons,
+    scanner.tables
 {
   let kind = make_literal(mut scanner, own tag, form: form, builder: own builder, stop: stop)
   finish_scanned(mut scanner, origin: origin, inline: inline, scanned: ScannedString(kind, ending))
@@ -407,7 +413,8 @@ fn finish_text(
 
 fn finish_string(scanner: mut Scanner, frame: own StringFrame, ending: Ending, stop: UInt64) -> Item
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank,
+    scanner.unterminated_at_end, scanner.semicolons, scanner.tables
 {
   match own frame.scan {
     MultiLineRawScan(text) => {
@@ -429,7 +436,7 @@ fn finish_string(scanner: mut Scanner, frame: own StringFrame, ending: Ending, s
 
 fn finish_scanned(scanner: mut Scanner, origin: StringOrigin, inline: Bool, scanned: ScannedString) -> Item
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank, scanner.semicolons
 {
   match origin {
     PlainString(_) => {}
@@ -445,11 +452,12 @@ type EscapeResult = ContinueString | EndOfLine
 
 fn continue_ordinary(scanner: mut Scanner, builder: mut Builder, closing: UInt8, literal_start: UInt64, nesting: UInt64) -> StringProgress
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics, scanner.position
   ensures result is Interpolates(_) ==> scanner.position < scanner.length
+  ensures old(scanner.position) <= scanner.position
 {
   while true
-    invariant scanner.continues(old(scanner))
+    invariant old(scanner.position) <= scanner.position
     decreases scanner.count_remaining(scanner.position)
   {
     copy_plain(mut scanner, buffer: mut builder.buffer, special: Special.OrdinarySpecial(closing))
@@ -498,7 +506,7 @@ fn continue_ordinary(scanner: mut Scanner, builder: mut Builder, closing: UInt8,
 
 fn scan_escape(scanner: mut Scanner, buffer: mut String) -> EscapeResult
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics, scanner.position
   ensures old(scanner.position) < scanner.position
 {
   let start = scanner.position
@@ -618,8 +626,8 @@ fn hexadecimal_value(byte: UInt8) -> UInt8
 
 fn report_escape_problem(scanner: mut Scanner, start: UInt64, stop: UInt64, message: StringSlice)
   uses Panic
+  modifies scanner.diagnostics, scanner.position
   requires scanner.position <= stop
-  ensures scanner.continues(old(scanner))
   ensures scanner.position == stop
 {
   report(mut scanner, code: "lexer.invalid_escape", span: source.make_span(start, stop), message: message)
@@ -628,10 +636,11 @@ fn report_escape_problem(scanner: mut Scanner, start: UInt64, stop: UInt64, mess
 
 fn scan_raw_dollars(scanner: mut Scanner, builder: mut Builder, dollars: UInt64, nesting: UInt64) -> Option[InterpolationRequest]
   uses Panic
+  modifies scanner.position
   requires scanner.is_at(scanner.position, byte: 36)
-  ensures scanner.continues(old(scanner))
   ensures result is Some(_) ==> scanner.position < scanner.length
   ensures result is None ==> old(scanner.position) < scanner.position
+  ensures old(scanner.position) <= scanner.position
 {
   let start = scanner.position
   let run = scanner.run_length(start, byte: 36)
@@ -648,7 +657,7 @@ fn scan_raw_dollars(scanner: mut Scanner, builder: mut Builder, dollars: UInt64,
 
 fn report_too_many_quotes(scanner: mut Scanner, start: UInt64, run: UInt64, quotes: UInt64, is_multi_line: Bool)
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics
 {
   let advice = if is_multi_line {
     " Open the string with a longer delimiter."
@@ -672,11 +681,12 @@ fn continue_one_line_raw(
   nesting: UInt64,
 ) -> StringProgress
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics, scanner.position
   ensures result is Interpolates(_) ==> scanner.position < scanner.length
+  ensures old(scanner.position) <= scanner.position
 {
   while true
-    invariant scanner.continues(old(scanner))
+    invariant old(scanner.position) <= scanner.position
     decreases scanner.count_remaining(scanner.position)
   {
     copy_plain(mut scanner, buffer: mut builder.buffer, special: Special.RawSpecial)
@@ -733,7 +743,7 @@ type Closing =
 
 fn finish_multi_line_raw(scanner: mut Scanner, tag: own Option[token.Tag], form: token.Form, text: own MultiLineRawText) -> token.Kind
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics, scanner.unterminated_at_end, scanner.tables
 {
   match own text.closing {
     Some(closing) => return build_multi_line(mut scanner, own tag, form, quotes: text.quotes, delimiter_stop: text.delimiter_stop, lines: text.lines, closing: own closing)
@@ -776,11 +786,11 @@ fn finish_line(builder: mut Builder, stop: UInt64) -> Finished
 
 fn continue_multi_line_raw(scanner: mut Scanner, builder: mut Builder, text: mut MultiLineRawText) -> StringProgress
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics, scanner.position
   ensures result is Interpolates(_) ==> scanner.position < scanner.length
+  ensures old(scanner.position) <= scanner.position
 {
   while true
-    invariant scanner.continues(old(scanner))
     decreases scanner.count_remaining(scanner.position)
   {
     if text.is_at_line_start {
@@ -939,7 +949,7 @@ fn build_multi_line(
   closing: own Closing,
 ) -> token.Kind
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics, scanner.tables
 {
   var indentation = ""
   var delimiter_start: UInt64 = 0
@@ -971,7 +981,6 @@ fn build_multi_line(
   }
   var joined = make_builder(delimiter_stop)
   for entry in lines.enumerate()
-    invariant scanner.continues(old(scanner))
   {
     let line = entry.element
     if entry.index > 0 {

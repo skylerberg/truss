@@ -42,6 +42,7 @@ let token_of_kind (kind : Token.kind) : Truss.token option =
         | Lends -> LENDS
         | Let -> LET
         | Match -> MATCH
+        | Modifies -> MODIFIES
         | Mut -> MUT
         | Opaque -> OPAQUE
         | Own -> OWN

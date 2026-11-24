@@ -2,7 +2,7 @@ use frontend.source
 use frontend.token
 
 fn store_number(scanner: mut Scanner, value: own NumberValue) -> token.Kind
-  ensures scanner.continues(old(scanner))
+  modifies scanner.tables
 {
   match own value {
     IntegerValue(integer) => {
@@ -24,8 +24,9 @@ fn punctuation(kind: token.Punctuation) -> Option[token.Kind] {
 
 fn lex_punctuation(scanner: mut Scanner, current: UInt8) -> Option[token.Kind]
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.position
   ensures result is Some(_) ==> old(scanner.position) < scanner.position
+  ensures old(scanner.position) <= scanner.position
 {
   let start = scanner.position
   let next = if start + 1 < scanner.length { scanner.lookup(start + 1) } else { 0 }
@@ -240,7 +241,7 @@ type Resolution = Resolved(item: Item) | Rescan(pending: Pending)
 
 fn make_scanned(scanner: mut Scanner, inline: Bool, start: UInt64, kind: token.Kind, ending: Ending = Ending.Closed) -> Scanned
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank, scanner.semicolons
 {
   report_semicolons(mut scanner, line_break: kind != token.Kind.Punctuation(token.Punctuation.Close(token.Bracket.Curly)))
   let first_line_break = if inline { None } else { scanner.first_line_break }
@@ -254,8 +255,7 @@ fn make_scanned(scanner: mut Scanner, inline: Bool, start: UInt64, kind: token.K
 }
 
 fn hold(scanner: mut Scanner, first: Item, second: Option[Item] = None)
-  ensures scanner.length == old(scanner.length)
-  ensures old(scanner.position) <= scanner.position
+  modifies scanner.held
   ensures scanner.held.length() <= old(scanner.held.length()) + 2
 {
   if second is Some(later) {
@@ -273,7 +273,7 @@ fn attach_trivia(skipped: Scanned, next: Scanned) -> Scanned {
 }
 
 fn restore_trivia(scanner: mut Scanner, skipped: Scanned)
-  ensures scanner.continues(old(scanner))
+  modifies scanner.first_line_break, scanner.blank_line
 {
   if skipped.first_line_break is Some(line_break) {
     scanner.first_line_break = Some(line_break)
@@ -283,14 +283,14 @@ fn restore_trivia(scanner: mut Scanner, skipped: Scanned)
 
 fn lexed(scanner: mut Scanner, inline: Bool, start: UInt64, kind: token.Kind, ending: Ending = Ending.Closed) -> Item
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank, scanner.semicolons
 {
   Item.Lexed(make_scanned(mut scanner, inline, start, kind, ending))
 }
 
 fn make_forbidden(scanner: mut Scanner)
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics, scanner.position, scanner.line_is_blank
   ensures old(scanner.position) < scanner.position
 {
   report_forbidden_run(mut scanner, context: Context.Code)
@@ -299,13 +299,16 @@ fn make_forbidden(scanner: mut Scanner)
 
 fn scan_item(scanner: mut Scanner, inline: Bool, nesting: UInt64) -> ItemScan
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank,
+    scanner.unterminated_at_end, scanner.name_indices, scanner.name_checks, scanner.previous, scanner.semicolons,
+    scanner.tables
   ensures result is Ready(End) || result is Ready(LineEnd)
     || (old(scanner.position) < scanner.position && old(scanner.position) < scanner.length)
   ensures result is Ready(LineEnd) ==> old(scanner.position) < scanner.length
+  ensures old(scanner.position) <= scanner.position
 {
   while true
-    invariant scanner.continues(old(scanner))
+    invariant old(scanner.position) <= scanner.position
     decreases scanner.count_remaining(scanner.position)
   {
     let start = scanner.position
@@ -332,8 +335,10 @@ fn scan_item(scanner: mut Scanner, inline: Bool, nesting: UInt64) -> ItemScan
 
 fn scan_token(scanner: mut Scanner, inline: Bool, nesting: UInt64, start: UInt64, current: UInt8) -> Option[ItemScan]
   uses Panic
+  modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank,
+    scanner.unterminated_at_end, scanner.name_indices, scanner.name_checks, scanner.previous, scanner.semicolons,
+    scanner.tables
   requires start == scanner.position && start < scanner.length && current == scanner.source.text.byte(start)
-  ensures scanner.continues(old(scanner))
   ensures old(scanner.position) < scanner.position
 {
   if is_ascii_letter(current) || current == 95 {
@@ -425,8 +430,9 @@ fn scan_token(scanner: mut Scanner, inline: Bool, nesting: UInt64, start: UInt64
 
 fn lex_number(scanner: mut Scanner, inline: Bool) -> ItemScan
   uses Panic
+  modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank,
+    scanner.previous, scanner.semicolons, scanner.tables
   requires scanner.position < scanner.length && is_digit(scanner.source.text.byte(scanner.position))
-  ensures scanner.continues(old(scanner))
   ensures old(scanner.position) < scanner.position
 {
   let start = scanner.position
@@ -480,7 +486,7 @@ fn lex_trailing_point(scanner: Scanner, start: UInt64, stop: UInt64, checked: Ch
 
 fn report_trailing_point(scanner: mut Scanner, start: UInt64, point: UInt64)
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics
 {
   let written = scanner.text(start, stop: point + 1)
   let fixes = scanner.list_code_fixes(source.make_span(start, stop: point + 1), codes: ["${written}0"])
@@ -495,9 +501,10 @@ fn report_trailing_point(scanner: mut Scanner, start: UInt64, point: UInt64)
 
 fn lex_leading_dot(scanner: mut Scanner) -> Option[NumberValue]
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics, scanner.position
   ensures result is None ==> scanner.position == old(scanner.position)
   ensures result is Some(_) ==> old(scanner.position) < scanner.position
+  ensures old(scanner.position) <= scanner.position
 {
   let start = scanner.position
   let stop = number_scan_end(scanner.source.text, start: start + 1)
@@ -533,7 +540,8 @@ fn lex_leading_dot(scanner: mut Scanner) -> Option[NumberValue]
 
 fn lex_ellipsis(scanner: mut Scanner, inline: Bool, start: UInt64) -> ItemScan
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank, scanner.previous,
+    scanner.semicolons
 {
   let was_after_operand = follows_operand(scanner)
   let raw = make_scanned(mut scanner, inline, start, kind: token.Kind.Punctuation(token.Punctuation.DotDotEqual))
@@ -543,8 +551,8 @@ fn lex_ellipsis(scanner: mut Scanner, inline: Bool, start: UInt64) -> ItemScan
 
 fn resolve(scanner: mut Scanner, pending: own Pending, following: Item) -> Resolution
   uses Panic
-  ensures scanner.length == old(scanner.length)
-  ensures old(scanner.position) <= scanner.position
+  modifies scanner.diagnostics, scanner.first_line_break, scanner.blank_line, scanner.previous, scanner.held,
+    scanner.tables
   ensures scanner.held.length() <= old(scanner.held.length()) + 2
   ensures result is Rescan(_) ==> following is Lexed(_) && scanner.held.length() == old(scanner.held.length())
 {
@@ -603,15 +611,13 @@ fn resolve(scanner: mut Scanner, pending: own Pending, following: Item) -> Resol
 
 fn settle(scanner: mut Scanner, pending: mut List[Pending], arrived: Item) -> Option[Item]
   uses Panic
-  ensures scanner.length == old(scanner.length)
-  ensures old(scanner.position) <= scanner.position
+  modifies scanner.diagnostics, scanner.first_line_break, scanner.blank_line, scanner.previous, scanner.held,
+    scanner.tables
   ensures !(arrived is Lexed(_)) && 0 < old(pending.length()) ==>
     3 * pending.length() + scanner.held.length() < 3 * old(pending.length()) + old(scanner.held.length())
 {
   var item = arrived
   while mut pending.pop() is Some(waiting)
-    invariant scanner.length == old(scanner.length)
-    invariant old(scanner.position) <= scanner.position
     invariant pending.length() <= old(pending.length())
     invariant 3 * pending.length() + scanner.held.length() + (old(pending.length()) - pending.length())
       <= 3 * old(pending.length()) + old(scanner.held.length())
@@ -637,8 +643,7 @@ fn opens_literal_at(scanner: Scanner, stop: UInt64) -> Bool
 
 fn intern_name(scanner: mut Scanner, start: UInt64, stop: UInt64) -> UInt64
   uses Panic
-  ensures scanner.continues(old(scanner))
-  ensures scanner.position == old(scanner.position)
+  modifies scanner.name_indices, scanner.name_checks, scanner.tables
 {
   if scanner.name_indices.get(scanner.text(start, stop)) is Some(interned_index) {
     return interned_index
@@ -652,7 +657,8 @@ fn intern_name(scanner: mut Scanner, start: UInt64, stop: UInt64) -> UInt64
 
 fn lex_name(scanner: mut Scanner, inline: Bool, nesting: UInt64) -> ItemScan
   uses Panic
-  ensures scanner.continues(old(scanner))
+  modifies scanner.diagnostics, scanner.position, scanner.first_line_break, scanner.blank_line, scanner.line_is_blank,
+    scanner.unterminated_at_end, scanner.name_indices, scanner.name_checks, scanner.semicolons, scanner.tables
   ensures old(scanner.position) < scanner.position
 {
   let start = scanner.position

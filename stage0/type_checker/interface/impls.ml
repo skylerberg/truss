@@ -622,6 +622,16 @@ and make_expected_signature lookups ?written (implemented : implemented_method) 
       }
   | None -> expected
 
+and combine_modifies ~(declared : Types.signature option) ~(stated : Types.signature) =
+  let is_stated position =
+    List.exists (fun (part : Types.modified) -> part.position = position) stated.modifies
+  in
+  match declared with
+  | Some declared ->
+      stated.modifies
+      @ List.filter (fun (part : Types.modified) -> not (is_stated part.position)) declared.modifies
+  | None -> stated.modifies
+
 and read_signature lookups (path : Path.t) =
   let ( let* ) = Option.bind in
   match path with
@@ -638,7 +648,12 @@ and read_signature lookups (path : Path.t) =
       let* stated = if Option.is_some written then written else declared in
       let signature =
         Types.add_impl_generics_and_uses ~impl_generics:impl.impl_generics ~impl_uses:impl.impl_uses
-          { (Option.value declared ~default:stated) with uses = stated.uses; costs = stated.costs }
+          {
+            (Option.value declared ~default:stated) with
+            uses = stated.uses;
+            costs = stated.costs;
+            modifies = combine_modifies ~declared ~stated;
+          }
       in
       let uses =
         normalize_capabilities_in_impl lookups
