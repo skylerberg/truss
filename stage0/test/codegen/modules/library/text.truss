@@ -195,6 +195,22 @@ test "a one-byte pattern matches each of its bytes beside multibyte characters" 
   assert "a".occurrences("a") == 1
 }
 
+test "a search skips to the first byte of the pattern and keeps a partial match" {
+  assert "xxxab".find("xab") == Some(2)
+  assert "abcx".find("xy") is None
+  assert "abxab".find_last("ab") == Some(3)
+  assert "xabyabab".occurrences("ab") == 3
+  assert "aaab".replace("ab", replacement: "-") == "aa-"
+  assert "\u{e9}\u{e9}x".find("\u{e9}x") == Some(2)
+  var parts: List[String] = []
+  for part in "a<b<>c<".split("<>") {
+    mut parts.push(part.to_string())
+  }
+  assert parts.length() == 2
+  assert parts[0] == "a<b"
+  assert parts[1] == "c<"
+}
+
 test "split gives the parts between separators, empty ones included" {
   var parts: List[String] = []
   for part in "a,b,,c".split(",") {
