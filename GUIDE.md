@@ -94,8 +94,12 @@ runs Truss code. It needs two other programs on your `PATH`:
 | A C compiler, `clang` or `cc` | Building programs | `TRUSS_CC` |
 | Z3 5.3.3, as `z3` | Proving programs correct | `TRUSS_Z3` |
 
-Truss builds programs for Linux and macOS. [README.md](README.md) says how
-to build `truss` from this repository. Check that the toolchain runs:
+Truss builds programs for Linux and macOS, on x86-64 and ARM64. A program
+built on x86-64 needs a CPU of the x86-64-v3 level, which Intel's CPUs have
+had since Haswell (2013) and AMD's since Excavator (2015). A project's
+manifest can name another level ([Projects](#projects)).
+[README.md](README.md) says how to build `truss` from this repository. Check
+that the toolchain runs:
 
 ```text
 $ truss --version
@@ -2007,6 +2011,27 @@ project. A project's manifest can also set how long each test may run:
 [test]
 time_limit = 10
 ```
+
+It can also set the level of x86-64 CPU that its programs are built for:
+
+```toml
+[build]
+x86_64_level = "v2"
+```
+
+The levels are `"v1"`, which every x86-64 CPU has, to `"v4"`, and a program
+is built for `"v3"` unless the manifest says otherwise. A higher level gives
+the C compiler more instructions to use and runs on fewer machines. An
+emulator or a virtual machine can provide a lower level than the CPU it runs
+on. A program built for a level that its machine lacks says so when it
+starts:
+
+```text
+This program needs a CPU with AVX, which this machine lacks. To build it for this machine, set x86_64_level = "v2" under [build] in the project's truss.toml.
+```
+
+The level changes no result of a program, so a test's cached result holds
+at every level.
 
 A package that is not inside a project is a project of its own, as every
 package in the earlier chapters was.
@@ -5187,6 +5212,11 @@ From the tightest binding to the loosest:
   a minute, or at once with `truss stop`. `--no-server`, or
   `TRUSS_NO_SERVER=1`, runs a command in its own process.
 - **`TRUSS_CC`** names the C compiler, and **`TRUSS_Z3`** the Z3 executable.
+- **An x86-64 program is built for the x86-64-v3 level** unless the
+  project's manifest names another ([Projects](#projects)). Before `main`
+  runs, the program checks the CPU for each feature of its level. Where one
+  is missing, it prints the feature's name and the level to write in the
+  manifest, and exits with status 126.
 - **A release build has a line table,** so a profiler, a debugger, and
   `objdump -S` attribute machine code to the Truss line it came from. Run
   `objdump -S` in the project's directory, where the table's file names

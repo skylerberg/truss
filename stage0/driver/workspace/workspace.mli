@@ -8,6 +8,7 @@ val problems : snapshot -> Project.problem list
 val list_dependency_problems : snapshot -> Database.t -> Project.problem list
 val list_packages : snapshot -> (string * Path.package) list
 val time_limit_ms : snapshot -> int
+val x86_64_level : snapshot -> X86_64_level.t
 val list_registry_packages : snapshot -> (Path.package * Registry.Version.t * string) list
 val lock_fix : snapshot -> string option
 val list_package_files : snapshot -> Path.package -> Path.file list

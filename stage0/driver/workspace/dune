@@ -41,4 +41,5 @@
   standard_library
   database
   registry
-  watcher))
+  watcher
+  x86_64_level))
