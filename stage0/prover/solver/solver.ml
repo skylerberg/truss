@@ -46,12 +46,13 @@ let header =
     steps
 
 let compute_key text =
-  Logic.hash
-    (Printf.sprintf
-       "z3 %s\nentry format %d\ncardinality bounds %s\nretried without quantified facts\n%s%s"
-       version entry_format_version
-       (String.concat ", " (List.map string_of_int cardinality_bounds))
-       header text)
+  "smt1-blake3-"
+  ^ Blake3.hash_to_hex
+      (Printf.sprintf
+         "z3 %s\nentry format %d\ncardinality bounds %s\nretried without quantified facts\n%s%s"
+         version entry_format_version
+         (String.concat ", " (List.map string_of_int cardinality_bounds))
+         header text)
 
 let hash_query query = compute_key (Logic.show_query query)
 

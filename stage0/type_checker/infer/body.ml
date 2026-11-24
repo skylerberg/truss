@@ -4,7 +4,7 @@ type checked = {
   used_packages : Path.package list;
   places_without_keyword : (Syntax.id * Language.Mode.t) list;
   mode_keywords : Core.mode_keyword list;
-  requires_run_forever : bool;
+  uses_run_forever : bool;
 }
 
 let no_output : State.env =
@@ -483,21 +483,21 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
       ~checks_body ~has_syntax_error
   in
   let checked = if is_clean tables then Some (build tables) else None in
-  let requires_run_forever =
+  let uses_run_forever =
     match checked with
     | Some form ->
         check_bit_vector_names state form;
-        let requires_run_forever = Capabilities.check state elaborated form in
+        let uses_run_forever = Capabilities.check state elaborated form in
         check_deserialized_invariants state elaborated form;
-        Some requires_run_forever
+        Some uses_run_forever
     | None ->
         state.capability_solution <- Some (Hashtbl.create 1);
         None
   in
   let has_capability_variables = state.unifier.capability_variable_count > 0 in
   let tables = if has_capability_variables then finalize () else tables in
-  match (checked, requires_run_forever) with
-  | Some form, Some requires_run_forever when is_clean tables ->
+  match (checked, uses_run_forever) with
+  | Some form, Some uses_run_forever when is_clean tables ->
       let form = if has_capability_variables then build tables else form in
       Ok
         {
@@ -507,7 +507,7 @@ let check (lookups : Lookups.t) (key : Resolve.Names.key) ~checks_body =
             list_used_packages resolved ~evidence_packages:state.evidence_packages form;
           places_without_keyword = state.places_without_keyword;
           mode_keywords = state.mode_keywords;
-          requires_run_forever;
+          uses_run_forever;
         }
   | _ ->
       Error

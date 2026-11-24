@@ -167,5 +167,4 @@ val rendered_text : rendering -> string
 val render_term : rendering -> term -> string option
 val list_symbols : rendering -> (symbol * string) list
 val list_members : query -> (string * (symbol * symbol list)) list
-val hash : string -> string
 val show_symbol : symbol -> string

@@ -95,7 +95,7 @@ let tables =
     fact_of_definition "contract" (state ^ ", form BLOB");
     fact_of_definition ~has_index_without_value:true "body"
       (state
-     ^ ", form BLOB, tables BLOB, requires_run_forever INTEGER, places_without_keyword BLOB, \
+     ^ ", form BLOB, tables BLOB, uses_run_forever INTEGER, places_without_keyword BLOB, \
         mode_keywords BLOB");
     fact_of_definition "body_mir" (state ^ ", graph BLOB");
     fact_of_definition "contract_mir" (state ^ ", graph BLOB");

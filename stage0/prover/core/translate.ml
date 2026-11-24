@@ -85,7 +85,6 @@ let make_outcome (context : State.context) =
   {
     Obligation.obligations = List.rev context.obligations;
     holes = List.rev context.holes;
-    warnings = [];
     evaluation = None;
   }
 
@@ -708,7 +707,6 @@ let translate_function ?(proof = false) ?inherited ?(substitution = Types.no_sub
     holes =
       List.sort_uniq compare
         (List.concat_map (fun (outcome : Obligation.outcome) -> outcome.holes) outcomes);
-    warnings = [];
     evaluation = None;
   }
 

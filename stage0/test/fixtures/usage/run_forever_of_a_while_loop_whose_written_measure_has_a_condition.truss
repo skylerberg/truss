@@ -1,0 +1,12 @@
+fn f[Source: Cursor](source: own Source, limit: UInt64) -> UInt64
+  uses Source.Uses, RunForever unless Source: FiniteCursor
+{
+  var cursor = own source
+  var count: UInt64 = 0
+  while count < limit
+    decreases cursor.remaining() when Source: FiniteCursor
+  {
+    count = count
+  }
+  count
+}

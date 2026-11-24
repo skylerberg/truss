@@ -149,3 +149,47 @@ let () =
       expect_fine Fixtures.Usage.var_assigned_and_read);
   Harness.test "writing through a mut binding changes the place it is bound to" (fun () ->
       expect_fine Fixtures.Usage.mut_bindings_written_through)
+
+let () =
+  let expect_removed text fixed = expect_one_diagnostic ~fixed text "usage.unused_run_forever" in
+  Harness.test "a RunForever that nothing uses is reported, and removing it joins the brace"
+    (fun () ->
+      expect_removed Fixtures.Usage.run_forever_that_nothing_uses
+        "fn f(values: Slice[UInt64]) -> UInt64 {\n\
+        \  var total: UInt64 = 0\n\
+        \  for value in values {\n\
+        \    total = value\n\
+        \  }\n\
+        \  total\n\
+         }\n");
+  Harness.test "removing a RunForever listed after another capability keeps that capability"
+    (fun () ->
+      expect_removed Fixtures.Usage.run_forever_listed_after_another_capability
+        "fn f(values: Slice[UInt64]) -> UInt64\n  uses Panic\n{\n  values.length() + 1\n}\n");
+  Harness.test "removing a RunForever listed before another capability keeps that capability"
+    (fun () ->
+      expect_removed Fixtures.Usage.run_forever_listed_before_another_capability
+        "fn f(values: Slice[UInt64]) -> UInt64\n  uses Panic\n{\n  values.length() + 1\n}\n");
+  Harness.test "removing a RunForever before another clause keeps the brace on its own line"
+    (fun () ->
+      expect_removed Fixtures.Usage.run_forever_before_an_ensures
+        "fn f(values: Slice[UInt64]) -> UInt64\n\
+        \  ensures result == values.length()\n\
+         {\n\
+        \  values.length()\n\
+         }\n");
+  Harness.test "a RunForever is used by a recursion, which it leaves unchecked" (fun () ->
+      expect_fine Fixtures.Usage.run_forever_of_a_recursion);
+  Harness.test "a RunForever is used by a lambda passed to a generic callee that may run forever"
+    (fun () -> expect_fine Fixtures.Usage.run_forever_of_a_lambda_passed_to_a_generic_callee);
+  Harness.test "a RunForever is used by a call of a function that may run forever" (fun () ->
+      expect_fine Fixtures.Usage.run_forever_of_a_callee_that_runs_forever);
+  Harness.test "a RunForever is used by a while loop whose measure is its condition" (fun () ->
+      expect_fine Fixtures.Usage.run_forever_of_a_while_loop_measured_by_its_condition);
+  Harness.test "a RunForever is used by a while loop whose written measure has a condition"
+    (fun () ->
+      expect_fine Fixtures.Usage.run_forever_of_a_while_loop_whose_written_measure_has_a_condition);
+  Harness.test "a while loop in a lambda does not use its enclosing function's RunForever"
+    (fun () ->
+      expect_one_diagnostic Fixtures.Usage.run_forever_beside_a_while_loop_in_a_lambda
+        "usage.unused_run_forever")

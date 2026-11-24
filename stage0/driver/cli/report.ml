@@ -72,12 +72,9 @@ let count_warnings report =
 let has_errors report = count_errors report > 0
 
 let count_fixable report =
-  let count diagnostics = List.length (Diagnostic.list_machine_applicable diagnostics) in
-  let count_warnings_of file =
-    count (List.filter (fun diagnostic -> not (Diagnostic.is_error diagnostic)) file.diagnostics)
-  in
-  List.fold_left (fun total file -> total + count file.diagnostics) 0 report.checked
-  + List.fold_left (fun total file -> total + count_warnings_of file) 0 (Lazy.force report.proven)
+  List.fold_left
+    (fun total file -> total + List.length (Diagnostic.list_machine_applicable file.diagnostics))
+    0 report.checked
 
 let describe_fixable report =
   match count_fixable report with

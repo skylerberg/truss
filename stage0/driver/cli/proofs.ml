@@ -40,8 +40,6 @@ let list_diagnostics checked file =
   Lazy.force checked.decided;
   Database.list_proof_diagnostics checked.database file
 
-let list_warnings checked file = Database.list_proof_warnings checked.database file
-
 let list_states checked file =
   Lazy.force checked.decided;
   Database.list_proof_states checked.database file

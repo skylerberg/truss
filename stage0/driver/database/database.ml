@@ -316,7 +316,7 @@ let has_unchecked_body (database : t) (package : Path.package) =
   Store.locate_schema database.store package = Main
   && Store.has_unchecked_body database.store ~package:(Path.show_package package) ~skipped_kind:None
 
-let list_staged (database : t) (file : Path.file) ~is_selected : Diagnostic.t list =
+let list_located (database : t) (file : Path.file) ~is_selected : Diagnostic.t list =
   let hides_unused = lazy (has_unchecked_body database file.module_.package) in
   let is_shown (stage : Kind.stage) = stage <> Check_unexported || not (Lazy.force hides_unused) in
   List.sort_uniq
@@ -325,25 +325,19 @@ let list_staged (database : t) (file : Path.file) ~is_selected : Diagnostic.t li
     (List.filter_map
        (fun (located : Store.located) ->
          let stage = List.nth Kind.stages located.stage in
-         if is_shown stage && is_selected stage located then
-           Some
-             (match located.base with
-             | Some base ->
-                 Diagnostic.map_spans
-                   (Source.Definition_span.to_file ~base)
-                   (Marshal.from_string located.detail 0 : Diagnostic.in_definition)
-             | None -> (Marshal.from_string located.detail 0 : Diagnostic.t))
-         else None)
+         match find_checker stage with
+         | Some checker when is_shown stage && is_selected checker located ->
+             Some
+               (match located.base with
+               | Some base ->
+                   Diagnostic.map_spans
+                     (Source.Definition_span.to_file ~base)
+                     (Marshal.from_string located.detail 0 : Diagnostic.in_definition)
+               | None -> (Marshal.from_string located.detail 0 : Diagnostic.t))
+         | Some _ | None -> None)
        (Store.list_file_diagnostics database.store
           (Store.locate_schema database.store file.module_.package)
           ~file:(Ids.of_file file) ~test_kind:(Declarations.rank_kind Test)))
-
-let list_located database file ~is_selected =
-  list_staged database file ~is_selected:(fun stage located ->
-      match find_checker stage with Some checker -> is_selected checker located | None -> false)
-
-let list_proof_warnings database file =
-  list_staged database file ~is_selected:(fun stage _ -> stage = Prove)
 
 let list_diagnostics checkers database file =
   list_located database file ~is_selected:(fun checker _ -> List.mem checker checkers)
@@ -351,12 +345,13 @@ let list_diagnostics checkers database file =
 let list_file_diagnostics database file = list_located database file ~is_selected:(fun _ _ -> true)
 
 let list_blocking_diagnostics database file =
-  list_located database file ~is_selected:(fun checker located ->
-      match checker with
-      | Parse -> true
-      | Resolve | Interface | Infer | Usage | Ownership ->
-          Option.is_some located.base && not located.is_in_test
-      | Package_checks | Unexported -> false)
+  List.filter Diagnostic.is_error
+    (list_located database file ~is_selected:(fun checker located ->
+         match checker with
+         | Parse -> true
+         | Resolve | Interface | Infer | Usage | Ownership ->
+             Option.is_some located.base && not located.is_in_test
+         | Package_checks | Unexported -> false))
 
 let read_source (database : t) = Lookups.read_source database Tracker.untracked
 
@@ -591,19 +586,18 @@ let list_proof_diagnostics (database : t) (file : Path.file) =
   List.sort
     (fun (left : Diagnostic.t) (right : Diagnostic.t) ->
       compare (left.span, left.code, left.message) (right.span, right.code, right.message))
-    (list_proof_warnings database file
-    @ List.filter_map
-        (fun (base, (verdict : Store.verdict)) ->
-          Option.map
-            (fun failure ->
-              let failure =
-                Diagnostic.map_spans
-                  (Source.Definition_span.to_file ~base)
-                  (Marshal.from_string failure 0 : Diagnostic.in_definition)
-              in
-              Option.fold ~none:failure ~some:(cite failure) verdict.citation)
-            verdict.failure)
-        (Store.list_file_verdicts database.store ~file:(Ids.of_file file)))
+    (List.filter_map
+       (fun (base, (verdict : Store.verdict)) ->
+         Option.map
+           (fun failure ->
+             let failure =
+               Diagnostic.map_spans
+                 (Source.Definition_span.to_file ~base)
+                 (Marshal.from_string failure 0 : Diagnostic.in_definition)
+             in
+             Option.fold ~none:failure ~some:(cite failure) verdict.citation)
+           verdict.failure)
+       (Store.list_file_verdicts database.store ~file:(Ids.of_file file)))
 
 let list_unit_targets (database : t) stage id =
   List.map

@@ -8,7 +8,6 @@ type proof =
 
 val prove : Lookups.t -> Resolve.Names.key -> proof
 val list_evaluations : proof -> Obligation.evaluation list
-val list_warnings : proof -> Source.Definition_span.t Diagnostic.diagnostic list
 
 val resolve_location :
   Resolve.Names.lookups -> Resolve.Names.key -> Obligation.location -> Source.Definition_span.t
