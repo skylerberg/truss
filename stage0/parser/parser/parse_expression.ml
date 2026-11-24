@@ -449,13 +449,12 @@ and parse_clause cursor : Syntax.clause =
   { kind; condition; id = Cursor.allocate_id_from cursor start }
 
 and parse_cost cursor =
-  let amortized =
+  let amortized_word =
     match (Contextual_keyword.of_token (Cursor.peek_kind cursor), Cursor.peek_ahead cursor 1) with
-    | Some Amortized, Lower _ ->
-        Cursor.advance cursor;
-        true
-    | _ -> false
+    | Some Amortized, Lower _ -> Some (Cursor.take cursor)
+    | _ -> None
   in
+  let amortized = Option.is_some amortized_word in
   if Contextual_keyword.of_token (Cursor.peek_kind cursor) = Some Potential then begin
     Cursor.report cursor Misplaced_potential (Cursor.peek cursor).span
       "`cost potential` belongs to a type, and states the potential its values hold.";
@@ -488,6 +487,13 @@ and parse_cost cursor =
              ~expected:"a bound: `O(...)`, `<=`, or `==`");
         Big_o (parse_parenthesized_expression cursor)
   in
+  (match (amortized_word, resource, bound) with
+  | Some word, (Calls _ | Metric _), (At_most _ | Exactly _) | Some word, Calls _, Big_o _ ->
+      Cursor.report cursor Amortized_bound word.span
+        "`amortized` applies only to an `O(...)` bound on `time`, `allocations`, or \
+         `allocated_bytes`. Potential is credit spent on time or memory, so it pays for no calls, \
+         and an exact count with `<=` or `==` cannot borrow from it."
+  | Some _, Metric _, Big_o _ | None, _, _ -> ());
   { amortized; resource; bound }
 
 and parse_call_target cursor =
@@ -1392,7 +1398,13 @@ and parse_loop_clauses cursor =
     | Keyword Cost ->
         let keyword = Cursor.take cursor in
         let cost = parse_cost cursor in
-        if cost.amortized then
+        if
+          cost.amortized
+          &&
+          match (cost.resource, cost.bound) with
+          | Metric _, Big_o _ -> true
+          | (Metric _ | Calls _), (Big_o _ | At_most _ | Exactly _) -> false
+        then
           Cursor.report cursor Loop_cost_bound keyword.span
             "A loop's `cost` bounds the loop's cost so far, so it is never `amortized`. Potential \
              belongs to the values the loop mutates, which the function's own `cost` accounts for.";

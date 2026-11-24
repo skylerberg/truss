@@ -35,6 +35,7 @@ type for_loop = {
 }
 
 val havoc : State.context -> State.frame -> State.changed -> State.frame
+val forget_changes : State.context -> State.frame -> State.changed -> State.frame
 val keep_holding_clauses : State.context -> Mir.loop_clause list -> Mir.loop_clause list
 val run_while_loop : State.context -> State.frame -> while_loop -> State.frame option
 val run_for_loop : State.context -> State.frame -> for_loop -> State.frame option

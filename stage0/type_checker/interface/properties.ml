@@ -358,7 +358,8 @@ let compute_facts lookups ~facts_of (interface : Types.type_interface) : Environ
          || (property = Copyable && is_declared (Well_known.make_path Copyable)))
   in
   let find_owned_conditions property =
-    if is_undeclared property || (property = Plain && allocates) then None
+    if is_undeclared property || (property = Plain && (allocates || interface.declares_potential))
+    then None
     else find_conditions property field_types
   in
   match interface.shape with

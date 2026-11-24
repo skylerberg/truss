@@ -106,6 +106,33 @@ let declare_unknown_amount context frame (counter : Costs.counter) =
   Facts.assume context frame (Logic.less_equal (Costs.least_amount counter.resource) amount);
   amount
 
+let spend_operation context frame ~potential_change ?(note = fun _ _ -> ())
+    (charge_of : Costs.counter -> Costs.charge) =
+  let change = Option.map Lazy.from_fun potential_change in
+  spend context frame (fun counter ->
+      let ({ amount; counted } : Costs.charge) = charge_of counter in
+      let find_change () =
+        match Option.map Lazy.force change with
+        | change -> change
+        | exception Facts.Unsupported _ -> None
+      in
+      let amount =
+        match (counted, counter.amortized) with
+        | No_potential, false | (Potential_change | Potential_growth), true -> amount
+        | No_potential, true -> (
+            match find_change () with
+            | Some change -> Costs.plus amount change
+            | None -> declare_unknown_amount context frame counter)
+        | Potential_change, false -> (
+            match find_change () with Some change -> Costs.minus amount change | None -> amount)
+        | Potential_growth, false -> (
+            match find_change () with
+            | Some change -> Costs.minus amount (Costs.at_least_zero change)
+            | None -> amount)
+      in
+      note counter amount;
+      amount)
+
 let list_impl_packages (context : State.context) (ty : Types.ty) =
   List.sort_uniq compare
     ((match ty with Types.Named { path; _ } -> [ Path.locate_package path ] | _ -> [])

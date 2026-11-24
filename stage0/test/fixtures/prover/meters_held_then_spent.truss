@@ -1,0 +1,23 @@
+type Holder(view: Slice[Meter], tag: UInt32)
+
+fn hold(meters: Slice[Meter]) -> Holder
+  ensures identical(result.view, meters)
+  cost amortized time O(1)
+{
+  Holder(view: meters, tag: 0)
+}
+
+fn spend_first(meters: mut Slice[Meter])
+  requires meters.length() > 0
+  cost amortized time O(1)
+{
+  mut meters[0].spend()
+}
+
+fn spends_after_holding(meters: mut Slice[Meter])
+  requires meters.length() > 0
+  cost time O(1)
+{
+  let _ = hold(meters)
+  spend_first(mut meters)
+}

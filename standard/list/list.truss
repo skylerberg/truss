@@ -353,6 +353,7 @@ impl Cursor for ListCursor[Element] {
     ensures forall i in 0..self.model().length() =>
       identical(self.model()[i], old(self.model())[i + 1])
     cost time O(1)
+    cost amortized time O(1)
     cost allocations == 0
   {
     mut self.reversed.pop()

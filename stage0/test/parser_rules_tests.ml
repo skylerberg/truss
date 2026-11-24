@@ -296,6 +296,13 @@ let () =
   Harness.test "a loop's cost is not amortized" (fun () ->
       Parse_support.expect_body_error "while a\n  cost amortized time O(1)\n{}"
         ~code:Loop_cost_bound ~at:"cost");
+  Harness.test "an amortized bound is an O bound on a metric" (fun () ->
+      Parse_support.expect_error "fn f()\n  cost amortized allocations <= 0\n{}"
+        ~code:Amortized_bound ~at:"amortized";
+      Parse_support.expect_error "fn f(visit: fn())\n  cost amortized calls(visit) O(1)\n{}"
+        ~code:Amortized_bound ~at:"amortized";
+      Parse_support.expect_error "fn f(visit: (fn() cost amortized allocations == 0)) {}"
+        ~code:Amortized_bound ~at:"amortized");
   Harness.test "specifications allow forall" (fun () ->
       Parse_support.expect_definition
         "type S(items: List[Int64])\n  invariant forall i in items => i > 0"

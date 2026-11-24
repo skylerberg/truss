@@ -1,0 +1,29 @@
+capability Bank {
+  fn deposit(credit: UInt32)
+    cost time O(1)
+  fn burn()
+    cost amortized time O(1)
+}
+
+impl Bank for Meter {
+  fn deposit(mut self, credit: UInt32)
+    cost time O(1)
+  {
+    self.credit = credit
+  }
+
+  fn burn(mut self)
+    cost amortized time O(1)
+  {
+    mut self.spend()
+  }
+}
+
+fn spends_a_provided_deposit(credit: UInt32)
+  cost amortized time O(1)
+{
+  provide Meter(credit: 0) {
+    Bank.deposit(credit)
+    Bank.burn()
+  }
+}

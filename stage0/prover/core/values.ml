@@ -655,27 +655,28 @@ let copy_value ?literal (context : State.context) frame ty term =
         (Well_known.make_method_path Copyable_copy)
         ~trait_arguments:[] ty
     in
-    let compute_copy_potential () =
-      try Amounts.compute_potential context frame ty term with Facts.Unsupported _ -> Costs.zero
-    in
-    Operations.spend context frame (fun (counter : Costs.counter) ->
+    Operations.spend_operation context frame
+      ~potential_change:(Some (fun () -> Amounts.compute_potential context frame ty term))
+      (fun (counter : Costs.counter) ->
+        let make_plain amount = { Costs.amount; counted = No_potential } in
+        let make_unknown () =
+          Costs.make_counted_charge counter
+            (Operations.declare_unknown_amount context frame counter)
+        in
         match (literal, counter.resource, counter.counting) with
         | _, Metric Time, Units ->
             let time = match literal with Some _ -> Costs.zero | None -> declare_copy_cost Time in
-            let amount = Costs.plus time (Logic.int 1) in
-            if counter.amortized then amount else Costs.minus amount (compute_copy_potential ())
+            { Costs.amount = Costs.plus time (Logic.int 1); counted = Potential_change }
         | Some literal, Metric (Allocations | Allocated_bytes), Units
         | Some literal, Metric Allocations, _ ->
-            Logic.int (match literal with Text "" | Elements [] -> 0 | Text _ | Elements _ -> 1)
+            make_plain
+              (Logic.int
+                 (match literal with Text "" | Elements [] -> 0 | Text _ | Elements _ -> 1))
         | Some (Text text), Metric Allocated_bytes, (At_most | Exactly) ->
-            Logic.int (String.length text)
-        | Some (Elements _), Metric Allocated_bytes, (At_most | Exactly) ->
-            Operations.declare_unknown_amount context frame counter
-        | Some _, Calls _, _ -> Costs.zero
+            make_plain (Logic.int (String.length text))
+        | Some (Elements _), Metric Allocated_bytes, (At_most | Exactly) -> make_unknown ()
+        | Some _, Calls _, _ -> Costs.make_counted_charge counter Costs.zero
         | None, Metric ((Allocations | Allocated_bytes) as metric), _ ->
-            Amounts.compute_counted_amount context frame counter
-              ~potential_change:
-                (Some (fun () -> Amounts.compute_made_potential context frame ty term))
+            make_plain
               (Amounts.compute_amount_within context frame counter (declare_copy_cost metric))
-        | _, Metric Time, (At_most | Exactly) | None, Calls _, _ ->
-            Operations.declare_unknown_amount context frame counter)
+        | _, Metric Time, (At_most | Exactly) | None, Calls _, _ -> make_unknown ())

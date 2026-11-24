@@ -532,28 +532,32 @@ let exit_loop context ~(clause_at : State.frame) (exit_ : State.frame) costs ~it
   in
   { exit_ with spent }
 
+let list_held_values context (entry : State.frame) (changed : State.changed) =
+  List.filter_map
+    (fun id ->
+      Option.map
+        (fun ty -> (ty, fun (at : State.frame) -> Locals.find_opt id at.locals))
+        (Facts.find_local_type context entry id))
+    changed.changed_locals
+  @
+  match (changed.changes_self, entry.self_type) with
+  | true, Some ty -> [ (ty, fun (at : State.frame) -> at.self) ]
+  | _ -> []
+
+let sum_held held measure (at : State.frame) =
+  List.fold_left
+    (fun total (ty, read) ->
+      match read at with Some term -> Costs.plus total (measure at ty term) | None -> total)
+    Costs.zero held
+
+let measure_held_potential context held =
+  sum_held held (fun at ty term -> Amounts.compute_accessible_potential context at ty term)
+
 let measure_held_gains context (entry : State.frame) (changed : State.changed) =
-  let held =
-    List.filter_map
-      (fun id ->
-        Option.map
-          (fun ty -> (ty, fun (at : State.frame) -> Locals.find_opt id at.locals))
-          (Facts.find_local_type context entry id))
-      changed.changed_locals
-    @
-    match (changed.changes_self, entry.self_type) with
-    | true, Some ty -> [ (ty, fun (at : State.frame) -> at.self) ]
-    | _ -> []
-  in
-  let sum_held measure (at : State.frame) =
-    List.fold_left
-      (fun total (ty, read) ->
-        match read at with Some term -> Costs.plus total (measure at ty term) | None -> total)
-      Costs.zero held
-  in
-  let measure_whole = sum_held (fun at ty term -> Amounts.compute_potential context at ty term)
+  let held = list_held_values context entry changed in
+  let measure_whole = measure_held_potential context held
   and measure_elements =
-    sum_held (fun _ ty term -> Amounts.compute_elements_potential context ty term)
+    sum_held held (fun _ ty term -> Amounts.compute_elements_potential context ty term)
   and holds_potential = List.exists (fun (ty, _) -> Amounts.has_potential context ty) held in
   lazy
     (let whole_on_entry = measure_whole entry in
@@ -587,6 +591,14 @@ let havoc context frame (changed : State.changed) =
   match (changed.changes_self, frame.self_type) with
   | true, Some ty -> { frame with self = Some (Facts.arrive context frame "loop" ty) }
   | _ -> frame
+
+let forget_changes context frame (changed : State.changed) =
+  let measure = measure_held_potential context (list_held_values context frame changed) in
+  let forgotten = havoc context frame changed in
+  Operations.spend context forgotten (fun (counter : Costs.counter) ->
+      if counter.amortized then
+        Costs.minus (Costs.at_least_zero (measure forgotten)) (measure frame)
+      else Costs.zero)
 
 let list_validity_obligations context (entry : State.frame) (changed : State.changed) =
   let find_obligation described ty before read =
@@ -939,14 +951,23 @@ let prove_cursor_loop ~(for_loop : for_loop) context (frame : State.frame)
       measures
   in
   let entry_measure = match find_measured frame with Some [ entry ] -> Some entry | _ -> None in
-  let is_amortized =
-    List.exists
-      (fun (next_clauses : State.clauses) ->
-        List.exists (fun (cost : Mir.cost) -> cost.amortized) next_clauses.costs)
+  let next_costs =
+    List.concat_map
+      (fun (next_clauses : State.clauses) -> next_clauses.costs)
       (Contracts.list_declared_clauses contract)
   in
+  let states_only_amortized_cost =
+    List.exists
+      (fun (cost : Mir.cost) ->
+        cost.amortized
+        && not
+             (List.exists
+                (fun (other : Mir.cost) -> (not other.amortized) && other.resource = cost.resource)
+                next_costs))
+      next_costs
+  in
   let holds =
-    if is_amortized then for_loop.compute_changed_in frame
+    if states_only_amortized_cost then for_loop.compute_changed_in frame
     else for_loop.compute_changed_by_body frame
   in
   prove_receiving_loop ~for_loop context frame ~element_type

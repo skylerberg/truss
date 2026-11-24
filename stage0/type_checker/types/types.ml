@@ -531,7 +531,7 @@ let costs_imply ~(provided : cost list) ~(required : cost list) =
       List.exists
         (fun (provided : cost) ->
           provided.resource = required.resource
-          && (required.amortized || not provided.amortized)
+          && provided.amortized = required.amortized
           && bound_implies provided.bound required.bound)
         provided)
     required
@@ -810,6 +810,7 @@ type type_interface = {
   opaque : bool;
   is_tuple : bool;
   derives : Path.t list;
+  declares_potential : bool;
 }
 
 let substitute_fields interface arguments fields =

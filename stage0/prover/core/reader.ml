@@ -1056,21 +1056,31 @@ and read_statement context frame run (statement : Mir.statement) =
         term;
       Some frame
   | Provide { target; provided; body; _ } ->
+      let provider_potential =
+        lazy
+          (List.fold_left
+             (fun total (implementation : Mir.provided) ->
+               Costs.plus total
+                 (Amounts.compute_potential context frame
+                    (Facts.substitute_type context frame implementation.type_)
+                    (read_operand context
+                       { frame with makes_obligations = false }
+                       run implementation.value)))
+             Costs.zero provided)
+      in
       let refresh frame =
-        List.fold_left
-          (fun frame place ->
-            let root = { (expand_place frame run place) with Mir.projections = [] } in
-            let ty = compute_place_type context frame run root in
-            let refreshed = refresh_place context frame ty (make_passed_place context run root) in
-            let measure (at : State.frame) =
-              Amounts.compute_potential context at ty
-                (read_place context { at with makes_obligations = false } run root)
-            in
-            Operations.spend context refreshed (fun (counter : Costs.counter) ->
-                if counter.amortized then Costs.minus (measure refreshed) (measure frame)
-                else Costs.zero))
-          frame
-          (list_mut_provided_places provided)
+        Operations.spend context
+          (List.fold_left
+             (fun frame place ->
+               let root = { (expand_place frame run place) with Mir.projections = [] } in
+               refresh_place context frame
+                 (compute_place_type context frame run root)
+                 (make_passed_place context run root))
+             frame
+             (list_mut_provided_places provided))
+          (fun (counter : Costs.counter) ->
+            if counter.amortized || counter.counting <> Units then Costs.zero
+            else Lazy.force provider_potential)
       in
       let read =
         read_providing context run provided ~refresh (fun () -> read_block context frame run body)
@@ -1152,7 +1162,7 @@ and read_statement context frame run (statement : Mir.statement) =
           (List.mapi (fun index branch -> (index, branch)) branches)
       in
       let forget_other_branches (index, (exited : State.frame)) =
-        Loops.havoc context exited
+        Loops.forget_changes context exited
           (compute_changes run exited (List.filteri (fun other _ -> other <> index) branches))
       in
       let joined =

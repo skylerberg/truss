@@ -222,6 +222,7 @@ type type_interface = {
   opaque : bool;
   is_tuple : bool;
   derives : Path.t list;
+  declares_potential : bool;
 }
 
 val instantiate_fields : type_interface -> argument list -> field list option

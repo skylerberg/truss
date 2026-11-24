@@ -117,18 +117,33 @@ type promise = {
   inherited : bool;
 }
 
-let list_promises context (source : State.source) locals (costs : Mir.cost list) ~inherited =
+let is_capability_implementation (lookups : Lookups.t) (path : Path.t) =
+  match path with
+  | Method { owner; _ } -> (
+      match Interface.Definition.find_impl_interface lookups.interface owner with
+      | Some impl ->
+          Resolve.Names.find_kind lookups.interface.names impl.implements.trait
+          = Some Resolve.Names.Capability
+      | None -> false)
+  | _ -> false
+
+let list_promises context (source : State.source) locals (costs : Mir.cost list) ~inherited
+    ~counts_provider_potential =
   List.filter_map
     (fun (cost : Mir.cost) ->
       match Contracts.find_resource cost ~locals with
       | None ->
           Facts.raise_unsupported (Facts.locate context source cost.origin) "this `calls` target"
       | Some resource ->
+          let counting = Lambdas.classify_counting cost in
           let counter =
             {
               Costs.resource;
-              counting = Lambdas.classify_counting cost;
-              amortized = cost.amortized;
+              counting;
+              amortized =
+                (cost.amortized
+                || counts_provider_potential && counting = Units
+                   && match resource with Metric _ -> true | Calls _ -> false);
             }
           in
           (match (cost.resource, resource) with
@@ -426,12 +441,15 @@ let translate_run ~proof ?inherited ~substitution ~condition ~assumes_panic_cond
     | Some { form; _ } -> form
     | None -> Facts.raise_bug "`%s` has a body and no MIR" source.name
   in
+  let counts_provider_potential = is_capability_implementation lookups path in
   let promised =
     list_promises context source start.locals contract.costs ~inherited:false
+      ~counts_provider_potential
     @
     match find_trait_frame start ~result:None with
     | Some (clauses, inside) ->
         list_promises context clauses.callee inside.locals clauses.costs ~inherited:true
+          ~counts_provider_potential
     | None -> []
   in
   context.counters <-
@@ -842,7 +860,7 @@ let prove_restated_method context (start : State.frame) ~at ~impl_interface ~tra
           in
           let promised =
             list_promises context clauses.callee (reading entry).locals clauses.costs
-              ~inherited:true
+              ~inherited:true ~counts_provider_potential:false
           in
           context.counters <-
             Contracts.deduplicate_counters (List.map (fun promise -> promise.counter) promised);

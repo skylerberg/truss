@@ -4,6 +4,11 @@ type target = Through of Logic.term | Capability of Path.t | Capability_method o
 type resource = Metric of Language.Metric.t | Calls of target
 type counting = Units | At_most | Exactly
 type counter = { resource : resource; counting : counting; amortized : bool }
+type counted = No_potential | Potential_change | Potential_growth
+type charge = { amount : Logic.term; counted : counted }
+
+let make_counted_charge (counter : counter) amount =
+  { amount; counted = (if counter.amortized then Potential_change else No_potential) }
 
 let least_amount = function
   | Metric Time -> Logic.Integer Z.one

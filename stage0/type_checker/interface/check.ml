@@ -260,7 +260,12 @@ let check_derives state (interface : Types.type_interface) (clauses : Syntax.typ
             if Well_known.is Plain trait then Impls.is_plain state.lookups ~list_bounds self
             else Impls.is_copyable state.lookups ~list_bounds self
           in
-          if not holds then
+          if Well_known.is Plain trait && interface.declares_potential then
+            Checking.report state Cannot_derive state.spans.(written.id)
+              "A type that declares a `cost potential` is not `Plain`: an implicit copy would \
+               duplicate the potential, and a caller could spend it twice. Derive `Copyable`, \
+               whose `copy()` pays for the potential of the copy."
+          else if not holds then
             Checking.report state Cannot_derive state.spans.(written.id)
               (Printf.sprintf "A field of this type is not `%s`, so the type cannot be." shown)
         end
