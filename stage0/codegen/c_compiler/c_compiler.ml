@@ -2,6 +2,7 @@ type t = {
   command : string;
   identity : string;
   system : Libc.system;
+  x86_64_level : X86_64_level.t;
   added_flags : string list;
   debug_prefix_maps : (string * string) list;
   objects : string;
@@ -22,7 +23,7 @@ let identify command =
   | _ -> Error (command ^ " --version failed")
   | exception Unix.Unix_error _ -> Error ("cannot run " ^ command)
 
-let find ?(debug_prefix_maps = []) ~objects () =
+let find ?(debug_prefix_maps = []) ~x86_64_level ~objects () =
   let added_flags =
     match find_variable flags_variable with
     | Some flags -> List.filter (( <> ) "") (String.split_on_char ' ' flags)
@@ -34,7 +35,16 @@ let find ?(debug_prefix_maps = []) ~objects () =
         | command :: rest -> (
             match identify command with
             | Ok identity ->
-                Ok { command; identity; system; added_flags; debug_prefix_maps; objects }
+                Ok
+                  {
+                    command;
+                    identity;
+                    system;
+                    x86_64_level;
+                    added_flags;
+                    debug_prefix_maps;
+                    objects;
+                  }
             | Error error -> identify_first (error :: errors) rest)
       in
       identify_first []
@@ -60,9 +70,17 @@ let required_flags =
     "-fno-asynchronous-unwind-tables";
   ]
 
-let list_target_flags (system : Libc.system) =
-  (match system.architecture with X86_64 -> [ "-march=x86-64-v3" ] | Arm64 -> [])
-  @ match system.os with Linux -> [ "-fstack-clash-protection" ] | Macos -> []
+let show_x86_64_architecture : X86_64_level.t -> string = function
+  | V1 -> "x86-64"
+  | V2 -> "x86-64-v2"
+  | V3 -> "x86-64-v3"
+  | V4 -> "x86-64-v4"
+
+let list_target_flags compiler =
+  (match compiler.system.architecture with
+    | X86_64 -> [ "-march=" ^ show_x86_64_architecture compiler.x86_64_level ]
+    | Arm64 -> [])
+  @ match compiler.system.os with Linux -> [ "-fstack-clash-protection" ] | Macos -> []
 
 let list_link_flags compiler : Profile.t -> string list = function
   | Development -> compiler.added_flags
@@ -80,7 +98,7 @@ let list_profile_flags compiler : Profile.t -> string list = function
 
 let list_compile_flags compiler profile =
   list_profile_flags compiler profile
-  @ required_flags @ list_target_flags compiler.system @ list_link_flags compiler profile
+  @ required_flags @ list_target_flags compiler @ list_link_flags compiler profile
 
 let list_compilation_directory_flags : Profile.t -> string list = function
   | Development -> []

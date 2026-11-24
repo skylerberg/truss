@@ -1639,9 +1639,10 @@ Rules: [The registry](PACKAGES.md#the-registry).
 ## Target CPUs
 
 **An x86-64 program is built for the x86-64-v3 level:** AVX2, FMA, BMI1,
-BMI2, LZCNT, MOVBE, F16C, and the features of the levels below. An ARM64
-program is built for the C compiler's default: ARMv8.0 on Linux, and Apple
-silicon on macOS.
+BMI2, LZCNT, MOVBE, F16C, and the features of the levels below. A project's
+manifest can name another level, from `"v1"`, the baseline, to `"v4"`. An
+ARM64 program is built for the C compiler's default: ARMv8.0 on Linux, and
+Apple silicon on macOS.
 
 | Option | Consequence |
 |---|---|
@@ -1654,8 +1655,10 @@ silicon on macOS.
 |---|---|
 | The level changes no result. | Two float operations are fused only where the code calls `fused_multiply_add`, and the C compiler may not reorder float arithmetic. A cached test result holds at every level (*determinism*). |
 | A development build has the level of a release build. | At a lower level a test would run the C library's `fma` and rounding functions, and the released program the CPU's instructions. |
-| A program checks the CPU for each feature it was built for before `main` runs, and exits with status 126 after naming the first that is missing. | Without the check the program is killed by an illegal instruction signal, at whichever instruction the CPU lacks first, and neither the signal nor its address names the feature. Go's programs make the same check when they are built for a level above the baseline. |
-| The check reads the features that the C compiler assumed, not a list for one level. | A program built with `TRUSS_CFLAGS=-march=x86-64` then runs on every x86-64 CPU. |
+| A program checks the CPU for each feature it was built for before `main` runs, and exits with status 126 after naming one that is missing. | Without the check the program is killed by an illegal instruction signal, at whichever instruction the CPU lacks first, and neither the signal nor its address names the feature. Go's programs make the same check when they are built for a level above the baseline. |
+| The message names the highest level that the machine has. | The fix is then one line of the manifest, which an agent can write without knowing the CPU. |
+| The level is the project's, written in its manifest. | A program has one level, so a dependency cannot choose it, and a project deploys to machines that its manifest can record. An environment variable would be set again on every machine that builds. |
+| A manifest names a level, never a CPU or one feature. | The four levels are every value, so the check covers each one in full. A feature outside the levels would need a row of its own in the check, and a CPU's name is known only to the C compilers released after the CPU. |
 | ARM64 keeps the C compiler's default. | Raising the level on Linux gives the atomic instructions of ARMv8.1, and excludes the Cortex-A72 of the Raspberry Pi 4. |
 
 ## Omitted features

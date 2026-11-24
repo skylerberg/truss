@@ -310,7 +310,7 @@ let () =
   Codegen_support.test "an object that a build finds again is as new as that build" (fun () ->
       let directory = Filename.concat (Lazy.force Codegen_support.scratch) "aged-objects" in
       let c_compiler =
-        match C_compiler.find ~objects:directory () with
+        match C_compiler.find ~x86_64_level:X86_64_level.default ~objects:directory () with
         | Ok c_compiler -> c_compiler
         | Error message -> failwith message
       in
@@ -336,7 +336,7 @@ let () =
     (fun () ->
       let directory = Filename.concat (Lazy.force Codegen_support.scratch) "release-objects" in
       let c_compiler =
-        match C_compiler.find ~objects:directory () with
+        match C_compiler.find ~x86_64_level:X86_64_level.default ~objects:directory () with
         | Ok c_compiler -> c_compiler
         | Error message -> failwith message
       in
@@ -367,7 +367,7 @@ let () =
         match
           C_compiler.find
             ~debug_prefix_maps:[ ("example/", "packages/example/") ]
-            ~objects:directory ()
+            ~x86_64_level:X86_64_level.default ~objects:directory ()
         with
         | Ok c_compiler -> c_compiler
         | Error message -> failwith message
@@ -391,7 +391,7 @@ let () =
     (fun () ->
       let directory = Filename.concat (Lazy.force Codegen_support.scratch) "startup-objects" in
       let c_compiler =
-        match C_compiler.find ~objects:directory () with
+        match C_compiler.find ~x86_64_level:X86_64_level.default ~objects:directory () with
         | Ok c_compiler -> c_compiler
         | Error message -> failwith message
       in
@@ -499,14 +499,16 @@ let () =
               | status, _, errors -> Codegen_support.fail "status %d (%s)" status errors)))
     [ ("development", Backend.Development); ("release", Release) ]
 
-let expect_x86_64_object ~added_flags text =
-  let previous_flags = Option.value (Sys.getenv_opt "TRUSS_CFLAGS") ~default:"" in
-  Unix.putenv "TRUSS_CFLAGS" (String.concat " " (previous_flags :: added_flags));
-  let c_compiler = C_compiler.find ~objects:(Lazy.force Codegen_support.scratch) () in
-  Unix.putenv "TRUSS_CFLAGS" previous_flags;
-  match c_compiler with
+let expect_x86_64_features x86_64_level ~assumed ~not_assumed () =
+  match C_compiler.find ~x86_64_level ~objects:(Lazy.force Codegen_support.scratch) () with
   | Error message -> failwith message
   | Ok c_compiler -> (
+      let text =
+        Printf.sprintf "#if %s\n#error \"the object assumes other features\"\n#endif\n"
+          (String.concat " || "
+             (List.map (Printf.sprintf "!defined(%s)") assumed
+             @ List.map (Printf.sprintf "defined(%s)") not_assumed))
+      in
       match
         C_compiler.For_testing.compile c_compiler Release ~text
           ~output:(Codegen_support.make_scratch_path "x86-64-object")
@@ -518,15 +520,19 @@ let () =
   match Codegen_support.host.architecture with
   | Arm64 -> ()
   | X86_64 ->
-      Codegen_support.test "an x86-64 object is compiled for x86-64-v3" (fun () ->
-          expect_x86_64_object ~added_flags:[]
-            "#if !(defined(__AVX2__) && defined(__FMA__) && defined(__BMI2__) && \
-             defined(__LZCNT__) && defined(__MOVBE__) && defined(__F16C__))\n\
-             #error \"the object is compiled for a level below x86-64-v3\"\n\
-             #endif\n");
-      Codegen_support.test "TRUSS_CFLAGS lowers the level an x86-64 object is compiled for"
-        (fun () ->
-          expect_x86_64_object ~added_flags:[ "-march=x86-64" ]
-            "#if defined(__SSE3__)\n\
-             #error \"the object is compiled for a level above the x86-64 baseline\"\n\
-             #endif\n")
+      List.iter
+        (fun (x86_64_level, assumed, not_assumed) ->
+          Codegen_support.test
+            (Printf.sprintf "an x86-64 object of level %s assumes the features of that level only"
+               (X86_64_level.show x86_64_level))
+            (expect_x86_64_features x86_64_level ~assumed ~not_assumed))
+        [
+          (V1, [ "__SSE2__" ], [ "__SSE3__" ]);
+          (V2, [ "__SSSE3__"; "__SSE4_2__"; "__POPCNT__" ], [ "__AVX__" ]);
+          ( V3,
+            [ "__AVX2__"; "__FMA__"; "__BMI2__"; "__LZCNT__"; "__MOVBE__"; "__F16C__" ],
+            [ "__AVX512F__" ] );
+          ( V4,
+            [ "__AVX512F__"; "__AVX512DQ__"; "__AVX512CD__"; "__AVX512BW__"; "__AVX512VL__" ],
+            [ "__AVX10_2__" ] );
+        ]

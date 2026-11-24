@@ -20,6 +20,7 @@
   solver
   prover
   c_compiler
+  x86_64_level
   backend
   lowered
   database))

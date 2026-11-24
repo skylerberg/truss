@@ -710,6 +710,57 @@ let () =
       | exception Manifest.Malformed { line = 4; _ } -> ()
       | _ -> fail "accepted")
 
+let () =
+  test "the project's [build] x86_64_level gives the level its programs are built for" (fun () ->
+      let root =
+        make_directory
+          [
+            ("truss.toml", "[project]\n[build]\nx86_64_level = \"v1\"\n");
+            ("one/truss.toml", make_manifest "one");
+          ]
+      in
+      let project = Cli.Command_packages.load (Filename.concat root "one") in
+      if Workspace.x86_64_level (fst project) <> V1 then fail "read another level");
+  test "a project without an x86-64 level builds its programs for v3" (fun () ->
+      if Workspace.x86_64_level (fst (Cli.Command_packages.load (make_package []))) <> V3 then
+        fail "read another level");
+  test "an x86-64 level in a package's manifest that is not its project's is a problem" (fun () ->
+      let root =
+        make_directory
+          [
+            ("truss.toml", "[project]\n");
+            ("one/truss.toml", make_manifest "one" ^ "[build]\nx86_64_level = \"v1\"\n");
+          ]
+      in
+      let project = Cli.Command_packages.load root in
+      let problems = Workspace.problems (fst project) in
+      if
+        not
+          (List.exists
+             (fun (problem : Project.problem) ->
+               problem.file = "one/truss.toml"
+               && String.includes ~affix:"A build's x86-64 level is its project's" problem.message)
+             problems)
+      then fail "problems: %s" (String.concat "; " (List.map Project.show_problem problems));
+      if Workspace.x86_64_level (fst project) <> V3 then fail "read the package's level");
+  List.iter
+    (fun (written, expected) ->
+      test (Printf.sprintf "an x86-64 level written as %s is malformed, at its line" written)
+        (fun () ->
+          match
+            Manifest.parse (Printf.sprintf "[project]\n[build]\nx86_64_level = %s\n" written)
+          with
+          | exception Manifest.Malformed { line = 3; message }
+            when String.includes ~affix:expected message ->
+              ()
+          | exception Manifest.Malformed { line; message } -> fail "line %d: %s" line message
+          | _ -> fail "accepted"))
+    [ ({|"v5"|}, {|`"v1"`, `"v2"`, `"v3"`, `"v4"`|}); ("3", "is a string in quotes") ];
+  test "a key of [build] other than x86_64_level is malformed, at its line" (fun () ->
+      match Manifest.parse "[project]\n[build]\nlevel = \"v1\"\n" with
+      | exception Manifest.Malformed { line = 3; _ } -> ()
+      | _ -> fail "accepted")
+
 let edit start stop replacement = Diagnostic.replace (Source.make_span start stop) replacement
 
 let make_diagnostic ~fixes start stop =
