@@ -296,12 +296,6 @@ let () =
     Fixtures.Ownership.slice_of_an_own_parameter_returned "ownership.view_escapes";
   expect_accepted "a view copied out of an `own` parameter can be returned"
     Fixtures.Ownership.view_field_of_an_own_parameter_returned;
-  expect_rejected "an `any` that stores a view of a local cannot be returned"
-    Fixtures.Ownership.any_runner_viewing_a_local "ownership.view_escapes";
-  expect_rejected "the place that an `any` views cannot be mutated while the `any` is live"
-    Fixtures.Ownership.push_while_an_any_views_the_list "ownership.mutated_while_viewed";
-  expect_accepted "an `any` made from owned data can be returned"
-    Fixtures.Ownership.any_runner_of_owned_items;
   expect_rejected "a capturing lambda cannot be returned as a wider function type"
     Fixtures.Ownership.capturing_lambda_returned_as_a_wider_type "ownership.view_escapes";
   expect_rejected "the value of an `if` has the views of its branches' tail expressions"

@@ -42,13 +42,15 @@ let rec list_mentioned_paths = function
   | Types.Function { inputs; output; _ } ->
       List.concat_map (fun (_, type_) -> list_mentioned_paths type_) inputs
       @ list_mentioned_paths output
-  | Types.Any trait -> trait.trait :: List.concat_map list_argument_paths trait.trait_arguments
   | Types.Projection { base; _ } -> list_mentioned_paths base
   | _ -> []
 
 and list_argument_paths = function
   | Types.Type type_ -> list_mentioned_paths type_
   | Types.Value _ -> []
+
+let list_trait_paths (trait : Types.trait_reference) =
+  trait.trait :: List.concat_map list_argument_paths trait.trait_arguments
 
 let find_visibility (state : Checking.state) (path : Path.t) =
   match path with
@@ -58,7 +60,7 @@ let find_visibility (state : Checking.state) (path : Path.t) =
       | None -> None)
   | _ -> None
 
-let check_private_in_public state ~visibility types (span : Source.Definition_span.t) =
+let check_private_in_public state ~visibility paths (span : Source.Definition_span.t) =
   if Resolve.Names.is_public visibility then
     List.iter
       (fun path ->
@@ -70,7 +72,7 @@ let check_private_in_public state ~visibility types (span : Source.Definition_sp
                   `%s` public, or this definition not."
                  (Path.show path) (Path.show path))
         | _ -> ())
-      (List.sort_uniq Path.compare (List.concat_map list_mentioned_paths types))
+      (List.sort_uniq Path.compare paths)
 
 let check_method_location (state : Checking.state) (head : Syntax.type_head) =
   let owner =
@@ -98,13 +100,14 @@ let check_method_location (state : Checking.state) (head : Syntax.type_head) =
       | _ -> ())
   | _ -> ()
 
-let list_signature_types (signature : Types.signature) =
-  Types.extract_result_type signature.output
-  :: List.map (fun (parameter : Types.parameter_info) -> parameter.type_) signature.parameters
+let list_signature_paths (signature : Types.signature) =
+  List.concat_map list_mentioned_paths
+    (Types.extract_result_type signature.output
+    :: List.map (fun (parameter : Types.parameter_info) -> parameter.type_) signature.parameters)
   @ List.concat_map
       (fun (generic : Types.generic) ->
         match generic.kind with
-        | Type_generic bounds -> List.map (fun bound -> Types.Any bound) bounds
+        | Type_generic bounds -> List.concat_map list_trait_paths bounds
         | _ -> [])
       signature.generics
 
@@ -548,7 +551,7 @@ let check (state : Checking.state) =
             in
             if not (has_body || is_restated) then check_defaults_without_body state signature;
             check_restated state signature ~has_body written ~trait_path:container.path trait;
-            check_private_in_public state ~visibility (list_signature_types written)
+            check_private_in_public state ~visibility (list_signature_paths written)
               state.spans.(name.id)
         | { kind = Impl { trait_; _ }; _ }, Impl_interface impl ->
             Impl_checks.check_impl_method state name
@@ -568,7 +571,7 @@ let check (state : Checking.state) =
           match signature.name with
           | Plain_name name | Member_name (_, name) -> state.spans.(name.id)
         in
-        check_private_in_public state ~visibility (list_signature_types elaborated) span
+        check_private_in_public state ~visibility (list_signature_paths elaborated) span
     | None, Law_proof { law; type_; _ }, Law_proof_interface { generics; trait; for_type; _ } -> (
         (match lookups.find_trait_header trait.trait with
         | Some header when not (List.mem law.text header.laws) ->
@@ -610,15 +613,17 @@ let check (state : Checking.state) =
         check_derives state interface clauses resolved;
         if visibility = Public then
           check_private_in_public state ~visibility
-            (Types.list_field_types interface)
+            (List.concat_map list_mentioned_paths (Types.list_field_types interface))
             state.spans.(name.id)
     | None, Trait { name; requires; _ }, Trait_interface trait ->
         check_trait_cycle state requires;
         check_private_in_public state ~visibility
-          (List.map (fun (bound : Types.trait_reference) -> Types.Any bound) trait.requires)
+          (List.concat_map list_trait_paths trait.requires)
           state.spans.(name.id)
     | None, Constant { name = Plain_name name; _ }, Constant_interface constant ->
-        check_private_in_public state ~visibility [ constant.constant_type ] state.spans.(name.id)
+        check_private_in_public state ~visibility
+          (list_mentioned_paths constant.constant_type)
+          state.spans.(name.id)
     | None, Impl { trait_; members; _ }, Impl_interface impl ->
         Impl_checks.check_impl state members impl trait_
     | None, Constant { name = Member_name (head, _); _ }, _ -> check_method_location state head

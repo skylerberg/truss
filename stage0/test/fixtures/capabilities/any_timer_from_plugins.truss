@@ -1,6 +1,0 @@
-use framework.sources
-use plugins.timers
-
-fn f() -> any sources.Source {
-  any timers.Timer()
-}

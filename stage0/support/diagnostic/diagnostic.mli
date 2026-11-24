@@ -200,7 +200,6 @@ module Code : sig
     | Read_only_owning_parameter
     | Unknown_associated_type
     | Unknown_associated_capability
-    | Associated_type_not_fixed
 
   type patterns = Not_covered | Unreachable_arm | Unreachable_alternative | Refutable
 

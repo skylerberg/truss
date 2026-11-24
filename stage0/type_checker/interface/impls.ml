@@ -155,89 +155,6 @@ and match_arguments ~variables substitution patterns arguments =
       (Some substitution) patterns arguments
 
 type solution = Evidence of Types.evidence | Built_in | Accepted of Types.ty
-type through_any = Callable | Has_generics | Names_self
-
-type dispatched = {
-  declared_by : Types.trait_reference;
-  trait_method : Types.trait_method;
-  through_any : through_any;
-}
-
-let classify_dispatched_signature ~self (signature : Types.signature) =
-  let names_self type_ =
-    let mentions_self = ref false in
-    ignore
-      (Types.map
-         (function
-           | Types.Projection { base = Types.Parameter base; _ } as projected when base = self ->
-               Some projected
-           | Types.Parameter parameter as named when parameter = self ->
-               mentions_self := true;
-               Some named
-           | _ -> None)
-         type_);
-    !mentions_self
-  in
-  if signature.generics <> [] || signature.capability_parameters <> [] then Has_generics
-  else if
-    List.exists (fun (info : Types.parameter_info) -> names_self info.type_) signature.parameters
-    || names_self (Types.extract_result_type signature.output)
-  then Names_self
-  else Callable
-
-let list_dispatched_methods lookups (any : Types.trait_reference) =
-  let self = Types.make_self_parameter any.trait in
-  let traits =
-    List.fold_left
-      (fun traits (bound : Types.trait_reference) ->
-        if
-          List.exists
-            (fun (listed : Types.trait_reference) -> Path.equal listed.trait bound.trait)
-            traits
-        then traits
-        else traits @ [ bound ])
-      []
-      (Properties.list_bound_closure lookups ~self:(Types.Parameter self) any)
-  in
-  List.concat_map
-    (fun (declared_by : Types.trait_reference) ->
-      match Definition.find_trait_interface lookups declared_by.trait with
-      | None -> []
-      | Some interface ->
-          let substitution =
-            Types.make_trait_substitution interface.trait_generics ~self:(Types.Parameter self)
-              declared_by
-          in
-          List.filter_map
-            (fun (trait_method : Types.trait_method) ->
-              if trait_method.method_receiver = Static then None
-              else
-                Some
-                  {
-                    declared_by;
-                    trait_method;
-                    through_any =
-                      classify_dispatched_signature ~self
-                        (Types.substitute_signature substitution
-                           (Definition.read_method_signature lookups ~owner:declared_by.trait
-                              trait_method));
-                  })
-            interface.methods)
-    traits
-
-let classify_through_any lookups ~(any : Types.trait_reference) ~(trait : Path.t)
-    (trait_method : Types.trait_method) =
-  match
-    List.find_opt
-      (fun (dispatched : dispatched) ->
-        Path.equal dispatched.declared_by.trait trait && dispatched.trait_method = trait_method)
-      (list_dispatched_methods lookups any)
-  with
-  | Some dispatched -> dispatched.through_any
-  | None ->
-      raise_bug "`any %s` dispatches no method %s of %s" (Types.show_trait any)
-        trait_method.method_name (Path.show trait)
-
 type bounds = Properties.Bounds.t
 
 let list_no_bounds = Properties.Bounds.none
@@ -374,10 +291,6 @@ let rec find_evidence lookups ~(list_bounds : bounds) ?(depth = 0) ?(checks_cond
             if list_matching_bounds lookups ~list_bounds type_ wanted <> [] then
               Some (Evidence Bound)
             else None
-        | Types.Any _ ->
-            if list_matching_bounds lookups ~list_bounds type_ wanted <> [] then
-              Some (Evidence Dynamic)
-            else None
         | Types.Named _ ->
             List.find_map
               (fun { impl_path; impl; substitution } ->
@@ -441,25 +354,13 @@ and list_matching_bounds lookups ~list_bounds (type_ : Types.ty) (wanted : Types
            | _ -> false)
          wanted.trait_arguments actual_arguments
   in
-  let matches ~base ~associated (bound : Types.trait_reference) =
-    Path.equal bound.trait wanted.trait
-    && arguments_match bound.trait_arguments
-    && has_matching_associated_types lookups ~list_bounds wanted ~base associated
-  in
-  match type_ with
-  | Types.Any trait ->
-      List.filter
-        (fun (bound : Types.trait_reference) ->
-          matches ~base:None
-            ~associated:
-              (if Path.equal bound.trait trait.trait then trait.associated else bound.associated)
-            bound)
-        (Properties.list_bound_closure lookups ~self:type_ trait)
-  | _ ->
-      List.filter
-        (fun (bound : Types.trait_reference) ->
-          matches ~base:(Some type_) ~associated:bound.associated bound)
-        (Properties.list_known_bounds lookups ~list_bounds type_)
+  List.filter
+    (fun (bound : Types.trait_reference) ->
+      Path.equal bound.trait wanted.trait
+      && arguments_match bound.trait_arguments
+      && has_matching_associated_types lookups ~list_bounds wanted ~base:(Some type_)
+           bound.associated)
+    (Properties.list_known_bounds lookups ~list_bounds type_)
 
 and has_matching_associated_types lookups ~list_bounds (wanted : Types.trait_reference) ~base fixed
     =
@@ -508,13 +409,6 @@ and project_declared_type lookups ~list_bounds ?defining type_ (trait : Types.tr
           with
           | Some fixed -> Some fixed
           | None -> Some (Types.Projection { base = type_; trait; name }))
-      | Some (Evidence Dynamic) -> (
-          match type_ with
-          | Types.Any any ->
-              List.find_map
-                (fun (bound : Types.trait_reference) -> List.assoc_opt name bound.associated)
-                (any :: Properties.list_bound_closure lookups ~self:type_ any)
-          | _ -> None)
       | Some Built_in -> None
       | Some (Accepted unknown) -> Some unknown
       | None -> None)
@@ -544,7 +438,7 @@ and project_capability_set lookups ~list_bounds ?(depth = 0) type_ (trait : Type
                     (List.assoc_opt name interface.capability_sets)))
         | None -> Types.no_capabilities)
     | Some (Evidence Bound) | Some (Accepted (Types.Variable _)) | None -> projection
-    | Some (Evidence Dynamic | Built_in | Accepted _) -> Types.no_capabilities
+    | Some (Built_in | Accepted _) -> Types.no_capabilities
 
 and normalize_capabilities lookups ~list_bounds ?depth (capabilities : Types.capability_set) =
   let reads_an_impl : Types.capability -> bool = function
@@ -631,8 +525,7 @@ and decide_bound_condition lookups ~list_bounds ~depth (bound : Types.bound_cond
                      (list_required_bounds interface.impl_generics substitution))
             | None -> None)
         | _ -> None)
-  | Types.Any _ | Types.Function _ | Types.Never | Types.Integer ->
-      if holds () then Some [] else None
+  | Types.Function _ | Types.Never | Types.Integer -> if holds () then Some [] else None
 
 and normalize lookups ~list_bounds ?defining (type_ : Types.ty) : Types.ty =
   let normalize = normalize lookups ~list_bounds ?defining in
@@ -785,7 +678,7 @@ let resolve_evidence lookups substitution ~self_type ~trait (evidence : Types.ev
       with
       | Some (Evidence evidence) -> evidence
       | Some (Built_in | Accepted _) | None -> Bound)
-  | (Impl _ | Dynamic) as evidence -> evidence
+  | Impl _ as evidence -> evidence
 
 let read_scope (lookups : Lookups.t) (key : Resolve.Names.key) :
     Environment.known_bounds Environment.scope =

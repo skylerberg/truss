@@ -48,10 +48,7 @@ and show_expression (node : Core.expression) =
         match callee.target with
         | Trait_method { self_type; evidence; _ } ->
             Printf.sprintf " for %s by %s" (Types.show self_type)
-              (match evidence with
-              | Impl { impl; _ } -> Path.show impl
-              | Bound -> "a bound"
-              | Dynamic -> "any")
+              (match evidence with Impl { impl; _ } -> Path.show impl | Bound -> "a bound")
         | _ -> ""
       in
       Printf.sprintf "%s%s(%s)"
@@ -366,7 +363,7 @@ let () =
             Some
               (Printf.sprintf "%s(%s) for %s by %s" (Language.Metric.show metric)
                  (Core_lint.show_target method_) (Types.show self_type)
-                 (match evidence with Bound -> "a bound" | Impl _ -> "an impl" | Dynamic -> "any"))
+                 (match evidence with Bound -> "a bound" | Impl _ -> "an impl"))
         | Method_cost { metric; method_ } ->
             Some
               (Printf.sprintf "%s(%s)" (Language.Metric.show metric) (Core_lint.show_target method_))

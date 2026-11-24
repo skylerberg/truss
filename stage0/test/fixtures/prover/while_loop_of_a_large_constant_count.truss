@@ -1,0 +1,9 @@
+fn f() -> UInt64
+  cost time O(1)
+{
+  var index: UInt64 = 0
+  while index < 1114112 {
+    index = index + 1
+  }
+  index
+}

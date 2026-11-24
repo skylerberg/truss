@@ -3,9 +3,6 @@ type static_ =
   | Static_trait of Path.t * Types.argument list option
   | Static_capability of Path.t
 
-val check_grants_when_final :
-  State.state -> Source.Definition_span.t -> Types.ty -> Types.trait_reference -> unit
-
 val read_type_generics : State.state -> Path.t -> Types.generic list
 val make_fresh_trait_reference : State.state -> Path.t -> Types.trait_reference
 val instantiate_type : State.state -> written:Syntax.id -> Path.t -> Types.argument list

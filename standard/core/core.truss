@@ -271,6 +271,8 @@ public trait Model {
   fn model(self) -> Self.Value
 }
 
+public let maximum_length: UInt64 = 9223372036854775807
+
 public trait Index {
   type Key
   type Output

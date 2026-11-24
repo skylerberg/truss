@@ -1,0 +1,9 @@
+type Settings(retries: Int64 = 3, levels: List[Int64] = [1, 2], verbosity: UInt8)
+  derives Default
+
+fn fresh() -> Settings
+  cost time O(1)
+  cost allocations <= 1
+{
+  Settings.default()
+}

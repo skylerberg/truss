@@ -120,7 +120,6 @@ let build_debug env ty =
         ~as_text:(classify_form ty = Text)
   | _, Handle -> write_output_text "Handle"
   | _, Shared _ -> write_output_text "Shared"
-  | _, Any -> write_output_text "any"
   | _, Storage element ->
       write_list element ~index_element:(Storage.index_element value)
         ~count:(Copy (Storage.project_length value))
@@ -136,7 +135,6 @@ let build_debug env ty =
       | Named { path; _ }, Record fields ->
           write_fields (Path.show_name path) fields (fun field ->
               Lowered.project value (Field field))
-      | _, Record _ -> raise_bug "%s has the shape of a record and no name" (Ground.to_string ty)
       | _, Array (element, count) ->
           write_list element
             ~index_element:(fun index -> Lowered.project value (Index index))

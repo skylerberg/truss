@@ -1,0 +1,7 @@
+fn five() -> Int64 {
+  5
+}
+
+fn f() {
+  five() = 1
+}

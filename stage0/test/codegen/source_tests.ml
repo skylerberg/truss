@@ -348,8 +348,8 @@ let () =
       match Option.map list_scaled_copies (find_instance "scaled_or_panic" panicking) with
       | Some [ false ] -> ()
       | _ -> Codegen_support.fail "scaled_or_panic calls no copy of scaled that checks");
-  Codegen_support.test "a call through `any` in a copy that assumes its condition is unreachable"
-    (fun () ->
+  Codegen_support.test
+    "a call of a function value in a copy that assumes its condition is unreachable" (fun () ->
       let small =
         Lowered.Item.make_code
           (Top { module_ = Codegen_support.example; name = "small" })
@@ -364,7 +364,7 @@ let () =
       in
       let _, backend =
         Codegen_support.load ~profile:Release ~roots:[ small ]
-          Fixtures.Source.call_through_any_in_a_copy_that_assumes_its_condition
+          Fixtures.Source.call_of_a_function_value_in_a_copy_that_assumes_its_condition
       in
       if
         not

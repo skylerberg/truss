@@ -352,15 +352,6 @@ let () =
            [
              ({ owner = None; name = "framework" }, [ Grant.Prelude "Clock" ]);
              ({ owner = None; name = "plugins" }, [ Grant.Prelude "Clock" ]);
-           ]));
-  Harness.test "an impl of a dependency behind an `any` value can use only the granted capabilities"
-    (fun () ->
-      expect_codes ~expected:[ "capabilities.not_granted" ]
-        (list_codes_with_grants
-           [ ("app.main", Fixtures.Capabilities.any_timer_from_plugins); sources; timers ]
-           [
-             ({ owner = None; name = "framework" }, [ Grant.Prelude "Clock" ]);
-             ({ owner = None; name = "plugins" }, []);
            ]))
 
 let ledger = ("store.ledger", Fixtures.Capabilities.ledger_ledger)
@@ -629,11 +620,7 @@ let () =
   Harness.test "a method that Cursor provides runs where the cursor's `Uses` are available"
     (fun () -> expect_fine (readings ^ Fixtures.Capabilities.count_of_readings_using_meter));
   Harness.test "a cursor whose `next` uses no capability needs none" (fun () ->
-      expect_fine Fixtures.Capabilities.counted_cursor);
-  Harness.test "a cursor whose `next` uses a capability cannot be an any value" (fun () ->
-      expect_one_diagnostic
-        (readings ^ Fixtures.Capabilities.any_cursor_of_readings)
-        "types.no_impl")
+      expect_fine Fixtures.Capabilities.counted_cursor)
 
 let feed = Fixtures.Capabilities.feed
 
@@ -697,14 +684,7 @@ let () =
       expect_fine (feed ^ folded ^ Fixtures.Capabilities.fold_of_a_counter_using_meter);
       expect_one_diagnostic
         (feed ^ folded ^ Fixtures.Capabilities.fold_of_a_gauge_without_uses)
-        "capabilities.not_available");
-  Harness.test "an any value hides only a type whose associated capability sets are empty"
-    (fun () ->
-      expect_fine (feed ^ Fixtures.Capabilities.any_feed_of_a_counter);
-      expect_one_diagnostic (feed ^ Fixtures.Capabilities.any_feed_of_a_gauge) "types.no_impl";
-      expect_one_diagnostic
-        (feed ^ Fixtures.Capabilities.any_feed_of_a_generic_source)
-        "types.no_impl")
+        "capabilities.not_available")
 
 let () =
   Harness.test "an impl cannot take only the callbacks that terminate where its trait takes any"
@@ -900,11 +880,6 @@ let () =
     (fun () ->
       expect_one_diagnostic
         Fixtures.Capabilities.function_value_of_a_function_that_panics_unless_a_condition_on_values
-        "capabilities.not_available" ~says:"This call uses `Panic`");
-  Harness.test "a call through `any` of a method that panics unless a condition uses `Panic`"
-    (fun () ->
-      expect_one_diagnostic
-        Fixtures.Capabilities.call_through_any_of_a_method_that_panics_unless_a_condition_on_values
         "capabilities.not_available" ~says:"This call uses `Panic`");
   Harness.test "a bound names the time of no callback that may run forever" (fun () ->
       expect_one_diagnostic Fixtures.Capabilities.time_of_a_callback_that_runs_forever

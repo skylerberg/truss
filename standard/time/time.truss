@@ -239,7 +239,10 @@ impl Negate for Duration {
 }
 
 impl Default for Duration {
-  fn default() -> Duration {
+  fn default() -> Duration
+    cost time O(1)
+    cost allocations == 0
+  {
     Duration.zero
   }
 }

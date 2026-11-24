@@ -826,28 +826,50 @@ let call_contract context (frame : State.frame) (site : Invocation.site) (invoca
       | `Returns -> Amounts.compute_potential context after result_type result)
       values
   in
+  let declared_clauses = Contracts.list_declared_clauses contract in
+  let method_cost =
+    lazy
+      (if Laws.has_method_cost context invocation.callee path then
+         Some (fun metric -> Amounts.compute_method_cost context frame metric invocation.callee)
+       else None)
+  in
+  let states_cost metric =
+    Option.is_some (Lazy.force method_cost)
+    || List.exists
+         (fun (clauses : State.clauses) ->
+           List.exists (fun (cost : Mir.cost) -> cost.resource = Metric metric) clauses.costs)
+         declared_clauses
+  in
   let after =
     Operations.spend context after (fun counter ->
-        match (invocation.callee, counter.resource) with
-        | Capability_method _, Calls _ ->
-            Amounts.compute_step_amount context after invocation values counter
-        | _ ->
-            let method_cost =
-              if Laws.has_method_cost context invocation.callee path then
-                Some
-                  (fun metric -> Amounts.compute_method_cost context frame metric invocation.callee)
-              else None
-            in
-            Amounts.compute_callee_amount ?method_cost context after
-              ~is_recursive:(Option.is_some recursive_callee)
-              ~clauses:(Contracts.list_declared_clauses contract)
-              ~bind_frame:(fun clauses ->
-                {
-                  (read_entry_frame clauses) with
-                  result = Some result;
-                  condition = after.condition;
-                })
-              ~uses:invocation.uses ~values ~change:(Some compute_change) counter)
+        let amount =
+          match (invocation.callee, counter.resource) with
+          | Capability_method _, Calls _ ->
+              Amounts.compute_step_amount context after invocation values counter
+          | _ ->
+              Amounts.compute_callee_amount ?method_cost:(Lazy.force method_cost) context after
+                ~is_recursive:(Option.is_some recursive_callee) ~clauses:declared_clauses
+                ~bind_frame:(fun clauses ->
+                  {
+                    (read_entry_frame clauses) with
+                    result = Some result;
+                    condition = after.condition;
+                  })
+                ~uses:invocation.uses ~values ~change:(Some compute_change) counter
+        in
+        (match counter.resource with
+        | Metric metric when Facts.is_home context frame.source ->
+            context.call_amounts <-
+              {
+                call = Facts.quote frame.source site.origin;
+                callee = path;
+                states_cost = states_cost metric;
+                counter;
+                amount;
+              }
+              :: context.call_amounts
+        | Metric _ | Calls _ -> ());
+        amount)
   in
   (after, Option.value !definition ~default:result)
 
@@ -1076,8 +1098,17 @@ let apply_call ?leave_lent context (frame : State.frame) (site : Invocation.site
         | Some Equal_equal, _, [ left; right ] when Facts.is_equality_identity context self_type ->
             Without_contract (Some (frame, Logic.equal left right))
         | Some Equal_equal, Impl { impl = Derived _; _ }, [ left; right ] ->
+            let spent =
+              Operations.spend context frame (fun counter ->
+                  Amounts.compute_callee_amount
+                    ~method_cost:(fun metric ->
+                      Amounts.compute_method_cost context frame metric invocation.callee)
+                    context frame ~is_recursive:false ~clauses:[]
+                    ~bind_frame:(fun _ -> frame)
+                    ~uses:invocation.uses ~values ~change:None counter)
+            in
             Without_contract
-              (Some (frame, Operations.make_equality context frame self_type left right))
+              (Some (spent, Operations.make_equality context frame self_type left right))
         | _ ->
             let trait_substitution =
               bind_callee trait_path arguments capability_arguments

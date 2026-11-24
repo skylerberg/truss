@@ -10,6 +10,7 @@ type stated =
   | Ranked_elements of Types.ty
   | Range_elements of Types.ty
   | Non_negative_rank of Types.ty
+  | Method_cost_bound of Logic.symbol
 
 module Symbol_table : Hashtbl.S with type key = Logic.symbol
 module Term_table : Hashtbl.S with type key = Logic.term

@@ -1,0 +1,2 @@
+type Interval(start: Int64, stop: Int64)
+  derives Equal, Ordered

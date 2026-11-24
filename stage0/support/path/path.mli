@@ -33,13 +33,7 @@ type t =
   | Unresolved of { file : file; names : string list }
 
 and reference = { path : t; arguments : argument list; associated : (string * argument) list }
-
-and argument =
-  | Named of reference
-  | Parameter of string
-  | Any of reference
-  | Count of Z.t
-  | Constant of t
+and argument = Named of reference | Parameter of string | Count of Z.t | Constant of t
 
 val standard_package : package
 val make_standard_module : string list -> module_

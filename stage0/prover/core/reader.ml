@@ -759,7 +759,6 @@ let rec read_rvalue context (frame : State.frame) run (value : Mir.rvalue) ~(sit
       ( frame,
         Values.translate_global_value context frame site path instantiation.type_arguments
           ~is_argument )
-  | To_any _ -> Operations.convert_to_any context frame site
   | Operation { operation; operands; type_arguments } ->
       let types =
         List.filter_map

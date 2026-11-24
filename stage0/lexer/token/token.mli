@@ -1,5 +1,4 @@
 type keyword =
-  | Any
   | Assert
   | Break
   | Capability

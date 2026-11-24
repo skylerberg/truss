@@ -92,7 +92,7 @@ grants none, so the package can only do pure computation.
   named.** A call of a dependency's function is checked against the
   dependency's grant, from the callee's `uses`, and so is every other way of
   using its code: taking its function as a value, using its `impl` where a
-  bound or an `any` needs one, and a `provide` of its type. The build fails
+  bound needs one, and a `provide` of its type. The build fails
   where code names something of a dependency that uses a capability the
   dependency was not granted, and the error names the function and the
   capability.

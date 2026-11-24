@@ -40,32 +40,37 @@ let emit_mark (state : Lowering.state) (intrinsic : Lowered.intrinsic) (call : L
        })
 
 let find_forwarded_call state (call : Mir.call) : Forwarded.t option =
-  match Mir_calls.resolve_callee state call.callee with
-  | Some (path, instantiation) when Path.locate_package path = Path.standard_package ->
-      let frame = Mir_places.require_mir_frame state in
-      let take_fresh_number () =
-        frame.forwarded_locals <- frame.forwarded_locals + 1;
-        -frame.forwarded_locals
-      in
-      let code = Definitions.make_code state.context path instantiation in
-      let passes_no_evidence (forwarded_call : Mir.call) =
-        Definitions.list_evidence state.context code.substitution forwarded_call.callee.uses = []
-      in
-      Option.bind
-        (Forwarded.forward_call ~substitution:code.substitution ~make_fresh_local:take_fresh_number
-           (Mir_places.read_mir_graph state.context path)
-           call)
-        (fun (forwarded : Forwarded.t) ->
-          if
-            (match forwarded.lent with Call call -> passes_no_evidence call | Place _ -> true)
-            && List.for_all
-                 (fun (_, type_, setup_call) ->
-                   Lowering.is_trivial state (Lowering.ground state type_)
-                   && passes_no_evidence setup_call)
-                 forwarded.setup
-          then Some forwarded
-          else None)
-  | _ -> None
+  match call.callee.target with
+  | Capability_method _ | Intrinsic _ | Indirect _ -> None
+  | Function _ | Trait_method _ -> (
+      match Mir_calls.resolve_item state call.callee with
+      | path, instantiation when Path.locate_package path = Path.standard_package ->
+          let frame = Mir_places.require_mir_frame state in
+          let take_fresh_number () =
+            frame.forwarded_locals <- frame.forwarded_locals + 1;
+            -frame.forwarded_locals
+          in
+          let code = Definitions.make_code state.context path instantiation in
+          let passes_no_evidence (forwarded_call : Mir.call) =
+            Definitions.list_evidence state.context code.substitution forwarded_call.callee.uses
+            = []
+          in
+          Option.bind
+            (Forwarded.forward_call ~substitution:code.substitution
+               ~make_fresh_local:take_fresh_number
+               (Mir_places.read_mir_graph state.context path)
+               call)
+            (fun (forwarded : Forwarded.t) ->
+              if
+                (match forwarded.lent with Call call -> passes_no_evidence call | Place _ -> true)
+                && List.for_all
+                     (fun (_, type_, setup_call) ->
+                       Lowering.is_trivial state (Lowering.ground state type_)
+                       && passes_no_evidence setup_call)
+                     forwarded.setup
+              then Some forwarded
+              else None)
+      | _ -> None)
 
 let is_forwarded_whole (frame : Lowering.mir_frame) part =
   match frame.body.blocks.(frame.block).terminator with

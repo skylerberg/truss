@@ -393,9 +393,6 @@ and list_trait_candidates (state : State.state) receiver_type name =
       list_bound_candidates
         (Interface.Properties.list_known_bounds state.lookups.interface
            ~list_bounds:(State.lookup_bounds state) (Types.Parameter parameter))
-  | Types.Any trait, _ ->
-      list_bound_candidates
-        (Interface.Properties.list_bound_closure state.lookups.interface ~self:receiver_type trait)
   | _, (_ :: _ as closures) -> list_bound_candidates (List.concat_map snd closures)
   | _, [] -> list_implemented_trait_lookups state receiver_type name
 

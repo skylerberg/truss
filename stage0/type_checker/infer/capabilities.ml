@@ -125,7 +125,7 @@ let check_callee_grants checking (origin : Core.origin) (callee : Core.operand C
                 (Signatures.read state.signatures state.lookups.interface
                    (Method { owner = impl; name; receiver }))
           | Some _ | None -> ())
-      | Impl _ | Bound | Dynamic -> ())
+      | Impl _ | Bound -> ())
   | Capability_method _ | Intrinsic _ | Indirect _ -> ()
 
 let add_alternative ~sentence_start alternative =
@@ -542,9 +542,9 @@ let rec can_call_capability_code (state : State.state) ~list_bounds ?(seen = [])
   let can_call_inside = can_call_capability_code state ~list_bounds ~seen in
   let has_a_method_that_uses (bound : Types.trait_reference) =
     let can_hold_a_capability : Types.capability -> bool = function
-      | Capability_projection _ -> ( match type_ with Types.Any _ -> false | _ -> true)
       | Built_in _ -> false
-      | Capability _ | Capability_parameter _ | Capability_variable _ -> true
+      | Capability _ | Capability_parameter _ | Capability_projection _ | Capability_variable _ ->
+          true
       | Capability_error _ -> State.raise_bug "a trait's method uses a capability with an error"
       | Capability_unless _ | Capability_unless_values _ ->
           State.raise_bug "a capability's base has a condition"
@@ -578,9 +578,6 @@ let rec can_call_capability_code (state : State.state) ~list_bounds ?(seen = [])
         uses
       || List.exists (fun (_, input) -> can_call_inside input) inputs
       || can_call_inside output
-  | Types.Any trait ->
-      List.exists has_a_method_that_uses
-        (Interface.Properties.list_bound_closure state.lookups.interface ~self:type_ trait)
   | Types.Parameter parameter ->
       List.exists has_a_method_that_uses (Interface.Properties.Bounds.list list_bounds parameter)
   | Types.Named { path; arguments = type_arguments } -> (

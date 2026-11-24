@@ -131,8 +131,8 @@ and check_written_arguments state items : (Types.argument list, Types.ty) result
         | Item_constraint ((name : Syntax.name), _) ->
             Some
               (State.make_error_type state Arity (State.read_span state name.id)
-                 "An associated type is fixed where a type is written, as in `any Trait[Name = \
-                  Type]`, not among type arguments in an expression."))
+                 "An associated type is fixed in a bound, as in `Source: Cursor[Element = Int64]`, \
+                  not among type arguments in an expression."))
       items
   in
   match errors with [] -> Ok arguments | error :: _ -> Error error

@@ -775,69 +775,38 @@ and check_method_with_receiver state env ?expected ?(type_arguments = [])
 and check_trait_method_with_receiver state env (value : Syntax.expression)
     ~(receiver : Syntax.expression) ~receiver_type (trait : Types.trait_reference)
     (method_ : Types.trait_method) ~type_arguments arguments =
-  let not_callable =
-    match receiver_type with
-    | Types.Any any -> (
-        match
-          Interface.Impls.classify_through_any state.lookups.interface ~any ~trait:trait.trait
-            method_
-        with
-        | Callable -> None
-        | Has_generics ->
-            Some
-              (State.make_error_type state Not_callable (State.read_span state value.id)
-                 (Printf.sprintf
-                    "`%s` has generic or capability parameters of its own, so it cannot be called \
-                     through `%s`: an `any` value holds one instance of each method, and this one \
-                     has an instance for each set of arguments. Call it on a value whose type is \
-                     known."
-                    method_.method_name (State.show state receiver_type)))
-        | Names_self ->
-            Some
-              (State.make_error_type state Not_callable (State.read_span state value.id)
-                 (Printf.sprintf
-                    "`%s` takes or returns a type that names `Self`, which is the type `%s` hides, \
-                     so it cannot be called through it. Call it on a value whose type is known."
-                    method_.method_name (State.show state receiver_type))))
-    | _ -> None
+  let instance, callee =
+    Name_lookup.instantiate_trait_method state ~written:value.id ~self_type:receiver_type trait
+      method_
   in
-  match not_callable with
-  | Some error -> Calls.check_arguments_alone state env arguments error
-  | None -> (
-      let instance, callee =
-        Name_lookup.instantiate_trait_method state ~written:value.id ~self_type:receiver_type trait
-          method_
-      in
-      match Name_lookup.check_explicit_type_arguments state value instance type_arguments with
-      | Error error -> Calls.check_arguments_alone state env arguments error
-      | Ok () -> (
-          match
-            Calls.check_arguments state env Argument_matching.Call value
-              instance.signature.parameters ~declared:instance.declared.parameters
-              ~flatten:instance.flatten arguments ~has_receiver:true
-          with
-          | Error error -> error
-          | Ok (checked, left_out) ->
-              let result = Types.extract_result_type instance.signature.output in
-              let receiver_argument =
-                {
-                  Tables.expression = receiver;
-                  core_argument_index = 0;
-                  mode =
-                    (match method_.method_receiver with Instance mode -> mode | Static -> Read);
-                }
-              in
-              State.elaborate state value.id
-                (Call
-                   {
-                     callee;
-                     arguments = receiver_argument :: checked;
-                     omitted_defaults = left_out;
-                     callee_result = result;
-                     lends = Types.find_lent_mode instance.signature.output;
-                   });
-              List.iter
-                (Solver.require state (Method_call (State.read_span state value.id)) receiver_type)
-                (Option.to_list (Name_lookup.find_sealed_provider state receiver_type trait)
-                @ [ trait ]);
-              State.normalize state result))
+  match Name_lookup.check_explicit_type_arguments state value instance type_arguments with
+  | Error error -> Calls.check_arguments_alone state env arguments error
+  | Ok () -> (
+      match
+        Calls.check_arguments state env Argument_matching.Call value instance.signature.parameters
+          ~declared:instance.declared.parameters ~flatten:instance.flatten arguments
+          ~has_receiver:true
+      with
+      | Error error -> error
+      | Ok (checked, left_out) ->
+          let result = Types.extract_result_type instance.signature.output in
+          let receiver_argument =
+            {
+              Tables.expression = receiver;
+              core_argument_index = 0;
+              mode = (match method_.method_receiver with Instance mode -> mode | Static -> Read);
+            }
+          in
+          State.elaborate state value.id
+            (Call
+               {
+                 callee;
+                 arguments = receiver_argument :: checked;
+                 omitted_defaults = left_out;
+                 callee_result = result;
+                 lends = Types.find_lent_mode instance.signature.output;
+               });
+          List.iter
+            (Solver.require state (Method_call (State.read_span state value.id)) receiver_type)
+            (Option.to_list (Name_lookup.find_sealed_provider state receiver_type trait) @ [ trait ]);
+          State.normalize state result)

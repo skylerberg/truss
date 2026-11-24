@@ -93,7 +93,6 @@ let rec zonk unifier (type_ : Types.ty) : Types.ty =
   | Projection { base; trait; name } ->
       Projection { base = zonk base; trait = zonk_trait unifier trait; name }
   | Function function_type -> Function (zonk_function unifier function_type)
-  | Any trait -> Any (zonk_trait unifier trait)
   | type_ -> type_
 
 and zonk_argument unifier = function
@@ -200,7 +199,6 @@ let list_unknowns unifier (type_ : Types.ty) =
     | Function { inputs; output; _ } ->
         List.iter (fun (_, type_) -> collect type_) inputs;
         collect output
-    | Any reference -> collect_trait reference
     | Parameter _ | Never | Integer | Hole | Error _ -> ()
   and collect_argument = function
     | Types.Type type_ -> collect type_
@@ -255,7 +253,6 @@ let rec unify unifier (left : Types.ty) (right : Types.ty) =
            left.inputs right.inputs
       && unify unifier left.output right.output
       && unify_capabilities unifier left.uses right.uses
-  | Any left, Any right -> unify_trait unifier left right
   | Projection left, Projection right ->
       left.name = right.name
       && Path.equal left.trait.trait right.trait.trait
@@ -290,12 +287,3 @@ and unify_value unifier left right =
       || bind_value (max left_index right_index) (Value_variable (min left_index right_index))
   | Value_variable index, other | other, Value_variable index -> bind_value index other
   | left, right -> left = right
-
-and unify_trait unifier (left : Types.trait_reference) (right : Types.trait_reference) =
-  Path.equal left.trait right.trait
-  && unify_arguments unifier left.trait_arguments right.trait_arguments
-  && List.length left.associated = List.length right.associated
-  && List.for_all2
-       (fun (left_name, left) (right_name, right) ->
-         left_name = right_name && unify unifier left right)
-       left.associated right.associated

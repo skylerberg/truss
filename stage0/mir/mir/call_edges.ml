@@ -46,19 +46,6 @@ let make_impl_method trait_interface impl_interface impl (declared : Types.trait
           ~default:declared.method_receiver;
     }
 
-let find_implemented_declaration (interface : Interface.Lookups.t)
-    (impl_interface : Types.impl_interface) ~impl path =
-  let trait = impl_interface.implements.trait in
-  Option.bind (Interface.Definition.find_trait_interface interface trait) (fun trait_interface ->
-      List.find_map
-        (fun (declared : Types.trait_method) ->
-          if Path.equal (make_impl_method trait_interface impl_interface impl declared) path then
-            Some
-              (Path.Method
-                 { owner = trait; name = declared.method_name; receiver = declared.method_receiver })
-          else None)
-        trait_interface.methods)
-
 let list_impl_methods (interface : Interface.Lookups.t) impl =
   let impl_interface = Interface.Definition.read_impl_interface interface impl in
   let trait_interface =
@@ -86,7 +73,6 @@ let rec list_code_of_impl_for interface ((type_ : Types.ty), (bound : Types.trai
                 (Interface.Impls.list_required_bounds
                    (Interface.Definition.read_impl_interface interface impl).impl_generics
                    substitution)
-        | Dynamic -> list_trait_methods interface required.trait
         | Bound -> [])
     (Interface.Properties.list_bound_closure interface ~self:type_ bound)
 
@@ -158,7 +144,6 @@ let resolve_callee (interface : Interface.Lookups.t) instance (callee : _ Core.t
         | Impl { impl; substitution } ->
             let method_ = Path.Method { owner = impl; name; receiver } in
             (Some method_, lazy (list_code_supplied_to method_ ~bound_by_owner:substitution))
-        | Dynamic -> (Some declaration, lazy (list_code_supplied_to_declaration ()))
         | Bound ->
             ( (if is_self_of_enclosing_trait self_type then Some declaration else None),
               lazy (list_code_supplied_to_declaration ()) )
@@ -191,7 +176,7 @@ let resolve_node (lookups : lookups) (declaration : Path.t) instance =
           ~trait Bound
       with
       | Impl { impl; _ } -> Some (Path.Method { owner = impl; name; receiver })
-      | Bound | Dynamic -> None
+      | Bound -> None
     in
     match lookups.mir.find_form_origin method_ with
     | Some (Inherited key, _) when Path.equal key.path declaration -> Some method_
@@ -202,7 +187,7 @@ let resolve_node (lookups : lookups) (declaration : Path.t) instance =
       Option.value (find_inheriting_method owner name receiver) ~default:declaration
   | _ -> declaration
 
-type supplier = Call | Named_function of Path.t | Conversion_to_any | Provide
+type supplier = Call | Named_function of Path.t | Provide
 type edge = Calls of Path.t | Supplies of { supplier : supplier; code : Path.t list }
 
 let list_statement_edges interface instance (statement : Tree.statement) =
@@ -218,9 +203,6 @@ let list_statement_edges interface instance (statement : Tree.statement) =
   | Basic (Assign { value = Function_value { path; instantiation; _ }; _ }) ->
       supply (Named_function path)
         (path :: list_code_supplied_by_function_value interface instance path instantiation)
-  | Basic (Assign { value = To_any { value; trait; _ }; _ }) ->
-      supply Conversion_to_any
-        (list_code_supplied_to_bound interface instance (Walk.extract_operand_type value, trait))
   | Provide { provided; _ } ->
       supply Provide
         (List.concat_map
@@ -312,8 +294,7 @@ let list_dependencies (lookups : lookups) instance (code : Tree.t) =
             {
               value =
                 ( Operand _ | Operation _ | Compare _ | Not _ | Array _ | Is_variant _ | Convert _
-                | To_any _ | Copy _ | Function_value _ | Lambda _ | Value_parameter _
-                | Specification _ );
+                | Copy _ | Function_value _ | Lambda _ | Value_parameter _ | Specification _ );
               _;
             }
         | Live _ | Dead _ | Assert _ | Echo _ | Loan_start _ | Loan_end _ | Ghost_assert _
@@ -382,41 +363,3 @@ let list_path_edges (lookups : lookups) path =
            (fun (dependency : dependency) -> dependency.path)
            (list_dependencies lookups instance code))
        code)
-
-type node = Definition | Trait_method_declaration
-
-let find_trait_interface (lookups : lookups) (path : Path.t) =
-  match path with
-  | Method { owner; _ } -> (
-      match Interface.Definition.find_interface lookups.interface owner with
-      | Some (Interface.Environment.Trait_interface trait_interface) -> Some trait_interface
-      | Some _ | None -> None)
-  | _ -> None
-
-let find_node lookups path =
-  match find_trait_interface lookups path with
-  | Some _ -> Trait_method_declaration
-  | None -> Definition
-
-let list_implementations (lookups : lookups) ~calling_package (path : Path.t) =
-  match (path, find_trait_interface lookups path) with
-  | Method { owner; name; receiver }, Some trait_interface ->
-      let declared =
-        List.filter
-          (fun (declared : Types.trait_method) ->
-            declared.method_name = name && declared.method_receiver = receiver)
-          trait_interface.methods
-      in
-      List.concat_map
-        (fun package ->
-          List.concat_map
-            (fun impl ->
-              List.map
-                (make_impl_method trait_interface
-                   (Interface.Definition.read_impl_interface lookups.interface impl)
-                   impl)
-                declared)
-            (Interface.Impls.list_impls_of_trait lookups.interface ~trait:owner package))
-        (calling_package
-        :: Resolve.Names.list_transitive_dependencies lookups.interface.names calling_package)
-  | _ -> []

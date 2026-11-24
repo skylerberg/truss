@@ -190,6 +190,10 @@ let check_slice_writes state ~(by : mutation) ~is_to_generic ~code (value : Synt
              contract describes them as written."
       | Passed_mut -> Option.iter report_stored (find_slice_written_through state value))
 
+let locate_mode_keyword state (value : Syntax.expression) (inner : Syntax.expression) =
+  Source.Definition_span.make (State.read_span state value.id).start
+    (State.read_span state inner.id).start
+
 let mutate_with state env ~(by : mutation) ~is_to_generic (value : Syntax.expression) =
   let code : Diagnostic.Code.types =
     match by with Assignment -> Not_assignable | Passed_mut -> Wrong_mode
@@ -224,9 +228,21 @@ let mutate_with state env ~(by : mutation) ~is_to_generic (value : Syntax.expres
           ]
         "This part is lent read-only, so it cannot be mutated. Pass the place it is lent from \
          `mut`, so that it is lent `mut`."
-  | Some Not_a_place, Assignment ->
-      State.report state code (State.read_span state value.id)
-        "Only a place, such as a variable, a field, or an element, can be assigned."
+  | Some Not_a_place, Assignment -> (
+      match value.kind with
+      | Mode (mode, inner) when Places.is_place state.State.resolved state.State.tables inner ->
+          State.report state Redundant_mode (State.read_span state value.id)
+            ~fixes:
+              [
+                State.fix "Remove the keyword."
+                  [ Diagnostic.delete (locate_mode_keyword state value inner) ];
+              ]
+            (Printf.sprintf "An assignment writes its target, so `%s` takes no `%s`."
+               (State.quote_span state (State.read_span state inner.id))
+               (match mode with Mut -> "mut" | Own -> "own"))
+      | _ ->
+          State.report state code (State.read_span state value.id)
+            "Only a place, such as a variable, a field, or an element, can be assigned.")
   | Some (Lent_read_only | Not_a_place), Passed_mut -> ());
   (match find_immutable state env value with
   | None when not (State.is_formula env) -> check_slice_writes state ~by ~is_to_generic ~code value
@@ -277,10 +293,6 @@ let find_lent_field_mode (state : State.state) (value : Syntax.expression) type_
   | Some Mut, With_mode (Mut, _) -> Some Mut
   | _ -> None
 
-let locate_mode_keyword state (value : Syntax.expression) (inner : Syntax.expression) =
-  Source.Definition_span.make (State.read_span state value.id).start
-    (State.read_span state inner.id).start
-
 let check_mode state env (value : Syntax.expression) (parameter : Types.parameter_info) type_
     ~has_generic_type =
   let name = parameter.name in
@@ -291,11 +303,7 @@ let check_mode state env (value : Syntax.expression) (parameter : Types.paramete
         ~fixes:
           [
             State.fix "Remove the keyword."
-              [
-                Diagnostic.delete
-                  (Source.Definition_span.make (State.read_span state value.id).start
-                     (State.read_span state inner.id).start);
-              ];
+              [ Diagnostic.delete (locate_mode_keyword state value inner) ];
           ]
         (Printf.sprintf "`%s` only reads its argument, so it takes no mode keyword." name)
   | Mut, With_mode (Mut, inner) ->

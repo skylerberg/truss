@@ -1,5 +1,0 @@
-fn f(items: Slice[Int64]) -> UInt64 {
-  var boxed: any Cursor[Element = Int64] = any items.cursor()
-  let _ = own boxed.skip(1)
-  0
-}
